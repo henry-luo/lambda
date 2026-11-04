@@ -302,7 +302,7 @@ void input_archive(Input* input, const void* bytes, size_t length, ArchiveFormat
         return;
     }
     archive->index_bytes += metadata_bytes;
-    // D4.1.3: the Input manager owns every node and cached parse until teardown.
+    // D5.1.3: the Input manager owns every node and cached parse until teardown.
     // No cached Item points into a runtime heap; dropping the root cannot free members.
     pool_add_cleanup(input->pool, fs_tree_release, archive);
     FsTree* tree = (FsTree*)arena_calloc(input->arena, sizeof(FsTree));

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T22-6: a left-associated all-string append chain uses the exclusive builder, while a chain containing an int retains generic join conversion (S9.1.1, D5.2.2v3).",
+  "description": "T22-6: a left-associated all-string append chain uses the exclusive builder, while a chain containing an int retains generic join conversion (S9.1.1, D6.2.2).",
   "checks": [
     {
       "in_func": "_concat_chain_tune22_#",

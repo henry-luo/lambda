@@ -11,14 +11,14 @@ It states the final design only; §11 records what the code implements as of the
 survey, §12 what is still outstanding.
 **Date:** 2026-10-06 (code survey against master `2e21d6e5b`).
 **Spec linkage:** D2.1.1 (the three `Item` storage classes), D2.1.2
-(`get_type_id` is the only semantic-type interface), D2.1.5 (container
-constructors never OR a TypeId), D4.1.1v2 (content tiers), D4.1.4v5 (the four
-allocation mechanisms), D4.2.2v2 (`MemContext` is the single allocation-failure
-coordinator), D4.2.5v3 (no libc allocation outside `lib/` memory managers),
-D4.5.1v4 (Radiant seam: arenas-as-regions, type-stable pools, generation
-handles, RAII; contracts pin / gen-check / copy-as-value), D4.5.2 (Radiant
+(`get_type_id` is the only semantic-type interface), D2.1.4 (container
+constructors never OR a TypeId), D5.1.1 (content tiers), D5.1.4 (the four
+allocation mechanisms), D5.2.2 (`MemContext` is the single allocation-failure
+coordinator), D5.2.4 (no libc allocation outside `lib/` memory managers),
+D5.5.1 (Radiant seam: arenas-as-regions, type-stable pools, generation
+handles, RAII; contracts pin / gen-check / copy-as-value), D5.5.2 (Radiant
 never retains a GC pointer; ruled 2026-10-06, argued in §2.3). Apart from
-D4.5.2 nothing here is a new ruling; where this document and the formal spec
+D5.5.2 nothing here is a new ruling; where this document and the formal spec
 disagree, the spec wins.
 **Scope:** header-only C++ facilities in `lib/`, `lambda/core/` and `radiant/`,
 the lint rules that enforce them, and the ownership rules for raw pointers that
@@ -112,9 +112,9 @@ them with lint, and cover the still-raw remainder with sanitizers and fuzzing.
 ### 2.1 Domains
 
 A domain is an empty tag type naming where storage lives and how it is
-released. Domains are a compile-time view of the D4.1.4v5 mechanisms:
+released. Domains are a compile-time view of the D5.1.4 mechanisms:
 
-| Domain | Storage | Release | D4.1.4v5 mechanism |
+| Domain | Storage | Release | D5.1.4 mechanism |
 |---|---|---|---|
 | `GcHeapDomain` | runtime values | collector | GC heap |
 | `PoolDomain` | document/style pools and arenas | bulk (arena) or owner teardown (pool) | arena, pool |
@@ -128,12 +128,12 @@ demands one; session domains stay broad until then.
 **`StaticDomain` is static storage only** (decided 2026-10-06): storage that
 lives for the whole process because it is part of the program image. It is a
 label, not an allocation mechanism — nothing allocates or frees it — so it does
-not add a fifth mechanism to D4.1.4v5. Storage that is merely long-lived is
+not add a fifth mechanism to D5.1.4. Storage that is merely long-lived is
 **not** static: interned names live as long as their name pool, and the
-immortal Mark data of D4.1.2 as long as its `Input` arena or const pool; those
+immortal Mark data of D5.1.2 as long as its `Input` arena or const pool; those
 take their owner's domain (`PoolDomain`).
 
-Scratch-arena allocations (tail-rewound, owned by one scratch stack, D4.1.4v5)
+Scratch-arena allocations (tail-rewound, owned by one scratch stack, D5.1.4)
 still have no domain; that is an open decision (§12.7).
 
 ### 2.2 Borrowed and owned pointers
@@ -169,7 +169,7 @@ retained-field and retained-list wrapper:
 
 | `DomainOutlives<Source, Storage>` | Storage: GC | Pool | LayoutSession | InputScratch |
 |---|---|---|---|---|
-| Source: GC | ✅ | — (D4.5.2) | ✅ transient | ✅ transient |
+| Source: GC | ✅ | — (D5.5.2) | ✅ transient | ✅ transient |
 | Source: Pool | — | ✅ | ✅ | ✅ |
 | Source: LayoutSession | — | — | ✅ | — |
 | Source: InputScratch | — | — | — | ✅ |
@@ -178,9 +178,9 @@ retained-field and retained-list wrapper:
 Unlisted pairs are false: the lattice **fails closed**. Static storage is
 read-only, so it is never a storage domain — no holder lives in it.
 
-**GC values in Radiant: borrow to read, copy to keep (D4.5.2).** Radiant
+**GC values in Radiant: borrow to read, copy to keep (D5.5.2).** Radiant
 storage — the document arena, the view tree and their pools — is invisible to
-the collector (D4.1.1v2), so a GC value referenced only from there can be
+the collector (D5.1.1), so a GC value referenced only from there can be
 collected while the holder still points at it. Hence:
 
 - **Retaining is a copy.** A pool-domain holder never stores a `GcPtr`; a GC
@@ -218,7 +218,7 @@ template<class T, class StorageDomain> class PersistentFieldRef;  // setter over
 
 field.set(PoolPtr<char>(p));        // ✅ pool outlives pool
 field.set(std::move(session_ptr));  // ❌ deleted: an owned session pointer must be promoted first
-field.set(gc_borrow(s));            // ❌ deleted: copy a GC value into the document arena first (D4.5.2)
+field.set(gc_borrow(s));            // ❌ deleted: copy a GC value into the document arena first (D5.5.2)
 field.set(session_borrow);          // ❌ deleted: session does not outlive pool
 ```
 
@@ -244,7 +244,7 @@ never a generic `set`/`assign`:
 
 | Operation | Meaning |
 |---|---|
-| `promote_to_pool(pool, src)` / `promote_to_arena(arena, s)` | copy into the longer-lived domain; the source keeps its own allocation. Also the only way for Radiant to keep a GC value (D4.5.2) |
+| `promote_to_pool(pool, src)` / `promote_to_arena(arena, s)` | copy into the longer-lived domain; the source keeps its own allocation. Also the only way for Radiant to keep a GC value (D5.5.2) |
 | `copy_to_gc(heap, src)` | copy into the GC heap (declared, deliberately undefined until a GC copy path exists) |
 | `take_ownership(raw)` | wrap an existing memtracked allocation as a `SessionPtr` |
 | `detach_session_buffer(p)` | release a session buffer for an explicit hand-over to an owning field |
@@ -265,8 +265,8 @@ debug builds, and the check compiles away in release:
 | Wrapping into | Debug check |
 |---|---|
 | `PoolPtr` from a pool or arena (`checked_pool_ptr` and arena equivalents) | `pool_owns(pool, p)` / `arena_owns(arena, p)` |
-| `GcPtr` (`gc_borrow`) | `gc_is_managed(heap, p)` — the D4.1.1v2 gatekeeper range test |
-| `SessionPtr` (`take_ownership`) | a lookup in the debug-build memtrack allocation registry (D4.2.5v3 keeps allocation-level records debug-only) |
+| `GcPtr` (`gc_borrow`) | `gc_is_managed(heap, p)` — the D5.1.1 gatekeeper range test |
+| `SessionPtr` (`take_ownership`) | a lookup in the debug-build memtrack allocation registry (D5.2.4 keeps allocation-level records debug-only) |
 | `StaticPtr` (`static_borrow`) | the address lies in the executable image's read-only data |
 | `ItemOf<Tag>`, `view_require<Tag>`, `dom_require<Tag>` | the tag check itself (§4) |
 
@@ -366,7 +366,7 @@ template<class F> decltype(auto)    visit(Item, F&&);  // exhaustive dispatch, o
   the array-hole sentinel (`is_hole_sentinel`, `hole_sentinel_item`), so holes
   cannot leak into user-visible values as an ordinary `Item`.
   `ShapeRef` / `shape_next(owner, ref)` walk shape chains bounded by the owner
-  type (D3.4.3v3), replacing raw `ShapeEntry*` walks.
+  type (D3.4.3), replacing raw `ShapeEntry*` walks.
 - **Typed data construction and reading.** `MarkBuilder` methods that know
   their tag return `ItemOf<Tag>`; container parameters are typed GC borrows
   (`GcPtr<Map>`, `GcPtr<Element>`); `ItemReader::asItem<Tag>()` and the
@@ -469,7 +469,7 @@ call-site sugar (`arena_emplace<T>`). **Non-null is not non-dangling:**
 `NonNull` is honest only if the arena upholds it at its single failure point —
 chunk acquisition. Unit allocations inside a live chunk are pointer bumps that
 cannot fail. At the chunk boundary, the `MemContext` failure coordinator
-(D4.2.2v2) runs the escalation ladder:
+(D5.2.2) runs the escalation ladder:
 
 ```
 arena needs a chunk → page allocation
@@ -507,7 +507,7 @@ reused, a display list referencing an image surface):
   handle — **fail closed**: the holder retires itself instead of dereferencing
   freed memory. A pointer returned by lookup is a borrow for the current turn;
   it is never stored back into a heap object.
-- This is the D4.5.1v4 seam contract *gen-check*. Manual pointer scrubbing
+- This is the D5.5.1 seam contract *gen-check*. Manual pointer scrubbing
   after a bulk free is the interim substitute for holders not yet migrated.
 
 ---
@@ -531,9 +531,9 @@ transition and is reviewed as one:
 | scratch arena | the active render/layout scope | allow if popped before the arena resets |
 | static storage (literal, constant table) | any holder | allow as `StaticPtr`, no copy |
 | pool allocation | retained tree or cache | allow through a §2 setter |
-| GC allocation | Radiant document arena, view tree, their pools | reject; copy into the document arena (D4.5.2) |
-| GC allocation under a registered root that outlives the document | document-side holder | allow (D4.5.2 exemption) |
-| GC allocation | Radiant work that only reads it now | allow as a transient borrow (provisional, D4.5.2) |
+| GC allocation | Radiant document arena, view tree, their pools | reject; copy into the document arena (D5.5.2) |
+| GC allocation under a registered root that outlives the document | document-side holder | allow (D5.5.2 exemption) |
+| GC allocation | Radiant work that only reads it now | allow as a transient borrow (provisional, D5.5.2) |
 | borrowed external object | lookup registry | allow only if the registry never owns the element's lifecycle |
 
 Review question: *will every use of this pointer finish before the pointee's
@@ -616,7 +616,7 @@ untyped `void*` constructor in the public runtime API.
 ### 8.7 Item construction from container pointers
 
 Containers are raw header pointers; only scalar leaves carry a high-byte tag
-(D2.1.1). Container constructors never OR a TypeId into a pointer (D2.1.5) —
+(D2.1.1). Container constructors never OR a TypeId into a pointer (D2.1.4) —
 doing so corrupts the address. A container pointer becomes an `Item` only
 through the canonical constructors or a dedicated accessor (for JS, the
 property-storage layer of `lambda/js/js_props.h`); scalar packing goes through
@@ -644,7 +644,7 @@ reason.
 | §5.1 unbounded string scans, unsafe libc string calls | `unsafe-string-scan`, `no-unsafe-libc-str` | `STR_SCAN_LOCAL_OK`, `UNSAFE_LIBC_OK` |
 | §5.2 growth through checked helpers | `no-open-realloc` (Radiant) | `REALLOC_OK` |
 | §5.3 depth parameters actually bound recursion | `unused-depth-param` | `UNUSED_DEPTH_OK` |
-| §6 / D4.2.5v3 no libc allocation in engine code | `no-raw-alloc`, `radiant-alloc-allowlist`, `radiant-no-bare-mem-free` | `RAWALLOC_OK`, `ALLOC_API_OK` |
+| §6 / D5.2.4 no libc allocation in engine code | `no-raw-alloc`, `radiant-alloc-allowlist`, `radiant-no-bare-mem-free` | `RAWALLOC_OK`, `ALLOC_API_OK` |
 | §8.2 CSS shorthand temporaries | `css-temp-decl` (`resolve_css_style.cpp`), `no-raw-css-value-stack` (rest of `radiant/`) | `CSS_TEMP_DECL_OK` |
 | §8.1 large stack buffers | `large-stack-array` (info) | — |
 
@@ -698,7 +698,7 @@ the defining headers.
 | Field kinds (`lib/mem_kind.hpp`) | ✅ adopting | `Own` 198, `OwnArr` 97, `Up` 388, `Counted` 6, `Handle` 18 sites |
 | Promotion vocabulary | 🟡 partial | `promote_to_pool` 9, `detach_session_buffer` 2; `promote_to_arena`, `take_ownership` unused; `copy_to_gc` declared `= delete` |
 | `unsafe_*` escape hatches | ⚪ unused | |
-| No GC pointer in retained Radiant storage (D4.5.2) | 🟡 partial | the lattice has no GC→Pool edge and a pool field rejects `GcPtr` (compile-time probe in `test_own_tagged`); every JS DOM and `lambda/dom` setter audited copies into the document's Input arena or pool; rooted document-side references are exempt; every UI-mode content append (runtime `list_push`, Input-owned `list_push_with_owner`, `MarkEditor` imports) copies content the document does not own, through one shared helper set (forced-GC regression test). Residue: values reaching the arena tree outside any append (§12.5 item 18) |
+| No GC pointer in retained Radiant storage (D5.5.2) | 🟡 partial | the lattice has no GC→Pool edge and a pool field rejects `GcPtr` (compile-time probe in `test_own_tagged`); every JS DOM and `lambda/dom` setter audited copies into the document's Input arena or pool; rooted document-side references are exempt; every UI-mode content append (runtime `list_push`, Input-owned `list_push_with_owner`, `MarkEditor` imports) copies content the document does not own, through one shared helper set (forced-GC regression test). Residue: values reaching the arena tree outside any append (§12.5 item 18) |
 | `StaticDomain` / `StaticPtr` (§2.1) | ✅ landed | `static_borrow`; the six built-in font-family literals use it |
 | Debug provenance checks (§2.7) | ⬜ not implemented | `checked_pool_ptr` exists (unused) but checks nothing; `gc_borrow` and `take_ownership` check nothing; `pool_owns`, `arena_owns` and `gc_is_managed` exist; no memtrack ownership query |
 | `ArrayList<T>` | ✅ adopted | 47 sites in 13 files |
@@ -716,7 +716,7 @@ the defining headers.
 | Armed stack-overflow recovery | ✅ landed | per-frame `signal_armed`; unarmed → default action |
 | `NonNull<T>`, `arena_new*` | 🟡 landed, unused | not yet honest: arena chunk failure still returns null (§12.2) |
 | `checked_alloc.hpp` | 🟡 landed, unused | `checked_realloc` / `checked_malloc` call libc directly |
-| OOM ladder | 🟡 partial | reclaimer registry and `MemContext` coordinator exist (D4.2.2v2); no cost-ordered reclaim at chunk failure, no PARK/FAIL/ABORT policy |
+| OOM ladder | 🟡 partial | reclaimer registry and `MemContext` coordinator exist (D5.2.2); no cost-ordered reclaim at chunk failure, no PARK/FAIL/ABORT policy |
 | `Handle<T>` + slot tables | 🟡 partial | image surfaces in display lists use generation handles; `lib/slot_table.hpp` has no users; animation targets and interaction-state holders are still raw |
 | `CssTempDecl` / `CssTempListDecl<N>` | ✅ landed | in `radiant/view.hpp`; both CSS lints pass |
 | Render clip clone-before-push | ✅ landed | `render_clip_clone_shape`; no dedicated lint |
@@ -780,7 +780,7 @@ the defining headers.
    with a logged reason at the chunk boundary, then replace that body with the
    §6.3 ladder (cost-ordered reclaim, per-thread PARK/FAIL/ABORT).
 6. Route `checked_realloc` / `checked_malloc` through `mem_realloc` /
-   `mem_alloc` (D4.2.5v3) and mark `pool_try_new` `[[nodiscard]]`; then adopt
+   `mem_alloc` (D5.2.4) and mark `pool_try_new` `[[nodiscard]]`; then adopt
    the helpers or remove them.
 7. Implement `ItemOrError` and convert the first `Ret*` path.
 8. Build the unchecked-allocation-dereference lint (§6.1).
@@ -791,7 +791,7 @@ the defining headers.
    `AnimationInstance::target` (`void*`), cursor, drag/drop and
    interaction-state pointers. Animation targets are pruned only on the
    layout-reset path, while a removed element's arena slot can be retired and
-   reused (D4.1.4v5), so a raw target can alias a later element in between.
+   reused (D5.1.4), so a raw target can alias a later element in between.
    Decide whether DOM nodes use `lib/slot_table.hpp` or the image-surface
    registry pattern. `animation_scheduler_remove_views` now has test callers
    only; remove it once the handle migration lands.
@@ -819,7 +819,7 @@ the defining headers.
     path; a retained-source owner type; heap-epoch assertions on state that can
     survive a recycle.
 17. Lifecycle-owner type for serve registries (§8.4).
-18. Enforce D4.5.2 (§2.3). Done 2026-10-06: `StaticDomain` / `StaticPtr`
+18. Enforce D5.5.2 (§2.3). Done 2026-10-06: `StaticDomain` / `StaticPtr`
     added, the GC→Pool edge dropped (probed in `test/lib/test_own_tagged.cpp`),
     and the font-family literals relabelled. The audit of the Lambda→Radiant
     write paths found every JS DOM and `lambda/dom` setter copying into the

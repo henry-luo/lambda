@@ -72,12 +72,12 @@ work; do not recreate implemented shader, SVG or simulation facilities.
 | Authority | Consequence for every milestone |
 |---|---|
 | **S12.1.1v3**, **S12.1.3** in [formal semantics](../../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) | Constructors and geometry transforms remain pure values; GPU work and playback belong to the host; event mutations remain procedural. |
-| **D7.2.4v4**, **D7.5.3v2** in [formal design](../../doc/Lambda_Formal_Design.md) | Public helpers stay under `lambda.scene3d.*`; native rendering stays behind the existing Lambda/Radiant boundary. |
-| **D4.5.1v4**, **D4.5.2** | Retained descriptions, shader source and buffers are document/native-owned. Borrowed GC values never become unrooted retained pointers. |
-| **D4.5.3v2** | Preserve presentation ownership and reuse valid downstream state through template regeneration. |
-| **D2.11.4** | Fixed-time captures settle the selected frame; taking another snapshot does not independently advance simulation or animation. |
-| **D7.4.1v2**, **D7.5.2** | Keep native resources behind branded handles; use the existing resource-acquisition boundary and quotas. |
-| **D7.3.5** | Every new module surface names its conformance gate and joins the existing test lanes. |
+| **D9.3.4**, **D9.5.6** in [formal design](../../doc/Lambda_Formal_Design.md) | Public helpers stay under `lambda.scene3d.*`; native rendering stays behind the existing Lambda/Radiant boundary. |
+| **D5.5.1**, **D5.5.2** | Retained descriptions, shader source and buffers are document/native-owned. Borrowed GC values never become unrooted retained pointers. |
+| **D5.5.3** | Preserve presentation ownership and reuse valid downstream state through template regeneration. |
+| **D10.1.7** | Fixed-time captures settle the selected frame; taking another snapshot does not independently advance simulation or animation. |
+| **D9.5.1**, **D11.1.2** | Keep native resources behind branded handles; use the existing resource-acquisition boundary and quotas. |
+| **D9.4.5** | Every new module surface names its conformance gate and joins the existing test lanes. |
 
 The existing scene design supplies the graphics-specific contracts: its
 [scene vocabulary](../radiant/Radiant_Design_WebGL.md#4-lambda-package-and-scene-elements),
@@ -548,8 +548,8 @@ The delivered native profile is `lambda.scene3d.postprocessing`: at most eight
 ordered effects, linear passes before display passes, opaque-background bloom,
 directional FXAA and GLSL color passes that preserve coverage. It reuses the
 shader/reflection cache and shared fullscreen draw; one final snapshot publishes
-the frame. Numeric tracks use existing playback (S12.1.1v3, D2.11.4), while
-targets and programs stay native-owned (D4.5.1v4–D4.5.3v2). Failed projections
+the frame. Numeric tracks use existing playback (S12.1.1v3, D10.1.7), while
+targets and programs stay native-owned (D5.5.1–D5.5.3). Failed projections
 roll back newly linked programs and cannot pin unused cache entries.
 
 The native checks include 100 resize/revert cycles, two output densities,
@@ -597,8 +597,8 @@ masking; opaque mode ignores the product. glTF mask factors retain their alpha.
 Normal maps use their actual transformed frame when authored tangents no longer
 apply. Camera nodes retain stable occurrence IDs and transforms, orthographic
 near 0 and finite/infinite perspective projection; explicit viewport selection
-wins. Scene descriptions and destination ownership retain **S12.1.1v3, D4.1.3,
-D4.5.1v4/D4.5.2 and D7.2.4v4**. No formal ruling changes are introduced.
+wins. Scene descriptions and destination ownership retain **S12.1.1v3, D5.1.3,
+D5.5.1/D5.5.2 and D9.3.4**. No formal ruling changes are introduced.
 
 All 55 native cases, 52 importer/exporter cases, 14 new package checks and 99
 Scene3D/render replays pass. The round-trip image case requires visible output
@@ -650,7 +650,7 @@ the pinned r186 energy handling, independent coat normals and per-map UVs.
 The shared map/factor descriptors serve native rendering, animation and glTF/GLB
 conversion. Numeric/color properties remain uniforms; map-presence variants link
 on demand and retain their programs. Descriptions/playback/ownership preserve
-**S12.1.1v3, D2.11.4, D4.5.1v4–D4.5.3v2 and D7.2.4v4**. No formal ruling changes.
+**S12.1.1v3, D10.1.7, D5.5.1–D5.5.3 and D9.3.4**. No formal ruling changes.
 
 The checked GL binding plan queries device capacity and shares aliased texture
 units. The full case renders ten maps, an HDR environment, four shadow maps and
@@ -686,7 +686,7 @@ IOR changes dielectric reflectance and the refracted endpoint; world-scaled
 mesh thickness drives Beer absorption. Maps reuse M3 coordinates, while shared
 extension descriptors drive import/export. Declared tracks reserve the shader
 feature before playback, so numeric changes retain programs and targets.
-This preserves **S12.1.1v3, D2.11.4, D4.5.1v4–D4.5.3v2 and D7.2.4v4**.
+This preserves **S12.1.1v3, D10.1.7, D5.5.1–D5.5.3 and D9.3.4**.
 
 The selected profile is documented in the scene design: opaque/masked coverage,
 bounded nine-tap rough filtering, environment/background fallback and one
@@ -733,7 +733,7 @@ preserve 1px coverage independently of source texture UVs. The first probe
 found a clockwise ribbon index order and undefined shadow preprocessor macros;
 shared orientation/define helpers fix those causes without changing GL state
 or weakening pixel checks. Ownership and pure queries retain **S12.1.1v3,
-D4.5.1v4/D4.5.2, D7.2.4v4 and D7.3.5**.
+D5.5.1/D5.5.2, D9.3.4 and D9.4.5**.
 
 The selected basic-color profile, screen/world units, anchors, UV modes and
 limits are in the scene design and package guide. glTF modes 0/1/3 preserve
@@ -794,7 +794,7 @@ capture face. Nested distance levels retain their geometry/programs and
 inactive poses. Presentation selection uses symmetric threshold hysteresis;
 level 0 casts shadows, and captures select by their own origin. No source
 visibility attributes are mutated. The selected profile retains
-**S12.1.1v3, D4.5.1v4/D4.5.2, D7.2.4v4 and D7.3.5**.
+**S12.1.1v3, D5.5.1/D5.5.2, D9.3.4 and D9.4.5**.
 
 Review found that projection-owned hysteresis would reset selection during
 context loss or an unrelated template edit inside a threshold band. Selection

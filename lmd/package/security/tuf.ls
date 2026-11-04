@@ -1,4 +1,4 @@
-// D7.5.8: update authentication decisions are Lambda Script. Host callbacks own
+// D11.2.4: update authentication decisions are Lambda Script. Host callbacks own
 // admitted downloads, atomic protected checkpoints, policy checks and staging.
 import json: lambda.security.tuf.json
 import meta: lambda.security.tuf.metadata

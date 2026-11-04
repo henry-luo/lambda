@@ -482,7 +482,7 @@ static Item js_observer_deliver(void) {
         if (js_array_length(records_root.get()) <= 0) continue;
         // Replacing the observer-owned pending slot removes its last ordinary
         // edge to the delivery array, so retain it explicitly across the
-        // allocating replacement and callback boundary (D5.1.1v2).
+        // allocating replacement and callback boundary (D6.1.1).
         observer_replace_pending(observer);
         Item args[2] = {records_root.get(), object_root.get()};
         dom_realm_call(callback_root.get(), make_js_undefined(), args, 2);
@@ -532,7 +532,7 @@ static void observer_install_interface_members(Item prototype) {
     Rooted<Item> prototype_root(roots, prototype);
     if (!roots.valid()) return;
     // shared prototype methods validate their receiver's native observer kind
-    // rather than trusting a forged prototype or mutable string tag (D6.2.2v2).
+    // rather than trusting a forged prototype or mutable string tag (D7.2.2).
     dom_realm_install_method(prototype_root.get(), "disconnect", js_observer_disconnect<Kind>);
     if (Kind == JS_OBSERVER_MUTATION) {
         dom_realm_install_method(prototype_root.get(), "observe", js_mutation_observer_observe);
@@ -568,7 +568,7 @@ JS_FORWARD_ITEM(dom_resize_observer_new, (Item callback), js_observer_new,
 
 extern "C" Item dom_intersection_observer_new(Item callback, Item options) {
     // option getters may return unpublished values; retain them through
-    // later allocations, and use interned field keys across GC (D5.3.5).
+    // later allocations, and use interned field keys across GC (D6.3.5).
     JS_ROOTS(roots, options_root, options, root_root, ItemNull,
         margin_root, ItemNull, thresholds_root, ItemNull);
     JsObserverState* observer = nullptr;
@@ -745,7 +745,7 @@ extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
                                             added, removed);
                 break;
             }
-            // every record field survives later allocations before the pending array owns it (D5.3.3).
+            // every record field survives later allocations before the pending array owns it (D6.3.3).
             RootFrame roots(7);
             Rooted<Item> record(roots, js_new_object());
             Rooted<Item> added(roots, js_array_new(0));

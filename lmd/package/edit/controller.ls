@@ -1,5 +1,5 @@
 // shared model-editor lifecycle. State stays in the calling template (S12.1.3);
-// selection and completion policy stays above Radiant's DOM mechanisms (D7.2.5).
+// selection and completion policy stays above Radiant's DOM mechanisms (D10.2.1).
 import dom
 import lambda.editor.mod_editor
 import lambda.editor.mod_step
@@ -7,7 +7,7 @@ import image: lambda.editor.mod_image
 import html: .html
 import result: lambda.dom.edit_result
 
-// DOM reads retain fn colour even when their receiver is mutable (D7.4.6).
+// DOM reads retain fn colour even when their receiver is mutable (D7.1.1).
 pub fn surface(node, id = "edit-surface") {
     if (node == null) null else dom.get_element_by_id(dom.root_node(node), id)
 }
@@ -91,7 +91,7 @@ pub fn clipboard_result(editor, input_type, outcome) any^ {
 
 pub pn handle(editor, evt, read_only = false, preset = "html5_subset", id = "edit-surface", selection = null) {
     if (read_only) { return {editor: editor, result: result.decline(true, false, "read-only", 0)} }
-    // copy must not redraw or create history; native still owns clipboard transport (D7.2.5).
+    // copy must not redraw or create history; native still owns clipboard transport (D10.2.1).
     if (evt.input_type == "copy") {
         return {editor: editor, result: clipboard_result(editor, evt.input_type,
             result.model_applied(false, false, false, "", editor.selection, editor.model_revision))}

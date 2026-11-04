@@ -1,4 +1,4 @@
-// S12.1.3 / D7.5.3v2: pure scene descriptions; camera events update retained DOM.
+// S12.1.3 / D9.5.6: pure scene descriptions; camera events update retained DOM.
 import s: lambda.scene3d
 import viewer: .mod_scene_view
 import camera: lambda.scene3d.camera

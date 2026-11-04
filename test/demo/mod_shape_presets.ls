@@ -1,4 +1,4 @@
-// D7.2.5: shape palettes shared by the Word and Slides ribbons.
+// D10.2.1: shape palettes shared by the Word and Slides ribbons.
 pub let styles = [
     {id:"outline",label:"Blue outline",values:{fill:"#ffffff",stroke:"#3478cc",text_color:"#245a9b",weight:1.5}},
     {id:"blue",label:"Blue",values:{fill:"#3478cc",stroke:"#245a9b",text_color:"#ffffff",weight:1.5}},

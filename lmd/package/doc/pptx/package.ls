@@ -1,4 +1,4 @@
-// Relationship owners, never filename guesses, define the presentation graph (D7.5.2).
+// Relationship owners, never filename guesses, define the presentation graph (D11.1.2).
 import c: .common
 import opc: lambda.doc.opc
 import theme: lambda.doc.docx.theme

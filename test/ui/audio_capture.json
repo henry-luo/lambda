@@ -1,5 +1,5 @@
 {
-  "name": "D7.5.10 capture is procedural, denied without a host grant, and never self-grants",
+  "name": "D11.3.2 capture is procedural, denied without a host grant, and never self-grants",
   "html": "test/ui/audio_capture.html",
   "viewport": {"width": 200, "height": 160},
   "env": [{"key": "LAMBDA_AUDIO_OUTPUT", "value": "offline"}],

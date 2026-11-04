@@ -1,6 +1,6 @@
 # Lambda Documentation Convention
 
-**Version:** 1.3.0 (2026-11-03)
+**Version:** 1.4.0 (2026-11-04)
 
 **Status:** normative for how Lambda documentation is organized, written, and
 kept honest. Codifies the conventions previously scattered across CLAUDE.md
@@ -49,11 +49,21 @@ The two formal specs are Lambda's root Architecture Decision Records.
 **Structure.**
 
 - **Ruling IDs** are section-path IDs: `S4.6.2` is the second ruling of §4.6 of
-  the semantics spec; `D2.3.1` likewise in the design spec. The `S` and bare
+  the semantics spec; `D2.3.2` likewise in the design spec. The `S` and bare
   `D` series are reserved for these two documents.
 - **Revision in place**: a revised ruling keeps its ID with a version suffix
   (`S4.6.2v2`), replacing its predecessor; superseded text is **not carried**
   in the spec (it lives in the vibe record).
+- **Renumbering is exceptional**: it happens only in a whole-spec
+  restructure, ships as a MAJOR version, resets the version suffixes,
+  publishes its old-to-new map, and rewrites every citation in the same
+  change. A migration script is a one-shot tool: it is not idempotent, so
+  delete it after use. The design spec was renumbered once, at 61.0.0
+  (2026-11-04).
+  [`Lambda_Impl_Formal_Design_History.md`](../vibe/impl/Lambda_Impl_Formal_Design_History.md)
+  §1 holds the map, and `python3 utils/formal_index.py --old <ID>` reads it.
+  Text from an older branch or stash must have its citations updated from
+  that map before it is merged.
 - **Doc-level semver**: MAJOR — an existing ruling changed meaning, or added
   rulings break existing programs; MINOR — rulings added compatibly; PATCH —
   editorial.
@@ -85,6 +95,18 @@ plus compact one-line why-tags and aphorisms. What stays and what moves:
 - Before removing text from a spec, **verify the vibe record already carries
   the argument** — add it there first if not. Content is never lost, only
   relocated.
+- **Principles over details** (USER, 2026-11-04). A ruling states a
+  principle and a decision at a level that stays true while the
+  implementation moves. Tuning values, internal names that can change,
+  measurements, admission lists and per-version narratives go to the vibe
+  record; implementation history goes to `vibe/impl/`. If a routine
+  implementation change would force a spec edit, the spec is too detailed.
+- **The design spec is written in ASD-STE100 Simplified Technical English**
+  (USER, 2026-11-04): short sentences (about 20 words, never more than 25
+  where avoidable), active voice, present tense, one statement per sentence,
+  vertical lists for parallel items, `must`/`can`/`do not` for obligation and
+  permission. Code names are technical names. Each ruling is
+  `- **D#[*] — <principle as a sentence>.** <decision> [records]`.
 
 **Citation (CLAUDE.md rule 17).** In chat and in every new or updated design
 or implementation doc, cite the `S#`/`D#` ruling when one covers the point;

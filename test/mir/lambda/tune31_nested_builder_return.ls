@@ -1,4 +1,4 @@
-// Tune31 T31-2 / D3.2.1-D3.3.1: an open outer builder may retain only
+// Tune31 T31-2 / D4.2.1-D4.3.1: an open outer builder may retain only
 // proven int-lane returns; indexing it is admitted at the consumer boundary.
 
 pn build_codes(text) {

@@ -20,8 +20,8 @@
 - **Formal authority:** **S11.1.1v2** (homogeneous arrays and rank),
   **S11.4.1v3** (checked construction and mutation), **S7.7.2** (checked
   boundaries), **S7.10.6** (mutator errors), **S9.1.1–S9.2.2** (value/COW and
-  `var` borrowing), **D3.1.1v4** (the full `Type*` graph is authoritative),
-  **D3.2.4v3** (named-layout reification), and **D3.3.3v3** (a certificate is
+  `var` borrowing), **D4.1.1** (the full `Type*` graph is authoritative),
+  **D4.2.5** (named-layout reification), and **D4.3.3** (a certificate is
   not inferred narrowing).
 
 ---
@@ -35,19 +35,19 @@ After this plan, `T[]` is one coherent contract across every Lambda surface:
    (**S11.1.1**).
 2. Nesting is compositional: `T[][]` is an array of `T[]`; a two-dimensional
    packed `ArrayNum` is a representation of `T[][]`, never a license to treat
-   a row as `T` (**S11.1.1**, **D2.6.2**).
+   a row as `T` (**S11.1.1**, **D3.2.2**).
 3. A declaration, parameter, return, indexed write, `push`, and array-producing
    system function all use the same full `Type*` contract (**S7.8.1**,
    **S11.4.1**).
 4. An unproven scalar indexed read from `T[]` has public type `T?`; a proven
-   in-bounds read may use `T` privately in the emitter (**D2.5.3**,
-   **D3.3.4**).
+   in-bounds read may use `T` privately in the emitter (**D2.4.3**,
+   **D2.4.3**).
 5. Value positions are covariant when every element embeds exactly. A `var`
    parameter is invariant and requires the same structural array contract
    (**S9.2.1**).
 6. Physical storage is unobservable. A boxed `Array`, native-lane `Array`, and
    `ArrayNum` compare, iterate, format, match, and type-check identically when
-   they represent the same value (**D2.6.2**).
+   they represent the same value (**D3.2.2**).
 7. A wrong element never enters a declared array. Failure is static where
    provable and otherwise a rich, transactional runtime error; it is never a
    lossy conversion, silent no-op, `null`, unchanged-success result, or wrong
@@ -55,11 +55,11 @@ After this plan, `T[]` is one coherent contract across every Lambda surface:
 8. A typed array pays an O(n) admission at most when an uncertified value first
    crosses the contract. The resulting representation certificate makes
    repeated same/subtype value boundaries O(1). No element check is emitted at
-   every read or every already-admitted call (**S7.7.2**, **D3.2.4v2**).
+   every read or every already-admitted call (**S7.7.2**, **D4.2.5**).
 9. Record arrays retain enough physical proof for `xs[i].field` to combine a
    bounds/null guard with the named record's direct byte-offset access. A
-   `MAP` tag alone never proves the record layout (**D3.1.1v2**,
-   **D3.2.4v2**).
+   `MAP` tag alone never proves the record layout (**D4.1.1**,
+   **D4.2.5**).
 10. Read views are snapshot values. A write-through view is a non-escaping
     `var` borrow created only for a mutable place and checked for exclusivity
     (**S9.1.1–S9.1.3**, **S9.2.2**).
@@ -116,7 +116,7 @@ The implementation currently has four partial notions of an array type:
 
 AST, MIR, and runtime separately implement helpers for extracting an array's
 element type. Their accepted wrappers already differ. This is a design smell,
-not merely missing optimization: **D3.1.1v2** says the complete `Type*` graph
+not merely missing optimization: **D4.1.1** says the complete `Type*` graph
 is the semantic authority and a TypeId alone is never a contract.
 
 ### 2.2 Reproduced failures on 2026-09-09
@@ -146,7 +146,7 @@ the same with a base `TypeId`. Neither fact proves a composite element type,
 null/error admission, named layout, union membership, or immediate array rank.
 
 The repair therefore cannot be another `if (elem_type == ...)` fast path. It
-must separate four authorities exactly as **D2.4.1** requires:
+must separate four authorities exactly as **D2.3.4** requires:
 
 1. **semantic contract:** canonical `Type*` (`Variable[]`, `int?[][]`);
 2. **planned representation:** boxed/native/ArrayNum plus lane and rank;
@@ -235,7 +235,7 @@ typedef enum LambdaArrayContractRelation {
   nullability, union structure, sized numeric kind, and named-map layout
   identity (**S9.1.3**, **S9.2.1**).
 - Named record arrays use the same trusted map relation/reification rules as
-  scalar named maps (**D3.2.4v2**).
+  scalar named maps (**D4.2.5**).
 - `Type*` pointer equality is an optimization after canonicalization, never
   the definition of array-type equality.
 
@@ -267,11 +267,11 @@ preserve the optimized physical representation.
 
 A binding contract and a value's representation proof are not the same fact:
 
-- the binding owns the language-level declaration (**D3.2.3**);
+- the binding owns the language-level declaration (**D4.2.4**);
 - the value may carry proof that it was constructed/admitted under a layout;
 - that proof may justify a fast boundary or direct load;
 - the proof must never be used to infer or narrow an unrelated unannotated
-  binding (**D3.3.3**).
+  binding (**D4.3.3**).
 
 Introduce an immutable, interned `ArrayRepCert` shared by arrays with the same
 representation proof. A proposed logical payload is:
@@ -298,7 +298,7 @@ normally leaves it null unless its content face gains a homogeneous proof.
 
 This choice:
 
-- keeps the pinned eight-byte `Container` header unchanged (**D2.6.11**);
+- keeps the pinned eight-byte `Container` header unchanged (**D3.1.1**);
 - preserves every existing field offset used by MIR and GC;
 - keeps `sizeof(List) == sizeof(ArrayNum)` for legal representation changes;
 - costs one pointer per list/array/element rather than a hash lookup at every
@@ -342,7 +342,7 @@ Representation follows the complete admitted leaf contract:
 |---|---|
 | non-null `int`, `float`, `i64`, `u64`, sized numeric, bool | `ArrayNum` with the exact element kind |
 | nullable `int?`, `float?`, bool?, nullable narrow sized integer | native-lane `Array` using the ruled sentinel/widened lane |
-| nullable `i64?`/`u64?` | boxed Item-lane `Array` per **D2.5.2** |
+| nullable `i64?`/`u64?` | boxed Item-lane `Array` per **D2.4.2** |
 | non-null pointer scalar such as string/symbol/binary | non-null pointer-lane `Array` |
 | nullable pointer scalar | nullable pointer-lane `Array` |
 | exact named map/element | concrete-layout pointer lane such as `MapVariable*[]`; every member is reified to that exact layout |
@@ -350,7 +350,7 @@ Representation follows the complete admitted leaf contract:
 | nested homogeneous numeric rank | N-D `ArrayNum` when rectangular; nested boxed arrays otherwise |
 
 No native lane is selected if the element contract admits `error` or the
-producer is not statically proved error-free (**S7.8.1**, **D2.8.1–D2.8.3**).
+producer is not statically proved error-free (**S7.8.1**, **D2.5.1–D2.5.3**).
 
 For every lane-safe mapping from a Lambda element contract `T` to its concrete
 native representation `t`, the homogeneous array representation closes over
@@ -362,7 +362,7 @@ notation for the concrete packed layout identified by `Variable`'s canonical
 lane proof must retain the equivalent descriptor identity and fixed field
 offsets. The common `Map` prefix is usable for generic runtime operations only
 after leaving the specialized lane. Treating it as the lane element type would
-discard the reification proof required by **D3.2.4v2**.
+discard the reification proof required by **D4.2.5**.
 
 ---
 
@@ -394,7 +394,7 @@ Admission algorithm:
    named-map relation. Do not modify the source.
 5. Select and allocate the destination representation only after the plan is
    known. Root source, candidate, converted elements, and shape metadata across
-   every allocation (**D5.3.3–D5.3.4**).
+   every allocation (**D6.3.3–D6.3.4**).
 6. Reify named maps into the exact target layout; recursively admit nested
    arrays; write numeric lanes only with already-admitted values.
 7. Install the target certificate after construction completes.
@@ -404,7 +404,7 @@ Admission algorithm:
 
 This makes an initial dynamic `Variable[]` boundary O(n), but every subsequent
 same-contract call O(1). It also makes direct record fields legal: each map was
-reified before the array certificate was installed (**D3.2.4v2**).
+reified before the array certificate was installed (**D4.2.5**).
 
 ### 5.2 Exact element store
 
@@ -469,14 +469,14 @@ They do not leave a partially changed typed array when a later element fails
 - A null written/appended to `T?[]` uses the ruled native nullable lane. If the
   current carrier is non-null `ArrayNum`, build the replacement buffer first,
   then atomically retag/publish the same-size `List`/`ArrayNum` header or return
-  a replacement through the `var` root (**D2.6.2**).
+  a replacement through the `var` root (**D3.2.2**).
 - `splice` removal preserves a typed contract. Views and N-D arrays may keep
   the explicit `copy()/ravel()` requirement under `LR12-5`; they must return a
   real error rather than unchanged success.
 - Internal collection builders retain a clearly named unchecked append only
   when their construction proof already owns every element. Content builders
   continue to use `list_push`; array builders use verbatim collection append
-  per **D2.6.5**.
+  per **D3.3.1**.
 
 ---
 
@@ -664,7 +664,7 @@ wrong result, tier divergence, memory overwrite, or missing expected output.
   return a collection.
 - Keep mutable binding declarations intact. Mutation invalidates a physical
   proof only when it actually changes representation; it does not change the
-  binding's declared result type (**D3.2.3**, **D3.3.3**).
+  binding's declared result type (**D4.2.4**, **D4.3.3**).
 
 **Exit gate**
 
@@ -681,7 +681,7 @@ wrong result, tier divergence, memory overwrite, or missing expected output.
 - `lambda/runtime/transpile-mir.cpp`: typed parameter analysis, index-policy
   selection, array caches, invalidation, module slots, direct calls, adapters,
   and boundary elision.
-- `MirValue` and representation router helpers governed by **D2.4.1–D2.4.3**.
+- `MirValue` and representation router helpers governed by **D2.3.4–D2.3.5**.
 
 **Implementation**
 
@@ -834,7 +834,7 @@ wrong result, tier divergence, memory overwrite, or missing expected output.
   relation. A certificate can make the positive check O(1); uncertified values
   are walked.
 - Repair `ArrayNum`/Array structural equality and ordering so representation is
-  invisible (**D2.6.2**).
+  invisible (**D3.2.2**).
 - Ensure `type()`, formatting, MarkReader, and serialization expose semantic
   array behavior, never `ArrayNumElemType` or certificate identity.
 
@@ -1135,7 +1135,7 @@ combined to make subsequent admissions traverse and rebuild the graph.
 
 The original AWFY profile recorded 34,030,320 map admissions, 32,614,995
 relation-cache misses, and 275,820 reifications. This was not an unavoidable
-cost of Lambda's value semantics: **D3.2.4v3** and **D3.3.3v3** already provide
+cost of Lambda's value semantics: **D4.2.5** and **D4.3.3** already provide
 the layout and certificate invariants needed to avoid it.
 
 ### Implemented changes
@@ -1143,7 +1143,7 @@ the layout and certificate invariants needed to avoid it.
 1. **Full path inference.** The shared declared-path resolver preserves array
    fields and resolves record fields through nullable wrappers. Indexed and
    nullable-receiver reads still contribute `null`, as required by
-   **S7.1.1v3/D3.3.4**. The shared non-null map resolver deliberately does not
+   **S7.1.1v3/D2.4.3**. The shared non-null map resolver deliberately does not
    discharge value-dependent refinements from layout alone.
 2. **Proof-preserving mutation.** A proven record path admits only its incoming
    leaf, including array-valued leaves. Shallow COW clones retain certificates;
@@ -1156,11 +1156,11 @@ the layout and certificate invariants needed to avoid it.
    stores the integer lane directly without allocating a key array or calling
    a path setter. Shared or unproven paths take the rooted checked COW arm;
    there are no interior pointers live across its allocation safepoints
-   (**S9.1.2/S9.3.1/D5.1.1v2**).
+   (**S9.1.2/S9.3.1/D6.1.1**).
 4. **Boundary reuse.** Same-contract typed bindings and explicitly admitted
    function returns avoid duplicate array admission. An inferred builtin
    result alone is not a carrier proof: `split` still crosses the String[]
-   conversion boundary before native-pointer reads (**D3.3.3v3**).
+   conversion boundary before native-pointer reads (**D4.3.3**).
 5. **Typed RMW handles.** An invariant array annotation no longer excludes a
    get-modify-put handle from existing borrow analysis. `push`/`splice` now
    record place-copy mutation just like user `var` calls, so eliminating a
@@ -1226,8 +1226,8 @@ identity-semantics change, or alternate compiler backend is introduced.
 
 This increment addresses the remaining contract-metadata and vector-write
 costs identified after §13. It preserves full representation proofs
-(**D3.3.3v3**), named-record layout admission (**D3.2.4v3**), snapshot semantics
-(**S9.1.2/S9.3.1**), and precise ownership across safepoints (**D5.1.1v2**).
+(**D4.3.3**), named-record layout admission (**D4.2.5**), snapshot semantics
+(**S9.1.2/S9.3.1**), and precise ownership across safepoints (**D6.1.1**).
 No benchmark source, vendor source, or language semantics changed.
 
 ### Implemented
@@ -1276,7 +1276,7 @@ No benchmark source, vendor source, or language semantics changed.
   if all explicit returns are native integers. Return-lane analysis now scans
   the complete function body, excluding nested definitions, using the shared
   Lambda AST traversal. Such a body keeps an Item-capable result instead of
-  misboxing the error as an integer (**S7.4**, **D3.3.1**).
+  misboxing the error as an integer (**S7.4**, **D4.3.1**).
 
 ### Measurements and remaining work
 
@@ -1308,7 +1308,7 @@ avoid unnecessary snapshots, guard reuse across proven mutation-free regions,
 native splice/removal and additional element lanes, scalar boundary cleanup,
 constant propagation, and small-function inlining. These are not implemented
 by this increment. Public nullable reads and rejected writes retain their
-language behavior (**D3.3.4**, **S7.1.1v3/S7.1.3v2**).
+language behavior (**D2.4.3**, **S7.1.1v3/S7.1.3v2**).
 
 New regression coverage: `typed_array_reuse.{ls,txt,mir-check}` exercises
 same-contract forwarding, dynamic rejection, interior error exits, snapshots,

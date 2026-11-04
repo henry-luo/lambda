@@ -19,7 +19,7 @@ later Lambda-`Item` alignment experiment is recorded as abandoned history in
 The follow-up [full LambdaJS comparison and optimization proposal](JS_MVP_Full_Runtime_Comparison.md)
 traces v1's performance advantages, records fresh diagnostic measurements, and
 identifies designs that can improve the full engine while retaining Lambda types
-and ECMAScript semantics (**S1.11**, **D1.3v3**, **D8.4.1v2**).
+and ECMAScript semantics (**S1.11**, **D1.3**, **D7.4.1**).
 
 ## 1. Objective and acceptance boundary
 
@@ -63,7 +63,7 @@ it rejects changed sources, inputs, wrapper descriptions, or population size.
 ## 2. Design decisions
 
 **JM1 — Reuse the untyped Lambda substrate, keep JavaScript semantics private.**
-This implements **D1.3v3**. The MVP reuses source admission, the parser/AST
+This implements **D1.3**. The MVP reuses source admission, the parser/AST
 builder, the MIR library lifecycle, `memtrack` allocation categories, diagnostics,
 and release/baseline workflow. It does not create a second host runtime, event
 loop, general allocator framework, source cache, or compiler backend.
@@ -112,7 +112,7 @@ on `this` uses the corresponding private indexed lookup. Method direct calls are
 limited to source classes without a top-level subclass, so prototype dispatch
 remains correct where the proof is absent. There is no bytecode VM, tiering,
 inline cache, feedback vector, deoptimization, or benchmark-specific rewrite.
-This is consistent with **D8.4.1v2**.
+This is consistent with **D7.4.1**.
 
 ## 3. Runtime representation and call flow
 
@@ -121,12 +121,12 @@ This is consistent with **D8.4.1v2**.
 `MvpValue` is a one-word private NaN-boxed ABI. It preserves IEEE-754 Numbers,
 including NaN, infinities, and negative zero; tagged values represent undefined,
 null, booleans, and private heap references. It never aliases Lambda `Item`, as
-required by **D1.2v2**.
+required by **D1.2**.
 
 `MvpHeap` is a new non-moving mark-and-sweep heap. Heap objects form a private
 allocation list, and each kind traces its owned `MvpValue` edges explicitly.
 `MvpRootFrame` roots only private values. This follows the ownership discipline
-of **D1.5v2** without restoring retired native-stack scanning. The execution
+of **D1.5** without restoring retired native-stack scanning. The execution
 owns the global root frame, literal cache, active function frames, and a reusable
 frame pool. Leaving a function clears every pooled slot before reuse, so a
 released local cannot retain a JS object.
@@ -170,7 +170,7 @@ private error result. The benchmark workload does not execute a catch/finally
 recovery path. General in-function throw/catch/finally propagation remains
 outside this synchronous benchmark profile; accordingly this is not a claim of
 full ECMAScript error conformance. The formal returned-completion ruling
-**D1.4v4 / D8.4.3v2** remains marked partial in the implementation footnote.
+**D1.4 / D7.4.3** remains marked partial in the implementation footnote.
 
 ## 4. Independence audit
 
@@ -274,10 +274,10 @@ excluded, reweighted, or replaced by a native benchmark implementation.
 After v1 met the benchmark target, a v2 experiment tried to satisfy the stronger
 unification goal by making JavaScript values use Lambda's `Item` currency and
 container substrate. This was an implementation experiment, not a change to the
-formal rulings. It explored **D1.2v2**, which allows a private guest ABI only
-behind an explicit host adapter, and **D1.3v3**, which requires a guest to reuse
+formal rulings. It explored **D1.2**, which allows a private guest ABI only
+behind an explicit host adapter, and **D1.3**, which requires a guest to reuse
 applicable untyped-Lambda substrate before introducing private machinery.
-Precise shared rooting remained governed by **D1.5v2**.
+Precise shared rooting remained governed by **D1.5**.
 
 ### 7.2 Design that was tried
 
@@ -296,7 +296,7 @@ formatting were switched to the existing Lambda JSON input and formatter paths.
 The MIR entry and parser/AST admission remained the v1 direct-MIR flow. Thus the
 experiment removed duplicate physical carriers, but it did not remove the JS
 semantic kernels or their dynamic checks. That separation is also consistent
-with **D8.1.3v10**, which keeps JS and Lambda semantic walkers and activation
+with **D8.4.1**, which keeps JS and Lambda semantic walkers and activation
 records distinct.
 
 ### 7.3 Benchmark result
@@ -330,7 +330,7 @@ operations moved from private tagged words and direct private pointers to
 bookkeeping, and JS adapters layered over those paths. Reusing JSON eliminated
 some duplicate code, but it did not offset the per-operation representation and
 ownership cost. The retained v1 private ABI is therefore intentional under
-**D1.2v2** and **D1.3v3**, with its private roots still proved under **D1.5v2**;
+**D1.2** and **D1.3**, with its private roots still proved under **D1.5**;
 v2 is not kept as a runtime mode or fallback.
 
 The v2 run and v1 acceptance sessions were separate captures at different
@@ -368,6 +368,6 @@ broader compatibility path.
 | New MVP MIR runtime | private value/heap/runtime plus direct numeric and generic MIR files | complete |
 | Support 63 standard workloads | two fresh 63-row, three-sample release sessions | complete |
 | No legacy JS runtime helpers/data structures | isolation audit and private runtime layouts | complete |
-| Align with untyped Lambda | D1.3v3 substrate reuse table and normal project gates | complete |
+| Align with untyped Lambda | D1.3 substrate reuse table and normal project gates | complete |
 | Simple call flow | one parser adapter, two direct MIR paths, one private execution owner | complete |
 | MVP / QuickJS geometric mean <= 0.80 | 0.695110x and 0.691519x | complete |

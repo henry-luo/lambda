@@ -1,4 +1,4 @@
-// D2.4.1, S5.1.1: native bool/null equality and checked bool call results.
+// D2.3.4, S5.1.1: native bool/null equality and checked bool call results.
 pn compare_neighbors(values: float[], index: int) {
     var left = values[index] > 0.0
     var right = values[index + 1] > 0.0

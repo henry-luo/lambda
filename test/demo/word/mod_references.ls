@@ -1,4 +1,4 @@
-// Source records and rendered fields share one undoable document transaction (D7.2.5).
+// Source records and rendered fields share one undoable document transaction (D10.2.1).
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import lambda.editor.mod_source_pos

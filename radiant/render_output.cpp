@@ -1106,7 +1106,7 @@ bool render_paged_window_compose(UiContext* ui) {
         if (tree) view_tree_secondary_release(doc, tree);
         return false;
     }
-    // publish after composition succeeds; the registry owns edition allocations (D4.5.1v4).
+    // publish after composition succeeds; the registry owns edition allocations (D5.5.1).
     if (ui->paged_view) view_tree_secondary_release(doc, ui->paged_view);
     ui->paged_view = lam::up(tree);
     render_paged_window_scroll(ui, ui->paged_scroll_x, ui->paged_scroll_y);
@@ -1166,7 +1166,7 @@ static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox
     OffscreenRenderArenas arenas;
     if (!arenas.init("render.paged.snapshot", "render.paged.snapshot.list", "render.paged.snapshot.scratch")) return nullptr;
     PaintList paint = {}; paint_list_init(&paint, nullptr);
-    // SVG stops, dashes and captured metadata must survive recording through replay (D4.5.1v4).
+    // SVG stops, dashes and captured metadata must survive recording through replay (D5.5.1).
     DisplayList list = {}; dl_init(&list, arenas.list_arena);
     ImageSurface* surface = nullptr;
     RdtLogicalRect bounds = {};

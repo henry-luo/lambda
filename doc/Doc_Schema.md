@@ -38,7 +38,7 @@ in `format` and unsupported-construct metadata in `data-kind` and
 
 See the [wiki design](../vibe/input/Input_Wiki.md) for syntax mappings and losses.
 The same normalized content rules apply (S2.6.1v2, S2.6.2–S2.6.5), and parser
-construction remains in MarkBuilder (D7.1.5).
+construction remains in MarkBuilder (D9.1.4).
 
 ## Mark Schema
 

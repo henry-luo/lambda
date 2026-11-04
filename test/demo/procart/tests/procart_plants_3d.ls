@@ -1,4 +1,4 @@
-// S12.1.1v3 / D7.5.3v2: real seeded solids, valid native scenes and display-only modes.
+// S12.1.1v3 / D9.5.6: real seeded solids, valid native scenes and display-only modes.
 import B: ~~.mod_plants
 import solids: ~~.mod_plant_solids
 import three: ~~.mod_botanical3d

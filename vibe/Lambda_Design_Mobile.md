@@ -3,7 +3,7 @@
 **Date:** 2026-10-26 (rev 6: host paths (MB13) done; the rest of P1.2 awaits Xcode)
 **Status:** **PROPOSAL — not ratified.** Nothing here revises an `S#`/`D#` ruling yet. §10 lists the spec changes this design would need; each needs a user ruling before it lands.
 **User direction (2026-10-25):** Phase 1 is a **developer-build MVP**: several simple demos running on the user's own iPhone, installed from Xcode. App Store distribution is out of phase 1. External Jube modules are deferred to a later phase. Phase 1 is specified in **§1** and overrides the full-port sections where they differ.
-**Design authority:** `doc/Lambda_Formal_Design.md` — D1.1, D1.3v3, D7.1.1, D7.1.4v2 (headless profile C), D7.1.6 (`lambda-cli`), **D7.1.7v6 (`lambda-wasm`, the no-JIT precedent)**, D8.1.1v18 (T0/AUTO tiering), D8.1.3v42 (LambdaJS AST interpreter), D8.5 (MIR cache), D4.5 (Radiant seam).
+**Design authority:** `doc/Lambda_Formal_Design.md` — D1.1, D1.3, D9.1.1, D9.2.1 (headless profile C), D9.2.2 (`lambda-cli`), **D9.2.3 (`lambda-wasm`, the no-JIT precedent)**, D8.3.2 (T0/AUTO tiering), D8.4.5 (LambdaJS AST interpreter), D8.5 (MIR cache), D5.5 (Radiant seam).
 **Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI25), `vibe/Lambda_Design_Static_Modules.md` (wasm profile), `vibe/Lambda_Design_JS_Interpreter.md`, `vibe/Memory_Context.md` (reclaim ladder), `doc/dev/Lambda_WASM_Build.md`, `doc/dev/radiant/RAD_00_Overview.md`.
 **Scope:** porting the Lambda runtime, LambdaJS and Radiant to iOS and iPadOS (device and simulator, arm64). Android is out of scope, but §4's platform seam is meant to serve it too.
 **Ledger:** this doc opens the **`MB#`** series (mobile). Open questions are **`MB-O#`**.
@@ -17,7 +17,7 @@ iOS lets an App Store app execute only code that Apple signed when it installed 
 That is less radical than it sounds, because most of the hard part already exists:
 
 - `LAMBDA_NO_MIR` already compiles MIR out of the Lambda engine. In that build T0 is the only tier and promotion is impossible (`interp.cpp:57-78`).
-- `lambda-wasm` (D7.1.7v6) ships this exact constraint in production: no MIR, no promotion, no MIR-interpreter fallback.
+- `lambda-wasm` (D9.2.3) ships this exact constraint in production: no MIR, no promotion, no MIR-interpreter fallback.
 - LambdaJS has a complete AST interpreter. Its impl record reports Test262 40,261/40,261 under `ast`.
 
 Wasm strips out the OS. iOS keeps most of it: threads, fibers, libuv, files, the network, images, Radiant and JS. The work splits into three parts:
@@ -115,8 +115,8 @@ P1.0 and P1.1 need no iOS SDK.
 
 **Lambda engine: links without MIR.** `LAMBDA_NO_MIR` had only ever been compiled by `lambda-wasm`, which also drops the resource cache, tasks and file IO. Keeping those exposed code that had drifted into MIR-only regions. Fixes, each at the boundary and not by stubbing:
 
-- `interp_poll_interrupt` (D8.1.1v17) was inside the `#ifndef LAMBDA_NO_MIR` region of `interp.cpp`, although T0 polls it in every profile. Moved out.
-- `lambda_script_cache_request` (the backend-neutral source/AST cache key, D8.5.1v4) and `lambda_finalize_ast_template_for_execution` (T0 activation of a cached AST template) were MIR-guarded in `runner.cpp`. Now only the AUTO fallback tail of the latter is guarded; a T0-only build refuses there like explicit `interp` (D8.1.1v15).
+- `interp_poll_interrupt` (D8.3.6) was inside the `#ifndef LAMBDA_NO_MIR` region of `interp.cpp`, although T0 polls it in every profile. Moved out.
+- `lambda_script_cache_request` (the backend-neutral source/AST cache key, D8.5.1) and `lambda_finalize_ast_template_for_execution` (T0 activation of a cached AST template) were MIR-guarded in `runner.cpp`. Now only the AUTO fallback tail of the latter is guarded; a T0-only build refuses there like explicit `interp` (D8.3.1).
 - **The script run entry points lived in `transpile-mir.cpp`.** `run_script_mir`, its large-stack worker, `run_lambda_package_module` and the document-transform table and entries now sit in a new `lambda/runtime/script_run.cpp`; only their whole-module MIR branch is guarded. The wasm manifest does not list the new file, so that profile compiles exactly what it did before.
 - Two copies of the post-order import-cone walk and collector (`transpile-mir.cpp`, and `interp.cpp`, whose comment said it existed only because the original was static to the MIR file) became one shared `script_import_cone_postorder` / `collect_import_cone` in `runner.cpp` (AGENTS rule 13). Four hand-copied declarations of `prepare_context_module_state` became one in `transpiler.hpp`, beside the other `mir.c` exports.
 - MIR-only call sites are guarded with an explicit diagnostic where a user can reach them:
@@ -285,18 +285,18 @@ These facts drive every decision below. Items marked *(verify)* must be confirme
 
 ### 3.1 The profile (MB1, MB2)
 
-**MB1 — the iOS build is a `LAMBDA_NO_MIR` profile.** `transpile-mir.cpp`, `runtime/mir.c`, `libmir` and every MIR-only LambdaJS translation unit are left out of the source manifest. `lambda_tier_set` refuses any tier but `INTERP` (`interp.cpp:70-78`). Like D7.1.7v6: no promotion workers, no MIR caches, no MIR-interpreter fallback. Unlike wasm, the profile **keeps** tasks and fibers, libuv, threads, file and network IO, image processing, LambdaJS/TS, the DOM and Radiant. It is a sibling of `lambda-wasm`, not a subset of it.
+**MB1 — the iOS build is a `LAMBDA_NO_MIR` profile.** `transpile-mir.cpp`, `runtime/mir.c`, `libmir` and every MIR-only LambdaJS translation unit are left out of the source manifest. `lambda_tier_set` refuses any tier but `INTERP` (`interp.cpp:70-78`). Like D9.2.3: no promotion workers, no MIR caches, no MIR-interpreter fallback. Unlike wasm, the profile **keeps** tasks and fibers, libuv, threads, file and network IO, image processing, LambdaJS/TS, the DOM and Radiant. It is a sibling of `lambda-wasm`, not a subset of it.
 
 **MB2 — a desktop twin, `lambda-nomir`, is built first.** It is the same `LAMBDA_NO_MIR` manifest built for macOS with the ordinary GLFW Radiant. It runs every Lambda, JS and Radiant gate under T0 on a developer machine, with no iOS SDK, simulator or signing. Every execution gap in §3.2–§3.5 is found and closed here. The iOS build then differs from it only in the platform layer (§4) and services (§5). This also gives the project a permanent "does it still work without MIR" CI gate, which `lambda-wasm` cannot give for JS or Radiant.
 
 ### 3.2 What already works
 
-- **Tier selection.** `LAMBDA_NO_MIR` defaults the tier to `INTERP` (`interp.cpp:57-61`). Under explicit `interp`, an unsupported script fails with E501 before execution, and whole-module MIR fallback is not allowed (D8.1.1v15; `runner.cpp:1548-1564`).
+- **Tier selection.** `LAMBDA_NO_MIR` defaults the tier to `INTERP` (`interp.cpp:57-61`). Under explicit `interp`, an unsupported script fails with E501 before execution, and whole-module MIR fallback is not allowed (D8.3.1; `runner.cpp:1548-1564`).
 - **MIR guards across the engine.** `interp.cpp` (`INTERP_DISABLED_MIR_HOOK`), `runner.cpp`, `transpiler.hpp:90,250`, `module_registry.cpp:396`, `sys_func_registry.c:1500` and `lambda-mem.cpp:453`. Built and tested by `make lambda-wasm`.
 - **REPL.** It runs through `interp_repl_session_eval` (`runner.cpp:2715`). `main-repl.cpp` makes no MIR calls.
-- **Async.** T0 runs suspending definitions on their task activations (D8.1.1v16, AI24v2).
+- **Async.** T0 runs suspending definitions on their task activations (D8.3.2, AI24v2).
 - **`that` predicates and const folding.** They run in T0's `EvalMode::PREDICATE`/`CONST` (AI P3), so `validate` needs no JIT.
-- **Dynamic JS source** (`eval`, `Function`, string timers). It is always interpreted, whatever the tier (D8.1.3v20).
+- **Dynamic JS source** (`eval`, `Function`, string timers). It is always interpreted, whatever the tier (D8.4.3).
 
 ### 3.3 Lambda constructs T0 still refuses
 
@@ -313,7 +313,7 @@ Under AUTO these go to MIR. Under MB1 they become hard E501 errors. The support 
 
 `test/lambda/interp_excluded.txt` lists 24 corpus scripts in this class, mostly image `INDEX_EXPR` and COW `INDEX_ASSIGN`/`MEMBER_ASSIGN`.
 
-**MB3 — on iOS, a refused construct is a defect to close in T0, not a feature to drop.** Wasm can live with a refusal list because it is an evaluation sandbox. An iOS app that runs `test/demo/*` cannot. The work is ranked by what the shipped packages (`lmd/package/*`) and the target demos actually hit, which M0 measures. Closing a gap follows the existing T0 rule: simplest design, fewest lines, reuse the MIR lowering's helpers rather than writing parallel ones (AI3; AGENTS rule 13). Sized-int lanes and N-D indexing route through the existing boxed runtime helpers that the MIR boxed lane already calls (SI3/D3.3.1: erasing inferred types and running boxed must give identical results).
+**MB3 — on iOS, a refused construct is a defect to close in T0, not a feature to drop.** Wasm can live with a refusal list because it is an evaluation sandbox. An iOS app that runs `test/demo/*` cannot. The work is ranked by what the shipped packages (`lmd/package/*`) and the target demos actually hit, which M0 measures. Closing a gap follows the existing T0 rule: simplest design, fewest lines, reuse the MIR lowering's helpers rather than writing parallel ones (AI3; AGENTS rule 13). Sized-int lanes and N-D indexing route through the existing boxed runtime helpers that the MIR boxed lane already calls (SI3/D4.3.1: erasing inferred types and running boxed must give identical results).
 
 **Doc drift to fix along the way:** the §4.9 table of `Lambda_Design_Ast_Interpreter.md` still says modules with views stay eager-MIR. The code admits views that have a body (`interp_plan.cpp:220-225`).
 
@@ -327,11 +327,11 @@ The interpreter exists (`js_interp.cpp`, 8,305 lines). Its support scan (`js_int
 - Promotion compiles through `mvp_lmd_compile_function_satellite` / `_loop_satellite` (`js_interp.cpp:6477,6774`).
 - 17 tests are pinned to MIR (`test/js/mir_list.txt`).
 
-**MB4 — LambdaJS gets the same MIR partition Lambda has.** The JS front end, AST, interpreter, runtime kernels and DOM bindings are MIR-free. The MVP lowering, satellite compiler and whole-module MIR path sit behind `LAMBDA_NO_MIR`. In that build `JS_EXEC_BACKEND` is forced to `ast`. An unsupported unit fails with the same explicit diagnostic as Lambda's E501 instead of falling back. The partition follows D1.3v3: the host substrate is shared, and the MIR lifecycle is one removable component of it.
+**MB4 — LambdaJS gets the same MIR partition Lambda has.** The JS front end, AST, interpreter, runtime kernels and DOM bindings are MIR-free. The MVP lowering, satellite compiler and whole-module MIR path sit behind `LAMBDA_NO_MIR`. In that build `JS_EXEC_BACKEND` is forced to `ast`. An unsupported unit fails with the same explicit diagnostic as Lambda's E501 instead of falling back. The partition follows D1.3: the host substrate is shared, and the MIR lifecycle is one removable component of it.
 
 The 17 MIR-pinned tests are classified: either they test MIR itself (excluded from the no-MIR gate) or they expose an interpreter gap (fixed, per AGENTS rule 18). Test262 runs under `ast` in `lambda-nomir` as part of M1.
 
-**Doc drift:** `vibe/Lambda_Design_JS_Interpreter.md:41` still says "Unset remains MIR". D8.1.3v19 made unset select AUTO.
+**Doc drift:** `vibe/Lambda_Design_JS_Interpreter.md:41` still says "Unset remains MIR". D8.4.2 made unset select AUTO.
 
 ### 3.5 The JS→Lambda bridge
 
@@ -341,7 +341,7 @@ A JS module that imports a Lambda module goes through `load_script_mir_direct` (
 
 ### 3.6 Rejected: MIR's own interpreter as a fallback
 
-`--mir-interp` looks like a no-JIT option. It is not. The MIR interpreter generates machine-code thunks: `_MIR_get_ff_call` for foreign calls (`lambda/mir/mir-interp.c:1778`) and `_MIR_get_interp_shim`, redirected via `_MIR_redirect_thunk` (`mir-interp.c:2058`). Both need executable pages, which C1 forbids. MIR is vendored (AGENTS rule 16), so patching thunk generation out is not on the table either. D7.1.7v6 already excludes "MIR-interpreter fallback" for the same reason.
+`--mir-interp` looks like a no-JIT option. It is not. The MIR interpreter generates machine-code thunks: `_MIR_get_ff_call` for foreign calls (`lambda/mir/mir-interp.c:1778`) and `_MIR_get_interp_shim`, redirected via `_MIR_redirect_thunk` (`mir-interp.c:2058`). Both need executable pages, which C1 forbids. MIR is vendored (AGENTS rule 16), so patching thunk generation out is not on the table either. D9.2.3 already excludes "MIR-interpreter fallback" for the same reason.
 
 ### 3.7 Stacks, fibers, faults
 
@@ -401,7 +401,7 @@ No iOS work exists anywhere in the tree today. `TARGET_OS_IPHONE` appears only i
 
 `view.hpp` stops including GL and GLFW headers. Only backend TUs see them.
 
-The alternative is to keep calling GLFW and implement a GLFW-shaped shim on UIKit, the way `radiant/headless.cpp` stubs GLFW for `LAMBDA_NO_GUI`. That is rejected for iOS. The null shim works because a headless run *has* no window semantics. iOS has richer semantics than GLFW can express: touches with identifiers and phases, safe areas, keyboard frames, scene lifecycle, memory warnings. A fake GLFW would either drop them or smuggle them through invented key codes, which is a workaround (AGENTS rule 1). The seam keeps D7.1.4v2's principle: every profile compiles the **same Radiant sources** against a different windowing backend, with no `#ifdef` stripping of display code. The headless null backend becomes one more implementation of the interface instead of a GLFW stub.
+The alternative is to keep calling GLFW and implement a GLFW-shaped shim on UIKit, the way `radiant/headless.cpp` stubs GLFW for `LAMBDA_NO_GUI`. That is rejected for iOS. The null shim works because a headless run *has* no window semantics. iOS has richer semantics than GLFW can express: touches with identifiers and phases, safe areas, keyboard frames, scene lifecycle, memory warnings. A fake GLFW would either drop them or smuggle them through invented key codes, which is a workaround (AGENTS rule 1). The seam keeps D9.2.1's principle: every profile compiles the **same Radiant sources** against a different windowing backend, with no `#ifdef` stripping of display code. The headless null backend becomes one more implementation of the interface instead of a GLFW stub.
 
 **MB8 — the shell drives Radiant by ticks; Radiant never owns the loop.** The body of `window.cpp:2146-2287` becomes `radiant_tick(budget)`: drain the event queue, pump libuv with `UV_RUN_NOWAIT`, run due timers and frame callbacks, lay out, paint, present. The desktop backend calls it from its own `while` loop. iOS calls it from a CADisplayLink callback while frames are wanted, and from the libuv backend file descriptor (`uv_backend_fd`, watched by a `dispatch_source` on the main queue) while idle. Then network completions and timers still wake an app that is not animating. The frame clock (RAD_16 §2) already only wakes the loop, so it maps directly onto CADisplayLink. ProMotion uses `preferredFrameRateRange` plus `CADisableMinimumFrameDurationOnPhone` in Info.plist.
 
@@ -419,7 +419,7 @@ A simpler first step is an IOSurface-backed `CALayer.contents`. It is acceptable
 
 `gl_core.cpp` creates a desktop GL 4.1 core context and reads pixels back. iOS has no desktop GL. Options:
 
-1. **Phase 1: compile the GPU paths out** of the iOS profile with the explicit "excluded from this build" diagnostic (the D7.1.6 pattern), so canvas falls back to its CPU path where one exists. Nothing degrades silently.
+1. **Phase 1: compile the GPU paths out** of the iOS profile with the explicit "excluded from this build" diagnostic (the D9.2.2 pattern), so canvas falls back to its CPU path where one exists. Nothing degrades silently.
 2. **OpenGL ES 3.0** through EAGL. WebGL's GLSL ES 3.00 runs nearly as is (the `#version 330 core` rewrite becomes unnecessary). But the API has been deprecated since iOS 12 and may be removed.
 3. **ANGLE on Metal**, the path WebKit uses. It keeps the GLES API surface on a supported GPU API, at the cost of a large new vendored dependency (AGENTS rule 16 applies).
 4. **A native Metal backend** for scene3d and a WebGL translation layer. This is the most work and the long-term option.
@@ -497,7 +497,7 @@ The runtime gets an explicit "host paths" initialisation (home, cache, temp, doc
 
 ### 5.2 Processes, terminal, CLI
 
-- **Processes.** `cmd` (`SYSPROC_CMD`, `sys_func_registry.c:1257`), `lib/shell.c` `posix_spawn` and Node `child_process` fail with an explicit "not available on this platform" error (the D7.1.6/D7.1.7 "fail explicitly" rule). They are not stubbed to return empty output.
+- **Processes.** `cmd` (`SYSPROC_CMD`, `sys_func_registry.c:1257`), `lib/shell.c` `posix_spawn` and Node `child_process` fail with an explicit "not available on this platform" error (the D9.2.2/D9.2.3 "fail explicitly" rule). They are not stubbed to return empty output.
 - **Terminal.** `lib/terminal_device.c`, the CLI entry (`main.cpp`) and the line-edited REPL are excluded. The app embeds the runtime through an entry API shaped like `wasm_embed.cpp`: init, load package, run, evaluate in a REPL session, shutdown. An in-app console view can host a REPL.
 - **Environment knobs** (`LAMBDA_EXEC_BACKEND`, `LAMBDA_HOME`, `LAMBDA_LOG_LEVEL`, …). They are set through that entry API's config struct. `shell_getenv` stays as the desktop override.
 
@@ -513,7 +513,7 @@ C3 forbids `dlopen` of the `modules/node-*` and `rdb-drivers` dylibs. Static reg
 - `node_net` server sockets and `serve` (the HTTP server) are excluded in v1: background suspension and the local-network permission prompt make a server a poor fit.
 - `rdb` keeps SQLite (built with `SQLITE_OMIT_LOAD_EXTENSION`) and drops the libpq/mariadb drivers.
 
-This collides with **D1.1** ("bundles differ only by the Jube modules beside it; host binaries are byte-identical") and **D7.1.1** ("dynamic is reserved for Jube modules"). See §10.
+This collides with **D1.1** ("bundles differ only by the Jube modules beside it; host binaries are byte-identical") and **D9.1.1** ("dynamic is reserved for Jube modules"). See §10.
 
 ### 5.4 Network and TLS trust (MB18)
 
@@ -564,7 +564,7 @@ Budgets for the shipped demos are measured in M8 against device jetsam limits. G
 
 ### 6.1 Targets (MB16)
 
-**MB16 — iOS is a new platform block in `build_lambda_config.json`**, generated like every other profile (AGENTS rule 7: never hand-edit the Lua). It produces static archives for `arm64-apple-ios` and `arm64-apple-ios-simulator` from the same layered libraries: `lib` → `lambda-data` → `lambda-rt` → `radiant` (D7.1.1). They are packaged as one `Lambda.xcframework`. A thin Xcode project under a new `platform/ios/` directory holds the UIKit shell (scene delegate, Metal view, text-input view), Info.plist, entitlements and asset bundling, and links the xcframework. Swift or Objective-C++ in the shell is a free choice. The engine stays C+.
+**MB16 — iOS is a new platform block in `build_lambda_config.json`**, generated like every other profile (AGENTS rule 7: never hand-edit the Lua). It produces static archives for `arm64-apple-ios` and `arm64-apple-ios-simulator` from the same layered libraries: `lib` → `lambda-data` → `lambda-rt` → `radiant` (D9.1.1). They are packaged as one `Lambda.xcframework`. A thin Xcode project under a new `platform/ios/` directory holds the UIKit shell (scene delegate, Metal view, text-input view), Info.plist, entitlements and asset bundling, and links the xcframework. Swift or Objective-C++ in the shell is a free choice. The engine stays C+.
 
 The deployment target is iOS 17 (proposal, MB-O4): it covers current devices and gets modern `UITextInput`/`UIPointerInteraction` behavior.
 
@@ -580,7 +580,7 @@ Every Homebrew `.a` must be rebuilt from source for both iOS slices, by a new `s
 
 ### 6.3 Assets
 
-`lmd/` is 22 MB, mostly `package/doc` (9.0 MB) and `package/music` (7.9 MB). The bundle step copies only the packages an app's import closure reaches, computed by the same import discovery the static-module prebuild uses (`module_ast_prebuild`, D8.5.1v4). AST prebuild output for bundled packages can ship as a cache seeded into `Library/Caches` on first launch. That is a derived cache (D1.7), never source.
+`lmd/` is 22 MB, mostly `package/doc` (9.0 MB) and `package/music` (7.9 MB). The bundle step copies only the packages an app's import closure reaches, computed by the same import discovery the static-module prebuild uses (`module_ast_prebuild`, D8.5.1). AST prebuild output for bundled packages can ship as a cache seeded into `Library/Caches` on first launch. That is a derived cache (D1.7), never source.
 
 ### 6.4 Testing on iOS
 
@@ -667,11 +667,11 @@ M0–M3 need no iOS SDK and can proceed in parallel with dependency cross-buildi
 
 If this design is accepted, these formal-spec changes would follow. **None is made by this document.** Each needs the user's ruling (`doc/Doc_Convention.md` §2).
 
-- **New D7.1.8 — `lambda-ios` profile.** It is defined against D7.1.7v6 the way D7.1.7 is defined against D7.1.6: MIR and all JIT machinery excluded, evaluation stays in AST (Lambda and JS), and the retained and excluded capability lists come from §3.1, §5.2 and §5.3. A companion note states the `lambda-nomir` desktop twin.
-- **D1.1 and D7.1.1 (deferred with Jube).** Both assume Jube modules are dynamic libraries beside a byte-identical host. MB14 needs either an amendment ("on platforms that forbid loading unsigned code, Jube modules link statically into the host; the module contract is unchanged") or a ruling that the iOS host is a separate product outside D1.1.
-- **D7.1.4v2.** Generalize "null windowing backend in place of GLFW" to "a windowing backend" (MB7), with the null backend one implementation among GLFW and UIKit.
-- **D8.1.1 and D8.1.3.** Note that under a no-MIR profile, AUTO's fallback paths do not exist and refusal is the only outcome (already true for Lambda per D8.1.1v15; new for JS via MB4). Record MB5's T0 export path for JS→Lambda imports.
-- **D4.5 (Radiant seam).** If MB8's tick inversion changes ownership of the event loop between rt and radiant, D4.5 records it.
+- **New D9.2.4 — `lambda-ios` profile.** It is defined against D9.2.3 the way D9.2.3 is defined against D9.2.2: MIR and all JIT machinery excluded, evaluation stays in AST (Lambda and JS), and the retained and excluded capability lists come from §3.1, §5.2 and §5.3. A companion note states the `lambda-nomir` desktop twin.
+- **D1.1 and D9.1.1 (deferred with Jube).** Both assume Jube modules are dynamic libraries beside a byte-identical host. MB14 needs either an amendment ("on platforms that forbid loading unsigned code, Jube modules link statically into the host; the module contract is unchanged") or a ruling that the iOS host is a separate product outside D1.1.
+- **D9.2.1.** Generalize "null windowing backend in place of GLFW" to "a windowing backend" (MB7), with the null backend one implementation among GLFW and UIKit.
+- **D8.3.1 and D8.4.1.** Note that under a no-MIR profile, AUTO's fallback paths do not exist and refusal is the only outcome (already true for Lambda per D8.3.1; new for JS via MB4). Record MB5's T0 export path for JS→Lambda imports.
+- **D5.5 (Radiant seam).** If MB8's tick inversion changes ownership of the event loop between rt and radiant, D5.5 records it.
 
 ## Appendix S — Superseded rulings
 

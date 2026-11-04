@@ -115,7 +115,7 @@ static MirValue convert(void* owner, MirValue v, ValueRep to) {
         lambda_type_nonnull_map_contract(v.semantic_contract) || mvp_array_contract(pointer_contract);
     MIR_reg_t r = 0;
     if (v.semantic_type == LMD_TYPE_NULL) {
-        // null has a distinct sentinel in each native nullable lane (D2.4.3).
+        // null has a distinct sentinel in each native nullable lane (D2.3.5).
         r = to == VALUE_REP_F64 ? null_float(c) : constant(c,
             to == VALUE_REP_INT_LANE ? INT_LANE_NULL : to == VALUE_REP_I64 ? BOOL_ERROR :
             to == VALUE_REP_RAW_GC_POINTER ? 0 : ITEM_NULL);
@@ -249,7 +249,7 @@ static MIR_label_t array_sum_loop(MvpCompiler* c, AstLoopControlNode* node) {
     branch(c, MIR_UBGT, generic, reg(c, limit), reg(c, plan.array->array_length));
     branch(c, MIR_BGE, done, reg(c, index), reg(c, limit));
     // the complete element domain and trip bound prove every partial/merged sum
-    // finite. This allocation-free region can retain its buffer (D4.4.4v4, S4.1.2).
+    // finite. This allocation-free region can retain its buffer (D5.4.4, S4.1.2).
     MIR_reg_t items = em_load_at(&c->em, plan.array->reg, LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "sum_items");
     // packed bool bytes are exactly 0/1, so counting truth is the same finite reduction.
     int width = mvp_array_element(plan.array->contract) == &TYPE_BOOL ? 1 : 8;
@@ -442,7 +442,7 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
         const char* site = "MVP scalar boundary") {
     contract = type_field_unwrap_simple_decl(contract);
     if (!contract || contract == &TYPE_ANY) return convert(c, v, VALUE_REP_ITEM);
-    // a static success contract cannot erase a boxed error join (D2.8.2, S11.4.1v3).
+    // a static success contract cannot erase a boxed error join (D2.5.2, S11.4.1v3).
     bool proven = mvp_boundary_proven(v.semantic_contract, contract);
     MIR_label_t admitted_error = NULL;
     MIR_reg_t outcome = 0;
@@ -538,7 +538,7 @@ static void refresh_record(MvpCompiler* c, MvpBinding* binding) {
     em_guard_map_shape(&c->em, binding->reg, constant(c, (intptr_t)shape), done, true,
         !binding->record_written);
     // shape remains valid when a value snapshot removes exclusive write
-    // permission; closed readers may cache that weaker fact (D3.2.4v4).
+    // permission; closed readers may cache that weaker fact (D4.2.5).
     if (binding->record_written) array_writable_guard(c, binding, done);
     move(c, *witness, imm(c, 1));
     mark(c, done);
@@ -651,7 +651,7 @@ static void store_binding(MvpCompiler* c, MvpBinding* binding, MirValue v) {
             binding_needs_number_home(c, binding)) {
         if (!binding->scalar_home) binding->scalar_home = em_scalar_home_new(&c->em);
         MIR_reg_t home = em_materialize_frame_ref(&c->em, em_scalar_home_ref(&c->em, binding->scalar_home));
-        // mutable boxed bindings own their cold scalar bytes, independently of a reusable producer home (D5.2.3).
+        // mutable boxed bindings own their cold scalar bytes, independently of a reusable producer home (D6.2.3).
         v.reg = em_adopt_scalar_item_value(&c->em, SCALAR_RETURN_DYNAMIC, v.reg, home);
     }
     move(c, binding->reg, reg(c, v.reg), v.mir_type);
@@ -676,7 +676,7 @@ static MirValue constant_fill(MvpCompiler* c, AstCallNode* fill, Type* contract,
     if (!count.finite || count.lower != count.upper || count.lower < 0 || count.lower > 64 ||
             !scalar.finite || scalar.lower != scalar.upper) return {};
     for (int64_t i = 0; i < count.lower; i++) samples[i] = scalar.lower;
-    // read-only, nonescaping actuals may share immutable Input storage with the compiled image (D4.1.1v2).
+    // read-only, nonescaping actuals may share immutable Input storage with the compiled image (D5.1.1).
     // cap each folded payload so specialization cannot create an unbounded constant pool.
     MarkBuilder builder(c->module->tp);
     Item item = builder.createNumericArray(ELEM_INT, 1, &count.lower, samples);
@@ -794,7 +794,7 @@ static MirValue module_literal(MvpCompiler* c, MvpBinding* b, AstNode* source) {
                     !mvp_boundary_proven(leaf->type, element)) return {};
         }
         // immutable literal tables belong to the Input arena; writes still
-        // detach through the ordinary COW boundary (D4.1.2, S9.1.2).
+        // detach through the ordinary COW boundary (D5.1.2, S9.1.2).
         MarkBuilder builder(c->module->tp);
         ArrayBuilder array = builder.array();
         for (AstNode* item = ((AstArrayNode*)n)->item; item; item = item->next) {
@@ -847,7 +847,7 @@ static MirValue read_binding(MvpCompiler* c, MvpBinding* b, AstNode* node, bool 
         r = em_call_1(&c->em, "fn_string_freeze", MIR_T_P, MIR_T_P, reg(c, r), true);
     Type* map_contract = lambda_type_nonnull_map_contract(b->contract);
     // unchanged scalar/error bindings already own their number-home bytes;
-    // reads reuse that owner and have no mutable buffer to snapshot (D5.2.3).
+    // reads reuse that owner and have no mutable buffer to snapshot (D6.2.3).
     if (capture && !stable_scalar && ((b->rep == VALUE_REP_ITEM && (ast_type_may_be_container(b->contract) ||
             (string_base && string_base->type_id == LMD_TYPE_STRING))) || mvp_array_element(b->contract) || map_contract ||
             (string_base && string_base->type_id == LMD_TYPE_MAP) ||
@@ -863,7 +863,7 @@ static MirValue read_binding(MvpCompiler* c, MvpBinding* b, AstNode* node, bool 
     }
     MirValue result = value(c, r, b->contract->type_id, b->rep, b->contract, node);
     // native carriers already encode their domain; this fact describes only
-    // the success alternative of a boxed outcome (D2.4.3).
+    // the success alternative of a boxed outcome (D2.3.5).
     if (b->rep == VALUE_REP_ITEM && b->producer_success_contract)
         result.admitted_success_contract = b->producer_success_contract;
     return result;
@@ -1406,7 +1406,7 @@ static void array_write(MvpCompiler* c, AstAssignStamNode* node) {
                 !lambda_type_counts_array_length(binding->contract)) {
             // compiler-owned certificates need not share the runtime interner's
             // identity. Reuse its primitive carrier proof, not a type walk on
-            // every erased-value write (D3.3.3v3, S11.4.1v5).
+            // every erased-value write (D4.3.3, S11.4.1v5).
             MIR_type_t types[] = {MIR_T_I64, MIR_T_I64, MIR_T_I64, MIR_T_P, MIR_T_P,
                 MIR_T_P, MIR_T_P, MIR_T_I64, MIR_T_I64};
             MIR_op_t args[] = {reg(c, binding->reg), reg(c, key.reg), reg(c, input.reg), reg(c, type),
@@ -1910,7 +1910,7 @@ static bool float_array_comparison(MvpCompiler* c, AstBinaryNode* n, MirValue* o
     MIR_reg_t address = em_array_element_address(&c->em, pointer, key.reg, 8);
     MIR_reg_t member = em_load_at(&c->em, address, 0, MIR_T_D, "compared_float");
     // ArrayNum float slots are non-nullable; nullable native lanes use Array,
-    // which the carrier guard excludes (D2.4.3, D3.3.3v3).
+    // which the carrier guard excludes (D2.3.5, D4.3.3).
     MirValue threshold = expression(c, other);
     if (float_outcome && threshold.rep == VALUE_REP_ITEM) {
         // an unchanged float/error threshold needs one outcome guard, not a
@@ -2479,7 +2479,7 @@ static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstNode* args, bool 
         }
         MirValue joined_value = value(c, joined, LMD_TYPE_ANY, VALUE_REP_ITEM, &TYPE_ANY);
         // call-site failures join only errors; the callee's success value
-        // passed its return contract even with Item transport (D8.4.2v2, S7.7.3).
+        // passed its return contract even with Item transport (D7.4.2, S7.7.3).
         if (!lambda_type_accepts_error(f->result_contract))
             joined_value.admitted_success_contract = f->result_contract;
         return joined_value;
@@ -2623,7 +2623,7 @@ static MirValue call(MvpCompiler* c, AstCallNode* node, bool discard) {
         MirValue arg = arguments[n];
         if (arg.rep != VALUE_REP_ITEM || !lambda_type_accepts_error(arg.semantic_contract)) continue;
         // raw-return C helpers cannot carry ItemError. Classify staged
-        // arguments before entering that ABI (S7.9.3, D2.4.3).
+        // arguments before entering that ABI (S7.9.3, D2.3.5).
         if (!done) { done = label(c); joined = em_new_reg(&c->em, "builtin_outcome", MIR_T_I64); }
         move(c, joined, reg(c, arg.reg));
         branch(c, MIR_BEQ, done, reg(c, operation(c, MIR_URSH, reg(c, arg.reg), imm(c, 56))), imm(c, LMD_TYPE_ERROR));
@@ -2702,7 +2702,7 @@ static MirValue map_literal(MvpCompiler* c, AstMapNode* node, TypeMap* destinati
     MirValue* staged = (MirValue*)mem_alloc(count * sizeof(MirValue), MEM_CAT_TEMP);
     int i = 0;
     // stage every expression before construction; precise register roots keep
-    // earlier fields alive across recursive producers (D5.3, S7.7.1).
+    // earlier fields alive across recursive producers (D6.3, S7.7.1).
     for (AstNode* item = node->item; item; item = item->next) {
         AstNode* source = item->node_type == AST_NODE_KEY_EXPR ? ((AstNamedNode*)item)->as : item;
         MirValue member = expression(c, source);
@@ -2725,7 +2725,7 @@ static MirValue map_literal(MvpCompiler* c, AstMapNode* node, TypeMap* destinati
     ShapeEntry* prepared_field = shape->shape;
     for (int n = 0; n < count; n++) {
         // keep scalar fields in their native lanes across the allocation;
-        // only the generic fill ABI needs a staged Item (D2.4.3, D5.3).
+        // only the generic fill ABI needs a staged Item (D2.3.5, D6.3).
         staged[n] = convert(c, staged[n], native ? mvp_rep(prepared_field->type) : VALUE_REP_ITEM);
         if (native) prepared_field = typemap_next_field(shape, prepared_field);
         else members[n] = reg(c, staged[n].reg);
@@ -2861,7 +2861,7 @@ static void return_value(MvpCompiler* c, MirValue v, AstNode* node) {
     Type* contract = c->function->result_contract;
     v = capture_projection(c, v, node, true);
     // native lanes cannot hold ItemError. Admit their nullable success domain
-    // directly so only absence reaches the validator (D2.4.3).
+    // directly so only absence reaches the validator (D2.3.5).
     if (c->function->declared_result && c->function->declared_result != contract &&
             v.rep == VALUE_REP_ITEM && lambda_type_accepts_error(v.semantic_contract) &&
             !mvp_boundary_proven(v.semantic_contract, contract)) {
@@ -2917,7 +2917,7 @@ static bool tail_call(MvpCompiler* c, AstNode* node) {
     for (AstNode* a = args; a; a = a->next, p = (AstNamedNode*)p->next, i++) {
         MvpBinding* b = mvp_binding(c->module, p->entry);
         // unchanged read-only owners remain in the same precise root frame;
-        // only scalar arguments change, so storage witnesses stay valid (D5.3.1).
+        // only scalar arguments change, so storage witnesses stay valid (D6.3.1).
         values[i] = admit(c, mvp_array_element(b->contract) ? read_binding(c, b, a, false) :
             expression(c, a), mvp_contract(p));
     }
@@ -3490,7 +3490,7 @@ static void epilogue(MvpCompiler* c) {
 }
 
 // Version only closed numeric bodies: no captures, array replacement or
-// collecting/reentrant calls can invalidate the entry guards (D4.4.4v4).
+// collecting/reentrant calls can invalidate the entry guards (D5.4.4).
 static bool fused_character_index(MvpCompiler* c, AstNode* node) {
     if (!mvp_string_index(c->module, node)) return false;
     AstIndex* index = &c->module->tp->ast_index;

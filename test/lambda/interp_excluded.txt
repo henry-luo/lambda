@@ -2,7 +2,7 @@
 #
 # Scripts whose pre-scan finds a construct the walker does not execute fail
 # before execution under explicit interp, counted as excluded with fallback=0
-# (D8.1.1v15). Only AUTO may choose whole-module MIR instead.
+# (D8.3.1). Only AUTO may choose whole-module MIR instead.
 #
 # This file, interp_p0_subset.txt, and interp_inconclusive.txt partition the
 # classified corpus; regenerate all three with this script.
@@ -12,7 +12,7 @@
 #
 # `node:AST_NODE_PROC` is usually the task-backed boundary rather than the `pn`
 # spelling: suspension-capable bodies need a MIR satellite and are therefore
-# unsupported under the strict T0 pin (D8.1.1v15).
+# unsupported under the strict T0 pin (D8.3.1).
 #
 # format: <script>	node:<first unsupported kind>
 test/lambda/image_composition.ls	node:AST_NODE_INDEX_EXPR

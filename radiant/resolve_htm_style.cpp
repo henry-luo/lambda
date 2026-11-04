@@ -889,9 +889,9 @@ static uint64_t media_bind_audio(DomDocument* document, RdtVideo* video) {
     auto* owner = (MediaAudioOwner*)mem_calloc(1, sizeof(MediaAudioOwner), MEM_CAT_RENDER);
     if (!owner) return 0;
     owner->document = document; owner->video = video;
-    // tickets identify this selected native source and never survive its replacement (D5.3.3).
+    // tickets identify this selected native source and never survive its replacement (D6.3.3).
     owner->token = audio_bus_identity(); if (!owner->token) { mem_free(owner); return 0; }
-    // register after DocumentAudio so decoder bindings retire before their quota/submix owner (D4.5.2).
+    // register after DocumentAudio so decoder bindings retire before their quota/submix owner (D5.5.2).
     if (!dom_document_add_resource(document, owner, media_audio_owner_destroy)) { mem_free(owner); return 0; }
     RdtVideoAudioBinding binding = {mix, owner, media_audio_reserve, media_audio_release, media_audio_retire};
     if (rdt_video_bind_audio(video, &binding)) return owner->token;
@@ -900,7 +900,7 @@ static uint64_t media_bind_audio(DomDocument* document, RdtVideo* video) {
 
 bool radiant_media_set_gain(DomDocument* document, MediaViewState* media, float volume, bool muted) {
     if (!document || !media || !isfinite(volume) || volume < 0 || volume > 1) return false;
-    // changing a muted/zero-gain transport to audible output is a new start under D7.5.4.
+    // changing a muted/zero-gain transport to audible output is a new start under D11.3.1.
     if (media->play_requested && !muted && volume > 0 && !radiant_document_may_start_audio(document)) {
         media->play_error = 1; return false;
     }

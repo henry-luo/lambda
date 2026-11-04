@@ -1,4 +1,4 @@
-// S7.1.1v3, D5.2: an absent source read takes the declaration's checked path.
+// S7.1.1v3, D6.2: an absent source read takes the declaration's checked path.
 pn guarded_pair(v0: float[], v1: float[]) float {
     let pair: float[] = [v0[1] + v1[0], v0[0] - v1[1]]
     pair[0] + pair[1]

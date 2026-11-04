@@ -1,7 +1,7 @@
 # Math image comparisons against pdfLaTeX
 
 `run_texcmp.mjs` reads the upstream KaTeX `ss_data.yaml` corpus, renders each
-formula with Lambda's public `lambda.doc.math.math` package (D7.2.4), and uses
+formula with Lambda's public `lambda.doc.math.math` package (D9.3.4), and uses
 Lambda's native `render` command to produce a PNG. It compiles a LaTeX equivalent
 with `pdflatex` and rasterizes the PDF with Poppler. All generated scripts,
 documents, images, logs, and reports stay under `./temp/`.
@@ -95,7 +95,7 @@ are explicit skips with their original reasons. Failures do not stop later cases
 
 ## Renderer support
 
-The public math renderer (`lambda.doc.math.math`, D7.2.4) supports inline raster
+The public math renderer (`lambda.doc.math.math`, D9.3.4) supports inline raster
 images with `\includegraphics[width=...,height=...,totalheight=...,alt=...]{...}`.
 `height` measures above the baseline; `totalheight - height` is the depth.
 Without an explicit width, the image keeps its intrinsic aspect ratio. The

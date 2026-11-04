@@ -11,10 +11,10 @@
 `designMode`, `<input>` text controls, and `<textarea>`; Lambda-node storage,
 native Radiant DOM-waist application, grouping, retention, and lifecycle.
 
-> **Formal linkage.** D7.2.5 assigns `contenteditable` history and editing
-> policy to the shipped Lambda DOM behavior package. D7.2.1 requires package
-> state to live in per-context storage; D7.5.3 requires an explicit
-> Lambda↔Radiant waist; D5.3.3 requires precise native roots; D1.10 requires
+> **Formal linkage.** D10.2.1 assigns `contenteditable` history and editing
+> policy to the shipped Lambda DOM behavior package. D9.3.1 requires package
+> state to live in per-context storage; D9.5.6 requires an explicit
+> Lambda↔Radiant waist; D6.3.3 requires precise native roots; D1.10 requires
 > executable enforcement. S9.1.4 and S9.1.7 forbid captured or module-global
 > mutable history state. This proposal preserves those rulings except for the
 > form-control ownership expansion described below.
@@ -23,7 +23,7 @@ native Radiant DOM-waist application, grouping, retention, and lifecycle.
 > `<textarea>` on their existing native `EditHistory` ring. This proposal
 > replaces that decision: all UA editing surfaces use one package-owned,
 > Lambda-node history architecture. Ratification therefore requires an
-> in-place D7.2.5v2 revision, the formal-document version bump required by
+> in-place D10.2.1 revision, the formal-document version bump required by
 > `doc/Doc_Convention.md`, and matching revisions to the parent design and
 > implementation plan. Until then, the existing formal and parent rulings
 > remain authoritative.
@@ -43,7 +43,7 @@ one **independent linear timeline per editing surface**.
    Focus changes never combine timelines and do not make undo jump to a
    different surface.
 4. One logical UA edit is an immutable `<edit-step>`. This name replaces
-   `EditPlan` in the D7.2.5 design. A step contains ordered primitive
+   `EditPlan` in the D10.2.1 design. A step contains ordered primitive
    operations and their precise inverses.
 5. One `<edit-history-entry>` contains one or more coalesced edit steps plus
    the state before and after the group.
@@ -80,7 +80,7 @@ durable file history, crash recovery, or a collaboration log.
 - Bound both history depth and retained memory deterministically.
 - Prevent UA history from recording an edit owned by CodeMirror,
   ProseMirror, Editor.js, a Radiant model editor, or page script.
-- Meet the WPT and pinned Chromium gates required by D7.2.5 and D1.10.
+- Meet the WPT and pinned Chromium gates required by D10.2.1 and D1.10.
 
 ### 2.2 Non-goals
 
@@ -145,7 +145,7 @@ input / selectionchange / MutationObserver / layout checkpoint
 | MutationObserver records and invalidation | native DOM mechanism |
 | author-editor history | the editor that canceled or claimed the edit |
 
-This is the D7.2.5 boundary: policy is Lambda; checked mutation mechanics are
+This is the D10.2.1 boundary: policy is Lambda; checked mutation mechanics are
 native. The native layer can reject an invalid operation but cannot select a
 different edit or manufacture a fallback history entry.
 
@@ -183,7 +183,7 @@ individual timeline survives a DOM change.
 
 The service is confined to the document's owning `EvalContext`. It cannot be
 read or written under another runtime context. No history node or borrowed
-DOM handle survives an asynchronous suspension; D7.2.5 editing dispatch stays
+DOM handle survives an asynchronous suspension; D10.2.1 editing dispatch stays
 synchronous.
 
 ---
@@ -225,7 +225,7 @@ must never move a registered `value.item` root slot.
 
 On slot creation, native code registers `&slot.value.item` against
 `slot.owner_context` using the precise persistent-root API required by
-D5.3.3. Replacing the value writes through that already registered slot and
+D6.3.3. Replacing the value writes through that already registered slot and
 increments `revision`; it never unregisters/re-registers around an update.
 Document teardown unregisters the root under the same owner context before
 freeing the slot registry.
@@ -1012,7 +1012,7 @@ same normalized result. The package never substitutes equivalent
   descriptor compatibility rule before an outer native transaction begins.
 - Every slot value, step, next-state root, DOM wrapper, and returned result is
   continuously rooted across native allocation/callback boundaries under
-  D5.3.3.
+  D6.3.3.
 - History may retain detached nodes only through validated handles and
   history-specific lifecycle pins. Dropping the last reachable entry releases
   those pins; document teardown clears them deterministically even before the
@@ -1096,7 +1096,7 @@ executable gates rather than review prose.
 ### 15.1 Native per-control or per-host rings
 
 Rejected. They duplicate command/grouping policy, cannot naturally hold rich
-DOM inverses as Lambda values, and contradict D7.2.5 for contenteditable. The
+DOM inverses as Lambda values, and contradict D10.2.1 for contenteditable. The
 current form-control ring also ties one surface family to snapshot storage
 while rich DOM needs precise operations.
 
@@ -1119,7 +1119,7 @@ failed. Precise deltas keep local edits local.
 Rejected. A multi-operation rich edit must update live Ranges, native DOM
 lifetimes, form state, observers, Selection, layout invalidation, and the
 history root atomically. Those mechanisms already straddle the native DOM
-boundary. D7.5.3 calls for one explicit waist, not best-effort rollback in
+boundary. D9.5.6 calls for one explicit waist, not best-effort rollback in
 package script.
 
 ### 15.5 Store separate undo/redo arrays
@@ -1142,7 +1142,7 @@ must not be silently accepted by the wrong applier.
 
 Ratifying this proposal requires one coordinated documentation change:
 
-1. revise D7.2.5 in place to D7.2.5v2 so package ownership explicitly covers
+1. revise D10.2.1 in place to D10.2.1 so package ownership explicitly covers
    UA history for contenteditable, `designMode`, text inputs, and textareas;
 2. bump `doc/Lambda_Formal_Design.md` according to
    `doc/Doc_Convention.md` because an existing ruling changes meaning;

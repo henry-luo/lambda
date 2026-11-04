@@ -38,15 +38,15 @@ position, including returns and function types.
 
 | Area | Formal authority | Required result |
 |---|---|---|
-| Unified ordinary errors | S7.4.1v2–S7.4.2v4, S7.4.5v2–S7.4.6v3, S11.4.2v3, S12.3.4v2, D5.2.1v5 | One ordinary-error discipline; equivalent return spellings; `raise` returns an admitted error early. |
+| Unified ordinary errors | S7.4.1v2–S7.4.2v4, S7.4.5v2–S7.4.6v3, S11.4.2v3, S12.3.4v2, D6.2.1 | One ordinary-error discipline; equivalent return spellings; `raise` returns an admitted error early. |
 | Acknowledgement | S7.5.1v6–S7.5.5 | Inferred initializers and whole-variable reassignments acknowledge; `any` and `any \| error` agree; unresolved explicit admission warns. Error-preserving composition carries outcomes to a receiver; unacknowledged fallible results cannot be overwritten. |
 | Deferred validation | S7.7.1v3, S7.7.2v2, S7.7.5v3, S7.7.7v4, S11.4.1v5, S11.4.6v4, S11.4.7v3 | A deferred initializer binds the admitted value or rich validation error and continues; post-binding recovery is reachable. |
 | Whole-variable reassignment | S7.5.2v4, S7.7.4v2–S7.7.6v2, S12.2.1v3 | Same admission decision as initialization; store the new outcome, including error, and continue. Never retain a stale old value on deferred failure. |
-| Truthful types and storage | SI14v3, S12.2.1v3, D2.8.1, D2.8.3v3, D3.2.2v3, D3.2.3v3 | Keep the declared admission target separate from the effective outcome type; an error never enters a native value slot. |
+| Truthful types and storage | SI14v3, S12.2.1v3, D2.5.1, D2.5.3, D4.2.3, D4.2.4 | Keep the declared admission target separate from the effective outcome type; an error never enters a native value slot. |
 | Handler results and surface | S7.6.1v9, S7.6.2v5, S7.6.6v6, S7.6.7v5, S10.1.7v4, S16.4.3v4 | The single error handler preserves results for `fn` and `pn`, including suspension. Reject and migrate the optional success arm; do not reinterpret it as cleanup. |
 | Procedural sequences | S2.5.3v3, S2.5.4v3, S12.1.2v3 | Produced values replace earlier results, including `null`; declarations produce no result; explicit `return` exits the procedure. |
 | Binding shorthand | S7.4.2v4 | `let`/`var` annotations `T^` and `T \| error` are equivalent; return spellings now have identical semantics too. |
-| Particular error outcomes | S7.4.2v4, S11.4.2v3, D5.2.1v5 | Remove `T^E`; ordinary unions specify admitted error alternatives with no implicit broad ordinary errors. Derive type/ABI facts from the normalized contract. |
+| Particular error outcomes | S7.4.2v4, S11.4.2v3, D6.2.1 | Remove `T^E`; ordinary unions specify admitted error alternatives with no implicit broad ordinary errors. Derive type/ABI facts from the normalized contract. |
 | Handler convenience | S7.6.8–S7.6.9, S7.5.6, S7.6.2v5, S7.6.5v4–S7.6.6v6, S10.1.7v4, S16.2.2v3, S16.2.6v2, S16.4.3v4 | `or^` covers errors/falsy values once; filtered handlers pass unmatched errors through and chains see fresh recovery errors. Explicit error-or-null classification acknowledges. |
 
 The [formal semantics](../../doc/Lambda_Formal_Semantics.md) and
@@ -243,7 +243,7 @@ if an intermediate state could select an incorrect carrier.
 - Keep the admitted-success representation when proven safe. Error-bearing
   locals/captures must use the existing suitable outcome representation until
   discharge/proof. No native error sentinel, fabricated null, unchecked cast,
-  or early cleanup of a still-live block is permitted (D2.8.1, D5.1.4).
+  or early cleanup of a still-live block is permitted (D2.5.1, D6.1.4).
 - Preserve no-result declaration semantics on both outcomes. Continue subsequent
   declarators and statements; return an error from the block only when ordinary
   result-producing or explicit control-flow code does so.
@@ -611,7 +611,7 @@ questions at each checkpoint. Current decisions and qualification are in
 [M8](#m8-qualification-boundary-2026-11-03).
 
 **Authority:** S7.4.2v3, S7.5.1v6–S7.5.5, S7.7.2v2/S7.7.4v2,
-S7.8.1–S7.8.2, SI14v3, D3.2.3v3, D5.2.1v5. This is an implementation
+S7.8.1–S7.8.2, SI14v3, D4.2.4, D6.2.1. This is an implementation
 record, not a change to those rulings.
 
 - Deferred local checks issue E241, bind/store the admitted value or validation
@@ -707,7 +707,7 @@ migration or the required aggregate gate. Legacy negative admission fixtures
 now explicitly propagate their bound validation error to exercise runtime
 rejection after implicit declaration exits were removed.
 
-S7.7.2v2/D2.8.3v3: a deferred record receiver now contributes its actual
+S7.7.2v2/D2.5.3: a deferred record receiver now contributes its actual
 member-read alternatives, including metadata recovery. The shared read oracle
 also refreshes loop-carried receiver outcomes. This fixes a reproduced tier
 disagreement where an error-valued field was decoded as a clean JIT integer.
@@ -769,7 +769,7 @@ string result, avoiding an unnecessary deferred admission on native string
 accumulators. The diagnostic gate passes **246/246** and focused tier/GC
 executions **120/120**. Reusing a destination constructor's live certificate
 restores native array consumers without repeating representation guards
-(D3.3.3v3). The latest MIR migration review passes **246/279** checks.
+(D4.3.3). The latest MIR migration review passes **246/279** checks.
 
 Migration preserves annotation contracts at mutation boundaries: a deferred
 record or array admission can be retained in a checked binding and propagated
@@ -856,10 +856,10 @@ figures do not replace the required aggregate qualification.
 
 Three reproduced failures were fixed at their owning boundaries:
 
-- S7.8.1/D5.2.1v5 native tail joins reuse return admission before a boxed
+- S7.8.1/D6.2.1 native tail joins reuse return admission before a boxed
   outcome enters a scalar or pointer success lane. The string-builder fixture
   now checks an original recursive error as well as successful nested calls.
-- D2.4.1–D2.4.3 call producers publish the actual post-conversion carrier.
+- D2.3.4–D2.3.5 call producers publish the actual post-conversion carrier.
   Explicit propagation checks an Item outcome; it does not decode a proven
   native integer as an Item. The latter crashed the native leaf/division case.
 - D8.2.2 place-copy diagnostics belong to the compilation. Late MIR argument
@@ -895,9 +895,9 @@ widens an integer through the numeric conversion helper. Current interpreter uni
 admission preserves an already-conforming member; `float^` therefore cannot
 promise a physical float result from an integer or mixed-kind body. The native
 return proof now checks the actual normal kind across branches and explicit
-returns, retaining the Item ABI when necessary (D2.4.1–D2.4.3). Skipping a
+returns, retaining the Item ABI when necessary (D2.3.4–D2.3.5). Skipping a
 redundant check still routes an admitted error through the native error lane
-(D5.2.1v5).
+(D6.2.1).
 
 The return-outcome fixture checks plain float conversion, union member-kind
 preservation through return and propagation, mixed numeric branches, and
@@ -966,7 +966,7 @@ runtime admission rule changes while that decision is pending.
 S11.1.1v3 uncounted homogeneous arrays admit an empty literal without an
 element check. Shared AST admission analysis retains that expression evidence
 for declarations, arguments, explicit returns and defect summaries. The proof
-does not remove runtime representation admission (D3.2.4v4), infer emptiness
+does not remove runtime representation admission (D4.2.5), infer emptiness
 from a mutable binding's historical length, or bypass counted/constrained
 contracts. A definitely completed procedure is checked at its owned return
 sites; its aggregate inferred type is not a second runtime boundary that can
@@ -993,7 +993,7 @@ boolean proof through propagation, without general truthiness calls. These
 changes preserve current union admission; they do not decide the pending
 normal-conversion/reification policy.
 
-D2.8.3/S11.4.1v5 strict return admission also rejects absent array reads. The
+D2.5.3/S11.4.1v5 strict return admission also rejects absent array reads. The
 origination solver previously mistook a nullable native lane for proof that
 this admission could not fail. It now distinguishes the physical carrier from
 non-null membership, reserving the return error channel instead of publishing
@@ -1007,7 +1007,7 @@ runner passes **321/321**, full MIR GC **350/350**, and MIR emission remains
 
 ### Rebinding representation and legacy fixture admission (2026-11-03)
 
-D3.3.3v3/S7.7.4v2 typed array reassignment retains its representation
+D4.3.3/S7.7.4v2 typed array reassignment retains its representation
 admission even when the source's element type already proves membership.
 Previously `values = fill(3, 9)^` skipped certification and the next checked
 borrowed element write rejected the valid array. The borrowed-outcome fixture
@@ -1055,7 +1055,7 @@ that remain under review; GC consistency alone does not qualify their values.
 
 ### Explicit propagation and constructor call lanes (2026-11-03)
 
-S7.6.3v3/D2.8.3 explicit propagation now contributes its early-completion
+S7.6.3v3/D2.5.3 explicit propagation now contributes its early-completion
 error lane even when a callable's final normal result is scalar. A propagated
 C-ABI Item result keeps its physical Item descriptor until the error check;
 this repairs the native WFC failure path without forcing clean native math
@@ -1134,7 +1134,7 @@ AGENTS.md rule 16 approval is pending before a MIR fix and auditable patch.
 
 ### Broad Item inlining and sized admission (2026-11-03)
 
-S7.4.2v3/D2.8.3 inlining now distinguishes a broad `any` return contract,
+S7.4.2v3/D2.5.3 inlining now distinguishes a broad `any` return contract,
 whose existing Item join admits both outcomes, from a narrower result contract
 that needs its return firewall. The legacy `can_raise` rejection had disabled
 safe broad-Item leaves after ordinary-error unification. Existing store-inline
@@ -1219,7 +1219,7 @@ no assertions or budgets changed. Evidence:
 
 ### Boxed-entry array proof parity (2026-11-03)
 
-D3.3.3v3 full array admission now leaves the same contract proof and refreshed
+D4.3.3 full array admission now leaves the same contract proof and refreshed
 header cache in a boxed body as in a native-witness body. Selecting the boxed
 ABI for an ordinary error-union result had lost that proof. Borrowed roots
 retain their ownership checks, and var-home publication reloads detached
@@ -1400,7 +1400,7 @@ removed admission. Its check now pins the resulting two-slot frame and adds
 the actual string save/call/reload/length sequence, while forbidding redundant
 return admission. The allocating call and error join remain. This updates a
 changed frame shape while directly strengthening the live-string invariant
-(D5.3.1–D5.3.2), rather than retaining unused roots to match an old slot count.
+(D6.3.1–D6.3.2), rather than retaining unused roots to match an old slot count.
 
 The immediately preceding rebuilt aggregate (commit `82a5ae590`) completed
 **6,431/6,446**, including main **1,998/2,000**, errors **321/321**, REPL
@@ -1417,7 +1417,7 @@ and **247/247** diagnostics. Evidence:
 
 ### Dynamic union controls, typed reads and loop call carriers (2026-11-03)
 
-S11.4.6v3/D3.2.2v3: the ANY-bearing refusal control now obtains its union
+S11.4.6v3/D4.2.3: the ANY-bearing refusal control now obtains its union
 field from parsed input. The former literal value was completely proven and
 safely used descriptor-aware `map_fill` construction, so it no longer exercised
 the refusal path. The dynamic control keeps its original five admissions and
@@ -1439,7 +1439,7 @@ returning a boxed int directly into an array index. `emit_dynamic_call_value`
 had kept the Item for `^`, then described it as a native scalar; propagation
 therefore skipped both its error guard and normal unbox. The descriptor now
 records that boxed result until `transpile_call` consumes it (S7.6.3v3,
-D2.4.1–D2.4.3). The failure was an invalid index, not lost GC ownership; no
+D2.3.4–D2.3.5). The failure was an invalid index, not lost GC ownership; no
 rooting policy or vendor code changed.
 
 `admission_loop_call_outcomes` covers success and post-handoff failure. Its
@@ -1461,14 +1461,14 @@ results directory, and `m3-loop-call-carrier-input-{wpt,markdown,yaml,ascii,math
 The shrinking-index MIR check's `lt` substring also matched the `blt` branch
 used by scalar Item boxing. Its opcode patterns now include the leading tab,
 so the check still forbids repeated index comparisons without forbidding the
-unrelated int53 boxing guard (D3.3.4/S7.1.3v2). No generated code or bounds
+unrelated int53 boxing guard (D2.4.3/S7.1.3v2). No generated code or bounds
 policy changed. The full emission gate passes **277/280**; evidence:
 `m3-shrinking-opcode-mir.json`. The preceding aggregate count remains the
 observed count above, rather than a synthetic rerun total.
 
 ### Nullable record declaration layout (2026-11-03)
 
-S11.4.6v3/D3.2.4v3: declaration admission now uses the existing
+S11.4.6v3/D4.2.5: declaration admission now uses the existing
 `mir_map_contract_needs_reification` helper, as assignments, arguments and
 returns already do. Its former inline gate inspected only the wrapper's
 TypeId, so it missed the packed record inside `N?`. A more precise semantic
@@ -1488,7 +1488,7 @@ and **277/280** MIR emission checks. Evidence:
 
 ### Float outcome guard qualification (2026-11-03)
 
-S7.7.2v2/S7.6.3v3/D2.8.3: the migrated float-read fixture stores each local
+S7.7.2v2/S7.6.3v3/D2.5.3: the migrated float-read fixture stores each local
 validation outcome, then propagates before using its normal float. Its old
 whole-function ban on `it2d` therefore rejected safe normal-arm decoding too.
 The MIR check now captures each exact Item, requires its error test and error
@@ -1563,7 +1563,7 @@ The existing read-handle fixture checks its ordinary integer result and now
 also checks missing record elements yielding return-admission errors. Native
 return guards likewise inspect an error tag only on an Item producer.
 
-S7.6.3v3/D2.4.1–D2.4.3: raw boolean system calls box their outcome for `^`.
+S7.6.3v3/D2.3.4–D2.3.5: raw boolean system calls box their outcome for `^`.
 The producer previously published that register as a native bool because the
 post-propagation AST names only its success kind. Propagation consequently
 skipped the Item error test. The shared boolean-result helper now returns a
@@ -1625,7 +1625,7 @@ and `m4-sweep-mismatch-review.{json,log}`.
 
 Three Lambda-side root causes are repaired:
 
-- **S11.4.8v2/S4.2.2/D8.3.1v2:** static scalar value-binder selection uses
+- **S11.4.8v2/S4.2.2/D7.3.1:** static scalar value-binder selection uses
   the runtime binder's semantic type normalization. A concrete float literal
   had bound `N` to singleton `1.5`, so the newly enforced return boundary
   rejected `increment(1.5) => 2.5`. The shared AST collector already reaches
@@ -1643,7 +1643,7 @@ Three Lambda-side root causes are repaired:
   The mutation walk also recognizes a procedure method's implicit receiver,
   so a read-only alias optimization cannot span a method write. The optional
   presence snapshot and a simple counter snapshot agree on both tiers.
-- **D2.4.1/D8.3.3:** a forward raw target without a native plan can gain native
+- **D2.3.4/D7.3.3:** a forward raw target without a native plan can gain native
   parameters when its body is lowered. Such calls now use its stable boxed
   public entry; already lowered bodies and proven native plans retain their
   direct routes. The LaTeX macro scanner had received an Item-tagged length in
@@ -1756,7 +1756,7 @@ destination fact; its existing exact concatenation assertion remains unchanged.
 `error_tail_call_outcomes` covers returned/raised errors, expression/procedure
 tails, direct/boxed calls, and normal recursion.
 
-**D5.1.3/D5.2.3:** T0 re-homed a tiny float into the callee's number extent
+**D6.1.3/D6.2.3:** T0 re-homed a tiny float into the callee's number extent
 immediately before destroying that extent. A subsequent call reused the home
 and changed an earlier snapshot. Return and borrowed-argument publication now
 capture payloads through `lambda_item_adopt_scalar_home` before frame teardown,
@@ -1789,7 +1789,7 @@ not manifest qualification. All three interpreter manifests remain unchanged.
 
 ### Admitted scalar success lanes and immediate propagation (2026-11-03)
 
-**S7.6.3v3/S11.4.6v3/D2.4.1–D2.4.3:** after `^`, a deferred immutable
+**S7.6.3v3/S11.4.6v3/D2.3.4–D2.3.5:** after `^`, a deferred immutable
 local with a strict plain `int`/`float` contract has an already admitted normal
 kind. The carrier oracle and native-return proof share that fact; the emitter
 still checks an Item error before unboxing. Error unions, nullable/literal
@@ -1797,14 +1797,14 @@ contracts, mutable locals, captures, module reads and unresolved targets do not
 gain that proof. In particular, `float^` retains its current union-member
 behavior; the pending normal-admission ruling is not decided here.
 
-**D5.2.1v5/D8.3.3:** procedure planning proves normal returns independently
+**D6.2.1/D7.3.3:** procedure planning proves normal returns independently
 of ordinary-error admission, using the existing native error companion. The
 legacy blanket `can_raise` rejection blocked this proof. Exact ordinary-union
 selection still verifies the actual normal kind. A shared analysis scope
 replaces the repeated save/restore sequences and supplies the function context
 to that exact-kind proof.
 
-**S7.7.2v2/S7.6.3v3/D8.2.6v2:** a single immutable scalar binding whose
+**S7.7.2v2/S7.6.3v3/D8.2.6:** a single immutable scalar binding whose
 sole use is the next statement's direct `^` may fuse admission and propagation.
 Only a producer-owned matching native kind qualifies. Failure explicitly exits
 the function; it cannot take a containing block/store's implicit containment
@@ -1844,7 +1844,7 @@ manifest qualification remain pending; no vendor code or size budget changed.
 
 ### Reviewed emission cost of retained outcomes (2026-11-03)
 
-**S7.7.2v2/S7.7.4v2/S7.7.3/D2.8.3v3/D8.3.3:** removing the
+**S7.7.2v2/S7.7.4v2/S7.7.3/D2.5.3/D7.3.3:** removing the
 implicit declaration exit changes the proof available after a checked binding.
 A nullable array read admitted against a strict record, for example, now leaves
 either the record or an error in its local. The declaration's normal contract
@@ -1913,7 +1913,7 @@ fixtures since the preceding complete inventory. Evidence:
 
 ### M7 independent qualification boundary (2026-11-03; superseded by M8 below)
 
-**S1.6/D8.1.1:** the new complete interpreter/JIT sweep covers **1,440**
+**S1.6/D8.3.1:** the new complete interpreter/JIT sweep covers **1,440**
 scripts: **1,431 matches**, **8 exclusions**, **1 mismatch**, **0 timeouts**.
 The sole mismatch is `proc/tune27_loop_accumulator.ls`, whose wrong level-2
 code generation was independently reproduced without the Lambda runtime.
@@ -1947,7 +1947,7 @@ the affected fixes/gates, and a successful full sweep before manifest publicatio
 ### Normal admission ruling and approved MIR repair (2026-11-03)
 
 The user selected ordinary T admission for `T | error` / `T^` and approved the
-MIR optimizer fix. **S7.4.2v4/S11.4.6v4/D3.2.4v5** capture the ruling;
+MIR optimizer fix. **S7.4.2v4/S11.4.6v4/D4.2.5** capture the ruling;
 TE-13.4 preserves the retired matching-member alternative and its rationale.
 The formal specs receive major version bumps because normal numeric kinds
 and container representations can change under the former union behavior.
@@ -1969,7 +1969,7 @@ a move saves their current value. Forwarding that PHI into another block may
 read a later iteration's assignment. The old predicate found only single-block
 cycles, missing the multi-block loop exposed after GVN. The shared guard now
 rejects cross-block PHI forwarding; local PHIs and other stable expressions
-still fold. All optimization passes remain enabled (S1.6, D8.2.6v2).
+still fold. All optimization passes remain enabled (S1.6, D8.2.6).
 The vendor delta is recorded in `patches/mir-phi-address-snapshot.patch` and
 `lambda/mir/VENDOR.md`, under the user's AGENTS.md rule 16 approval. Exact
 upstream-plus-patches verification passes. Standalone original MIR computes
@@ -1996,7 +1996,7 @@ checked local/call contract removes redundant checks in the optional-int and
 literal-extent emission fixtures without weakening their assertions.
 
 The printer adds **180** instructions because `RenderResult^` now establishes
-the normal packed record layout (D3.2.4v5). The direct result paths pass fields;
+the normal packed record layout (D4.2.5). The direct result paths pass fields;
 public boxed adapters still materialize maps: `render_parts_at` +92, its boxed
 adapter +69, and `render_doc`'s boxed adapter +68; `render_doc` itself shrinks
 31 and `render_doc_root` shrinks 18. Eight result-factory calls change to direct
@@ -2053,7 +2053,7 @@ importers. Evidence: `m8-final-focused.log`, `m8-source-compile.json`,
 The source recovery gate also found two stale allowlist entries after earlier
 runtime extraction. Review confirms that `script_run.cpp` carries the script
 execution/module boundaries and `activation.cpp` carries activation-root and
-base-stack execution boundaries, all under S7.11/D5.3.6v2. Adding these files
+base-stack execution boundaries, all under S7.11/D6.3.6. Adding these files
 restores the intended closed allowlist; no ordinary error implementation gains
 an unwind boundary. `make check-error-recovery` passes. The Test262 baseline
 passes **40,261/40,261** against the repaired MIR with its existing manifest and
@@ -2151,7 +2151,7 @@ The complete final parity sweep remains incomplete.
 > contract still rejects it. The propagated outcome crosses the same return
 > admission as a body result. This does not change state-slot receiving rules.
 >
-> **Historical carrier qualification (2026-11-03, S7.8.1/D2.4.1–D2.4.3; superseded by M8):** a propagated
+> **Historical carrier qualification (2026-11-03, S7.8.1/D2.3.4–D2.3.5; superseded by M8):** a propagated
 > call consumes its producer's actual Item/native representation. A native tail
 > join applies the callable's return admission before opening a success lane;
 > an ordinary error is never decoded as an integer or pointer. The full MIR GC
@@ -2174,11 +2174,11 @@ The complete final parity sweep remains incomplete.
 > at `a` and continues, while an invalid fill count propagates. Uncounted numeric
 > literal fill success has a static membership proof; runtime storage admission
 > is still required. The focused tier/GC matrix passes 256/256.
-> S7.6.3v3/D2.4.1 dynamic dispatch preserves its boxed outcome until propagation
+> S7.6.3v3/D2.3.4 dynamic dispatch preserves its boxed outcome until propagation
 > checks it, including when a loop continuation calls an existing module
 > definition. The deterministic handoff regression checks both normal values
-> and errors under forced/poison GC (D8.1.1v18).
-> S11.4.6v3/D3.2.4v3 declarations use the same named-record reification gate
+> and errors under forced/poison GC (D8.3.2).
+> S11.4.6v3/D4.2.5 declarations use the same named-record reification gate
 > as assignments, arguments and returns, including a record inside `N?`.
 > Semantic membership does not establish its packed offsets. The native
 > optimization gate passes 55/55 with its original copy/share budgets.
@@ -2190,14 +2190,14 @@ The complete final parity sweep remains incomplete.
 > S7.6.3v3 boolean system-call producers also publish whether they boxed their
 > outcome before `^`; the normal bool type does not describe that earlier
 > physical representation. These fixes retain the pending union-policy question.
-> S11.4.8v2/S4.2.2/D8.3.1v2 exact raw scalar value-binder keys use the same semantic type as
+> S11.4.8v2/S4.2.2/D7.3.1 exact raw scalar value-binder keys use the same semantic type as
 > runtime binding, rather than retaining a singleton literal. Selection follows
 > parameter admission: conversion-dependent static inference retains an
 > approximation, and scalar raw entries require full membership and the admitted
 > kind before bypassing the checked entry. S7.7.3/S9.1.2 method preparation also
 > keeps an incoming error as the call's outcome when its receiver has a snapshot.
 > S7.7.4v2/S9.1.2 boxed constructor outcomes also retain successful container ownership and
-> snapshots across procedure-method writes. D8.3.3 forward calls whose native
+> snapshots across procedure-method writes. D7.3.3 forward calls whose native
 > plan is not established use the stable public Item entry; a later native
 > specialization cannot reinterpret tagged arguments. The full LaTeX corpus
 > now matches its JIT golden after this boundary repair. A complete interpreter
@@ -2205,13 +2205,13 @@ The complete final parity sweep remains incomplete.
 > manifests; detailed comparisons and qualification limits are in the
 > [implementation record](<Lambda_Impl_Type_Error_Handling (done).md>).
 > S7.7.3/D8.2.6 tail-call rejection retains its ordinary error outcome even when
-> the successful path becomes a backedge. D5.1.3/D5.2.3 interpreter publication
+> the successful path becomes a backedge. D6.1.3/D6.2.3 interpreter publication
 > also captures wide scalar payloads before frame teardown, preserving snapshots
 > when a later outcome replaces the variable. Qualification and the remaining
 > vendor divergence are tracked in the
 > [tail-call and ownership record](<Lambda_Impl_Type_Error_Handling (done).md#tail-call-rejection-and-scalar-escape-ownership-2026-11-03>).
 > S7.6.3v3/S11.4.6v3 validated plain scalar locals also retain their proven
-> normal kind after propagation. D5.2.1v5 procedure planning keeps the ordinary
+> normal kind after propagation. D6.2.1 procedure planning keeps the ordinary
 > error companion independently of that success lane. An immediate, sole `^`
 > may fuse a local's check without skipping intervening user code or changing its
 > error location (S7.7.2v2/S7.4.4); other observations retain the boxed outcome.
@@ -2320,7 +2320,7 @@ their recorded scope; no partial sweep is promoted to a passing result.
 The merge preserves master's function-local control/capture homes and pure
 benchmark migration. Completed `fn` bodies validate explicit exits without an
 invented collected fallthrough (S12.1.2v3). The shared MIR exit walk retains
-independent success/error carriers and exact-kind proofs (D5.2.1v5).
+independent success/error carriers and exact-kind proofs (D6.2.1).
 Binding outcomes initialize shared local capture homes without declaration
 exits (S7.7.2v2); the paired `fn_local_error_outcomes` regression covers them.
 

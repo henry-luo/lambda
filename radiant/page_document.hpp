@@ -283,7 +283,7 @@ struct RadiantPageDocument {
     RadiantPageDiagnostic diagnostic;
 };
 
-// immutable snapshots belong to the selected view's CSS pool (D4.5.1v4 / D4.1.4v5).
+// immutable snapshots belong to the selected view's CSS pool (D5.5.1 / D5.1.4).
 RadiantPageDocument* radiant_page_document_compile(ViewTree* tree, CssEngine* engine, Pool* pool);
 bool radiant_page_element(DomElement* element, const char* local_name);
 // shared FO/native cardinality normalization within the common counter domain.

@@ -41,7 +41,7 @@ The native runtime owns playback time. Handlers sample that clock for the
 instrument panel; geometry animation stays in the native clip. The page is
 built once, with live presentation changes owned by its session handlers
 (**S12.1.5v2**); typed scene edits cross the explicit DOM boundary
-(**D7.5.3v2**). The model is a kinematic illustration; it does not solve
+(**D9.5.6**). The model is a kinematic illustration; it does not solve
 hydraulic pressure, spring stress or contact forces.
 
 Verification:

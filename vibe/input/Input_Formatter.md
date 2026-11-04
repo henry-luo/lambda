@@ -754,7 +754,7 @@ MathFlavor detect_math_flavor(const ElementReader& elem);
 **Changes**:
 - Pre-compute hash keys for common element types
 - Use a static dispatch table or perfect hash for known type sets — **not** an
-  inline cache (**D8.4.1v2**/LC1v2 ban per-site mutable dispatch state in both
+  inline cache (**D7.4.1**/LC1v2 ban per-site mutable dispatch state in both
   lanes; specialization over caching)
 - Consider perfect hash functions for known type sets
 

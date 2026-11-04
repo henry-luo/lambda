@@ -53,7 +53,7 @@ Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t len
     bool native_harness = false);
 
 // standalone callers receive an ordinary Runtime owner; destroy retires its
-// heap before the execution's AST/MIR metadata (D5.3, D5.4.1).
+// heap before the execution's AST/MIR metadata (D6.3, D6.4.1).
 // optional timing covers only the generated entry, excluding compile/setup and result publication.
 MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* execution_ms = NULL,
     const MvpLmdHost* host = NULL);

@@ -1,6 +1,6 @@
 // S11.1.6v2: `T?` is `T | null`, and S1.6: the carrier a tier picks for it is
 // invisible. The JIT keeps a nullable bool in its 0/1/2 lane and a nullable
-// pointer as the raw pointer, zero for null (D2.5.1). Two binding paths broke
+// pointer as the raw pointer, zero for null (D2.4.1). Two binding paths broke
 // that on the JIT only:
 // - a `bool?` or `string?` call result published the TypeId `any` beside its
 //   unboxed lane, so `let` stored the raw lane as an Item: printing a bound

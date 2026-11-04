@@ -6,8 +6,8 @@ This document outlines the design and implementation plan for enhancing the Lamb
 
 ## Mark file extensions
 
-**Adopted 2026-10-02 — D2.9.1–D2.9.2** in
-[Lambda Formal Design](../../doc/Lambda_Formal_Design.md#d29-mark-file-conventions).
+**Adopted 2026-10-02 — D10.1.1–D10.1.2** in
+[Lambda Formal Design](../../doc/Lambda_Formal_Design.md#d101-document-formats).
 Mark Notation uses **`.mark` as its only canonical extension**. Automatic
 filename detection recognizes only `.mark` (case-insensitively); `.m` and
 `.mk` are removed without a compatibility period. Explicit `mark` selection
@@ -25,7 +25,7 @@ such as `data.json` whose extension ordinarily selects another parser.
 | `.ma` | Reject | Already identifies [Maya ASCII](https://download.autodesk.com/us/maya/2011help/files/Glossary_M_ma_file_format.htm), and is less recognizable than the full format name. |
 | `.mrk` | Reject | A plausible shorthand, but less readable than `.mark` and also used by [DPOF camera files](https://www.cipa.jp/std/documents/e/DC_001_2003_Rev2.pdf). There is no three-character extension constraint requiring it. |
 | All six, or several equally preferred extensions | Reject | Splits documentation, editor configuration, file associations and generated filenames across spellings without adding functionality. |
-| `.mark` plus deprecated `.m`/`.mk` input aliases | Reject | Retains ambiguous automatic detection; callers with noncanonical filenames can explicitly select `mark` under D2.9.2. |
+| `.mark` plus deprecated `.m`/`.mk` input aliases | Reject | Retains ambiguous automatic detection; callers with noncanonical filenames can explicitly select `mark` under D10.1.2. |
 
 The final choice overrides the earlier suggestion to retain legacy input
 aliases. New and migrated files use lowercase `.mark`, and Lambda scripts
@@ -33,18 +33,18 @@ keep their separate `.ls` extension. The MIME identity remains `text/x-mark`
 (with the existing `application/x-mark` parser mapping); this decision changes
 filenames rather than the Mark data model or syntax.
 
-### Domain formats written in Mark (D2.9.3, 2026-10-07)
+### Domain formats written in Mark (D10.1.3, 2026-10-07)
 
 The user ruled that slide decks are `.slides` files — Mark syntax with a
 `<presentation>` root — presented by `lambda view deck.slides` through a
 presenter script. Making `.slides` a filename alias of `mark` would contradict
-D2.9.1, so `slides` is its own format name: the parser table maps `slides` to
+D10.1.1, so `slides` is its own format name: the parser table maps `slides` to
 the Mark parser, the `.slides` document route requests that format explicitly
 (the `slides` document transform), and scripts call `input(path, 'slides')`.
 Generic filename detection still recognizes only `.mark`; `input("x.slides")`
 without a format is not Mark. Options considered: keep decks as `.mark`
 files (offered; the user chose the dedicated `.slides` extension), or register
-`.slides` as a Mark filename alias (rejected: D2.9.1). Record of the deck
+`.slides` as a Mark filename alias (rejected: D10.1.1). Record of the deck
 format: `vibe/Lambda_Pkg_Slide_Presentation.md` §0.
 
 ## Current State Analysis
@@ -608,7 +608,7 @@ This implementation successfully brings Lambda Script into the modern web era, e
 
 ## Appendix — Mark extension migration (2026-10-02)
 
-**D2.9.1–D2.9.2 implemented.** Renamed all 20 existing Mark `.m`/`.mk`
+**D10.1.1–D10.1.2 implemented.** Renamed all 20 existing Mark `.m`/`.mk`
 fixtures to `.mark`, verified byte-identical contents, and updated live
 references, generated-file examples and the release sample list. Removed
 aliases from the shared MIME table, validator auto-detection, output extension
@@ -629,7 +629,7 @@ A supplemental run of `input/input_mark.ls` initially reached the migrated
 as `'1.0.5.alpha'`, rather than a decimal quantity. The numeric example
 also changes from `2.71n` to `2.71m`, following S4.3.3's decimal suffix.
 These content corrections follow the byte-preserving filename migration;
-they do not revise D2.9.1–D2.9.2 or the numeric semantics.
+they do not revise D10.1.1–D10.1.2 or the numeric semantics.
 
 The same follow-up replaces the quoted explanatory lines inside `<list>`
 with actual named values: element, map, array, string, symbol, numeric array,
@@ -637,7 +637,7 @@ datetime and binary attributes. The attribute pairs use commas under
 S16.9.3, and the three numeric examples form one array-valued attribute.
 `b'A0FE'` is valid hexadecimal binary syntax and needs no enclosing string.
 
-Checking the typed example exposed a D2.1.5 conformance bug: Mark's string
+Checking the typed example exposed a D2.1.4 conformance bug: Mark's string
 case passed the cursor-advancing parser into the `s2it` macro, which evaluates
 its pointer argument twice. Parsing once into a local before boxing preserves
 the string and cursor position. `mark_string_input.ls` covers root strings,

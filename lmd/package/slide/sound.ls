@@ -1,4 +1,4 @@
-// D7.5.3 / D7.5.4: acquire bytes in Lambda and keep one native cue voice per player.
+// D9.5.6 / D11.3.1: acquire bytes in Lambda and keep one native cue voice per player.
 import dom
 import media: lambda.doc.media
 

@@ -1,5 +1,5 @@
 // Photo album demo: library browsing and viewer (vibe/Lambda_Demo_Photo_Album.md §3.1–3.2).
-// S12.1.3 / D4.5.1v4: the native shell is retained; handlers publish state into regions and
+// S12.1.3 / D5.5.1: the native shell is retained; handlers publish state into regions and
 // mount only the grid rows near the viewport, keyed by row index.
 import dom
 import resources: ~~.mod_resources

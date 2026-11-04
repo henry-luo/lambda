@@ -1,4 +1,4 @@
-// D8.4.3: a new activation and an infallible try prologue are CLEAN.  This
+// D7.4.3: a new activation and an infallible try prologue are CLEAN.  This
 // catches regressions that mistake js_with_save_depth's scalar result for an
 // ERROR Item.
 function cleanTry() {

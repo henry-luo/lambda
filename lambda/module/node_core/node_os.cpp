@@ -111,7 +111,7 @@ static Item node_os_set_constant(Item object, const char* name,
     Item key = make_string_item(name);
     *key_root = key.item;
     // The value allocation can collect before property_set starts; keep the
-    // already-created key in the host root frame across that boundary (D5.3.3).
+    // already-created key in the host root frame across that boundary (D6.3.3).
     Item value_item = make_string_item(value);
     *value_root = value_item.item;
     js_set_key_default(object, node_os_root_value(key_root),
@@ -577,7 +577,7 @@ extern "C" Item js_os_version(void) {
 extern "C" Item js_os_networkInterfaces(void) {
     Item result = js_new_object();
     // result accumulates across the whole scan and every step below allocates,
-    // so it needs a root for the duration (D5.4.2)
+    // so it needs a root for the duration (D6.4.2)
     JubeScopedRoots result_roots(node_os_host, 1);
     uint64_t* result_root = result_roots.slot(result);
     if (!result_root) return result;
@@ -697,7 +697,7 @@ extern "C" Item js_os_userInfo(Item options) {
         if (item_is_error(encoding)) return encoding;
     }
     Item obj = js_new_object();
-    // reachable from nothing while its five properties are installed (D5.4.2)
+    // reachable from nothing while its five properties are installed (D6.4.2)
     JubeScopedRoots obj_roots(node_os_host, 1);
     uint64_t* obj_root = obj_roots.slot(obj);
     if (!obj_root) return obj;

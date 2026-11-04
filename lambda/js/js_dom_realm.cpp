@@ -150,7 +150,7 @@ extern "C" void js_dom_install_interface(Item global, const char* name) {
     // Interface constructors share one native illegal-constructor callback but
     // must not share a cached JsFunction: each owns a distinct `.prototype`.
     // WebIDL illegal constructors still have [[Construct]]; their body, rather
-    // than a missing capability, supplies the required TypeError (D6.2.2v2).
+    // than a missing capability, supplies the required TypeError (D7.2.2).
     ctor_root.set(js_new_distinct_native_constructor(
         strcmp(name, "HTMLElement") == 0 ? _html_element_constructor : _coll_illegal_constructor));
     js_set_function_name(ctor_root.get(), key_root.get());
@@ -279,7 +279,7 @@ extern "C" void dom_install_history_interface(Item global, Item history) {
     const char* methods[] = {"pushState", "replaceState", "back", "forward", "go"};
     for (size_t index = 0; index < sizeof(methods) / sizeof(methods[0]); index++) {
         // WebIDL length excludes optional parameters; the native adapter still
-        // receives the URL/delta operand through its declared ABI (D6.2.2v2).
+        // receives the URL/delta operand through its declared ABI (D7.2.2).
         dom_set_interface_method_metadata(prototype_root.get(), methods[index], index < 2 ? 2 : 0);
     }
     dom_bind_interface_prototype(global_root.get(), history_root.get(), "History");
@@ -330,7 +330,7 @@ static void _install_nodelist_for_each(Item global) {
     if (get_type_id(node_list_proto) == LMD_TYPE_MAP &&
         js_is_callable(array_for_each)) {
         // NodeList shares Array's callback contract while retaining its own
-        // WebIDL identity and VArray carrier (D7.4.5v2).
+        // WebIDL identity and VArray carrier (D9.5.5).
         js_set_key_cstr(node_list_proto, "forEach", array_for_each);
     }
     // NodeList's keys/values/entries use the same live indexed iterator
@@ -1531,7 +1531,7 @@ static void dom_install_native_constructor_global(const char* ctor_name,
 }
 
 extern "C" void dom_install_dom_parser_global(void) {
-    // D6.2.2v2: the prototype owns the parse capability, so construction and
+    // D7.2.2: the prototype owns the parse capability, so construction and
     // method publication share one rooted native-constructor transaction.
     dom_install_native_constructor_global("DOMParser", dom_parser_constructor,
         "parseFromString", dom_parser_parse_from_string);

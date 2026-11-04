@@ -1,4 +1,4 @@
-// The DOM bridge reads hit metadata; selection policy stays in interaction.ls (D7.2.5).
+// The DOM bridge reads hit metadata; selection policy stays in interaction.ls (D10.2.1).
 import dom
 import interaction: .interaction
 import parameter: .parameter

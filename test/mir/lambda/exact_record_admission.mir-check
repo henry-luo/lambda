@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.2.4v4: an admitted nullable record reads its fixed field directly, while a dynamic record still crosses the checked boundary before its layout is trusted.",
+  "description": "D4.2.5: an admitted nullable record reads its fixed field directly, while a dynamic record still crosses the checked boundary before its layout is trusted.",
   "checks": [
     {
       "in_func": "_read_node_#",

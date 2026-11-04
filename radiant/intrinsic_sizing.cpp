@@ -786,7 +786,7 @@ static void get_intrinsic_box_side_widths_from_css(LayoutContext* lycon, DomElem
         horizontal ? (border ? CSS_PROPERTY_BORDER_RIGHT_WIDTH : CSS_PROPERTY_PADDING_RIGHT)
                    : (border ? CSS_PROPERTY_BORDER_BOTTOM_WIDTH : CSS_PROPERTY_PADDING_BOTTOM)};
     if (!border) {
-        // cell box probes may run with the table active; substitution belongs to the measured owner (D4.5.1v4).
+        // cell box probes may run with the table active; substitution belongs to the measured owner (D5.5.1).
         LayoutViewScope owner_scope(lycon);
         lycon->view = lam::up(static_cast<View*>(element));
         lycon->elmt = lam::up(element);
@@ -5565,7 +5565,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         intrinsic_element_has_explicit_box_decoration_break(element);
     bool explicit_box_decoration_run_sizing = false;
     bool vertical_block_sequence = intrinsic_is_vertical_block_sequence(element);
-    // intrinsic percentage-margin bases may differ from provisional used values (D4.5.1v4).
+    // intrinsic percentage-margin bases may differ from provisional used values (D5.5.1).
     radiant::LayoutMeasureScope vertical_margin_scope(vertical_block_sequence ? lycon : nullptr, element);
     IntrinsicSizes vertical_blocks = {};
     ViewBlock* previous_vertical_block = nullptr;
@@ -7021,7 +7021,7 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
             IntrinsicFontScope child_font_scope(lycon, lycon->font);
             LayoutViewScope child_view_scope(lycon);
             // style resolution resets the selected owner, so bind the child
-            // before materializing its contribution (D4.5.1v4).
+            // before materializing its contribution (D5.5.1).
             lycon->view = lam::up(static_cast<View*>(element));
             lycon->elmt = lam::up(child);
             // provisional inlines need their computed box role before CSS can
@@ -7096,7 +7096,7 @@ bool layout_measure_direct_inline_intrinsics(LayoutContext* lycon, ViewBlock* bl
                                               IntrinsicSizes* sizes) {
     if (!lycon || !block || !sizes || !block->is_element()) return false;
     if (intrinsic_measure_direct_text(lycon, block, sizes)) return true;
-    // D4.5.1v4 / D4.1.4v5: style-only descendant queries cannot publish
+    // D5.5.1 / D5.1.4: style-only descendant queries cannot publish
     // speculative geometry or replace the caller's active flow/font state.
     radiant::LayoutMeasureScope measure_scope(lycon, block, true);
     radiant::LayoutRunModeScope run_scope(lycon, radiant::RunMode::ComputeSize);

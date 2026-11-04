@@ -111,7 +111,7 @@ static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* nam
             : style->source->specified_style.get();
         selected = style_tree_get_property_declaration(declarations, css_property_code_from_name(name));
     }
-    // D4.5.1v4: page/native query metadata survives the next shared cascade epoch.
+    // D5.5.1: page/native query metadata survives the next shared cascade epoch.
     CssDeclaration* copy = selected ? css_declaration_snapshot(selected, tree->model->css->pool) : nullptr;
     if (!copy) return false;
     *result = *copy;

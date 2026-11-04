@@ -3,8 +3,8 @@
 - **Date:** 2026-08-18
 - **Status:** IP0–IP4 and IP6 IMPLEMENTED; carrier sweep DONE (§14); TIG1 LANDED (§15); reverts retried (§16); int-lane audit DONE (§17); the graphviz "regression" resolved as a keyed-sort BUG FIX with stale goldens (§18). Census 28,203 → 22,890; `test_lambda_gtest` 732/732. IP7's arm-join half stays open on the recursive-placeholder prerequisite (2026-08-18).
 - **Design authority:** `vibe/Lambda_Design_Type_Infer.md` (TI1–TI8, TIG1–TIG17); this doc implements only its *decided* items and never resolves an open design question in code — where an open question gates a slice, the interim disposition is stated and the slice stays inside it
-- **Formal authority:** D2.4.1, D2.5.3, D3.2.1, D3.2.3, D3.3.1v2–D3.3.4, D8.6.1–D8.6.3; S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1–S11.4.4; SI3v2, SI14
-- **Related:** `vibe/impl/Lambda_Impl_Tune19.md` (T19-1 ValueRep — the representation twin of IP5), `vibe/Lambda_Design_Compiling_Lane.md`, `doc/Lambda_Formal_Design.md` §D3.3
+- **Formal authority:** D2.3.4, D2.4.3, D4.2.1, D4.2.4, D4.3.1–D2.4.3, D8.6.1–D8.6.3; S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1–S11.4.4; SI3v2, SI14
+- **Related:** `vibe/impl/Lambda_Impl_Tune19.md` (T19-1 ValueRep — the representation twin of IP5), `vibe/Lambda_Design_Compiling_Lane.md`, `doc/Lambda_Formal_Design.md` §D4.3
 - **ID series:** `IP#` (impl phases), sub-items `IP#.#`
 
 ## 0. Ground truth this plan builds on (verified 2026-08-18)
@@ -98,7 +98,7 @@ and fix rejected scripts in-change.
    built `TypeList` — set `ast_node->type = (Type*)ast_node->list_type` and
    teach the two consumers that asserted "returns Item, not List" (grep for
    the comment; the boxed representation is unchanged, only the static type
-   is retained — D3.3.4 representation follows contract, not vice versa).
+   is retained — D2.4.3 representation follows contract, not vice versa).
 4. **IP1.4 TIG12 unary +/-** (`:4715`): non-numeric operand types as
    `number | error`; `T?` numeric operand as `T | error`.
 5. **IP1.5 TIG16 pipe with `~`** (`:5378`): result is `TypeArray` with
@@ -164,7 +164,7 @@ compares and dead chained access.
    `ARRAY`/`ARRAY_NUM` objects with a known `TypeArray.nested`, type the read
    `lambda_type_nullable_normalized(pool, nested)` — same call the
    declared-destination path already makes at `:2591`. Public type stays
-   `T?` (D2.5.3 unchanged); ANY remains only when `nested` is null/unknown
+   `T?` (D2.4.3 unchanged); ANY remains only when `nested` is null/unknown
    (census ANY_INDEX_ELEM).
 2. **IP3.2 TIG2** map/element field reads (`:2643`): return the shape's
    recorded field `Type*` for ALL field types, not just scalar — delete the
@@ -172,7 +172,7 @@ compares and dead chained access.
    results reuse the field's `Type*` directly (it lives in the shape pool —
    no clone). The old filter existed for unbox-function coverage: consumers
    that can't unbox a container read the type but keep boxed representation
-   (D3.3.4) — audit the three call sites of the resolved type before
+   (D2.4.3) — audit the three call sites of the resolved type before
    deleting the filter.
 3. **IP3.3 TIG15** decompose (`:6167`): project the source type through the
    pattern — array source: element type per position (`item_patterns` when
@@ -201,7 +201,7 @@ non-interned runtime-map path must clone or stay ANY.
 
 1. **IP4.1** Compatible annotation + literal-known init: binding's effective
    type for *reads* is the meet — record it beside the declaration
-   (`declared_type` keeps the contract per D3.2.3; add
+   (`declared_type` keeps the contract per D4.2.4; add
    `effective_type` on AstNamedNode, defaulting to declared). `let` always
    meets; `var` meets only when the body never reassigns the binding
    (reuse the existing reassignment scan that feeds `param_reassigned`).
@@ -599,7 +599,7 @@ and `let a: any = 5` followed by `a + 1` emits **zero `fn_add`** — the additio
 is already on the native int lane. Recording the meet on the AST would
 therefore change no codegen; its only remaining value is to static checking,
 and it carries the §9.2 carrier hazard for any consumer that reads the binding
-type for a lane decision. Left as a D3.2.3 bookkeeping item, not built
+type for a lane decision. Left as a D4.2.4 bookkeeping item, not built
 speculatively.
 
 ### 12.2 What IP4 actually delivered: TIG11's single-value blocks
@@ -870,7 +870,7 @@ of type int with null"*. Not a nullable-construction defect: the source is
 `var vxy = [null, null]`, so the array's recorded element type genuinely IS
 `null` — and a helper later fills it with ints.
 
-The right rule is **D3.3.3** ("container element-type narrowing dies with its
+The right rule is **D4.3.3** ("container element-type narrowing dies with its
 binding"): a `var` array's element contract is not stable, because any later
 store can rewrite it. TIG1 now declines to publish an element type when the
 object is a mutable or widened binding — the same guard

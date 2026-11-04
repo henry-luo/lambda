@@ -153,7 +153,7 @@ is `position <= n - m`, `offset < m`, then `text[position + offset]`
 32-bit integers, raw array loads and stack work tables. Lambda's `int`
 includes poison values, and invalid reads yield null (**S4.1.1–S4.1.2,
 S7.1.1v3**). Array typing alone proves neither that relation nor finite
-element values (**D3.3.4**).
+element values (**D2.4.3**).
 
 Historical Tune31 samples put roughly 83% of typed Text Search in generated
 code, with little type-check time. That supports native-loop investigation,
@@ -174,7 +174,7 @@ Direct typed paths **already exist**: `mir_emit_typed_path_store`,
 single-field borrow specialization requires a trusted fixed shape and calls
 a helper that rechecks carrier identity. The opportunity is to retain valid
 facts across several accesses/calls, and extend eligible coverage, rather
-than implement direct access from scratch. **D4.4.4v4** requires invalidation
+than implement direct access from scratch. **D5.4.4** requires invalidation
 on conflicting writes/sharing and reloading storage after relevant calls.
 
 Splay is different: rotations bind child values and reattach them while
@@ -202,8 +202,8 @@ numeric-array results ([transpile-mir.cpp:27599](../../lambda/runtime/transpile-
 
 These are hypotheses with mechanism gates, not promised speedups. Reuse
 the shared analysis/emitter and existing storage helpers; carry proofs in
-the existing contract/representation machinery (**D2.4.1–D2.4.3,
-D8.2.5v3–D8.2.6**).
+the existing contract/representation machinery (**D2.3.4–D2.3.5,
+D8.2.5–D8.2.6**).
 
 | Priority | Proposed change | First pilots | Evidence required before expansion |
 |---|---|---|---|
@@ -219,7 +219,7 @@ array storage/admission machinery and publish the final value. Across a
 tail-recursive call, first prove the caller/closures/containers cannot retain
 the old accumulator. Otherwise retain ordinary immutable concatenation.
 Typing and a clear local shared bit alone are insufficient. Any broader
-consuming-call convention needs its own design review under **D4.4.4v4–D4.4.6**;
+consuming-call convention needs its own design review under **D5.4.4–D5.4.5**;
 this analysis does not ratify one. A separate source-level builder experiment
 can measure the opportunity, but its gain is not an engine gain.
 
@@ -245,7 +245,7 @@ re-navigating a stable owner/path for adjacent accesses, and inline eligible
 small consumers so the same facts reach their operations. Reload/recheck
 after invalidating mutation or allocation; transport replacement homes on
 `var` calls. Use static guards and the boxed fallback, never mutable inline
-caches (**D8.3.1v2–D8.3.3, D8.4.1v2**).
+caches (**D7.3.1–D7.3.3, D7.4.1**).
 
 **5: lifetime analysis before storage substitution.** Begin with a bounded
 producer-consumer chain whose result is consumed locally after inlining;
@@ -253,7 +253,7 @@ scalarize its fields/elements or construct directly into a proved destination.
 Existing scalar-record/destination plans are the starting point. Array results
 that escape or remain live across reuse still need independent storage.
 Do not globally reuse Cube3d scratch arrays or replace every plain parameter
-with `var` (**D4.1.4v4, D5.2, S9.1.2–S9.1.3**).
+with `var` (**D5.1.4, D6.2, S9.1.2–S9.1.3**).
 
 For copy-heavy graphs, a larger gain may require a separately designed
 ownership/escape analysis or an explicit source representation experiment
@@ -264,9 +264,9 @@ proposing the same flattening again.
 
 Root traffic amplifies helper costs, but it is not independently optional.
 Use the existing dirty-live-root protocol and mechanically proven `NO_GC`
-effects (**D5.3.1–D5.3.4**). Eliminating a boundary can eliminate its root
+effects (**D6.3.1–D6.3.4**). Eliminating a boundary can eliminate its root
 traffic; classifying an allocating path as `NO_GC` cannot. No conservative
-native-stack scanning or vendor changes are proposed (**D1.5v2, D1.6**).
+native-stack scanning or vendor changes are proposed (**D1.5, D1.6**).
 
 ## 5. Lessons that prevent repeating completed or failed work
 
@@ -329,8 +329,8 @@ helper on eligible `s[i] == "x"` and `a[i] == b[j]` comparisons. Unicode, absent
 non-String defensive cases use the existing behavior through fallbacks.
 `fn_string_ord_at` decodes Unicode directly without materializing a character
 String. The source remains rooted across index evaluation, which may allocate.
-This follows **S7.1.1v3**, **S4.1.1–S4.1.2**, **D2.8.3** and
-**D5.3.1–D5.3.4**; it does not change the language's indexing or `ord` result.
+This follows **S7.1.1v3**, **S4.1.1–S4.1.2**, **D2.5.3** and
+**D6.3.1–D6.3.4**; it does not change the language's indexing or `ord` result.
 
 In release, seven source-identical alternating pairs gave Log Pipeline
 0.9532x candidate/control for the fused helper alone (6/7 wins), then
@@ -380,14 +380,14 @@ COW array copies. These counters do **not** count `fn_join_sequences`' prefix
 copies, so Microdiff's zero COW-copy count does not refute the O(n²) concat
 mechanism. Artifacts are `temp/result49_typed_impl/cow_{microdiff,prettier,richards,splay}.tsv`.
 This evidence keeps snapshot removal constrained by **S9.1.2–S9.1.3** and
-points Richards toward the path-fact work under **D4.4.4v4**.
+points Richards toward the path-fact work under **D5.4.4**.
 
 ## 8. Continued implementation and gates
 
 The byte emitter now omits the repeated tag/null checks only for a direct
 binding with a checked non-null `string` contract. Dynamic, nullable, and
 computed sources retain both guards and the Unicode/absent fallback
-(**S7.1.1v3, D3.3.3v3**). Nine source-identical release pairs against the
+(**S7.1.1v3, D4.3.3**). Nine source-identical release pairs against the
 preceding candidate measured 0.9479x Log Pipeline and 0.9565x Levenshtein,
 with matching output. A three-pair 63-row screen measured 0.9956x geometric
 mean time and equal output on every row; short rows remain noisy. Samples are
@@ -403,7 +403,7 @@ captured snapshot observe a later append, and the new fixture caught it.
 Selection requires an owned local and a RHS with no indirect reference to
 that binding (or the direct self-RHS handled by detachment). Lists, views,
 native lanes, representation certificates, and attribute-bearing arrays use
-the existing join. This follows **S9.1.2, S10.6.1, D4.4.4v4** and is not yet
+the existing join. This follows **S9.1.2, S10.6.1, D5.4.4** and is not yet
 the proposed cross-call accumulator ownership proof.
 
 Nine release pairs measured 0.9867x Microdiff and 1.0043x Prettier against
@@ -424,7 +424,7 @@ hot `position + offset` relation; nine release pairs measured 1.2980x time
 loop's defect and bound checks remained. The raw artifact is
 `paired_int_pair_text_search.json`. A useful native-loop change therefore
 needs the relational index proof and a cheaper generated loop, not another
-call boundary (**S4.1.1–S4.1.2, S7.1.3v2, D3.3.3v3**).
+call boundary (**S4.1.1–S4.1.2, S7.1.3v2, D4.3.3**).
 
 The current retained release, with the text paths, private open-array append,
 and non-null String guard, measured 0.9671x geometric-mean time against the
@@ -443,13 +443,13 @@ Hashmap, and 1.0094x Deltablue, all output-equal. Richards' hot
 so this borrow path did not remove their navigation; the extra guards made
 Hashmap slower. Raw data are in `paired_typed_borrow.json`. Further path work
 must target repeated direct-store/read path facts and their invalidation,
-rather than inlining an unrelated borrow (**D4.4.4v4**).
+rather than inlining an unrelated borrow (**D5.4.4**).
 
 The shared Map/Element copy path now allocates its packed data without a
 redundant zero-fill: the clone immediately overwrites all `data_cap` bytes
 with `memcpy` before publishing or collecting. This removes one full memory
-write per COW copy while preserving the allocation contract (**D4.3.1,
-D5.3.1–D5.3.4**). Nine release pairs measured Splay 0.9881x (9/9 wins,
+write per COW copy while preserving the allocation contract (**D5.3.1,
+D6.3.1–D6.3.4**). Nine release pairs measured Splay 0.9881x (9/9 wins,
 equal output) and Richards 1.0049x. A three-pair 63-row screen measured
 1.0004x geometric mean with all outputs equal, so this is a specific Splay
 allocation improvement rather than a suite-wide gain. The 225-case forced-GC
@@ -479,7 +479,7 @@ fresh ownership nor the wrapper as a possible container. The shared AST
 classifier now recognizes this exact fresh-join shape and typed-array
 contracts, so both tiers mark the later alias before mutation. The regression
 fixture checks that `base` and `extended` remain unchanged under JIT and T0,
-as required by **S9.1.2–S9.1.3** and **D3.3.3v3**. The native root audit passes.
+as required by **S9.1.2–S9.1.3** and **D4.3.3**. The native root audit passes.
 
 The compiler now recognizes a bounded pure tail-recursive `T[]` accumulator:
 its final parameter has a rank-one certified pointer lane; exactly one tail
@@ -490,7 +490,7 @@ shared once, so the first consuming join detaches any caller snapshot. Later
 backedges reuse the private lane with geometric growth, while incompatible
 operands fall back before a visible write. The generic typed argument boundary
 still checks the backedge, and the boxed non-TCO lane retains ordinary joins.
-This is the bounded ownership proof called for by **D4.4.4v4** and
+This is the bounded ownership proof called for by **D5.4.4** and
 **S9.1.2–S9.1.3**, rather than a new consuming convention for arbitrary calls.
 
 The new `result49_typed_tail_accumulator` fixture checks both structural
@@ -511,7 +511,7 @@ whose indices are pure native-int expressions. It checks each index against
 the cached length, loads the native lane directly, and uses raw equality when
 both values are in the ordinary int band. The original lowering handles
 absent reads, overflow/poison values, and other carriers, preserving
-**S4.1.2, S5.1.2, S7.1.1v3, and D3.3.3v3**. This eliminates the repeated
+**S4.1.2, S5.1.2, S7.1.1v3, and D4.3.3**. This eliminates the repeated
 read-null and numeric-conversion branches in Text Search's inner comparison;
 it does not yet prove the enclosing `position + offset` relation across the
 whole loop. The `result49_int_array_pair_compare` fixture covers equal,
@@ -533,7 +533,7 @@ nine release pairs measured Richards 1.0225x and Havlak 1.0062x time
 expanding handle coverage adds bind/Item overhead where the existing direct
 path was already cheap. The measured artifact is `paired_record_array_handle.json`.
 Further path work must remove repeated checks in a measured hot region while
-preserving **D4.4.4v4** invalidation and **D5.2** rooting.
+preserving **D5.4.4** invalidation and **D6.2** rooting.
 
 A bounded scalar replacement now handles a private `float[]` literal of one
 to four values when its immutable local binding has only fixed, in-range
@@ -541,7 +541,7 @@ index reads in the same function. The emitter evaluates each admissible,
 defect-free element once into a float lane and substitutes those lanes at
 the reads. Identity never escapes, so no array allocation or materialization
 is needed; escape and absent-index cases take the ordinary path. This follows
-**S9.1.2, D5.2, and D8.2.5v3**. The proof counts the literal's linked items:
+**S9.1.2, D6.2, and D8.2.5**. The proof counts the literal's linked items:
 its AST `length` field is optional metadata and can be zero for a populated
 literal. The `result49_small_array_scalar` fixture checks both paths and MIR
 emission. A 120,000-call isolated release pilot ran at 0.3110x the previous
@@ -567,7 +567,7 @@ The fast copy retains the rooted non-moving String pointer and reads bytes
 without per-character tag, ASCII, or extent checks; the unchanged generic
 copy handles UTF-8, negative and absent indices, poison, and failed guards.
 The `ord` result is still boxed at its nullable `Item` boundary, as required
-by **S7.1.1v3, D5.3.1, and D8.3.1v2**. The new
+by **S7.1.1v3, D6.3.1, and D7.3.1**. The new
 `result49_ascii_scan` fixture covers those fallback cases and a wide numeric
 fold that can collect during the fast loop. Its focused MIR emission and
 forced-GC checks pass. Nine source-identical release pairs measured Log
@@ -621,7 +621,7 @@ one byte; other leaf types still require the aligned-shape proof. A MIR-local
 batch recognizes adjacent literal-boolean stores to the same stable place,
 binds one writing handle, and reuses it until the last store. The first bind
 retains the COW, null, certificate and bounds guards, while each store keeps
-the checked cold arm (**D4.4.4v4**, **D3.2.4v4**, **S9.3.1**). A changed index
+the checked cold arm (**D5.4.4**, **D4.2.5**, **S9.3.1**). A changed index
 or intervening statement ends the batch. The `result49_first_write_handle`
 fixture checks one certificate proof and three byte stores, a changed index,
 a COW snapshot, neighboring int fields and a null child on both tiers and
@@ -667,7 +667,7 @@ by `pattern[offset]`, yet the indexed read checked the same upper bound again.
 A bounded loop fact now recognizes a zero-origin counter with one tail `+1`
 update, a stable rank-one array length, and a read-only right arm of `and`.
 That right arm and the loop body may read the locally cached, certified array
-without another bounds branch (**S7.1.1v3**, **D2.5.3**). The proof is shared
+without another bounds branch (**S7.1.1v3**, **D2.4.3**). The proof is shared
 by ordinary indexed reads and certified `int[]` pair comparisons. It does not
 assert a 32-bit counter range: array length is stored as `int64_t`, so
 arithmetic retains its poison/overflow path under **S4.1.2**. Negative starts
@@ -677,7 +677,7 @@ Certified `int[]` pair equality also used to branch to generic numeric
 comparison for every poison element. The existing non-null IntLane equality
 rule handles those values with raw equality plus one nan test, so the pair
 path now uses it directly; only an invalid index takes the generic fallback
-(**S4.1.2**, **D2.6.2**). `result49_length_bound_read` checks equal prefixes,
+(**S4.1.2**, **D3.2.2**). `result49_length_bound_read` checks equal prefixes,
 an empty array, a shorter left array, nan elements and a negative start on
 JIT and interpreter, including forced GC. Its MIR check expects one bounds
 guard for the two-read prefix and none for the separately proved read.
@@ -707,7 +707,7 @@ required length of each source once, transfers its cached typed-array layout
 to the callee parameter's temporary binding, and keeps the proven index facts
 only for this read-only body. Escaping, rebound, or nonmatching results still
 use the ordinary call and allocation. This extends the private-lifetime case
-under **D5.2, D8.2.5v3, and S9.1.2** without claiming a general call-effect
+under **D6.2, D8.2.5, and S9.1.2** without claiming a general call-effect
 summary.
 
 If a source is too short, the fast body performs no read and calls the
@@ -749,7 +749,7 @@ pointer-array contract. The emitted store checks for the live Array carrier;
 on a miss it runs the original field boundary and diagnostic before storing.
 The static defect scan still treats that field as fallible. Capture happens
 before the check and direct store, preserving **S9.3.1** and the binding's
-invariant representation under **D3.3.3v3**. Dynamic arrays still take
+invariant representation under **D4.3.3**. Dynamic arrays still take
 `map_fill` and full admission. `result49_map_field_binding` checks all three
 paths, an invalid dynamic value, MIR shape, T0/JIT parity and forced GC.
 
@@ -778,7 +778,7 @@ validates the destination's rank-one pointer lane and every item before
 detaching or writing. A list item, failed element contract, changed carrier,
 or reserve failure reconstructs the source array literal and uses the
 ordinary `++` path. This preserves list splicing, snapshots, and errors under
-**S9.3.1, S9.1.2, S10.6.1, and D4.4.4v4**.
+**S9.3.1, S9.1.2, S10.6.1, and D5.4.4**.
 
 Against the preceding admitted-record release, nine paired runs of a
 96 × 384 singleton-append pilot measured **0.5987x** time (9/9 wins); typed
@@ -833,7 +833,7 @@ The bounded implementations now cover private array consumption, whole-scan
 ASCII/ordinal lowering, loop length/index facts, adjacent typed-record path
 reuse, and scalar replacement across a small direct `float[]` call. They keep
 the cold semantic paths and precise roots required by **S7.1.1v3, S9.1.2,
-S9.3.1, D3.3.3v3, D4.4.4v4, and D5.2–D5.3.4**.
+S9.3.1, D4.3.3, D5.4.4, and D6.2–D6.3.4**.
 
 At that point the measured limits were concrete: Cube3d was 0.9926x original time
 and still allocated its escaping 3/4/16-member numeric results; Microdiff was
@@ -841,7 +841,7 @@ and still allocated its escaping 3/4/16-member numeric results; Microdiff was
 shared snapshots; CD was near flat, where broader path/call effect facts are
 still needed. Any next implementation should prove the lifetime or region
 before removing those operations, then measure executed work rather than
-counting omitted MIR checks alone (**D4.4.4v4, D5.2, D8.3.1v2**).
+counting omitted MIR checks alone (**D5.4.4, D6.2, D7.3.1**).
 
 ### Fresh Array plus one item
 
@@ -854,7 +854,7 @@ for wide-scalar tail homes before that copy. Lists, the empty-list marker,
 N-D numeric children, certified/native lanes, views, and changed carriers
 reconstruct the original RHS literal and call `fn_join`. The emitter keeps
 the existing consuming-local and certified-tail selections ahead of this
-fresh-result case (**S9.3.1, S10.6.1, D4.4.4v4**).
+fresh-result case (**S9.3.1, S10.6.1, D5.4.4**).
 
 Nine release pairs against the preceding build measure **0.8996x** typed
 Microdiff time (9/9 wins) and **1.0005x** typed Prettier (6/9), with matching
@@ -882,7 +882,7 @@ CD's current release `COW_EXEC_PROFILE` records 80,162 shared ArrayNum
 copies (36.1 MB), 176,660 shared open-Array copies (53.0 MB), and 42,495
 shared Map copies (2.0 MB). Its three-level `arr_set` writes each copied
 child back into its parent; removing a detach requires an ownership proof
-for that level under **S9.1.2** and **D4.4.4v4**. A trial that skipped
+for that level under **S9.1.2** and **D5.4.4**. A trial that skipped
 zero-filling complete ArrayNum clones passed a focused 1-D/2-D forced-GC
 case, but CD's nine source-identical release pairs measured 1.0015x prior
 time, with equal output. The trial was reverted; the large copy volume alone
@@ -897,7 +897,7 @@ three-element inputs, `a` and `b`, before that call. Their elements read
 **S7.1.1v3**. Eliminating those arrays needs a guard over the required
 source lengths, a cold path that evaluates the original declaration and
 reports its exact error, and a producer-consumer proof that the callee only
-reads the temporary lanes (**D5.2, D8.2.5v3, S11.4.1v3**). The later
+reads the temporary lanes (**D6.2, D8.2.5, S11.4.1v3**). The later
 source-level ceiling experiment below makes this edge a lower priority.
 
 ### Literal-stride matrix extent
@@ -912,7 +912,7 @@ column axes, provided the source array has at least `extent²` elements.
 Only a strictly bounded nested counter joins this proof: `j <= extent`
 can reach the first index past the guarded region. The guard-failing sibling
 keeps the original checked reads and writes (**S7.1.1v3, S7.1.3v2,
-D2.5.3, D3.3.3v3**).
+D2.4.3, D4.3.3**).
 
 `result49_literal_matrix_extent` exercises valid multiplication, a short
 source, and the inclusive nested-loop boundary in JIT, interpreter, and
@@ -950,7 +950,7 @@ the largest fixed index read from each parameter and guards their lengths
 before evaluating any element. On a failed guard it evaluates the original
 literal and crosses the declaration's checked `float[]` boundary, preserving
 its exact error site. The successful arm stores only the numeric lanes;
-escaping locals still materialize an independent ArrayNum (**D5.2,
+escaping locals still materialize an independent ArrayNum (**D6.2,
 S11.4.1v3**). The direct-call short-array path uses the same length-guard
 emitter.
 
@@ -996,7 +996,7 @@ plain unwritten parameter and every other argument is an effect-free leaf.
 The call may retain the record and introduce sharing, so this proof cannot
 license a later write through the handle: the first write ends it. A handle
 that crosses the call lives in a precise root slot and is reloaded afterward,
-including when the callee allocates and GC runs (**D4.4.4v4, D5.3.3,
+including when the callee allocates and GC runs (**D5.4.4, D6.3.3,
 S9.1.2**). General callees, `var` parameters, expressions with effects and
 mutating calls still invalidate the fact.
 
@@ -1053,5 +1053,5 @@ is not reached. The bounded implementations cover all five proposed
 mechanisms, but a general interprocedural path/call-effect proof and
 aggregate destination analysis remain open. The Cube3d scalar-source
 ceiling and already-reused Richards read path argue against expanding those
-two specific pilots without a new executed-work census (**D4.4.4v4, D5.2,
-D8.3.1v2**).
+two specific pilots without a new executed-work census (**D5.4.4, D6.2,
+D7.3.1**).

@@ -1,5 +1,5 @@
 // T27-4 key span: a typed-root path store with more than three keys takes the
-// same checked setter as a short one (D3.2.4v3) -- a proven root writes in
+// same checked setter as a short one (D4.2.5) -- a proven root writes in
 // place, a leaf needing numeric admission is converted, a mistyped leaf is
 // rejected and leaves the record untouched -- without building a path array.
 type Cell = {n: int, f: float, tags: int[]}

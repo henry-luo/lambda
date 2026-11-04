@@ -1,7 +1,7 @@
 // Tune27 T27-7: a float literal whose members may be null (out-of-bounds typed
 // reads) builds one packed array with direct stores; a member that IS null
 // republishes the literal as generic storage so a later boundary still sees
-// the null (D3.2.2, S7.1.3v2).
+// the null (D4.2.3, S7.1.3v2).
 pn tune27_take(v: float[]) float { return v[0] + v[1] }
 
 pn tune27_float_literal_nullable(q: float[], i: int, j: int) any {

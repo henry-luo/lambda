@@ -2,11 +2,11 @@
 
 **Date:** 2026-08-29
 
-**Status:** ACTIVE — the current-boundary closeout is complete: Lambda and JS core expression boundaries publish demand-carrying `MirValue`; JS runtime property-key linking is manager-owned at its execution boundary; the JS source-to-MIR-artifact edge is keyed solely by `FunctionId`; and Lambda has physical `parse` → `build` → `bind` scheduling. Build-only scopes support type assembly, while bind replaces every published scope/entry/use/capture edge before `BOUND`. The audited direct-frontend retirement supplies the quantified **D8.6.4v2** deletion credit, and the prescribed current-tree compiler-time ratchets pass. The P5/P6 review base and candidate each governed 326,064 `lambda/runtime` + `lambda/js` lines; the post-P6 direct-frontend retirement reduced that scope to 318,980 (`-7,084`), and the current project cap check is 287,618 against 308,711. The broader staged roadmap remains active where its separate completion-definition bullets below are unchecked; this status does not mislabel those unrelated future phases as complete.
+**Status:** ACTIVE — the current-boundary closeout is complete: Lambda and JS core expression boundaries publish demand-carrying `MirValue`; JS runtime property-key linking is manager-owned at its execution boundary; the JS source-to-MIR-artifact edge is keyed solely by `FunctionId`; and Lambda has physical `parse` → `build` → `bind` scheduling. Build-only scopes support type assembly, while bind replaces every published scope/entry/use/capture edge before `BOUND`. The audited direct-frontend retirement supplies the quantified **D8.6.4** deletion credit, and the prescribed current-tree compiler-time ratchets pass. The P5/P6 review base and candidate each governed 326,064 `lambda/runtime` + `lambda/js` lines; the post-P6 direct-frontend retirement reduced that scope to 318,980 (`-7,084`), and the current project cap check is 287,618 against 308,711. The broader staged roadmap remains active where its separate completion-definition bullets below are unchecked; this status does not mislabel those unrelated future phases as complete.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
-**Formal authority:** **S1.6**, **S1.11**, and **S3.1–S3.3** in [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md); **D1.2–D1.6**, **D1.8–D1.10**, **D2.4.1–D2.4.3**, **D3.2.3**, **D3.3.1v2**, **D5.3.4**, **D8.1.1v5**, **D8.1.3v10**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specifications win on disagreement.
+**Formal authority:** **S1.6**, **S1.11**, and **S3.1–S3.3** in [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md); **D1.2–D1.6**, **D1.8–D1.10**, **D2.3.4–D2.3.5**, **D4.2.4**, **D4.3.1**, **D6.3.4**, **D8.3.2**, **D8.4.1**, **D8.2.1–D8.2.6**, **D7.4.1**, **D7.4.3**, and **D8.6.1–D8.6.4** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specifications win on disagreement.
 
 **Design lineage:** This document specializes the already-confirmed compiler-consolidation rulings **U27–U36** in [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md). It does not create a new ruling series or replace that document's language-neutral catalog. It narrows the next implementation to Lambda and LambdaJS, records the live structural defects that must be removed, and adds the phase-local LOC conservation rule requested on 2026-08-28.
 
@@ -42,7 +42,7 @@ This is a consolidation, not a parallel replacement. Every landed phase removes 
 
 ### 1.1 Hard outcome
 
-The completed work must remove at least **2,000 additional net physical C/C++ lines** from the fixed **D8.6.4v2** scope:
+The completed work must remove at least **2,000 additional net physical C/C++ lines** from the fixed **D8.6.4** scope:
 
 ```text
 lambda/runtime/**.{c,cc,cpp,h,hpp}
@@ -111,7 +111,7 @@ These do not satisfy the gate:
 
 Each ledger row records the physical lines removed with the retired implementation, the replacement lines added for that behavior, and the credited net. At final closeout the sum of those credited consolidation rows must be at most `-2,000`. Concurrent or unrelated deletion may improve the physical cap but earns no consolidation credit. Formatting-only hunks and code movement earn none.
 
-The numeric LOC result and the quantified semantic deletion ledger must both pass. **D8.6.4v2** explicitly rejects formatting, comment stripping, and scope-escape as substitutes for consolidation.
+The numeric LOC result and the quantified semantic deletion ledger must both pass. **D8.6.4** explicitly rejects formatting, comment stripping, and scope-escape as substitutes for consolidation.
 
 ---
 
@@ -155,7 +155,7 @@ This has four costs:
 
 - lowering can disagree with the builder about shadowing;
 - capture, call, and direct-call analyses rescan by pointer or spelling;
-- builder-time inferred types become difficult to distinguish from source contracts, contrary to **D3.2.3**;
+- builder-time inferred types become difficult to distinguish from source contracts, contrary to **D4.2.4**;
 - interpreter and MIR backends can grow separate fixes for the same binding defect.
 
 ### 2.4 `AstIndex` is a scaffold, not yet the authority
@@ -221,7 +221,7 @@ core Lambda and JS expression boundaries. They return `MirValue` and apply
 their explicit demand before a consumer observes the value. Internal
 register-only helpers remain allowed below those producers; they do not form a
 core expression boundary. This completes the boundary requirement of
-**D2.4.1–D2.4.3** and **D8.2.6**.
+**D2.3.4–D2.3.5** and **D8.2.6**.
 
 ### 2.7 Execution is more unified than compilation
 
@@ -230,7 +230,7 @@ The two AST interpreters correctly keep separate semantic frames:
 - Lambda has slot-planned `InterpFrame` records and `EvalSignal`.
 - JavaScript has `JsInterpFrame`, traced lexical environments, references, labels, `this`/`new.target`/home-class state, and JS completion kinds including throw, yield, and await.
 
-**D8.1.3v10** explicitly requires separate semantic walkers and activation records while sharing the runtime, heap, event loop, module registry, module state, and call kernels. A single semantic interpreter switch would add language branches to nearly every node and would risk applying Lambda truthiness (**S3.1–S3.3**) to JavaScript.
+**D8.4.1** explicitly requires separate semantic walkers and activation records while sharing the runtime, heap, event loop, module registry, module state, and call kernels. A single semantic interpreter switch would add language branches to nearly every node and would risk applying Lambda truthiness (**S3.1–S3.3**) to JavaScript.
 
 The duplication worth removing here is the execution shell: context preparation, current-file and module-state guards, root setup, execution-turn lifecycle, result publication, event-loop ownership, and cleanup.
 
@@ -240,7 +240,7 @@ The duplication worth removing here is the execution shell: context preparation,
 
 ### 3.1 Syntax adapters remain language-specific
 
-Lambda retains its first-party lexer and recursive-descent/Pratt parser under **D8.1.1v5**. JavaScript and TypeScript use their first-party C lexer and recursive-descent/Pratt parser under **D8.1.3v10**; their vendored Tree-sitter grammars are unchanged and isolated to `lambda-cst`. No vendor source is modified.
+Lambda retains its first-party lexer and recursive-descent/Pratt parser under **D8.3.2**. JavaScript and TypeScript use their first-party C lexer and recursive-descent/Pratt parser under **D8.4.1**; their vendored Tree-sitter grammars are unchanged and isolated to `lambda-cst`. No vendor source is modified.
 
 The builders share only mechanics that are independent of grammar shape:
 
@@ -403,9 +403,9 @@ Profile handlers retain:
 - JavaScript classes, private fields, `super`, `eval`, `with`, generators, and async semantics;
 - Lambda query clauses, elements, patterns, pipes, views, and other true extensions.
 
-Every core expression returns the full `MirValue` required by **D2.4.1–D2.4.3** and **D8.2.6**. Demands are `DISCARD`, `ANY`, `REQUIRED_REP`, `DEST_REG`, and `BRANCH`. Unsupported demands fall back to boxed `ANY`; they never change semantics. Root and final-store ownership remains exclusive to `MirEmitter` under **D5.3.4**.
+Every core expression returns the full `MirValue` required by **D2.3.4–D2.3.5** and **D8.2.6**. Demands are `DISCARD`, `ANY`, `REQUIRED_REP`, `DEST_REG`, and `BRANCH`. Unsupported demands fall back to boxed `ANY`; they never change semantics. Root and final-store ownership remains exclusive to `MirEmitter` under **D6.3.4**.
 
-Per **D8.4.1v2**, neither language gains inline caches. JavaScript property operations continue through the shared JS reference/property kernels; TypeMap shape metadata remains ordinary lookup data.
+Per **D7.4.1**, neither language gains inline caches. JavaScript property operations continue through the shared JS reference/property kernels; TypeMap shape metadata remains ordinary lookup data.
 
 ### 3.8 Shared execution shell, separate interpreters
 
@@ -420,7 +420,7 @@ One execution service owns:
 - result/error publication and common fault containment;
 - tracing, counters, and backend diagnostics.
 
-Lambda and JavaScript retain their own frame payloads, lexical environments, references, and completion enums. A shared completion carrier may be extracted only if its payload is always precisely rooted and each profile keeps its own semantic kind. No shared carrier may reintroduce a pending-exception side channel; **D1.4v3** and **D8.4.3v2** require explicit returned completion through every frame.
+Lambda and JavaScript retain their own frame payloads, lexical environments, references, and completion enums. A shared completion carrier may be extracted only if its payload is always precisely rooted and each profile keeps its own semantic kind. No shared carrier may reintroduce a pending-exception side channel; **D1.4** and **D7.4.3** require explicit returned completion through every frame.
 
 ### 3.9 Runtime services promoted only below the semantic boundary
 
@@ -470,7 +470,7 @@ It:
 1. verifies the frozen project anchor and records the first review-slice base plus all three LOC counters;
 2. extends the existing LOC checker rather than creating a second tool, including self-contained creation of its `./temp/ast_tune/` working directory and separate project-anchor, formal-anchor, and phase-base reports;
 3. adds core-catalog completeness assertions to an existing AST/compiler test harness;
-4. records exact current Lambda and JS compiler timing manifests under the existing **D8.6.4v2** protocol;
+4. records exact current Lambda and JS compiler timing manifests under the existing **D8.6.4** protocol;
 5. deletes enough obsolete assertion/helper/checker code in the same slice to keep all three counters non-positive.
 
 If the catalog test requires more code than can honestly be retired in P0, the test lands with the first P1 node-family migration that deletes the old traversal cases. A test-only positive phase is forbidden.
@@ -479,7 +479,7 @@ If the catalog test requires more code than can honestly be retired in P0, the t
 
 P0a replaced the formal-anchor-only behavior in `utils/check_ast_tune_loc.sh`; it did not add a second checker. The surviving checker now creates `./temp/ast_tune/` itself, retains the fixed 319,606-line formal-anchor assertion, accepts a project cap through `--cap`, and reports/enforces changed C/C++ and hand-source deltas through `--phase-base`. A phase report refuses to run while an untracked source file exists, so a new file cannot silently evade the source counter.
 
-The retired code was the one-anchor, fixed-cap checker path. The phase report recorded `added=31`, `removed=34`, `delta=-3` source lines; C/C++ was `added=0`, `removed=0`, `delta=0`. The governed scope remained 310,711 lines, exactly equal to the frozen project anchor. Thus P0a is non-positive on all three counters, as required by **D8.6.4v2**.
+The retired code was the one-anchor, fixed-cap checker path. The phase report recorded `added=31`, `removed=34`, `delta=-3` source lines; C/C++ was `added=0`, `removed=0`, `delta=0`. The governed scope remained 310,711 lines, exactly equal to the frozen project anchor. Thus P0a is non-positive on all three counters, as required by **D8.6.4**.
 
 Verified commands and results:
 
@@ -506,7 +506,7 @@ assumptions. Each capture now derives the required row count from the exact
 filtered GTest manifest, while JS captures pass `--baseline`; Lambda retains its
 full corpus. This keeps completeness fail-closed as the repository corpus grows
 and does not weaken the existing failed-record checks. The utility diff is
-`+5/-5` source lines (`0` net), so all three D8.6.4v2 LOC counters remain
+`+5/-5` source lines (`0` net), so all three D8.6.4 LOC counters remain
 non-positive.
 
 Release-mode test targets were built after the release host:
@@ -618,7 +618,7 @@ body-before-test order of `do...while`); the JS child table uses the same row.
 JS early-error, AST-interpreter, MIR-lowering, module-lexical, capture, type,
 and return analyses now dispatch on `form` instead of maintaining three node
 switches. The JS and Lambda semantic execution frames remain separate as
-required by **D8.1.3v10**; only structural storage and traversal were unified.
+required by **D8.4.1**; only structural storage and traversal were unified.
 
 The independent P1d source delta, measured after the already-landed P1c
 changes, is C/C++ `+273/-369 = -96`; all hand source is also `+273/-369 = -96`.
@@ -1079,7 +1079,7 @@ also contains P4e and is `313,938 → 313,931` governed lines with
 `+131/-138 = -7` across changed first-party C/C++ and source. MIR link,
 execution/cleanup policy, and Lambda's later analysis/lowering remain explicit
 residue for the next driver slices; P3g does not claim the complete cross-
-language schedule or the final **D8.6.4v2** ratchets.
+language schedule or the final **D8.6.4** ratchets.
 
 Focused verification after rebuilding the affected targets:
 
@@ -1129,7 +1129,7 @@ git diff --check                                     # clean
 
 P3i and P3j subsequently move Lambda link/entry and the conditional indexed
 prerequisite into the authoritative driver; mode-specific cleanup and the
-final **D8.6.4v2** ratchets remain explicit closeout work.
+final **D8.6.4** ratchets remain explicit closeout work.
 
 #### P3i implementation record — manager-owned Lambda MIR link and shared execution entry, 2026-08-29
 
@@ -1254,7 +1254,7 @@ LAMBDA_TEST_MAX_CONCURRENT=1 node test/test_run.js --target=lambda --category=ba
 # Input parsers 2104/2104; Lambda runtime 1901/1901; combined 4005/4005
 ```
 
-This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+This slice does not claim the final **D8.6.4** timing or `-2,000`-line
 target.
 
 #### P4b implementation record — shared direct-eval facts, 2026-08-29
@@ -1301,7 +1301,7 @@ LAMBDA_TEST_MAX_CONCURRENT=1 node test/test_run.js --target=lambda --category=ba
 # Input parsers 2104/2104; Lambda runtime 1901/1901; combined 4005/4005
 ```
 
-The final **D8.6.4v2** timing and `-2,000`-line project target remain open.
+The final **D8.6.4** timing and `-2,000`-line project target remain open.
 
 #### P4c implementation record — shared `arguments` observation fact, 2026-08-29
 
@@ -1326,7 +1326,7 @@ Focused verification after rebuilding the release-native JS script target:
 # 104/104 passed
 ```
 
-This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+This slice does not claim the final **D8.6.4** timing or `-2,000`-line
 target.
 
 #### P4d implementation record — shared tail-reuse eligibility fact, 2026-08-29
@@ -1352,7 +1352,7 @@ Focused verification after rebuilding the affected targets:
 ./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
 ```
 
-This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+This slice does not claim the final **D8.6.4** timing or `-2,000`-line
 target.
 
 #### P4e implementation record — shared lexical-observation fact, 2026-08-29
@@ -1379,7 +1379,7 @@ Focused verification after rebuilding the affected targets:
 ./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
 ```
 
-This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+This slice does not claim the final **D8.6.4** timing or `-2,000`-line
 target.
 
 #### P4f implementation record — AST-owned function analysis, 2026-08-29
@@ -1413,7 +1413,7 @@ git diff --check                                     # clean
 ```
 
 The full Lambda baseline remains the next gate after the subsequent P3/P4
-driver slices; this record does not claim the final **D8.6.4v2** timing or
+driver slices; this record does not claim the final **D8.6.4** timing or
 `-2,000`-line project target.
 
 #### P4g implementation record — indexed enclosing lexical facts, 2026-08-29
@@ -1446,7 +1446,7 @@ git diff --check                                     # clean
 ```
 
 P4j subsequently consumes indexed call-site evidence and completes the
-capture/inference worklists; the final **D8.6.4v2** timing and project target
+capture/inference worklists; the final **D8.6.4** timing and project target
 remain acceptance gates.
 
 #### P4h implementation record — common capture-capacity ownership, 2026-08-29
@@ -1480,7 +1480,7 @@ git diff --check                                     # clean
 
 The JS pointer/count view is still consumed by backend code and is the next
 capture migration target; this slice does not claim sole `FunctionId` capture
-identity or the final **D8.6.4v2** project ratchet.
+identity or the final **D8.6.4** project ratchet.
 
 #### P4i implementation record — AST-owned capture identity, 2026-08-29
 
@@ -1512,7 +1512,7 @@ git diff --check                                       # clean
 ```
 
 P4j subsequently completes the capture fixed point, call-site evidence, and
-function-local inference caches; the final **D8.6.4v2** ratchets remain open.
+function-local inference caches; the final **D8.6.4** ratchets remain open.
 
 #### P4j implementation record — shared JavaScript profile facts and indexed inference, 2026-08-29
 
@@ -1679,31 +1679,31 @@ Recommended order:
 6. root-range registration/reset only with the two-client proof and same-slice `runtime-state.cpp` retirement required by §3.9;
 7. cleanup and artifact-retention decisions.
 
-The two interpreter frames and completion enums remain. Shared lifecycle code must not introduce a second runtime, event loop, heap, module registry, or stack owner, satisfying **D8.1.3v10**.
+The two interpreter frames and completion enums remain. Shared lifecycle code must not introduce a second runtime, event loop, heap, module registry, or stack owner, satisfying **D8.4.1**.
 
 P6 also removes stale compatibility aliases only after build/cache versioning proves no retained artifact can import them. Deleting an ABI symbol without that proof is not an acceptable LOC shortcut.
 
 #### P5–P6 implementation record — semantic MIR profiles and shared runtime lifecycle, 2026-08-30
 
-P5 now routes the structural lowering boundaries through demand-carrying `MirValue` profile calls: discard, branch and destination demands; linked sequences and conditions; module-slot loads/stores; call argument/root/result completion; return/completion routing; function publication; and module finalization/link plumbing. Lambda and JS retain semantic callbacks for their truthiness, coercion, language extensions, and boxed fallback, while the shared emitter owns the structural contract. This realizes **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6** without collapsing language-specific lowering modules. Binding-aware hoisted declaration writeback preserves source-keyed lexical cells for recursive nested closures; the HLJS fixture covers that regression.
+P5 now routes the structural lowering boundaries through demand-carrying `MirValue` profile calls: discard, branch and destination demands; linked sequences and conditions; module-slot loads/stores; call argument/root/result completion; return/completion routing; function publication; and module finalization/link plumbing. Lambda and JS retain semantic callbacks for their truthiness, coercion, language extensions, and boxed fallback, while the shared emitter owns the structural contract. This realizes **D2.3.4–D2.3.5**, **D6.2.1**, **D6.3.4**, and **D8.2.6** without collapsing language-specific lowering modules. Binding-aware hoisted declaration writeback preserves source-keyed lexical cells for recursive nested closures; the HLJS fixture covers that regression.
 
-P6 centralizes retained/fresh context-owner binding, result-root publication, current-file, execution-turn, and module-state scopes, plus generic active-module name and slot access, in `runtime-state`. The superseded JS-specific runtime-state aliases and duplicated restoration paths are deleted. Semantic interpreters, frames, completions, and language-owned execution policies remain separate, as required by **D7.2.1** and **D8.1.3v10**.
+P6 centralizes retained/fresh context-owner binding, result-root publication, current-file, execution-turn, and module-state scopes, plus generic active-module name and slot access, in `runtime-state`. The superseded JS-specific runtime-state aliases and duplicated restoration paths are deleted. Semantic interpreters, frames, completions, and language-owned execution policies remain separate, as required by **D9.3.1** and **D8.4.1**.
 
 The final P5/P6 delta is 326,064 to 326,064 governed lines (`0`); changed C/C++ is `+1246/-1253 = -7` and all first-party source is `+1255/-1257 = -2`. Verification passed: coherent debug-profile and release builds; Lambda MIR emission `63/63`; JS MIR emission `21/21`; MIR GC stress `93/93`; JS optimization `19/19`; JS script ownership `104/104`; Lambda/Input baseline `4,061/4,061`; Test262 baseline `40,261/40,261`; the HLJS MIR fixture; `git diff --check`; and the LOC gates. The matched P4 release capture has identical manifests and reports Lambda compiler median `7,745,692 → 5,956,751 us` (`0.769041`) and JS MIR-direct median `327,798,863 → 126,591,876 us` (`0.386188`); JS complete/library MIR volume changes are `+24/+31` instructions with no zero-MIR JS record. This is an implementation-status record, not a change to a formal ruling.
 
 #### Post-P6 implementation record — direct JavaScript frontend retirement, 2026-08-30
 
-Production JavaScript and TypeScript parsing now have one authority: the first-party C parser publishes the indexed AST consumed directly by the interpreter and MIR entry points. The obsolete Tree-sitter AST builder, its production-disabled parser-comparison façade, TypeScript source-preprocess fallback, backend-selection state, and repeated AST fallback calls are retired together. The remaining direct-parser facts—node allocation, operator decoding, and parser errors—are centralized in `js_c_ast_helpers`/`js_scope`; script-owned import/export recording stays with the scope owner. This keeps the single runtime/compilation boundary required by **D8.1.3v10** while preserving semantic profiles and AST ownership under **D2.4.1–D2.4.3**.
+Production JavaScript and TypeScript parsing now have one authority: the first-party C parser publishes the indexed AST consumed directly by the interpreter and MIR entry points. The obsolete Tree-sitter AST builder, its production-disabled parser-comparison façade, TypeScript source-preprocess fallback, backend-selection state, and repeated AST fallback calls are retired together. The remaining direct-parser facts—node allocation, operator decoding, and parser errors—are centralized in `js_c_ast_helpers`/`js_scope`; script-owned import/export recording stays with the scope owner. This keeps the single runtime/compilation boundary required by **D8.4.1** while preserving semantic profiles and AST ownership under **D2.3.4–D2.3.5**.
 
-The deleted implementation files are `lambda/js/build_js_ast.cpp`, `lambda/js/js_parser_compare.cpp`, and `lambda/ts/ts_preprocess.cpp`; `build_lambda_config.json` no longer compiles the removed comparison façade. The independent C-parser versus grammar differential remains a test-only validator (`418/418` accepted sources) and is not a second production frontend. This is genuine retirement under **D8.6.4v2**: no flag, stub, alternate runtime entry, blank-line deletion, or formatting-only reduction remains.
+The deleted implementation files are `lambda/js/build_js_ast.cpp`, `lambda/js/js_parser_compare.cpp`, and `lambda/ts/ts_preprocess.cpp`; `build_lambda_config.json` no longer compiles the removed comparison façade. The independent C-parser versus grammar differential remains a test-only validator (`418/418` accepted sources) and is not a second production frontend. This is genuine retirement under **D8.6.4**: no flag, stub, alternate runtime entry, blank-line deletion, or formatting-only reduction remains.
 
 The post-P6 governed LOC result is `326,064 → 318,980` (`-7,084`), including the direct frontend retirement and its shared-helper consolidation. Validation passed: debug and release builds; C parser `16/16`; JS library `354/354`; JS script ownership `104/104`; JS MIR emission `21/21`; TypeScript `19/19`; parser differential `418/418`; sequential Lambda/Input baseline `4,061/4,061`; and Test262 `40,261/40,261` with zero regressions. The ordinary parallel baseline still exposes its pre-existing nested-process pressure failure in the recursive-stack-fault fixture; its isolated and sequential canonical runs pass, so this record does not weaken or alter the test runner. No formal-spec ruling or semver changed.
 
 #### Post-P6 implementation record — residual direct-AST retirement, 2026-08-30
 
-The C parser and its direct scope rebuild remain the sole production JavaScript/TypeScript frontend under **D8.1.3v10**. This follow-up removes the remaining direct-builder compatibility emulation: construction-order fact replay, transient reduction-time scopes, binding-identifier/finally wrappers, stale Tree-sitter AST macros and allocator entry points, and the unused parallel-import graph declarations. The direct scope pass now owns every binding and the direct lowering path consumes the parser's semantic AST shapes, including expression-form classic `for` initializers.
+The C parser and its direct scope rebuild remain the sole production JavaScript/TypeScript frontend under **D8.4.1**. This follow-up removes the remaining direct-builder compatibility emulation: construction-order fact replay, transient reduction-time scopes, binding-identifier/finally wrappers, stale Tree-sitter AST macros and allocator entry points, and the unused parallel-import graph declarations. The direct scope pass now owns every binding and the direct lowering path consumes the parser's semantic AST shapes, including expression-form classic `for` initializers.
 
-This is a genuine deletion under **D8.6.4v2**: the eliminated paths have no forwarding API, hidden frontend selection, or replacement copy. The residual direct-class scope wrapper was inlined at its sole call site; source comments were corrected only to describe the surviving authority. No blank lines were removed and no formatting-only reduction was used.
+This is a genuine deletion under **D8.6.4**: the eliminated paths have no forwarding API, hidden frontend selection, or replacement copy. The residual direct-class scope wrapper was inlined at its sole call site; source comments were corrected only to describe the surviving authority. No blank lines were removed and no formatting-only reduction was used.
 
 The JavaScript-engine diff for this cleanup is measured from the workspace base as `+65/-1067 = -1,002` lines under `lambda/js`. Validation passed: coherent debug test build; C parser `16/16`; TypeScript `19/19`; JS interpreter `357/357`; JS script ownership `104/104`; JS MIR emission `21/21`; JS optimization `19/19`; and the complete Test262 runner with zero regressions against its `40,261` passing-case baseline. This is an implementation-status record only; no formal ruling or semver changed.
 
@@ -1713,8 +1713,8 @@ The C parser now reduces every admitted TypeScript type span directly to Lambda'
 canonical `Type*` representation. Variable declarations use the existing shared
 `declared_type` field; function, method, and parameter contracts carry the same
 resolved fact rather than a TypeScript wrapper AST. This implements the
-declared-versus-effective type separation of **D3.2.3** while preserving the
-single direct frontend and indexed executable AST required by **D8.1.3v10** and
+declared-versus-effective type separation of **D4.2.4** while preserving the
+single direct frontend and indexed executable AST required by **D8.4.1** and
 **D8.2.4**. Type aliases and interfaces register their resolved facts at their
 declaration boundary; runtime enum, namespace, and decorator syntax continues
 to lower to ordinary JavaScript before scope/index passes.
@@ -1725,7 +1725,7 @@ parameter payloads that no runtime consumer read, and the post-parse visitors
 for already-lowered enum/namespace/decorator intermediates. The surviving
 authority is the direct C parser plus `ts_type_parser.cpp`, which admits no
 syntax independently and builds only Lambda `Type*` facts. This is genuine
-retirement under **D8.6.4v2**: there is no alternate TypeScript driver,
+retirement under **D8.6.4**: there is no alternate TypeScript driver,
 recursive type-AST resolution pass, forwarding API, or retained pre-lowering
 visitor.
 
@@ -2338,7 +2338,7 @@ JS-private function-kind scan is deleted.
 
 This is an implementation-only **D8.2.4** status update. It does not merge the
 JavaScript and Lambda semantic interpreters: both keep their profile-specific
-walkers and activation records under **D8.1.3v10**, while consuming the same
+walkers and activation records under **D8.4.1**, while consuming the same
 indexed source identities and runtime substrate.
 
 #### Post-P6 implementation record — manager-owned JavaScript prelink, 2026-08-31
@@ -2420,7 +2420,7 @@ semantic conversion from the published class ID to the MIR backend entry.
 
 This is an implementation-only **D8.2.4** status update. It keeps class
 backend entries as MIR artifacts and does not change JS/Lambda interpreter
-separation under **D8.1.3v10**.
+separation under **D8.4.1**.
 
 #### Post-P6 implementation record — index-owned subtree adjacency, 2026-08-31
 
@@ -2446,7 +2446,7 @@ the JS storage, rebuild, and cleanup are deleted.
 
 This is an implementation-only **D8.2.4** status update. It shares index
 structure, not JavaScript declaration semantics or interpreter behavior, which
-remain profile-owned under **D8.1.3v10**.
+remain profile-owned under **D8.4.1**.
 
 #### Post-P6 implementation record — direct Lambda primary `MirValue`, 2026-08-31
 
@@ -2458,13 +2458,13 @@ raw-GC pointer literals each retain their actual representation and the AST
 The shared const-backed pointer-literal path replaces five duplicated cases,
 and `AST_NODE_PRIMARY` is retired from the legacy raw dispatcher, so a primary
 cannot re-enter that compatibility path. This is the first literal/primary
-slice of P5 item 1, applying **D2.4.1–D2.4.3**, **D5.3.4**, and **D8.2.6**.
+slice of P5 item 1, applying **D2.3.4–D2.3.5**, **D6.3.4**, and **D8.2.6**.
 
 Identifier, call, control-flow, and extension-node producers still use the
 remaining raw legacy boundary; JavaScript's `jm_transpile_expression()` also
 remains raw. They are not represented as complete merely because structural
 consumers already accept `MirValue`. The two interpreters and their activation
-records remain separate under **D8.1.3v10**.
+records remain separate under **D8.4.1**.
 
 | Ledger field | Result |
 |---|---|
@@ -2488,7 +2488,7 @@ boundary. Lambda now enters through `transpile_expr_value_core()` and
 `jm_transpile_expression_direct()` and `jm_transpile_expression_value()`.
 Each producer returns a full demand-carrying `MirValue`, and the emitter owns
 representation conversion, rooting, and final storage as required by
-**D2.4.1–D2.4.3**, **D5.3.4**, and **D8.2.6**. A static declaration audit finds
+**D2.3.4–D2.3.5**, **D6.3.4**, and **D8.2.6**. A static declaration audit finds
 no core `transpile_expr*` or `jm_transpile_expression*` boundary returning
 `MIR_reg_t`.
 
@@ -2516,7 +2516,7 @@ is now the only source-to-artifact edge; the source-owned backend pointer and
 its node-owned lookup are retired. The JS truthiness and delayed-native-return
 adapters also now consume `MirValue`; the remaining `MIR_reg_type()` uses are
 named physical-carrier helpers, not core expression boundaries, under
-**D2.4.1–D2.4.3** and **D8.2.6**. The FunctionId source-authority audit is
+**D2.3.4–D2.3.5** and **D8.2.6**. The FunctionId source-authority audit is
 complete: no implementation declaration or use of `js_mir_backend` remains;
 the formal and working documents retain the spelling only to record its
 retirement, and only the source-less module carrier retains backend-local
@@ -2525,7 +2525,7 @@ direct-frontend retirement ledger below supplies the required named credit;
 the current project-level source cap is `310,711 → 287,618 = -23,093`.
 The prescribed release capture (one warm-up and five measured runs on
 identical manifests) reports Lambda `0.512534` and JS `0.690065` compiler-time
-ratios, passing **D8.6.4v2**. Finalized JS MIR diagnostics are complete
+ratios, passing **D8.6.4**. Finalized JS MIR diagnostics are complete
 `1.000181` and large-library `0.999995`; the complete-corpus movement is below
 0.02% and the library decreased.
 
@@ -2534,7 +2534,7 @@ Current validation: forced-MIR shadowed-tail-call `1/1`; Lambda/Input baseline
 `40,261/40,261` fully passing, with zero non-fully-passing, failed, regressed,
 or retried tests (`retry 0.0s`; empty partial ledger). These are
 implementation-status facts under
-**D8.2.4–D8.2.6** and **D8.6.4v2**, not revised formal rulings.
+**D8.2.4–D8.2.6** and **D8.6.4**, not revised formal rulings.
 
 The subsequent FunctionId artifact follow-up compiles the changed JS runtime,
 removes every source-owned backend-pointer declaration/use, and passes the focused MIR
@@ -2542,7 +2542,7 @@ class-field, hoisted-module-variable, and direct-call checks (`3/3`) plus the
 forced-MIR `JsMir` identity checks (`2/2`). The complete Lambda and Test262
 reruns above now provide the required new-slice closeout evidence.
 
-#### D8.6.4v2 credited direct-frontend retirement ledger — audited 2026-09-05
+#### D8.6.4 credited direct-frontend retirement ledger — audited 2026-09-05
 
 The atomic commit `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` (`JS code
 reduction`, parent `cf66198406c1a4d1dab0cabf2f0c1d39cab389ac`) removes the
@@ -2564,7 +2564,7 @@ deletion (`-1,013`) is explicitly excluded from this governed credit.
 | no-code-movement proof | the credited files are deleted in the atomic commit; `ts_preprocess.cpp` is reported but excluded |
 | current structural and semantic gates | `make test-lambda-baseline` `4,098/4,098`; `make test262-baseline` `40,261/40,261`, zero failures and retries; `git diff --check` |
 
-This closes the quantified deletion-credit condition of **D8.6.4v2**. It does
+This closes the quantified deletion-credit condition of **D8.6.4**. It does
 not close the separate current-tree timing capture or the physical Lambda
 build→bind split.
 
@@ -2612,7 +2612,7 @@ The LOC report is captured before formatting so formatting cannot obscure implem
 
 Performance is measured only with a release build, never a debug build.
 
-The final consolidation must retain the complete **D8.6.4v2** protocol:
+The final consolidation must retain the complete **D8.6.4** protocol:
 
 - identical complete Lambda and JS manifests;
 - one warm-up and five measured runs;
@@ -2660,11 +2660,11 @@ If residual duplication is non-empty because another caller still depends on the
 
 ### 7.1 One semantic interpreter
 
-Rejected. **D8.1.3v10** requires separate semantic walkers and activation records. A language branch in nearly every expression and statement case would increase LOC, obscure semantics, and invite cross-language mistakes.
+Rejected. **D8.4.1** requires separate semantic walkers and activation records. A language branch in nearly every expression and statement case would increase LOC, obscure semantics, and invite cross-language mistakes.
 
 ### 7.2 One parser or CST
 
-Rejected. **D8.1.1v5** makes the first-party Lambda parser authoritative for ordinary Lambda compilation. JavaScript retains its grammar. Parser/CST decoding is not the expensive duplicated semantic process targeted here.
+Rejected. **D8.3.2** makes the first-party Lambda parser authoritative for ordinary Lambda compilation. JavaScript retains its grammar. Parser/CST decoding is not the expensive duplicated semantic process targeted here.
 
 ### 7.3 Tree rewriting/desugaring as unification
 
@@ -2680,7 +2680,7 @@ Rejected unless an external/cache ABI proof requires the symbol temporarily. Int
 
 ### 7.6 Moving code out of the governed directory
 
-Rejected. **D8.6.4v2** explicitly makes this invalid. A helper moved from `lambda/js` to an uncounted directory is not consolidation.
+Rejected. **D8.6.4** explicitly makes this invalid. A helper moved from `lambda/js` to an uncounted directory is not consolidation.
 
 ### 7.7 Unifying JavaScript semantics with Lambda helpers
 
@@ -2688,7 +2688,7 @@ Rejected by **D1.3** and **S1.11**. JavaScript equality, coercion, property refe
 
 ### 7.8 Inline caches as part of unification
 
-Rejected by **D8.4.1v2**. Shared property/reference kernels and ordinary TypeMap metadata are the allowed design.
+Rejected by **D7.4.1**. Shared property/reference kernels and ordinary TypeMap metadata are the allowed design.
 
 ### 7.9 Extending C2MIR
 
@@ -2705,17 +2705,17 @@ This proposal is complete only when all statements are true:
 - [ ] `AstIndex` owns stable node, scope, binding, function, and class identities.
 - [x] Lowering never repairs binding or re-resolves a compiler name by spelling.
 - [x] One pass manager runs the complete **D8.2.5** schedule for Lambda and JavaScript.
-- [ ] Source contracts and inferred/effective facts are separate under **D3.2.3** and **D3.3.1v2**.
+- [ ] Source contracts and inferred/effective facts are separate under **D4.2.4** and **D4.3.1**.
 - [x] `FunctionId` is the sole source-to-function-artifact identity; `func_entries` is post-order emission storage only.
 - [x] Core expression boundaries return full `MirValue` and accept explicit demands under **D8.2.6**.
-- [x] `MirEmitter` is the sole owner of representation conversion, root/final-store policy, and common finalization under **D5.3.4**.
-- [ ] Lambda and JS retain separate semantic interpreters but share one execution shell and runtime substrate under **D8.1.3v10**.
+- [x] `MirEmitter` is the sole owner of representation conversion, root/final-store policy, and common finalization under **D6.3.4**.
+- [ ] Lambda and JS retain separate semantic interpreters but share one execution shell and runtime substrate under **D8.4.1**.
 - [ ] Every phase and subphase has non-positive governed, changed-C/C++, and changed-source LOC deltas.
 - [x] The deletion ledger proves that the credited direct-frontend retirement landed atomically.
 - [x] Current governed C/C++ LOC is 287,618, below 308,711 and the 308,311 target.
 - [x] Current governed C/C++ LOC is at least 2,000 lines below the older formal anchor.
 - [x] Quantified ledger rows independently credit at least 2,000 net lines to named compiler/runtime consolidation, excluding unrelated deletion and code movement.
-- [x] The Lambda and JS compiler-time ratchets of **D8.6.4v2** pass under the prescribed release protocol.
+- [x] The Lambda and JS compiler-time ratchets of **D8.6.4** pass under the prescribed release protocol.
 - [x] MIR budgets, forced-GC oracles, Lambda baseline, and complete Test262 baseline pass without weakened gates, masked tests, failures, or retries.
 
 The project is not complete merely because shared structs exist, a common helper was added, or tests remain green. Completion requires deleting the duplicate process and proving the codebase is materially smaller.
@@ -2751,10 +2751,10 @@ The initial stale-document set was reconciled on 2026-08-28:
 
 | Document | Reconciliation |
 |---|---|
-| `doc/Lambda_Formal_Design.md` | Appendix A now records the physical Lambda parse→build→bind schedule, complete core `MirValue` boundaries, FunctionId-only JS artifact lookup, and the current D8.6.4v2 LOC/timing closeout. The remaining unchecked completion-definition bullets are separate structural roadmap work; no D8 ruling changed. Older IC examples elsewhere were editorially reconciled with **D8.4.1v2**. |
+| `doc/Lambda_Formal_Design.md` | Appendix A now records the physical Lambda parse→build→bind schedule, complete core `MirValue` boundaries, FunctionId-only JS artifact lookup, and the current D8.6.4 LOC/timing closeout. The remaining unchecked completion-definition bullets are separate structural roadmap work; no D8 ruling changed. Older IC examples elsewhere were editorially reconciled with **D7.4.1**. |
 | `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` | Renamed from `(done)` to `(retired)` and marked as a historical partial record whose G1/G2/G3 closeout was not accepted. Open work points here. |
-| `doc/dev/js/JS_01_Compilation_Pipeline.md` | Reverified against the 2026-08-28 tree: function/class/member arrays are exact-sized after count/fill collection, control stacks are dynamic, duplicate pointer identity and orchestration residue are explicit, and **D8.4.1v2** no-inline-cache terminology is restored. |
-| `Lambda_Design_Unified_AST.md` | Current continuation links now point here; the retired plan is historical only; `JsLoadIC`/`JsStoreIC` wording was removed and replaced by the formal **D8.4.1v2** boundary. |
-| `Lambda_Design_Ast_Interpreter.md` | The retired-plan cross-reference and header were synchronized with landed **D8.1.1v5**; its historical JavaScript Stage-2 section now defers to **D8.1.3v10**, keeps separate completion/frame semantics, reflects dynamic MIR stacks, and rejects per-node ICs under **D8.4.1v2**. |
+| `doc/dev/js/JS_01_Compilation_Pipeline.md` | Reverified against the 2026-08-28 tree: function/class/member arrays are exact-sized after count/fill collection, control stacks are dynamic, duplicate pointer identity and orchestration residue are explicit, and **D7.4.1** no-inline-cache terminology is restored. |
+| `Lambda_Design_Unified_AST.md` | Current continuation links now point here; the retired plan is historical only; `JsLoadIC`/`JsStoreIC` wording was removed and replaced by the formal **D7.4.1** boundary. |
+| `Lambda_Design_Ast_Interpreter.md` | The retired-plan cross-reference and header were synchronized with landed **D8.3.2**; its historical JavaScript Stage-2 section now defers to **D8.4.1**, keeps separate completion/frame semantics, reflects dynamic MIR stacks, and rejects per-node ICs under **D7.4.1**. |
 
 Future implementation phases update status prose as they land, but do not revise an S#/D# ruling unless the user changes the design. Documentation edits do not earn code-deletion credit.

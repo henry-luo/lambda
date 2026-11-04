@@ -1,4 +1,4 @@
-// S12.1.1v3 / D7.2.4v4: queries consume pure values and never retain a native viewport.
+// S12.1.1v3 / D9.3.4: queries consume pure values and never retain a native viewport.
 import c: .camera
 import t: .transform
 

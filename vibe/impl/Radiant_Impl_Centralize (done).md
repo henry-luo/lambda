@@ -14,7 +14,7 @@
 [`Radiant_Design_Geometry.md`](Radiant_Design_Geometry.md) and
 `view_geometry.cpp`
 
-**Header convention:** D7.1.3's provider-ownership rule requires each public
+**Header convention:** D9.1.3's provider-ownership rule requires each public
 declaration to be provided by its owning module; DD4 completes that rule for
 Radiant by placing shared declarations in coherent subsystem headers. This
 was completed by

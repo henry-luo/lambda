@@ -4992,7 +4992,7 @@ struct IframeContextScope {
         owner = runtime ? runtime_get_eval_context(runtime) : nullptr;
     }
     ~IframeContextScope() {
-        // Child load/teardown transfers the evaluator at a quiescent layout boundary (D5.4.1).
+        // Child load/teardown transfers the evaluator at a quiescent layout boundary (D6.4.1).
         if (owner && (!radiant_eval_context_switch(owner) ||
                 !radiant_bind_document_script_host(ui, parent)))
             log_error("iframe context: could not restore the embedding document evaluator");

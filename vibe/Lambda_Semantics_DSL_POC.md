@@ -770,7 +770,7 @@ that building the model is itself the hardening instrument:
     runs were heap strings inside an arena-owned element nothing traces, swept
     at the next collection (`" and "` read back as `"binary"`, or as a
     neighbouring `" and "`). An active input parse now owns its merged text
-    (D4.2.6 Input ownership); pinned by `test/mir/lambda/gc_parse_merged_text.ls`
+    (D5.2.5 Input ownership); pinned by `test/mir/lambda/gc_parse_merged_text.ls`
     under the forced-collection stress sweep. Debugging note: a probe that
     *reads* the parsed text before the churn stores the pointers in a traced
     array and keeps the strings alive — several early "the tree survives"
@@ -1289,7 +1289,7 @@ substitution and store allocation do.
 To model real programs, source text must become element terms. This is an
 input-side addition, not a language construct. The 2026-07 draft planned
 `input(f, 'lambda')` over a tree-sitter CST; the production parser is now the
-first-party C parser (D8.1.1v18), and since M4 (§6.3, P11) its AST dump *is*
+first-party C parser (D8.3.2), and since M4 (§6.3, P11) its AST dump *is*
 Mark, read back with `input(f, 'mark')`: node kind → element tag, fields and
 attributes → child elements, literals → their source text (re-read as Mark
 scalars by `normalize`). The `normalize` pass, written in Lambda, lowers the
@@ -1650,7 +1650,7 @@ reachable without redesign.
   delicate corners (numeric promotion boundaries, closures over `var`,
   spread-flattening, error propagation through pipes) finds these systematically.
 - **14.2 Arbitrating between execution tiers.** The T0 interpreter and the MIR JIT
-  (D8.1.1v18 tiered execution) are de-facto differential tests of each other, but when
+  (D8.3.2 tiered execution) are de-facto differential tests of each other, but when
   they disagree, deciding which is right is reasoning from intent. The model is the
   tie-breaker, and a disagreement between one tier and the model localizes the fault
   to that tier.

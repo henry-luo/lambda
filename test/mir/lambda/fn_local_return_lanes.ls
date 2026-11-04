@@ -1,4 +1,4 @@
-// D2.2.2/D5.2.1v5: all exits determine a statement-bodied fn's return ABI.
+// D2.2.2/D6.2.1: all exits determine a statement-bodied fn's return ABI.
 fn fib(n: int) int {
     if (n < 2) { return n }
     return fib(n - 1) + fib(n - 2)

@@ -49,7 +49,7 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 unsigned int g_js_mir_optimize_level = 2;
 
 // The Lambda Direct compiler still owns this legacy document policy. LambdaJS
-// no longer reads it: D8.1.3v11 requires selected JS MIR to execute native code.
+// no longer reads it: D8.4.2 requires selected JS MIR to execute native code.
 int g_js_force_document_interp = 0;
 
 // diagnostic probes are shared by the host and native JS runtime.
@@ -95,7 +95,7 @@ extern "C" void js_set_document_source_load_observer(
 
 
 static void js_mir_finish_script_turn(Runtime* runtime, Item result) {
-    // D5.4.1: callbacks remain part of the active evaluator turn; marking this
+    // D6.4.1: callbacks remain part of the active evaluator turn; marking this
     // boundary prevents synchronous layout from handing TLS to another realm.
     RuntimeExecutionScope execution_scope(context);
     js_event_loop_drain_script_turn(
@@ -152,7 +152,7 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
     }
     uint64_t execution_start = time_now_us();
     RootFrame result_roots(1);
-    // D5.3.3: module completion remains live through microtasks and script-turn cleanup.
+    // D6.3.3: module completion remains live through microtasks and script-turn cleanup.
     Rooted<Item> result(result_roots, es_module
         ? js_interp_execute_es_module_script(runtime, script, result_home)
         : js_interp_execute_script(runtime, script, result_home));
@@ -625,7 +625,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     if (typescript_profile) {
         // The fast TS preprocessor erases syntax, not the compilation profile;
         // losing this bit made the TS-only type() intrinsic look like a JS
-        // property-miss synthesis dependency after D6.2.2v2 removed that path.
+        // property-miss synthesis dependency after D7.2.2 removed that path.
         tp->strict_js = false;
         tp->strict_mode = true;
     }

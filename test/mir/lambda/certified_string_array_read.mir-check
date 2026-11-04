@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3: a declared string[] uses its pointer certificate and keeps an item_at fallback, while an unproved array keeps generic indexing.",
+  "description": "D4.3.3: a declared string[] uses its pointer certificate and keeps an item_at fallback, while an unproved array keeps generic indexing.",
   "checks": [
     {
       "in_func": "_pick_#",

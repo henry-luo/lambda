@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2: packed field and numeric-index guards retain the formal descriptor/prototype fallback. D8.4.1v2: cache machinery and cache arguments are removed; shared own-data branches retain canonical decoding. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss. D8.4.1v2: the proven Map shape now guards nominal ownership directly; shared lookup and complete semantic misses are retained.",
+  "description": "D7.4.1: packed field and numeric-index guards retain the formal descriptor/prototype fallback. D7.4.1: cache machinery and cache arguments are removed; shared own-data branches retain canonical decoding. D8.4.2: check the terminal CLI specialization and its complete semantic miss. D7.4.1: the proven Map shape now guards nominal ownership directly; shared lookup and complete semantic misses are retained.",
   "checks": [
     {
       "in_func": "mvp_lmd_f2",

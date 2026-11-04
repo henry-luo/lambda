@@ -1,4 +1,4 @@
-// Package-owned inline-format policy (D7.2.5).  The waist receives only a
+// Package-owned inline-format policy (D10.2.1).  The waist receives only a
 // wrapper tag and ordinary DOM mutations; choosing semantic versus CSS output
 // and interpreting legacy command values remains here.
 import dom
@@ -97,7 +97,7 @@ pn set_wrapper_value(host, token, node, descriptor, use_css) {
     }
     else if (descriptor.legacy_style and descriptor.css_property != null) {
         // Legacy color commands still persist CSS where HTML has no matching
-        // attribute; styleWithCSS only chooses the element spelling (D7.2.5).
+        // attribute; styleWithCSS only chooses the element spelling (D10.2.1).
         dom.set_attribute(wrapper, "style", style_entry(descriptor.css_property,
             if (descriptor.css_value == null) descriptor.format_value
             else descriptor.css_value)^)
@@ -176,7 +176,7 @@ pn clear_block_style(host, node) {
 
 // A collapsed removeFormat affects only future typing. Non-collapsed input
 // removes every direct formatting shell around the selected run while leaving
-// links and other authored non-format attributes untouched (D7.2.5).
+// links and other authored non-format attributes untouched (D10.2.1).
 pub pn remove(host, edit_context) {
     let token = edit_context.token;
     let node = dom.edit_node(host, token);

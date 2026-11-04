@@ -534,3 +534,22 @@ The current design decision remains:
 - V8, Maglev and optimized numeric representation: <https://v8.dev/blog/maglev>
 - V8, mutable `HeapNumber` fields: <https://v8.dev/blog/mutable-heap-number>
 - V8, specialized double-element arrays: <https://v8.dev/blog/spread-elements>
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.1.3 → D2.1.1
+
+**D2.1.1** Measured ruling: String/Symbol/Binary stay **tagged leaf
+pointers** — raw header pointers regressed the geomean 11.1% (55/62
+benchmarks slower) with 7 correctness hazards. Rejected likewise: tagging
+container pointers; a generic CONTAINER tag; the universal raw-header
+model. *Representation uniformity is not a goal by itself.* [Item_Boxing §4]

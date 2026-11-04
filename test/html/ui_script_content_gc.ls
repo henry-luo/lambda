@@ -1,4 +1,4 @@
-// D4.5.2 regression: a UI-mode script result lives in the document's untraced
+// D5.5.2 regression: a UI-mode script result lives in the document's untraced
 // arena. Runtime symbols, non-spreadable arrays and GC elements (built per group)
 // placed in element content must be copied there; run under forced, poisoning
 // collection by RadiantViewTest.UiScriptContentSurvivesForcedGc.

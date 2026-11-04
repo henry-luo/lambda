@@ -2,7 +2,7 @@
 
 #include "../lambda-data.hpp"
 
-// shared by the procedural module and the browser adapter (D7.2.4v4).
+// shared by the procedural module and the browser adapter (D9.3.4).
 bool io_websocket_protocol_token(const char* text);
 Item io_websocket_protocol(Item connection);
 Item io_websocket_close_start(Item connection, Item code, Item reason);

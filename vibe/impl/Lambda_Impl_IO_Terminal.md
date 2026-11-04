@@ -9,7 +9,7 @@ validation and the native-code reduction gate remain open.
 
 - `lambda.io.terminal` resolves as a shipped package alongside the exact
   `lambda.io` built-in namespace. The resolver excludes only a direct leaf
-  that collides with a built-in `io_*` export (D7.2.4).
+  that collides with a built-in `io_*` export (D9.3.4).
   The package was renamed to `lambda.io.terminal` on 2026-10-06; the Node
   `readline` and `readline/promises` module names remain compatibility APIs.
 - The Lambda package owns code-point editing, bounded history, draft
@@ -23,7 +23,7 @@ validation and the native-code reduction gate remain open.
   latter remains an optional document-backed embed.
 - The runtime exposes only utf8proc scalar width/category queries through
   `lambda.io.cell_width` and `lambda.io.unicode_category`; Lambda computes
-  wrapping, tabs, caret and word classification (S2.5.8, D7.1.6).
+  wrapping, tabs, caret and word classification (S2.5.8, D9.2.2).
 - Handler invocation moved from Radiant to the shared template registry.
   Headless dispatch and a scoped `emit` receiver now exist, so a non-GUI host
   can deliver an event to a template and route child submission to its parent.
@@ -34,7 +34,7 @@ validation and the native-code reduction gate remain open.
   terminal history; the shell retains expression evaluation. Forced collection
   exposed that the native template-state hashmap was invisible to precise GC.
   The activation root visitor now traces model keys and state values through a
-  collector-neutral state-store callback (D5.3.3, D5.4).
+  collector-neutral state-store callback (D6.3.3, D6.4).
 - The frame handlers now include Unicode word movement, kill operations,
   transpose, session-owned bounded kill ring and yank. The protocol collapses
   CRLF across chunk boundaries before dispatching Enter. Ctrl-C yields a
@@ -51,7 +51,7 @@ validation and the native-code reduction gate remain open.
   key/source and value homes actually held by their evaluator. A second
   diagnostic came from allocating zero bytes for an empty map's field store;
   `map_fill` and `map_fill_items` now share a rooted, nonempty-only allocation
-  helper (D5.3.3).
+  helper (D6.3.3).
 - The CLI's legacy Tab behavior was literal tab insertion because it registers
   no completion provider. The frame handler now routes that key through its
   ordinary text-input/undo path; a real completion provider remains pending.
@@ -65,11 +65,11 @@ validation and the native-code reduction gate remain open.
   been validated on Windows.
 - A generic retained `TemplateHostSession` and size-gated Jube template API
   mount, dispatch, render and close templates without exposing runtime structs
-  to `node_core` (D7.3.3, D7.4.2v2). Nested JS-to-Lambda entry suspends the JS
+  to `node_core` (D9.4.3, D9.5.2). Nested JS-to-Lambda entry suspends the JS
   thread binding and selects session-owned precise root/number side stacks;
   closing inside a binding defers destruction until that binding unwinds
-  (D5.3.3). Jube mount, dispatch and render entries raise the activation
-  barrier during synchronous script work (D7.4.2v2). The Node adapter now
+  (D6.3.3). Jube mount, dispatch and render entries raise the activation
+  barrier during synchronous script work (D9.5.2). The Node adapter now
   subscribes to input events, queues copied
   semantic outcomes until the JS realm is restored, and publishes line,
   close, callback-question and Promise-question results. Lambda owns prompt
@@ -83,7 +83,7 @@ validation and the native-code reduction gate remain open.
   edit or frame change. The adapter copies the provider result before
   reentering Lambda and never edits the line itself. `write(data, key)` now
   sends key objects to a Lambda handler; modifier normalization and commands
-  remain in the frame (S12.1.3, D7.4.2v2).
+  remain in the frame (S12.1.3, D9.5.2).
 - Existing EventEmitter `emit` had allocated before rooting incoming event
   arguments. Rooting those values at entry fixed a forced-GC loss of the first
   `data` event; the same test now exercises ordinary and Promise readline,
@@ -154,7 +154,7 @@ validation and the native-code reduction gate remain open.
    option validation, completion error forwarding, history reflection, async
    iteration, abort, error and stream backpressure. Exercise the now-installed
    Jube activation barrier with a suspension fixture and verify Promise
-   ordering (D7.4.2v2, S13.1.2v2).
+   ordering (D9.5.2, S13.1.2v2).
 5. Inventory every
    remaining native primitive against design §5.1, then run the scoped LOC
    gate. Run `make test-lambda-baseline`, `make test262-baseline`,

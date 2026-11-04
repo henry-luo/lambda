@@ -1,4 +1,4 @@
-// Pure reconstruction uses the ordinary element contract and ownership (D3.4.5/D4.5.2).
+// Pure reconstruction uses the ordinary element contract and ownership (D3.4.5/D5.5.2).
 import radiant
 import svg: 'http://www.w3.org/2000/svg'
 import xlink: 'http://www.w3.org/1999/xlink'

@@ -2,7 +2,7 @@
 
 Valid-preserving operations only touch declared scalar bindings. Invalid
 operations name the invariant they intentionally break, keeping the two input
-contracts separate (S16, D1.9, D8.2.5v2).
+contracts separate (S16, D1.9, D8.2.5).
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@ id: no-retired-free-api
 language: cpp
 severity: error
 message: >-
-  scratch_free, arena_free and arena_realloc are retired (D4.1.4v5): scratch
+  scratch_free, arena_free and arena_realloc are retired (D5.1.4): scratch
   memory is released by ending its scope, and arena memory is released in
   bulk or retained for reuse with arena_retire, never freed individually.
 rule:

@@ -17,7 +17,7 @@ guarded candidates and acceptance gates are resolved in the linked reports.
 
 Authority: [Formal Semantics](../../doc/Lambda_Formal_Semantics.md) **S1.11**
 (hosted JS follows ECMAScript); [Formal Design](../../doc/Lambda_Formal_Design.md)
-**D2.4.3**, **D3.3.2v2**, **D5.3.1–D5.3.5**, **D8.4.1v2–D8.4.3v2**.
+**D2.3.5**, **D4.3.2**, **D6.3.1–D6.3.5**, **D7.4.1–D7.4.3**.
 No normative ruling changes are proposed.
 
 ## 1. Result and scope
@@ -81,7 +81,7 @@ show why the MVP implementation cannot simply replace the full engine:
 
 In particular, MVP's numeric entry uses `mvp_to_number` on arguments. Transfer
 its compact physical operations only behind genuine guards, preserving original
-values for the semantic fallback (**S1.11**, **D2.4.3**, **D3.3.2v2**).
+values for the semantic fallback (**S1.11**, **D2.3.5**, **D4.3.2**).
 
 ## 3. Priorities from current evidence
 
@@ -169,8 +169,8 @@ For `js_call_mir_this_direct`, distinguish callee effects that require current
 those operations are provably redundant. Reuse function capability metadata
 and caller-rooted arguments. Keep realm changes, re-entry, accessors, indirect
 callee changes and stack/error behavior correct. No mutable call/shape caches
-are permitted (**D8.4.1v2**); preserve precise roots and returned completions
-(**D5.3**, **D8.4.3v2**).
+are permitted (**D7.4.1**); preserve precise roots and returned completions
+(**D6.3**, **D7.4.3**).
 
 **Exit evidence:** measure hit-path cost as well as hit rate across Havlak,
 Bounce, CD, Richards, hashmap and log_pipeline. Counter frequency is not a
@@ -217,7 +217,7 @@ Use finalized MIR to establish the mechanism and longer paired runs to accept
 small gains. Finish with the full canonical matrix, explicit failed-row
 accounting, forced-GC checks for changed ownership/effects, and
 `make test-lambda-baseline` plus `make test262-baseline`. A `NO_GC` leaf requires
-transitive effect verification (**D5.3.2**), not just benchmark survival.
+transitive effect verification (**D6.3.2**), not just benchmark survival.
 
 Build and validation outcomes for this integration are retained in
 [validation.json](../../test/benchmark/js_mvp/profile_20260928/validation.json)

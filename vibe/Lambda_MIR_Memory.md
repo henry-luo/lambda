@@ -39,15 +39,15 @@ problem.
 This report does not change a language or architecture ruling. Any subsequent
 optimization must preserve these formal decisions:
 
-- **D8.1.1**: compilation flows through typed AST to MIR Direct, and MIR-interp
+- **D8.3.1**: compilation flows through typed AST to MIR Direct, and MIR-interp
   is the sole non-JIT execution path. There is no production AST-walking
   interpreter.
-- **D5.3.1**: generated code uses safepoint-current canonical root slots; root
+- **D6.3.1**: generated code uses safepoint-current canonical root slots; root
   stores are proportional to dirty live homes at `MAY_GC` boundaries.
-- **D5.3.4**: rootability is semantic rather than inferred from MIR register
+- **D6.3.4**: rootability is semantic rather than inferred from MIR register
   type, and final rooting policy lives in `MirEmitter`.
-- **D5.3.5**: argument roots use a fixed suffix of the side-root frame.
-- **D8.4.3**: fallible JS/Jube helpers return an ERROR-tagged `Item`; MIR tests
+- **D6.3.5**: argument roots use a fixed suffix of the side-root frame.
+- **D7.4.3**: fallible JS/Jube helpers return an ERROR-tagged `Item`; MIR tests
   that returned tag and routes the same value through try/catch/finally.
 - **D8.5.1**: imported-module caching is L1; lazy code generation is an approved
   experiment, not permission to weaken ownership or lifetime requirements.
@@ -168,7 +168,7 @@ The most frequent pre-link opcodes were:
 | `ne` | 3,846 |
 
 The combination of calls, tag extraction (`ursh`), comparisons, branches, and
-moves is consistent with JS dynamic semantics, D8.4.3 error-lane tests, boxed
+moves is consistent with JS dynamic semantics, D7.4.3 error-lane tests, boxed
 value handling, and precise-root write-back around `MAY_GC` calls.
 
 ### 5.2 Function-entry amplification
@@ -352,11 +352,11 @@ Several effects multiply rather than merely add:
 1. **Many functions.** Roughly two MIR entries per ordinary callable JS function
    create thousands of independent function records and register tables.
 2. **Many calls.** There are 111,969 pre-link calls. Potentially fallible helpers
-   require the D8.4.3 tag test and completion routing.
-3. **Precise GC frames.** Rootable values crossing `MAY_GC` calls require D5.3.1
-   canonical slots and D5.3.4 semantic liveness. Those slots are displaced
+   require the D7.4.3 tag test and completion routing.
+3. **Precise GC frames.** Rootable values crossing `MAY_GC` calls require D6.3.1
+   canonical slots and D6.3.4 semantic liveness. Those slots are displaced
    memory accesses before linking.
-4. **Fixed argument-root suffixes.** D5.3.5 call argument homes add more
+4. **Fixed argument-root suffixes.** D6.3.5 call argument homes add more
    frame-relative stores, clears, and loads.
 5. **Large functions.** One function has 29,026 locals, making geometrically
    grown register/value-numbering structures materially expensive.
@@ -469,7 +469,7 @@ upstream/vendor work and must not be patched directly in `lambda/mir/`; project
 approval and an auditable patch under `patches/` are required.
 
 A Lambda-owned compact interpreter artifact is an alternative, but it is a
-larger architecture change governed by D8.1.1 rather than a local allocation
+larger architecture change governed by D8.3.1 rather than a local allocation
 optimization.
 
 ### 12.2 Lazy per-function lowering
@@ -490,10 +490,10 @@ Secondary opportunities should be evaluated by instruction and local-register
 counts, not only elapsed time:
 
 - prove when a function cannot escape and omit an unnecessary public wrapper;
-- coalesce error-lane tests only where the tracked D8.4.3 lane state proves a
+- coalesce error-lane tests only where the tracked D7.4.3 lane state proves a
   second test redundant;
-- reduce redundant frame-relative loads/stores while preserving D5.3.1 dirty
-  liveness and D5.3.4 semantic rooting;
+- reduce redundant frame-relative loads/stores while preserving D6.3.1 dirty
+  liveness and D6.3.4 semantic rooting;
 - limit temporary-register creation in tag tests and completion routing;
 - split pathological giant lowering functions only where control-flow,
   completion, and lexical-environment semantics remain exact.
@@ -557,9 +557,9 @@ Relevant implementation points at the time of capture:
 | Function register tables | `lambda/mir/mir.c:531` |
 | LambdaJS frame setup/finalization | `lambda/js/js_mir_hashmap_scope_utils.cpp:503` |
 | Error-lane test and routing | `lambda/js/js_mir_completion.cpp:320` |
-| Formal compilation pipeline | `doc/Lambda_Formal_Design.md`, D8.1.1 |
-| Formal root invariants | `doc/Lambda_Formal_Design.md`, D5.3.1–D5.3.5 |
-| Formal merged error ABI | `doc/Lambda_Formal_Design.md`, D8.4.3 |
+| Formal compilation pipeline | `doc/Lambda_Formal_Design.md`, D8.3.1 |
+| Formal root invariants | `doc/Lambda_Formal_Design.md`, D6.3.1–D6.3.5 |
+| Formal merged error ABI | `doc/Lambda_Formal_Design.md`, D7.4.3 |
 
 ## 15. Conclusion
 

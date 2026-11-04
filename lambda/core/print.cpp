@@ -590,7 +590,7 @@ struct PrintItemVisitor {
     void operator()(lam::ItemOf<LMD_TYPE_MAP> item) const {
         Map* map = item.ptr();
         TypeMap* map_type = (TypeMap*)map->type;
-        // D2.6.6v2 phase 2 / OB8: a NOMINAL map prints as `<Type a: 1>` — its
+        // D3.1.1 phase 2 / OB8: a NOMINAL map prints as `<Type a: 1>` — its
         // type name is its tag, and that spelling is what round-trips as an
         // object literal. Only a structural map wears braces.
         if (TypeNominal* record = type_nominal_record((Type*)map_type)) {
@@ -727,7 +727,7 @@ struct PrintItemVisitor {
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_TYPE> item) const {
-        // D3.1.1v4: a pattern is a bare TypePattern under the TYPE tag, not the
+        // D4.1.1: a pattern is a bare TypePattern under the TYPE tag, not the
         // TypeType wrapper read below (whose kind is SIMPLE); reading its
         // `type` field crashed. It prints as its canonical source.
         Type* value = (Type*)item.ptr();

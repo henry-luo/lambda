@@ -106,7 +106,7 @@ static void js_exec_timeout_handler(int sig) {
     JsExecGuard* guard = js_exec_current;
     if (guard && guard->guarded) {
         guard->timed_out = 1;
-        // D8.4.3v2: the next guest boundary returns an error on its own stack.
+        // D7.4.3: the next guest boundary returns an error on its own stack.
     }
 }
 
@@ -2138,7 +2138,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
         &has_embedded_navigation);
     if (has_embedded_navigation && runtime->dom_ui_context) {
         EvalContext* owner = runtime_get_eval_context(runtime);
-        // D5.4.1: child evaluators may switch only after the parent's script frames returned.
+        // D6.4.1: child evaluators may switch only after the parent's script frames returned.
         if (!owner || owner->execution_depth) return false;
         UiContext* ui = (UiContext*)runtime->dom_ui_context;
         DomDocument* previous_document = ui->document;
@@ -2253,7 +2253,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         log_error("execute_document_scripts: failed to initialize preamble consumer");
         return ItemError;
     }
-    // D5.4.1: load-time layout and native input resolve this same live realm, including child loads.
+    // D6.4.1: load-time layout and native input resolve this same live realm, including child loads.
     DomDocument* executing_document = (DomDocument*)runtime->dom_doc;
     executing_document->js.runtime = runtime;
     executing_document->js_has_dom_realm = true;
@@ -2494,7 +2494,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // path dedup never hit, and nothing owned the Scripts to free them.
     // runtime_init memsets, so it must run before the fields set below.
     if (new_runtime) runtime_init(runtime);
-    // D8.1.1v13: the shared DOM package uses this document's result arena.
+    // D8.3.5: the shared DOM package uses this document's result arena.
     runtime_set_ui_result_input(runtime, dom_doc->input);
     runtime->dom_doc = (void*)dom_doc;
     runtime->resource_policy = dom_doc->resource_policy;
@@ -2502,7 +2502,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     const char* document_base_url = dom_doc->url ? url_get_href(dom_doc->url) :
         (base_url ? url_get_href(base_url) : nullptr);
     // history updates replace Url storage; module resolution retains the
-    // document's original base in its document-lifetime pool (D4.5.1v4).
+    // document's original base in its document-lifetime pool (D5.5.1).
     runtime->js_document_base_url = document_base_url
         ? pool_strdup(dom_doc->document_pool, document_base_url) : nullptr;
     // Browser documents use the AST executor throughout one DOM realm. This
@@ -2718,7 +2718,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 #ifndef _WIN32
     if (jmp_val == 0) {
         // queued load-time callbacks share the document's CPU budget and the
-        // D8.4.3v2 cooperative error path used by its synchronous scripts.
+        // D7.4.3 cooperative error path used by its synchronous scripts.
         if (js_exec_current->timed_out && get_type_id(result) != LMD_TYPE_ERROR) {
             log_error("execute_document_scripts: JS execution timed out after %ds",
                 js_exec_current->budget_seconds);
@@ -3022,7 +3022,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         return;
     }
 
-    // the document Runtime retains MVP units and their escaping handler Functions (D5.3).
+    // the document Runtime retains MVP units and their escaping handler Functions (D6.3).
     // Install the compiled functions into each element's on<type> IDL slot.
     // From this point on, normal dom_dispatch_event() handles `this`,
     // `event`, return-false default prevention, and propagation ordering.
@@ -3067,7 +3067,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
 
     Runtime* runtime = dom_doc->js.runtime;
     if (runtime && runtime != dom_doc->lambda_runtime) {
-        // native callback roots must unregister before their evaluator and code retire (D5.3.3).
+        // native callback roots must unregister before their evaluator and code retire (D6.3.3).
         dom_document_release_runtime_resources(dom_doc,
             (Context*)runtime_get_eval_context(runtime));
         state_store_retire_runtime(dom_doc, runtime_get_eval_context(runtime));
@@ -3099,6 +3099,8 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         return;
     }
     dom_lifecycle_release_backing_roots(dom_doc);
+    // The outer cleanup owns this runtime until document teardown returns.
+    if (runtime->cleanup_in_progress) return;
     runtime_cleanup(runtime);
     mem_free(runtime);
 

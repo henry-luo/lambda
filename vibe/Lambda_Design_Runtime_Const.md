@@ -4,12 +4,12 @@
 **Status:** IMPLEMENTED for Lambda — RC-P0 … RC-P8 landed, two deliberate
 residues (§10). **Designed, not built, for JavaScript** (§9).
 
-**Formal authority:** **D6.1.1–D6.1.2** (the purity bit; it *is* the
+**Formal authority:** **D7.1.1–D7.1.2** (the purity bit; it *is* the
 const-folder's soundness gate), **D8.2.2** (purity is a core flag),
-**D8.2.5v2** (fact placement: core runtime facts on the AST, no ID-keyed
-per-node fact table), **D2.4.1–D2.4.3** (one authority per compiler fact;
+**D8.2.5** (fact placement: core runtime facts on the AST, no ID-keyed
+per-node fact table), **D2.3.4–D2.3.5** (one authority per compiler fact;
 carrier/representation), **DI14** (no stale address may enter cacheable MIR),
-**D5.3.3** (fold frames own their rooting), **D8.1.1v2** (T0 AST interpreter)
+**D6.3.3** (fold frames own their rooting), **D8.3.1** (T0 AST interpreter)
 in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). Semantics:
 **S12.1** (effect system). The formal specifications win on disagreement.
 
@@ -43,7 +43,7 @@ model and inertness guarantee are its own.
 | ID | Ruling |
 |---|---|
 | **RC1** | **One const-folding pass serves both tiers.** The fold is a property of the compilation unit, not of a back end. Its result is consumed by the T0 AST interpreter and by MIR lowering alike. A fold only one tier can use is a defect, not a design. |
-| **RC2** | **Eligibility is bounded by the AST interpreter's evaluation capability, gated by purity.** Any *expression* T0 can evaluate is a candidate; **D6.1.2**'s purity bit decides whether it *may* fold. Not a hand-maintained node-shape whitelist. Const values (RC15) are outside this entirely — materialized, not evaluated. |
+| **RC2** | **Eligibility is bounded by the AST interpreter's evaluation capability, gated by purity.** Any *expression* T0 can evaluate is a candidate; **D7.1.2**'s purity bit decides whether it *may* fold. Not a hand-maintained node-shape whitelist. Const values (RC15) are outside this entirely — materialized, not evaluated. |
 | **RC3** | **Constness is compositional over the pure fragment** (§3). |
 | **RC4** | **Folded results are values, not type IDs.** Admission asks a *representation* question — is this Item self-contained, or does it need pool residency? — never a type-id whitelist. |
 | **RC5v2** | **One storage home: the const pool** (§4). Every const value is a `const_list` entry; the node holds only a handle. The representation split survives at **emission**, not in storage. |
@@ -66,14 +66,14 @@ model and inertness guarantee are its own.
 The pre-existing fold mechanism is sound and survives unchanged: real
 interpreter semantics rather than a parallel arithmetic evaluator; a throwaway
 frame so every intermediate is rooted and its side-stack extent disappears
-(**D5.3.3**); a per-node fuel budget; fault containment. RC14 is that property,
+(**D6.3.3**); a per-node fuel budget; fault containment. RC14 is that property,
 named.
 
 ---
 
 ## 3. Constness (RC3)
 
-**D6.1.2** already rules that the purity bit is the const-folder's soundness
+**D7.1.2** already rules that the purity bit is the const-folder's soundness
 gate; widening eligibility is what brings it into force.
 
 A node is **const** when:
@@ -83,13 +83,13 @@ A node is **const** when:
 3. it is an identifier bound by an **immutable** binding whose initializer is
    const; or
 4. it is a call to a **pure sys-func** with all-const arguments. A user-defined
-   `fn` call is semantically const under D6.1.2 but is **out of scope** (§10,
+   `fn` call is semantically const under D7.1.2 but is **out of scope** (§10,
    Appendix C.5); or
 5. it is a control form (`if`, `match`) whose scrutinee and taken arms are const.
 
 A node is **not** const when it reaches a `pn`, a mutable binding, a `var`
 parameter, module-level mutable state, I/O, or any surface whose purity bit is
-unset. Guest builders mark all-effectful (**D6.1.1**), so a hosted-language node
+unset. Guest builders mark all-effectful (**D7.1.1**), so a hosted-language node
 is non-const by default and never folds by accident.
 
 Two consequences:
@@ -113,7 +113,7 @@ struct AstNode {
     AstNodeType  node_type;
     AstConstKind const_kind;   // NONE | FOLDED | POOLED
     uint32_t     const_index;
-    Type        *type;         // the inferred/effective type (D8.2.5v2)
+    Type        *type;         // the inferred/effective type (D8.2.5)
     AstNode     *next;
     SourceSpan   source_span;
 };                             // 32 bytes
@@ -237,11 +237,11 @@ must surface as one, never as a quietly missed optimization.
 
 ## 8. Relationship to other rulings
 
-- **D8.2.5v2 / U30v2** — satisfied. The const handle is core runtime information
+- **D8.2.5 / U30v2** — satisfied. The const handle is core runtime information
   living on the AST; no ID-keyed per-node fact table exists.
 - **DI14** — honoured by construction: self-contained words are baked, everything
   else is reached through the module-state indirection.
-- **D6.1.2** — brought into force on this path for the first time.
+- **D7.1.2** — brought into force on this path for the first time.
 - **P7 U-D** — superseded. U-D preserved the existing fold and only relocated its
   result; the fold itself was the defect.
 
@@ -343,9 +343,9 @@ wants its own session with the key-image code as the worked example.
 
 | ID | Ruling |
 |---|---|
-| **RC-J1** | **The storage design is shared; the folder is not.** `AstNode`'s handle, the const pool, the two `AstConstKind` cases and the emission split (RC5v2, RC12v2, RC13, RC18) carry over unchanged. Evaluation does not: **S3.1–S3.3** truthiness is Lambda's, and JS coercion can run user code through `valueOf`/`toString`. One storage design, two folders — the same shape **D8.1.3v10** settled on for the two interpreters. |
+| **RC-J1** | **The storage design is shared; the folder is not.** `AstNode`'s handle, the const pool, the two `AstConstKind` cases and the emission split (RC5v2, RC12v2, RC13, RC18) carry over unchanged. Evaluation does not: **S3.1–S3.3** truthiness is Lambda's, and JS coercion can run user code through `valueOf`/`toString`. One storage design, two folders — the same shape **D8.4.1** settled on for the two interpreters. |
 | **RC-J2** | **Pointer-backed literal values move into the const pool; their per-evaluation construction is retired** (§9.5). Immediates are **not** pooled — `jm_box_float_const` already bakes a self-contained double and `jm_boxed_immediate_const` a bool/null, which is the correct emission and a pool load would be strictly worse. This is the same immediate/pooled split RC5v2 draws for Lambda. No literal value spends a `NameId`; property *keys* keep the NameId path untouched. |
-| **RC-J3** | **Purity gating is JS-specific and must be built before any call folds.** JS has no `is_proc`. Property access can invoke a getter, most builtins can throw, and coercion can re-enter user code — so a JS purity judgement is an analysis, not a bit lookup. Until it exists, **D6.1.1**'s "guests mark all-effectful" governs and nothing calls. |
+| **RC-J3** | **Purity gating is JS-specific and must be built before any call folds.** JS has no `is_proc`. Property access can invoke a getter, most builtins can throw, and coercion can re-enter user code — so a JS purity judgement is an analysis, not a bit lookup. Until it exists, **D7.1.1**'s "guests mark all-effectful" governs and nothing calls. |
 | **RC-J4** | **RC14 inertness needs a JS restricted-eval mode first.** Lambda's guarantee rests on `EvalMode::CONST`, per-node fuel, `mode_rejected` and a throwaway rooted frame. JS has none of these. A fold that can throw, suspend, or allocate unboundedly during compilation is not admissible. |
 | **RC-J5** | **User-defined function calls are deferred**, for the same reasons as Lambda (Appendix C.5) and more: a JS callee can throw, await, or capture a realm. |
 | **RC-J6** | **JS container literals are NOT poolable** (measured 2026-09-12). RC-O2's identity rule decides it: a Lambda constructed container has no observable identity, but a JS array/object does — `mk() === mk()` is `false` and mutating one result does not affect another. Every evaluation of `[1,2,3]` or `{a:1}` must yield a fresh object. Sharing one materialized container would break `===` and mutation isolation. **RC15 materialization therefore does not transfer to JS at all**; only *primitives* are poolable there — strings and bigints, both immutable and compared by value (`123n === 123n` is `true`). |
@@ -373,7 +373,7 @@ RC-J3/RC-J4 exist.
 | **User-defined `fn` calls** (RC3.4) | **Deliberately out of scope**, ruled 2026-09-12. Rationale: Appendix C.5. |
 | **Payload deletion for expression-position literals** (RC17v2) | **Blocked.** Needs proof that a `build_lit_*` result never reaches type position; failure there is silent. Appendix C.4. |
 | **Rehoming** (RC7) | **No reachable case.** Eligibility cannot yet produce a pointer-backed computed value — every producible result is self-contained. Unblocks when eligibility widens further. |
-| **D8.6.4v2 ratchets** | **Unmeasured** across all phases. RC-P3 should have moved MIR volume down; nothing has confirmed it. |
+| **D8.6.4 ratchets** | **Unmeasured** across all phases. RC-P3 should have moved MIR volume down; nothing has confirmed it. |
 
 Open questions: **RC-O3** (which floats are inline-representable — resolved in
 practice by `lambda_float_ptr_to_item`'s packing rule), **RC-O4** (should folding

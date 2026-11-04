@@ -4,7 +4,7 @@
 > written for developers.
 >
 > **Status (alpha).** No hosted language ships. The `lang-python` module and
-> the host's hosted-language services were removed on 2026-10-07 (the D7.4.3
+> the host's hosted-language services were removed on 2026-10-07 (the D9.5.3
 > footnote in `doc/Lambda_Formal_Design.md`). The Bash and Ruby front ends
 > remain in the source tree (`lambda/module/bash`, `lambda/module/rb`) but are
 > not compiled into any build: their CLI handlers sit behind the `LAMBDA_BASH`
@@ -30,7 +30,7 @@ modules/node-fs/
 `module.json` names the module, its `provides` specifiers and dependencies,
 and the `base_abi_version` / `hosted_api_version` it was built against; the
 host loads a module only when both match its own `JUBE_ABI_VERSION` and
-`JUBE_HOST_API_VERSION` (D7.3.2). It may also carry a platform-specific
+`JUBE_HOST_API_VERSION` (D9.4.2). It may also carry a platform-specific
 SHA-256 for the native library, which the host verifies before loading.
 A missing or incompatible module surfaces as Node's ordinary
 `MODULE_NOT_FOUND`.
@@ -40,11 +40,11 @@ the executable, then the working directory's `modules`. The first manifest
 for a module's specifier wins; later copies of the same module cannot replace
 it. An incompatible selected image reports an error rather than trying a
 lower-priority copy. Manifests from different modules claiming one specifier
-still conflict, and the selected manifest must match its descriptor (D7.3.4).
+still conflict, and the selected manifest must match its descriptor (D9.4.4).
 
 ### JavaScript source effects
 
-Under **D8.1.3v27**, a manifest may declare `"script_source": "closed"` when
+Under **D8.4.2**, a manifest may declare `"script_source": "closed"` when
 the module cannot evaluate or load additional JavaScript. The corresponding
 `JubeModuleDef.script_source_closed` tail must be present according to
 `struct_size` and equal to `1`. The loader checks that attestation before
@@ -60,7 +60,7 @@ specifier requires the complete shared realm before execution. `node-fs`
 currently declares this contract.
 
 The host exports only the symbols listed in `lambda/jube/jube_host_exports.txt`
-to modules (D7.3.6).
+to modules (D9.4.6).
 
 The compatibility name `lambda-jube.exe` is a symlink to `lambda.exe`; it is
 not an independently compiled runtime.

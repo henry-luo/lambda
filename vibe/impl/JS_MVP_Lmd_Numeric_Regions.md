@@ -28,17 +28,17 @@ Date: 2026-10-09. Implements the bounded specialization work in
 - Correct cached and shaped Function field reads to preserve Lambda's direct
   pointer representation, including strict identity.
 
-The design reuses **D3.4.3v5** shapes and **D5.2–D5.3** ownership/root analysis.
+The design reuses **D3.4.3** shapes and **D6.2–D6.3** ownership/root analysis.
 No helper is declared `NO_GC` merely because its fast path is numeric: emitted
 operations retain their effects, and allocations remain safepoints
-(**D5.3.1–D5.3.2**). Function representation and public entries remain aligned
-with **D6.2.1**, **D6.2.3v2–D6.2.4**. No runtime helper, new object layout,
+(**D6.3.1–D6.3.2**). Function representation and public entries remain aligned
+with **D7.2.1**, **D7.2.3–D7.2.4**. No runtime helper, new object layout,
 descriptor, proxy or prototype-mutation feature is introduced.
 
 The six new compiler helpers were disclosed before implementation:
 `numeric_region_path`, `numeric_region_read`, `plan_numeric_region`,
 `guard_property_cache`, `guard_numeric_region`, and `scalar_factory_plan`.
-The cache-dependent guard is historical: **D8.4.1v2** retirement on 2026-10-18
+The cache-dependent guard is historical: **D7.4.1** retirement on 2026-10-18
 removes it and uses shared descriptor lookup plus source-predicted shape guards;
 see [MVP §36.10](../jube/JS_MVP_Lmd.md#3610-remove-cache-machinery-and-reuse-lambda-field-specialization).
 Constructor and factory handling otherwise extend existing helpers. Read lookup

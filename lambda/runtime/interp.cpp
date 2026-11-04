@@ -1,9 +1,9 @@
-// Tier-0 AST walker (D8.1.1v2 / AI1–AI5, AI13–AI15).
+// Tier-0 AST walker (D8.3.1 / AI1–AI5, AI13–AI15).
 //
 // Boxed Items only, all semantics through the same C-ABI runtime helpers
 // generated code calls (AI3). Every GC-visible intermediate lives in a frame
 // slot on the side-root stack before any child evaluation or MAY_GC helper
-// call and is re-read from that slot afterwards (D5.3.3): container *objects*
+// call and is re-read from that slot afterwards (D6.3.3): container *objects*
 // are stable but their data buffers move under gc_compact_data, so no
 // `items[]`/`data` pointer may ever be cached across an allocating call.
 
@@ -53,7 +53,7 @@ extern __thread Context* input_context;
 // ---------------------------------------------------------------------------
 
 // auto is the shipped policy: cold definitions start in T0 and eligible hot
-// definitions promote through the per-function satellite path (D8.1.1v4).
+// definitions promote through the per-function satellite path (D8.3.1).
 #ifdef LAMBDA_NO_MIR
 static LambdaTier g_lambda_tier = LAMBDA_TIER_INTERP;
 #else
@@ -83,7 +83,7 @@ void lambda_tier_set(LambdaTier tier) {
 #define INTERP_DISABLED_MIR_HOOK(type, name, args, result) \
     type name args { return result; }
 
-// D8.1.1v17: an interactive session arms this around each entry. The SIGINT
+// D8.3.6: an interactive session arms this around each entry. The SIGINT
 // handler only stores the flag (async-signal-safe); T0 raises the fault at its
 // next call entry or loop back-edge. The flag stays set until the session
 // clears it, so a procedure-boundary handler that consumes the fault is
@@ -107,7 +107,7 @@ typedef struct AstPromotionOverlayEntry {
 
 // The queue is per execution Script while the workers are process-wide. A
 // Script teardown increments `generation` and waits for `pending`, so queued
-// work can never read a released cached-AST shell (D8.5.1v6).
+// work can never read a released cached-AST shell (D8.3.4).
 struct InterpSatelliteQueue {
     pthread_mutex_t mutex;
     pthread_cond_t idle;
@@ -123,7 +123,7 @@ typedef struct InterpSatelliteJob {
     Runtime* runtime;
     Script* script;
     const AstFuncNode* def;
-    // D8.1.1v14: when set, the worker compiles this loop continuation of
+    // D8.3.2: when set, the worker compiles this loop continuation of
     // `def` instead of `def`, and publication fills def's loop entry. The job
     // owns the continuation's node pool until an image adopts it.
     AstFuncNode* continuation;
@@ -242,7 +242,7 @@ static void interp_satellite_compile_job(void* opaque) {
     }
     if (job) {
         // teardown must keep Script/parent pools alive until the rejected
-        // image has released all compiler-owned references (D8.5.1v7).
+        // image has released all compiler-owned references (D8.3.5).
         pthread_mutex_unlock(&queue->mutex);
         interp_satellite_image_destroy(image);
         interp_satellite_job_destroy(job);
@@ -348,7 +348,7 @@ static bool interp_satellite_publish_image(Script* script,
     return true;
 }
 
-// D8.1.1v14: a continuation image binds to its module state like any image,
+// D8.3.2: a continuation image binds to its module state like any image,
 // but publishes to the definition's loop entry rather than to its Function;
 // the running activation takes it at its next handoff-loop head test.
 static void interp_loop_continuation_publish(Script* script, InterpSatelliteJob* job,
@@ -534,7 +534,7 @@ public:
         }
         // Binder types can be heap-owned type values. Reserve exact Item-shaped
         // roots for their direct-pointer carriers rather than relying on the
-        // retired native-stack scan (D5, D3.3.3v3).
+        // retired native-stack scan (D5, D4.3.3).
         if (!roots_.valid()) {
             // Fail closed through the armed recovery point rather than run
             // with non-rooting slots.
@@ -603,7 +603,7 @@ public:
 
 // The dynamic-call adapter materializes a variadic rest list before it enters
 // T0. Keep that List rooted in the callee frame while `current_vargs` exposes
-// it to `varg()`: Context itself is not a GC root (D5.1.1).
+// it to `varg()`: Context itself is not a GC root (D6.1.1).
 static bool interp_set_frame_vargs(InterpFrame* frame, Item rest) {
     if (!frame || frame->vargs_index == UINT32_MAX ||
             frame->vargs_index >= frame->slot_count) {
@@ -687,7 +687,7 @@ public:
 // A bounded Item span borrowed from the activation's prepared root window.
 // Argument values remain live through nested evaluation and the callee entry;
 // unplanned/oversized frames retain the existing dynamically rooted fallback
-// rather than borrowing outside their proven window (D5.3.3).
+// rather than borrowing outside their proven window (D6.3.3).
 class ScratchSpan {
     InterpFrame* frame_;
     uint32_t first_;
@@ -946,7 +946,7 @@ static Item interp_read_cross_lang_binding(InterpState* st, NameEntry* entry) {
 }
 
 #ifndef LAMBDA_NO_MIR
-// A MIR module's export is its boxed `_b` entry (D7.2.2). Publish it as the
+// A MIR module's export is its boxed `_b` entry (D9.3.2). Publish it as the
 // same Function carrier MIR builds at each reference to a module function.
 static Item interp_mir_export_function(Script* module, AstFuncNode* function,
         void* boxed_entry, int arity) {
@@ -1229,7 +1229,7 @@ static Item interp_type_check_at(InterpFrame* f, Item value, Type* expected,
 // A declared numeric lane is a runtime admission boundary even when static
 // checking accepted the source. Every numeric contract, the sized ones
 // included, takes lambda_type_check's shared value-aware admission (S11.4.5;
-// D8.3.5: admission is not a cast). The sized/u64 coercers had served here
+// D7.3.5: admission is not a cast). The sized/u64 coercers had served here
 // too, so `x: u8` admitted -1 as 255 on T0 while the JIT rejected it
 // (LR03-11); they remain the explicit `u8(v)` conversion only.
 static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
@@ -1262,7 +1262,7 @@ static Item interp_coerce_declared_array(InterpFrame* f, Item value,
     *handled = true;
     // TypeId-only coercion lost nested rank and named map layout. The shared
     // boundary validates/reifies every element once and installs its exact
-    // certificate for both T0 and MIR consumers (D3.1.1v2, D3.3.3).
+    // certificate for both T0 and MIR consumers (D4.1.1, D4.3.3).
     return interp_type_check_at(f, source_root.get(), declared_type, NULL, boundary);
 }
 
@@ -1450,7 +1450,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         // COPY: the callee's writes would land in the copy and the widening is
         // O(n) on every call (typed hashmap's `int_slot_set(var slots: array)`
         // converted a 10k-element field per store and never finished). MIR
-        // admits the packed carrier in place under the open contract (D3.2.1,
+        // admits the packed carrier in place under the open contract (D4.2.1,
         // fn_array_set widens a lane on demand); only an N-D/view carrier still
         // needs the boundary, because scalar indexing would flatten a row.
         Type* element = ast_declared_array_element(parameter->declared_type);
@@ -1506,7 +1506,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     // read value so the first write DETACHES -- a real S9.1.2 snapshot --
     // instead of aliasing a child a fresh literal never captured. All T0
     // declaration paths funnel through this bind. Mark-only: cannot allocate.
-    // CW24v3 / D4.4.6: also mark when the PLACE may be written while the
+    // CW24v3 / D5.4.5: also mark when the PLACE may be written while the
     // copy is alive -- the copy is then a second holder whether or not it is
     // ever written itself.
     if (named->entry && named->entry->is_place_copy &&
@@ -1551,7 +1551,7 @@ static void interp_static_member_names_destroy(InterpState* state) {
 }
 
 // Dotted-member names are source facts, but their pooled runtime identity is
-// EvalContext-owned (D4.6.2v2). Link once per activation instead of storing a
+// EvalContext-owned (D5.6.2). Link once per activation instead of storing a
 // foreign NamePool pointer in a reusable AST image.
 static Item interp_static_member_name_item(InterpFrame* frame,
         const AstIdentNode* source) {
@@ -1699,7 +1699,7 @@ static Item eval_literal(InterpFrame* f, AstNode* node) {
 static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
     if (node->op == OPERATOR_SPREAD) return eval_expr(f, node->operand);
     // Publish before the call: the helper allocates, and an operand living only
-    // in a C++ local would not be reachable from the collector (D5.3.3).
+    // in a C++ local would not be reachable from the collector (D6.3.3).
     Item operand_value = eval_expr(f, node->operand);
     Scratch operand_slot(f);
     operand_slot.set(operand_value);
@@ -2299,7 +2299,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         // tco reuses this frame instead of re-entering lambda_dynamic_call;
         // count the logical recursive invocation and its entry-equivalent
         // tail edge here. A direct tail boundary can hand off to T1 without
-        // materializing arbitrary interpreter locals (D8.1.1v5).
+        // materializing arbitrary interpreter locals (D8.3.2).
         bool tail_hot = interp_note_tail_call(f);
         if (tail_hot && tail_handoff_candidate && f->callable_slot) {
             Function* callable = (Function*)(uintptr_t)*f->callable_slot;
@@ -2579,7 +2579,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         Scratch receiver(f);
         receiver.set(eval_expr(f, method_member->object));
         if (interp_frame_pending(f)) return receiver.get();
-        // D2.6.6v2 phase 2: a method receiver is any value carrying a record.
+        // D3.1.1 phase 2: a method receiver is any value carrying a record.
         if (!lambda_value_nominal(get_type_id(receiver.get()),
                 (const void*)(uintptr_t)receiver.get().item)) {
             log_error("interp: object method receiver is not an object");
@@ -2759,7 +2759,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             words[index] = private_owner.item;
             interp_write_binding(f, entry, private_owner);
         }
-        // T21-3b (D8.1.1v6): a promoted callee takes its borrowed homes through
+        // T21-3b (D8.3.3): a promoted callee takes its borrowed homes through
         // the CW33 transport cells the generated code already uses -- T0 hands
         // over the ADDRESS of each frame slot, prepares chain-root borrows
         // exactly as the interpreted callee prologue would, and the satellite
@@ -2830,7 +2830,7 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
 
     // Two allocations plus a capture read per slot, every one of them a
     // safepoint: the env and the Function must be rooted across all of them
-    // and re-read afterwards (D5.3.3).
+    // and re-read afterwards (D6.3.3).
     RootFrame roots(2);
     Rooted<void*> env_root(roots, NULL);
     if (cap_count > 0) {
@@ -2856,7 +2856,7 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
         (void)interp_whole_script_publish_function(module, (AstFuncNode*)fn_node, fn);
     }
 
-    // D6.2.3v3: snapshots hold values; confined pns retain shared homes.
+    // D7.2.3: snapshots hold values; confined pns retain shared homes.
     if (cap_count > 0 && creating_frame) {
         int index = 0;
         for (FnCapture* cap = fn_node->captures; cap; cap = cap->next, index++) {
@@ -3087,7 +3087,7 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
         Array* arr = (Array*)(uintptr_t)acc.get().item;
         if (!arr) return ItemError;
         // The sequence append spreads a list by its kind bit, never by the
-        // literal's syntax (S2.5.1v2, D2.6.5v3); a pipe result is a value too.
+        // literal's syntax (S2.5.1v2, D3.3.1); a pipe result is a value too.
         if (item->node_type == AST_NODE_SPREAD) {
             array_push_spread(arr, value);
         } else if (ast_expr_insertion_needs_capture(item)) {
@@ -3207,7 +3207,7 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
             if (valid) admitted.items()[i] = converted;
         }
         if (valid) {
-            // D3.2.4v4: publish the exact layout only after every field admits.
+            // D4.2.5: publish the exact layout only after every field admits.
             return interp_fill_map(f, destination, admitted.items(), vi);
         }
         // The ordinary outer boundary retains its diagnostic and failure order.
@@ -3618,7 +3618,7 @@ extern bool has_current_item_ref(AstNode* node);
 // container.  `array_get` intentionally canonicalizes a small u64 through the
 // generic scalar reader, but a Lambda value read must retain its declared
 // numeric identity just like the static MIR carrier.  Re-home that payload in
-// the current number extent before publishing it from T0 (D3.2.2).
+// the current number extent before publishing it from T0 (D4.2.3).
 static Item interp_preserve_array_u64(Item source, int64_t index, Item value) {
     if (get_type_id(source) != LMD_TYPE_ARRAY || !source.array ||
             index < 0 || index >= source.array->length ||
@@ -3626,7 +3626,7 @@ static Item interp_preserve_array_u64(Item source, int64_t index, Item value) {
     // Native nullable lanes deliberately store raw words in `items`; treating
     // those words as Item values would dereference a lane such as `1` as a
     // pointer while probing its TypeId. Only generic Item arrays may be
-    // inspected for a preserved u64 carrier (D3.2.2).
+    // inspected for a preserved u64 carrier (D4.2.3).
     Item raw = source.array->items[index];
     if (get_type_id(raw) == LMD_TYPE_UINT64) {
         return box_uint64_value(raw.get_uint64());
@@ -3805,7 +3805,7 @@ typedef struct ForCtx {
     uint64_t*    keys;      // rooted Array* sort-key stream for ordered expressions
     uint64_t*    destination;
     Rooted<Item>* output_error;
-    // D8.1.1v18: this statement is the activation's handoff loop, entered with
+    // D8.3.2: this statement is the activation's handoff loop, entered with
     // the frame's scratch at `statement_scratch` (its own slots sit above it)
     bool         handoff;
     uint32_t     statement_scratch;
@@ -3932,7 +3932,7 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
     NameEntry* index_entry = loop->index_name
         ? interp_scope_lookup(fc->node->vars, loop->index_name) : NULL;
 
-    // D8.1.1v18: a continuation's copy resumes its walk at a given position
+    // D8.3.2: a continuation's copy resumes its walk at a given position
     bool outermost = loop == (AstLoopNode*)fc->node->loop;
     int64_t start = 0;
     if (outermost && fc->node->resume_from) {
@@ -3944,7 +3944,7 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
     bool ok = true;
     for (int64_t i = start; i < length && ok; i++) {
         if (fc->handoff && outermost) {
-            // D8.1.1v18: at this head test the walk's hidden state is its
+            // D8.3.2: at this head test the walk's hidden state is its
             // snapshot and position i, which the continuation takes after the
             // frame's live-ins; T0 unwinds as for `return`
             FnPromotionCell* cell = f->promotion_cell;
@@ -4383,7 +4383,7 @@ static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_de
             out_slot, key_slot);
     }
 
-    // D8.1.1v18: a numbered statement walks under its handoff scope
+    // D8.3.2: a numbered statement walks under its handoff scope
     if (for_node->interp_handoff_ordinal) interp_for_handoff_walk(&fc, loop);
     else interp_for_level(&fc, loop);
     if (destination) return output_error.get();
@@ -5530,7 +5530,7 @@ static bool interp_loop_census_enabled(void) {
 #endif
 }
 
-// D8.1.1v14: makes a numbered top-level loop the activation's handoff loop
+// D8.3.2: makes a numbered top-level loop the activation's handoff loop
 // for the loop statement's extent; nested loops leave the frame's loop as is.
 class InterpHandoffLoopScope {
     InterpFrame* frame_;
@@ -5567,7 +5567,7 @@ public:
     InterpHandoffLoopScope& operator=(const InterpHandoffLoopScope&) = delete;
 };
 
-// D8.1.1v18: a numbered `for` statement is the activation's handoff loop for
+// D8.3.2: a numbered `for` statement is the activation's handoff loop for
 // the extent of its walk, as a `while` is for its loop statement.
 static bool interp_for_handoff_walk(ForCtx* fc, AstLoopNode* loop) {
     InterpHandoffLoopScope handoff_scope(fc->f, (AstNode*)fc->node);
@@ -5603,7 +5603,7 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
     InterpFastIntCache cache = {};
     if (!interp_fast_int_cache_fill(&cache, frame, loop->cond) ||
             !interp_fast_int_cache_fill(&cache, frame, loop->body)) return false;
-    // its iterations are back-edges of the enclosing handoff loop (D8.1.1v14)
+    // its iterations are back-edges of the enclosing handoff loop (D8.3.2)
     InterpBackedgeTally tally(frame, loop);
     if (interp_fast_int_linear_while(frame, loop, &cache, result, &tally.trips)) return true;
     // LR12-23: the slots one iteration may write, so a mid-body bail hands the
@@ -5966,7 +5966,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         f->st->mode_fuel--;
     }
     // the plan proves these are this function's own slots, so a surrounding
-    // view's state overlay cannot shadow them (D6.2.3 / S12.1.3).
+    // view's state overlay cannot shadow them (D7.2.3 / S12.1.3).
     if (node->node_type == AST_NODE_IDENT && node->const_kind == AST_CONST_NONE &&
             ((const AstIdentNode*)node)->interp_frame_slot_read &&
             f->st->mode == EvalMode::RUNTIME) {
@@ -6093,7 +6093,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // legacy pipe-to-file AST nodes are statement-shaped, but their runtime
         // contract is still the same boxed source/target call as MIR lowering;
         // evaluate the source first so a target allocation cannot observe a
-        // stale unrooted source (D5.3.3).
+        // stale unrooted source (D6.3.3).
         AstBinaryNode* pipe = (AstBinaryNode*)node;
         Scratch source(f);
         source.set(eval_expr(f, pipe->left));
@@ -6483,7 +6483,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_LOOP: {
         AstLoopControlNode* loop = (AstLoopControlNode*)node;
         bool test_first = loop->form != LOOP_FORM_DO_WHILE;
-        // D8.1.1v14: a numbered top-level loop of this activation's body owns
+        // D8.3.2: a numbered top-level loop of this activation's body owns
         // the back-edges of its subtree and is where the activation may leave
         InterpHandoffLoopScope handoff_scope(f, loop);
         if (test_first) {
@@ -6633,9 +6633,9 @@ static InterpState* interp_current_state(void);
 
 // general loop counters belong to the active definition, but promotion is
 // deferred until its next entry: only a direct self-tail boundary has the
-// entry-equivalent state needed for a safe T1 handoff (D8.1.1v5).
+// entry-equivalent state needed for a safe T1 handoff (D8.3.2).
 // ---------------------------------------------------------------------------
-// D8.1.1v14 loop-head handoff
+// D8.3.2 loop-head handoff
 // ---------------------------------------------------------------------------
 // A `while` that is a direct statement of a `pn` body (numbered by the frame
 // plan) counts the back-edges of its whole subtree. When it reaches
@@ -6773,7 +6773,7 @@ static String* interp_pool_string(Pool* pool, const char* prefix, size_t prefix_
     return text;
 }
 
-// D8.1.1v18: the names of a `for` continuation's two trailing parameters.
+// D8.3.2: the names of a `for` continuation's two trailing parameters.
 // Lookups go by binding entry, so they cannot capture a user binding; a
 // live-in spelled the same is still refused, to keep the names distinct.
 static const char INTERP_LOOP_WALK_NAME[] = "__loop_walk";
@@ -6878,7 +6878,7 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
     }
 
     if (loop->node_type == AST_NODE_FOR_EXPR) {
-        // D8.1.1v18: the continuation's first statement is a copy of the `for`
+        // D8.3.2: the continuation's first statement is a copy of the `for`
         // that walks the T0 snapshot from the position T0 stopped at. Only the
         // copy and its source clause are new; the body and clauses are shared.
         AstForNode* source_for = (AstForNode*)loop;
@@ -6958,7 +6958,7 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
 
 static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_node,
         FnPromotionCell* cell) {
-    // D8.1.1v18: a `while` or a plain `for` statement
+    // D8.3.2: a `while` or a plain `for` statement
     AstNode* loop = (AstNode*)loop_node;
     uint8_t ordinal = ast_handoff_ordinal(loop);
     int resume_args = loop->node_type == AST_NODE_FOR_EXPR ? 2 : 0;
@@ -7101,7 +7101,7 @@ static void interp_note_backedge(InterpFrame* frame) {
 // boundary with no implicit context or partially published `var` state.
 static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item* out,
         const Item* resume, int resume_count, uint32_t statement_scratch) {
-    // D8.1.1v18: a `for` walk holds its own scratch slots (its snapshot among
+    // D8.3.2: a `for` walk holds its own scratch slots (its snapshot among
     // them), so the boundary test applies to the statement's entry level
     if (statement_scratch != f->scratch_base || interp_frame_pending(f) ||
             f->st->mode != EvalMode::RUNTIME || f->var_marked_mask || f->method ||
@@ -7114,7 +7114,7 @@ static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item*
     int live_count = cell->loop_live_in_count;
     int argc = live_count + resume_count;
     // the argument words and the Function are rooted across the allocation
-    // and the call (D5.3.3)
+    // and the call (D6.3.3)
     RootSpan roots((size_t)argc + 1);
     uint64_t* words = roots.words();
     if (!words) return false;
@@ -7163,7 +7163,7 @@ static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item*
 
 // a direct self-tail boundary starts a semantically fresh activation even
 // though TCO reuses the frame. It is the only active-frame point whose live
-// state is exactly the next entry's argument vector (D8.1.1v5).
+// state is exactly the next entry's argument vector (D8.3.2).
 static bool interp_tail_handoff_candidate(const InterpFrame* frame) {
     if (!frame || !frame->fn || lambda_tier_selected() != LAMBDA_TIER_AUTO ||
             !frame->fn->analysis) return false;
@@ -7265,7 +7265,7 @@ typedef struct InterpBorrowedCall {
 // buffers on the C stack made deeply recursive interpreted calls consume a
 // fixed block per activation. Allocate those escape buffers independently so
 // recursion depth is bounded by the language frame/side-root budget rather
-// than native stack frame size (D5.3.3).
+// than native stack frame size (D6.3.3).
 class InterpBorrowedScratch {
 public:
     Item* values;
@@ -7550,7 +7550,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                     &borrowed_scratch.scalar_payloads[index]);
             }
         }
-        // D5.1.3/D5.2.3: copying into the dying extent leaves tiny floats
+        // D6.1.3/D6.2.3: copying into the dying extent leaves tiny floats
         // dangling. Capture every scalar payload before the frame closes,
         // then re-home it in the caller using the shared ownership helpers.
         result = lambda_item_adopt_scalar_home(result, &escaped_scalar_payload);
@@ -7605,7 +7605,7 @@ Item interp_call_emit(Function* fn, const Item* args, int argc, List* destinatio
     return interp_call_internal(fn, args, argc, nullptr, output.home());
 }
 
-// T21-3b (D8.1.1v6): the borrowed-mode entry. A generated caller (a
+// T21-3b (D8.3.3): the borrowed-mode entry. A generated caller (a
 // satellite) transports borrowed `var` homes in the CW33 cells; consume them
 // exactly as the generated prologue does -- read, then clear -- and treat
 // each as a chain-root borrow, so the interpreted callee prepares through the
@@ -7652,7 +7652,7 @@ typedef struct InterpAmbient {
 static void interp_ambient_init(void* storage) {
     InterpAmbient* ambient = (InterpAmbient*)storage;
     memset(ambient, 0, sizeof(*ambient));
-    // escaped tasks can outlive a retained callback's stack-local InterpStateGuard (D5.3.3).
+    // escaped tasks can outlive a retained callback's stack-local InterpStateGuard (D6.3.3).
     ambient->st = &ambient->owned;
     ambient->owned.ctx = context;
     ambient->owned.runtime = context ? context->runtime : NULL;
@@ -7855,7 +7855,7 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
             export_entry->slot < 0) {
         // A module compiled by MIR Direct (templates with handlers, for one)
         // has no T0 module slot for its functions; its export is the boxed
-        // `_b` entry in its JIT context (D7.2.2).
+        // `_b` entry in its JIT context (D9.3.2).
         void* boxed_entry = NULL;
 #ifndef LAMBDA_NO_MIR
         if (export_function && module->jit_context) {
@@ -8102,7 +8102,7 @@ static bool interp_const_node_supported_depth(AstNode* node, int depth) {
         }
     }
     case AST_NODE_CALL_EXPR: {
-        // RC3.4 / D6.1.2: purity is the soundness gate, and
+        // RC3.4 / D7.1.2: purity is the soundness gate, and
         // `interp_eval_mode_allows_sys_func` already encodes it -- it rejects
         // `is_proc` and `is_async` callees and names the restricted-mode
         // allowlist. Reuse that judgement rather than keeping a second list
@@ -8167,7 +8167,7 @@ bool interp_const_fold_script(Transpiler* tp) {
 
     // The pass owns a throwaway frame rather than borrowing a runtime frame:
     // every intermediate is rooted while helpers run, and its side-stack
-    // extent disappears after each fold attempt (D5.3.3).
+    // extent disappears after each fold attempt (D6.3.3).
     FnFramePlan plan = {};
     plan.scratch_depth = INTERP_CONST_FRAME_SLOTS - 1;
     plan.total_slots = INTERP_CONST_FRAME_SLOTS;
@@ -8277,7 +8277,7 @@ static uint32_t interp_promotion_threshold(const char* env_name, uint32_t fallba
     return (uint32_t)value;
 }
 
-// D8.1.1v17: a REPL session selected with `jit` promotes at the first call
+// D8.3.6: a REPL session selected with `jit` promotes at the first call
 // instead of compiling a whole module; the environment knob still wins.
 static uint32_t g_interp_func_jit_threshold_default = 5;
 void interp_set_func_jit_threshold_default(uint32_t threshold) {
@@ -8290,7 +8290,7 @@ static uint32_t interp_jit_threshold(void) {
 }
 
 // back-edges of one handoff loop's subtree before its continuation compiles;
-// the user set 10000 on 2026-10-02 (D8.1.1v14, Interp Tune2 §4.3)
+// the user set 10000 on 2026-10-02 (D8.3.2, Interp Tune2 §4.3)
 static uint32_t interp_jit_backedge_threshold(void) {
     return interp_promotion_threshold("LAMBDA_LOOP_JIT_THRESHOLD", 10000);
 }
@@ -8307,7 +8307,7 @@ void lambda_function_publish_boxed_entry(Function* fn, const AstFuncNode* def,
         void* entry) {
     if (!fn || !def || !entry) return;
     // Publish the native pointer before the ABI byte: every later dispatcher
-    // either sees the old T0 pair or a complete boxed entry (D8.1.1v2 §5.3).
+    // either sees the old T0 pair or a complete boxed entry (D8.3.1 §5.3).
     fn->ptr = (fn_ptr)entry;
     lambda_function_mark_mir_context_abi(fn);
     if (def->node_type == AST_NODE_PROC) {
@@ -8330,7 +8330,7 @@ void lambda_function_publish_boxed_entry(Function* fn, const AstFuncNode* def,
 
 // This is an intentionally opt-in experiment. The normal AUTO policy remains
 // per-function satellites; the POC compiles one complete MIR image only after
-// the first threshold trigger (D8.1.1v4/P2).
+// the first threshold trigger (D8.3.1/P2).
 static bool interp_whole_script_poc_enabled(void) {
     const char* value = getenv("LAMBDA_AUTO_WHOLE_SCRIPT");
     return value && (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
@@ -8354,7 +8354,7 @@ static bool interp_whole_script_publish_function(Script* script,
         // Whole-module lowering still exposes each function through the same
         // boxed ABI as a satellite. Keep the established aggregate/mutable
         // parameter admission gate or a valid MIR image can silently narrow
-        // an Item container at the wrapper boundary (D8.1.1v4/D5.2).
+        // an Item container at the wrapper boundary (D8.3.1/D6.2).
         return false;
     }
 
@@ -8433,7 +8433,7 @@ static bool interp_whole_script_bind_module_image(Script* script) {
     if (!layout) return false;
     // The POC compiler emits every module binding through the owner's T0 slab;
     // preparing the eager MIR layout here would replace that live slab and
-    // violate the interpreter's persistent-root invariant (D7.2.1).
+    // violate the interpreter's persistent-root invariant (D9.3.1).
     if (!lambda_module_state_bind_static(script->module_state_id,
             script->const_list ? script->const_list->data : NULL,
             script->type_list)) {
@@ -8457,7 +8457,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
             !interp_satellite_supported(script, (AstFuncNode*)trigger->def)) {
         // The whole image still publishes functions through the satellite
         // boxed ABI. Reject an unsupported first trigger before paying for a
-        // module compile that cannot safely become active (D8.1.1v4/D5.2).
+        // module compile that cannot safely become active (D8.3.1/D6.2).
         log_debug("interp-tier: whole-script POC skipped file=%s reason=trigger-boundary",
             script->reference ? script->reference : "<unknown>");
         return false;
@@ -8473,7 +8473,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
     if (script->direct_imports && script->direct_imports->length > 0) {
         // Full-module MIR linking requires compiled import symbols. Keep the
         // POC on the import-free cone until dependency images can be promoted
-        // as one transaction (D7.2.2).
+        // as one transaction (D9.3.2).
         log_debug("interp-tier: whole-script POC skipped file=%s reason=imports",
             script->reference ? script->reference : "<unknown>");
         return false;
@@ -8551,7 +8551,7 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
 
     FnPromotionCell* cell = interp_promotion_cell(script, def);
     if (!cell) return false;
-    // D4.5.2: MIR uses the same UI-aware element allocator and content-copy
+    // D5.5.2: MIR uses the same UI-aware element allocator and content-copy
     // helpers as T0. Promotion preserves the active runtime/result Input;
     // pinning every UI call predates the shared arena-content ownership fix.
 
@@ -8575,7 +8575,7 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
         return false;
     }
     if (count_entry && cell->call_count != UINT32_MAX) cell->call_count++;
-    // D8.1.1v14: entries and self-tail edges promote a definition; a hot loop
+    // D8.3.2: entries and self-tail edges promote a definition; a hot loop
     // instead hands its running activation off at the loop head, so owning a
     // loop no longer promotes at the first entry (the retired v7 trigger).
     if (cell->call_count < interp_jit_threshold() &&
@@ -8627,7 +8627,7 @@ bool interp_promote_function_if_hot(Function* fn) {
 
 // a tail edge was counted before the caller reached this point. Reusing the
 // publication path without another entry increment keeps the definition-site
-// call counter equal to the source-level invocation count (D8.1.1v5).
+// call counter equal to the source-level invocation count (D8.3.2).
 static bool interp_promote_function_from_tail(Function* fn) {
     return interp_promote_function(fn, false);
 }
@@ -8971,7 +8971,7 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
                     break;
                 }
                 // `main` runs on the base stack, which is the root task:
-                // task builtins see the same root at every tier (D6.3.1).
+                // task builtins see the same root at every tier (D7.5.1).
                 tail.set(interp_call_function_result(
                     (Function*)(uintptr_t)callee.item, NULL));
                 called_main = true;
@@ -8981,7 +8981,7 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
         }
 #ifndef LAMBDA_NO_TASKS
         // Tasks that outlive their starter still run before the script ends,
-        // exactly as the MIR runner drains them (D6.3.1).
+        // exactly as the MIR runner drains them (D7.5.1).
         if (st && st->ctx && st->ctx->scheduler &&
                 (!runner || !runner->runtime || !runner->runtime->no_task_drain)) {
             lambda_scheduler_drain(st->ctx->scheduler);
@@ -9009,7 +9009,7 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     // T0 itself reads the AST pools directly, but any task-backed MIR satellite
     // published from this module resolves literals through the same
     // context-owned const/type image. Bind that image before the first closure
-    // can enter its generated resumable wrapper (D7.2.1).
+    // can enter its generated resumable wrapper (D9.3.1).
     if (!lambda_module_state_bind_static(script->module_state_id,
             script->const_list ? script->const_list->data : NULL,
             script->type_list)) {
@@ -9077,7 +9077,7 @@ Script* interp_repl_fragment_unsupported_import(AstNode* fragment) {
     return NULL;
 }
 
-// D7.2.2: an entry's imports initialize before the entry runs, in the same
+// D9.3.2: an entry's imports initialize before the entry runs, in the same
 // post-order a script's cone uses. A module whose initializer already ran in
 // this session is not re-run; a failed initializer is not recorded, so the
 // next import retries it.
@@ -9146,7 +9146,7 @@ static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
         run->procedural);
 }
 
-// Module initialization is transactional (D7.2.2/S7.7.6): a fault inside an
+// Module initialization is transactional (D9.3.2/S7.7.6): a fault inside an
 // initializer lands on its own barrier, resets the partial module slab, then
 // forwards to the still-armed execution boundary, so a half-initialized module
 // is never visible to a local handler.

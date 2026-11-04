@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.4, D8.2.6v2, D8.1.3v27: a globalThis write invalidates the implicit numeric-key proof. The terminal entry retains shared global property access, key conversion and complete indexed-property dispatch.",
+  "description": "D2.4.3, D8.2.6, D8.4.2: a globalThis write invalidates the implicit numeric-key proof. The terminal entry retains shared global property access, key conversion and complete indexed-property dispatch.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

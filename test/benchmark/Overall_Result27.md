@@ -257,7 +257,7 @@ data:
    annotations created the R2 family (fannkuch/primes/sieve); Tune17's T1 fixed R1/R3
    and created permute/towers/storage. Gross movement in v27 is huge (sha1 −84%,
    pnpoly −68% against permute +1097%, towers +359%) and the geomean nets to exactly
-   zero. The "same facts ⇒ same code" invariant (Tune17 §2, per D3.2.1, D2.4) is only
+   zero. The "same facts ⇒ same code" invariant (Tune17 §2, per D4.2.1, D2.3) is only
    enforced on the fixture shapes (tak and pnpoly carry emission-identity fixtures);
    every shape without a fixture is free to re-diverge, and did. Until emission identity
    is asserted as a broad ratchet rather than per-specimen, the pattern will repeat.
@@ -271,7 +271,7 @@ data:
    invalidation proof — and correctly shipped nothing speculative. The honest reading
    of the Tune17 status note: **the safe admission/elision slices are exhausted.**
    What remains needs value-model design work — the S1.4–S1.6 binary lane, record
-   lowering to fixed shapes, and the LambdaJS NameId path (D8.4.1 permits ICs there) —
+   lowering to fixed shapes, and the LambdaJS NameId path (D7.4.1 permits ICs there) —
    not another elision pass.
 
 3. **Enforcement debt is still being amortized.** The R18→R20 type-enforcement round

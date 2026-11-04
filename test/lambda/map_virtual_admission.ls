@@ -1,4 +1,4 @@
-// D7.4.5v2: generic map membership is independent of physical or virtual storage.
+// D9.5.5: generic map membership is independent of physical or virtual storage.
 fn accept(value: map) => value.x
 fn preserve(value: map) map => value
 let dynamic = map(["x", 3, "label", "Lambda"])

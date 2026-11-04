@@ -1,12 +1,12 @@
 #pragma once
 
-// Tier-0 AST interpreter (D8.1.1v2, vibe/Lambda_Design_Ast_Interpreter.md).
+// Tier-0 AST interpreter (D8.3.1, vibe/Lambda_Design_Ast_Interpreter.md).
 //
 // T0 walks the typed AST directly, manipulating boxed Items only (AI3) and
 // calling the same C-ABI runtime helper library generated code calls. An
 // activation is a C++ InterpFrame (control state, no Items) paired with a
 // statically-sized window on the existing side-root stack plus a number-stack
-// watermark (AI4/D5.1.1) — no fourth stack mechanism exists.
+// watermark (AI4/D6.1.1) — no fourth stack mechanism exists.
 //
 // Log prefixes: `interp:` (walker/runner) and `frame-plan:` (the plan pass).
 
@@ -33,10 +33,10 @@ LambdaTier lambda_tier_selected(void);
 Item interp_call_emit(Function* fn, const Item* args, int argc, List* destination);
 void lambda_tier_set(LambdaTier tier);
 // Default AUTO function-entry promotion threshold (5); LAMBDA_FUNC_JIT_THRESHOLD
-// overrides it. A `jit` REPL session sets 1 (D8.1.1v17).
+// overrides it. A `jit` REPL session sets 1 (D8.3.6).
 void interp_set_func_jit_threshold_default(uint32_t threshold);
 
-// REPL entry interrupt (D8.1.1v17). `request` is async-signal-safe; T0 raises
+// REPL entry interrupt (D8.3.6). `request` is async-signal-safe; T0 raises
 // LAMBDA_FAULT_INTERRUPTED at its next call entry or loop back-edge until the
 // session clears the request.
 void interp_interrupt_request(void);
@@ -106,7 +106,7 @@ struct InterpFrame {
     const FnFramePlan*  plan;
     uint64_t*           slots;       // side-root window base (Item lanes)
     // the active Function is rooted beside the frame slots so a tail handoff
-    // can publish and invoke it across satellite compilation (D8.1.1v5).
+    // can publish and invoke it across satellite compilation (D8.3.2).
     uint64_t*           callable_slot;
     Item*               env;         // closure capture env (NULL when not a closure)
     uint32_t            env_count;
@@ -142,10 +142,10 @@ struct InterpFrame {
     // its blocks yield their last value (S2.5.3) exactly as MIR's `in_proc`
     // handler functions do.
     bool                proc_handler;
-    // D8.1.1v14: the top-level handoff loop now executing in this activation
+    // D8.3.2: the top-level handoff loop now executing in this activation
     // (back-edges of its nested loops count toward it), and the definition's
     // promotion cell, looked up once rather than at every back-edge.
-    // D8.1.1v18: a `while` or `for` statement (AstLoopControlNode / AstForNode)
+    // D8.3.2: a `while` or `for` statement (AstLoopControlNode / AstForNode)
     const struct AstNode* handoff_loop;
     struct FnPromotionCell* promotion_cell;
 };
@@ -237,7 +237,7 @@ typedef struct InterpRunStats {
 
 // P4 owns one Script for the lifetime of an interactive session. New inputs
 // append only their own typed AST fragment and execute only that fragment
-// (D8.1.1v17: the persistent T0 session is the only REPL engine).
+// (D8.3.6: the persistent T0 session is the only REPL engine).
 typedef enum ReplEntryStatus {
     REPL_ENTRY_OK = 0,      // built, ran, and published
     REPL_ENTRY_INCOMPLETE,  // the parser needs more input; session untouched
@@ -288,7 +288,7 @@ FnPromotionCell* interp_promotion_cell(Script* script, const AstFuncNode* fn);
 // T27-6: NULL when supported, otherwise a short reason (an AST node kind
 // name for a scanner refusal) for the pinned-function log line.
 const char* interp_satellite_refusal(const Script* script, const AstFuncNode* fn);
-// D8.1.1v9: a satellite image co-compiles the target's direct-callee cluster;
+// D8.3.3: a satellite image co-compiles the target's direct-callee cluster;
 // each extra member's boxed entry is published to its T0 Function here.
 bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* entry);
 // Retire queued worker jobs before a Script or its cached execution shell can
@@ -365,7 +365,7 @@ extern "C" Item interp_eval_view_handler(Context* context, Script* module,
 // boxed MIR entry and returns true; on a miss/pinned definition it returns
 // false and the dispatcher executes interp_call normally. T0 loop backedges
 // mark the definition for promotion at a later entry; no frame is replaced
-// while it is active (no OSR, D8.1.1v2 §5.1).
+// while it is active (no OSR, D8.3.1 §5.1).
 bool interp_promote_function_if_hot(Function* fn);
 
 // Executes an already-loaded, already-planned Script under T0. Arms the
@@ -397,12 +397,12 @@ Script* interp_repl_fragment_unsupported_import(AstNode* fragment);
 
 // Calls an initialized public module function from a native document loader.
 // The module's own slab and T0 dispatch state remain authoritative; a module
-// compiled by MIR Direct is entered through its boxed `_b` export (D7.2.2).
+// compiled by MIR Direct is entered through its boxed `_b` export (D9.3.2).
 Item interp_call_module_export(Runtime* runtime, Script* module,
                                const char* export_name,
                                const Item* args, int argc);
 // Lazy native adapters load one package into the current evaluator, preserving
-// the caller's stacks, module state and execution metadata (D7.1.1/D7.2.2).
+// the caller's stacks, module state and execution metadata (D9.1.1/D9.3.2).
 Item interp_call_package_export(Runtime* runtime, const char* package_name,
                                const char* export_name, const Item* args, int argc);
 
@@ -439,7 +439,7 @@ void interp_repl_session_destroy(InterpReplSession* session);
 // stderr exactly once; the caller only reports the rollback.
 ReplEntryStatus interp_repl_session_eval(InterpReplSession* session,
                                          const char* source, Item* out);
-// Session services (D8.1.1v17). They read the live scope and slab, or build an
+// Session services (D8.3.6). They read the live scope and slab, or build an
 // entry without running it; none re-runs a prior entry.
 // The accepted entries, newline-joined (a failed entry was rolled back).
 const char* interp_repl_session_source(const InterpReplSession* session);
@@ -456,7 +456,7 @@ void interp_repl_session_complete(InterpReplSession* session, const char* word,
 
 // Creates a cold Function value for a definition site: entry_abi
 // LAMBDA_INTERPRETED, ptr NULL, def = fn_node. Captures are snapshotted by
-// value per D6.2.3.
+// value per D7.2.3.
 Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
                               InterpFrame* creating_frame);
 
@@ -465,7 +465,7 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
 // back to the compiled-entry binding.
 Function* interp_bind_object_method(const struct TypeMethod* method, Item self);
 
-// D8.4.1v2: immutable classifications, never observations of runtime values.
+// D7.4.1: immutable classifications, never observations of runtime values.
 struct InterpBoundaryPlan {
     Type* contract;
     Type* plain;

@@ -87,7 +87,7 @@ static JsCryptoNativeState* crypto_native_state_current(void) {
     return session ? jube_node_crypto_native_state(session) : NULL;
 }
 
-// JSCU24 / D7.4.1v2: a live native context is owned by the Node session's
+// JSCU24 / D9.5.1: a live native context is owned by the Node session's
 // generation-checked resource table and named by an integer rid. The JS object
 // stores that rid, never the pointer, so a stale handle fails closed instead of
 // dereferencing freed memory. These are native resources, not libuv handles,

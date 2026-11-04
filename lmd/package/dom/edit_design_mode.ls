@@ -1,5 +1,5 @@
 // Package-owned designMode canonicalization and host transition policy
-// (D7.2.5). Native retains only generic document Boolean storage.
+// (D10.2.1). Native retains only generic document Boolean storage.
 import dom
 
 fn canonical_enabled(value) {
@@ -12,7 +12,7 @@ pub pn set_mode(host, value) {
     else {
         // Deactivating a document host cannot leave it as the keyboard-input
         // fallback. The engine only clears the identified host; policy stays
-        // in this mode transition (D7.2.5).
+        // in this mode transition (D10.2.1).
         if (enabled) true else dom.clear_editing_focus(host)
     }
 }

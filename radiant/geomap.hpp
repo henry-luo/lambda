@@ -32,7 +32,7 @@ bool geomap_project(const GeoMapCamera& camera, double longitude, double latitud
 bool geomap_unproject(const GeoMapCamera& camera, double x, double y,
     double* longitude, double* latitude);
 
-// immutable projection owns its Input and paths; consumers explicitly retain historical frames (D4.5.2).
+// immutable projection owns its Input and paths; consumers explicitly retain historical frames (D5.5.2).
 struct GeoMapFrame {
     Pool* pool;
     Input* input;
@@ -53,7 +53,7 @@ StrBuf* geomap_frame_svg(const GeoMapFrame* frame);
 void geomap_release_subtree(DomNode* root);
 bool geomap_shape_hit(const GeoMapShape* shape, Rect query, bool rectangle, float tolerance = 0);
 
-// emits owned, realm-neutral paths; no borrowed Mark/DOM values survive this call (D4.5.2).
+// emits owned, realm-neutral paths; no borrowed Mark/DOM values survive this call (D5.5.2).
 bool geomap_paint(PaintList* paint, DomElement* root, Rect viewport,
     char* diagnostic = nullptr, size_t diagnostic_capacity = 0);
 StrBuf* geomap_svg(Element* model, float width, float height);

@@ -1,4 +1,4 @@
-// D2.6.5v3/S9.1.2: a unique open array appends string Items in place;
+// D3.3.1/S9.1.2: a unique open array appends string Items in place;
 // growth, a shared snapshot, and a non-string item retain the generic path.
 pn main() {
     var words: array = []

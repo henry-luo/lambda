@@ -1,4 +1,4 @@
-// D2.4.3: storage conversion retains JS Number, Symbol and coercion behavior.
+// D2.3.5: storage conversion retains JS Number, Symbol and coercion behavior.
 const types = [Int8Array, Uint8Array, Int16Array, Uint16Array, Int32Array,
     Uint32Array, Float32Array, Float64Array, Uint8ClampedArray];
 const inputs = [0, -0, 3.9, -4.9, 4294967297, -4294967297, 2147483648,

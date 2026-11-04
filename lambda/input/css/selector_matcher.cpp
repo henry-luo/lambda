@@ -850,7 +850,7 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
             }
             if (!selector_matcher_type_namespace_matches(simple_selector, element))
                 return false;
-            // xhtml shares HTML's namespace, but XML type selectors remain case-sensitive (D2.10.1).
+            // xhtml shares HTML's namespace, but XML type selectors remain case-sensitive (D10.1.4).
             return !simple_selector->value || exact_name ||
                 ((!element->doc || !element->doc->xml_document) &&
                  strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") == 0);

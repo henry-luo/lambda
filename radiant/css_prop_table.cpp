@@ -587,7 +587,7 @@ const CssValue* css_property_initial_value(CssPropertyCode id, Pool* fallback) {
     const CssProperty* property = css_property_get_by_code(id);
     if (!property || id <= 0 || id >= CSS_PROPERTY_CUSTOM) return nullptr;
     // initialize every built-in before publication: one pool writer, immutable
-    // readers, and no document/view-generation leases (D4.1.4v5, D4.5.1v4).
+    // readers, and no document/view-generation leases (D5.1.4, D5.5.1).
     static CssInitialValueCache cache;
     if (cache.pool) return cache.values[id];
     CssDeclaration* declaration = css_parse_property_value_declaration(property->name,
@@ -1404,7 +1404,7 @@ static bool serialize_background_components(const CssPropAccessor* accessor, Dom
 
 static bool cssom_append_svg_length(const CssValue* input, void* data) {
     CssomSvgScalarWriter* writer = (CssomSvgScalarWriter*)data;
-    // normalization writes only to the caller-owned projection, never retained declaration values (D4.5.1v4).
+    // normalization writes only to the caller-owned projection, never retained declaration values (D5.5.1).
     CssValue* value = cssom_clone_computed_length(writer->formatter, input, &writer->lengths.svg,
         cssom_svg_length_leaf, &writer->lengths);
     if (!value) return false;
@@ -1841,7 +1841,7 @@ static bool serialize_corner_radius(const CssPropAccessor* accessor, DomElement*
     const Corner* radius = boundary && boundary->border ? &boundary->border->radius : nullptr;
     const CornerExpressions* expressions = radius ? radius->expressions.get() : nullptr;
     if (expressions) radius = &expressions->computed;
-    // axis strings share the serializer's temporary pool without imposing a size limit (D4.5.1v4).
+    // axis strings share the serializer's temporary pool without imposing a size limit (D5.5.1).
     String* axes[2][4];
     for (unsigned axis = 0; axis < 2; axis++) {
         for (unsigned corner = 0; corner < 4; corner++) {
@@ -2525,7 +2525,7 @@ static void cssom_refresh_cascade_chain(DomElement* element) {
         CssomRefreshedElement query = {current, current->style_version, current->doc->mutation_epoch};
         HashMap* refreshed = s_cssom_cascade_scope ? s_cssom_cascade_scope->refreshed : nullptr;
         const CssomRefreshedElement* cached = refreshed ? CssomRefreshedMap::get(refreshed, query) : nullptr;
-        // D4.5.1v4: this synchronous borrow ends with the candidate walk. A
+        // D5.5.1: this synchronous borrow ends with the candidate walk. A
         // pending mutation must not recascade common ancestors per descendant.
         if (cached && cached->version == query.version && cached->mutation_epoch == query.mutation_epoch) continue;
         // an unlaid-out descendant (head, defs, display:none) does not make
@@ -2678,7 +2678,7 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
 String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type) {
     if (!pool || !element) return nullptr;
-    // intermediate formatter trees never accumulate in a retained caller pool (D4.5.1v4).
+    // intermediate formatter trees never accumulate in a retained caller pool (D5.5.1).
     Pool* scratch = pool_create();
     if (!scratch) return nullptr;
     StringBuf* output = stringbuf_new(scratch);

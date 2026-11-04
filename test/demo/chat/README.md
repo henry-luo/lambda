@@ -142,10 +142,10 @@ unaccepted sends are not durable across app termination.
 - `server.ls`, `mod_config.ls`: standalone server and environment configuration.
 - `mod_files.ls`: attachment selection and explicit saves, reusing Finder's
   path/listing helpers; `lambda.chat.attachment`: bounded ZIP/image preparation
-  and service-side validation (**D7.2.4v4**, **S12.1.1v3**).
+  and service-side validation (**D9.3.4**, **S12.1.1v3**).
 - `mod_ui.ls`, `chat.css`: native conversation UI and responsive layout.
 - `lambda.chat`: reusable local service/client and pure message transitions.
-- `lambda.io.websocket`: native procedural transport (**D7.2.4v4**), including
+- `lambda.io.websocket`: native procedural transport (**D9.3.4**), including
   verified `wss://` client connections. The demo uses plain loopback WS;
   production TLS termination and remote authentication are future work.
 - [Implementation plan](../../../vibe/impl/Lambda_Impl_Chat.md).

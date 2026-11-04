@@ -1500,7 +1500,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                     right = fmaxf(right, sx + (float)s_glyph->bitmap.width);
                     bottom = fmaxf(bottom, sy + (float)s_glyph->bitmap.height);
                 }
-                // loading the mark reuses LoadedGlyph storage; retain the text advance first (D4.5.1v4).
+                // loading the mark reuses LoadedGlyph storage; retain the text advance first (D5.5.1).
                 float text_advance = s_glyph->advance_x;
                 if (emphasis && emphasis->handle && text_emphasis_marks_codepoint(s_tt_cp)) {
                     float mark_x, mark_y;
@@ -2136,7 +2136,7 @@ static bool render_emphasis_capture_glyph(void* pointer, uint32_t codepoint,
     if (!mark->bitmap.width || !mark->bitmap.height) return true;
     RdtMatrix logical = rdt_matrix_scale(1.0f / density, 1.0f / density);
     size_t count = context->paint->size();
-    // consume the selected hinted bitmap synchronously; the published image owns its pixels (FT-17 / D4.1.4v5).
+    // consume the selected hinted bitmap synchronously; the published image owns its pixels (FT-17 / D5.1.4).
     paint_draw_glyph(context->paint, &mark->bitmap,
         (int)mark_x, (int)mark_y, context->color, false, nullptr, &logical, 0); // INT_CAST_OK: rounded physical glyph bitmap positions
     context->has_ink = true;
@@ -2175,7 +2175,7 @@ bool render_paint_text_emphasis(PaintList* paint, FontContext* fonts,
     if (ok && !context.has_ink) return true;
     size_t checkpoint = paint->size();
     if (ok) {
-        // a static accessible label survives deferred lowering after source/font retirement (D4.1.4v5).
+        // a static accessible label survives deferred lowering after source/font retirement (D5.1.4).
         RenderSemanticGroup label = {}; label.title = lam::up("text emphasis marks");
         paint_begin_semantic_group(paint, &label);
         ok = paint->size() == checkpoint + 1;
@@ -2312,7 +2312,7 @@ bool render_text_source_range_bounds(UiContext* ui, ViewText* text, const TextRe
     source.end = max(source.end, source.start);
     FontBox font = {};
     if (ui) setup_font(ui, &font, text->font);
-    else font.style = lam::up(text->font.get()); // committed query geometry reuses the already selected face (D4.5.1v4).
+    else font.style = lam::up(text->font.get()); // committed query geometry reuses the already selected face (D5.5.1).
     if (!font_box_handle(&font)) return false;
     PaintGlyphRun run = {};
     lam::Temp<char> content(render_text_rect_glyph_run(text, rect, &font, {}, 0.0f, 0.0f,

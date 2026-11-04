@@ -4,7 +4,7 @@ The initial physics implementation provides a native C 3D rigid-body engine,
 physics-bearing `scene3d` elements, pure batch simulation, and the
 `lambda.physics` package. It follows **S12.1.1v3**: constructors and batch
 computation are pure; live scene controls are procedures. Package paths follow
-**D7.2.4**, with native entry points under `lambda.sys.*` (**S17.2.1**).
+**D9.3.4**, with native entry points under `lambda.sys.*` (**S17.2.1**).
 
 ## Scene descriptions
 
@@ -125,10 +125,10 @@ charged against the existing per-world quotas; shared authoring does not raise
 those limits or imply shared native cooking.
 
 Pure batch compilation and live DOM use the same lower-layer compiler
-(**S12.1.1v3 / D7.1.1–D7.1.3**). Compatible live resource edits update every
+(**S12.1.1v3 / D9.1.1–D9.1.3**). Compatible live resource edits update every
 referencing collider while preserving ticks, poses and velocities. Unchanged
 data does not wake sleeping bodies; rejected edits retain the last working
-world (**S12.1.5v2 / D4.5.3v2**). Assets are resolved by scene ID, without file or
+world (**S12.1.5v2 / D5.5.3**). Assets are resolved by scene ID, without file or
 network acquisition.
 
 Density defaults to 1 for solid primitives/convex colliders and to 0 for
@@ -168,14 +168,14 @@ report pairs encountered during a completed tick, including swept impacts;
 a transient pair ends on the next tick without that pair. The runtime exposes
 `ccd:true`, `ccd_sphere:true` and `ccd_convex:false` to identify this coverage.
 Enabling/disabling CCD is a compatible live body edit that preserves the clock
-and motion (**S12.1.5v2 / D4.5.3v2**).
+and motion (**S12.1.5v2 / D5.5.3**).
 
 ### Joints
 
 Direct `<joint>` children of `scene3d` connect named bodies. The pure constructor
 is `physics.joint(id, kind, body_a, body_b, options={})`. Forward references work
 for ordinary and metadata bodies through the shared compiler
-(**S12.1.1v3 / D7.1.1–D7.1.3**).
+(**S12.1.1v3 / D9.1.1–D9.1.3**).
 
 ```lambda
 import physics: lambda.physics
@@ -249,7 +249,7 @@ errors. Faulted reads retain the last published body and joint snapshots.
 
 Compatible live joint edits retain the clock and native motion; unchanged joint
 caches and unrelated sleeping bodies survive. Rejected edits retain the working
-configuration (**S12.1.5v2 / D4.5.3v2**). Active joints currently reject CCD on
+configuration (**S12.1.5v2 / D5.5.3**). Active joints currently reject CCD on
 either attached body; a CCD candidate involving a joint-attached target also
 rejects. Coupled joint/CCD TOI solving remains open alongside the wider CCD
 matrix. See the admitted capsule movement and physical-bone/ragdoll profiles below.
@@ -262,7 +262,7 @@ visual node ID. Collider IDs and body IDs must be unique across the scene.
 
 `physics.move(scene, body, displacement, options={})^` computes a copied target
 against a fresh scene's sampled collision world. It does not advance or mutate
-that world (**S12.1.1v3 / D7.1.1–D7.1.3**). The body must be
+that world (**S12.1.1v3 / D9.1.1–D9.1.3**). The body must be
 `kinematic-position` with exactly one solid capsule; sensors may accompany it.
 The capsule's local Y axis must agree with `up` (either sign; a zero-height
 capsule is a sphere). Active joint attachments reject controller movement.
@@ -289,7 +289,7 @@ When a downward snap meets a steep stair lip, the same bounded slide loop follow
 its contact tangent and continues toward the original vertical drop limit. The
 snap is committed only after finding a walkable physical support; an insufficient
 drop budget retains the requested movement without adding an airborne snap
-(**S12.1.5v2 / D4.5.3v2**).
+(**S12.1.5v2 / D5.5.3**).
 Gravity, jump timing and input policy remain script responsibilities. Dynamic
 bodies are sampled obstacles; this profile does not apply pushing impulses or
 predict their future motion.
@@ -330,7 +330,7 @@ results retain their existing shapes. Live `lambda.physics.scene.move(node,
 body, displacement, options)` atomically computes and queues the target using
 one Radiant host operation. It returns the geometric result immediately; the
 existing coordinator applies the target on the next physics tick. This keeps
-the final transform with the existing physics owner (**S12.1.5v2 / D4.5.3v2**).
+the final transform with the existing physics owner (**S12.1.5v2 / D5.5.3**).
 The live `query` form only computes the target. Compatible collider/camera edits
 retain the world and tick. `character_controller` / `character_capsule` report
 this admitted profile; future-motion controller CCD and explicit
@@ -348,7 +348,7 @@ bindings are admitted. Authored bone ancestors must have rigid TRS transforms.
 The physical bone world frame is `body_world * inverse(body_in_bone)`. It feeds
 the existing skeleton palette and inverse bind matrices. The physical owner
 supplies the complete rigid pose; animation continues independently as a
-possible recovery destination (**S12.1.5v2 / D4.5.3v2**). Disabling a binding
+possible recovery destination (**S12.1.5v2 / D5.5.3**). Disabling a binding
 restores authored/animated bone transforms while its body continues simulating.
 Binding edits retain the existing world and clock. Frames add optional `bones`
 records `{id,body,enabled,position,quaternion}`; disabled records have null pose
@@ -485,7 +485,7 @@ Queries exclude sensors by default; `sensors:true` includes them. Optional
 filtering (both default to all bits). Explicit named distance pairs retain their
 unfiltered behavior. Exact overlap records add `point_b` and `overlapping`.
 All these queries are read-only in batch and live scenes (**S12.1.1v3 /
-D2.11.4**); they neither advance the clock nor apply a cast's movement.
+D10.1.7**); they neither advance the clock nor apply a cast's movement.
 
 ### Native inline sphere queries
 
@@ -498,7 +498,7 @@ all query kinds; unknown IDs and ambiguous/invalid inline descriptions reject.
 Nearest/all-hit ordering, filtering, surface sidedness, iteration and triangle
 limits are unchanged. The Lambda query surface above continues to use named
 source colliders. Native Scene3D CPU particle collision uses inline probes
-(**S12.1.5v2 / D7.1.1–D7.1.3 / D7.5.3v2**); see
+(**S12.1.5v2 / D9.1.1–D9.1.3 / D9.5.6**); see
 [the particle collision contract](Lambda_Packages.md#native-cpu-particle-scene-collisions).
 
 ## Live scenes
@@ -506,7 +506,7 @@ source colliders. Native Scene3D CPU particle collision uses inline probes
 Set `<physics state:'playing'>` for automatic fixed-step playback. The default
 is paused. The document owns the world and rendering consumes its poses;
 camera edits, repaint, resize and graphics-context recovery preserve simulation
-state (**D4.5.1v4 / S12.1.5v2**). So do template re-renders. An authored edit
+state (**D5.5.1 / S12.1.5v2**). So do template re-renders. An authored edit
 overrides only what it changes: a new gravity, body position or velocity takes
 effect as a command, and damping, gravity scale and collider changes are applied
 in place, all without resetting the tick. This includes valid capsule radius,
@@ -533,7 +533,7 @@ length scale, restarts the world from the new authored state.
 
 Import `lambda.physics.scene` for procedural `play`, `pause`, `reset`, `step`,
 `snapshot`, `events`, `command` and `query` helpers. These call the existing
-Radiant host boundary (**D7.5.3v2**) using a scene DOM node. `snapshot` returns
+Radiant host boundary (**D9.5.6**) using a scene DOM node. `snapshot` returns
 `{tick,time,bodies}`. JavaScript calls to exported Lambda procedures return
 Promises and must await their result.
 

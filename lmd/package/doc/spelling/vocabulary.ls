@@ -1,4 +1,4 @@
-// positional vocabulary POC; IO is procedural (S12.1.1v3), data uses source-package paths (D7.2.4v3).
+// positional vocabulary POC; IO is procedural (S12.1.1v3), data uses source-package paths (D9.3.4).
 import search: lambda.io.search
 
 fn valid_row(row, key) any^ => row is array and len(row) >= 2 and len(row) <= 4 and

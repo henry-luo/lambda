@@ -49,15 +49,15 @@ An LLM, agent loop, and MCP gateway are not prerequisites.
 
 | Formal ruling | Consequence for MCP |
 |---|---|
-| **S12.1.1v3**, **D6.1.1v2** | External calls, discovery, listening, and resource acquisition are `pn` operations. A tool's `readOnlyHint` cannot make network access pure. Pure transformation of already received data stays `fn`. |
+| **S12.1.1v3**, **D7.1.1** | External calls, discovery, listening, and resource acquisition are `pn` operations. A tool's `readOnlyHint` cannot make network access pure. Pure transformation of already received data stays `fn`. |
 | **S12.4.1v3–S12.4.3** | Acquire clients/listeners through scoped `open()` resources. Block exit closes them; cancellation/error cleanup follows the same ownership rules. GC finalizers are only a backstop. These rules are partly unimplemented and are an implementation dependency. |
 | **S13.1.1v2–S13.1.3v2**, **S13.3.1v2–S13.3.2** | Calls may suspend without new `async`/`await` syntax. Explicit concurrency uses `start`/`wait`; waiter timeouts do not imply cancellation of underlying work. |
 | **S7.4.1–S7.4.4** | Preserve the distinction between Lambda errors, raised failures, and system faults; define the separate MCP protocol/tool-error mapping (§4.4). |
-| **D5.3.3**, **D5.4.1–D5.4.4** | Precisely root retained values and callbacks. An isolate owns its evaluator and event loop; generic HTTP pool threads cannot share an evaluator or its `Item` pointers. |
-| **D7.1.1**, **D7.1.2v2**, **D7.1.3**, **D7.5.2** | Resource acquisition belongs to the I/O layer and central policy door. Protocol code cannot introduce a dependency from I/O/runtime to Radiant. |
-| **D7.1.4v2**, **D7.1.6**, **D7.1.7v6** | Initially target full `lambda.exe` and `lambda-headless`. `lambda-cli` excludes `serve` and Radiant; `lambda-wasm` excludes network/process I/O. Do not silently add these dependencies to reduced profiles. |
-| **D7.2.4v3** | Propose the built-in module `lambda.mcp`, with `import mcp` as its ordinary alias. No grammar extension is needed. |
-| **D7.5.1**, **S13.1.5** | Process separation alone is not a sandbox. A confined execution profile requires an OS sandbox and capability broker; native faults in a thread can terminate its host. |
+| **D6.3.3**, **D6.4.1–D6.4.4** | Precisely root retained values and callbacks. An isolate owns its evaluator and event loop; generic HTTP pool threads cannot share an evaluator or its `Item` pointers. |
+| **D9.1.1**, **D9.1.2**, **D9.1.3**, **D11.1.2** | Resource acquisition belongs to the I/O layer and central policy door. Protocol code cannot introduce a dependency from I/O/runtime to Radiant. |
+| **D9.2.1**, **D9.2.2**, **D9.2.3** | Initially target full `lambda.exe` and `lambda-headless`. `lambda-cli` excludes `serve` and Radiant; `lambda-wasm` excludes network/process I/O. Do not silently add these dependencies to reduced profiles. |
+| **D9.3.4** | Propose the built-in module `lambda.mcp`, with `import mcp` as its ordinary alias. No grammar extension is needed. |
+| **D11.1.1**, **S13.1.5** | Process separation alone is not a sandbox. A confined execution profile requires an OS sandbox and capability broker; native faults in a thread can terminate its host. |
 
 The proposed API spellings, document envelopes, and deployment defaults are
 recommendations for review, not additional language rulings. Ratification
@@ -86,7 +86,7 @@ Related working records:
 [Module_Web_Server.md](Module_Web_Server.md),
 [Module_Web_Server2.md](Module_Web_Server2.md), and
 [Lambda_Design_Concurrency.md](Lambda_Design_Concurrency.md). Older proposed
-module names in those records do not override **D7.2.4v3**.
+module names in those records do not override **D9.3.4**.
 
 ## 3. Protocol coverage and compatibility
 
@@ -339,7 +339,7 @@ perform permitted effects. Failures use §4.4's mapping.
 The libuv thread owns connections and all socket writes. Workers receive
 captured bytes/operation descriptors; results return through bounded completion
 queues. Each Lambda evaluator belongs to one execution owner for its lifetime
-(**D5.4.1**). Do not enter a shared evaluator from arbitrary `uv_queue_work`
+(**D6.4.1**). Do not enter a shared evaluator from arbitrary `uv_queue_work`
 callbacks. Start with serialized evaluation per isolate; scale with a bounded
 pool of independent evaluator workers. Rendering may need additional
 serialization until its host state is qualified for concurrent jobs.
@@ -392,7 +392,7 @@ Expose optional `lambda.layout` and trusted `lambda.run` only after the core
 document workflow is complete. `view`, REPL, GUI interaction, arbitrary shell
 execution, and a generic “run any CLI arguments” tool are outside the default
 document profile. Omit unsupported tools from discovery and reject stale
-invocations explicitly. Reduced build profiles retain **D7.1.6/D7.1.7v6**.
+invocations explicitly. Reduced build profiles retain **D9.2.2/D9.2.3**.
 
 Extract typed request/result operations from `main.cpp`; make both CLI argument
 handlers and MCP tool handlers call them. A CLI formatter prints diagnostics;
@@ -546,7 +546,7 @@ and uploading the document again.
 
 ## 7. Policy and deployment
 
-These are proposed deployment controls implementing **D7.5.2**, not additional
+These are proposed deployment controls implementing **D11.1.2**, not additional
 permissions granted by MCP discovery or tool annotations.
 
 - **Local stdio:** run with the host's explicitly configured executable,
@@ -575,7 +575,7 @@ permissions granted by MCP discovery or tool annotations.
   express all these permissions.
 - **Isolation and artifacts:** trusted handlers may run in-process. Confined
   untrusted jobs require the full process/sandbox/broker boundary of
-  **D7.5.1**. Namespace retained artifacts by authorized principal and explicit
+  **D11.1.1**. Namespace retained artifacts by authorized principal and explicit
   opaque ID, not by MCP connection identity. Apply expiry and byte/count quotas.
 
 Audit operation name, request ID, principal, elapsed time, admitted sizes, and
@@ -612,7 +612,7 @@ Include failure cases for split/coalesced stdio messages, escaped newlines,
 malformed UTF-8/JSON, out-of-order and late replies, child exit, partial SSE
 events, authorization failures, unsupported schema dialects, invalid base64,
 quota exhaustion, cancellation during output, and repeated cleanup. Force GC
-across queued callbacks and response construction to verify **D5.3.3**.
+across queued callbacks and response construction to verify **D6.3.3**.
 New golden-driven `.ls` fixtures must have corresponding `.txt` expectations.
 
 Measure startup/discovery cost, warmed call latency, document throughput, peak
@@ -645,9 +645,9 @@ for one file per protocol method.
 | Location | Responsibility |
 |---|---|
 | `lambda/io/mcp/` | Transport-neutral codec, revision profiles, JSON/schema handling, captured message ownership, and I/O acquisition adapters. No evaluator or Radiant dependency. |
-| `lambda/runtime/` MCP adapter | Built-in module registration, scoped runtime resources, scheduler integration, callbacks, precise roots, and Lambda-error translation. Item/event-loop-coupled glue is explicitly classified under **D7.1.2v2**. |
+| `lambda/runtime/` MCP adapter | Built-in module registration, scoped runtime resources, scheduler integration, callbacks, precise roots, and Lambda-error translation. Item/event-loop-coupled glue is explicitly classified under **D9.1.2**. |
 | `lambda/serve/` MCP adapter | Mount the shared dispatcher, HTTP header/Origin handling, existing TLS integration, streaming and disconnect lifecycle. Keep protocol logic reusable by stdio. |
-| Executable/host operation layer | CLI argument mapping and document-operation orchestration. Own optional Radiant integration above runtime; install operation callbacks without lower layers linking upward (**D7.1.1/D7.5.3v2**). |
+| Executable/host operation layer | CLI argument mapping and document-operation orchestration. Own optional Radiant integration above runtime; install operation callbacks without lower layers linking upward (**D9.1.1/D9.5.6**). |
 | `test/` | Native protocol/transport tests, independent interoperability harnesses, document fixtures/goldens, and lifecycle/GC stress cases. |
 
 Before adding a helper, locate and reuse existing JSON, base64, process,
@@ -662,4 +662,4 @@ runtime/module until the server drains and shuts down.
 Register build changes in `build_lambda_config.json`; regenerate through the
 normal build. No parser changes, vendor edits, or new C-text compilation path
 are required. Existing interpreted/tiered execution and MIR Direct remain the
-runtime path under **D8.1.1v18**.
+runtime path under **D8.3.2**.

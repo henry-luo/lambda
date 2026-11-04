@@ -34,13 +34,13 @@ python3 utils/struct_census.py --config utils/struct_census.config.json -j 10 --
 
 ## Modules
 
-Records are grouped by the static-module split, which is normative in `doc/Lambda_Formal_Design.md` **D7.1.1**: four archives plus the executable, layered strictly leftward.
+Records are grouped by the static-module split, which is normative in `doc/Lambda_Formal_Design.md` **D9.1.1**: four archives plus the executable, layered strictly leftward.
 
 ```
 lib  →  lambda-data  →  lambda-rt  →  radiant  →  lambda.exe
 ```
 
-The census reports **six** buckets rather than five, because `lambda-rt` is subdivided into `lmd-rt` and `js-rt`. That subdivision is a reporting refinement only — it does not change D7.1.1, which still packages both as one `liblambda-rt.a`. It exists because the two runtimes have very different data-structure profiles and the split is what makes that visible.
+The census reports **six** buckets rather than five, because `lambda-rt` is subdivided into `lmd-rt` and `js-rt`. That subdivision is a reporting refinement only — it does not change D9.1.1, which still packages both as one `liblambda-rt.a`. It exists because the two runtimes have very different data-structure profiles and the split is what makes that visible.
 
 | module | source prefixes |
 |---|---|

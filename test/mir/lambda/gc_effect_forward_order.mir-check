@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3.1-D5.3.2: a later-declared NO_GC callee and a length leaf leave their caller rootless.",
+  "description": "D6.3.1-D6.3.2: a later-declared NO_GC callee and a length leaf leave their caller rootless.",
   "checks": [
     {
       "in_func": "_gc_order_forward_caller_#",

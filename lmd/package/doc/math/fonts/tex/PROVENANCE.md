@@ -132,7 +132,7 @@ table or that CMU glyph bounds equal the original TeX fonts. Advances,
 outline bounds, italic faces and painted text continue to come from the
 actual CMU/KaTeX resources. Explicit supplied/installed fonts retain their
 own MATH parameters or MathML fallback and never inherit this companion.
-Resource acquisition remains in Lambda IO (**D7.1.2v2**).
+Resource acquisition remains in Lambda IO (**D9.1.2**).
 
 The independent reference in `test/lambda/math/tex_reference.tex` can be run
 with an installed TeX engine. `test_math_tex_metrics.ls` checks frozen TeX

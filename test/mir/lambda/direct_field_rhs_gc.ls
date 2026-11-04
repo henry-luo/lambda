@@ -1,4 +1,4 @@
-// D4.4.4v4 / D5.3.1: a collecting RHS must finish before a packed field's
+// D5.4.4 / D6.3.1: a collecting RHS must finish before a packed field's
 // data-zone address is loaded; bool stores touch only their one-byte slot.
 type State = {value: int, flag: bool}
 

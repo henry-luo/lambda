@@ -77,7 +77,7 @@ the same policy. FriBidi receives explicit strong-LTR types for upright source
 characters; source bytes and CSS-generated control scopes remain intact. The
 local fallback applies the same strong-class policy. Glyph metrics and painting
 use the separate shared orientation query described in §9. Both preserve
-selected-view ownership (**D4.5.1v4 / D4.1.4v5**).
+selected-view ownership (**D5.5.1 / D5.1.4**).
 
 Each visual text fragment on one line is a `TextRect` (defined in `view.hpp`, owned by `ViewText`): `x, y, width, height`, the `start_index`/`length` **byte range** into the node's text, `line_number`, `hanging_trim`, `has_trailing_hyphen`/`has_trailing_ellipsis`, and a `next` pointer forming a linked list. Critically the rect stores only a byte range and a width — **not** a shaped glyph buffer. Layout and rendering both walk the raw bytes and re-measure independently ([§9](#9-the-render_text-re-measurement-seam)). `output_text` (`layout_text.cpp:2447`) commits a rect into the `ViewText.rect` list, advances `advance_x`, and records the last-text-rect/view plus trailing-space bookkeeping for later trimming.
 
@@ -104,11 +104,11 @@ isolated character widths. Horizontal text keeps its existing projection path.
 CSS scope controls enter that paragraph once and close/reopen at forced
 paragraph boundaries; raw Unicode formatting ends at those boundaries. Copied
 levels and source indexes belong to `LayoutContext::pass_arena`, borrowed by
-the flow context for its inline pass under **D4.1.4v5 / D4.5.1v4**. Line
+the flow context for its inline pass under **D5.1.4 / D5.5.1**. Line
 placement removes synthetic scope replays before using the source levels.
 Unresolved shadow-slot projection retains the legacy per-line fallback;
 complete projection and no-FriBidi conformance remain partial. The private
-module retains **D7.3.3–D7.3.4** boundaries.
+module retains **D9.4.3–D9.4.4** boundaries.
 
 `TextRect::collapsed_space_advance` carries actual whitespace removal into
 bidi measurement, including wrapping at the current separator. Collapsed bytes
@@ -132,7 +132,7 @@ replace the range advance. Preserved segment breaks are excluded from character
 fragments without suppressing neighboring fallback advances. Seventeen controls
 cover Arabic/Hebrew, LF/CRLF, RTL, styled runs, tabs, document fonts and retained
 family changes at 1×/2×. This local geometry pass does not change style/snapshot
-ownership (**D4.5.1v4 / D4.1.4v5**) or implement complex-script shaping. Contextual arrow fallback remains open. The earlier explicit-CRLF intrinsic
+ownership (**D5.5.1 / D5.1.4**) or implement complex-script shaping. Contextual arrow fallback remains open. The earlier explicit-CRLF intrinsic
 width diagnosis is superseded by the source/DOM distinction below.
 
 An in-flow block sibling terminates the current anonymous inline context
@@ -141,7 +141,7 @@ counting and filling, carrying termination through nested inline scopes.
 Retained geometry on a later block must neither abort current-line bidi
 placement nor introduce a later isolated paragraph's scope controls. Scratch
 counts/fill state remains pass-local; selected-view ownership stays under
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 An atomic inline has no line membership until its fit/wrap decision completes.
 `setup_inline` invalidates retained atomic memberships within the rebuilt inline
@@ -156,7 +156,7 @@ mapping between float metrics, atomic source placement and bidi advances.
 Physical top is not line-left in sideways-lr. Apply that conversion before
 physical publication, using [Writing Modes 3 §6.3](https://www.w3.org/TR/css-writing-modes-3/#line-directions).
 The existing item membership field and transient frame calculation retain
-**D4.5.1v4 / D4.1.4v5** ownership; no CSS computed value or allocation owner changes.
+**D5.5.1 / D5.1.4** ownership; no CSS computed value or allocation owner changes.
 
 HTML input preprocessing normalizes literal CR/CRLF to LF in the tokenizer's
 actual byte-reading path; fast DATA/RCDATA/RAWTEXT and CDATA scans stop at CR.
@@ -165,8 +165,8 @@ A numeric-reference CR remains present in DOM/source ranges. For CSS processing,
 `layout_text_is_segment_break` recognizes LF. Actual layout, bidi,
 justification, intrinsic paragraph collection and export share this distinction,
 as [CSS Text §4](https://www.w3.org/TR/css-text-3/#white-space-processing) requires.
-Parser/Input ownership remains **D4.2.6**; selected styles remain
-**D4.5.1v4 / D4.1.4v5**. CSS processing does not rewrite DOM bytes.
+Parser/Input ownership remains **D5.2.5**; selected styles remain
+**D5.5.1 / D5.1.4**. CSS processing does not rewrite DOM bytes.
 
 The edge-codepoint lookup can return its source text node. A space-created wrap
 uses that node's wrapping policy rather than inheriting permission from an
@@ -224,7 +224,7 @@ mark to fit; empty/custom marks and `hyphens:none` retain their source meaning
 `span_has_line_filled` scopes the following inline's view/font and resolves
 stale styles under `ComputeSize`, restoring its caller's flow context. This
 keeps lookahead observational and preserves selected style owners
-(**D4.5.1v4 /D4.1.4v5**). Inline boundaries do not create extra word breaks.
+(**D5.5.1 /D5.1.4**). Inline boundaries do not create extra word breaks.
 
 Plain-text lookahead also scopes the following text owner's computed font,
 including the active first-line font. Leaving a nested code/span must not
@@ -248,7 +248,7 @@ A retained font-group reset may leave the active font aliasing that cleared
 group. `ensure_font` then obtains the family from the DOM parent rather than
 mistaking the cleared source for a missing inheritance value. This preserves
 [CSS Fonts 3 §3.1](https://www.w3.org/TR/css-fonts-3/#font-family-prop) inheritance
-and the selected style owners (**D4.5.1v4 /D4.1.4v5**); the source/parent family
+and the selected style owners (**D5.5.1 /D5.1.4**); the source/parent family
 assertion catches a formerly hidden fallback exposed by 2× line metrics.
 
 Actual size/face differences use subpixel tolerance when comparing the union
@@ -335,7 +335,7 @@ Three of the subtlest behaviors live in the interaction between the main loop an
 
 `InlineLineBoxScope` captures an active inline's own font-leading/alignment
 metrics on the C++ stack. `BlockContext::inline_box_metrics` borrows that
-immutable chain for the current pass (**D4.5.1v4 / D4.1.4v5**).
+immutable chain for the current pass (**D5.5.1 / D5.1.4**).
 `layout_commit_inline_boxes` includes enclosing boxes when text commits, source
 whitespace creates a possibly empty fragment, an atomic box accepts its line,
 or an empty inline contributes its strut. `layout_include_inline_box_metrics`
@@ -362,7 +362,7 @@ boundaries. A pending source edge cannot belong to an earlier placed fragment.
 The existing per-flow setup clears view pass markers. Committed text stamps
 its marker without erasing cached TextRect lines needed by retained reflow;
 no new retained owner or epoch is introduced
-(**D4.5.1v4 / D4.1.4v5**). Bidi and inline consumption share
+(**D5.5.1 / D5.1.4**). Bidi and inline consumption share
 `layout_inline_span_edge_extent`, so line-left/right use the same physical
 sides in horizontal, vertical and sideways modes. CSS Writing Modes 3 §2.4.5
 and CSS Break 3 §5.4 supply the first/last-line rule. M79's independent model
@@ -385,7 +385,7 @@ whereas the physical stack consumes block extents. The active `LayoutContext`
 and cached `BlockProp` sets are updated together. Inline-line contributions
 keep their line owner, fragmented columns keep their fragmentation owner, and
 fieldset body baselines exclude the rendered legend through the existing
-rendered-legend selector (**D4.5.1v4 / D4.1.4v5**).
+rendered-legend selector (**D5.5.1 / D5.1.4**).
 
 Sideways text uses the same finalized line-baseline alignment as other text.
 Atomic placement preserves the complete source inline cursor, including
@@ -405,8 +405,8 @@ the typed `-webkit-baseline-middle` value centers on the parent baseline alone
 The shared HTML adapter covers images, iframes, embeds, objects and image-button
 inputs. Its borrowed author-hint declaration participates in ordinary cascade
 ordering, layers and `revert` through `style_tree_get_declaration_with_fallback`.
-The lookup leaves shared style snapshots untouched (**D4.5.1v4 /D4.1.4v5**),
-and the keyword enum is appended to retain existing IDs (**D4.6.1v4**).
+The lookup leaves shared style snapshots untouched (**D5.5.1 /D5.1.4**),
+and the keyword enum is appended to retain existing IDs (**D5.6.1**).
 `LegacyReplacedAlignmentUsesTheParentBaselineAndAuthorCascade` verifies text and
 replaced-box geometry, computed values and retained attribute/type/float changes
 at both device densities. The `bottom` legacy hint remains a recorded
@@ -426,7 +426,7 @@ direction. `font_visit_face_text` borrows the selected face synchronously and
 returns glyph positions, advance and optional source-range caret offsets. The
 native selected face also owns parsed font tables, keeping collection glyph IDs,
 fallback metrics, raster glyphs and outlines in the same namespace
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 `render_visit_oriented_text_run_glyphs` projects the shared glyph frame for native
 paint and vector/PDF consumers. `render_text_run_range_bounds` measures ranges
@@ -449,7 +449,7 @@ resolver (`dom_range_text_rect_bounds`, `radiant/dom_range_resolver.cpp:43`) and
 the line-layout contribution. Native bitmap lowering (`render_glyph_run_bitmap_raster_lower`,
 `radiant/render_glyph_run_raster_lower.hpp:12`) preserves fractional bearings
 until the full affine placement is applied. Selected handles are borrowed only
-inside synchronous visits (**D4.5.1v4 / D4.1.4v5**). Mixed fallback-face compositions
+inside synchronous visits (**D5.5.1 / D5.1.4**). Mixed fallback-face compositions
 and portable shaping beyond the selected-face native API remain partial; writing-mode
 M64 records the bounded controls and aggregate qualification.
 
@@ -472,7 +472,7 @@ M64 records the bounded controls and aggregate qualification.
 
 ## 11. Horizontal overflow paint projection (2026-10-11)
 
-Under **D4.5.1v4 / D4.1.4v5** and **D7.3.3–D7.3.4**, layout keeps the original `TextRect` byte range and geometry. Reaching a clamp boundary records a candidate marker; paint checks that content was discarded before fitting that line. `RenderTextPaintScope` collects block-local lines once and `RenderTextPaintIterator` supplies temporary visible prefixes/suffixes or block-styled markers to raster/SVG/PDF. Fitting respects the existing grapheme helper and case expansion; the first visual cluster is clipped when necessary. Horizontal RTL overflow retains a source byte offset and x position, with an independent marker before the suffix. Mixed bidi, RTL clamp, vertical/atomic/scroll and broader shaping remain open in P1.3/P2.1.
+Under **D5.5.1 / D5.1.4** and **D9.4.3–D9.4.4**, layout keeps the original `TextRect` byte range and geometry. Reaching a clamp boundary records a candidate marker; paint checks that content was discarded before fitting that line. `RenderTextPaintScope` collects block-local lines once and `RenderTextPaintIterator` supplies temporary visible prefixes/suffixes or block-styled markers to raster/SVG/PDF. Fitting respects the existing grapheme helper and case expansion; the first visual cluster is clipped when necessary. Horizontal RTL overflow retains a source byte offset and x position, with an independent marker before the suffix. Mixed bidi, RTL clamp, vertical/atomic/scroll and broader shaping remain open in P1.3/P2.1.
 
 `layout_inline` now restores the containing block's definite width/height immediately after resolving a non-replaced inline's style. Letting the child's style resolution clear those dimensions caused absolute boxes to expand to overflowing span text after their inner layout. The absolute multi-run export reference and live fixture retain the authored width.
 
@@ -483,7 +483,7 @@ computed scalar, while invalid substituted values and non-inherited resets
 compute to `none`. Declaration-backed serialization keeps transient ancestor
 counters out of CSSOM. The shared propagation helper stops at independent
 formatting contexts ([CSS Overflow 4 §5.2](https://drafts.csswg.org/css-overflow-4/#max-lines)).
-Repeated computed reads release their scratch pools (**D4.5.1v4 / D4.1.4v5**).
+Repeated computed reads release their scratch pools (**D5.5.1 / D5.1.4**).
 The bounded grammar/math fixture has 320 assertions, with 16 further literal-count
 references in PNG/SVG/PDF at 1×/2×. The legacy display/orientation gate now
 shares computed state between CSSOM and layout, including inherited display,
@@ -498,7 +498,7 @@ block clamp initialization/result storage, and refreshes its overflow viewport
 after final height refinement. The 380-check live fixture covers causal changes
 and restoration; 22 further Chromium references match PNG/SVG/PDF at 1×/2×.
 Modern shorthand/longhands, broader legacy mappings and writing modes remain open.
-Ownership and stable catalog identity follow **D4.5.1v4 / D4.1.4v5 / D4.6.1v4**.
+Ownership and stable catalog identity follow **D5.5.1 / D5.1.4 / D5.6.1**.
 
 The RTL fixture adds 114 live assertions, including 98 Chromium attributes and
 16 paint checks; 14 independent suffix references pass PNG/SVG/PDF at 1×/2×.
@@ -515,7 +515,7 @@ letter-spacing suppression. Export slices retain their source whitespace context
 collapsed separators advance once, while preserved separators keep each advance.
 Source byte offsets remain unchanged when fitting a prefix or suffix. Recorded
 glyph-run spacing stores only extra justification; the captured font style owns
-authored spacing (**D4.5.1v4 / D4.1.4v5**). Eight independent spacing references
+authored spacing (**D5.5.1 / D5.1.4**). Eight independent spacing references
 pass PNG/SVG/PDF at both densities, and 139 live assertions cover causal inherited
 changes, computed reads, committed geometry and pixels. Geometry follows the
 non-forcing DOM frame contract in [DOM API §3.4](../../../vibe/radiant/Radiant_Design_DOM_API.md#34-cssom-layout-and-geometry).
@@ -526,7 +526,7 @@ M72's caret/range word advances also consume the finalized rect's word
 expansion through `text_rect_justification`. The forward and inverse event
 walks share that advance calculation, so a justified separator does not shift
 the next character's selection box away from its glyph. Computed font spacing
-remains owned by the selected style (**D4.5.1v4 / D4.1.4v5**). Cell and ordinary
+remains owned by the selected style (**D5.5.1 / D5.1.4**). Cell and ordinary
 inline formatting share `layout_setup_inline_text_alignment` for both computed
 alignment properties. Broader unexpandable-text justification policy remains
 a separate standards audit; M72's selected core and aggregate gates are qualified.
@@ -545,7 +545,7 @@ resetting the line. Terminal flushes and nested formatting contexts do not
 consume the owner's next paragraph.
 
 Each probe owns its temporary text and releases it on return
-(**D4.5.1v4 / D4.1.4v5**); no string or scratch pointer enters retained state.
+(**D5.5.1 / D5.1.4**); no string or scratch pointer enters retained state.
 Single-paragraph styled content reuses the richer DOM intrinsic provider.
 Complex block/float heights retain their intrinsic line-count estimate, since
 total height does not identify the number of inline line boxes. Float-aware
@@ -586,7 +586,7 @@ The caller retains the resolved whitespace mode after normalization, so
 physical-width minimum in a vertical box: its block stack supplies that
 dimension (CSS Writing Modes 3 §7.3; CSS Text 3 §§4–5). Queries retain transient
 scalar packing state and existing computed/font ownership
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 `VerticalTableAutoSizesPackMeasuredWordsAndTrimLineEdgeSpaces` covers ordinary
 wrapping, unbreakable/nbsp overflow, nowrap/pre, forced lines and retained

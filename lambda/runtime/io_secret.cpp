@@ -1,5 +1,5 @@
 // io_secret.cpp — lambda.io.secret: get, set and delete generic passwords in
-// the OS secret store (D7.2.4v4; vibe/Lambda_Demo_Mail.md ML6, MG6).
+// the OS secret store (D9.3.4; vibe/Lambda_Demo_Mail.md ML6, MG6).
 //
 // The OS may block a call on an unlock or access prompt, so each one runs on
 // the offload pool while the calling task parks. Values are never logged, and

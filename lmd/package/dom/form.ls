@@ -614,7 +614,7 @@ on scrollkey(evt) { scroll.navigate(~, evt) }
 on focuskey(evt) { focus.navigate(~, evt) }
 // F13: editing a plain contenteditable, the DOM twin of the text-control applier.
 on domedit(evt) { dom_edit.apply_fn(~, evt) }
-// D7.2.5: queryCommand* reads the package command descriptor.  It returns its
+// D10.2.1: queryCommand* reads the package command descriptor.  It returns its
 // scalar directly through the behavior boundary and has no default mutation.
 on editquery(evt) { commands.query(~, evt) }
 // F14.1: the legacy command surface. Behavior-only — `document.execCommand` is

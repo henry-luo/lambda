@@ -60,7 +60,7 @@ The pinned library, addons, license and source hashes live under `vendor/three/`
 
 `ringworld.ls` uses the native `lambda.scene3d` package from Phase I.
 It starts with a spinning storm-banded planet and three orbiting moons, sampled
-by the shared SVG/native animation engine (S12.1.1v2, D7.4.4). Pause / Play and
+by the shared SVG/native animation engine (S12.1.1v2, D9.5.4). Pause / Play and
 Restart control that timeline independently of the camera. Drag to orbit,
 Shift-drag or select Pan to move, and scroll to zoom. The toolbar also offers
 orbit, tilt, zoom, Top / Side presets and Reset view. Focus the scene for arrow
@@ -82,7 +82,7 @@ LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe render test/demo/scene3d/three-galler
 
 Ordinary headless mode returns `null` from `getContext('webgl2')`.
 The explicit GLFW option enables graphics for automated full-host captures;
-the separate headless-C executable excludes graphics (D7.1.4v2).
+the separate headless-C executable excludes graphics (D9.2.1).
 
 `reference/three-gallery-chromium.png` is the original independent
 Chromium/SwiftShader reference, also used for its tile preview. Its manifest

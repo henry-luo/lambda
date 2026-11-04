@@ -1,6 +1,6 @@
 # Lambda Compiler — Explicit Expression Representations
 
-- **Status:** IMPLEMENTED for Lambda MIR Direct. D2.4.1–D2.4.3's L0–L5 migration is
+- **Status:** IMPLEMENTED for Lambda MIR Direct. D2.3.4–D2.3.5's L0–L5 migration is
   landed; every Lambda expression producer returns `MirValue`, and consumers retain its
   recorded representation after lowering.
 - **Date:** 2026-08-28
@@ -44,7 +44,7 @@ All AST families dispatch through `transpile_expr_value()` and publish `MirValue
 post-lowering re-derivations in machine counts, loop bindings/filters/conditions, multidimensional indices,
 bitwise operands, pipes, paths, declarators, and edit indices now use
 `mir_value_carrier_type(MirValue)`. `mir_expr_carrier_type()` remains only a pre-lowering planner;
-it never interprets an emitted MIR register. This closes **LR07-1** under **D2.4.1–D2.4.3**.
+it never interprets an emitted MIR register. This closes **LR07-1** under **D2.3.4–D2.3.5**.
 
 ---
 
@@ -595,7 +595,7 @@ authority decides each field's storage lane, and every writer and reader obeys
 it. Rulings **TB1/TB2** below were given 2026-08-20; the boundary/adoption
 consequences live in [`Lambda_Design_Type_Boundary.md`](Lambda_Design_Type_Boundary.md),
 which defers to this section for the storage rules. Investigation record:
-`impl/Lambda_Impl_Tune19.md` §11. D2.5.2v3/D2.6.1v3/D2.6.4v3 extend the
+`impl/Lambda_Impl_Tune19.md` §11. D2.4.2/D3.2.1/D2.6.2 extend the
 destination-owned `TypedItem` rule to packed `i64?`/`u64?` Map/Shape fields.
 The shared persistent descriptor projection implements that rule as of 2026-09-14.
 
@@ -627,7 +627,7 @@ A Map/Shape field stores as `TypedItem` in either of these cases:
    descriptor selects a 9-byte destination-owned slot. The tag records null,
    `LMD_TYPE_INT64`, or `LMD_TYPE_UINT64`; the payload is inline. This is a
    contract-selected exception because no 8-byte nullable lane can represent
-   every full-width value. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
+   every full-width value. [D2.4.2, D3.2.1, D2.6.2]
 2. **The entry's type is `any`** — declared `any` fields, and literal fields
    whose value the compiler could not type (ANY-census). This includes
    `{value: v}` where `v` is an untyped parameter — i.e. the splay
@@ -663,7 +663,7 @@ packing. `{a: true}` packs `a` as a 1-byte bool slot and must work where
 and the emitter must not assume ANY packing for an any/untyped field — no fast
 lane, generic accessor only. Both halves are already enforced:
 `is_direct_access_type(LMD_TYPE_ANY)` is false, and every reader dispatches on
-the value's entry. [D2.5.2v3]
+the value's entry. [D2.4.2]
 
 Three asymmetries worth knowing:
 
@@ -681,7 +681,7 @@ Three asymmetries worth knowing:
   concrete stored member. TypedItem slots are therefore written at
   CONSTRUCTION and admission-rebuild time; ordinary mutation erases them.
   The exact `i64?`/`u64?` field is different: null/non-null mutation preserves
-  its nullable contract and its TypedItem descriptor. [D2.5.2v3]
+  its nullable contract and its TypedItem descriptor. [D2.4.2]
 
 ### 10.3 Rulings TB1 and TB2 (2026-08-20)
 
@@ -747,7 +747,7 @@ not an 8-byte raw Item. Construction, mutation, shape rebuilding, COW cloning,
 GC tracing, and every reader/writer must preserve that descriptor; a null/non-null
 write changes the inline tag/payload only, never the shape. This is the Map/Shape
 counterpart of the native Array rule and prevents a retained field from borrowing
-a number-frame payload. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
+a number-frame payload. [D2.4.2, D3.2.1, D2.6.2]
 
 ### 10.4 Union-typed LOCALS — the register side (verified 2026-08-20)
 
@@ -814,3 +814,40 @@ bug. Parenthesize or bind to a local before printing.
 in the PASSING `proc_type_numeric_structural_admission` run mean an ANY slot
 with tag 0 is read somewhere in today's green tree — the seam may already be
 touched benignly. Audit alongside G3.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.4.1 → D2.3.4
+
+**D2.3.4*** Four facts, four authorities: semantic contract → AST
+`Type*`; planned representation → lowering analysis; emitted
+representation + provenance → `MirValue`; physical register class →
+`MirValue.mir_type`. Under v5, boxed Item / int lane / Lambda `i64` /
+machine quantity all share `MIR_T_I64`, so `MIR_reg_type()` probing is
+banned in expression lowering (named physical-layer helpers only).
+[Lane §1–§4]
+
+### ex-D2.4.2 → D2.3.4
+
+**D2.3.4*** `transpile_expr()` returns a `MirValue` carrying the full
+`Type*` contract; ValueRep distinguishes `INT_LANE`, `MACHINE_I64/U64`
+from Lambda `I64`/`U64`/`F64`/`ITEM`/pointer reps;
+`lambda_canonical_rep(Type*)` never returns a machine rep for a Lambda
+type. [Lane §4.2]
+
+### ex-D2.4.3 → D2.3.5
+
+**D2.3.5*** **Representation conversion ≠ semantic coercion**:
+`em_require_rep()` changes only the carrier, keyed by (source rep,
+target rep, contract); unsupported pairs fail closed. Machine
+`INT64_MAX` is a finite quantity; the same bits in the int lane are
+`INT_LANE_INF` — no identity conversion crosses that boundary. [Lane §4.3]

@@ -29,7 +29,7 @@
 > in favour of an on-demand loop-end reclaim, which a wide-capable mutable
 > local's own number slot makes safe for loop-carried values. The trailing-scalar-home
 > ABI is retired in favor of the companion-lane convention; the formal spec
-> is revised (**D5.2.1v2**, **D2.7.2v2**, **D8.4.2v2**, spec v1.20.0), with
+> is revised (**D6.2.1**, **D6.2.1**, **D7.4.2**, spec v1.20.0), with
 > the retired-ABI record in its Appendix A. The v1 ABI remains the shipping
 > mechanism until migration P4 (§9); mechanism details below stay at
 > proposal fidelity until then. The 2026-08-14 rulings on Windows lowering,
@@ -42,7 +42,7 @@
 > 2026-07-15, superseded 2026-07-16) with new measured evidence and a new
 > pending-Item encoding that removes the defect that killed the first
 > attempt. It conforms to
-> **D2.8.1** (error-free lane invariant) and **D2.7.1** (no standalone scalar
+> **D2.5.1** (error-free lane invariant) and **D2.6.1** (no standalone scalar
 > cell in the GC heap), and extends the ValueRep doctrine of
 > [`Lambda_Design_Compiling_Lane.md`].
 > Related: [`Lambda_Design_Stack_Frame.md`] (SF14 both versions),
@@ -103,10 +103,10 @@ knows statically. Everything downstream forwards two registers for free.
 - **SF14 v2 (2026-07-16)** superseded it: *"the portable ARM64 handoff and
   two imported helpers made every boxed return pay for a rare
   representation."* The landed replacement classifies the returned Item
-  inline and copies wide payloads into a donated slot — which **D5.2.1**
+  inline and copies wide payloads into a donated slot — which **D6.2.1**
   then generalized into caller-donated canonical homes (hidden trailing ABI
   operand, liveness-colored slots, discard homes, tail-forwarding), recorded
-  in the ABI as **D8.4.2**.
+  in the ABI as **D7.4.2**.
 
 The v1 failure was an **implementation** defect (helper calls and a scratch
 workaround on the universal return path), not a design defect. v3 removes
@@ -155,7 +155,7 @@ Key findings:
 
 ### 1.3 Diagnosis
 
-D5.2.1's design bounds *space* by peak liveness — which it achieves — but
+D6.2.1's design bounds *space* by peak liveness — which it achieves — but
 bounds *instructions* by nothing: because the engine cannot prove most
 returns wide-free, nearly every function pays setup, classify, store, and
 check for a representation that occurs in ~1% of dynamic returns. The tax
@@ -304,7 +304,7 @@ That type is **shape 4 spelled as a type**:
 | `error` — the raise arms | lane 2, error Item |
 
 which is why the union is not merely *a* precise join but the *right* one
-here. **D2.8.1** ("no native lane slot ever holds an error") is the rule that
+here. **D2.5.1** ("no native lane slot ever holds an error") is the rule that
 forces `T^E` to be split across two lanes at all; `T | error` is the static
 statement of exactly that split, in the type system, at the point where the
 branches meet. Under ANY the compiler had to rediscover the split at the
@@ -487,11 +487,11 @@ can carry it, which is what P1 shipped.
 |---|---|---|
 | consume in arithmetic / compare / truthiness | **no** | the existing tag dispatch gains a pending arm that reads lane 2 instead of dereferencing a home pointer — zero marginal instructions |
 | return (tail-forward) | **no** | forward both lanes unchanged; the case that costs a full adopt cluster today drops to zero |
-| store to any GC-visible slot (variable, container element, field, root, push) | **yes** | this is where invariant RV4.1 is enforced: test, and on the rare pending arm allocate the destination-owned storage (D5.2.2 taxonomy) and patch |
+| store to any GC-visible slot (variable, container element, field, root, push) | **yes** | this is where invariant RV4.1 is enforced: test, and on the rare pending arm allocate the destination-owned storage (D6.2.2 taxonomy) and patch |
 | pass as argument | **yes** | arguments stay single-Item; the pair protocol is **return-only** — it never infects the argument ABI |
 | any subsequent call while unresolved | **yes** (patch before the call) | lane 2 dies at the next call boundary; worst case is an eager patch right after return — 2 instructions + untaken branch |
-| suspension points (`await`, generator `yield`) | **yes** (resolve before suspending) | suspension is a re-homing barrier (D5.1.3); the async spill tracker (`after_call_result` hook) must see only resolved Items |
-| GC safepoint | **no** | a pending Item is tag bits only and lane 2 is raw non-pointer bits (RV8) — nothing to trace (DI6); and since patching precedes any call, no `MAY_GC` boundary (D5.3.2) can observe a live pending pair |
+| suspension points (`await`, generator `yield`) | **yes** (resolve before suspending) | suspension is a re-homing barrier (D6.1.3); the async spill tracker (`after_call_result` hook) must see only resolved Items |
+| GC safepoint | **no** | a pending Item is tag bits only and lane 2 is raw non-pointer bits (RV8) — nothing to trace (DI6); and since patching precedes any call, no `MAY_GC` boundary (D6.3.2) can observe a live pending pair |
 | anything loaded from memory | **no** | already resolved by RV4.1 |
 
 **RV6 — ValueRep carries `maybe_pending`.** Per the Compiling-Lane rule
@@ -708,7 +708,7 @@ for … { acc = acc + arr[i] }      // assignment STORES into that slot
 
 The binding gets its slot once and keeps it for its scope; assigning a wide
 value copies the payload into that slot and retags, rather than pushing a
-fresh home. This is the D5.2.2 move — the binding becomes **destination-owned
+fresh home. This is the D6.2.2 move — the binding becomes **destination-owned
 storage** — applied to locals.
 
 *Why it makes RV15 sound.* The slot is allocated at the declaration, which
@@ -751,7 +751,7 @@ never pending; pending kind 3 stays reserved. (Verified in-tree: DTIME
 already maps to `MIR_SCALAR_RETURN_NONE` in
 `em_scalar_return_mode_for_type` — plain Item returns, no adopt mode — so
 the ruling is already satisfied representationally; v3 changes nothing for
-datetimes.) This keeps DI6 ("GC sees only pointers") and D2.7.1 intact by
+datetimes.) This keeps DI6 ("GC sees only pointers") and D2.6.1 intact by
 construction and removes any rooting question at the return edge —
 strictly safer than v2, whose returned Items can point into frame extents.
 
@@ -761,7 +761,7 @@ of a native `^E` return is a full error Item (**`ItemNull` = no error** —
 encoding is unambiguous by construction: a `T^E` function returning a
 legitimate `null` flows it on lane 1 (the value lane), so lane 2 `ItemNull`
 can only ever mean "no error" — a debug assert that lane-2 payloads are
-either `ItemNull` or ERROR-tagged pins this. This conforms to D2.8.1 — the
+either `ItemNull` or ERROR-tagged pins this. This conforms to D2.5.1 — the
 *value* lane never encodes error-ness — and un-deopts `can_raise` (today a
 `^E` annotation forces boxed-ANY return). It also retires `INT64_ERROR`
 (`== INT64_MAX == INT_LANE_INF` — the open v5 §5.8 collision) from the
@@ -800,7 +800,7 @@ of this bug class; the descriptor is the single-source-of-truth defense.
 - **Dynamic call sites** assume shape 2 (the universal shape). Every
   function therefore has a shape-2-speaking entry: for shape-1 functions it
   is the same entry (lane 2 dummy); for shape-3/4 functions the boxed
-  public entry (D8.3 dual-func) boxes the native result — producing a
+  public entry (D7.3 dual-func) boxes the native result — producing a
   pending pair only when the value is actually wide.
 
   > **[measured 2026-08-14]** This is the part of §6 that the register pair
@@ -876,20 +876,20 @@ the *calling* JIT frame's extent and returns ordinary caller-homed Items
 > domain than "Windows". Nothing in the protocol changes: same pending tag,
 > same single-live rule, same resolution sites, same descriptor. This is a
 > scope clarification within the ratified principle, not a new ruling, and
-> it leaves the formal spec text (D5.2.1v2 / D2.7.2v2 / D8.4.2v2) correct as
+> it leaves the formal spec text (D6.2.1 / D6.2.1 / D7.4.2) correct as
 > written — those describe the convention, not its per-platform transport.
 > Consequence for §9: **P3 stops being a Windows-only phase.** It is the
 > phase that unlocks population 2 of §1.4 everywhere, and should be
 > sequenced on that basis rather than on platform coverage.
 
-*Engagement with D2.7.2's rejection of "context-global slots":* that
+*Engagement with D6.2.1's rejection of "context-global slots":* that
 rejection targeted context slots as **homes** — ownership locations for
 values of arbitrary extent, which break under nesting. RV12's slot is a
 **transport**: single-live (RV4.2), dead at every call boundary, never the
 pointee of any Item. It inherits none of the rejected failure modes.
 Because it textually revisits a rejected option it was flagged for explicit
 ruling rather than slipped in; that ruling landed 2026-08-14 as part of
-RV12, and D2.7.2v2 records the transport-vs-home distinction as ratified.
+RV12, and D6.2.1 records the transport-vs-home distinction as ratified.
 
 ---
 
@@ -909,7 +909,7 @@ Census-backed, on full migration:
 
 Expected static reduction: the measured 9–39% of emitted MIR shrinks to a
 residue of 2-instruction tests at unknown-merge escape sites. Number-stack
-homes survive only where D5.2.2 already places destination-owned storage
+homes survive only where D6.2.2 already places destination-owned storage
 (container tails, fields, envs, module tables, async frames) — those are
 stores, not returns, and are untouched by this design.
 
@@ -980,8 +980,8 @@ Lambda entries (18%), and RV14 for C helpers (68%). With all three landed,
   convention on *every* platform, and per §1.4 that is 18% of all adopt
   sites — the largest block shape 2 alone cannot reach. Its value is no
   longer contingent on shipping Windows.)*
-- **P4 — ratification & deletion**: remove v2 machinery, revise D5.2.1 →
-  v2, D2.7.2 → v2, D8.4.2 → v2 (+ doc semver bump), annotate SF14 with the
+- **P4 — ratification & deletion**: remove v2 machinery, revise D6.2.1 →
+  v2, D6.2.1 → v2, D7.4.2 → v2 (+ doc semver bump), annotate SF14 with the
   v3 supersession, update LR/JS design docs.
 
 Ordering note: P1 before P2 because shape 2 is the universal entry every
@@ -1085,7 +1085,7 @@ numbering stays traceable.)*
   *Refinement — reclaim at statement boundaries, not back edges.* Given RV16,
   the values that survive a *statement* are exactly those stored into a
   binding (RV16 slot, allocated at the declaration) or into destination-owned
-  storage (D5.2.2). Everything else a statement produced is dead at its end —
+  storage (D6.2.2). Everything else a statement produced is dead at its end —
   that is what a statement boundary means in an expression-oriented language.
   So the reclaim can take its watermark at statement start and restore at
   statement end, which is **sound for the same reason as the back-edge form
@@ -1123,7 +1123,7 @@ numbering stays traceable.)*
   (covered iff RV16 uses the broad `may_be_wide` predicate; the shipped narrow
   one does not cover them) and **container stores unverified**: whether a wide
   Item stored into an array/map is copied into destination-owned storage
-  (D5.2.2) or retains a pointer into the caller's number extent. The eager
+  (D6.2.2) or retains a pointer into the caller's number extent. The eager
   per-call restore hides that question today; removing it exposes it. Verify
   before any reclaim ships.
 
@@ -1272,11 +1272,11 @@ numbering stays traceable.)*
 > **Status: PROPOSED 2026-08-17; not yet a ruling.** This section opens
 > **RVO13** (prove more boxed results wide-free, including their public entry)
 > and **RVO14** (forward and consume genuine pairs without eager patching).
-> It refines the implementation of **D5.2.1v3** under **D2.2.2**,
-> **D2.2.3**, **D2.4.1–D2.4.3**, **D5.2.2v3**, **D6.2.1**, and
-> **D8.3.1–D8.3.4**; it does not change Lambda value semantics. If accepted,
+> It refines the implementation of **D6.2.1** under **D2.2.2**,
+> **D2.2.3**, **D2.3.4–D2.3.5**, **D6.2.2**, **D7.2.1**, and
+> **D7.3.1–D7.3.4**; it does not change Lambda value semantics. If accepted,
 > the formal design must first state the per-function public return-shape
-> metadata by revising D5.2.1/D6.2.1 in place with a version suffix and
+> metadata by revising D6.2.1/D7.2.1 in place with a version suffix and
 > document-semver bump, as required for a design-ruling change.
 
 ### 11.1 Measured frontier
@@ -1352,7 +1352,7 @@ sys-function metadata:
   wide-capable if any member is wide-capable; otherwise it is unknown.
 - `any`, unresolved type variables, open type patterns, and other incomplete
   structured types are unknown. No physical `MIR_T_I64` observation may
-  strengthen the result (**D2.4.1**).
+  strengthen the result (**D2.3.4**).
 
 The shared helper is necessary because the current sys-function narrowing and
 Lambda body proof each inspect a shallow TypeId. A third near-identical type
@@ -1384,7 +1384,7 @@ an inductive proof over closed producers, not optimistic inference.
 #### Public `_b` entry
 
 The boxed `_b` entry remains the universal *target* for dynamic calls under
-**D6.2.1** and **D8.3.1**. “Universal target” does not require “universal
+**D7.2.1** and **D7.3.1**. “Universal target” does not require “universal
 shape 2.” Its public result shape is the join of:
 
 1. the selected internal body result;
@@ -1397,7 +1397,7 @@ Native `int`/bool and pointer/container boxing is wide-free. Native
 does not build a pending pair, and does not write `mir_companion_slot`.
 
 Dynamic dispatch needs the result contract carried with the `Function` value,
-as **D6.2.1** already requires for entry/signature metadata. Add a small
+as **D7.2.1** already requires for entry/signature metadata. Add a small
 `mir_public_return_shape` field with explicit `UNKNOWN`, `ITEM`, and
 `ITEM_COMPANION` states, set at publication from the same public
 `FnReturnAnalysis`. `UNKNOWN` fails closed to companion-slot resolution; this
@@ -1416,7 +1416,7 @@ be applied by analogy.
 
 ### 11.3 RVO14 — forward genuine pairs and materialize only at ownership boundaries
 
-The pair lifecycle remains **D5.2.1v3**:
+The pair lifecycle remains **D6.2.1**:
 
 ```text
 birth/classify -> register pair -> pending-aware consume or tail forward
@@ -1426,7 +1426,7 @@ birth/classify -> register pair -> pending-aware consume or tail forward
 The proposal does not allow a pending Item into a root, spill, container,
 module slot, closure environment, async frame, or ordinary one-lane return.
 Those destinations need a valid Item backed by destination/caller ownership
-under **D5.2.2v3**.
+under **D6.2.2**.
 
 #### Register pair → context-slot forwarding
 
@@ -1503,7 +1503,7 @@ Safety gates are stronger than the performance target:
 3. pending lane 1 is never published to Lambda-visible memory or a GC root;
 4. lane 2 remains a raw non-root word and is live iff lane 1 is pending;
 5. no source type is changed to obtain a shape and no shape is inferred from a
-   MIR register class (**D2.4.1–D2.4.3**);
+   MIR register class (**D2.3.4–D2.3.5**);
 6. a `Function`'s public return-shape field and `_b` entry descriptor are emitted
    from the same analysis result; mismatches fail during compilation/testing;
 7. LambdaJS defaults conservatively and the shared emitter change passes its
@@ -1536,3 +1536,96 @@ outside the hot integer kernel.
   Lambda-emitted pair live ranges and use a principled shape-driven workaround
   if native evidence still exposes a backend limitation;
 - no claim that static MIR deletion alone is a benchmark improvement.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.7.2v2 → D6.2.1
+
+**D6.2.1*** Public entry wrappers speak the **companion-lane pair**
+(D6.2.1); the trailing home out-param is retired. Rejections stand:
+callee donation (unbounded in dynamic-call loops), context-global
+*homes*, C-local forwarding — the Windows companion *transport* (a
+transient `EvalContext` slot, dead at every call boundary, never the
+pointee of any Item) is not a home and inherits none of the rejected
+failure modes; ruled 2026-08-14 as the Windows lowering (RVO1/RVO2
+closed — one protocol on every platform). The ownerless-slot GC
+fallback is counted and **explicitly transitional**. [SG2, RV10–RV12]
+
+### ex-D5.2.1v5 → D6.2.1
+
+**D6.2.1*** Function wide-scalar returns use the **companion-lane
+convention**: a may-be-wide boxed return is the pair `[item, scalar]` —
+lane 2 a raw 64-bit payload (never a pointer), live iff lane 1 is a
+**pending Item** (reserved tag `0x1E`, kind in the payload). A pending
+Item never lives in memory and at most one is live at a time; the
+caller resolves at first consume (free — the existing tag dispatch),
+patches on escape (one branch), or forwards on tail return (free).
+Typed fallible returns use a proven native success lane with a
+companion error-Item lane. Outcome planning follows the normalized contract:
+`T^` and `T | error` have identical semantics, irrespective of spelling or
+whether the body uses `raise` or an ordinary error return (S7.4.2v4).
+A particular error set is derived from ordinary union alternatives (`T | E`),
+never from a separate typed-raise contract or an implicit broad-error addition.
+This does not merge the scalar payload lane with the error lane.
+Classification happens at the wide value's *birth site*, statically —
+never at boundaries. Lambda and LambdaJS generated functions have no
+trailing caller-home parameter and no selectable v2 convention; their
+C-reachable wrappers use `Context::mir_companion_slot`. A separately
+versioned hosted-language ABI may still request an explicit payload-owner
+address, but that is a native ownership boundary, not this return ABI.
+(Reinstates SF14-v1 two-lane returns; retires v1's caller-donated canonical
+homes — retired-ABI record in Appendix A.) [RV1–RV13, Return_Value §2–§5]
+
+### ex-D5.2.2v3 → D6.2.2
+
+**D6.2.2** Scalar homes are raw payload words, never GC roots, colored
+in a separate slot space from root slots; fully-unobserved lanes use a
+discard home; tail calls forward the incoming home. Destination-owned
+scalar storage exists at every ownership boundary (array tails, typed
+fields, envs, module tables, task/message records) **and at
+wide-capable mutable locals**: such a binding owns one slot allocated at
+its declaration and held for its scope, and assigning a wide value copies
+the payload into that slot rather than pushing a fresh home. A binding
+declared inside a loop body is declared once per iteration and its slot
+dies with the iteration; only the mutable form needs the reuse, since an
+immutable binding is written once. (v1 enumerated only the non-local
+boundaries; locals are added because D6.2.3's back-edge reclaim is sound
+exactly when loop-carried wide values sit below the loop-entry watermark,
+which declaration-time allocation guarantees.) These slots remain for
+destination ownership and C/host result transfers; they must not be
+characterized as a fallback generated-function return convention.
+[RV14–RV16, Return_Value §4a; Stack_API §15.3, inv. 20–22]
+
+### ex-D5.2.3 → D6.2.3
+
+**D6.2.3*** **Watermark ownership selects the wide-return transport.** An
+entry that establishes a number-frame watermark tears it down at return,
+so it may not return a pointer into its own extent: first-party Lambda and
+LambdaJS `fn`/`pn` therefore use the companion lane (D6.2.1). An entry
+that establishes
+none — a C helper or sys func — allocates in its **caller's** extent, so
+it returns a wide scalar by pushing it on the number stack and handing
+back an ordinary Item, already caller-homed and needing no adoption. The
+rule is stated by ownership, not implementation language, so a sys func
+written in Lambda takes the companion lane and a C helper that ever grew
+a frame would too. The Lambda emitter sets the helper-result no-rehome rule
+explicitly. LambdaJS retains the conservative snapshot/restore-plus-adopt
+path: its helpers can return scalar Items borrowed from module state, and a
+global skip would leave those pointers unowned across `gc()` (the existing
+`regression_side_stack_frame_gc` gate catches this). The number-stack bound is
+re-established by an on-demand
+reclaim at loop back edges for loops the compiler saw make a wide-capable
+helper call. That reclaim is sound only when no loop-carried wide value lives
+in the reclaimed extent (open: `DO24`). The call-effect record still carries
+a per-callee **watermark effect** for hosted paths; its enum ordering is
+load-bearing — the conservative value must be zero, so an unaudited row
+decodes as "may allocate". [RV14, RV14a, RV15, RVO11, Return_Value §4a]

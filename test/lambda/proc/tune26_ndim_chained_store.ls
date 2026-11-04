@@ -1,4 +1,4 @@
-// D3.3.3v3/S9.2.2: a nested primitive contract may use one owned N-D
+// D4.3.3/S9.2.2: a nested primitive contract may use one owned N-D
 // ArrayNum lane; chained writes address that lane without materializing rows.
 pn set_int_cell(var matrix: int[][], row: int, column: int, value: int) {
     matrix[row][column] = value

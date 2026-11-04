@@ -1,4 +1,4 @@
-// record lanes, snapshots and nullable native returns (S9.1.2, D5.3).
+// record lanes, snapshots and nullable native returns (S9.1.2, D6.3).
 type Node = {value: int, next: Node?}
 type Counter = {count: int, flag: bool}
 type Scalars = {i: int?, f: float?, b: bool?, text: string?, next: Node?}

@@ -25,7 +25,7 @@ its gates count the trajectories produced by the paddle and collisions.
 The descriptions in `_scenes.ls` are shared by the viewer and the pure batch
 checks (**S12.1.1v2**). Document-owned worlds advance on the native physics clock
 (**S12.1.5v2**); `playground.js` only sends controls through the Radiant host
-boundary (**D7.5.3**), updates telemetry and moves the camera. Three's existing
+boundary (**D9.5.6**), updates telemetry and moves the camera. Three's existing
 OrbitControls supplies camera interaction; Radiant renders every scene.
 
 `_scenes.ls` derives visual and collider dimensions from the same part lists.

@@ -118,7 +118,7 @@ pub pn sync(owner,st,previous=null) {
         else "Save your layers, paths and shapes in an editable .sketch project.")^
     text(owner,"file-confirm",if (st.dialog=="import-image") "Import image" else if (st.dialog=="open") "Open file" else if (st.dialog=="export") "Export SVG" else "Save file")^
     text(owner,"dialog-error",st.error)^
-    // popup controls belong to one invocation; initialize their native state as they mount (D4.5.1v4).
+    // popup controls belong to one invocation; initialize their native state as they mount (D5.5.1).
     if (previous==null or previous.context!=st.context) {
         dom.set_inner_html(node(owner,"context-host"),if (st.context==null) "" else format(scene.context_menu(st),'xml')^)
     }

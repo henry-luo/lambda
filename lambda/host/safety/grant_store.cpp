@@ -238,7 +238,7 @@ char* security_grant_store_account_home(void) {
     errno = ENOTSUP;
     return nullptr;
 #else
-    // getpwuid_r ignores script-supplied HOME and Lambda path overrides (D7.5.7).
+    // getpwuid_r ignores script-supplied HOME and Lambda path overrides (D11.2.3).
     size_t capacity = 16384;
     char* home = nullptr;
     for (; capacity <= 1024 * 1024; capacity *= 2) {

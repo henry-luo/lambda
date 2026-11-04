@@ -20,7 +20,7 @@
 > S8.3.1v3, S10.1.2v2, S10.1.5v2, S10.6.1, S11.1.1v3, S11.1.2v2, S11.1.6v2,
 > S12.3.5v2, S16.7.2v2/S16.7.3v2, S16.8.6v3
 >
-> **Normative implementation constraints:** D2.6.5v3 (three append
+> **Normative implementation constraints:** D3.3.1 (three append
 > disciplines, one kind flag), S1.6/SI1 (tier parity, representation
 > invisible), S9.3.1 (construction captures by value), D1.6 (MIR Direct only)
 >
@@ -45,7 +45,7 @@
 | S12.3.5v2 | `*` never mutates; `*null` nothing; `*scalar` one item; `*range` spreads |
 | S2.2.3, S2.6.2, S2.6.4, S2.6.5 | lone `""` dropped; binaries merge; content writes normalize; `push` on elements |
 | S11.1.1v3, S11.1.2v2, S11.1.6v2, S16.8.6v3 | `T{n,m}` grammar; `T[n]` = array of n; `T[n+]`/`T[n, m]` retired; island spelling; boundary semantics of occurrence types; `is list`; `type()` names `list` |
-| D2.6.5v3 | content / sequence / verbatim appends |
+| D3.3.1 | content / sequence / verbatim appends |
 
 **Non-goals** (tracked elsewhere): the LaTeX parser carrying verbatim string
 runs in non-merging items (S2.6.1 transitional deviation); `keys`/`values`/
@@ -64,7 +64,7 @@ occurrence tables named in P5.
 `Array` carries two flags (`lambda/lambda.h:1015`–`1016`): `is_content`
 ("content list or value list") and `is_spreadable` ("spread when added to
 collections"). The survey showed they are set by disjoint producers and read
-by disagreeing consumers (LR05-10). D2.6.5v3 rules that content-ness is a
+by disagreeing consumers (LR05-10). D3.3.1 rules that content-ness is a
 property of the **destination** — an element's items are content because the
 container is an element; the script top level is content because the runner
 builds it — never of the value. Normalization is applied when content is
@@ -94,11 +94,11 @@ Every Lambda reader of `is_content` and its replacement:
 | `lambda/io/mark_builder.cpp:943`–`945` (clone preserves the bit) | preserves `is_content` | preserves `is_spreadable` (§1.5) |
 | result setters — vector ops `lambda-vector.cpp:585`, `:1189`; pipes `:2041`, `:2057`, `:2073`; reverse `:2403`, `:2418`; sort `:2436`, `:2514`; take `:2792`; drop `:2856`; slice `:2908`; zip `:4998`; `split` `lambda-eval.cpp:6813`, `:6881`, `:7045`; `find` `:7614`–`:7658`; `re2_wrapper.cpp:940`; `list_end` `lambda-data-runtime.cpp:1488` | each sets `is_content = 1` | replaced by the result-kind helper (§1.4) or cleared (constructors build arrays) |
 
-### 1.2 Three appends (D2.6.5v3)
+### 1.2 Three appends (D3.3.1)
 
 | Append | Used by | Behaviour |
 |---|---|---|
-| **content** (today `list_push`) | element content, script top level, content writes (S2.6.5) | drop `null` and `""`; splice any list; merge adjacent strings and adjacent binaries — **always**, no `input_context`/`input_allocation_context` gate (`collection_runtime.cpp:423` goes; the gate is the retired `disable_string_merging` in disguise, D2.6.5v3 footnote) |
+| **content** (today `list_push`) | element content, script top level, content writes (S2.6.5) | drop `null` and `""`; splice any list; merge adjacent strings and adjacent binaries — **always**, no `input_context`/`input_allocation_context` gate (`collection_runtime.cpp:423` goes; the gate is the retired `disable_string_merging` in disguise, D3.3.1 footnote) |
 | **sequence** (new; today `array_push` + the `*_spread` variants) | list and array literals, `push`/`splice`/`a[i] = v` on arrays and lists | splice iff `is_spreadable`; store everything else verbatim, `null` included; never merge |
 | **verbatim** (`array_push_verbatim`, renamed from `array_push_argument` in P1) | argument and rest lists, `zip` pairs, every positional runtime structure (group/join/order keys and rows, path keys, query matches, index-addressed vector results), element copies (clones, set operators, `reverse`/`take`/`drop`/`slice`/`unique`), and every single-value slot after the image conversion (§1.6) | store the item as one value whatever it is |
 
@@ -342,7 +342,7 @@ element") go through the content append with S2.6.5's re-normalization
 (write `null`/`""` removes, a list splices, a string beside a string merges,
 removing a separator merges its neighbours); `<e "">` drops the lone `""`;
 adjacent binaries merge. `input-ics.cpp` / `input-mark.cpp` use the content
-append for element content only (D2.6.5v3 footnote).
+append for element content only (D3.3.1 footnote).
 
 Acceptance: `list_kind_landing`, `content_normalize`.
 
@@ -384,7 +384,7 @@ Acceptance: `type_families`, the negative fixture, all migrated goldens.
 Semantics Appendix A: rewrite the four 2026-09-21/22 rows and the S2.2.3/S2.6
 row as conformant (with dates and baseline counts); drop the `*` marks that
 no longer apply (S2.2.3, S2.5.1v2, S2.5.2v2, S2.5.5v2–S2.5.8, S7.10.5v2,
-S10.6.1, S11.1.1v3, S11.1.6v2, S12.3.5v2). Design Appendix A: D2.6.5v3 row.
+S10.6.1, S11.1.1v3, S11.1.6v2, S12.3.5v2). Design Appendix A: D3.3.1 row.
 Move LR05-10/11/12, LR12-28, LR03-12, LR05-9 to the fixed ledger. (They keep
 their original IDs there: the `-R` series this plan first guessed at belongs
 to the archive's own historical appendix, not to central-ledger moves — §15.) Update `vibe/Lambda_Type_Pattern.md` §1.3 status and
@@ -463,7 +463,7 @@ to the archive's own historical appendix, not to central-ledger moves — §15.)
   content" answer in the container. Do this before deleting the field's
   Lambda meaning, not after.
 - **Input parsers.** `input-ics.cpp`/`input-mark.cpp` mix MarkBuilder appends
-  with `list_push` (D2.6.5v3 footnote); LaTeX stays verbatim by design.
+  with `list_push` (D3.3.1 footnote); LaTeX stays verbatim by design.
 - **Type-family migration** is small in the tree (five retired spellings, ~40
   `T[n]` uses) but user-visible: `int[0]`/`int[1]` change meaning; the
   parser's diagnostic for `[n+]`/`[n, m]` must name `{n+}`/`{n,m}`.
@@ -613,7 +613,7 @@ this plan.
 The full `make test-lambda-baseline` exercised suites the direct runs had not,
 and three P1 defects surfaced. All three are fixed.
 
-**Positional sites (D2.6.5v3).** `array_push` had spliced only `is_content`
+**Positional sites (D3.3.1).** `array_push` had spliced only `is_content`
 lists; P1 made it splice every list, and code that built positional
 structures with it began splitting for-results. A for-expression passed as one
 argument became several in the rest list (`count_args(for (x in [1, 2]) x)`
@@ -808,7 +808,7 @@ type costs them nothing.
 
 *Latent P1 defect.* `list_end` and `list_collapse` returned a one-item list's
 item straight from its storage; the item now goes through `array_get`, which
-re-homes a wide scalar held in the dying container (D2.5.2v2).
+re-homes a wide scalar held in the dying container (D2.4.2).
 
 **Where P2 differs from §1.**
 - A packed array can be a list. A list-kind vector result keeps its compact
@@ -924,7 +924,7 @@ cannot leave a partial append. Untyped `push` already spliced (P1).
 *Content stays normalized (S2.2.3, S2.6.2, S2.6.4, S2.6.5).* The content append
 (`list_push`) drops `""`, merges adjacent binaries (`heap_binary_concat`), and
 merges strings wherever content is built: the `input_context` gate — the
-retired `disable_string_merging` flag in disguise (D2.6.5v3) — is gone, and the
+retired `disable_string_merging` flag in disguise (D3.3.1) — is gone, and the
 merged string is allocated by the owner (the runtime context's allocator, the
 input pool, or the heap when there is no context). `e[i] = v` on an element
 (`element_content_set`) snapshots the children and appends them back through
@@ -934,7 +934,7 @@ The `put`/`del` write set rebuilds an element through the content append and
 an array through the verbatim append, splicing an inserted list with the
 sequence append.
 
-*Appends that built sequences with the content append (D2.6.5v3).* `find`'s
+*Appends that built sequences with the content append (D3.3.1).* `find`'s
 match lists (runtime and RE2) and `path.c`'s directory listings and glob
 matches now use `array_push_verbatim`; `input-ics.cpp` builds its component
 sequence with the pool-owned verbatim `array_append` (the static input library
@@ -1245,12 +1245,12 @@ on the content side. Four marks **stay**, each for a residue the row names:
   ruling ([LR05-13](<../Lambda_Issue_Ledger (fixed).md#lr05-13>)) — ruled the
   same day, see §17.
 - **S2.6.1** — LaTeX input keeps consecutive strings unmerged, the
-  transitional deviation D2.6.5v3 names.
+  transitional deviation D3.3.1 names.
 - **S7.10.5v2** — the RF5 audit's typed-`ArrayNum` and error-channel residue,
   which predates this plan.
 - **S11.1.1v3** — general structural array-pattern composition, likewise.
 
-**Design, 12.1.0.** The D2.6.5v3 row records P1–P4 and points at this file
+**Design, 12.1.0.** The D3.3.1 row records P1–P4 and points at this file
 under its final name.
 
 **Ledger.** LR03-12, LR05-9, LR05-10, LR05-11 and LR05-12 (with LR12-28) moved

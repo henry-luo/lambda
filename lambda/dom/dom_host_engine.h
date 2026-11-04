@@ -17,7 +17,7 @@ struct SourcePosC;
 struct DomBoundary;
 
 // native host calls borrow Items/documents/text synchronously; publication has process lifetime
-// (D4.5.1v4 / D4.1.4v5, D7.1.3 / D7.5.3).
+// (D5.5.1 / D5.1.4, D9.1.3 / D9.5.6).
 #define DOM_HOST_ENGINE_OPERATIONS(OP) \
     OP(Item, request_frame, (Item owner, Item event_name), (owner, event_name), ItemNull) \
     OP(Item, cancel_frame, (Item owner, Item token), (owner, token), ItemNull) \

@@ -91,7 +91,7 @@
         "source_lambda_commit": "537a867839e57be1ca0ee20e7ee4c929ec694db9",
         "merged_at": "2026-09-24T01:29:43",
         "cells": 126,
-        "note": "LambdaJS re-measured on the archived v49 binary: Part 1 pinned JS_EXECUTION_BACKEND=mir, Part 2 unpinned AUTO (D8.1.3v19); the original v49 LambdaJS cells ran unpinned AUTO for both parts."
+        "note": "LambdaJS re-measured on the archived v49 binary: Part 1 pinned JS_EXECUTION_BACKEND=mir, Part 2 unpinned AUTO (D8.4.2); the original v49 LambdaJS cells ran unpinned AUTO for both parts."
       }
     ]
   },

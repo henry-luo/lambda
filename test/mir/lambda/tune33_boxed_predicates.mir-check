@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S3.4/D2.4: boxed scalar comparisons admit only the true Item in branch and logical consumers, retaining original error/null values without is_truthy calls.",
+  "description": "S3.4/D2.3: boxed scalar comparisons admit only the true Item in branch and logical consumers, retaining original error/null values without is_truthy calls.",
   "checks": [
     {
       "in_func": "_classify_#",

@@ -2,7 +2,7 @@
 
 2026-10-29. Preserve **S12.1.1v3 / S12.1.5v2**, semantic admission
 **S11.4.6**, and shared provider/application ownership
-**D7.1.1–D7.1.3 / D7.3.5**. Eden decisions are ED10–ED13; they add no
+**D9.1.1–D9.1.3 / D9.4.5**. Eden decisions are ED10–ED13; they add no
 Lambda language ruling.
 
 ## Finite scope and diagnosis

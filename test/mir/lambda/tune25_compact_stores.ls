@@ -1,4 +1,4 @@
-// D3.3.3v3/S9.1.2: exact compact lanes retain snapshots and checked misses.
+// D4.3.3/S9.1.2: exact compact lanes retain snapshots and checked misses.
 pn bytes(var values: i8[], index: int, value: i8) { values[index] = value }
 pn convert(var values: i8[], value: any) { values[0] = value }
 pn widths() {

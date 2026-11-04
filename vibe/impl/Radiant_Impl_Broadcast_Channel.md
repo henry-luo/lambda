@@ -4,8 +4,8 @@
 an absent `BroadcastChannel` constructor. Implement the browser messaging path,
 following [HTML broadcasting](https://html.spec.whatwg.org/multipage/web-messaging.html#broadcasting-to-other-browsing-contexts).
 
-- **Ownership:** D7.4.4 declared Jube host records; D5.3.3 precise callback edges;
-  D5.4.2–D5.4.3 evaluator-owned registry and teardown. Channels with message
+- **Ownership:** D9.5.4 declared Jube host records; D6.3.3 precise callback edges;
+  D6.4.2–D6.4.3 evaluator-owned registry and teardown. Channels with message
   listeners stay alive while open; closing removes that root without discarding
   listeners. Closed callback cycles can be collected.
 - **Core scope:** document channels in one evaluator, same name and origin,
@@ -30,7 +30,7 @@ server imports then made `Buffer.from` throw.
 
 **Browser profile repair:** use the existing document module-resolution profile
 to exclude Node-only global slots during catalog admission, lazy resolution and
-late Jube module activation (D7.3.3–D7.3.4). Module globals declare their exposure
+late Jube module activation (D9.4.3–D9.4.4). Module globals declare their exposure
 on their records. CLI realms retain their Node compatibility; explicit module
 imports remain separate from publishing globals. Cover reflection, `typeof`,
 dynamic Function, browser-branch selection and post-activation visibility with
@@ -45,7 +45,7 @@ the original strict checks; the complete 37-page set was not rerun.
 overflow, confirmed on the starting release and by ASan. Import bridge records
 are base `Script` allocations carrying the JS language profile; they are not
 `JsScript` AST owners. Conversion now checks the extension lifecycle hook before
-reading AST callable caches (D5.4.3). The same helper guards module lookup and
+reading AST callable caches (D6.4.3). The same helper guards module lookup and
 re-export traversal. The existing fresh-realm reset unit covers both bridge and
 AST owners. Five mixed Lambda/JS batch fixtures pass on the final release host.
 

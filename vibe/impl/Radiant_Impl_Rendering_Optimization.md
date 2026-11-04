@@ -95,12 +95,12 @@ rewriting PDF generation or the Lottie player. Do not fold the separate
 
 ### Authority
 
-**D4.5.3v2** permits downstream retention; **D4.5.1v4 / D4.1.4v5** govern its
-region/pool ownership. **D4.2.2v2–D4.2.4** govern context attribution, shared
-allocator pins and exclusive reset; **D4.2.6** governs external-resource
-cleanup. **D4.5.2** forbids retaining unrooted runtime values. Preserve SVG
-admission/source-export/frame contracts (**D2.11.1–D2.11.4**) and PDF's completed
-file/evaluator boundaries (**S2.6.6v3 / D2.6.12v3 / D5.4.1**).
+**D5.5.3** permits downstream retention; **D5.5.1 / D5.1.4** govern its
+region/pool ownership. **D5.2.2–D5.2.3** govern context attribution, shared
+allocator pins and exclusive reset; **D5.2.5** governs external-resource
+cleanup. **D5.5.2** forbids retaining unrooted runtime values. Preserve SVG
+admission/source-export/frame contracts (**D10.1.5–D10.1.7**) and PDF's completed
+file/evaluator boundaries (**S2.6.6v3 / D3.5.1 / D6.4.1**).
 
 These references are to the [formal design](../../doc/Lambda_Formal_Design.md)
 and [formal semantics](../../doc/Lambda_Formal_Semantics.md). Milestone labels
@@ -158,7 +158,7 @@ Proposed concepts, with names subject to existing-helper discovery:
 Use existing `lib` containers, allocator owners and resource handles. Prefer
 chunk/arena-level ownership to a new heap allocation and atomic reference count
 for every path command. Readers pin the storage owner, not a raw payload address.
-Published storage cannot be rewound while borrowed (**D4.2.4**). Frame-local
+Published storage cannot be rewound while borrowed (**D5.2.3**). Frame-local
 resources stay frame-local unless an explicit owner or snapshot makes retention
 safe. Mutable image/media handles retain their existing live-versus-snapshot
 semantics.
@@ -216,7 +216,7 @@ Work:
 - Distinguish known Lambda-owned/native-cache bytes from unobserved ThorVG
   allocations. Use a supported profiler for the latter; entry-shell counts are
   not total backend memory. Keep instrumentation out of release hot paths when
-  disabled, consistent with **D4.2.5v3**.
+  disabled, consistent with **D5.2.4**.
 - Freeze source/binary identity, viewport, density, fonts, input resources,
   thread budget, cache state and readiness. Reuse existing trace infrastructure.
 
@@ -534,7 +534,7 @@ effects to make a benchmark faster.
 
 ## 7. Committed core checkpoint — 2026-10-19 (`689eb13d0`)
 
-The implementation follows **D4.5.1v4 / D4.2.4 / D4.5.3v2**. No formal ruling
+The implementation follows **D5.5.1 / D5.2.3 / D5.5.3**. No formal ruling
 has changed. Qualification receipts below distinguish implemented behavior
 from the full original acceptance envelope.
 
@@ -681,7 +681,7 @@ ThorVG footprint. This probe is not a baseline-versus-optimized memory compariso
 ## 8. Continuation delivery
 
 The user requested implementation of the remaining work after commit `689eb13d0`.
-This delivery continues **D4.5.3v2 / D4.5.1v4 / D4.2.4**; no formal ruling changes.
+This delivery continues **D5.5.3 / D5.5.1 / D5.2.3**; no formal ruling changes.
 
 This delivery covers native cost attribution, clip-segment submission,
 serial canvas reuse, unchanged full-frame recording reuse, and basic-shape cache
@@ -797,7 +797,7 @@ recording to 8,509,584 bytes against the 8 MiB admission limit. The correction
 retires overlay marks, then trims unused chunks only when there is exactly one
 arena scope, no earlier arena allocations and no live scratch data or nested
 scope. The same recording then reserves 4,096 arena bytes and charges 462,848
-bytes on reuse. The admission limit is unchanged (**D4.2.4 / D4.5.1v4**).
+bytes on reuse. The admission limit is unchanged (**D5.2.3 / D5.5.1**).
 `trim-admission/results.json` first reproduced successful admission; the full
 final warm matrix above confirms it across all ten scenarios.
 
@@ -871,7 +871,7 @@ failures above; the final UI automation and view inventories pass in full.
 ## 9. Referenced partial-frame execution
 
 **Milestone:** eliminate descriptor flattening when a selective frame reuses
-immutable retained chunks (**D4.5.3v2 / D4.5.1v4 / D4.2.4**). The owning stage was
+immutable retained chunks (**D5.5.3 / D5.5.1 / D5.2.3**). The owning stage was
 retained frame assembly: it copied every borrowed command even though the chunk
 graph and payload leases already existed.
 
@@ -1027,12 +1027,12 @@ embed resolved clips, including ancestor clips; translating every stored clip
 would also move clipping that belongs to the destination context. Qualify local
 placement and inherited clipping separately before allowing moved chunks to
 reuse these commands. Unsupported/unknown dependency contexts must keep the
-conservative rebuild under **D4.5.3v2 / D4.5.1v4**.
+conservative rebuild under **D5.5.3 / D5.5.1**.
 
 ## 10. Resource dependency summaries
 
 **Milestone:** resource validity checks use immutable publication summaries
-instead of scanning every retained draw command (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+instead of scanning every retained draw command (**D5.5.3 / D5.5.1 / D5.2.3**).
 The owning stage is `retained_display_list.cpp`: both selective reuse and a frame
 containing references still expand entire subtrees to discover their resources.
 
@@ -1136,7 +1136,7 @@ remain as documented in §9.
 The next finite milestone applies §10's dependency summaries to the flat,
 immutable document recording held by `RenderFrameCache`. A cache hit currently
 scans every command even though recording contents are unchanged. Under
-**D4.5.3v2 / D4.5.1v4 / D4.2.4**, capture dependency values once at publication,
+**D5.5.3 / D5.5.1 / D5.2.3**, capture dependency values once at publication,
 retain them with the document recording, and retire them when that recording is
 invalidated. Transient overlays are outside the snapshot.
 
@@ -1213,7 +1213,7 @@ Finite acceptance: a native background-only SVG visit paints the SVG's own CSS
 background without foreign HTML; foreground visits retain transformed foreign
 content; the existing live mutation/scroll/focus/hit-test fixture passes all
 assertions, including the old yellow pixel. Keep resource/recording ownership
-under **D4.5.3v2 / D4.5.1v4** unchanged. Verify the two phase cases before/after,
+under **D5.5.3 / D5.5.1** unchanged. Verify the two phase cases before/after,
 run affected native release/ASan checks, SVG paint and a targeted foreign-object
 PNG/SVG/PDF export set, then rerun the Radiant milestone gate because both raster
 and export traversal change. This does not enable placement reuse.
@@ -1275,7 +1275,7 @@ requalify them.
 This core metadata milestone removes repeated discovery around raster replay.
 Before this milestone, the same frame validated three times on the serial path,
 scanned for glyphs to choose serial replay, then scanned for video placeholders.
-Under **D4.5.3v2 / D4.5.1v4**, retain
+Under **D5.5.3 / D5.5.1**, retain
 validated document properties with the immutable recording and inspect fresh
 overlay commands separately. Keep the existing resource summary and cache key.
 
@@ -1398,7 +1398,7 @@ earlier runtime/PDF debt recorded in §12 also remains unresolved.
 descriptor copies, but validation still expands every unchanged command. Cache
 successful standalone validation with each private immutable publication and
 compose its replay properties and peak nesting into subsequent validation.
-Ownership remains governed by **D4.5.3v2 / D4.5.1v4 / D4.2.4**. The cache is
+Ownership remains governed by **D5.5.3 / D5.5.1 / D5.2.3**. The cache is
 derived metadata, not a mutable-list validation bypass.
 
 Acceptance:
@@ -1506,7 +1506,7 @@ foreground pass paints both with the SVG transform. A direct background-only
 producer visit must still paint the blue box and never walk foreign HTML. Keep
 the separate direct foreground SVG capture regression. This preserves the
 original producer-boundary check while updating the host scheduling assertion.
-Ownership remains **D4.5.1v4 / D4.5.3v2**; no normative ruling changes.
+Ownership remains **D5.5.1 / D5.5.3**; no normative ruling changes.
 Verification: focused SVG phase/capture cases, then the affected native suite and
 required aggregate together with §16. Historical §14 failures remain recorded.
 
@@ -1517,7 +1517,7 @@ draw commands, despite private publications already carrying complete dependency
 summaries. Copy merged epochs and surface stamps from those summaries, traversing
 only image-bearing child summaries. Skip the corresponding immutable command
 subtree. Snapshots remain flat and independent of publication lifetimes under
-**D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+**D5.5.3 / D5.5.1 / D5.2.3**.
 
 Acceptance:
 
@@ -1611,7 +1611,7 @@ staging list before erasing expired IDs. Keep each indexed publication's stable
 fragment entry and order entries by their last paint epoch. This removes repeated
 index publication and the full prune scan from unchanged branches while retaining
 the existing graph walk and membership policy. Ownership remains
-**D4.5.3v2 / D4.5.1v4 / D4.2.4**; replay never reads mutable index bookkeeping.
+**D5.5.3 / D5.5.1 / D5.2.3**; replay never reads mutable index bookkeeping.
 
 Acceptance:
 
@@ -1709,7 +1709,7 @@ but retains its original flat document commands as well. Assemble document-root
 references during capture and adopt that recording only after replay and overlay
 retirement. This removes duplicate persistent command storage while retaining the
 existing complete frame key and resource checks. Ownership remains
-**D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+**D5.5.3 / D5.5.1 / D5.2.3**.
 
 Acceptance: a wide native document retains root references rather than a second
 flat command array; unchanged forced frames preserve those owners with zero
@@ -1804,7 +1804,7 @@ groups. A complete group covers exactly its immutable paint subtree; refreshing
 its root can retain descendant membership without visiting commands or nodes.
 Changed bindings detach from their group and invalidate ancestor completeness;
 shared/overwritten dependencies fall back to ordered traversal and regrouping.
-Ownership remains **D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+Ownership remains **D5.5.3 / D5.5.1 / D5.2.3**.
 
 Acceptance: the 4,097-node recapture visits one membership node and preserves its
 logical reuse count and every indexed ID. A mixed rebuild keeps a wide unchanged
@@ -1892,7 +1892,7 @@ siblings. Keep the marking source's address as a weak hint alongside its ID.
 The document registry must validate both before reading the node; an existing
 parent-chain helper then answers containment. Missing, synthetic or stale hints
 use the existing live-ID subtree lookup. Retention and lifetime follow
-**D4.5.3v2 / D4.5.1v4 / D4.1.4v5**; hints own no node and never enter paint chunks.
+**D5.5.3 / D5.5.1 / D5.1.4**; hints own no node and never enter paint chunks.
 
 Acceptance: a native selective repaint reuses the unchanged 257-node sibling
 without a subtree search, with identical pixels and membership behavior. A dirty
@@ -1957,7 +1957,7 @@ underlying WPT fixture conformance claims remain unchanged. `test_summary.json`,
 `radiant-baseline.log`, `aggregate-exit.json` and `qualification.json` preserve
 the completed gate. Final source, executable and all eleven restored release-product
 hashes match the frozen candidate. This completes the scoped containment-check
-optimization under **D4.5.3v2 / D4.5.1v4 / D4.1.4v5**.
+optimization under **D5.5.3 / D5.5.1 / D5.1.4**.
 
 Unavailable hints retain subtree lookup; validated sources still walk parents per
 overlapping candidate/source pair. Placement-only composition, finer inherited/
@@ -1972,7 +1972,7 @@ content-indexed stop/dash buffers, so fresh recording copies unchanged vector
 values again. Give the persistent ViewTree recorder a bounded value index.
 The recorder keeps its leases between recordings; copied and published owners
 acquire independent leases. Other recorders keep their existing lifetime.
-Ownership follows **D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+Ownership follows **D5.5.3 / D5.5.1 / D5.2.3**.
 
 Acceptance: successive native frame scopes record gradients and dashed strokes
 with zero repeated array-copy bytes and identical pixels. Changed values publish
@@ -2042,7 +2042,7 @@ conformance claims remain unchanged. `test_summary.json`, `radiant-baseline.log`
 `aggregate-exit.json` and `qualification.json` preserve the completed gate.
 Source, executable and all eleven restored release-product hashes match the
 frozen candidate. Document links/fences and diff checks pass. This completes
-bounded stop/dash reuse under **D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+bounded stop/dash reuse under **D5.5.3 / D5.5.1 / D5.2.3**.
 
 The cache can retain unused values until its index retires at a clear boundary;
 active recording data can exceed the idle-reuse limit. Hashing and exact-value
@@ -2060,7 +2060,7 @@ version for hosts without SVG `foreignObject` content. Discover that conservativ
 host-wide dependency during the existing style index traversal, including
 potential cross-root `use` targets. Hosts containing embedded HTML, or unavailable
 style metadata, retain the full content-state key. Retention and lifetime remain
-under **D4.5.3v2 / D4.5.1v4**; no formal ruling changes.
+under **D5.5.3 / D5.5.1**; no formal ruling changes.
 
 Acceptance: a warmed native SVG keeps its layer with zero recaptures across
 repeated unrelated scrolling and supported translation. Pixels remain visible
@@ -2133,7 +2133,7 @@ source, HEAD and release-product hashes match the candidate. An earlier aggregat
 was deliberately stopped when review found unnecessary namespace ancestor walks
 on non-candidate HTML tags; `baseline-interrupted.log` and its receipt preserve
 that run without claiming completion. The completed gate uses the final tag-first
-check. This completes the scoped milestone under **D4.5.3v2 / D4.5.1v4**.
+check. This completes the scoped milestone under **D5.5.3 / D5.5.1**.
 
 The host-wide dependency intentionally disqualifies unrelated SVG roots when any
 SVG `foreignObject` exists. Full-frame recordings still invalidate on scroll;
@@ -2149,8 +2149,8 @@ total-memory improvement.
 overwrites raw runs, omits per-child peak RSS and does not summarize frame costs
 separately from encoding. Complete this bounded part of M0 before the larger
 placement refactor. Reuse existing render metrics; add no engine instrumentation.
-Measurement remains opt-in under **D4.2.5v3** and retention conclusions remain
-subject to **D4.5.3v2**.
+Measurement remains opt-in under **D5.2.4** and retention conclusions remain
+subject to **D5.5.3**.
 
 Acceptance: every measured process keeps its own stdout, PNG, event result and
 resource receipt; alternating repeated runs cannot overwrite previous evidence.
@@ -2263,7 +2263,7 @@ python3 utils/benchmark_radiant_rendering.py --executable path/to/release.exe --
 python3 utils/benchmark_radiant_rendering.py --executable path/to/release.exe --mode cold --profile --out temp/rendering-cold
 ```
 
-This closes the bounded measurement milestone under **D4.2.5v3 / D4.5.3v2**.
+This closes the bounded measurement milestone under **D5.2.4 / D5.5.3**.
 Placement-only chunk composition and narrower inherited/style/reference
 invalidation remain implementation work. Local mutations, movement, asynchronous
 resources, mixed effects and dirty/tile/strip replay still need broader timing
@@ -2276,7 +2276,7 @@ unobserved. The earlier runtime/PDF debt is unchanged.
 recorded placement. Add an explicit translated-reference API as the replay
 foundation for M4, without assuming that equal layout sizes prove unchanged paint.
 Retention, immutable payload leases and allocator ownership follow
-**D4.5.3v2 / D4.5.1v4 / D4.2.4**.
+**D5.5.3 / D5.5.1 / D5.2.3**.
 
 Acceptance: one published vector subtree composes at multiple translated
 placements, including nested chunks and inherited/local clips, without path,
@@ -2387,7 +2387,7 @@ measured frame-time or total-memory improvement claim.
 and repeats producer traversal even when only placement changes. Connect §24 to
 this production path, retaining its vector commands rather than clipping ink to
 a raster viewport. Retention and independent source/reader ownership follow
-**D4.5.3v2 / D4.5.1v4 / D4.2.4**; measurement follows **D4.2.5v3**.
+**D5.5.3 / D5.5.1 / D5.2.3**; measurement follows **D5.2.4**.
 
 Acceptance: repeated and translated vector SVG paints reuse a published command
 owner, preserve overflow and caller clips, and match an uncached recording.
@@ -2436,7 +2436,7 @@ locate its distinct cache key and previously prevented reclamation from making
 progress. Chunk arenas now belong to the already reference-counted storage-budget
 owner's independent rendering context, carrying the source document ID. Source
 document/context teardown therefore cannot free an active paint reader's arena.
-The last cache/chunk lease releases that context (**D4.2.4 / D4.5.3v2**).
+The last cache/chunk lease releases that context (**D5.2.3 / D5.5.3**).
 
 Focused cases cover overflow ink and fractional translation against direct
 recording, changed caller clips, local/cross-root mutations, selectors, scroll,
@@ -2510,7 +2510,7 @@ every SVG command into the HTML cache. Retain a foreign immutable leaf subscene
 directly beneath its newly captured HTML parent. The parent conservatively
 charges the complete borrowed graph to its own storage budget; the producer's
 ledger and independent memory context remain pinned until the last reader
-retires (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+retires (**D5.5.3 / D5.5.1 / D5.2.3**).
 
 Acceptance: warm visible-overflow SVG capture copies only surrounding HTML
 commands and preserves original SVG descriptor/payload identity, painter order,
@@ -2564,7 +2564,7 @@ each; one separate profile per binary contains thirteen scopes. Discarding two
 warm-up scopes leaves eleven steady frames. Every final PNG is identical; both
 profiles record one SVG hit and no SVG producer per steady frame. Measurement
 and environment receipts are under `temp/rendering-foreign-subscenes/measurement/`;
-the source and binary identities follow **D4.2.5v3**.
+the source and binary identities follow **D5.2.4**.
 
 The previous frozen release copies 521 commands per steady frame; the candidate
 copies seven surrounding HTML commands and borrows one SVG chunk. Across eleven
@@ -2592,7 +2592,7 @@ suite's shared UI, and that UI was never released at suite end. The next fixture
 correctly refuses to replace an existing evaluator. The suite now releases its
 own UI/loader in `TearDownTestSuite`, after its last fixture retires. This repairs
 the lifetime boundary rather than changing evaluator ownership checks
-(**D4.2.6 / D5.4.1**). It adds no renderer/runtime behavior change.
+(**D5.2.5 / D6.4.1**). It adds no renderer/runtime behavior change.
 
 The first aggregate also denied WPT's localhost bind and stalled native graphics
 cases under the sandbox. Its process tree was stopped and its artifacts preserved
@@ -2636,7 +2636,7 @@ does not eliminate native shape construction or establish a general speedup.
 vector producer, but §26 rejects its translated child during HTML capture.
 Preserve placement on the parent-to-child reference so the parent can be retained
 without copying or republishing SVG geometry. Ownership and budget charges remain
-those of §26 (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+those of §26 (**D5.5.3 / D5.5.1 / D5.2.3**).
 
 Acceptance: multiple integer/fractional placements share the original zero-ID SVG
 leaf and retain a valid parent/resource snapshot. Serial, dirty and tile replay
@@ -2696,7 +2696,7 @@ of 24.5 px, then completes twelve forced renders with whole-frame reuse disabled
 and SVG vector caching enabled. Five normal child-process samples per binary
 alternate order; separate profiles contain fourteen complete scopes. Discarding
 the first three leaves eleven steady frames. All final PNGs match and every
-scroll assertion passes (**D4.2.5v3**). Receipts and the driver are under
+scroll assertion passes (**D5.2.4**). Receipts and the driver are under
 `temp/rendering-placed-subscenes/measurement/`.
 
 The candidate imports one translated SVG leaf per steady frame; the control
@@ -2756,7 +2756,7 @@ validation pass when capturing a moved SVG leaf. Its public placement shell has
 already validated the same immutable source and displacement. Preserve that
 attestation on the private shell and copy it onto the captured parent edge,
 avoiding repeated descriptor checks without weakening validation
-(**D4.5.3v2 / D4.2.4**).
+(**D5.5.3 / D5.2.3**).
 
 Acceptance: repeated validation of a public translated fragment and capture of
 its parent use chunk summaries rather than walking the source commands. Two
@@ -2817,7 +2817,7 @@ delta. The same 512-path fixture asserts root scroll at 24.5 px, with whole-fram
 reuse and SVG layers disabled, vector caching enabled and one rendering thread.
 Five normal child-process samples alternate order; separate fourteen-scope
 profiles discard the first three frames. All twelve final PNGs and all scroll
-assertions match (**D4.2.5v3**). Receipts are under
+assertions match (**D5.2.4**). Receipts are under
 `temp/rendering-placement-validation/measurement/`.
 
 | Measure | §27 control | Candidate |
@@ -2883,7 +2883,7 @@ background commands snapshot caller clipping, so arbitrary
 fragment translation is unsafe. Admit only boxes whose painted pixels are fully
 inside a plain caller clip, and record their rectangle without that redundant
 clip. An exact retained-primitive check can then reuse the canonical leaf at its
-current position after reflow (**D4.5.3v2 / D4.5.1v4 / D4.2.4**).
+current position after reflow (**D5.5.3 / D5.5.1 / D5.2.3**).
 
 Acceptance: changing a preceding sibling's height moves an unchanged box and
 reuses its original immutable commands on repeated full paints, including
@@ -2959,7 +2959,7 @@ PNG captures. All twelve images match across every run in both modes.
 Five normal child-process samples per mode alternate order; separate profiles
 have twenty-five complete paint scopes (initial paint plus script-triggered and
 forced paints). Discarding the first three leaves twenty-two steady scopes
-(**D4.2.5v3**). The driver and receipts are under
+(**D5.2.4**). The driver and receipts are under
 `temp/rendering-html-placement/measurement/`.
 
 | Measure | Feature off | Feature on |
@@ -3049,7 +3049,7 @@ largest command union for every translated rectangle, marker and clip pop.
 Retain its existing cursor-local view, but copy only the common header and the
 operation's active payload before applying displacement. This reduces work for
 both explicit vector placements and automatic HTML boxes without a second
-representation or backend scene cache (**D4.5.3v2 / D4.2.4**).
+representation or backend scene cache (**D5.5.3 / D5.2.3**).
 
 Acceptance: small rectangle/marker streams copy fewer bytes; zero displacement
 still borrows original descriptors; all supported vector operations preserve
@@ -3102,7 +3102,7 @@ update in the draft copy helper; accounting was consolidated before final
 qualification. A subsequent run overlapped builds and used the preceding CLI
 while its replacement linked. Those receipts remain separately labeled and do
 not qualify the final candidate's timing. Final measurements use a completed,
-hash-guarded private release executable (**D4.2.5v3**).
+hash-guarded private release executable (**D5.2.4**).
 
 ### Final release movement comparison
 
@@ -3143,7 +3143,7 @@ uncontrolled and another checkout's input-event gate was still active; timing
 is diagnostic rather than a speedup qualification. Neither retained storage nor
 the cursor's scratch size shrinks. The driver, command manifests, per-process
 receipts and final profiles are under `measurement/` in the milestone directory
-(**D4.2.5v3**).
+(**D5.2.4**).
 
 ### Qualification inputs
 
@@ -3184,7 +3184,7 @@ pixel-exact source-over for translucent fills, but excludes opaque fills.
 Extend that path to opaque rectangles only when no native scene or sealed root
 is pending. Reuse the existing rectangle/clip/tile intersection proof and raster
 writer; retain native rendering for fractional coverage, nonrectangular clips
-and pending native work (**D4.5.3v2 / D4.2.4 / D4.2.6**).
+and pending native work (**D5.5.3 / D5.2.3 / D5.2.5**).
 
 Acceptance: admitted integer intersections create no native shape and match an
 explicit native rectangle path byte-for-byte. Exercise 1×/2×, negative/fractional
@@ -3199,7 +3199,7 @@ geometry, persistent native cache or renderer API. Verification budget: focused
 work/pixel/clip/barrier checks, affected native release/ASan, SVG paint, the
 versioned benchmark's paired release rectangle comparison, and one required
 Radiant aggregate. Artifacts belong under `temp/rendering-opaque-rectangles/`
-(**D4.2.5v3**).
+(**D5.2.4**).
 
 ### Rejected compound-path experiment
 
@@ -3268,7 +3268,7 @@ This does not explain the full normal-process difference; a capture speedup is
 not established. The 1× first control child also has a 742 ms cold-start outlier;
 raw samples and paired distributions remain in the receipt. Do not infer a
 general memory reduction from the small process high-water differences
-(**D4.2.5v3**).
+(**D5.2.4**).
 
 To isolate repeated paint from repeated encoding, `repaint_probe.py` and
 `repaint-isolation/` preserve a bounded follow-up: five alternating normal

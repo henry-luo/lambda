@@ -1705,6 +1705,7 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline
 	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
 	@$(PYTHON) test/sqlite_fullsync_failure_test.py
+	@$(PYTHON) test/sqlite_commit_sync_test.py
 	@echo "Running LAMBDA baseline test suite..."
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
@@ -1854,12 +1855,12 @@ test-js262-prelim: ensure-test262-gtest
 	@$(MAKE) -C build/premake config=debug_native test_js_test262_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@./test/test_js_test262_gtest.exe --prelim
 
-# D8.4.3 standing gate: a raw scalar or void helper must not silently regain
+# D7.4.3 standing gate: a raw scalar or void helper must not silently regain
 # an in-band error-lane contract that the emitter cannot transport.
 test-js-exception-catalog:
 	@python3 utils/js_exception_catalog_census.py --prefix js_ --violations
 
-# D6.2.2v2 standing gate: executable targets, visible bindings, identity
+# D7.2.2 standing gate: executable targets, visible bindings, identity
 # aliases, and call/construct capabilities remain one coherent catalog.
 test-js-callable-catalog:
 	@python3 utils/js_callable_census.py --check
@@ -2361,7 +2362,7 @@ UI_TEST_RUNNER := ./test/test_ui_automation_gtest.exe
 EDITABLE_UNIT_TESTS := test_editing_contenteditable_dom_action,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,editable_template_gate
 EDITABLE_UI_TESTS := test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,rte_typing_at_caret,editable_mixed_routes
 EDITABLE_EDITOR_TESTS := editable_editors_*
-# D7.2.5 requires package failure to leave rich-edit defaults unavailable,
+# D10.2.1 requires package failure to leave rich-edit defaults unavailable,
 # while author beforeinput listeners still observe the platform request; the
 # fixture sets RADIANT_DOM_PKG=0 for its own child.
 EDITABLE_PACKAGE_DISABLED_TESTS := test_editing_contenteditable_package_disabled
@@ -3062,7 +3063,7 @@ check-tutorial:
 	@python3 utils/check_tutorial.py $(ARGS)
 
 # Ruling index for the formal specs (Doc_Convention §3): regenerate after editing
-# either spec; `python3 utils/formal_index.py D7.3.6` prints one ruling.
+# either spec; `python3 utils/formal_index.py D9.4.6` prints one ruling.
 formal-index:
 	@python3 utils/formal_index.py --write
 
@@ -3085,7 +3086,7 @@ check-node-module-architecture:
 hosted-node-coupling-inventory:
 	@python3 utils/check_node_module_architecture.py --report
 
-# D7.3.6: the host exports exactly lambda/jube/jube_host_exports.txt, and the
+# D9.4.6: the host exports exactly lambda/jube/jube_host_exports.txt, and the
 # built Jube modules import nothing else from it.
 check-host-exports:
 	@$(PYTHON) utils/check_host_exports.py --host lambda.exe --modules

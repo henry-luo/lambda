@@ -135,7 +135,7 @@ struct JsRegexpLastMatch {
 };
 
 // Fixed realm singleton/cache values converge here. Callers reserve the
-// stable slot before an allocation can publish its Item (D5.3.5; JSCU29).
+// stable slot before an allocation can publish its Item (D6.3.5; JSCU29).
 enum JsRealmSlotId {
     JS_REALM_SLOT_PROTO_KEY,
     JS_REALM_SLOT_GENERATOR_FUNCTION_PROTOTYPE,
@@ -209,7 +209,7 @@ enum JsRealmSlotId {
     JS_REALM_SLOT_TYPED_ARRAY_PROTO_FLOAT16,
     // Catalog-indexed intrinsic identities use the same dynamic realm root
     // carrier. Keep each catalog as a contiguous span so its generated ID
-    // arithmetic remains local to the registry (D5.3.5; JSCU29).
+    // arithmetic remains local to the registry (D6.3.5; JSCU29).
     JS_REALM_SLOT_BUILTIN_FUNCTION_BASE,
     JS_REALM_SLOT_GLOBAL_BUILTIN_BASE = JS_REALM_SLOT_BUILTIN_FUNCTION_BASE +
         JS_INTRINSIC_BINDING_COUNT,
@@ -397,7 +397,7 @@ struct JsStringCacheState : RootVector {
 // One global-environment row represents either a declarative lexical binding,
 // an object-backed global var declaration, or a module-slot bridge. The row's
 // key/value pair resides in the environment RootVector so GC ownership is
-// independent of the native metadata tail (D5.3.5; JSCU29).
+// independent of the native metadata tail (D6.3.5; JSCU29).
 enum JsGlobalBindingKind : uint8_t {
     JS_GLOBAL_BINDING_LEXICAL,
     JS_GLOBAL_BINDING_OBJECT_VAR,
@@ -475,7 +475,7 @@ void js_global_environment_release_module_bindings(
 
 // Every cached Item, including catalog-indexed callable and constructor
 // identities, lives in the dynamic JsRealmSlots carrier above. This record
-// retains only native initialization and cache-validity state (D5.3.5; JSCU29).
+// retains only native initialization and cache-validity state (D6.3.5; JSCU29).
 struct JsRealmIntrinsicState {
     bool builtin_function_initialized = false;
     bool global_builtin_initialized = false;
@@ -621,7 +621,7 @@ enum JsModuleRuntimeSlot : int {
 // Module scheduling state is context-owned; canonical descriptors and their
 // namespace/TLA edges live in Runtime::module_registry. All module-provider
 // namespaces, including the replaceable active namespace, share one exact-root
-// carrier instead of independent Item/epoch registrations (D5.3.5).
+// carrier instead of independent Item/epoch registrations (D6.3.5).
 struct JsSourceModuleOps;
 struct JsModuleRuntimeState {
     RootVector values = {};
@@ -725,7 +725,7 @@ void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name);
 // A synchronous call has one ambient owner. Its Item homes are either the
 // context-owned base RootVector or one exact native RootFrame, so a nested
 // call replaces one activation link instead of mutating parallel globals
-// (D5.1.1v2, D6.2.2v2; JSCU28).
+// (D6.1.1, D7.2.2; JSCU28).
 typedef enum JsCallActivationItem {
     JS_CALL_ACTIVATION_THIS = 0,
     JS_CALL_ACTIVATION_NEW_TARGET,

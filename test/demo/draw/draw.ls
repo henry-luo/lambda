@@ -1,4 +1,4 @@
-// S12.1.3 / D4.5.1v4: retain the shell and pointer owner; publish SVG from values.
+// S12.1.3 / D5.5.1: retain the shell and pointer owner; publish SVG from values.
 import dom
 import resources: ~~.mod_resources
 import model: .mod_model

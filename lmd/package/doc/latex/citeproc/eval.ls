@@ -1,4 +1,4 @@
-// The CSL rendering tree is interpreted directly by Lambda functions (D7.2.3, S1.8).
+// The CSL rendering tree is interpreted directly by Lambda functions (D9.3.3, S1.8).
 import c: .common
 import out: .output
 import names: .names

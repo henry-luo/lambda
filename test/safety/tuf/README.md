@@ -1,6 +1,6 @@
 # Public signed update fixtures
 
-Authority: **D7.5.8**. `../generate_tuf_fixtures.py` creates the public fixtures
+Authority: **D11.2.4**. `../generate_tuf_fixtures.py` creates the public fixtures
 with fresh test-only keys and an independent Python OLPC canonical encoder.
 OpenSSL signs Ed25519, RSA-PSS/SHA-256 and P-256/SHA-256 vectors. Only public
 metadata, signatures, public keys and an inert binary artifact are checked in.

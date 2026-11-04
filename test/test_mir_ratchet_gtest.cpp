@@ -350,7 +350,7 @@ static long long count_error_lane_tag_tests(const Lines& lines) {
         if (text.find("\teq\t") != 0 && text.find("\tbeq\t") != 0 &&
                 text.find("\tbne\t") != 0) continue;
         size_t comma = text.rfind(", 27");
-        // D8.4.3's ERROR carrier has tag 27; this metric deliberately pins
+        // D7.4.3's ERROR carrier has tag 27; this metric deliberately pins
         // the emitted comparison, not the retired source-level poll helper.
         if (comma != (size_t)-1 && comma + 4 == text.size()) total++;
     }

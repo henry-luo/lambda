@@ -1,4 +1,4 @@
-// D7.5.8: constrained repository paths and ordered delegation checks.
+// D11.2.4: constrained repository paths and ordered delegation checks.
 import json: lambda.security.tuf.json
 import meta: lambda.security.tuf.metadata
 import uri: lambda.security.tuf.path

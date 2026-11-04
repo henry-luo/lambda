@@ -1,4 +1,4 @@
-// D7.2.5: command aliases, descriptors, and plan/result records remain
+// D10.2.1: command aliases, descriptors, and plan/result records remain
 // package data. This fixture has no DOM invocation; it pins the pure registry.
 import commands: lambda.dom.commands
 import plan: lambda.dom.edit_plan

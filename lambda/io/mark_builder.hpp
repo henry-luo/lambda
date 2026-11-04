@@ -204,7 +204,7 @@ public:
      */
     Item createArray();
     lam::ItemOf<LMD_TYPE_ARRAY> createArrayTyped();
-    // dense numeric storage belongs entirely to the Input arena (D4.1.2).
+    // dense numeric storage belongs entirely to the Input arena (D5.1.2).
     Item createNumericArray(ArrayNumElemType type, int rank, const int64_t* dimensions,
         const void* samples = nullptr);
 
@@ -270,7 +270,7 @@ public:
     Item deep_copy(Item item, bool force = false);
 
     // DOM construction needs independent elements/content even within one arena
-    // (D4.5.3); ordinary evaluation keeps deep_copy's ownership optimization.
+    // (D5.5.3); ordinary evaluation keeps deep_copy's ownership optimization.
     Item deep_copy_for_view(Item item);
     // UI content adopts external containers while retaining owned render identities.
     Item copy_ui_content(Item item);

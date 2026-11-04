@@ -31,7 +31,7 @@ TypeParam* alloc_type_param(Pool* pool, const Type* carrier);
 void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* declared);
 
 // The contract half of apply_declared_param_type: retain `contract` and pick
-// full_type from it. Also builds synthesized parameters (D8.1.1v14).
+// full_type from it. Also builds synthesized parameters (D8.3.2).
 void apply_param_contract(TypeParam* param_type, Type* contract, bool is_explicit);
 
 // Declare a fn type's return contract.

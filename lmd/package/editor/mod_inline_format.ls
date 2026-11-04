@@ -1,4 +1,4 @@
-// Shared character-format transactions, promoted from the Word demo (D7.2.5).
+// Shared character-format transactions, promoted from the Word demo (D10.2.1).
 // Selection mapping keeps the selected characters intact when a leaf is split.
 import .mod_doc
 import .mod_step

@@ -1016,7 +1016,7 @@ TEST_F(SecurityAdmissionTest, OversizedSourcesAndUnsafeEntriesNeverProduceAClien
     EXPECT_NE(open().store_result, SECURITY_STORE_OK); EXPECT_EQ(admission, nullptr); mem_free(outside);
 }
 
-// D7.5.2: exercise the real admission lease at the IPC publication boundary.
+// D11.1.2: exercise the real admission lease at the IPC publication boundary.
 class SecurityDeliveryTest : public SecurityAdmissionTest {
 protected:
     enum Change { NONE, REVOKE, EXTERNAL, EXPIRE, BAD_CAPTURE, EXPIRE_DURING } change = NONE;

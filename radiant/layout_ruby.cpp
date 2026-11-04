@@ -1890,7 +1890,7 @@ static void ruby_prepare_unbroken_float_band(LayoutContext* context, ViewSpan* r
     BlockContext* bfc = block_context_find_bfc(&context->block);
     if (!bfc || (!bfc->left_float_count && !bfc->right_float_count)) return;
 
-    // D4.5.1v4: the existing measurement scope restores selected fragments and generated effects.
+    // D5.5.1: the existing measurement scope restores selected fragments and generated effects.
     float height = layout_ruby_intrinsic_height(context, ruby, sizes.max_content);
     height = max(height, context->line.max_ascender + context->line.max_descender);
     layout_prepare_inline_float_band(context, ruby, height);
@@ -2155,7 +2155,7 @@ View* layout_ruby_trim_trailing_space(LayoutContext* context, ViewText* text, Te
 }
 
 float layout_ruby_intrinsic_height(LayoutContext* context, DomElement* ruby, float available_width) {
-    // D4.5.1v4: speculative flow must restore selected fragments as well as scalar boxes.
+    // D5.5.1: speculative flow must restore selected fragments as well as scalar boxes.
     ScratchScope counter_scratch(&context->scratch);
     CounterCheckpoint counters;
     if (!counters.enter(context->counter_context, &context->scratch, &counter_scratch.mark)) {

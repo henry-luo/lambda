@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S5.1.5 / D2.4: erased parameters, indexed values and local bindings compare with null through a guarded Item-tag test; Type values retain the equality fallback and errors preserve their payload.",
+  "description": "S5.1.5 / D2.3: erased parameters, indexed values and local bindings compare with null through a guarded Item-tag test; Type values retain the equality fallback and errors preserve their payload.",
   "checks": [
     {
       "in_func": "_equals_null_#",

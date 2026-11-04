@@ -1,4 +1,4 @@
-// Semantic prose extraction preserves inline joins and source paths (D7.2.5).
+// Semantic prose extraction preserves inline joins and source paths (D10.2.1).
 import spelling: lambda.doc.spelling
 
 let excluded = ['code','pre','script','style','svg','math','canvas','audio','video','img','image','raw_html','html_block']

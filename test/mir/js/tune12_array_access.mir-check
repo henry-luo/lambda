@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2: repeated indexed reads, typed construction and existing-element writes retain canonical descriptor/prototype miss routes. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
+  "description": "D7.4.1: repeated indexed reads, typed construction and existing-element writes retain canonical descriptor/prototype miss routes. D8.4.2: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

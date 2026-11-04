@@ -3,8 +3,8 @@
 > **Status:** fixed-record/native-binding implementation started 2026-10-15;
 > syntax ratified 2026-10-15: trailing `& {…}` metadata is confined to binary
 > declaration slots. Broader array/serializer phases below remain proposals.
-> **Formal linkage:** S11.5.1v2, S11.5.2, S11.5.3v3, D3.1.1v5, D3.5.1v2–D3.5.2v2,
-> D7.4.5v2. The current contract is recorded in §10; older implementation
+> **Formal linkage:** S11.5.1v2, S11.5.2, S11.5.3v3, D4.1.1, D4.4.1–D4.4.2,
+> D9.5.5. The current contract is recorded in §10; older implementation
 > sketches below precede the common Velmt carrier and MIR-only runtime.
 > **Scope:** Schema-driven binary (de)serialization for Lambda Script — a typed binary layout language expressed in Lambda's `type` system, a lazy zero-copy virtual element (`Velmt`) backed by a byte buffer + schema, and a schema-driven serializer for the round trip.
 > **Builds on:** [Lambda_Type_Binary.md](Lambda_Type_Binary.md) — the `Binary` runtime representation (Tier 1) and sub-binary zero-copy slicing (Tier 3) are prerequisites for the lazy/zero-copy Velmt described here.
@@ -304,7 +304,7 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 The [PDF phase 2 implementation](impl/Lambda_Impl_PDF_Output_Phase2.md) uses
 the shared native walker and schema-backed callback records. Tree and text
 fragment links remain native. Property references use the same lazy field
-accessor as bounded byte layouts, under **S11.5.1v2, S11.5.2, S11.5.3v3 / D3.5.1v2–D3.5.2v2**.
+accessor as bounded byte layouts, under **S11.5.1v2, S11.5.2, S11.5.3v3 / D4.4.1–D4.4.2**.
 
 The implemented declaration form uses trailing `& {…}` metadata directly at
 the root and field slots of `: binary` declarations (S11.5.1v2). Metadata is
@@ -324,10 +324,10 @@ declare boxed Item fields, whose exact edges are traced while the record owner
 is valid. Their declared logical type and nullability are checked at binding
 and access. Such fields cannot be reconstructed from arbitrary bytes.
 
-Schemas remain first-class Type values using **D3.1.1v5**'s internal binary
+Schemas remain first-class Type values using **D4.1.1**'s internal binary
 schema kind. The current declaration descriptor reuses TypeObject's
 declaration/index prefix, without creating a nominal map constructor. The
-backend uses the existing Velmt vtable and GC hooks (**D7.4.5v2**), rather than
+backend uses the existing Velmt vtable and GC hooks (**D9.5.5**), rather than
 the earlier VElmt/header sketches. A record retains its schema declaration;
 `record is Schema` recognizes that descriptor and aliases preserve it.
 
@@ -338,7 +338,7 @@ have shorter controls, invalidated before scratch reuse. A surviving wrapper
 cannot read a closed owner. Byte views trace their Binary source; native views
 precisely trace their selected Item fields, including nested property records.
 The same field visitor temporarily roots these Items during carrier allocation,
-before the new wrapper can publish its own trace edge (D5.3.3–D5.3.4).
+before the new wrapper can publish its own trace edge (D6.3.3–D6.3.4).
 
 Fixed-width fields, nested records, explicit field offsets and typed native
 property references form the initial subset. Native counted spans and
@@ -350,7 +350,7 @@ until those gates close.
 
 ## 11. Native counted spans and generated bindings (USER, 2026-10-15)
 
-**S11.5.3v3–S11.5.4 / D3.5.1v2–D3.5.2v2** extend the fixed-record profile.
+**S11.5.3v3–S11.5.4 / D4.4.1–D4.4.2** extend the fixed-record profile.
 A native field `Entry[count] & {pointer: 'native'}` is one pointer to contiguous
 entries, never an array of pointers. Scalar spans use the same generic accessor
 and return VArray. A count is a nonnegative integer literal or an admitted
@@ -405,7 +405,44 @@ intersection. No new metadata keyword or script-visible pointer type is added.
 
 ~~Native schemas name a host binding, without requiring a complete manifest
 revision. Native export bindings use shared C++ macros, with generation from
-one manifest left as follow-up work.~~ Replaced by S11.5.3v3 / D3.5.1v2:
+one manifest left as follow-up work.~~ Replaced by S11.5.3v3 / D4.4.1:
 generated versioned contracts reject stale or incompatible declarations before
-publishing a native view. D3.5.2v2 extends the same owner control and precise
+publishing a native view. D4.4.2 extends the same owner control and precise
 Item tracing to span records and all structural read paths.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D3.5.1v2 → D4.4.1
+
+**D4.4.1*** Binary schemas compile to immutable, module-owned field
+descriptors; one schema-backed Velmt backend serves bounded byte buffers
+and declared native layouts. Native fields use compiler-derived locations,
+widths and typed reference loads, including inherited members and ownership
+wrappers. A single manifest generates the native bindings and Lambda
+declarations. Admission checks the binding ABI, complete manifest revision,
+selected logical/storage kinds, typed targets and span stride/extent
+contracts before publication. A mismatch rejects admission; a byte buffer
+cannot grant native memory access. [Binary_Schema §10]
+
+### ex-D3.5.2v2 → D4.4.2
+
+**D4.4.2*** Native schema views retain an invalidatable lifetime control;
+the host pins the admitted storage, and invalidation precedes its release.
+Every record and VArray subview shares that control. Counted native spans
+validate counts against host-admitted allocation extents before lazy access.
+Structural reads, enumeration and validation check invalidation before
+treating a count as empty. Precisely trace declared native Item fields,
+including records in spans, before publishing a carrier and while it lives;
+retain byte-source edges; never scan arbitrary native memory. Field
+access checks validity before touching storage. No native address or
+ownership transfer becomes script-visible. [D5.5.1, D6.3.3–D6.3.4;
+Binary_Schema §10]

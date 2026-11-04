@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-12  
 **Status:** RETIRED 2026-08-28 — historical partial implementation record. Phase 0/1/2/3 slices landed, but this plan did not prove its G1/G2/G3 closeout. The open compiler/runtime consolidation moved to `vibe/Lambda_Design_JS_Unified.md` under the stricter project LOC anchor and phase-local non-growth gates.
-**Design authority:** `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3, D3.2.3, D3.3.1, D5.3.4, D8.1.1, D8.2.1–D8.2.6, D8.4.3, D8.5.1–D8.5.3, D8.6.1, D8.6.3, D8.6.4v2
+**Design authority:** `doc/Lambda_Formal_Design.md` D2.3.4–D2.3.5, D4.2.4, D4.3.1, D6.3.4, D8.3.1, D8.2.1–D8.2.6, D7.4.3, D8.5.1–D8.5.3, D8.6.1, D8.6.3, D8.6.4
 **Working design:** historical basis `vibe/Lambda_Design_Unified_AST.md` U27–U36; active continuation `vibe/Lambda_Design_JS_Unified.md`  
 **Predecessor:** `vibe/impl/Lambda_Impl_Unified_AST (done).md` (structural convergence record; not the checklist for this continuation)
 
@@ -24,7 +24,7 @@ This plan does not unify the Tree-sitter grammars or erase Lambda/JavaScript sem
 
 ## 2. Non-negotiable exit gates
 
-Under **D8.6.4v2**, the semantic, LOC, compiler-time, and measurement gates in this section are hard. A green test suite cannot compensate for a missed LOC or performance gate, and a faster test scheduler cannot compensate for unchanged compiler work. MIR volume is retained as a required diagnostic signal, but is not an exit blocker.
+Under **D8.6.4**, the semantic, LOC, compiler-time, and measurement gates in this section are hard. A green test suite cannot compensate for a missed LOC or performance gate, and a faster test scheduler cannot compensate for unchanged compiler work. MIR volume is retained as a required diagnostic signal, but is not an exit blocker.
 
 | Gate | Requirement | Pass condition |
 |---|---|---|
@@ -195,7 +195,7 @@ jm_copy_cached_function_locals`: a stale suppression-map read in an Annex-B
 batch worker. A worker crash then looked like a transpilation timeout because
 the batch controller waited for a lost result and retried the work.
 
-The ownership invariant is now explicit and follows **D5.3.4**: cached
+The ownership invariant is now explicit and follows **D6.3.4**: cached
 analysis facts live for the whole MIR-transpiler compilation and are released
 only by `jm_free_scope_env_names`/transpiler cleanup; copy helpers never free
 borrowed cached maps. An attempted whole-path memo was rejected: the lexical
@@ -253,7 +253,7 @@ Existing language-local walkers are migrated one at a time and deleted in the sa
 
 ### 4.4 Explicit facts and pass contracts
 
-Follow **D8.2.5**, **D2.4.1**, **D3.2.3**, and **D3.3.1**:
+Follow **D8.2.5**, **D2.3.4**, **D4.2.4**, and **D4.3.1**:
 
 - AST `Type*` is the source/semantic contract;
 - `AstIndex` is the identity/binding authority;
@@ -274,7 +274,7 @@ Each pass declares required and produced fact bits. Debug/test builds assert dep
 
 ### 4.5 `MirValue` and demand-driven lowering
 
-Complete **D8.2.6** and **D2.4.2–D2.4.3** on both paths. Every core expression returns `MirValue {reg, mir_type, rep, Type* contract, provenance}`. Bare-register expression APIs are transitional and must be removed before closeout.
+Complete **D8.2.6** and **D2.3.4–D2.3.5** on both paths. Every core expression returns `MirValue {reg, mir_type, rep, Type* contract, provenance}`. Bare-register expression APIs are transitional and must be removed before closeout.
 
 Pass one demand into lowering:
 
@@ -284,7 +284,7 @@ Pass one demand into lowering:
 - `VALUE_DEST_REG` — write directly into a known assignment/return/argument/scalar-home destination;
 - `VALUE_BRANCH` — branch directly without boxing a condition result.
 
-Profile hooks own semantic coercion; `em_require_rep()` owns carrier conversion. `MirEmitter` alone owns rootability and final root stores under **D5.3.4**. JS fallible helpers continue to use the merged Item error ABI under **D8.4.3**.
+Profile hooks own semantic coercion; `em_require_rep()` owns carrier conversion. `MirEmitter` alone owns rootability and final root stores under **D6.3.4**. JS fallible helpers continue to use the merged Item error ABI under **D7.4.3**.
 
 ---
 
@@ -381,7 +381,7 @@ tests remain the semantic gate; this phase adds a small deterministic suite
 that proves which cache, guard, IC, lowering demand, and fallback was selected.
 This gives the debugging/recovery work a durable regression oracle without
 coupling tests to MIR register names, pointer addresses, or incidental helper
-layout. The phase implements the measurement intent of **D8.6.4v2** at the
+layout. The phase implements the measurement intent of **D8.6.4** at the
 decision level and preserves the common pass/lowering structure required by
 **D8.2.5–D8.2.6**.
 
@@ -522,15 +522,15 @@ The first required rows are:
 | Dense array indexed store | dense contiguous array takes the direct store path | hole/sparse, prototype setter, non-extensible array, or non-writable length records the reason and uses the generic path |
 | Named load/store IC | first access installs mono/polymorphic state and later accesses hit it | shape/key/type change records a miss and invalidation/transition |
 | Dynamic `Function` fast path | simple eligible body records the parser fast path | comments, ASI-sensitive, reserved/complex syntax records the normal-parser fallback |
-| Demand-driven MIR lowering | discard, direct branch, and direct destination avoid unnecessary value materialization | representation mismatch records generic `VALUE_ANY` fallback; boxing/unboxing and root stores remain explicit under **D2.4.1–D2.4.3** and **D5.3.4** |
+| Demand-driven MIR lowering | discard, direct branch, and direct destination avoid unnecessary value materialization | representation mismatch records generic `VALUE_ANY` fallback; boxing/unboxing and root stores remain explicit under **D2.3.4–D2.3.5** and **D6.3.4** |
 | Module/TLA settlement | deferred body is drained before namespace resolution | pending async module is not resolved early and a module is not drained twice |
 | Scope/fact indexes | repeated lookups/fact requests hit the indexed cache | mutation or unavailable fact records a miss and rebuild/fallback |
-| URI error cache | repeated malformed URI decoding records a miss followed by rooted cache hits | absent runtime/root registration uses the uncached rooted constructor and cannot report a hit (**D5.3.3**) |
-| MIR branch-join carrier | logical and conditional joins publish the merged `Item` destination to the post-join ERROR-lane test | neither short-circuit nor alternate edges may expose a path-local helper register (**D8.4.3**) |
+| URI error cache | repeated malformed URI decoding records a miss followed by rooted cache hits | absent runtime/root registration uses the uncached rooted constructor and cannot report a hit (**D6.3.3**) |
+| MIR branch-join carrier | logical and conditional joins publish the merged `Item` destination to the post-join ERROR-lane test | neither short-circuit nor alternate edges may expose a path-local helper register (**D7.4.3**) |
 
 Each positive case must also assert the ordinary result. Each negative case
 must assert the result/error and the reasoned fallback. This is important for
-**D8.4.3**: an optimization may not hide or replace the merged JS `Item` error
+**D7.4.3**: an optimization may not hide or replace the merged JS `Item` error
 lane merely to make a fast-path counter increase.
 
 #### 5.5.3 Contract-test harness
@@ -648,8 +648,8 @@ Planning checkpoint, not a substitute for final gates: aim for ≥350 cumulative
 - [ ] Inventory every mutation/read of `AstNode.type` and classify it as declared contract, inferred type, narrowed flow fact, or representation plan.
 - [ ] Keep declared/source contracts on AST/bindings; migrate inferred/effective values into side tables.
 - [ ] Add assertions preventing an inferred fact from overwriting a declared contract.
-- [ ] Add a “facts erased” boxed mode for **D3.3.1** differential testing.
-- [ ] Keep representation/provenance out of `TypeId` shortcuts under **D2.4.1**.
+- [ ] Add a “facts erased” boxed mode for **D4.3.1** differential testing.
+- [ ] Keep representation/provenance out of `TypeId` shortcuts under **D2.3.4**.
 
 ### 7.2 Typed pass manager
 
@@ -691,10 +691,10 @@ Planning checkpoint: aim for ≥900 cumulative LOC removed, ≥5% Lambda compile
 ### 8.1 Complete the expression contract
 
 - [ ] Inventory every Lambda and JS expression-lowering entry/return type.
-- [ ] Extend common `MirValue` to carry the full `Type*` contract and provenance required by **D2.4.2**.
+- [ ] Extend common `MirValue` to carry the full `Type*` contract and provenance required by **D2.3.4**.
 - [ ] Convert core expression handlers from bare register/`TypeId` results to `MirValue`.
-- [ ] Ban `MIR_reg_type()` as a semantic/representation oracle in expression lowering; keep only named physical-layer helpers permitted by **D2.4.1**.
-- [ ] Route every carrier change through fail-closed `em_require_rep()` under **D2.4.3**.
+- [ ] Ban `MIR_reg_type()` as a semantic/representation oracle in expression lowering; keep only named physical-layer helpers permitted by **D2.3.4**.
+- [ ] Route every carrier change through fail-closed `em_require_rep()` under **D2.3.5**.
 - [ ] Keep JS semantic coercions in JS profile hooks and Lambda conversions in Lambda profile hooks.
 
 ### 8.2 Add demand, in low-risk slices
@@ -713,12 +713,12 @@ Every handler may fall back to `VALUE_ANY`. Correctness never depends on satisfy
 
 ### 8.3 Emitter ownership and emitted-work reduction
 
-- [ ] Consolidate final root stores, scalar homes, and module data finalization in `MirEmitter` only (**D5.3.4**).
+- [ ] Consolidate final root stores, scalar homes, and module data finalization in `MirEmitter` only (**D6.3.4**).
 - [ ] Delete language-local final-store/rooting copies as each caller migrates.
 - [ ] Count MIR instructions, calls, boxing/unboxing conversions, temporaries, and root stores per timed sample.
 - [ ] For each large JS fixture, compare compiler phase time and emitted instruction categories before/after.
 - [ ] Keep finalized MIR instruction counts deterministic across all repeated runs; investigate any variation before using a capture.
-- [ ] Preserve JS error Item identity and try/finally routing under **D8.4.3**.
+- [ ] Preserve JS error Item identity and try/finally routing under **D7.4.3**.
 - [ ] Reject any speedup that depends on weakening error checks or precise rooting.
 
 ### 8.4 Phase 3 tests and checkpoint
@@ -800,7 +800,7 @@ Restrictions:
 
 - persistent cache warm hits are not accepted as the primary G2/G3 proof;
 - a test/module sample may not disappear from the manifest because it was cached or made lazy;
-- ~~do not implement a new AST interpreter (**D8.1.1**)~~ — lifted 2026-08-15 by **D8.1.1v2**/AI1; interpreter work proceeds under `vibe/Lambda_Design_Ast_Interpreter.md` phases P0–P5, not this doc's contingencies;
+- ~~do not implement a new AST interpreter (**D8.3.1**)~~ — lifted 2026-08-15 by **D8.3.1**/AI1; interpreter work proceeds under `vibe/Lambda_Design_Ast_Interpreter.md` phases P0–P5, not this doc's contingencies;
 - do not patch MIR/vendor code;
 - do not weaken optimization level, validation, early errors, rooting, or link correctness;
 - do not add source-level parallelism until profiler data proves independent work and determinism/diagnostics are preserved.
@@ -841,10 +841,10 @@ make test-js-opt
 
 ### 11.3 Required semantic invariants
 
-- **D3.3.1:** boxed/facts-erased and specialized execution are observationally identical.
-- **D2.4.1–D2.4.3:** no representation decision is recovered from a MIR register class; conversions fail closed.
-- **D5.3.4:** precise root policy/final stores exist only in `MirEmitter`.
-- **D8.4.3:** JS fallible helpers preserve the merged error Item and its identity through routing.
+- **D4.3.1:** boxed/facts-erased and specialized execution are observationally identical.
+- **D2.3.4–D2.3.5:** no representation decision is recovered from a MIR register class; conversions fail closed.
+- **D6.3.4:** precise root policy/final stores exist only in `MirEmitter`.
+- **D7.4.3:** JS fallible helpers preserve the merged error Item and its identity through routing.
 - **D8.6.1:** no silent MIR budget slack.
 - **D8.6.3:** forced-GC/poison runs match unstressed runs.
 
@@ -937,7 +937,7 @@ attributed without turning MIR volume into an exit gate.
 A post-finalization copy-propagation experiment was rejected and removed because
 MIR's post-finish operand mutation contract is not established for all
 backends. The safe fallback is retained until a demand producer can prove the
-full **D8.4.3** error/root contract.
+full **D7.4.3** error/root contract.
 
 ### 13.1.2 Test262 instability root-cause closeout (2026-08-13)
 
@@ -952,11 +952,11 @@ retry rule was changed. Five coupled root causes were fixed:
    the complete `data_cap`, detach snapshot shapes before type/new-property
    mutation, and publish both hidden and public typed-array constructor
    `prototype` slots. This protects the realm-isolation invariant under
-   **D4.3.1**, **D5.4.3**, and **D6.2.2v2**.
+   **D5.3.1**, **D6.4.3**, and **D7.2.2**.
 2. Ordinary top-level `var` declarations were lowered into repeated
    `js_set_module_var`, global-property, and binding-registration MIR calls even
    though the runtime already had a bulk instantiation helper. A table-driven
-   **D8.4.3** lowering now emits one bulk call for ordinary script/module vars
+   **D7.4.3** lowering now emits one bulk call for ordinary script/module vars
    while eval/Annex-B cases retain their specialized lanes. On
    `language/identifiers/start-unicode-10.0.0-escaped.js`, normal-release time
    fell from about 5.30–5.40 s to 0.340–0.364 s; the profile's top-level runtime
@@ -972,7 +972,7 @@ retry rule was changed. Five coupled root causes were fixed:
    contract remains green.
 4. Logical and conditional MIR joins merged their semantic `Item` result but
    left `last_call_result_reg` naming a path-local RHS/branch register. The
-   post-join **D8.4.3** error test could therefore read an undefined stale
+   post-join **D7.4.3** error test could therefore read an undefined stale
    register on the short-circuit edge; in release builds that register
    intermittently contained the bare `ItemError` bit pattern. Logical joins now
    publish the merged result as the carrier, and conditional branches both
@@ -986,18 +986,18 @@ retry rule was changed. Five coupled root causes were fixed:
    stale pointer. The URI error slow path also created name and message strings
    as unrooted locals across consecutive allocations. The cache now registers
    its range on first use before storing an Item, and both URI decoders use the
-   canonical rooted error constructor, enforcing **D5.3.3**. Before this fix,
+   canonical rooted error constructor, enforcing **D6.3.3**. Before this fix,
    the decodeURIComponent stress batch produced ten `CRASH_139` results, killed
    the worker after 69/100 tests, and peaked at 1,371.5 MB RSS; afterwards the
    same batch completed 100/100 on every stability run.
 
-The runtime ownership fixes now have named **D5.3.3** fixtures in
+The runtime ownership fixes now have named **D6.3.3** fixtures in
 `test_mir_gc_stress_gtest`: global URI/character caches, `for...in` key/result
 construction, and RegExp named-group/indices result construction. Each fixture
 must match its unstressed output under collect-every plus poison, deterministic
 randomized GC plus poison, and collect-every through the MIR interpreter. The
 same source fixtures participate in `test_js_mir_emission_gtest`; an additional
-**D8.4.3** fixture requires exactly one
+**D7.4.3** fixture requires exactly one
 `js_init_module_vars_undefined_bulk` call so the batch-lowering path cannot be
 silently disabled again.
 
@@ -1023,7 +1023,7 @@ the continuation.
 | Phase | Status | Evidence |
 |---|---|---|
 | 0 — measurement/guardrails | completed | Common timing/MIR protocol, GTest parsers, TSV capture summaries, clean five-run Lambda/JS manifests, instrumentation equivalence, and finalized-artifact equivalence are recorded |
-| 0.5 — optimization contract testing | partial at retirement | `test_js_opt_gtest` passes 12/12 with profile tracing, including the medium capture-free regex cache/fresh-object contract, D8.4.3 logical and conditional join-carrier contracts, the D5.3.3 rooted URI cache contract, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; `test_mir_gc_stress_gtest` passes 66/66 with named fixtures for all repaired ownership paths; runtime ownership migration and the remaining optimization rows remain |
+| 0.5 — optimization contract testing | partial at retirement | `test_js_opt_gtest` passes 12/12 with profile tracing, including the medium capture-free regex cache/fresh-object contract, D7.4.3 logical and conditional join-carrier contracts, the D6.3.3 rooted URI cache contract, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; `test_mir_gc_stress_gtest` passes 66/66 with named fixtures for all repaired ownership paths; runtime ownership migration and the remaining optimization rows remain |
 | 1 — traversal/index/binding | partial at retirement | `AstIndex`, dense node/function identities, common core child visitor, JS function pointer index, and pass-manager prerequisite harness landed; extension catalog/binding migration remain |
 | 2 — facts/pass manager | partial at retirement | Typed fact bits/pass manager and `MirValue` demand/contract fields landed; production pass wrapping remains |
 | 3 — demand-driven `MirValue` | partial at retirement | Immediate boxed-number reuse is live for indexed JS function/module scopes; full demand propagation and common expression boundaries remain |
@@ -1063,17 +1063,17 @@ This plan would have been complete only if all statements were true:
 
 - [ ] Lambda and JS compile through one explicit pass manager over one indexed compilation unit (**D8.2.4–D8.2.5**).
 - [ ] Core traversal, binding identity, function/class lookup, facts, and graph scheduling each have one authority (**D8.2.4–D8.2.5**).
-- [ ] Declared contracts and inferred/effective facts are separate (**D3.2.3**).
-- [ ] Both expression pipelines use full-contract `MirValue`; demand-driven lowering has a safe generic fallback (**D8.2.6**, **D2.4.1–D2.4.3**).
-- [ ] Root/final-store policy exists only in `MirEmitter` (**D5.3.4**).
+- [ ] Declared contracts and inferred/effective facts are separate (**D4.2.4**).
+- [ ] Both expression pipelines use full-contract `MirValue`; demand-driven lowering has a safe generic fallback (**D8.2.6**, **D2.3.4–D2.3.5**).
+- [ ] Root/final-store policy exists only in `MirEmitter` (**D6.3.4**).
 - [ ] Language profiles contain semantic differences, not duplicate pass schedules or core walks (**D8.2.1–D8.2.5**).
 - [ ] Old walkers, linear rediscovery, quadratic propagation, bare-register core APIs, and compatibility lowering paths are deleted.
-- [ ] G1 reports at least 2,000 net physical runtime/compiler LOC removed (**D8.6.4v2**).
-- [ ] G2 reports at least 10% lower Lambda GTest compiler time (**D8.6.4v2**).
-- [ ] G3 reports at least 20% lower JS GTest compiler time (**D8.6.4v2**).
-- [ ] D4 reports deterministic finalized-MIR volume for the frozen JS large-library cohort and complete corpus; investigate material growth (**D8.6.4v2**).
-- [ ] G5 proves identical, complete, deterministic release-mode timing manifests; MIR manifests remain attached as diagnostics (**D8.6.4v2**).
-- [ ] Optimization Contract Testing passes: each material tuning path has a positive and guard/fallback fixture with deterministic `JsOptTrace` events; trace-on/trace-off output, errors, and finalized MIR are identical (**D8.2.5–D8.2.6**, **D8.6.4v2**).
+- [ ] G1 reports at least 2,000 net physical runtime/compiler LOC removed (**D8.6.4**).
+- [ ] G2 reports at least 10% lower Lambda GTest compiler time (**D8.6.4**).
+- [ ] G3 reports at least 20% lower JS GTest compiler time (**D8.6.4**).
+- [ ] D4 reports deterministic finalized-MIR volume for the frozen JS large-library cohort and complete corpus; investigate material growth (**D8.6.4**).
+- [ ] G5 proves identical, complete, deterministic release-mode timing manifests; MIR manifests remain attached as diagnostics (**D8.6.4**).
+- [ ] Optimization Contract Testing passes: each material tuning path has a positive and guard/fallback fixture with deterministic `JsOptTrace` events; trace-on/trace-off output, errors, and finalized MIR are identical (**D8.2.5–D8.2.6**, **D8.6.4**).
 - [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence has `make test-lambda-baseline` green at 3713/3713 (input 2104/2104 plus Lambda runtime 1609/1609, including JS MIR 20/20 and forced-GC 66/66), nine consecutive post-fix `make test262-baseline` runs green at 40261/40261 with zero non-fully-passing tests, retries, crash exits, or killed batches, and `test_js_opt_gtest` green at 12/12; the remaining §11 commands still require final closeout execution.
 - [ ] §13 contains the final commits, raw-capture locations, medians, phase attribution, LOC ledger, and verified test results.
 

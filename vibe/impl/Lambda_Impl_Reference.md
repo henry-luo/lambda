@@ -242,7 +242,7 @@ explicitly, so five new keywords silently broke:
 The design record is PROPOSED and the formal specs are unchanged. What ships
 now needs the §"Proposed spec linkage" revisions to become normative:
 S2.1.1v4 / new S2.4.6 / S6.2.1v2; new S10.6 and S10.6.3; S5.1.4v3, S9.1.5v3,
-D2.6.8v2 (closing SO41 and DO25, revising SO39); new S9.4 with S14.3.1v2, the
+D3.1.3 (closing SO41 and DO25, revising SO39); new S9.4 with S14.3.1v2, the
 S12 effect table, and S2.4.4v2; S10.1.2v2 / S10.1.5v2; and the S16.2.2v3 /
 S16.2.3v3 line-start classes. `vibe/Lambda_Design_Reference.md` also needs its
 status line moved off PROPOSED once those land.

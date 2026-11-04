@@ -1,7 +1,7 @@
 #pragma once
 
 // RootVector: the one growable, address-stable, precisely scanned Item
-// collection for context-owned non-LIFO state (D5.1.1v2, D5.4.2; JSCU12).
+// collection for context-owned non-LIFO state (D6.1.1, D6.4.2; JSCU12).
 //
 // Storage is a chain of fixed 64-slot blocks. A block is registered as a GC
 // root range with the owning context's heap before its first Item is

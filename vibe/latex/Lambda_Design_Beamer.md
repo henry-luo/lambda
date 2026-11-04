@@ -2,7 +2,7 @@
 
 **Status:** Design proposal, 2026-10-13. The user chose this direction over keeping beamer out of scope ([Phase V plan](../impl/Lambda_Impl_Latex_Packages.md) §17.5). Nothing is implemented; until it is, `\documentclass{beamer}` reports `unknown-package` and renders with the article profile.
 
-**Formal linkage:** **D7.2.7v2** (expansion only: `beamer.cls` never runs on the engine, and its semantics live in a class profile), **D7.2.1–D7.2.4v3** (script adapters in the static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (the lowering is pure and deterministic), **D7.5.3** (the Lambda/Radiant boundary the slide player keeps), **S7.4.1–S7.4.4** (located diagnostics). Within the slide package: SLD1–SLD4 ([Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) §0).
+**Formal linkage:** **D10.2.2** (expansion only: `beamer.cls` never runs on the engine, and its semantics live in a class profile), **D9.3.1–D9.3.4** (script adapters in the static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (the lowering is pure and deterministic), **D9.5.6** (the Lambda/Radiant boundary the slide player keeps), **S7.4.1–S7.4.4** (located diagnostics). Within the slide package: SLD1–SLD4 ([Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) §0).
 
 **Scope:** a beamer document's frames, overlays, blocks, columns, notes, outline and themes, lowered onto the `<presentation>` deck that `lambda.slide` already plays. Out of scope: running beamer's templates as TeX, pixel-exact theme artwork, `beamerarticle`'s article mode beyond §6, and PPTX.
 
@@ -12,7 +12,7 @@ A beamer document becomes a deck, not an article. The LaTeX package parses and a
 
 Why this shape:
 
-- beamer's typesetting (headlines, sidebars, overlay page duplication) is TeX output; Lambda expands like TeX but never typesets like it (**D7.2.7v2**). The slide package already owns canvas fitting, playback and transitions, so beamer adds a source format, not a second player.
+- beamer's typesetting (headlines, sidebars, overlay page duplication) is TeX output; Lambda expands like TeX but never typesets like it (**D10.2.2**). The slide package already owns canvas fitting, playback and transitions, so beamer adds a source format, not a second player.
 - The frame body is LaTeX the package already renders: math, tables, graphics, TikZ, theorems and bibliographies come for free.
 - Overlay specifications have a direct reading as cue boundaries (§3), and the slide model's stable addresses `{slide, cue, time_ms}` match beamer's pages one for one, which gives a verification oracle (§8).
 

@@ -90,6 +90,6 @@ void write_set_rollback(void);
 // unhandled runtime error ALWAYS rolls back.
 bool write_set_end_transaction(bool unwinding);
 
-// D5.4.2-D5.4.4: clears only the active evaluator; heap teardown retires its
+// D6.4.2-D6.4.4: clears only the active evaluator; heap teardown retires its
 // capsule and explicit roots even when a different evaluator is active.
 void write_set_reset(void);

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3.1-D5.3.2: the 65th-plus GC-free body and a length leaf leave the caller rootless; the old fixed registry added a root slot.",
+  "description": "D6.3.1-D6.3.2: the 65th-plus GC-free body and a length leaf leave the caller rootless; the old fixed registry added a root slot.",
   "checks": [
     {
       "in_func": "_gc_after_many_#",

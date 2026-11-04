@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune31 T31-2 / D3.2.1-D3.3.1, S9.2.2: a proven homogeneous append builder returns an int-lane ArrayNum and its direct consumer indexes that lane without generic array helpers.",
+  "description": "Tune31 T31-2 / D4.2.1-D4.3.1, S9.2.2: a proven homogeneous append builder returns an int-lane ArrayNum and its direct consumer indexes that lane without generic array helpers.",
   "checks": [
     {
       "in_func": "_build_codes_#",

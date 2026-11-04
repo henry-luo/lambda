@@ -2,7 +2,7 @@
 // platform.hpp — Radiant's platform backend seam (vibe/Lambda_Design_Mobile.md
 // MB7). Radiant sources name only these functions and opaque handles; exactly
 // one backend per build defines them: platform_glfw.cpp on desktop,
-// platform_null.cpp for builds without a GUI (LAMBDA_NO_GUI, D7.1.4v2), and a
+// platform_null.cpp for builds without a GUI (LAMBDA_NO_GUI, D9.2.1), and a
 // UIKit backend on iOS. The backend translates native input into RdtEvent and
 // reports it, and window notifications, through the radiant_host_* functions
 // at the end of this header; host policy (history keys, close guards, click

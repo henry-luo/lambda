@@ -1,3190 +1,1916 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 61.0.0 (2026-11-04)
+**Spec version:** 62.0.0 (2026-11-05)
 
-**Status:** normative — the single source of truth for the design and
-implementation decisions that realize the semantics in
-[`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md). Where any other
-document — including the `vibe/` design records — or the implementation
-disagrees, this specification wins; the design records govern the history.
-Scope: the Lambda core runtime and Jube polyglot hosting. LambdaJS and
-Radiant get their own documents, but the cross-language runtime contracts
-explicitly named in D1.4v4 and D8.4.3v2 bind every language hosted on the
+**Status:** normative. This document is the single source of truth for the
+design decisions that implement
+[`Lambda_Formal_Semantics.md`](Lambda_Formal_Semantics.md). If another
+document or the implementation disagrees with it, this document wins. The
+`vibe/` design records keep the history, the rejected alternatives and the
+detailed design.
+
+**Scope:** the Lambda core runtime, LambdaJS where it shares that runtime,
+Jube module hosting, the build profiles, and the shipped document packages.
+Radiant layout and rendering have their own documents. The cross-language
+runtime contracts in D1.4 and D7.4.3 apply to every language that runs on the
 Lambda runtime.
 
-**Ruling IDs.** Same convention as the semantics spec: section-path IDs
-(`D2.3.1` = first ruling of §2.3), `v2` suffix on revision, doc-level
-semver. The bare `D` series is reserved for this document — the
-data-processing ledger was renumbered `PD1–PD16` on 2026-08-06 to free it.
+**Principles first.** This document records design principles and the
+decisions that follow from them. Principles stay; details change as the
+implementation moves. Thus a ruling states its principle in its title and its
+decision at a stable level. It does not record tuning values, internal names
+that can change, measurements or implementation history. Those items belong
+in the vibe design records and in the
+[implementation history](../vibe/impl/Lambda_Impl_Formal_Design_History.md).
+A change of implementation detail must not need a change to this document.
 
-**Implementation marks.** A ruling marked `*` is not, or only partially,
-implemented; Appendix A carries the footnote. Open design issues are
-numbered **`DO#`** (design-open) in Appendix B. Appendix C maps sections to
-the decision records.
+**Style.** This document uses ASD-STE100 Simplified Technical English: short
+sentences, active voice, present tense, and one statement in each sentence.
+Code names are technical names.
+
+**Ruling IDs.** A ruling ID is a section path: `D2.3.1` is the first ruling
+of §2.3. A revised ruling keeps its ID and gets a version suffix (`D2.3.1v2`),
+and the document version changes by semver. The bare `D` series belongs only
+to this document. `DI#` are invariants. `DO#` are open design issues
+(Appendix B).
+
+**Renumbering (61.0.0).** Version 61.0.0 restructured this document and gave
+new IDs to all rulings. All version suffixes started again. The same change
+migrated every citation in the repository. Git history, commit messages and
+branches from before 2026-11-04 still use the old IDs. The
+[implementation history §1](../vibe/impl/Lambda_Impl_Formal_Design_History.md#1-old-to-new-ruling-ids)
+maps each old ID to its new ID. To find the new ruling for an old ID, run
+`python3 utils/formal_index.py --old D8.1.1v14`.
+
+**Implementation marks.** A `*` after an ID means that the ruling is not
+implemented, or is only partly implemented. Appendix A gives the status.
+Appendix C maps each section to its decision records.
+
+**Contents.** D1 Architecture principles · D2 Value representation · D3
+Containers and shapes · D4 Types · D5 Memory · D6 Execution state · D7
+Functions and calls · D8 Compilation and execution tiers · D9 Build, modules
+and packages · D10 Documents and shipped packages · D11 Security and
+capabilities.
 
 ---
 
 ## D1 Architecture Principles
 
-- **D1.1 — One host, many bundles.** There is exactly one `lambda.exe`;
-  bundles differ only by the Jube modules beside it, and host binaries are
-  byte-identical across bundles. Guest languages are **dialects hosted on
-  Lambda's substrate** — no 100%-compat claim; a guest is a grammar + AST
-  builder + LangProfile, and what the profile doesn't cover isn't
-  supported. [JA4, J5, U1]
-- **D1.2v2* — Explicit guest ABI boundary.** `Item` is the only value
-  currency across Lambda, Jube, native modules, and every **host boundary**.
-  A separately versioned guest execution ABI may keep private values and
-  private object pointers while executing, but none may cross that boundary
-  or be reinterpreted as an `Item`; crossing requires an explicit owned
-  adapter. Native host structs cross as VMap projections and system resources
-  as integer rids. [JA6, JM22]
-- **D1.3v3* — Shared host substrate, private guest cores.** There is one
-  host MIR library and at most one event loop per host context. A guest first
-  reuses every applicable untyped-Lambda substrate component: source-admission
-  ownership, parser/AST and binding facts, MIR lifecycle and diagnostics,
-  memory-accounting categories, logging, build/test gates, and explicit
-  return/cleanup discipline. A guest may own a private value heap, root stack,
-  and semantic kernels only where its isolated ABI under D1.2v2 makes direct
-  reuse semantically invalid; each such boundary must be named and tested.
-  It may not acquire another host Runtime, event loop, allocator framework, or
-  Lambda-side stack owner. [Lang_Hosting P1–P10, C1–C10, JM22]
-- **D1.4v4* — Language failures return through every frame.** A fallible
-  function returns an explicit completion: Lambda's host ABI uses an `Item`
-  success/error carrier or a proven native companion error lane
-  (D5.2.1v5); a private guest ABI uses its own versioned completion until an
-  explicit boundary adapter returns to the host. In either ABI, errors,
-  throws, and rejections propagate by normal return through **each** caller,
-  which routes failure before consuming success and runs its cleanup/epilogue.
-  No pending-exception side channel, C++ exception, `setjmp`/`longjmp`, SEH
-  unwind, signal jump, or guest unwind implements a language failure or skips
-  an intervening frame. The sole temporary exception is an untyped native
-  system/resource fault from the closed S7.11.1 set: it may abandon frames
-  through `LambdaRecoveryFrame` under D2.8.2/D6.3.3, but that mechanism is
-  never an ordinary error or hosted-language exception path. [S7.4.3,
-  S7.4.4, S7.11.1–S7.11.4, Runtime_Error_Handling REH-D1–REH-D5, JA5, J3,
+These principles apply to all parts of the runtime. The rulings in D2–D11
+apply them.
+
+- **D1.1 — One host, many bundles.** There is one `lambda.exe`. Bundles
+  differ only in the Jube modules that they ship beside it. The host binary is
+  the same in all bundles. A guest language is a dialect on the Lambda
+  substrate: a grammar, an AST builder and a `LangProfile`. Lambda does not
+  claim full compatibility with a guest language. What the profile does not
+  cover is not supported. [JA4, J5, U1]
+- **D1.2* — `Item` is the only value currency at a host boundary.** Lambda,
+  Jube, native modules and every host boundary exchange values only as
+  `Item`. A guest execution ABI with its own version can keep private values
+  while it runs. A private value never crosses a host boundary, and it is
+  never read as an `Item`. A crossing needs an explicit adapter that owns the
+  conversion. Native host structs cross as virtual carriers (D9.5.5). System
+  resources cross as integer resource IDs. [JA6, JM22]
+- **D1.3* — Guests share the host substrate.** A host context has one MIR
+  library and not more than one event loop. A guest first uses the shared
+  Lambda components: source admission, parser and AST facts, MIR lifecycle,
+  diagnostics, memory accounting, logging, test gates, and the
+  return-and-cleanup discipline. A guest can own a private value heap, root
+  stack or semantic kernel only where its private ABI (D1.2) makes the shared
+  component incorrect. Each such boundary must have a name and a test. A guest
+  never gets a second host runtime, event loop, allocator framework or Lambda
+  stack owner. [Lang_Hosting P1–P10, C1–C10, JM22]
+- **D1.4* — A language failure returns through every frame.** A function that
+  can fail returns an explicit completion. The Lambda host ABI uses an `Item`
+  success-or-error carrier, or a proven native lane with a companion error
+  lane (D6.2.1). A private guest ABI uses its own completion until an adapter
+  returns to the host. An error, a throw or a rejection moves to the caller
+  only by a normal return. Each caller examines the failure before it uses a
+  success value, and it runs its own cleanup. No pending-exception flag, C++
+  exception, `setjmp`/`longjmp`, SEH unwind, signal jump or guest unwind
+  carries a language failure. The only exception is a native system fault
+  from the closed set of S7.11.1. Such a fault can abandon frames through a
+  recovery frame (D6.3.6). That path is never an error path or a guest
+  exception path. [S7.4.3, S7.4.4, S7.11.1–S7.11.4, REH-D1–REH-D5, JA5, J3,
   JM22]
-- **D1.5v2* — Precise GC everywhere, forever.** Conservative native-stack
-  scanning is retired from every build and stays retired. A guest is precise
-  only when either the shared rooting primitives or its D1.2v2 private root
-  interface enumerates every live guest reference, its collector traces all
-  guest edges, and forced-collection tests prove the contract. [CR1–CR8,
-  JM22]
-- **D1.6 — The legacy paths are frozen.** The C-text C2MIR back end
-  (`transpile.cpp`) was permanently compatibility-only — no edits, no new
-  features, no validation gates, exempt from every new protocol — and has
-  since been removed from the tree along with the CLI flag that selected it;
-  MIR Direct is the sole back end. [rule 14; SM14, CR7, U11]
-- **D1.7 — Source is the spec level.** Scripts distribute as source; MIR is
-  a private in-memory IR, never a distribution format; every compiled
-  artifact is a **local derived cache keyed by build ID + content hash** —
-  memoization, not a format. [JA13, MC7/P14]
-- **D1.8 — Decisions are carried, never recovered.** The compiler carries
-  semantic contracts and representation choices forward explicitly; it
-  never reconstructs either by interpreting emitted MIR register classes,
-  and no context-dependent value lives at a code-baked address. [Lane §1, MT2]
-- **D1.9 — Fail closed.** Unresolved calls are `MAY_GC` with unknown
-  effects; unsupported representation conversions abort in every build;
-  malformed input is an error, never UB; suppressing logs must not turn
-  malformed MIR into accepted MIR. [Stack_API §7.2, Lane §4.3, CP18, MT2]
-- **D1.10 — Enforcement is part of the design.** Every invariant exists as
-  a static assert, debug check, lint rule, ratchet, or CI gate — the tag
-  budget is governed, emission size is ratcheted at 0% slack, module
-  boundaries are link-checked, and **every module kind names its
-  conformance gate; no module lands without its gate**. [Item_Boxing R7, MT7, SM5, JA9]
+- **D1.5* — Precise GC everywhere, permanently.** Conservative scans of the
+  native stack are removed from all builds. They must not come back. A guest
+  is precise only if all these conditions are true:
+  - a root interface (shared, or private under D1.2) gives every live guest
+    reference;
+  - its collector traces all guest edges;
+  - forced-collection tests prove the contract. [CR1–CR8, JM22]
+- **D1.6 — MIR Direct is the only compiler back end.** The C-text C2MIR back
+  end and its CLI flag are removed. Do not add a second back end that
+  generates C text. [rule 14; SM14, CR7, U11]
+- **D1.7 — Source is the distribution format.** Scripts are distributed as
+  source. MIR is a private in-memory IR, not a distribution format. A compiled
+  artifact is a local cache. Its key is the build ID and the content hash.
+  [JA13, MC7/P14]
+- **D1.8 — Carry decisions forward; never recover them.** The compiler carries
+  semantic contracts and representation choices forward explicitly. It never
+  reconstructs them from emitted MIR register classes. No value that depends
+  on the context lives at an address that is fixed in the code. [Lane §1, MT2]
+- **D1.9 — Fail closed.** An unresolved call is `MAY_GC` and has unknown
+  effects. An unsupported representation conversion stops the program in
+  every build. Malformed input is an error, never undefined behavior. A log
+  setting must not make malformed MIR acceptable. [Stack_API §7.2, Lane §4.3,
+  CP18, MT2]
+- **D1.10 — Enforcement is part of the design.** Each invariant has a static
+  assert, a debug check, a lint rule, a ratchet or a CI gate. The tag budget
+  has an owner. The emission size has a ratchet with 0% slack. Module
+  boundaries have link checks. Each module kind names its conformance gate,
+  and no module lands without its gate. [Item_Boxing R7, MT7, SM5, JA9]
 
 ### The invariant ledger (DI)
 
-Standing design invariants distilled from the rulings. Each holds in every
-build unless marked otherwise; any observed violation is a defect. The
-language-visible counterparts are the semantics spec's SI ledger.
+These invariants come from the rulings. Each one holds in every build, unless
+it says otherwise. A violation is a defect. The semantics spec has the
+language-level ledger (SI).
 
-- **DI1 — The Item contract.** `sizeof(Item) == 8`, passed by value; leaf
-  pointers fit the low 56 bits; raw container pointers stay in the
-  supported low range and outside the inline-double discriminator space;
-  TBI/MTE top-byte metadata never leaks into an Item. [D2.1]
-- **DI2 — Canonical encoding.** One encoding per value per build;
-  `get_type_id` is the only semantic-type interface; a raw Item word
-  compare is never semantic equality unless canonicality proves it. [D2.1.2, D2.1.5]
-- **DI3 — The tag budget is governed.** 64 legal high-byte values under
-  inline doubles; claiming one updates the partition assertions and this
-  doc in the same change. [D2.1.4]
-- **DI4 — Lane sentinels are private.** Int-lane sentinels never escape
-  into an Item, container, or guest bridge; an INT-tagged Item always
-  decodes to a finite band value. [D2.2.2]
-- **DI5 — No sentinel laundering.** A nullable lane value is tested before
-  arithmetic, compare, deref, or typed store; a plain-`T` carrier never
-  holds a null sentinel; `box(NULL_LANE(T)) == ItemNull` exactly. [D2.5]
-- **DI6 — GC sees only pointers.** Numeric/bool sentinels and scalar homes
-  are never roots; the number stack is never scanned. [D2.5.1, D5.1.1v3, D5.2.2]
-- **DI7 — No scalar cells in the GC heap.** No `INT64`/`UINT64`/`FLOAT`
-  payload is ever a standalone GC allocation; an Item with those tags can
-  never point into the GC zone. [D2.7.1]
-- **DI8 — ArrayNum is null-free.** Its contract may be `T?`; its storage
-  never holds any null encoding — an admitted null store demotes first.
+- **DI1 — The Item contract.** `sizeof(Item) == 8`, and an `Item` is passed
+  by value. Leaf pointers fit in the low 56 bits. Raw container pointers stay
+  in the supported low address range, outside the inline-double space.
+  AArch64 top-byte metadata never goes into an `Item`. [D2.1]
+- **DI2 — Canonical encoding.** Each value has one encoding in each build.
+  `get_type_id` is the only interface for the semantic type. A compare of raw
+  Item words is not semantic equality, unless canonical encoding proves it.
+  [D2.1.2, D2.1.4]
+- **DI3 — The tag budget has an owner.** Inline doubles leave 64 legal
+  high-byte values. A change that claims one must also update the partition
+  assertions and this document. [D2.1.3]
+- **DI4 — Lane sentinels are private.** An int-lane sentinel never goes into
+  an `Item`, a container or a guest bridge. An INT-tagged `Item` always
+  decodes to a finite value. [D2.2.2]
+- **DI5 — No sentinel laundering.** Code tests a nullable lane value before it
+  uses the value in arithmetic, a compare, a dereference or a typed store. A
+  plain `T` carrier never holds a null sentinel. `box(NULL_LANE(T)) ==
+  ItemNull` exactly. [D2.4]
+- **DI6 — The GC sees only pointers.** Numeric and boolean sentinels and
+  scalar homes are never roots. The collector never scans the number stack.
+  [D2.4.1, D6.1.1, D6.2.2]
+- **DI7 — No scalar cells in the GC heap.** An `INT64`, `UINT64` or `FLOAT`
+  payload is never a separate GC allocation. An Item with one of those tags
+  never points into the GC heap. [D2.6.1]
+- **DI8 — ArrayNum is null-free.** Its contract can be `T?`. Its storage never
+  holds a null encoding. An admitted null store first demotes the array.
+  [D3.2.2]
+- **DI9 — Containers own their scalars.** A wide-scalar Item in a container
+  points only into the buffer of that container. A header never moves away
+  from its identity. A wide optional slot is a destination-owned `TypedItem`.
   [D2.6.2]
-- **DI9 — Container-owned scalars.** A container's wide-scalar Items point
-  only into its own buffer; headers are never reallocated out from under
-  an identity. `i64?`/`u64?` native Array and packed Map/Shape slots are
-  destination-owned `TypedItem`s, never raw scalar Items. [D2.6.4v3]
-- **DI10 — The safepoint contract.** GC begins only inside a `MAY_GC`
-  call; `MAY_GC` is the default and `NO_GC` a mechanically verified claim;
-  all `MAY_GC` cleanup runs before watermark restoration. [D5.3.2, D5.1.4]
-- **DI11 — One context, no baked addresses.** One `EvalContext` per
-  isolate, one TLS root; no context-dependent value at a code-baked
-  address; capsules never reallocate. [D5.4]
-- **DI12 — Hot paths stay lock-free.** No lock, atomic RMW, publication
-  check, or coherence op is ever added to a repeated execution path. [D5.4.4]
-- **DI13 — Representation is carried.** Emitted MIR register classes are
-  never consulted for semantics, representation, nullability, or
-  ownership. [D2.4.1]
-- **DI14 — Entry integrity.** The unboxed entry has exactly two
-  proof-producing paths, and a guard-failing input never reaches it;
-  generated code is immutable — never patched. [D8.3.3, D8.4.1]
-- **DI15v2 — No language failure skips a frame.** Errors and hosted-language
-  exceptions move between activations only by explicit completion and normal
-  return; each generated/native frame routes the failure and executes its own
-  epilogue. `LambdaRecoveryFrame` is reserved for the native system-fault
-  carve-out, and faults never cross a thread boundary. [D1.4v4, D5.1.4,
-  D6.3.3, D8.4.3v2]
-- **DI16 — Transactional initialization.** A half-initialized package or a
-  failed module registration is never observable — init commits or rolls
-  back. [D7.2.2, D7.3.2]
-- **DI17 — One value currency.** `Item` crosses every boundary; a raw C
-  pointer never appears in a script-visible signature; compiled artifacts
-  are local derived caches, never distributed. [D7.4.1v2, D1.7]
-- **DI18 — The emission ratchet.** Budgets carry 0% slack; the commit that
-  grows emission carries the budget edit. [D8.6.1]
-- **DI19 — The COW bit.** The shared flag is monotonic; a false "shared"
-  is a wasted copy, a false "unique" is a semantic bug; the unique fast
-  path is one byte load/test/branch. [D4.4]
-- **DI20 — Native lanes are error-free.** No `error` value ever occupies a
-  native carrier — ArrayNum or native-Array storage, a packed map field, a
-  native local, an unboxed entry parameter or return — and no unboxed
-  operator ever receives an error operand. A source not provably
-  error-free is carried boxed until discharged; a lane store either proves
-  admission or does not happen. Gating is static and fail-closed; the
-  fault regime is separate. [D2.8]
+- **DI10 — The safepoint contract.** A collection starts only inside a
+  `MAY_GC` call. `MAY_GC` is the default. `NO_GC` is a claim that a tool
+  verifies. All `MAY_GC` cleanup runs before the watermarks are restored.
+  [D6.3.2, D6.1.4]
+- **DI11 — One context, no fixed addresses.** There is one `EvalContext` per
+  isolate and one TLS root. No value that depends on the context is at an
+  address that is fixed in the code. Capsules never move. [D6.4]
+- **DI12 — Hot paths have no locks.** Do not add a lock, an atomic
+  read-modify-write, a publication check or a coherence operation to a path
+  that executes repeatedly. [D6.4.4]
+- **DI13 — Representation is carried.** Semantics, representation,
+  nullability and ownership never come from emitted MIR register classes.
+  [D2.3.4]
+- **DI14 — Entry integrity.** Only two paths give the proof to enter an
+  unboxed entry. An input that fails the guard never reaches it. Generated
+  code is immutable; it is never patched. [D7.3.3, D7.4.1]
+- **DI15 — No language failure skips a frame.** Errors and guest exceptions
+  move between activations only as an explicit completion and a normal
+  return. Each generated or native frame examines the failure and runs its
+  own epilogue. The recovery frame is only for native system faults. A fault
+  never crosses a thread. [D1.4, D6.1.4, D7.4.3, D7.5.3]
+- **DI16 — Initialization is a transaction.** A package or module that is only
+  partly initialized is never visible. Initialization commits or rolls back.
+  [D9.3.2, D9.4.2]
+- **DI17 — One value currency.** `Item` crosses every boundary. A raw C
+  pointer never appears in a signature that a script can see. A compiled
+  artifact is a local cache; it is never distributed. [D9.5.1, D1.7]
+- **DI18 — The emission ratchet.** Emission budgets have 0% slack. The commit
+  that makes emission larger also changes the budget. [D8.6.1]
+- **DI19 — The COW bit.** The shared flag changes in one direction only. A
+  false "shared" costs a copy. A false "unique" is a semantic bug. The fast
+  path for a unique value is one byte load, one test and one branch. [D5.4]
+- **DI20 — Native lanes are error-free.** An `error` value never occupies a
+  native carrier: array storage, a packed field, a native local, or an unboxed
+  parameter or return. No unboxed operator receives an error operand. A value
+  that is not proven free of errors stays boxed. The gate is static, and it
+  fails closed. [D2.5]
 
-## D2 Data Representation
+## D2 Value Representation
+
+*A value has one meaning and can have several representations.
+Representation never changes meaning (S1.6).*
 
 ### D2.1 The Item model
 
-- **D2.1.1** An `Item` is one 64-bit word, passed by value, in exactly three
-  storage classes: **inline tagged immediate** (bits 63–56 = TypeId, 55–0 =
-  payload), **tagged scalar-leaf pointer** (same split, low 56 bits = the
-  pointer), and **raw header pointer** for containers (whole word is the
-  pointer; TypeId at byte offset 0 of the object). *Scalars are type-first;
-  containers are data-first. Keep the hybrid: tagged leaves, raw
-  aggregates, inline immediates.* [Item_Boxing §0, §3.1]
-- **D2.1.2** `get_type_id(Item)` is the **only** sanctioned semantic-type
-  interface (tag ≠ 0 → tag; item ≠ 0 → `*(TypeId*)item`; else null); the
-  inline-double self-tag test prepends without disturbing the container
-  branch. *Semantic equality has one entry point* — a raw Item word compare
-  is not semantic equality unless canonicality proves it. [Item_Boxing §3.2, R9]
-- **D2.1.3** Measured ruling: String/Symbol/Binary stay **tagged leaf
-  pointers** — raw header pointers regressed the geomean 11.1% (55/62
-  benchmarks slower) with 7 correctness hazards. Rejected likewise: tagging
-  container pointers; a generic CONTAINER tag; the universal raw-header
-  model. *Representation uniformity is not a goal by itself.* [Item_Boxing §4]
-- **D2.1.4** Container extensibility is **layered, not tag-based**: storage
-  class → `Container.type_id` family → kind/flags → shape/nominal
-  type/vtable. A new top-level TypeId only for genuinely distinct language
-  semantics. *The tag budget is governed, not discovered* — 64 legal
-  high-byte values under inline doubles; claiming one updates the partition
-  assertions and this doc in the same change. [Item_Boxing §5, R10]
-- **D2.1.5** Canonical construction: one encoding per value per build;
-  container constructors never OR a TypeId; leaf constructors go through
-  canonical `*2it`; a null pointer becomes the canonical null Item, never a
-  zero-word "container". [Item_Boxing §6.3]
-- **D2.1.6*** *A storage class is not designed until its lifecycle is* —
-  allocation, reclamation, and equality stated together; new tags,
-  sentinels, and packed encodings are illegal until pinned by an assertion.
-  [Item_Boxing R7, R8]
-- **D2.1.7** One-way doors, deliberately accepted and to be re-acknowledged
-  before GC/sandboxing/port work: non-moving heap, no pointer compression,
-  8-byte references, the low-address container model, and the AArch64
-  TBI/MTE rule that top-byte metadata never leaks into Items. [Item_Boxing §7.3]
+- **D2.1.1 — An Item is one word with three storage classes.** An `Item` is
+  one 64-bit word, passed by value. It has exactly three storage classes:
+  - an inline tagged immediate: bits 63–56 hold the TypeId, and bits 55–0
+    hold the payload;
+  - a tagged scalar-leaf pointer: the same split, with the pointer in the low
+    56 bits;
+  - a raw header pointer for a container: the whole word is the pointer, and
+    the TypeId is at byte 0 of the object.
 
-### D2.2 Number representation
+  Scalars are type-first; containers are data-first. Strings, symbols and
+  binaries stay tagged leaf pointers. Representation uniformity is not a goal.
+  [Item_Boxing §0, §3.1, §4]
+- **D2.1.2 — One interface gives the semantic type.** `get_type_id(Item)` is
+  the only approved interface for the semantic type. Its inline-double test
+  comes first and does not change the container branch. Semantic equality has
+  one entry point. A compare of raw Item words is not semantic equality,
+  unless canonical encoding proves it. [Item_Boxing §3.2, R9]
+- **D2.1.3 — Extend containers by layers, not by tags.** Container kinds
+  extend in layers: storage class, then the `Container.type_id` family, then
+  kind and flags, then shape, nominal type or vtable. A new top-level TypeId
+  is only for new language semantics. The tag budget has an owner (DI3).
+  [Item_Boxing §5, R10]
+- **D2.1.4 — Construction is canonical.** Each value has one encoding in each
+  build. A container constructor never adds a TypeId with OR. A leaf
+  constructor uses the canonical constructors. A null pointer becomes the
+  canonical null Item, never a zero-word container. [Item_Boxing §6.3]
+- **D2.1.5* — Design the lifecycle with the storage class.** A storage class
+  is designed only when its allocation, reclamation and equality are stated
+  together. A new tag, sentinel or packed encoding is not permitted until an
+  assertion pins it. [Item_Boxing R7, R8]
+- **D2.1.6 — Some decisions are one-way doors.** These decisions are accepted
+  deliberately: a non-moving heap, no pointer compression, 8-byte references,
+  the low-address container model, and the AArch64 top-byte rule (DI1).
+  Confirm them again before work on the GC, a sandbox or a new port.
+  [Item_Boxing §7.3]
 
-- **D2.2.1** Common doubles are **self-tagged inline** (the double's own bit
-  pattern is the Item; the tag partition reserves the discriminator space);
-  subnormal/colliding doubles box via number homes. One canonical
-  `ITEM_DBL_MASK` discriminator; epilogues never re-derive packed tests.
-  [Double_Boxing; Stack_API inv. 23]
-- **D2.2.2** The v5 `int` carrier: finite values pack into the 56-bit
-  payload (unbox = shift-left-8, arithmetic-shift-right-8); merged poison
-  is **not** packed — it stays the inline IEEE double, so an INT-tagged
-  Item always decodes to a finite band value. The native lane is **i64**
-  with sentinels at the two's-complement extremes (`NAN = INT64_MIN`,
-  `-INF = INT64_MIN+1`, `+INF = INT64_MAX`) — branch-free `neg`/`abs`,
-  out-of-band degradation. Lane sentinels are **private to the lane** and
-  never escape into an Item, container, or guest bridge. (Supersedes the
-  C16-era G0 "int's native representation is the double" ruling.)
-  [Int_Type §5.1]
-- **D2.2.3** Wide scalars (`i64`, `u64`, cold doubles) have **no
-  inline form at any magnitude** (no value-dependent representation
-  branches) and follow the scalar-home ownership taxonomy (§D5.2);
-  `DTIME` is object-backed — GC-owned when dynamic, Input-arena when
-  static. [Stack_API §15.1, SF16]
-- **D2.2.4** `LMD_TYPE_DECIMAL` carries a `Decimal` wrapper with an
-  explicit `DecimalKind storage_kind` (`FIXED`, `EXTENDED`, `BIGINT`) and
-  an embedded `mpd_t dec_val`. `mpd_t` describes only the mathematical
-  value; it never determines the Lambda tier or BigInt identity. Its flags
-  remain exclusively libmpdec's numeric/allocation flags. Construction
-  transfers an owned libmpdec header into the embedded field, marks that
-  field `MPD_STATIC`, and releases the original header; destruction calls
-  `mpd_del(&dec_val)`, releasing coefficient storage but never the wrapper.
-  Thus source-level decimal tiers remain invisible while the BigInt carrier
-  stays distinguishable without a new Item tag. [S4.6.1, S4.9.1]
-- **D2.2.5** **MVP-Lmd admits Lambda `int` as an internal runtime subtype
-  of JS Number.** Finite values use the existing INT Item and native i64
-  carrier; merged poison retains its canonical FLOAT encoding. JS observes
-  only Number, including across mixed INT/FLOAT comparisons, storage, and
-  calls. Integer execution requires finite-range and signed-zero proofs or
-  guards; an escaping result widens using JS binary64 semantics before any
-  Lambda saturation. The subtype is not closed under JS arithmetic. Existing
-  encodings, one-body lowering, and the host numeric FFI rule remain intact
-  (S1.11, S4.1.1–S4.1.2, S4.9.1, D2.4.1–D2.4.3). Scope is the experimental
-  MVP-Lmd profile. [USER, 2026-10-07;
-  JS_MVP_Lmd §9](../vibe/jube/JS_MVP_Lmd.md#9-integer-tuning-phase)
+### D2.2 Numbers
 
-### D2.3 Boxing and unboxing
+- **D2.2.1 — Common doubles are inline.** A common double is self-tagged: its
+  own bit pattern is the Item. The tag partition keeps the space for this
+  test. A subnormal or colliding double is boxed through a number home. One
+  canonical mask identifies inline doubles. [Double_Boxing; Stack_API inv. 23]
+- **D2.2.2 — The int carrier has a private native lane.** A finite `int`
+  packs into the 56-bit payload. Poison (`int.nan`, `int.inf`) is not packed;
+  it stays an inline IEEE double. Thus an INT-tagged Item always decodes to a
+  finite value. The native lane is `i64`. Its sentinels are at the
+  two's-complement extremes, so `neg` and `abs` need no branch. Lane
+  sentinels are private to the lane (DI4). [Int_Type §5.1]
+- **D2.2.3 — Wide scalars have no inline form.** `i64`, `u64` and cold doubles
+  have no inline form at any magnitude. Thus no representation branch depends
+  on the value. They follow the scalar-home ownership rules (D6.2). A datetime
+  is an object: GC-owned when it is dynamic, Input-owned when it is static.
+  [Stack_API §15.1, SF16]
+- **D2.2.4 — Decimal tiers are invisible.** A decimal Item points to a
+  `Decimal` wrapper. The wrapper records the storage kind (fixed, extended or
+  BigInt) and contains the libmpdec value. The libmpdec value describes only
+  the number. It never selects the Lambda tier or the BigInt identity. Thus
+  source-level tiers stay invisible, and a BigInt stays distinct without a new
+  tag. [S4.6.1, S4.9.1]
+- **D2.2.5 — In MVP-Lmd, Lambda `int` is a private subtype of JS Number.** The
+  scope is the experimental MVP-Lmd JavaScript profile. There, finite JS
+  integers can use the INT Item and the native `i64` lane. JavaScript sees only
+  Number, also in
+  mixed compares, storage and calls. Integer code needs range and signed-zero
+  proofs or guards. A result that escapes widens with JS binary64 semantics
+  before any Lambda saturation. The existing encodings and the host numeric
+  FFI rule do not change. [USER 2026-10-07; JS_MVP_Lmd §9]
 
-- **D2.3.1** A typed function compiles to a **native entry plus a boxed
-  entry** per the dual-func plan (§D8.3); untyped functions are boxed-only.
-  Closures keep captures as `Item` and unbox on access; union-typed
-  parameters never unbox (a representation decision, not a soundness one).
-  [Box_Unbox (retired); DF1, DF15, DF §1.3]
-- **D2.3.2*** **Blind `(void*)` casts of Items to container pointers are a
-  defect.** Container-typed parameters unbox through type-checking helpers
-  (`it2map`, `it2list`, …) returning NULL on mismatch (the `it2s`
-  contract); container returns box through `p2it()` so NULL becomes
-  `ItemNull`, never the zero word. [Box_Unbox2 (retired); DF2, DF4,
-  Nullable §7.2]
-- **D2.3.3** Boxing is representation only (semantics S1.6); every
-  box/unbox pair round-trips exactly, including poison and the nullable
-  sentinels.
+### D2.3 Representation discipline
 
-### D2.4 Value representation discipline
+*Never recover a decision from emitted MIR register classes.*
 
-*Never recover a decision by interpreting emitted MIR register classes.*
+- **D2.3.1 — Boxing is representation only.** Boxing never changes semantics
+  (S1.6). Each box/unbox pair gives back the same value exactly, also for
+  poison and for null sentinels.
+- **D2.3.2 — A typed function has a native entry and a boxed entry.** A typed
+  function compiles to a native entry and a boxed entry (D7.3). An untyped
+  function has only a boxed entry. A closure keeps its captures as `Item`
+  values and unboxes them when it reads them. A union-typed parameter is
+  never unboxed. This is a representation decision, not a soundness decision.
+  [DF1, DF15, DF §1.3]
+- **D2.3.3* — Never cast an Item to a container pointer blindly.** A blind
+  cast is a defect. A container-typed parameter unboxes through a helper that
+  checks the type and gives NULL on a mismatch. A container return boxes
+  through the canonical constructor, so NULL becomes `ItemNull`, never the
+  zero word. [DF2, DF4, Nullable §7.2]
+- **D2.3.4* — Four facts have four owners.** The AST `Type*` owns the semantic
+  contract. The lowering analysis owns the planned representation. `MirValue`
+  owns the emitted representation, its provenance and the full `Type*`
+  contract. Its MIR type owns only the physical register class. A boxed Item,
+  the int lane, Lambda `i64` and a machine quantity can use the same MIR
+  register type. Thus expression lowering must not probe MIR register types.
+  Machine representations are separate from Lambda representations. The
+  canonical representation of a Lambda type is never a machine
+  representation. [Lane §1–§4.2]
+- **D2.3.5* — A carrier conversion is not a semantic coercion.** One router
+  changes only the carrier. Its key is the source representation, the target
+  representation and the contract. An unsupported pair fails closed. No
+  identity conversion crosses between a machine quantity and an int-lane
+  value with the same bits. [Lane §4.3]
 
-- **D2.4.1*** Four facts, four authorities: semantic contract → AST
-  `Type*`; planned representation → lowering analysis; emitted
-  representation + provenance → `MirValue`; physical register class →
-  `MirValue.mir_type`. Under v5, boxed Item / int lane / Lambda `i64` /
-  machine quantity all share `MIR_T_I64`, so `MIR_reg_type()` probing is
-  banned in expression lowering (named physical-layer helpers only).
-  [Lane §1–§4]
-- **D2.4.2*** `transpile_expr()` returns a `MirValue` carrying the full
-  `Type*` contract; ValueRep distinguishes `INT_LANE`, `MACHINE_I64/U64`
-  from Lambda `I64`/`U64`/`F64`/`ITEM`/pointer reps;
-  `lambda_canonical_rep(Type*)` never returns a machine rep for a Lambda
-  type. [Lane §4.2]
-- **D2.4.3*** **Representation conversion ≠ semantic coercion**:
-  `em_require_rep()` changes only the carrier, keyed by (source rep,
-  target rep, contract); unsupported pairs fail closed. Machine
-  `INT64_MAX` is a finite quantity; the same bits in the int lane are
-  `INT_LANE_INF` — no identity conversion crosses that boundary. [Lane §4.3]
+### D2.4 The nullable native lane
 
-### D2.5 The nullable native lane
+- **D2.4.1* — An optional keeps a native carrier.** `N(T?) = N(T) |
+  NULL_LANE(T)`. Where a representation is selected, an optional keeps its
+  native carrier. These rules apply:
+  - `box(NULL_LANE(T)) == ItemNull`;
+  - code tests the sentinel before use (DI5);
+  - a plain `T` carrier never holds a null sentinel;
+  - the full type contract selects the representation, never the TypeId
+    alone;
+  - numeric sentinels are never roots (DI6). [Nullable §1–2]
+- **D2.4.2 — Each lane has one null code.** The int lane uses the `ItemNull`
+  word as its null code, so box and unbox are exact. `bool?` uses one byte
+  with three values. Sized integer optionals widen to the `i64` lane. `float?`
+  uses a reserved NaN payload; the null test is a bit compare, never IEEE
+  `==`. `i64?` and `u64?` have no spare one-word code. In expressions and at
+  dynamic boundaries, they use an ordinary Item. In persistent native storage,
+  they use a destination-owned `TypedItem` (DI9). Wide optionals do not use
+  the unboxed wide arithmetic path. [Nullable §3–4]
+- **D2.4.3 — Representation follows the full inferred contract.** An indexed
+  read with an unproven index infers `T?`, not `T` and not `any`. A
+  flow-sensitive proof can use the payload directly. It never changes the
+  public inferred type. `any`, `number`, `integer` and mixed unions stay
+  boxed. [Nullable §5]
 
-- **D2.5.1*** `N(T?) = N(T) | NULL_LANE(T)`: optionals keep a native
-  carrier everywhere a representation is chosen. Invariants:
-  `box(NULL_LANE(T)) == ItemNull`; **no sentinel laundering** (test before
-  arithmetic/compare/deref/store); plain-`T` carriers never hold a null
-  sentinel; representation follows the **full type contract**, never
-  TypeId alone; **GC sees only pointers** — numeric sentinels are never
-  roots. [Nullable §1–2]
-- **D2.5.2v3** Sentinels: `INT_LANE_NULL` (numerically the `ItemNull` word
-  — what makes box/unbox exact) joins the three poison sentinels; `bool?` is
-  one byte 0/1/2 with C-truthiness banned; sized `i8?`…`u32?` widen to the
-  i64 lane; `float?` reserves a distinct NaN payload (`ItemNull`'s bits are
-  a valid finite double) — the null test is a bit compare, never IEEE `==`,
-  and other NaNs canonicalize on store. `i64?`/`u64?` have no spare raw
-  one-word null code, so their expression and dynamic-boundary carrier is an
-  ordinary Item. Every persistent native destination for an `i64?`/`u64?`
-  payload — a native-Array element or packed Map/Shape field — is nevertheless
-  a destination-owned `TypedItem`: a null tag, or an inline `int64_t`/
-  `uint64_t` payload with its exact tag. The store validates then copies that
-  payload into its destination; the read reconstructs the consumer carrier.
-  A raw wide-scalar Item pointing into a number frame must never be retained.
-  Thus wide optionals preserve their native typed representation without
-  borrowing a scalar home; the extra tag is confined to persistent storage,
-  not the register ABI. Wide optionals remain outside the unboxed wide `+ - *`
-  path, which admits only non-optional operands. [Nullable §3–4; D5.2.2v3–D5.2.3]
-- **D2.5.3** `a[i]` with an unproven index infers `T?` — not `T`, not
-  `any`; flow-sensitive proofs may use the payload directly but never
-  change the public inferred type. `any`, `number`, `integer`, and
-  heterogeneous unions stay boxed. [Nullable §5]
+### D2.5 The error-free lane
 
-### D2.6 Containers and array storage
+*This is the representation side of the acceptance rule (S7.8.1). DI5 and DI8
+do the same for null.*
 
-- **D2.6.1v3** Three physical array forms: boxed Array (Items), native Array
-  (uniform descriptor-selected native slot per element), ArrayNum
-  (specialized numeric layout). Native slots are normally one 64-bit lane
-  word; `i64?[]`/`u64?[]` use a destination-owned `TypedItem` slot.
-  Map/shape packing uses minimum field width, except that an `i64?`/`u64?`
-  field is its descriptor-selected 9-byte destination-owned `TypedItem` slot.
-  The native Array's uniform descriptor slot remains a deliberate granularity
-  difference. Shapes carry an immutable `LaneStorageDesc` from **one shared
-  descriptor resolver** for MIR, map layout, arrays, and guests. [Nullable §6]
-- **D2.6.2** **ArrayNum is strictly non-null**: an admitted null store
-  performs a one-way, atomic demotion to native `Array<T?>`; `int[]`
-  rejects the store outright. Covariant `int[] → int?[]` assignment may
-  share the buffer under COW; `pn var` parameters are invariant. ArrayNum
-  must be observably indistinguishable from Array (equality, `type()`,
-  iteration) — representation invariance is a ruling, and the known
-  representation-sensitive `==` is a bug.* [Nullable §6.3–6.4, CW16.1]
-- **D2.6.3** `ELEM_INT` element storage is the i64 lane (finite values or
-  poison sentinels), mapped to IEEE at print/box boundaries; both int
-  element kinds share the i64 kernel path.* [Int_Type §5.8]
-- **D2.6.4v3** A container that retains a raw wide-scalar Item points **only
-  into that container's own buffer** (tail regions, `extra` = uniform tail
-  count); headers are never reallocated out from under an identity.
-  `i64?[]`/`u64?[]` and packed Map/Shape fields of those types instead retain
-  no raw scalar Item: each is an inline, destination-owned `TypedItem` slot
-  under D2.5.2v3. [SF15]
-- **D2.6.5v4** **The append discipline follows the destination: content,
-  sequence, or slot.** Three runtime appends exist and they are not
-  interchangeable. The **content** append (`list_push()`) applies S2.6's
-  normalization — a `null` or `""` is dropped, a list is spliced in, a string
-  or binary is concatenated onto a preceding item of the same kind — and is
-  correct only for element content and script top-level content; content
-  writes after construction preserve it (S2.6.5). The **sequence** append
-  builds lists and array literals: it splices a list (S2.5.1v2) and stores
-  every other value verbatim, `null` included, adjacent strings apart. The
-  **verbatim** append stores the item as one value whatever it is — argument
-  and rest lists, `zip` pairs, and every single-value slot (a map field, an
-  attribute, an object field), where a list is first turned into its array
-  image (S2.5.6). Which append a site uses is decided by what it builds,
-  never by a per-format switch, and a list's spreading is decided by the
-  value's kind at run time, never by the syntax around it (S1.6): the one
-  list flag is the kind bit.
-  The split is **content versus collection**, never per format: every input
-  parser yields normalized element content (S2.6.1v2). MarkBuilder's element
-  child append uses the owner-aware content append; collection append APIs
-  also dispatch element destinations to content normalization, so none can
-  preserve adjacent element strings. MarkEditor child writes rebuild through
-  the same content append in both edit modes (S2.6.5); web DOM node operations
-  have explicit positional-node APIs. LaTeX commands carry consecutive string
-  arguments in one array child, `<cmd ["a", "b"]>`, and their consumers read
-  the array entries as positional arguments. Arrays remain non-spreading
-  values (S2.6.3). The choice belongs at the destination and append site,
-  never ambient state: a process-wide "suppress merging" flag leaks across
-  allocations and early returns. The former flag on
-  `EvalContext`/`InputAllocationContext` is retired. [LR09-R3; Design_Syntax §7.27]
-- **D2.6.6v3*** **One container hierarchy — map → array → element — and
-  nominal is a descriptor property, not a kind.** Physically, containers form
-  a single-inheritance chain: `Map` is the base (header plus the attribute
-  face `type`/`data`/`data_cap`); `Array`, with `ArrayNum` beside it, extends
-  `Map` with `items`/`length`/`extra`/`capacity`; `Element` extends `Array`.
-  The attribute face therefore sits at ONE offset in every container and a
-  cast to any ancestor is valid by construction. *Why this shape:* the
-  object/element/map tension was the classic single-versus-multiple
-  inheritance problem — a type cannot extend both — so either map extends
-  array or array extends map, and the base is the one every value shares: the
-  property bag, which is what a JavaScript program calls an object (D2.6.9v3).
-  `LMD_TYPE_OBJECT` retires as a TypeId, and the `Object` alias with it: an
-  object is a map, array, or element whose type descriptor carries a
-  **nominal record** (name, base, methods, constraint, content pattern). The
-  descriptor is authoritative; a header bit `is_nominal` caches it and is
-  written only by construction and by instance alteration (S2.1.5), which
-  sealing (S2.1.4) makes safe. A shape transition from a declared shape — an
-  extra field on an open instance — yields a new shape that **points to the
-  same nominal record**, and `is T` compares that record, never the shape
-  pointer. Instance layout follows the declared structure, so an
-  attribute-only nominal type is a 32-byte map, not a 64-byte element.
-  JavaScript arrays hold their properties in their own attribute face, and
-  the reserved JS-properties slot in `extra` (D2.6.4v3) retires. *Accepted
-  cost:* every array header grows by the map face; array-heavy benchmarks
-  gate the change. *Sequencing:* the layout change lands first as its own
-  verified change, then the nominal-descriptor change and the TypeId
-  retirement (DO26). `TypeObject` carries the DECLARED content pattern in `TypeElmt::content_list` (D3.4.3v3) — NULL when the declaration has no content section, in which case the type is map-kinded; per-literal counts stay on `AstObjectLiteralNode`. A nominal type's name is the type's name only: it is never matched against an element's tag (S11.3.1v2 compares the record), and a tag is enforced by a structural element pattern alone (`type e = <tag …>`); a declaration that also names a tag is DO31. `entity` never had a TypeId. [OB1, OB2, OB4, OB13–OB16, OB20, OB23]
-- **D2.6.7*** A bound method is an ordinary D6.2.1 function value whose
-  closure environment is the receiver, captured by value; the method's
-  compiled entry takes the receiver first and `TypeMethod.arity` excludes
-  it. No unbound `fn(self, …)` value is ever surfaced (S12.3.3v2), and a
-  `pn` method yields no value at all — the emitter rejects the bare
-  reference at compile time. [OB6]
-- **D2.6.8*** **Node identity is data the container carries, never its
-  address.** D4.3.1's non-moving heap must not be relied on as an identity:
-  a COW detach produces a new address for the same node, and an identity
-  compared by address would break under exactly the write that S5.1.4v2
-  says preserves it (the same reason D6.2.1 stamps function identity at the
-  definition site). The carrier — a header word, a side table, or an
-  attribute — and the id-preserving operation set are DO25. [OB10]
-- **D2.6.9v3*** **A JavaScript object is a nominal Lambda `Map` — and
-  therefore a Lambda object.** Under D2.6.6v2 nominal-ness is a descriptor
-  property, and a JavaScript object's descriptor always carries one: its
-  class. So every JS object is a map whose descriptor holds a nominal record,
-  which is exactly S2.1.1v3's definition of an object; `js_obj is object` is
-  true, and a JS array is likewise a nominal Lambda array. The v2 wording
-  ("never a Lambda Object") described the shipped runtime, where `object`
-  was a separate element-shaped kind; it is superseded, and the naming trap
-  it warned about dissolves, because the language's `object` and what a JS
-  program calls an object now name the same thing. What stays separate is
-  the **semantics** behind the record, per D1.3v3: a JS class resolves members
-  through a prototype chain, a Lambda type through its method table; the
-  nominal-record slot is the shared contract, its payload is per-language.
-  Until phase 2 lands, the shipped state is the v2 one: `js_new_object`
-  allocates `LMD_TYPE_MAP`, no guest path constructs `LMD_TYPE_OBJECT`, and
-  an inbound Lambda object is element-shaped and read through the kind-aware
-  accessors, never punned to a `Map*`. Guest-owned map machinery with no
-  Lambda analogue — the property extension table, iterator/proxy/sparse map
-  kinds, the `js_native_trace` hook — stays gated to `LMD_TYPE_MAP`. [D1.3v3,
-  D2.6.6v2, OB21]
-- **D2.6.10*** **Sealing at the representation level.** Because a nominal
-  type does not change during evaluation (S2.1.4), the JIT may cache its
-  method table and declared-field offsets for the program's lifetime; because
-  an instance's declared prefix never moves, D3.2.4v2 direct access stays
-  valid across extension. Instance type alteration (S2.1.5) is a
-  reconstruction — a fresh instance under the new descriptor — so it
-  invalidates neither cache. [OB15, OB18]
-- **D2.6.11*** **The `is_nominal` bit packs into the existing header.** The
-  container header is eight bytes — `type_id` at 0, the `flags` bit-field
-  byte at 1, `array_flags` at 2, `map_kind` at 3, then `cow_state`,
-  `ctor_reserved_mask_lo`, `ctor_reserved_mask_hi`, `reserved_state` — with
-  every offset and `sizeof(Container) == 8` pinned by static asserts. The
-  cache bit for nominal-ness (D2.6.6v2) must be bit-packed into that header
-  without moving any pinned field or growing it: a free bit in the `flags`
-  byte or in `reserved_state`. `has_js_props` retires with the `extra`
-  JS-properties slot (D2.6.6v2), which frees exactly one such bit. The
-  header is public ABI for MIR and the GC; the asserts are the enforcement.
-  [OB22]
+- **D2.5.1 — No native lane holds an error.** Native array storage, packed
+  fields, native locals, unboxed parameters and returns, and their scalar
+  homes are free of errors by representation. They have no Item word for an
+  error, and no lane encoding is spent on one. An in-band error sentinel and
+  a side table of errors are both rejected designs. A lane that must be
+  decoded for errors is a boxed Item in disguise. [S7.8.1; IEH I1, TE-17]
+- **D2.5.2* — The emitter keeps errors out of unboxed operators.** No unboxed
+  operator receives an error operand. The emitter guarantees this; the
+  runtime does not. No skip target, landing pad or error edge is emitted
+  inside a native lane. This rule covers errors and defects. System faults
+  have no type; they unwind through a recovery frame (D6.3.6). [IEH I2, TE-15]
+- **D2.5.3* — Lane entry needs a static proof.** The destination contract
+  decides admission (S7.8.1). A source that is proven infallible enters the
+  lane without a branch. A source of type `T | error` is not eligible; it
+  stays boxed until code discharges the error. A deferred initializer or a
+  whole-variable reassignment can bind an error and continue (S7.7.2v2,
+  S7.7.4v2). Thus its annotation alone does not prove later uses clean.
+  Reassignments and joins must update the proof before a native use. The
+  gate is the `may_defect` fact, and it fails closed (D7.1.3). An unknown fact
+  means "can fail", so the effect split is a prerequisite for lane routing. An
+  unannotated literal that boxes only because its fallibility is unproven
+  must get a diagnostic. [TE-17, TE-18.1–TE-18.2; IEH I3, I4]
 
-- **D2.6.12v3*** **Virtual output lists carry their builder.** A PDF file's
-  content destination extends the existing List prefix (through Element)
-  with a builder pointer. Its `is_virtual` representation flag dispatches
-  content append to that builder instead of an Item array; it is independent
-  of the `is_spreadable` kind bit. Normal lists keep their existing storage.
-  A common builder interface admits future destinations. No output context
-  or allocator context is installed or changed. Finish and ownership follow
-  the extended destination. The PDFBuilder's MVP object encoder reads borrowed
-  map/array storage and writes bytes directly, retaining no source Item edges;
-  document construction stays in Lambda. Emitting and counting destinations
-  share the same encoder; counting retains byte lengths without output bytes.
-  Pure result-demand lowering passes a rooted destination explicitly through
-  eligible calls and control flow. Checked appends return a separate completion
-  status; handlers checkpoint and rewind their operand's bytes and failure
-  state. Nested file constructors own separate destinations. Completed files
-  compose as bytes and support an owned `binary(file)` snapshot (S2.6.6v3).
-  General retained-child observation/mutation remains DO32/SO48.
-  [PDF_Output §5.4–§5.6]
+### D2.6 Scalar ownership
 
-### D2.7 The scalar-GC invariant
+- **D2.6.1 — No standalone scalar cell in the GC heap.** An `INT64`, `UINT64`
+  or `FLOAT` payload is never allocated in the GC object zone. An Item with
+  one of these tags can never point into it. The shared allocation point
+  enforces this in every build, and a violation is fatal. A GC object can
+  contain scalar words; it is never a scalar cell. This makes a class of
+  lifetime bugs impossible. [SG1, SG4]
+- **D2.6.2 — A container owns its wide scalars.** A raw wide-scalar Item in a
+  container points only into the buffer of that container. A header is never
+  reallocated away from its identity. A wide optional array element or packed
+  field holds no raw scalar Item; it is an inline, destination-owned
+  `TypedItem` (D2.4.2). [SF15]
 
-- **D2.7.1** **No standalone scalar cell in the GC heap**: no
-  `INT64`/`UINT64`/`FLOAT` payload is ever allocated in the GC object
-  zone; an Item with those tags can never point into it; enforced fatally
-  at the shared allocation choke point in every build. *A class of
-  lifetime bugs becomes unrepresentable.* (A GC object may *contain*
-  scalar payload words; it just never *is* a scalar cell.) [SG1, SG4]
-- **D2.7.2v2*** Public entry wrappers speak the **companion-lane pair**
-  (D5.2.1v5); the trailing home out-param is retired. Rejections stand:
-  callee donation (unbounded in dynamic-call loops), context-global
-  *homes*, C-local forwarding — the Windows companion *transport* (a
-  transient `EvalContext` slot, dead at every call boundary, never the
-  pointee of any Item) is not a home and inherits none of the rejected
-  failure modes; ruled 2026-08-14 as the Windows lowering (RVO1/RVO2
-  closed — one protocol on every platform). The ownerless-slot GC
-  fallback is counted and **explicitly transitional**. [SG2, RV10–RV12]
+## D3 Containers and Shapes
 
-### D2.8 The error-free lane invariant
+### D3.1 The container model
 
-*The representational counterpart of the semantics' acceptance rule
-(§S7.8.1). What DI5 and DI8 are for nulls, this is for errors.*
+- **D3.1.1* — One container hierarchy: map, array, element.** Containers form
+  one inheritance chain. `Map` is the base: a header and the attribute face.
+  `Array` extends `Map` with its items; `ArrayNum` is beside `Array`.
+  `Element` extends `Array`. Thus the attribute face is at one offset in every
+  container, and a cast to an ancestor is always valid. The base is the
+  property bag that all values share; JavaScript calls it an object. A Lambda
+  object is a map, array or element whose type descriptor has a nominal
+  record. Nominal status is a property of the descriptor, not a separate kind
+  or TypeId. A header bit can cache it. A shape transition from a declared
+  shape keeps the same nominal record, and `is T` compares that record. A
+  nominal name is the name of the type; it is never matched against an
+  element tag (S11.3.1v2). Only a structural element pattern enforces a tag.
+  Whether a declaration can also name a tag is open (DO31). The container
+  header is public ABI for MIR and the GC; static asserts pin its size and
+  offsets. [OB1, OB2, OB4, OB13–OB16, OB20, OB22, OB23]
+- **D3.1.2* — Sealed types permit cached layout.** A nominal type does not
+  change during evaluation (S2.1.4). Thus the JIT can cache its method table
+  and its declared field offsets for the life of the program. The declared
+  prefix of an instance never moves, so direct access stays valid after an
+  extension (D4.2.5). A type alteration (S2.1.5) builds a new instance, so it
+  makes neither cache invalid. [OB15, OB18]
+- **D3.1.3* — Node identity is data, never an address.** Do not use the
+  address of a container as its identity. A COW detach gives a new address to
+  the same node (S5.1.4v2). The carrier of the identity and the operations
+  that keep it are open (DO25). [OB10]
+- **D3.1.4* — A bound method is a closure over its receiver.** A bound method
+  is an ordinary function value (D7.2.1). Its closure environment is the
+  receiver, captured by value. The compiled entry takes the receiver first,
+  and the method arity does not count it. No unbound method value is visible
+  (S12.3.3v2). A `pn` method gives no value; the emitter rejects a bare
+  reference to it at compile time. [OB6]
+- **D3.1.5* — A JavaScript object is a nominal Lambda map.** The descriptor of
+  every JavaScript object has a nominal record: its class. Thus every JS
+  object is a Lambda object (S2.1.1v3), and a JS array is a nominal Lambda
+  array. The semantics behind the record stay per language (D1.3). A JS class
+  finds its members through its prototype chain. A Lambda type finds them
+  through its method table. Map machinery that only JavaScript uses stays
+  limited to plain maps. [OB21]
 
-- **D2.8.1** **No native lane slot ever holds an error.** ArrayNum and
-  native-Array element storage, packed map-field storage, native locals,
-  unboxed entry parameters and returns, and the scalar homes behind them
-  are error-free **by representation** — there is no Item word to put an
-  error in, and no lane encoding is ever spent on one: the int lane's
-  out-of-band encodings denote `int.nan`/`int.inf` values (D2.2.2), the
-  null sentinels denote null (D2.5.2v3), and dense sized lanes have no spare
-  pattern at all. Both escape hatches are rejected rulings, not unbuilt
-  options: an **in-band error sentinel** records only *that* a failure
-  happened (contradicting rich error payloads) and re-creates the
-  consumer-dependent in-band sentinel that was a measured live divergence;
-  a **sidecar** index→error table fixes the write and nothing else,
-  because read-back then delivers an error into the lane anyway. A lane
-  that must be decoded for error-ness is a boxed Item wearing a native
-  costume. [S7.8.1; IEH I1, TE-17]
-- **D2.8.2*** **No unboxed operator ever receives an error operand**, and
-  the **emitter** guarantees it, not the runtime: no skip target, landing
-  pad, or error edge is ever emitted inside a native lane. Scope is
-  errors and defects only — system/resource faults are untyped, no static
-  analysis can gate them, and they unwind through `LambdaRecoveryFrame`
-  (D6.3.3), abandoning any partially-built container. [IEH I2, TE-15]
-- **D2.8.3v3*** **Lane entry is gated on static proof, never on runtime
-  rescue.** Admission is read from the destination contract (§S7.8.1): a
-  provably infallible source enters branch-free; a source only inferable
-  as `T | error` is **not lane-eligible** and stays boxed until
-  discharged — never a checked lane store that might fail mid-mutation.
-  A deferred initializer or whole-variable reassignment binds an admitted
-  value or error and continues (§S7.7.2v2, §S7.7.4v2); its annotation alone
-  therefore does not prove later uses clean. Reassignments and branch/loop
-  joins must update that proof before any native use.
-  Its effective outcome stays error-capable until discharge or a valid proof
-  excludes the error on the use path. Only that clean path may use native
-  storage and operators (D2.8.1–D2.8.2). The gating analysis is `may_defect` with
-  fail-closed polarity (D6.1.3): unknown ⇒ defect-capable ⇒ demotion,
-  which is viral through unanalyzed callers — so the effect split is a
-  **prerequisite** for lane routing, not a later optimization, and an
-  unannotated literal that boxes solely for unproven fallibility must be
-  diagnosed rather than silently demoted. [TE-17, TE-18.1–TE-18.2; IEH I3, I4]
+### D3.2 Arrays
 
-### D2.9 Mark file conventions
+- **D3.2.1 — There are three physical array forms.** An array is a boxed
+  Array of Items, a native Array, or an `ArrayNum`. A native Array has one
+  uniform native slot for each element, selected by its descriptor. An `int`
+  element uses the `i64` lane and maps to IEEE at print and box boundaries.
+  One shared descriptor resolver selects the storage for MIR, map layout,
+  arrays and guests. Shapes keep the result as an immutable
+  `LaneStorageDesc`. [Nullable §6; Int_Type §5.8]
+- **D3.2.2* — ArrayNum is non-null and invisible.** An admitted null store
+  demotes an `ArrayNum` to a native `Array<T?>`, once and atomically. An
+  `int[]` rejects the null store. A covariant `int[] → int?[]` assignment can
+  share the buffer under COW. `pn var` parameters are invariant. An `ArrayNum`
+  must be the same as an `Array` for equality, `type()` and iteration. An
+  `==` that depends on the representation is a bug. [Nullable §6.3–6.4,
+  CW16.1]
 
-- **D2.9.1** **`.mark` is the sole canonical file extension for Mark
-  Notation.** New files, examples, generated artifacts and file associations
-  use lowercase `.mark`; automatic filename-based Mark detection recognizes
-  only this extension, using the detector's existing case-insensitive match.
-  `.m`, `.mk`, `.mr`, `.ma` and `.mrk` are not aliases, including for legacy
-  input. *Spell the format's name: `.m` conflicts with MATLAB/Objective-C,
-  `.mk` with makefiles, `.ma` with Maya ASCII, `.mr` is obscure, and `.mrk`
-  loses readability and overlaps DPOF; multiple standard extensions fragment
-  tooling without adding a capability.* [Input_System §Mark file extensions]
-- **D2.9.2** **An explicit `mark` format overrides the filename.** Mark
-  input accepts any filename, including one without an extension or with
-  another format's extension, when the caller selects `mark` (for example,
-  `input("data.payload", 'mark')` or `convert -f mark`). Filename aliases
-  are unnecessary when format selection is explicit.
-  [Input_System §Mark file extensions]
-- **D2.9.3** **A domain document written in Mark takes its own format name
-  and extension; it is not a Mark alias.** `.slides` is a slide deck — Mark
-  syntax with a `<presentation>` root — read as format `slides`. Its own
-  route selects that format explicitly (`lambda view deck.slides` runs the
-  `lambda.slide.present` transform; scripts call `input(path, 'slides')`),
-  while filename-based Mark detection still recognizes only `.mark`
-  (D2.9.1). *The extension names what the document is; the syntax is shared.*
-  [Input_System §Mark file extensions; Lambda_Pkg_Slide_Presentation §0]
+### D3.3 The append discipline
 
-### D2.10 XHTML input
+- **D3.3.1 — The destination selects the append.** There are three appends,
+  and they are not interchangeable:
+  - The content append applies the S2.6 normalization. It drops `null` and
+    `""`, splices a list, and joins adjacent strings or binaries. Use it only
+    for element content and script top-level content.
+  - The sequence append builds lists and array literals. It splices a list,
+    and it stores every other value as it is.
+  - The verbatim append stores the item as one value. Use it for argument
+    lists, pairs and every single-value slot. A list becomes its array image
+    first (S2.5.6).
 
-- **D2.10.1v2** **`xhtml` uses XML syntax and emits the HTML element tree.**
-  Explicit `input`/`parse` format `xhtml`, filename extensions `.xhtml` and
-  `.xht` (case-insensitive), and MIME `application/xhtml+xml` select the
-  strict XML 1.0/UTF-8 parser with namespace validation and whitespace
-  preservation. The document element is `{http://www.w3.org/1999/xhtml}html`.
-  Output uses the HTML parser's `#document`, `#doctype` and `#comment`
-  representations; an XML declaration is omitted from document children.
-  XHTML, SVG and MathML element prefixes resolve to their local names,
-  keeping namespace identity; ordinary HTML attributes keep their names
-  and string values, and qualified attributes retain their namespace.
-  Name handling preserves XML case sensitivity (S8.2.2v6); it never folds
-  foreign names such as `viewBox` or `foreignObject`. XML tree structure,
-  CDATA text and self-closing boundaries survive without HTML reparsing.
-  Radiant admits the result through its HTML DOM/CSS/layout pipeline in
-  standards mode, including when no doctype is present. The recognized public
-  identifiers in HTML §14.2 select its built-in named-character-reference
-  catalog, without DTD fetching. Other doctypes retain inert identifiers and
-  admit only XML's five predefined named entities. Internal subsets, arbitrary
-  entity declarations and unknown named entities are unsupported.
-  [Input_XML §XHTML admission; USER 2026-10-15, catalog extension 2026-10-26]
-
-### D2.11 SVG admission, DOM export and frame snapshots
-
-- **D2.11.1** **SVG embedded in `text/html` follows browser-standard HTML
-  parsing.** Use the WHATWG HTML tokenizer and SVG foreign-content tree
-  construction, including namespace assignment, name adjustments, integration
-  points and error recovery. SVG remains part of the host document's Mark/DOM
-  tree. SVG in XHTML retains XML parsing under D2.10.1v2. [USER 2026-10-18;
-  Radiant_SVG2 §SVG parsing admission]
-- **D2.11.2** **External SVG reuses that same HTML5 SVG parsing path and
-  result model.** Standalone SVG, image/background resources and external
-  references produce the same namespace-aware Mark `Element` subtree as the
-  same SVG markup embedded in `text/html`; source ownership, style isolation
-  and resource policy remain contextual. There is no independent XML-only SVG
-  intake. This intentionally applies HTML name, namespace and self-closing
-  rules to external SVG too, reducing parser duplication; it does not change
-  explicit XML or XHTML input. [USER 2026-10-18;
-  Radiant_SVG2 §SVG parsing admission]
-- **D2.11.3** **SVG source export serializes the current SVG DOM, including
-  edits.** Preserve its elements, text, attributes, styles and resource
-  references as SVG markup through shared namespace-aware DOM serialization.
-  Rendered-page SVG/PDF output remains a separate paint-export contract.
-  [USER 2026-10-18; Radiant_SVG2 §DOM export and virtual-frame snapshots]
-- **D2.11.4*** **Animation snapshots use the frame selected by the virtual
-  timer.** Settle that frame's DOM updates and sampled presentation state
-  before export; capture leaves virtual time fixed. The exported snapshot
-  retains that frame when reopened. Repeated capture without intervening edits
-  or virtual-time advancement observes the same state. Export during advancing
-  wall-clock animation is outside the requirement.
-  [USER 2026-10-18; Radiant_SVG2 §DOM export and virtual-frame snapshots]
-
-## D3 Type and Shape
-
-Types are first-class in Lambda — composed, inferred, reflected, and
-matched/queried (semantics §S10.1, §S11). This section rules the machinery
-that carries them.
-
-### D3.1 First-class type values
-
-- **D3.1.1v5*** A type value is a `Type*` graph node under one compact
-  TypeId (`LMD_TYPE_TYPE`), discriminated by `Type.kind` (simple, unary,
-  binary, pattern, constrained, range, parameter, binder, or bound-name
-  reference, grammar/rule, or binary schema). Composite, pattern, range, constrained, binder and binary-schema types share
-  the tag rather than spending tag-budget entries (D2.1.4). A range kind
-  carries static bounds for inclusive membership while preserving the value's
-  storage domain; a pattern kind carries its domain tag and compiled content
-  matcher. The `Type*` graph is the **semantic authority** for every contract
-  the compiler carries (D2.4.1); a TypeId alone is never a contract. In
-  particular, `T[]` retains its immediate element, leaf element, rank, and
-  leaf carrier in that graph; no array path may recover those facts from an
-  erased array tag.
-  [S11.1.1v3, Lane §1, lambda-data.hpp]
-- **D3.1.2** Types compose as values (`|` union, `?`, `[]`, constraints)
-  and compare **representationally** — normalized forms, not semantic
-  equivalence (undecidable with constraints); union normalization uses a
-  canonical ordering (semantics S5.5.2; ordering rules still to pin —
-  DO22). [C8.5-4]
-- **D3.1.3** Reflection is by operators and functions, not properties:
-  `type(x)` yields the type value, `name(T)` its name; `match` arms and
-  `is` dispatch through the same runtime membership operation (D3.2.1) —
-  one classification machinery for the whole surface. [C9a, TE-6]
-- **D3.1.4v2** A type-binder site stores its written bound, name, and stable
-  signature-local slot; a bound-name reference stores that slot and a copied
-  bound, never a mutable back-pointer. The parameter-only source shorthand
-  `x: as T` elaborates to this same site with `TYPE_ANY_NO_ERROR` as its bound;
-  it adds no `TypeKind`, runtime rule, or specialization key. `TypeFunc` owns
-  the slot-ordered canonical-site table. Every interpreter or MIR activation
-  owns an exact rooted environment for selected `Type*` values, and
-  binder-carrying parameters use the boxed entry boundary until a future
-  specialization can prove an equivalent direct path. Cached container
-  certificates prove a written contract only; they never skip the walk that
-  publishes an invocation's binder slot. [S11.4.8v2, D1.5, D3.3.3v3,
-  D8.1.1v10]
-
-### D3.2 The subtype foundation
-
-- **D3.2.1** **One subtype model, three distinct operations**, sharing one
-  numeric foundation and never falsely identified: `subtype(S, T)` —
-  static, drives inference and static admission; `matches(item, T)` —
-  runtime membership, drives `is`/`match`/validator checks;
-  `checked_convert(item, T)` — explicit conversion functions own lossy
-  conversions. [TE-6]
-- **D3.2.2v3*** The **validator is the runtime enforcer** for user-defined
-  types: deep, on first crossing, producing a rich error with a validator
-  path as the failed validation outcome. A deferred initializer or whole-variable
-  reassignment binds that outcome without exiting its block (S7.7.2v2,
-  S7.7.4v2); other boundaries consume it
-  according to their own contracts. Constrained types (`T that …`)
-  enforce the base only, for now; `is`, `fn_is`, the emitter, and the
-  validator must consolidate onto the shared foundation (a known
-  three-way divergence today). [TE-10, TE-6 P5, TE-18.1–TE-18.2]
-- **D3.2.3v3*** Declared and effective types are **separate recorded facts**
-  (declaration on the binding node, inference beside it): an annotation is
-  a strict admission contract (S11.4.1v5). A deferred initializer or whole-variable
-  reassignment's effective type includes the validation-error alternative
-  (S7.7.2v2, S7.7.4v2). Track possible outcomes across writes and branch/loop
-  joins without widening the declared target; preserving that
-  outcome does not weaken admission or make the rejected value satisfy the
-  annotation. Inference must never replace validation or authorize a native
-  representation for an error-bearing outcome. [TE-1, TE §8.1, TE-18.1–TE-18.2]
-- **D3.2.4v5*** **A crossing into a named map contract is a reification, not
-  merely a check.** A named contract fixes a *physical* packed layout —
-  per-field `byte_offset` and storage class — and the emitter's direct
-  field access indexes by that layout. So a boundary may be elided only
-  when the source **provably already carries the contract's layout**;
-  semantic compatibility alone is never sufficient, because the same value
-  admits under two different physical shapes. A value acquires that proof
-  in exactly two ways: adopting the contract at construction, or crossing a
-  boundary that reified it. Every consumer of this rule — static elision,
-  runtime admission, and the direct read/write pair — must reach the
-  contract **through the non-null arm** of its spelling: `N?` and `N | null`
-  are wrappers whose own `type_id` is `LMD_TYPE_TYPE`, and a
-  self-referential record is necessarily optional, so testing the wrapper
-  silently exempts precisely the recursive contracts this rule exists to
-  protect. Error alternatives likewise preserve the normal contract's full
-  reification: `N^` and `N | E` establish N's layout on their normal arm
-  (S11.4.6v4). Errors retain Item storage and never establish that layout.
-  The open `map` fixes no layout and so needs no reification. For an
-  open **nominal** instance the contract fixes the **declared prefix**: extra
-  fields extend the shape after it and never disturb that prefix (S2.1.4).
-  Violating this is a memory-safety defect, not a missed optimization: an
-  unreified literal shape read through a contract's offsets returns a
-  malformed Item. The same rule holds at every rank of `N[]`: the native
-  carrier is a `MapN*` lane only while an exact full-array certificate proves
-  the named layout, rank, and leaf contract; `Map*` and the map TypeId alone
-  are insufficient. **Corollary (v4): the proof is transitive through a
-  verified carrier.** An element read from a certified `T[]`, or a field read
-  from an admitted record, *carries* `T`'s declared-prefix layout proof,
-  because every write into a certified carrier admits its value before
-  publishing (S11.4.1v5). A reader that holds the carrier's proof therefore
-  accesses the element or field by offset with no per-access shape-identity
-  compare and no certificate re-check; the proof lasts as long as the
-  carrier's verification does (D3.2.6). [S11.1.1v3, Tune19 §11.5, Tune20
-  §T20-6a, OB16; v4 2026-09-17, v5 TE-13.4 2026-11-03, user]
-- **D3.2.5v2** The surface spelling for the shared subtype relation is the
-  binary `<:` operator. It accepts two type values and returns `bool`; it is
-  not the magnitude operator `<` and does not perform value membership.
-  `fn_subtype` delegates to `lambda_type_contract_is_subtype`, the
-  conversion-free static value-set relation; it must not use declared-boundary
-  compatibility, which permits destination conversion. The relation includes
-  the nominal-base walk required by S11.3.1v2. Function-type operands are
-  rejected until their variance is ruled. [S1.7, S6.1.1, S11.1.4v2,
-  S11.3.1v2]
-- **D3.2.6*** **Verified once, valid while unchanged; a required field is
-  a required field.** A declared type — on `let`/`var`, a parameter, a
-  return, or a nominal binding of an element — is verified at the crossing,
-  and the verification remains valid as long as the data is not changed
-  (S11.4.10). Under a nominal contract every required field is present in
-  an admitted value; the container stays **open** beyond the declared prefix
-  (S11.4.6, S2.1.4). **Native lanes store exactly the declared layout — that
-  is the ABI**, for every lane implementation. Consequently a reader holding
-  a verified contract reads a required field by offset with no presence
-  test and no empty-slot arm, and a reader of a `T[]` lane reads `T`'s
-  carrier with no slot test. Structural composition is unconstrained — an
-  element may carry any attributes and content, including errors — and only
-  the nominal binding verifies. Host-built values (language interop) are
-  outside this rule until they cross a boundary that admits them. [TE-19,
-  S11.4.10; 2026-09-17, user]
-
-### D3.3 Inference
-
-- **D3.3.1v2** **A type-error-free script's evaluation result is never
-  affected by inference** (revised 2026-08-18; supersedes "inference is
-  unobservable"). For any script with no type error, erasing every
-  inferred type and running boxed must produce identical results; this is
-  the standing invariant (semantics SI3v2), checked by the boxed-vs-JIT
-  differential harness. Inference IS statically observable: improving
-  precision may reject a previously-compiling script at compile time, and
-  the rejection lands **straightaway** — no warn-first transition period.
-  Strictness is per-surface (Type_Infer TI6): the Lambda lane is strict
-  by default (static type errors reject with no result), with
-  `--static-warning` as the explicit per-invocation relaxed mode — the
-  same diagnostics report as warnings, compilation proceeds, and a
-  diagnosed (unresolved or rejected) annotation is dropped to the
-  inferred value type so representation never follows a failed contract
-  (SI14); the LambdaJS lane is lenient by default (static type findings
-  are diagnostics/warnings only; the script still runs and may produce a
-  dynamic result containing error values).
-  What remains absolute is the dynamic half: a script accepted under both
-  the weaker and the stronger inference evaluates identically under both.
-  [B7, TI6]
-- **D3.3.2v2** Entry-shape inference and body/result inference are
-  **separate products**: float arithmetic on a parameter does not retype
-  the parameter; *inference selects an implementation, it does not create
-  a source contract*. (Revised 2026-08-18: the former clause "inference
-  never creates a `^` obligation" is retired with D3.3.1v2 — precise
-  inference may surface a previously-hidden error component and thereby
-  create a static containment obligation (E208); it still never changes
-  what an accepted program evaluates to, and never creates a *runtime*
-  obligation that the erased-types execution would not honor.)
-  [DF12, DF13, TE-13, TI6]
-- **D3.3.3v3** Inferred container element-type **narrowing dies with its
-  binding**: it is a property of one binding's scope, never written back into
-  the container. An explicit, successfully enforced `T[]` contract is
-  different: it may attach an immutable, heap-local representation
-  certificate to the value. That certificate proves the complete rank, leaf
-  contract, and physical carrier, and is reusable only when both the target
-  contract **and the current carrier** still match it. A semantic certificate
-  on boxed `Item` slots cannot authorize a raw-pointer or compact-lane read.
-  A transform retains a certificate only after it materializes the matching
-  carrier; otherwise it clears the proof and the next checked boundary
-  re-admits the value. An unchecked representation-changing mutation likewise
-  clears it. The double-box → `ITEM_ERROR` failure remains the diagnostic tell
-  for confusing inference with this explicit proof. [S11.4.1v3,
-  elem-type invariant]
-- **D3.3.4** Representation always follows the **full inferred contract**
-  (D2.4, D2.5): an unproven indexed read infers `T?`; flow-sensitive
-  proofs may narrow privately but never change the public type.
-- **D3.3.5** **System-function result relations are declarative registry
-  metadata.** `SysFuncInfo` records a result kind and source-argument index;
-  the AST builder instantiates that relation from the complete call argument
-  list. The initial relation vocabulary is fixed result, same argument,
-  element of argument, array of argument, numeric/text family preservation,
-  and audited collection transforms. It replaces first-argument-only
-  inference without reparsing source-like signatures or allocating a
-  `TypeBinder`; a relation neither exposes a type name nor changes native
-  dispatch. A row must fall back to its declared open result whenever its
-  native operation cannot prove the relation. [S11.4.9, S17.2.1, D3.3.1v2]
+  What the site builds selects the append. A format switch or an ambient flag
+  never selects it. The kind of a value at run time decides whether a list
+  spreads, never the syntax around it (S1.6). Every input parser gives
+  normalized element content (S2.6.1v2). Builder and editor writes to element
+  content use the content append (S2.6.5). [LR09-R3; Design_Syntax §7.27]
 
 ### D3.4 Shapes
 
-- **D3.4.1v2** A map/element shape is a `ShapeEntry` chain on
-  `TypeMap`/`TypeElmt`; map data is a **packed C struct**: `byte_offset`
-  precomputed as a running sum, every field 8-byte aligned, `any`/untyped
-  fields are a 16-byte TypedItem. The layout is **ABI**: transpiled
-  direct field access and the runtime read/store path must read the same
-  bytes. Literal validation rejects repeated explicit names before lowering
-  (S2.3.1v2). Computed-key and spread literals use the shared runtime field
-  setter: an existing name replaces its value without appending a shape entry
-  or changing its position; a type change follows D3.4.5. The resulting shape
-  has one physical field per effective key on every execution tier. Static
-  duplicate rejection is independent of optimization and remains an error
-  under `--static-warning`. (Revised 2026-11-04, v2.)
-  [Shape_Pool §1, Transpile_Map, Shape_Transitions §9]
-- **D3.4.2v2** Shape identity is **structural, not nominal**: the ordered (field-name, TypeId) sequence, which is the path a type takes from its root in the `Input`'s transition tree (D3.4.3v3). Field order is significant; `byte_offset` is derivable from the type sequence and deliberately excluded from identity. [Shape_Pool §3, Shape_Transitions §3]
-- **D3.4.3v5** **Maps and elements share types through a per-`Input` transition tree, grown one field at a time.** Every `Input` owns an empty root shape. Adding a field to a map on a tree shape follows the edge keyed by the field's identity (D3.4.4v2), its key kind and the value's `TypeId` to the child shape that extends the parent by that one field; a miss mints the child once and records the edge on the parent. Maps built by the same sequence of adds therefore share one `TypeMap`: identity is the path, so field order is significant (D3.4.2), and JavaScript class metadata is part of that identity (D3.4.7). The edge list is shape metadata keyed on immutable inputs, never per-site cache state (D8.4.1v2). **A shared type's field list is immutable**: an add with no usable edge detaches the map onto a private clone, a layout-changing write rebuilds (D3.4.5), and only a private type grows in place. **A path shares its field entries too**: a child extends its parent's entry chain in place while the parent still owns the chain's tail, so a path of *n* fields holds *n* entries rather than *n*(*n*+1)/2, and a branch copies its prefix once. A type's fields therefore run from its first entry through `last`, and its chain may run on into a descendant's: every walk of a type's fields stops at `last`, the collector's included, and a lookup table shared along a chain answers only for entries within the type's length. The tree is bounded — per-node fan-out and a per-`Input` shape budget — and past a bound a map keeps a private type. A literal's type is built at compile time and shared by construction. **Element types share the same way** — a root per tag and namespace, attributes as edges — and an editor rebuild of either kind replays its field list through the tree. For that, `TypeElmt` carries no per-instance content count: its `content_list` (a typed `TypeList*`, NULL when content is unconstrained) holds a DECLARED type's content pattern for validation (S11.1.6v3) and plays no part in sharing, while the child count an element literal needs to pre-size its content array comes from the literal's syntax tree. **A map or element grown at runtime shares through its context's runtime tree**: the evaluation context owns one tree-holding `Input` per heap generation (its entries carry that generation's dynamic NameIds, D4.6.2v2), an add to an empty plain map starts at that tree's root, and an add to a container whose type is a node of that tree follows its edge. **Any other type is an external parent** -- a literal's, a contract's or nominal type's, a parsed document's, a private type: the tree grows from it without owning it. Its edges live in the tree's own table, keyed by the parent's structure, and the parent is never written; the child copies the parent's field list, names included, and keeps its record identity (a nominal instance stays an instance of its type), and a cached child is reused only while everything it copied equals the live parent's. **A type-changing write (D3.4.5) takes a retype edge the same way**: the parent's fields with one field's lane replaced and every other field's contract kept, shared by every map retyped alike. Runtime-built results of one field list -- match records, join tuples -- start on the tree too. The tree's graph budget is 65,536 map types; a container that the tree declines (fan-out, budget, a JavaScript shape, spread link slots, a qualified key) keeps a type of its own, and there is no shape pool. *Sharing is memory policy, never semantics: one layout per shape instead of one per object, one entry per field of a path.* (Revised 2026-10-06, v5: v4 let only an empty map or a tree node grow through the tree, so a map grown from a literal, a parsed document, a contract or a private type copied its whole shape on every add, O(*n*^2) in never-reclaimed entries.) [Shape_Transitions §2–§7; JS Tune10 §9.3, §9.9; Impl_Map_Transition_Coverage]
-- **D3.4.4v4*** ShapeEntry name identity follows S8.2.2v4: a name is
-  identified by its resolved namespace and its normalized spelling. For a
-  `STRING`-kind name, a name in the global namespace, `name_id` is a proof
-  of equality, never of difference — equal non-`NONE` ids prove one
-  spelling (a pool never gives one spelling two ids), while differing or
-  absent ids are confirmed by key kind, namespace, length and bytes.
-  `name_hash` is routing metadata only. **JavaScript keys join the same
-  space under the host root namespace `js`**: a property name is a
-  global-namespace name; `Symbol.for(k)` is `k` in `js.symbol.for`; a
-  well-known symbol is its name in `js.symbol`; `Symbol(d)` is `d` in an
-  anonymous namespace `js.symbol.unique.<n>` minted per creation; a private
-  name `#x` is `x` in `js.private.<class>`, one per class declaration. Those
-  namespaces are the records the runtime already keeps (NI15, NI18): a
-  registered or well-known record is interned per (kind, characters) and so
-  stands for (namespace, characters), and a unique or private record is
-  fresh per creation and *is* its anonymous namespace. A `SYMBOL`- or
-  `PRIVATE`-kind entry is therefore identified by `(name_id, key_kind)` —
-  exactly (resolved namespace, characters) — and never by its description
-  bytes, which are diagnostic. Shape copies, descriptor clones and
-  transitions preserve `name_id`, `key_kind` and `ns` unchanged, and every
-  key kind may take transition-tree edges. (Revised 2026-10-06, v4: v3 had
-  placed JavaScript symbols outside the Lambda name space; v2 compared a
-  non-`NONE` id exactly, which split one spelling across the compiler's,
-  each parse `Input`'s and the runtime's name pools in the transition
-  trees' edges.) [NI10, NI13, NI15, NI17, NI18]
-- **D3.4.5** Shape transitions obey the **map-layout invariant**: the
-  exact runtime shape always describes the stored bytes. Type-compatible
-  writes stay on the direct path (same type; `int → float`;
-  `int ↔ i64`); an incompatible write rebuilds the shape and repacks —
-  transactionally, so on failure nothing changes (semantics S11.4.1).
-  `let`-bound containers never transition (immutable); only
-  `var`/procedural code can, and an annotated root must keep conforming.
-  [TE §6 B7b, Transpiler DD3]
-- **D3.4.6** Shapes carry the immutable `LaneStorageDesc` derived from the
-  full `Type*` via the one shared descriptor resolver (D2.6.1v3); changing
-  a field's *contract* re-derives layout, writing a null into a `T?`
-  field does not. [Nullable §6]
-- **D3.4.7** A runtime JavaScript `TypeMap` may carry one immutable
-  `const JsClassMeta*` refinement selected before publication. The metadata
-  contains only stable IDs, flags, policies, and static operation-table
-  pointers: no `Item`, realm prototype, mutable cache, or context-owned
-  pointer. It is orthogonal to D3.4.2's structural field-layout identity but
-  qualifies runtime TypeMap, transition, and cache identity; TypeMaps from
-  different metadata families are never interchangeable runtime blueprints.
-  Foreign/Input TypeMaps may retain null metadata until the explicit JS
-  boundary creates a runtime family. [JS_Runtime_Object_Property JOP1–JOP5]
-- **D3.4.8** A JavaScript accessor descriptor is a virtual, object-local
-  `ShapeEntry`: it owns a `JsAccessorCell*`, has `JSPD_IS_ACCESSOR` and
-  `byte_offset == -1`, and consumes no `Map.data` lane. Only the JS property
-  kernel may dispatch it; its containing `TypeMap` is private before
-  attachment and the collector follows its direct shape-to-cell edge.
-  Descriptor transitions do not reinterpret an accessor cell as an `Item`.
-  Detailed representation, GC, and transition rules: [JSCU33].
+- **D3.4.1v2 — Shape layout is ABI.** A map or element shape is a `ShapeEntry`
+  chain on its type. Map data is a packed struct with precomputed offsets.
+  A map literal or element/object attribute list rejects repeated explicit
+  names as a compile error. Computed entries and spreads may replace earlier
+  values; the first insertion fixes field order, so a shape has one field per
+  effective key (S2.3.1v2). Transpiled direct access and the runtime read and
+  store paths must read the same bytes. [Shape_Pool §1, Transpile_Map]
+- **D3.4.2 — Shape identity is structural.** A shape is identified by its
+  ordered sequence of field names and TypeIds. That sequence is its path in
+  the transition tree (D3.4.3). Field order is significant. Offsets come from
+  the sequence; they are not part of the identity. [Shape_Pool §3,
+  Shape_Transitions §3]
+- **D3.4.3 — Shapes share through a transition tree.** Maps and elements
+  share types through a transition tree that grows one field at a time. Each
+  `Input` owns a tree. Each evaluation context owns a runtime tree for each
+  heap generation. An add follows the edge for the field name, key kind and
+  value TypeId, or it makes the child once. The field list of a shared type is
+  immutable. An add with no usable edge moves the map to a private type. A
+  tree can grow from an external parent type, but it never writes to that
+  parent. A child keeps the nominal record of its parent. A type-changing
+  write follows a retype edge in the same way. The tree has bounds; past a
+  bound, a map keeps a private type. Sharing is memory policy, never
+  semantics. [Shape_Transitions §2–§7; JS Tune10 §9.3, §9.9]
+- **D3.4.4* — Shape names follow the name identity rule.** A shape-entry name
+  is its resolved namespace and its normalized spelling (S8.2.2v4). Equal name
+  IDs prove an equal spelling. Different or missing name IDs prove nothing;
+  the key kind, namespace, length and bytes decide. JavaScript keys use the
+  same space under the host namespace `js`: symbols and private names get the
+  namespaces that the runtime already keeps. A symbol or private entry is
+  identified by its name ID and key kind, never by its description. Copies and
+  transitions keep the name ID, the key kind and the namespace. [NI10, NI13,
+  NI15, NI17, NI18]
+- **D3.4.5 — The exact shape always describes the stored bytes.** A
+  compatible write stays on the direct path. An incompatible write rebuilds
+  the shape and repacks the data as a transaction: if it fails, nothing
+  changes (S11.4.1). A `let`-bound container never transitions. Only `var`
+  and procedural code can cause a transition. An annotated root must continue
+  to conform. [TE §6 B7b, Transpiler DD3]
+- **D3.4.6 — Shapes carry the lane descriptor.** A shape carries the
+  immutable `LaneStorageDesc` from the shared resolver (D3.2.1). A change of a
+  field contract computes the layout again. A null that is written into a
+  `T?` field does not. [Nullable §6]
+- **D3.4.7 — JavaScript class metadata refines runtime shapes.** A runtime
+  JavaScript type can carry one immutable class-metadata record, selected
+  before publication. The record holds only stable IDs, flags, policies and
+  static operation tables. It is part of the runtime type, transition and
+  cache identity, but not of the structural layout identity. A JavaScript
+  accessor is a virtual, object-local shape entry that uses no data lane. Only
+  the JS property kernel dispatches it. [JOP1–JOP5, JSCU33]
 
-### D3.5 Physical binary schemas
+### D3.5 Virtual output lists
 
-- **D3.5.1v2*** Binary schemas compile to immutable, module-owned field
-  descriptors; one schema-backed Velmt backend serves bounded byte buffers
-  and declared native layouts. Native fields use compiler-derived locations,
-  widths and typed reference loads, including inherited members and ownership
-  wrappers. A single manifest generates the native bindings and Lambda
-  declarations. Admission checks the binding ABI, complete manifest revision,
-  selected logical/storage kinds, typed targets and span stride/extent
-  contracts before publication. A mismatch rejects admission; a byte buffer
-  cannot grant native memory access. [Binary_Schema §10]
-- **D3.5.2v2*** Native schema views retain an invalidatable lifetime control;
-  the host pins the admitted storage, and invalidation precedes its release.
-  Every record and VArray subview shares that control. Counted native spans
-  validate counts against host-admitted allocation extents before lazy access.
-  Structural reads, enumeration and validation check invalidation before
-  treating a count as empty. Precisely trace declared native Item fields,
-  including records in spans, before publishing a carrier and while it lives;
-  retain byte-source edges; never scan arbitrary native memory. Field
-  access checks validity before touching storage. No native address or
-  ownership transfer becomes script-visible. [D4.5.1v4, D5.3.3–D5.3.4;
-  Binary_Schema §10]
+- **D3.5.1* — A virtual output list carries its builder.** The content
+  destination of a PDF file is a list with a builder. A representation flag
+  sends content appends to that builder instead of to an Item array. The flag
+  is separate from the list kind bit. Normal lists keep their storage. No
+  output context or allocator context is installed. The encoder reads
+  borrowed storage and writes bytes; it keeps no source Item edges. Document
+  construction stays in Lambda. A result-demand path passes a rooted
+  destination explicitly (D8.2.6). A checked append returns a separate
+  completion status, and a handler can rewind its bytes. Completed files
+  compose as bytes. [PDF_Output §5.4–§5.6]
 
-## D4 Memory Management
+## D4 Types
 
-### D4.1 Allocator tiers
+*Types are first-class values: they compose, they are inferred, and they are
+reflected and matched (S10.1, S11).*
 
-- **D4.1.1v2** Four **content tiers**: **GC heap** (runtime values), **Input
-  arena** (parsed documents), **AST/const pool**, **NamePool** (interned
-  names). The non-GC tiers are invisible to the collector: `gc_is_managed()`
-  (a pointer range test) is the single gatekeeper; tracing stops at any
-  non-managed pointer. Content tiers state lifetime and collector
-  visibility; *how* heap bytes are obtained and released is the orthogonal
-  **mechanism axis** of D4.1.4 — every content tier maps onto exactly one
-  mechanism. [GC1 §2.10.4; Mem_Heap §1.1]
-- **D4.1.2** Static Mark data is **born shared and immortal**:
-  `MarkBuilder` sets the shared COW state at construction; the first
-  mutation materializes into the runtime heap. Reads of wide scalars out
-  of containers: **reference iff immortal storage (const pool / Input
-  arena), else copy** — the discriminator is storage class, not
-  mutability. [CW8, SF16]
-- **D4.1.3** Input/format allocations are pool/arena-owned and **outside GC
-  rooting entirely**; any future GC-heap boundary there requires an
-  explicit audit. [CR8]
-- **D4.1.4v5*** Heap bytes are kept by exactly **four mechanisms** — tracked
-  raw allocation (`memtrack`), GC heap, arena, pool — and no fifth may be
-  added without a new ruling. **Arena = sequential allocation + batch
-  release**, where batch release has exactly two variants: whole-arena
-  (reset/destroy) and tail-region (mark/rewind — the sidecar-stack
-  pattern). An arena block is **never individually freed or discarded**; it
-  may only be **retained for reuse** — kept on the arena's retired list and
-  handed back to a later allocation from the same arena, its bytes released
-  with the arena. *Retain, never discard.* Retention is the exception, not a
-  second free path: its sanctioned user is DOM node retirement, which
-  recycles node slots inside their document or `Input` arena. Any other site
-  needing individual free is reclassified to pool. A tail-rewound arena has
-  **one owner** (a scratch stack) that owns its tail: no other allocation and
-  no retention may land in it. **Pool = individual allocation + individual
-  free** (plus owner-wide teardown as the safety net). Both share
-  single-writer/multi-reader: published allocations are readable from any
-  thread; all mutation (alloc, retire, free, reset, rewind, destroy) stays on
-  the one writer thread. The general variable-size Pool
-  implementation owns growth extents, subdivides them into boundary-tagged
-  blocks, and indexes **free blocks by span** in segregated free lists. Its
-  optional initial reservation is clamped to at least 1 KiB and rounded up to
-  the sequence `1 KiB * 2^n`; each later reservation doubles. Reservations
-  below 4 KiB use the context/memtrack block path, and reservations at or
-  above 4 KiB use page-backed VM. Each VM commit starts at `max(4 KiB,
-  required block bytes)` rounded to the platform page size. A Pool
-  user allocation is carved from one of those blocks; it does not call
-  `mem_alloc_loc`/`mem_free_loc`, use a pointer hashmap, or maintain an
-  allocated-object index. Extent acquisition, release, and context accounting
-  remain outside the per-block hot path. [Mem_Heap §1.1–§1.2, §4–§5; MP-12,
-  MP-15, MP-21]
+### D4.1 Type values
 
-- **D4.1.5*** Two mechanism-selection corollaries of D4.1.4. **String
-  builders** have two legitimate cases: *standalone* (raw `memtrack`, result
-  copied to its destination) and *owner-backed* (buffer allocated from the
-  destination pool/arena, so the finished string is handed over with **no
-  copy**); pick by whether the destination lifetime is known at build time.
-  Owner-backed splits by growth mechanism: **pool-backed grows by `realloc`**
-  (buffer may move, no ordering discipline), **arena-backed grows by tail
-  extension** (buffer stays put; the string must own the arena tail —
-  formatters fit cleanly, parsers must not interleave node allocation),
-  falling back to grow-and-abandon or size-then-build when it cannot. An arena-backed builder never `realloc`s. **Interning stores** (NamePool)
-  are append-only with no eviction and therefore take an
-  **arena**, not a pool; they remain distinct semantic owners and
-  `MemContext` nodes. [Mem_Heap §2.3, §4.3; MP-19, MP-20]
-### D4.2 Memory Context
+- **D4.1.1* — A type value is a `Type*` graph.** A type value is a node of a
+  `Type*` graph under one TypeId, with a kind field. Composite, pattern,
+  range, constrained, binder and binary-schema types share that tag; they use
+  no tag budget (D2.1.3). The `Type*` graph is the semantic authority for
+  every contract that the compiler carries (D2.3.4). A TypeId alone is never a
+  contract. For example, `T[]` keeps its element, leaf element, rank and leaf
+  carrier in the graph. No array path recovers those facts from an erased
+  array tag. [S11.1.1v3, Lane §1]
+- **D4.1.2 — Types compose as values and compare by representation.** Types
+  compose as values: union, optional, array and constraint. They compare by
+  normalized form, not by semantic equivalence, which is undecidable with
+  constraints. Union normalization uses a canonical order (S5.5.2). That order
+  is open (DO22). [C8.5-4]
+- **D4.1.3 — Reflection uses operators and functions.** `type(x)` gives the
+  type value, and `name(T)` gives its name. `match` and `is` use the same
+  runtime membership operation (D4.2.1). One classification mechanism serves
+  the whole surface. [C9a, TE-6]
+- **D4.1.4 — A type binder has a stable slot.** A binder site stores its
+  written bound, its name and a stable slot in its signature. A bound-name
+  reference stores the slot and a copy of the bound, never a pointer back.
+  `x: as T` elaborates to the same site with an error-free `any` bound; it adds
+  no type kind and no specialization key. Each interpreter or MIR activation
+  owns an exact, rooted environment for its binder values. A binder parameter
+  uses the boxed entry until a specialization proves a direct path. A cached
+  certificate never skips the walk that publishes a binder slot.
+  [S11.4.8v2, D4.3.3]
 
-- **D4.2.1v3** `MemContext` is a **factory that owns every allocator** — no
-  allocator exists off-graph; parent/backing edges wire at creation;
-  cascade teardown is in reverse-dependency order. System allocations use
-  the hardened `memtrack` substrate: direct allocations use its checked
-  `mem_alloc`/`mem_calloc`/`mem_realloc`/`mem_free` contract. Pool is a
-  context-owned allocator whose user bytes come from Pool-owned VM extents;
-  `memtrack` may account extent metadata and diagnostics but is not the
-  ownership mechanism for individual Pool blocks. The platform VM layer is an
-  opaque region provider below those owners. Hot allocation paths do not take
-  the `MemContext` registry lock; ownership registration and teardown remain
-  centralized. [Memory_Context §2–§7; Mem_Heap §5]
-- **D4.2.2v2** Per-document sub-contexts key allocators to a document URL,
-  with the **attribution/reclamation split**: Radiant documents are
-  reclaimable per-document; Lambda `input()` data is GC-coupled and gets
-  attribution only. `MemContext` is the single page-allocation failure and
-  memory-pressure coordinator. Its VM region layer reserves, commits,
-  decommits, and releases page-aligned extents; allocation failure enters
-  the context's configured retry/reclamation path before returning `NULL`.
-  Legacy `memtrack` pressure callbacks are compatibility adapters and must
-  not form a second escalation ladder. [Memory_Context §15]
-- **D4.2.3*** Every arena and pool is **bound at creation to a context** — a
-  named `MemContext` owner (document/input, parse, eval, validation,
-  layout/render, JIT/module, session) recording role, label, parent, and
-  thread mode; there are no free-floating allocators. Context teardown
-  releases — or drops its reference to (D4.2.4) — every allocator it owns
-  and proves its allocator child list empty. [Mem_Heap §1.3; MP-16]
-- **D4.2.4*** A shared arena/pool's lifetime is governed by an
-  **allocator-level atomic `ref_count`**: created at 1 held by the creating
-  context; acquire/release; destroy at zero; the count is the *only*
-  cross-thread-mutable allocator field. Batch invalidation — reset, or
-  rewind of published data — requires exclusivity (`ref_count == 1`,
-  debug-checked). Immortal storage (D4.1.2) is the limiting case: a
+### D4.2 Subtyping and validation
+
+- **D4.2.1 — One subtype model, three operations.** The three operations share
+  one numeric foundation. They are never treated as the same operation:
+  - `subtype(S, T)` is static. It drives inference and static admission.
+  - `matches(item, T)` is runtime membership. It drives `is`, `match` and the
+    validator checks.
+  - `checked_convert(item, T)` belongs to the explicit conversion functions,
+    which own lossy conversions. [TE-6]
+- **D4.2.2 — `<:` spells the subtype relation.** `<:` takes two type values
+  and returns `bool`. It is not the magnitude operator `<`, and it does not
+  test value membership. It uses the static value-set relation without
+  conversion, including the nominal base walk (S11.3.1v2). Declared-boundary
+  compatibility permits a conversion, so `<:` must not use it. Function-type
+  operands are rejected until a ruling defines their variance. [S1.7, S6.1.1,
+  S11.1.4v2, S11.3.1v2]
+- **D4.2.3* — The validator enforces user-defined types at run time.**
+  Validation is deep, and it happens at the first crossing. A failure gives a
+  rich error with a validator path. A deferred initializer or a whole-variable
+  reassignment binds that outcome and does not leave its block (S7.7.2v2,
+  S7.7.4v2). Other boundaries use the outcome by their own contracts. A
+  constrained type (`T that …`) enforces only its base for now. `is`, the
+  runtime, the emitter and the validator must use the shared foundation.
+  [TE-10, TE-6 P5, TE-18.1–TE-18.2]
+- **D4.2.4* — Declared and effective types are separate facts.** The
+  declaration is on the binding node, and inference is beside it. An
+  annotation is a strict admission contract (S11.4.1v5). The effective type of
+  a deferred initializer or a reassignment includes the validation-error
+  alternative (S7.7.2v2, S7.7.4v2). Track the possible outcomes through writes
+  and joins, and do not widen the declared target. Inference never replaces
+  validation. It never selects a native representation for an outcome that
+  can hold an error. [TE-1, TE §8.1, TE-18.1–TE-18.2]
+- **D4.2.5* — A crossing into a named map contract reifies its layout.** A
+  named contract fixes a physical layout: field offsets and storage classes.
+  Direct field access indexes by that layout. Thus a boundary check can be
+  skipped only if the source is proven to have that layout already. Semantic
+  compatibility is not sufficient, because the same value can have two
+  physical shapes. A value gets the proof in two ways only: it adopts the
+  contract at construction, or it crosses a boundary that reified it. Each
+  user of this rule finds the contract through the non-null arm of its
+  spelling (`N?`, `N | null`, `N^`, `N | E`). Errors stay in Item storage and
+  never get the layout. The open `map` fixes no layout. For an open nominal
+  instance, the contract fixes the declared prefix. A violation is a
+  memory-safety defect. The rule holds at each rank of `N[]`. The proof is
+  transitive through a verified carrier: an element or a field read from a
+  certified carrier has the layout proof while the verification is valid
+  (D4.2.6). [S11.1.1v3, S11.4.6v4, Tune19 §11.5, Tune20 §T20-6a, OB16,
+  TE-13.4]
+- **D4.2.6* — Verified once, valid while unchanged.** A declared type on
+  `let`, `var`, a parameter, a return or a nominal element binding is verified
+  at the crossing. The verification stays valid while the data does not change
+  (S11.4.10). Under a nominal contract, each required field is present; the
+  container stays open beyond the declared prefix (S11.4.6, S2.1.4). Native
+  lanes store exactly the declared layout: that is the ABI. Thus a reader with
+  a verified contract reads a required field by offset, with no presence test.
+  Structural composition has no constraint. A value built by a host is outside
+  this rule until it crosses a boundary that admits it. [TE-19, S11.4.10]
+
+### D4.3 Inference
+
+- **D4.3.1 — Inference never changes the result of a correct program.** Take
+  a script with no type error. Erase all inferred types and run it boxed: the
+  result must be the same (SI3v2). A differential harness between boxed and
+  JIT runs checks this. Inference is visible statically: better precision can
+  reject a script at compile time, at once, with no warning period. Strictness
+  is per surface. The Lambda lane is strict by default. Its relaxed mode
+  reports the same diagnostics as warnings, and it drops a failed annotation
+  to the inferred type (SI14). The LambdaJS lane is lenient by default. [B7,
+  TI6]
+- **D4.3.2 — Inference selects an implementation, never a contract.**
+  Entry-shape inference and body inference are separate products. Float
+  arithmetic on a parameter does not change the parameter type. Precise
+  inference can find an error component and make a static obligation (E208).
+  It never makes a runtime obligation that the erased run does not have.
+  [DF12, DF13, TE-13, TI6]
+- **D4.3.3 — Inferred narrowing dies with its binding.** Inferred element-type
+  narrowing belongs to one binding scope. It is never written into the
+  container. An explicit `T[]` contract that is enforced is different. It can
+  attach an immutable certificate that proves the rank, the leaf contract and
+  the physical carrier. The certificate is valid only while the contract and
+  the carrier both match it. A semantic certificate on boxed slots cannot
+  authorize a raw or compact-lane read. A transform keeps a certificate only
+  after it makes the matching carrier. An unchecked change of representation
+  clears the certificate. [S11.4.1v3, elem-type invariant]
+- **D4.3.4 — System-function result relations are registry metadata.** A
+  sys-func registry row records a result relation and a source-argument index.
+  The AST builder applies the relation to the full argument list. A relation
+  never exposes a type name, and it never changes native dispatch. A row falls
+  back to its declared open result where the native operation cannot prove
+  the relation. [S11.4.9, S17.2.1]
+
+### D4.4 Binary schemas
+
+- **D4.4.1* — Binary schemas compile to immutable descriptors.** A binary
+  schema compiles to immutable field descriptors that its module owns. One
+  schema-backed element backend serves byte buffers and declared native
+  layouts. One manifest generates the native bindings and the Lambda
+  declarations. Admission checks the binding ABI, the manifest revision, the
+  field kinds, the typed targets and the span contracts. A mismatch rejects
+  admission. A byte buffer cannot grant native memory access.
+  [Binary_Schema §10]
+- **D4.4.2* — A native schema view can be made invalid.** A native view keeps
+  a lifetime control. The host pins the admitted storage, and it makes the
+  view invalid before it releases the storage. Every subview shares the
+  control. Each access checks validity before it touches storage. Counted
+  spans check their counts against the host extents. Declared native Item
+  fields are traced precisely; arbitrary native memory is never scanned. No
+  native address or ownership transfer is visible to a script. [D5.5.1,
+  D6.3.3–D6.3.4; Binary_Schema §10]
+
+## D5 Memory
+
+### D5.1 Tiers and mechanisms
+
+- **D5.1.1 — There are four content tiers.** Content lives in four tiers: the
+  GC heap (runtime values), the Input arena (parsed documents), the AST and
+  const pool, and the NamePool (interned names). The collector does not see the
+  non-GC tiers. A pointer range test is the only gate, and tracing stops at a
+  pointer outside the GC heap. Each content tier maps to exactly one
+  allocation mechanism (D5.1.4). [GC1 §2.10.4; Mem_Heap §1.1]
+- **D5.1.2 — Static Mark data is born shared and immortal.** The builder sets
+  the shared COW state at construction. The first mutation makes a copy in
+  the runtime heap. A read of a wide scalar from a container takes a reference
+  if the storage is immortal (const pool or Input arena); otherwise it copies.
+  The storage class decides, not mutability. [CW8, SF16]
+- **D5.1.3 — Input data is outside GC rooting.** Input and format allocations
+  belong to a pool or an arena. They are outside GC rooting. A new boundary to
+  the GC heap there needs an explicit audit. [CR8]
+- **D5.1.4* — There are four allocation mechanisms.** Heap bytes come from
+  exactly four mechanisms: tracked raw allocation (`memtrack`), the GC heap,
+  an arena and a pool. A fifth mechanism needs a new ruling.
+  - An arena allocates in sequence and releases in batches: the whole arena,
+    or a tail region (mark and rewind). An arena block is never freed alone.
+    It can only be retained for reuse in the same arena: retain, never
+    discard. DOM node retirement is the approved user of retention. A rewound
+    tail has one owner.
+  - A pool allocates and frees blocks one at a time. Owner-wide teardown is
+    its safety net. A pool block operation uses no global registry, hash map
+    or lock.
+  - Arenas and pools have one writer thread and many reader threads.
+    [Mem_Heap §1.1–§1.2, §4–§5; MP-12, MP-15, MP-21]
+- **D5.1.5* — Select the mechanism by lifetime.** A string builder is
+  standalone (tracked memory; the result is copied) or owner-backed
+  (allocated from the destination; no copy). Select by whether the destination
+  lifetime is known at build time. A pool-backed builder grows by
+  reallocation. An arena-backed builder grows by tail extension, and it never
+  reallocates. An interning store is append-only, so it uses an arena.
+  [Mem_Heap §2.3, §4.3; MP-19, MP-20]
+
+### D5.2 Memory contexts
+
+- **D5.2.1 — `MemContext` owns every allocator.** Each arena and pool is bound
+  to a named context when it is created. The context records the role,
+  label, parent and thread mode. No allocator exists outside the graph.
+  Teardown releases each owned allocator, or drops its reference (D5.2.3), in
+  reverse dependency order. Then it proves that no allocator child remains.
+  System allocations use the checked `memtrack` API. A pool gets its bytes from
+  VM extents that it owns. Hot allocation paths do not take the registry lock.
+  [Memory_Context §2–§7; Mem_Heap §1.3, §5; MP-16]
+- **D5.2.2 — Documents get attribution; some also get reclamation.** A
+  per-document sub-context keys allocators to a document URL. A Radiant
+  document can be reclaimed as one unit. Lambda `input()` data is coupled to
+  the GC, so it gets attribution only. `MemContext` is the one coordinator for
+  page-allocation failure and memory pressure. An allocation failure enters its
+  retry-and-reclaim path before it returns `NULL`. [Memory_Context §15]
+- **D5.2.3* — A shared allocator has a reference count.** A shared arena or
+  pool has an atomic reference count. The creating context holds the first
+  reference. The allocator is destroyed at zero. The count is the only
+  allocator field that more than one thread changes. A reset, or a rewind of
+  published data, needs exclusive ownership. Immortal storage holds a
   permanent reference. [Mem_Heap §1.4; MP-17]
-- **D4.2.5v3*** Allocation tracking is a **diagnostic, never the mechanism**:
-  release builds default `memtrack` OFF; STATS is counters-only;
-  allocation-level registry records are DEBUG-exclusive — no tracked mode
-  may impose a per-allocation global lock on release hot paths, and the
-  Pool hot path is registry-free and mutex-free (fixed-header recovery,
-  boundary tags, and free-list links owned by the Pool). Pool extent
-  reservation/commit and teardown may enter the VM/context slow path, but
-  per-block operations do not. **Outside the memory-management implementations
-  under `lib/`, application code MUST NEVER call libc `malloc`, `calloc`,
-  `realloc`, or `free` directly. It MUST use the corresponding hardened
-  `memtrack` API (`mem_alloc`, `mem_calloc`, `mem_realloc`, `mem_free`) or an
-  owning GC/Arena/Pool API; direct libc allocation is confined to implementing
-  those memory-management APIs in `lib/`.** The raw surface splits into
-  `stack_alloc`/`stack_free`
-  (function-scoped LIFO temporaries on a thread-confined sidecar stack)
-  plus manager-internal use; the source audit enforces the prohibition.
-  [Mem_Heap §2.1, §2.4, §5.2; MP-13, MP-14, MP-18, MP-21]
-- **D4.2.6** A pool may **own a resource that is not one of its blocks**
-  through a **cleanup**: `pool_add_cleanup` registers a callback that runs
-  once, newest first, when the pool releases its blocks (destroy, drain,
-  reset), while those blocks are still valid. It is lifecycle only — the
-  pool keeps none of the resource's bytes — so it is not a fifth mechanism
-  (D4.1.4v5). **Every `Input` is owned by the pool it lives in**: it has
-  its own context (D4.2.3), created under the pool's context, for its arena
-  and name pool, and it registers its release as a cleanup, so it is
-  released explicitly or, at the latest, with its pool — the lifetime its
-  creator already chose, since the `Input` struct is one of that pool's
-  blocks. A cleanup reached from a registry cascade must not re-enter the
-  registry; the cascade has already destroyed every context created under
-  the pool's. [Memory_Context §16]
+- **D5.2.4* — Allocation tracking is a diagnostic.** Tracking is never the
+  allocation mechanism. Release builds turn `memtrack` off by default.
+  Per-allocation records exist only in debug builds. No tracking mode puts a
+  global lock on a release hot path. Outside the memory implementations in
+  `lib/`, code must never call libc `malloc`, `calloc`, `realloc` or `free`. It
+  must use the `memtrack` API or an owner API (GC, arena or pool). A source
+  audit enforces this. [Mem_Heap §2.1, §2.4, §5.2; MP-13, MP-14, MP-18, MP-21]
+- **D5.2.5 — A pool can own an external resource through a cleanup.** A
+  cleanup is a callback that runs once, newest first, when the pool releases
+  its blocks. It is lifecycle only, not a fifth mechanism. Every `Input`
+  belongs to the pool that holds it. It has its own context, and it registers
+  its release as a cleanup of that pool. A cleanup called from a registry
+  cascade must not enter the registry again. [Memory_Context §16]
 
-### D4.3 Garbage collection
+### D5.3 Garbage collection
 
-- **D4.3.1** **Non-moving mark-and-sweep, dual-zone**: objects never move
-  (Item pointers stable forever, zero write barriers); only the data zone
-  compacts, with exactly one pointer fixup per surviving object — *fixup
-  is O(survivors), not O(references)*. Copying GC and handle tables
-  rejected. [GC2 §4]
-- **D4.3.2v2** Object zone = size-class segregated free lists backed by
-  VM-owned extents; data zone = bump allocator fully reset per GC; strings
-  keep inline `chars[]` in the object zone. Multiple slabs may share an
-  extent, large objects use dedicated regions, and only the owning GC heap
-  releases its regions. Adaptive growth threshold (×4 under 40% freed, ×2
-  to 74%, hold at ≥75%, capped). [GC2 §5, §12]
-- **D4.3.3** Precise closure-env tracing via `closure_field_count`; VMap
-  traces and finalizes through vtable callbacks that are allocation-free
-  and never re-enter script. [GC2 §8, JA6]
-- **D4.3.4** A shaped field whose declared lane is `null` is traced
-  **conservatively**: the collector marks the eight-byte word it holds when
-  that word is a managed object. The store path upgrades a `null` field to
-  a container pointer in place (the same-width fast path of `fn_map_set`),
-  and a literal shape shared by every instance of its site keeps `null` for
-  the others, so the declared lane says nothing about the word; a `null`
-  lane that follows a nine-byte `any` lane also sits at an offset the
-  eight-byte word sweep never visits. Decided 2026-09-07 after splay's right
-  subtrees were freed while linked on every tier (D4.3.1's precise trace had
-  a hole, not the roots). A real `null` is zero and marks nothing.
+- **D5.3.1 — The collector is a non-moving, two-zone mark-and-sweep.** Objects
+  never move: Item pointers are stable, and there are no write barriers. Only
+  the data zone compacts, with one pointer fix for each surviving object. Thus
+  the fix cost follows the survivors, not the references. The object zone uses
+  size-class free lists. The data zone is a bump allocator that resets at each
+  collection. Only the owning GC heap releases its regions. A copying GC and
+  handle tables are rejected. [GC2 §4, §5, §12]
+- **D5.3.2 — Closures and virtual maps are traced precisely.** A closure
+  environment records its field count. A virtual map traces and finalizes
+  through vtable callbacks. Those callbacks never allocate, and they never
+  enter script. [GC2 §8, JA6]
+- **D5.3.3 — A null-typed shape lane is traced as a possible pointer.** The
+  store path can put a container pointer into a `null` lane in place. A
+  literal shape that many instances share keeps `null` for the others. Thus
+  the declared lane does not describe the word. The collector marks the word
+  when it points to a managed object. A real `null` is zero and marks nothing.
+  [GC2 §8; DO30 record]
 
-### D4.4 COW implementation
+### D5.4 Copy-on-write
 
-- **D4.4.1** v1 ships the **1-bit shared flag** (`cow_state`, monotonic,
-  idempotent; copies initialize state explicitly, never memcpy it) — *a
-  false "shared" is a wasted copy; a false "unique" is a semantic bug.*
-  Saturating counts / GC-refresh are bit-compatible extensions gated on
-  live-corpus counters. The same bit becomes the cross-isolate
-  discriminator (biased refcounting). [CW3, CW6, CW3-C]
-- **D4.4.2** A COW copy is exactly **one level** — copy own storage, mark
-  container children shared; O(width) per level, DAG sharing preserved
-  free. Raw mutators stay policy-free; Lambda lowers through parallel
-  `_cow` wrappers; JS lowering never emits `_cow`; no language-mode test
-  in a raw hot path. The unique fast path is non-negotiable: one byte
-  load/test/branch. [CW9, CW21, CW1/CW2]
-- **D4.4.3** All copy paths precisely root source/replacement/owner chain
-  and reload after possible GC; forced-GC stress is a permanent gate.
-  Exclusivity checks and view-borrow confinement are Stage 2.* [CW20]
-- **D4.4.4v4*** A place handle — `var h = root.path` on a `var` local or
-  `var` parameter root, **or the compiler's own handle for a path spelled
-  repeatedly in one body** — **may be bound as a borrow of its place** (no
-  share-mark; a store-back to the same path stores the pointer it holds and
-  skips capture) whenever the sharing stays **unobservable under S9.1.2**:
-  `let`/`var` hold values, never aliases, and no program can distinguish the
-  borrow from the snapshot bind. That invariant is the ruling. A handle
-  carries **facts about its place** — identity (the object header, stable
-  under D4.3.1), layout and presence (D3.2.4v5, D3.2.6), and uniqueness
-  (the spine test, and S9.2.2's un-share of a shared leaf at a writing
-  bind) — and **the facts hold exactly as long as the place and its
-  ownership are unchanged**: any event that may replace the place or a
-  prefix of its path, reorder a prefix container, hand the root or a prefix
-  to a writer, or re-share the spine ends the facts it can affect, and the
-  next use re-establishes them. Data-zone pointers (packed fields, array
-  buffers) are never facts: they are reloaded after any allocation point
-  (D4.3.1 compacts the data zone). **Which paths, which writes through the
-  handle, where the store-backs sit, nested handles, rebinding of the handle,
-  and the concrete invalidation table are implementation details**, chosen
-  for the best performance and recorded in the COW design record (CW36,
-  CW37 with its appendix table), under three fixed conditions: the static
-  shape is decided once for both tiers; the bind runs the runtime spine test
-  (every container from the root to the leaf's parent unshared at the bind;
-  a shared, static or immortal link keeps the snapshot bind); and on every
-  path that writes through the handle, the handle is either stored back to
-  its path before its next use, or share-marked at the point the invariant
-  would otherwise be at risk. An error exit leaves partial writes visible
-  through the root, as for a `var` parameter. Implemented shapes: the v2
-  straight-line shape (same statement list, sibling-member access, early
-  return before every use) and, where it declines, a path-by-path walk
-  admitting store-backs inside `if` arms, nested handles and `var`-call
-  rebinds of the handle (CW36). Synthesized handles and carried facts are
-  ruled, not implemented (CW37). [CW34; v2 2026-09-14; v3 2026-09-16; v4
-  2026-09-17]
-- **D4.4.6** A **place copy** (`let`/`var h = root.path`, root mutable) is
-  share-marked at its bind iff **the place may be written while the copy is
-  alive**, decided statically per binding: a write through the root, or any
-  prefix of the path, between the bind and the copy's last use; the root handed
-  to a call as a `var` argument in that range (the callee may write in place);
-  or the copy escaping the function (returned, stored, captured, passed on).
-  Otherwise the bind is a free borrow. The copy's *own* mutation still marks
-  (D4.4.4v2's snapshot). Replaces the rule that marked only a mutated copy,
-  which left `let old = r.kid; r.kid.n = 7; print(old.n)` printing 7 on every
-  tier since at least Result42 (S9.1.2: a false "unique" is a semantic bug,
-  D4.4.1). Read-and-return helpers stay free because their range contains no
-  root write and the copy dies in the frame; returning the *node itself* marks,
-  as it must. [CW24v3; 2026-09-16]
-- **D4.4.5** A **move-out** place copy — `var h = root.path` whose place is
-  overwritten by an unconditional store `root.path = e` (`e` not naming `h`)
-  later in the same statement list, where every statement in between is a
-  declaration or assignment that only reads through `h` and uses the root
-  through sibling members, with no write through `h`, escape of `h`, branch,
-  loop or control transfer — binds as a **borrow** under D4.4.4v2's runtime
-  spine test. After the overwrite `h` is the place's only holder, so its
-  writes need no copy; the leaf's own share bit still decides whether they
-  detach. Same root and annotation conditions as D4.4.4v2; tier-shared static
-  decision. [CW35]
+- **D5.4.1 — COW uses one shared bit.** The shared flag is monotonic and
+  idempotent. A copy sets its own state explicitly; it never copies the flag.
+  A false "shared" costs a copy; a false "unique" is a semantic bug. A
+  saturating count is a compatible extension for the future, gated on
+  live-corpus counters. The same bit identifies values that cross isolates.
+  [CW3, CW6, CW3-C]
+- **D5.4.2 — A COW copy is one level.** A copy duplicates its own storage and
+  marks its container children shared. Raw mutators have no policy. Lambda
+  lowers through COW wrappers; JavaScript lowering never uses them. A raw hot
+  path never tests the language mode. The unique fast path is one byte load,
+  one test and one branch. [CW9, CW21, CW1/CW2]
+- **D5.4.3* — Copy paths stay rooted.** Each copy path roots its source, its
+  replacement and its owner chain precisely. It reloads after a possible
+  collection. Forced-GC stress is a permanent gate. [CW20]
+- **D5.4.4* — A place handle can borrow its place.** A place handle is `var h
+  = root.path`, or a handle that the compiler makes for a path that is spelled
+  many times. It can borrow its place if the sharing stays invisible under
+  S9.1.2. A handle carries facts about its place: identity, layout, presence and
+  uniqueness. The facts hold only while the place and its ownership do not
+  change. An event that can replace, reorder, share or give away the place or
+  a prefix ends the facts that it can affect. Data-zone pointers are never
+  facts; reload them after an allocation point. Three conditions are fixed:
+  - one static decision serves both tiers;
+  - the bind runs the runtime spine test;
+  - each path that writes through the handle stores it back before its next
+    use, or share-marks it.
 
-- **D4.4.7** A place passed to a `var` parameter uses a caller-owned,
-  precisely rooted Item home and evaluated path keys. The callee publishes
-  its final value through that home; the caller reinstalls it through the
-  original path, including on an error result. No address into a movable
-  data buffer crosses the call (D4.3.1, D4.4.4v4). Scalar and container
-  places follow the same protocol; native adapters preserve the declared
-  lane and S9.1.3v3's invariance and exclusivity. [CW33v2; USER 2026-11-03]
+  The handle shapes and the invalidation table are implementation details
+  (CW36, CW37). [CW34]
+- **D5.4.5 — A place copy is share-marked if its place can change.** A place
+  copy is `let`/`var h = root.path` on a mutable root. It is share-marked at
+  its bind if the place can be written while the copy is alive. Decide this
+  statically for each binding. These events in the live range of the copy are
+  triggers:
+  - a write through the root or a prefix of the path;
+  - the root as a `var` argument;
+  - an escape of the copy.
 
-### D4.5 The Radiant seam
+  Otherwise the bind is a free borrow. A move-out
+  copy, whose place is overwritten later in the same statement list before
+  any other use, also binds as a borrow. [CW24v3, CW35]
+- **D5.4.6 — A `var` argument uses a caller-owned home.** A place that is
+  passed to a `var` parameter uses an Item home that the caller owns and
+  roots, and evaluated path keys. The callee publishes its final value
+  through the home. The caller writes it back through the original path, also
+  on an error result. No address into a movable data buffer crosses the call.
+  Scalar and container places use the same protocol. [CW33v2; USER
+  2026-11-03]
 
-- **D4.5.1v4** One system-allocation substrate (`memtrack` + VM regions,
-  owned through `MemContext`), **two policies**: Lambda traces; Radiant uses
-  arenas-as-regions + type-stable pools + generation handles + RAII, never
-  GC'd — *the document arena is the cycle collector*. Ordinary Arena owns
-  its blocks directly and exposes **batch lifetime only** — whole-arena
-  reset/destroy or tail-region mark/rewind — plus retention for reuse
-  (D4.1.4v5): retired DOM nodes stay on their arena's retired list for later
-  node allocations; other former individual-free users are reclassified,
-  not accommodated. Each layout, render and display-list scratch stack owns
-  its own arena. Seam contracts: **pin, gen-check, copy-as-value**.
+### D5.5 The Radiant seam
+
+- **D5.5.1 — One substrate, two policies.** Lambda and Radiant share one
+  system-allocation substrate. Lambda traces. Radiant uses arenas as regions,
+  type-stable pools, generation handles and RAII, and it is never collected.
+  The document arena is the cycle collector. Arenas have batch lifetime only,
+  plus retention for reuse (D5.1.4). Each scratch stack owns its own arena.
+  The seam contracts are: pin, check the generation, copy as a value.
   [Memory_Model §7; Mem_Heap §4, MP-15]
-- **D4.5.2*** **Radiant never retains a GC pointer.** Storage that outlives
-  the current call — the document arena, the view tree and their pools —
-  never points into the GC heap; a GC value Radiant must keep is **copied
-  into the document arena**, which outlives it. Passing a GC value from
-  Lambda into Radiant **for reading** is a transient borrow for the duration
-  of the work that reads it, admitted provisionally until a breaking case is
-  found. Exempt: a reference held under a registered GC root that lasts at
-  least as long as the document — the root, not the storage, keeps the value
-  alive (script-identity values such as a `FileList` or a Selection wrapper).
-  *Radiant storage is invisible to the collector (D4.1.1v2): borrow to read,
-  copy or root to keep.* [Memory_Safety_Template §2.3]
-- **D4.5.3v2** **UI/view-mode DOM construction deep-copies ordinary Elements
-  and their content through MarkBuilder**, including values already owned by
-  the document arena. Each presentation occurrence owns its native parent and
-  sibling links. Normal Lambda evaluation retains ordinary value sharing and
-  ownership-based copy elision; rooted callables and native handles keep their
-  existing identity. DOM copies preserve the evaluator's source/result mapping.
-  The ruling governs only how DOM is built from Lambda scripts; it does not
-  constrain style, layout or rendering. Incremental presentation fully embraces
-  retention: a regeneration may keep an existing occurrence's subtree, patched
-  in place to present the new result, and restyle, reflow and repaint reuse
-  every retained structure that is still valid. *Copy at construction, retain
-  downstream.* [Reactive_UI §5.3, §10.1; user, 2026-10-11, 2026-10-13]
+- **D5.5.2* — Radiant never keeps a GC pointer.** Storage that outlives the
+  current call never points into the GC heap. To keep a GC value, Radiant
+  copies it into the document arena. A GC value passed for reading is a short
+  borrow for the work that reads it. A reference under a registered GC root
+  that lives at least as long as the document is exempt. Borrow to read; copy
+  or root to keep. [Memory_Safety_Template §2.3]
+- **D5.5.3 — DOM construction copies; presentation retains.** View-mode DOM
+  construction deep-copies ordinary elements and their content. Each
+  presentation occurrence owns its native parent and sibling links. Normal
+  Lambda evaluation keeps ordinary value sharing. The copies keep the
+  source-to-result mapping. Incremental presentation retains structure: a
+  regeneration can patch a retained subtree in place, and restyle, reflow and
+  repaint reuse every valid structure. This ruling does not constrain style,
+  layout or rendering. [Reactive_UI §5.3, §10.1]
 
-### D4.6 Name identity
+### D5.6 Name identity
 
-- **D4.6.1v4** One semantic **property** identity is a `NameId`, never a
-  `String*` address. `NameId = [pool16][ordinal16]`; `NAME_ID_NONE` is the
-  id-less Input seam, and `SectionNameId = [slot16][offset16]` remains a
-  location rather than identity. Generated ordinary names retain catalog
-  IDs. The existing NamePool owns resolution; pointer equality is not a
-  property, shape, transition, IC, Lambda textual-symbol, or private-name
-  comparison. A hosted JS `Symbol` is the single explicit exception at the
-  **value** layer: its pointer is JS value identity, while its `name_id`
-  remains the property identity on the existing shape/transition route. It
-  never becomes a Lambda `NameKey`, and its diagnostic spelling is never its
-  property identity. Ordinary string keys enter NamePool, shape edges, and
-  map lookup/mutation in the canonical UTF-8/lossless WTF-8 form of
-  S8.2.2v5. Equal code-unit sequences share bytes; unequal NameIds or pool
-  membership never prove unequal string keys across pools. No Unicode
-  normalization or surrogate replacement participates in identity.
-  Observable strings may be materialized at
-  Proxy/reflection boundaries. [NI1–NI4, NI16, JSCU57]
-- **D4.6.2v2** Evolve NamePool, don't replace it (first definer wins and
-  parent-first lookup). One identity scope has a sealed static root and one
-  owner-thread dynamic child: static segment numbers occupy the lower pool16
-  half and dynamic segments the upper half. Static linking uses the existing
-  `PropertyKeySpec` sealed image and per-context `NameId[]`; arbitrary dynamic
-  IDs are never persisted or emitted as MIR immediates. Mark/Input document
-  fields remain id-less unless they resolve through an explicitly retained
-  schema/static parent. `eval`/REPL use the same module-table and NamePool
-  pipeline; cross-context Input ownership is not inferred from numeric IDs.
+- **D5.6.1 — A `NameId` is property identity.** A property name is
+  identified by a `NameId`, never by a `String*` address. The NamePool
+  resolves names. Pointer equality never compares properties, shapes,
+  transitions, symbols or private names. A JavaScript `Symbol` is the one
+  exception at the value layer: its pointer is its JS identity, and its name
+  ID stays its property identity. String keys use the canonical UTF-8 or
+  lossless WTF-8 form (S8.2.2v5). No Unicode normalization takes part in
+  identity. Different name IDs from different pools never prove different
+  keys. [NI1–NI4, NI16, JSCU57]
+- **D5.6.2 — Evolve the NamePool; do not replace it.** The first definer wins,
+  and lookup checks the parent first. One identity scope has a sealed static
+  root and one dynamic child for each owner thread. Static linking uses a
+  sealed key image and a per-context ID table. Dynamic IDs are never persisted
+  and never emitted as MIR immediates. Document fields stay without IDs unless
+  a retained schema resolves them. `eval` and the REPL use the same pipeline.
   [NI6, NI7, NI10, NI12, NI13]
 
-### D4.7 Const pool / MarkPack
+### D5.7 Const pool and MarkPack
 
-- **D4.7.1*** **One binary encoding for Lambda data, four consumers**
-  (const pool, documents, interchange, messages): four sections
-  (names/types/data/code); containers materialize a spine and map leaves
-  (in-place relocation rejected — per-isolate refs can't live in shared
-  pages); materialized templates are permanent COW sources; an emitter
-  whitelist is the only legal MIR-operand surface. [CP2–CP7, CP25]
-- **D4.7.2*** Two stream variants over one encoding (bare stream;
-  + trailing skip table and block index) — **sealing appends, stream
-  bytes are never rewritten**; two-tier validation (full structural
-  before any mapped pointer escapes — *a lying skip table must not
-  mis-drive scanners*; magic/hash for trusted caches); malformed input is
-  an error, never UB. Functions, closures, VMaps, and native handles do
-  not serialize — encoder error. [CP18, CP20–CP22, §4c]
+- **D5.7.1* — One binary encoding has four users.** The const pool,
+  documents, interchange and messages use one encoding. It has four sections:
+  names, types, data and code. Containers materialize a spine and map their
+  leaves; in-place relocation is rejected. A materialized template is a
+  permanent COW source. An emitter allowlist is the only legal surface of MIR
+  operands. [CP2–CP7, CP25]
+- **D5.7.2* — Sealing appends; stream bytes never change.** Two stream
+  variants use one encoding: a bare stream, and a stream with a skip table and
+  a block index. Validation has two tiers: full structural validation before
+  any mapped pointer escapes, and magic and hash checks for trusted caches.
+  Malformed input is an error, never undefined behavior. Functions, closures,
+  virtual maps and native handles do not serialize. [CP18, CP20–CP22, §4c]
 
-## D5 Execution State: Stacks and Rooting
+## D6 Execution State
 
-### D5.1 The stack model
+### D6.1 Stacks
 
-- **D5.1.1v3** Three stack-like mechanisms with distinct owners: the native
-  C stack (invisible to GC); **watermarked side stacks** — the root stack,
-  precisely scanned `[base, top)`, and the **number stack, never
-  scanned** — two strictly separate mappings; and **activation stacks** —
-  every suspendable body (a Lambda task; a JS generator, async function or
-  module body; in either tier) runs once on a native stack of its own, with
-  its own root and number segments, and parks in place. *A parked
-  activation's root segment is the one Item region it contributes, traced
-  through its owner (the task, or the generator/async carrier); its native
-  stack and number segment are never scanned.* LIFO lifetimes live on the
-  side stacks, an activation's included; non-LIFO lifetimes own their
-  scalars in tail regions of their own allocation. (Revised 2026-10-05, v3:
-  the third mechanism was the heap async frame, a tail-bearing container a
-  transformed function spilled into; no tier transforms a function in order
-  to suspend it.) [SF2, SF12, Stack_Frame §5.1, Runtime_Async RA1, RA3,
+- **D6.1.1 — Three stack mechanisms have different owners.** The native C
+  stack is invisible to the GC. Two watermarked side stacks hold values: the
+  root stack, which the collector scans precisely, and the number stack,
+  which it never scans. Activation stacks run suspendable bodies: a Lambda
+  task, or a JS generator, async function or module body. Each one runs on its
+  own native stack with its own root and number segments, and it parks in
+  place.
+  A parked activation contributes only its root segment, traced through its
+  owner. LIFO lifetimes use the side stacks. Non-LIFO lifetimes own their
+  scalars in tail regions of their own allocation. No tier transforms a
+  function in order to suspend it. [SF2, SF12, Stack_Frame §5.1, RA1, RA3,
   RA13–RA15]
-- **D5.1.2** Static per-function frame sizing, no `MIR_ALLOCA`, two saved
-  watermarks per frame, virtual reservation + demand paging (decommit
-  after GC), explicit frame-entry limit checks; no hotness detection —
-  primitives are unconditionally cheap. *Be as static as a dynamic runtime
-  can be.* [SF5–SF7, SF13]
-- **D5.1.3** **Downward flows never re-home; only upward flows and
-  outliving stores do. Suspension is a re-homing barrier** — an async
-  frame is a tail-bearing heap container; LIFO state goes to side stacks,
-  non-LIFO to owned storage. [SF19, SF20]
-- **D5.1.4** Cleanup order is load-bearing: all `MAY_GC` cleanup runs
-  **before** root/number watermark restoration; one epilogue per
-  function. Frame-capacity failure is fail-closed through the language's
-  failure lane. [Stack_API §8.6, §8.10]
+- **D6.1.2 — Frames are static.** A function has a static frame size, no
+  `MIR_ALLOCA` and two saved watermarks. Stacks use a virtual reservation with
+  demand paging. Frame entry checks the limit explicitly. There is no hotness
+  detection; the primitives are always cheap. Be as static as a dynamic
+  runtime can be. [SF5–SF7, SF13]
+- **D6.1.3 — Only upward flows and outliving stores re-home a value.** A
+  downward flow never re-homes a value. An upward flow, or a store that
+  outlives the frame, re-homes it. Suspension is a re-homing barrier.
+  [SF19, SF20]
+- **D6.1.4 — Cleanup runs before the watermarks are restored.** All `MAY_GC`
+  cleanup runs before the root and number watermarks are restored. Each
+  function has one epilogue. A frame-capacity failure fails closed through the
+  failure lane of the language. [Stack_API §8.6, §8.10]
 
-### D5.2 Scalar homes
+### D6.2 Scalar homes and wide returns
 
-- **D5.2.1v5*** Function wide-scalar returns use the **companion-lane
-  convention**: a may-be-wide boxed return is the pair `[item, scalar]` —
-  lane 2 a raw 64-bit payload (never a pointer), live iff lane 1 is a
-  **pending Item** (reserved tag `0x1E`, kind in the payload). A pending
-  Item never lives in memory and at most one is live at a time; the
-  caller resolves at first consume (free — the existing tag dispatch),
-  patches on escape (one branch), or forwards on tail return (free).
-  Typed fallible returns use a proven native success lane with a
-  companion error-Item lane. Outcome planning follows the normalized contract:
-  `T^` and `T | error` have identical semantics, irrespective of spelling or
-  whether the body uses `raise` or an ordinary error return (S7.4.2v4).
-  A particular error set is derived from ordinary union alternatives (`T | E`),
-  never from a separate typed-raise contract or an implicit broad-error addition.
-  This does not merge the scalar payload lane with the error lane.
-  Classification happens at the wide value's *birth site*, statically —
-  never at boundaries. Lambda and LambdaJS generated functions have no
-  trailing caller-home parameter and no selectable v2 convention; their
-  C-reachable wrappers use `Context::mir_companion_slot`. A separately
-  versioned hosted-language ABI may still request an explicit payload-owner
-  address, but that is a native ownership boundary, not this return ABI.
-  (Reinstates SF14-v1 two-lane returns; retires v1's caller-donated canonical
-  homes — retired-ABI record in Appendix A.) [RV1–RV13, Return_Value §2–§5]
-- **D5.2.2v3** Scalar homes are raw payload words, never GC roots, colored
-  in a separate slot space from root slots; fully-unobserved lanes use a
-  discard home; tail calls forward the incoming home. Destination-owned
-  scalar storage exists at every ownership boundary (array tails, typed
-  fields, envs, module tables, task/message records) **and at
-  wide-capable mutable locals**: such a binding owns one slot allocated at
-  its declaration and held for its scope, and assigning a wide value copies
-  the payload into that slot rather than pushing a fresh home. A binding
-  declared inside a loop body is declared once per iteration and its slot
-  dies with the iteration; only the mutable form needs the reuse, since an
-  immutable binding is written once. (v1 enumerated only the non-local
-  boundaries; locals are added because D5.2.3's back-edge reclaim is sound
-  exactly when loop-carried wide values sit below the loop-entry watermark,
-  which declaration-time allocation guarantees.) These slots remain for
-  destination ownership and C/host result transfers; they must not be
-  characterized as a fallback generated-function return convention.
-  [RV14–RV16, Return_Value §4a; Stack_API §15.3, inv. 20–22]
-- **D5.2.3*** **Watermark ownership selects the wide-return transport.** An
-  entry that establishes a number-frame watermark tears it down at return,
-  so it may not return a pointer into its own extent: first-party Lambda and
-  LambdaJS `fn`/`pn` therefore use the companion lane (D5.2.1v5). An entry
-  that establishes
-  none — a C helper or sys func — allocates in its **caller's** extent, so
-  it returns a wide scalar by pushing it on the number stack and handing
-  back an ordinary Item, already caller-homed and needing no adoption. The
-  rule is stated by ownership, not implementation language, so a sys func
-  written in Lambda takes the companion lane and a C helper that ever grew
-  a frame would too. The Lambda emitter sets the helper-result no-rehome rule
-  explicitly. LambdaJS retains the conservative snapshot/restore-plus-adopt
-  path: its helpers can return scalar Items borrowed from module state, and a
-  global skip would leave those pointers unowned across `gc()` (the existing
-  `regression_side_stack_frame_gc` gate catches this). The number-stack bound is
-  re-established by an on-demand
-  reclaim at loop back edges for loops the compiler saw make a wide-capable
-  helper call. That reclaim is sound only when no loop-carried wide value lives
-  in the reclaimed extent (open: `DO24`). The call-effect record still carries
-  a per-callee **watermark effect** for hosted paths; its enum ordering is
-  load-bearing — the conservative value must be zero, so an unaudited row
-  decodes as "may allocate". [RV14, RV14a, RV15, RVO11, Return_Value §4a]
+- **D6.2.1* — Wide returns use a companion lane.** A boxed return that can be
+  wide is a pair: an Item and a raw 64-bit scalar. The scalar is live only if
+  the Item is a pending Item, which has a reserved tag. A pending Item never
+  lives in memory, and only one is live at a time. The caller resolves it at
+  its first use, patches it on an escape and forwards it on a tail return. A
+  typed fallible return uses a proven native success lane with a companion
+  error lane. `T^` and `T | error` have the same outcome plan (S7.4.2v4). The
+  scalar lane and the error lane stay separate. The birth site of the wide
+  value selects its class statically, never a boundary. Generated functions
+  have no trailing caller-home parameter. Their C-reachable wrappers use a
+  context companion slot. A guest ABI with its own version can ask for an
+  explicit payload owner; that is a native ownership boundary, not this return
+  ABI. [RV1–RV13, Return_Value §2–§5; SG2]
+- **D6.2.2 — A scalar home is a payload word owned by a destination.** A
+  scalar home is a raw payload word in a separate slot space, never a GC root.
+  A lane that nobody reads uses a discard home. Every ownership boundary has
+  destination-owned scalar storage: array tails, typed fields, environments,
+  module tables, and task and message records. A wide-capable mutable local
+  also owns one slot for its scope, and an assignment copies the payload into
+  that slot. These slots are not a return convention for generated functions.
+  [RV14–RV16, Return_Value §4a; Stack_API §15.3]
+- **D6.2.3* — Watermark ownership selects the wide-return path.** An entry
+  that sets a number-frame watermark removes it at return. Thus it cannot
+  return a pointer into its own extent, so Lambda and LambdaJS functions use
+  the companion lane. An entry that sets no watermark, such as a C helper,
+  allocates in the extent of its caller. It returns a wide scalar as an
+  ordinary Item that is already homed for the caller. Ownership decides, not
+  the implementation language. A loop that calls a wide-capable helper
+  reclaims the number stack at its back edge. That reclaim is sound only if no
+  loop-carried wide value is in the reclaimed extent (DO24). An unaudited
+  callee means "can allocate". [RV14, RV14a, RV15, RVO11, Return_Value §4a]
 
-### D5.3 GC rooting
+### D6.3 GC rooting
 
-- **D5.3.1** Generated code uses **safepoint-current canonical slots**: a
-  stable home per rootable binding plus colored scratch homes; registers
-  are a write-back cache between safepoints. *Root stores are
-  proportional to dirty live homes at `MAY_GC` boundaries — not to
-  instructions.* Zero-root functions elide the frame entirely. [CR1, CR3]
-- **D5.3.2** **GC begins only inside a `MAY_GC` call** — no asynchronous,
-  signal-driven, or background collection without stack maps. `MAY_GC` is
-  the default; `NO_GC` is a claim **mechanically verified transitively**
-  (frozen allowlist checker). [CR4]
-- **D5.3.3** C/C++ helpers use slot-backed `RootFrame` / `Rooted<T>` /
-  handles / `PersistentRooted` on the same side-root stack: arguments are
-  caller-rooted borrows; returns are legal (no safepoint between frame pop
-  and caller store); statics use persistent roots; handoffs stay
-  continuously rooted. *Generated code writes back, native code writes
-  through — one stack, one safepoint invariant, one collector interface.*
+- **D6.3.1 — Generated code uses safepoint-current canonical slots.** Each
+  rootable binding has a stable home, and scratch homes are colored.
+  Registers are a write-back cache between safepoints. The number of root
+  stores follows the dirty live homes at `MAY_GC` boundaries, not the number
+  of instructions. A function with no roots has no frame. [CR1, CR3]
+- **D6.3.2 — A collection starts only in a `MAY_GC` call.** There is no
+  asynchronous, signal-driven or background collection without stack maps.
+  `MAY_GC` is the default. `NO_GC` is a claim that a checker verifies
+  transitively. [CR4]
+- **D6.3.3 — Native helpers root through slot-backed frames.** C and C++
+  helpers use `RootFrame`, `Rooted<T>`, handles and `PersistentRooted` on the
+  same side-root stack. Arguments are borrows that the caller roots. A helper
+  can return a value safely. Statics use persistent roots. A handoff stays
+  rooted all the time. Generated code writes back; native code writes through.
+  There is one stack, one safepoint invariant and one collector interface.
   [CR2, RH1–RH8]
-- **D5.3.4** Rootability is driven by the four representation classes
-  (`BOXED_ITEM`, `RAW_GC_POINTER`, `NON_GC_SCALAR`,
-  `RAW_NON_GC_POINTER`) — never by MIR register type. Rooting policy and
-  final store insertion live **only in `MirEmitter`**; transpilers report
-  semantic events; a guest is precise iff it emits through those
-  primitives. [CR5, CR6, SF11]
-- **D5.3.5** Argument passing reserves each function's **maximum
-  lexically-overlapping argument arity as a fixed suffix of its side-root
-  frame** (per-call dynamic rooting measured at +43% on `fib` and
-  removed); fixed global Item storage uses epoch-guarded root ranges.
-  Cross-semantic context-stack merges are rejected, as is any merge
-  involving the number region. [Stack_API §17]
-- **D5.3.6v2** Recovery frames form **one LIFO chain per activation** (the
-  thread's base stack is one), a frame per boundary (execution entry, task
-  body, handler, module transaction, guest entry), each with an exact
-  side-root + number-stack checkpoint; landing restores the watermarks before
-  inspecting the fault; the outer barrier retires abandoned inner chains. A
-  frame may stay armed across a park on its own stack; *no jump ever crosses
-  a stack*. (Revised 2026-10-05, v2: v1 kept one chain per thread, which a
-  park on another stack would interleave. Supersedes the single shared
-  recovery point.) [Rooting §2.1a, ER, Runtime_Async §4.5]
+- **D6.3.4 — The representation class decides rootability.** Four
+  representation classes decide rootability: boxed Item, raw GC pointer,
+  non-GC scalar and raw non-GC pointer. The MIR register type never decides.
+  Rooting policy and final store insertion belong only to `MirEmitter`. A
+  transpiler reports semantic events. A guest is precise only if it emits
+  through these primitives. [CR5, CR6, SF11]
+- **D6.3.5 — Arguments use a fixed frame suffix.** A function reserves its
+  largest overlapping argument arity as a fixed suffix of its side-root frame.
+  Dynamic rooting for each call is rejected. Fixed global Item storage uses
+  root ranges with an epoch guard. A merge of context stacks with different
+  semantics is rejected. [Stack_API §17]
+- **D6.3.6 — Recovery frames form one chain per activation.** Each activation
+  has one LIFO chain of recovery frames; the base stack of a thread is one
+  activation. Each boundary has a frame: execution entry, task body, handler,
+  module transaction and guest entry. Each frame has an exact checkpoint of
+  the side-root and number stacks. A landing restores the watermarks before it
+  examines the fault. A frame can stay armed across a park on its own stack.
+  No jump ever crosses a stack. [Rooting §2.1a, ER, Runtime_Async §4.5]
 
-### D5.4 Runtime globals and EvalContext
+### D6.4 Context and globals
 
-- **D5.4.1** **One canonical long-lived `EvalContext` per isolate; exactly
-  one sanctioned TLS root.** The hidden `Context*` argument belongs only
-  to generated MIR; native helpers read TLS; an eval thread has one
-  context identity for its lifetime — no save/bind/restore, migration
-  only via quiescent handoff. [RG0, RG1]
-- **D5.4.2** Context state lives in lazily-allocated opaque capsules;
-  the JIT-visible `Context` prefix is frozen; capsules never reallocate
-  (rooted-Item address stability). Root registration takes an explicit
-  heap/context and happens at construction, never in the repeated store.
-  [RG2, RG5]
-- **D5.4.3** **No context-dependent value at a code-baked address**:
-  module globals live in per-context slabs indexed by baked slot +
-  module cell; any other per-instantiation mutable cells live in per-context
-  slabs; shared MIR contexts are sealed eagerly. *Reset becomes construction* — reset/replace-heap/
-  destroy are three distinct ordered contracts. [MT2 contract, RG11]
-- **D5.4.4** Frozen registries stay global (immutable after publication);
-  diagnostics may never feed semantics; one event loop per context;
-  thread infra stays `__thread`, donated into context fields. Lambda
-  script has **no module-scope mutable binding** (structural, §D7.2);
-  guests are exempt. **No lock, atomic RMW, or coherence op may be added
-  to any repeated execution path.** [RG6–RG10, RG13, RG14]
+- **D6.4.1 — One `EvalContext` per isolate and one TLS root.** There is one
+  long-lived `EvalContext` per isolate and exactly one approved TLS root. Only
+  generated MIR receives the hidden `Context*` argument; native helpers read
+  TLS. An eval thread keeps one context identity for its life. A context moves
+  only by a quiescent handoff. [RG0, RG1]
+- **D6.4.2 — Context state lives in opaque capsules.** Capsules are allocated
+  when they are first needed. The context prefix that the JIT sees is frozen.
+  Capsules never move, so rooted Item addresses stay stable. Root
+  registration takes an explicit heap or context. It happens at construction,
+  never in a repeated store. [RG2, RG5]
+- **D6.4.3 — No context value is at a fixed address in code.** Module globals
+  and other per-instantiation mutable cells live in per-context slabs. Code
+  indexes them by a fixed slot and a module cell. Shared MIR contexts are
+  sealed early. Reset becomes construction: reset, heap replacement and
+  destruction are three separate, ordered contracts. [MT2, RG11]
+- **D6.4.4 — Registries are frozen; hot paths stay lock-free.** Registries are
+  global and immutable after publication. Diagnostics never feed semantics.
+  There is one event loop per context. Thread infrastructure stays
+  thread-local and is donated into context fields. A Lambda script has no
+  mutable module-scope binding (D9.3.1); guests are exempt. Do not add a lock,
+  an atomic read-modify-write or a coherence operation to a repeated path
+  (DI12). [RG6–RG10, RG13, RG14]
 
-## D6 Function
+## D7 Functions and Calls
 
-### D6.1 The effect coloring
+### D7.1 The effect color
 
-- **D6.1.1v2** `fn`/`pn` is a one-bit, declared, compiler-checked effect
-  system (semantics §S12.1), realized as **infrastructure, not
-  documentation**: purity is a core AST flag (guest builders mark
-  all-effectful), and every callable surface carries the bit — sys-func
-  registry rows, Jube module signatures (the `fn`/`pn` prefix is
-  mandatory — *purity is never accidental*), and the runtime-function
-  catalog. The AST effect walk visits both attribute and content edges of
-  element literals and establishes their pure construction boundary even
-  inside a procedure. Unknown callable colours retain the runtime guard;
-  ordinary preceding procedure statements retain their procedural context.
-  [S12.1.1v3; U14, NM §6.2, Lang_Hosting §7.1]
-- **D6.1.2v2*** The bit is load-bearing across the runtime: it is the
-  const-folder's soundness gate, the stream-fusion and parallelization
-  license (*Polars/DuckDB must trust their UDFs; Lambda verifies*), the
-  reduction-legality condition, the guarantee that `fn` regions are
-  suspension-free (no scheduling polls in pure code), and what makes the
-  JS Promise membrane computable. **No reified effects**: a `pn` call
-  executes; there is no held, unexecuted effect value. Local mutation and
-  control inside `fn` do not change its call colour, but the bit alone does
-  not prove a local read invariant, a loop independent, or evaluation
-  terminating. Optimizations must preserve sequential local dependencies
-  and completion; non-escaping live captures may not be lifted into shared
-  or cached environments. Escaping captures keep the immutable-value
-  contract of S9.1.4v2. [U26, PD11, K19, K23, Features §3.6;
-  S12.1.2v3; Design_Procedural §6]
-- **D6.1.3v2*** Effect analyses beyond the bit are separate compiler
-  facts: `may_await` (the call may park, so it may collect and re-enter)
-  and `may_defect` (fault capability) — and a **missing analysis must mean
-  defect-capable**, never "trusted clean"; the reverse polarity was a
-  measured live divergence. `may_await` drives no transform and no tier
-  choice. (Revised 2026-10-05, v2: it selected the state-machine transform
-  in v1.) [IEH §5.3, ER-D13, Runtime_Async RA1, RA11]
+- **D7.1.1 — `fn`/`pn` is infrastructure.** `fn` and `pn` form a one-bit,
+  declared effect system that the compiler checks (S12.1). Purity is a core
+  AST flag; guest builders mark all code as effectful. Every callable surface
+  carries the bit: sys-func rows, the runtime-function catalog and Jube module
+  signatures. A host module states the color with the first keyword of each
+  signature, and an `fn` cannot call a `pn` (S12.1.1v2, E224). A DOM row that
+  changes state is a `pn`; a compile-time check keeps the keyword and the
+  flag aligned. The effect walk visits both the attributes and the content of
+  element literals. An unknown callee color keeps the runtime guard.
+  [S12.1.1v3; U14, NM §6.2, Lang_Hosting §7.1, ES48]
+- **D7.1.2* — The bit is load-bearing.** The bit is:
+  - the soundness gate of the constant folder;
+  - the license for stream fusion and parallel execution;
+  - the condition for reductions;
+  - the proof that `fn` regions do not suspend.
 
-### D6.2 Function values and closures
+  It also makes the JS Promise membrane computable. Effects are not reified: a
+  `pn` call executes, and there is no held effect value. Local mutation in an
+  `fn` does not change its color. The bit alone does not prove that a read is
+  invariant, that a loop is independent or that evaluation terminates.
+  Optimizations keep sequential local dependencies and completion. A live
+  capture that does not escape is never lifted into a shared or cached
+  environment. [U26, PD11, K19, K23, Features §3.6; S12.1.2v3;
+  Design_Procedural §6]
+- **D7.1.3* — Other effects are separate facts that fail closed.**
+  `may_await` (the call can park, collect and re-enter) and `may_defect` (the
+  call can fault) are separate compiler facts. A missing analysis means "can
+  fault", never "clean". `may_await` drives no transform and no tier choice.
+  [IEH §5.3, ER-D13, RA1, RA11]
 
-- **D6.2.1** A function value is a GC object carrying its entry pointers,
-  its attached type/signature, and its closure environment. Identity is
-  the **static AST definition site** stamped at creation — never a memory
-  address (addresses break under COW and JIT recompilation; semantics
-  S5.5.1). The boxed `_b` entry is the universal dynamic-call target
-  (§D8.3). [C8.7, DF7]
-- **D6.2.2v2** Dynamic calls dispatch through per-callee executable entries.
-  LambdaJS function values carry distinct `[[Call]]` and `[[Construct]]`
-  capabilities: call dispatch uses `fn->invoke`; construction uses an explicit
-  construct entry and passes `newTarget` as an operand, never through a pending
-  one-shot side channel. Builtin catalog IDs, names, formal lengths, and class
-  labels are metadata and may not select runtime semantics; a declared native
-  ABI may select a typed adapter once when the function is created. The
-  JavaScript dynamic boundary remains `Item* + argc`; caller-donated scalar
-  homes and precise rooted argument spans are ownership-qualified adapters to
-  the same entries, not separate dispatch mechanisms. The 16-slot source-
-  argument limit remains statically checked where possible with a runtime
-  backstop; adapter spans are dynamically sized, precisely rooted, and
-  LIFO-destroyed. Dynamic calls with named arguments and dynamic calls to
-  `var`/inout signatures remain rejected. [Function_Arg, LC call-ABI; JC1–JC4]
-- **D6.2.3v3*** **Closure representation respects capture permissions.**
-  `fn` captures and every potentially escaping closure retain immutable
-  `Item` snapshots at creation; captured writes are compile errors. A
-  proven non-escaping nested `pn` may access the enclosing `fn`'s live local
-  `var` storage under S9.1.4v2. Sibling procedures refer to the same binding
-  home, not independent writable copies. One tier-shared analysis decides
-  capture mode before layout/lowering; an unknown escape is not proof of
-  confinement. Live storage never outlives the parent invocation and uses
-  precise roots (D4.3.3, D6.2.4), never a native-stack scan. Escape does not
-  trigger a late snapshot: snapshot-at-creation semantics must already
-  hold. Captures outside this confined parent-fn case keep their existing
-  snapshot representation. Under D1.3v3 this does not change LambdaJS
-  capture semantics.
-  [Design_Procedural §5.3; C4, Box_Unbox, JSI5]
-- **D6.2.4** The closure env is precisely traced (`closure_field_count`);
-  wide scalars live in the env's tail region (SF18). Closures are
-  **boxed-only** in the dual-func plan — the most valuable future
-  relaxation (§D8.3.4v4). [GC2 §8, DF11]
+### D7.2 Function values and closures
 
-### D6.3 Concurrency runtime
+- **D7.2.1 — A function value has a definition-site identity.** A function
+  value is a GC object with its entry pointers, its type and its closure
+  environment. Its identity is the static AST definition site, stamped at
+  creation. An address is never its identity, because COW and recompilation
+  change addresses (S5.5.1). The boxed entry is the universal target of a
+  dynamic call (D7.3). [C8.7, DF7]
+- **D7.2.2 — Dynamic calls use per-callee entries.** A dynamic call goes
+  through the executable entry of the callee. A LambdaJS function has separate
+  call and construct capabilities. Construction passes `newTarget` as an
+  operand, never through a side channel. Catalog IDs, names, lengths and class
+  labels are metadata; they never select runtime semantics. A declared native
+  ABI can select a typed adapter once, at creation. The JS dynamic boundary is
+  `Item* + argc`. Adapters that own scalar homes or rooted spans reach the
+  same entries. The limit on source arguments is checked statically where
+  possible, with a runtime backstop. Dynamic calls with named arguments, and
+  dynamic calls to `var` signatures, stay rejected. [Function_Arg, LC
+  call-ABI; JC1–JC4]
+- **D7.2.3* — Closures respect capture permissions.** `fn` captures and every
+  closure that can escape keep immutable Item snapshots from creation. A write
+  to a capture is a compile error. A nested `pn` that is proven not to escape
+  can access the live local `var` storage of its parent `fn` (S9.1.4v2).
+  Sibling procedures share the same binding home. One analysis, shared by both
+  tiers, decides the capture mode before layout. An unknown escape is not a
+  proof of confinement. Live storage never outlives the parent call, and it
+  uses precise roots. This does not change the LambdaJS capture semantics
+  (D1.3). [Design_Procedural §5.3; C4, JSI5]
+- **D7.2.4 — A closure environment is traced precisely and stays boxed.** The
+  environment records its field count for precise tracing. Wide scalars live
+  in its tail region. A closure has only a boxed entry. This is the most
+  valuable relaxation for the future (D7.3.4). [GC2 §8, DF11, SF18]
 
-- **D6.3.1** Tasks share the context heap under **one scheduler per
-  context**; a Lambda resume is a macrotask in FIFO readiness order,
-  never interrupting a JS job or its microtask checkpoint. The K13
-  capture rule (no `var` capture by reference into `start`) is enforced
-  at compile time, which is what makes thread count semantically
-  unobservable. [K16, RG8, K13]
-- **D6.3.2*** Workers are **share-nothing isolates** (thread default,
-  process optional); messages mean copies — read-only structural sharing
-  is representation only; the `is_shared` COW bit doubles as the
-  cross-isolate discriminator. Thread-mode prerequisites: the per-isolate
-  runtime-state audit and the cross-isolate lifetime ruling (DO20).
-  [K31/K32, CW3-C]
-- **D6.3.3v2** Faults are scoped to one thread and one stack — no jump ever
-  crosses a thread or an activation; a worker publishes only an
-  already-materialized fault result; a task's boundary frames live on its
-  own activation and stay armed across its parks (semantics S7.11.2v2).
-  (Revised 2026-10-05, v2: v1 said recovery frames never survive a scheduler
-  yield.) [ER-D1, ER-D11, Runtime_Async §4.5]
+### D7.3 Dual-function compiling
 
-### D6.4 System built-ins
+- **D7.3.1* — A boxed boundary plus a bounded set of raw variants.** A
+  function has a boxed `<name>_b` entry and a bounded set of immutable raw
+  variants. Each raw variant has one complete, exact semantic-shape key. A
+  dynamic call reaches a variant only through the exact guard of its key. A
+  statically proven direct edge is the equivalent proof. A multi-variant plan
+  keeps `_b` as its complete boxed fallback. No variant is evicted, replaced
+  or selected from runtime feedback. Variants are admitted in a deterministic
+  order, up to a fixed limit. Partial specialization by parameter is rejected.
+  A declared, native-eligible function has no boxed slow body. A slow body
+  exists only if a parameter is specialized by inference, unboxing helps, and
+  the set of callers is open. [S1.6, DF1–DF3]
+- **D7.3.2 — The check lives in the callee.** A call site that cannot prove
+  admission statically calls `_b`. The callee does the one boundary
+  operation: one guard site, one correctness argument. A declared violation
+  gives an error value. An inferred mismatch fails the guard and goes to the
+  boxed body. An inferred guard is an exact shape test, not an admission.
+  Unions and `any` get no test, and they stay `Item`. [DF4, DF5, DF8]
+- **D7.3.3 — Correctness is relative to the source.** Neither generated body
+  defines the semantics of the other. An input that fails the guard never
+  reaches the unboxed entry. The unboxed entry has exactly two paths that give
+  the proof: a statically proven site, or `_b`. A third path is a bug, not a
+  slow path. [DF9, DF14]
+- **D7.3.4* — Visibility decides which entries exist.** An exported function
+  must have `_b`. A function that is not exported and has one exact visible
+  call shape has only the unboxed entry: no guard and no slow body. A
+  caller-side guard is permitted only as guard hoisting: the same predicate,
+  with its failure edge on the `_b` path. A fixed-arity `pn` can have raw
+  variants at a direct exact edge, also if it can suspend; it keeps `_b`. A
+  `var` parameter is eligible when the edge carries its home exactly as `_b`
+  does. A method is eligible when the exact receiver shape is proven at the
+  edge. Closures, variadic functions and procedures that need a task context
+  stay boxed-only. [DF15, DF16, DF11; O11v2]
+- **D7.3.5 — One numeric admission rule.** At an implicit boundary, a static
+  embedding of the whole domain admits and normalizes. A dynamic value is
+  admitted only if the conversion is lossless. Admission is not a cast. [DF6,
+  DF12, DF13]
 
-- **D6.4.1** Public sys funcs return **boxed `Item`** at the runtime/JIT
-  boundary; collection results ride `Item.array`/`array_num` (no raw
-  pointer convention); `return_type` describes the stable successful shape
-  as narrowly as the type system permits — `TYPE_ANY` never justifies
-  ad-hoc null/array/error switching. Empty results preserve container
-  mode (a typed empty, never a generic array). [Sys_Func §7]
-- **D6.4.2** Raw `-1` helpers are **adapter-only**; public wrappers guard
-  error operands first, then normalize negatives to `null`; no
-  Lambda-surface path calls a `_raw` helper. The §8 registration
-  checklist is normative for every new sys func. *The COW writeback value
-  and the language-level expression result are different concerns.*
-  [Sys_Func §7–§8]
+### D7.4 Dispatch and the call ABI
 
-## D7 Modules and Packaging
+- **D7.4.1 — No inline caches.** The Lambda lane and LambdaJS have no inline
+  caches, feedback vectors or callee caches. Shared semantic dispatch is
+  preferred to per-site caches. Specialized lowering has no dynamic dispatch
+  sites. An open site uses runtime dispatch, and a hot open site is first an
+  inference bug. Multi-version dispatch is a guard chain, never a patchable
+  cache. Generated code stays immutable. The approved speed-up is a
+  compile-time prediction with an inline guard and the shared kernel on a
+  miss. A JS fast path is permitted only if a miss gives the same observable
+  result as the kernel. [LC1v2]
+- **D7.4.2* — Direct calls pass ABI operands.** A core direct call passes
+  `Context*` and the arguments as separate operands. Returns use the companion
+  lane (D6.2.1). `Item* + argc` is only the JS dynamic boundary. [LC
+  call-ABI, RV1, RV10]
+- **D7.4.3* — Every guest helper uses an explicit completion ABI.** A helper
+  that can produce a Lambda error, a JS throw or rejection, or a guest
+  exception returns an explicit completion. The shared ABI uses an
+  ERROR-tagged Item or the declared companion error lane. A guest ABI with its
+  own version uses only its declared completion adapter. No form uses a
+  pending flag, a C++ exception, a non-local jump or an exception poll. MIR
+  code tests the completion in the current activation. It routes the
+  completion to the handler, the `finally` code, the cleanup or the error
+  return. A raw scalar helper is permitted only if its catalog contract is
+  infallible. `LambdaError` is the shared ERROR carrier. Native system faults
+  are outside this ABI (D1.4). [S7.4.3, S7.4.4, REH-D3–REH-D12, JR3]
 
-*Terminology.* Lambda script modules are **packages** where disambiguation
-matters; Jube/native DSOs are **modules**. "Module" is nonetheless used
-loosely across the corpus — context disambiguates, and we live with it.
+### D7.5 Concurrency
 
-### D7.1 Build packaging and layering
+- **D7.5.1 — One scheduler per context.** Tasks share the context heap under
+  one scheduler per context. A Lambda resume is a macrotask in FIFO readiness
+  order. It never interrupts a JS job or its microtask checkpoint. The
+  compiler rejects a `var` capture by reference into `start` (K13). This makes
+  the thread count invisible to semantics. [K16, RG8, K13]
+- **D7.5.2* — Workers are share-nothing isolates.** A worker is an isolate
+  that shares nothing. Thread mode is the default, and process mode is
+  optional. A message is a copy. Read-only structural sharing is only a
+  representation. The COW shared bit also identifies values that cross
+  isolates. Thread mode needs the audit of per-isolate runtime state and the
+  cross-isolate lifetime ruling (DO20). [K31/K32, CW3-C]
+- **D7.5.3 — A fault stays in one thread and one stack.** No jump crosses a
+  thread or an activation. A worker publishes only a fault result that is
+  already materialized. The boundary frames of a task live on its own
+  activation, and they stay armed while it parks (S7.11.2v2). [ER-D1, ER-D11,
+  Runtime_Async §4.5]
 
-- **D7.1.1** Build packaging is **static libraries** (dynamic is reserved
-  for Jube modules): four archives + exe — `lib` → `lambda-data`
-  (core + io) → `lambda-rt` → `radiant` → `lambda.exe` — with a strict
-  leftward-only layering DAG; upward calls only via lower-owned hook
-  headers with null-safe defaults. Exception: **GC allocation is a
-  safepoint, not an allocator flavor** — a missing heap service never
-  degrades to a weak/null/malloc fallback. [SM1–SM3, SM6]
-- **D7.1.2v2*** **All resource IO lives in `lambda-io`**: source bytes and
-  file acquisition may be retained by the neutral `InputScriptCache` composed
-  into `InputManager`, while **derived artifacts live above** (rt: script/MIR
-  caches; radiant: font/media rendering — *Radiant never fetches*). The cache
-  owns only source identity and opaque artifact lifetime; language adapters
-  own AST/MIR types and finalizers. No execution input, document, heap, or
-  context state crosses this boundary. Raw context-free mechanisms stay `lib`;
-  event-loop/Item-coupled language IO stays rt under an explicit reviewed
-  classification, not a loophole. [SM12]
-- **D7.1.3** **Provider ownership beats include ownership**: every function
-  a module's public header declares is defined by that module or a lower
-  one; enforced by symbol-provider inventory. Boundary enforcement is
-  two-tier: lint rules + five boundary DSOs that must link
-  fatal-undefined-clean; the rt→radiant residue (Class F) is a ratcheted
-  import baseline — additions fail, deletions are progress.* [SM13, SM5]
-- **D7.1.4v2** Headless is **three profiles**: A (`lambda-cli`, D7.1.6) is
-  a link-time omission of `radiant.a`; B is a runtime flag inside radiant in
-  the full `lambda.exe`; C (`lambda-headless`) is the full engine — Lambda +
-  Radiant + JS — linked against a **null windowing backend** in place of
-  GLFW, OpenGL and the native GUI/webview toolkits, with `view`/`edit`
-  refused explicitly. B and C compile the **same Radiant sources** — no
-  `#ifdef`-stripping of display code; the null backend behaves as
-  uninitialized GLFW, the state B already runs in. Radiant sits **above** rt
-  (layered, Option A) and embeds it via a narrow `embed.h`. Public headers
-  never define build-profile macros. [SM9, SM10, SM16]
-- **D7.1.5** Mark API ownership: `MarkReader` is core; `MarkBuilder` /
-  `MarkEditor` are io (they take `Input*`) — ownership resolves the
-  layering, not callback abstractions; forwarding shims are deleted once
-  call sites migrate. [SM §9.4]
-- **D7.1.6** **`lambda-cli` is the runtime-only host**: it carries only
-  the Lambda runtime — core, io, the Lambda engine and validator, and the
-  third-party libraries they need — and excludes **Radiant, the JS/TS
-  runtime and DOM, Jube host modules, and the HTTP server (`serve`)**. It is
-  a reduced build profile beside the one `lambda.exe` (D1.1), not a bundle
-  of it. An excluded command fails with an explicit "excluded from this
-  build" diagnostic; importing a `.js`/`.ts` or Jube module is an ordinary
-  import error. Nothing degrades silently. [SM15]
-- **D7.1.7v6** **`lambda-wasm` is the browser evaluation profile**, smaller
-  than `lambda-cli` (D7.1.6). It embeds the Lambda parser, AST interpreter,
-  core values, precise GC and a **stateful in-memory REPL** over
-  host-supplied source and data; the native CLI entry point is excluded.
-  It excludes **MIR and all JIT machinery, network access (including
-  curl/HTTP), system information, filesystem IO, and image loading**, in
-  addition to D7.1.6's exclusions. Also excluded are **libuv, threads,
-  task/mailbox scheduling, resource caches, SQLite/cookies, PDF and LaTeX
-  parsers and their packages, ambient clock, timezone discovery, and entropy
-  providers**. **CSS and graph input parsers are excluded; HTML document and
-  fragment parsing are retained.** HTML style attributes/elements and resource
-  URLs remain inert data, without CSS parsing or resource acquisition.
-  **Image-processing kernels and pixel conversions, CSS/graph/LaTeX/math
-  formatting, and document math-expression parsing are excluded.** Core
-  numerical operations remain. **`undo`, `redo`, `edit_commit` and `emit`
-  are excluded; template `apply` is retained**, including stateful templates
-  across REPL submissions. Rejected submissions roll back template registration,
-  and session reset retires template entries and their borrowed state before
-  releasing the AST (D5.3.3).
-  Evaluation is synchronous and stays in AST: no native-code
-  promotion or MIR-interpreter fallback. REPL bindings and retained results
-  obey ordinary ownership contracts (D4.6.2v2, D5.3.3); no terminal or
-  filesystem transport is required. **Logging uses a disabled stub and
-  console inspection dumps are excluded at compile time**; structured source
-  diagnostics and explicit procedural `print` remain available (D5.4.4).
-  **Allocation tracking is excluded**: a lean `lib/` allocation provider
-  retains the ordinary allocation API, overflow checks and ownership without
-  tracker state or counters (D4.2.5v3). The initial browser artifact uses scalar
-  string search and excludes the inactive native SIMD translation unit.
-  Unavailable capabilities fail explicitly; retained values and operations
-  keep their ordinary semantics
-  and ownership contracts (D2.1, D5.3.3). This is a reduced build profile,
-  not a Jube bundle or a WASM guest language. [SM17, SM §13.4]
+### D7.6 System built-ins
 
-### D7.2 Script packages
+- **D7.6.1 — Public sys funcs return boxed Items.** At the runtime/JIT
+  boundary, a public sys func returns a boxed `Item`. Collection results use
+  the array carriers; there is no raw pointer convention. The return type
+  describes the successful result as narrowly as possible. `any` never
+  justifies a switch between null, array and error. An empty result keeps its
+  container mode. [Sys_Func §7]
+- **D7.6.2 — Raw helpers are only for adapters.** A raw helper that returns
+  `-1` is only for adapters. A public wrapper checks error operands first,
+  then changes negative results to `null`. No Lambda-surface path calls a raw
+  helper. The registration checklist of Sys_Func §8 applies to every new sys
+  func. The COW write-back value and the expression result are different
+  concerns. [Sys_Func §7–§8]
 
-- **D7.2.1** A Lambda script module (package) is the compilation unit:
-  its language profile is a unit property (D8.2.1), its bindings are
-  **immutable at module scope** (no module-scope mutable binding —
-  structural, via scope guards; guests exempt), and its instantiation is
-  effectful even though the bindings are immutable. Package state lives
-  in per-context slabs, never at code-baked addresses (D5.4.3). [RG14, U2]
-- **D7.2.2** Imports resolve to the **boxed `_b` symbol** of exported
-  functions (export ⇒ boxed entry mandatory, D8.3.4v4); package
-  initialization is a **transaction barrier** — a failed init rolls back,
-  and a module with half-established top-level state must never become
-  importable (semantics S7.7.6). [DF15, ER-D2]
-- **D7.2.3** Imported packages are cached in-process (L1, D8.5.1) and
-  distribute as **source** (D1.7); compiled artifacts are derived local
-  caches only.
-- **D7.2.4v4** **`lambda.*` is the one root for everything Lambda ships**, and
-  the root name is reserved (S16.10.1v2). Three tiers live under it:
-  **`lambda.sys.*`** — the runtime's own system functions, prelude-imported
-  unqualified (S17.2.1); **`lambda.<module>`** — built-in modules, with the
-  bare spelling as an alias, so `import math` ≡ `import lambda.math`; and
-  **`lambda.<package>`** — shipped script packages, which drop the former
-  `package` level (`lambda.package.editor` → `lambda.editor`). Document-
-  processing packages group under **`lambda.doc.*`**, including math
-  typesetting, PDF and LaTeX; `lambda.math` remains the built-in math module.
-  A package path names
-  exactly one thing: no path may be both a built-in module and a shipped
-  package. **`lambda.io.<leaf>` may name a built-in runtime module** whose
-  functions park the calling task on IO, as `io.fetch` does — work a Jube
-  module may not do (D7.4.2v2). It is imported by its full path only, with no
-  bare `io.<leaf>` spelling, and its leaf may name neither a shipped package
-  nor an `io` system function. Namespace resolution maps shipped paths to the source tree under
-  `<lambda-home>/package/`, preserving every component below `lambda`:
-  `lambda.doc.<package>.*` maps to `package/doc/<package>/`, with no exceptional mapping.
-  [S17.2.1, S17.2.2, S16.10.1v2; Demo_Mail ML11]
-- **D7.2.5*** **Full user-agent editing policy belongs to the shipped Lambda
-  DOM behavior package, never to Radiant's native implementation.** Radiant
-  owns the platform-input gate and standard DOM mechanisms—editing-host
-  recognition,
-  events, Selection/Range, clipboard/composition transport, observation,
-  geometry, and checked generic DOM mutation primitives. The behavior package
-  (currently sourced under `lmd/package/dom`) owns uncanceled
-  `contenteditable` default actions, structural normalization, editing
-  history, `designMode`, and the complete
-  `execCommand`/`queryCommand*` compatibility surface. User input and legacy
-  commands lower through one package operation model, so cancellation,
-  command state, mutation, history, and selection cannot drift between entry
-  points. Its conformance gates are the applicable automated WPT
-  contenteditable/editing suites and the pinned Chromium editing corpus.
-  [D7.2.1–D7.2.3, D7.3.5, D7.5.3; Radiant_Design_Editable §20]
-- **D7.2.6** **Import resolution follows the S16.9.8 roots, one resolver for
-  every caller.** A package path is looked up by name only: the built-in
-  modules (`math`, `io`), the runtime-registered host modules, then
-  `lambda.<package>` beneath `<lambda-home>/package/` (D7.2.4v4). Any other
-  root yields no path and the import fails E216; it is reserved for the
-  package registry and is never retried against the working directory or the
-  Lambda home. A relative path resolves against the importing script's
-  directory (the working directory when the script has no file): `.a.b` →
-  `a/b`, and each leading `~~` step adds one `../`, trying `.ls` and then
-  `.js`. Because a relative import binds to its file's location, a checked-in
-  script with relative imports runs in place; a harness that copies its text
-  elsewhere breaks it. [S16.9.8, D7.2.4v4]
-- **D7.2.7v2*** **LaTeX is read by TeX expansion, never by TeX typesetting.** Every LaTeX parse runs Lambda's TeX expansion engine at the input boundary before the one direct-parser digester builds the Mark AST; there is no unexpanded front end, so one source yields one AST whatever the entry point. The engine executes TeX *programming* — catcodes, macros, registers, grouping, conditionals, e-TeX and expl3 — for the bundled packages and for `.sty`/`.cls` files beside the document, and passes document constructs through as constructors to the `lambda.doc.latex` script adapters, which own their meaning (D7.2.1–D7.2.4v4). Bundled packages are either unmodified upstream programming packages, which emit no document material, or Lambda-owned bindings, whose macros only expand a package's user commands into constructs the digester and the script adapters already own; a binding neither typesets nor carries semantics of its own. It never reproduces TeX's paragraph builder, page builder, `\output` or font machinery: Radiant owns layout. Reading TeX source as TeX inside this sandbox is not running a string as Lambda code (S1.8): nothing it reads becomes a Lambda import, source or `compile()` input, and `\directlua` stays unsupported. Reads are read-only and path-gated to the document's directory plus the bundled resources in the package tree (D7.1.2v2, D7.5.2) — no TeX installation, network, shell escape or disk write — and output depends only on source and resources (S12.1.1v2). A package or class name resolves once, in source order: a bundled package runs on the engine (an adapter of the same name still receives the declaration); else a script adapter; else a file beside the document; else the located `unknown-package` diagnostic. A local file never replaces an adapter or a built-in class profile. Callers that render with `lambda.doc.latex` parse through it, so the engine receives the adapter registry. [`vibe/latex/Lambda_Design_TeX_Engine.md` §1–§8]
+## D8 Compilation and Execution Tiers
 
-- **D7.2.8*** **Document math preserves its source notation's layout policy.**
-  `lambda.doc.math` exports Presentation MathML and accepts MathML element
-  trees alongside the existing TeX/AsciiMath AST. TeX-derived layout follows
-  the supported TeX definitions; MathML-derived layout follows MathML Core.
-  Both reuse font facts and baseline-relative box geometry, without converting
-  MathML through TeX or borrowing TeX companion constants for MathML. Conversion
-  policy belongs to the script package; XML syntax and serialization remain IO
-  mechanisms, with package invocation above IO (D7.1.1, D7.1.2v2). Unsupported
-  conversion/rendering features report errors; support is a documented subset,
-  not a claim of complete MathML conformance. Namespace and content identity
-  follow S5.4.3 and S2.6.1v2. [Lambda_Pkg_Math §11]
+### D8.1 Front ends
 
-- **D7.2.9** **Bundled document fonts are shared file resources.** Generated
-  HTML/SVG `@font-face` rules reference the fonts in Lambda's package tree by
-  URL, rather than embedding their complete bytes in each formula or document.
-  Font measurement may still consume IO-owned byte snapshots (D7.1.2v2).
-  Caller-supplied font bytes without a resource URL retain their existing
-  embedding behavior. [USER 2026-10-21; Lambda_Pkg_Math §8]
+- **D8.1.1 — First-party C parsers are the production front ends.** Lambda
+  and LambdaJS each use a first-party C lexer and a hybrid
+  recursive-descent/Pratt parser. Each parser reduces directly into the
+  retained AST; no CST or second syntax tree is kept. The Tree-sitter grammars
+  are reference grammars, editor and binding grammars, and differential
+  verifiers. `lambda/tree-sitter-lambda/grammar.js` is the best structural
+  reference, but it does not cover every corner case. The result of neither
+  parser is normative alone. A disagreement goes to manual review against the
+  syntax rulings. Then fix the wrong side, and pin the ruling with a fixture.
+  Never edit a generated `parser.c` or a generated build file. [CGP5v2; rules
+  5, 7]
 
-### D7.3 Jube modules: the module system
+### D8.2 The unified AST
 
-- **D7.3.1** Core = ECMA-262 + engine substrate + `./lib` + a **closed
-  globals allowlist** (console, timers, `queueMicrotask`); everything
-  else is a Jube module; extending the allowlist is an ADR-level change.
-  Core keeps file I/O + the shared stream core **for performance**;
-  spec-surface stream/crypto APIs are modules. [JA1]
-- **D7.3.2** Modules are DSOs + `module.json`: hash-verified, ABI and
-  hosted-API negotiated before any module code runs, lazily loaded,
-  **transactionally registered** (failed init rolls back),
-  process-lifetime (no hot unload), additive-only evolution behind
-  size gates. Static registration is dev-only with mandated behavioral
-  parity. [JA2, JA5, JA11]
-- **D7.3.3** **One strict host-API tier for everyone** — `jube.h` only, no
-  second softer tier for in-tree modules (*in-tree modules are the
-  constant test of the same contract third parties get*); no host-internal
-  symbol imports; the v1 surface is **derived by extraction from real
-  usage, not speculation**. Signatures are **Lambda type-syntax strings**
-  with mandatory `fn`/`pn` (D6.1.1). [JA5, NM §6.2, §6.4]
-- **D7.3.4** Core never links modules; modules never link each other's
-  symbols (manifest dependencies or script re-export instead); the
-  manifest is readable without dlopen and mirrors the C descriptor table,
-  which is ground truth. [JA8, NM §7]
-- **D7.3.5** **Every module kind names its conformance gate, wired into
-  CI**: core = Test262; web-platform = its WPT slice; node-compat = the
-  node baseline; languages = their own corpus; data packs = pack corpus +
-  integrity. [JA9]
-- **D7.3.6*** **The host exports an allowlist, nothing more.** Host code
-  compiles with **hidden default visibility**, and the host executable's
-  dynamic export table is exactly the checked-in allowlist
-  `lambda/jube/jube_host_exports.txt` — the only symbols a loaded Jube module
-  can resolve from it, in every build configuration. The allowlist is the
-  bounded, reviewed record of the host-internal imports D7.3.3 retires: a
-  module that needs a further runtime symbol has it **opened case by case**
-  (a list entry naming its consumers, plus the `LAMBDA_*_API` marker on the
-  symbol's owner declaration), and an entry no module imports is dropped. A
-  host without the Jube loader exports nothing. *Exporting every global made
-  every global a dead-strip root.* [JA5.1, D7.3.3]
+- **D8.2.1* — Language is a property of the compilation unit.** One leveled
+  catalog of core nodes serves the host and the guests. At least 80% of any
+  guest uses core nodes. Language belongs to the compilation unit, never to a
+  node. Operator semantics dispatch through the language profile. A program
+  can mix languages; a module cannot. [U1, U2, U4]
+- **D8.2.2* — Keep syntax variance as fields; never rewrite the tree.**
+  Variance uses these tiers, in order of preference: fields and flags, then
+  clause chains, then node kinds for one language. A node can be promoted to
+  core, never demoted. One node for each concept (loop, match, if, assign)
+  carries form fields. There is no tree rewriting, so desugaring hazards cannot
+  occur. `for` is its own core node, because pure iteration and procedural
+  loops have different colors. Purity is a core flag. [U3, U19, U22, U14]
+- **D8.2.3* — Extract the common core after convergence.** Extract common core
+  code only when two working clients exist. The rooting fix for guests is a
+  prerequisite inside `MirEmitter`. [U12/U21, K17]
+- **D8.2.4* — One indexed compilation unit.** Dense, stable IDs name nodes,
+  scopes, bindings, functions and classes. One child-enumeration contract
+  builds the parent, owner, binding, use/def and graph indexes. Lowering uses
+  resolved identities, and it never repairs a binding. A core pass never adds
+  a private walk of core children. Derived index facts are immutable. An AST
+  extension must rebuild them before use. [U27, U28]
+- **D8.2.5* — One typed pass manager; facts live on the AST.** One pass
+  manager owns the schedule from parse to link. Passes declare the facts that
+  they need and produce. The compiler records the time of each pass. Source
+  contracts and core runtime facts live on the AST: the type of a node is its
+  effective type, and a declared annotation is on the declaring node. Inferred
+  types and constants are essential facts, not erasable ones. Erasable
+  optimization facts hang off a side record of the type. There is no per-node
+  fact table keyed by ID. Language profiles answer typed semantic questions;
+  they do not own other pass schedules. [U29, U30v2]
+- **D8.2.6* — Lowering is driven by demand.** Core expression lowering returns
+  the full `MirValue` (D2.3.4). A demand (discard, any, required
+  representation, destination register or branch) can avoid materialization.
+  It never changes semantics. An unsupported demand falls back to generic
+  lowering. Carrier conversion, semantic coercion and rooting keep their
+  owners (D2.3.5, D6.3.4). PDF output demand carries an explicit destination
+  and a checked status (D3.5.1). No ambient output context is installed. [U31,
+  U32; PDF_Output §5.5]
 
-### D7.4 Jube modules: data and async contracts
+### D8.3 Lambda execution tiers
 
-- **D7.4.1v2** `Item` is the only value currency; native structs cross as
-  **VMap projections**, and engine-owned internal-slot objects may use the
-  same carrier when native slots are primary. VMap is selected by
-  representation, not module ownership; shape-backed ECMAScript objects
-  remain typed Maps. Brand, precise trace, and finalize are vtable-owned; raw
-  C pointers never become script-visible, and system resources are integer
-  **rids**.* [JA6, NM §6.3, §8; JR7]
-- **D7.4.2v2** Modules are **fully shielded from the async substrate** — no
-  loop escape hatch, ever. A micro-kernel of five concepts (scheduling,
-  thread-safe completion post, blocking pool, rid table, shutdown);
-  completions delivered only on the JS thread in loop order; *modules
-  never pump, poll, or drain*. A task never parks while a `JubeHostAPI` frame
-  is on its stack: the host's call into script raises a native barrier on the
-  running activation, and a suspension beneath it is a reported fault.
-  (Revised 2026-10-05, v2: v1 held this by construction, since only a
-  transformed state machine could suspend.) [JA7, Concurrency §4.4,
-  Runtime_Async RA10]
-- **D7.4.3** Guest hosting crosses **no core types**: no `Runtime*`,
-  `EvalContext*`, `Input*`, `MIR_context_t`, or `AstNode*` over the
-  boundary — opaque handles and versioned sub-API tables only. Every
-  callable runtime helper carries catalog metadata (signatures, ownership,
-  GC/allocation effects, re-entry, exception behavior); lowering resolves
-  through the catalog, never by guessing. The host owns heap activation,
-  context install, side-stack entry/exit, and recovery boundaries —
-  guests never construct contexts or touch global runtime pointers (the
-  G1 gate). The JS merged Item error lane (D8.4.3v2) is not reused as another
-  guest's exception model.* [Lang_Hosting §5–§7, §13, D8.4.3v2]
-- **D7.4.4** **Declared interfaces + record-owned hooks are the ONLY
-  host-object protocol — one way to be a host object, no fallback tier.**
-  A host type's surface is its Lambda-type-syntax interface declaration
-  compiled to member records, plus the record-owned open-name/indexed
-  hooks (`named_get`/`named_set`/`object_*`, `indexed_get`) and
-  `JubeTypeDef.destroy` for lifecycle. The type-level dispatch fallbacks
-  (`JubeTypeDef.host_ops`, `JubeTypeBinding.legacy_ops`) are **retired**:
-  no instances, consumer paths deleted, struct surface removed with a
-  `JUBE_ABI_VERSION` bump. Corollary: property keys cross the member ABI
-  as `Item`s (string | symbol | number), are resolved internally via one
-  borrowed byte view, and are never re-materialized for a fallback
-  consumer. [DOM4 D4k, D4j]
-- **D7.4.5v2*** **Three virtual carriers mirror the container taxonomy and
-  occupy their structural TypeId bands: `vmap`, `varray`, `velmt`.** The
-  valid TypeIds end at `LMD_TYPE_ERROR`; no valid type follows it. The
-  sequence-family tags are one closed numeric band,
-  `LMD_TYPE_RANGE <= type_id <= LMD_TYPE_VARRAY`, with VArray immediately
-  after Array. Velmt immediately follows Element. This ordering is an Item ABI
-  contract, enforced by static assertions; consumers may use the sequence
-  range for family classification, but a physical storage decode still needs
-  an exact representation guard under D2.3.2.
-  Host data crosses as the virtual carrier
-  matching its shape — virtual map (exists), virtual array (indexed face +
-  length via vtable, `type()` = "array"; live by reading, not materialized
-  copies kept fresh by mutation sweeps), virtual element (Lambda
-  `Element`'s dual list+map nature: children list face, named map face,
-  tag). Refines D7.4.1's "VMap projections": VMap was never the shape
-  ruling, only the first carrier; representation still selects the
-  carrier. Declared interfaces / member records (D7.4.4) are the
-  named-member protocol on ALL carriers; the carrier decides which
-  structural faces exist virtually. Flattening element-shaped data into a
-  map projection, or materializing array-shaped host state into real
-  arrays with liveness-by-invalidation, are both anti-patterns this
-  ruling retires. [DOM4 D4l, D7.4.1, D7.4.4]
-- **D7.4.6** **A host module states each function's colour in its
-  signature.** The leading keyword of a `JubeFuncDef` signature is the
-  colour: `pn(...)` registers a procedure, which an `fn` cannot call
-  (S12.1.1v2, E224), and `fn(...)` registers a function. The DOM catalogue
-  marks exactly its effectful rows `pn` — `DOM_F_MUTATES`: a write to the
-  tree, a buffer, the state store, focus, scroll or the clipboard, or a
-  dispatch of an event, command or navigation — and a compile-time check
-  keeps the keyword and the flag in step. Reads stay `fn`. [ES48]
+- **D8.3.1* — The AST interpreter is the baseline tier.** The boxed
+  AST-walking interpreter (T0) is the baseline. The retained AST is the
+  runtime source of truth. The default policy is AUTO: each definition starts
+  in T0, and a hot eligible definition can be promoted to a boxed MIR image.
+  The tier selector has three modes: `interp` (T0 only), `auto`, and `jit`
+  (eager whole-module MIR Direct, T1). In `interp` mode, an unsupported script
+  or import fails before execution, with a diagnostic. A fallback to
+  whole-module MIR belongs only to AUTO. [AI1–AI24, CGP1, CGP2]
+- **D8.3.2* — Only hit counters trigger promotion; a handoff is one way.**
+  Call counts, self-tail edges and loop back edges are counted at each site. A
+  definition is promoted only when a counter reaches its threshold. The color
+  of a definition never excludes it: T0 runs suspending definitions on their
+  task activations. A running T0 activation can hand off to compiled code at a
+  validated self-tail call or at a loop-head test. The compiled code completes
+  the activation, and control never returns to the interpreter during that
+  activation. A loop is eligible only if every live value at its head is a
+  named frame slot, or is the state of a plain `for` walk. Threshold values
+  are tuning, not design. [AI23, AI25, RA11, RA12]
+- **D8.3.3* — Promoted code enters through the boxed wrapper.** A promoted
+  image is always entered through its `_b` wrapper. The wrapper admits the
+  arguments under the declared contracts, as the eager tier does. An `any`
+  parameter is safe, because it has no raw carrier. A `var` parameter crosses
+  the tier boundary through the caller-owned home transport (D5.4.6). An image
+  is a cluster: the target plus the reachable promotable definitions, within a
+  bound. Calls in the cluster are direct native edges. A body that the image
+  cannot represent stays in T0. [AI ledger; CW33]
+- **D8.3.4* — Background compilation publishes only at safe points.** A hot
+  definition queues work for a bounded compiler pool that the process shares.
+  The triggering call and the calls before publication stay in T0. A worker
+  compiles from frozen AST and source facts into a private MIR context. It
+  never changes shared script, module, constant or function state. Only a
+  later execution safe point (a function entry or a loop-head test) verifies
+  the generation and publishes the entries. A failed or stale image is
+  discarded, and the definition stays in T0. Publication replaces no active
+  frame. [D1.8, D6.4.3, D7.4.1, D8.5.1]
+- **D8.3.5 — Static import prebuild is a shared keyed-future service.** One
+  process-wide service owns a bounded pool and one task for each canonical
+  module path and language profile. Discovery submits child requests, and it
+  does not wait for the whole closure. A duplicate request gets the same
+  future. A completed child releases only its direct parents. No worker waits
+  for a child. An importer waits only for the future of the module that it
+  uses next. A worker publishes only a retained AST template through the
+  script cache; it never instantiates a module or lowers MIR. The receiving
+  runtime plans T0 itself. The scheduler is common infrastructure, not a
+  shared parser or evaluator. [D8.5.1]
+- **D8.3.6 — The REPL is one persistent T0 session.** Each completed entry is
+  parsed, built, planned and executed as a fragment against the retained
+  script, scope and module slab. A rejected or failed entry is rolled back as
+  a whole. Replay of the whole history is retired. In a session, the tier
+  selector governs only promoted images. An entry outside the T0 surface is
+  rejected with a diagnostic; it is never compiled as a separate MIR module. An
+  interrupt raises a fault through the recovery frame, and the session
+  restores its snapshot. [RI1–RI6]
 
-### D7.5 Jube modules: trust and IO
+### D8.4 LambdaJS execution tiers
 
-- **D7.5.1** Three trust tiers: **T1 system** (in-process DSO — *not a
-  security boundary*: loading one ≡ linking it into the host), **T2
-  confined** (separate process **+ OS sandbox + capability broker — all
-  three, or it means nothing**; a second interface style, not a loading
-  option), **T3 sandboxed WASM** (enforced by construction, the
-  recommended default for untrusted code). **Third-party native modules
-  never enter the runtime process.** T1 admission carries a
-  thread-isolation-safety declaration; undeclared ⇒ process-isolation
-  only, thread-isolate load is a load-time error.* [JA10]
-- **D7.5.2*** **One central IO API is the sole IO door** for Lambda,
-  Radiant, and all modules — raw IO isolated to `./lib`; one chokepoint,
-  not two; it carries **policy** (path/capability gates, isolation,
-  audit, quotas), a real boundary for scripts and governance for T1.
-  *Converts "did someone sneak in an `open()`?" from an unanswerable
-  question into a checker rule.* Surface extracted empirically. [JA16]
-- **D7.5.3v2** Lambda↔Radiant is two explicit contracts: Radiant embeds
-  Lambda through a versioned, Jube-aligned embed interface; Lambda
-  reaches Radiant only through the `radiant-dom` module; `lambda-rt`
-  never links radiant. Shipped document layouts connect automatically to
-  pure package `layout(parent, children, ctx)` exports on the document's
-  evaluator. Callback registration is host plumbing, absent from the public
-  DOM/Radiant API; callers never install graph, TikZ or MathML layouts.
-  [JA15, SM10; Radiant_Design_Custom_Layout §6]
-- **D7.5.4*** **Audible output is a capability gated by document origin.**
-  Starting audible output — synthesized music, decoded audio, speech, and
-  unmuted media playback — is judged per requesting document. A document
-  whose top-level source is a local file the user opened (a path or `file:`
-  URL, as given to `view` or `demo`) may start audio from any `pn` context. A
-  document loaded from the network (`http`/`https` or another remote scheme)
-  may start audio only after **sticky activation**: once it has received a
-  trusted activation-triggering input delivered by the host (a pointer press,
-  a touch end, or a non-modifier key press), it stays activated for its
-  lifetime. Script-dispatched events never activate. A refused start fails
-  visibly — `null`/`false` from the Lambda row, `NotAllowedError` in
-  JavaScript — and unmuted `autoplay` media stays paused until activation.
-  Muted playback and output-free work (decoding, preparing, offline rendering
-  to buffers or files) need no activation. Each document is judged by its own
-  origin, so a network document embedded in a local one needs its own
-  activation. **Only the host grants activation up front** (a `view`/`demo`
-  option or an embedding application's setting); a document never grants it
-  to itself. (USER, 2026-10-19) [Radiant_Design_Speech §5]
-- **D7.5.5*** **Apps and ad-hoc scripts execute within an admitted
-  source/resource root.** They may read/import inside that root and load
-  approved shipped packages; outside dependencies need additional grants.
-  A loose file initially grants only itself and approved shipped libraries;
-  selecting a project/folder establishes the wider root. Transitive imports,
-  initializer IO, and cache hits obey the same policy; importing an API or
-  resolving a path grants no authority (S2.4.4, S16.9.8). Imported code shares,
-  never expands, the caller's grants. Loading has no unrestricted bootstrap
-  phase. (USER, 2026-11-02)
-  [App_Safety §4.1](../vibe/Lambda_Design_App_Safety.md#41-default-script-loading-and-dependency-scope)
-- **D7.5.6*** **New files under the app/project root are allowed by
-  default; overwriting existing files requires user approval.** Creation is
-  atomic create-if-absent, never a check followed by truncation. Modification,
-  append, and replacement cannot bypass approval through alternate APIs or
-  delete/recreate. A remembered overwrite grant requires explicit user consent;
-  protected host/OS resources remain excluded. Root mutations are brokered so
-  native code cannot bypass the distinction. (USER, 2026-11-02)
-  [App_Safety §7.3](../vibe/Lambda_Design_App_Safety.md#73-default-creation-and-approval-before-overwrite)
-- **D7.5.7*** **Per-app and per-ad-hoc-script grants live under
-  `~/.lambda/setting`, controlled by the trusted host.** Apps and user scripts
-  cannot create, modify, delete, replace, or redirect this security state,
-  including through ancestor grants or path aliases. The host binds records
-  to admitted principals and preserves expiry/revocation; no script can grant
-  itself authority. OS confinement plus broker checks enforce protection;
-  same-user filesystem ownership alone is insufficient. (USER, 2026-11-02)
-  [App_Safety §6.4](../vibe/Lambda_Design_App_Safety.md#64-protected-settings-and-grant-persistence)
-- **D7.5.8*** **App/script network access is denied by default; package
-  auto-update is a separate host-owned pull service.** It may poll and download
-  verified updates only from admitted designated package endpoints, without
-  granting network authority to package code. Requests carry no user data,
-  credentials, or telemetry by default; unavoidable connection/request metadata
-  is not anonymity. Users can pause, disable, and restore updating, with state
-  protected under D7.5.7; a global offline setting overrides this exception.
-  Update admission cannot expand app grants or authorize replacement of user
-  project files without D7.5.6 approval. (USER, 2026-11-02)
-  [App_Safety §8.3](../vibe/Lambda_Design_App_Safety.md#83-host-controlled-package-auto-update)
+- **D8.4.1* — One runtime, separate semantic walkers.** A retained `JsScript`
+  owns its AST, its source facts and its module identity. It runs in the same
+  `EvalContext`, GC heap, event loop and module registry as Lambda. Lambda and
+  JavaScript keep separate semantic walkers and activation records. AST
+  functions are a function body kind behind the normal call and construct
+  capabilities, not a second dispatcher. Lexical environments are records that
+  are traced precisely, and closures capture their mutable cells by reference.
+  [JSI1–JSI13]
+- **D8.4.2* — AUTO starts in the AST; MVP-Lmd is the MIR engine.**
+  JavaScript defaults to AUTO. A unit that the interpreter supports starts in
+  the AST interpreter. An unsupported unit uses whole-unit MIR. Hot
+  definitions and loops can be promoted. MVP-Lmd is the only JavaScript MIR
+  engine, for an explicit `mir` selection, the AUTO fallback and promotion.
+  The old MIR engine is not a fallback. A forced `ast` selection fails closed.
+  A selected MIR unit is not redirected to the AST, and a compile failure is
+  reported without replay. A unit is classified before its declarations or
+  user code run. [JSI16v2, JSI35, JSI36]
+- **D8.4.3 — Dynamic source always runs in the AST interpreter.** `eval`, the
+  `Function` constructor family, string timer handlers and `$262.evalScript`
+  parse into a retained `JsScript` and run in the AST interpreter. This is
+  true for every caller tier, and MIR never lowers dynamic source. A direct
+  eval links to the live environment chain of the caller frame; nothing is
+  projected or written back. Both tiers use the same binding resolver and
+  declaration instantiation. Early errors use the bound AST facts, never
+  source-text scans. This is a language boundary, not a fallback. [JSI ledger]
+- **D8.4.4 — All tiers share one JavaScript semantic contract.** The AST,
+  AUTO, dynamic-source and MIR paths share the MVP realm and the JavaScript
+  operation contract. The execution policy selects the walker, the
+  compilation and the promotion. It never selects different property,
+  coercion, array, class or call semantics. Native adapters keep explicit ABI
+  capabilities. Builds without MIR keep dynamic source, classes, realms and
+  AST module loading. Observable bindings keep live environment cells.
+  Per-site mutable caches stay forbidden (D7.4.1). JavaScript coercion and
+  mutation stay different from those of Lambda (S1.11). A conformance failure
+  is an implementation gap. It never justifies a change of tests, expectations
+  or the baseline. [JSI ledger]
+- **D8.4.5* — JS promotion has closed admission and keeps callable
+  identity.** A JS definition compiles to MIR only on a hot hit: a call count
+  or a loop back-edge count. A running AST activation can hand off at a
+  loop-head test, in the same one-way shape as Lambda (D8.3.2). Admission is
+  closed: a definition is eligible only if a checked body-and-dependency proof
+  covers it. Every other definition stays in the AST interpreter. A promoted
+  image keeps the identity, source, name, length, receiver, home and
+  constructibility of the original callable. It never bridges an existing AST
+  environment, and it never executes module source again. The admitted shapes
+  and the thresholds are implementation details. [JS_Interpreter]
+- **D8.4.6 — JavaScript modules use the shared module registry.** CommonJS
+  `require()` and ES modules use the runtime module registry, not a private JS
+  cache. A module publishes its namespace placeholder first, then instantiates
+  its hoisted functions, then follows its static dependencies and executes.
+  Import reads resolve on every read, so named bindings stay live. A `.ls`
+  target compiles into the same registry, and its functions cross the normal
+  boxed call ABI. One page has one `EvalContext`, heap, event loop, module
+  registry and module-state authority. [JSI ledger]
 
-- **D7.5.9*** **Uninstall retains private app data by default.** Deleting
-  retained persistent data requires a separate explicit trusted-user action.
-  Cache and temporary files remain discardable; removing installation or
-  grant state alone does not authorize persistent-data erasure.
-  (USER, 2026-11-03)
-  [App_Safety §7.1](../vibe/Lambda_Design_App_Safety.md#71-storage-model)
-- **D7.5.10*** **Microphone input requires explicit acquisition and separate
-  grants.** Acquisition is procedural through the existing IO/host capability
-  route and requires both OS permission and a grant for the requesting
-  document. Pure evaluation and scene descriptions cannot open a microphone;
-  D7.5.4 activation grants output only. The trusted host owns permission UI
-  and grants; a document cannot grant itself access or serialize permission
-  into a scene. Capture uses bounded native PCM storage and copied host-boundary
-  buffers/meters with timestamps and overrun diagnostics. Explicit stop,
-  document teardown, revocation and device loss close the capture owner;
-  denied/unavailable states are visible. Monitoring is off by default and,
-  when enabled, separately obeys D7.5.4. (USER, 2026-11-03; ID disambiguated 2026-11-04)
-  [Scene3D §9.3](../vibe/radiant/Radiant_Design_Scene3D.md#93-microphone-input)
+### D8.5 Caches
 
-## D8 Compilation Pipeline
-
-### D8.1 Structure
-
-- **D8.1.1v18*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
-  parser → the shared typed AST → **tiered execution**. The parser reduces
-  directly into the retained `AstNode` graph; no Lambda CST or replacement
-  syntax tree is retained. The default file/module path is the C parser, while
-  Tree-sitter remains an explicit reference/rollback parser and the editor/
-  binding grammar. A boxed AST-walking interpreter (**T0**) remains the
-  baseline execution mode and the retained AST is the runtime source of truth;
-  the shipped Lambda script policy is **AUTO**: each definition starts in T0,
-  and an eligible hot definition may promote to its P2 boxed MIR satellite.
-  *(v15, 2026-10-03, USER)* Explicit `LAMBDA_EXEC_BACKEND=interp` is strictly T0:
-  unsupported scripts or imports fail with an unsupported-feature diagnostic
-  before execution; whole-module MIR fallback is not permitted. These fallback
-  paths belong to AUTO only; explicit `jit` selects the eager MIR path.
-  [Ast_Interpreter AI24] *(v16, 2026-10-05, USER)* T0 executes suspending
-  definitions (`start`, `wait`, scoped tasks) on their tasks' activations, so
-  no definition is excluded from a tier by its colour: promotion and loop
-  handoff read hit counters only, in both languages. [Runtime_Async RA11,
-  RA12]
-  Ordinary interpreted entries promote at `LAMBDA_FUNC_JIT_THRESHOLD` (**5** by
-  default). A direct, validated self-tail edge also increments the
-  definition-site call and tail-edge counters; at the same threshold it may
-  synchronously publish the eligible satellite and transfer to its ordinary
-  boxed entry with the rooted next-call arguments. This is a tail-entry
-  handoff: a tail expression has no continuation, so its state is exactly the
-  next entry's arguments. *(v14, 2026-10-02, USER)* A running T0 activation
-  may also hand off at a **loop-head test**. Back-edges are counted per loop
-  site; a loop that reaches `LAMBDA_LOOP_JIT_THRESHOLD` (**10000** by default)
-  queues its definition once, and that image carries, beside the boxed entry,
-  a loop entry for that loop. After publication the activation enters it at
-  the next head test of the same loop with its frame's named slots; compiled
-  code completes the activation and returns its result, and T0 unwinds as for
-  `return`. Handoff is one-way: compiled code never returns control to the
-  interpreter mid-activation. A loop is eligible only where every T0 value
-  live at its head is a named frame slot; every other loop, and every guard
-  miss, stays T0. *(v18, 2026-10-12, USER)* A plain `for` statement -- one
-  source, no join, `group`, `order`, `limit` or `offset` -- is eligible too:
-  beside the named slots its only live state is the walk's entry snapshot and
-  next position, which its loop entry takes as two trailing parameters and
-  resumes the walk from (S8.1.3v2, S9.2.3). [Ast_Interpreter AI25] Owning a loop does not promote a definition at entry: the
-  call threshold, the self-tail threshold and the loop threshold are the only
-  triggers. [Ast_Interpreter AI23] *(v6, 2026-09-06)*
-  A satellite is always entered through its boxed `_b` wrapper, so a definition
-  whose signature carries plain `any` parameters is promotable: an `any`
-  parameter has no raw carrier to mis-decode, and a lane the body alone infers
-  for it is guarded by the wrapper's exact shape test with the boxed slow body
-  behind it. A promoted body owns its whole activation, so local `var`
-  declarations, plain rebinding assignments, and indexed/member stores are
-  promotable too (a store through a local or a value parameter replaces a
-  register the satellite roots itself; through a module binding it reaches the
-  shared slab). An untyped `var` parameter crosses the tier boundary through
-  the CW33 home transport (`Context::mir_var_homes`): T0 publishes the
-  address of its frame slot and prepares chain-root borrows before entering a
-  satellite, the satellite publishes its rooted slot address before a dynamic
-  call (pre-detaching a shared root, as the direct edge does), and each callee
-  -- the generated prologue/epilogue or `interp_call` -- consumes the cells and
-  stores the final parameter value back through them; the dispatcher accepts
-  such signatures only in the borrowed-call mode (`fn_call_borrowed_into`). A
-  `var` local passed to an untyped `var` parameter is bound boxed at its
-  declaration so it owns the root slot the transport needs. *(v7: aggregate
-  and structured VALUE parameter contracts -- `float[]`, records, maps -- are
-  admitted: the boxed `_b` wrapper admits each argument under the declared
-  contract exactly as the eager module compiler's wrapper does before the raw
-  entry sees it.)* *(v8, 2026-09-07)* A typed `var` parameter (`var x:
-  float[]`, `var p: Rec`) is admitted too. On every boxed edge -- T0 →
-  satellite, and a satellite's dynamic call -- its position travels through
-  the same CW33 home cells; the boxed `_b` wrapper consumes the cell and,
-  when a home WAS transported, prepares the container once (un-share-at-
-  borrow, S9.2.2: the CW33 callee-prologue prepare placed in the adapter, a
-  byte-test no-op when the container is unique; without a home there is
-  nothing to store a replacement back through, so the container passes
-  through as before), admits it under the declared contract, hands the raw
-  entry the container to write in place, and stores the admitted container
-  back through the home on return; a satellite caller reloads its register
-  from the slot and keeps the raw descriptor, since a typed `var` position is
-  invariant (S9.2.1). What the raw entry cannot publish is a REBIND of the
-  parameter, so a body that assigns to a typed `var` parameter stays in T0,
-  and so does every satellite that would call it directly: T0 publishes the
-  rebind through the home, a raw argument would not be reloaded. P2 still
-  fails closed for such rebinding bodies, nested definitions, indirect Lambda
-  calls, object-field identifiers, and match expressions. *(v9, 2026-09-07)*
-  A synchronous satellite image is a **cluster**, not a single definition: the promoted
-  target together with every module-level definition reachable from it
-  through direct calls that is itself promotable and not yet compiled or
-  pinned (bounded, 64 definitions), defined in module order. Calls among
-  cluster members are direct native edges, and the image's call-site
-  inference collects from the module's complete retained AST, so a member's
-  parameters take the lanes the eager tier would give them (a T0 caller that
-  passes something else meets the wrapper's exact-shape guard). Each member's
-  boxed entry is published to its T0 function when the image links; a callee
-  that is already compiled keeps its own entry and stays a dynamic target,
-  as do pinned and unsupported bodies. A satellite reads module bindings and
-  interned constants with the eager tier's inline loads from the owner's
-  slab state (re-read from the state at every use), no longer through a
-  per-read accessor call. Two invariants this
-  admission exposed: a satellite that interns literals into its module's const
-  list must rebind the module state's static image afterwards, and a
-  dynamic-call argument list is built by verbatim positional append, never by
-  content-splicing push. *(v12, 2026-09-22)* A hot AUTO definition queues a
-  single snapshot-safe target definition instead of synchronously compiling on
-  the execution thread. The triggering call and every call before publication
-  stay T0. The process-wide bounded compiler pool deduplicates that target for
-  one Script execution generation. A worker compiles from frozen AST/source
-  facts in a private MIR context and returns a sealed image; it may not mutate
-  the Script MIR context, module slab, constant/type/property-key images,
-  shared import resolver, AST analysis facts, or Function entries. Only a
-  later ordinary execution safe point -- an interpreted function entry or a
-  loop-head test -- verifies the generation and publishes the image's
-  entries. A failed, stale, or unsupported image is discarded and
-  pins that execution-local definition to T0. Publication itself replaces no
-  active frame; the loop-head handoff above is the only transfer of a running
-  activation. The first
-  parallel implementation excludes async closures, cross-language imports,
-  pattern prepasses, and constant-list growth; those cases do not revert to
-  synchronous compilation. Private direct-callee cluster images remain future
-  work. [D1.8, D5.4.3, D8.4.1v2, D8.5.1v6]
-  `LAMBDA_EXEC_BACKEND=interp` pins the run to T0, while `LAMBDA_EXEC_BACKEND=jit` explicitly
-  selects eager whole-module **MIR Direct** (`transpile-mir.cpp`) → MIR JIT
-  (**T1**). *(v13, 2026-09-22)* Static import prebuild is a process-global,
-  language-neutral keyed-future service. It owns one bounded work pool and
-  retains one task per canonical module path plus language/profile; the
-  `InputScriptCache` separately remains authoritative for exact source bytes,
-  source generation, parser ABI, and artifact admission. Root discovery
-  submits work and returns without a closure-wide wait. Parse-accurate
-  discovery immediately canonicalizes and requests every static child. A
-  duplicate request receives the same future, while a completed child releases
-  only its direct parents. Thus for `A -> B -> C` and `A -> D -> C`, discovering
-  `B` and `D` requests one shared `C`; `C` completion releases both parents.
-  A task never waits for a child task while occupying a pool worker; only a
-  node whose direct dependencies completed may queue its AST build. The
-  ordinary Lambda/JS importer waits only for the future of its direct module
-  before consuming it, and never from the prebuild-worker path. Cycle failure
-  is a prebuild miss; ordinary loading keeps its established diagnostics and
-  cycle handling. A worker owns a temporary `Runtime` and may publish only a
-  retained AST template through `InputScriptCache`; it neither instantiates a
-  module nor lowers MIR. The receiving runtime clones that template, plans T0,
-  and the ordinary AUTO P2 counters decide whether a hot Lambda definition
-  later receives its MIR satellite. An AST shape outside T0's supported surface
-  falls back only on that receiving runtime's established whole-MIR path. The
-  scheduler is common infrastructure, not a shared language parser or
-  evaluator. [D8.5.1v7] *(v17, 2026-10-06, USER)* **The REPL is one
-  persistent T0 session.** Each completed entry is parsed by the C parser,
-  built, planned and executed as a fragment against the retained Script,
-  global scope and module slab; a rejected or failed entry is rolled back
-  whole. No REPL or inspection path depends on Tree-sitter. Whole-history
-  replay is retired: in a session the tier selector governs satellites only
-  (`auto` promotes at the ordinary thresholds, `interp` never, `jit` at the
-  first call) and nothing compiles a whole module. An entry outside T0's
-  supported surface is rejected with a diagnostic naming the construct and is
-  never compiled as a per-entry MIR module. An interrupt (SIGINT) during an
-  entry raises a fault through the execution recovery frame; the session
-  reports the entry as failed and restores its snapshot. [Repl_Interp
-  RI4–RI6] *(Historical: v1 ruled the opposite — "no
-  AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
-  by user ruling 2026-08-15; the full record is
-  `Lambda_Design_Unified_AST.md` §12.)* [CGP1, CGP2, AI1–AI22]
-- **D8.1.2v3** The shipped Lambda executable uses the first-party C parser as
-  the final production implementation for normal source-to-AST compilation.
-  `lambda/tree-sitter-lambda/grammar.js` is the best structural reference, the
-  editor/bindings grammar, and the first-cut verifier for generated and fuzzed
-  source, but it is known not to implement every corner case. Neither parser's
-  acceptance result is normative by itself: a disagreement is held for manual
-  review against the formal syntax rulings and current vibe records, then the
-  incorrect side is fixed and the ruling is pinned by a reviewed fixture.
-  Generated `parser.c` remains a reference artifact regenerated from
-  `grammar.js` (never hand-edit `parser.c`). Build config generates the build
-  files (never hand-edit the Lua). [CGP5v2, rules 5, 7]
-- **D8.1.3v43*** LambdaJS uses its first-party C lexer and hybrid
-  recursive-descent/Pratt parser for normal JavaScript and TypeScript
-  source admission. It reduces directly into the retained `JsAstNode` graph;
-  the vendored JavaScript and TypeScript Tree-sitter grammars are linked only
-  by the isolated `lambda-cst` differential verifier. LambdaJS has an
-  explicit, boxed AST interpreter backend. A
-  retained `JsScript : Script` owns its AST/source facts and stable module
-  identity; it executes in the same runtime-owned `EvalContext`, GC heap,
-  event loop, and module-state registry as Lambda. AST functions are an
-  explicit `JsFunction` body kind behind the ordinary `fn->invoke` and
-  `fn->construct` capabilities, not a second call dispatcher. The current
-  synchronous slice uses JavaScript completion kinds and the existing JS
-  property/call kernels; lexical environments are precisely traced records
-  whose mutable cells are captured by reference. The admitted synchronous
-  surface includes patterns/defaults/rest/spread, sync iteration with
-  IteratorClose, switch/labels, optional/logical assignment, regex/template/
-  tagged-template expressions, object environments, and class
-  methods/accessors/fields/static blocks plus implicit and explicit derived
-  construction.
-  All semantic operations route through the existing JS property, iterator,
-  class, and call kernels. Direct and indirect `eval` calls are admitted, as
-  is `new.target`, including lexical capture by an AST arrow function.
-  `super()` and `super` property references use the existing lexical home
-  class, derived-`this` binding, field-initialization, and construct helpers;
-  this includes class and object methods, accessors, statics, and AST arrows.
-  Private fields, methods/accessors, static private elements, and private
-  brand checks resolve a class-owned identity key through the existing private
-  runtime. Class evaluation installs that key's owner in a traced lexical
-  environment; member bodies, field initializers, static blocks, and nested
-  closures retain it. Instance private methods publish the existing metadata
-  brand record before field initializers; every get/set/in operation routes to
-  the existing private property and brand kernels.
-  Both caller tiers expose private-name identities only while the eval source
-  is parsed; execution resolves them through the retained lexical environments.
-  *(v20, 2026-09-24)* Dynamic source is interpreted. Direct and indirect
-  `eval`, the `Function`, `GeneratorFunction`, `AsyncFunction`, and
-  `AsyncGeneratorFunction` constructors, string timer handlers, and
-  `$262.evalScript` parse into a retained `JsScript` and execute in the AST
-  interpreter. This holds whatever the caller's tier or the unit selector;
-  MIR never lowers dynamic source. Script top-level lexicals resolve through
-  realm records linked to their module slots. This is a deliberate language
-  boundary. It is neither an unsupported-unit fallback nor a replay of the
-  enclosing script.
-  *(v21, 2026-09-24)* A direct eval from interpreted code links its activation to the caller frame's live environment chain; nothing is projected or written back. The eval's own declarative record holds its lexical declarations, and a strict eval's vars; its outer record is the caller's current one. Eval code, and every closure it creates, resolves a free name through that chain — each record's declarations, its `arguments`, and the vars direct eval added to it — then through the outermost caller script's top-level bindings and the realm. A sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment and reuse a binding it already has (EvalDeclarationInstantiation with Annex B.3.2.3 and B.3.4). `this`, `new.target`, and the home object are the caller frame's own.
-  *(v26, 2026-10-18)* MVP callers also supply live `JsInterpEnv` cells through
-  the rooted `JsInterpHostCaller` descriptor. Direct eval uses the same linked
-  binding resolver and declaration instantiation on both tiers; the retired
-  LJS MIR projection/write-back journals and their direct-eval entry are absent.
-  Context-sensitive early errors use the shared bound-AST function facts,
-  including lexical function boundaries and property-name exclusion, rather
-  than source-text scans. Escaping lexical receivers own numeric payloads in
-  their GC environment through Lambda's scalar-home API (**D5.2–D5.3**).
-  *(v43, 2026-10-29)* Ordinary AST/AUTO, dynamic source and MIR share the
-  MVP realm and JavaScript operation contract. Execution policy selects the
-  walker, compilation and promotion; it does not select different property,
-  coercion, array, class or call semantics. Native callable/storage adapters
-  retain explicit ABI capabilities for host and module consumers. Initializing
-  an interpreted realm requires no empty MIR unit; interpreter-only builds
-  retain dynamic source, classes, realms and AST module loading.
-  Synchronous `yield*` uses the shared MVP protocol loop on each delegating
-  activation; interpreter completion signals are adapted at that boundary.
-  Immutable scope facts may place unobservable synchronous locals in exact
-  activation root slots with destination-owned numeric homes and reusable
-  temporary windows (**D5.3.3**, **D8.2.4v2**). Observable bindings retain live
-  environment cells; per-site mutable caches remain forbidden (**D8.4.1v2**).
-  JavaScript coercion and mutation remain distinct from Lambda's (**S1.11**).
-  `JS_EXEC_BACKEND=ast` forces this backend.
-  *(v25, 2026-10-16, USER)* MVP-Lmd is the formal JavaScript MIR engine.
-  Activated MIR uses the fast MVP compiler: explicit `JS_EXEC_BACKEND=mir`,
-  AUTO's whole-unit fallback and eligible function/loop promotion all use
-  this engine. Host and module entry points honor the same tier selection;
-  legacy LJS MIR is not an implicit fallback.
-  Dynamic source remains in the retained AST interpreter as specified above.
-  Generated code and returned values retain their caller-owned Runtime and
-  EvalContext lifetimes, with shared Lambda storage and precise roots.
-  Conformance failures exposed by activation are implementation gaps; they
-  do not justify rerouting tests, weakening expectations or changing the
-  supported baseline population.
-  *(v29, 2026-10-21, USER; clarifies v28)* JavaScript defaults to AUTO:
-  unset, empty and `JS_EXEC_BACKEND=auto` selectors use the AST interpreter
-  for supported units, with MVP MIR fallback and hot promotion as specified
-  below. The fast MVP engine replaces the old MIR engine whenever MIR is
-  activated; it does not replace AUTO as the default tier policy.
-  `JS_EXEC_BACKEND=mir` explicitly selects whole-unit MIR, and `ast` forces
-  the AST interpreter. The redundant `--runtime=mvp-lmd` CLI option remains
-  removed from Script and batch entry points. Runtime ownership alone must not imply
-  dynamic-source effects or discard native call, numeric and storage proofs.
-  Shared canonical context, realm bindings and retained-code ownership follow
-  **D5.3–D5.4**. General handling is selected from demonstrated source or
-  environment dependencies before execution, or by an explicit guarded
-  operation/body boundary; completed side effects are never replayed.
-  Preserving the rewritten MVP's release performance is the first integration
-  gate and precedes expansion of dynamic feature coverage.
-  *(v12, 2026-09-19)* AUTO is an AST-first
-  policy: an interpreter-supported JS unit consumes the same static-import AST
-  closure prebuilt under D8.1.1v13/D8.5.1v7, while an unsupported unit keeps
-  the established whole-module MVP MIR path. The unset JS selector is AUTO *(v29)*, and
-  forced `ast` remains fail-closed. *(v13, 2026-09-22)* AUTO also has a
-  definition-site P2 MIR-satellite boundary. `JS_FUNC_JIT_THRESHOLD` has a default
-  of **5** calls, the same as Lambda's `LAMBDA_FUNC_JIT_THRESHOLD` *(v24; 100 in v23, 1000 in v22, five before)*. At an ordinary call entry that
-  reaches the threshold, a supported function can publish a boxed native entry
-  before its body begins; no arbitrary interpreter program counter transfers
-  to MIR.
-  *(v22, 2026-10-03, USER)* A JS definition is compiled to MIR only on a hot
-  hit: its call count reaching `JS_FUNC_JIT_THRESHOLD`, or one of its loops
-  reaching the back-edge threshold. Nothing compiles a definition at first
-  entry or because it owns a loop. A running AST activation may hand off at a
-  **loop-head test**, in the shape D8.1.1v14 rules for Lambda: back-edges are
-  counted per loop site; a loop that reaches `JS_LOOP_JIT_THRESHOLD` (**10000** by
-  default) queues its definition once; the image carries a loop entry over
-  the bindings live at that head; after publication the activation enters it
-  at the next head test of the same loop, compiled code completes the
-  activation, and the interpreter unwinds as for `return`. Handoff is one-way.
-  A loop is eligible only where every value live at its head is a named
-  binding the image can receive; every other loop stays interpreted. The
-  selector and knobs keep their JS names (`JS_EXEC_BACKEND`,
-  `JS_FUNC_JIT_THRESHOLD`, `JS_LOOP_JIT_THRESHOLD`); both thresholds are provisional and
-  are to be revised from release profiling.
-  The initial admission is intentionally closed: only a synchronous classic
-  top-level function declaration or function expression with local-only
-  bindings is eligible. Any capture, module/global binding, call boundary,
-  nested callable, class,
-  compound literal/pattern, `arguments`, `new.target`, `eval`, or `with` pins
-  that definition to AST.
-  *(v34, 2026-10-23, USER)* ES modules additionally admit synchronous
-  top-level function declarations/expressions and public instance methods under
-  the existing checked body/dependency proof. Methods require simple parameters;
-  their class site is top-level or inside one top-level synchronous module
-  function/arrow. Every resolved free lexical binding must be an ordinary source
-  module-slab binding; wrapper locals, parameters and class-self/private bindings
-  remain captures. Ordinary unresolved globals retain the classic checks.
-  Admitted bodies may perform local loops, property operations and live module
-  reads, writes and calls through ordinary invocation; no binding constancy is
-  inferred. Imports, captures outside the slab, constructors, accessors,
-  static/computed/private methods, super/private access, other nested/deeper or
-  suspended definitions, eval and dynamic source stay excluded. Classification
-  precedes the hot call, including threshold one. Boxed satellites preserve the
-  source slab, namespace and original callable's identity, source, strict
-  receiver, method home and non-constructibility. Thresholds, forced AST and
-  whole-unit admission do not change. The parameter-expression proof remains
-  a narrower light-call proof.
-  *(v35, 2026-10-23, USER)* Synchronous top-level ES-module functions passing
-  that body/dependency proof may also use the existing hot-loop, one-way
-  handoff. Module reads, writes and calls retain the original live slab;
-  local live-ins come from the precisely rooted activation at the loop head.
-  A shadowing for-let head retains its own lexical boundary rather than
-  flattening distinct bindings into one name. Unrepresentable live-ins, TDZ,
-  const-write refusals, import/capture/nested-callable/method/suspension/dynamic
-  exclusions and the existing thresholds remain authoritative.
-  *(v36, 2026-10-24, USER)* Hot-entry promotion of checked synchronous
-  top-level ES-module functions additionally admits contained synchronous
-  ordinary function declarations and switch statements. Every contained body
-  passes the same dependency and activation checks. Resolved lexical bindings
-  must belong to the selected function subtree or the original module slab;
-  contained closures use ordinary compiled closure ownership, while module
-  reads and writes retain live source slots. Dependency selection includes
-  references from every contained function. Imports, captures outside that
-  subtree/slab, contained function expressions/arrows/methods/classes,
-  suspended definitions, eval and dynamic source remain excluded. Original
-  callable identity, receiver and construction behavior remain authoritative.
-  No outer AST environment is bridged or module source re-executed. This
-  extension does not change classic-function admission, loop handoff,
-  thresholds, forced AST or whole-unit admission.
-  *(v37, 2026-10-24, USER)* Module hot-entry admission additionally accepts
-  untagged template literals with no substitutions and exactly one valid
-  cooked quasi as constant strings, using the existing lowering and original
-  source. Interpolation and tagged templates remain excluded. All other
-  callable/dependency exclusions, thresholds, classic admission, forced AST,
-  whole-unit admission and loop handoff remain unchanged.
-  *(v38, 2026-10-24, USER)* Checked public instance module methods at
-  the approved class sites additionally admit identifier parameters with
-  checked defaults and contained synchronous arrows, ordinary declarations,
-  switch statements and constant templates. Check every initializer and
-  contained body; resolved bindings must stay within the selected method
-  subtree or original live module slab. Compiled closures own their ordinary
-  environments; no pre-existing AST environment is bridged. Imports,
-  wrapper/external/class-self/private captures, destructuring/rest, contained
-  function expressions/classes/methods, suspended/dynamic definitions and
-  arguments/new.target/super remain excluded. Original method identity,
-  source/name/length, strict receiver, home and non-constructibility remain
-  authoritative. Other class/method exclusions, classic/ordinary-function
-  admission, whole-unit admission, thresholds and all loop handoff stay
-  unchanged.
-  *(v39, 2026-10-24, USER)* Hot entry additionally admits synchronous
-  top-level ES-module arrows with simple identifier parameters, no activation
-  observations (this/arguments/new.target/super) and the existing checked
-  body/dependency proof over live module slots. Preserve original arrow
-  identity, source/name/length, lexical receiver metadata and
-  non-constructibility; no pre-existing AST environment is bridged. The
-  approved constant-template proof applies. Imports, external captures,
-  nested/suspended/dynamic definitions and other existing exclusions remain
-  authoritative. Ordinary nested-declaration/switch promotion stays deferred;
-  classic admission, all loop handoff, whole-unit admission and thresholds
-  remain unchanged.
-  *(v40, 2026-10-24, USER)* These checked module arrows may also be
-  defined inside one top-level synchronous module function declaration,
-  function expression or arrow. Every free binding must still resolve to
-  the original live module slab or an ordinary unresolved global; no
-  wrapper-local, import, external, class-self or private capture is admitted.
-  Deeper/suspended wrappers and class/field/static-block sites stay excluded.
-  Simple parameters, no activation observations, original arrow metadata,
-  the existing body proof and all other v39 boundaries remain authoritative.
-  No pre-existing AST environment is bridged. Ordinary nested-declaration/
-  switch promotion stays deferred; thresholds and all loop handoff are unchanged.
-  *(v41, 2026-10-24, USER)* Checked synchronous ordinary function
-  expressions inside one top-level synchronous ES-module function/arrow may
-  read that wrapper's body let/const/var bindings through their original live
-  AST cells. Both functions require simple identifier parameters and no
-  direct-eval/with effects; the target has no activation observations or
-  nested callable bodies. Each read uses immutable original binding identity
-  and the current original callable's traced environment, preserving TDZ,
-  scalar ownership, sibling instances and live replacement. Captured
-  parameters/writes, imports, self/private bindings, deeper/suspended/class/
-  method/field sites and dynamic source remain excluded. Preserve original callable
-  identity, source/name/length and receiver/construction behavior; never copy
-  captures into module slots or re-execute the wrapper. Other admission,
-  thresholds and all loop handoff remain unchanged.
-  *(v42, 2026-10-24, USER)* Checked synchronous arrows directly inside the bodies of
-  synchronous public instance methods may hot-promote when the entire method
-  passes the existing v38 body/dependency and class-site proof. The target has
-  simple identifier parameters, no nested callable bodies and no activation
-  observations except its original method's lexical this. The method retains
-  its checked defaults. Free bindings may additionally be immediate-method-body
-  let/const/var cells: read consts, and read/write let/var through each current
-  original callable's traced AST environment and shared binding operations.
-  Read lexical this from that original AST payload, never a synthetic MIR
-  closure environment. Preserve live cell/receiver ownership, TDZ, scalar
-  homes, identity, source/name/length and arrow non-constructibility. Captured
-  parameters/const writes, other outer/class-self/private bindings, imports,
-  deeper or other callable sites, suspended/dynamic definitions, eval/with
-  and arguments/new.target/super remain excluded. Constructors, accessors,
-  static/computed/private methods stay excluded. Other admission, thresholds
-  and all loop handoff remain unchanged.
-  *(v14, 2026-09-22)* A promoted definition may read
-  or write a direct non-computed named property of its ordinary `this`
-  receiver. The existing call kernel installs that receiver; P2 appends its
-  sealed property-key image to the definition's active module slab at the
-  encoded key-table base, so the temporary clone never leaks name indices into
-  the retained body. Other property forms, including computed and nested
-  accesses, remain AST-pinned. The satellite context is owned by the current
-  `EvalContext` until final realm teardown. *(v15, 2026-09-22)* Classic
-  function expressions use the same definition-owned `JsCallableCode` and
-  `FunctionId` path as declarations, so a non-capturing expression with no
-  enclosing `FunctionId` reaches the same P2 boundary. Thus an unsupported
-  definition remains AST-executed; whole-module MIR is never represented as
-  promotion. *(v16, 2026-09-22)* P2 also admits arrays without spread and
-  plain data object literals with non-computed identifier or literal keys.
-  Static non-computed named-member chains rooted in `this`, a parameter, or a
-  function-local value use the existing property kernels; every static name
-  from the temporary clone is appended to the owner slab before publication.
-  Computed or indexed access, spread, accessors, methods, and dynamic keys
-  remain AST-pinned. *(v17, 2026-09-22)* A computed member read or write is
-  also admitted when both its receiver and key independently satisfy the
-  local-only P2 scan. The existing MIR Reference path evaluates the receiver
-  before the key, applies `ToPropertyKey` once, and invokes the ordinary
-  property kernel. Computed object-literal keys, spread, accessors, methods,
-  and any nonlocal receiver or key remain AST-pinned. *(v18, 2026-09-22)* A
-  data object literal may use a computed key when that key and its value each
-  satisfy the local-only scan. The existing object lowering evaluates and
-  canonicalizes the key before its value, then calls the same data-property
-  kernel. Spread, accessors, methods, and nonlocal key/value expressions
-  remain AST-pinned.
-  A synchronous CommonJS `require()` resolves literal targets against the
-  owning `JsScript`, then enters the existing CJS resolver, cache, and runtime
-  module registry. Its synthetic wrapper executes in a private module slab
-  and restores the caller's active slab on return, so `module`/`exports` never
-  leak into the page global and nested loads retain ordinary cache identity.
-  The admitted synchronous ES-module slice uses the same registry rather than
-  a JS-private cache: a module first publishes its registry-owned namespace
-  placeholder, instantiates hoisted function declarations, then traverses
-  static dependencies and executes its retained `JsScript` in its own shared
-  module slab. It admits default/named/namespace imports; default/named,
-  namespace (`export * as name`), and non-ambiguous star exports; named and
-  star re-exports; `import.meta.url`; and dynamic `import()` as a Promise over
-  that same resolver. Import reads resolve through the retained binding plan
-  on every read, and export writes propagate through the registry, so the
-  admitted named bindings remain live across re-exports and circular function
-  imports. ES top-level `this` is undefined and imports are read-only.
-  A `.ls` target is compiled by Lambda into the same registry descriptor; its
-  public boxed function values retain their `TypeFunc` and cross the ordinary
-  call kernel through Lambda's existing boxed dynamic-call ABI, not through a
-  wrapper heap or a second evaluator. Thus one page/runtime has one
-  `EvalContext`, heap, event-loop owner, module registry, and active module
-  state authority, while Lambda and JavaScript retain separate semantic
-  walkers and activation records. Top-level await, async module evaluation,
-  generators/async functions, ambiguous star-export resolution, shared T0/T1
-  environments, and continuations remain excluded from that initial slice. AUTO sends
-  an interpreter-supported unit to AST and an unsupported unit to formal MVP MIR;
-  the unset or empty selector is AUTO (v29). An explicit `mir` selector remains
-  in the MIR lane; its shared link policy may choose eager native, lazy
-  native, or the MIR-interpreter interface from unit volume, document
-  attachment, and the largest finalized function. A selected MIR unit is not
-  silently redirected to AST; compilation failure is reported without replay.
-  Its dynamic source still executes in AST under v20.
-  An AST ordinary function materializes the existing runtime `arguments`
-  object in its precisely traced activation environment before evaluating
-  parameter defaults. Sloppy functions with simple identifier parameters use
-  the runtime's mapped aliases for parameter reads and writes; strict or
-  non-simple functions use its unmapped object. An AST arrow resolves
-  `arguments` through its retained outer function environment. This retains
-  existing `arguments.callee` policy and never reads mutable ambient call
-  state after the activation has escaped.
-  The support admission runs after parse/bind/index but before declarations or
-  user code; unsupported syntax raises a JS error in the prepared realm and
-  never replays through MIR. *(v19, 2026-09-23)* The shared link policy
-  chooses native, lazy-native, or MIR-interpreter interface from total and
-  largest-function instruction counts plus document attachment; a large
-  native function may lower only its generator optimization level. Default or
-  explicit `auto` takes the interpreter-supported AST-first path; unsupported
-  units retain formal MVP MIR. The unset selector selects AUTO (v29).
-  [D1.3v3, D1.5v2, D1.7, D5.4.1, D6.2.2v2, D6.2.3v2,
-  D8.2.4, D8.4.1v2, D8.4.3v2, JSI1–JSI13, JSI16v2, JSI35, JSI36]
-
-### D8.2 Unified AST
-
-- **D8.2.1*** One leveled core-node catalog serves host and guests; ≥80%
-  of any guest lands in core nodes. Language is a property of the
-  **compilation unit** (`Script.lang → LangProfile*`), never of a node;
-  operator semantics dispatch through the profile. Mixed-language
-  *programs* exist; mixed-language *modules* do not. [U1, U2, U4]
-- **D8.2.2*** Variance tiers in strict preference order: fields/flags →
-  clause chains → language-range node kinds; **promotion to core allowed,
-  demotion never**. *Semantically unified, syntax variance preserved as
-  fields*: one LOOP/MATCH/IF/ASSIGN node with form fields, **no tree
-  rewriting** (desugar hazards never arise). `AST_FOR` is its own core
-  node (pure `fn` iteration vs `pn` condition loops — different color);
-  purity is a **core flag** and the const-folder's soundness gate. [U3, U19, U22, U14]
-- **D8.2.3v2*** Migration is extract-after-convergence: the common core is
-  extracted only after two working clients exist; the G1 rooting fix is a
-  Phase-0 prerequisite baked into `MirEmitter`. (Revised 2026-10-07, v2: v1
-  named Python the first guest port and acceptance test; hosted-language
-  support was removed with `lang-python`.) [U12/U21, K17 doctrine]
-- **D8.2.4v2*** The unified compiler has one **indexed compilation unit**:
-  dense stable IDs name nodes/scopes/bindings/functions/classes; one common
-  child-enumeration contract builds parent, owner, binding, use/def and graph
-  indexes; lowering consumes resolved identities and never repairs binding.
-  Core passes may not grow private core-child walks. Preorder subtree ranges,
-  per-function ranges, uses-by-binding, calls-by-callee-binding,
-  member-uses-by-object, and function-child adjacency are immutable derived
-  index facts. A synthetic function that logically owns a source fragment
-  outside its structural preorder range receives an explicit per-function
-  overlay slice; ranges themselves remain dense. Span recovery is limited to
-  an orphaned structural edge; sanctioned AST extension must rebuild these
-  derived facts before consumption.
-  [U27, U28]
-- **D8.2.5v3*** One typed pass manager owns build → bind → validate → index →
-  collect → capture/effect → environment layout → type/representation
-  inference → forward declaration → MIR lowering/finalization/prelink/link.
-  Passes declare required/produced facts and the compiler records their elapsed
-  time in the unit timing record.
-  **Source contracts and core runtime facts live on the AST**: `AstNode.type`
-  *is* the effective/inferred type — most expression nodes carry no source
-  annotation — while a declared annotation lives on the declaring node
-  (`NameEntry`, param, declarator).
-  Inferred type and const results are essential runtime facts, not erasable
-  ones. Genuinely erasable optimization facts hang off a **lazily allocated
-  side record reached by a pointer in `Type`**, so they may describe only the
-  type, never the node — the bare `TYPE_ANY`-family singletons are shared.
-  No ID-keyed per-node fact table (D2.4.1, D3.2.3, D3.3.1v2). Profiles answer
-  typed semantic questions and extension nodes; they do not own alternate pass
-  schedules. [U29, U30v2]
-- **D8.2.6v2*** Core expression lowering is demand-driven and returns the full
-  `MirValue` of D2.4.2. `DISCARD`, `ANY`, `REQUIRED_REP`, `DEST_REG`, and
-  `BRANCH` may avoid materialization but never change semantics; unsupported
-  demand falls back to generic lowering. Carrier conversion remains
-  `em_require_rep()` (D2.4.3), semantic coercion remains profile-owned, and
-  root/final-store ownership remains emitter-only (D5.3.4). PDF output demand
-  additionally carries an explicit destination and a checked completion status
-  (D2.6.12v3). Eligible pure result paths may append directly; ordinary calls,
-  argument/local values, explicit arrays and constrained returns retain their
-  materialization and type boundaries. No ambient output context is installed.
-  [U31, U32; PDF_Output §5.5]
-
-### D8.3 Dual-function compiling
-
-- **D8.3.1v2*** Plan-dependent entries comprise the boxed `<name>_b` boundary
-  and a **bounded set of immutable raw variants**. Every raw variant has one
-  complete exact semantic-shape key; dynamic selection reaches it only through
-  that key's exact guard, while a statically proven direct edge is the
-  equivalent proof. A multi-variant plan retains `_b` as its complete boxed
-  fallback; no variant is evicted, replaced, or selected from runtime feedback.
-  The compiler admits distinct qualifying keys in deterministic source order up
-  to its fixed implementation cap, then routes later, dynamic, partial, or
-  ineligible shapes to `_b`. Per-parameter partial specialization remains
-  rejected. D8.3.4v4 still permits the single closed-world raw-only case. A
-  declared, native-eligible function has **no boxed slow body**; a slow body
-  exists iff a param is inference-specialized, unboxing is profitable, and the
-  caller set is open. [S1.6, DF1–DF3]
-- **D8.3.2** **The check lives in the callee**: a site that cannot
-  statically prove admission calls `_b`, and the callee does the one
-  boundary operation — *one guard site, one correctness argument*.
-  Declared violation → TE-9 error value; inferred mismatch → guard fails →
-  boxed body. Inferred guards are **exact semantic-shape tests**, not
-  admissions; unions/`any` get no test and stay `Item`. [DF4, DF5, DF8]
-- **D8.3.3** **Source-relative correctness is the invariant**: neither
-  generated body defines the other's semantics; guard-failing inputs must
-  never reach the unboxed entry; the unboxed entry has exactly **two**
-  proof-producing paths (statically-proven site, or `_b`) — *any third
-  path is a bug, not a slow path*. [DF9, DF14]
-- **D8.3.4v4** **Visibility decides which versions exist**: exported ⇒ `_b`
-  mandatory; non-exported with one exact visible call shape ⇒ unboxed
-  only, no guard, no slow body. Caller-side guards are accepted **only as
-  guard hoisting** (same predicate, failure edge lands on the `_b` path,
-  flag-gated, benchmark-justified).* A fixed-arity `pn` may admit D8.3.1 raw
-  variants at a direct exact edge whether or not it can suspend (v4,
-  2026-10-05: a parking `pn` keeps one entry protocol, D5.1.1v3); it retains
-  `_b`, and it is not guard-hoist eligible. **`var` parameters and methods are
-  eligible** (v3, 2026-09-16): a raw variant may take a `var` position when
-  that edge carries the position's CW33 home exactly as `_b` does, so the
-  callee consumes the home in its prologue and publishes through it in its
-  epilogue (D8.1.1v10) — the borrow's observable write-back, exclusivity and
-  plain-parameter snapshot are unchanged (S9.1.2, S9.1.3, S9.2.2); and a
-  method may take one when the receiver's exact shape is proven at the edge,
-  which is the same proof every other raw argument needs, never a dispatch
-  guess. A pointer lane retains a boxed source root for the call (D8.3.1v2),
-  and D8.3.3's two-proof-paths invariant is unchanged: a raw body is reached
-  only from a statically exact edge or through `_b`. Remaining boxed-only
-  exclusions are closures, variadics, and procedures that may await or
-  require a task context. [DF15, DF16, DF11; O11v2]
-- **D8.3.5** Numeric admission at implicit boundaries is one rule (static
-  whole-domain embedding admits + normalizes; dynamic admits iff lossless;
-  admission ≠ cast); entry-shape inference and body inference are separate
-  products (D3.3.2v2). [DF6, DF12, DF13]
-
-### D8.4 Dispatch policy
-
-- **D8.4.1v2** **No inline caches anywhere in the Lambda lane or LambdaJS** —
-  *shared semantic dispatch over per-site caching*: specialized lowerings have
-  no dynamic-dispatch sites by construction; open sites use runtime dispatch;
-  a hot open site is a DF12 inference bug first. Multi-version dispatch, when
-  it comes, is a guard chain, never a patchable cache. LambdaJS named and
-  indexed property accesses use the shared runtime reference/property kernels;
-  TypeMap shape metadata remains ordinary lookup data, not mutable per-site
-  cache state. Generated code stays immutable. This bans mutable per-site
-  cache cells, feedback vectors, and callee/method caches in **both** lanes:
-  the sanctioned speed-up is **compile-predicted specialization with an
-  inline guard and the shared kernel on a miss** — for LambdaJS, per-site
-  literal and constructor shapes, integer-index lanes, and static `NameId`s
-  (D3.4.4v2, D4.6.1v3), the same physical routes the Lambda lane uses. A JS
-  fast path is admissible only when a miss is observationally identical to
-  the kernel result. [LC1v2]
-- **D8.4.2v2*** Core direct calls pass individual ABI operands (`Context*`,
-  args); returns are shaped per the companion-lane convention (D5.2.1v5)
-  — the trailing scalar-home operand is retired. `Item* + argc` is the JS
-  dynamic boundary only. [LC call-ABI, RV1, RV10]
-- **D8.4.3v2*** **Every hosted-language helper uses an explicit completion
-  ABI.** A helper that can produce a Lambda error, LambdaJS throw/rejection,
-  or another guest-language exception returns an explicit completion: the
-  shared ABI uses an ERROR-tagged `Item` (or the declared companion error
-  lane), while a separately versioned guest ABI may use only its
-  profile-declared completion adapter. Neither form relies on a pending flag,
-  C++ exception, non-local jump, or separate exception poll. MIR lowering tests
-  the returned completion in the current activation and routes it to that
-  activation's handler/finally/cleanup or error return; propagation to a
-  caller then occurs by an ordinary return carrying the same error identity.
-  Raw scalar helpers are permitted only when their catalog contract is
-  infallible (`PRESERVES`). A guest may retain its own exception payload and
-  language semantics, but its adapter must materialize an explicit host
-  completion before returning to host code. `LambdaError` is the shared ERROR
-  carrier; its Map-compatible resting prologue is traced as a heap reference,
-  and JS Error stack materialization may remain lazy. Native system faults are
-  outside this helper exception ABI and use only the D1.4v4 carve-out.
-  [S7.4.3, S7.4.4, D1.4v4, Runtime_Error_Handling REH-D3–REH-D12, JR3]
-
-### D8.5 MIR module cache
-
-- **D8.5.1v7*** **L1** is a persistent in-process `InputScriptCache` for
-  executable script sources, including main scripts, imports, harnesses, and
-  document/hosted-language scripts. Source identity uses exact bytes plus
-  canonical identity, source kind, language/parser profile, and resolution
-  policy; AST and optional MIR artifacts are subordinate entries. A hit
-  recreates execution, heap, DOM, module, and exception state, and the default
-  policy admits every successful script (`LAMBDA_SCRIPT_CACHE=off|ast|mir|all`).
-  `LAMBDA_SCRIPT_CACHE_MAX_BYTES` is an optional retained-byte limit: unset or
-  `0` retains without a limit, while a positive limit evicts only inactive,
-  dependency-free entries in least-recently-used order. A live lease or
-  dependency cone may exceed the limit and records retention pressure rather
-  than losing an artifact it still references.
-  If recovery closes a scope that owns an unfinished AST/MIR build claim, the
-  common service wakes waiters and poisons that key until source invalidation.
-  Static module closure prebuild is an AST-only cache producer backed by a
-  process-global keyed-future registry and one bounded pool. Root discovery
-  submits its static-import requests without waiting for the closure. A request
-  for an existing canonical path plus language/profile receives the existing
-  task future; child completion continues only direct parents, and a parent
-  queues its AST build only after its direct child futures succeed. No
-  dependency-depth batch barrier, whole-closure wait, or worker-side wait on a
-  nested import is permitted. The ordinary Lambda and JS loaders wait only on
-  the future for the direct module they are about to consume. Task identity is
-  a scheduling key only: cache admission still checks exact source identity
-  and parser/resolution profile before reuse. Cycle failure leaves ordinary
-  loader diagnostics authoritative. Module initialization, execution state,
-  and MIR compilation remain with the receiving runtime. Canonical file paths are used
-  at both prebuild and runtime import boundaries, so a relative spelling
-  cannot bypass the retained AST image. AUTO satellite compilation is a second
-  process-wide, bounded compiler-work class. Its initial task key is Script
-  execution generation plus target definition, and its output is a private,
-  immutable MIR image that waits for execution-safe publication; no cache
-  template or receiving-runtime state crosses that boundary. A later private
-  cluster-image extension must preserve this boundary. [D8.1.1v12, D8.1.3v18]
-  The cache remains source-distributed and in-process; disk/code-image caching
-  stays D8.5.2–D8.5.3. L2 lazy codegen remains an approved experiment. [MC1,
-  MC2]
-- **D8.5.2*** The disk-cache direction is **code image + relocation
-  journal** (Route B); a C-source route is rejected (a C toolchain as a
-  production dependency), and MIR-bitcode caching is dropped (*it caches
-  the wrong phase*). Prerequisite: **de-pointering** the lowering — baked
-  pointers are anonymous immediates with no relocation records, so
-  value-based identification is unsound. v1 load model regenerates the
-  front-end and loads the back-end. [MC3, MC5/MC6, L3-1..L3-2]
-- **D8.5.3*** The **differential write verifier is mandatory and
-  fail-closed**: compile twice at different addresses, diff; any byte the
-  journal cannot explain vetoes caching that module — *every cache entry
-  is born verified*. Keys include build stamp, arch, opt policy, format
-  version, and transitive source hashes; artifacts are local,
-  SHA-validated, size-capped, never signed, **never distributed**.
-  Any per-instantiation mutable cell must become a named data item before its
-  language joins; LambdaJS has no inline-cache admission path under
-  D8.4.1v2. [L3-6..L3-9, MC7/MC8]
+- **D8.5.1* — The L1 script cache is in-process.** One persistent in-process
+  cache holds executable script sources: main scripts, imports, harnesses,
+  documents and guest scripts. The source identity is the exact bytes, the
+  canonical identity, the source kind, the language profile and the
+  resolution policy. AST and MIR artifacts are subordinate entries. A hit
+  recreates the execution, heap, DOM, module and exception state. An optional
+  byte limit evicts only inactive entries that have no dependents, least
+  recently used first. A live lease can go above the limit. A recovery that
+  closes an unfinished build claim wakes the waiters and poisons that key.
+  Prebuild (D8.3.5) and background compilation (D8.3.4) are producers with
+  their own keys. Admission always checks the exact source identity. The cache
+  stays in-process and source-based. [MC1, MC2, Script_Cache]
+- **D8.5.2* — A disk cache stores a code image with a relocation journal.** A
+  C-source cache is rejected, because it makes a C toolchain a production
+  dependency. A MIR-bitcode cache is rejected, because it caches the wrong
+  phase. The prerequisite is a lowering without baked pointers: a baked
+  pointer has no relocation record. The first load model generates the front
+  end again and loads the back end. [MC3, MC5/MC6, L3-1..L3-2]
+- **D8.5.3* — Every cache entry is born verified.** A differential write
+  verifier is mandatory, and it fails closed: compile twice at different
+  addresses and compare. A byte that the journal cannot explain stops the
+  caching of that module. Keys include the build stamp, architecture,
+  optimization policy, format version and transitive source hashes. Artifacts
+  are local, hash-checked, size-limited, never signed and never distributed. A
+  per-instantiation mutable cell must become a named data item before its
+  language joins. [L3-6..L3-9, MC7/MC8]
 
 ### D8.6 Emission testing
 
-- **D8.6.1** **The MT7 ratchet: 0% slack.** Any emission-size increase
-  over `test/mir/mir_budgets.json` fails the baseline; landing growth
-  requires a manual threshold lift **in the same commit** — *the budget
-  diff is the review artifact*. Decreases auto-tighten; the test never
-  edits its own config; nondeterministic probes are removed, not padded;
-  no silent platform-dependent slack. [MT7]
-- **D8.6.2** One artifact contract: the MIR dump path honored in release;
-  `--no-log` is the master switch, and mandatory emitter aborts stay live
-  under it. `mir-check` sidecars assert names and instruction shapes,
-  **never raw immediates**, over the finalized dump. [MT1, MT2]
-- **D8.6.3** Liveness is verified by **dynamic oracles** — forced-GC
-  (`FORCE_EVERY=1`) + poison sweeps, self-baselining (stressed run must
-  byte-match unstressed), gated in the baseline; a static liveness
-  duplicate is rejected. The independent structural verifier is deferred
-  until emission is final. [MT4, MT3]
-- **D8.6.4v2*** Unified-AST consolidation has three **hard, fail-closed exit
-  ratchets**: at least 2,000 net physical C/C++ lines removed from the
-  anchored `lambda/runtime` + `lambda/js` scope; at least 10% lower internal
-  parse-through-link compiler time for the complete `test_lambda_gtest`
-  corpus; and at least 20% lower for `test_js_gtest`. Finalized MIR volume for
-  the frozen `test_js_gtest` large-library cohort and complete JS corpus is a
-  required numeric diagnostic, not an exit ratchet: it is counted from
-  finalized top-level module functions with the same instruction definition
-  as MT7 (labels/declarations are excluded), printed as a machine-readable
-  per-test record, compared on identical manifests, and any material growth is
-  attributed. Timings use identical release-mode sample manifests and the
-  median of five complete measured runs after one warm-up; execution, process,
-  cleanup and scheduler time do not count. Cache hits, missing/retried samples,
-  code moves out of the LOC scope, formatting, and comment stripping cannot
-  satisfy a ratchet. [U33–U36]
+- **D8.6.1 — The emission ratchet has 0% slack.** An increase in emission size
+  above `test/mir/mir_budgets.json` fails the baseline. Growth needs a manual
+  budget change in the same commit; the budget diff is the review artifact. A
+  decrease tightens the budget automatically. The test never edits its own
+  configuration. Remove a nondeterministic probe; do not pad it. There is no
+  hidden platform slack. [MT7]
+- **D8.6.2 — One artifact contract.** The MIR dump path works in release
+  builds. `--no-log` is the master switch, and mandatory emitter aborts stay
+  live under it. `mir-check` sidecars assert names and instruction shapes over
+  the finalized dump, never raw immediates. [MT1, MT2]
+- **D8.6.3 — Dynamic oracles verify liveness.** Forced-GC runs and poison
+  sweeps verify liveness. A stressed run must match the unstressed run byte
+  for byte. The baseline gates these runs. A static liveness duplicate is
+  rejected. An independent structural verifier waits until emission is final.
+  [MT4, MT3]
+- **D8.6.4* — The unified-AST consolidation has hard exit ratchets.** The
+  consolidation finishes only when three ratchets pass, and they fail closed:
+  - at least 2,000 net lines removed from the runtime and JS compiler scope;
+  - at least 10% less Lambda compile time;
+  - at least 20% less JS compile time.
+
+  Finalized MIR volume is a required numeric diagnostic, not a ratchet.
+  Measurements use fixed release manifests and repeated runs. Cache hits, code
+  moved out of scope, formatting and comment removal cannot satisfy a ratchet.
+  [U33–U36]
+
+## D9 Build, Modules and Packages
+
+*Terminology.* A Lambda script module is a **package**. A Jube native DSO is a
+**module**. Context makes the meaning clear where the text uses "module"
+loosely.
+
+### D9.1 Build layering
+
+- **D9.1.1 — Static libraries in a strict layer order.** The build links
+  static libraries; dynamic libraries are only for Jube modules. The layers are
+  `lib` → `lambda-data` (core and io) → `lambda-rt` → `radiant` →
+  `lambda.exe`. A layer calls only to its left. An upward call goes through a
+  hook header that the lower layer owns, with a null-safe default. GC
+  allocation is a safepoint, not an allocator flavor: a missing heap service
+  never falls back to a weak, null or malloc path. [SM1–SM3, SM6]
+- **D9.1.2* — All resource IO lives in `lambda-io`.** Source bytes and file
+  acquisition can be kept in the neutral script cache of the input manager.
+  Derived artifacts live above it: script and MIR caches in rt, and font and
+  media rendering in radiant. Radiant never fetches. The cache owns only the
+  source identity and the opaque artifact lifetime; language adapters own the
+  AST and MIR types. No execution, document, heap or context state crosses
+  this boundary. Raw mechanisms that need no context stay in `lib`. IO that is
+  coupled to the event loop or to Items stays in rt, by an explicit, reviewed
+  classification. [SM12]
+- **D9.1.3 — Provider ownership beats include ownership.** The module that
+  declares a function in its public header, or a lower module, must define it.
+  A symbol-provider inventory enforces this. Boundary enforcement has two
+  tiers: lint rules, and boundary DSOs that must link with no undefined
+  symbols. The remaining rt → radiant imports are a ratcheted baseline:
+  additions fail, and deletions are progress. [SM13, SM5]
+- **D9.1.4 — Mark API ownership resolves the layering.** `MarkReader` is core.
+  `MarkBuilder` and `MarkEditor` are io, because they take an `Input*`.
+  Ownership resolves the layering, not callback abstractions. Remove a
+  forwarding shim when its call sites move. [SM §9.4]
+
+### D9.2 Build profiles
+
+- **D9.2.1 — Headless has three profiles.** Profile A (`lambda-cli`, D9.2.2)
+  omits `radiant` at link time. Profile B is a runtime flag inside the full
+  `lambda.exe`. Profile C (`lambda-headless`) is the full engine with a null
+  windowing backend in place of the GUI, OpenGL and webview toolkits; it
+  refuses `view` and `edit` explicitly. B and C compile the same Radiant
+  sources, with no `#ifdef` removal of display code. Radiant is above rt, and
+  it embeds rt through a narrow interface. Public headers never define
+  build-profile macros. [SM9, SM10, SM16]
+- **D9.2.2 — `lambda-cli` is the runtime-only host.** It has only the Lambda
+  runtime: core, io, the engine, the validator and their libraries. It
+  excludes Radiant, the JS/TS runtime and DOM, the Jube host modules and the
+  HTTP server. It is a reduced build profile, not a bundle (D1.1). An excluded
+  command fails with an explicit diagnostic. An import of a JS or Jube module
+  is an ordinary import error. Nothing degrades silently. [SM15]
+- **D9.2.3 — `lambda-wasm` is the browser evaluation profile.** It is smaller
+  than `lambda-cli`. It has the parser, the AST interpreter, the core values,
+  precise GC and a stateful in-memory REPL over source and data that the host
+  supplies. It excludes MIR and all JIT machinery, the network, the
+  filesystem, ambient system access, threads, task scheduling and the large
+  format and package families. The Static Modules record has the exact
+  manifest. Evaluation is synchronous, and it stays in the AST. An unavailable
+  capability fails explicitly. Retained values and operations keep their
+  ordinary semantics and ownership. It is a build profile, not a Jube bundle
+  or a WASM guest language. [SM17, SM §13.4]
+
+### D9.3 Script packages
+
+- **D9.3.1 — A package is the compilation unit.** A Lambda script module (a
+  package) is the compilation unit. Its language profile is a property of the
+  unit (D8.2.1). Its module-scope bindings are immutable; scope guards enforce
+  this structurally, and guests are exempt. Its instantiation has effects,
+  although its bindings are immutable. Package state lives in per-context
+  slabs (D6.4.3). [RG14, U2]
+- **D9.3.2 — Imports bind boxed entries; initialization is a transaction.** An
+  import resolves to the boxed `_b` entry of an exported function, so an
+  export must have a boxed entry (D7.3.4). Package initialization is a
+  transaction barrier. A failed initialization rolls back. A module with
+  half-built top-level state never becomes importable (S7.7.6). [DF15, ER-D2]
+- **D9.3.3 — Packages are cached in-process and distributed as source.**
+  Imported packages use the in-process cache (D8.5.1). They are distributed as
+  source (D1.7). Compiled artifacts are local caches only.
+- **D9.3.4 — `lambda.*` is the one root for shipped code.** The root name is
+  reserved (S16.10.1v2). It has three tiers:
+  - `lambda.sys.*`: the system functions, which the prelude imports
+    unqualified (S17.2.1);
+  - `lambda.<module>`: built-in modules; the bare name is an alias, so
+    `import math` is the same as `import lambda.math`;
+  - `lambda.<package>`: shipped script packages. Document packages group
+    under `lambda.doc.*`.
+
+  One path names one thing: no path is both a built-in module and a package.
+  `lambda.io.<leaf>` can name a built-in module whose functions park the
+  calling task on IO, which a Jube module cannot do (D9.5.2). Such a module is
+  imported only by its full path. Shipped paths map to the source tree under
+  `<lambda-home>/package/`, one component per level, with no exceptions.
+  [S17.2.1, S17.2.2, S16.10.1v2; Demo_Mail ML11]
+- **D9.3.5 — One import resolver serves every caller.** Import resolution
+  follows the S16.9.8 roots. A package path is looked up by name only: the
+  built-in modules, then the runtime-registered host modules, then the shipped
+  packages. Any other root fails with E216. That root space is reserved for the
+  package registry, and it is never tried against the working directory. A
+  relative path resolves against the directory of the importing script. Thus a
+  script with relative imports runs in place, not from a copy. [S16.9.8]
+
+### D9.4 Jube modules
+
+- **D9.4.1 — The core is closed; everything else is a module.** The core is
+  ECMA-262, the engine substrate, `./lib` and a closed allowlist of globals
+  (console, timers, `queueMicrotask`). Everything else is a Jube module. A
+  change to the allowlist is an ADR-level change. The core keeps file IO and
+  the shared stream core for performance. Spec-surface stream and crypto APIs
+  are modules. [JA1]
+- **D9.4.2 — Modules are verified, negotiated and transactional.** A module is
+  a DSO and a `module.json` manifest. Its hash is verified, and its ABI and
+  host API are negotiated before any module code runs. Modules load lazily and
+  register as a transaction: a failed initialization rolls back. A module
+  lives for the process; there is no hot unload. Evolution is additive only,
+  behind size gates. Static registration is only for development, and it must
+  behave the same. [JA2, JA5, JA11]
+- **D9.4.3 — There is one strict host-API tier.** Every module uses only
+  `jube.h`. In-tree modules get no softer tier; they are the constant test of
+  the contract that third parties get. Modules import no host-internal
+  symbols. The API surface comes from real use, not speculation. Signatures
+  are Lambda type-syntax strings with a mandatory `fn`/`pn` keyword (D7.1.1).
+  [JA5, NM §6.2, §6.4]
+- **D9.4.4 — No module links another.** The core never links modules. A module
+  never links the symbols of another module; it uses manifest dependencies or
+  a script re-export. The manifest can be read without `dlopen`. It mirrors
+  the C descriptor table, which is the ground truth. [JA8, NM §7]
+- **D9.4.5 — Every module kind names its conformance gate.** Each module kind
+  has a gate in CI. The core uses Test262. Web-platform modules use their WPT
+  slice. Node-compat modules use the node baseline. Languages use their own
+  corpus. Data packs use the pack corpus and integrity checks. [JA9]
+- **D9.4.6* — The host exports only an allowlist.** Host code compiles with
+  hidden visibility by default. The dynamic export table of the host is
+  exactly the checked-in allowlist; a loaded module can resolve only those
+  symbols. A module that needs another symbol gets it case by case: an
+  allowlist entry that names its users, and an API marker on the declaration.
+  An entry that no module imports is removed. A host without the Jube loader
+  exports nothing. [JA5.1]
+
+### D9.5 Jube data and async contracts
+
+- **D9.5.1 — Items cross; host structs use virtual carriers.** `Item` is the
+  only value currency (D1.2). Native structs cross as virtual carriers
+  (D9.5.5). An engine-owned object with internal slots can use the same
+  carrier when its native slots are primary. The representation selects the
+  carrier, not the module ownership. Shape-backed ECMAScript objects stay
+  typed maps. The vtable owns the brand, the precise trace and the finalizer.
+  Raw C pointers are never visible to a script. System resources are integer
+  resource IDs. [JA6, NM §6.3, §8; JR7]
+- **D9.5.2 — Modules are shielded from the async substrate.** There is no
+  escape hatch to the event loop. A micro-kernel of five concepts serves
+  modules: scheduling, a thread-safe completion post, a blocking pool, the
+  resource table and shutdown. Completions arrive only on the JS thread, in
+  loop order. Modules never pump, poll or drain. A task never parks while a
+  host-API frame is on its stack. The call from the host into script raises a
+  native barrier, and a suspension below that barrier is a reported fault. [JA7,
+  Concurrency §4.4, RA10]
+- **D9.5.3* — Guest hosting crosses no core types.** No `Runtime*`,
+  `EvalContext*`, `Input*`, `MIR_context_t` or `AstNode*` crosses the
+  boundary. Only opaque handles and versioned sub-API tables cross. Every
+  callable runtime helper has catalog metadata: signatures, ownership, GC and
+  allocation effects, re-entry and exception behavior. Lowering resolves
+  through the catalog, never by a guess. The host owns heap activation,
+  context install, side-stack entry and exit, and recovery boundaries. The JS
+  error lane (D7.4.3) is not reused as the exception model of another guest.
+  [Lang_Hosting §5–§7, §13]
+- **D9.5.4 — Declared interfaces are the only host-object protocol.** The
+  surface of a host type is its interface declaration in Lambda type syntax,
+  compiled to member records. Record-owned hooks for open names and indexes,
+  and a destroy callback, complete it. There is no fallback tier; the
+  type-level dispatch fallbacks are retired. Property keys cross the member
+  ABI as Items (string, symbol or number). They resolve through one borrowed
+  byte view, and they are never materialized again. [DOM4 D4k, D4j]
+- **D9.5.5* — Three virtual carriers mirror the container taxonomy.** The
+  carriers are `vmap`, `varray` and `velmt`. Each one occupies its structural
+  TypeId band: VArray directly after Array, and Velmt directly after Element.
+  The sequence-family tags form one closed numeric band. Static asserts
+  enforce this order as an Item ABI contract. A physical storage decode still
+  needs an exact guard (D2.3.3). Host data crosses as the carrier that matches
+  its shape. A virtual array reads live through its vtable. A virtual element
+  has both its list face and its map face. Member records (D9.5.4) are the
+  named-member protocol on all carriers. Do not flatten element-shaped data
+  into a map, and do not copy array-shaped state into real arrays. [DOM4 D4l]
+- **D9.5.6 — Lambda and Radiant meet through two explicit contracts.** Radiant
+  embeds Lambda through a versioned embed interface that follows Jube. Lambda
+  reaches Radiant only through the `radiant-dom` module. `lambda-rt` never
+  links radiant. Shipped document layouts connect automatically to pure
+  package `layout(parent, children, ctx)` exports. Callback registration is
+  host plumbing, and it is not part of the public DOM or Radiant API. [JA15,
+  SM10; Radiant_Design_Custom_Layout §6]
+
+## D10 Documents and Shipped Packages
+
+### D10.1 Document formats
+
+- **D10.1.1 — `.mark` is the one Mark file extension.** New files, examples,
+  generated artifacts and file associations use lowercase `.mark`. Filename
+  detection of Mark recognizes only this extension, with no case sensitivity.
+  Other short forms are not aliases, also for legacy input. Spell the name of
+  the format; extra extensions fragment the tools and add no capability.
+  [Input_System §Mark file extensions]
+- **D10.1.2 — An explicit format overrides the filename.** When the caller
+  selects `mark`, Mark input accepts any filename, with or without an
+  extension. Thus filename aliases are not necessary. [Input_System §Mark file
+  extensions]
+- **D10.1.3 — A domain document in Mark syntax has its own format.** A domain
+  document that uses Mark syntax has its own format name and extension; it is
+  not a Mark alias. For example, `.slides` is a slide deck with a
+  `<presentation>` root, read as the format `slides`. Its own route selects
+  the format explicitly. Filename detection of Mark still recognizes only
+  `.mark`. The extension names what the document is; the syntax is shared.
+  [Input_System §Mark file extensions; Lambda_Pkg_Slide_Presentation §0]
+- **D10.1.4 — XHTML uses XML syntax and gives the HTML element tree.** The
+  format `xhtml`, the `.xhtml` and `.xht` extensions and the MIME type
+  `application/xhtml+xml` select the strict XML parser with namespace
+  validation. The result uses the document, doctype and comment
+  representations of the HTML parser. Prefixes resolve to local names, and the
+  namespace identity is kept. Name case is kept (S8.2.2v6). Radiant shows the
+  result in standards mode. Known public identifiers select the built-in
+  entity catalog; no DTD is fetched. Other doctypes admit only the five XML
+  entities. [Input_XML §XHTML admission]
+- **D10.1.5 — SVG always uses HTML5 SVG parsing.** SVG in `text/html` follows
+  the WHATWG HTML tokenizer and the foreign-content tree construction.
+  External SVG (standalone files, image resources and external references)
+  uses the same parser, and it gives the same namespace-aware element subtree.
+  There is no separate XML-only SVG intake. Explicit XML and XHTML input do not
+  change. [Radiant_SVG2 §SVG parsing admission]
+- **D10.1.6 — SVG export serializes the current DOM.** SVG source export
+  writes the current SVG DOM, edits included, through the shared
+  namespace-aware serializer. The export of a rendered page to SVG or PDF is a
+  separate paint contract. [Radiant_SVG2 §DOM export and virtual-frame
+  snapshots]
+- **D10.1.7* — An animation snapshot uses the virtual-timer frame.** Before
+  export, settle the DOM updates and the presentation state of the frame that
+  the virtual timer selected. Capture does not move virtual time. The snapshot
+  keeps that frame when it is opened again. A repeated capture without edits
+  or time movement gives the same state. Export during a wall-clock animation
+  is not covered. [Radiant_SVG2 §DOM export and virtual-frame snapshots]
+
+### D10.2 Document packages
+
+- **D10.2.1* — The DOM behavior package owns the editing policy.** The full
+  user-agent editing policy belongs to the shipped Lambda DOM behavior
+  package, never to Radiant native code. Radiant owns the input gate and the
+  standard DOM mechanisms: editing-host recognition, events, Selection and
+  Range, clipboard and composition transport, observation, geometry and
+  checked DOM mutation. The package owns the default actions, normalization,
+  history, `designMode` and the full `execCommand`/`queryCommand*` surface.
+  User input and legacy commands use one operation model. The gates are the
+  WPT editing suites and the pinned Chromium editing corpus.
+  [Radiant_Design_Editable §20]
+- **D10.2.2* — LaTeX is read by TeX expansion, never by TeX typesetting.**
+  Every LaTeX parse runs the Lambda TeX expansion engine at the input boundary.
+  Then one digester builds the Mark AST. Thus one source gives one AST at
+  every entry point. The engine executes TeX programming: catcodes, macros,
+  registers, groups, conditionals, e-TeX and expl3. Document constructs go to
+  the `lambda.doc.latex` adapters, which own their meaning. Bundled packages
+  are unchanged upstream programming packages or Lambda-owned bindings. The
+  engine never reproduces the TeX paragraph builder, page builder, output
+  routine or font machinery; Radiant owns layout. TeX source never becomes
+  Lambda code (S1.8). Reads are read-only, and they are limited to the
+  document directory and the bundled resources. The output depends only on
+  the source and the resources (S12.1.1v2). A package or class name resolves
+  once, in a fixed order: bundled package, adapter, local file, then a
+  diagnostic. [TeX_Engine §1–§8]
+- **D10.2.3* — Document math keeps the layout policy of its notation.**
+  `lambda.doc.math` exports Presentation MathML, and it accepts MathML trees
+  beside TeX and AsciiMath. TeX-derived layout follows TeX. MathML-derived
+  layout follows MathML Core. Both share font facts and box geometry. MathML
+  is never converted through TeX. The package owns the conversion policy; XML
+  syntax stays an IO mechanism. Unsupported features report errors, and the
+  support is a documented subset. [Lambda_Pkg_Math §11]
+- **D10.2.4 — Bundled fonts are shared resources.** Generated HTML and SVG
+  `@font-face` rules reference the bundled fonts by URL. They do not embed the
+  font bytes in each document. Font bytes that a caller supplies without a URL
+  keep their embedding. [Lambda_Pkg_Math §8]
+
+## D11 Security and Capabilities
+
+*Authority comes only from the trusted host and the user. Code never grants
+authority to itself.*
+
+### D11.1 Trust and IO
+
+- **D11.1.1* — There are three trust tiers.** T1 (system) is an in-process
+  DSO, and it is not a security boundary: to load one is the same as to link
+  it into the host. T2 (confined) is a separate process with an OS sandbox and
+  a capability broker; all three parts are necessary. T3 (sandboxed WASM) is
+  safe by construction. It is the recommended default for untrusted code.
+  Third-party native modules never run in the runtime process. T1 admission
+  needs a declaration of thread-isolation safety; without it, only process
+  isolation is permitted. [JA10]
+- **D11.1.2* — One central IO API is the only IO door.** Lambda, Radiant and
+  all modules use one IO API. Raw IO stays in `./lib`. The API carries policy:
+  path and capability gates, isolation, audit and quotas. It is a real
+  boundary for scripts and a governance point for T1. Thus a checker can find
+  any direct `open()`. [JA16]
+
+### D11.2 Apps and scripts
+
+- **D11.2.1* — Apps and scripts run inside an admitted root.** An app or an
+  ad-hoc script can read and import inside its admitted source/resource root,
+  and it can load approved shipped packages. A dependency outside the root
+  needs an additional grant. A loose file first grants only itself and the
+  approved shipped libraries. The selection of a project or folder sets a
+  wider root. Transitive imports, initializer IO and cache hits obey the same
+  policy. To import an API or to resolve a path grants no authority (S2.4.4,
+  S16.9.8). Imported code shares the grants of its caller and never expands
+  them. Loading has no unrestricted bootstrap phase. [App_Safety §4.1]
+- **D11.2.2* — Create freely; overwrite only with approval.** New files under
+  the app or project root are permitted by default. To overwrite an existing
+  file needs the approval of the user. Creation is an atomic create-if-absent,
+  never a check followed by a truncation. Modification, append and replacement
+  cannot avoid approval through other APIs or through delete-and-recreate. A
+  remembered overwrite grant needs explicit consent. Protected host and OS
+  resources stay excluded. Root mutations go through a broker, so native code
+  cannot avoid the distinction. [App_Safety §7.3]
+- **D11.2.3* — The trusted host owns the grant settings.** Grants for each app
+  and each ad-hoc script live under `~/.lambda/setting`, and the trusted host
+  controls them. Apps and user scripts cannot create, change, delete, replace
+  or redirect this security state, also not through ancestor grants or path
+  aliases. The host binds records to admitted principals, and it keeps their
+  expiry and revocation. OS confinement and broker checks enforce the
+  protection; filesystem ownership by the same user is not sufficient.
+  [App_Safety §6.4]
+- **D11.2.4* — Network access is denied by default; updates are a host
+  service.** App and script network access is denied by default. Package
+  auto-update is a separate pull service that the host owns. It polls and
+  downloads verified updates only from admitted package endpoints, and it gives
+  no network authority to package code. Requests carry no user data,
+  credentials or telemetry by default. The user can pause, disable and restore
+  updates, and that state is protected (D11.2.3). A global offline setting
+  overrides this exception. An update cannot expand app grants, and it cannot
+  replace user project files without approval (D11.2.2). [App_Safety §8.3]
+- **D11.2.5* — Uninstall keeps private app data.** To delete retained
+  persistent data needs a separate, explicit action by a trusted user. Cache
+  and temporary files can be discarded. The removal of installation or grant
+  state alone does not authorize the erasure of persistent data.
+  [App_Safety §7.1]
+
+### D11.3 Media capabilities
+
+- **D11.3.1* — Audible output depends on the document origin.** The start of
+  audible output (synthesized music, decoded audio, speech and unmuted media)
+  is judged for each requesting document. A document whose top-level source is
+  a local file that the user opened can start audio from any `pn` context. A
+  document from the network can start audio only after sticky activation.
+  Activation comes from a trusted input that the host delivers: a pointer
+  press, a touch end or a non-modifier key press. The document keeps
+  activation for its life. Events that a script dispatches never activate. A
+  refused start fails visibly. Muted playback and output-free work need no
+  activation. Each document is judged by its own origin. Only the host can
+  grant activation in advance; a document never grants it to itself.
+  [Radiant_Design_Speech §5]
+- **D11.3.2* — The microphone needs explicit acquisition and separate
+  grants.** Acquisition is procedural, through the existing IO and host
+  capability route. It needs both the OS permission and a grant for the
+  requesting document. Pure evaluation and scene descriptions cannot open a
+  microphone. Output activation (D11.3.1) grants output only. The trusted host
+  owns the permission UI and the grants; a document cannot grant itself access
+  or serialize a permission into a scene. Capture uses bounded native storage
+  and copied buffers at the host boundary. An explicit stop, document
+  teardown, revocation or device loss closes the capture owner. Denied and
+  unavailable states are visible. Monitoring is off by default, and it obeys
+  D11.3.1 when it is on. [Scene3D §9.3]
 
 ---
 
-## Appendix A — Implementation Footnotes
+## Appendix A — Implementation Status
 
-Status of `*`-marked rulings as of 2026-10-07.
-
-**D1.2v2, D1.3v3, D1.4v4, and D1.5v2** remain partially implemented. The
-independent JS MVP profile that exercised D1.2v2/D1.3v3's private guest ABI and
-D1.5v2's private-root contract was removed from the active tree on 2026-10-07.
-Its source and release measurements are historical; see
-`vibe/jube/JS_MVP_Runtime.md`. The production LambdaJS path continues to use
-the shared `Item` and precise-GC substrate. Any future private guest runtime
-must still satisfy the explicit host-boundary, completion, and rooting
-contracts in these rulings.
-
-The D8.2.4–D8.2.6 implementation record now includes P3j, P4l, and the
-post-P6 binding/identity schedule work (2026-08-31):
-`CompilerPassSpec` carries an optional pass-owned context, and the shared
-`AstIndexPassContext`/`ast_index_compiler_pass` callback is used by Lambda and
-LambdaJS. The JS driver has discrete manager-owned `analyze-plan`,
-`mir-lower`, `mir-finalize-load`, and static `prelink` operations; Lambda MIR Direct has matching
-plan, lower, and finalization/load operations before its established entry
-link. Builder-published `NameEntry` links and FunctionId-keyed
-`func_entries_by_id` replace lowering-time name and callable recovery;
-direct class-entry consumers map the common nearest `AstClassId` to their
-index-ordered backend entries, while nested/private class resolution, subtree
-membership, descendant capture writes, and subtree visitors use indexed
-structural ancestry/adjacency rather than source ranges or backend order recovery; module declaration caching consumes the same
-binding-definition edge. Function backend relationships now carry their sealed
-`AstFunctionId`: parent lookup follows that ID through the published
-`func_entries_by_id` table, and the active lowering function is its
-published backend record rather than a post-order table position. JS source, eval, module, and cached-AST execution use one
-recovery-aware entry helper. The Lambda driver conditionally schedules the
-indexed prerequisite when a retained AST has not already published it, so
-build-to-entry is one authoritative schedule. Indexed
-suspension/assignment/return/local/constructor facts and sparse
-scope-environment writeback now use the AST-owned function identity; the
-recursive mirrors are retired. The follow-on P4l slice retires duplicate
-lexical-key, module-block, and `for`-initializer walks in favor of the indexed
-scope chain and shared child contract, and reuses `em_frame_dispose()` for frame
-teardown. Post-link BSS/template publication and final owner transfer remain
-explicit runtime handoff work under **D8.2.5**.
-
-The post-P6 FunctionId fact-table follow-up (2026-08-31) puts JavaScript
-strictness, IIFE promotion, class/constructor/field-initializer status, and
-TCO eligibility on the source function's `FnAnalysis`; collection publishes
-them after its backend link resets the analysis record, and lowering consumes
-those facts without re-reading directive syntax or using a post-order entry
-flag. The shared IIFE-body predicate retires repeated current-function tests.
-The next follow-up also stores lexical class ownership as `AstClassId` on that
-analysis record and resolves its MIR class entry only at a backend-use boundary;
-`NATIVE_RETURN_NONE` is the sole no-native plan state, replacing the duplicate
-native-version flag. Copied-closure parent-link, reusable-parent environment,
-direct-parent-link, parent-link-direction, and native-return classification
-plan/slot facts are likewise source function facts on `FnAnalysis`; the
-synthetic module carrier and MIR entry handles remain backend artifacts because
-they have no source `FunctionId`. This is an implementation-only **D8.2.4**
-status update; no formal ruling or document semver changes.
-
-The JavaScript C front end now has a manager-owned `parse-build` → `bind` →
-`validate` → `index` schedule under **D8.2.5**. Parsing and binding failures
-leave no published AST; an early-error validation failure retains its AST and
-existing diagnostic state but cannot publish `INDEXED`. Automatic JavaScript /
-TypeScript and module selection enter the same C-parser boundary. That manager
-is retained by `JsTranspiler` and resumes at appended `analyze-plan` →
-`mir-lower` → `mir-finalize-load` → `prelink` passes, rather than re-seeding
-front-end facts in a second manager. The AST owner is also the MIR pass root.
-Static property-key prelink is manager-owned; runtime module-state linking
-is a manager-owned execution-boundary `runtime-link` pass appended after
-module-state activation. Lambda's active `Transpiler` now starts that same
-compiler unit with `parse` → `build` → `bind` → `validate` → `index`, then
-carries it through const-fold, planning, MIR lowering, finalization/load, and
-entry link; retained-AST fallback starts a fresh manager from its already
-indexed unit. The `parse` pass drives a syntax sink that allocates each
-retained AST node as its production completes and records only source facts:
-names are interned but unbound and read as `any`, and no scope, constant,
-type or diagnostic is published. A syntax error leaves the nodes built so far
-in the unit's pool, unpublished. `build` is the resolve pass: it walks that
-tree in the order its productions completed, entering and leaving each
-construction scope where the parser reported it, and binds names, assigns
-types, registers constants and types, and reports diagnostics in source
-order. A node whose kind depends on resolution (a name that reads a field,
-constant or builtin; an element tag that names an object type) is morphed in
-place at a size its syntax form reserved, so every parent keeps its link.
-`bind` rebuilds the canonical scope/`NameEntry` graph from those retained
-AST-facing facts, rejects any node the resolve pass did not reach, rewrites
-declaration/use and capture edges to that graph, and only then publishes
-`BOUND`. Post-reduction semantic validation remains manager-owned and a
-rejected validation cannot publish `INDEXED`. The compiler-time record now
-measures physical parse, build, bind, validate, and index stages; `bind_us`
-is no longer fabricated as zero. Construction scopes and their declaration
-lookup are private resolve-time support for bottom-up type assembly: the
-physical binder replaces every published scope, declaration, use, and capture
-edge with the canonical graph before `BOUND`; allocation failure rejects the
-resolve pass without publishing a partial root. They are not a second binding
-schedule or lowering authority, so the **D8.2.5** pass-manager requirement is
-complete. This is an implementation-only status update; merely renaming a
-pass would not satisfy **D8.2.5**.
-
-Current end-to-end evidence for this status slice is `make test-lambda-baseline`
-at `4,098/4,098`, including MIR emission/ratchet and forced-GC suites, and the
-release Test262 target invocation at `40,261/40,261`, with zero
-non-fully-passing, failed, regressed, or retried entries. Those gates verify
-the physical Lambda binder and the unified schedule.
-
-The post-P6 **D8.2.4** follow-up makes the direct lexical parent of every
-source function an `AstIndex` fact keyed by `FunctionId`. The relation follows
-the index's structural parent links, not `owner_functions` labels recovered
-from source spans; class-field synthetic collection alone applies its explicit
-direct-descendant policy to this shared relation. `JsFuncCollected` retains its
-`FunctionId` and MIR-emission artifacts but no parent cache, and JavaScript
-strictness/ancestor consumers resolve the common parent record and its shared
-structural-descendant predicate. This is an
-implementation-only status update; no formal ruling or document semver changes.
-
-P3e (2026-08-28) remains the declaration-snapshot slice:
-eval-preamble publication and batch/preamble declaration snapshots share
-`js_preamble_entries_from_module_consts`, a single owned map-to-array copy with
-partial-copy unwind. This retires the two duplicated snapshot walks without
-changing the mode-specific module-variable policies.
-
-P3f (2026-08-28) initially consolidated finalized MIR volume accounting into
-one shared module walk under **D8.2.5**. The 2026-10-22 implementation follow-up
-retires that walk: Lambda and LambdaJS reuse the shared emitter's existing
-label-excluding function metadata. Lambda accumulates module/function/total
-counts during emission and subtracts late prologue removals; link policy uses
-the cached largest-function count, which can overestimate by four instructions
-before that pruning. This changes accounting mechanics, not the ruling.
-
-P1e (2026-08-29) completes the JavaScript side of the child-ownership slice:
-core-shaped JS nodes now delegate to `ast_visit_core_children()`, while
-`js_ast_children.cpp` retains only extension layouts. The adapter preserves
-list/sibling order and the `do...while` body-before-test order, and the former
-duplicated JS core rows are retired under **D8.2.4**. The current `master`
-governed tree was 312,272 lines before this slice and is 312,260 afterward;
-the historical 310,711-line project anchor is retained for audit, not
-reinterpreted as a passing final cap.
-
-P4a (2026-08-29) moves JavaScript strictness propagation into function
-collection. The collector now publishes compilation-unit, direct-directive,
-class-method, synthetic-field, descendant, and class-heritage strictness while
-the owning ranges are available; the redundant post-collection propagation and
-AST containment walk is retired. Class-method ownership (`is_class_method`) is
-published at the same boundary. This is an implementation-only **D8.2.4**
-slice; no formal semantic ruling or document semver changes.
-
-P4b (2026-08-29) moves JavaScript direct-`eval` classification to the shared
-AST-support owner. The core/extension child contract supplies one recursive
-node scan with explicit nested-function/class boundaries, and the shared
-function helper covers both parameter defaults and the body. MIR collection and
-the AST interpreter now consume that helper; their duplicate scans are retired,
-including the collector's former 96-line implementation. This is an
-implementation-only **D8.2.4** slice; no formal semantic ruling or document
-semver changes.
-
-P4c (2026-08-29) moves JavaScript `arguments` observation to the same shared
-AST-support owner. The function fact scans parameters and the body through the
-core/extension child contract, retains lexical arrows, and excludes nested
-ordinary functions, methods, and classes. MIR collection and the AST
-interpreter consume that fact; the interpreter-local scan is retired while
-MIR's reference set remains the capture-edge source. This is an
-implementation-only **D8.2.4** slice; no formal semantic ruling or document
-semver changes.
-
-P4d (2026-08-29) moves AST tail-reuse eligibility to the shared AST-support
-owner and centralizes nested function/method/class boundary handling for the
-direct-eval, `arguments`, and tail-reuse scanners. The interpreter-local
-structural scan is retired; `eval`, `with`, `try`, `arguments`, and nested
-function safety conditions remain unchanged. This is an implementation-only
-**D8.2.4** slice; no formal semantic ruling or document semver changes.
-
-P4e (2026-08-29) moves `arguments`, `this`, and `new.target` observation to one
-shared AST-support mask, including lexical-arrow propagation and `super`-based
-`this` observation. The temporary arrow pseudo-reference walk and MIR-local
-`with` scan are retired; the dynamic-environment boundary remains explicit.
-This is an implementation-only **D8.2.4** slice; no formal semantic ruling or
-document semver changes.
-
-P4f (2026-08-29) retires the duplicate `FnAnalysis` embedded in
-`JsFuncCollected`. The AST function node is now the sole owner of shared
-function analysis consumed by JavaScript and the common runtime; MIR collection
-metadata reaches it through one accessor. The capture analyzer's four repeated
-self/lexical-pseudo-capture initializers are replaced by one shared initializer
-in the same deletion-funded slice. MIR-only collection artifacts remain
-temporarily on `JsFuncCollected` pending their indexed-table migration. This is
-an implementation-only **D8.2.4** slice; no formal semantic ruling or document
-semver changes.
-
-P4g (2026-08-29) replaces the per-function recursive subtree walk used to
-rediscover enclosing lexical declarations with the bound `NameScope` parent
-chain. The projected facts retain lexical kind, source range, binding pointer,
-and Annex-B declaration markers, so capture analysis consumes the scope graph
-already published by the indexed compilation unit. The old collector and its
-private child-dispatch context are deleted in the same **D8.2.4** slice. This is
-an implementation-only change; no formal semantic ruling or document semver
-changes.
-
-P4h (2026-08-29) moves capture-array capacity and teardown to the AST-owned
-`FnAnalysis` record. JavaScript collection entries retain only their temporary
-backend view while indexed capture/environment work is in progress; the common
-analysis record owns the allocation and capacity. P4i (2026-08-29) removes the
-remaining JavaScript pointer/count mirror and routes all MIR capture access
-through that AST-owned array/count. Class-method collection relies on the
-publication pass to initialize `FnAnalysis` before capture facts are touched.
-These are implementation-only **D8.2.4** slices; no formal semantic ruling or
-document semver changes.
-
-P4j (2026-08-29) moves JavaScript profile facts, parameter/return metadata,
-capture storage, and scope-walk caches to AST-owned `FnAnalysis`. The former
-recursive parameter and return inference walks are replaced by `AstIndex`
-owner-filtered dispatch; capture propagation is a queued fixed point and
-call-site evidence reads indexed call nodes. `JsFuncCollected` now retains
-collection/backend artifacts only. This is an implementation-only
-**D8.2.4** slice; no formal semantic ruling or document semver changes.
-
-P3j (2026-08-29) makes the Lambda MIR Direct driver conditionally run the
-shared indexed-AST prerequisite for retained pre-built AST callers, then keeps
-const-fold, MIR lower/finalize, and link/entry in one ordered manager schedule.
-P4k (2026-08-29) replaces the remaining recursive suspension, assignment,
-boxed-return, body-local, constructor-shape, and body-reference scans with
-indexed owner-filtered facts and hardens sparse scope-environment writeback by
-skipping unused parent-env slots. These are implementation-only
-**D8.2.4–D8.2.5** slices; no formal semantic ruling or document semver changes.
-P4l (2026-08-29) then retires the duplicate lexical-key and declaration-shape
-walks, reusing indexed scopes, the shared child-enumeration contract, and the
-existing frame disposer. It also records the deliberate rejection of a generic
-lexical-binding counter rewrite after sibling double-counting changed
-Highlight.js behavior. This is an implementation-only **D8.2.4–D8.2.5**
-slice; no formal semantic ruling or document semver changes.
+Status of the `*`-marked rulings on 2026-11-04. Each entry gives only the
+status and the live residue. The detailed footnotes, evidence and dates are in
+the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.md#2-implementation-footnotes).
 
 | Ruling | Status |
 |---|---|
-| D3.5.1v2–D3.5.2v2 | **Native P2 profile implemented 2026-10-15.** One manifest generates compiler-checked bindings and Lambda declarations with matching complete revisions. Native record/scalar spans validate counts, capacity and stride, share invalidation controls and precisely trace record Item edges during publication and collection. Structural reads, enumeration, validation and formatting reject stale views. Buffer counted arrays, offset references and general cyclic schemas remain separate extensions. [PDF P2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#11-p2-native-reference-binding-progress-2026-10-15). |
-| D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
-| D2.2.5 | **Implemented 2026-10-07 (USER).** MVP-Lmd preserves finite INT Items through storage and boxed calls, classifies INT/FLOAT as JS Number, and uses range-proven native integer regions plus checked boxed add/subtract/remainder. Widening retains JS binary64 rounding and signed zero. Shared finite boxing/unboxing/band emitters also serve Lambda; no runtime helper was added. Focused tests pass normally and under forced GC; the shared-emitter baseline passes 6284/6284 and the unchanged Test262 baseline 40261/40261. Archived release evidence and conservative proof limits: [JS_MVP_Lmd §9.6](../vibe/jube/JS_MVP_Lmd.md#96-archived-integer-evidence--2026-10-07). |
-| D2.3.2 | **Met by admission, not as written; ruling text awaits the user (re-checked 2026-10-23).** The blind-cast crash is closed in MIR Direct: a declared container parameter is admitted at the `_b` boundary (DF2) before any pointer cast; a static mismatch is E207 at compile time and a dynamic null or wrong kind raises E201 (DF4). `p2it` landed as specified. `it2map`/`it2list`/`it2elmt`/`it2obj`/`it2arr`/`it2range`/`it2path`/`it2p` exist only as unchecked casts (`lambda/lambda.h`, `lambda/lambda.hpp`). The ruling's "NULL on mismatch (the `it2s` contract)" is therefore not implemented and conflicts with DF4's raise; the earlier note that the MIR path keeps container params as ANY predates the pointer lanes of D2.5.1. Record: `vibe/impl/Lambda_Box_Unbox2 (retired).md`. |
-| D2.6.5v4 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. **Landed with [List Fixes](<../vibe/impl/Lambda_List_Fixes (done).md>) P1–P4 (2026-09-22/23, both tiers); that plan closed at P6.** One kind bit (`is_spreadable`; the old `is_content` survives only as LambdaJS's `is_js_arguments`); a value-decided sequence append (`array_push` splices a list by its bit; array literals, pipe items included, never choose spreading syntactically); the verbatim append `array_push_verbatim` at every positional site — argument and rest lists, group/join/order keys and rows, path keys, query and `find` matches, directory listings, clones, element-copying transforms, `zip` pairs; single-value slots store a list's array image (`slot_image`, S2.5.6); and the content append now applies all of S2.6.2–S2.6.4 unconditionally — a lone `""` is dropped, adjacent binaries merge, and the `input_context` gate on string merging (the retired flag in disguise) is gone. Content writes stay normalized (S2.6.5): `e[i] = v` rebuilds the children through the content append and `push` on an element appends content. `input-ics.cpp` builds its component sequence with the pool-owned verbatim `array_append`; `input-mark.cpp`'s `list_push` is element content, the content append's own case. P4 removes the last syntactic spreading: `*x` no longer marks its operand (the retired `item_spread`) but builds the list of x's items, which the sequence and content appends then splice by its kind bit like any other list, so the ruling's "decided by the value, never by the syntax" now holds for the spread operator too. The LaTeX deviation closed on 2026-10-02: element appends normalize strings, command argument runs are array children, and the LaTeX package and formatter consume their entries positionally. The unused LaTeX AST-normalization module and reconstruction helper are retired. MarkEditor child writes normalize in both edit modes (54/54 editor tests); explicit web DOM node APIs retain node identity (112/112 node/range tests). Verified: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. [Input_Latex](../vibe/input/Input_Latex.md). |
-| D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
-| D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
-| D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Implemented 2026-09-14.** `i64?`/`u64?` native Arrays and packed Map/Shape fields use descriptor-selected, destination-owned `TypedItem` slots. Construction, mutation, static materialization, rebuilding, COW, reads, and GC tracing preserve the selected layout; the regression covers JIT/interpreter plus forced-GC number-frame reuse. |
-| D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
-| D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |
-| D2.6.9v3, D2.6.11 | **Ruled 2026-09-03 (USER), not implemented** — both belong to phase 2 of D2.6.6v2. Shipped state is the v2 description below. |
-| D2.6.9v3 (MVP slice) | **Implemented 2026-10-07 for the bounded MVP:** plain JS objects and ES Map carry distinct nominal records on ordinary Lambda Map/TypeMap storage. Add, retype and delete preserve those records. No VMap or full-JS property/lifecycle hook participates. This does not claim the full engine's nominal migration or D2.6.11 is complete. Scope and evidence: [JS_MVP_Lmd §10](../vibe/jube/JS_MVP_Lmd.md#10-map-and-plain-object-phase). |
-| D2.6.9v2 (shipped state) | **Conformant as of 2026-09-03**, verified rather than assumed: `js_new_object` (`js_runtime.cpp`) allocates `LMD_TYPE_MAP`; a sweep of `lambda/js/` and `lambda/dom/` finds no construction of an `LMD_TYPE_OBJECT` value. The inbound-acceptance sites pass whole Items to shared helpers rather than punning, except `js_props_storage_map`, which returned `object.map` for a nominal object and was rewritten to return the packed buffer and capacity; the Map-only extension table is now gated to maps. JS suite 360/360, coercion 15/15, baseline 4083/4083. |
-| D2.6.6v2 (phase 1, layout) | **Implemented 2026-09-03.** `Map` is the base; `List`/`Array` and `ArrayNum` extend it; `Element` extends `List` and declares no fields of its own. The attribute face is at one offset in every container, so the kind-aware accessors and per-kind JIT offset helpers this file's v1 row describes are **retired**: `mir_container_data_offset`/`mir_container_type_offset` are gone and codegen uses `offsetof`-derived constants. The GC traces and compacts every container through named `GC_OFF_*` offsets. Sizes: `Map` 32, `List`/`ArrayNum`/`Element` 64. Layout is pinned by static asserts in **both** `lambda.hpp` **and** the C mirror in `lambda.h` — the mirror had none before, and adding them exposed a pre-existing divergence: it declared a 2-byte `flags` where `Container` uses single bytes, so the mirror never matched the real header ([LR03-9](../vibe/Lambda_Issue_Ledger.md)). Two GC gaps the new layout opened were closed: an array's and an ArrayNum's attribute buffer are now traced AND compacted (`gc_compact_attr_face`). **The reserved-tail JS-properties slot is retired**: a JS array's companion map now lives in the array's own attribute face (one tagged Item under `ArrayPropsShape`), which deletes the `extra` reservation, the tail-shift that had to rebase embedded scalars to make room, the companion carry-over in numeric growth and in tagged promotion, and the two GC tail-slot marks. The companion stays a real object — a sparse array's is a `SparseArrayMap` with its own fields — so what moved inline is the pointer. `has_js_props` is gone and its bit is reserved as `CONTAINER_FLAG_NOMINAL_RESERVED` for D2.6.11. Baseline 4083/4083, JS 360/360, GC stress 93/93, tier parity, stable under forced GC. Per USER 2026-09-03 the array-header growth needs no benchmark gate: this is the container layout. |
-| D2.6.6v3 | **Implemented 2026-09-25 ([Impl_Element_Type_Sharing P0](../vibe/impl/Lambda_Impl_Element_Type_Sharing.md)).** `TypeElmt::content_length` is gone: a declared type's content section resolves to `content_list`, a typed `TypeList` whose slots are filled as a bracket pattern's are (`fill_sequence_pattern_slots`), and every instance and literal type leaves it NULL — the parsers' 120 per-element count writes, `MarkEditor`'s type writes on content edits and its new type per content copy are gone. An element literal's content count comes from its syntax tree, keeping `list_fill` pre-sizing. `TypeNominal::content_length` is removed; the nominal kind follows `content_list` and a derived type inherits both from its base (S2.1.3v2). Baseline 5869/5869; validator GTests 58/58, 38/38, 44/44. |
-| D2.6.6v2 (phase 2, nominal) | **Implemented 2026-09-03, apart from open instances.** Nominal-ness is now a property of the type descriptor: `TypeNominal` is the record, allocated once per declaration, pointed to by `TypeMap::nominal`, with `Type::is_nominal` as the base-flag discriminator — it lives on the BASE because the question must be safe to ask of a bare singleton `Type`, which shares the map tag but is not a shape. **The representation flip is done**: a nominal type and every value built from it wear the DECLARED structural kind, so `type P { x: int }` yields maps and `type B { …, string* }` yields elements, and `is object` / `is map` are independent axes exactly as S2.1.1v3 says. Nominal sameness is record identity, not name equality (S5.4.2v3), and equality gates on it, so a structural map never equals a nominal one. The object shape extends `TypeElmt`, so a nominal element's `name`/`content_length`/`ns` sit where every element path reads them. Rerouted onto the record: type matching, `fn_is`, equality, the total order, `fn_type`, `fn_name`/`fn_name_from_type`, member and method resolution in both lanes, printing (a nominal map prints `<P x: 3>`, not braces), the formatter dispatch, and `fn_len` — including the JIT's `fn_len_e` specialization, which returned content only and was the one place the two tiers disagreed. Every construction path now carries the real kind; only the `TYPE_OBJECT` singleton still mentions the tag, and the enum member is vestigial. Fixture `test/lambda/object_nominal.ls`; baseline 4083/4083, JS 360/360, GC stress 93/93, exact tier parity, stable under forced GC. **S2.1.4 part 3 now holds too**: an unknown member write GROWS the shape instead of failing. Growth already existed in `map_extend_open_shape` but was reachable only from the cow-path caller, which is why an ordinary `p.z = 9` silently did nothing on T0 and errored on MIR; it is now the shared miss path in `fn_map_set`, and it admits element-shaped values as well — valid only because D2.6.6v2 put every container's attribute face at one offset. The grown shape carries the nominal record forward, so the value stays an instance of its type with its methods intact, which closes [LR03-8](../vibe/Lambda_Issue_Ledger.md) at the one site that actually produces a grown shape. The declared prefix keeps its layout, satisfying D3.2.4v2; the grown shape drops `is_trusted_contract`, so direct access falls back to the checked path. Fixture `test/lambda/proc/object_open_instance.ls`. **The dead `LMD_TYPE_OBJECT` arms are swept**: 251 mentions down to 68, all of which are live or inert — the `object` TYPE itself (`TYPE_OBJECT`, `LIT_TYPE_OBJECT`, `type_info`, `get_type_name`), the range checks that use the tag as the upper bound of the contiguous container band, and tag-keyed template machinery (`ItemTagToType`, `IsMapLike`, `item_payload`) that no value can now reach. The enum member is documented at its declaration as type-only. **The member is now removed** (2026-09-03, on the ruling that the retirement be carried through): `object` is a TYPE, not a tag, so the `TYPE_OBJECT` singleton wears the map tag purely to route through the container arms of the type switches and is matched by POINTER identity everywhere. Removal shifted every later TypeId down by one — MAP=19, ELEMENT=21, TYPE=22, FUNC=23, ANY=24, ERROR=25 — which is an ABI change only for artifacts that pin a raw tag: the two JS error-lane MIR goldens pinned `LMD_TYPE_ERROR` as the literal 26 and were re-pinned to 25 with the constant named in their description. The shift also exposed the one real hazard of giving `object` no tag of its own, and it is worth stating because it will recur for any future tag-sharing type: `lambda_type_node_singleton` (`runtime/ast.hpp`) resolves a type node to its runtime identity and falls back to the node's TAG when no singleton arm matches, so `object` silently resolved to the `map` singleton and `{x: 1} is object` answered true on BOTH tiers. The helper already carried this arm for `date`/`time`/`list`/`number`/`integer` for exactly the same reason; `object` now has one too. `fn_is` likewise matches `&TYPE_OBJECT` by identity ahead of any tag comparison. Baseline 4085/4085, JS MIR emission 21/21. The sweep also surfaced one real regression the flip had left: `total_type_rank` selected the object ORDER BAND by container tag, which nominal values no longer wear, so they sorted with plain maps and elements instead of between them; both it and the `total_cmp` nominal arm are now keyed on the record, and `test/lambda/object_nominal.ls` pins the band. Baseline 4085/4085, JS 360/360, GC stress 93/93. |
-| D2.6.10 | **Ruled 2026-09-03 (USER), not implemented.** It depends on the phase-2 representation flip. |
-| D2.6.6 (v1, shipped) | **Implemented 2026-09-03; superseded by v2 above.** `Object` is a typedef of `struct Element`; the GC traces and compacts it on the element path; `TypeObject::content_length`, `lambda_content_list`/`lambda_content_count`, `lambda_attr_shape`/`lambda_attr_data`, `is_element_family_type_id`, `object_content`/`object_content_fill`/`object_content_fill_items`, the T0 and MIR literal content phases, and the content-face admissions in `fn_len`, `item_keys`, `iter_len`/`iter_key_at`/`iter_val_at`, `item_at`, `fn_index`, `fn_eq`/`object_eq`, `total_cmp`, `in`, both clone paths, the arena deep copy, `print_tagged`, and the formatters. De-punned: `as_map(ItemOf<LMD_TYPE_OBJECT>)` is deleted, `MapReader` holds shape+buffer instead of a `Map*`, `ElementReader` resolves the tag by kind, `js_props` returns the buffer instead of a `Map*`, and `mir_container_data_offset`/`mir_container_type_offset` select the JIT's packed-field offsets per kind. Fixture `test/lambda/object_content.ls`; baseline 4083/4083, exact tier parity, stable under `LAMBDA_GC_FORCE_EVERY`. Not implemented: schema-driven input producing objects — verified 2026-09-03, `input(doc, {'schema': P})` yields a plain map, because the option drives a post-parse `lambda_type_check` rather than construction. The validator's content-arity check against `content_length` is NOT missing after all: `validate_against_element_type` enforces it and an element-kinded nominal type reaches that arm by tag. It is now run rather than code-only: `lambda-runtime-full` carries the direct type-pattern reducer and its schema loader registers the direct parser's canonical type declarators, so the enabled validator tests complete and the CLI reaches genuine validation. The shipped pair presently fails its independent `element`-versus-`map` check; LR13-3's root-selection contract and LR13-9's missing baseline gate remain open. |
-| D2.6.6 (v1 validator verification update, 2026-09-05) | This amends the prior row's stale loader finding: all ten `lambda-runtime-full` validator test executables load and enumerate their GTests after their hosts retain the DSO's two core-global imports. The post-startup null reduction target is fixed by linking the direct type-pattern parser, and the loader recognizes direct `AstDeclaratorNode` aliases, so selected root lookup proceeds to validation. This verifies neither schema-driven object construction nor a root-selection policy: the former still returns structural maps, and the latter remains LR13-3 ([LR13-9](../vibe/Lambda_Issue_Ledger.md#lr13-9)). |
-| D2.6.7 | Bound `fn` methods already build the receiver-captured closure (`to_closure_named` in `lambda-eval.cpp`; `closure_env` holds the receiver). Not verified: the compile-time rejection of a bare `pn` method reference on both tiers. |
-| D2.6.8 | No identity carrier exists; nothing to verify until DO25 is decided. |
-| D2.7.2v2 | v2 (companion-lane entries) decided 2026-08-14, not implemented — the v1 trailing-home wrapper ABI ships until Return_Value P4. Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
-| D2.8.3v3, D3.2.2v3, D3.2.3v3 | **Core implemented 2026-11-02; aggregate qualification in progress.** Deferred checks retain boxed outcomes through continued execution, whole-variable writes, branch/loop joins, immutable aliases, captures and borrow publication. The original annotation alone is not a clean-value proof. Deferred return checks retain their call outcome, and tail-pair forwarding cannot bypass admission. Native initializer reuse and borrowed-return planning use the same effective outcome facts. Focused tier/GC and native diagnostic checks pass; package/demo qualification is pending. [TE-18.1–TE-18.2 implementation status](../vibe/Lambda_Design_Type_Error_Handling.md#reassignment-outcomes). |
-| D2.8.2 (prior lane-gating qualification) | **Prior lane-gating implementation, 2026-09-27 (LR12-24), on the D6.1.3 fact; this predates D2.8.3v2's continued initializer outcomes.** Lane entry is gated on static proof: a call whose value may be an error it does not declare (a defect-capable callee, a call through a function-type contract, a system function that rejects or passes through an operand that may be one) is a boxed join to every lane planner, and so are a member, element or arithmetic result of one; a literal slot fed by one is boxed on both tiers. Exact lowerings keep the common consumers native: equality against an in-band int compares Item words, integer arithmetic tests the first error and runs on the lanes, and a destination whose contract the join's success already satisfies tests only the error arm. The 2026-09-18 routing (shape 4 for a body that originates a defect) now covers every origination class. Cost: +14/+82/+217/+53 module instructions on the four affected ratchet probes (tune4, cube3d, deltablue, prettier_ast); runtime (release, paired A/B against the base, 15 pairs, 27 typed rows): 20 rows within ±2%, three faster (prettier_ast −3.8%), and deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (−4.5% to +15.6% across four runs) and queens +12% (a 70 µs run) slower. The remaining cost is join arithmetic feeding a declared accumulator. Known violation V1 is unchanged: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true but makes the S7.7.2 dominance guarantee false. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
-| D2.9.1–D2.9.2 | **Implemented 2026-10-02.** Twenty fixtures migrated with unchanged contents; Lambda/input baseline 6,162/6,162, MIME detection 13/13, new extension regression matches on interp/jit/auto, and 15 CLI checks pass. Verification and existing fixture residue: [Input_System appendix](../vibe/input/Input_System.md#appendix--mark-extension-migration-2026-10-02). |
-| D2.9.3 | **Implemented 2026-10-07.** Format `slides` parses with the Mark parser (`input.cpp`); the `slides` document transform (`lambda.slide.present.present`) backs the `.slides` view/layout route; no filename detection was added. The three demo decks were converted from `.ls` and re-format byte-identically to their generator output; five slide UI fixtures open `.slides` decks. Record: [Lambda_Pkg_Slide_Presentation §0](../vibe/Lambda_Pkg_Slide_Presentation.md). |
-| D2.10.1v2 | **Implemented 2026-10-15.** Shared XML emission profile, explicit format and MIME/extension routes, direct Radiant loading, and Lambda-returned document unwrapping. XHTML golden passes on interpreter, automatic and MIR tiers; five Radiant integration tests cover HTML parity, linked/inline CSS, foreign content, scripts, HTTP MIME/redirects, no-doctype standards mode and the feature gallery. The gallery's 27 checks and nine replay assertions pass in desktop/narrow interactive views; static layout/render retains a startup computed-border discrepancy. MIME tests 13/13 and related Lambda XML/HTML/parse goldens 26/26 pass. Full Lambda/Radiant baselines and the native parser test runner cannot link with the concurrent Wiki change's unresolved `array_push`; those gates remain unverified. Record: [Input_XML §XHTML admission](../vibe/input/Input_XML.md#xhtml-admission). **v2 catalog extension implemented 2026-10-26:** recognized public IDs select the shared HTML entity table without external DTD acquisition; seven native XHTML parser tests and the combined Lambda/input baseline (8,251/8,251) pass. The Radiant baseline passes. The broader input-processing run completes with 4,533/4,559 passing; remaining wiki/prose-format and PDF checks are recorded in [the writing-modes implementation log](../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md). |
-| D2.11.1 | **Implemented 2026-10-18 for the current HTML SVG inventory.** Shared current-node namespace classification preserves SVG integration-point closing tags and HTML descendant recovery. Parser and independent Chromium controls are recorded in the [SVG parser record](../vibe/impl/Radiant_Impl_SVG_Support.md#12-shared-svg-parser-implementation-record); full standards conformance is not inferred. |
-| D2.11.2 | **Implemented 2026-10-18.** External picture intake delegates to the HTML5 parser and retains its `#document` owner; isolated DOMs use HTML name/namespace interpretation. FO serializes namespace-resolved graphics through canonical HTML-compatible SVG names and the existing fragment formatter. Explicit XML/XHTML input remains unchanged. Qualification is recorded in the [SVG parser record](../vibe/impl/Radiant_Impl_SVG_Support.md#12-shared-svg-parser-implementation-record). |
-| D2.11.3–D2.11.4 | **2026-10-18 implementation.** Current-DOM saves and frozen CSS/SMIL projections reuse `dom_serialize_xml`. Reopening preserves edited content, independent local/file-backed use states, sibling filter definitions and a frozen local SVG image, at both densities/cache modes with independent Chromium checks. Capture preserves the live source/time. The retained-fragment shutdown use-after-free is fixed under D4.2.1v3; scoped ASan passes with leak detection disabled. **D2.11.4 remains partial:** nested resource closure, image imports within use templates and broader host inheritance combinations remain unqualified; Linux/Windows runtime and aggregate qualification retain separate status. See [SVG support §14](../vibe/impl/Radiant_Impl_SVG_Support.md#14-outstanding-work-follow-up). |
-| D3.1.1v5 | Binary schemas use `TYPE_KIND_BINARY_SCHEMA` under the existing Type tag (2026-10-15); imported declaration values retain descriptor identity across module type lists. The general `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
-| D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
-| D3.4.3v5 | **Implemented 2026-09-25 ([Impl_Element_Type_Sharing](../vibe/impl/Lambda_Impl_Element_Type_Sharing.md) P0–P3).** Maps built through `map_put` — every `MarkBuilder` parser and every JS object — share through the per-`Input` tree (`map_put_with_data_growth`): the edge table dates from 2026-06-25, the shared root and the bounds (256 edges from the root, 16 from any other type, 1,024 map types per `Input`) from 2026-09-09; maps stopped interning through the shape pool on 2026-08-08. Parsed elements share since P1: `ElementBuilder` starts each element on its tag's root (`elmt_tree_root`) and `putToElement` adds attributes through the tree (`elmt_put_tree`), under their own budget of 16,384 per `Input`. Editor rebuilds since P2 replay their field list through the tree (`type_tree_root_like`, `type_tree_follow`), editing in place only a type the container owns — the old guard had also rewritten tree and literal types, re-laying a sibling map's fields. P3 deleted the shape pool (`shape_pool.cpp`, `Input::shape_pool`, `elmt_finalize_shape`, `map_finalize_shape`, `shape_builder_finalize`). Verification: peak RSS on a 13 MiB layout-test corpus (203K elements, 1,775 types) 184.0 → 120.2 MB and on a 13 MiB page corpus 109.6 → 85.8 MB, parse 1.42× and 1.39× faster; 17,230 HTML files, 99 test inputs and 84 formatter outputs identical to the pre-change build; the map budget took the test262 batch peak from 5,662 to 891 MB (2026-09-09). Since 2026-09-25 tree nodes and edges come from the `Input`'s arena and go with the `Input` (D4.1.4v4, D4.2.6; `input_tree_alloc`); the element-root table stays a pool block and frees its old copy when it grows; JavaScript descriptor retags (`js_property_attrs.cpp`) keep `js_input`'s pool. **v3 implemented 2026-09-25** (`transition_target_for_key`): a child extends its parent's chain in place while the parent's `last` has no successor, and takes the parent's lookup table while it has room and holds no entry with the added field's identity (`typemap_hash_holds_equal`); an entry the tree appends records its position (`ShapeEntry::chain_index`, in padding) and `typemap_hash_entry_is_own` rejects a descendant's; an in-place child shares the parent's `slot_entries`. Every walk goes through `FOR_EACH_MAP_FIELD` / `typemap_next_field` / `shape_chain_next_until` — the link is renamed `ShapeEntry::chain_next`, 181 walks were converted, and lint `no-raw-shape-chain-walk` flags a raw read — and the collector stops at `last` (`LAMBDA_GC_OFF_TYPE_MAP_LAST`). Verification (release, medians of five): one 1,000-key JSON object's parse peak 94.1 → 16.5 MB (debug: 98.8 → 17.4 MB; a 1,000-key JS object 84.7 → 18.4 MB); 13 MiB HTML corpora (real-site pages 99.3 → 99.0 MB, layout tests 104.7 → 104.5 MB) and 60K 20-field JSON records (102.7 MB) unchanged in memory and parse time; Lambda baseline 5,924/5,924, Radiant baseline green, test262 baseline 40,261/40,261 with an unchanged batch peak (643.9 vs 639.8 MB); `TransitionTreePrefixSharingTest` (6). **v4 implemented 2026-10-05** ([LR03-38](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-38>)): `map_extend_open_shape` first tries `map_extend_via_runtime_tree`, which holds the tree `Input` as a context capsule extension (`RUNTIME_SHAPE_TREE_OWNER`, so `EvalContext`'s layout is unchanged), tests node membership by `type_index` against that `Input`'s type list (`type_tree_owns`), adds through `type_tree_add_map_field`, and grows the map's data by doubling. `fn_map_set` answers a plain string key from the type's hash table, hit or miss, instead of walking every field. Building a 512-key map 512 times went from 9.8 s and 11.9 GB to linear time (64 builds of 1,024 keys in 11 ms, debug); fixture `proc/map_runtime_shape_tree.ls`, in the forced-collection sweep. **v5 implemented 2026-10-06** ([Impl_Map_Transition_Coverage](../vibe/impl/Lambda_Impl_Map_Transition_Coverage.md) P0–P3): the runtime tree keeps external-parent edges in a table keyed by a structural fingerprint of the parent (`external_parent_edges`), mints children with the parent's names copied into its arena (`clone_shape_entries_owned`, `copy_external_identity`), and reuses a child only when `external_child_matches_parent` finds every copied value equal to the live parent's; retype edges (`type_tree_retype_field`) share the target of a type-changing write, whose data move `container_move_to_type` serves the private rebuild too; `runtime_result_shape`, group-by groups and join tuples start on the tree; the tree is dropped with its heap generation (`runtime_shape_tree_release`, [LR03-43](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-43>)). Lambda `Symbol` keys and JS identity keys take edges (D3.4.4v4). Debug peak RSS for 16 builds of a 1,024-key map: from a literal 1.43 GB → 33 MB, from a parsed object 1.43 GB → 34 MB (16 documents of one shape share one path), from a spread 1.43 GB → 33 MB. Lambda baseline green but the environmental `pdf_svg_page_resources`; test262 with no semantic regression (three unicode-identifier cases flag batch time under load; a paired A/B measured no difference). **Residue:** a declined add (fan-out 16/256 or the budget; P1.5 measured both caps on 268 benchmarks and the Lambda corpus and kept them, since nothing declines below the root and a 2,048-edge root cost 9-10% CPU in linear edge walks), JavaScript shapes, spread link-slot types, qualified keys (LR03-40) keep private types. **Admission reuse completed 2026-10-09:** `type_tree_retype_contract` shares structural admission layouts through the same bounded retype edges; the edge compares the full field contract pointer, rather than its coarse TypeId, so `number`, `any` and distinct union contracts cannot alias. A declined edge retains the private rebuild. `TransitionTreeRetypeTest.FullAdmissionContractsShareBoundedLayoutsWithoutAliasingTheirTypeId` checks preserved extra fields, immutable parents, independent contracts, owner lifetime and 4,096 repeated admissions without arena/type-list growth (D3.4.5, D4.5.1v4). |
-| D3.4.4v4 | **Ruled 2026-10-06 (USER, with S8.2.2v4; the JavaScript namespace mapping accepted the same day); not yet built.** Every read conforms (byte confirmation at each map and element access; identity kinds by record). The transition trees' edge match (`transition_target_for_key`), `typemap_shape_entries_equal`/`typemap_hash_holds_equal` and `map_existing_shape_entry` still take a differing id as a different name, so one spelling has one edge per name pool and a pooled key never shares an edge with an unpooled spelling; and the `property_key_requires_identity` gates at `type_tree_add_map_field`, `map_put_with_data_growth`, `elmt_put_tree` and `type_tree_follow` keep `SYMBOL`/`PRIVATE` keys off every tree although their edges already compare `(name_id, key_kind)`. Plan: [Impl_Map_Transition_Coverage](../vibe/impl/Lambda_Impl_Map_Transition_Coverage.md) P0; design record: [Design_Name_Identity](../vibe/Lambda_Design_Name_Identity.md) NI17, NI18. Unruled: the interop spelling of a JavaScript key seen from Lambda (`js.symbol.for.k`). |
-| D4.1.4v5 | **v5 implemented 2026-10-02:** `arena_free`, `arena_realloc` and the arena free list are removed; `arena_retire` keeps a block on the arena's retired list (binned by span, coalesced, rejoining the tail when adjacent to it) and `arena_alloc` reuses it; its only caller is DOM node retirement (`dom_retire_recycle_one`). `arena_mark`/`arena_rewind` landed; ScratchArena rewinds its backing arena on scope end, restore and release, and registers as the arena's sole owner — a second owner, a direct `arena_alloc`, or an `arena_retire` on an owned arena asserts, and `arena_rewind` asserts on an arena holding retired blocks. Verification: layout view trees identical to the prior binary for 10,331 layout test files; `ArenaRetireTest` (7), `ArenaRewindTest` (4), `ArenaScopeOwnerTest` (2). Still pending: the every-arena audit for sites other than DOM retirement that would need retention. Pool v2 core landed in Mem_Heap R7 on 2026-08-11: `pool_alloc` carves user bytes from Pool-owned growth extents, uses boundary-tagged blocks and segregated free lists, and no longer calls `mem_alloc_loc`/`mem_free_loc` per user allocation or uses a pointer index. Growth starts at an optional reservation clamped to 1 KiB and rounded up to `1 KiB * 2^n`, doubles subsequent reservations, uses the context/memtrack path below 4 KiB and page-backed VM at/above 4 KiB, and commits at least `max(4 KiB, required block bytes)` page-rounded. |
-| D4.2.1v3 | MemContext owns allocator identity/lifecycle; hardened memtrack and the VM region provider are the normative system-allocation substrate. Pool is a context-owned VM-extent allocator; its user blocks are not `memtrack_pool_*` allocations. The Pool v2 core migration is landed and verified. **2026-10-18:** cascade teardown follows explicit backing-child edges across contexts and reparenting; subtree unregistration needs no temporary allocation. Seventeen context and seven factory cases pass under scoped ASan; the retained-fragment navigation/export reproducer also passes. The broader every-allocator context-binding audit remains pending. |
-| D4.2.2v2 | Stage 2 page allocation and the single MemContext failure coordinator are implemented as the allocator-retirement foundation. Full cost-based reclaimers remain follow-up work. |
-| D4.1.5 | String-builder two-case model matches the code (`StrBuf` standalone; `StringBuf` owner-backed, pool-backed `realloc` growth). The arena-backed tail-growth variant does not exist yet — it needs the `arena_mark`/`arena_rewind` promotion of D4.1.4 (Mem_Heap R6). Formatters are the first consumer (already structurally ready: destination pool passed in, scratch on a separate pool, no destination allocations during the walk); parsers follow, subject to the tail-ownership hazard. NamePool still takes a `Pool*` — conversion is Mem_Heap R4b. |
-| D4.2.3 | MemContext graph exists. Every `Input`'s arena and name pool are bound to a per-`Input` context since 2026-09-25 (D4.2.6); the every-arena/pool context-binding audit (Mem_Heap R6) has not run. |
-| D4.2.4 | Ref-counting not implemented; shared-allocator census (Mem_Heap §15 Q7) pending. |
-| D4.2.5v3 | R1a landed 2026-08-10 (release default `MEMTRACK_MODE_OFF`, measured: primes2 825→155 ms). R3a removed the historical Pool side index, and R7 landed the Pool-owned boundary-tag/free-list hot path with no global mutex or registry call on block operations. The 2026-09-17 revision makes the application-level ban on direct libc allocation explicit; STATS counters-only (R2), the `stack_alloc` split (MP-18), and independent release-performance evidence remain pending. |
-| D4.2.6 | **Implemented 2026-09-25.** `pool_add_cleanup` (`lib/mempool`) runs a pool's cleanups newest first on destroy, drain and reset, before any block is released. Every `Input` has a context (`input.doc` with a URL, `input.local` without) created under its pool's context (`mem_node_owner`), and registers `input_pool_cleanup`; inside a cascade the cleanup skips the registry (`mem_context_in_teardown`). Before this, a URL-less `Input`'s arena stayed registered in the root context until exit — the owner it lost when arenas stopped drawing chunks from their pool (2026-08-08). The audit of every creator fixed three places that relied on that leak: npm `package.json` Items kept past their parse pool, the per-thread sysinfo cache reusing a destroyed pool's `Input`, and Script loading owning the direct parser's registries twice. Verification: Lambda baseline 5,903/5,903, Radiant baseline (all required), test262 40,261/40,261; `PoolCleanupTest` (6) and `InputLifetimeTest` (3), whose 64 created-and-destroyed URL-less `Input`s leave the allocator count unchanged; `NpmPackageJsonTest` (3) and `SysInfoRuntimeTest` (1) pin the two leak-dependent fixes and fail with them undone. |
-| D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
-| D4.3.4 | Decided 2026-09-07: `gc_trace_shape_field` marks a `null`-typed lane's word conservatively (`gc_mark_possible_item`). Found through DO30: the auto tier's fast splay figure came from collections that freed the linked right subtrees (17k of 420k objects traced); reproduced deterministically on every tier with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`; pin `test/mir/lambda/gc_splay_null_lane` under the forced-collection stress sweep. The companion robustness fix keeps `fn_map_set`'s same-width retag from typing a shared literal shape's field as `error`. |
-| D4.5.1v4 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 recorded batch-only arena lifetime (two variants, D4.1.4); v4 (2026-10-02) admits retention for reuse for DOM node retirement and gives each scratch stack its own arena: `view_tree.scratch_arena` (layout), `view_tree.render_scratch_arena`, `view_tree.display_list_arena`, `view_tree.layout_pass_arena` (counter state and generated content), one arena per retained display-list fragment, and `OffscreenRenderArenas` for offscreen SVG and effect renders. |
-| D4.5.2 | Ruled 2026-10-06 (user). **Partially implemented 2026-10-06:** the ownership lattice has no GC→Pool edge (a pool-domain field rejects `GcPtr`, probed in `test_own_tagged`), and built-in literals carry a static label. Audit: the JS DOM and `lambda/dom` setters copy into the document's Input arena or pool. Rooted document-side references (history state, `FileList`, Range/Selection wrappers, editing session root, custom-paint content, non-string UI attribute values) fall under the exemption (user, 2026-10-06). UI-mode script results comply since 2026-10-06: `list_push` deep-copies every non-string content value not already in the result arena into the result `Input` (pinned by `RadiantViewTest.UiScriptContentSurvivesForcedGc` under forced, poisoning GC). The Input-owned append (`list_push_with_owner`) and `MarkEditor` imports apply the same rule through one shared helper set. Live residue: values that reach the arena tree outside any append (a GC top-level script result, the math package splice in `cmd_layout.cpp`). Detail: `vibe/Memory_Safety_Template.md` §12.5 item 18. |
-| D4.4.3 | COW Stage 1 landed 2026-07-23. Place-home publication and numeric-view snapshots were completed under D4.4.7 / S9.2.2v2 on 2026-11-03; other Stage 2 checks retain their separate status. |
-| D4.4.7 | Implemented 2026-11-03 on interp, AUTO and JIT, including scalar places, partial errors and precise GC; baseline 8,718/8,718. Qualification: `vibe/impl/Lambda_Impl_Place_Borrow_Views (done).md`. |
-| D4.4.5 | Decided 2026-09-14 (CW35, `vibe/Lambda_Design_Runtime_COW.md` §11.12): move-out binds (`var left = node.left; …; node.left = branch; left.right = node`) borrow their place; static rule in `build_ast` (`rmw_moves_out`), runtime spine test shared with CW34. Fixture `test/lambda/proc/cow_move_out_bind.ls`. JetStream splay does not benefit yet: its `splay_node` binds store back inside `if` branches, so the rotations receive already-shared roots and keep the snapshot bind. |
-| D4.4.4v4 | Ruled 2026-09-17 (user). **Implemented (partial scope) 2026-09-17 (Tune29 T29-1, `vibe/impl/Lambda_Impl_Tune29.md` §12):** synthesized handles for record places spelled repeatedly on declared `var` roots, planned once in `build_ast` and ignored by T0; writing binds un-share through `cow_place_leaf_fixed`. Deltablue2 hot functions −35% instructions, −5% time; roots with a CW34 named borrow and `for` statements are excluded. Originally recorded as not implemented (CW37, `vibe/Lambda_Design_Runtime_COW.md` §11.14 + Appendix D). Motivation: the typed lane re-navigates `w.cons[cid]` on every access — ~38 MIR instructions per field read and ~42 per field write against one in the c2m port, the whole deltablue/havlak/richards/splay/cd family (`vibe/impl/Lambda_Impl_Tune29.md`; evidence `temp/r46/`). The star stays: named borrows, `for` loops and non-record places are still outside the implemented scope. **2026-09-17 (Tune29 §20):** a named handle may also be passed as a plain argument to a procedure that keeps no root; MIR joins its may-be-shared binding facts at control-flow merges (LR12-17). |
-| D3.2.4v5 | Corollary ruled 2026-09-17 (user). **Partially implemented 2026-09-17 (T29-2 §11.5):** typed path stores compare no shape pointer at any step below a declared root. The certificate guard is still re-run per access (deltablue2 `c_choose_method`), because the carrier `w.cons` may change between accesses; removing it needs D4.4.4v4's handles (T29-1). **2026-09-17 (Tune29 §20.2):** a `T[]` declaration initialized from an admitted record's field admits any container inline and checks only null. |
-| D3.2.6 | Ruled 2026-09-17 (user). **Partially implemented 2026-09-17 (Tune29 T29-2, `vibe/impl/Lambda_Impl_Tune29.md` §11.3–§11.5):** required container fields of a trusted record are read with no empty-slot arm, a member read through such a field needs no receiver null test, and typed path stores test only contracts that admit null. The audit of Lambda-side writers found and fixed one hole: the JIT accepted `null` in a required field of a contract-constructed literal (the field proof mistook a declaration wrapper for an optional). Residue: `bool[]` has no native lane (admission still walks elements, T29-5); host-built values are unaudited by design. |
-| D4.4.4v3 | Revised 2026-09-16 (v3, user ruling): the borrow is admitted wherever it is unobservable under S9.1.2; path shape, handle writes, store-back placement, nested handles and handle rebinds are implementation details (CW36, `vibe/Lambda_Design_Runtime_COW.md` §11.13), fixed only by the tier-shared static decision, the runtime spine test, and store-back-or-mark on every writing path. Motivation: JetStream splay `splay_node` stores back inside `if` branches — 826k map copies and 32% GC per run under v2. **Implemented 2026-09-16 (T28-8, `vibe/impl/Lambda_Impl_Tune28.md` §9.16):** `rmw_branch_local` in `build_ast.cpp` tracks per path whether the handle may still hold the unmarked leaf and whether it wrote it unstored; a store-back is final (skips capture) only when nothing after it names the handle; loops naming the handle and plain handle rebinds refuse. The decision now runs in `lambda_ast_finalize_script`, after every procedure signature exists, so a `var` pass to a procedure defined later counts as a write. splay2 map copies 826k→683k; the residue is rotation stores of the caller's `var` root (a call-site move convention, not a store-back shape). |
-| D4.4.4v2 | Revised 2026-09-14 (v2, Tune27 §10.12): sibling-member access to the root and a return that precedes every use of the handle are admitted inside the region; cd's table put (`var keys = t.keys; var vals = t.vals; …; t.keys = keys; t.vals = vals`) now borrows both handles — 2,000 → 2 array copies per 1,000 puts. Fixture `test/lambda/proc/cow_rmw_sibling_borrow.ls`. Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
-| D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
-| D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |
-| D5.1.1v3 | **Implemented 2026-10-05** (Runtime_Async P0–P5): Lambda tasks and JS generator, async and module bodies of both tiers run on activations; the `LambdaAsyncFrame`, the JS MIR state machines and the interpreter replay are deleted. Parked root segments are traced through their carriers; beyond a warm window cold parks are compacted (RA13). Gates: Lambda baseline 6206/6206; test262 MIR with the untouched base's exact failure set, AST 40261/40261. Open: JSCU25 weak registration of JS async activations. ([Runtime_Async §10.1](../vibe/Lambda_Design_Runtime_Async.md)) |
-| D5.2.2v3 | Generated-function caller homes are deleted. The retained `MirScalarHomeBinding` coloring is payload ownership for C/helper and hosted-language boundaries, not an alternate function-return ABI. Per-source mutable-binding storage and loop back-edge reclaim remain unimplemented (DO24); they are independent of companion-lane transport. |
-| D5.2.3 | Lambda helper-adopt emission is retired as of 2026-08-17: its emitter sets the v3 no-rehome rule and fresh Lambda MIR has zero `lambda_item_adopt_scalar_home` calls. LambdaJS keeps the conservative helper rehome path because helpers may return module-state scalar Items; the attempted global skip changed `regression_side_stack_frame_gc` and was reverted. Shared machinery also remains for foreign hosted compilers and explicit C/host ownership boundaries. Loop back-edge reclaim and the associated peak-side-stack proof remain open under `DO24`; revisit JS only with a per-helper ownership proof. |
-| D5.2.1v5 | **2026-11-03: unified outcome metadata and normal admission through error unions are qualified (S7.4.2v4/S11.4.2v3/S11.4.6v4): Lambda 6,456/6,456, focused tier/GC 288/288, MIR emission 282/282 and MIR GC 352/352. The following companion-lane qualification predates unification.** LambdaJS P2.5 and P5a landed 2026-08-17: Lambda and LambdaJS compile only the companion-lane ABI; `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, generated `_scalar_home` parameters, and direct-call donation are deleted. Record of the retired v2 design: every function carried a hidden trailing home address and copied a wide payload into it. Retained side-number-stack slots belong only to destination ownership, C helpers, or hosted-language APIs under D5.2.2v3. **Qualification scope:** production T0/MIR Direct; experimental Lambda MIR MVP adaptation is deferred ([LR01-22](../vibe/Lambda_Issue_Ledger.md#lr01-22)). |
-| D6.1.2v2, D6.2.3v3 | **Parent-fn extension qualified 2026-11-02: Lambda/input baseline 8520/8520, including MIR GC stress 350/350.** Shared indexed flow facts select capture permissions before T0/MIR lowering, with fixed-point known-call return/retention summaries. A parent local and its confined sibling pns retain the same internal one-element GC Array home using existing owned Item/scalar slots; reads preserve scalar ownership, and rebind/COW replacement publishes through that home. Precise frame/environment roots preserve lifetime. Pure and escaping captures snapshot at creation; named direct calls reuse the declaration environment. AUTO refuses shared-home satellites under the existing fallback contract; eager MIR supports them. No fn-to-pn call exception or native-stack scanning. Focused tiers, native shared-home/GC tests and optimizer checks pass. All 15 local-state fixtures match interpreter/JIT with zero fallback; full-sweep and checker failures are base-controlled or explained in the implementation record. Legacy pn-parent capture debt remains separate. [Implementation record](<../vibe/impl/Lambda_Impl_Function_Local_State (done).md>). **Follow-up:** ordinary and decomposed bindings share home initialization; source values stay rooted across projection and home allocation, and decomposition participates in the indexed escape graph. Final follow-up Lambda/input baseline: **8533/8533**, including 353 GC stress tests; see [follow-up qualification](<../vibe/impl/Lambda_Impl_Function_Local_Decomposition (done).md>). |
-| D6.1.3v2 | `may_await` (v2) feeds call metadata and GC planning as a may-park effect, and still gates the MIR region producer/consumer pass. **`may_defect` built 2026-09-27, fail-closed.** build_ast computes a conservative fact per function (`TypeFunc::defect_known`/`may_defect`); it fixes literal slot layouts and the S11.4.3 flag for both tiers and serves imports. The JIT solves the least fixed point per compile (`mir_solve_may_defect`), each origination site judged by the emitter's own gate, and treats anything outside its table as defect-capable. build_ast's fact over-approximates the solve, and the JIT narrows the S11.4.3 flag with its own answer except for an operand whose type admits error. `may_return_error` still carries both meanings in the variant effects. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
-| D6.3.1 | **JSCU25 implemented 2026-10-05, in the lean form** (Runtime_Async §10.1): a parked JS async activation registers weakly with the attached scheduler (`lambda_scheduler_weak_enter/leave`, a token naming the scheduler's serial). It counts in `lambda_scheduler_live_count` until it settles or its carrier is collected, so a Lambda run's end-of-run drain lets an unawaited JS async call finish. Readiness stays with the microtask queue, and the run queue never resumes a JS activation. The record is the GC-owned async carrier, and its Promise is the handle; there is no `LambdaTask` per JS call and no mailbox. A drain with only weak registrations left waits while anything besides its own watchdog keeps the loop alive; when idle it gives queued promise jobs a checkpoint, collects, and then ends without error. Fixture `test/lambda/conc/js_async_weak.ls`; gtest `WeakRegistrationsCountUntilTheyLeave`. |
-| D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
-| D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
-| D7.1.7v6 | **Implemented 2026-10-06.** `make lambda-wasm` builds the synchronous browser REPL from an explicit source/dependency manifest, with no MIR, allocation tracker, native string-SIMD unit or excluded acquisition/ambient providers. CSS/graph/math input and CSS/graph/LaTeX/math formatting, image-processing kernels and public history/event builtins are excluded. HTML parsing and template apply are retained, with REPL registration/rollback/reset verified. Node and Chromium each pass 283 embedding checks; native REPL tests pass 41/41 and the full native Lambda baseline passes 6,243/6,243. Optimized WASM + loader: 1,891,405 bytes raw / 729,874 bytes gzipped. Interpreter corpus and broader browser coverage remain verification work; the C API is initial, and external imports are rejected. Working record: `vibe/Lambda_Design_Static_Modules.md` §13.4; reproduction and ABI: `doc/dev/Lambda_WASM_Build.md`. |
-| D7.2.4v4 | **v4 clause implemented 2026-10-22** with its first module, `lambda.io.mail`: `builtin_module_name` maps the full path, and `resolve_builtin_module_member` the qualified spelling `lambda.io.mail.<fn>`, to the `io_mail_*` rows, which park like `io.fetch`; `io.mail` is not a spelling, and an unaliased import is refused because its `open` and `send` would shadow the built-in ones. Regressions: `make test-mail`, `test_mail_imap_gtest` (`vibe/Lambda_Demo_Mail.md` M0 checkpoint). v3 record (implemented 2026-10-15): Shipped imports mirror their namespace below `<lambda-home>/package/`; math, PDF and LaTeX source and resources live in `lmd/package/doc/{math,pdf,latex}/`, with no resolver exceptions or old namespace aliases. Native document bridges, PDF export and TeX resource loading use the matching paths. The checkout and release share `./lmd/`, copied unchanged by `utils/prepare_release.sh`. Built-in `lambda.math`/`lambda.io` aliases and `lambda.sys.*` remain separate from script packages. Regressions: `test/lambda/lambda_namespace.ls`, the reserved-root negative fixture, and `test/lambda/{math,pdf,latex,eps}/`. |
-| D7.2.5 | Implemented 2026-09-07. The shipped `lmd/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
-| D7.2.6 | **Implemented 2026-09-29.** `lambda_resolve_import_module_path` is the one resolver (AST import, dependency prebuild, document-transform package loader); it returns NULL for a bare root other than `lambda`, and `resolve_import` reports E216 after the built-in and registered-module checks. `run_source_fixture` in `test/test_lambda_opt_gtest.cpp` runs checked-in scripts in place for the same reason the ruling states. |
-| D7.2.7v2 | **Partially implemented 2026-10-12; bindings 2026-10-13.** Expansion is the only front end: `parse_latex_direct` always runs the engine (the unexpanded branch and the `LAMBDA_TEX_EXPAND` knob are gone), the native document transform and the doc viewer parse through `lambda.doc.latex`, and the script's macro substitution is retired. Engine, bundled programming packages, expl3 through an in-memory format, the path gate and the resolution order are built; 151 trace records match `pdftex -ini -etex`. Lambda-owned bindings run from the bundled `binding/` directory: `physics.sty` and the `mathtools.sty` macro layer. Residue: the layout-metrics hook (box widths are estimates), in-memory write streams for multi-pass runs, the `local-package-shadowed` diagnostic, engine reads through the central IO door, and an on-disk format cache. Pointer: `vibe/latex/Lambda_Design_TeX_Engine.md` §10. |
-| D7.2.8 | **Partially implemented 2026-10-14.** Font-independent export, strict XML input and runtime/CLI conversion implement the first delivery stage. The next stage adds a separate MathML box builder, generated operator dictionary, shared SVG geometry, and Radiant package-layout integration that retains the source DOM and inert annotations. The supported subset uses selected MATH/Core constants, never TeX companions; full Core/CSS and accessibility integration remain open. Scope and verification: `vibe/Lambda_Pkg_Math.md` §11. |
-| D7.3.6 | **Implemented 2026-10-07 on macOS; Linux generated but unverified; Windows not covered.** `utils/generate_premake.py` turns the one list into `-Wl,-exported_symbols_list` (macOS) or `-Wl,--dynamic-list` (Linux) for every Jube-capable host configuration, debug included, and release compiles with `-fvisibility=hidden` again (dropped 2026-07-20 for hosted Python, with `-export_dynamic`). The initial list is the 400 symbols the built `lang-python` and `node-*` modules import: 102 from vendored mbedTLS, mpdecimal and RE2 archives, 298 Lambda-owned. Release exe size, before → after (macOS arm64, stripped ThinLTO release builds of commit `f6e11aa33` that differ only in the visibility and export flags): `lambda.exe` 21,702,952 → 19,158,984 bytes (−2,543,968 bytes, −11.7%); exported symbols 15,971 → 400. Removing `lang-python` (2026-10-07) dropped its 126 entries: the list is now 274 symbols (79 vendored mbedTLS, 195 Lambda-owned) imported by `node-core`, `node-crypto`, `node-fs` and `node-net`, and the release host exports exactly those. `utils/check_host_exports.py` runs after every release link (host ⊇ list: the linker silently skips a listed hidden symbol), and `make check-host-exports` also checks module imports ⊆ list. Windows hosts still link `--export-all-symbols` for the module import library. Working record: `vibe/Lambda_Design_Jube_Architecture.md` JA5.1. |
-| D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
-| D7.4.3 | **Not implemented since 2026-10-07 (USER):** `lang-python` and the host's hosted-language and hosted-compiler services (source, diagnostics, output, session memory, guest execution with the MIR compiler cursor, module graph, runtime catalog, data API, language descriptors and `lambda <language>` dispatch) were removed with a Jube ABI bump (`JUBE_ABI_VERSION` 8, `JUBE_HOST_API_VERSION` 5). No guest language is hosted; the ruling constrains any future one. Record: `vibe/Lambda_Design_Jube_Lang_Hosting.md`. |
-| D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol. The protocol remains unchanged; the D7.4.5v2 TypeId-order revision advances the current Jube ABI to version 6. |
-| D7.4.5v2 | Partially implemented 2026-09-08. Distinct VArray/Velmt TypeIds and GC-traced headers, semantic type/validation/index/iteration/equality/order/printing dispatch, Jube ABI 6 carrier selection, carrier-neutral host metadata, and exact shaped-field storage are landed. The reordered physical tags are `RANGE=16`, `ARRAY_NUM=17`, `ARRAY=18`, `VARRAY=19`, `MAP=20`, `VMAP=21`, `ELEMENT=22`, `VELMT=23`, `TYPE=24`, `FUNC=25`, `ANY=26`, and `ERROR=27`; Error is the last valid TypeId. Native Radiant snapshots are renamed `RadiantVelmt`; custom-layout handles and all shared DOM Node-family wrappers use Velmt. Live child/element/form/lookup/options/selected-options/attribute/token/CSSOM collections and static query/radio/rect/mutation lists use direct or retained VArray backends; Lambda child-list access reads the native backend directly under the fixed-DOM run contract and has no `snapshot_for_lambda` hook. Remaining gates are FileList/DataTransferItemList/SVGTransformList migration, the VMap status-vtable follow-up, synthetic splice/materialization coverage, and the full GC/WPT/performance matrix. ZIP input adds optional fallible preparation before cached counts in virtual ABI 2 (2026-10-08), preserving deferred payload errors under S14.3.1v2. Jube ABI 9 rejects modules compiled against the earlier callback layout. Working record: `vibe/Lambda_Design_Type_Virtual.md`. |
-| D7.1.2v2 | Partially implemented 2026-09-14: `InputManager` owns a process-persistent `InputScriptCache` with named cache contexts, exact-byte source identity, scopes/leases, opaque AST/MIR slots, policy controls, accounting, request-scoped source-generation retirement, and Lambda plus JS/Radiant source or MIR adapter entry paths. Lambda source records and admitted synchronous static-JS-import module records retain direct-import edges by persistent unit ID; a changed file-backed dependency retires its full importer cone before a cached artifact is reused, while leases defer destruction. The common cache also owns AST/MIR-key single-flight states; Lambda uses them, and a minimal per-key poison state blocks reuse until source invalidation. Full executable-source inventory, JS/guest adapter adoption, remaining JS/guest dependency cones, richer failure recovery, and eviction remain open. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
-| D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
-| D7.5.2 | Host file/source byte and identity clients, ordinary input/directory, TeX/Structurizr resources, runtime path metadata/traversal, task-read clients and bounded private IPC are extracted; the remaining IO surface is incomplete (`js_fs`/`js_os`/`js_net` raw-IO violations remain in the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
-| D7.5.5–D7.5.8 | **Ruled 2026-11-02 (USER); components only.** Neutral policy, anchored files, host grant store/file broker, target-bound approval challenges, bound-client `output()`, Lambda source/import/cache/prebuild, ordinary input/directory/parser resources, path metadata/traversal and task reads (interpreter and MIR JIT), bounded broker IPC with captured-authority publication leases and expiry checks, an experimental signed T0 Lambda worker and a basic macOS syscall-denial probe are implemented. Scoped snapshots, document heads and write-set transactions have context-owned precise roots; snapshot authority epochs invalidate captures, and task reads recheck delivery and join cancellation. Unsupported legacy mutation/search, command, fetch, mail/secret and loopback adapters refuse bound callers before native work. A host ad-hoc admission core now builds source manifests and a base protected catalog (including absent names), binds profile identities and restores supported file grants; signed tests cover host-process restart, revocation and changed-code refusal. A dedicated macOS supervisor now validates the publisher/sealed worker bundle and suspended child identity, launches with a clean environment/handle allowlist, owns once-only terminal consent and monitors CPU/physical-footprint/wall/output budgets plus kernel bootstrap caps. Broker-owned per-principal data/cache and per-admission temporary files are bound to the admitted channel through virtual mounts, a protected physical namespace, owner-object identity checks and bounded class-wide byte/entry accounting; no private mount grants source authority. Host-only cache eviction and joined session finish use strict anchored removal, with observable cleanup failure and nonblocking lease-based abandoned-temp recovery after host death. The experimental macOS launcher clears registered user Mach rights, task exception ports and bootstrap access before startup; its worker rejects ptrace through a syscall filter. Before runtime/source acquisition, the worker validates one bootstrap thread, the actual null input device, anonymous output pipes, a connected local broker socket and absence of extra descriptors; native controls show that pre-held file reads and writable mappings otherwise survive policy installation. Native controls demonstrate that an inherited memory entry otherwise permits parent-page modification after sandbox installation. TASK_ACCESS_PORT and full debugger qualification remain open. A constructor gate also leaves the direct-linked worker unqualified: closed-fd mappings survive entry. An opt-in libSystem-only bootstrap now applies policy before loading the separate T0 runtime, with one literal runtime-image read/map allowance and nested-code verification. Local composition controls are separate from successful hardened publisher loading; the user skipped signing-identity setup, so that deployment gate remains open. A deny-native-IO macOS process-policy prototype is under qualification; the user approved retaining its private Darwin backend experimentally on 2026-11-03, with qualification required before any default rollout. Protected updater control/catalog state, scoped pause/disable/restore and offline precedence, persisted job reservations/backoff and host console management are implemented; no app fetch capability was added. Trusted storage inspection and explicit, random-intent-bound persistent-data reset are implemented with live-session refusal, bounded cleanup and host-death resumption controls. Anchored creation now syncs child/parent namespace edges and new lock/lease files; protected state/private mounts require macOS full-sync barriers, with fault-tested refusal and uncertain-commit handling. Protected per-principal quotas and trusted CLI edits/default restoration now persist generations, refuse stale/live edits and retain existing data across reductions. Default production integration, installed publisher qualification, approved OS backend and complete per-principal isolation/crash qualification, corrupt-data/full power-loss recovery, installed-app uninstall integration, graphical quota and persistent permission UI, complete installed-app/global catalog coordination, remaining IO/non-Lambda loading adapters, complete quotas and end-to-end updater verification/staging/activation remain pending. A host-only anonymous HTTPS pull component now checks every redirect origin and resolved peer, bounds responses and cancels on policy changes; successful bytes remain unverified and update delivery remains unavailable. Lambda Script verifier components now implement strict signing-byte parsing, root thresholds/rotation, freshness/rollback, delegated targets and checkpoint sequencing, using native public-key signature primitives and a protected opaque per-package cache. A dedicated bounded host bridge now runs the immutable embedded Lambda verifier in an offline early-confined interpreter process, applies live-job-bound fetch/checkpoint actions and returns reservation-bound opaque artifacts. Owned TLS composition, persisted-cache retry and cancellation controls pass; independent pinned conformance currently passes 112/119 with all failures retained, and 688 strict-JSON differential inputs pass on interpreter/JIT. Cache reuse reauthenticates each current delegation edge and unchanged polling checks cached expiry. Opaque UTF-8 role labels stay inside the unchanged cache layout; canonical URI encoding and an independent native gate preserve URL/file-domain separation, with 728 differential cases on native/interpreter/JIT. A bounded inactive ZIP decoder now validates the complete image namespace in Lambda Script and streams exact member bytes from an early-confined offline interpreter, with fixed-size per-entry acknowledgements and no file-write or package-code execution authority. Its initial member-name profile is printable ASCII with collision/device-name refusal; 53 owned archive/IPC controls include maximum size/count boundaries and cancellation. A native host adapter now consumes only live reservation-bound opaque artifacts, independently gates decoder paths/types/counts and writes private inactive images through strict anchored full-sync operations. One pending image per profile, random identity, exclusive claims and checksummed intent/receipts bound storage and bounded offline/paused cleanup; ready publication follows clean decoder exit and a fresh policy lease. Native mechanism and owned signed HTTPS/verifier/decoder composition checks pass, including tamper/traversal refusal and retained-data canaries. Successful hardened publisher launch, full conformance, managed-image publisher/capability admission and active publication, activation/recovery and installed-catalog coordination remain unqualified. Delivery stays disabled. See `vibe/impl/Lambda_Impl_App_Safety.md` §6; no end-to-end sandbox is claimed. |
-| D7.5.9 | **Ruled 2026-11-03 (USER); partial.** The experimental trusted host retains data unless explicitly reset, with bounded inspection and interrupted-reset recovery. Installed-app uninstall/retention integration and lifecycle UI remain pending. See `vibe/Lambda_Design_App_Safety.md` §7.1 and `vibe/impl/Lambda_Impl_App_Safety.md` §6. |
-| D7.5.10 | Partial: explicit procedural capture, separate OS/document grants, bounded copied PCM, stop/revocation/loss/teardown and gated monitoring through dry/named bus routes are implemented for the macOS core profile. Physical permission/hotplug qualification and other OS backends remain open; D7.5.4 output permission never grants input. |
-| D7.5.4 | Ruled 2026-10-19 (USER); partly implemented 2026-10-19 for Lambda rows. `radiant/audio.cpp` judges each document by its own URL (`file:` or none is local), keeps a sticky activation flag set by trusted presses and non-modifier keys in `handle_event` and by EventSim pointer/touch input, and honours the host grant (`view --autoplay`); `dom.speak`, `dom.midi_command(…, "play")` and unmuted `dom.audio_play` check it (verified by `RadiantFrameDelivery.AudibleOutputGateFollowsDocumentOrigin`). Residue: `<video autoplay>` still starts unmuted for every origin (`radiant/resolve_htm_style.cpp`); JS media and Web Speech (`NotAllowedError`) wait for LambdaJS speech (Radiant_Design_Speech M5); a `<base href>` replaces `DomDocument::url`, so a local page with a network base is judged as network. |
-| D8.1.1v10 | Revised 2026-09-14 (v10): every publishable `var` position -- untyped, typed container, typed scalar or record, optional or not -- consumes its CW33 home in the generated prologue and publishes its final boxed value in the epilogue (encoded through the declared contract lane, so a null `float?`/`bool?`/`string?` publishes `null`); the `_b` adapter forwards the cell it consumed to the raw body and stores the reloaded binding back; a typed scalar/record argument whose binding is a lane local is homed from its boxed argument slot and decoded back into its lane after the call. The v8 fail-closed pin on bodies that rebind a typed `var` parameter (and their direct satellite callers) is therefore lifted: such a body promotes like any other and the rebind reaches the T0 caller through the same home (fixtures `test/lambda/proc/cow_var_typed_rebind.ls`, `interp_typed_var_rebind.ls`, three tiers byte-identical). Revised 2026-09-07 (v9): a satellite image co-compiles the target's direct-callee cluster in module order (direct native edges among members, module-wide call-site inference, every member's boxed entry published; compiled/pinned/unsupported callees stay dynamic) -- diviter 20 s → 349 ms, richards 786 → 620 ms, deltablue 464 → 348 ms auto e2e, each at eager parity; DO30 records splay. Revised 2026-09-07 (v8): typed `var` parameters are admitted to satellites -- every `var` position travels through the CW33 home cells on the boxed edges, the `_b` wrapper prepares, admits and stores the container back through the home, and a satellite's dynamic edge transports and reloads typed positions keeping their raw descriptor; a body that rebinds a typed `var` parameter, and every satellite that would call it directly, stays in T0 (navier_stokes, nbody2, json2 promote; DO29 records the eager tier's own rebind loss). Revised 2026-09-07 (v7): a loop-bodied procedure promotes at its first entry (once-called `main` loops: mandelbrot 5.5 s → 0.8 s, matmul 3.2 s → 56 ms auto e2e on the debug build); aggregate/structured value-parameter contracts are admitted to satellites (nbody2, pnpoly2, deriv2, ray2, array1); a satellite's read of an annotated `string[]` module binding takes the generic index path because the T0-initialized slab carries the boundary's native carrier (DO28). Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
-| D8.1.1v11 | Revised 2026-09-22 (v11): static file-backed import prebuild uses one bounded closure-wide task pool. Parse-accurate discovery immediately canonicalizes, deduplicates, and queues each static-import request; a completed child notifies and releases all direct parents, so a shared child is built once without dependency-depth batch barriers. Worker tasks publish only AST templates and never wait on child work; the cache retains its ordinary single-flight handling for separate closures. Initialization, execution, and MIR stay on the receiving runtime. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
-| D8.1.1v12 | Revised 2026-09-22: AUTO P2 promotion queues one deduplicated, snapshot-safe target definition to the bounded process-wide compiler service and continues the triggering call in T0. A worker produces only a private, immutable MIR image from frozen facts; it never mutates a live Script context, AST analysis fact, module image, or Function entry. A later ordinary safe point generation-checks and publishes the target boxed entry. Stale/failed/unsupported work pins that execution-local definition to T0. This adds no OSR or active-frame replacement; private direct-callee cluster images remain later work. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. **Conformance fix 2026-09-22 (LR01-16):** the worker placed its image's property-key suffix from the owner slab's key count. That thread-local read saw an empty slab, and publication kept any suffix whose count differed, so every image after the first resolved member names through the first image's keys. The suffix is now placed when the safe point binds the image, linked by key-ID content and recorded in `LambdaModuleLayout::property_key_base`, which the generated code reads; `LAMBDA_SATELLITE_SYNC=1` pins publication for tests. |
-| D8.1.1v13 | Revised 2026-09-22: static import prebuild moves from a per-root closure graph to a process-global canonical profile/path task-future registry and one bounded pool. Root discovery is fire-and-forget; tasks immediately request all children, deduplicate a shared child, and release only direct parents by continuation. AST build workers never wait on child work. Ordinary Lambda/JS import consumers wait only for their direct dependency future; prebuild-worker loaders bypass that wait. The cache separately validates exact source identity before an artifact is consumed, and cycle/prebuild failure falls back to ordinary-loader diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
-| D8.1.1v14 | Ruled 2026-10-02 (USER); **partially implemented** 2026-10-02 (branch `worktree-interp-tune2`). Implemented: the per-loop back-edge trigger at 10000, retirement of the loop-owner first-entry trigger, and handoff at the loop head. The loop entry is a synthesized procedure over the live-in locals (the body's statements from the loop onward), entered through its boxed wrapper, so every live-in is admitted like an unknown caller's argument. Residue: eligible loops are only `while` statements directly in a `pn` body, and back-edges of their nested loops count toward them; the loop-triggered image does not carry the definition's own boxed entry. Under AUTO, `mandelbrot2` 12.0 s → 0.10 s and `matmul2` 6.3 s → 0.11 s (eager JIT 0.06 s / 0.05 s, debug build). AUTO corpus differential 1092/1092 identical; with `LAMBDA_LOOP_JIT_THRESHOLD=1 LAMBDA_SATELLITE_SYNC=1` every eligible loop hands off and the corpus matches `interp` except one pre-existing sync-mode satellite abort. Plan and evidence: `vibe/impl/Lambda_Impl_Interp_Tune2.md` §12.2. Working record: `vibe/Lambda_Design_Ast_Interpreter.md` §5.1.1. Renamed 2026-10-03 (USER), meaning unchanged: the tier selector `LAMBDA_TIER` is `LAMBDA_EXEC_BACKEND`, `LAMBDA_JIT_THRESHOLD` is `LAMBDA_FUNC_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE` is `LAMBDA_LOOP_JIT_THRESHOLD`, and LambdaJS's `JS_EXECUTION_BACKEND` is `JS_EXEC_BACKEND`; the old names are no longer read. |
-| D8.1.1v15 | **Implemented 2026-10-03.** Explicit interp rejects unsupported scripts/imports before execution, including task-backed MIR satellites and cached AST activation. AUTO retains fallback; explicit jit retains eager MIR. Lambda baseline: 6,180/6,180; strict-pin regression cases: 6/6. Evidence and existing differential failures: `vibe/impl/Lambda_Impl_Typed_Performance_Audit.md` §6–§7. |
-| D8.1.1v16 | **Implemented 2026-10-05** (Runtime_Async P1, P4): T0 evaluates `start`, `select` and scoped tasks, and the strict-`interp` rejection of task-backed bodies is gone; JS promotion admits async and generator definitions and loop handoff refuses only a loop whose tail can suspend. Forced-promotion sweep over every `test/js` golden identical to the base. |
-| D8.1.1v17 | **Implemented 2026-10-06** (branch `worktree-repl-interp`). `run_repl` owns one `InterpReplSession`; whole-history `run_script_mir` replay and the init-failure fallback are deleted, and a `jit` selection becomes `auto` with a first-call promotion threshold. The entry transaction (`ReplEntryTxn`, `runner.cpp`) returns OK, INCOMPLETE (the C parser's status, no pre-check), REJECTED or FAILED and prints each diagnostic once; an unsupported construct or import is rejected by name. Imported cones initialize before the entry runs. SIGINT is armed per entry; T0 polls it at call entry and back-edges (`LAMBDA_FAULT_INTERRUPTED`), and promoted satellite code is not polled. No Tree-sitter symbol is reachable from the REPL path. Session services: `.env`, `.type`, `.time`, `.load`, `.save`, Tab completion and a history file. Gates: `LambdaReplSessionTests` and `LambdaReplTests`. [Repl_Interp §3, §6](../vibe/Lambda_Design_Repl_Interp.md) |
-| D8.1.1v18 | **Implemented 2026-10-12** (USER ruling the same day). The frame plan numbers a plain `for` statement of a `pn` body as a handoff loop; at its head test T0 passes the walk's snapshot and next position after the live-ins, and the synthesized continuation's first statement is a copy of the `for` over the snapshot parameter starting at the position parameter (`AstForNode::resume_from`). The boundary test compares the statement's entry scratch level, since a `for` walk holds its own scratch slots. Fixture `test/lambda/proc/for_loop_handoff.ls` (12 shapes: `of`/`at`/`in`, pairs, `where`, `break`, `continue`, early `return`, a `var` parameter, a rebound source) hands off at forced thresholds 2 and 5 and matches T0. A one-call 490k-character walk ran 98 ms as `for` against 58 ms as `while` on `auto` before this. Record: [Ast_Interpreter AI25](../vibe/Lambda_Design_Ast_Interpreter.md). **Parent-fn follow-up (2026-11-02):** direct function while suffixes retain callable colour and functional completion in their continuation. A collected prefix remains T0 unless an unconditional terminal return/raise discards it; shared capture homes remain T0. Forced-threshold/GC fixtures cover COW live-ins, early returns and multiple results. Record: [function-local benchmark qualification](<../vibe/impl/Lambda_Impl_Function_Local_Benchmarks (done).md>). |
-| D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
-| D8.1.3v19 | Revised 2026-09-23: the unset `JS_EXEC_BACKEND` now selects AUTO. Interpreter-supported units execute through the retained AST path and may promote admitted hot definitions to P2; unsupported units retain whole-module MIR. `ast` remains explicit and fail-closed, `mir` remains an explicit whole-module selector. MIR link-interface and O1 decisions are selected through shared `mir_select_link_interface`, so large modules/documents can install the MIR interpreter without changing generated MIR. The v18 parser, AST-interpreter, module-registry, and P2 admission record remains otherwise unchanged. Working record: `vibe/Lambda_Design_Compiling_Pipeline_JS.md` LC4.1–LC4.12. |
-| D8.1.3v20 | Revised 2026-09-24 (USER): dynamic source — direct/indirect `eval`, the `Function`-family constructors, string timers, and `$262.evalScript` — parses into a retained `JsScript` and executes only in the AST interpreter, whatever the caller's tier or the unit selector. The MIR dynamic-code service (expression-wrapper and whole-script eval tiers, the dynamic-Function MIR cache, eval preambles, the `is_eval_direct` lowering mode) is deleted; a MIR caller keeps only the direct-eval bridge projection and write-back. Script top-level lexical realm records link their module slots on both tiers, so interpreted readers see live values and TDZ, and a projected caller binding outranks a global lexical of the same name. Dynamic source shares the AST template cache (a direct eval naming private members is parsed per call); whitespace/comment-only and lone-RegExp sources create no script. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3754/3754 (incl. `test_js_gtest` 479/479, `test_js_script_gtest` 191/191); `test_js_gtest --baseline --full-mir` 477/477. Residue: eval-created closures lose projected caller locals after the eval returns, `eval("arguments")` in functions and `new.target` in direct eval remain unsupported (pre-existing). Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI35; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
-| D8.1.3v21 | Revised 2026-09-24 (USER): a direct eval from interpreted code links its activation to the caller frame's live `JsInterpEnv` chain through one boundary record (`JsInterpEnv::eval_script`). Free names in eval code and in its closures resolve by name through that chain (`js_interp_lookup_name`); EvalDeclarationInstantiation targets the caller's nearest function variable environment (`js_interp_instantiate_linked_eval`); the eval frame borrows the caller's `this`, `new.target`, and home-object homes. A function whose body or nested arrow contains a direct eval materializes `arguments`. The interpreted side of the bridge (projection, write-back, per-activation journal frames) is deleted; MIR callers keep it, with the source scan for strict writes to bridged consts. Strict `eval`/`arguments` targets in every assignment form are parser early errors on both tiers, and the eval-source stack and function eval-origin payload that only the deleted MIR eval unit fed are removed. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3756/3756 (incl. `test_js_gtest` 481/481); ad-hoc `test/language/eval-code` interpreter 214 → 312 of 343, MIR 217 → 218. Residue: MIR callers keep the bridge until P4 shared environment cells, so JS05-L5–L7 persist there; the interpreter keeps parameters and body vars in one function record (the `arrow-fn-body-cntns-arguments-*` eval-code cases); PerformEval's caller-dependent `new.target`/`super` early errors are not enforced. Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI36; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
-| D8.1.3v22 | Ruled 2026-10-03 (USER); **not implemented** beyond the call-threshold default. JS promotion is hotness-only: `JS_FUNC_JIT_THRESHOLD` defaults to 1000 calls (was five), and a loop reaching `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running AST activation to compiled code at the loop-head test, in the D8.1.1v14 shape (continuation over the live bindings, one-way). This supersedes the v13 sentence that no active AST frame transfers to MIR and JSI18's entry-only rule. JS keeps its own selector and knob names. Both thresholds are provisional pending release profiling. Open: P2 admission still rejects calls and outer bindings, so few loops are eligible until it widens; the satellite still re-parses its source. Working record: `vibe/Lambda_Design_JS_Interpreter.md` §9.3/JSI18v2; plan: `vibe/impl/Lambda_Impl_JS_Interp_Tune.md`. |
-| D8.1.3v23 | Revised 2026-10-03 (USER): the `JS_FUNC_JIT_THRESHOLD` default is 100 calls (1000 in v22). A release sweep over 13 JS benchmarks found no row slower at 100 than at 1000, with most of the gap to 5 recovered (mbrot2 22.8 → 12.6 ms, paraffins 82 → 62, nqueens2 50 → 44, puzzle 51 → 42); 100 still keeps rarely called functions interpreted while each promotion re-parses its whole source (17–59 ms at 17–87 KB). `JS_LOOP_JIT_THRESHOLD` (named `JS_JIT_BACKEDGE` until this revision) stays 10000; the call knob is renamed `JS_FUNC_JIT_THRESHOLD` (was `JS_JIT_THRESHOLD`). Both remain provisional; revisit after satellites compile from the retained script (plan E2). Evidence: `vibe/impl/Lambda_Impl_JS_Interp_Tune.md` §11.5. Renamed 2026-10-03 (USER), meaning unchanged: the tier selector `LAMBDA_TIER` is `LAMBDA_EXEC_BACKEND`, `LAMBDA_JIT_THRESHOLD` is `LAMBDA_FUNC_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE` is `LAMBDA_LOOP_JIT_THRESHOLD`, and LambdaJS's `JS_EXECUTION_BACKEND` is `JS_EXEC_BACKEND`; the old names are no longer read. |
-| D8.1.3v43 | Revised 2026-10-29: ordinary AST/AUTO and dynamic-source execution use MVP semantic operations and runtime-only realms; immutable activation plans and shared indexed/call kernels preserve live-cell fallbacks and precise ownership. Qualification is recorded in `vibe/impl/JS_Interpreter_MVP_Alignment.md`. The unrelated v42 extension remains partially implemented as recorded 2026-10-24. The checked method-body arrow extension is approved but its candidate is not retained: the original callback compiles and 252 native/20 forced-GC checks pass, but CSS median is 13,605 versus 13,542 ms control and overview/pricing retain the 120 s watchdog. Atlas passes with both versions. The patch and evidence remain under `temp/radiant-online-oct24-method-callbacks/`. Source and release/modules are restored to qualified D8.1.3v41: 249 native, 92 GC, 17 forced-GC, 121 optimization contracts, 40,261 Test262 cases and Radiant pass; Lambda retains only the known PDF mismatch. No broader gates ran for the rejected candidate. Working records: `vibe/Lambda_Design_JS_Interpreter.md` §9.4 and `vibe/impl/Radiant_Online_Loading_Oct23.md`. |
-| D8.1.3v29 | Clarified 2026-10-21 (USER): JavaScript defaults to AUTO, including an unset or empty `JS_EXEC_BACKEND`. Supported units start in AST; whole-unit fallback, hot promotion and explicit `mir` use fast MVP MIR. MVP replaces the old MIR engine, not the AUTO tier policy. The redundant `--runtime=mvp-lmd` option remains removed. Performance preservation and remaining effect-analysis gates stay open. Working records: `vibe/jube/JS_MVP_Integration.md`, `vibe/impl/JS_MVP_Integration.md`. |
-| D8.1.3v27 | Ruled 2026-10-20 (USER): preserve fast MVP performance while unifying the default/explicit command and Lambda context, globals, host and lifetime ownership. Implementation and release qualification remain in progress; finer dynamic-effect boundaries remain open. Design and acceptance gates: `vibe/jube/JS_MVP_Integration.md`. |
-| D8.1.3v26 | Revised 2026-10-18: align the retained interpreter with formal MVP direct eval. Both tiers use live `JsInterpEnv` bindings and bound-AST context checks; remove the retired LJS MIR binding-projection journals, source-scan const checks and bridged-eval entry. Lexical receiver payloads use destination-owned Lambda scalar homes in the GC environment. Explicit AST/native and MVP operation profiles remain distinct. Source audit and qualification: `vibe/impl/JS_Interpreter_MVP_Alignment.md`. |
-| D8.1.3v25 | Revised 2026-10-16 (USER): MVP-Lmd is the formal JS MIR engine. Ordinary Script/Module and document/preamble MIR entries are activated; reusable MVP machine-code images keep metadata and relocation tables per realm (D8.5.1v2). Frontend cache overlays, host/AUTO integration and baseline closure are tracked in `vibe/impl/JS_MVP_Lmd_Formal_MIR.md`. |
-| D8.1.3v24 | Revised 2026-10-03 (USER): the `JS_FUNC_JIT_THRESHOLD` default is 5 calls (100 in v23), the same as Lambda's `LAMBDA_FUNC_JIT_THRESHOLD`. A release sweep of values 1–500 (AUTO, values interleaved, min of three) chose 5 for both languages on end-to-end wall time: Lambda 126 scripts, geomean vs 5 = 1.040 / 1.005 / 1.000 / 1.014 / 1.069 / 1.113 at 1 / 2 / 5 / 10 / 100 / 500; JS 73 rows, vs 100 = 0.983 / 0.978 / 0.984 / 1.000 / 1.008 at 2 / 5 / 10 / 100 / 500. JS at 1 (0.875) is first-call compilation, excluded by hotness-only promotion; its gain comes from rows whose once-called hot function reaches MIR only through a slower loop continuation, a separate defect. `JS_LOOP_JIT_THRESHOLD` stays 10000. Evidence: `vibe/impl/Lambda_Impl_JS_Interp_Tune.md` §11.6. |
-| D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; No guest acceptance test remains since `lang-python` was removed (D8.2.3v2). |
-| D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v11**. The 2026-09-05 FunctionId follow-up retires `FnAnalysis::js_mir_backend`: JS MIR artifacts are reached only through the `func_entries_by_id` table keyed by the shared `FunctionId`; post-order storage remains a backend detail. The 2026-09-23 LC4 closeout adds preorder ranges, reverse query tables, function-child adjacency, synthetic-fragment overlays, named JS collection/capture/environment/inference/forward passes, and the shared MIR link policy. Current verification is 4,098 Lambda/Input and 40,261 Test262 baseline cases, with Lambda 0.512534 and JS 0.690065 release compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v5**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. **D8.2.5v2 (2026-09-11) is historical and superseded operationally by D8.2.5v3**: `AstNode.type` is the effective-type authority, declared annotations live on their declaring node, and the implemented v3 manager records named pass facts/timings without an ID-keyed per-node fact table. Rationale and the superseded U30 text: `vibe/Lambda_Design_Unified_AST.md` §13; plan: `vibe/Lambda_Proposal_JS_Unify_P7.md` U-D. |
-| D8.3.1v2–D8.3.3, D8.3.4v2 | **Binder TG8 direct-edge procedure slice implemented 2026-09-16.** Eligible fixed-arity `fn` and `pn` binder functions (task-free only until D8.3.4v4) with immutable parameters and exact scalar, normalized `array`/`map`/`range`, named/nominal map, or concrete element keys admit at most four immutable `__rawN` bodies in source order. `_b` shares one exact-key matcher: scalar tags, selected type-value identity, normalized container kinds, and descriptor-pointer identity for shape-bearing maps/elements. It retains the complete generic boxed fallback; later, partial, dynamic, capped, or ineligible keys consume no slot. A statically exact local call selects its predeclared `__rawN` body directly; a shape literal is exact when its AST descriptor is the raw key, while declared base-shape and other unproven edges retain `_b`. `var` parameters retain `_b` (task-context and may-await procedures no longer do, D8.3.4v4). Fixtures: `test/lambda/type_binder_raw_variants.ls`, `test/lambda/proc/type_binder_proc_raw.ls`. [S1.6, D8.3.1v2–D8.3.4v2] |
-| D4.4.6 | **Ruled 2026-09-16 (user), implemented same day (CW24v3).** The bind-time share-mark of a place copy was gated on `place_copy_mutated` -- whether the COPY is written -- and ignored writes through the PLACE, so an unmutated `let old = r.kid` aliased a later `r.kid.n = 7` on both tiers in every archived release back to Result42 (repros `temp/t28/value_semantics_bug/`). New static fact `NameEntry::place_copy_place_written`, computed at FUNCTION_END per binding from its live range (bind to last top-level statement naming it): root may be written in range (`ast_body_may_write_entry`, the CW30 gate, conservative on unknown callees and `var` passes) or the copy escapes (`ast_body_cow_param_effects` retention). Both tiers' bind gates mark on `mutated || place_written`. Deliberation: `vibe/Lambda_Design_Nested_Mutation.md` §4.3 (CW24v3). Blocks lifted: D4.4.4v3/CW36 (T28-8). **Conformance fix (same day, T28-8):** `ast_body_may_write_entry` did not look inside declarations, returns, blocks or several composites, so `let old = r.kid; var z = mutate(r)` still printed the new value; it now does. The same helper stopped counting a non-procedure system function or a known plain `pn` parameter as a writer (S9.1.3 keeps the callee's writes local); an unbuilt callee signature stays conservative. |
-| D8.3.4v3 | **Ruled 2026-09-16 (user): `var` parameters and methods leave the boxed-only exclusion list.** O11's reason was that a raw *scalar* carrier severs a borrowed position from the caller's storage; CW33/D8.1.1v10 later built the home transport that `_b` already uses, so a raw edge that carries the same home preserves the write-back. A method's receiver is admitted on the same exact-shape proof as any other raw argument, never on a dispatch guess. Obligations carried into the implementation: the home is consumed in the prologue and published in the epilogue; S9.1.3 exclusivity and the plain-parameter snapshot are untouched; pointer lanes keep a boxed source root; D8.3.3's two proof paths still hold. Remaining exclusions: closures, variadics, may-await/task-context procedures. Deliberation: `vibe/Lambda_Design_Compiling_Dual_Func.md` §O11v2. Implementation: `vibe/impl/Lambda_Impl_Tune28.md` T28-2. |
-| D8.3.4v2 | **DF16's caller-side guard-hoist slice is implemented, opt-in, 2026-09-15.** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` emits the very `_b` exact-key chain at an eligible local dynamic binder edge; a matching arm calls its immutable `__rawN`, and every miss calls `_b`. Its conservative loop-region case requires bounded raw keys, one unmodified identifier argument, and exactly one eligible dynamic call in a synchronous `while`; it evaluates that shared chain once, prepares the selected raw argument once, then enters its direct-`__rawN` sibling or an `_b`-only fallthrough sibling. Its straight-line CSE case shares a raw-index or boxed selection only between repeated eligible calls to the same callee with the same immutable identifier in one content sequence; both calls remain, while control, assignment, or an intervening different call clears the choice. It excludes closures, methods, `pn`/`var`, variadics, optional/named/spread arguments, and mutable source identifiers. The fixed cap remains four (deterministic source order; no profile feedback); five release benchmark processes measured 0.26 s baseline versus 0.18 s enabled for `test/benchmark/tg8_guard_hoist.ls`. **DF12's scalar first slice is also opt-in:** `LAMBDA_MIR_DF12_SPECULATIVE_LIFT=1` lets bare arithmetic body evidence select an `int` raw shape; the exact wrapper guard admits only `int` and every mismatch runs the complete boxed slow body. Direct float evidence remains `float`; broader speculative shapes await Result-suite measurement. [S1.6, D3.3.2v2, D8.3.1v2–D8.3.4v2, D8.4.1v2] |
-| D8.4.1v2 | ICs are retired in both lanes: the Lambda lane never had them; the LambdaJS per-site `JsLoadIC`/`JsStoreIC` machinery was deleted 2026-08-15 (IC_Retire IR1–IR8) and the LambdaJS carve-out in LC1 was closed 2026-09-09 (LC1v2). The replacement — compile-predicted literal/constructor shapes with an inline guard, an integer-index lane, and the shared kernel on a miss — is specified in `vibe/jube/JS_Tune_History.md` §4.3 (T10-1/T10-2) and is **not implemented**; Result38 measures LambdaJS at 4.35× QuickJS with the unspecialized kernel path. |
-| D8.4.2v2 | Core direct calls pass individual ABI operands. Internal shape-2 results use two MIR results and C-reachable entries use the context companion slot; the trailing scalar-home operand remains retired. Tune24 aggregate-construction plans carry precise record-field destinations as internal operands and return an Item completion. The numeric companion-return ABI is unchanged. |
-| D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
-| D8.5.1v2 | Partially implemented 2026-09-14: the common source registry is live, Lambda and JS CLI/Node-runner/test-batch/module source admission use it, hosted CLI file admission uses language/profile keys, and Radiant's preamble/external-classic JS MIR adapter stores opaque artifacts there. Closed-T0 Lambda AST templates now instantiate import cones and interpreter view registration through fresh Script overlays; cached Lambda MIR hits instantiate the complete JIT dependency cone and its dense per-runtime slabs, while P2 satellite imports derive their owner/slot without mutating the shared AST. P2 promotion counters and boxed satellite entries are also execution-local overlays, so a cached AST definition cannot expose a retired EvalContext's native entry (D8.1.1v2); an AST image that has entered P2 is conservatively excluded from later AST hits until lowering's remaining mutable facts have execution overlays. Lambda file-backed dependency changes and admitted cache-safe static-JS ESM dependency changes are refreshed before an artifact hit and retire the common importer cone; exact source comparison decides the retirement. Common AST/MIR build claims single-flight Lambda artifact construction across fresh runtimes, common JS AST claims single-flight parser-template construction, and the Radiant JS-MIR lease adapter plus synchronous static-JS-import module-MIR adapter claim their eligible artifacts; a minimal poison state is fail-closed until source invalidation, while eviction remains deferred. Eager JIT AST-miss reuse remains excluded because MIR lowering still mutates AST facts. The common JS AST adapter supports function, class, module, eval, and TypeScript parser templates through fresh execution overlays; those clones retain the source logical unit and bind a fresh dense slab. An ESM module whose transitive static-JS-import closure is synchronous and cache-safe can reuse an immutable MIR artifact after rebuilding every dependency namespace, its own namespace, and its module slab; TLA, dynamic/re-export, CommonJS, cycles, and cross-language module artifacts remain excluded. The legacy Runtime retention cache is retired to a local `loaded_script_index` registry, and the legacy Radiant cache façade is retired to a bounded lease/accounting session. Open work includes the excluded JS module families, remaining command pipelines, guest build-claim adoption, and cache lifecycle gates; L2 lazy codegen remains approved but `mir.c` is eager. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
-| D8.5.1v3 | Revised 2026-09-14 (v3): a source-level command-path audit closes the executable loader inventory: Lambda run/import/REPL/AST-dump/validator, JS CLI/require/interpreter/module/AST-dump/batch, Radiant local and URL scripts, Jube hosted sources, and direct Bash/Ruby guest loaders all reach `InputScriptCache`; ordinary document, JSON/package-metadata, filesystem, and transfer payload reads remain outside the executable-source contract. An owner scope that closes with an unfinished AST/MIR claim poisons the key and broadcasts its waiters, covering managed parse/compile recovery without inventing a broad crash cache. `LAMBDA_SCRIPT_CACHE_MAX_BYTES` provides an opt-in, inactive-only LRU byte limit; active leases retain their images and report pressure. This supersedes the v2 implementation status above; guest build-claim adoption, broader timeout/crash containment, dependency cones outside the admitted module families, and richer budget policy remain open. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
-| D8.5.1v5 | Revised 2026-09-22 (v5): static closure prebuild is a bounded, dynamic task graph, not serial discovery followed by per-depth worker batches. Canonical profile/path requests deduplicate shared modules; completion continuation releases each direct dependent, and workers do not block on nested imports. The cache retains its process-wide artifact-key single-flight guarantee for separate closures, while module initialization, execution state, and MIR remain runtime-local. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
-| D8.5.1v6 | Revised 2026-09-22: P2 satellite work uses the same process-wide bounded-work principle but an initial Script-generation/target-definition key. Its artifact is a private immutable image until a receiving execution safe point adopts it; the artifact cache never holds a live EvalContext, module slab, Function pointer, or worker-owned compiler state. Private direct-callee cluster images remain later work. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
-| D8.5.1v7 | Revised 2026-09-22: static-module prebuild is a process-global future registry, not a closure-owned graph and `wait_all()` barrier. Canonical profile/path requests share one in-flight or completed future across all roots; direct dependency continuations schedule parent AST builds without worker-side waits. Ordinary Lambda/JS import consumption waits only for its direct module future. The `InputScriptCache` remains the exact-source/profile artifact authority, so task readiness never bypasses source invalidation or normal diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
-| D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
-| D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines. The audited atomic direct-frontend retirement `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` is `+1,366/-8,450 = -7,084` in `lambda/runtime` + `lambda/js`; its named deleted files alone credit `-6,204`, excluding the out-of-scope TypeScript deletion. The current checker reports 287,618 against the stricter ≤308,711 cap. The 2026-09-05 prescribed captures (one warm-up, five release samples, identical manifests) compare the pre-bind base with the same two semantic repairs applied to both trees: Lambda compiler median ratio `0.512534` and JS ratio `0.690065`, satisfying the ≤0.90 and ≤0.80 ratchets. Finalized JS MIR diagnostics are complete `1.000181` and library `0.999995`; the complete-corpus change is below 0.02% and the library decreased. Large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
-
-**D2.6.12v2 — MVP with dictionaries, 2026-10-02.** Interpreter/MIR file
-construction selects `VirtualOutputElement`/`PDFBuilder`; raw byte appends,
-dictionary encoding, and `output` are implemented.
-The builder owns no Item edges and is released by the existing GC external
-payload hook. Producer-return lists and retained-content contracts remain DO32.
-
-**D2.6.12v3 / D8.2.6v2 — pure output demand, 2026-10-15.** Both tiers forward
-eligible pure result paths to an explicit rooted destination with checked
-completion and handler checkpoints/rewind. Counting and emitting share the
-encoder; Lambda freezes stream payloads, measures object lengths and emits
-without a document-sized fragment Item array. Generic/constrained calls can
-materialize; full helper and production-export qualification remains DO32.
-[Phase 2 §13](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#13-functional-generation-and-p3p5-continuation--2026-10-15).
-[Implementation record](../vibe/impl/Lambda_Impl_PDF_Output_MVP.md).
+| D1.2, D1.3, D1.5 | Partial. The production LambdaJS path uses the shared `Item` and precise-GC substrate. No private guest runtime is active since 2026-10-07; a future one must meet these contracts. |
+| D1.4 | Partial. Explicit completions are in place for Lambda, LambdaJS and Jube (D7.4.3). No private guest ABI is active. |
+| D2.1.5 | Partial. Raw `>> 56` sites, open-coded double reads and raw `MIR_EQ` emissions remain. |
+| D2.3.3 | Met by admission at the `_b` boundary, not as written: the unboxing helpers are unchecked casts. The ruling text waits for a user decision. |
+| D2.3.4, D2.3.5 | First slice in place (2026-08-28). Migration of the remaining lowering sites continues. |
+| D2.4.1 | First slice in place. `f16?`/`f32?`, mutable ArrayNum views and vector kernels are pending. |
+| D2.5.2, D2.5.3 | Core in place (lane gating 2026-09-27; continued initializer outcomes 2026-11-02). Aggregate package and demo qualification is in progress. |
+| D3.1.1 | Layout (map → array → element) and the nominal descriptor are in place, apart from open instances. The header cache bit and the retirement of the object TypeId are not complete. |
+| D3.1.2 | Not implemented. |
+| D3.1.3 | No identity carrier exists (DO25). |
+| D3.1.4 | Bound `fn` methods are in place. The compile-time rejection of a bare `pn` method reference is not verified on both tiers. |
+| D3.1.5 | In place for the MVP-Lmd profile (2026-10-07). The full engine still allocates plain maps without a nominal record. |
+| D3.2.2 | The representation-sensitive ArrayNum `==` is a known live bug. |
+| D3.4.4 | Reads conform. Byte confirmation for transition-tree edges is not built. |
+| D3.5.1 | In place for both tiers with explicit pure-result demand. Producer-return lists and retained children stay open (DO32). |
+| D4.1.1 | The kind-discriminated `Type*` layout has no design record (DO22). |
+| D4.2.3, D4.2.4 | Continued outcomes in place (2026-11-02). Constrained types enforce only their base; the `is`/runtime/validator divergence is open. |
+| D4.2.5, D4.2.6 | Partial. Typed path stores need no shape compare below a declared root. The certificate guard still runs for each access; `bool[]` has no native lane. |
+| D4.4.1, D4.4.2 | The native profile is in place (2026-10-15). Buffer-counted arrays, offset references and cyclic schemas are separate extensions. |
+| D5.1.4 | In place (2026-10-02): arena retention, mark/rewind and single-owner scratch arenas. |
+| D5.1.5 | The arena-backed builder with tail growth does not exist yet. |
+| D5.2.3 | Reference counting is not implemented. |
+| D5.2.4 | Release default off and the registry-free pool hot path are in place. Counter-only statistics and the `stack_alloc` split are pending. |
+| D5.4.3 | Stage 1 and place-home publication are in place. Other Stage 2 checks are pending. |
+| D5.4.4 | Partial: straight-line handles and the path walk are in place. Synthesized handles and carried facts are not. |
+| D5.5.2 | Partial: the ownership lattice has no GC → pool edge. The full audit is pending. |
+| D5.7.1, D5.7.2 | Draft design; no phase has started. |
+| D6.2.1 | In place for Lambda and LambdaJS (companion-lane ABI only; unified outcome metadata 2026-11-03). Removal of the ownerless-slot GC fallback is gated on its inventory. |
+| D6.2.3 | Lambda helper results need no re-home. LambdaJS keeps the conservative re-home path. The back-edge reclaim proof is open (DO24). |
+| D7.1.2, D7.2.3 | Confined parent-`fn` captures are qualified (2026-11-02). |
+| D7.1.3 | `may_await` and a fail-closed `may_defect` are in place. |
+| D7.3.1, D7.3.4 | Binder direct-edge variants and opt-in guard hoisting are in place. |
+| D7.4.2 | In place; the trailing scalar-home operand is retired. |
+| D7.4.3 | In place (2026-08-17) for Lambda, LambdaJS, Jube and hosted boundaries. |
+| D7.5.2 | Not started: process isolation first, thread isolation after the audit and DO20. |
+| D8.2.1–D8.2.6 | The shared indexed compiler substrate and pass manager are in place. Structural convergence of the two front ends is incomplete. |
+| D8.3.1–D8.3.4 | AUTO, strict `interp`, loop and tail handoff, clusters and background compilation are in place. Handoff breadth stays open (DO33). |
+| D8.4.1, D8.4.2, D8.4.5 | AST-first AUTO with MVP-Lmd MIR is in place. Promotion admission grows by checked extensions. |
+| D8.5.1 | The common source registry and its loaders are in place. |
+| D8.5.2, D8.5.3 | Not started. |
+| D8.6.4 | Instrumentation is in place. The exit ratchets are not yet met. |
+| D9.1.2 | Partial: the persistent script cache is in place. The IO inventory is incomplete. |
+| D9.4.6 | In place on macOS. Linux is generated but not verified. Windows is not covered. |
+| D9.5.3 | Not active since guest-language hosting was removed (2026-10-07). |
+| D9.5.5 | Partial: distinct VArray/Velmt TypeIds and carrier dispatch are in place. Some live collections are pending. |
+| D10.1.7 | In place for the current inventory (2026-10-18). |
+| D10.2.1 | In place (2026-09-07). |
+| D10.2.2 | Partial: expansion is the only front end. The layout-metrics hook is pending. |
+| D10.2.3 | Partial: export and strict input are in place. The MathML box builder is pending. |
+| D11.1.1 | T1 verification layers are staged. T2 and T3 are not built. |
+| D11.1.2 | Partial: the main clients are extracted. The remaining IO surface is incomplete. |
+| D11.2.1–D11.2.4 | Components only (2026-11-02). |
+| D11.2.5 | Partial: the experimental host keeps data. Uninstall integration is pending. |
+| D11.3.1 | Partial: in place for Lambda rows on macOS. |
+| D11.3.2 | Partial: in place for the macOS core profile. Physical permission and hot-plug qualification are pending. |
 
 ## Appendix B — Open Design Issues (DO#)
 
-Numbered `DO#` (design-open); each links to its record.
+Each entry states the question and a pointer. The deliberation is in the
+record. Closed entries (DO15, DO26, DO30) and the history of open entries are
+in the [implementation history §3](../vibe/impl/Lambda_Impl_Formal_Design_History.md#3-open-issue-history).
 
-**Data representation**
-- **DO1** Nullable-lane residue: boxed fallback for `any`/`number`/unions
-  (confirm); absent-vs-null-valued optional field observability;
-  flow-proof scope; native `pn` write-back ABI; ArrayNum re-promotion.
-  [Nullable §10]
-- **DO25** Node-identity carrier and operations (S5.1.4v2, D2.6.8): where
-  the identity lives (a header word costs every container one word; a
-  side table keyed by address needs explicit copy on every COW detach; an
-  attribute is visible to formatting), the universal id form (document path
-  + node id, one scheme for local and online documents), which runtime
-  operations copy it, and whether `===` needs a scalar-id fast path.
-  Deliberately unruled on 2026-09-03; semantics side is SO39. [OB10]
-- **DO2** Scalar-home audits: result-bearing dispatch-helper enumeration;
-  `start`/await resume slot reads; exception-peek rematerialization;
-  RetItem-vs-Item ABI census; donated-home lifetime proofs. [SG §5]
-- **DO3** Box/unbox: union params stay boxed (revisit?); return-type
-  participation in unboxed-call selection; varargs policy.
-- **DO4** ValueRep: `MirValue` size (measure first); whether
-  `FnValueAnalysis.actual_rep` becomes the planned-occurrence source or is
-  deleted — no second analysis ledger. [Lane §9]
+**Values and containers**
+- **DO1** Nullable-lane residue: boxed fallback for `any`, `number` and
+  unions; observability of an absent versus a null-valued optional field; the
+  scope of flow proofs; the native `pn` write-back ABI; ArrayNum
+  re-promotion. [Nullable §10]
+- **DO2** Scalar-home audits: result-bearing dispatch helpers, resume-slot
+  reads, exception-peek rematerialization, the RetItem census and
+  donated-home lifetime proofs. [SG §5]
+- **DO3** Boxing: do union parameters stay boxed? Does the return type take
+  part in unboxed-call selection? What is the policy for variadic functions?
+- **DO4** `MirValue`: its size (measure first), and whether the planned
+  occurrence source replaces the actual-rep analysis. No second analysis
+  ledger. [Lane §9]
+- **DO25** Node identity (D3.1.3, S5.1.4v2): where the identity lives, the
+  universal ID form, which operations copy it, and whether `===` needs a fast
+  path. [OB10; Design_Reference §4]
+- **DO27** Instance type alteration (S2.1.5): can reconstruction reuse the old
+  buffer, and how are extra fields carried? [OB18]
+- **DO28** Tier carrier divergence for annotated module bindings: one carrier
+  for each declared contract at the shared boundary would remove the guard.
+  [D3.2.2, D4.2.1]
+- **DO31** Can an object declaration also name an element tag, and how do
+  the tags of a hierarchy relate? [D3.1.1]
+- **DO32** Virtual PDF output: wider pure-producer demand, retained-child
+  representation (SO48), remaining object encodings, native helpers and
+  Radiant integration. [PDF_Output §5.6]
 
-**Memory & GC**
-- **DO5** Numeric GC-fallback end state: per-boundary inventory to zero,
-  then delete `scalar_heap`; any future donated-persistent-home protocol
-  needs explicit owner/lifetime and a borrowed-vs-retained public ABI.
-  [Stack_API §15.5–15.6]
-- **DO6** Side-root slot metadata (boxed-Item vs raw-pointer tag) — only
-  needed for a moving collector; `Rooted` cached-raw-copy idiom for hot
-  native loops. [Rooting CQ6/CQ7]
-- **DO7** Stack maps (KIV) — the only route to zero mutator rooting cost;
-  requires forking the MIR backend. Moving/generational collection stays a
-  non-goal; exact mutable homes are prerequisite infrastructure only.
-- **DO8** CW4 shared-flag → saturating count/GC-refresh: blocked on CW5
-  counters from a live corpus; element chunked-children representation for
-  huge fan-out gated on the editor benchmark.
-- **DO9** Memory Context Stage 2 opens, incl. measuring MIR JIT code-page
-  bytes; RG G1 defect: `push`/`splice` bypass E211 on a module-level
-  `let`, breaking RG14 and the `fn`-purity claim.
-- **DO10** SF verification items: concat memcpy without tail-payload
-  rebase (latent dangling wide scalars); temporaries live across a
-  mid-expression `wait`; closure-env precise-tracing layout split.
+**Memory and GC**
+- **DO5** Numeric GC fallback: bring the per-boundary inventory to zero, then
+  delete the scalar heap. A donated persistent home needs an explicit owner
+  and a borrowed-versus-retained ABI. [Stack_API §15.5–15.6]
+- **DO6** Side-root slot metadata (boxed Item versus raw pointer), needed only
+  for a moving collector; the cached-raw-copy idiom for hot native loops.
+  [Rooting CQ6/CQ7]
+- **DO7** Stack maps (kept in view): the only route to zero rooting cost in
+  the mutator; they need a fork of the MIR backend. A moving or generational
+  collector stays a non-goal.
+- **DO8** COW counts: a saturating count waits for live-corpus counters. A
+  chunked-children element for huge fan-out waits for the editor benchmark.
+- **DO9** Memory Context stage 2, including MIR code-page bytes; `push` and
+  `splice` on a module-level `let` bypass E211.
+- **DO10** Stack-frame checks: concat without tail-payload rebase;
+  temporaries live across a mid-expression `wait`; the layout split for
+  precise closure-environment tracing.
+- **DO24** Can a compiler-generated wide temporary be live across a loop back
+  edge under the D6.2.3 reclaim? The emitter must prove the answer before the
+  reclaim is gated on it. [RVO11, Return_Value §4a]
 
-**Compilation**
-- **DO11** Dual-func: O1 promotion-aware numeric inference and lowering
-  (Stage-1 boundary only today); O6 guard-failure counters; O14 cold
-  boxed bodies still JIT at startup — lazy slow-path generation belongs
-  with the cache work; the DF12 "SPECULATE INT" revisit.
-- **DO12** MIR cache: GC-root registry reset under L1 (verify before
-  relying); thunk identity under lazy gen; name-pool growth bound
-  (never reset — needs a high-water metric); L3 opens (Lambda
-  `expr_data` production, `MIR_link` NULL-interface behavior, x86 rel32
-  survivorship, Model-A hit-path cost, main-script caching,
-  per-function granularity).
-- **DO13** Emission testing: guest-transpiler scope (no guest is hosted
-  since `lang-python` was removed, 2026-10-07); MT6 coupling spike; a clean zero-root-elision
-  fixture. MIR-Direct lacks all of C2MIR's sys-func specializations
-  (`fn_pow_u`, native `sin`/`sqrt`) — deliberately pinned by a forbid
-  fixture; porting them is a decision, not a drift.
-- **DO14** Unified AST: the "views" fourth variance tier (adopt only when
-  a real shared pass asks); C2MIR retirement revisit after Phase 4.
-- **DO15** *(resolved 2026-08-07)* Online exception-poll doc status
-  conflict: verified landed in `52c0f3c02` (2026-07-24) — `exc_track` is the
-  live mechanism, the G1 peephole and `jm_optimize_exception_polls` pass are
-  deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
-  OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
-  JR3.
-- **DO25** Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module
-  treatment under the MT7 emission budgets (AIO2); cross-context visibility of
-  promotion cells (AIO8); loop-head handoff breadth — loops outside the
-  eligible shape, a second handoff loop per definition, work-weighted
-  counting, and a per-Script image budget (AIO13); and the remaining full
-  call-site matrix
-  needed to widen promotion beyond the current fail-closed boundary (AIO1).
-  The release AUTO correctness gate is green; these are follow-on tiering
-  breadth/performance questions, not correctness blockers. [Ast_Interpreter
-  AIO1–AIO13]
+**Compilation and execution**
+- **DO11** Dual functions: promotion-aware numeric inference, guard-failure
+  counters, lazy generation of cold boxed bodies, and the "speculate int"
+  revisit.
+- **DO12** MIR cache: GC-root registry reset under L1, thunk identity under
+  lazy generation, a growth bound for the name pool, and the L3 open items.
+- **DO13** Emission testing: guest-transpiler scope, the MT6 coupling spike, a
+  clean zero-root-elision fixture, and the missing MIR Direct sys-func
+  specializations (pinned by a forbid fixture).
+- **DO14** Unified AST: the "views" variance tier (adopt only when a shared
+  pass needs it).
+- **DO29** Typed `var` rebinding: arbitrary places, async rebinding, and a
+  scalar-lane binding passed to an untyped `var` parameter. [COW §11.10]
+- **DO33** Interpreter tier breadth (D8.3.2): satellite budgets under MT7,
+  cross-context promotion cells, loops outside the eligible shape, a second
+  handoff loop per definition, work-weighted counts, an image budget, and the
+  call-site matrix for wider promotion. [Ast_Interpreter AIO1–AIO13]
 
-**Runtime services & modules**
-- **DO16** Name identity: temporal canonical accepted; dynamic-intern
-  growth bound (KIV); pooled-flag audit; GOT rebuild on L1 in-memory
-  cache hits must not be skipped; mapped-backing granularity; and the
-  whole **MIR-cache reconciliation** (NI §8) — settled jointly with const
-  pool on String/NameMeta ABI versioning and NameId-vs-SectionNameId
-  reference tagging.
-- **DO17** Const pool: decimal sharing scope; datetime packing;
-  cross-module literal dedup (KIV); mapped-leaf page retention; the
-  eager-materialization benchmark (gates the document path); serializer
-  heuristics; per-block compression (KIV); incremental-append semantics.
-- **DO18** Sys-func registry: the public mutation convention (owner-
-  returning vs unit) and `splice`'s public result; the confirmed ArrayNum
-  carrier violations (§6.2) unfixed.
-- **DO19** Jube: `js_globals.cpp` allowlist audit; WPT harness choice
-  (before `web-streams`/`web-crypto` land); data-pack design (first
-  adopter); `dynamic_lookup` retirement (bounded meanwhile by the D7.3.6
-  allowlist, which Windows hosts do not yet apply); the Radiant-domain host API and
-  the Lambda↔Radiant embed contract; remaining IO policy details (gate taxonomy,
-  realms, audit format and platform profiles; app/script defaults, settings,
-  and update authority are ruled in D7.5.5–D7.5.8); T2 marshaled interface +
-  per-platform sandbox profiles; JS semantic-adapter items 1–8 before POC-1 step 3;
-  owning-vs-non-owning `JubeTypeDef`; Windows loading parity. (The ten
-  Lang_Hosting §17 follow-up ADRs lapsed with hosted-language support,
-  removed 2026-10-07.)
-- **DO20** Cross-isolate lifetime for shared graph Items (promote-on-share
-  recommended) — must be decided before thread-mode workers; prerequisite
-  is closing the C4.1 aliasing catalog. [Concurrency O-D]
-- **DO21** Static modules: Class F scheduling (the browser-style
-  engine/bindings split is the eventual shape); profile-B headless audit;
-  the §2.2 runtime-native IO inventory completion; Windows per-module
-  export macros.
+**Runtime services and modules**
+- **DO16** Name identity: the dynamic-intern growth bound, the pooled-flag
+  audit, GOT rebuild on L1 hits, mapped-backing granularity, and the MIR-cache
+  reconciliation (with DO17). [NI §8]
+- **DO17** Const pool: decimal sharing, datetime packing, cross-module literal
+  dedup, mapped-leaf page retention, the eager-materialization benchmark,
+  serializer heuristics, compression and incremental append.
+- **DO18** Sys-func registry: the public mutation convention, the public
+  result of `splice`, and the confirmed ArrayNum carrier violations.
+- **DO19** Jube: the globals allowlist audit, the WPT harness, the data-pack
+  design, `dynamic_lookup` retirement, the Radiant-domain host API, the
+  remaining IO policy details, the T2 interface and sandbox profiles, the JS
+  semantic-adapter items, `JubeTypeDef` ownership and Windows parity.
+- **DO20** Cross-isolate lifetime for shared graph Items (promote-on-share is
+  recommended). Decide it before thread-mode workers. [Concurrency O-D]
+- **DO21** Static modules: Class F scheduling, the profile-B headless audit,
+  the runtime-native IO inventory and Windows export macros.
 
-**Type & shape**
+**Types and shapes**
 - **DO22** First-class `Type*` representation needs its own design record:
-  today the kind-discriminated layout is code-authoritative only; union
-  normalization's canonical ordering is unpinned; the type-graph
-  de-pointering census (CP §6 census C) is deferred to the same future
-  doc (` §2-types` is its designated home).
-- **DO23** Shape system opens: cross-`Input` type sharing — each `Input` grows its own transition tree (D3.4.3v3) — and shape serialization. *Closed 2026-09-25 with the shape pool's retirement:* the pool's hash-collision policy, its element-name-as-attribute-zero encoding, parse-vs-runtime interning (Shape_Pool Phase 5) and `CachedShape.ref_count`; `byte_offset`'s exclusion from identity is stated in D3.4.2v2.
-- **DO24** Unnamed wide temporaries crossing a loop back edge, under
-  D5.2.3's reclaim. **D5.2.2v3 settles the named case**: a wide-capable
-  mutable local owns a slot allocated at its declaration, which precedes the
-  loop and therefore sits below the loop-entry watermark, so the reclaim
-  cannot reach it while per-iteration transients above it are freed. What
-  remains open is whether a *compiler-generated* wide temporary — not a
-  source binding, so it receives no slot — can be live across a back edge.
-  That set ought to be empty once bindings own their storage, but the
-  reclaim must be gated on the emitter positively establishing it, not on
-  the assumption: a wrong answer is a use-after-free, not a slowdown. The
-  question is now bounded and per-loop rather than open-ended.
-  [RVO11, Return_Value §4a]
-- **DO26** The D2.6.6v2 migration, **updated after phase 1 landed and phase 2
-  began, 2026-09-03**. The phase-2 flip is site-classified: ~150 sites alias
-  MAP and ~15 alias ELEMENT (both just lose their object arm once the value IS
-  a map or element); ~35 group all three; ~40 are genuinely nominal (method
-  resolution, literal construction, `type()`/`name()`, printing, formatting,
-  the MIR method prologue) and must read the record; and ~15 assume the TypeId's
-  numeric position (`total_type_rank`, `type_info`, `get_type_name`, the
-  contiguous RANGE..OBJECT band checks in `lambda-data.cpp`, `mark_editor`,
-  `transpile-mir`, and `dom_element`). The ordering band is a switch, not a
-  table: `total_type_rank` in `lambda-eval.cpp` returns 10 for object between
-  map's 9 and element's 11, and must key on the record instead. Settled: `ArrayNum` joined the hierarchy in phase 1 and shares
-  `List`'s header exactly; the raw-offset audit found sites only in the GC, the
-  JIT, and `mark_builder`'s inline-data allocations — `lambda/dom/`,
-  `radiant/`, `lambda/input/` and the JS MIR lowering use member access
-  throughout. **Closed by USER ruling 2026-09-03: the array-header growth needs no
-  benchmark gate** — *"no need to measure/benchmark, this will be our container
-  layout."* Post-change release timings kept only for the record (best of three,
-  seconds): array1 0.16, quicksort 0.12, gcbench 2.75, richards 3.80,
-  mandelbrot 3.76. The `extra` JS-properties slot and `has_js_props` are also
-  retired, so phase 1 is complete and bit 6 is free for `is_nominal`. Nothing
-  remains open in this entry; phase 2 is tracked by the D2.6.6v2 phase-2 row.
-  [OB20, OB22]
-- **DO27** Representation of instance type alteration (S2.1.5): whether
-  reconstruction reuses the old buffer when the declared prefix is a
-  compatible superset, and how extras are carried. Undesigned. [OB18]
-
-- **DO28** Tier carrier divergence for annotated module bindings: the eager
-  module init keeps a trusted `let T: string[] = [...]` literal as a boxed
-  Array-of-Items, while T0's declaration boundary (`lambda_type_check` via
-  `interp_coerce_declared_array`) rebuilds a pointer-lane element contract
-  into its native carrier. Unobservable within a tier (P6), it surfaced when a
-  satellite decoded the T0 slab value with the eager assumption (base642 on
-  the auto tier read every table element as null). The read now takes the
-  generic path under a satellite; the representation choice itself is open --
-  one carrier per declared contract at the shared boundary would retire the
-  guard (D2.6.2, D3.2.1).
-- **DO29** Typed `var` parameter rebind on the eager tier. D8.1.1v8 keeps
-  T0 semantics on the auto tier by pinning a body that rebinds a typed `var`
-  parameter (and its direct satellite callers), because the raw entry has no
-  home to publish through. The eager whole-module tier (`LAMBDA_EXEC_BACKEND=jit`)
-  has the same gap on its direct native edge -- the caller passes the raw
-  container and never reloads, so `pn rebind(var x: float[]) { x = fill(2,
-  v) }` leaves the caller's binding unchanged where T0 publishes the new
-  array (fixture `test/lambda/proc/interp_typed_var_rebind.ls`, golden is
-  T0's; the auto tier matches it). Closing it is CW33's typed
-  `Container**` half on the raw entry (COW doc §11.10), not a satellite
-  matter.
-  **Partial implementation, 2026-09-10:** eager typed-array binding arguments
-  now transport/reload precise root-slot homes, including wrapper forwarding
-  and COW detach after nested capture; the cited rebind fixture passes eager
-  JIT too. Typed-record, arbitrary-place and async rebinding remain outside
-  this increment, and satellite eligibility restrictions are unchanged.
-  See `vibe/impl/Lambda_Impl_Typed_Array.md` §14 for scope and verification.
-  **Closed for scalar and record rebinds, 2026-09-14 (D8.1.1v10):** the
-  eager tier had no home at all for a typed non-array `var` position --
-  `pn inc(var n: int) { n = n + 1 }` rebound only the callee's lane register
-  (every scalar lane, `string`, records and their optional forms; T0 and the
-  auto tier were right). Every publishable `var` position now consumes a home
-  and publishes its final value through the declared contract lane, the `_b`
-  adapter forwards the cell to the raw body, and the auto-tier rebind pin is
-  gone (fixture `test/lambda/proc/cow_var_typed_rebind.ls`). Still open:
-  arbitrary-place (`f(var m.rows[i])` is a CW25 leaf borrow, not a home) and
-  async rebinding, and a scalar-lane binding passed to an *untyped* `var`
-  parameter, which would need a mid-function carrier switch (D3.3.4) and so
-  keeps the in-place-only behaviour.
-- **DO30** *(closed 2026-09-07 — misattributed)* "Eager inference slower
-  than boxed bodies on splay." The 256 ms auto figure that the cluster
-  (446 ms, the eager tier's own time) seemed to lose came from the
-  one-definition satellites' run under-tracing the tree: their `right`
-  links sat in `null`-typed lanes at offset 17 and were freed while linked
-  (collections traced 17k of 420k objects), so the collector's marks were
-  cheap and wrong. The inference side was tested and rejected: not
-  counting a comparison against an untyped member read as numeric use kept
-  splay's `key` boxed, changed nothing on the eager tier (1.03) and cost
-  binarytrees 1.24x and gcbench 1.26x. The defect is D4.3.4's rule; with it
-  every tier traces the whole tree and the auto tier runs splay at the
-  eager tier's time by right.
-- **DO31** Whether an object declaration may name an element tag — `type <B> { x: int; string* }`, B being both the type name and the tag — and how a hierarchy's tags would relate. Deferred 2026-09-25: a nominal name is the type's name only and is never matched against a tag (D2.6.6v3); a tag is enforced by a structural element pattern, `type e = <tag …>`. [Type_Object OB23]
-
-- **DO32** Virtual PDF output follow-up: extend pure-producer demand coverage,
-  retained-child representation (SO48), remaining object encodings, phase-2
-  native helpers and production Radiant integration. Explicit pure-result
-  demand, shared counting/encoding, byte accounting and expression rollback
-  are ruled in D2.6.12v3/D8.2.6v2; general value calls may still materialize.
-  [PDF Output §5.6](../vibe/Lambda_Design_PDF_Output.md#56-what-the-virtual-list-resolves-and-what-remains)
+  the kind-discriminated layout, the canonical order for union normalization,
+  and the type-graph de-pointering census.
+- **DO23** Shapes: cross-`Input` type sharing and shape serialization.
 
 ## Appendix C — Decision-Record Index
 
@@ -3192,54 +1918,48 @@ Numbered `DO#` (design-open); each links to its record.
 |---|---|---|
 | D1 | JA4/JA13, J5, P1–P10, LC/Lane/MT preambles, REH-D1–REH-D5, rules 5/7/14 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D2.1 | Item_Boxing §0–§8 (R7–R10, W1–W3) | `Lambda_Design_Item_Boxing.md` |
-| D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
-| D2.2.5 | MVP-Lmd integer subtype (USER, 2026-10-07) | [JS_MVP_Lmd §9](../vibe/jube/JS_MVP_Lmd.md#9-integer-tuning-phase) |
-| D2.3 | Box_Unbox, Box_Unbox2 (both retired, C-transpiler era); DF1, DF2, DF4, DF15; Nullable §7.2 | `vibe/impl/Lambda_Box_Unbox (retired).md`, `vibe/impl/Lambda_Box_Unbox2 (retired).md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Compiling_Nullable.md` |
-| D2.6.12v2 | PDF virtual-list and dictionary MVP | `Lambda_Design_PDF_Output.md` §5.4–§5.6 |
-| D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
-| D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |
-| D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
-| D2.8 | TE-15/TE-17/TE-18; TE-18.1–TE-18.2; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Type_Error_Handling.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
-| D5.2.1v5 | TE-13.2–TE-13.3; Return_Value §2–§5 | `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Compiling_Return_Value.md` |
-| D3.2.2v3, D3.2.3v3 | TE-18.1–TE-18.2 | `Lambda_Design_Type_Error_Handling.md` |
-| D2.9 | Mark file extensions (2026-10-02) | `input/Input_System.md` §Mark file extensions |
-| D2.10 | XHTML input (2026-10-15) | `input/Input_XML.md` §XHTML admission |
-| D2.11 | Shared SVG admission, DOM export and virtual-frame snapshots (USER, 2026-10-18) | [Radiant_SVG2 §SVG parsing admission](../vibe/radiant/Radiant_SVG2.md#svg-parsing-admission), [§DOM export and virtual-frame snapshots](../vibe/radiant/Radiant_SVG2.md#dom-export-and-virtual-frame-snapshots) |
-| D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13/TE-19; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
-| D3.5 | Binary Schema fixed-record/native profile | `Lambda_Type_Binary_Schema.md` §10 |
-| D3.4 | Shape_Pool §1–§8; Shape_Transitions §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b; JSCU33; JS Tune History §4.3 (Tune10 shape root) | `Lambda_Shape_Pool.md`, `Lambda_Design_Shape_Transitions.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md`, `Lambda_Design_Structs_JS.md`, `jube/JS_Tune_History.md` |
-| D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
-| D4.2 | Memory_Context stages; Mem_Heap §1.3–§1.4, §2, §9 (MP-13, MP-14, MP-16–MP-18) | `vibe/Memory_Context.md`, `Lambda_Design_Mem_Heap.md` |
-| D4.3 | GC2 §4–§12 | `Lambda_Garbage_Collector2.md` |
-| D4.4 | CW1–CW21, CW34–CW37 | `Lambda_Design_Runtime_COW.md` |
-| D4.5 | Memory_Model §5–§7; Memory_Safety_Template §2.3 (D4.5.2) | `Lambda_Design_Memory_Model.md`, `vibe/Memory_Safety_Template.md` |
-| D4.6 | NI1–NI16, W1–W6 | `Lambda_Design_Name_Identity.md` |
-| D4.7 | CP1–CP26 | `Lambda_Design_Const_Pool.md` |
-| D5.1–D5.3 | SF1–SF20 (+ SF20 addendum 2026-09-07), OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C; JSCU9–JSCU14, JSCU25–JSCU26 | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Structs_JS.md` |
-| D5.2, D2.7.2, D8.4.2 | RV1–RV16 (+ RV3a, RV10a, RV14a), RVO1–RVO11 | `Lambda_Design_Compiling_Return_Value.md` |
-| D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
-| D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
-| D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5; Design_Procedural §5.3 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
-| D6.1.2v2, D6.2.3v3 | Local control dependencies and confined procedure captures (USER, 2026-11-02) | `Lambda_Design_Procedural.md` §5.3, §6 |
-| D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
-| D5.1.1v3, D5.3.6v2, D6.1.3v2, D6.3.3v2, D7.4.2v2, D8.1.1v16, D8.3.4v4 | RA1–RA15 | `Lambda_Design_Runtime_Async.md` |
-| D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
-| D7.1 | SM1–SM16 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
-| D7.2 | RG14; DF15; ER-D2; MC1; UA editing; TeX engine (D7.2.7v2); Demo_Mail ML11, MQ12 (D7.2.4v4) | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20, `vibe/latex/Lambda_Design_TeX_Engine.md`, `vibe/Lambda_Demo_Mail.md` §5.2 |
-| D7.3–D7.5 | JA1–JA16 (D7.3.6: JA5.1); Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
-| D7.5.4 | Audible-output gate (USER, 2026-10-19) | [Radiant_Design_Speech §5, §9](../vibe/radiant/Radiant_Design_Speech.md#5-policy) |
-| D7.5.5–D7.5.8 | App/script defaults, protected grants, and package auto-update (USER, 2026-11-02; JA16 follow-on) | [Lambda_Design_App_Safety §4.1, §6.4, §7.3, §8.3](../vibe/Lambda_Design_App_Safety.md), `Lambda_Design_Jube_Architecture.md` JA16 |
-| D7.5.9 | Persistent data retained on uninstall; deletion is a separate explicit action (USER, 2026-11-03) | [Lambda_Design_App_Safety §7.1](../vibe/Lambda_Design_App_Safety.md#71-storage-model) |
-| D7.5.10 | Explicit microphone acquisition and grants (USER, 2026-11-03) | [Radiant Scene3D §9.3](../vibe/radiant/Radiant_Design_Scene3D.md#93-microphone-input) |
-| D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune_History.md` §4.6 |
-| D8.1.1v17 | RI1–RI6 | `Lambda_Design_Repl_Interp.md` |
-| D8.1.1v18 | AI25 | `Lambda_Design_Ast_Interpreter.md` |
-| D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
-| D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune_History.md` §4.3, `Lambda_Design_Runtime_Error_Handling.md` |
+| D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15; JS_MVP_Lmd §9 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md`, `Lambda_Design_Stack_API.md`, `jube/JS_MVP_Lmd.md` |
+| D2.3 | DF1, DF2, DF4, DF15; Nullable §7.2; Lane §1–§9 | `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Compiling_Lane.md` |
+| D2.4 | Nullable §1–§10 | `Lambda_Design_Compiling_Nullable.md` |
+| D2.5 | TE-15, TE-17, TE-18.1–TE-18.2; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Type_Error_Handling.md` |
+| D2.6 | SG1–SG8; SF15 | `Lambda_Design_Scalar_GC_Invariant.md`, `Lambda_Design_Stack_Frame.md` |
+| D3.1 | OB1–OB23 | `Lambda_Type_Object.md` |
+| D3.2 | Nullable §6; CW16; Int_Type §5.8 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md` |
+| D3.3 | LR09-R2/R3; Design_Syntax §7.27 | `Lambda_Issue_Ledger.md`, `Lambda_Design_Syntax.md` |
+| D3.4 | Shape_Pool §1–§8; Shape_Transitions §1–§8; Transpiler DD1–DD4; NI10–NI18; TE §6 B7b; JOP1–JOP5; JSCU33 | `Lambda_Shape_Pool.md`, `Lambda_Design_Shape_Transitions.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md`, `Lambda_Design_Structs_JS.md` |
+| D3.5 | PDF_Output §5.4–§5.6 | `Lambda_Design_PDF_Output.md` |
+| D4.1–D4.3 | C8.5-4, C9a; TE-1, TE-6, TE-10, TE-13, TE-19; DF12/DF13; B7, TI6; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Type_Error_Handling.md`, `Lambda_Design_Type_Infer.md`, `Lambda_Design_Type_Generics.md`, `Lambda_Design_Compiling_Dual_Func.md` |
+| D4.4 | Binary Schema §10 | `Lambda_Type_Binary_Schema.md` |
+| D5.1–D5.2 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1–§5, §9 (MP-12–MP-21); Memory_Context stages | `Lambda_Garbage_Collector.md`, `Lambda_Design_Mem_Heap.md`, `Memory_Context.md` |
+| D5.3 | GC2 §4–§12 | `Lambda_Garbage_Collector2.md` |
+| D5.4 | CW1–CW37 | `Lambda_Design_Runtime_COW.md` |
+| D5.5 | Memory_Model §5–§7; Memory_Safety_Template §2.3; Reactive_UI §5.3, §10.1 | `Lambda_Design_Memory_Model.md`, `Memory_Safety_Template.md`, `Lambda_Design_Reactive_UI.md` |
+| D5.6 | NI1–NI18, W1–W6 | `Lambda_Design_Name_Identity.md` |
+| D5.7 | CP1–CP26 | `Lambda_Design_Const_Pool.md` |
+| D6.1–D6.3 | SF1–SF20, OS1–OS11; Stack_API phases and invariants; CR1–CR8, RH1–RH8; RV1–RV16, RVO1–RVO11; RA1–RA15 | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Compiling_Return_Value.md`, `Lambda_Design_Runtime_Async.md` |
+| D6.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
+| D7.1 | U14, U26; Features §3.6; NM §6.2; IEH §5.3; ES48; Design_Procedural §6 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_DOM_Host_API.md`, `Lambda_Design_Procedural.md` |
+| D7.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5; Design_Procedural §5.3 | `Lambda_Design_Function_Arg.md`, `jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md`, `Lambda_Design_Procedural.md` |
+| D7.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
+| D7.4 | LC1v2 and call-ABI notes; IR1–IR8; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `Lambda_Design_Runtime_Error_Handling.md` |
+| D7.5 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
+| D7.6 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
+| D8.1 | CGP1–CGP21 | `Lambda_Design_Grammar_Parser.md`, `Lambda_Grammar_Parser.md` |
+| D8.2 | U1–U36 | `Lambda_Design_Unified_AST.md`, `Lambda_Design_JS_Unified.md` |
+| D8.3 | AI1–AI25, AIO1–AIO13; RI1–RI6 | `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_Repl_Interp.md` |
+| D8.4 | JSI1–JSI36 | `Lambda_Design_JS_Interpreter.md`, `jube/JS_MVP_Lmd.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |
-| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` |
+| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Design_Unified_AST.md` |
+| D9.1–D9.2 | SM1–SM17 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
+| D9.3 | RG14; DF15; ER-D2; MC1; Demo_Mail ML11 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Demo_Mail.md` |
+| D9.4–D9.5 | JA1–JA16 (D9.4.6: JA5.1); Native_Module §6–§10; Lang_Hosting §5–§13; DOM4 D4j–D4l | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_Type_Virtual.md`, `Lambda_Jube_DOM4.md` |
+| D10.1 | Mark file extensions; XHTML admission; SVG parsing admission and DOM export | `input/Input_System.md`, `input/Input_XML.md`, `radiant/Radiant_SVG2.md` |
+| D10.2 | UA editing; TeX engine; Pkg_Math §8, §11 | `radiant/Radiant_Design_Editable.md` §20, `latex/Lambda_Design_TeX_Engine.md`, `Lambda_Pkg_Math.md` |
+| D11.1 | JA10, JA16 | `Lambda_Design_Jube_Architecture.md` |
+| D11.2 | App_Safety §4.1, §6.4, §7.1, §7.3, §8.3 | `Lambda_Design_App_Safety.md` |
+| D11.3 | Speech §5; Scene3D §9.3 | `radiant/Radiant_Design_Speech.md`, `radiant/Radiant_Design_Scene3D.md` |
 
-The decision records preserve the full deliberations — every alternative
-that lost and the arguments that did not persuade. This specification is
-their distillation: the record governs the history; this document governs
-the design.
+The decision records keep the full deliberations: every alternative that lost,
+and the arguments that did not persuade. This specification is their
+distillation. The records govern the history; this document governs the
+design.

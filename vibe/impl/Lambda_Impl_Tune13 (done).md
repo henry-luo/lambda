@@ -10,8 +10,8 @@
   `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/Lambda_Design_Compiling_Lane.md`,
   and `vibe/Lambda_Semantics_Int_Type.md`
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S1.4–S1.6, S4.1, S4.5.3,
-  S11.4; `doc/Lambda_Formal_Design.md` D1.4–D1.6, D2.2–D2.6, D3.2–D3.3,
-  D4.4, D5.1–D5.3, D8.3–D8.4, D8.6
+  S11.4; `doc/Lambda_Formal_Design.md` D1.4–D1.6, D2.2–D3, D4.2–D4.3,
+  D5.4, D6.1–D6.3, D7.3–D7.4, D8.6
 
 ## 1. Headline numbers
 
@@ -66,7 +66,7 @@ trace shows this sequence:
 Ten thousand stores times an O(n) clone/validation path explains the result. The fix must preserve
 S11.4.1's checked-before-commit contract and S1.4's value/COW semantics, but a successfully
 admitted element stored through a representation-compatible lane already preserves the enclosing
-array contract. Re-walking the whole container is not required by D3.2.2 once the original
+array contract. Re-walking the whole container is not required by D4.2.3 once the original
 boundary proof and the admitted element together preserve the full contract.
 
 The interleaved archived/current release probe `test/benchmark/larceny/array12.ls` performs
@@ -92,7 +92,7 @@ an unguarded inferred narrowing, but not for an annotated guarded witness: the g
 the runtime representation and falls back safely after a real representation change.
 
 The remedy is to distinguish a declared contract witness from an inferred storage narrowing,
-not to trust a raw pointer indefinitely. D3.3.3 keeps narrowing local to its binding; D2.6 and
+not to trust a raw pointer indefinitely. D4.3.3 keeps narrowing local to its binding; D3 and
 S1.6 require the guarded representation change to remain observationally invisible.
 
 ### R22-3: Redundant direct-call container boundaries
@@ -105,7 +105,7 @@ an `int[]` parameter.
 This is safe to elide only from an explicit proof: the stable binding was checked before
 publication, its contract was not widened, and the direct callee expects the same full occurrence
 contract. Unknown, converted, nullable, borrowed-`var`, view, and representation-changing values
-retain the checked entry. This is the statically-proven path required by D8.3.2–D8.3.3, not a
+retain the checked entry. This is the statically-proven path required by D7.3.2–D7.3.3, not a
 TypeId shortcut.
 
 ### R22-4: Native results can lose their proof before a typed local boundary
@@ -116,7 +116,7 @@ arithmetic reaches a declared local but its AST contract/provenance is stale: th
 checks, and unboxes a value whose full source contract already proves identity admission.
 
 Builtin result contracts and expression `ValueRep`/provenance must reach boundary lowering
-explicitly. S4.1.2 already rules that `int` arithmetic stays `int`; D2.4 forbids reconstructing
+explicitly. S4.1.2 already rules that `int` arithmetic stays `int`; D2.3 forbids reconstructing
 that semantic or representation fact from the physical MIR register class.
 
 ## 3. What the C2MIR comparison does and does not prove
@@ -152,7 +152,7 @@ The following are the core Result18 items carried into Tune13:
 5. **Frame/root work after specialization (residual M8/D1b).** The unconditional side-stack ensure
    and dead prologue loads were already removed. Remaining work is profile-gated scalar-home,
    root-frame publication/clearing, and native leaf/recursive-frame reduction under the current
-   caller-donated-home and safepoint-current design [D5.2–D5.3].
+   caller-donated-home and safepoint-current design [D6.2–D6.3].
 6. **Typed-array entry/capability/frame residual.** Direct typed-array loads/stores and the
    typed-array native gate already exist. Tune13 must improve proof reuse and checked fallback,
    not add a second direct-addressing path.
@@ -173,26 +173,26 @@ and `levenshtein` remain a separate conditional track.
 1. **Inline guarded stores for annotated arrays.** Mirror the guarded read path: check current
    storage/element representation, require a compatible proved value lane, perform the raw store,
    and fall back to the checked helper on guard failure. Consume explicit expression
-   `ValueRep`/contract provenance; never probe `MIR_reg_type` for semantics [D2.4].
+   `ValueRep`/contract provenance; never probe `MIR_reg_type` for semantics [D2.3].
 2. **De-quadratify `lambda_array_set_checked`.** Admit the element once, preserve transactionality,
    clone only when COW ownership requires it, and remove the post-store whole-container validator
-   sweep when the element/store proof preserves the full array contract [S11.4.1, D3.2.2,
-   D4.4.1–D4.4.3].
+   sweep when the element/store proof preserves the full array contract [S11.4.1, D4.2.3,
+   D5.4.1–D5.4.3].
 3. **Keep guarded declared witnesses until a real invalidation.** Restrict conservative
    function-wide invalidation to inferred/unguarded narrowing. A guarded declared witness checks
    the live owner/representation and takes the cold fallback after detachment, demotion, view, or
-   replacement [D2.6, D3.3.3].
+   replacement [D3, D4.3.3].
 
 ### P1 — Boundary, expression-proof, and result-demand propagation
 
 4. **Stable array/occurrence direct-call proof.** Extend the existing stable-map proof to an exact
    stable array occurrence contract. The proof includes full `Type*`, nullability, element lane,
    non-widened binding identity, ownership/borrow mode, and current guarded capability. Mismatches
-   call the checked wrapper [S11.4.1, D8.3.2–D8.3.3].
+   call the checked wrapper [S11.4.1, D7.3.2–D7.3.3].
 5. **Builtin and native-expression result facts.** Publish exact result contracts and emitted
    representations for `abs`, `min`, `max`, `len`, native int arithmetic, and other audited
    builtins so identity declaration/assignment/return boundaries omit only the check, not a
-   required carrier conversion [D2.4, D3.2.1, D3.3.1].
+   required carrier conversion [D2.3, D4.2.1, D4.3.1].
 6. **Result-demand-aware `for` lowering.** Thread an explicit result-demand flag from content/call
    consumption into loop lowering. When the value is proved unused, execute the body and all
    effects but emit no comprehension array, push, spread, order/limit result work, or finalization.
@@ -201,7 +201,7 @@ and `levenshtein` remain a separate conditional track.
 7. **Finish v5 int proof propagation.** Ensure `int` arithmetic and `div`/`%` retain their full
    semantic contract and `INT_LANE` provenance through AST inference and lowering. Do not change
    S4.1/S4.5 semantics and do not infer from `MIR_T_I64`, which is shared by several unrelated
-   representations [D2.2.2, D2.4.1].
+   representations [D2.2.2, D2.3.4].
 
 ### P2 — Native returns, scalar homes, and reduced frames
 
@@ -213,8 +213,8 @@ and `levenshtein` remain a separate conditional track.
 
    A closed unannotated `pn` may receive a native implementation when every success exit proves
    the same carrier; this is an inferred implementation choice, not a new source contract
-   [D3.3.1–D3.3.2]. Declared return firewalls and raised diagnostics remain enforced through the
-   boxed wrapper/error lane [S11.4.2, D1.4, D8.3.3].
+   [D4.3.1–D4.3.2]. Declared return firewalls and raised diagnostics remain enforced through the
+   boxed wrapper/error lane [S11.4.2, D1.4, D7.3.3].
 9. **Remove boxed recursive result dispatch only from that proof.** For fib-class functions, raw
    recursive success results should feed native arithmetic directly; a guard failure, dynamic
    call, open result, or error-capable merge keeps the Item path. This is the load-bearing
@@ -223,7 +223,7 @@ and `levenshtein` remain a separate conditional track.
     fresh release profile attributes at least 10% of a target to boxed adapters, scalar-home
     adoption/restoration, root-frame clearing/publication, or equivalent frame work. Zero-root
     functions elide the root frame; other functions clear/publish only what the existing
-    `MirEmitter` liveness proof permits [D5.3.1, D5.3.4]. Keep stack-capacity checks and the cold
+    `MirEmitter` liveness proof permits [D6.3.1, D6.3.4]. Keep stack-capacity checks and the cold
     grow path; D1a already removed the unconditional ensure call.
 
 ### P3 — Conditional separate tracks
@@ -243,37 +243,37 @@ and `levenshtein` remain a separate conditional track.
   guarded loads/stores, admits compatible native RHS proofs, and emits a checked fallback for
   OOB, detached, widened, nullable, view, or otherwise representation-changing values. The
   fallback preserves `var` write-back and COW ownership; it does not infer semantics from
-  `MIR_reg_type` [D2.4, D2.6, S11.4.1].
+  `MIR_reg_type` [D2.3, D3, S11.4.1].
 - `lambda/runtime/lambda-eval.cpp` now recognizes the legacy non-nullable `ArrayNum` carrier as
   a valid representation proof, clones it through the normal COW path, and skips the whole-array
   validator only after the lane proof is re-established. The checked path remains transactional
-  and rejects an incompatible value before publication [S1.4–S1.6, S11.4.1, D3.2.2, D4.4].
+  and rejects an incompatible value before publication [S1.4–S1.6, S11.4.1, D4.2.3, D5.4].
 - The declared guarded witness is no longer discarded by a conservative function-wide
-  invalidation scan. Borrowed or widened roots still use the checked path [D2.6, D3.3.3].
+  invalidation scan. Borrowed or widened roots still use the checked path [D3, D4.3.3].
 
 ### P1 retained
 
 - Stable direct-call elision now covers exact non-widened array occurrence contracts, including
   element lane, full occurrence identity, and the current guarded binding witness; nullable,
-  borrowed, converted, and mismatched values retain the checked boundary [D8.3.2–D8.3.3,
+  borrowed, converted, and mismatched values retain the checked boundary [D7.3.2–D7.3.3,
   S11.4.1].
 - Exact native facts now flow through the audited scalar `abs`, `round`, `floor`, `ceil`, `trunc`,
   `min`, and `max` helpers. Indexed values and integer arithmetic reopen their native lane only
   when the same `mir_is_native_int_arith` predicate used by emission proves it. This predicate
   restriction was necessary: an early broader proof emitted an Item tag as a raw integer store,
   producing `inf` in the sequential probe and failing `nqueens`; the rejected form is not retained
-  [S4.1, S4.5.3, D2.2.2, D2.4.1].
+  [S4.1, S4.5.3, D2.2.2, D2.3.4].
 - `for` lowering now receives an explicit result-demand bit. Discarded procedural loops still
   execute effects and control flow but do not allocate, spread, push, order, or finalize a
-  comprehension result; observed loops retain the old materializing path [S1.4, D3.2, D8.3].
+  comprehension result; observed loops retain the old materializing path [S1.4, D4.2, D7.3].
 
 The structural fixtures are `test/mir/lambda/tune13_array_lane.ls` plus its expected output and
 MIR check, `test/mir/lambda/tune13_for_demand.ls` plus its expected output and MIR check, the
 updated `typed_array_guard.mir-check`, `tune13_array_boundary.ls` plus its expected output and
 MIR check, and `tune13_native_facts.ls` plus its expected output and MIR check. The two new
 fixtures lock the stable exact-array occurrence boundary against its widened fallback and keep
-audited `abs`/`min` integer result facts native through typed locals and returns [S4.1, D2.4,
-D8.3.2–D8.3.3]. The MIR budget was re-baselined for the justified guard growth: module
+audited `abs`/`min` integer result facts native through typed locals and returns [S4.1, D2.3,
+D7.3.2–D7.3.3]. The MIR budget was re-baselined for the justified guard growth: module
 instructions 1089, guarded-load instructions 102, guarded-store instructions 170; guarded-load
 roots/safepoints 3/4 and guarded-store roots/safepoints 5/7 [D8.6.1–D8.6.2].
 
@@ -284,7 +284,7 @@ adoption/restoration, boxed recursive adapters, or root-frame publication on Lam
 available `LAMBDA_PROFILE=1` trace is compilation-phase-only, and the current fib/fibfp release
 rows do not establish the required 10% runtime attribution or the required 15% target win. P2
 therefore does not enter under the stated gate; no scalar-home or root-clearing behavior was
-changed [D5.2–D5.3, D8.6.3].
+changed [D6.2–D6.3, D8.6.3].
 
 ### P3 explicitly deferred
 
@@ -294,7 +294,7 @@ shared copies, zero copied bytes, and zero map-admission copies. That maintained
 attribute loop concat, character boxing, generic indexing, or UTF-8 rescanning to a percentage;
 the entry threshold is therefore not met. The current typed rows were 65.8 ms for `base64` and
 46.5 ms for `levenshtein`, so neither meets the 20% retained-change threshold against its
-current untyped control or the archived row [S1.4–S1.6, D4.4].
+current untyped control or the archived row [S1.4–S1.6, D5.4].
 
 ## 7. Verification and release evidence
 
@@ -320,7 +320,7 @@ are: `nqueens` 5.90→2.17 ms (-63%), `quicksort` 40.8→5.02 ms (-88%), and `bo
 The retained changes obey the formal split: P0/P1 carry semantic and representation proofs
 through existing checked boundaries, while P2/P3 remain profile-gated non-entries. No legacy
 `--c2mir`, `transpile.cpp`, vendored MIR, or conservative native-stack scanning was changed
-[D1.6, D5.1–D5.3].
+[D1.6, D6.1–D6.3].
 
 ## 8. Non-goals and superseded Result18 items
 
@@ -329,7 +329,7 @@ through existing checked boundaries, while P2/P3 remain profile-gated non-entrie
 - Do not remove comprehension output based only on `AST_NODE_FOR_STAM`.
 - Do not remove root clearing from a store-before-first-call guess; use the canonical
   safepoint-current liveness machinery and D8.6.3 forced-GC oracle.
-- Do not add Lambda inline caches; specialization-over-caching remains D8.4.1.
+- Do not add Lambda inline caches; specialization-over-caching remains D7.4.1.
 - Do not modify `--c2mir`, `transpile.cpp`, `lambda/mir/`, or another vendored dependency [D1.6].
 - Do not carry forward the old 2–3x aggregate forecast. Each phase retains only measured wins on
   a fixed current population.

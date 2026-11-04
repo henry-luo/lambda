@@ -209,7 +209,7 @@ struct JsAstFunctionFacts {
     uint8_t observations = 0;
     bool has_direct_eval = false;
     // A direct eval in the body or in a nested arrow. Eval code resolves the
-    // function's `arguments` through its live environment (D8.1.3v21).
+    // function's `arguments` through its live environment (D8.4.3).
     bool observes_direct_eval = false;
     bool has_with = false;
     bool has_direct_super_call = false;

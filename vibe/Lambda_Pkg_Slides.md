@@ -8,10 +8,10 @@
 > **Scope:** a presentation package written primarily in Lambda Script, with
 > slide elements lowered to HTML/CSS/SVG and playback orchestrated in Lambda.
 > PPTX import and export are explicitly outside this phase.
-> **Spec linkage:** D7.2.4 (shipped package namespace), D7.5.3 (Lambda/Radiant
+> **Spec linkage:** D9.3.4 (shipped package namespace), D9.5.6 (Lambda/Radiant
 > boundary), S12.1.1v2 and S12.1.3 (effects and reactive templates), S2.6.3
-> (element content construction), D4.5.1v4 (Radiant ownership), D5.3.3 (precise
-> script roots), D4.6.1v3 (property identity).
+> (element content construction), D5.5.1 (Radiant ownership), D6.3.3 (precise
+> script roots), D5.6.1 (property identity).
 > **Authority:** this document proposes package behavior and additive host
 > mechanisms. It does not revise any formal semantics or design ruling.
 
@@ -21,18 +21,18 @@ These supersede the earlier text where they conflict (notably §5.2 and §10.1).
 
 | ID | Ruling |
 |---|---|
-| SLD1 | Slide decks are stored in `.slides` files: Mark syntax with a `<presentation>` root, read as format `slides` (D2.9.3). The file is data; code that builds a deck saves it with `output(deck, path, 'mark')`. |
+| SLD1 | Slide decks are stored in `.slides` files: Mark syntax with a `<presentation>` root, read as format `slides` (D10.1.3). The file is data; code that builds a deck saves it with `output(deck, path, 'mark')`. |
 | SLD2 | `lambda view deck.slides` runs the presenter script — the `slides` document transform, `lambda.slide.present.present(deck, {source_path})` — to transform and view the deck. |
 | SLD3 | Slides render on demand. Browsing or presenting never renders all slides at once; only exports (`snapshot`, `slides`, `handout`) may. |
 | SLD4 | Back-and-forth navigation changes only state, never slide markup: a slide renders once, the first time it is shown, and stays mounted; later visits toggle layer display, transition transforms and sampled visuals. |
 | SLD5 | Existing `.ls` decks are converted to `.slides` (Northstar, the introduction and the package-content demo). |
 | SLD6 | Detached DOM held only by script wrappers is reclaimed by one collection at an idle point once enough of it is stranded, not by charging GC allocation thresholds. |
-| SLD7 | Add a presenter console with notes/next-slide preview/timer; overview, slide picker, toolbar hiding, blackout and pointer; reusable themes/layouts and master slides. These are source-package features under D7.2.4/D7.5.3 and S12.1.3; SLD3/SLD4 still govern rendering. |
-| SLD8 | The 2026-10-25 editor request adds the transition gallery, effect variants, sound and per-slide advance settings, preview and Apply to All. Package sampling uses supported CSS clips and existing native byte audio; no new host waist is added (D7.2.5, D7.5.3, S12.1.1v2/S12.1.3). `start_slide`, host `activate` and `stop` let embedded hosts initialize and dispose playback without briefly starting another slide's sound/timer. See the implementation report and public API for behavior and verification. |
+| SLD7 | Add a presenter console with notes/next-slide preview/timer; overview, slide picker, toolbar hiding, blackout and pointer; reusable themes/layouts and master slides. These are source-package features under D9.3.4/D9.5.6 and S12.1.3; SLD3/SLD4 still govern rendering. |
+| SLD8 | The 2026-10-25 editor request adds the transition gallery, effect variants, sound and per-slide advance settings, preview and Apply to All. Package sampling uses supported CSS clips and existing native byte audio; no new host waist is added (D10.2.1, D9.5.6, S12.1.1v2/S12.1.3). `start_slide`, host `activate` and `stop` let embedded hosts initialize and dispose playback without briefly starting another slide's sound/timer. See the implementation report and public API for behavior and verification. |
 
 Earlier designs replaced the canvas with freshly parsed `[outgoing, incoming]`
 layer markup on every slide change (§10.1). That reparsed published Mark data
-into the document's `Input` arena each time; under D4.1.2 and D4.1.4v5 it could
+into the document's `Input` arena each time; under D5.1.2 and D5.1.4 it could
 never be released, so navigation storage grew without bound (17.5 KB per
 two-slide round after the other fixes). SLD3/SLD4 remove the reparse itself.
 SLD1/SLD2 are the user's choice of deck format and entry point; keeping decks
@@ -66,7 +66,7 @@ radius from `--slide-ui-*` custom properties whose fallbacks are the previous
 literal values, so existing decks render identically (Northstar's presenter view
 was compared pixel for pixel). A validated `ui` map in options or on
 `<presentation>` sets the properties on the player root and page body; option
-tokens override deck tokens. This is package behavior under D7.2.4 and adds no
+tokens override deck tokens. This is package behavior under D9.3.4 and adds no
 formal ruling. Public reference: [Player chrome](../doc/Lambda_Slide.md#player-chrome).
 
 ## 1. Purpose
@@ -136,7 +136,7 @@ conformance or performance measurement.
 
 | Foundation | Available today | Consequence for this package |
 |---|---|---|
-| Source packages | `lmd/package/`, canonical `lambda.*` imports | Use `lambda.slide` under D7.2.4. |
+| Source packages | `lmd/package/`, canonical `lambda.*` imports | Use `lambda.slide` under D9.3.4. |
 | Reactive templates | `view`, instance `state`, `on` handlers, `emit`, `apply` | Reuse for the player shell and discrete controls; S12.1.3. |
 | DOM operations | Selection, attributes, events and geometry; per-property style writes exist in the catalog | Reuse `dom`. *Since implemented:* `style_set_property` is realm-neutral and `presentation_style_set_property` adds the retained presentation layer. |
 | Rendering | HTML/CSS, SVG, opacity, clipping and transforms | Slides need no separate renderer. |
@@ -501,7 +501,7 @@ The shipped Play control supplies that schedule through the positive finite
 slide advance). `autostart` activates only entry cues. Dwell time is separate
 from sampled cue time so completed visuals remain fixed while waiting. This
 policy stays in the Lambda reducer and procedural frame handlers
-(S12.1.1v2/S12.1.3, D7.5.3).
+(S12.1.1v2/S12.1.3, D9.5.6).
 
 The toolbar provides a native range input for 0.5×–4× playback in 0.25× steps,
 with an accessible label and a live multiplier readout. A positive finite rate
@@ -582,9 +582,9 @@ source replacement or disposal, cancel its frame token and invalidate the old
 generation. Late delivery is ignored before resolving target nodes.
 
 Active targets are stable DOM handles, not cached raw layout `View*` pointers.
-DOM handle generations are checked after relayout/removal, under D4.5.1v4.
+DOM handle generations are checked after relayout/removal, under D5.5.1.
 Native queued callbacks/events retain script values through precise traced roots
-under D5.3.3; conservative native-stack scanning is not an option.
+under D6.3.3; conservative native-stack scanning is not an option.
 
 The host automatically cancels document-owned requests on destruction. This must
 not depend on a user script remembering to run cleanup after the document dies.
@@ -728,7 +728,7 @@ Do not treat viewport bounding boxes as untransformed object geometry.
 The names below began as API sketches; §11.1, §11.2 and the presentation-style
 channel of §13.5 are now implemented. Add
 shared operations through the existing DOM catalog/module contracts rather than
-hand-maintaining parallel Lambda and JS bindings. Preserve D7.5.3: `lambda-rt`
+hand-maintaining parallel Lambda and JS bindings. Preserve D9.5.6: `lambda-rt`
 must not link Radiant.
 
 ### 11.1 Required: Lambda-callable frame request and cancellation
@@ -799,7 +799,7 @@ dom.commit_visual_patches(owner, patches) -> success / checked error
 Each patch names a generation-checked target and typed supported properties.
 Validate the batch before committing, coalesce change notifications, then settle
 style/layout/paint once at the existing boundary. Reuse existing property
-metadata, parsers and consumers; D4.6.1v3 keeps canonical property identity.
+metadata, parsers and consumers; D5.6.1 keeps canonical property identity.
 This is a mechanism for any Lambda UI animation, not a native slide-effect API.
 
 Do not introduce a second style store to accelerate slides. If an animated-value
@@ -902,7 +902,7 @@ measured bottleneck warrants them. A debug build is never performance evidence.
 Bound object/DOM/resource retention during repeated navigation and long sessions.
 
 Implementation measurements now justify a retained presentation-style channel
-(D7.5.3, D4.5.1v4). Replacing a `style` attribute every sample also replaces its
+(D9.5.6, D5.5.1). Replacing a `style` attribute every sample also replaces its
 immutable Mark string; reclaiming parser scratch alone cannot bound the Input
 arena. The channel should store owned CSS values against generation-checked DOM
 nodes, keep authored attributes intact, preserve cascade precedence and reapply
@@ -917,15 +917,15 @@ storage rather than falling back at 64 records; record order and node pins remai
 intact. Handler temporaries use GC, while template bodies retain UI allocation.
 DOM records retain managed backing values until retirement and reload their
 borrowed buffers through the backing accessor after compaction
-(D4.1.1v2, D4.1.3, D4.3.1, D5.3.3).
+(D5.1.1, D5.1.3, D5.3.1, D6.3.3).
 Text and comment nodes retain their own backing values after detachment; adoption
 preserves the physical GC owner across runtimes. Roots are withdrawn before
 document resource destruction can tear down an adopted source heap.
-Ordinary published arena blocks cannot be discarded individually (D4.1.4v5);
+Ordinary published arena blocks cannot be discarded individually (D5.1.4);
 SLD3/SLD4 therefore remove per-navigation publication rather than reclaim it.
 
 Measured frame cost justified three further host mechanisms, none of them a
-slide model (D7.5.3). The journal records which property a presentation write
+slide model (D9.5.6). The journal records which property a presentation write
 changed, so a turn whose writes are all `opacity`, or `transform` that stays a
 transform, commits without cascade or layout (RAD_16 §8). Inline SVGs painted in
 one pass share one host style context. Inline-SVG raster layers key on content
@@ -984,8 +984,8 @@ must follow the project's approval and recorded-patch process.
 
 - [Formal semantics](../doc/Lambda_Formal_Semantics.md): S12.1.1v2,
   S12.1.3 and S2.6.3.
-- [Formal design](../doc/Lambda_Formal_Design.md): D7.2.4, D7.5.3,
-  D4.5.1v4, D5.3.3 and D4.6.1v3.
+- [Formal design](../doc/Lambda_Formal_Design.md): D9.3.4, D9.5.6,
+  D5.5.1, D6.3.3 and D5.6.1.
 - [Documentation convention](../doc/Doc_Convention.md): proposal status,
   authority and code-fence conventions.
 - [Lambda packages](../doc/Lambda_Packages.md) and

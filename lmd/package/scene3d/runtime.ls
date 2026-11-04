@@ -1,4 +1,4 @@
-// S12.1.1v3/D7.5.3v2: live scene commands cross the existing Radiant host boundary.
+// S12.1.1v3/D9.5.6: live scene commands cross the existing Radiant host boundary.
 import radiant
 
 pub pn play(node) { return radiant.scene3d(node, {operation: "play"}) }
@@ -29,7 +29,7 @@ pub pn audio_render_read(node, request) { return radiant.scene3d(node, {operatio
 pub pn audio_render_cancel(node, request) { return radiant.scene3d(node, {operation: "audio_render_cancel", payload: request}) }
 pub pn audio_render_close(node, request) { return radiant.scene3d(node, {operation: "audio_render_close", payload: request}) }
 
-// D7.5.4/S12.1.1v3: completed PCM streams through ordinary procedural IO authority.
+// D11.3.1/S12.1.1v3: completed PCM streams through ordinary procedural IO authority.
 pub pn audio_render_file(node, request, target) {
  let job=audio_render_snapshot(node,request)^
  if (job.state!="complete") { raise error("audio render: file output requires a completed job") }

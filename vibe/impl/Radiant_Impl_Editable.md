@@ -10,7 +10,7 @@ routing, provide the minimum DOM-compatible text/composition action needed by
 real editors, retain Radiant template editing on the same gate, and prove the
 result with CodeMirror 6, ProseMirror, and Editor.js end-to-end tests.
 
-> **Phase boundary (D7.2.5).** This file records the implemented Phase-1 gate
+> **Phase boundary (D10.2.1).** This file records the implemented Phase-1 gate
 > and its then-current capability limits through Phase 8. Section 20 of the
 > [design contract](Radiant_Design_Editable.md) supersedes its “no full UA
 > default” and “no `execCommand`” decisions. New UA editing policy, commands,

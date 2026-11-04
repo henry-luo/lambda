@@ -1,4 +1,4 @@
-// S9.1.3v3/D4.4.7: packed scalar places use boxed homes and retain exact lanes.
+// S9.1.3v3/D5.4.6: packed scalar places use boxed homes and retain exact lanes.
 import helper: .place_borrow_homes
 type Scalars = {tiny: float, flag: bool, text: string, wide: i64}
 type Cell = {k: int}

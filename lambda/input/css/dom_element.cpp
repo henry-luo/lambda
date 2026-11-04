@@ -817,6 +817,7 @@ static void dom_document_destroy_resource(lam::Own<DomDocumentResource>* link) {
 }
 
 void DomDocument::destroy() {
+    destroying = true;
     dom_retire_begin_destroy(this);
     mem_free(services.preferred_languages); services.preferred_languages = nullptr;
     lam::free_owned(services.pragma_language);
@@ -1106,7 +1107,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         if (native_element != &element->elmt) {
             element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
             if (doc->input && doc->input->ui_mode) {
-                // S12.1.3/D4.5.1v4: DOM writes and retirement cannot consume a retained pure value.
+                // S12.1.3/D5.5.1: DOM writes and retirement cannot consume a retained pure value.
                 Element* snapshot = &element->elmt;
                 if (!elmt_clone_type_for_mutation(snapshot, doc->input->pool, true)) return nullptr;
                 if (snapshot->data_cap > 0) {
@@ -1221,7 +1222,7 @@ DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* 
     return DomElement::create(doc, tag_name, native_element);
 }
 
-// fragment allocation belongs to the document node factory, independently of Range/layout (D7.1.3).
+// fragment allocation belongs to the document node factory, independently of Range/layout (D9.1.3).
 extern "C" DomElement* dom_document_fragment_create(DomDocument* doc) {
     if (!doc) return nullptr;
     return DomElement::create(doc, "#document-fragment", nullptr);
@@ -1277,7 +1278,7 @@ void dom_element_invalidate_custom_property_index(DomElement* element) {
     CssCustomPropertyIndex* index = element && element->ext
         ? element->ext->custom_property_index.get() : nullptr;
     if (!index) return;
-    // names and candidates borrow declaration storage; retire before recascade frees it (D4.5.1v4).
+    // names and candidates borrow declaration storage; retire before recascade frees it (D5.5.1).
     pool_free(element->storage_pool(), index->entries);
     pool_free(element->storage_pool(), index);
     element->ext->custom_property_index = nullptr;
@@ -1538,7 +1539,7 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_clear_custom_properties(element, CSS_CUSTOM_ALL);
     dom_element_invalidate_custom_property_index(element);
     style_epoch_selection_clear_element(element);
-    // retirement releases both the authored pool and its document resource registration (D4.5.1v4).
+    // retirement releases both the authored pool and its document resource registration (D5.5.1).
     if (element->ext && element->ext->inline_declarations)
         dom_document_release_resource(element->storage_owner(), element->ext->inline_declarations);
     if (element->ext) {
@@ -1815,7 +1816,7 @@ static bool dom_element_record_all_attributes(DomElement* element) {
     if (ext->attributes_are_recorded) return true;
     int count = 0;
     const char** names = element->attribute_names(&count);
-    // D4.5.1v4: the ordered list owns distinct expanded names; Mark mirrors only the first QName.
+    // D5.5.1: the ordered list owns distinct expanded names; Mark mirrors only the first QName.
     lam::Own<DomNamespacedAttribute> remainder = ext->namespaced_attributes;
     ext->namespaced_attributes = nullptr;
     lam::Own<DomNamespacedAttribute>* tail = &ext->namespaced_attributes;
@@ -1936,7 +1937,7 @@ void dom_attribute_node_detach(DomAttr* attribute) {
 }
 
 void dom_attribute_node_release_retired_storage(DomAttr* attribute) {
-    // values and names belong to the physical source pool even after adoption (D4.5.1v4).
+    // values and names belong to the physical source pool even after adoption (D5.5.1).
     const char* fields[] = {attribute->namespace_uri.get(), attribute->qualified_name.get(),
         attribute->local_name.get(), attribute->prefix.get(), attribute->value.get()};
     for (const char* field : fields) if (field) pool_free(attribute->storage_pool, (void*)field);
@@ -4697,7 +4698,7 @@ void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item curren
     TypeId kind = get_type_id(previous);
     if (kind != get_type_id(current)) return;
     if (kind == LMD_TYPE_ELEMENT) {
-        // a no-op rerender still replaces evaluator identities (D4.5.3).
+        // a no-op rerender still replaces evaluator identities (D5.5.3).
         dom_rebind_render_element(doc, previous.element, current.element);
     } else if (kind != LMD_TYPE_ARRAY) {
         return;
@@ -4789,7 +4790,7 @@ static DomElement* build_dom_tree_with_parent(Element* elem, DomDocument* doc,
     bool copied_for_view = false;
     if (doc->input && doc->input->ui_mode &&
             !(doc->page_kind == DOM_PAGE_KIND_HTML && dom_element_has_embedded_storage(doc, elem))) {
-        // D4.5.3: copy at the DOM boundary, after evaluation/render-map recording,
+        // D5.5.3: copy at the DOM boundary, after evaluation/render-map recording,
         // so each occurrence owns its embedded links without changing Lambda values.
         MarkBuilder builder(doc->input);
         Item copied = builder.deep_copy_for_view({.element = elem});

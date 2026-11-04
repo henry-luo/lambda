@@ -1,5 +1,5 @@
 // style-neutral controls with explicit change actions. Native control state is
-// synchronized by the same package policy as the styled families (D7.2.5).
+// synchronized by the same package policy as the styled families (D10.2.1).
 import c: .core.component
 import shared: .core.contract
 import control: .core.control

@@ -1065,3 +1065,31 @@ Required boundary behavior:
   span.
 - AOT compatibility and `entry_abi` versioning remain outside this
   implementation.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D6.2.2v2 → D7.2.2
+
+**D7.2.2** Dynamic calls dispatch through per-callee executable entries.
+LambdaJS function values carry distinct `[[Call]]` and `[[Construct]]`
+capabilities: call dispatch uses `fn->invoke`; construction uses an explicit
+construct entry and passes `newTarget` as an operand, never through a pending
+one-shot side channel. Builtin catalog IDs, names, formal lengths, and class
+labels are metadata and may not select runtime semantics; a declared native
+ABI may select a typed adapter once when the function is created. The
+JavaScript dynamic boundary remains `Item* + argc`; caller-donated scalar
+homes and precise rooted argument spans are ownership-qualified adapters to
+the same entries, not separate dispatch mechanisms. The 16-slot source-
+argument limit remains statically checked where possible with a runtime
+backstop; adapter spans are dynamically sized, precisely rooted, and
+LIFO-destroyed. Dynamic calls with named arguments and dynamic calls to
+`var`/inout signatures remain rejected. [Function_Arg, LC call-ABI; JC1–JC4]

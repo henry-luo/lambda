@@ -10,7 +10,7 @@ pub fn resource_path(file) any^ {
 }
 
 fn source(face) any^ {
-    // D7.2.9: bundled resources keep their URLs; only bytes-only custom faces embed.
+    // D10.2.4: bundled resources keep their URLs; only bytes-only custom faces embed.
     if (face.src is string and face.src != "") "url(" ++ format(face.src, 'json')^ ++ ")"
     else {
         let encoded = format(face.data, 'json')^;

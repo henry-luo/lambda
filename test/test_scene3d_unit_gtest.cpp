@@ -9123,7 +9123,7 @@ TEST_F(Scene3dTest, RecomputedVariablesAndBackgroundUrlsKeepRetainedStorageBound
     }
     size_t bytes_after = 0, count_after = 0;
     pool_get_stats(layout.pool, &bytes_after, &count_after);
-    // D4.5.1v4: temporary substitution trees cannot become retained view storage.
+    // D5.5.1: temporary substitution trees cannot become retained view storage.
     EXPECT_EQ(bytes_after, bytes_before);
     EXPECT_EQ(count_after, count_before);
 }

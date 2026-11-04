@@ -5,7 +5,7 @@ feature/campaign ratchets, reviewed parser gaps, parser stability, explicit
 T0/JIT/AUTO parity, and forced-GC/poison/root-witness parity. The reference
 grammar is `lambda/tree-sitter-lambda/grammar.js`, used only as a first cut;
 the C parser remains production and neither parser wins a difference without
-review (**D8.1.2v3**, **S16**).
+review (**D8.1.1**, **S16**).
 
 The parser lane also mutates raw byte streams (including NUL and invalid UTF-8)
 and retains only novel C-parser structural signatures under

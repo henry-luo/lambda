@@ -1,4 +1,4 @@
-// S7.1.3v2/S9.1.2/D5.3.4: misses and operand calls preserve checked ownership.
+// S7.1.3v2/S9.1.2/D6.3.4: misses and operand calls preserve checked ownership.
 pn byte_store(index: int, value: any) {
     var a: i8[] = [1i8]
     a[index] = value

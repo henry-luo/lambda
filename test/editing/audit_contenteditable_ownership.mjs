@@ -1,4 +1,4 @@
-// D7.2.5 ownership guard: package policy must not reappear in native edit
+// D10.2.1 ownership guard: package policy must not reappear in native edit
 // mechanisms. The audit reports a stable inventory under temp/ for CI review.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
@@ -62,7 +62,7 @@ for (const channel of legacy_channels) {
 }
 
 const report = {
-    ruling: 'D7.2.5',
+    ruling: 'D10.2.1',
     mechanism_files,
     policy_literals,
     legacy_channels,

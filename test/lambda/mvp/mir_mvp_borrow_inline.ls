@@ -1,4 +1,4 @@
-// S9.1.2, D5.3.1: inlined var owners retain snapshots and rooted write-back on every exit.
+// S9.1.2, D6.3.1: inlined var owners retain snapshots and rooted write-back on every exit.
 pn store_at(var a: int[], key: int, value: int) { a[key] = value }
 pn replace_owner(var a: int[], value: int) { a = fill(3, value)^; store_at(a, 1, value + 1) }
 pn nested(var a: int[], var b: int[]) {

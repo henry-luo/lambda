@@ -1,4 +1,4 @@
-// TeX source serialization; conversion policy stays in the package (D7.2.8).
+// TeX source serialization; conversion policy stays in the package (D10.2.3).
 import common: .format_common
 
 pub fn to_latex(ast) any^ => item(ast, 0)

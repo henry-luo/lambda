@@ -60,7 +60,7 @@ Temporary results and captures go in `./temp/doom/`.
 
 Native sound currently uses AVAudioPlayer on macOS. Other hosts report an absent
 audio backend visibly. Sound bytes are loaded by Lambda, while native voices are
-owned by the document and closed on teardown (**D7.1.2v2**, **D4.5.1v4**).
+owned by the document and closed on teardown (**D9.1.2**, **D5.5.1**).
 
 The native replays cover the E1M1 walkthrough, combat/pickups and exit to E1M2,
 natural enemy damage through death/restart, every episode map and spectator input:

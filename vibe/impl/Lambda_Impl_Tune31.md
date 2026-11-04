@@ -170,14 +170,14 @@ different binary, or generalize this defect to every typed-array loop.
 
 | Ruling | Consequence for Tune31 |
 |---|---|
-| **D3.3.2v2–D3.3.4** | Entry specialization is separate from body/result inference. Inferred narrowing stays scoped to its binding; it cannot create a source contract or an explicit array certificate. Preserve legal widening of open arrays. |
-| **D3.3.5, D8.2.5v2–D8.2.6** | Reuse declarative builtin result relations, the shared analysis pipeline, and representation-aware lowering; do not add another ad hoc type oracle. |
-| **D8.3.1v2–D8.3.4v3** | Raw entries need a complete exact key and either static proof or the boxed wrapper's exact guard. Preserve fallback and `var`-home transport. No per-parameter partial dispatch scheme. |
-| **D8.4.1v2** | No mutable inline caches or feedback-driven specialization. |
-| **D2.5.1–D2.5.3, D2.8.1–D2.8.3** | Test the actual carrier's null sentinel; keep null/error values out of native arithmetic. Unproven indexed reads stay nullable. |
+| **D4.3.2–D2.4.3** | Entry specialization is separate from body/result inference. Inferred narrowing stays scoped to its binding; it cannot create a source contract or an explicit array certificate. Preserve legal widening of open arrays. |
+| **D4.3.4, D8.2.5–D8.2.6** | Reuse declarative builtin result relations, the shared analysis pipeline, and representation-aware lowering; do not add another ad hoc type oracle. |
+| **D7.3.1–D7.3.4** | Raw entries need a complete exact key and either static proof or the boxed wrapper's exact guard. Preserve fallback and `var`-home transport. No per-parameter partial dispatch scheme. |
+| **D7.4.1** | No mutable inline caches or feedback-driven specialization. |
+| **D2.4.1–D2.4.3, D2.5.1–D2.5.3** | Test the actual carrier's null sentinel; keep null/error values out of native arithmetic. Unproven indexed reads stay nullable. |
 | **S4.1.1–S4.1.5, S4.2.3** | Preserve int saturation, poison behavior, sized-integer wrapping and NaN equality; a native opcode alone is not a semantic proof. |
-| **S9.1.2–S9.1.3, D4.4.4v4–D4.4.6** | Preserve snapshots, borrow publication and handle invalidation. Remove unnecessary checks/copies only with an ownership proof. |
-| **D5.3.1–D5.3.4** | Root dirty live values at collecting calls; `NO_GC` needs transitive mechanical verification. Root policy remains in `MirEmitter`; never restore conservative native-stack scanning. |
+| **S9.1.2–S9.1.3, D5.4.4–D5.4.5** | Preserve snapshots, borrow publication and handle invalidation. Remove unnecessary checks/copies only with an ownership proof. |
+| **D6.3.1–D6.3.4** | Root dirty live values at collecting calls; `NO_GC` needs transitive mechanical verification. Root policy remains in `MirEmitter`; never restore conservative native-stack scanning. |
 
 Missing effect/defect analysis is not permission to assume a clean lane.
 Retain the existing error channel and the
@@ -262,7 +262,7 @@ simply attach the typed return's certificate.
 2. Preserve justified element/carrier facts in the caller's scope and in
    complete exact entry plans. An open array may use a compact physical
    representation while retaining legal widening; inferred narrowing must
-   not be installed as an explicit contract certificate (**D3.3.3v3**).
+   not be installed as an explicit contract certificate (**D4.3.3**).
 3. For **explicit** typed boundaries, establish and reuse the full
    rank/leaf/carrier certificate at an eligible producer, or reuse an
    admitted replacement within a proven unchanged-value region. Audit
@@ -292,7 +292,7 @@ First reconfirm the hot sites in the candidate's MIR/profile.
 
 1. Lower `bool == bool` / `bool != bool` directly when both operands
    have valid native carriers. Nullable comparisons/conditions must follow
-   their semantics and representation: **D2.5.2v3** gives native `bool?`
+   their semantics and representation: **D2.4.2** gives native `bool?`
    the sentinel **2**, not the boxed `ItemNull` word.
 2. Lower proven scalar `abs`, min/max and numeric conversions using the
    existing semantic helpers/proofs. Float-to-int is not generally a bare
@@ -315,7 +315,7 @@ eligible crypto leaf calls. Cover null, poison, signed/unsigned edges,
 shift counts and non-ASCII input in semantic differential tests.
 
 Pure syntax does not establish `NO_GC`. Any remaining helper classified
-`NO_GC` must pass the transitive checker (**D5.3.2**); mixed-type
+`NO_GC` must pass the transitive checker (**D6.3.2**); mixed-type
 comparison and conversion helpers cannot be blanket-allowlisted.
 
 ### T31-4 — Profile and reduce ownership, construction and string work
@@ -331,7 +331,7 @@ unavoidable. Puzzle's required plain-parameter copies stay out of the
 
 - Reuse handle-relative identity/layout/ownership proofs across valid
   regions; distinguish repeated checking from real sharing and preserve
-  the existing invalidation rules (**D4.4.4v4**).
+  the existing invalidation rules (**D5.4.4**).
 - Build the representation required by an explicit array contract using
   existing constructors/admission helpers. Specializing `fill` must keep
   count/value/error semantics and GC ownership; zero fill must preserve
@@ -347,7 +347,7 @@ Do not require `fn_fill` to disappear merely to satisfy a call-count gate.
 
 Region allocation, stack containers and caller-provided result buffers
 remain deferred if they require new lifetime/ABI rules. Non-escape alone
-does not prove a buffer dead at the next iteration (**D4.1.4v4, D5.2**).
+does not prove a buffer dead at the next iteration (**D5.1.4, D6.2**).
 
 ### T31-5 — Reduce proven call-boundary costs
 
@@ -357,7 +357,7 @@ or native lowering may already have removed the costly calls.
 Use the current `MirEmitter` machinery to measure and reduce redundant
 root publication, unnecessary reloads or remaining wrapper transitions.
 The model is dirty **live** roots at `MAY_GC` boundaries, not an assumption
-that every Item is spilled at every call (**D5.3.1–D5.3.4**).
+that every Item is spilled at every call (**D6.3.1–D6.3.4**).
 
 Keep CW33 home transport and replacement publication for `var` arguments.
 Do not remove them because the input happened to be unique in one run.
@@ -408,8 +408,8 @@ The call-site fixed point now ignores only an unknown self-forward of the
 callee's own formal. Such an edge contributes no competing representation
 fact before its first iteration; concrete external evidence and all boxed
 fallbacks remain in the join. This allows fill → recursive var parameter →
-partition/store to retain an inferred ArrayNum witness under **D3.2.1** and
-**D3.3.1**, without turning it into a declared array contract. The existing
+partition/store to retain an inferred ArrayNum witness under **D4.2.1** and
+**D4.3.1**, without turning it into a declared array contract. The existing
 T21 forwarding fixture now pins the resulting representation-agnostic COW
 setter and its widening fallback.
 
@@ -426,8 +426,8 @@ function-local scan proves one owner, homogeneous direct push writes, no
 assignment/index write/alias/escape/nested closure, and a return of the same
 binding. The scan also recognizes a nested array-return builder only at the
 consumer boundary; the outer open-array index remains checked. This retains
-legal widening and the boundary discipline in **D3.2.1**, **D3.3.1** and
-**D3.3.3v3**.
+legal widening and the boundary discipline in **D4.2.1**, **D4.3.1** and
+**D4.3.3**.
 
 lambda_array_int_push_inferred_cow is the shared COW-preserving runtime
 entry for the proved integer builder. It roots owner and value, prepares a
@@ -463,7 +463,7 @@ counter, recursive witness and Bool equality changes remove the corresponding
 generic call boundaries. Splay, deltablue, hashmap and the other
 ownership-heavy guards were screened on unchanged sources; no new ownership
 rule, snapshot change, root policy or var home transport was introduced.
-This preserves **S9.1.2–S9.1.3**, **D4.4.4v4** and **D5.3.1–D5.3.4**.
+This preserves **S9.1.2–S9.1.3**, **D5.4.4** and **D6.3.1–D6.3.4**.
 
 ### 3.8 Regression-pin audit (2026-09-19)
 
@@ -473,9 +473,9 @@ fixture. T31-1's `tune31_nested_counter` and
 self-forwarded ArrayNum paths, with the T21 forwarding fixture retaining the
 representation-agnostic COW fallback; the corresponding parity tests run on
 interp, JIT and auto. This holds the S4.1.1-S4.1.5 counter rules and the
-D3.2.1/D3.3.1 inference boundary together. T31-2's direct and nested builder
+D4.2.1/D4.3.1 inference boundary together. T31-2's direct and nested builder
 fixtures pin the inferred append helper, raw direct consumer, and checked
-outer-boundary fallback under D3.2.1/D3.3.3v3 and S9.2.2. T31-3 has both the
+outer-boundary fallback under D4.2.1/D4.3.3 and S9.2.2. T31-3 has both the
 native Bool-or-null equality positive case and the reassignment negative case,
 which retain S5.1.1/S6.1.2 total equality. T31-0 made no engine change, T31-4
 and T31-5 found no additional implementation target, and T31-6 remains
@@ -699,7 +699,7 @@ individually; do not transfer Hyphen/base64's percentages to those kernels.
 
 C2MIR remains an independent native C port. Splay uses pointer mutation,
 cube3d uses caller-owned buffers, and microdiff uses fixed-capacity result
-storage. These differences matter under **S9.1.2–S9.1.3** and **D4.1.4v4**.
+storage. These differences matter under **S9.1.2–S9.1.3** and **D5.1.4**.
 Report the remaining gap as semantic/representation work plus removable
 compiler/runtime work; a common checksum does not establish identical
 memory operations. The R47 3.59x typed/C geomean is historical context,
@@ -720,7 +720,7 @@ dynamic core. The typed entry now calls
 2. **Admission once at setup.** Generated `hyphen_tables.json` is loaded
    into the declared record before verification/timing. Its generated
    [table module](../../test/benchmark/hyphen_tables.ls) defines the
-   explicit contract and loader. This uses **D3.3.3v3**'s declared
+   explicit contract and loader. This uses **D4.3.3**'s declared
    representation boundary; it does not attach a certificate to an inferred
    open array. An initial static-Lambda-literal prototype added about two
    seconds of JIT startup and was replaced by this setup-time load. The hot
@@ -772,13 +772,13 @@ copies and helper events to the actual source operations; separate real
 two-observer snapshots from facts lost at joins, nested handles and calls.
 Extend the existing shared analysis for eligible nested/recursive
 store-backs and reuse identity/layout/uniqueness until an invalidating
-write, escape or replacement. **D4.4.4v4** supplies the optimization rule;
-**D4.4.6** and **S9.1.2–S9.1.3** preserve observable snapshots.
+write, escape or replacement. **D5.4.4** supplies the optimization rule;
+**D5.4.5** and **S9.1.2–S9.1.3** preserve observable snapshots.
 
 For a unique owner, remove redundant preparation/path navigation only when
 the same proof also preserves replacement publication and `var` home
 transport. Reload movable data buffers after allocation as required by
-**D4.3.1**. Do not infer that zero copies means zero ownership cost.
+**D5.3.1**. Do not infer that zero copies means zero ownership cost.
 
 **Gate:** a paired gain plus fewer executed copies/bytes or unique-owner
 helper events on the identified path. Pin positive cases and invalidation
@@ -795,7 +795,7 @@ unchanged and still prepares the selected field. A capture, alias, retained
 argument or other body-side share sets cow_marked in emission order, so the
 next path borrow restores root preparation and write-back. This is the
 existing ownership fact, narrowed to **S9.1.2**, **S9.2.2** and
-**D4.4.4v4**; it introduces no new uniqueness inference.
+**D5.4.4**; it introduces no new uniqueness inference.
 
 #### B. Construct typed arrays in their final representation
 
@@ -807,7 +807,7 @@ count/value/error behavior, null/poison and floating signed zero.
 
 Then assess scalar replacement or caller-provided result storage where
 lifetimes prove it safe. A non-escaping allocation can still be live across
-the next iteration; **D4.1.4v4, D5.2** require an actual lifetime/rooting
+the next iteration; **D5.1.4, D6.2** require an actual lifetime/rooting
 argument. Any new lifetime/return ABI needs its own design before code.
 
 **Gate:** reduced executed allocation/admission work and paired typed gains;
@@ -828,7 +828,7 @@ an integer output buffer or another parallel builder subsystem.
 For the high-total-time text rows, select changes from fresh profiles of
 traversal, equality, collection construction, copied bytes and runtime
 calls. Static shape and representation proofs must preserve dynamic misses;
-**D8.4.1v2** excludes feedback-driven mutable inline caches.
+**D7.4.1** excludes feedback-driven mutable inline caches.
 
 **Gate:** helper/copy/allocation reductions on executed paths and matching
 outputs. Cover ASCII and multibyte strings, empty slices, string aliases,
@@ -841,11 +841,11 @@ Revisit typed bounce, crypto_sha1, levenshtein and towers after A–C. Select
 actual hot abs/bitwise/character/conversion or wrapper operations. Extend
 the existing representation-aware lowering and leaf inliner only when the
 numeric, nullable and error domains are proven (**S4.1.1–S4.1.5,
-D2.5.1–D2.5.3, D2.8.1–D2.8.3**).
+D2.4.1–D2.4.3, D2.5.1–D2.5.3**).
 
 Root traffic is a multiplier on those calls: eliminating a boundary can
 remove boxing, dirty-live-root publication and layout reloads together.
-Use the shared emitter under **D5.3.1–D5.3.4**; a `NO_GC` classification
+Use the shared emitter under **D6.3.1–D6.3.4**; a `NO_GC` classification
 requires transitive mechanical verification. Keep collecting setter and
 admission paths rooted, and preserve the existing defect/error channel.
 
@@ -870,7 +870,7 @@ Untyped nbody still performs 2.7M unique mutation helpers with zero copies,
 and its final time is 8.7x its typed twin. Its counter fix did not satisfy
 T31-1's native-store objective. When improving shared store lowering, carry
 the inferred float lane into a guarded direct write with the existing
-widening/error/COW fallback (**D3.3.3v3, S7.1.3v2**). Keep this as an
+widening/error/COW fallback (**D4.3.3, S7.1.3v2**). Keep this as an
 explicit secondary deliverable; its improvement cannot substitute for
 Phase II's typed goals.
 
@@ -944,7 +944,7 @@ to select the successful representation arm. It does not fabricate a source
 T[] contract: COW, view, element-kind, null, bounds, widening and error
 misses still reach the existing checked setters. The nullable-F64 proof
 follows an unmodified local initializer and recognizes an integer carrier for
-an inferred index. This is the representation-scoped rule in **D3.3.3v3**,
+an inferred index. This is the representation-scoped rule in **D4.3.3**,
 with the hard-write boundary in **S7.1.3v2** and var write-back in
 **S9.1.3**.
 
@@ -985,7 +985,7 @@ is_var_param; cow_path_borrow_fixed still prepares and relinks the child
 array. A body-side capture retains cow_marked, therefore preserves the
 root preparation before the next borrow. This retains caller-home
 publication, snapshot isolation and all shared-child handling under
-**S9.1.2**, **S9.2.2** and **D4.4.4v4**.
+**S9.1.2**, **S9.2.2** and **D5.4.4**.
 
 The release COW census on unchanged typed hashmap2 source records the
 pre-A Phase II binary's **450,004** map unique-mutation preparations with
@@ -1058,7 +1058,7 @@ representative boxed shift and bitwise calls in its string/word conversion
 paths. Their values cross the int, u32 and error domains; static call removal
 does not prove the needed result carrier. The next candidate is a shared
 module-constant/native-lane proof followed by executed helper attribution,
-under **S4.1.1–S4.1.5** and **D2.4.1–D2.4.3**. Tune31 adds no D shortcut
+under **S4.1.1–S4.1.5** and **D2.3.4–D2.3.5**. Tune31 adds no D shortcut
 without that proof and a paired result.
 
 **E experiment rejected.** Typed fft initially snapshots its plain
@@ -1132,7 +1132,7 @@ close without a safe, measured generic change.
 
 These benchmark-source rewrites apply the same representation discipline as
 the typed Hyphen port. They do not change the runtime and must not be folded
-into a Tune31 engine geomean. **D3.3.3v3** permits an explicit source
+into a Tune31 engine geomean. **D4.3.3** permits an explicit source
 representation to retain its established carrier; **S7.1.1v3–S7.1.2** keeps
 string indexing and slicing semantic rather than requiring a byte-output buffer.
 Each port keeps its external text output and canonical oracle.
@@ -1211,7 +1211,7 @@ of unique ownership, stable field location, valid index range, finite numeric
 values or temporary lifetime. Existing typed arithmetic and packed arrays
 already remove much dynamic dispatch. The remaining cost lies at the places
 where those additional facts are unavailable or lost across a call, borrow,
-store or loop (**D3.3.3v3–D3.3.4**, **D4.4.4v4**, **D5.3.1–D5.3.4**).
+store or loop (**D4.3.3–D2.4.3**, **D5.4.4**, **D6.3.1–D6.3.4**).
 
 ### 8.2 Fresh executed evidence
 
@@ -1242,7 +1242,7 @@ Splay and havlak's copy counts are unchanged from the Phase I census.
 Deltablue also retains **38,980 ArrayNum copies / 3,409,760 bytes**. These
 are actual copies, unlike hashmap's cheap uniqueness tests. Not every copy
 is removable: the compiler must establish that the old value has no observer
-before suppressing a snapshot (**S9.1.2–S9.1.3**, **D4.4.6**).
+before suppressing a snapshot (**S9.1.2–S9.1.3**, **D5.4.5**).
 
 The independent C2MIR ports commonly have fixed field offsets, direct array
 loads/stores and caller-owned buffers. Lambda still traverses generic paths,
@@ -1274,8 +1274,8 @@ Its current `kind: string` fields are not literal discriminants, so a
 `kind == "text"` test alone must not be treated as proof of a record shape.
 Respect current-carrier certificates, invalidation by mutation/resharing,
 caller-home writeback, and pointer reloads after allocation
-(**D3.3.3v3**, **D4.4.4v4**, **D5.3.1–D5.3.4**). Use no call-site inline cache
-(**D8.4.1v2**).
+(**D4.3.3**, **D5.4.4**, **D6.3.1–D6.3.4**). Use no call-site inline cache
+(**D7.4.1**).
 
 **2. Remove generic work from the existing string fast paths.** Base64's
 concat tree is already flattened and its accumulator normally has capacity;
@@ -1286,18 +1286,18 @@ template, then evaluate a compiler-emitted capacity-fit path when lengths,
 ownership and overlap are proved. Keep allocation/growth/freezing on the
 existing slow path. A successful nonallocating branch can avoid the helper
 transition and its safepoint traffic; the allocating branch retains precise
-roots (**D5.3.1–D5.3.4**).
+roots (**D6.3.1–D6.3.4**).
 
 Also fuse scalar string consumers such as `ord(s[i])` and `s[i] == t[j]`.
 Literal-character equality already has an allocation-free helper, but two
 indexed characters can still cross two string helpers and generic equality.
 Use guarded ASCII byte loads where valid and retain Unicode, null and bounds
-semantics (**S7.1.1v3**, **D3.3.4**). This lets ordinary string source recover
+semantics (**S7.1.1v3**, **D2.4.3**). This lets ordinary string source recover
 part of the benefit obtained manually by Fast Diff's code-table rewrite.
 Measure on the archived original source as well as source-port guards. Module
 string-table lanes must be validated in auto/T0 as well as forced JIT: the
 current module-slot carrier is not interchangeable with a packed pointer lane
-(**D3.3.3v3**).
+(**D4.3.3**).
 
 **3. Add relational range proofs to already-native loops.** Text search is
 the strongest freshly sampled candidate. Its `naive_search` MIR has raw
@@ -1309,7 +1309,7 @@ stable. Eliminate redundant read guards and checked counter arithmetic where
 these proofs suffice. Range safety and element-value safety are separate:
 `int[]` does not establish that every element is finite or in 0..255. Removing
 element sentinel handling needs a producer/domain proof or a guarded fallback
-(**S4.1.1–S4.1.5**, **S4.2.3**, **S7.1.1v3**, **D3.3.4**).
+(**S4.1.1–S4.1.5**, **S4.2.3**, **S7.1.1v3**, **D2.4.3**).
 
 Reuse the analysis for quicksort and the rewritten Fast Diff numeric loop,
 then measure each unchanged source. Inspect native instructions before
@@ -1326,7 +1326,7 @@ destination construction or scalar replacement for the returned 3/4/16-lane
 temporaries, only with an escape/lifetime and full-overwrite proof. C's reused
 buffers explain the opportunity, but neither deleting initialization nor
 turning every result into an inout parameter is justified
-(**D3.3.3v3**, **D4.1.4v4**, **D5.2**, **S9.1.2–S9.1.3**). The rejected
+(**D4.3.3**, **D5.1.4**, **D6.2**, **S9.1.2–S9.1.3**). The rejected
 literal and FFT-var experiments already show that fewer copies or more
 explicit source can still cost more.
 
@@ -1338,7 +1338,7 @@ dead before a rotation or nested update. Extend the existing synthesized-place
 and move/store-back analysis for those proved cases, sharing the static
 decision between tiers. Retain fallback copies for observed snapshots and
 invalidate borrowed facts at conflicting writes, escaping captures and
-resharing (**S9.1.2–S9.1.3**, **D4.4.4v4–D4.4.6**). Reduce allocation demand
+resharing (**S9.1.2–S9.1.3**, **D5.4.4–D5.4.5**). Reduce allocation demand
 before proposing GC tuning; a GC percentage alone does not identify a collector
 defect.
 
@@ -1414,23 +1414,23 @@ Extend the existing semantic and MIR analysis facilities. In particular:
   builder/ownership subsystem. Extract shared logic before adding another
   near-identical lane or arity case.
 - Keep semantic contract, physical carrier, nullability, index validity,
-  element domain and uniqueness as distinct facts. **D3.3.3v3** requires the
-  certificate to match the current carrier; **D3.3.4** keeps an unproved read
+  element domain and uniqueness as distinct facts. **D4.3.3** requires the
+  certificate to match the current carrier; **D2.4.3** keeps an unproved read
   nullable. An annotation or a previous cache hit cannot substitute for a
   missing proof.
 - Record a fact's origin, scope and invalidation conditions. Merge only facts
   valid on every incoming path. Rebinding, prefix mutation, representation
   change, escaping aliases and writer calls invalidate affected facts under
-  **D4.4.4v4**. Reload data pointers after possible allocation.
+  **D5.4.4**. Reload data pointers after possible allocation.
 - Preserve evaluation order, observable snapshots, inout publication and
   error behavior. **S9.1.2–S9.1.3**, **S7.1.1v3** and **S7.1.3v2** continue
   to govern optimized and fallback paths.
 - Rooting remains owned by `MirEmitter` and precise runtime frames. Remove
   unnecessary allocating boundaries rather than deleting required root
   publication. A `NO_GC` helper requires the transitive verification specified
-  by **D5.3.2**; all allocating fallbacks retain **D5.3.1–D5.3.4**.
+  by **D6.3.2**; all allocating fallbacks retain **D6.3.1–D6.3.4**.
 - Use compile-time facts and static guards, not runtime call-site feedback or
-  inline caches (**D8.4.1v2**). Work stays in Lambda's MIR Direct/runtime code;
+  inline caches (**D7.4.1**). Work stays in Lambda's MIR Direct/runtime code;
   this proposal requires no MIR vendor changes or C-text backend.
 
 ### 9.2 A — Typed field borrows and admission propagation
@@ -1586,7 +1586,7 @@ do not special-case a benchmark function name or copy the loop emitter.
    domain may justify native equality/arithmetic after its stores are proved,
    but `int[]` contains more than ordinary finite machine integers. Retain
    poison/null handling unless an independent scoped proof removes it under
-   **S4.1.1–S4.1.5**, **S4.2.3** and **D3.3.4**.
+   **S4.1.1–S4.1.5**, **S4.2.3** and **D2.4.3**.
 5. Invalidate affected length, carrier or element facts on rebind, resizing,
    uncertain stores and writer calls. Reuse the same analysis on quicksort
    and current Fast Diff where their loop shapes qualify; declining an
@@ -1638,8 +1638,8 @@ initialization and safe input/output aliasing. A value retained across calls
 cannot share a reused result buffer. Exceptions, partial writes and early
 returns must preserve the values visible before an exit. Keep ordinary
 allocation for unproved cases; use no unsafe stack allocation of escaping
-containers or conservative stack GC. Authority is **D3.3.3v3**, **D4.1.4v4**,
-**D5.2**, **D5.3** and **S9.1.2–S9.1.3**.
+containers or conservative stack GC. Authority is **D4.3.3**, **D5.1.4**,
+**D6.2**, **D6.3** and **S9.1.2–S9.1.3**.
 
 **Optimization and semantic pins.** Test producer-contract reuse across a
 local return, zero-size arrays, mismatched/nullable fill values, boxed carrier
@@ -1660,7 +1660,7 @@ negative evidence, rather than assuming that buffer reuse must help.
 **Starting points:** `lambda_ast_plan_place_handles`, `rmw_branch_local` and
 the place-copy lifetime analysis in `lambda/runtime/build_ast.cpp`, plus
 their interpreter/MIR consumers. The relevant authority is
-**D4.4.4v4–D4.4.6** and **S9.1.2–S9.1.3**, not a new aliasing convention.
+**D5.4.4–D5.4.5** and **S9.1.2–S9.1.3**, not a new aliasing convention.
 
 **Implementation sequence.**
 
@@ -1846,7 +1846,7 @@ ASCII strings it compares the selected bytes; otherwise it compares the exact
 UTF-8 character spans. Two absent indexed reads compare equal, preserving the
 ordinary `null == null` result. The helper is a no-GC leaf only after the
 MIR-side explicit `string` certificate; inferred string lanes retain their
-existing `fn_string_ascii_at` lowering. This is required by **D3.3.3v3** and
+existing `fn_string_ascii_at` lowering. This is required by **D4.3.3** and
 preserves **S7.1.1v3** indexing and equality behavior without a source
 representation rewrite.
 
@@ -1887,8 +1887,8 @@ identity and slot capacity, reads the slot through the canonical shaped-field
 reader, and otherwise calls `cow_path_borrow_fixed`. The helper roots owner,
 key and child; if detaching the child can collect, it reloads the rooted map
 and packed data before the canonical lane writer reinstalls the child. This
-retains **D3.3.3v3** current-carrier certification, **D4.4.4v4** invalidation
-and reload requirements, and **D5.3.1–D5.3.4** precise-root obligations. The
+retains **D4.3.3** current-carrier certification, **D5.4.4** invalidation
+and reload requirements, and **D6.3.1–D6.3.4** precise-root obligations. The
 generic helper remains the carrier-mismatch and malformed-child route, so
 **S9.1.2–S9.1.3** ownership publication and **S7.1.3v2** error behavior do
 not depend on the fast arm.
@@ -1925,8 +1925,8 @@ an existing `Doc` boundary proof, then installed an exact ordinary-Array
 certificate once after construction. Its positive and open-element-negative
 MIR fixtures proved the compiler selection and fallback; JIT/interpreter,
 forced-GC/freed-memory poisoning and JIT root-witness checks all preserved the
-checksum. The construction rule followed **D3.3.3v3** and the allocation-safe
-certificate publication/rooting rule in **D3.3.4**.
+checksum. The construction rule followed **D4.3.3** and the allocation-safe
+certificate publication/rooting rule in **D2.4.3**.
 
 The mechanism did reduce executed union admissions from **6,615,040** to
 **6,182,144** per canonical run (6.5%; cache misses remained six), but it
@@ -1950,8 +1950,8 @@ two source items and fresh result across allocations, and was selected only
 when the existing primitive, non-null `T[]` proof qualified. Positive and
 untyped-negative MIR fixtures pinned selection/fallback, and JIT/interpreter,
 forced-GC/freed-memory poisoning and JIT root-witness runs passed. This kept
-the certificate, allocation and error rules required by **D3.3.3v3**,
-**D3.3.4** and **S9.2.2**.
+the certificate, allocation and error rules required by **D4.3.3**,
+**D2.4.3** and **S9.2.2**.
 
 The MIR dump reduced all 15 cube3d typed-fill sites to one fused call and
 removed the two public calls from those sites, but the required root frame and
@@ -1972,7 +1972,7 @@ and its repeated 3/4/16-element values are not a nonescaping temporary class:
 returned arrays; callers retain them, forward them through additional calls,
 or observe their elements after later allocation. Reusing a stack buffer or a
 single destination would violate the value/snapshot lifetime and precise-root
-requirements of **D4.1.4v4**, **D5.2**, **D5.3** and **S9.1.2–S9.1.3**.
+requirements of **D5.1.4**, **D6.2**, **D6.3** and **S9.1.2–S9.1.3**.
 The safe candidate first needed D1’s construction gain, which was rejected.
 No separate D2 implementation is retained until a future profile identifies
 an actually nonescaping result class with its full lifetime proof.
@@ -1984,7 +1984,7 @@ the body for resizing calls, rebinding, mutable lending and capture. It then
 removed the matching direct read's negative and upper-bound branches. The
 temporary `tune31_dynamic_array_bound` MIR fixture proved that the direct
 load remained after the loop-head test, and its JIT semantic fixture preserved
-the result. This was a valid application of **D3.3.3v3**'s certificate carrier
+the result. This was a valid application of **D4.3.3**'s certificate carrier
 and **S7.1.1v3**'s in-bounds read condition, but it did not recover enough
 work to satisfy §9.8's measured pilot gate.
 
@@ -2023,14 +2023,14 @@ uses the handle-store `World`; its mutable `todo`, `sources`, plan and
 constraint vectors preserve inputs or work-list observers across a removal or
 propagation call. These are precisely the binding/construction copies and
 sole-`var` sharing rule of **S9.1.2–S9.1.3**, and the residual Splay rotation
-case recorded by **D4.4.4v4**. A syntactic final reference cannot overrule
+case recorded by **D5.4.4**. A syntactic final reference cannot overrule
 those reachable observers.
 
 An E implementation would therefore need a new call-site move or general
 escape/liveness convention, rather than an extension of the existing
 store-back proof. That would require a separate formal design and semantic
 proposal; it cannot be admitted as a Tune31 optimization under
-**D4.4.4v4–D4.4.6**. No ownership code is retained, and the existing
+**D5.4.4–D5.4.5**. No ownership code is retained, and the existing
 snapshot, branch-local and COW-counter tests remain the regression guards.
 
 ### 9.11 Completion record
@@ -2095,4 +2095,4 @@ bottleneck is not a missing type annotation or generic field lookup: copy-heavy
 graphs still require the observable snapshots in **S9.1.2–S9.1.3**, while the
 unresolved broad cost is the aggregate of typed representation, construction,
 admission and ownership work described in §8. A future move/escape convention
-must be proposed against **D4.4.4v4–D4.4.6** before revisiting E.
+must be proposed against **D5.4.4–D5.4.5** before revisiting E.

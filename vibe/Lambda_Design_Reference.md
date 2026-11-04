@@ -27,7 +27,7 @@ node API, remote transport.
 > (pipe binds `~`), [S10.4](../doc/Lambda_Formal_Semantics.md#s104-parent-navigation)
 > / [S10.5](../doc/Lambda_Formal_Semantics.md#s105-root-navigation) (postfix
 > navigation), [S16.2.2v2 / S16.2.3v2](../doc/Lambda_Formal_Semantics.md#s162-line-start-tokens)
-> (line-start token classes), and open items SO39, SO41, DO25, D2.6.8.
+> (line-start token classes), and open items SO39, SO41, DO25, D3.1.3.
 > The formal specs win where this record disagrees.
 
 **Proposed spec linkage (on ratification):**
@@ -36,7 +36,7 @@ node API, remote transport.
 |---|---|
 | §2 reference type; `path` leaves `symbol` | S2.1.1v4, new S2.4.6, S6.2.1v2 |
 | §3 `#` force step, fragment sugar, longest-prefix forcing | new S10.6; S2.4.4 impl note; S7.4.5 cross-ref; S16.2.2v3 (`#`, `===` join the continuation set) |
-| §4 `&`, identity, `===`, `temp.` | S5.1.4v3, S9.1.5v3, D2.6.8v2; closes SO41, DO25; revises SO39; S16.2.3v3 (`&` joins the dual-role set) |
+| §4 `&`, identity, `===`, `temp.` | S5.1.4v3, S9.1.5v3, D3.1.3; closes SO41, DO25; revises SO39; S16.2.3v3 (`&` joins the dual-role set) |
 | §4.7 three tiers, CRUD statements, `commit`/`rollback`, cursors, `open` | new S9.4 "Document updates"; S14.3.1v2 (`#`/`input` no longer promise eager reading); S12 effect table (CRUD, `commit` are pn-family); S2.4.4v2 (`open` rebinds the relative base lexically) |
 | §5 `~key` respell | S10.1.2v2, S10.1.5v2 |
 | §6 forcing a symbol | new S10.6.3 |
@@ -309,7 +309,7 @@ document" — made precise on three points:
 
 ### 4.3 Generations: `commit` mints identity, local mutation drops it (PTH43v2, PTH50–PTH52)
 
-Document nodes are Input-arena owned, immutable, and non-moving (D4.3.1), so
+Document nodes are Input-arena owned, immutable, and non-moving (D5.3.1), so
 **the container pointer is the identity carrier**: the owning document maps
 the pointer to `(parent, key, generation)`, and `&` walks that table to the
 root to spell the path. No header word — DO25's carrier question closes.
@@ -368,7 +368,7 @@ put d.a.b.c.x = 3        // ERROR: a var is never a CRUD root — use open (PTH6
 
 This **revises the expectation SO39 recorded** (that a detach preserves the
 *same* identity): a committed write set is new data (S1.4) and new data is
-a new generation; a local mutation is new data and has no identity. D2.6.8
+a new generation; a local mutation is new data and has no identity. D3.1.3
 keeps its point — identity is never a raw address compared across contexts
 — and loses its "data the container carries" half: identity is a relation
 the document holds. The alternatives are recorded in §7.
@@ -672,7 +672,7 @@ open t = temp('scratch') { put t.rows.2.x = 1; commit }   // Tier 3: the documen
   node it is false, because the generation differs.
 - No `!==` is minted: `not (a === b)` (S10.3.1, words over sigils); PTH-O6
   records the option.
-- No `ref_eq` and no address comparison exist (S5.1.4v2; D2.6.8).
+- No `ref_eq` and no address comparison exist (S5.1.4v2; D3.1.3).
 
 ### 4.6 What this closes
 

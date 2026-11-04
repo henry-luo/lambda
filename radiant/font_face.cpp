@@ -194,7 +194,7 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
 
     int count = 0;
     CssFontFaceDescriptor** css_descs = css_extract_font_faces(stylesheet, base_path, nullptr, &count);
-    // extraction can allocate an array even when every descriptor is rejected (D4.5.1v4).
+    // extraction can allocate an array even when every descriptor is rejected (D5.5.1).
     lam::Temp<CssFontFaceDescriptor*> descriptor_array(css_descs);
 
     if (!css_descs || count == 0) {

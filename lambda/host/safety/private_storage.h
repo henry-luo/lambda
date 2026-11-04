@@ -46,7 +46,7 @@ typedef struct SecurityPrivateStorageStatus {
 } SecurityPrivateStorageStatus;
 void security_private_storage_default_limits(SecurityPrivateStorageLimit limits[SECURITY_PRIVATE_COUNT]);
 
-// Trusted host only (D7.5.1-2, D7.5.5-7). Private data grants confer no source
+// Trusted host only (D11.1.1-2, D11.2.1-7). Private data grants confer no source
 // loading or host settings authority. Caller serializes callbacks and destruction.
 SecurityPrivateStorage* security_private_storage_open(const SecurityPrivateStorageConfig* config);
 void security_private_storage_close(SecurityPrivateStorage* storage);

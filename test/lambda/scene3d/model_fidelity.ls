@@ -1,4 +1,4 @@
-// S12.1.1v3 / D7.2.4v4: richer geometry and maps remain pure scene descriptions.
+// S12.1.1v3 / D9.3.4: richer geometry and maps remain pure scene descriptions.
 import s: lambda.scene3d
 import camera: lambda.scene3d.camera
 let P = [-1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 0.0, 1.0, 0.0]

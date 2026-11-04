@@ -3,7 +3,7 @@
 **Date:** 2026-10-11
 **Status:** IN PROGRESS — **P0–P3 implemented 2026-10-11** (§7), **P4 and P5 the same day** (§8: composition, spans, quoted names, and `lambda.grammar.xpath`, scoped by USER to parsing only); imported tokens in local islands and cross-module composition 2026-10-12 (§9); **M4 jq and M5 XQuery and RELAX NG compact 2026-10-12** (§10, with GM13 `~x`). Q1–Q6 ruled by USER on 2026-10-11 (§6), which rewrote §2 from a VMap handle to the type path; GM4.2 ruled during P2 (design §0).
 **Design:** [Lambda_Design_Grammar_Parser.md](../Lambda_Design_Grammar_Parser.md) — GM1–GM4, GM4.1, GM5v2, GM5.1, GM5.2 ruled (USER 2026-10-11); GM6–GM12 proposed; GM-O1–O3, O5–O7 open. The design doc holds the reasoning; this plan holds the seams, the phases and the tests.
-**Rulings touched:** none yet. GM-O1 decides where `grammar` lands in the formal spec (proposed: an S16.9 declaration ruling for the surface, a new D8.3 for the engine, one line in S15 naming `parse(text, grammar)` as the second producer of trees that reach `compile`). S16.10.1v2's barred list grows by one word (`grammar`) — Appendix K of Lambda_Design_Syntax.md is regenerated, not hand-edited.
+**Rulings touched:** none yet. GM-O1 decides where `grammar` lands in the formal spec (proposed: an S16.9 declaration ruling for the surface, a new D7.3 for the engine, one line in S15 naming `parse(text, grammar)` as the second producer of trees that reach `compile`). S16.10.1v2's barred list grows by one word (`grammar`) — Appendix K of Lambda_Design_Syntax.md is regenerated, not hand-edited.
 **Scope:** the `grammar` declaration, the loader + lint, the PEG interpreter with bounded left recursion, the `parse`/`input` surface, and the first guest (XPath 3.1) as the acceptance test. jq, XQuery and RELAX NG compact follow once the engine is proven; they are listed for sequencing only.
 
 ## 1. Where we start
@@ -22,7 +22,7 @@ Every fact below was checked in the code on 2026-10-11. The plan rests on them; 
 
 **Sys funcs.** `parse` is `fn_parse2(Item str, Item type)` (`lambda-eval.cpp:6168`; `fn_parse1` at `:6304` forwards `ItemNull`), which accepts a format symbol **or an options map** — `type`, `flavor`, `sourcepos: 'spans'`, `window` (`:5910`, `:6179`) — then calls `input_from_source[_with_options]` and returns `input->root`. `input` is `fn_input2` (`:5450`). Names resolve through the single-source registry `lambda/runtime/sys_func_registry.c` (`parse` rows `:1076/:1079`, `input` rows `:668/:671`; row struct `SysFuncInfo` at `sys_func_registry.h:88`, `can_raise` at `:97` marks a `T^` return) via `get_sys_func_info()` (`build_ast.cpp:470`). Error return: `set_runtime_error(code, fmt, …)` (`lambda-eval.cpp:164`) then `return ItemError`; parsers use `set_input_parse_error()` (`:182`) over `input->parse_error_message`.
 
-**Input parsers.** Signature `void parse_xxx(Input*, const char* src)` (`lambda/input/input-parsers.h`), dispatched by `INPUT_PARSER_MAPPINGS[]` (`input.cpp:1938`) from `input_from_source_n_with_name_parent` (`:2101`). A parser wraps its `Input` in `InputContext ctx(input, src, len)` (`input-context.hpp:19`, `builder` at `:28`) and builds with `MarkBuilder`: `element(tag)` (`mark_builder.hpp:170`), `ElementBuilder::attr` (`:368-430`), `child` (`:439`), `text` (`:444`), `final()` (`:460`); `input-rtf.cpp:451` is the smallest element-building example. `Input::create(Pool*, Url*, Input* parent)` (`input.cpp:2556` → `:2560`) registers `pool_add_cleanup` (`:2621`), which is D4.2.6's pool ownership.
+**Input parsers.** Signature `void parse_xxx(Input*, const char* src)` (`lambda/input/input-parsers.h`), dispatched by `INPUT_PARSER_MAPPINGS[]` (`input.cpp:1938`) from `input_from_source_n_with_name_parent` (`:2101`). A parser wraps its `Input` in `InputContext ctx(input, src, len)` (`input-context.hpp:19`, `builder` at `:28`) and builds with `MarkBuilder`: `element(tag)` (`mark_builder.hpp:170`), `ElementBuilder::attr` (`:368-430`), `child` (`:439`), `text` (`:444`), `final()` (`:460`); `input-rtf.cpp:451` is the smallest element-building example. `Input::create(Pool*, Url*, Input* parent)` (`input.cpp:2556` → `:2560`) registers `pool_add_cleanup` (`:2621`), which is D5.2.5's pool ownership.
 
 **String-pattern islands.** `parse_island_body()` (`parse_type_pattern.cpp:512`, under `parse_island()` `:538`) builds `AST_NODE_PATTERN_ISLAND`; `resolve_type_pattern()` (`:1431`, `LSF_TP_ISLAND` at `~1530-1552`) compiles it with `compile_runtime_pattern()` (`re2_wrapper.cpp:809`) into a `TypePattern` (`lambda-data.hpp:1292`: anchored `re2`, lazy `re2_unanchored`, `source`). Matching: `fn_is` (`lambda-eval.cpp:2832`) → `pattern_full_match_chars()` (`re2_wrapper.cpp:1020`); `pattern_get_unanchored()` (`:1125`). **There is no "match anchored at offset, return the end" API** — nothing in `lambda/` uses `RE2::ANCHOR_START`. `lib/re2/` is vendored (AGENTS.md rule 16); `re2_wrapper.cpp` is Lambda's and is where the new call goes.
 
@@ -36,7 +36,7 @@ Every fact below was checked in the code on 2026-10-11. The plan rests on them; 
 
 | Object | Representation | Lifetime / owner | Built by |
 |---|---|---|---|
-| the grammar `calc` | `TypeGrammar : Type`, kind `TYPE_KIND_GRAMMAR` — rule table, compiled token matchers, analysis results | the module: `Script`'s pool, entered in `type_list` like every declared type (D4.1.1v2) | the resolve pass of `build_ast` (P1), once per module |
+| the grammar `calc` | `TypeGrammar : Type`, kind `TYPE_KIND_GRAMMAR` — rule table, compiled token matchers, analysis results | the module: `Script`'s pool, entered in `type_list` like every declared type (D5.1.1) | the resolve pass of `build_ast` (P1), once per module |
 | a token rule `calc.number` | the `TypePattern` (kind `TYPE_KIND_PATTERN`) its `:=` body compiles to — nothing new | same | the island compiler, unchanged |
 | a syntax rule `calc.expr` | `TypeGrammarRule : Type`, kind `TYPE_KIND_GRAMMAR_RULE` — `{ TypeGrammar* grammar; uint32_t index; }` | same | the loader (P1) |
 
@@ -98,7 +98,7 @@ typedef struct ParseState {
 - `parse_expr(ParseState*, GrammarExpr*, ChildList*) → bool` is the interpreter proper: a switch over `GrammarExprKind`, position restored on failure, children appended on success. Repetition stops when an iteration does not advance (the nullable-repetition guard).
 - `parse_rule(ParseState*, uint32_t rule, uint32_t level) → Item` handles `space` before and after the body (unless `nospace`), memoization, the seed-growing loop of design §5.2 for left-recursive rules, and element construction: one `ElementBuilder` per rule, tag = rule name, children in order, labels as attributes, `hidden` splicing into the caller's `ChildList`.
 - Tokens: `GX_LITERAL` is `memcmp` at `pos` plus the word-boundary test — no regex. `GX_TOKEN` calls the new `pattern_match_prefix_at(TypePattern*, const char*, size_t len, size_t pos, size_t* end)` (P2) which is `re2_unanchored->Match(text, pos, len, RE2::ANCHOR_START, &m, 1)`.
-- The scratch `Arena` is created per `parse` call and destroyed at its end (D4.1.4v5: whole-arena release, one owner). The output tree lives in the `Input`, which the caller's pool owns (D4.2.6) — exactly as every other `input_from_source` result.
+- The scratch `Arena` is created per `parse` call and destroyed at its end (D5.1.4: whole-arena release, one owner). The output tree lives in the `Input`, which the caller's pool owns (D5.2.5) — exactly as every other `input_from_source` result.
 - Failure is a `bool` plus `pos` reset; only the furthest position keeps its expected set, so the hot path allocates nothing.
 
 ### 2.4 File layout
@@ -120,7 +120,7 @@ Each phase ends green on `make build`, `make test-lambda-baseline`, and the JIT 
 
 1. `lambda_lexer.c`: add `{"grammar", LAMBDA_TOK_GRAMMAR}` to `lexer_keywords[]`; it is barred by `default` in `lambda_lexer_word_bars_binding()`, which is the intent (GM5v2). Add `LAMBDA_TOK_DEFINE` for `:=` in the `:` branch of `lambda_lexer_next()`, longest-match like `=>`. `:=` has no prior meaning anywhere in the language, so lexing it unconditionally is safe; the parser rejects it outside a grammar block with "`:=` is a grammar token rule; outside `grammar { }` write `:` or `=`".
 2. Rename the binding in `test/lambda/graph/graphviz/formatter.ls:42` (`let grammar` → `let dot_grammar`); its golden is unaffected unless it prints the name.
-3. `grammar.js`: add `'grammar'` to `KEYWORD_NAMES`; add a `grammar_stam` rule to the statement choices at `:533`/`:563` (body parsed loosely — the reference grammar is the first-cut verifier, D8.1.2v3, not the production parser). `make generate-grammar`.
+3. `grammar.js`: add `'grammar'` to `KEYWORD_NAMES`; add a `grammar_stam` rule to the statement choices at `:533`/`:563` (body parsed loosely — the reference grammar is the first-cut verifier, D8.1.1, not the production parser). `make generate-grammar`.
 4. Regenerate Appendix K of `Lambda_Design_Syntax.md` (65 → 66 barred words).
 5. Ledger: open a `GM` area in `vibe/Lambda_Issue_Ledger.md` only when the first defect lands (there is no `LR_14` yet; §6 Q6).
 
@@ -178,7 +178,7 @@ Tests: `prec_traces.ls` pins the two §5.2 traces (`a + b * c`, `a * b + c`), un
 
 1. `import other;` inside a block (P1's parser accepts it; the loader resolves it in P4): the imported `Grammar*` is a module-scope binding resolved by name at load time (the importer must be in scope — same rule as any identifier). Rules are merged by name, local wins, `space` included; the lint runs on the composed table.
 2. `memo` on arbitrary rules (the mechanism exists since P3; this phase exposes the word and the lint suggestion).
-3. REPL: a `grammar` declaration in a session goes through the same T0 path as `type` (D8.1.1: T0 session); verify `.type` lists it with the other declared types and `.load` of a module that redeclares it replaces the type cleanly.
+3. REPL: a `grammar` declaration in a session goes through the same T0 path as `type` (D8.3.1: T0 session); verify `.type` lists it with the other declared types and `.load` of a module that redeclares it replaces the type cleanly.
 4. `sourcepos: 'spans'` (GM11) once an options-map form of `parse` exists; the attribute payload (`start`/`end` offsets) differs from the markdown/html highlight-span payload behind the same option name, which the doc for `parse` must say.
 
 Tests: `compose_override.ls` (XPath-in-XQuery shape with a tiny pair of grammars), `memo_quadratic.ls` (a grammar that backtracks quadratically without `memo`, with a size that finishes either way but a golden that only checks the tree).

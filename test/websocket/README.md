@@ -23,5 +23,5 @@ transport, cancellation, task identity and service tests are under
 `test/demo/chat/tests`. Both harnesses need local socket access. The test
 runner never disables TLS verification.
 
-Contracts: procedural IO **D7.2.4v4**, task suspension **S13.1.2v2**, precise
-roots **D5.3.3**, and task-handle identity **S13.1.3v2**.
+Contracts: procedural IO **D9.3.4**, task suspension **S13.1.2v2**, precise
+roots **D6.3.3**, and task-handle identity **S13.1.3v2**.

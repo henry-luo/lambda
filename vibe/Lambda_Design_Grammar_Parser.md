@@ -17,7 +17,7 @@ with Pratt parsing. Open rulings in §9.
 **Formal linkage:** [D1.1](../doc/Lambda_Formal_Design.md#d1-architecture-principles)
 (a guest is a grammar + AST builder + LangProfile), [S15.1 / S15.3](../doc/Lambda_Formal_Semantics.md#s15-metaprogramming)
 (the `lm.` AST is an element tree; `compile(ast)` is the only way from data
-to code), [D8.2.1](../doc/Lambda_Formal_Design.md#d82-unified-ast) (one core
+to code), [D8.2.1](../doc/Lambda_Formal_Design.md#d82-the-unified-ast) (one core
 node catalog serves host and guests), [S11.1.2v4](../doc/Lambda_Formal_Semantics.md#s111-types-compose-like-values)
 (string patterns, which lexical rules reuse), [S16.10.1v2](../doc/Lambda_Formal_Semantics.md#s1610-keywords-as-names)
 (`grammar` becomes a barred word). No `S#`/`D#` ruling covers grammar
@@ -29,7 +29,7 @@ XQuery, RELAX NG compact, and similar small expression languages.
 **Not in scope:** replacing Lambda's own C parser
 ([Lambda_Grammar_Parser.md](Lambda_Grammar_Parser.md), CGP1–CGP21), the
 Tree-sitter reference grammars, or the retired hosted-language runtime
-(D8.2.3v2).
+(D8.2.3).
 **Series:** `GM#` (grammar module). New area; no existing series covers a
 user-declared grammar facility (CGP = the C parser of Lambda itself, SP =
 string patterns, U = unified AST).
@@ -52,7 +52,7 @@ string patterns, U = unified AST).
 | **P5 scope** | **A guest grammar only parses**: `lambda.grammar.xpath` turns XPath into a Lambda element tree; evaluating it, and lowering to `lm.` (whose `compile`, S15.3, is unimplemented), are out of this phase. The XPath grammar is written **Tree-sitter style** — one directly left-recursive `Expr` with a precedence ladder and labels — rather than as a line-by-line EBNF transcription, which would make every precedence level a node. |
 | **GM13** (2026-10-12) | **`~x` matches `x` where the previous token ended**: no `space` is skipped before it — Tree-sitter's `token.immediate`. It marks one literal or `:=` rule reference (`~(a \| b)` and `~rule` on a `=` rule are errors), so `~x*` is `(~x)*`. It is how a space-sensitive position is written inside spaced text: jq's string text after an interpolation, XQuery's element content and attribute values around `{ … }`. Ruled over an exit from `nospace` regions (a `spaced` modifier) and over per-rule `nospace`, after comparing with Tree-sitter, which has no regions: whether space may precede something belongs to that token. `nospace` stays for whole space-free regions. |
 | **GM5.2** | **Diagnostics align with the existing parsers**: compile-time grammar errors use the script parser's E-code scheme and reporters; a failed `parse` is the same `ERR_PARSE_ERROR` every input parser raises, with the furthest-failure message as its `parse_error_message`; lint warnings go through the warning channel the script compiler already uses. No new catalog, no new tags. |
-| **GM14** (extension implemented 2026-10-15 for the authorized diff package) | `parse(binary, g[, rule/options])` reuses the grammar over a byte alphabet. Ordinary lexical captures are binary (empty captures are `null`, S2.2.2v2); symbol captures remain symbols. Text input keeps Unicode/string behavior. Script-facing grammar results are GC-owned, with private parse storage released per call (D4.2.6/D5.3.3). Byte spans are checked before narrowing to 32 bits. |
+| **GM14** (extension implemented 2026-10-15 for the authorized diff package) | `parse(binary, g[, rule/options])` reuses the grammar over a byte alphabet. Ordinary lexical captures are binary (empty captures are `null`, S2.2.2v2); symbol captures remain symbols. Text input keeps Unicode/string behavior. Script-facing grammar results are GC-owned, with private parse storage released per call (D5.2.5/D6.3.3). Byte spans are checked before narrowing to 32 bits. |
 
 USER also asked whether Tree-sitter-style precedence rules (`prec.left(n, …)`
 on directly left-recursive alternatives) can be supported. Yes — §5 gives the
@@ -575,19 +575,19 @@ in the shape of every node.
 Why a tree of elements and not a callback sink (the `LambdaParseSink` shape
 the C parser uses): the whole module is user-facing data flow. A parse tree
 that is a value can be printed, diffed against a golden, validated against a
-schema (D3.2.2, [Lambda_Validator.md](../doc/Lambda_Validator.md)), cached,
+schema (D4.2.3, [Lambda_Validator.md](../doc/Lambda_Validator.md)), cached,
 and transformed by any Lambda function. The transpiler step then needs no new mechanism at all — it is a
 function from one element tree (the guest's) to another (`lm.`), ending in
 `compile` (S15.3). This is what D1.1's "grammar + AST builder" means when
 both halves are written in Lambda.
 
 Script-facing `parse` builds precisely rooted GC-owned values, then releases
-its private parse Input and scratch arena (GM14, D5.3.3). The native engine also
-supports a caller-owned Input/MarkBuilder result (D4.2.6). Neither mode retains
+its private parse Input and scratch arena (GM14, D6.3.3). The native engine also
+supports a caller-owned Input/MarkBuilder result (D5.2.5). Neither mode retains
 scratch nodes in the returned tree. The grammar itself is a type (GM5v2):
 compiled rules and token matchers live in the module's type list with every
 other declared type, immutable, shared by every execution of the module, and
-released with it (D4.1.1v2, D7.2.1). A script never holds a run-time object
+released with it (D5.1.1, D9.3.1). A script never holds a run-time object
 for a grammar — only the `Type*`, exactly as for `type T = …`.
 
 ### 7.1 Byte grammar input (GM14)
@@ -626,7 +626,7 @@ with a syntax error does not run, so a partial tree has no consumer.
 
 | ID | Question | Proposed default |
 |---|---|---|
-| **GM-O1** | Does `grammar` go into the formal spec as a new S16.9 declaration ruling (syntax) plus a D-ruling for the engine (likely a new D8.3), or only as a D-ruling with the syntax folded into S15 metaprogramming? | S16.9 for the surface (it is a declaration like `type`), D8 for the engine; S15 gains one line pointing at `parse(text, grammar)` as the second producer of trees that reach `compile` |
+| **GM-O1** | Does `grammar` go into the formal spec as a new S16.9 declaration ruling (syntax) plus a D-ruling for the engine (likely a new D7.3), or only as a D-ruling with the syntax folded into S15 metaprogramming? | S16.9 for the surface (it is a declaration like `type`), D8 for the engine; S15 gains one line pointing at `parse(text, grammar)` as the second producer of trees that reach `compile` |
 | **GM-O2** | Explicit level references in the grammar surface (`expr@3`) for authors who want to call a rule above a given precedence | **not in V1**; the ladder is private to the rule. Add if a target spec needs it |
 | **GM-O3** | *Closed by GM4.3 (USER, 2026-10-11): `'x'` in a `=` rule is a rule name.* | closed |
 | **GM-O8** | *Closed by GM5.4: `text is g.rule` is not valid syntax; bind the rule first.* | closed |
@@ -635,7 +635,7 @@ with a syntax error does not run, so a partial tree has no consumer.
 | **GM-O4** | *Ruled by GM5.1 (USER, 2026-10-11).* `parse` takes the grammar as a type value and the entry rule as a symbol (`parse(text, g, 'rule')`); no grammar-by-name string form, which keeps S15.3's "strings are never code" clean and makes `pub grammar` the one sharing mechanism | closed |
 | **GM-O5** | Packrat by default (memoize every rule) vs. opt-in `memo` | opt-in, as ruled in §4.6; measure on the XQuery grammar before revisiting |
 | **GM-O6** | Semantic predicates (`&{ expr }`) in rules | **no**; context-sensitivity that parser-driven lexing and lookahead cannot express goes into the transpiler, which keeps the grammar a pure description |
-| **GM-O7** | Does the module belong to `lambda-cli` (D7.1.6)? | yes — it is a core-language feature with no Radiant/JS/Jube dependency; the `cli` profile lists `lambda/runtime/grammar` since 2026-10-11 (that profile not yet rebuilt) |
+| **GM-O7** | Does the module belong to `lambda-cli` (D9.2.2)? | yes — it is a core-language feature with no Radiant/JS/Jube dependency; the `cli` profile lists `lambda/runtime/grammar` since 2026-10-11 (that profile not yet rebuilt) |
 
 ## 10. Milestones (sketch; detail belongs in `vibe/impl/`)
 
@@ -674,7 +674,7 @@ As implemented 2026-10-11; the plan's §2 and phase notes carry the detail.
   `build_ast.cpp` wraps it in the same `TYPE_STAM` + declarator as
   `type Name = T` (form `LSF_GRAMMAR`; D8.2.2 prefers a form field to a new
   node kind), so both tiers treat it as a compile-time type binding with no
-  change. `grammar.js` reads the body as one opaque token (D8.1.2v3).
+  change. `grammar.js` reads the body as one opaque token (D8.1.1).
 - **Island reuse:** `parse_pattern_island_syntax` (`parse_type_pattern.cpp`)
   parses a `:=` body; `resolve_type_pattern` compiles it, with earlier
   token rules in a private scope as named pattern definitions.
@@ -694,3 +694,28 @@ As implemented 2026-10-11; the plan's §2 and phase notes carry the detail.
 - **Where the lint reports:** `record_semantic_warning_span`, which joins the
   runner's printed warning list (`err_print_warning`) and never fails the
   compile.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D8.1.2v3 → D8.1.1
+
+**D8.1.1** The shipped Lambda executable uses the first-party C parser as
+the final production implementation for normal source-to-AST compilation.
+`lambda/tree-sitter-lambda/grammar.js` is the best structural reference, the
+editor/bindings grammar, and the first-cut verifier for generated and fuzzed
+source, but it is known not to implement every corner case. Neither parser's
+acceptance result is normative by itself: a disagreement is held for manual
+review against the formal syntax rulings and current vibe records, then the
+incorrect side is fixed and the ruling is pinned by a reviewed fixture.
+Generated `parser.c` remains a reference artifact regenerated from
+`grammar.js` (never hand-edit `parser.c`). Build config generates the build
+files (never hand-edit the Lua). [CGP5v2, rules 5, 7]

@@ -7,8 +7,8 @@ Public API: [Lambda_Image](../../doc/Lambda_Image.md).
 
 The selected schema uses still-image root stacks, frame-owned animation
 stacks, nested stacks for groups and image-scoped `assets`. The implementation
-preserves **S9.1.2 / S9.2.2** snapshots, **D7.4.5v2** virtual element semantics
-and **D5.3.3** precise rooting. This is an implementation record; the proposal's
+preserves **S9.1.2 / S9.2.2** snapshots, **D9.5.5** virtual element semantics
+and **D6.3.3** precise rooting. This is an implementation record; the proposal's
 full target vocabulary is not a claim that all Photoshop behavior is supported.
 
 ## Delivery boundaries
@@ -40,9 +40,9 @@ full target vocabulary is not a claim that all Photoshop behavior is supported.
   and block strict output rather than being silently erased.
 - `lambda/runtime/image_psd.cpp` and `lambda/input/input-psd.cpp`: runtime
   owners versus Input-owned materialized samples. The latter never embeds
-  untraced GC Velmts in an arena (**D4.1.2 / D5.3.3**).
+  untraced GC Velmts in an arena (**D5.1.2 / D6.3.3**).
 - `lmd/package/image.ls`: public constructors, inspection, editing, composition,
-  interchange and capability/report wrappers (**D7.2.4v3**).
+  interchange and capability/report wrappers (**D9.3.4**).
 - `lmd/package/image/edit.ls`: sessions reuse `lambda.editor.mod_history`;
   adjacent updates sharing a group undo as one stroke. Original-byte export
   requires equality with the session's captured original document.
@@ -70,12 +70,12 @@ editable; a merged-only file imports as one raster layer.
 - Imported MIR boxed calls omitted the CW33 borrow-home protocol, so a
   procedural Raster replacement stayed in the callee. Imported and dynamic
   boxed edges now reuse the same preparation/transport helpers, then reload
-  the caller's binding (**S9.1.3 / D8.1.1**). Positional, named and defaulted
+  the caller's binding (**S9.1.3 / D8.3.1**). Positional, named and defaulted
   region-write calls are covered.
 - Numeric-array Input construction shares a dense arena factory with deep
   copy. Shape extraction/validation moved from the runtime vector unit into
   the data layer so Input-only executables do not acquire a runtime link
-  dependency (**D1.9 / D4.1.2**).
+  dependency (**D1.9 / D5.1.2**).
 - A PSD group mask must mark the group unsupported while its coverage is
   outside the decoder/render profile. A native regression prevents an imported
   masked group from silently becoming an unmasked group.
@@ -120,7 +120,7 @@ admission lists or document-loader router. The reported `view ...psd` command
 therefore failed before reaching the image decoder.
 
 The finite fix admits `.psd` case-insensitively and registers the stateless
-`lambda.doc.image` transform (**D7.2.4v3**). It reads through `lambda.image`
+`lambda.doc.image` transform (**D9.3.4**). It reads through `lambda.image`
 and presents a fresh composition as an in-memory PNG in the existing image
 document DOM. It also reaches the shared `layout`/`render` document route.
 Unsupported rendering features remain checked; no merged-preview fallback
@@ -193,7 +193,7 @@ Incremental brush/eraser previews share the whole-stroke dab and pixel kernels.
 `paint_stroke_step` carries immutable coverage, spacing/pressure and work across
 batches, applying cumulative opacity against the frozen source (**S9.2.2**).
 Continuation source/settings bindings preserve value equality (**S5.4.3**), and
-native allocation paths use precise roots (**D5.3.3**). Earlier source, coverage
+native allocation paths use precise roots (**D6.3.3**). Earlier source, coverage
 and preview snapshots remain independently readable. The editor combines this
 with existing `render_region` / `with_region` to refresh bounded dirty regions;
 neighborhood effects/styles retain full-composition previews. Performance and
@@ -203,5 +203,5 @@ The canvas upload bridge now treats same-size bitmap updates as repaint work.
 Only changed width/height attributes enter DOM reconciliation; the shared canvas
 generation helper requests repaint directly. Repeated frame uploads retain owned
 pixels without relayout, while resize-dependent CSS still reflows. This preserves
-the native pixel-ownership boundary (**D4.5.2**) and removes a per-stroke-frame
+the native pixel-ownership boundary (**D5.5.2**) and removes a per-stroke-frame
 layout cost exposed by the native frame profiler.

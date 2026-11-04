@@ -617,7 +617,7 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
         // Named maps, nested arrays, and pointer-lane scalars are checked by
         // the same structural relation as a normal declared boundary. The
         // numeric cases above remain explicit because their admission may
-        // convert carriers rather than merely compare contracts (D3.1.1v2).
+        // convert carriers rather than merely compare contracts (D4.1.1).
         return lambda_type_contract_semantically_compatible(arg_elem,
             expected_elem);
     }
@@ -727,7 +727,7 @@ static Type* parameter_contract_for_declared(Transpiler* tp, Type* declared,
     if (optional && !default_value) {
         // An omitted typed optional is the language-level null value. Keep the
         // scalar payload for the native lane, but publish the nullable contract
-        // so ABI padding decodes null instead of silently becoming zero (D2.5.1).
+        // so ABI padding decodes null instead of silently becoming zero (D2.4.1).
         return lambda_type_nullable_normalized(tp->pool, declared);
     }
     return declared;
@@ -898,7 +898,7 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
         // min/max select an element only when the elements are numeric (a
         // null element selects null): any other element makes the native
         // operation fail, so the relation is unproven and the row's open
-        // result stands (D3.3.5). `min` of a `string?[]` was typed `string?`
+        // result stands (D4.3.4). `min` of a `string?[]` was typed `string?`
         // and the JIT read the error Item back as a string pointer.
         Type* elem = known_array_element_type(source);
         bool nullable = false;
@@ -1988,7 +1988,7 @@ bool lambda_boundary_is_redundant(Type* source, Type* target) {
 }
 
 // ---------------------------------------------------------------------------
-// D6.1.3 (LR12-24): the conservative `may_defect` fact build_ast needs itself.
+// D7.1.3 (LR12-24): the conservative `may_defect` fact build_ast needs itself.
 // A literal's slot representation is fixed here, before either tier runs, so a
 // slot fed by a value that may be a contained defect -- an error its static
 // type does not declare -- must be boxed here, or both tiers lay out a native
@@ -2696,7 +2696,7 @@ static bool analyze_captures(Transpiler* tp, AstFuncNode* fn_node,
     return tp->error_count == 0;
 }
 
-// S9.1.4v2/D6.2.3v3: one indexed value-flow graph decides capture mode for
+// S9.1.4v2/D7.2.3: one indexed value-flow graph decides capture mode for
 // every tier. Function summaries separate returned values from retained ones.
 struct LambdaClosureFlow {
     AstIndex* index;
@@ -3436,7 +3436,7 @@ static void resolve_array(Transpiler* tp, AstArrayNode* ast_node) {
         else if (nested_type && !array_item_types_agree(nested_type, item_type, 0)) {
             nested_type = NULL;
         }
-        // D6.1.3/S7.8.1: a possible defect keeps the array generic
+        // D7.1.3/S7.8.1: a possible defect keeps the array generic
         if (ast_expr_may_defect(item, 0)) nested_type = NULL;
         type->length++;
     }
@@ -3579,7 +3579,7 @@ static const char* registered_jube_module_name(StrView* name) {
 #endif
 }
 
-// D7.2.4v4: the built-in lambda.io.<leaf> modules. Each answers to its full
+// D9.3.4: the built-in lambda.io.<leaf> modules. Each answers to its full
 // path only, and its members are the io_<leaf>_* rows.
 static const struct { const char* path; const char* module; } io_leaf_modules[] = {
     {"lambda.io.mail", "io_mail"},
@@ -3618,7 +3618,7 @@ static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
     return registered_jube_module_name(name);
 }
 
-// S17.2.1/D7.2.4: split a fully qualified built-in member without creating a
+// S17.2.1/D9.3.4: split a fully qualified built-in member without creating a
 // parallel namespace object. The AST still carries the ordinary member chain;
 // calls and constants resolve its complete spelling against the existing
 // registry/module rows.
@@ -3635,7 +3635,7 @@ static bool resolve_builtin_module_member(StrView path, const char** module,
             path.str[path.length - 1] == '\n')) {
         path.length--;
     }
-    // lambda.io.<leaf>. precedes lambda.io.: a member of a leaf module (D7.2.4v4)
+    // lambda.io.<leaf>. precedes lambda.io.: a member of a leaf module (D9.3.4)
     for (const auto& leaf : io_leaf_modules) {
         size_t leaf_len = strlen(leaf.path);
         if (path.length <= leaf_len + 1 || memcmp(path.str, leaf.path, leaf_len) != 0 ||
@@ -4382,7 +4382,7 @@ static Type* unresolved_type_any(void) {
 }
 
 // qualified and bare builtin values must publish the same callable contract;
-// a return-typed call callee is not a function value (D6.2.1, S12.3.7).
+// a return-typed call callee is not a function value (D7.2.1, S12.3.7).
 static void resolve_sys_func_value(Transpiler* tp, AstNode* node, size_t allocated, SysFuncInfo* info) {
     morph_ast_node(node, AST_NODE_SYS_FUNC, allocated);
     TypeFunc* type = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
@@ -6177,7 +6177,7 @@ static void merge_ns_attr_maps(Transpiler* tp, AstNode* dst_item, AstNode* src_i
         dst_type->shape = src_type->shape;
     }
     // a type that tracks its last field keeps it at the joined tail: walks
-    // stop there (D3.4.3v3)
+    // stop there (D3.4.3)
     if (dst_type->last && src_last) dst_type->last = src_last;
 
     dst_type->length += src_type->length;
@@ -6359,7 +6359,7 @@ static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode
             field_type = ((TypeType*)field_type)->type;
         }
     }
-    // D6.1.3/S7.8.1: a slot fed by a possible defect cannot be a native lane
+    // D7.1.3/S7.8.1: a slot fed by a possible defect cannot be a native lane
     if (!is_spread && ast_expr_may_defect(((AstNamedNode*)item)->as, 0)) {
         field_type = &TYPE_ANY;
     }
@@ -6515,7 +6515,7 @@ static TypeObject* lookup_object_type_for_tag(Transpiler* tp, StrView tag_name) 
     Type* resolved = entry->node->type;
     if (resolved->type_id != LMD_TYPE_TYPE) return NULL;
     Type* inner = ((TypeType*)resolved)->type;
-    // D2.6.6v2 phase 2: a nominal type now wears its structural kind, so the
+    // D3.1.1 phase 2: a nominal type now wears its structural kind, so the
     // tag is recognised by its nominal record rather than by an object tag.
     return type_nominal_record(inner) ? (TypeObject*)inner : NULL;
 }
@@ -8842,7 +8842,7 @@ static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
     if (!node || !bind || bind->failed || !direct_bind_mark_visited(bind, node)) return;
     if (node->syntax_form != LSF_NONE) {
         // The resolve pass clears every form it reaches; a node it missed is
-        // still an unbound `any` and must not be published (D8.2.5v3).
+        // still an unbound `any` and must not be published (D8.2.5).
         log_error("lambda bind: unresolved syntax form %d on node type %d at %u",
             (int)node->syntax_form, (int)node->node_type,
             node->source_span.start_byte);
@@ -9711,7 +9711,7 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
     if (!lambda_ast_analyze_indexed_captures(tp, script)) return false;
     if (!complete_outcome_facts(tp, script)) return false;
     // A pn member is bound by the runtime member lane so calls can lower it,
-    // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
+    // but S12.3.3v2/D3.1.4 forbid retaining that bound closure as a value.
     walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
     if (tp->error_count != 0) return false;
     CallColourWalk colour_walk = {tp, NULL,
@@ -9736,7 +9736,7 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
     if (tp->error_count != 0) return false;
     // both parser front ends share this final pass. Direct AST construction
     // used to skip it, leaving suspend-capable procedures without their
-    // resumable task state machine (D6.1.2).
+    // resumable task state machine (D7.1.2).
     if (tp->error_count == 0) lambda_ast_decide_cow_borrows(tp, script,
         functions);
     if (tp->error_count == 0) analyze_lambda_concurrency(tp, script,
@@ -10029,7 +10029,7 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
         // Every record arm reached from a named union alias is a declared
         // contract, just like a directly named record. Marking only the outer
         // union left compiler-constructed member carriers unable to certify
-        // recursive admission (D3.2.4v3, D8.3.2-D8.3.3).
+        // recursive admission (D4.2.5, D7.3.2-D7.3.3).
         if (type->type_id == LMD_TYPE_MAP) map->is_trusted_contract = true;
         // a declared element's content pattern can reach records whose fields
         // were laid out against the placeholder too
@@ -10882,7 +10882,7 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
             if (imported && imported->import && imported->node) {
                 // An import alias may share a system-function spelling (for
                 // example `stack`). Resolve its qualified export before the
-                // bare spelling can become a callable value (D4.6.1v2).
+                // bare spelling can become a callable value (D5.6.1).
                 AstIdentNode* resolved = (AstIdentNode*)alloc_ast_node_from_span(
                     tp, AST_NODE_IDENT, span, sizeof(AstIdentNode));
                 resolved->name = imported->name;
@@ -11082,7 +11082,7 @@ static TypeMethod* direct_lookup_object_method(Transpiler* tp,
         lambda_type_remove_error(tp->pool, receiver->type));
     if (!receiver_type || !is_map_family_type_id(receiver_type->type_id) ||
             is_global_simple_type(receiver_type)) return NULL;
-    // D2.6.6v2 phase 2: a receiver has methods iff its shape carries a nominal
+    // D3.1.1 phase 2: a receiver has methods iff its shape carries a nominal
     // record; the structural kind no longer distinguishes it.
     if (!type_nominal_record(receiver_type)) {
         // maps, vmaps, and elements carry shape entries but no method table.
@@ -11553,7 +11553,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             call->is_proc_method = true;
         }
     }
-    // S12.3.2, D6.2.2v2: a call through a function value has no declaration
+    // S12.3.2, D7.2.2: a call through a function value has no declaration
     // to bind names against, and both tiers passed its named arguments by
     // position. Named arguments need a statically known callee.
     if (!info && !user_method_found && !ast_direct_call_function(call) &&
@@ -11731,7 +11731,7 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
         raw->next = NULL;
         if (raw->node_type == AST_NODE_CONTENT) {
             // the literal's type records no content: the transpiler sizes the
-            // content array from this node (D3.4.3v3)
+            // content array from this node (D3.4.3)
             node->content = raw;
         } else {
             AstNode* candidate = raw;
@@ -11856,7 +11856,7 @@ static void resolve_param(Transpiler* tp, AstNamedNode* param) {
     if (declared == &TYPE_TYPE && binder_entry) {
         // `T: type` is the explicit spelling of a binder site. Registering it
         // on the ordinary parameter entry preserves source-order lookup while
-        // keeping T out of value-frame storage (D3.3.3v3).
+        // keeping T out of value-frame storage (D4.3.3).
         TypeBinder* binder = (TypeBinder*)alloc_type_kind(tp->pool,
             TYPE_KIND_BINDER, sizeof(TypeBinder));
         binder->bound = &TYPE_TYPE;
@@ -12125,7 +12125,7 @@ typedef struct CowParamEffectScan {
     // not a member/index read of it -- is returned, stored, rebound, passed or
     // captured. The CW29 sweep matches by ROOT (`print(p.n)` counts as passing
     // `p`), which is right for a parameter's write-through question and wrong
-    // here: it made every read-and-return helper mark, the exact cost D4.4.6
+    // here: it made every read-and-return helper mark, the exact cost D5.4.5
     // keeps free.
     bool bare_only;
     // the body being scanned, and the local-part recursion depth
@@ -12560,7 +12560,7 @@ static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
 //   a.l0 = l            // stored back to the SAME path; l dead afterwards
 //
 // S9.1.2 makes the bind a copy: the write detached one level and the
-// store-back captured the copy, and with a monotonic share bit (D4.4.1) every
+// store-back captured the copy, and with a monotonic share bit (D5.4.1) every
 // later call copied every level (cd/havlak `arr_set`, splay's node handles).
 // Between the bind and the store-back nothing observes the root, and after
 // the store-back nothing observes the handle, so writing through the handle IN
@@ -12578,13 +12578,13 @@ static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
 //   - inside the region the root is named only by store-backs of that path
 //     or through a SIBLING member -- `root.g...` read or written, `g` not the
 //     handle's first member segment, the written value not naming the handle
-//     (D4.4.4v2: a different slot, and an alias between slots is share-marked
+//     (D5.4.4: a different slot, and an alias between slots is share-marked
 //     so the leaf still detaches); no key identifier is reassigned or passed
 //     to a call, no nested function, handler, `raise`, `^` propagation,
 //     `start` or `try` appears, `break`/`continue` target a loop inside the
 //     region, and every `return` is immediately preceded by a store-back in
 //     its own list -- or, outside any loop of the region, precedes every use
-//     of the handle (no in-place write can have happened yet, D4.4.4v2);
+//     of the handle (no in-place write can have happened yet, D5.4.4);
 //   - after any store-back the handle is never named again in that list.
 // An error exit inside the region leaves the partial in-place writes visible
 // through the root -- the rule a `var` parameter already has (CW33), which
@@ -12702,7 +12702,7 @@ typedef struct RmwExprScan {
 
 static void rmw_check_expr(AstNode* top, RmwBorrowCtx* c);
 
-// D4.4.4v2: does the place `object` (extended by `key` when given) start at
+// D5.4.4: does the place `object` (extended by `key` when given) start at
 // the root through a member other than the handle's first member segment?
 // Such a place is a different slot of the root. Its index keys are still
 // ordinary expressions and are checked like any other.
@@ -12812,7 +12812,7 @@ static void rmw_check_stmt(AstNode* node, AstNode* prev, RmwBorrowCtx* c) {
     switch (stmt->node_type) {
     case AST_NODE_RETURN_STAM: {
         // leaving without the store-back is unobservable only before any
-        // in-place write could have happened (D4.4.4v2)
+        // in-place write could have happened (D5.4.4)
         bool stored_back = prev && rmw_is_storeback(prev, c);
         if (!stored_back && (c->handle_named || c->loop_depth > 0)) {
             c->bad = true;
@@ -12897,7 +12897,7 @@ static void rmw_check_chain(AstNode* head, RmwBorrowCtx* c) {
     }
 }
 
-// D4.4.5 move-out bind: `var h = root.path` followed, in the same statement
+// D5.4.5 move-out bind: `var h = root.path` followed, in the same statement
 // list, by an unconditional overwrite `root.path = e` of that place (e not
 // naming h). Before the overwrite only reads through `h` and sibling-member
 // uses of the root may appear -- no write through h, no escape of h, no
@@ -12988,7 +12988,7 @@ static bool rmw_moves_out(AstNode* stmt_node, RmwBorrowCtx* c) {
     return false;
 }
 
-// CW36 / D4.4.4v3: store-backs inside branches. When no store-back follows
+// CW36 / D5.4.4: store-backs inside branches. When no store-back follows
 // the bind in its own list (splay's `var left = node.left` written and stored
 // back inside sibling `if`s), the region is walked path by path with two
 // facts per path:
@@ -13128,7 +13128,7 @@ static void rmw_use_cb(AstNode* child, AstNode* parent, void* opaque) {
             bool bare_handle = bare && bare->node_type == AST_NODE_IDENT &&
                 ((AstIdentNode*)bare)->entry == handle;
             bool var_handle = bare_handle && pt && pt->is_var_param;
-            // Tune29 §19.1 (D4.4.4v4): a plain argument the procedure only
+            // Tune29 §19.1 (D5.4.4): a plain argument the procedure only
             // reads, or keeps a part of, never observes an in-place write.
             // A returned part is share-marked at the call site on both tiers
             // (LR12-11), and a part stored elsewhere is captured (S9.3.1), so
@@ -13319,7 +13319,7 @@ static void rmw_try_candidate(AstNode* stmt_node) {
     if (named->declared_type) {
         // An invariant annotation preserves the borrowed place's
         // representation: the same array contract, or the same nominal record
-        // with the same optionality (D3.2.4v3). A converting/different
+        // with the same optionality (D4.2.5). A converting/different
         // contract must retain snapshot admission.
         Type* source_contract = declared_compound_destination_type(NULL, named->init, NULL);
         Type* source_map = lambda_type_nonnull_map_contract(source_contract);
@@ -13428,7 +13428,7 @@ static void lambda_ast_lower_rmw_borrows(AstFuncNode* fn) {
 }
 
 // ---------------------------------------------------------------------------
-// T29-1 / CW37 (D4.4.4v4, COW §11.14): synthesized place handles.
+// T29-1 / CW37 (D5.4.4, COW §11.14): synthesized place handles.
 //
 // A record place P = root.s1[.s2] spelled in several statements of a `pn`
 // body is navigated once. The first unconditional read `P.f` in a statement
@@ -13599,7 +13599,7 @@ static void ph_scan_children(AstNode* node, PlaceHandleScan* scan) {
 
 // A direct pure callee with a plain, unwritten parameter cannot replace its
 // caller's root or key. Retention may share the value, so only reads survive
-// this edge (D4.4.4v4, S9.1.2).
+// this edge (D5.4.4, S9.1.2).
 static bool ph_call_preserves_read(PlaceHandleScan* scan, AstCallNode* call) {
     AstNode* function = unwrap_primary_node(call->function);
     NameEntry* function_entry = function && function->node_type == AST_NODE_IDENT
@@ -13668,7 +13668,7 @@ static void ph_scan_place(AstNode* chain, const AstCowPath* path, bool write,
         scan->kill = true;   // a proper prefix of P: the container itself
         return;
     }
-    // a sibling slot of the root is a different place (D4.4.4v2)
+    // a sibling slot of the root is a different place (D5.4.4)
     if (path->count >= 1 && path->is_member[0] && h->path.is_member[0] &&
             !ast_cow_path_segment_equal(path->segment[0], true, h->path.segment[0], true)) {
         ph_scan_keys(path, 0, scan);
@@ -14386,7 +14386,7 @@ static void lambda_ast_plan_place_handles(Transpiler* tp, AstFuncNode* fn) {
     log_debug("t29-handles: planned %u place handles", (unsigned)ctx.next_slot);
 }
 
-// CW24v3 / D4.4.6: decide, per place-copy binding, whether the PLACE may be
+// CW24v3 / D5.4.5: decide, per place-copy binding, whether the PLACE may be
 // written while the copy is alive. The live range is the statement list from
 // the bind to the last top-level statement of that list naming the copy; a
 // nested use makes its whole enclosing top-level statement part of the range.
@@ -14394,7 +14394,7 @@ static void lambda_ast_plan_place_handles(Transpiler* tp, AstFuncNode* fn) {
 // a write through the root or any path prefix, an unknown callee and a `var`
 // pass as writes; "escapes" is the CW29 retention scan over the whole body,
 // conservative in the same direction. A miss here is a semantic bug, a false
-// hit is one share-mark (D4.4.1), so every unknown shape falls to "written".
+// hit is one share-mark (D5.4.1), so every unknown shape falls to "written".
 static void place_copy_decide_list(AstNode* head, AstNode* fn_body);
 
 static void place_copy_decide_declaration(AstNode* stmt_node, AstDeclaratorNode* named,
@@ -14973,7 +14973,7 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
         }
     }
 
-    // D7.2.4v2: shipped source mirrors every component below lambda.*.
+    // D9.3.4: shipped source mirrors every component below lambda.*.
     size_t prefix_len = strlen("lambda.");
     StrView physical = {module.str + prefix_len, module.length - prefix_len};
     strbuf_append_format(path, "%s/package/", host_path(HOST_PATH_HOME));
@@ -14988,7 +14988,7 @@ bool lambda_import_is_relative(StrView module) {
 
 // S16.9.8: `.a.b` resolves beside the importer, and each leading `~~` is one
 // parent step (S2.4.1v2), so `~~.~~.a` is `../../a`. A bare root names a
-// package: only `lambda.*` resolves to source today (D7.2.4v2); every other root
+// package: only `lambda.*` resolves to source today (D9.3.4); every other root
 // is reserved for the package registry and yields NULL, never a cwd file.
 char* lambda_resolve_import_module_path(const char* base_directory,
         StrView module) {
@@ -15297,7 +15297,7 @@ static Type* direct_loop_value_type(Transpiler* tp, AstNode* source,
 // The direct reduction builder constructs a join predicate before the binding
 // reduction installs its new loop name. Reattach only unresolved identifiers
 // for that binding; otherwise T0 evaluates `c.id`/`r.id` as ItemError while MIR
-// still resolves the same source name during lowering (D7.2.1/D8.1.1v2).
+// still resolves the same source name during lowering (D9.3.1/D8.3.1).
 static void direct_rebind_join_ident(AstNode* node, String* name,
         NameEntry* entry) {
     if (!node || !name || !entry) return;
@@ -16100,7 +16100,7 @@ static bool ast_group_child_is_declaration(AstNode* item) {
 
 // A member key is a spelling, not a lexical variable reference. In particular,
 // built-ins such as `name` must not turn `record.name` into a system-function
-// node (D4.6.1v2).
+// node (D5.6.1).
 static AstNode* syntax_member_field(Transpiler* tp, LambdaToken token) {
     LambdaAstLiteralKind literal_kind;
     if (lambda_literal_kind_from_token(token.kind, &literal_kind)) {
@@ -16133,7 +16133,7 @@ static AstNode* syntax_base_type(Transpiler* tp, SourceSpan span) {
 
 // A type slot's text parses into type-pattern syntax. A slot the pattern
 // grammar rejects becomes the error type, and its diagnostic is reported when
-// the slot resolves (D8.1.1v3).
+// the slot resolves (D8.3.1).
 static AstNode* syntax_type_slot(LambdaSyntaxSink* sink, SourceSpan span,
         TypePatternMode mode) {
     Transpiler* tp = sink->tp;
@@ -16993,7 +16993,7 @@ static AstNode* syntax_type_slot_reduction(LambdaSyntaxSink* sink,
     if ((flags & LAMBDA_REDUCTION_FLAG_ANNOTATION_IMPLICIT_BINDER) &&
             reduction->child_count == 0) {
         // `x: as T` is the ordinary non-error parameter domain with a
-        // binder, not a new leading type expression (S4.2.2, D3.3.3v3).
+        // binder, not a new leading type expression (S4.2.2, D4.3.3).
         AstNode* base = direct_type_from_value(tp, span, &TYPE_ANY_NO_ERROR);
         return build_binder_type_syntax(tp, span, base,
             direct_token_text(tp, reduction->secondary_token));
@@ -17952,7 +17952,7 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
 static TypeObject* resolver_object_declare(Transpiler* tp, AstObjectTypeNode* object) {
     TypeObject* object_type = (TypeObject*)pool_calloc(tp->pool,
         object->is_binary_schema ? sizeof(TypeBinarySchema) : sizeof(TypeObject));
-    // D2.6.6v2 phase 2 (S2.1.1v3): a nominal type IS a map or an element; the
+    // D3.1.1 phase 2 (S2.1.1v3): a nominal type IS a map or an element; the
     // object tag is gone. Default to map and refine at resolver_object_end,
     // which is the first point a content pattern is known.
     object_type->type_id = LMD_TYPE_MAP;
@@ -17966,14 +17966,14 @@ static TypeObject* resolver_object_declare(Transpiler* tp, AstObjectTypeNode* ob
     object_type->name = object_type->type_name;
     object_type->struct_name = object->name->chars;
     object_type->is_trusted_contract = true;
-    // D2.6.6v2 phase 2 (S2.1.4): the nominal record. It is what `is T` compares
+    // D3.1.1 phase 2 (S2.1.4): the nominal record. It is what `is T` compares
     // and what every shape extended from this one keeps pointing at, so the
     // declared shape publishes it here, once, and never rewrites it.
     TypeNominal* record = (TypeNominal*)pool_calloc(tp->pool, sizeof(TypeNominal));
     record->type_name = object_type->type_name;
     record->struct_kind = LMD_TYPE_MAP;  // refined at resolver_object_end
     object_type->nominal = record;
-    object_type->is_nominal = 1;  // base-flag discriminator (D2.6.6v2 phase 2)
+    object_type->is_nominal = 1;  // base-flag discriminator (D3.1.1 phase 2)
     lambda_ast_register_name(tp, (AstNode*)object);
     return object_type;
 }
@@ -18277,7 +18277,7 @@ static void resolver_object_end(LambdaResolver* r) {
     // A type declared inside a method body closes the one open declaration
     // state, so the enclosing type publishes no further members.
     if (!r->object_node) return;
-    // D2.6.6v3: the DECLARED content pattern. It describes the type, not any
+    // D3.1.1: the DECLARED content pattern. It describes the type, not any
     // one literal's children — every literal of this type shares this
     // TypeObject, so per-literal counts live on AstObjectLiteralNode instead.
     // A declared pattern replaces an inherited one (OB7).
@@ -18784,7 +18784,7 @@ static void resolve_var_stam(Transpiler* tp, AstLetNode* var) {
 
 static void resolve_let_stam(Transpiler* tp, AstLetNode* let) {
     let->type = let->declare->type;
-    // CW24v3 / D4.4.6: a `let` bound from a mutable root's place is a place
+    // CW24v3 / D5.4.5: a `let` bound from a mutable root's place is a place
     // copy as much as a `var` is -- it cannot be written through, but the
     // PLACE can be, and the copy must not see that. Only the `var` path
     // recorded the fact, which is why `let old = r.kid` never marked. The
@@ -19823,7 +19823,7 @@ static bool lambda_rd_prepare_transpiler(Transpiler* tp, const char* source) {
         tp->root = input->root;
         // The transpiler — the Script it becomes — takes the registries over
         // and releases them itself; left on the Input too, the pool's release
-        // of the Input (D4.2.6) freed them a second time. The Input keeps its
+        // of the Input (D5.2.5) freed them a second time. The Input keeps its
         // context and arena, which go with the pool.
         input->name_pool = nullptr;
         input->type_list = nullptr;

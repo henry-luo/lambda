@@ -909,7 +909,7 @@ collapses to a slot-address compare in the callee prologue.
    is one (`JIT_VALUE_RAW_GC_POINTER` class exists for raw pointers); the
    caller reloads its register from the home after the call — one load per
    `var` arg, cheaper than today's pre-detach *call*.
-2. **CW25 place arguments (CW33v2; D4.4.7, USER 2026-11-03).**
+2. **CW25 place arguments (CW33v2; D5.4.6, USER 2026-11-03).**
    Member/index arguments, including scalar places, use a caller-owned
    precisely rooted Item home. Evaluate each path key once and retain the
    rooted keys until the call ends. Prepare the root and spine before the
@@ -917,7 +917,7 @@ collapses to a slot-address compare in the callee prologue.
    Reinstall the published leaf through the path after the call, including
    an error result, so detach/rebinding and partial writes reach the caller.
    Never transport `&parent->items[i]` or a packed field pointer: data buffers
-   move under D4.3.1 and fields need declared-lane encoding. Both tiers share
+   move under D5.3.1 and fields need declared-lane encoding. Both tiers share
    this protocol and preserve S9.1.3v3 exclusivity and invariance.
 3. **Wide scalars** stored through a slot must be rehomed off the callee's
    number stack first (`lambda_item_heap_rehome`) — the subtlety
@@ -941,7 +941,7 @@ publishes straight through the address (`*home = value`), covering rebinds
 and mid-body detaches with no entry resolution; the wide-scalar capture/box
 split across the number extent stays.
 
-**Typed half on the boxed edges — implemented 2026-09-07 (D8.1.1v8).** The
+**Typed half on the boxed edges — implemented 2026-09-07 (D8.3.3).** The
 boxed `_b` wrapper is the adapter the table above names: for a typed `var`
 position it consumes the `Item*` home cell, runs the callee-prologue prepare
 (`cow_prepare_write`, once -- only when a home was transported, since a
@@ -1038,7 +1038,7 @@ is a store through the caller's home. Until then the shape is a standing
 T0/MIR divergence for a rarely-written idiom (rebind-through-borrow rather
 than mutate-through-borrow).
 
-**M1a extension — typed scalar and record homes (2026-09-14, D8.1.1v10).**
+**M1a extension — typed scalar and record homes (2026-09-14, D8.3.3).**
 The M1a prologue skipped every typed non-array `var` position, so on the
 eager tier `pn inc(var n: int) { n = n + 1 }` rebound only the callee's lane
 register — every scalar lane, `string`, records and their optional forms;
@@ -1058,7 +1058,7 @@ pointer-ABI stage):
   `String*` pointer) has no Item-classed slot of its own: the caller homes
   it from the boxed argument's root slot and decodes the published Item back
   into the lane after the call (`MirVarHomeKind::TYPED_LANE`). The reload
-  never switches a binding's carrier (D3.3.4), which is why a scalar-lane
+  never switches a binding's carrier (D2.4.3), which is why a scalar-lane
   binding passed to an *untyped* `var` parameter still publishes no home.
 
 Two pre-existing lane defects surfaced by the fixture were fixed with it:
@@ -1066,7 +1066,7 @@ an assignment of `null` to a nullable float/bool/string lane binding decoded
 through the non-nullable decoder (NaN / `false` / a non-null "" pointer), and
 `return g` boxed a lane local without its contract. Fixture
 `test/lambda/proc/cow_var_typed_rebind.ls`; the auto-tier rebind pin of
-D8.1.1v8 is lifted.
+D8.3.3 is lifted.
 
 ### 11.11 CW34 — read-modify-write handle borrows (RATIFIED 2026-09-06, user; IMPLEMENTED same day)
 
@@ -1085,7 +1085,7 @@ pn arr_set(var a, idx, val) {
 
 Under the Stage-1 mechanism the bind share-marks the level (`cow_bind_var`),
 the first write detaches one level, and the store-back captures the copy
-(S9.3.1) — and because the mark is a monotonic bit (D4.4.1) the next call
+(S9.3.1) — and because the mark is a monotonic bit (D5.4.1) the next call
 finds the level shared again and copies again. `COW_EXEC_PROFILE` on the
 suite (2026-09-06): havlak 205k array copies / 36 MB per run, awfy deltablue
 49k, all with `unique_mutations = 0` — copies whose source dies at the
@@ -1135,7 +1135,7 @@ An error exit inside the region leaves the partial in-place writes visible
 through the root — exactly the rule a `var` parameter already has under
 CW33, which the borrow is.
 
-**Revision v2 (D4.4.4v2, RATIFIED 2026-09-14, user).** Two region rules
+**Revision v2 (D5.4.4, RATIFIED 2026-09-14, user).** Two region rules
 were stricter than P6 needs. (a) *Sibling members.* A region may name the
 root through a member other than the handle's first member segment —
 `var vals = t.vals`, `t.vals = vals`, `len(t.vals)` — because that is a
@@ -1189,19 +1189,19 @@ pn rotate_right(var node: N?) N? {
 ```
 
 The bind's mark is stale by the time of the write — the overwrite removed the
-only other reference — but the monotonic bit (D4.4.1) still forces a copy.
+only other reference — but the monotonic bit (D5.4.1) still forces a copy.
 §11.11's "Not covered" paragraph named this shape ("an observer removed by an
 intervening write") as a candidate for a later ruling.
 
-**The ruling (D4.4.5).** `var h = root.path` binds as a borrow when a later
+**The ruling (D5.4.5).** `var h = root.path` binds as a borrow when a later
 statement of the same list is an unconditional store `root.path = e` to the
 same path with `e` not naming `h`, and every statement in between is a
 declaration or plain/indexed/member assignment that (i) names `h` only as the
 object of a member or index read, (ii) names the root only through sibling
-members (D4.4.4v2), (iii) does not write through `h` or rebind it, and (iv)
+members (D5.4.4), (iii) does not write through `h` or rebind it, and (iv)
 contains no branch, loop, return, `raise`, `^`, handler, nested function or
 `start`. Root kinds, key kinds, link count and annotation conditions are
-D4.4.4v2's; the bind uses the same runtime spine test
+D5.4.4's; the bind uses the same runtime spine test
 (`cow_bind_rmw_handle`), so a shared root or intermediate link keeps the
 snapshot bind, and the leaf's own share bit still decides whether `h`'s later
 writes detach. Between the bind and the overwrite nothing writes through
@@ -1237,7 +1237,7 @@ asked for is §11.13.
 
 ### 11.13 CW36 — store-backs anywhere the borrow is unobservable (RATIFIED 2026-09-16, user; IMPLEMENTED 2026-09-16, T28-8)
 
-**The ruling (D4.4.4v3).** The user's ruling, verbatim in substance: the
+**The ruling (D5.4.4).** The user's ruling, verbatim in substance: the
 store-back can be allowed as long as it does not break the overall value
 semantics design — `let`/`var` hold values, not aliases (S9.1.2). Which path,
 what the handle may modify in place, and where it stores back are not core
@@ -1247,13 +1247,13 @@ subset* of one invariant, not the boundary of the licence.
 
 **The invariant, stated so it can be checked.** A handle `h` bound from
 `root.path` is a borrow iff no execution can observe a difference from the
-snapshot bind. Under the monotonic share bit (D4.4.1) that reduces to:
+snapshot bind. Under the monotonic share bit (D5.4.1) that reduces to:
 
 1. the spine from the root to the leaf's parent is unshared at the bind
    (runtime spine test, unchanged);
 2. between the bind and a store-back, nothing reads the place `root.path`
    other than through `h` — a sibling-member read of the root is fine
-   (D4.4.4v2), a read of the same path is not;
+   (D5.4.4), a read of the same path is not;
 3. on every path where `h` was written through, the pointer `h` holds is
    stored back to `root.path` before `h`'s next use or the frame's end; and
 4. after a store-back on a path where `h` stays live, the stored pointer is
@@ -1277,7 +1277,7 @@ syntactically live in the next block. Under the invariant:
   are admitted; the inner spine test runs through the outer handle's leaf.
 - **Rebinding the handle by a borrowing call** keeps the borrow: the callee
   received the place through the CW33 home and the store-back stores
-  whatever `h` holds (D4.4.4v2 already says this for the pointer).
+  whatever `h` holds (D5.4.4 already says this for the pointer).
 - **A root rebind after the store-back** ends the region for that path; the
   later block's uses of `left` see a share-marked pointer (condition 4) and
   behave exactly as today. The dynamically dead cross-branch path is not a
@@ -1327,7 +1327,7 @@ fixed first:
 2. **The write oracle missed declarations.** `ast_body_may_write_entry` did
    not descend into `var`/`let` initializers, returns, blocks or several
    composites, so `let old = r.kid; var z = mutate(r)` printed the new value
-   (a D4.4.6 conformance bug, also reachable through the JIT's read-only
+   (a D5.4.5 conformance bug, also reachable through the JIT's read-only
    alias check).
 3. **The write oracle over-counted.** Seeing declarations exposed two old
    over-approximations that cost cd2/havlak2/deltablue2 up to +30% copies:
@@ -1358,7 +1358,7 @@ instruction in C. This is the whole deltablue/havlak/richards/splay/cd family.
 Tune28's certificate hoist failed because the proof was carried in a flag
 after a join; the fix is to make the proof a property of a *handle*.
 
-**The principle (D4.4.4v4).** A handle `h` is a borrow of a place `P =
+**The principle (D5.4.4).** A handle `h` is a borrow of a place `P =
 root.p1…pn`. It may be named (`var h = w.cons[cid]`) or **synthesized by the
 compiler** for a path spelled repeatedly in one body. A handle carries four
 facts, each established once at the bind, and **the facts hold exactly as
@@ -1366,10 +1366,10 @@ long as the place and its ownership are unchanged**:
 
 | Fact | Established by | Cached as |
 |---|---|---|
-| identity | navigating `P` once | the record's header pointer (never moves, D4.3.1) |
-| layout | D3.2.4v4: a certified container element or admitted field carries the declared-prefix proof | nothing at runtime; offsets are compile-time |
-| presence | D3.2.6 / S11.4.10: required fields are present; `P` itself is null-tested once if its type is optional | nothing at runtime |
-| uniqueness | the spine test (D4.4.4v3), extended to the leaf: a writing bind over a shared leaf **un-shares first** (S9.2.2) | one bit per handle |
+| identity | navigating `P` once | the record's header pointer (never moves, D5.3.1) |
+| layout | D4.2.5: a certified container element or admitted field carries the declared-prefix proof | nothing at runtime; offsets are compile-time |
+| presence | D4.2.6 / S11.4.10: required fields are present; `P` itself is null-tested once if its type is optional | nothing at runtime |
+| uniqueness | the spine test (D5.4.4), extended to the leaf: a writing bind over a shared leaf **un-shares first** (S9.2.2) | one bit per handle |
 
 Three consequences follow from the principle, not from any table:
 
@@ -1380,11 +1380,11 @@ Three consequences follow from the principle, not from any table:
    for a unique value. Without it a write through an aliasing spelling could
    copy and leave `h` on the pre-copy object.
 2. **Data-zone pointers are never facts.** Packed field buffers and array
-   buffers compact under D4.3.1; a handle holds the header (and for a scalar
+   buffers compact under D5.3.1; a handle holds the header (and for a scalar
    array element the index) and reloads the buffer pointer after any
    allocation point. Only the header pointer survives a call.
 3. **A missing invalidation is a silent wrong write, not a lost
-   optimization**, so the conditions of D4.4.4v3 stay fixed: one static
+   optimization**, so the conditions of D5.4.4 stay fixed: one static
    decision for both tiers, the runtime spine test at the bind, and
    store-back-or-mark on every writing path. The T0 walker keeps per-access
    navigation, which is observably identical; tier parity remains the gate.
@@ -1399,7 +1399,7 @@ afresh each iteration at the first spelling, so a `while` body pays one
 navigation per iteration instead of one per access.
 
 **Implementation record, Tune29 §20 (2026-09-17).** These follow within
-D4.4.4v4's implementation latitude; no ruling changed.
+D5.4.4's implementation latitude; no ruling changed.
 1. A named handle passed as a plain argument to a `pn` that does not keep
    the leaf itself stays a borrow. This is Appendix D's "keep identity, kill
    uniqueness" row: a returned part is share-marked at the call site
@@ -1565,7 +1565,7 @@ bounds-check elimination as a new item not yet in any ledger.
 |---|---|---|
 | **Nested-mutation ergonomics** — path-shaped `var` borrows (`f(var t.nodes[i])`), `_modify`-style in-place accessors, guaranteed get-modify-put | C4.4 #6; `doc/Lambda_Formal_Semantics.md` §9.5.2 | **OWNED as of 2026-08-28 by [`Lambda_Design_Nested_Mutation.md`](Lambda_Design_Nested_Mutation.md) (CW22–CW28)**, which extends this doc's CW series. CW24 (mutated-place-copy error) + CW25 (path borrows) are **implemented on worktree branch `nm-impl-work`**; nine corpus scripts migrated |
 | **Element/document node representation for huge fan-out** — chunked children so a one-level copy of a 10⁵-child node isn't O(width) | §9.5.1 residue; §12.2 | gate on the editor/document benchmark; only if it fails on real documents (NM-O1) |
-| **Confined nested-`pn` captures of parent `fn` locals** | S9.1.4v2, D6.2.3v3 | **OWNED 2026-11-02** by [Design_Procedural §5.3](Lambda_Design_Procedural.md#53-function-and-procedure-closures). Siblings share live binding homes only while confined; escaping closures snapshot at creation and reject captured writes. `fn`→`pn` calls remain forbidden. [Implementation plan](<impl/Lambda_Impl_Function_Local_State (done).md>). |
+| **Confined nested-`pn` captures of parent `fn` locals** | S9.1.4v2, D7.2.3 | **OWNED 2026-11-02** by [Design_Procedural §5.3](Lambda_Design_Procedural.md#53-function-and-procedure-closures). Siblings share live binding homes only while confined; escaping closures snapshot at creation and reject captured writes. `fn`→`pn` calls remain forbidden. [Implementation plan](<impl/Lambda_Impl_Function_Local_State (done).md>). |
 
 **Historical gate analysis (2026-08-28).** Insertion capture was then
 implemented on both tiers behind `LAMBDA_COW_CAPTURE` (default off;
@@ -1757,7 +1757,7 @@ mirroring Appendix B.
 
 ## Appendix D — CW37 handle-invalidation table (implementation record)
 
-Ratified 2026-09-17 as the first concrete form of D4.4.4v4's principle; it is
+Ratified 2026-09-17 as the first concrete form of D5.4.4's principle; it is
 detail, not the ruling, and may change while the principle stands. "Kill"
 means the next use re-navigates, which is what today's code does on every
 access. When only uniqueness dies, the handle stays a valid pointer and its
@@ -1779,13 +1779,13 @@ handle instead of per access.
 
 ## Place-home and view-snapshot completion — 2026-11-03
 
-S9.1.3v3 / S9.2.2v2 / D4.4.7 are implemented on both tiers. The full Lambda
+S9.1.3v3 / S9.2.2v2 / D5.4.6 are implemented on both tiers. The full Lambda
 baseline passed 8,718/8,718 and async requalification passed 210/210 tier/GC
 runs. [Implementation and evidence](<impl/Lambda_Impl_Place_Borrow_Views (done).md>).
 
 ## Superseded mutable-view and place-home rulings — 2026-11-03
 
-The user approved S9.1.3v3, S9.2.2v2 and D4.4.7, replacing the following
+The user approved S9.1.3v3, S9.2.2v2 and D5.4.6, replacing the following
 CW32v2/CW33 wording.
 
 <details><summary>Historical deferral and interior-pointer mechanism</summary>
@@ -1810,3 +1810,90 @@ CW32v2/CW33 wording.
 </del>
 
 </details>
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D4.4.4v4 → D5.4.4
+
+**D5.4.4*** A place handle — `var h = root.path` on a `var` local or
+`var` parameter root, **or the compiler's own handle for a path spelled
+repeatedly in one body** — **may be bound as a borrow of its place** (no
+share-mark; a store-back to the same path stores the pointer it holds and
+skips capture) whenever the sharing stays **unobservable under S9.1.2**:
+`let`/`var` hold values, never aliases, and no program can distinguish the
+borrow from the snapshot bind. That invariant is the ruling. A handle
+carries **facts about its place** — identity (the object header, stable
+under D5.3.1), layout and presence (D4.2.5, D4.2.6), and uniqueness
+(the spine test, and S9.2.2's un-share of a shared leaf at a writing
+bind) — and **the facts hold exactly as long as the place and its
+ownership are unchanged**: any event that may replace the place or a
+prefix of its path, reorder a prefix container, hand the root or a prefix
+to a writer, or re-share the spine ends the facts it can affect, and the
+next use re-establishes them. Data-zone pointers (packed fields, array
+buffers) are never facts: they are reloaded after any allocation point
+(D5.3.1 compacts the data zone). **Which paths, which writes through the
+handle, where the store-backs sit, nested handles, rebinding of the handle,
+and the concrete invalidation table are implementation details**, chosen
+for the best performance and recorded in the COW design record (CW36,
+CW37 with its appendix table), under three fixed conditions: the static
+shape is decided once for both tiers; the bind runs the runtime spine test
+(every container from the root to the leaf's parent unshared at the bind;
+a shared, static or immortal link keeps the snapshot bind); and on every
+path that writes through the handle, the handle is either stored back to
+its path before its next use, or share-marked at the point the invariant
+would otherwise be at risk. An error exit leaves partial writes visible
+through the root, as for a `var` parameter. Implemented shapes: the v2
+straight-line shape (same statement list, sibling-member access, early
+return before every use) and, where it declines, a path-by-path walk
+admitting store-backs inside `if` arms, nested handles and `var`-call
+rebinds of the handle (CW36). Synthesized handles and carried facts are
+ruled, not implemented (CW37). [CW34; v2 2026-09-14; v3 2026-09-16; v4
+2026-09-17]
+
+### ex-D4.4.5 → D5.4.5
+
+**D5.4.5** A **move-out** place copy — `var h = root.path` whose place is
+overwritten by an unconditional store `root.path = e` (`e` not naming `h`)
+later in the same statement list, where every statement in between is a
+declaration or assignment that only reads through `h` and uses the root
+through sibling members, with no write through `h`, escape of `h`, branch,
+loop or control transfer — binds as a **borrow** under D5.4.4's runtime
+spine test. After the overwrite `h` is the place's only holder, so its
+writes need no copy; the leaf's own share bit still decides whether they
+detach. Same root and annotation conditions as D5.4.4; tier-shared static
+decision. [CW35]
+
+### ex-D4.4.6 → D5.4.5
+
+**D5.4.5** A **place copy** (`let`/`var h = root.path`, root mutable) is
+share-marked at its bind iff **the place may be written while the copy is
+alive**, decided statically per binding: a write through the root, or any
+prefix of the path, between the bind and the copy's last use; the root handed
+to a call as a `var` argument in that range (the callee may write in place);
+or the copy escaping the function (returned, stored, captured, passed on).
+Otherwise the bind is a free borrow. The copy's *own* mutation still marks
+(D5.4.4's snapshot). Replaces the rule that marked only a mutated copy,
+which left `let old = r.kid; r.kid.n = 7; print(old.n)` printing 7 on every
+tier since at least Result42 (S9.1.2: a false "unique" is a semantic bug,
+D5.4.1). Read-and-return helpers stay free because their range contains no
+root write and the copy dies in the frame; returning the *node itself* marks,
+as it must. [CW24v3; 2026-09-16]
+
+### ex-D4.4.7 → D5.4.6
+
+**D5.4.6** A place passed to a `var` parameter uses a caller-owned,
+precisely rooted Item home and evaluated path keys. The callee publishes
+its final value through that home; the caller reinstalls it through the
+original path, including on an error result. No address into a movable
+data buffer crosses the call (D5.3.1, D5.4.4). Scalar and container
+places follow the same protocol; native adapters preserve the declared
+lane and S9.1.3v3's invariance and exclusivity. [CW33v2; USER 2026-11-03]

@@ -1,4 +1,4 @@
-// D7.2.4v4 / S12.1.1v3: codecs are pure; file acquisition/publication is procedural.
+// D9.3.4 / S12.1.1v3: codecs are pure; file acquisition/publication is procedural.
 import media: lambda.doc.media
 import img: lambda.image
 

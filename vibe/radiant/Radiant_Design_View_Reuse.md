@@ -254,7 +254,7 @@ ran is forbidden. Changed inputs remain conservative invalidation until complete
 field-aware output comparison is available (**VR6**).
 
 Retained results belong to the selected view's pools and never borrow layout
-scratch or unrooted GC values (**D4.5.1v4 / D4.1.4v5 / D4.5.2**). Ordinary geometry
+scratch or unrooted GC values (**D5.5.1 / D5.1.4 / D5.5.2**). Ordinary geometry
 resets preserve styles whose inputs are unchanged. Replacing the selected view
 still retires its owned records safely. Font descriptors must be separated from
 mutable font handles/metrics before general immutable sharing (**VR4**).
@@ -278,7 +278,7 @@ state, positioned links, table borders and grid track/placement output. Rewritin
 live geometry expires its association, not other constraint results. A→B→A replay
 restores A while preserving the root's external allocation. Generation and
 content/style/resource inputs invalidate stale results; teardown releases every
-owned payload (**D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+owned payload (**D5.5.1 / D5.1.4 / D5.5.2**).
 
 Assigned inline constraints also cover horizontal percentage lengths and row
 percentage bases; root containing inputs remain keyed. Block-size-dependent

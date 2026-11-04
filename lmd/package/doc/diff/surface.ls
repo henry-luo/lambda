@@ -1,4 +1,4 @@
-// View state owns review policy; DOM/clipboard operations are transport (D7.2.5, S12.1.3).
+// View state owns review policy; DOM/clipboard operations are transport (D10.2.1, S12.1.3).
 import dom
 import units: lambda.dom.edit_history
 import c: .common

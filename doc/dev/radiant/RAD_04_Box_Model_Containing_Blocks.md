@@ -38,7 +38,7 @@ distribution and the reversed inline-axis constraint. Callers supply the
 containing width and final border-box width; provisional intrinsic sizing uses
 authored margins with automatic margins zeroed. The block driver commits used
 margins after intrinsic sizing and again after multipass width changes, storing
-the result in the existing boundary group (**D4.5.1v4 / D4.1.4v5**). See
+the result in the existing boundary group (**D5.5.1 / D5.1.4**). See
 [RAD_03 §4.2](RAD_03_Layout_Driver_Block_BFC.md#42-layout_block_content--placement-bfc-establishment-95-float-avoidance)
 for placement and BFC geometry refresh.
 
@@ -158,7 +158,7 @@ out content. The existing evaluator resolves percentage math there; fixed
 terms and comparison-function limits survive a zero basis. Auto height uses
 the separate -1 sentinel. `LayoutViewScope` binds and restores the matching DOM
 node/view for deferred style calls, preserving sibling computed state and
-selected ownership (**D4.5.1v4 / D4.1.4v5**). DOM inheritance and hypothetical
+selected ownership (**D5.5.1 / D5.1.4**). DOM inheritance and hypothetical
 flow positions continue to use their own source contexts.
 
 ---

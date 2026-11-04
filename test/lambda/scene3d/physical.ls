@@ -1,4 +1,4 @@
-// S12.1.1v3 / D7.2.4v4: physical layers and their tracks are declarative values.
+// S12.1.1v3 / D9.3.4: physical layers and their tracks are declarative values.
 import s: lambda.scene3d
 fn scene(options = {}, kind = 'physical') any^ => s.scene([s.camera(), s.mesh(s.box(), s.material(kind, {id: "finish", *: options}))])
 fn message(scene) any^ => s.normalize(scene) ^ { ^.message }

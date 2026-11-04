@@ -14,9 +14,9 @@ through the latest large-directory work. Usage and shortcuts remain in the
 S1.4, S12.1.1v3 and S12.1.3 cover session values, effects and reactive handlers;
 S7.6.7v4 covers procedure error handling; S12.4.1v3 and S14.3.1v3 cover captured
 filesystem/archive values and deferred member content.
-[Formal Design](../doc/Lambda_Formal_Design.md) D4.5.1v4/D4.5.2 cover native
-ownership, D5.3.3 precise rooting, D5.4.1 evaluator ownership, D7.1.2v2 source IO,
-and D7.2.5 the shared DOM editing policy. The design applies these contracts.
+[Formal Design](../doc/Lambda_Formal_Design.md) D5.5.1/D5.5.2 cover native
+ownership, D6.3.3 precise rooting, D6.4.1 evaluator ownership, D9.1.2 source IO,
+and D10.2.1 the shared DOM editing policy. The design applies these contracts.
 
 ## 1. Product and architectural direction
 
@@ -177,7 +177,7 @@ is unchanged, `publish` retains the rows and updates selection/focus attributes
 and other affected regions. New markup already contains selection/focus values,
 avoiding a redundant attribute sweep immediately after creating every row.
 Column publication replaces only the columns/windows that changed. This follows
-S12.1.3 while preserving native ownership under D4.5.1v4.
+S12.1.3 while preserving native ownership under D5.5.1.
 
 Revisions also protect archive laziness. Structural equality on entry arrays can
 inspect native member nodes and force their content. Cache and publication keys
@@ -225,7 +225,7 @@ and retired canvases release their pixels; a window change does not leave image
 buffers attached to abandoned rows.
 
 Native jobs copy paths and own decoded bytes; completion values are copied into
-retained canvases under D4.5.2. Source reads remain in `lambda-io` under D7.1.2v2.
+retained canvases under D5.5.2. Source reads remain in `lambda-io` under D9.1.2.
 Generation counters, job tokens and slot/size checks reject stale completions.
 Cancellation leaves retained ancestor slots eligible to retry, and closing the
 window cancels and joins workers.
@@ -260,7 +260,7 @@ The embedded document's viewport follows the iframe's content box. A resize
 reflows text, viewport units and media queries in the existing document; it does
 not repeat the initial load handler. Removing an iframe during a handler defers
 its native document destruction until evaluator execution is quiescent, preserving
-D5.4.1 and the caller's precise roots under D5.3.3.
+D6.4.1 and the caller's precise roots under D6.3.3.
 
 ## 6. ZIPs as files and navigable containers
 
@@ -293,7 +293,7 @@ Filename presses select items rather than text ranges. App chrome uses
 `user-select: none`; editable fields, preview text and metadata values explicitly
 allow text selection. The shared Lambda DOM mouse policy honors cascaded
 `user-select`, including `auto` ancestry and an explicit `text` override, following
-D7.2.5. Native cursor inheritance keeps filename glyphs on the button's pointer
+D10.2.1. Native cursor inheritance keeps filename glyphs on the button's pointer
 cursor while ordinary or explicitly selectable text retains its text cursor.
 
 Context menus use the standard `contextmenu` event for right mouse or trackpad
@@ -312,7 +312,7 @@ The Move dialog includes a path field and folder selector with breadcrumbs,
 Parent/Home/Current controls and disabled invalid destinations. Browsing changes
 the destination without altering the source selection. Only confirmation moves
 the files. Drag moves use the same validation, and native transport keeps its
-event and target precisely rooted across callbacks under D5.3.3.
+event and target precisely rooted across callbacks under D6.3.3.
 
 Dialogs trap focus, restore it on close, and show action labels immediately.
 Secondary text uses shared darker grey tokens. These are interaction and visual
@@ -386,7 +386,7 @@ shared helper. Registered node addresses are validated before checking connectio
 through their parent chain. Nonregistered legacy owners retain the appropriate
 tree-search path. Stale payloads are still released, and allocation-pressure
 fallbacks preserve cleanup correctness. Live form values, focus and form caches
-remain intact under D4.5.1v4. The full folder was still mounted after this pass.
+remain intact under D5.5.1. The full folder was still mounted after this pass.
 
 ### A.5 Latest pass: bound the mounted work
 

@@ -100,7 +100,7 @@ struct JsScript : Script {
     // dynamic classic scripts retain global lexicals but never promote their bodies to MIR.
     bool dynamic_source;
     // The Script of the interpreted frame whose environments this direct eval
-    // execution links to (D8.1.3v21); null for every other execution.
+    // execution links to (D8.4.3); null for every other execution.
     JsScript* eval_caller_script;
     // Module top levels use a private module slab. CJS remains non-strict,
     // while ES modules set both this bit and strict_mode.
@@ -267,7 +267,7 @@ struct JsPreambleState {
 // needs a sealed property-name image and module-const snapshot to enter a
 // fresh realm. Its static dependency paths are immutable compiler metadata;
 // every hit reloads those modules into the receiving realm before execution
-// (D8.5.1v2).
+// (D8.5.1).
 struct JsModuleMirArtifact {
     JsPreambleState image;
     char** static_dependency_paths;
@@ -275,7 +275,7 @@ struct JsModuleMirArtifact {
 };
 
 // the returned InputManager scope pins a live module image until its Runtime
-// has destroyed the realm that may hold pointers into that code (D8.5.1v2).
+// has destroyed the realm that may hold pointers into that code (D8.5.1).
 const JsModuleMirArtifact* js_module_mir_cache_lookup(const char* source,
     size_t source_len, const char* filename, struct InputCacheScope** out_scope);
 InputScriptBuildClaim js_module_mir_cache_begin_build(const char* source,
@@ -286,7 +286,7 @@ const JsModuleMirArtifact* js_module_mir_cache_adopt_build(
 void js_module_mir_cache_complete_build(InputScriptBuildScope* build,
     bool published, bool poison);
 // Link exact module source generations so a changed static dependency retires
-// every importer before its cached MIR can be reused (D8.5.1v2).
+// every importer before its cached MIR can be reused (D8.5.1).
 bool js_module_mir_cache_record_dependency(const char* importer_source,
     size_t importer_source_len, const char* importer_filename,
     const char* dependency_source, size_t dependency_source_len,

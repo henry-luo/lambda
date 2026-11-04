@@ -19,7 +19,7 @@
 ## LC1v2 — Specialization over caching: no inline caches in Lambda script or LambdaJS
 
 **Status: DECIDED 2026-08-01; revised to v2 on 2026-09-09.** v2 extends the
-ruling to LambdaJS. Formal authority: **D8.4.1v2** in
+ruling to LambdaJS. Formal authority: **D7.4.1** in
 [`../doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The v1 text
 carved LambdaJS out ("LJS keeps its ICs"); the IC retirement of 2026-08-15
 ([`Lambda_Design_JS_IC_Retire.md`](Lambda_Design_JS_IC_Retire.md) IR1-IR8) and
@@ -133,7 +133,7 @@ constructor shape cache that earlier revisions of this note described were
 removed on 2026-08-15 ([`Lambda_Design_JS_IC_Retire.md`](Lambda_Design_JS_IC_Retire.md)
 IR6). Named accesses now lower to `js_get_name_id(obj, name_id)` and
 `js_set_name_id(obj, name_id, value, strict)`, whose stateless fast head probes
-the receiver's `TypeMap` by `NameId` (D3.4.4v2, D4.6.1v2) and falls back to the
+the receiver's `TypeMap` by `NameId` (D3.4.4, D5.6.1) and falls back to the
 shared property kernel. The replacement fast route - compile-predicted shapes
 with an inline guard, kernel on miss - is specified in
 [`jube/JS_Tune_History.md`](jube/JS_Tune_History.md) §4.3 T10-2 and is not

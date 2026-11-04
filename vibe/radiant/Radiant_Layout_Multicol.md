@@ -497,5 +497,5 @@ that local cursor; it must not infer an extra column from half-leading. In
 test happened to compensate until FT-19 corrected font metrics. This change
 uses the existing closed-end fragment remainder calculation and removes that
 font-dependent compensation. It changes no ownership or module boundary
-(D4.5.1v4, D4.1.4v5). Qualification and remaining limits follow in the CSS
+(D5.5.1, D5.1.4). Qualification and remaining limits follow in the CSS
 implementation ledger.

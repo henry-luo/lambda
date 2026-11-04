@@ -35,7 +35,7 @@ def elog(*args, **kwargs):
     kwargs.setdefault('file', sys.stderr)
     print(*args, **kwargs)
 
-# The reviewed set of host symbols Jube modules may resolve (D7.3.6).
+# The reviewed set of host symbols Jube modules may resolve (D9.4.6).
 HOST_EXPORT_LIST = Path(__file__).resolve().parent.parent / 'lambda' / 'jube' / 'jube_host_exports.txt'
 
 def read_host_export_list(path: Path = HOST_EXPORT_LIST) -> List[str]:
@@ -846,7 +846,7 @@ class PremakeGenerator:
         return 'build/premake'
 
     def _host_export_link_options(self) -> List[str]:
-        """Restrict the host's dynamic exports to the D7.3.6 allowlist.
+        """Restrict the host's dynamic exports to the D9.4.6 allowlist.
 
         Jube modules resolve host symbols at load time; every other global
         stays unexported, so dead stripping and LTO may drop it. The linker
@@ -1033,7 +1033,7 @@ class PremakeGenerator:
                     '        linkoptions {',
                     '            "-flto=thin",',
                     '            "-Wl,-dead_strip",',
-                    '            -- no -export_dynamic: the host exports only its D7.3.6',
+                    '            -- no -export_dynamic: the host exports only its D9.4.6',
                     '            -- allowlist, so every other global stays dead-strippable',
                 ] + ([
                     '            "-Wl,-x",  -- Strip local symbols',
@@ -1092,7 +1092,7 @@ class PremakeGenerator:
                     '        }',
                 ])
 
-        # Hidden by default (D7.3.6): a host symbol a Jube module needs is opened
+        # Hidden by default (D9.4.6): a host symbol a Jube module needs is opened
         # by its LAMBDA_*_API marker plus an entry in lambda/jube/jube_host_exports.txt.
         release_visibility_options = [
             '            "-fvisibility=hidden",',
@@ -2894,7 +2894,7 @@ class PremakeGenerator:
         dependencies = list(dependencies or [])
         if 'lambda-runtime-full' in dependencies:
             # the static validation front end needs runtime/Radiant providers.
-            # D7.3.4: host-owned trace functions must not bind to a replaceable Node module.
+            # D9.4.4: host-owned trace functions must not bind to a replaceable Node module.
             for host_dependency in ('lambda-rt', 'radiant'):
                 if host_dependency not in dependencies:
                     dependencies.append(host_dependency)
@@ -3397,7 +3397,7 @@ class PremakeGenerator:
                 '    '
             ])
 
-        # runtime test hosts can load modules without linking them (D7.3.4-D7.3.6).
+        # runtime test hosts can load modules without linking them (D9.4.4-D9.4.6).
         if ('lambda-runtime-full' in dependencies or
                 all(dep in dependencies for dep in ('lambda-rt', 'radiant'))) or any(
                 configured_targets.get(dep, {}).get('link') == 'dynamic' for dep in dependencies):

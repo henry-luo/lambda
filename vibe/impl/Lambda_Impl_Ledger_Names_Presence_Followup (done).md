@@ -2,7 +2,7 @@
 
 **Status:** bounded implementation and qualification complete; LR03-40 remains PARTIAL for Mark encoding. **Base:** `0023db901`.
 
-Existing authority: **S16.9.5**, **S8.2.2v6**, **D5.4.1–D5.4.4**;
+Existing authority: **S16.9.5**, **S8.2.2v6**, **D6.4.1–D6.4.4**;
 profiling capacity is **LR01-5**, with no new language ruling.
 
 This bounded pass covers the four selected records: remaining nominal-field
@@ -95,7 +95,7 @@ paths, replacing the 64-row and 512-byte limits. Allocation failure is reported.
 The existing profile-reporting mutex serializes store operations; records are
 cleared before process memory accounting and again safely at static teardown.
 
-**D5.4.1–D5.4.4 / LR12-6:** `g_dry_run` is removed. Native C and C++ paths read
+**D6.4.1–D6.4.4 / LR12-6:** `g_dry_run` is removed. Native C and C++ paths read
 `Runtime::dry_run` through `lambda_dry_run_enabled()` and the active canonical
 context. CLI compile-time resource reads establish that owner first. Native
 coverage alternates independent threaded owners and exercises the C I/O path.

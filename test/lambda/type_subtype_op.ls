@@ -1,4 +1,4 @@
-// S11.1.4/D3.2.5: `<:` compares the admitted value sets of two type values.
+// S11.1.4/D4.2.2: `<:` compares the admitted value sets of two type values.
 type Narrow = {a: int, b: int}
 type Wide = {a: int}
 type Ints = int[]

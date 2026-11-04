@@ -5,12 +5,12 @@
 #include "../core/lambda-decimal.hpp"  // for decimal literal comparison
 
 static bool validator_is_map_kind(ConstItem item) {
-    // D7.4.5v2: virtual storage still inhabits the generic map kind.
+    // D9.5.5: virtual storage still inhabits the generic map kind.
     return item.type_id() == LMD_TYPE_MAP || item.type_id() == LMD_TYPE_VMAP;
 }
 
 static bool validator_is_element_kind(ConstItem item) {
-    // D7.4.5v2: archive-backed elements have the element contract despite their virtual storage tag.
+    // D9.5.5: archive-backed elements have the element contract despite their virtual storage tag.
     return item.type_id() == LMD_TYPE_ELEMENT || item.type_id() == LMD_TYPE_VELMT;
 }
 
@@ -695,7 +695,7 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
     // loop, re-deriving a fact its storage guarantees. Same argument as the
     // map shape-identity short-circuit (Tune19 §7.13); fast mode only, because
     // the reporting validator owes a per-element diagnosis rather than a
-    // verdict [D2.6.1, D3.2.1].
+    // verdict [D3.2.1, D4.2.1].
     if (validator->is_fast_mode() && array_type->nested && length > 0 &&
             item.type_id() == LMD_TYPE_ARRAY_NUM && item.array_num) {
         Type* nested = unwrap_type(array_type->nested);
@@ -855,7 +855,7 @@ static bool shape_entries_match_fast(SchemaValidator* validator, const TypeMap* 
 //
 // Scoped to fast mode on purpose: that is the runtime admission predicate
 // (lambda_type_matches). The reporting validator still walks, because it owes a
-// per-field diagnosis rather than a verdict (D3.2.1, D4.6.1v2).
+// per-field diagnosis rather than a verdict (D4.2.1, D5.6.1).
 static bool map_carries_exact_shape(ConstItem item, const TypeMap* map_type) {
     if (!map_type || !item.item) return false;
     TypeId tid = item.type_id();

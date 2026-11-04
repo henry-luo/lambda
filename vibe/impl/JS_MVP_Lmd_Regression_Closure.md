@@ -29,8 +29,8 @@ The per-callee size limit does not bound total caller expansion.
 - Predict removal and reinsertion layouts from known literal shapes. Reuse
   `plan_shape_field`, the existing four-shape guard budget, `field_read` and
   runtime shape construction. Predictions are fixed before execution; a
-  mismatching shape uses the generic reader (**D3.4.3v5**, **D3.4.5**,
-  **D8.4.1v2**). Different value types, property orders and private shapes
+  mismatching shape uses the generic reader (**D3.4.3**, **D3.4.5**,
+  **D7.4.1**). Different value types, property orders and private shapes
   remain valid fallbacks.
 - The new compiler helper is `plan_deleted_shapes`, disclosed before
   implementation. No new mutable per-site cache is added.
@@ -38,9 +38,9 @@ The per-callee size limit does not bound total caller expansion.
   callee identity. Other class implementations use the original call path.
   Cap cumulative allocating expansion at three ordinary statement-body
   budgets per caller, while retaining the per-callee and recursion limits
-  (**D6.2.1**, **D8.4.1v2**).
+  (**D7.2.1**, **D7.4.1**).
 - Preserve precise GC roots and destination-owned scalar lifetimes
-  (**D5.2–D5.3**). Regression coverage alternates field types and shapes, deletes
+  (**D6.2–D6.3**). Regression coverage alternates field types and shapes, deletes
   and reinserts properties, checks field order and object identity, retains
   tiny doubles across retyping, and exercises the non-inlined class target.
 - Extract `fn_map_set`'s existing compatible conversion into the shared helper
@@ -59,7 +59,7 @@ unnecessary polymorphic expansion directly.
 The first four candidates reused the existing MVP property cache for ordinary
 objects, initially promoting `object_face` to share its family check. The broad
 run in `pre-numeric-cache/` was stopped to narrow emitted cache lanes. Checking
-the normative ruling then exposed a conflict: **D8.4.1v2** bans mutable per-site
+the normative ruling then exposed a conflict: **D7.4.1** bans mutable per-site
 caches, while the pre-existing MVP uses them. Clarification was requested; no
 exception was assumed. The ordinary-object extension and helper promotion were
 removed in favor of static predictions. The pre-existing MVP cache design is
@@ -124,7 +124,7 @@ Runs use unchanged workload sources and output oracles, pinned native MIR,
 release binaries, fresh processes and balanced six-permutation ordering with
 an identical-control peer. Workload times are self-reported; process wall time
 includes startup, compilation and execution. Diagnostic counters are collected
-separately under **D5.4.4**, outside performance measurements.
+separately under **D6.4.4**, outside performance measurements.
 
 User interruptions stopped one partial run, retained under
 `pre-richards-refinement/interrupted/`. That superseded candidate's initial
@@ -165,7 +165,7 @@ Lambda ports use different native data structures and clock their kernel;
 MVP/Node include class setup and verification. These ratios do not isolate
 typing or compiler quality.
 
-Separate instrumented release probes confirm the mechanism (**D5.4.4**):
+Separate instrumented release probes confirm the mechanism (**D6.4.4**):
 
 | Diagnostic, incoming → fixed | Before | After |
 |---|---:|---:|
@@ -234,7 +234,7 @@ hits because canonicalization and allocating updates contain precise-root
 setup. The eighth candidate factors those owned operations into `map_call_owned`,
 disclosed before implementation. It reuses `canonical_string`, `store`,
 `compact_entries`, `entry_find`, shared array reservation and scalar ownership
-instead of duplicating their implementations (**D5.2–D5.3**). This also combines
+instead of duplicating their implementations (**D6.2–D6.3**). This also combines
 the two root-setup blocks. The native diagnostic audit confirms **2,772 → 1,244
 bytes** for the hot helper and **240 → 112 bytes** for its stack frame.
 

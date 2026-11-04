@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.8.2/D8.2.4v2: guarded float result loads retain OOB, while defect and rebound receivers keep the boxed read.",
+  "description": "D2.5.2/D8.2.4: guarded float result loads retain OOB, while defect and rebound receivers keep the boxed read.",
   "checks": [
     {"in_func": "_read_probabilities_#", "expect": ["dmov\t{{r}}, d:("]},
     {"in_func": "_changed_probabilities_#", "expect": ["call\tfn_index_p, fn_index"]},

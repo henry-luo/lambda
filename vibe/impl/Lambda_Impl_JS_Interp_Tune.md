@@ -4,19 +4,19 @@
 **Status at the 2026-10-03 checkpoint:** IN PROGRESS — J1, J3, J5 (with a dense-index read), E1 and E3
 implemented on branch `fix-continuation-param-inference` (§11); J2, J4, J6–J8,
 E2, E4 and track A not started. The three policy points were ruled by the user
-on 2026-10-03 (§8) and are recorded as **D8.1.3v22** and JSI18v2.
+on 2026-10-03 (§8) and are recorded as **D8.4.5** and JSI18v2.
 **Source baseline:** `72cc6de76` (source reading); release executable built
 from `551d9cd3e` (`temp/bench_auto/lambda-fix-rel`) for timings and profiles.
 **Scope:** the LambdaJS boxed AST walker (`lambda/js/js_interp.cpp`), its P2
 promotion edge, and the parts of Lambda's T0 (`lambda/runtime/interp.cpp`,
 `interp_plan.cpp`) that the two walkers could own jointly. The private-value
-JS MVP backend was retired on 2026-10-07 (**D1.2v2**, **D1.3v3**); this plan's
+JS MVP backend was retired on 2026-10-07 (**D1.2**, **D1.3**); this plan's
 historical measurements and comparisons do not describe a current backend.
 
 **2026-10-30 follow-up:** the [MVP alignment implementation](JS_Interpreter_MVP_Alignment.md)
 implements J2 and bounded J6/J7 through immutable scope facts, direct slots for
 unobservable synchronous locals, and an activation-owned temporary root window
-(**D8.1.3v43**, **D8.2.4v2**, **D5.3.3**). Observable bindings and AUTO loop
+(**D8.4.4**, **D8.2.4**, **D6.3.3**). Observable bindings and AUTO loop
 handoff retain live cells. Numeric and indexed operations use the shared MVP
 kernels. The alignment record owns current qualification and the profile-based
 decision on the conditional J4 frame split: final optimized profiles do not
@@ -24,11 +24,11 @@ establish dominant frame-copy cost, so that condition is not triggered. The
 measurements below remain the dated checkpoint evidence.
 
 **Formal authority:** [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)
-**D8.1.3v22** (LambdaJS tiers; hotness-only promotion and loop-head handoff,
-*v22*), **D8.1.1v14** (Lambda loop-head handoff),
-**D8.4.1v2** (no inline caches), **D8.2.3** (extract after two working
-clients), **D8.2.4v2–D8.2.5v3** (fact placement, pass manager), **D8.5.1v6–v7**
-(satellite work keying, bounded workers), **D5.3.3** (precise roots),
+**D8.4.5** (LambdaJS tiers; hotness-only promotion and loop-head handoff,
+*v22*), **D8.3.2** (Lambda loop-head handoff),
+**D7.4.1** (no inline caches), **D8.2.3** (extract after two working
+clients), **D8.2.4–D8.2.5** (fact placement, pass manager), **D8.3.4–v7**
+(satellite work keying, bounded workers), **D6.3.3** (precise roots),
 **D1.3** (shared substrate, profile-owned semantics).
 
 **Related work:** [Lambda T0 round 2](Lambda_Impl_Interp_Tune2.md) (the items
@@ -206,8 +206,8 @@ shows a superlinear front-end cost unrelated to promotion: 4.2 s to load
 
 ## 4. Track J — tune the JS walker
 
-These need no ruling: they are fact placement under **D8.2.4v2** and keep
-**D8.4.1v2** (plan-time facts on immutable nodes, no run-time caches).
+These need no ruling: they are fact placement under **D8.2.4** and keep
+**D7.4.1** (plan-time facts on immutable nodes, no run-time caches).
 
 **J1 — Suspension fact at plan time.** Record "this subtree contains a
 `yield`/`await` outside a nested callable" once per node when the script is
@@ -282,12 +282,12 @@ definition from the retained `JsScript` instead of a re-parsed clone, on the
 satellite worker pool Lambda already has, and publish at a safe point. The
 prerequisite is JSI3: the facts lowering needs are computed once and kept
 with the script, and lowering stops mutating shared nodes (or works on an
-execution overlay, as Lambda's satellites do under **D8.5.1v6**). This is the
+execution overlay, as Lambda's satellites do under **D8.3.4**). This is the
 largest item in the plan. Until it lands, an interim step is to cache one
 clone per script generation rather than re-parsing per function.
 
 **E3 — Loop-head handoff for JS (ruled, §8 R1).** Carry
-**D8.1.1v14** over unchanged in shape: a loop that is a direct statement of
+**D8.3.2** over unchanged in shape: a loop that is a direct statement of
 a function body counts back-edges in the definition's `FnPromotionCell`; at
 the threshold, the statements from that loop to the end of the body are
 compiled as a continuation function whose parameters are the live-in
@@ -360,7 +360,7 @@ round-2 defect (back-edge 1 with synchronous publication, against forced
 interpretation) then runs over `test/js/` with the JS knob names.
 
 **A3 — JS plan pass under the pass manager.** Give the JS walker a plan pass
-registered like Lambda's (**D8.2.5v3**) that writes J1, J2, J5, J6 facts and
+registered like Lambda's (**D8.2.5**) that writes J1, J2, J5, J6 facts and
 the handoff ordinals. The handoff-eligibility rule ("direct statement of the
 body, admitted loop form, ordinal ≤ `INTERP_HANDOFF_LOOP_MAX`") is the same
 code with a per-profile form predicate.
@@ -401,11 +401,11 @@ A4–A6 follow J6 and E3.
 
 ## 8. Rulings (USER, 2026-10-03)
 
-Recorded as **D8.1.3v22** (formal design, spec 19.0.0) and JSI18v2 / §9.3 of
+Recorded as **D8.4.5** (formal design, spec 19.0.0) and JSI18v2 / §9.3 of
 the JS interpreter design.
 
 **R1 — Loop-head handoff for JS: allowed.** A running AST activation may hand
-off at a loop-head test in the **D8.1.1v14** shape. This replaces the v13
+off at a loop-head test in the **D8.3.2** shape. This replaces the v13
 sentence that no active AST frame transfers to MIR, and JSI18's entry-only
 rule. E3 is unblocked; it still depends on E1 to be useful.
 
@@ -418,7 +418,7 @@ reads its own knobs; the stress differential for JS is
 
 **R3 — Hotness-only promotion; call threshold 1000, then 100, then 5.** A JS
 definition is compiled only on a hot hit: 1000 calls (five before; 100 since
-D8.1.3v23, §11.5; **5**, the same as Lambda, since **D8.1.3v24**, §11.6) or a
+D8.4.5, §11.5; **5**, the same as Lambda, since **D8.4.5**, §11.6) or a
 loop reaching the
 back-edge threshold. Nothing is compiled at first entry or because a
 definition owns a loop. Both thresholds are provisional and are to be revised
@@ -568,7 +568,7 @@ the input for E4. `larceny/primes`, `kostya/primes` and `levenshtein` stay
 far from MIR: their hot code is not a direct-statement loop of an admitted
 function. Raw data: `temp/bench_auto/js_e3_time.json` (main checkout).
 
-### 11.5 Threshold sweep and the 100-call default (D8.1.3v23)
+### 11.5 Threshold sweep and the 100-call default (D8.4.5)
 
 Release AUTO exec ms, min of three, load 2–4, binary `286c909d2`; columns are
 call threshold / back-edge threshold.
@@ -588,7 +588,7 @@ call threshold / back-edge threshold.
 - **Calls.** No row is slower at 100 than at 1000; 100 recovers most of the
   gap to 5. Five is not chosen yet because each promotion still re-parses the
   whole source (§2.5), a cost these small files do not show. The user set the
-  default to 100 (**D8.1.3v23**).
+  default to 100 (**D8.4.5**).
 - **Back-edges.** 100,000 is worse almost everywhere. 1,000 helps fft2, ray
   and base64 but hurts puzzle; 10,000 is kept until E2 removes the
   size-dependent compile cost, then re-derived by break-even as Lambda's was.
@@ -597,7 +597,7 @@ call threshold / back-edge threshold.
   promotes its recursive function, whose calls go through the generic call
   kernel. Not yet investigated.
 
-### 11.6 Function-threshold sweep for both languages (D8.1.3v24)
+### 11.6 Function-threshold sweep for both languages (D8.4.5)
 
 Release `a51bab468`, AUTO, loop threshold 10000, values interleaved per
 script, min of three, load 3–6 (2026-10-03 18:16–19:45). Script:
@@ -613,7 +613,7 @@ checkout). Geomean end-to-end wall time, lower is better:
   costs 4% by compiling once-called functions; above 10 cost grows steadily
   (diviter 458 ms at 5 → 11.3 s at 500).
 - **JS:** among real thresholds 5 is best, on wall and on exec time (0.955 vs
-  100). The default is set to 5 (**D8.1.3v24**).
+  100). The default is set to 5 (**D8.4.5**).
 - **JS at 1** compiles every function at its first call, which hotness-only
   promotion excludes. Its gain is concentrated in rows whose hot function is
   called once and so reaches MIR only through loop handoff: larceny/primes
@@ -672,7 +672,7 @@ In the sieve, the first outer iteration's inner loop (500,000 iterations for
 `i = 2`) runs entirely in T0 before the next outer head test. Closing it
 needs a handoff point at a nested loop's head, whose continuation must also
 finish the enclosing iteration and loop; that is a larger change to the
-continuation shape (D8.1.1v14 restricts Lambda the same way).
+continuation shape (D8.3.2 restricts Lambda the same way).
 
 ### 11.4 Not done at the 2026-10-03 checkpoint
 

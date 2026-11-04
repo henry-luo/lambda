@@ -16,16 +16,16 @@
   that carries Tune26. Tune26 attacked the *array* admission scan; Tune27
   attacks what remains on the mandatory per-iteration path once that scan is
   gone, plus the tier/compile costs that Part 1 of the reports cannot see.
-- **Authority:** [formal design](../../doc/Lambda_Formal_Design.md) **D3.2.1**
-  (three distinct subtype operations), **D3.2.2** (the validator is the runtime
-  enforcer, deep, **on first crossing**), **D3.2.4v3** (a named map crossing is
+- **Authority:** [formal design](../../doc/Lambda_Formal_Design.md) **D4.2.1**
+  (three distinct subtype operations), **D4.2.3** (the validator is the runtime
+  enforcer, deep, **on first crossing**), **D4.2.5** (a named map crossing is
   a reification; elide only on a proven physical layout, reached through the
-  non-null arm), **D3.3.4** (representation follows the full inferred
-  contract), **D4.4.2/D4.4.4** (one-level COW, RMW place borrow),
-  **D5.3.4** (precise roots), **D8.2.6**, **D8.4.3v2**, **D8.3.2** (the
+  non-null arm), **D2.4.3** (representation follows the full inferred
+  contract), **D5.4.2/D5.4.4** (one-level COW, RMW place borrow),
+  **D6.3.4** (precise roots), **D8.2.6**, **D7.4.3**, **D7.3.2** (the
   check lives in the callee: one guard site, one correctness argument),
-  **D8.3.3** (the unboxed entry has exactly two proof-producing paths),
-  **D8.1.1v9** (tiered execution: T0 with per-function satellite promotion is
+  **D7.3.3** (the unboxed entry has exactly two proof-producing paths),
+  **D8.3.3** (tiered execution: T0 with per-function satellite promotion is
   the shipped default), **D8.6.1** (MT7 0%-slack emission ratchet),
   **D2.2.2** (the native `int` lane is i64 with sentinels at the extremes);
   [formal semantics](../../doc/Lambda_Formal_Semantics.md) **S11.4.1v3** (an
@@ -33,7 +33,7 @@
   actual carrier matches it), **S7.1.3v2** (checked writes), **S9.1.2**,
   **S4.1.2** (`int` arithmetic is closed and total; out-of-band saturates).
   Tune27 proposes **no change** to these rulings. Its whole claim is that
-  D3.2.2's "on first crossing" and S11.4.1v3's proof-reuse licence are not
+  D4.2.3's "on first crossing" and S11.4.1v3's proof-reuse licence are not
   being taken in the emitted code.
 
 ## 1. Objective and completion contract
@@ -45,7 +45,7 @@ Three obligations, each independently reportable:
 2. **Semantic identity.** Every boundary that stops running still rejects
    everything it rejected before, with the same error, boundary name and
    validator path. A contract elided on a layout that was never reified is a
-   memory-safety defect under D3.2.4v3, not a missed optimization.
+   memory-safety defect under D4.2.5, not a missed optimization.
 3. **No corpus rewriting.** No canonical benchmark source is edited to make the
    compiler look faster. Annotation-parity pairs, if added, live beside the
    canonical row and are reported separately.
@@ -214,10 +214,10 @@ source but are **not emitted by the v42 binary**, so the archived run cannot say
 which limit fires. Re-measuring those two counters on a current release is the
 first deliverable of T27-0.
 
-Authority reading: D3.2.2 already says the validator enforces *deep, on first
+Authority reading: D4.2.3 already says the validator enforces *deep, on first
 crossing*. Per-value re-validation of an already-proven carrier is an
 implementation gap against that ruling, and S11.4.1v3 grants the proof-reuse
-licence explicitly. D3.2.4v3 fixes the price of getting it wrong and supplies
+licence explicitly. D4.2.5 fixes the price of getting it wrong and supplies
 the elision test — a *proven physical layout*, reached **through the non-null
 arm** of the spelling. That last clause is load-bearing: `N?` and `N | null`
 are wrappers whose own `type_id` is `LMD_TYPE_TYPE`, so testing the wrapper
@@ -229,7 +229,7 @@ prettier_ast itself.
 `cow_prepare_write` is mandatory per iteration in deltablue (x16),
 navier_stokes (x7), nbody (x7), hashmap (x2), with `cow_bind_var`,
 `cow_path_borrow_fixed` and `pn_push_cow` beside it in levenshtein,
-text_search, three_way_merge and log_pipeline. D4.4.4 (CW34) bound the
+text_search, three_way_merge and log_pipeline. D5.4.4 (CW34) bound the
 read-modify-write place borrow, and the RMW census recorded that
 `cd`/`splay`/jetstream-`deltablue` are **not covered** by it. These rows are
 that residue. This is not boxing — it is a per-iteration ownership test and
@@ -288,13 +288,13 @@ under M1–M3.
 ### M5 — The auto tier refuses the constructs typed code writes
 
 Every Part-1 number pins `LAMBDA_TIER=jit`. The shipped default is T0 with
-satellite promotion (D8.1.1v9), and `interp_satellite_supported`
+satellite promotion (D8.3.3), and `interp_satellite_supported`
 ([interp_plan.cpp:2022](../../lambda/runtime/interp_plan.cpp:2022)) rejects,
 among others: any `match` expression ([:1956](../../lambda/runtime/interp_plan.cpp:1956),
 "pattern arms carry compiled regex/type-list state owned by the T0
 activation"), any function that rebinds a typed `var` parameter and any
 *caller* of one ([:1968](../../lambda/runtime/interp_plan.cpp:1968),
-[:2032](../../lambda/runtime/interp_plan.cpp:2032), D8.1.1v8), nested
+[:2032](../../lambda/runtime/interp_plan.cpp:2032), D8.3.3), nested
 function definitions, and object-method field identifiers. `match … case
 error:` is exactly how a typed script keeps an `int` local total under
 S4.1.2, and `var x: int[]` rebinds are how it reuses a buffer — so the
@@ -323,7 +323,7 @@ size of a benchmark function, so this cost accrued unnoticed across Tune22–26.
 
 ### M7 — A typed direct call is admitted up to three times
 
-D8.3.2 rules that the check lives in the callee, once. The emitter today
+D7.3.2 rules that the check lives in the callee, once. The emitter today
 admits a declared parameter at the **caller** for the native-param edge
 ([transpile-mir.cpp:23844](../../lambda/runtime/transpile-mir.cpp:23844),
 gated only by `mir_boundary_is_redundant`), again in the callee's public
@@ -332,7 +332,7 @@ gated only by `mir_boundary_is_redundant`), again in the callee's public
 ([:31791](../../lambda/runtime/transpile-mir.cpp:31791) witness-miss arm,
 [:31910](../../lambda/runtime/transpile-mir.cpp:31910) full `ARRAY_NUM`
 admission). The callee-side checks are not suppressed when the caller
-proved the contract, which is the "third path" D8.3.3 forbids. Separately,
+proved the contract, which is the "third path" D7.3.3 forbids. Separately,
 the only elision gate, `mir_boundary_is_redundant`
 ([:5245](../../lambda/runtime/transpile-mir.cpp:5245)), is keyed on **`Type*`
 identity**, so two structurally identical contracts spelled at two sites
@@ -388,12 +388,12 @@ commit, plus the two union-cache counters.
    `relation` field; give it a disproven value and populate it.
 2. Admit element-tagged and nominal values to the same memo where their
    identity key is as stable as `TypeMap*`. Audit what the key must cover: a
-   shape that can *grow* (D2.6.6v2 open instances) invalidates a proof keyed on
+   shape that can *grow* (D3.1.1 open instances) invalidates a proof keyed on
    the old shape, so the key is the post-growth `TypeMap*` or the memo is wrong.
-3. Reach the contract through the non-null arm (D3.2.4v3). `Doc` is recursive
+3. Reach the contract through the non-null arm (D4.2.5). `Doc` is recursive
    and therefore optional; a wrapper test exempts precisely this case.
 4. Keep the validator on the rejection path unchanged: same error, boundary and
-   validator path (D3.2.2, S11.4.1v3).
+   validator path (D4.2.3, S11.4.1v3).
 
 **Non-goal:** eliding the boundary itself. That is T27-2.
 
@@ -410,12 +410,12 @@ call results with an explicit return contract
 keyed on `Type*` identity and an explicit contract.
 
 - Extend it past the call-result case to values whose *carrier* provably still
-  matches a proof established earlier in the same frame, under D3.2.4v3's
+  matches a proof established earlier in the same frame, under D4.2.5's
   physical-layout test. Semantic compatibility is never sufficient.
 - The proof dies at any point the carrier can be replaced — a call that may
   reassign the binding, a COW replacement, a GC-visible publication. Reuse the
   existing dense-loop root facts rather than minting a parallel fact table
-  (D2.4.1, D3.2.3: no ID-keyed per-node fact table).
+  (D2.3.4, D4.2.4: no ID-keyed per-node fact table).
 - `cube3d` (x19 mandatory `lambda_type_check`) and `splay` (x6) are the pilots;
   both are "same contract in, same contract out" shapes.
 
@@ -432,7 +432,7 @@ the carrier *is* replaced mid-frame still re-checks.
   Item round trip. `lambda_array_set_checked_inplace_item` must not appear on a
   mandatory path where the element is a proven native double.
 - The RHS/key evaluation order and post-call owner reload from Tune25 apply
-  unchanged (D5.3.4): no interior pointer survives a call.
+  unchanged (D6.3.4): no interior pointer survives a call.
 - Values needing admission, views, shared owners and failed bounds keep the
   checked setter (S7.1.3v2).
 
@@ -441,7 +441,7 @@ the carrier *is* replaced mid-frame still re-checks.
 
 ### T27-4 — Extend the RMW place borrow to the uncovered rows
 
-**Problem:** M2. `cd`, `splay` and deltablue are outside D4.4.4's shape;
+**Problem:** M2. `cd`, `splay` and deltablue are outside D5.4.4's shape;
 `richards` (§2.1) is the pilot because its failing precondition is already
 known. (`puzzle` was pilot 1 in rev 2; its share-mark is the required
 S9.1.3 snapshot, see §2.1, and must stay.)
@@ -449,11 +449,11 @@ S9.1.3 snapshot, see §2.1, and must stay.)
 - **Pilot, `richards`:** twenty `pn f(var w: World, …)` accessors, each
   paying the unconditional wrapper `cow_prepare_write`. Replace the
   `home != 0` guard with the frame's exclusivity fact; establish that fact
-  as a per-function capture/escape result (S9.2.2, D3.3.3v3), so the Tune26
+  as a per-function capture/escape result (S9.2.2, D4.3.3), so the Tune26
   §9 snapshot reproducer stays guarded because *it* captures, and richards
   stops paying because it does not. Typed richards must not be slower than
   untyped richards when this lands.
-- State, per row, *which* D4.4.4 precondition fails (root is not a `var` local
+- State, per row, *which* D5.4.4 precondition fails (root is not a `var` local
   or parameter; the value is observed between bind and store-back; a spine link
   is shared/static/immortal; the borrow is not dead afterwards). Fix the
   emitter only where the precondition genuinely holds and the current analysis
@@ -463,7 +463,7 @@ S9.1.3 snapshot, see §2.1, and must stay.)
   unless the evidence closes it.
 
 **Evidence:** `cow_prepare_write` mandatory count per row; `COW_EXEC_PROFILE`
-share-mark and copy counts; forced-GC stress remains a gate (D4.4.3).
+share-mark and copy counts; forced-GC stress remains a gate (D5.4.3).
 
 ### T27-5 — `cd` as the M4 pilot
 
@@ -494,11 +494,11 @@ whole.
    `case int:` arm over a scalar needs no pattern state at all and should
    be admitted first.
 3. Typed `var` parameter rebinds: give the satellite the CW33 home the
-   module path already has (D8.1.1v8 records why it was withheld — the raw
+   module path already has (D8.3.3 records why it was withheld — the raw
    ABI had no home). If the home cannot be transported, promote the
    *caller* with the callee as a cluster member so the rebind stays inside
    one image, rather than pinning both to T0.
-4. Do not touch the D8.1.1v9 thresholds; this track changes eligibility,
+4. Do not touch the D8.3.3 thresholds; this track changes eligibility,
    not policy.
 
 **Evidence:** crypto_sha1 typed auto wall within 1.2x of untyped auto wall;
@@ -530,13 +530,13 @@ golden parity on the new arms; forced-GC stress.
 identical output; cube3d typed auto wall under 100 ms; deltablue auto wall
 within 1.3x of JIT-pinned exec + one compile.
 
-### T27-8 — One admission per crossing, in the callee (D8.3.2)
+### T27-8 — One admission per crossing, in the callee (D7.3.2)
 
 **Problem:** M7. This is what T27-2 would otherwise chase value by value.
 
 1. Retire the caller-side declared-parameter admission on the direct typed
    edge and the raw-entry re-admission behind the `_b` wrapper. The direct
-   unboxed entry then has exactly the two proof-producing paths D8.3.3
+   unboxed entry then has exactly the two proof-producing paths D7.3.3
    names. A site that cannot prove the contract calls `_b` — never a
    caller-side check plus the unboxed entry.
 2. Key `mir_boundary_is_redundant` on structural contract equality
@@ -545,7 +545,7 @@ within 1.3x of JIT-pinned exec + one compile.
    record elide.
 3. Drop the null guard on a direct field read when the field's declared
    type is not optional and the object has just crossed its contract
-   (D3.2.4v3 makes the layout a proof; the non-null arm is that proof).
+   (D4.2.5 makes the layout a proof; the non-null arm is that proof).
 4. Map/record parameters as raw pointers to their packed layout on the
    direct typed edge — the same witness-bit protocol `T[]` uses — with the
    `_b` wrapper as the only boxed entry. This is the structural half of the
@@ -704,11 +704,11 @@ genuinely unknown. Those are the language, not the implementation.
 | T27-1 | memoize contract proof incl. disproof | re-scoped by §10.1: union memo already hits; plain `T[]` whole-array validator walk removed (§10.3) |
 | T27-2 | elide identical-contract re-crossings | landed as the T27-8 structural key (§10.14): a declared binding, record field, `null` or non-raising call result whose contract is structurally the target's crosses nothing; cube3d `lambda_type_check` x17 → 0 mandatory, splay_node x23 → 0 (G2 met) |
 | T27-3 | native stores for `var T[]` parameters | module-constant subscripts landed (§10.6): navier's mandatory Item setter gone; the lane setter is still a call on its guarded arm |
-| T27-4 | RMW place borrow: richards pilot, then cd/splay/deltablue | `any`-leaf admission fast path (§10.6); fixed-key checked path setter with compiler-resolved leaf + builtin scalar contract fast path (§10.11): richards 0.58x, deltablue 0.62–0.85x, splay 0.80x, G7 met for richards; COW prologue and cd open; puzzle withdrawn as a target 2026-09-13 (S9.1.3 fix, v42 JIT was wrong); D4.4.4v2 sibling-field handles + early returns and D4.4.5 move-out binds (§10.12): cd 0.91x, table puts 2,000 → 2 copies; splay unchanged (store-backs inside `if` branches need a nested-list ruling) |
+| T27-4 | RMW place borrow: richards pilot, then cd/splay/deltablue | `any`-leaf admission fast path (§10.6); fixed-key checked path setter with compiler-resolved leaf + builtin scalar contract fast path (§10.11): richards 0.58x, deltablue 0.62–0.85x, splay 0.80x, G7 met for richards; COW prologue and cd open; puzzle withdrawn as a target 2026-09-13 (S9.1.3 fix, v42 JIT was wrong); D5.4.4 sibling-field handles + early returns and D5.4.5 move-out binds (§10.12): cd 0.91x, table puts 2,000 → 2 copies; splay unchanged (store-backs inside `if` branches need a nested-list ruling) |
 | T27-5 | `cd` + `queens` generic-operator case studies | reported (§10.17): cd's residue is the port's shape (untyped `[voxels, seen]` return, linear key table), queens has one `fn_ne` on a proven `int` compare -- no per-operator special case is warranted |
-| T27-6 | auto-tier admission: refusal log, `match`, typed `var` rebinds | refusal log + type/literal `match` landed (§10.2); typed `var` rebinds landed on every tier and the D8.1.1v8 pin lifted (§10.13, D8.1.1v10) |
-| T27-7 | emission diet + per-function size gate + satellite re-link | packed nullable float literals, dead layout-reload pruning (§10.4); scalar capture elision, NaN-first literal null test with packed-array reuse (§10.11); nullable-literal member predicate fixed (§10.13); `run_cube` 20,499 → 15,514 insns from the §10.14 proofs; the float null lane is a double immediate (§10.15); satellite re-link already fixed by D8.1.1v9 (`find_func`); per-function budgets for cube3d/deltablue/prettier_ast recorded as MT7 probes (§11); the 10,000 target is not met |
-| T27-8 | callee-only admission (D8.3.2), structural elision key, record ABI | call-defined local bindings skip caller re-admission (§10.11); structural key through `T?`, record-field and alias proofs, float literals admitted by construction under a `float[]` contract, declared `T[]` locals from a proving call no longer re-admitted (§10.14); callee-only admission and record ABI not started |
+| T27-6 | auto-tier admission: refusal log, `match`, typed `var` rebinds | refusal log + type/literal `match` landed (§10.2); typed `var` rebinds landed on every tier and the D8.3.3 pin lifted (§10.13, D8.3.3) |
+| T27-7 | emission diet + per-function size gate + satellite re-link | packed nullable float literals, dead layout-reload pruning (§10.4); scalar capture elision, NaN-first literal null test with packed-array reuse (§10.11); nullable-literal member predicate fixed (§10.13); `run_cube` 20,499 → 15,514 insns from the §10.14 proofs; the float null lane is a double immediate (§10.15); satellite re-link already fixed by D8.3.3 (`find_func`); per-function budgets for cube3d/deltablue/prettier_ast recorded as MT7 probes (§11); the 10,000 target is not met |
+| T27-8 | callee-only admission (D7.3.2), structural elision key, record ABI | call-defined local bindings skip caller re-admission (§10.11); structural key through `T?`, record-field and alias proofs, float literals admitted by construction under a `float[]` contract, declared `T[]` locals from a proving call no longer re-admitted (§10.14); callee-only admission and record ABI not started |
 | T27-9 | interval analysis: int53 band + BCE | band test consolidated; sentinel-operand defect fixed (§10.7); loop-accumulator proof and fused band branches recover array1/fib/triangl (§10.9); static array lengths for `fill(K, v)`/literal locals prove constant-index reads non-null (§10.14); literal loop bounds enter the finite plan and the dense extent proof, nested counters declared inside the body join it, and a finite fact starting at zero proves a counter non-negative (§10.16: quicksort 0.62x, nbody recovers 3% of its §10.15 cost); general interval/BCE extension open |
 
 ## 10. Implementation evidence (rev 3)
@@ -770,7 +770,7 @@ contract accepts `error`, and passed a boxed Item into the int-lane formal. The
 router already sends every argument it cannot prove on the lane to `_b`, so
 once the raw entry is selected the formal *is* the lane; the emitter now takes
 the native branch for inferred specializations (transpile-mir.cpp, call
-argument lowering; D8.3.3: the unboxed entry has exactly two proof paths). T27-6
+argument lowering; D7.3.3: the unboxed entry has exactly two proof paths). T27-6
 would otherwise have exposed this in the auto tier, because satellites use the
 same lowering. Fixture: `test/lambda/proc/tune27_satellite_match.ls`
 (5,718,569 on T0, JIT and auto; v43 JIT printed `inf`).
@@ -785,7 +785,7 @@ only repeated the element proof, deeply, through every nested element graph.
 prettier_ast's `acc: Doc[]` accumulators are rebuilt each step, never carry a
 certificate, and paid the walk per crossing. The walk now runs only when the
 outer contract is not a unary `T[]` (constrained bases are already stripped at
-the boundary under D3.2.2's base-only rule).
+the boundary under D4.2.3's base-only rule).
 
 | Row (JIT exec, interleaved) | v43 | r6 |
 |---|---:|---:|
@@ -817,7 +817,7 @@ Three mechanisms, measured on cube3d2's `run_cube`:
    into double registers first, then one `array_float_new` and direct packed
    stores follow; a member that *is* null takes one out-of-line call,
    `array_float_literal_with_nulls(packed, null_mask)`, which republishes
-   generic storage so the later boundary still reports the null (D3.2.2,
+   generic storage so the later boundary still reports the null (D4.2.3,
    S7.1.3v2). The existing non-null path got the same evaluate-first shape,
    which also removes a fresh header held unrooted across member evaluation.
    `array_float.ls`: 286 → 235 calls.
@@ -1138,7 +1138,7 @@ Five slices plus one pre-existing crash fix, each archived as a release build
 `lambda_map_path_set_checked_inplace`. Every `w.tasks[tid].pp = v` built a
 heap path array (`array_plain` + three `array_push`), re-walked the declared
 contract per store to find the leaf, and nested three `RootFrame`s. The leaf
-below an open `array` field is always `any` (D3.2.4v3), and nothing about it
+below an open `array` field is always `any` (D4.2.5), and nothing about it
 depends on the runtime key values except index exactness. Now:
 
 - `lambda_map_path_set_checked_fixed(owner, value, k0, k1, k2, shape,
@@ -1169,7 +1169,7 @@ before the root-frame anchor, so a store inside a loop reuses it, and it is
 kept out of async spill tracking because every re-entry reruns the prologue.
 The keys stay rooted in their own slots across the call.
 `cow_path_set_impl` and `runtime_map_path_write_proven` root a fixed key span
-of any length with `RootSpan`. Semantics are unchanged (D3.2.4v3): a proven
+of any length with `RootSpan`. Semantics are unchanged (D4.2.5): a proven
 root writes in place, and anything else materializes the descriptor for the
 transactional setter. Fixture: `test/lambda/proc/typed_deep_path_store.ls`.
 
@@ -1228,7 +1228,7 @@ awfy/deltablue2 on the same branch, with attribution by
   or wrapper index is now evaluated once, rooted as the cold arm's key, and
   tag-tested on the hot arm.
 - Port fix: `vec_at(var v: Vec, ...)` never writes `v`, but the `var` pass
-  made every `cs = w.vars[i].constraints` place copy count as mutated (D4.4.6),
+  made every `cs = w.vars[i].constraints` place copy count as mutated (D5.4.5),
   so each call copied the list: 38,980 → 4,340 `int[]` copies per run.
 
 deltablue2 went from 27.9 ms on HEAD to 15.2 ms (release, median of 7): about
@@ -1259,7 +1259,7 @@ a width below `large_length`. Written the obvious way, the new port first ran
 - **Admission deep-cloned uncertified arrays.** The copy arm of
   `runtime_type_admit_array_env` used `fn_mutable_value`, a deep clone with a
   cycle table. Every `acc ++ [...]` handed to a `Doc[]` parameter copied the
-  whole document subtree. It now copies one level (D4.4.2). The only visible
+  whole document subtree. It now copies one level (D5.4.2). The only visible
   cost is one lazy child detach, pinned in
   `LambdaOptAdmission.TypedArrayPathPreservesGraphProof`.
 
@@ -1357,7 +1357,7 @@ MIR emission 135/135 with `typed_path_store`'s pin moved to the fixed-key
 setter; MT7 ratchet 16/16 with `lambda_corpus_array_float` raised 1412 → 1420
 for the receiver test (reason recorded in the budget).
 
-### 10.12 Round 3: COW borrows for cd and splay (D4.4.4v2, D4.4.5)
+### 10.12 Round 3: COW borrows for cd and splay (D5.4.4, D5.4.5)
 
 Profiles of the two worst remaining typed rows against Node (Result43: cd
 14.6x, splay 19.8x) pointed at copies, not at emitted code:
@@ -1367,7 +1367,7 @@ Profiles of the two worst remaining typed rows against Node (Result43: cd
 | cd | array 344,179, map 132,567 | 152 MB |
 | splay | map 603,158 | 39 MB |
 
-**cd — D4.4.4v2 (ratified 2026-09-14).** `rbt_put` binds two read-modify-write
+**cd — D5.4.4 (ratified 2026-09-14).** `rbt_put` binds two read-modify-write
 handles on sibling fields of one `var` root and returns early in its update
 branch:
 
@@ -1384,16 +1384,16 @@ field, and the early `return` is not preceded by `keys`' store-back. Neither
 is observable. A sibling member is a different slot, and an alias between two
 slots is share-marked by the field store or literal that published it. A
 return that precedes every use of the handle cannot leave an in-place write
-behind. D4.4.4v2 admits both (`rmw_sibling_place`, `handle_named` in
+behind. D5.4.4 admits both (`rmw_sibling_place`, `handle_named` in
 `build_ast.cpp`). A 1,000-put probe went from 2,000 array copies (8.1 MB) to 2;
 a single cd frame from 1,050 to 654. cd moved from 563–617 ms to 516–520 ms. The rest of the row is
 workload shape: the Lambda port replaced the red-black tree with a linear
 key table (`rbt_find_node` scans), which the JS original does not have.
 
-**splay — D4.4.5 move-out binds (ratified 2026-09-14).** The rotations
+**splay — D5.4.5 move-out binds (ratified 2026-09-14).** The rotations
 `var left = node.left; var branch = left.right; node.left = branch;
 left.right = node` copy `left` because the bind marked it, although the
-overwrite removed the only other holder first. D4.4.5 binds such a handle as a
+overwrite removed the only other holder first. D5.4.5 binds such a handle as a
 borrow under the CW34 spine test (`rmw_moves_out`). Record annotations with the
 same nominal contract and optionality are admitted too. Probes of typed and
 untyped rotations went from one map copy per rotation to zero.
@@ -1427,7 +1427,7 @@ spectralnorm 1.099 (round-1 `eval_A` residue), paraffins 1.034, list 1.032
 Gates for this round: Lambda baseline 5425/5425 (both new fixtures); forced-GC
 stress (`LAMBDA_GC_FORCE_EVERY=1`, `LAMBDA_GC_POISON_FREED=1`) green on
 `cow_rmw_sibling_borrow`, `cow_move_out_bind` and `cow_rmw_borrow` on all
-three tiers. Formal design spec 3.0.0 → 3.2.0 (D4.4.4v2, D4.4.5); COW record
+three tiers. Formal design spec 3.0.0 → 3.2.0 (D5.4.4, D5.4.5); COW record
 §11.11 revision v2 and §11.12 CW35.
 
 ### 10.13 Round 4: typed `var` rebinds on every tier, and the census refresh
@@ -1447,7 +1447,7 @@ pays 1.07x for the `_b` route (copies +0.7%, `map_admit_calls` +19%), a
 tuning follow-up.
 
 **Typed `var` rebinds were lost on the eager tier — every kind (r40,
-D8.1.1v10).** Probing DO29 more widely than its text showed that
+D8.3.3).** Probing DO29 more widely than its text showed that
 `pn inc(var n: int) { n = n + 1 }` rebinds only the callee's register
 JIT-pinned, for every scalar lane, `string`, records and their optional
 forms; only untyped and typed-array positions wrote back. T0 and the auto
@@ -1463,7 +1463,7 @@ tier were right solely because of the v8 pin. Three gaps, one convention:
   typed lane argument is homed from its boxed *argument* slot and decoded
   back into the lane through the contract after the call
   (`MIR_VAR_HOME_TYPED_LANE`), never switching the binding's carrier
-  (D3.3.4);
+  (D2.4.3);
 - the `_b` adapter consumed T0's cell for every typed position but
   forwarded only array homes; it now forwards all of them through its own
   binding slot and stores the reloaded value back.
@@ -1537,7 +1537,7 @@ Read against §2: cube3d's `lambda_type_check` x19 is x17 with
 deltablue's `cow_prepare_write` is x10 (awfy) and 0 mandatory on the
 JetStream port, whose remaining copies are 16,060 maps; splay still copies
 607k maps (the nested-list store-back ruling, §10.12); cd copies 133k maps
-and 260k arrays after D4.4.4v2. brainfuck, fast_diff and the text rows are
+and 260k arrays after D5.4.4. brainfuck, fast_diff and the text rows are
 string-bound as §2 said and untouched by this round.
 
 **COW census, r39 → r40 (`COW_EXEC_PROFILE`, JIT).** cd2 array copies
@@ -1582,7 +1582,7 @@ call argument` on packed float literals plus 9 `float` null rejections on
 cd2 16 on `recurse_draw(voxels, seen, …)` where `voxels = step[0]` reads an
 untyped array the port returns.
 
-**T27-8 structural key (S11.4.1v3, D3.2.4v3).** `mir_contract_structurally_equal`
+**T27-8 structural key (S11.4.1v3, D4.2.5).** `mir_contract_structurally_equal`
 compares two contracts through their declaration wrappers and the optional
 wrapper: identical nominal base with equal nullability, equal simple ids,
 or invariant-compatible arrays. A `SplayNode?` return, parameter and field
@@ -1594,7 +1594,7 @@ identity test had seen three contracts. On top of it:
   was checked against the same invariant, S9.2.1);
 - `obj.f` proves field `f`'s declared contract when `obj` carries a trusted
   record and either the target accepts null or `obj` cannot be null
-  (D3.2.2: the record was reified, every store into `f` is checked);
+  (D4.2.3: the record was reified, every store into `f` is checked);
 - `null` proves any `T?`; a non-raising call proves a structurally equal
   declared return; the unannotated-local definition scan accepts an alias
   of a declared binding and no longer refuses a `var` position whose
@@ -1657,7 +1657,7 @@ fixture parity on every `cow_*`/`tune27_*`/typed fixture, MIR emission
 compile at 165 ms of a 360 ms wall (exec 23 ms); a `sample` of that run has
 25 of its 27 compile samples inside `MIR_link` -- MIR's own generator, not
 the emitter. Emission size is therefore the lever G9 says it is, and the
-satellite re-link item is already closed (D8.1.1v9 publishes members with
+satellite re-link item is already closed (D8.3.3 publishes members with
 `find_func`).
 
 **Float null lane as a double immediate.** `emit_float_null_lane` emits
@@ -1772,7 +1772,7 @@ still forbidden in both) and the `lambda_tune4_typed_array_guard` ratchet
 ### 10.17 T27-5: the `cd` and `queens` case studies
 
 **cd (JIT, `_handle_new_frame`/`_recurse_draw`, dominator-exact).** After
-D4.4.4v2 (§10.12) and the §10.14 proofs the mandatory-path census reads
+D5.4.4 (§10.12) and the §10.14 proofs the mandatory-path census reads
 `array_push:8, lambda_type_check:7, item_at:4, fn_ne:3, is_truthy:3,
 fn_add:3, member_set_cow:2`. Every one attributes to the port, not to an
 operator that lacks a proof:
@@ -1836,8 +1836,8 @@ quicksort 0.63x, list 0.66x, prettier_ast 0.67x, raytrace3d 0.74x, splay
 the way, each a tier divergence (S9.1.2/S9.1.3/S7.1.3v2): the place-mutator
 aliasing, the nullable-record `var` borrow, every typed scalar/record `var`
 rebind on the eager tier, `x = null` into a nullable lane, `return g` of a
-nullable lane, and the nullable float store. Two rulings ratified (D4.4.4v2,
-D4.4.5) and one revised (D8.1.1v10); formal design 5.1.0 after the merge.
+nullable lane, and the nullable float store. Two rulings ratified (D5.4.4,
+D5.4.5) and one revised (D8.3.3); formal design 5.1.0 after the merge.
 
 **Deferred (each with the evidence that scopes it).**
 - T27-8 record ABI and callee-only admission on the direct typed edge (§8
@@ -1854,7 +1854,7 @@ D4.4.5) and one revised (D8.1.1v10); formal design 5.1.0 after the merge.
   MIR's generator dominates its compile (§10.15), so the lever is a lighter
   lowering of those calls, not the emitter's speed.
 - The splay nested-list store-back ruling (§10.12) -- a design question for
-  the user (D4.4.4 admits store-backs only at the handle's own list level).
+  the user (D5.4.4 admits store-backs only at the handle's own list level).
 - The pre-existing JIT-tier defects of §10.15 (`action_c_error_lane`,
   `tune24_branch_proofs`, `tune26_dense_carried_index`, four
   `proc_nullable_*` crashes): none introduced here; all reproduce on HEAD.
@@ -1918,8 +1918,8 @@ dense-guard split no wildcard pattern can see). Added:
 - **Census pins** (`test_lambda_opt_gtest`, `LambdaOptCow`/`LambdaOptJs`):
   the exec-profile reader now exposes the per-type COW rows
   (`array_shared_copies`, `array_num_unique_mutations`, …), and five tests
-  pin D4.4.4v2 (29 array copies), D4.4.5 (83 map copies), the place
-  mutators (7 + 1 detaches, ≥1,000 unique appends), D8.1.1v10 (no array
+  pin D5.4.4 (29 array copies), D5.4.5 (83 map copies), the place
+  mutators (7 + 1 detaches, ≥1,000 unique appends), D8.3.3 (no array
   copy on a typed `var` rebind) and the fixed-key path setter (1 + 2
   detaches) on both tiers. A new row `js_realm_slot_reservations` counts
   LambdaJS's full realm-slot walks; the JS test drives 20,000 intrinsic
@@ -1941,7 +1941,7 @@ dense-guard split no wildcard pattern can see). Added:
   `emit_sysfunc_abi_arg` requests the descriptor at production
   (`transpile_expr_value(..., required)`), and the inline bitwise/shift
   lowering opens each operand's proven `int` lane through
-  `emit_native_bitwise_lane_arg` (D2.4.1-D2.4.3). Pinned by
+  `emit_native_bitwise_lane_arg` (D2.3.4-D2.3.5). Pinned by
   `test/mir/lambda/tune20_shift_native_lane` (`rsh r, %p1, c` / `lsh r,
   %p1, %p2` / `and r, %p1, n` on the raw parameter registers, at most one
   `int2it_lane` per body -- the earlier `tune16_native_bitwise` sidecar

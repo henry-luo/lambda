@@ -11,8 +11,8 @@ recorded in §9.
 Improve unchanged JavaScript workloads using evidence from untyped Lambda;
 retain the configured Test262 suite's zero-failure, zero-timeout, zero-retry gate.
 
-**Authority:** **S1.11**, **S9.1.3**, **D8.1.3v26**, **D8.4.1v2–D8.4.3v2**,
-**D3.4.3v5–D3.4.5**, **D5.2–D5.3**, especially **D5.3.4**. This plan changes no
+**Authority:** **S1.11**, **S9.1.3**, **D8.4.3**, **D7.4.1–D7.4.3**,
+**D3.4.3–D3.4.5**, **D6.2–D6.3**, especially **D6.3.4**. This plan changes no
 language or architecture ruling. The formal specs govern the optimizations;
 historical tuning documents are implementation evidence only.
 
@@ -43,7 +43,7 @@ There are nevertheless concrete opportunities:
    mix engine costs with different algorithms, APIs, and timing boundaries.
 
 Do not restore property/callee caches, rewrite canonical benchmarks to obtain
-the gain, or replace JS semantics with Lambda semantics. **D8.4.1v2** requires
+the gain, or replace JS semantics with Lambda semantics. **D7.4.1** requires
 compile-predicted guards and shared-kernel fallback; **S1.11** keeps the languages'
 semantic responsibilities separate.
 
@@ -221,22 +221,22 @@ not prove all extra code can be removed.
 | Closure representation | MVP `new_function`, `mvp_lmd_function_new`; shared `Function`, closure environment and owned-slot stores | Precompute immutable definition facts; eliminate allocation only after escape/identity proof |
 | Small-object scalar replacement | MVP `plan_scalar_objects`, `scalar_constructor_plan`, `scalar_factory_plan` | Currently bounded and excludes identity, aliases and method receivers; widen only for measured safe cases |
 | Allocation/layout | MVP `constructor_layout_reusable`, `mvp_lmd_class_invoke`; Lambda shared shapes and `map_alloc_for_type` | Constructor reuse already exists; preserve absent properties until initialization is observably complete |
-| Ownership | `lambda/runtime/mir_emitter_shared.hpp`, `RootFrame`/`Rooted`, representation-aware MIR events | **D5.3.4**: rooting policy stays in `MirEmitter`; no second JS rooting subsystem |
+| Ownership | `lambda/runtime/mir_emitter_shared.hpp`, `RootFrame`/`Rooted`, representation-aware MIR events | **D6.3.4**: rooting policy stays in `MirEmitter`; no second JS rooting subsystem |
 
 The current shared-dispatch work is documented in
 [MVP §36.10](../jube/JS_MVP_Lmd.md#3610-remove-cache-machinery-and-reuse-lambda-field-specialization).
 It already reduced Havlak from about 3,419 to 2,654 ms in its own paired screen.
 Do not claim those changes again. The older
 [class tuning record](JS_MVP_Lmd_Class_Tuning.md) describes retired per-site
-caches; those sections are superseded by **D8.4.1v2**, not a template for this work.
+caches; those sections are superseded by **D7.4.1**, not a template for this work.
 The existing [library tuning record](JS_MVP_Lmd_Library_Generators.md#6-library-workload-tuning)
 already covers prepared RegExp subjects/scratch and ASCII offset shortcuts.
 
 Reuse AST-independent representation and emission helpers directly. When a
 needed helper is file-local, promote a suitable shared interface instead of
 copying it. Lambda and JS AST analyses can remain separate when their binding,
-aliasing or completion semantics differ. **D8.4.2v2** governs direct operands;
-**D8.4.3v2** requires explicit completion propagation on fallible edges.
+aliasing or completion semantics differ. **D7.4.2** governs direct operands;
+**D7.4.3** requires explicit completion propagation on fallible edges.
 
 ## 6. Implementation sequence
 
@@ -316,7 +316,7 @@ functions and observable `length`/`name`/constructibility.
 not intrinsic `Array.prototype.forEach`. Prove the consumer invokes its callback
 synchronously and neither stores it nor observes its identity/properties. Extend
 the existing guarded method/inline frame to carry callback code and captured
-values through individual operands where practical (**D8.4.2v2**).
+values through individual operands where practical (**D7.4.2**).
 
 Capture the live method before evaluating arguments. Guard that captured
 function's identity and the required realm/receiver facts; do not reread a
@@ -350,7 +350,7 @@ shared shape/representation emitter helpers.
 - Use immutable source-predicted shapes and guard chains. Within a region proven
   free of relevant mutation/reentrancy, reuse the checked shape/data/field
   result in invocation-local registers. Extend the existing region machinery;
-  do not introduce mutable lookup state (**D8.4.1v2**).
+  do not introduce mutable lookup state (**D7.4.1**).
 - Retain JS ownership, descriptor, own-shadowing and prototype checks. Recheck
   writable storage after RHS effects. A pointer to movable data must not survive
   a safepoint; root its owner and reload afterward. Lookup equality alone does
@@ -537,7 +537,7 @@ claim is corrected here. This original analysis predates the implementation in
   complete initializer statement within the same block activation. Captured,
   eval-visible, generator/async and implicit-write bindings remain excluded.
   Existing representation/range inference and `MirEmitter` ownership carry the
-  resulting native lanes (**D5.3.4**).
+  resulting native lanes (**D6.3.4**).
 - **P2a:** formal length, duplicate-parameter and callable/home classification
   are definition metadata. Creation still allocates fresh Functions and installs
   the live program, realm, receiver and capture cells.
@@ -550,7 +550,7 @@ claim is corrected here. This original analysis predates the implementation in
   captured parameters, escaping/inspected callbacks, dynamic classes, eval,
   complex parameters and unproved bodies retain ordinary calls. Mutable captures
   and lexical `this` retain the shared precise cells; no per-site cache was added
-  (**D8.4.1v2**, **D5.3.4**).
+  (**D7.4.1**, **D6.3.4**).
 - **P4:** a native compilation sample found repeated recursive traversal in
   `primitive_property_key`, rather than binding lookup, dominating the planning
   phase. A query-local node visitation table reuses conjunctive obligations and

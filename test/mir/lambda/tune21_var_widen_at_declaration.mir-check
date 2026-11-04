@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.4: inferred mixed locals stay boxed at their declarations, including skipped assignments. Tune34 admits complete numeric recurrences to float consumers without changing the local Item tag; subtraction and comparison can now run natively after decoding that Item.",
+  "description": "D2.3: inferred mixed locals stay boxed at their declarations, including skipped assignments. Tune34 admits complete numeric recurrences to float consumers without changing the local Item tag; subtraction and comparison can now run natively after decoding that Item.",
   "checks": [
     {
       "in_func": "_f_#",

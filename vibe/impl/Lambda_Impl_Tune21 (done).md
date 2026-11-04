@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-02
 - **Status:** IMPLEMENTED WITH OPEN FOLLOW-UPS (reviewed 2026-09-09). The core
-  T21-1 through T21-5 slices landed, with later D8.1.1v6-v9 and CW34 follow-ups.
+  T21-1 through T21-5 slices landed, with later D8.3.3-v9 and CW34 follow-ups.
   The §5 targets remain measured outcomes: some are met and some remain open.
 - **Input:** `test/benchmark/Overall_Result36.md` / `benchmark_results_v36.json`
   as of the 2026-09-02 re-measure (all 59 rows validate on every engine; the
@@ -17,10 +17,10 @@
   `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1 (P2 satellite gates).
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S3 (truthiness), S9.1.3
   (plain-param snapshot), S11.4.2 (declared returns are enforced);
-  `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3 (value representation
-  discipline), D3.3 (inference), D4 (memory), D5.2 (scalar homes), **D8.1.1v9**
+  `doc/Lambda_Formal_Design.md` D2.3.4–D2.3.5 (value representation
+  discipline), D4.3 (inference), D4 (memory), D6.2 (scalar homes), **D8.3.3**
   (tiered execution, satellite write-back, aggregate admission, and direct-callee
-  clusters), D8.4.1v2 (no inline caches), D8.6.1–D8.6.3
+  clusters), D7.4.1 (no inline caches), D8.6.1–D8.6.3
   (emission ratchet, mir-check, forced-GC sweeps).
 - **ID series:** `T21-#`.
 
@@ -36,7 +36,7 @@ claim that every performance target or follow-up design item is closed.
 |---|---|
 | T21-1 | Core regression reversals 1a/b/c/e landed. The CW34 read-modify-write handle borrow covers the later 1d(A) ruling; moved-argument elision 1d(B) remains open. |
 | T21-2 | 2a–2e landed; 2b was already covered. The implementation target is incomplete: 10 untyped rows remain above 2x their typed twin, versus the target of ≤4. |
-| T21-3 | Implemented through D8.1.1v6-v9, including boxed satellite admission, write-back, aggregate/typed-`var` support, and direct-callee clusters. Typed-`var` rebinding remains pinned under DO29. |
+| T21-3 | Implemented through D8.3.3-v9, including boxed satellite admission, write-back, aggregate/typed-`var` support, and direct-callee clusters. Typed-`var` rebinding remains pinned under DO29. |
 | T21-4 | Partial: integral division, nursery pacing, and lazy zeroing landed. Map-field protocol, moved arguments, and tenured-zone reclamation remain follow-ups. |
 | T21-5 | All five benchmark/report hygiene items are closed. |
 
@@ -166,7 +166,7 @@ Result36 wrong-output rows, whose correctness fix in `56ab0a571` chose
 Both are the same root cause class as Result32's finding: the index and bool
 expressions lost their **witness** (in-range by construction; boolean by
 contract) when their producers were unified onto the generic ValueRep publish,
-so consumers re-prove at runtime what the planner knew. D2.4.2 says a
+so consumers re-prove at runtime what the planner knew. D2.3.4 says a
 `MirValue` carries the *contract*; a counted-loop index against a
 loop-invariant bound is in range by that contract, and the emitter must not
 regenerate the overflow arm for it.
@@ -300,7 +300,7 @@ guard), which is T21-2's counted-loop witness work, not a regression reversal.
   publish exactly that (via `mir_value_from_reg`'s semantic override) instead
   of the AST's `any`, so `mir_profile_emit_condition` branches on the byte and
   `lambda_convert_rep` boxes it as a bool. The out-of-bounds and slow arms
-  produce the lane's null (2, D2.5.1), `mir_expr_may_be_null` admits bool
+  produce the lane's null (2, D2.4.1), `mir_expr_may_be_null` admits bool
   element reads (and native `and`/`or` results), the converter boxes a
   possibly-null native bool through `emit_box_bool_lane`, an unannotated
   `let x = flags[9]` binds as an Item, and `and`/`or`/`not` on the lane test
@@ -352,7 +352,7 @@ correct) — a T0 `var`-param write-back regression on the `c` array.
   publishes a rep that (a) conditions branch on directly and (b) boxes as a
   *bool* Item when a consumer needs an Item — instead of today's forced
   `MIR_INDEX_RESULT_BOXED_BOOL` + `is_truthy` call. This closes the class of
-  bug behind Result36's wrong-output rows structurally (D2.4.3: conversion is
+  bug behind Result36's wrong-output rows structurally (D2.3.5: conversion is
   keyed by (source rep, target rep); I64→ITEM and BOOL→ITEM must be different
   pairs). Gate: primes2 ≤ 3.5 ms, sieve2 ≤ 0.035 ms, `proc_fill_bool_inferred_read`
   and the r1/h1 repros pass on both tiers, forced-GC sweep (D8.6.3).
@@ -391,7 +391,7 @@ correct) — a T0 `var`-param write-back regression on the `c` array.
     a.l0; … l[i] = c; a.l0 = l` (cd/havlak `arr_set`, splay's node
     handles, deltablue's `p_vars`/`constraints`): the bind marks the level
     shared (`cow_bind_var`), the write copies it, the store-back captures the
-    copy (marks it again), and the mark is monotonic (D4.4.1), so every later
+    copy (marks it again), and the mark is monotonic (D5.4.1), so every later
     call copies every level — `marks ≈ copies, unique = 0` is the signature.
     **(B) functional rebinding through a mutated plain parameter** — `st =
     SubBytes(st)` with `pn SubBytes(s) { s[i] = …; return s }` (crypto_aes):
@@ -406,7 +406,7 @@ correct) — a T0 `var`-param write-back regression on the `c` array.
     path port does this by hand); (B) = a **moved argument**: at `x = f(x)`
     with `x` an unmarked local dead after the call, pass ownership so the
     callee skips its CW29 entry mark (an ABI signal the callee must see,
-    since CW29 placed the mark callee-side). D4.4.1's sanctioned extensions
+    since CW29 placed the mark callee-side). D5.4.1's sanctioned extensions
     (saturating counts / GC-refresh) do not help (A): at the write the field
     still observes the old level, so the copy is required until the
     store-back is proven. Options and the rows each unlocks are in the
@@ -415,7 +415,7 @@ correct) — a T0 `var`-param write-back regression on the `c` array.
     unless the proof holds, so they are semantics work, not oracle edits.
 
   **Implementation status (2026-09-06, later): (A) ratified as CW34 and
-  landed** (`vibe/Lambda_Design_Runtime_COW.md` §11.11; **D4.4.4**, spec
+  landed** (`vibe/Lambda_Design_Runtime_COW.md` §11.11; **D5.4.4**, spec
   1.46.0). The static shape is decided once in `build_ast`
   (`lambda_ast_lower_rmw_borrows` at FUNCTION_END → `NameEntry::
   cow_borrow_lowered` on the handle, `AstAssignNode::cow_borrow_release` on
@@ -543,7 +543,7 @@ caller's root without demoting its binding to `any` (`mir_prepare_cow_root`
 does both today), or the CW33 home cell must be published for ArrayNum roots
 (excluded today because the caller's register may hold the raw pointer
 representation and the post-call reload would reinterpret it). Either is a
-CW33/D5.2 design item, recorded here for the next round.
+CW33/D6.2 design item, recorded here for the next round.
 
 **Implementation status (2026-09-05): T21-2c — boxed arithmetic round trips
 — landed.** The dumps showed the round trips were not at call/index boundaries
@@ -551,7 +551,7 @@ but at *type-oracle* boundaries: `(i + j) * (i + j + 1) / 2` already lowered
 natively (`i2d` + `ddiv`) in eval_A, and the very next `+ i` boxed both sides
 for `fn_add`, after which `float()`, `1.0 / …` and the return stayed boxed.
 Every fix is again an oracle edit in `transpile-mir.cpp`, cited to the lane
-rulings (S4.5.3, D2.4.1–D2.4.3, D3.3.1):
+rulings (S4.5.3, D2.3.4–D2.3.5, D4.3.1):
 
 1. *Operand oracle, double lane.* `mir_native_arithmetic_operand_type`
    recovered a closed `int` tree for a native consumer but had no float arm;
@@ -600,7 +600,7 @@ identically on the control (stale goldens). New fixture
 its `prev`/`curr` rows are swapped through a `var tmp`, which demotes both
 bindings to `any` and routes every `prev[j]`/`curr[j] = …` through
 `fn_index`/`fn_array_set` (15 `int2it_lane`); that is a binding-lane item
-(D3.3.1), not a round trip. crypto_sha1's remaining `fn_add ×4` are the u32
+(D4.3.1), not a round trip. crypto_sha1's remaining `fn_add ×4` are the u32
 builtin results (`shl(...) + 16`, `input_len + 64`) in core_sha1's prologue,
 outside the hot loop; the u32 lane has a pre-existing tier divergence
 (`u32 + int`, §T21-1) and was left alone. The 1.12x reading is therefore a
@@ -625,7 +625,7 @@ field is the parameter's implicit `any \ error`, which is not an array
 contract, so `lambda_array_set_checked_inplace` rejected every element with
 E201 ("expected any \ error, got bool") and the callee left through the error
 lane before its first store. The benchmark swallowed the error and reported
-a solver that "found" eight queens in row 0. Four edits (D3.2.1, D3.3.1,
+a solver that "found" eight queens in row 0. Four edits (D4.2.1, D4.3.1,
 CW33):
 
 1. `emit_array_num_store_fallback` reserves the checked typed store for a root
@@ -667,7 +667,7 @@ per call — queens 4 → 28, towers 6 → 16) is what separates queens (0.40 vs
 0.34), permute (0.27 vs 0.13) and towers (0.69 vs 0.38) from their typed
 twins now; the typed path skips it through `proven_array_witness`, which an
 inferred parameter's binding does not satisfy after a MAY_GC call. That is a
-cache-validity question (D3.3.1), not an inference one. The typed contract
+cache-validity question (D4.3.1), not an inference one. The typed contract
 also rejects an array LITERAL for a `var t: int[]` parameter statically
 (E207) while the inferred witness admits it — `[0, 0, 0]` builds an ArrayNum,
 so the admission is the identity and write-through holds; worth a ruling
@@ -678,9 +678,9 @@ whether E207 should relax to match.
 towers2 34 vs 16), so re-admission is not what separates them. permute and
 towers are separated by `st.count = st.count + 1` / `st.moves` on an untyped
 map `var` parameter: the read is already a guarded packed load (T20-1c), but
-the guard publishes a boxed Item on both arms by the D2.4 same-representation
+the guard publishes a boxed Item on both arms by the D2.3 same-representation
 rule, so the add is `fn_add` and the store `fn_map_set`. Lifting that is a
-representation decision on the guard (D2.4), not an inference edit, and is
+representation decision on the guard (D2.3), not an inference edit, and is
 left for T21-4.
 
 **Implementation status (2026-09-06): T21-2e — call-site string lane and
@@ -688,7 +688,7 @@ error-free argument boundaries — landed.** levenshtein's remaining 4x was not
 arithmetic either: its typed twin indexes `s1[i - 1]` through
 `fn_string_ascii_at` (one bounds check, one byte load), the untyped row
 through `fn_index`, which allocates a one-character string, and then a string
-`fn_eq`. Two edits (S4.1, D2.4, D3.2.1):
+`fn_eq`. Two edits (S4.1, D2.3, D4.2.1):
 
 1. *String lane.* The inference had no string notion at all. The call-site
    typer now passes a statically string-typed argument (a literal, a typed
@@ -745,7 +745,7 @@ too. The garbage occasionally decoded as an array Item and `fn_add` ran the
 vector path over a phantom multi-gigabyte operand; otherwise it logged
 `unknown add type: 144, 8`. A four-line probe reproduces it deterministically
 (`var j = 0; if (flag) { j = j - 0.5 }; j + 1` printed a type error for
-`flag == false`). Fix (D2.2.2, D3.3.1): the binding is widened at its
+`flag == false`). Fix (D2.2.2, D4.3.1): the binding is widened at its
 DECLARATION, the one point dominating every read and write —
 `transpile_let_stam` scans the function body with
 `mir_nested_control_writes_binding(…, cascade_widen)` for any assignment the
@@ -806,9 +806,9 @@ Gate for the track: no untyped row > 2x its typed row (today: 14 rows above
 3x); MIR-U/Node ≤ 1.0x. Measure each sub-track at ≥ 3 alternating pairs against
 `temp/lambda_head_release.exe` (Tune19 §8.4-2).
 
-### T21-3 — The auto tier promotes nothing untyped (needs a D8.1.1 revision)
+### T21-3 — The auto tier promotes nothing untyped (needs a D8.3.1 revision)
 
-**Implementation status (2026-09-06): landed as D8.1.1v6 (spec 1.45.0;
+**Implementation status (2026-09-06): landed as D8.3.3 (spec 1.45.0;
 `vibe/Lambda_Design_Ast_Interpreter.md` §5.2.1).** Two admissions in
 `interp_plan.cpp`: `interp_satellite_supported` no longer refuses a plain
 `any` parameter (the satellite is entered through its boxed `_b` wrapper, so
@@ -857,7 +857,7 @@ unset AUTO default: see the closing summary below the table.
 
 **T21-3b (2026-09-06, landed): satellite write-back for indexed stores and
 untyped `var` parameters** (impl `vibe/impl/Lambda_Impl_Ast_Interp (done).md`
-§3.0.58; design §5.2.1 "Write-back across the tier boundary"; D8.1.1v6 text
+§3.0.58; design §5.2.1 "Write-back across the tier boundary"; D8.3.3 text
 extended in place). Indexed/member stores are simply admitted by the scan (a
 promoted activation owns its registers; module stores go to the shared slab;
 a store through an untyped `var` parameter is published by the CW33
@@ -867,10 +867,10 @@ promoted callee through the new borrowed dispatch mode
 (`fn_call_borrowed_into`), and a satellite's dynamic call publishes its
 rooted slots and reloads them, with `interp_call_borrowed` consuming the
 cells on the interpreted side. Typed `var` parameters (raw-lane ABI, no
-home) stayed pinned until D8.1.1v8 (2026-09-07: admitted through the boxed
+home) stayed pinned until D8.3.3 (2026-09-07: admitted through the boxed
 edges' CW33 cells with a wrapper prepare/admit/store-back; rebinding bodies
 and their satellite callers stay in T0 -- Result37 analysis §6 item 4).
-D8.1.1v9 (same day) then made each satellite image a direct-callee cluster
+D8.3.3 (same day) then made each satellite image a direct-callee cluster
 with module-wide call-site inference, which closed the richards/deltablue
 dispatch gap and diviter's boxed arithmetic (Result37 analysis §6 item 4). A `var` local passed to an untyped `var` parameter is
 bound boxed at declaration — which also fixed a pre-existing eager-JIT
@@ -882,7 +882,7 @@ unchanged).
 | larceny/quicksort | 16.7 | 128.4 | **31.5** | 1.88x | `var` array params promote; rest = boxed satellite indexing |
 | awfy/permute | 14.3 | 27.9 | **14.4** | 1.00x | parity |
 | kostya/levenshtein | 31.2 | 305.7 | **216.8** | 6.9x | `levenshtein` now promotes (was pinned by its indexed stores); the satellite's `any`-param body indexes boxed — satellite call-site specialization is the residual, not write-back |
-| beng/nbody | 62.8 | 1017.8 | 1018.7 | 16.2x | **correction:** `advance`/`energy` take typed `float[]` parameters — pinned by the aggregate-contract rule D8.1.1v6 keeps, not by indexed stores |
+| beng/nbody | 62.8 | 1017.8 | 1018.7 | 16.2x | **correction:** `advance`/`energy` take typed `float[]` parameters — pinned by the aggregate-contract rule D8.3.3 keeps, not by indexed stores |
 | hyphen, sum, tak, fib, primes, queens, towers, sieve, mbrot, binarytrees | ≈ | ≈ | ≈ | 0.87–1.6x | unchanged |
 
 (ms, wall clock, median of 3, release `temp/lambda_t30_final.exe`, quiet.)
@@ -911,7 +911,7 @@ item above).
 
 `interp_satellite_supported` ([interp_plan.cpp:1874](../../lambda/runtime/interp_plan.cpp))
 refuses promotion when any parameter's contract is `any`, array, map, element,
-object or a structured type. D8.1.1v5 records this as "P2 fails closed for
+object or a structured type. D8.3.2 records this as "P2 fails closed for
 aggregate/structured signatures", justified by the satellite's raw-carrier
 specialization mis-decoding aggregates. Two consequences the report makes
 visible:
@@ -924,7 +924,7 @@ visible:
    210 vs 0.81), which is why part 2's typed/Node is 2.79x while part 1's is
    0.85x.
 
-Landed ruling: **D8.1.1v6** — a definition whose signature
+Landed ruling: **D8.3.3** — a definition whose signature
 fails the raw-carrier specialization test is still promotable to a satellite
 compiled with the **boxed dynamic ABI for every parameter** (the same entry
 `lambda_dynamic_call` already uses for multi-argument dynamic calls). The
@@ -938,7 +938,7 @@ line for an all-scalar or all-`any` signature.
 Secondary: back-edge promotion is deferred to the *next entry* (no OSR), so a
 script whose hot loop is in `main` never promotes at all (hyphen2 typed: 27 ms
 auto vs 1.85 JIT; 8 E201 errors were raised in T0 before promotion in the
-pre-fix source). Loop-entry OSR is explicitly out of scope in D8.1.1v5; the
+pre-fix source). Loop-entry OSR is explicitly out of scope in D8.3.2; the
 cheap alternative is the whole-script route (`LAMBDA_AUTO_WHOLE_SCRIPT=1`) —
 worth measuring as the default for import-free scripts whose `main` owns the
 loop, since it is already implemented and gated.
@@ -1121,7 +1121,7 @@ cycle) is the next lever — memory first, time second.
 
 ## 4. What NOT to do (inherited and new)
 
-- Everything in Tune20 §4 and Tune19 §8 stands: no inline caches (D8.4.1v2),
+- Everything in Tune20 §4 and Tune19 §8 stands: no inline caches (D7.4.1),
   no dynamic shape index, no transitive closed-caller or scalar-param edges,
   no shape interning for literals, no `is_trusted_contract` on inferred
   shapes, no C2MIR-path or vendored-dep changes, no typed contracts on the

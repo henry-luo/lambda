@@ -13,7 +13,7 @@ cases, and using a single scan with a group stack.
 
 **Spec linkage:** [Formal Design](../../doc/Lambda_Formal_Design.md) **D1.3**
 preserves guest-language semantics across shared
-runtime facilities; **D1.4v3** and **D8.4.3v2** govern explicit failure
+runtime facilities; **D1.4** and **D7.4.3** govern explicit failure
 propagation. No existing `S#` or `D#` specifies this routing algorithm, and
 this document changes no formal ruling. Decisions 1.1–1.5 extend the original
 RegExp matcher-routing decision without introducing another decision series.
@@ -456,7 +456,7 @@ not bypass analysis with an entry admitted under a different policy. Existing
 literal/property/class fast paths must prove their eligibility independently;
 the number of requested captures is not an eligibility test.
 
-**2026-10-23 direct-compiler size limits (D1.3v3, D1.4v4).** If an analyzed RE2
+**2026-10-23 direct-compiler size limits (D1.3, D1.4).** If an analyzed RE2
 candidate fails with `ErrorPatternTooLarge` or `ErrorRepeatSize`, try the existing
 spec matcher using the normalized JavaScript source and original flags. Unicode
 property expansion and nested counted repetitions can exceed RE2's program or
@@ -473,7 +473,7 @@ separators, nonmatches and flags; standalone MVP RegExp uses a separate matcher.
 
 The internal matching API needs distinct outcomes for `MATCH`, `NO_MATCH`,
 and failure such as budget/depth/allocation exhaustion. Error propagation at
-the JS/host boundary follows **D1.4v3** and **D8.4.3v2** using explicit returned
+the JS/host boundary follows **D1.4** and **D7.4.3** using explicit returned
 completions; no pending exception flag or non-local unwind is introduced.
 
 The existing backtracker returns `0` both for no-match and for exhausted

@@ -2899,7 +2899,7 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
 }
 
 // An image environment: a local Radiance HDR file decoded once per resolved path into an RGBA32F
-// equirectangular texture that the entry keeps across re-projections (D7.2.4).
+// equirectangular texture that the entry keeps across re-projections (D9.3.4).
 static bool scene3d_environment_image(Scene3dBuild* build, const char* source) {
     Scene3dEntry* entry = build->entry;
     DomDocument* document = build->root->doc;
@@ -3732,7 +3732,7 @@ bool scene3d_seek(DomElement* root, size_t ticks) {
     return committed;
 }
 Item scene3d_control(DomElement* root, Item request) {
-    // preparing animation can queue GC-allocating events; retain the command across that handoff (D5.3.3).
+    // preparing animation can queue GC-allocating events; retain the command across that handoff (D6.3.3).
     RootFrame roots(1);
     Rooted<Item> command(roots, request);
     auto* entry = scene3d_entry(root, true);
@@ -5398,7 +5398,7 @@ static bool scene3d_environment_setup(Scene3dEntry* entry) {
 }
 // Capture the lighting environment from its origin into the atlas's top level, one face per
 // region, then GGX-filter each level from the one above (Three.js r186 PMREMGenerator.fromScene
-// with no blur). Runs only when the capture key changes, never per frame (D7.2.4).
+// with no blur). Runs only when the capture key changes, never per frame (D9.3.4).
 static bool scene3d_environment_filter(Scene3dEntry* entry, uint64_t key);
 static bool scene3d_environment_capture(Scene3dEntry* entry, DomElement* root) {
     Scene3dProjection* p = &entry->projection;

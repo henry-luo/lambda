@@ -45,7 +45,7 @@ enum SpeechState { SPEECH_QUEUED, SPEECH_RENDERING, SPEECH_SPEAKING, SPEECH_PAUS
 struct SpeechInfo { SpeechState state; double position; int64_t char_index; };
 
 // takes ownership of `text`. Returns 0 and fills `error` when the document may
-// not start audio (D7.5.4) or the request is invalid.
+// not start audio (D11.3.1) or the request is invalid.
 uint64_t radiant_speech_speak(DomElement* owner, SpeechText* text, const SpeechOptions* options,
     const char** error);
 bool radiant_speech_command(DomDocument* doc, uint64_t token, const char* command);

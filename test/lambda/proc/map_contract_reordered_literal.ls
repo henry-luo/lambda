@@ -1,6 +1,6 @@
 // A map literal bound to a named record contract may list its fields in any
 // order: admission reifies it into the contract's declared layout, moving each
-// field by name (D3.2.4v4). The fields had kept the literal's order while the
+// field by name (D4.2.5). The fields had kept the literal's order while the
 // contract's offsets read them -- `{b: "s", a: 1}` bound to `{a: int, b: string}`
 // read `a` as 0 and crashed printing `b` -- and the JIT adopted the contract
 // for the literal and filled its slots in source order.

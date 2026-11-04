@@ -1,4 +1,4 @@
-// D7.2.4 document package; S12.1.2 keeps the execution loop behind a pn boundary.
+// D9.3.4 document package; S12.1.2 keeps the execution loop behind a pn boundary.
 import interp: .interp
 import svg: .svg
 import operators: .operators

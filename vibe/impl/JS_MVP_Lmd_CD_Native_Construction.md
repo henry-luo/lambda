@@ -13,7 +13,7 @@ slow initialization stores for the tree node's alternating Boolean/Map value.
   entry still carries the class allocation epoch; ordinary stores validate the
   selected layout. Numeric subtypes may share a key and use ordinary retyping.
   This is a layout hint, never a type proof. Sites without nullable links retain
-  their existing single entry (**D3.4.3v5**, **D3.4.5**, **D8.4.1v2**).
+  their existing single entry (**D3.4.3**, **D3.4.5**, **D7.4.1**).
 - Extend the existing `scalar_constructor_plan` for concrete numeric/Boolean
   arguments in proven numeric regions. Only small, receiver-unobserving,
   non-derived constructors with unique fields and forwarding/literal
@@ -22,16 +22,16 @@ slow initialization stores for the tree node's alternating Boolean/Map value.
   initialize through `field_write`. Constructor identity, argument evaluation,
   property order, real object identity and generic fallback remain intact.
   Native doubles need no boxing just to validate their already-known lane
-  (**D3.4.3v5**, **D3.4.5**, **D6.2.1**).
+  (**D3.4.3**, **D3.4.5**, **D7.2.1**).
 - Share receiver shape/data loads among sibling reads inside a numeric region's
   guard sequence. This sequence neither mutates objects nor collects; each
   property still validates its cache entry and storage kind. Raw data addresses
-  do not survive a safepoint (**D5.3**, **D8.4.1v2**).
+  do not survive a safepoint (**D6.3**, **D7.4.1**).
 - Reuse an enclosing pure region's checked method identity for its admitted
   scalar callees. Guard argument lanes, retain original snapshots on fallback,
   and keep proven numeric/Boolean returns native, including early-return joins.
   Preserve the existing precise root and scalar ownership machinery
-  (**D5.2–D5.3**, **D6.2.1**).
+  (**D6.2–D6.3**, **D7.2.1**).
 - Admit allocating numeric methods of at most 48 proof nodes to the existing
   guarded inliner inside ordinary functions. Avoid expansion inside other
   methods, which multiplied method graphs and slowed startup even on unrelated
@@ -162,7 +162,7 @@ they do not assign a percentage of elapsed time to each operation.
   the restored release executable matches the frozen candidate hash.
 
 The frozen performance binaries are not instrumented. Diagnostic helper/frame
-counts are collected separately, following **D5.4.4**.
+counts are collected separately, following **D6.4.4**.
 
 Correctness gates are complete. Performance acceptance remains open for the
 confirmed `object_delete` regression and the disclosed CD cold-start increase;

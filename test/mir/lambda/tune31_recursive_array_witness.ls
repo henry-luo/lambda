@@ -1,4 +1,4 @@
-// Tune31 T31-1 / D3.2.1-D3.3.1: the initial fill establishes an int lane;
+// Tune31 T31-1 / D4.2.1-D4.3.1: the initial fill establishes an int lane;
 // recursive var forwarding must preserve that witness and its write-back.
 
 pn recursive_fill(var values, n) {

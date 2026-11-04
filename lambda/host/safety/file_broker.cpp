@@ -219,7 +219,7 @@ static SecurityFileRoot* security_file_resolve(SecurityFileBroker* broker,
                     (candidate->leaf && strcmp(candidate->leaf, suffix) &&
                         (!candidate->canonical_leaf || strcmp(candidate->canonical_leaf, suffix)))) continue;
             size_t score = length + (candidate->leaf ? strlen(suffix) + 1 : 0);
-            // D7.5.6: a remembered overwrite/append selection at this same
+            // D11.2.2: a remembered overwrite/append selection at this same
             // root must be considered before the default project's challenge.
             SecurityOperations mutations = wanted & (SECURITY_REPLACE | SECURITY_APPEND);
             bool explicit_mutation = (candidate->spec.selected_operations & mutations) &&

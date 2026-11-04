@@ -1,4 +1,4 @@
-// D5.2.1v3, D5.3.4: live strings survive collecting direct calls and loop backedges.
+// D6.2.1, D6.3.4: live strings survive collecting direct calls and loop backedges.
 pn decorate(s: string, n: int) string { return s ++ ":" ++ n }
 pn tiny(x: float) float { return x / 2.0 }
 pn boxed(x: float) any { return x }

@@ -1,4 +1,4 @@
-// D3.4.3v5: a map grows from whatever type it has -- a literal's, a parsed
+// D3.4.3: a map grows from whatever type it has -- a literal's, a parsed
 // document's, a contract's, a nominal type's, a retyped map's, an element's --
 // through the runtime tree, which keeps the edge from that external parent in
 // its own table and never writes the parent. Each add used to copy the whole

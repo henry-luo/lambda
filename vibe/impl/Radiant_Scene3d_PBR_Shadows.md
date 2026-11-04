@@ -14,7 +14,7 @@ Before this work, Dreamhome (`test/demo/dreamhome/`) exposed the native renderer
 | Lighting | Ambient plus at most 8 directional, point or spot lights, inverse-square falloff; Lambert irradiance with no 1/π term | fragment shader, `radiant/scene3d.cpp:972`; quota at `:704` |
 | Shadows, environment | None | — |
 | Color | Linear shading written to a 4× MSAA `SRGB8_ALPHA8` target with hardware sRGB encoding; no exposure or tone mapping, so highlights clip | `native_gl_target`, `radiant/gl_core.cpp:594`; `native_gl_begin` `:623` |
-| Passes | One program, one pass into one target, then readback as the D4.5.1v4 snapshot | `scene3d_snapshot`, `radiant/scene3d.cpp:1041` |
+| Passes | One program, one pass into one target, then readback as the D5.5.1 snapshot | `scene3d_snapshot`, `radiant/scene3d.cpp:1041` |
 | GL waist | One base-color texture (unit 0) and one data texture (unit 1, skinning palette) per draw; every texture uploads as `SRGB8_ALPHA8`; no depth-only targets, compare samplers, cube maps or float color targets | `NativeGlDraw`, `radiant/gl_core.hpp`; upload at `gl_core.cpp:547` |
 | Vertices | Position, normal, UV0, color, skin, two morph targets; no tangents | `Scene3dVertex`, `radiant/scene3d.cpp:28` |
 | Invalidation | Any document mutation (including a camera attribute write) re-projects the whole scene | `reproject` in `scene3d_snapshot` |
@@ -28,12 +28,12 @@ No formal ruling changes. The design doc already notes that its follow-on decisi
 | Ruling | How it applies |
 |---|---|
 | **S12.1.1v3** | Lambda builds pure scene data; shadow maps, environment prefiltering and shading are host effects in Radiant. |
-| **D7.2.4v4** | GPU resources (shadow maps, prefiltered environments) belong to the renderer, never to module state. |
-| **D7.4.1v2** | New GL kinds (depth targets, cube maps, float textures) cross the waist only as context-branded `NativeGlResource` IDs. |
-| **D4.5.1v4 / D4.5.2** | The published image stays the generation-owned snapshot; shadow and environment caches are native-owned and hold no GC pointers. |
-| **D7.5.3** | Lambda reaches the renderer only through the DOM host boundary: new features are scene attributes and elements, not new APIs. |
-| **D7.3.5** | Every milestone names its conformance gate (§9). |
-| **D7.1.4v2** | Headless profile C keeps its null backend; scenes there report "graphics unavailable" as today. |
+| **D9.3.4** | GPU resources (shadow maps, prefiltered environments) belong to the renderer, never to module state. |
+| **D9.5.1** | New GL kinds (depth targets, cube maps, float textures) cross the waist only as context-branded `NativeGlResource` IDs. |
+| **D5.5.1 / D5.5.2** | The published image stays the generation-owned snapshot; shadow and environment caches are native-owned and hold no GC pointers. |
+| **D9.5.6** | Lambda reaches the renderer only through the DOM host boundary: new features are scene attributes and elements, not new APIs. |
+| **D9.4.5** | Every milestone names its conformance gate (§9). |
+| **D9.2.1** | Headless profile C keeps its null backend; scenes there report "graphics unavailable" as today. |
 
 Thread and coordinate policy follow RC1 and RSC1/RSC6–RSC8, as in the design doc §2.
 
@@ -118,7 +118,7 @@ As built in M6, a source key excludes camera view attributes while tracking all 
 
 These sit below both clients; the WebGL adapter keeps its own command path and is unaffected.
 
-- **Draw bindings.** `NativeGlDraw` has a fixed array of resource/kind bindings; array index selects the texture unit, at most 12. The value-only waist is unchanged (D7.4.1v2).
+- **Draw bindings.** `NativeGlDraw` has a fixed array of resource/kind bindings; array index selects the texture unit, at most 12. The value-only waist is unchanged (D9.5.1).
 - **Texture color space.** `NativeGlSampler::srgb` selects `RGBA8` for data maps or `SRGB8_ALPHA8` for color maps; the minification filter controls mipmap generation.
 - **Depth targets.** `native_gl_depth_target(context, size, cube)` (a depth texture with compare mode) and a depth-only begin for a target, or one face of it.
 - **Float cube targets.** `native_gl_cube_target(context, size, levels)` (RGBA16F), with begin-face-and-level, for environment capture and prefiltering. (M3 uses a float atlas target instead, below; the cube target stays for M5's point shadows and HDR images.)
@@ -270,7 +270,7 @@ Aggregate gates in the worktree:
 
 ### M6 — Dreamhome adoption and camera-only rendering (2026-10-27)
 
-- **Invalidation.** `scene3d_snapshot` compares a bounded source key when the document epoch changes. It includes node identities, child order, attributes and text, excluding only the cameras' view/transform attributes. Immutable compound attribute identities keep large mesh arrays out of the per-move walk; only the hash survives (D4.5.2). Camera edits and sibling UI writes retain the projection, refresh cameras through the shared dynamic-object reader, and render the main pass. An animation/physics generation change still refreshes all poses and checks the environment/shadow keys. Mixed edits, changed camera IDs, topology changes, rebuilds and context loss retain the full projection/validation path; invalid camera parameters clear the snapshot and recover after repair (D4.5.1v4).
+- **Invalidation.** `scene3d_snapshot` compares a bounded source key when the document epoch changes. It includes node identities, child order, attributes and text, excluding only the cameras' view/transform attributes. Immutable compound attribute identities keep large mesh arrays out of the per-move walk; only the hash survives (D5.5.2). Camera edits and sibling UI writes retain the projection, refresh cameras through the shared dynamic-object reader, and render the main pass. An animation/physics generation change still refreshes all poses and checks the environment/shadow keys. Mixed edits, changed camera IDs, topology changes, rebuilds and context loss retain the full projection/validation path; invalid camera parameters clear the snapshot and recover after repair (D5.5.1).
 - **Dreamhome.** `mod_scene.ls` shares standard materials by colour and finish: individual floor roughness for wood, tile, stone and carpet, rough cloth, metallic fixtures and smooth transparent glass. A procedural room environment supplies reflections, neutral tone mapping preserves highlights, and the sun uses a 2048² shadow map with normal bias. Wall geometry already cuts openings; blended glass casts no shadow, allowing sunlight through the windows (SP3). Lamps retain their existing emission and point lighting.
 - **Acceptance fixtures.** The Dreamhome model golden checks validation in day, evening, cutaway and walk modes, GLB export, standard finishes, environment selection and the sun settings. `test/ui/dreamhome/pbr_orbit.json` captures eight real pointer moves: pixels change, snapshots advance, and projection, environment, shadow and GPU-memory deltas stay zero. The room/HDR/directional/point oracle pixel fixtures now require zero camera re-projections too. A native regression checks retained allocations, camera-error recovery, mixed material edits, changed camera IDs/children and parent transforms.
 - **Measurement.** The existing release-only `measure_frames` operation now accepts `source:"scene3d"`, reporting projection/snapshot/environment/shadow deltas alongside its frame p50/p95 and GPU accounting. The orbit replay optionally measures 120 camera-write plus whole-page-render frames with sun shadows enabled; it requires 120 snapshots and zero projection, environment, shadow or GPU-memory growth. Reproduction commands are in `test/demo/dreamhome/README.md`.
@@ -282,7 +282,7 @@ Aggregate gates in the worktree:
 ### M7 — documentation (2026-10-27)
 
 - **Outcome and scope.** Synchronize the main design's element table, native shading/caching description and raw/renderable glTF profiles with `scene3d_material`, `scene3d_snapshot`, `Gltf::load_materials` and `GltfExport` in the current tree. Add the package guide's Scene3D overview, API, runnable PBR/room/shadow example, tests and export limits. Correct the raw OBJ/MTL examples' content separators and make the asset example return its viewport. Retain the existing M6 performance and aggregate evidence rather than treating documentation as a new engine qualification.
-- **Implementation record.** Mark §1's original Lambert-only table as historical; replace superseded SH/linear-point-depth plans with the implemented PMREM/perspective-depth contracts, and distinguish planned gaps from delivered features. No formal ruling changes: pure construction remains **S12.1.1v3**, package placement **D7.2.4v4**, and native retention **D4.5.1v4 / D4.5.2**.
+- **Implementation record.** Mark §1's original Lambert-only table as historical; replace superseded SH/linear-point-depth plans with the implemented PMREM/perspective-depth contracts, and distinguish planned gaps from delivered features. No formal ruling changes: pure construction remains **S12.1.1v3**, package placement **D9.3.4**, and native retention **D5.5.1 / D5.5.2**.
 - **Acceptance and budget.** Compile and run the new example through interp/auto/jit, compile the main design's Lambda fences, check local links/anchors and fence balance, compare the affected package-doc gate with its pre-edit result, and run `git diff --check`. No engine build or engine baseline is required for these documentation-only changes (`radiant/README.md`).
 
 **Verification.** The new PBR/room/shadow example constructs and normalizes
@@ -312,7 +312,7 @@ roughness plus light shadow softness, and its color reader admits emissive.
 `scene3d_material_values` reads color, opacity, PBR factors and emission for
 both projection and retained pose refresh. Shadow softness uses the existing
 animated numeric reader. No authored scene data is mutated (**S12.1.1v3**);
-retained state continues to use native ownership (**D4.5.1v4 / D4.5.2**).
+retained state continues to use native ownership (**D5.5.1 / D5.5.2**).
 
 `PbrTracksChangePixelsAndRestoreAuthoredValuesWithoutReprojection` separately
 drives all four properties, verifies changed pixels and restored image bytes,
@@ -335,7 +335,7 @@ packed PNG data URI. They read R without color decoding, write roughness to G
 and metalness to B, and leave missing channels white. The generated texture
 is explicitly linear. Matching dimensions and wrap modes are required;
 incompatible inputs raise errors. Values and URIs remain Input-owned
-(**D4.1.3**); decoder scratch is released before return.
+(**D5.1.3**); decoder scratch is released before return.
 
 All three new `SceneAssetMtl*` cases failed before the implementation. The
 full model-input suite now passes 50/50, covering factors, normal scale,

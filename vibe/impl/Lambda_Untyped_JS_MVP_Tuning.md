@@ -6,11 +6,11 @@ accepted, with a small confirmed `microdiff` regression recorded below.
 **Scope:** `julia/parse_integers`, `beng/fasta`, and `julia/formatted_output`.
 
 **Authority:** **S1.11** preserves each language's semantics; **S4.4.1** and
-**S4.5.3** govern integer arithmetic; **S7.8.1**, **D2.8.1–D2.8.3** preserve
+**S4.5.3** govern integer arithmetic; **S7.8.1**, **D2.5.1–D2.5.3** preserve
 errors outside native lanes. Representation and ownership follow
-**D2.2.2**, **D2.4.1–D2.4.3**, **D3.3.3v3**, **D5.2–D5.3**.
+**D2.2.2**, **D2.3.4–D2.3.5**, **D4.3.3**, **D6.2–D6.3**.
 Use the existing indexed compiler and exact specialization boundaries
-(**D8.2.4v2–D8.2.6v2**, **D8.3.1v2–D8.3.4v4**).
+(**D8.2.4–D8.2.6**, **D7.3.1–D7.3.4**).
 This plan changes no ruling. Sections 1-5 record the pre-implementation control
 and plan; sections 6-7 record the implementation and final measurements.
 
@@ -176,7 +176,7 @@ carriers when both arms are present and the condition cannot deliver an error.
 Use the same proof in the initializer, emission and whole-binding widening
 decision. Track every assignment, capture and borrowed write; mixed/null/error
 joins retain their full descriptors. Reuse the shared binding-use index and
-`MirValue` contract (**D8.2.4v2–D8.2.6v2**), rather than introducing another
+`MirValue` contract (**D8.2.4–D8.2.6**), rather than introducing another
 parallel type oracle.
 
 **Exit:** unchanged decimal loops retain integer locals and valid string-owner
@@ -202,13 +202,13 @@ from inference improvements so its contribution remains attributable.
 output retains every line/digest operation and all 391 synchronous writes.
 Validate aliases and snapshots, Unicode and absence, error propagation, and
 forced-GC/poison behavior. Root every live string across allocating calls
-(**D5.2–D5.3**); ownership cannot be inferred from a type alone.
+(**D6.2–D6.3**); ownership cannot be inferred from a type alone.
 
 ### P3 — Preserve guarded numeric result and presence facts
 
 Extend the existing homogeneous array producer/result summary for `fill` plus
 homogeneous stores. Retain the element witness on `cum` only while its binding
-and mutation proof remain valid (**D3.3.3v3**). A successful result can be guarded
+and mutation proof remain valid (**D4.3.3**). A successful result can be guarded
 without pretending that a possible error result is a native array.
 
 Reuse exact-array length lowering and local guarded numeric reads for the
@@ -260,11 +260,11 @@ annotate the benchmark sources.
   optional annotation. Native return proof and call-shape hints follow the same
   branch structure. The existing whole-body write scan also preserves presence
   for conditional-initialized mutable scalars; captures, unknown producers and
-  borrowed replacements retain boxed behavior (**D3.3.3v3**, **D8.3.1v2-D8.3.4v4**).
+  borrowed replacements retain boxed behavior (**D4.3.3**, **D7.3.1-D7.3.4**).
 - **P2:** proven integer `chr` operands keep the string lane; string procedure
   results and bounded local-producer hints reach the existing exact-call
   boundary. String-lane joins publish their nullable string contract even when the
-  runtime helper physically returns an Item (**D2.4.1-D2.4.3**). Fused ASCII
+  runtime helper physically returns an Item (**D2.3.4-D2.3.5**). Fused ASCII
   literal comparisons share their matcher with the condition/error oracle.
   `fn_chr` reuses the existing immutable ASCII character cache, whose storage now
   aligns both the base and every entry to the `String` ABI. Existing owned
@@ -274,7 +274,7 @@ annotate the benchmark sources.
   selects a guarded indexed comparison: rank/type/storage, scalar float kind,
   bounds and absence must all match. Every miss uses the original boxed
   comparison, including errors, nulls, other element kinds and rebindings
-  (**S7.1.1v3**, **D2.8.1-D2.8.3**, **D3.3.3v3**).
+  (**S7.1.1v3**, **D2.5.1-D2.5.3**, **D4.3.3**).
 
 Focused regressions are `test/mir/lambda/untyped_scalar_flow.*` and
 `untyped_numeric_read_flow.*`. They cover homogeneous/mixed branches, borrowed
@@ -291,12 +291,12 @@ The assignment regression also reproduced an existing control-JIT defect: a
 missing float read written after a homogeneous conditional became NaN. The
 declaration-time presence check and producer-owned Item conversion fix this
 case too: assignment boxing retains the full nullable `MirValue`, instead of
-rebuilding it from the compact TypeId (**D2.4.1-D2.4.3**). The proof, producer and
+rebuilding it from the compact TypeId (**D2.3.4-D2.3.5**). The proof, producer and
 cache storage now own those fixes. The string-join descriptor retains null, and error-capable joins remain
 boxed. Conditional result homogeneity does not prove presence: potentially
 absent scalar joins remain Items, including at inferred return boundaries.
 This preserves null in integer ordering, float arithmetic and bool logic
-(**S7.1.1v3**, **D2.4.1-D2.4.3**). The affected UI, math and music reproductions now match their goldens.
+(**S7.1.1v3**, **D2.3.4-D2.3.5**). The affected UI, math and music reproductions now match their goldens.
 Only the final private release's gates below are acceptance evidence.
 
 
@@ -362,7 +362,7 @@ The full configured MIR/MVP Test262 gate passes **40,782/40,782** with
 `673e9bacbe28590f501e2dcd817aadcc31899191`. Configured native assertion helpers
 remain enabled: 16,673 native-assert jobs and 24,109 JS-harness jobs, all on MIR
 with **0 AST jobs**, including 651 module jobs and two separate slow jobs.
-MVP is the default MIR backend (**D8.1.3v26**); `--mir-only` pins every selected
+MVP is the default MIR backend (**D8.4.3**); `--mir-only` pins every selected
 job to it. The frozen private release and runtime sources retain their recorded
 hashes; the release rebuilt by the baseline is byte-identical.
 

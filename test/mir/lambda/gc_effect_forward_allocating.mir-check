@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3.1-D5.3.2/S7.4.2v3: an allocating direct callee retains the live string and its boxed success/error join. The int^ return reuses the exact integer outcome proof, removing three admission-only root slots. The string is still saved before the allocating call and reloaded before the NO_GC length call.",
+  "description": "D6.3.1-D6.3.2/S7.4.2v3: an allocating direct callee retains the live string and its boxed success/error join. The int^ return reuses the exact integer outcome proof, removing three admission-only root slots. The string is still saved before the allocating call and reloaded before the NO_GC length call.",
   "checks": [
     {
       "in_func": "_gc_order_alloc_caller_#",

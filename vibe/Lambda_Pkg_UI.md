@@ -10,12 +10,12 @@
 
 | Subject | Formal linkage | Consequence for this proposal |
 |---|---|---|
-| Shipped package namespace, source distribution and resolution | **D7.2.1–D7.2.4, D7.2.6; S16.9.8** | Ship Lambda sources under `lmd/package/ui/`; resolve the requested import without a new namespace exception. |
+| Shipped package namespace, source distribution and resolution | **D9.3.1–D9.3.4, D9.3.5; S16.9.8** | Ship Lambda sources under `lmd/package/ui/`; resolve the requested import without a new namespace exception. |
 | Functional rendering and procedural interaction | **S12.1.1v2–S12.1.3** | Constructors and presentation remain pure; handlers perform mutation and I/O. |
 | State ownership and value semantics | **S1.4, S9.1.4, S9.1.7, S9.2.4v2, S9.3.1** | No mutable package singleton, closure-based state cell, or implicit shared mutable props. |
-| DOM behavior ownership | **D7.2.5** | Reuse the shipped DOM behavior package for controls and editing; component code must not recreate browser default actions. |
-| Runtime and presentation lifetimes | **D4.5.1v4, D4.5.2, D5.3.3** | Copy or precisely root retained values; validate native handles and document ownership. |
-| Execution tier independence | **D8.1.1v17** | The same component and interaction contract must work on T0 and MIR Direct. |
+| DOM behavior ownership | **D10.2.1** | Reuse the shipped DOM behavior package for controls and editing; component code must not recreate browser default actions. |
+| Runtime and presentation lifetimes | **D5.5.1, D5.5.2, D6.3.3** | Copy or precisely root retained values; validate native handles and document ownership. |
+| Execution tier independence | **D8.3.6** | The same component and interaction contract must work on T0 and MIR Direct. |
 
 Where the formal specifications do not settle a contract, this document names the existing working record and leaves the proposed extension explicitly open for consultation (§11). Approval of a component roadmap alone does not resolve those questions.
 
@@ -65,7 +65,7 @@ Count component coverage separately from feature coverage. A named component tha
 
 Component policy belongs in Lambda. Do not add native `dtna` tags, a native AntD widget hierarchy, a parallel renderer, or component-specific branches to the CSS/layout engine. Ordinary HTML and SVG presentation should exercise the same pipeline used by other Lambda documents. A reusable engine mechanism such as reliable pointer capture or overlay positioning can be added when required, with its own contract and regression fixtures.
 
-The public entry point maps directly to `lmd/package/ui/dtna.ls` under **D7.2.4/D7.2.6**. Internal component modules live in `lmd/package/ui/dtna/`. There is no new built-in module named `lambda.ui.dtna`, and no import-resolver special case is needed.
+The public entry point maps directly to `lmd/package/ui/dtna.ls` under **D9.3.4/D9.3.5**. Internal component modules live in `lmd/package/ui/dtna/`. There is no new built-in module named `lambda.ui.dtna`, and no import-resolver special case is needed.
 
 ### 3.2 Component data and presentation
 
@@ -77,7 +77,7 @@ The package import must register its author templates in the active runtime and 
 
 ### 3.3 Configuration and future theme boundaries
 
-Proposed ConfigProvider and App equivalents establish an explicit application root containing immutable configuration and document-owned services. Configuration includes tokens, locale, direction, default size, disabled defaults, motion preference, and overlay ownership. Nested providers override supplied values and inherit the remainder. Public component behavior must not depend on a process-global theme or mutable module binding (**D7.2.1; S9.1.7**).
+Proposed ConfigProvider and App equivalents establish an explicit application root containing immutable configuration and document-owned services. Configuration includes tokens, locale, direction, default size, disabled defaults, motion preference, and overlay ownership. Nested providers override supplied values and inherit the remainder. Public component behavior must not depend on a process-global theme or mutable module binding (**D9.3.1; S9.1.7**).
 
 CSS inheritance and scoped theme selectors can carry visual tokens. Nonvisual configuration must travel through explicit component data/render context or a separately reviewed runtime facility. **No general ambient context API is assumed to exist.** M0 compares these options and settles provider propagation without breaking source identity. Detached overlays must resolve the originating provider's configuration rather than accidentally using the outermost root.
 
@@ -86,7 +86,7 @@ Future style families should share state machines, action contracts, focus rules
 ### 3.4 Initial sibling family: bold
 
 The user selected **`bold`** as the theme and package name on 2026-10-10.
-`lambda.ui.bold` ships at `lmd/package/ui/bold.ls` under **D7.2.4** and presents
+`lambda.ui.bold` ships at `lmd/package/ui/bold.ls` under **D9.3.4** and presents
 logical `<bold.button>` and other qualified elements through ordinary imported
 views (**S2.4.3v3**, **S12.1.3**). Its initial neobrutalist styling references
 [Neobrutalism](https://neobrutalism.com/), with independent `bold-` selectors
@@ -97,7 +97,7 @@ dtna Phase 1 catalog or claiming reference-wide correspondence.
 markup, typed change requests and application-controlled synchronization.
 Both families use the same native radio-group ownership marker, allowing
 controlled peers of either family to settle after a request. Native editing,
-activation and exclusivity remain DOM package responsibilities (**D7.2.5**).
+activation and exclusivity remain DOM package responsibilities (**D10.2.1**).
 The shared component helpers also supply namespace-aware attributes, property
 diagnostics, color validation and semantic headings. Bold supplies its own
 contracts, tokens, layout/surface recipes and presentation views. See the
@@ -122,7 +122,7 @@ contracts, tokens, layout/surface recipes and presentation views. See the
 
 `null`, `false`, an empty string, and an omitted prop have different meanings under Lambda's value semantics. Controlledness requires a property-presence check, not a truthiness test. For collections, stable item keys are mandatory wherever selection, editing, expansion, or drag ordering persists across updates. Duplicate keys are an error, not a reason to fall back to array indices.
 
-A proposed application composition looks like this. These examples include unimplemented services and remain deliberately marked `no-run`; they must become executable fixtures before the corresponding milestone closes. The current shipped subset and runnable examples are documented in [Lambda_UI.md](../doc/Lambda_UI.md) (**D7.2.4**).
+A proposed application composition looks like this. These examples include unimplemented services and remain deliberately marked `no-run`; they must become executable fixtures before the corresponding milestone closes. The current shipped subset and runnable examples are documented in [Lambda_UI.md](../doc/Lambda_UI.md) (**D9.3.4**).
 
 ```lambda no-run
 import ui: lambda.ui.dtna
@@ -206,7 +206,7 @@ M0 must decide and test how a logical component retains state through parent reg
 
 Build Input, TextArea, Password, Search, OTP, InputNumber, and editable cells on the shared text-control model and DOM behavior package. Preserve caret, selection, composition, clipboard, undo/redo, readonly/disabled behavior, and committed-change ordering. Test Unicode with explicit offset units: UTF-8 bytes, Lambda code points, and DOM UTF-16 indices are not interchangeable.
 
-Avoid handwritten append/delete input logic that bypasses the established editor. Keyboard activation, form submission, reset, checkbox/radio defaults, and label activation must follow the existing DOM route (**D7.2.5; ES22–ES29**). An author cancellation must suppress the appropriate default exactly once.
+Avoid handwritten append/delete input logic that bypasses the established editor. Keyboard activation, form submission, reset, checkbox/radio defaults, and label activation must follow the existing DOM route (**D10.2.1; ES22–ES29**). An author cancellation must suppress the appropriate default exactly once.
 
 ### 6.3 Shared overlay and focus contract
 
@@ -226,7 +226,7 @@ Form validation, remote search, tree loading, upload, modal confirmation, and in
 
 Application services are owned by a mounted root. Their procedural APIs perform work from handlers or `pn` entry points; a constructor cannot perform I/O. An ordinary reducer may return descriptive data, but that is not a new reified-effect language facility (**S12.1.1v2**). Delivering background results to an arbitrary template and author lifecycle cleanup are not fully settled in the reactive UI record §§7.7/8/18; resolve the necessary contract before presenting async components as complete.
 
-Retained native values follow **D4.5.2**: copy to the document owner or keep them under a registered precise root. Native handles must be generation checked. Do not restore conservative native-stack scanning to keep component callbacks alive.
+Retained native values follow **D5.5.2**: copy to the document owner or keep them under a registered precise root. Native handles must be generation checked. Do not restore conservative native-stack scanning to keep component callbacks alive.
 
 ### 6.5 Accessibility and localization
 
@@ -448,13 +448,13 @@ When a decision changes an existing semantics/design ruling, update both formal 
 **Status: proposed; awaiting consultation, not a ratified runtime contract.**
 The following makes the choices in §11 concrete. Existing pure rendering and
 procedural interaction remain governed by **S12.1.1v2–S12.1.3**; retained values
-and handles remain subject to **D4.5.2/D5.3.3**. No formal ruling currently
+and handles remain subject to **D5.5.2/D6.3.3**. No formal ruling currently
 settles reactive presentation identity or lifecycle ordering. The source-keyed
 retention rule in the reactive UI design §5.2 remains authoritative until a
 reviewed extension replaces it.
 
 1. **Construction and identity.** Keep the shipped pure constructor + `apply`
-   facade (**D7.2.4**). Add an optional general presentation key, supplied
+   facade (**D9.3.4**). Add an optional general presentation key, supplied
    explicitly through `apply` options; dtna forwards its `key` prop. A keyed
    instance is identified by owning presentation instance, explicit sibling
    scope, key, and template identity. Keys are strings, symbols, or integers;
@@ -490,7 +490,7 @@ reviewed extension replaces it.
    restored to a live trigger, then a surviving owner, then the application
    root. Trigger removal closes its overlays. Implement a general DOM/layout
    attachment mechanism only if ordinary positioned DOM fails the clipping
-   prototype; no dtna branches enter the engine (**D7.2.5**).
+   prototype; no dtna branches enter the engine (**D10.2.1**).
 5. **Async delivery.** Work carries document, application root, presentation
    owner and generation. Delivery runs procedurally on the document UI thread;
    a stale generation or dead owner rejects the result before state mutation.
@@ -629,7 +629,7 @@ Require viewport-bounded mounted nodes for virtual collections and no cumulative
 
 ## Appendix D. Validation commands and reporting
 
-The component paths and `dtna` suite below are now registered. Exact executed commands, results and remaining failures are recorded in [the implementation record](impl/Lambda_Impl_UI_Dtna.md); their availability does not establish a passing Phase 1 gate (**D8.1.1v17**).
+The component paths and `dtna` suite below are now registered. Exact executed commands, results and remaining failures are recorded in [the implementation record](impl/Lambda_Impl_UI_Dtna.md); their availability does not establish a passing Phase 1 gate (**D8.3.6**).
 
 ```bash
 # build/discovery checks after adding package/tests

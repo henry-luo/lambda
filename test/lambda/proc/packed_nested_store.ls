@@ -1,7 +1,7 @@
 // T29-5: a comprehension of equal numeric rows is one packed N-D array. A
 // nested index store writes its leaf at the full coordinate instead of
 // building a row view per store; the value semantics are unchanged
-// (S9.1.2, S9.2.2, D3.3.3v3).
+// (S9.1.2, S9.2.2, D4.3.3).
 pn fill_grid(var m: (int*)*, n: int) any {
     var y: int = n - 1
     while (y >= 0) {

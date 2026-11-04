@@ -52,7 +52,7 @@ ordinary picture fixture. No reference is repacked to produce a pass.
 The corpus includes both Microsoft Word and LibreOffice producer metadata;
 the manifest records the exact producer for each file. Mammoth's embedded
 style-map extension is metadata for that converter: Lambda retains the source
-paragraph and uses its own explicit `style_map` option (D7.2.4, S1.8).
+paragraph and uses its own explicit `style_map` option (D9.3.4, S1.8).
 Output assertions are semantic; Word page appearance remains outside the
 package profile. The three `docx_reference*.ls` goldens cover every reference.
 
@@ -80,7 +80,7 @@ its two cropped photographs and decorative theme-colored rectangle now retain
 their signed column/paragraph offsets and behind-text order. Only its 12
 header/footer-story warnings remain. The supported DrawingML rectangle is
 selected instead of its legacy VML fallback. This is the converter's flow
-representation (D7.2.4), without Word's 21-page pagination. Native and Chromium
+representation (D9.3.4), without Word's 21-page pagination. Native and Chromium
 previews were inspected at 1100 × 2200.
 
 `cached-fields.docx` exercises nested TOC/page-reference fields spanning
@@ -109,7 +109,7 @@ raster drawings and cached chart remain visible. The SmartArt layout now renders
 from its composite/linear/text instructions, constraints and theme styles; the
 embedded video's saved EMF icon and `Wildlife.wmv` label render as SVG with a
 BMP alpha image. This file imports in strict unsupported mode with zero
-diagnostics (D7.2.4v4, S1.8). Unimplemented SmartArt algorithms and EMF records
+diagnostics (D9.3.4, S1.8). Unimplemented SmartArt algorithms and EMF records
 still produce diagnostics and retain the established text/object fallback.
 
 `drawing-edge-fallback.docx` covers a 2px column offset with 6px wrapping
@@ -129,7 +129,7 @@ now wraps with its source offset/clearance. Empty footer metadata no longer
 warns. Its eight page-relative drawings still use flow presentation and retain
 placement diagnostics: the flowing converter does not implement Word page
 assignment or page-relative coordinates. These are actual remaining limits,
-separate from the eight avoidable warnings fixed here (D7.2.4v4).
+separate from the eight avoidable warnings fixed here (D9.3.4).
 
 `diagram-composite.docx` independently varies template names, proportions,
 right-to-left child placement, connection ordering and shade colors.

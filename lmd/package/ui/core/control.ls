@@ -1,4 +1,4 @@
-// native control ownership is shared across style families (D7.2.5; S8.2.2v5).
+// native control ownership is shared across style families (D10.2.1; S8.2.2v5).
 import dom
 import tree: lambda.dom.tree
 import c: lambda.ui.core.component

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S7.7.2v2/S7.6.3v3/D2.8.3: sole immediate propagation may fuse each float[] read's admission. Pin both native null guards before their exact values reach arithmetic, retain both cold diagnostics, and test negative, left-OOB and right-OOB outcomes at runtime.",
+  "description": "S7.7.2v2/S7.6.3v3/D2.5.3: sole immediate propagation may fuse each float[] read's admission. Pin both native null guards before their exact values reach arithmetic, retain both cold diagnostics, and test negative, left-OOB and right-OOB outcomes at runtime.",
   "checks": [
     {
       "in_func": "_read_sum_#",

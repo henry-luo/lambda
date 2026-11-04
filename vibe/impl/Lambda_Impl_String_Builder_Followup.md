@@ -6,9 +6,9 @@
   whole-renderer destinations and scalar records. Baselines and
   the focused release comparison are complete; small residual slowdowns are recorded below.
 - Authority: S1.4/S1.6 (observable mutation and representation), S9.1.1–S9.1.2
-  (finality and snapshots), D2.4.2–D2.4.3 (value descriptors and representation
-  conversion), D5.3.3–D5.3.4 (precise roots), D8.2.6 (expression demand),
-  D8.3.1–D8.3.3 (function entries and source-relative correctness).
+  (finality and snapshots), D2.3.4–D2.3.5 (value descriptors and representation
+  conversion), D6.3.3–D6.3.4 (precise roots), D8.2.6 (expression demand),
+  D7.3.1–D7.3.3 (function entries and source-relative correctness).
 
 ## Existing implementation at the pre-extension audit
 
@@ -30,7 +30,7 @@ interpreter during this audit (8 executions). Interpreter parity checks output,
 not whether the interpreter implements the MIR builder optimization.
 
 `lib/strbuf.*` and `lib/stringbuf.*` also exist. They serve native construction
-and formatting; they do not automatically optimize Lambda `++`. D4.1.5's
+and formatting; they do not automatically optimize Lambda `++`. D5.1.5's
 standalone/owner-backed allocator distinction must not be confused with this
 GC-managed String buffer. Reuse the latter for generated Lambda values.
 
@@ -98,7 +98,7 @@ not publish a module string-element carrier, and conversion elision tests the
 carrier oracle rather than the emitted value's available string proof.
 
 This is a gap in proof consumption; changing the carrier oracle to claim that
-boxed values are raw strings would be incorrect (D2.4.2–D2.4.3). Nor may an
+boxed values are raw strings would be incorrect (D2.3.4–D2.3.5). Nor may an
 unchecked type annotation erase out-of-bounds/null conversion behavior.
 
 Even successful ownership reuse still makes one helper call, capacity test,
@@ -152,7 +152,7 @@ slice/parser representation work is a separate proposal and measurement.
    function parameter semantics. Next investigate destination passing across
    a closed recursive renderer call graph, avoiding materialized child strings
    and eventually transient RenderResult objects. The latter depends on record
-   escape analysis; it is a separate, larger stage. Keep D8.3.1's single unboxed
+   escape analysis; it is a separate, larger stage. Keep D7.3.1's single unboxed
    version constraint; multiple public/native specializations require a ruling
    revision and are not assumed here.
 
@@ -203,7 +203,7 @@ changes are needed.
 the binary and variadic helpers. The binary API instantiates the utility with
 its fixed count of two, allowing the release compiler to remove the dynamic
 loop and wrapper without duplicating source code. Every source survives allocation through precise
-`RootSpan` homes (D5.3.3–D5.3.4), with the slot base acquired once per allocation.
+`RootSpan` homes (D6.3.3–D6.3.4), with the slot base acquired once per allocation.
 The shared piece-copy utility uses a byte store when the stored length is one,
 including a NUL byte; multi-byte fragments retain the general copy.
 Pointer-equal self-appends allocate a new
@@ -214,7 +214,7 @@ allocations and actual capacity growth; `string_copied_bytes` includes prefix
 and suffix bytes copied by these helpers.
 
 The compiler consumes field/array contracts separately from their physical
-carriers (D2.4.2–D2.4.3). Proven or tag-admitted strings decode with a pointer
+carriers (D2.3.4–D2.3.5). Proven or tag-admitted strings decode with a pointer
 mask, without repeating the text helper's general tag checks. Forward call return proofs now use the resolved function
 binding (D8.2.4), rather than a stale identifier function type. Tail lowering
 also needed three correctness repairs exposed by the renderer and new fixtures:
@@ -230,7 +230,7 @@ also needed three correctness repairs exposed by the renderer and new fixtures:
   admission; this change does not expand other TCO admission protocols.
 
 These changes stay within MIR Direct and the existing entry plan
-(D8.2.6, D8.3.1–D8.3.3).
+(D8.2.6, D7.3.1–D7.3.3).
 
 ### Validation
 
@@ -261,10 +261,10 @@ Whole-renderer destination passing required escape/effect analysis and
 an internal result protocol preserving errors, snapshots and column updates.
 Record scalar replacement was a separate step. [Tune24](Lambda_Impl_Tune24.md)
 now implements both for eligible typed graphs and adds scalar-observer borrow
-summaries under D5.3.4 and D8.3.1–D8.3.3. SIMD append specialization and cached
+summaries under D6.3.4 and D7.3.1–D7.3.3. SIMD append specialization and cached
 Unicode character counts remain open. Repeated `len` on a growing non-ASCII string
 can still rescan its contents even though builder copying itself is linear.
-The existing public typed entry remains unchanged (D8.3.1); this does not
+The existing public typed entry remains unchanged (D7.3.1); this does not
 establish that C-equivalent allocation behavior requires a language change.
 
 ## Final release comparison

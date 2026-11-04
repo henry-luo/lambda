@@ -1,4 +1,4 @@
-// reuse Finder's filesystem snapshots and path rules (S12.4.1v3 / D7.2.5).
+// reuse Finder's filesystem snapshots and path rules (S12.4.1v3 / D10.2.1).
 import browser: ~~.finder.mod_model
 import filesystem: ~~.finder.mod_io
 import attachments: lambda.chat.attachment

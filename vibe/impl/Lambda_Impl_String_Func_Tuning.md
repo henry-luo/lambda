@@ -244,7 +244,7 @@ Node's `JSON.stringify` takes 180 ms on the same workload, so the LambdaJS gap t
   - The table is built once by running the list classifier over every markup record, so an id answers exactly what its spelling would.
   - The builder, `MarkupNameClassTable` in `lambda/core/markup_name_classes.hpp`, is shared with P4's void and raw-text table in `html-defs.cpp`.
 - **Where the ids come from.**
-  - Open elements carry `TypeElmt::name_id`: MarkBuilder takes it from the name pool, which resolves every well-known spelling to its catalog record. D4.6.1v3 says generated names retain catalog IDs.
+  - Open elements carry `TypeElmt::name_id`: MarkBuilder takes it from the name pool, which resolves every well-known spelling to its catalog record. D5.6.1 says generated names retain catalog IDs.
   - Tokens cache theirs on first use (`html5_token_tag_id`, one catalog lookup per tag token). `html5_token_set_tag_name` clears the cache.
 - **Equality.** `html5_same_tag` compares ids only when both are markup ids, and spellings otherwise. An element whose type lost its id, as in a MarkEditor copy, still compares by bytes.
 - **Call sites.**

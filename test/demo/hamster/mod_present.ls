@@ -1,4 +1,4 @@
-// D4.5.1v4 / S12.1.3: geometry stays mounted while simulation updates poses and care meters.
+// D5.5.1 / S12.1.3: geometry stays mounted while simulation updates poses and care meters.
 import dom
 import scene_dom: lambda.scene3d.dom
 import cage: .mod_cage

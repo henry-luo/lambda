@@ -18,10 +18,10 @@ JS WebGL adapter and Three.js planned for Phase II, as described in
 [Radiant WebGL Design](Radiant_Design_WebGL.md); they reuse canvas
 ownership and painting while keeping graphics-context state separate.
 
-**Formal linkage:** **D7.4.1v2** requires native resources to cross the script
-boundary as VMap projections rather than raw pointers; **D7.4.4** requires
-declared interfaces and record-owned hooks for every host object; **D7.4.2**
-owns async completion delivery; and **D7.5.3** fixes the Lambda↔Radiant
+**Formal linkage:** **D9.5.1** requires native resources to cross the script
+boundary as VMap projections rather than raw pointers; **D9.5.4** requires
+declared interfaces and record-owned hooks for every host object; **D9.5.2**
+owns async completion delivery; and **D9.5.6** fixes the Lambda↔Radiant
 boundary. The per-page ordering assumption is Radiant's existing **RC1**:
 script, style, layout, and display-list construction share one page thread.
 
@@ -84,7 +84,7 @@ advertised subset or absent from the published surface.
 
 ```
 Canvas JS API
-    │ declared native interfaces (D7.4.1v2, D7.4.4)
+    │ declared native interfaces (D9.5.1, D9.5.4)
     ▼
 CanvasRegistry ─── CanvasEntry ─── CanvasState + current path
     │                     │
@@ -127,9 +127,9 @@ ownership are excluded.
 interfaces with native state resolved only through the bridge. Future
 `OffscreenCanvas`, `CanvasGradient`, `CanvasPattern`, `Path2D`, `ImageData`,
 and `ImageBitmap` use opaque resource IDs. Native pointers never become values
-observable to script, as required by **D7.4.1v2**. Member lookup, property
+observable to script, as required by **D9.5.1**. Member lookup, property
 writes, and finalization use the one record-owned host-object protocol of
-**D7.4.4**.
+**D9.5.4**.
 
 A context resolves its owning HTML canvas to the registry entry instead of
 copying bitmap or state. Repeated `getContext("2d")` returns the same context
@@ -158,7 +158,7 @@ The current subset applies each completed draw synchronously inside
 short-lived Radiant `RdtVector` targeting only that surface; it does not draw
 to the page `RenderContext`, enter layout, or expose renderer pointers through
 the DOM binding. This follows the existing local SVG-rasterization containment
-pattern while preserving **D7.5.3**'s explicit bridge boundary.
+pattern while preserving **D9.5.6**'s explicit bridge boundary.
 
 Every completed draw bumps the surface generation and publishes a
 paint-only DOM mutation. `width`/`height`, including `setAttribute` and
@@ -285,7 +285,7 @@ repeated conversion.
 
 Future `toBlob` and `OffscreenCanvas.convertToBlob` deliver their result
 through the existing event-loop completion path, not a module-owned loop pump,
-per **D7.4.2**. The intended first export slice supports PNG only and performs
+per **D9.5.2**. The intended first export slice supports PNG only and performs
 no filesystem I/O.
 
 ## 9. Alternatives rejected
@@ -353,13 +353,13 @@ single rendering authority in Radiant.
 
 ## Appendix B — ratification and follow-up
 
-The implemented C0/C1a application of **D7.5.3** does not revise a formal
+The implemented C0/C1a application of **D9.5.6** does not revise a formal
 ruling. Expanding the formal Lambda↔Radiant contract still requires the
 following before the later milestones are accepted:
 
 1. recording the C0/C1a bounded support contract in
    `Radiant_Design_DOM_API.md`;
-2. recording any expanded Lambda↔Radiant Canvas placement against **D7.5.3**;
+2. recording any expanded Lambda↔Radiant Canvas placement against **D9.5.6**;
    if that expands the ruling rather than merely applying it, revise the formal
    ruling in place and bump the formal-design document version; and
 3. moving the remaining C1b–C4 implementation sequence and progress evidence

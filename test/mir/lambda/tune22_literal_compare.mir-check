@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T22-1b/c: short literal-RHS string equality emits a direct context-owned constant load and byte comparison, without either generic equality helper or a module-constant helper (S5.1.1/2, D5.4.3).",
+  "description": "T22-1b/c: short literal-RHS string equality emits a direct context-owned constant load and byte comparison, without either generic equality helper or a module-constant helper (S5.1.1/2, D6.4.3).",
   "checks": [
     {
       "in_func": "_literal_match_tune22_#",

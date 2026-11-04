@@ -346,8 +346,8 @@ Write data to a file.
 
 **Format Auto-Detection** (when `format` is omitted):
 
-Mark filename selection follows D2.9.1: only `.mark` is canonical.
-Explicit `mark` input accepts arbitrary filenames under D2.9.2.
+Mark filename selection follows D10.1.1: only `.mark` is canonical.
+Explicit `mark` input accepts arbitrary filenames under D10.1.2.
 
 - `.json` → JSON format
 - `.yaml`, `.yml` → YAML format

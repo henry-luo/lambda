@@ -3,7 +3,7 @@
 **Status:** implemented; targeted semantic/GC, benchmark and baseline checks pass,
 2026-10-08. See the §20 follow-up below for current validation status.
 Scope: [JS_MVP_Lmd §§18–20](../jube/JS_MVP_Lmd.md#18-ordinary-arrays-and-core-string-methods).
-Authority: **S1.11**, **D2.6.1v3**, **D3.4.3v5**, **D5.3.1–D5.3.4**.
+Authority: **S1.11**, **D3.2.1**, **D3.4.3**, **D6.3.1–D6.3.4**.
 
 ## Implementation and shared reuse
 
@@ -86,7 +86,7 @@ compiler utilities were disclosed before coding:
 `visit_destructured_assignments` reuses assignment transfer for
 kind/range analysis without changing the AST; `string_concat` groups primitive
 string additions into existing fixed-arity Lambda concatenation calls. Neither
-adds runtime-owned state or a new runtime helper (**D8.2.6**, **D5.3.4**).
+adds runtime-owned state or a new runtime helper (**D8.2.6**, **D6.3.4**).
 
 - Literal destructuring retains per-element kinds, numeric lanes and lengths.
   Discarded function-body swaps snapshot all RHS operands before ordered writes;
@@ -172,7 +172,7 @@ feature matrix from MVP §15 remains separate outstanding work.
 Implementation, targeted semantic/GC checks, paired benchmarks and both
 baseline gates pass, 2026-10-08. Two small performance regressions are retained
 and quantified below.
-Authority: **S1.11**, **D2.4.3**, **D5.3.4**, **D8.2.6**. Changes stay in
+Authority: **S1.11**, **D2.3.5**, **D6.3.4**, **D8.2.6**. Changes stay in
 `mvp_lmd_mir.cpp`; no shared runtime or full-JS execution code changes.
 
 ### Implementation and disclosed helpers
@@ -269,7 +269,7 @@ python3 temp/mvp_four_tuning_20261008/runner.py \
 
 Implementation, paired benchmarks, **44/44 normal and forced-GC MVP tests**,
 and both baseline gates pass, 2026-10-08.
-Authority: **S1.11**, **D2.2.5**, **D2.4.3**, **D5.3.4**, **D8.2.6**.
+Authority: **S1.11**, **D2.2.5**, **D2.3.5**, **D6.3.4**, **D8.2.6**.
 
 Four compiler utilities were disclosed before coding; no runtime helper is
 added. `linear_index` shares recognition of exact literal-offset loop indices.

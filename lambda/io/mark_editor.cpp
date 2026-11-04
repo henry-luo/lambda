@@ -654,7 +654,7 @@ Item MarkEditor::map_update(Item map, String* key, Item value) {
 // ============================================================================
 // ATTRIBUTE OPERATIONS — one path for every attribute-bearing container
 // ============================================================================
-// D2.6.6v2: `Element` extends `Map`, so a map and an element carry their
+// D3.1.1: `Element` extends `Map`, so a map and an element carry their
 // attribute face — shape pointer, packed buffer, capacity — at the same
 // offsets. These helpers therefore take the shared `Map` base and work for
 // both; elements upcast at the call site. Only three things stay kind-aware,
@@ -697,7 +697,7 @@ Map* MarkEditor::container_clone_header(const Map* container) {
 }
 
 // The field list a rebuild lays out, as tree steps: a field the old type has
-// keeps that field's identity (D3.4.4v2); a new one joins under a pooled key,
+// keeps that field's identity (D3.4.4); a new one joins under a pooled key,
 // as ElementBuilder::attr pools its keys.
 static TypeTreeStep* rebuild_steps(MarkBuilder* builder_,
         TypeMap* old_type, ShapeBuilder* builder) {
@@ -782,7 +782,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
         return ItemError;
     }
 
-    // D3.4.3v3: the rebuilt type comes from the Input's transition tree when
+    // D3.4.3: the rebuilt type comes from the Input's transition tree when
     // the container may use it, so an edited container joins the type its new
     // field sequence already has, allocating nothing on a hit. A declined tree
     // leaves a private type with a chain of its own.
@@ -818,7 +818,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
 
     // Carry across every field the new shape shares with the old one at the
     // same type; anything added or retyped stays zero for the caller to fill.
-    // a tree type's chain may run on past new_last (D3.4.3v3)
+    // a tree type's chain may run on past new_last (D3.4.3)
     for (ShapeEntry* entry = new_shape; entry;
             entry = shape_chain_next_until(entry, new_last)) {
         TypeId old_type_id;
@@ -1283,7 +1283,7 @@ bool MarkEditor::owns_ui_node_storage(const void* storage) const {
 Item MarkEditor::import_child(Item child, bool preserve_ui_nodes) {
     // keep a live UI node by identity only when its storage is one this editor
     // vouches for; reading a node header in front of a GC object would read
-    // garbage and could leave a GC pointer in the document (D4.5.2)
+    // garbage and could leave a GC pointer in the document (D5.5.2)
     const void* storage = mark_editor_ui_node_storage(child);
     bool registered = ui_document_ && dom_node_registry_owns(ui_document_, (DomNode*)storage);
     // adoption retains the source document; copying its registered node would duplicate DOM identity.
@@ -1291,7 +1291,7 @@ Item MarkEditor::import_child(Item child, bool preserve_ui_nodes) {
         (registered || owns_ui_node_storage(storage)) &&
         mark_editor_is_ui_dom_node(child)) return child;
     // retained template children may be projection handles; preserve live UI identity
-    // before recursively inspecting their backing as a plain Mark subtree (D4.5.2).
+    // before recursively inspecting their backing as a plain Mark subtree (D5.5.2).
     if (builder_->is_in_arena(child)) return child;
     return builder_->deep_copy(child);
 }

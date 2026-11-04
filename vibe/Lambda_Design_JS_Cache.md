@@ -27,7 +27,7 @@ entry function normally.
 
 This is deliberately an **in-process Level-1 cache only**. JavaScript code may
 reference process-local runtime addresses, while **D1.8** prohibits a
-context-dependent value at a code-baked address and **D8.4.1v2** keeps the
+context-dependent value at a code-baked address and **D7.4.1** keeps the
 generated code immutable. Cross-process or disk-backed JS code caching remains
 out of scope until the relocation/verifier prerequisites of **D8.5.2–D8.5.3**
 are complete.
@@ -68,7 +68,7 @@ Repeated external classic scripts now use the batch-owned in-process cache.
 This is a local derived cache under **D1.7**: its key includes exact source
 bytes, execution mode, resolved diagnostic filename, and the current preamble
 declaration/property ABI. Generated code remains immutable and contains no
-context-dependent baked address under **D1.8** and **D8.4.1v2**.
+context-dependent baked address under **D1.8** and **D7.4.1**.
 
 On a hit, Radiant creates a fresh document-local module slab, copies the
 current declaration prefix, links the retained property-name image, executes
@@ -400,7 +400,7 @@ lists.
 
 ### 7.3 Immutable code and runtime state
 
-**D8.4.1v2** now prohibits LambdaJS inline caches and requires immutable
+**D7.4.1** now prohibits LambdaJS inline caches and requires immutable
 generated code. **D1.8** separately prohibits context-dependent values at
 code-baked addresses. Mutable objects, prototypes, regex state, templates,
 module values, and host bindings therefore belong to the execution realm and
@@ -920,7 +920,7 @@ rather than treating the aggregate upper bounds as promised savings.
 - **OQ1 (resolved for in-process external classics):** D1.8 prohibits
   context-dependent baked addresses; retained source and compiler pools own
   process-stable compile metadata.
-- **OQ2 (resolved):** D8.4.1v2 prohibits LambdaJS inline caches and requires
+- **OQ2 (resolved):** D7.4.1 prohibits LambdaJS inline caches and requires
   immutable generated code, so there is no per-site mutable IC/shape cell to
   share across realms.
 - **OQ3 (resolved for fixed lifecycle units):** Form-suite and focused batch

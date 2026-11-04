@@ -159,7 +159,7 @@ static bool prepare_runtime(void) {
     log_init("");
     memtrack_init(MEMTRACK_MODE_OFF);
     runtime_init(&g_runtime);
-    // The retained evaluator owns every controller's rooted session (D5.3.3/D5.4.1).
+    // The retained evaluator owns every controller's rooted session (D6.3.3/D6.4.1).
     Input* bootstrap = run_script_mir(&g_runtime, "0", (char*)"<macos-ime>", false);
     if (!bootstrap || item_is_error(bootstrap->root)) return false;
     g_engines_registered = heap_try_register_gc_root_range(g_engine_roots, 2) &&

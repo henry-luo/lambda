@@ -556,7 +556,7 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     dom_node_resolve_style(child, lycon);
     if (elem->blk && grid_item_prop(elem_block)) {
         // cached computed CSS survives role initialization; project it into
-        // the grid item's per-pass alignment adapter (D4.5.1v4).
+        // the grid item's per-pass alignment adapter (D5.5.1).
         GridItemProp* gi = grid_item_prop(elem_block);
         gi->justify_self = elem->block()->justify_self.value;
         gi->align_self_grid = elem->block()->align_self.value;

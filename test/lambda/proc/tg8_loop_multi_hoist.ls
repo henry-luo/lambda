@@ -1,4 +1,4 @@
-// D8.3.4/DF16: a dynamic loop call selects each bounded raw key once at entry,
+// D7.3.4/DF16: a dynamic loop call selects each bounded raw key once at entry,
 // then uses its raw loop sibling; a non-key still uses the `_b` sibling.
 fn choose_type(value: any as T) int => 1;
 let int_seed = choose_type(0);

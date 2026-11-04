@@ -5,8 +5,8 @@
 Unit, forced-GC and baseline suites were not rerun for the latest follow-up.
 
 Scope: [MVP §17](../jube/JS_MVP_Lmd.md#17-slow-kernel-tuning).
-Authorities: **S1.11**, **D2.2.5**, **D2.4.3**, **D3.4.3v5**,
-**D5.2.1v3**, **D5.3.4**, **D8.2.6**. No formal ruling changes.
+Authorities: **S1.11**, **D2.2.5**, **D2.3.5**, **D3.4.3**,
+**D6.2.1**, **D6.3.4**, **D8.2.6**. No formal ruling changes.
 
 ## Current changes and reuse
 

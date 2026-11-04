@@ -1,4 +1,4 @@
-// S8.2.2v4 / D3.4.4v4: a symbol key and a string key with the same characters
+// S8.2.2v4 / D3.4.4: a symbol key and a string key with the same characters
 // are one key, and a map grown by symbol keys -- a subscript write or a spread
 // -- shares the runtime tree's edges with string-key growth instead of copying
 // its whole shape on every add (LR03-38's residue for spreads).

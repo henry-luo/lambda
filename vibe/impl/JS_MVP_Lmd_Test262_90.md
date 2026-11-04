@@ -47,14 +47,14 @@ root-cause triage determines the implementation order within each package.
 
 | Concern | Contract |
 |---|---|
-| Reuse | **D1.3v3**: reuse applicable untyped Lambda/lib substrate; preserve guest semantics and existing Lambda/full-LJS defaults |
-| Representations | **D2.6.6v3**, **D2.6.9v3**, **D2.7.1**: retain shared container/nominal contracts and scalar ownership; no ordinary-object VMap conversion |
-| Keys and shapes | **D3.4.3v5**, **S8.2.2v6**, **D4.6.1v4**: shared shapes and canonical UTF-8/lossless WTF-8 key identity |
-| Class ancestry and captures | **S2.1.3v2**, **D6.2.3v2**: preserve Lambda ancestry and immutable Lambda captures; JS captures share mutable cells |
-| Dynamic source | **D8.1.3v24**: eval, Function-family constructors and applicable `$262.evalScript` use the existing retained AST interpreter, including subsequent dynamic-body calls |
-| Lifetime and completion | **D1.4v4**, **D5.2–D5.3**, **D8.4.3v2**: precise owners/roots and explicit completion through every frame |
-| Suspension | **D5.1.1v3**, **D1.3v3**: shared activation infrastructure and one host event-loop authority |
-| Specialization | **D8.4.1v2**: immutable compile-predicted fast paths with guards and shared semantic operations on a miss; no mutable per-site caches |
+| Reuse | **D1.3**: reuse applicable untyped Lambda/lib substrate; preserve guest semantics and existing Lambda/full-LJS defaults |
+| Representations | **D3.1.1**, **D3.1.5**, **D2.6.1**: retain shared container/nominal contracts and scalar ownership; no ordinary-object VMap conversion |
+| Keys and shapes | **D3.4.3**, **S8.2.2v6**, **D5.6.1**: shared shapes and canonical UTF-8/lossless WTF-8 key identity |
+| Class ancestry and captures | **S2.1.3v2**, **D7.2.3**: preserve Lambda ancestry and immutable Lambda captures; JS captures share mutable cells |
+| Dynamic source | **D8.4.5**: eval, Function-family constructors and applicable `$262.evalScript` use the existing retained AST interpreter, including subsequent dynamic-body calls |
+| Lifetime and completion | **D1.4**, **D6.2–D6.3**, **D7.4.3**: precise owners/roots and explicit completion through every frame |
+| Suspension | **D6.1.1**, **D1.3**: shared activation infrastructure and one host event-loop authority |
+| Specialization | **D7.4.1**: immutable compile-predicted fast paths with guards and shared semantic operations on a miss; no mutable per-site caches |
 
 The existing [interpreter boundary contract](JS_MVP_Lmd_Test262_Parity.md#3-execution-boundary-and-interpreter-integration)
 continues to apply. A common Item tag does not establish compatible callable or
@@ -144,7 +144,7 @@ The existing `mvp_lmd_to_primitive` hint gains an ordinary-conversion option for
 Date's symbol protocol. Private Lambda shape fields hold instance DateValue;
 the Date prototype has no DateValue slot. Preserve declared subclass ancestry
 and exact rooting
-(**D1.3v3**, **D2.6.9v3**, **D5.2–D5.3**, **D6.2.3v2**). Install extended methods
+(**D1.3**, **D3.1.5**, **D6.2–D6.3**, **D7.2.3**). Install extended methods
 only in units where Date is observable. The buffer7 audit below predates this
 follow-up and does not validate the changed sources. Shared setter components
 now remain doubles through normalization before TimeClip; this avoids premature
@@ -162,7 +162,7 @@ operations. The existing carrier accessors `js_get_arraybuffer_ptr` and
 index validation. MVP adds `buffer_construct`, `buffer_method` and
 `mvp_lmd_buffer_initialize`; the immutable policy uses small callback adapters.
 All callback boundaries require rooted owners/arguments and fresh backing-store
-bounds checks. This follows **D1.3v3**, **D2.6.9v3**, **D5.2–D5.3**; it introduces
+bounds checks. This follows **D1.3**, **D3.1.5**, **D6.2–D6.3**; it introduces
 no new ordinary-object flag or change to numeric-array MIR specialization.
 The slice policy also provides species lookup/construction; physical bounds are
 revalidated after callbacks. Buffer/view subclasses retain their declared Lambda
@@ -186,7 +186,7 @@ and the typed trailing carriers already provide the required storage ownership.
 The exported LJS constructors also depend on LJS class/prototype metadata and
 coercion; they are not directly compatible with MVP's nominal packed shapes.
 Extract or parameterize those existing allocation/view operations before adding
-the MVP semantic adapter (**D1.3v3**, **D2.6.9v3**, **D5.3.3**). Keep the current
+the MVP semantic adapter (**D1.3**, **D3.1.5**, **D6.3.3**). Keep the current
 numeric-array specialization where its compile-time proofs hold. The follow-up
 below implements that adapter; general method/species algorithms remain open.
 
@@ -196,8 +196,8 @@ Benchmark timing is deferred at the user's request while other sessions build
 and test. The Date pin and its interrupted strict-mode captures remain separate
 from this new increment; no new aggregate or performance claim is made.
 
-Under **D1.3v3**, **D2.6.9v3**, **D5.2–D5.3**, **S2.1.3v2** and
-**D8.4.1v2**, this increment reuses physical typed carriers, ByteBufferHandle,
+Under **D1.3**, **D3.1.5**, **D6.2–D6.3**, **S2.1.3v2** and
+**D7.4.1**, this increment reuses physical typed carriers, ByteBufferHandle,
 ArrayNum views, canonical numeric-key parsing and existing iteration/property
 operations. Existing numeric-only constructor proofs retain their ArrayNum path;
 observable typed storage uses nominal packed Maps, with no ordinary-object flag.
@@ -218,7 +218,7 @@ observable typed storage uses nominal packed Maps, with no ordinary-object flag.
 `mvp_lmd_receiver_identity` promotes the existing iterator identity callback for
 `Symbol.species`; unlike Object.valueOf, this getter preserves primitive receivers.
 Native assignment returns use the existing number-stack allocator for wide
-scalar homes that must outlive the C frame (**D5.2–D5.3**). Merely publishing unused
+scalar homes that must outlive the C frame (**D6.2–D6.3**). Merely publishing unused
 constructors on the global object does not invalidate ordinary-array fast-path
 proofs. Primitive typed-array inputs perform ToIndex before reading
 newTarget.prototype; object inputs observe that prototype before their input
@@ -242,7 +242,7 @@ existing typed map/filter loops into that visitor, reusing species construction,
 typed stores and `JsRootedItems`. MVP publishes the eleven callback methods only
 with observable typed storage. Snapshot internal length, retain callback values
 and filter selections across reentry, and preserve borrowed Array hole behavior
-(**D1.3v3**, **D5.2–D5.3**, **D8.4.1v2**). Ordinary Array visitors and numeric-only
+(**D1.3**, **D6.2–D6.3**, **D7.4.1**). Ordinary Array visitors and numeric-only
 loops retain their current implementation. The selected frozen cohort contains
 550 callback-method IDs; entry MVP lacks these methods. Timing remains deferred.
 
@@ -251,7 +251,7 @@ loops retain their current implementation. The selected frozen cohort contains
 Implement Promise resolution/assimilation, reactions/combinators and observable
 job order through the existing event loop. Cover throwing then getters, reentrant
 thenables and single settlement. Ordinary async bodies remain MVP MIR; dynamic
-async bodies remain in the shared interpreter under D8.1.3v24.
+async bodies remain in the shared interpreter under D8.4.5.
 
 Reuse activations for await/yield suspension, async-generator request queues and
 for-await including AsyncFromSync adaptation. Test return/throw/IteratorClose
@@ -311,8 +311,8 @@ Keep this inventory updated as implementation decisions become concrete.
 
 ### P1 object-environment helper inventory
 
-These additions were disclosed before coding. **D1.3v3**, **D6.2.3v2** and
-**D5.2–D5.3** govern shared algorithms, mutable JS capture cells and precise roots.
+These additions were disclosed before coding. **D1.3**, **D7.2.3** and
+**D6.2–D6.3** govern shared algorithms, mutable JS capture cells and precise roots.
 
 | Helper / shared data | Owner, callers and contract |
 |---|---|
@@ -340,7 +340,7 @@ assignments require a simple target even in sloppy mode; tighten that existing
 shared early-error condition. Cover simple/compound assignment, prefix/postfix
 updates, for-in/of, iterator closing, a throwing call, and logical/strict early
 errors. Ordinary references emit no additional runtime checks
-(**D1.3v3**, **D8.4.3v2**).
+(**D1.3**, **D7.4.3**).
 
 The expanded family also exposed an entry-build crash on `() => ({}) = 1`:
 the shared early-error function visitor passed concise bodies to statement
@@ -354,7 +354,7 @@ runtime is active. Its existing lookup now returns no binding when that owner
 is absent, fixing the entry crash without creating another runtime or admitting
 unsupported private-element execution. The shared unary-expression validator
 rejects deletion of private fields, including parenthesized/nested-arrow forms.
-Both changes extend existing functions; no new helper (**D1.3v3**, **D8.1.3v24**).
+Both changes extend existing functions; no new helper (**D1.3**, **D8.4.5**).
 
 The shared assignment-target predicate also rejects `new.target` and
 `import.meta`, whose identifier-shaped AST carrier does not make them writable
@@ -362,7 +362,7 @@ bindings. Add pattern/call admission options to that existing predicate and
 reuse it for compound assignment and updates; loop targets retain the same
 validation. Preserve sloppy call-target and logical-assignment distinctions.
 Focused cases cover direct/parenthesized assignment, updates and for-in/of.
-No new helper or runtime work is introduced (**D1.3v3**, **D8.4.3v2**).
+No new helper or runtime work is introduced (**D1.3**, **D7.4.3**).
 
 ImportCall uses the call AST carrier but is outside Annex B's sloppy call-target
 extension. The same predicate rejects it before execution. The expanded entry
@@ -371,13 +371,13 @@ parameter defaults. Move the existing `scope_initialize` for that name scope
 before parameter evaluation, retaining it through the body instead of resetting
 it. Default-created/escaped closures, strict versus sloppy writes, generator
 creation and abrupt defaults use the same precisely rooted Lambda capture cells
-(**D6.2.3v2**, **D5.2–D5.3**). No new helper, runtime field or allocation is added.
+(**D7.2.3**, **D6.2–D6.3**). No new helper, runtime field or allocation is added.
 
 ### P2 class helper inventory
 
 **Private-element increment (2026-10-13):** retain shared shape/key contracts
-(**D3.4.3v5**, **S8.2.2v6**), nominal ancestry (**S2.1.3v2**) and
-**D5.2–D5.3** precise ownership. New compiler
+(**D3.4.3**, **S8.2.2v6**), nominal ancestry (**S2.1.3v2**) and
+**D6.2–D6.3** precise ownership. New compiler
 `private_binding(program, site, name, declaring_function)` resolves lexical
 private names and creates hidden bindings using the existing capture cells.
 New `mvp_lmd_private_element(owner, key, value, operation)` reuses unique private
@@ -394,13 +394,13 @@ order, return-object stamping, reflection invisibility and forced GC.
 Follow-up uses the existing shared function-fact walker for class heritage and
 computed keys: these execute in the enclosing function and must retain its
 `this`, arguments and eval observations. Field initializers and method bodies
-remain separate activation scopes (**D6.2.3v2**, **D8.4.1v2**). Extend the shared
+remain separate activation scopes (**D7.2.3**, **D7.4.1**). Extend the shared
 early-error walker for reserved class names, forbidden noncomputed element names,
 private-name expression positions and initializer `arguments`/`super()` restrictions
 through arrows. Quoted keys compare their full length, preserving embedded NULs.
 New compiler-only `js_ast_class_element_key(element, computed, statics)` shares
 field/method key extraction across validation, function facts and MVP planning
-(**D1.3v3**). It replaces repeated extraction blocks and adds no runtime allocation.
+(**D1.3**). It replaces repeated extraction blocks and adds no runtime allocation.
 Anonymous class names use class metadata,
 including when an explicit constructor method is present.
 
@@ -415,7 +415,7 @@ cover public and private fields. No new helper or ordinary runtime check is adde
 `int mvp_lmd_error_kind(const TypeNominal*, const MvpLmdLibraryState*)` was
 disclosed before coding. It consolidates Error-family recognition for class
 admission and exception classification using Lambda's existing
-`lambda_nominal_derives_from` (**S11.3.1v2**, **D2.6.9v3**). It allocates nothing,
+`lambda_nominal_derives_from` (**S11.3.1v2**, **D3.1.5**). It allocates nothing,
 does not reenter and returns the most specific native Error family or `-1`.
 Native Error constructors retain their existing conversion/cause/iterator order;
 an actual declared subtype supplies the allocation shape. Default derived
@@ -430,7 +430,7 @@ private shape slot with `name_pool_create_unique_private` and `map_shape_set`;
 existing construction roots retain the instance across allocation. Object tags
 check that own slot without prototype traversal or proxy dispatch. This preserves
 nominal ancestry while distinguishing `Reflect.construct(Plain, [], ErrorSubtype)`
-from actual Error allocation (**D1.3v3**, **D2.6.9v3**, **D5.2–D5.3**). Error
+from actual Error allocation (**D1.3**, **D3.1.5**, **D6.2–D6.3**). Error
 prototypes and objects inheriting from Error instances have no ErrorData brand.
 No new helper or ordinary-container flag is introduced.
 
@@ -444,7 +444,7 @@ kernel specializes mapping at compile time, so ordinary flat iteration keeps
 its current roots and loop. Mapping runs only at the outer level, before
 IsArray/LengthOfArrayLike and destination writes; recursive flattening does not
 reapply it. Reuse Lambda scalar-home adoption, species, property and invocation
-operations (**D1.3v3**, **D2.6.6v3**, **D5.2–D5.3**). Validate holes versus
+operations (**D1.3**, **D3.1.1**, **D6.2–D6.3**). Validate holes versus
 find's Get semantics, inherited indices, length snapshots, species/proxy effects,
 callback receiver/abrupt completion and scalar results across forced GC.
 
@@ -454,8 +454,8 @@ apart from addresses. The later build-provenance correction in §7 invalidates
 code-regression attribution from that mixed-build comparison. The existing cached read path still sends
 writes of the same live entry through a native call. Extend that same guarded
 ordinal path to `set`, reusing `array_index_write` for the private entry array's
-owned scalar storage; no new helper or cache is introduced (**D8.4.1v2**,
-**D2.6.6v3**). Resolve guards after argument effects, check live entry/key identity,
+owned scalar storage; no new helper or cache is introduced (**D7.4.1**,
+**D3.1.1**). Resolve guards after argument effects, check live entry/key identity,
 retain the existing miss path, and validate clear/delete/reinsert, object identity,
 subnormal scalar lifetimes, zero signs and chaining before timing again.
 
@@ -468,15 +468,15 @@ API adjustment was disclosed before coding; no new helper or cache is added.
 The import does not allocate, collect or reenter; it borrows both Items and
 reuses the existing number, string and BigInt comparisons. A byte-equal string
 already matches the canonical stored key; other spellings retain native
-canonicalization on a miss (**D3.4.3v5**, **D8.4.1v2**, **D5.2–D5.3**).
+canonicalization on a miss (**D3.4.3**, **D7.4.1**, **D6.2–D6.3**).
 Validate fresh substring keys, scalar ownership, NaN, signed zero, BigInt and
 UTF-16 surrogate concatenation before timing the new pin.
 
 An experimental cold-setup change moved the repeated `js_ast_collect_parameter_facts`
 and `ast_index_parent` work out of `mvp_lmd_function_new` allocation. Formal
 length and non-constructibility were computed in the existing compile plan
-instead. It added no helper or callable/container field (**D1.3v3**,
-**D8.4.1v2**), but the matching 31-round sieve result stayed at 0.090 versus
+instead. It added no helper or callable/container field (**D1.3**,
+**D7.4.1**), but the matching 31-round sieve result stayed at 0.090 versus
 0.087 ms. The experiment was reverted; `callable1/` preserves its patch, pin
 and timing. The precise cause of the cold-layout difference remains unproven.
 
@@ -485,7 +485,7 @@ and timing. The precise cause of the cold-layout difference remains unproven.
 Retain direct scalar lanes, dense-array storage and proven object/call paths.
 Create descriptor/private/buffer/interpreter/async metadata only where its
 semantics require it. No universal is_normal flag, blanket environment allocation,
-dormant async frames or mutable per-site caches (**D8.4.1v2**).
+dormant async frames or mutable per-site caches (**D7.4.1**).
 
 Propagate dynamic-source and callback exposure through retained call/escape facts;
 only affected bindings, properties and storage assumptions lose their proofs.
@@ -599,7 +599,7 @@ Array prototype metadata uses the promoted LJS name table. Shared early-error
 validation now visits the object expression and body and rejects declarations
 in statement position. The handwritten C parser preserves the `let [` lookahead
 restriction across a newline. These implement existing guest contracts;
-**D1.3v3**, **D6.2.3v2** and **D5.2–D5.3** remain unchanged.
+**D1.3**, **D7.2.3** and **D6.2–D6.3** remain unchanged.
 
 | Evidence | Current result |
 |---|---|
@@ -629,7 +629,7 @@ Native Error subclasses now preserve their declared Lambda nominal ancestry
 while the native allocator retains Error's conversion, cause and aggregate
 iteration order. Default derived construction delegates to native constructors
 without reading a nonexistent source AST. Exception classification reuses Lambda
-ancestry (**S11.3.1v2**, **D2.6.9v3**); the subsequent brand correction below makes
+ancestry (**S11.3.1v2**, **D3.1.5**); the subsequent brand correction below makes
 object tags depend on actual Error allocation.
 
 Array `flatMap`, `findLast` and `findLastIndex` extend the existing visitor and
@@ -675,7 +675,7 @@ The interpreter audit confirms that `js_interp_call_function` expects a
 `JsFunction` payload/call activation, while MVP uses `MvpLmdCallable`; direct
 casts are invalid. The bridge still needs a compatible execution profile,
 shared property/call/global authority and live environment-cell integration
-before eval/Function admission can open (**D8.1.3v24**, **D6.2.3v2**).
+before eval/Function admission can open (**D8.4.5**, **D7.2.3**).
 
 ### 2026-10-13: Map writes, Error branding and assignment targets
 
@@ -901,13 +901,13 @@ the explicit incomplete phase/performance status. `git diff --check` passes.
 ### 2026-10-14: private class elements
 
 Native private fields, methods, accessors and brand checks now use class-owned
-private NameRefs, shared shapes and mutable capture cells (**D3.4.3v5**,
-**S8.2.2v6**, **D6.2.3v2**). Each class evaluation gets fresh identities; methods
+private NameRefs, shared shapes and mutable capture cells (**D3.4.3**,
+**S8.2.2v6**, **D7.2.3**). Each class evaluation gets fresh identities; methods
 precede field initialization. Private access validates the actual receiver,
 including constructor-returned arrays/functions and revoked proxies, without
 public prototype traversal or proxy traps. Public reflection excludes the slots.
 The initializer and private-element imports retain precise roots and scalar
-ownership (**D5.2–D5.3**).
+ownership (**D6.2–D6.3**).
 
 Follow-up fixes cover private-name scope and early errors, enclosing function
 observations in computed class keys, anonymous constructor names and embedded-NUL
@@ -1010,11 +1010,11 @@ BigInt loads/stores, endian handling, fixed/tracking views, resize, transfer,
 species-aware slice and the Test262 detachment host operation. The shared
 `ByteBufferHandle`, carrier layouts, external-memory accounting and DataView
 kernels remain the storage authority. Operation policies retain each front end's
-coercion, prototype and error authority (**D1.3v3**, **D2.6.9v3**). Carrier tracing
+coercion, prototype and error authority (**D1.3**, **D3.1.5**). Carrier tracing
 and finalization use the physical kind; callbacks retain exact roots and refresh
-payload pointers (**D5.2–D5.3**). Buffer/view subclasses keep the compatible
+payload pointers (**D6.2–D6.3**). Buffer/view subclasses keep the compatible
 declared Lambda nominal shape independently of mutable JS prototype links
-(**S2.1.3v2**, **D6.2.3v2**).
+(**S2.1.3v2**, **D7.2.3**).
 
 The final candidate is `buffer7/lambda.exe`, SHA-256
 `1f503b64a5389f7cc369ac2c2a76068b76d7501123e8c2afe9ca339d51cd0feb`.
@@ -1093,7 +1093,7 @@ reproduced `setUTCMilliseconds(Infinity)` / `setUTCMilliseconds(2147483648)`
 conversion to `2147483647`. Invalid-date setters retain callback writes when the
 operation must return NaN without storing. Calendar conversion preserves the
 existing minute-offset handling of historical local dates. Exact receiver and
-argument roots remain live across reentrant coercion (**D5.2–D5.3**).
+argument roots remain live across reentrant coercion (**D6.2–D6.3**).
 
 The frozen candidate passes **215/215** focused checks and **215/215** with forced
 GC and poisoning. All **609/609** selected Date/Annex B/subclass cases pass their
@@ -1109,7 +1109,7 @@ historical-timezone failures. The corpus and Test262 harness are unchanged.
 
 ### Typed-view increment (2026-10-14; whole-population audit and timing deferred)
 
-Under **D1.3v3**, **D2.6.9v3**, **D5.2–D5.3** and **D6.2.3v2**, the
+Under **D1.3**, **D3.1.5**, **D6.2–D6.3** and **D7.2.3**, the
 P4 adapter now uses shared typed carriers and buffer storage for all numeric and
 BigInt constructors, aliases, indexed reflection, getters, iteration and subclass
 construction. Array.from also reuses the existing collector for array-like input,
@@ -1154,7 +1154,7 @@ archived; the new pass alone does not establish their cause.
 
 Resizable-buffer corpus cases that include `resizableArrayBufferUtils.js`
 remain blocked by its `new Function` subclass factory. The harness is unchanged;
-the retained-interpreter bridge (**D8.1.3v24**) must resolve this capability gap. Focused tests
+the retained-interpreter bridge (**D8.4.5**) must resolve this capability gap. Focused tests
 exercise resize/detach semantics directly, without counting that as corpus
 coverage. Buffer7 remains the last complete whole-population audit. No benchmark
 or jq execution was performed, and no new aggregate percentage or absence of
@@ -1172,7 +1172,7 @@ publication analysis already builds an indexed predecessor list.
 Reuse that builder as `em_root_build_predecessors`, with
 `MirRootPredecessors` and `em_root_free_predecessors`. Both liveness and
 publication consume the same ascending edges and unchanged fixed-point rules
-(**D5.3.1**, **D8.6.1**). Reuse the existing successor matrix for the later dirty
+(**D6.3.1**, **D8.6.1**). Reuse the existing successor matrix for the later dirty
 state pass instead of rebuilding it. This changes compiler analysis work and
 allocation only; acceptance must retain exact roots, GC stress, MIR guards and
 both shared baseline gates. A native test compares the sparse traversal with
@@ -1213,10 +1213,10 @@ The eleven typed callback methods now share `js_typed_array_callback_algorithm`
 across LJS and MVP, including the existing map/filter walks. `JsTypedArrayOps`
 supplies callable/invocation operations; the existing default buffer policy is
 visible to the shared algorithm. Species creation and typed conversion/stores
-reuse the preceding kernels (**D1.3v3**, **D2.6.9v3**). Precise roots retain the
+reuse the preceding kernels (**D1.3**, **D3.1.5**). Precise roots retain the
 receiver, callback, thisArg, accumulator, current value, callback result and
 output; selected filter scalars and returned scalars receive durable number
-homes (**D5.2–D5.3**). The walk captures internal length, preserves callback/
+homes (**D6.2–D6.3**). The walk captures internal length, preserves callback/
 species order and propagates conversion exceptions. Borrowed Array methods keep
 their existing hole policy. Ordinary Array visitors are unchanged.
 
@@ -1250,7 +1250,7 @@ A final planning review reproduces a capability failure for
 An array-initialized typed view passes the same call, identifying the raw-storage
 selection as the cause. Computed method calls now select observable typed storage
 even without a known spelling; numeric element reads retain the preceding rule
-(**D8.4.1v2**). The follow-up `typed_methods3/mvp-typed-methods3.exe`, SHA-256
+(**D7.4.1**). The follow-up `typed_methods3/mvp-typed-methods3.exe`, SHA-256
 `f490df0026636d2bf2e75b1ab85207101e29bfabeee402155fa59fb386cfb466`, passes
 **227/227** focused and **227/227** forced/poisoned-GC checks, including computed
 callback dispatch and numeric non-callable TypeError. Its selected audit was
@@ -1264,7 +1264,7 @@ are retained under `typed_methods2/`. The inferred-key follow-up extracts
 type inference, a typed receiver with a potentially non-numeric key selects
 observable storage and reruns the existing solver once before choosing ABIs.
 The storage decision is monotone; numeric/optional-numeric reads retain their
-preceding specialization and capability boundary (**D1.3v3**, **D8.4.1v2**).
+preceding specialization and capability boundary (**D1.3**, **D7.4.1**).
 No runtime helper or ordinary-container flag is added. Direct and returned
 computed method aliases have focused checks. The follow-up
 `typed_methods4/mvp-typed-methods4.exe`, SHA-256
@@ -1322,20 +1322,20 @@ cohorts never replace a whole-population audit. Timing remains deferred.
   `mvp_lmd_dynamic_initialize_body` adapter perform the existing instantiation
   transfer. Default closures retain parameter cells while body vars and hoists
   use their own cells. Plain functions retain their prior path
-  (**D5.2–D5.3**, **D5.3.3**, **D6.2.3v2**, **D8.1.3v24**).
+  (**D6.2–D6.3**, **D6.3.3**, **D7.2.3**, **D8.4.5**).
 - **Suspension and jobs:** native Promise reactions, async/generator activations,
   for-await, dynamic suspended Function bodies and host timers reuse existing
   jobs, request queues, exact roots and forwarding/storage helpers. Public
   Promise expandos use MVP maps while their native exotic carrier is retained.
   Argument packs and scalar results have durable owners across suspension and
-  callback domain restoration (**D2.6.9v3**, **D5.2–D5.3**).
+  callback domain restoration (**D3.1.5**, **D6.2–D6.3**).
 - **Library reuse:** typed-array methods and static constructors, generic locale
   strings, weak collections, Set operations, grouping and RegExp protocols
   parameterize existing algorithms. RegExp matchAll iterators share the native
   algorithm; iterator prototypes share the existing hierarchy. Primitive
   String protocol dispatch and split coercion ordering preserve observable
   evaluation order. Immutable program proofs retain the ordinary RegExp bulk
-  lane (**D1.3v3**, **D3.4.8**, **D8.4.1v2**).
+  lane (**D1.3**, **D3.4.7**, **D7.4.1**).
 - **Modules:** source loading, resolution/cache, linking, instantiation and
   evaluation use the shared registry and Lambda module-state slabs. Namespace
   reflection resolves live export cells, including TDZ and ambiguity; only this
@@ -1343,13 +1343,13 @@ cohorts never replace a whole-population audit. Timing remains deferred.
   Shared handwritten JS parsing now accepts empty exports and quoted export
   aliases, with decoded string names retained by the AST. Teardown releases the
   module registry while its runtime state is still alive
-  (**D7.2.1**, **D8.5.1v7**, **D5.2–D5.3**).
+  (**D9.3.1**, **D8.3.5**, **D6.2–D6.3**).
 - **Compiler size:** `emit_iterator_error_pad` factors exceptional iterator
   cleanup once per lexical iterator. Normal loop paths gain no instructions;
   nested catches/finally and destructuring retain their existing close/error
   precedence. Exact root liveness stays in the shared MIR emitter; no vendor
   optimizer, harness timeout or GC ownership rule is changed
-  (**D5.1.1v3**, **D5.2–D5.3**, **D8.4.1v2**).
+  (**D6.1.1**, **D6.2–D6.3**, **D7.4.1**).
 
 #### Current evidence and open gates
 
@@ -1413,27 +1413,27 @@ Benchmark timing remains deferred; no jq workload has been run.
   computed names and bodies. Hosted object methods/accessors reuse existing
   descriptors and method homes. Calls preserve eval/call/apply forwarding context
   while actual source calls install their own initializer context. With/module
-  eval callers remain explicit capability boundaries (**D1.3v3**, **D6.2.3v2**,
-  **D8.1.3v24**).
+  eval callers remain explicit capability boundaries (**D1.3**, **D7.2.3**,
+  **D8.4.5**).
 - **Nominal-parent lifetime:** forced collection exposed an untraced dynamic base
   constructor behind the shared nominal link. One trailing parent Item in the
   existing dynamic constructor closure now preserves that edge even after both
   public prototype links change. Existing closure counts/tracing own it; closed
   static classes keep their prior layout/path. The unchanged original fixture
   and two controls all crashed on parallel33 and pass the Node oracle
-  (**D3.4.8**, **D5.2–D5.3**, **D5.3.3**).
+  (**D3.4.7**, **D6.2–D6.3**, **D6.3.3**).
 - **Hosted for-in:** the shared key snapshot and liveness policy handle inherited
   keys, primitive boxing, absent proxy keys, deletion and suspension. Existing
   loop scopes/completions and activation roots own the snapshot and cursor. The
   MIR receiver is boxed once only when mutable prototypes make primitive
   enumeration observable. Deep chains no longer stop at an arbitrary 64-link
-  cutoff; ordinary closed paths retain existing proofs (**D1.3v3**, **D5.2–D5.3**,
-  **D8.4.1v2**).
+  cutoff; ordinary closed paths retain existing proofs (**D1.3**, **D6.2–D6.3**,
+  **D7.4.1**).
 - **Module lifecycle:** shared registry cleanup now unregisters `cjs_module`
   alongside its other descriptor Item roots. This pre-existing omission was
   reproduced against parallel35 archives by checking the exact stale slot before
   requesting collection; the corrected fixture passes normally and with forced/poisoned GC.
-  No new root cache or module representation is introduced (**D5.3.3**, **D7.2.1**).
+  No new root cache or module representation is introduced (**D6.3.3**, **D9.3.1**).
 - **RegExp:** `JsRegExpIndicesOps` shares result-pair construction, unmatched
   captures, null-prototype groups and named-pair identity. A direct dense-array
   read regressed five LJS cases because retained LJS can use companion property
@@ -1442,8 +1442,8 @@ Benchmark timing remains deferred; no jq workload has been run.
   ownership and strict lastIndex failure ordering. No-d paths allocate no indices
   scratch. The decoder extraction reuses existing UTF primitives and StrBuf,
   preserves original public spelling, and checks quantifiers in the existing
-  parser. Unicode sets and new realms remain separate boundaries (**D1.3v3**,
-  **D5.3.3**, **D8.4.1v2**).
+  parser. Unicode sets and new realms remain separate boundaries (**D1.3**,
+  **D6.3.3**, **D7.4.1**).
 - **Compiler size:** shared exceptional iterator cleanup reduces the includes
   reproducer from 1,865 IteratorClose calls to two without adding normal-path
   instructions. Cold top-level property reads then reduce its finalized main
@@ -1452,7 +1452,7 @@ Benchmark timing remains deferred; no jq workload has been run.
   ten-second limit; five of six TypedArray probes still time out. Existing
   scalar retention and sized-number widening cover the C helper boundary.
   No vendor optimizer, harness limit or ownership rule is changed
-  (**D5.1.1v3**, **D5.2–D5.3**, **D8.4.1v2**).
+  (**D6.1.1**, **D6.2–D6.3**, **D7.4.1**).
 
 The final candidate must pass normal/forced-GC checks, the shared LJS gate and
 Lambda/Input verification before closure. Measure all frozen IDs and additional
@@ -1472,7 +1472,7 @@ Map was consequently read as an Array. The original helper now again calls
 interpreter, MIR, MVP and generator-delegation callers use it explicitly.
 Both imports retain may-GC/reentrant/boxed-Item metadata. No type guessing,
 algorithm duplication or ordinary-call overhead is introduced
-(**D1.3v3**, **D5.2–D5.3**, **D8.4.3**).
+(**D1.3**, **D6.2–D6.3**, **D7.4.3**).
 
 The original failing native assertion is unchanged. A new control checks absent
 and undefined record results, a guest Array passed through the raw API, and
@@ -1557,9 +1557,9 @@ The older parallel38 whole audit remains attributable to its own archived build.
   optional nominal class and three slots are planned only when observable.
   Atomics, agents and additional realms are excluded.
 
-Reuse and ordinary-path separation follow **D1.3v3**, **D2.6.9v3**,
-**D5.2–D5.3**, and **D8.4.1v2**. Container/inline String addresses are nonmoving;
-Array/Map data buffers can compact (**D4.3.1**, **D4.3.2v2**). New ownership
+Reuse and ordinary-path separation follow **D1.3**, **D3.1.5**,
+**D6.2–D6.3**, and **D7.4.1**. Container/inline String addresses are nonmoving;
+Array/Map data buffers can compact (**D5.3.1**, **D5.3.1**). New ownership
 boundaries preserve callback-live inputs; they do not imply object relocation.
 All existing method IDs and successful lookup prefixes are retained. No new
 MIR import, container flag or backing-store representation is introduced.
@@ -1589,7 +1589,7 @@ receiver can be String and the key-domain proof cannot exclude named hooks.
 Canonical numeric strings reuse `mvp_lmd_string_key`; optional-family assertions
 protect numeric/decimal-affix indexing. New text token arms are omitted only
 when planned live prototype functions make them unreachable. No new helper is
-introduced (**D1.3v3**, **D8.4.1v2**).
+introduced (**D1.3**, **D7.4.1**).
 
 The focused failure is the original metadata program's valid `let of` binding.
 Minimal probes fail on both MVP and LJS AST and pass in Node. Existing parser
@@ -1627,7 +1627,7 @@ binding-child traversal, and validates declared loop patterns after their
 declaration wrapper is stripped. Property keys, default expressions, sloppy
 var/parameter names and C-style multiple declarations retain their existing
 meaning. These changes run only during validation; no new helper or runtime
-path is added (**D1.3v3**, **D8.1.3v24**). The original negative fixtures remain
+path is added (**D1.3**, **D8.4.5**). The original negative fixtures remain
 unchanged, with fourteen positive and twenty-two additional negative controls.
 
 Pin40's selected/forced-GC aggregate work was explicitly superseded after these
@@ -1683,8 +1683,8 @@ workers and integrated by the parent:
   Disclosed test-only `mvp_compact_entry_source` shares synthetic size pressure
   across semantic, ownership, MIR-growth and unaffected-path controls.
 
-Ownership and dispatch boundaries follow **D1.3v3**, **D4.3.1**,
-**D4.3.2v2**, **D5.2–D5.3**, **D8.1.3v24** and **D8.4.1v2**.
+Ownership and dispatch boundaries follow **D1.3**, **D5.3.1**,
+**D5.3.1**, **D6.2–D6.3**, **D8.4.5** and **D7.4.1**.
 The final frozen selection is **527 IDs**, including twelve duplicate-binding
 controls with overlaps. Require a guarded private release build, normal and
 forced/poisoned focused checks, exact compiler-timeout replay under the unchanged
@@ -1736,7 +1736,7 @@ sequence arguments, parenthesized constructor targets, `import.meta` member
 constructors and ordinary properties named `import`. This adds no helper or
 runtime/module behavior. Fourteen syntax positives and sixteen negatives agree
 with Node; valid two-argument parsing remains separate from MVP import-options
-execution admission (**D1.3v3**, **D8.1.3v24**).
+execution admission (**D1.3**, **D8.4.5**).
 
 Remaining compiler analysis finds nine guarded `MayNeedBigInt` inlines occupying
 **16,855/45,589** entry lines and **477/1,558** calls. Method-token fanout is not
@@ -1745,8 +1745,8 @@ candidate loop to stop starting further guarded inlines after the emitted-cost
 budget. Preserve direct inlining, already-active inline bodies and separate
 functions. The first permitted body may cross the budget; this is not a strict
 whole-function line cap. Callee capture, argument snapshots, ABI validation,
-generic invocation and roots retain their existing paths (**D5.2–D5.3**,
-**D8.4.1v2**). Two new focused groups share the existing test source builder;
+generic invocation and roots retain their existing paths (**D6.2–D6.3**,
+**D7.4.1**). Two new focused groups share the existing test source builder;
 ten exact Node oracles agree. No new helper, runtime ABI/import, vendor edit or
 deadline change is introduced. Both patches are staged for the next guarded
 integration, with compiler-size/required-mode replay and full shared gates still
@@ -1812,7 +1812,7 @@ poisoned GC. Native JS **204/204**, backtracker **51/51**, affected native GC
 additional String/Number shared controls **40/40** pass. The independent raw/
 mode/provenance verifier confirms **611/611** selected all-required passes,
 including **589/589** additional strict variants, without isolated replay or
-lost prior selected passes (**D1.3v3**, **D5.2–D5.3**, **D8.4.1v2**).
+lost prior selected passes (**D1.3**, **D6.2–D6.3**, **D7.4.1**).
 
 Shared LJS retains **40,260/40,261** fully passing plus the same retry-only
 non-whitespace RegExp case, zero regressions. Lambda/Input records
@@ -1854,7 +1854,7 @@ completion; partial logs and owned process-group proof remain. Pin38 establishes
 archived coverage milestone; current-build coverage, zero lost later controls,
 the shared baseline gate and benchmark performance acceptance remain separate.
 Benchmark timing is still deferred at the user's request, so the phase is not
-marked complete (**D8.1.3v24**, **D8.4.1v2**).
+marked complete (**D8.4.5**, **D7.4.1**).
 
 #### Parallel45: close repeated-eval and native replacement costs
 
@@ -1873,7 +1873,7 @@ JS lexer and require EOF at the actual source length, permitting only an initial
 hashbang token. Real tokens, four line terminators followed by code, malformed
 comments, misplaced hashbangs and non-string identity keep their proper paths.
 The borrowed String proof is allocation-free and adds no realm, cache or runtime
-helper (**D1.3v3**, **D8.1.3v24**, **D5.2–D5.3**).
+helper (**D1.3**, **D8.4.5**, **D6.2–D6.3**).
 
 The shared retry-only non-whitespace RegExp case takes generic match-record
 construction for every wide subject. Reuse the existing guarded native bulk
@@ -1883,7 +1883,7 @@ pair; matcher byte spans support the existing literal/template substitution.
 Native `exec`, coercion rechecking, writable `lastIndex`, no captures and the
 existing Unicode/indices/UTF16-subject exclusions remain. Callbacks retain their
 generic UTF16-index path. Precise roots retain immutable, nonmoving String bytes
-(**D4.3.1/D4.3.2v2**, **D5.2–D5.3**, **D8.4.1v2**).
+(**D5.3.1/D5.3.1**, **D6.2–D6.3**, **D7.4.1**).
 
 Independent source review finds an existing silent one-million-match cutoff in
 that bulk replacement loop. Remove it using the matcher's monotone byte-position
@@ -1926,7 +1926,7 @@ joining launcher and the execution worker both leave process-directed SIGALRM
 unmasked, while timeout/crash/MIR recovery records are process globals. A signal
 delivered to the launcher therefore jumps onto the still-running worker's stack.
 The engine's existing TLS recovery model already forbids this
-(**D5.3.6v2**, **D6.3.3v2**); no ruling changes.
+(**D6.3.6**, **D7.5.3**); no ruling changes.
 
 Reuse the existing batch handlers and jump records, making the records and
 armed flags thread-local. Register one immutable pthread owner before installing
@@ -2008,14 +2008,14 @@ and adding property/coercion dispatch to hot loops and other Array/String calls.
 Use solved receiver/argument facts and the existing monotone promotion/replay;
 reuse raw typed fill only with adequate semantic proofs. Unknown receivers,
 method escapes, nonprimitive coercions, buffer/view reflection, detach/resize,
-species and prototype observation retain shared full storage (**D8.4.1v2**).
+species and prototype observation retain shared full storage (**D7.4.1**).
 No new helper or normality flag is needed for this proposed repair.
 
 The separate text review identifies extra RegExp dispatch/rooting/exec lookup
 for Hyphen and extra protocol/accessor guards for Fast-diff. These are concrete
 additional paths, with unmeasured timing shares; Text Search and Microdiff's
 causes remain unresolved. Any repair must retain callback semantics, explicit
-completions and precise roots (**D8.4.3v2**, **D5.2–D5.3**).
+completions and precise roots (**D7.4.3**, **D6.2–D6.3**).
 
 Captures and the verification report are under
 `temp/mvp_test262_90/parallel47/performance/`: `screen84/comparison.json`,
@@ -2039,12 +2039,12 @@ tests. The repair retains shared Lambda representations and existing operations:
   or workload-specific admission rules.
 - **Optional keys:** raw `array[undefined]` uses the existing `ArrayNum` Map
   attribute face and shape transitions, separately from its numeric buffer
-  (**D2.6.6v3**, **D3.4.3v5**). An option on the existing property-map helper enables
+  (**D3.1.1**, **D3.4.3**). An option on the existing property-map helper enables
   that face only for named reads/writes; reflection still requires full storage.
   Existing type inference joins possible named-store
   value kinds so arbitrary attributes cannot acquire a numeric ABI. Named stores
   keep the original RHS; only indexed stores convert it. Existing precise GC
-  tracing and compaction cover both faces (**D5.3**).
+  tracing and compaction cover both faces (**D6.3**).
 - **Navier–Stokes:** proven primitive property keys retain the native Number to
   String path even when Symbols are available. This removes added numeric boxing
   and scalar homes; Symbol/object/unknown keys keep complete ToPropertyKey.
@@ -2055,7 +2055,7 @@ tests. The repair retains shared Lambda representations and existing operations:
   under a shape identity guard, checking live descriptors/getters on every use.
   The related primitive-string `RegExp.test` path also avoids general protocol
   dispatch after checking the live `exec`, prototype and `lastIndex` contracts.
-  No mutable per-site cache is added (**D8.4.1v2**).
+  No mutable per-site cache is added (**D7.4.1**).
 
 No new runtime helper or container normality flag is introduced. These changes
 remove identified extra work; its timing contribution and the amount recovered
@@ -2168,19 +2168,19 @@ Results3–9 remain unchanged. Artifacts are under
   from a subsequently numeric domain. The existing transfer now includes that
   initialization, including block re-entry. The reduced tokenizer passes;
   complete jq replay remains pending. No interpreter fallback is introduced
-  (**D8.1.3v24**).
+  (**D8.4.5**).
 - **Triangl:** align ordinary optional-index inference with its existing closed
   array proof, then retain numeric payload/presence through raw typed-array
   reads. Named typed attributes join their own integer ranges; fractional,
   signed-zero, NaN and arbitrary named values preserve their representations
-  (**D2.2.5**, **D2.6.6v3**, **D3.4.3v5**). Seven paired release-MIR rounds give
+  (**D2.2.5**, **D3.1.1**, **D3.4.3**). Seven paired release-MIR rounds give
   **155.019 ms** repaired, **278.262 ms** pre-fix, **155.083 ms** Result9.
   Brainfuck remains **48.310 ms** versus **42.967 ms** Result9. Pin `round2`
   SHA-256 is `d4fc9ed3fa03e68d701a15c27f1c20b7a060667c081230407bb389e99e1b3d53`.
 - **Fixed-key literal experiment, withdrawn:** unknown value kinds discard the
   entire allocation plan. A trial retained it with Lambda `TypedItem` slots and
   the existing field reader/writer, preserving scalar snapshots and initializer
-  order (**D3.4.3v5**, **D5.2–D5.3**). The first seven-round capture reduced Splay
+  order (**D3.4.3**, **D6.2–D6.3**). The first seven-round capture reduced Splay
   from 191.374 to 176.728 ms and Microdiff from 150.249 to 144.698 ms, but Fast-diff
   increased from 633.260 to 674.119 ms. A follow-up with an identical-binary peer
   recorded competing builds/tests and was cancelled. The experiment is removed
@@ -2223,7 +2223,7 @@ The next direct repair pass uses immutable release-MIR executables, archived
 benchmark sources/oracles and their original self timers. Published Results3–9
 remain unchanged. Evidence is under `temp/mvp_perf_eleven_20261015/`.
 
-Implemented repairs follow **D8.4.1v2**, **D3.4.3v5** and **D5.2–D5.3**:
+Implemented repairs follow **D7.4.1**, **D3.4.3** and **D6.2–D6.3**:
 
 - Recover function identity, scalar domains and fixed prototype setup only when
   the source proves that reflection cannot mutate or escape the relevant global
@@ -2231,16 +2231,16 @@ Implemented repairs follow **D8.4.1v2**, **D3.4.3v5** and **D5.2–D5.3**:
   intrinsic aliases and property iteration targets keep conservative dispatch.
   The new compiler helper is `plan_fixed_global_bindings`; it reuses the existing
   representation solver, key proof and builtin catalog. Published functions
-  retain their boxed entry ABI (**D8.1.3v24**).
+  retain their boxed entry ABI (**D8.4.5**).
 - Give `for…in` targets their string domain while joining other writes. Skip
   scalar-home work for proven nonnumeric bindings and closed nonnumeric returns.
   Optional numeric equality and immediate-integer equality retain undefined,
-  NaN and signed-zero behavior (**D2.2.5**, **D5.2–D5.3**).
+  NaN and signed-zero behavior (**D2.2.5**, **D6.2–D6.3**).
 - True, passive ordered loop conditions establish local numeric presence until
   a write. Nested backedges discard enclosing facts; alternative branches start
   from the same facts and intersect them on exit. This removes named-property
   fallback from Brainfuck's guarded typed-array reads without conflating NaN
-  and undefined (**D2.2.5**, **D8.4.1v2**).
+  and undefined (**D2.2.5**, **D7.4.1**).
 - Extend that proof to integral local writes: `integer_binding_writes` checks
   every source write, and `ordered_integer_range` proves a bounded integer range
   inside a true ordered loop condition. Fractional, captured and unsupported
@@ -2276,7 +2276,7 @@ Implemented repairs follow **D8.4.1v2**, **D3.4.3v5** and **D5.2–D5.3**:
   unknown or incompletely maintained ones; those retain the original scan.
   Array edit checks can skip scanning every named prototype method, while
   still reading live links, descriptors and extensibility. This is ordinary
-  shape metadata, with no per-site cache (**D3.4.3v5**, **D8.4.1v2**).
+  shape metadata, with no per-site cache (**D3.4.3**, **D7.4.1**).
 
 The retained `integer-consumers` release has SHA-256
 `7edac2ef51b9341c5dd810978c216c69bc2015ac9d7926f22b644e7b388fdedc`.
@@ -2345,16 +2345,16 @@ checkout `1f25b6c53` and the same historical controls. Evidence lives under
 are unchanged.
 
 The retained candidate changes existing routes, adding no helper or per-site
-cache (**D8.4.1v2**):
+cache (**D7.4.1**):
 
 - Numeric consumers test the existing property's scalar storage lane before
   loading pointer metadata. Optional, nonnumeric and legacy pointer cases keep
-  shared coercion/readers (**D3.4.5**, **D5.2–D5.3**).
+  shared coercion/readers (**D3.4.5**, **D6.2–D6.3**).
 - Shared shape lookup accepts a nonzero matching ordinary `NameId` as a proof
   of equality, retaining byte comparison for absent or differing IDs. Shape
   transitions reuse the pooled record's hash; canonicalization, Symbol/private
-  identity and chain ownership checks are unchanged (**D3.4.4v4**,
-  **D4.6.1v4**, **D3.4.3v5**).
+  identity and chain ownership checks are unchanged (**D3.4.4**,
+  **D5.6.1**, **D3.4.3**).
 - The fixed-property dispatcher specializes its existing implementation for
   `Get` and callee reads. The compiler's existing closed-unit proof selects
   that route; reflective units keep general dispatch. Both variants share
@@ -2410,13 +2410,13 @@ No golden, test deadline or Test262 harness was changed.
 
 This continuation starts at `33c0e9c0e` and retains the prior final executable as
 its clean control: all 1,454 production input hashes match. It adds no helper,
-container flag, public ABI or per-site cache (**D8.4.1v2**).
+container flag, public ABI or per-site cache (**D7.4.1**).
 
 - Empty JS arrays reuse Lambda's empty `array()` without allocating an unused
   handoff buffer. Nonempty construction delegates rooting to the existing dense
   reserve and sparse preparation helpers. Object headers stay fixed, each
   collecting helper retains its owner, and publication has no intervening
-  safepoint (**D4.3.1**, **D5.3.2–D5.3.3**). Root reservation failure transfers
+  safepoint (**D5.3.1**, **D6.3.2–D6.3.3**). Root reservation failure transfers
   control through the existing recovery frame; it cannot continue unrooted.
 - Key-only projections do not invoke getters, so they keep their descriptor
   snapshot. Value/entry projections retain live rechecks after callbacks.

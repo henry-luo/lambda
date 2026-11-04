@@ -89,7 +89,7 @@ protected:
     }
 
     void TearDown() override {
-        // the pool releases the Input it holds (D4.2.6)
+        // the pool releases the Input it holds (D5.2.5)
         if (validator) {
             schema_validator_destroy(validator);
             validator = nullptr;
@@ -173,7 +173,7 @@ TEST(AstValidatorCreation, CreateValidatorNullPool) {
     EXPECT_EQ(null_validator, nullptr) << "Validator creation should fail with null pool";
 }
 
-// D4.2.6: reporting can outlive the validator registry; imported type owners
+// D5.2.5: reporting can outlive the validator registry; imported type owners
 // stay in the result pool until its cleanup, including repeated schema loads.
 TEST_F(AstValidatorTest, ImportedSchemaOwnersSurviveRegistryDestruction) {
     const char* schema = "import .mod_ledger_import_types\ntype Document = Entry\n";

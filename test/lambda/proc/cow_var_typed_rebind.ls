@@ -1,6 +1,6 @@
 // CW33 / S9.1.3: a typed `var` parameter that is REBOUND inside the callee
 // publishes its final value through the caller's home, exactly like an
-// untyped `var` (D8.1.1v10). Every scalar lane, string, record and their
+// untyped `var` (D8.3.3). Every scalar lane, string, record and their
 // optional forms; rebinds inside branches and loops; a `let` snapshot taken
 // before the call keeps its value (S9.1.2). Identical on interp, jit and auto.
 

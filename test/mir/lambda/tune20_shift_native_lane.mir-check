@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T20-3 #3 (D2.4.1-D2.4.3): the inline native shift/bitwise lowering opens each operand's proven `int` lane -- the word instruction consumes the raw parameter registers directly. The shl/shr registry rows describe only the boxed fn_*_item fallback; when the emitter requested that Item descriptor for the inline operands, both were boxed before the shift and the tag bits were shifted (paraffins nb(23) = inf, mandelbrot2 `bor: operands must be integer`). The single int2it_lane per function is the result box.",
+  "description": "T20-3 #3 (D2.3.4-D2.3.5): the inline native shift/bitwise lowering opens each operand's proven `int` lane -- the word instruction consumes the raw parameter registers directly. The shl/shr registry rows describe only the boxed fn_*_item fallback; when the emitter requested that Item descriptor for the inline operands, both were boxed before the shift and the tag bits were shifted (paraffins nb(23) = inf, mandelbrot2 `bor: operands must be integer`). The single int2it_lane per function is the result box.",
   "checks": [
     {
       "in_func": "_half_#",

@@ -2,7 +2,7 @@
 
 `grammar.js` is Lambda's first structural check, not a language authority.
 This adapter deliberately reports both directions of a difference so each one
-is adjudicated against D8.1.2v3 rather than silently choosing the C parser.
+is adjudicated against D8.1.1 rather than silently choosing the C parser.
 """
 
 from __future__ import annotations
@@ -178,7 +178,7 @@ def review_source(status: ParserStatus, source: Path,
     if review is None:
         return "parser-review", (
             f"unreviewed {status.tree_status}/{status.c_status}: {source}; "
-            "adjudicate under D8.1.2v3")
+            "adjudicate under D8.1.1")
     if review.source_hash != _source_hash(source):
         return "parser-review-stale", f"fixture content changed: {source}"
     if (review.tree_status, review.c_status) != (status.tree_status, status.c_status):

@@ -1,4 +1,4 @@
-// Cue selection is pure; native playback belongs to handlers (S12.1.3, D7.5.4).
+// Cue selection is pure; native playback belongs to handlers (S12.1.3, D11.3.1).
 import dom
 import model: .mod_model
 

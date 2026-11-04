@@ -2,7 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// prepared native plans: no DOM, script values or callback-owned allocations (D4.5.2).
+// prepared native plans: no DOM, script values or callback-owned allocations (D5.5.2).
 static constexpr unsigned AUDIO_GRAPH_OWNERS = 8, AUDIO_GRAPH_BUSES = 16,
     AUDIO_GRAPH_SENDS = 4, AUDIO_GRAPH_INSERTS = 4, AUDIO_GRAPH_CHUNK = 256;
 static constexpr size_t AUDIO_GRAPH_STORAGE_LIMIT = 8u * 1024u * 1024u;

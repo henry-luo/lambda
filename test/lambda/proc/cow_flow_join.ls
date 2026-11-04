@@ -1,4 +1,4 @@
-// S9.1.2 / D4.4.1: MIR Direct picks a raw or share-checked store at compile
+// S9.1.2 / D5.4.1: MIR Direct picks a raw or share-checked store at compile
 // time from its "may be shared" facts, and used to update those facts in
 // emission order only. A detach or rebind inside one branch arm cleared the
 // fact for the path that skipped the arm, and a share made late in a loop

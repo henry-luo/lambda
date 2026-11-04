@@ -12,7 +12,7 @@ extern "C" {
 
 #include "../lambda.h"
 
-// D6.2.2v2: direct Document callable targets for the selection operations.
+// D7.2.2: direct Document callable targets for the selection operations.
 Item dom_create_range(void);
 Item dom_get_selection(void);
 

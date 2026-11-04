@@ -4859,7 +4859,7 @@ static PaintList* paged_publish_paint(PagedFlowState* state) {
     return &record->paint;
 }
 
-// D4.5.1v4: shared painters decode directly into the edition's resource owner.
+// D5.5.1: shared painters decode directly into the edition's resource owner.
 struct PagedPaintResources {
     ViewTree* tree;
     UiContext* ui;
@@ -5036,7 +5036,7 @@ static TypesetStatus paged_publish_image(PagedFlowState* state, LayoutViewNode* 
     if (!image) return TYPESET_OK;
     ViewTree* tree = state->tree;
     if (block->embed && block->embedp()->selected_image_source) {
-        // D4.5.1v4: an edition owns its images after the host cache and DOM workspace retire
+        // D5.5.1: an edition owns its images after the host cache and DOM workspace retire
         image = load_document_image_resource(tree->model->document, &tree->model->image_resources,
             block->embedp()->selected_image_source);
         if (!image) return paged_flow_fail(state, TYPESET_UNPLACEABLE, block,
@@ -5060,7 +5060,7 @@ static TypesetStatus paged_publish_image(PagedFlowState* state, LayoutViewNode* 
         (!block->scroller || (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
             block->scroll()->overflow_y == CSS_VALUE_VISIBLE));
     node->image_box = lam::up(box);
-    // retain the image's page-space transform before the DOM workspace is reused (D4.5.1v4).
+    // retain the image's page-space transform before the DOM workspace is reused (D5.5.1).
     Rect border = render_geometry_block_border_rect(&blot, block, 1.0f);
     RdtMatrix matrix;
     if (render_geometry_transform_matrix(block->transformp(), border.x, border.y, border.width, border.height, &matrix)) {
@@ -6530,7 +6530,7 @@ void paged_flow_compose(LayoutContext* lycon) {
     ViewTree* tree = state->tree;
     // the browsing layout materializes generated boxes and recascades, which
     // advances the document's mutation epoch; the edition is built from that
-    // settled DOM, so it adopts the epoch before publication (D4.5.1v4)
+    // settled DOM, so it adopts the epoch before publication (D5.5.1)
     tree->model->source_epoch = tree->model->document->mutation_epoch;
     if (state->pass) { view_tree_model_accept(tree, state->pass); state->pass = nullptr; }
     // running elements and margin content lay out outside the flow's hooks

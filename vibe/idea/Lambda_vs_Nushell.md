@@ -128,11 +128,11 @@ well as a shipped runtime direction.
 
 ### Effects and failures
 
-Lambda's **S12.1** and **D6.1.1** define `fn`/`pn` as a declared,
+Lambda's **S12.1** and **D7.1.1** define `fn`/`pn` as a declared,
 compiler-checked one-bit effect system: an `fn` is pure and deterministic;
 only a `pn` may perform effects; an `fn` cannot call a `pn`. This is valuable
 for reusable transformations and is intended to licence sound fusion and
-parallelization under **D6.1.2**.
+parallelization under **D7.1.2**.
 
 Nushell's command vocabulary is its effect surface: `ls`, `cd`, `save`, an
 external program, and a user-defined `def` all compose in the pipeline. It has
@@ -480,9 +480,9 @@ are the source for this summary.
   and visualizations for structured values where their relevant features are
   enabled.
 
-Lambda has a different kind of callable metadata. **D6.1.1** requires every
+Lambda has a different kind of callable metadata. **D7.1.1** requires every
 callable surface—including system-function registry entries and Jube-module
-signatures—to carry the `fn`/`pn` effect bit; **D6.4.1** requires public system
+signatures—to carry the `fn`/`pn` effect bit; **D7.6.1** requires public system
 functions to publish a narrow successful `return_type`. **S7.10** further
 specifies the cardinality/error contract for those functions. Lambda therefore
 has the ingredients for semantically reliable callable contracts, but its
@@ -516,7 +516,7 @@ native commands are nevertheless Rust implementations, and its Polars plugin
 is an excellent answer for large columnar datasets. See [How Nushell Code Gets
 Run](https://www.nushell.sh/book/how_nushell_code_gets_run.html).
 
-Under **D8.1.1v3**, Lambda uses a tiered design: a boxed AST interpreter (T0)
+Under **D8.3.1**, Lambda uses a tiered design: a boxed AST interpreter (T0)
 is the default; MIR Direct can produce a native JIT tier (T1) under the retained
 tier policy. This makes Lambda better positioned for compute-heavy language
 code, vector operations, and reusable transformations after JIT promotion. It
@@ -583,7 +583,7 @@ transformation. That composition treats each tool as the thing it is best at.
 
 - Lambda formal semantics: **S2.1.1**, **S7.4**, **S9.1**, **S10.1.1**,
   **S12.1**, **S14.1–S14.3** — `doc/Lambda_Formal_Semantics.md`.
-- Lambda formal design: **D6.1.1–D6.1.2**, **D8.1.1v3** —
+- Lambda formal design: **D7.1.1–D7.1.2**, **D8.3.1** —
   `doc/Lambda_Formal_Design.md`.
 - Lambda implementation status: formal-semantics Appendix A, especially
   `S14.2, S14.3`.

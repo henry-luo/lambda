@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conservative JS native-helper dependency audit (D8.1.3v25).
+"""Conservative JS native-helper dependency audit (D8.4.2).
 
 Requires Xcode libclang on macOS. Includes function/address/data dependencies,
 macro expansion, actual MIR-emitter strings, host exports and test references.

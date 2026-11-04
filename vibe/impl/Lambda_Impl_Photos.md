@@ -10,8 +10,8 @@ gates retain the qualification limits recorded below.
 
 Design: [Photos proposal](../Lambda_Demo_Photo_Editor.md). Existing contracts:
 **S9.1.2 / S9.2.2** immutable snapshots, **S12.1.3** pure views and procedural
-handlers, **D5.3.3** precise roots, **D4.5.2** owned pixel transport,
-**D7.2.4v3** shipped package paths. No formal ruling changes.
+handlers, **D6.3.3** precise roots, **D5.5.2** owned pixel transport,
+**D9.3.4** shipped package paths. No formal ruling changes.
 
 ## Active checkpoint
 
@@ -73,7 +73,7 @@ The file-dialog replay exposed four leaked `FormControlProp` allocations. A
 script can create a heap-owned form before layout; retained restyling called the
 item-property teardown, cleared its only pointer and left that storage orphaned.
 `radiant/view_pool.cpp` now distinguishes item-layout reset from final release
-and retains the form owner during reset (**D4.5.1v4**). The new
+and retains the form owner during reset (**D5.5.1**). The new
 `RadiantFormControls.ScriptCreatedFormSurvivesRetainedStyleReset` test failed
 before the fix, then passed together with the existing open-select reset test.
 Evidence: `temp/photos-controls-before.log`, `temp/photos-controls-after.log`.
@@ -83,7 +83,7 @@ The close-preview replay also found that the native guard rejected every
 input routing. An explicit guard request from the presented top-level document
 now selects that routing, including when the guard is initially unarmed. This
 lets Photos own Escape after saving and protects native window close; packages
-still own Save/Discard/Cancel (**D7.2.5 / S12.1.3**; detailed window contract in
+still own Save/Discard/Cancel (**D10.2.1 / S12.1.3**; detailed window contract in
 [Radiant Edit Mode §7](../radiant/Radiant_Design_Edit_Mode.md#7-top-toolbar-and-application-input)).
 Photos cancels pending preview/capture/frame state before checking committed
 dirty content, so a clean document can close during a draft. The new lifecycle
@@ -204,7 +204,7 @@ on each committed move is a measured cost for M2's region-processing work.
 
 Shared `lambda.image` now provides sparse tiles backed by `ByteStorage`;
 region/stroke writes detach touched tiles and preserve old Raster/channel
-snapshots (**S9.2.2 / D4.1.4v5**). Dense inputs remain shared spans until edited.
+snapshots (**S9.2.2 / D5.1.4**). Dense inputs remain shared spans until edited.
 GC accounting follows physical byte-store lifetime rather than charging each
 history snapshot for the full logical image. Region composition allocates the
 requested viewport and group scratch directly. PSD/GIF readers of Raster samples
@@ -276,7 +276,7 @@ native RGB ranges and the actual bounded preview geometry during M4 review;
 final full-replay results and aggregate qualification follow below.
 
 A native effect probe caught an iterator borrowing a temporary `MapReader`; the
-adapter now keeps that reader alive for the option scan (**D5.3.3**). The existing
+adapter now keeps that reader alive for the option scan (**D6.3.3**). The existing
 multiply-rejection fixture now asserts the newly supported rendered pixel.
 
 ## M4 retouch and actions — implemented subset
@@ -453,7 +453,7 @@ demo; generated reports and images remain under `temp/photos/`.
 This checkpoint closes the selected M4 core workflow, while retaining explicit
 profile limits. Shared image values remain authoritative (**S9.1.2 / S9.2.2**),
 font acquisition/file publication are procedural (**S12.1.1v3**), and native
-helpers use rooted callers and owned native buffers (**D5.3.3 / D4.5.2**).
+helpers use rooted callers and owned native buffers (**D6.3.3 / D5.5.2**).
 There are no formal ruling or virtual-carrier ABI changes.
 
 The finite delivery covers editable design above a photo, reusable coverage,
@@ -646,7 +646,7 @@ Implemented behavior:
   New coverage recomputes only changed bounds against the frozen source;
   frame subdivision does not compound stroke opacity. Snapshots remain immutable
   (**S9.1.2 / S9.2.2**), source bindings use value equality (**S5.4.3**), and native
-  wrappers use precise roots (**D5.3.3**).
+  wrappers use precise roots (**D6.3.3**).
 - Brush/erase interaction resumes this state. Changed settings or growing source
   coordinates restart from the original source and complete point sequence.
   Actions continue to capture that ordinary command; preview state does not enter
@@ -658,7 +658,7 @@ Implemented behavior:
 - The native view avoids rewriting unchanged surface/target geometry. During
   frame callbacks the demo updates stage pixels/overlays, then refreshes the
   histogram, inspectors and workspace shell at gesture completion/cancellation
-  (**S12.1.3 / D4.5.2**). Pending callbacks are cancelled at pointer-up.
+  (**S12.1.3 / D5.5.2**). Pending callbacks are cancelled at pointer-up.
 - `test/demo/photos/benchmark_brush.py` instruments disposable copies under
   `temp/`, identifies the optimized binary/package, alternates saved/current
   sources and separates edit/publication timing. The application has no profiling
@@ -676,7 +676,7 @@ handler alone would have left that visible lag in place. The canvas upload
 adapter now reconciles attributes only when width/height attributes actually
 change. The common canvas pixel-generation path requests repaint directly;
 bitmap ownership and intrinsic-size updates retain their existing contracts
-(**D4.5.2 / D5.3.3**). Preview frames and initial brush/eraser/retouch publication
+(**D5.5.2 / D6.3.3**). Preview frames and initial brush/eraser/retouch publication
 update only the stage, leaving inspector diagnostics until the transaction
 boundary. A native trace then recorded 40 brush callbacks with zero DOM
 mutations, zero commits and zero layout time, with stable retained view storage.
@@ -781,7 +781,7 @@ The integration combines Photos through `b92fa9809` with master `6ace30436`,
 then its newer `1a4e870e5` tip. Merge resolutions retain master's live form-state
 ownership and speech tests, both demo CLI entries, and the implemented Photos
 proposal checkpoint. Canvas publication and one-stroke history retain the
-existing contracts (**D4.5.2 / S12.1.3**).
+existing contracts (**D5.5.2 / S12.1.3**).
 
 The first combined UI run exposed intrinsic grid minima in the Photos dock:
 `1fr 1fr` expanded its scrollable width to 337 px for a 283 px client area.
@@ -814,7 +814,7 @@ The final Lambda baseline reports **7,912/7,914 passed**, including
 portion passes 5,800/5,802. `math_test_math_includegraphics` retains its bulk-only
 failure and passes the focused rerun. `mermaid_scene_render` loses its batch
 record because the debug host asserts on a scratch-lived view-property owner
-at `view_prop_ensure.cpp:10` (**D4.1.4v5 / D4.5.1v4**); the focused rerun
+at `view_prop_ensure.cpp:10` (**D5.1.4 / D5.5.1**); the focused rerun
 reproduces it. The main checkout's pre-Photos release
 `ed723ec5b4cacd998dea75ea4db2f420120b5dcbebe56fed2131aaa4a5ab91b9`
 passes that fixture, but this different-profile control does not resolve the
@@ -846,7 +846,7 @@ bounded workflows while retaining the existing native image and command paths:
   draft; tool changes, extent changes and history navigation clear stale drafts.
   Clicks and zero-area lines produce no crop. Four finite shaded regions and a
   separate border overlay leave saved/exported pixels untouched
-  (**S9.1.2 / S12.1.3 / D4.5.2**).
+  (**S9.1.2 / S12.1.3 / D5.5.2**).
 
 Inspector dropdown publication now uses the existing `set_selected_index`
 writer, with `dom.tree.options_of` for option lookup. Text/range controls retain
@@ -882,7 +882,7 @@ the same helper. Checkbox/radio paths receive the current transform.
 `render_clip_push_rect_scope` optionally owns a transformed rectangle clip,
 used by selected-option text. Existing callers retain their prior screen-space
 contract. Paths and clips use the existing owned recording machinery
-(**D4.5.1v4 / D4.5.2**). No vendor changes or modal-positioning workaround is used.
+(**D5.5.1 / D5.5.2**). No vendor changes or modal-positioning workaround is used.
 
 `test/ui/test_form_transform.{html,json}` checks translated and rotated captions
 and arrows plus translated checkbox/radio faces. The initial four caption/arrow
@@ -939,7 +939,7 @@ The next bounded milestone is implemented in the current checkout, without a
 worktree. It targets two common missing workflows: visual layer resizing/rotation
 and editable Levels/Curves. Existing affine commands, retained effects, image
 processing, project data and gesture history remain authoritative
-(**S9.1.2 / S9.2.2 / S12.1.3 / D4.5.2**); no formal ruling changes are planned.
+(**S9.1.2 / S9.2.2 / S12.1.3 / D5.5.2**); no formal ruling changes are planned.
 
 Acceptance: eight canvas resize handles and a rotation handle preserve source
 samples and the opposite anchor; Shift constrains corner proportions or snaps
@@ -974,7 +974,7 @@ piecewise-linear curves, with strictly increasing inputs spanning 0–1. The sha
 processor applies master then channel curves after matrix/intensity, then maps
 output endpoints. Alpha stays unchanged. A bucket-to-segment index accelerates
 exact interpolation without losing narrow peaks between 8-bit samples. Fixed
-owned option arrays also survive existing worker option copies (**D4.5.2**).
+owned option arrays also survive existing worker option copies (**D5.5.2**).
 Tone settings invalidate color/blur caches while geometry remains reusable.
 
 The inspector edits curve drafts through a graph or checked Mark point arrays.
@@ -1078,7 +1078,7 @@ Offsets retain whole-pixel placement. A click or return to the press point never
 creates a snap-induced edit. Magenta target lines and cyan guides are overlays;
 Move owns guide hit areas and stable stage capture while guide nodes republish.
 Guide-only edits reuse the cached raster, and histograms follow presented raster
-identity instead of authored metadata changes (**S9.1.2 / S9.2.2 / D4.5.2**).
+identity instead of authored metadata changes (**S9.1.2 / S9.2.2 / D5.5.2**).
 
 Remaining canvas work includes group-mask/filter transforms, rulers/grids,
 navigator, guide locking/layout presets, other-layer snapping, crop aspect/canvas
@@ -1127,7 +1127,7 @@ uncommitted in the current checkout; no worktree or remote publication is involv
 Implement backdrop color-adjustment layers, paintable masks and optional smooth
 RGB/channel curves directly in the current checkout. Source layers and history
 remain immutable snapshots (**S9.1.2 / S9.2.2**); native pixels stay owned outside
-the GC heap and borrowed only during synchronous evaluation (**D4.5.2**).
+the GC heap and borrowed only during synchronous evaluation (**D5.5.2**).
 No formal semantics/design ruling changes are required.
 
 Acceptance: foreground-first order, isolated/pass-through group scope, masked
@@ -1291,7 +1291,7 @@ Implement pixel rulers with guide dragging, a configurable major/subdivision gri
 and move snapping, and a composite navigator with a visible viewport and captured
 click/drag panning. Reuse shared camera math, guide transactions and the retained
 composite. View settings/camera remain per-tab session state without authored
-history (**S9.1.2 / S9.2.2 / S12.1.3**); thumbnail transport follows **D4.5.2**.
+history (**S9.1.2 / S9.2.2 / S12.1.3**); thumbnail transport follows **D5.5.2**.
 
 Acceptance: rulers/grid track pan, fit and zoom; grid work is bounded by the
 visible screen interval. Guide creation commits once on release and cancels
@@ -1323,7 +1323,7 @@ strips and a retained composite thumbnail/viewport outline. Grid SVG dimensions
 never grow with deep zoom. Thumbnail resize/upload and layout reads are skipped
 during live edit gestures, then refresh at completion/cancellation/undo. Camera
 gestures reuse thumbnail pixels; channel previews do not replace the composite
-thumbnail (**D4.5.2**).
+thumbnail (**D5.5.2**).
 
 New ruler gestures override the artwork tool, show guides, derive drafts from
 the original snapshot and commit one guide command on a valid drop. Outside

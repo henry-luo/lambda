@@ -11,7 +11,7 @@ rulings below).
 and Windows only; Linux builds report speech as unavailable, and Linux may later
 get a separate implementation of its own. This resolves §9 questions 3 and 4 by
 deferral. **Ruling (USER, 2026-10-19): audible output is gated by document
-origin**, ratified as D7.5.4; this resolves §9 question 1 (§5). **Ruling
+origin**, ratified as D11.3.1; this resolves §9 question 1 (§5). **Ruling
 (USER, 2026-10-19): document sub-mixes on a window bus** resolve §9
 question 2 (§3.2). **macOS minimum: Lambda's deployment target, macOS 15.7**
 (2026-10-19), which resolves §9 question 5. **Ruling (USER, 2026-10-19):
@@ -34,15 +34,15 @@ in §9 rather than decided here.
 
 | Topic | Governing rulings | Application here |
 |---|---|---|
-| Audible-output gate | [D7.5.4](../../doc/Lambda_Formal_Design.md) | Local documents may start speech from any `pn` context; network documents need sticky activation; only the host grants it up front |
-| Effects | [S12.1.1v3, S12.1.3](../../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system), [D7.4.6](../../doc/Lambda_Formal_Design.md) | Starting, pausing and cancelling speech are `pn` host rows; templates stay pure, and speech starts from `on` handlers |
-| Lambda ↔ Radiant boundary | D7.5.3 | Lambda reaches speech only through the `radiant-dom` module, like `dom.midi_open` |
-| Host values and handles | D7.4.1v2 | An utterance is an integer token; no native pointer becomes visible to scripts |
-| Asynchronous completion | D7.4.2v2 | Synthesis results and speech events are posted to the loop; modules never pump or poll |
-| Native ownership | D4.5.1v4, D4.5.2 | Speech sessions are document resources; text is copied into native storage when an utterance starts |
-| Resource IO | D7.1.2v2, D7.5.2 | Any future engine data files (bundled voice models) are acquired through the central IO door |
-| Build profiles | D7.1.4v2, D7.1.6, D7.1.7v6 | Live speech in `lambda.exe`; a null engine in headless profile C; excluded from `lambda-cli` and `lambda-wasm` |
-| Packages | D7.2.4v3 | An optional pure `lambda.speech` package for narration data |
+| Audible-output gate | [D11.3.1](../../doc/Lambda_Formal_Design.md) | Local documents may start speech from any `pn` context; network documents need sticky activation; only the host grants it up front |
+| Effects | [S12.1.1v3, S12.1.3](../../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system), [D7.1.1](../../doc/Lambda_Formal_Design.md) | Starting, pausing and cancelling speech are `pn` host rows; templates stay pure, and speech starts from `on` handlers |
+| Lambda ↔ Radiant boundary | D9.5.6 | Lambda reaches speech only through the `radiant-dom` module, like `dom.midi_open` |
+| Host values and handles | D9.5.1 | An utterance is an integer token; no native pointer becomes visible to scripts |
+| Asynchronous completion | D9.5.2 | Synthesis results and speech events are posted to the loop; modules never pump or poll |
+| Native ownership | D5.5.1, D5.5.2 | Speech sessions are document resources; text is copied into native storage when an utterance starts |
+| Resource IO | D9.1.2, D11.1.2 | Any future engine data files (bundled voice models) are acquired through the central IO door |
+| Build profiles | D9.2.1, D9.2.2, D9.2.3 | Live speech in `lambda.exe`; a null engine in headless profile C; excluded from `lambda-cli` and `lambda-wasm` |
+| Packages | D9.3.4 | An optional pure `lambda.speech` package for narration data |
 
 Related designs: [the music package](../Lambda_Pkg_Music.md), whose MIDI
 transport this proposal reuses, and [the WebGL design](Radiant_Design_WebGL.md)
@@ -58,7 +58,7 @@ for the document-owned native resource pattern.
 3. Report word and sentence boundaries, so pages can highlight spoken text.
 4. Render speech offline to samples, for deterministic tests and audio export.
 5. Behave the same way as Radiant's other audio: gated by document origin
-   (D7.5.4), owned by the document, released when the document closes.
+   (D11.3.1), owned by the document, released when the document closes.
 
 ## 2. Platform survey
 
@@ -115,8 +115,8 @@ levels:
 
 - **Document sub-mix.** Each document, including each iframe document, owns a
   sub-mix: its streams (MIDI sessions, utterances, decoded audio), its clock,
-  its volume and its D7.5.4 gate. The sub-mix is a document resource, like
-  `DocumentAudio` today, and is released with the document (D4.5.1v4). A
+  its volume and its D11.3.1 gate. The sub-mix is a document resource, like
+  `DocumentAudio` today, and is released with the document (D5.5.1). A
   document never owns another document's audio.
 - **Window bus.** The window owns the single output device and mixes the
   documents' sub-mixes. It carries window-wide master volume and mute.
@@ -148,8 +148,8 @@ M2).
 
 ```
 Lambda page / LambdaJS page
-   │  dom.speak / speechSynthesis.speak            (radiant-dom module, D7.5.3)
-Radiant speech service      document resource: tokens, queue, events (D4.5.1v4)
+   │  dom.speak / speechSynthesis.speak            (radiant-dom module, D9.5.6)
+Radiant speech service      document resource: tokens, queue, events (D5.5.1)
    │  rdt_speech_* C ABI                           (platform engines)
    ├─ AVSpeechSynthesizer (macOS)   ├─ WinRT / SAPI (Windows)
    ├─ unavailable on Linux (deferred, §9)          └─ fake engine (tests)
@@ -162,8 +162,8 @@ Document sub-mix ── window bus ── miniaudio device, or the offline rende
 - **Radiant speech service**, modelled on `DocumentAudio` in
   [`audio.cpp`](../../radiant/audio.cpp): token slots that never alias (as
   `audio_slot_add` guarantees), a per-document utterance queue, PCM handed to
-  the document sub-mix, events posted to the loop (D7.4.2v2). Text is copied into native
-  storage at `speak` time (D4.5.2).
+  the document sub-mix, events posted to the loop (D9.5.2). Text is copied into native
+  storage at `speak` time (D5.5.2).
 - **Fake engine:** deterministic synthesis — tones or silence with computed
   durations, and boundary events at known offsets — for headless and CI runs.
 
@@ -177,7 +177,7 @@ misses its cue, speech starts late and an event reports the delay.
 
 **Ruling (USER, 2026-10-19): `at` is seconds on the document sub-mix clock,
 and `dom.audio_clock(owner)` reads that clock.** The read is a `fn` row, a
-live host read like `dom.midi_info` (D7.4.6). A page records the clock when it
+live host read like `dom.midi_info` (D7.1.1). A page records the clock when it
 starts its music and speaks at that value plus a cue time:
 
 ```lambda
@@ -216,11 +216,11 @@ events.
 
 | Row | Colour | Meaning |
 |---|---|---|
-| `dom.speech_voices()` | `fn`: a live host read (D7.4.6; §9, question 6) | `[{id, name, lang, local, quality, gender}]`, the voices installed now, most natural first; `quality` is `default`, `enhanced` or `premium`, `gender` is `male`, `female` or `unspecified` |
+| `dom.speech_voices()` | `fn`: a live host read (D7.1.1; §9, question 6) | `[{id, name, lang, local, quality, gender}]`, the voices installed now, most natural first; `quality` is `default`, `enhanced` or `premium`, `gender` is `male`, `female` or `unspecified` |
 | `dom.speak(owner, utterance, options)` | `pn` | Queue a string or a `<speak>` element (§4.2); returns a token, or `null` if unavailable |
 | `dom.speech_command(owner, token, command)` | `pn` | `pause`, `resume`, `cancel` |
 | `dom.speech_info(owner, token)` | `fn` | `{state, position, char_index}` |
-| `dom.audio_clock(owner)` | `fn`: a live host read (D7.4.6; §3.4) | Seconds on the owner document's sub-mix clock; 0 before its first stream |
+| `dom.audio_clock(owner)` | `fn`: a live host read (D7.1.1; §3.4) | Seconds on the owner document's sub-mix clock; 0 before its first stream |
 
 Without `voice`, an utterance uses the most natural installed voice for its
 `lang` (the first match in `dom.speech_voices()`), not the platform's language
@@ -294,7 +294,7 @@ Rules:
   `<break>` and `<mark>` never degrade, because the speech service can split an
   utterance there and insert silence or the event itself.
 - **Element values are copied** into native storage when `dom.speak` is called
-  (D4.5.2).
+  (D5.5.2).
 - **Pure construction.** Building markup is ordinary `fn` element construction
   (S12.1.1v3); only `dom.speak` is a `pn` effect.
 - **JavaScript stays plain text.** The Web Speech API's `text` remains a string
@@ -308,7 +308,7 @@ element Apple cannot express gets a documented fallback before M1 ships.
 Pure helpers that build narration data — `<speak>` markup (§4.2) and cue lists
 such as `[{t: 17.0, line: <speak …>}]` — and a ready-made narrator view that
 schedules a cue list against the document sub-mix, as `lambda.music`'s player
-does for performances (D7.2.4v3). All construction is `fn`; transport stays in
+does for performances (D9.3.4). All construction is `fn`; transport stays in
 `on` handlers (S12.1.3).
 
 ### 4.4 LambdaJS: the Web Speech API
@@ -321,7 +321,7 @@ Recognition (`SpeechRecognition`) stays out of scope.
 
 ## 5. Policy
 
-- **Audible-output gate (D7.5.4, USER 2026-10-19).** Starting speech is judged
+- **Audible-output gate (D11.3.1, USER 2026-10-19).** Starting speech is judged
   by the requesting document's origin:
   - **Local documents** (a file the user opened with `view` or `demo`) may start
     speech from any `pn` context, so a local demo can narrate from the start.
@@ -412,7 +412,7 @@ Recognition (`SpeechRecognition`) stays out of scope.
 1. ~~**User activation:** should a formal ruling state that audio and speech start
    only from a user gesture, as the music player and browsers already behave?
    Today this is practice, not a ruling.~~ **Resolved (USER, 2026-10-19):** by document origin,
-   ratified as D7.5.4. Local documents may start audio freely; network documents
+   ratified as D11.3.1. Local documents may start audio freely; network documents
    need sticky activation; only the host grants activation up front (§5).
 2. ~~**Mixer scope:** one mixer per document, or one per window shared by embedded
    documents?~~ **Resolved (USER, 2026-10-19):** a sub-mix per
@@ -434,9 +434,9 @@ Recognition (`SpeechRecognition`) stays out of scope.
    branches are needed. If the target is ever lowered below 14, markers need
    availability checks; below 13, SSML and markers do too.
 6. ~~**Colour of voice enumeration:** the voice list is a host read but varies by
-   machine. Keep it `fn` like other reads (D7.4.6), or make it `pn` because it
+   machine. Keep it `fn` like other reads (D7.1.1), or make it `pn` because it
    is not deterministic across hosts (S12.1.1v3)?~~ **Resolved (USER, 2026-10-19):** `fn`, a live read.
-   This follows D7.4.6 and the existing DOM reads whose answers vary by host or
+   This follows D7.1.1 and the existing DOM reads whose answers vary by host or
    time (`dom.midi_info`, `dom.audio_state`, `dom.bounding_box`, all `fn` with
    `DOM_F_NEUTRAL`). `voiceschanged` tells templates to re-render (§3.5).
 7. ~~**SSML:** accept SSML input in M1 (macOS 13+, Windows), or plain text only at
@@ -495,13 +495,13 @@ As built in M1 (2026-10-19):
   `char_length`, `time`, `name`, `cancelled` and `reason`. `voiceschanged` is a
   window notification, sent to documents that have read the voice list or
   spoken.
-- **Ownership.** Utterances own copies of their text and samples (D4.5.2).
+- **Ownership.** Utterances own copies of their text and samples (D5.5.2).
   Owners follow view rebuilds as MIDI sessions do
   (`radiant_frame_requests_follow_rebuild`). An utterance whose owner leaves the
   document is cancelled without an event, and the document resource frees
   everything at teardown.
-- **Gate (D7.5.4).** `radiant/audio.cpp` holds the origin check, the sticky
-  activation flag and the host grant (`view --autoplay`); see the D7.5.4
+- **Gate (D11.3.1).** `radiant/audio.cpp` holds the origin check, the sticky
+  activation flag and the host grant (`view --autoplay`); see the D11.3.1
   footnote in the formal design for coverage and residue.
 - **Quotas.** 32768 characters and nesting depth 16 per utterance, 64 live
   utterances per document. The PCM byte budget is not implemented yet.
@@ -568,7 +568,7 @@ As built in M2 (2026-10-19):
     no rows set them.
 - **Known gaps.**
   - Engine jobs are sampled on the frame tick rather than posted to the loop
-    (D7.4.2v2), because no general completion-post service exists yet.
+    (D9.5.2), because no general completion-post service exists yet.
   - Sentence boundaries are not reported on macOS: `AVSpeechSynthesizer.write`
     delivers only word and bookmark markers (probed 2026-10-19), and the fake
     engine matches it. The service already maps engine sentence marks to
@@ -588,3 +588,35 @@ As built in M2 (2026-10-19):
   mute, and ducking across documents (a voice in an iframe can lower music in
   its parent)."~~ and the list item ~~"optional ducking within the document"~~.
   Superseded the same day by §9 question 8: no mixer ducking at either level.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](../impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D7.5.4 → D11.3.1
+
+**D11.3.1*** **Audible output is a capability gated by document origin.**
+Starting audible output — synthesized music, decoded audio, speech, and
+unmuted media playback — is judged per requesting document. A document
+whose top-level source is a local file the user opened (a path or `file:`
+URL, as given to `view` or `demo`) may start audio from any `pn` context. A
+document loaded from the network (`http`/`https` or another remote scheme)
+may start audio only after **sticky activation**: once it has received a
+trusted activation-triggering input delivered by the host (a pointer press,
+a touch end, or a non-modifier key press), it stays activated for its
+lifetime. Script-dispatched events never activate. A refused start fails
+visibly — `null`/`false` from the Lambda row, `NotAllowedError` in
+JavaScript — and unmuted `autoplay` media stays paused until activation.
+Muted playback and output-free work (decoding, preparing, offline rendering
+to buffers or files) need no activation. Each document is judged by its own
+origin, so a network document embedded in a local one needs its own
+activation. **Only the host grants activation up front** (a `view`/`demo`
+option or an embedding application's setting); a document never grants it
+to itself. (USER, 2026-10-19) [Radiant_Design_Speech §5]

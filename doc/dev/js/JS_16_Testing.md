@@ -17,7 +17,7 @@ The runner enforces a **zero-crash policy**: any crash or lost test is treated a
 
 ### 1.1 Current batch throughput implementation
 
-Under **D8.1.3v10**, AST batches retain immutable `JsScript` owners and execute
+Under **D8.4.1**, AST batches retain immutable `JsScript` owners and execute
 them in each test's fresh realm. The worker prepares `sta.js`/`assert.js` once
 with `harness:<len>`. For eligible positive AST tests, the coordinator groups
 the ordered include set and strictness and sends a second
@@ -26,7 +26,7 @@ their parsed source and binding facts survive recycling. The include Script
 receives the test's strict directive, while the base harness remains a
 separate non-strict Script. Negative tests retain their previous inclusion
 policy. Hybrid routing interprets test bodies, including async, module and raw
-jobs now served by the shared activations (**D5.1.1v3**), unless their exact
+jobs now served by the shared activations (**D6.1.1**), unless their exact
 name or metadata feature appears in `test/js262/mir_list.txt`. Explicit
 `--ast-only` and `--mir-only` remain available for tier qualification.
 
@@ -50,7 +50,7 @@ optimization level as well as the emitted MIR; changing the requested level
 compiles a fresh image.
 
 Compiled helpers can be shared with interpreted consumers through
-`compile_js_mir_preamble_len` and `instantiate_js_preamble` (**D8.5.1v7**).
+`compile_js_mir_preamble_len` and `instantiate_js_preamble` (**D8.3.5**).
 `JsFormalMir.CachedHarnessFunctionsServeAstAcrossFreshRealms` verifies native
 entry reuse, fresh callable/global state, mutation isolation and precise GC.
 The current image instantiator rebuilds realm metadata and re-emits MIR to
@@ -66,15 +66,15 @@ only markers still owned by the runtime, preserving replaced or deleted
 siblings and the installed descriptors.
 Bootstrap uses own-slot stores, and deferred host families build on a private
 null-prototype staging object so guest prototype setters cannot intercept
-initialization (**D6.2.2v2**).
+initialization (**D7.2.2**).
 Internal HTTP and Blob factories initialize their intrinsic family through
 realm-owned caches, independently of reads or replacements of public bindings.
 Reads and property descriptors resolve the slot; presence, assignment, and
 deletion use ordinary property semantics. Calls still use real callable
-objects and executable entries (**D6.2.2v2**). `runtime_reset_heap` owns the
+objects and executable entries (**D7.2.2**). `runtime_reset_heap` owns the
 normal full reset; the worker no longer duplicates it. Binding removal after
 heap destruction observes the root generation without creating new roots
-(**D5.3.3**).
+(**D6.3.3**).
 
 The selective native harness remains C+. Its `assert.throws` compares the
 thrown object's constructor identity, and `verifyProperty` performs real
@@ -163,7 +163,7 @@ After each test the worker decides how to recover (`:3713`): on crash/timeout it
 
 Two reset functions in `js_runtime_state.cpp` define what survives between tests:
 
-- **`js_batch_reset_to(checkpoint_var_count)`** — the **light, per-test** path used in steady state. It restores module-vars to the preamble checkpoint, clears transient call state, re-creates the mutable global singletons that tests may have mutated (Math/JSON/console/Reflect/Atomics/`$262`, constructor prototypes, `globalThis`, DOM state), resets the event loop, regex caches, and every Node-module namespace cache, and clears strict mode. D8.4.3v2 has no pending exception state to reset. The **heap is left intact** — the harness is not recompiled.
+- **`js_batch_reset_to(checkpoint_var_count)`** — the **light, per-test** path used in steady state. It restores module-vars to the preamble checkpoint, clears transient call state, re-creates the mutable global singletons that tests may have mutated (Math/JSON/console/Reflect/Atomics/`$262`, constructor prototypes, `globalThis`, DOM state), resets the event loop, regex caches, and every Node-module namespace cache, and clears strict mode. D7.4.3 has no pending exception state to reset. The **heap is left intact** — the harness is not recompiled.
 - **`js_batch_reset()`** (`:271`) — the **heavy, crash-recovery** path. It does everything `..._to` does, **plus increments `js_heap_epoch`** (`:273`) and tears down more aggressively (module registry + module cache, function-pointer→`JsFunction` cache, builtin cache, `js_deep_batch_reset`, proto-snapshot invalidation). It is the path taken after a crash/timeout and at worker exit, paired with `heap_destroy` in `main.cpp`.
 
 **`js_heap_epoch`** (`js_runtime_state.cpp:65`, exposed via `js_get_heap_epoch`) is the invalidation token for lazily-cached, heap-allocated singletons. Module-namespace getters in `js_runtime.cpp` cache an `Item` + an epoch and rebuild when `epoch != js_heap_epoch` (e.g. `async_hooks`, `timers`, `worker_threads` at `:31399`+), so a `js_batch_reset` that bumps the epoch transparently invalidates ~30 such caches without touching each call site. What is **not** reset by either path: compiled MIR code for the harness preamble (retained until heap teardown), the OS-cached test source files, and process-global statics outside the registered reset surface (see §10).

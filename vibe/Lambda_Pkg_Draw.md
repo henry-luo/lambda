@@ -12,10 +12,10 @@ extract reusable code from `test/demo/draw`, and consolidate drawing-specific
 `lambda.editor` modules where necessary. The first release should provide an
 embeddable diagram editor and a useful pure drawing API.
 
-**Spec linkage:** package naming and source distribution follow **D7.2.1–D7.2.4v3,
-D7.2.6**; values and effects follow **S1.4, S12.1.1v3, S12.1.3**; native
-presentation ownership follows **D4.5.1v4–D4.5.3v2**; execution-tier qualification
-follows **D8.1.1v18**. This proposal changes no formal ruling. Package APIs and
+**Spec linkage:** package naming and source distribution follow **D9.3.1–D9.3.4,
+D9.3.5**; values and effects follow **S1.4, S12.1.1v3, S12.1.3**; native
+presentation ownership follows **D5.5.1–D5.5.3**; execution-tier qualification
+follows **D8.3.2**. This proposal changes no formal ruling. Package APIs and
 data conventions below are proposed contracts, not additions to the language
 specification.
 
@@ -85,7 +85,7 @@ not gate this release. Each subsequent feature needs its own finite milestone.
 
 ### 3.1 Namespace and entry points
 
-Under **D7.2.4v3**, `lambda.editor.draw` maps to
+Under **D9.3.4**, `lambda.editor.draw` maps to
 `lmd/package/editor/draw.ls`; submodules map to the sibling `draw/` directory.
 `lmd` is the source-tree location, not an import root. New applications should
 use `lambda.editor.draw`, not a new `lmd.editor` namespace.
@@ -407,7 +407,7 @@ handlers perform effects (**S12.1.3**).
 Keep the canvas owner, scrollport, and active native text controls stable
 through edits. Replacing inner SVG paint is acceptable initially, matching
 the demo; replacing the capture/focus owner during a gesture is not. Native
-ownership and retained presentation follow **D4.5.1v4–D4.5.3v2**, using the
+ownership and retained presentation follow **D5.5.1–D5.5.3**, using the
 existing DOM bridge rather than a new drawing-specific native lifetime model.
 
 Every instance needs a distinct supplied/generated presentation prefix for
@@ -441,7 +441,7 @@ its default only when v4 migration tests and UI file replays are updated.
 The connector-editing implementation now completes that switch: the demo writes
 v4 waypoints, retains v1–v3 reads, and validates its fixed page/object profile
 before opening. Package archives continue to support custom pages and objects
-independently of the demo inspector (**S1.4, D7.2.4v3**).
+independently of the demo inspector (**S1.4, D9.3.4**).
 
 Validate before publishing: container shape, supported version/profile,
 unique IDs, finite geometry, attribute types, endpoint references, ports,
@@ -466,7 +466,7 @@ contract; do not force SVG source objects to become semantic vertices.
 Likewise, rich-document drawing blocks reuse `draw.schema`, commands, geometry,
 and rendering while retaining the surrounding editor's document and history.
 The package does not take over `lambda.dom` user-agent editing policy, whose
-ownership remains governed by **D7.2.5**.
+ownership remains governed by **D10.2.1**.
 
 ### 8.3 Graph layout
 
@@ -579,7 +579,7 @@ Existing focused entry points include:
 The UI suite names above are registered in `test/ui/ui_test_manifest.json`.
 Confirm newly added discovered names before extending filters. Run package
 cases under interpreter, automatic tiering, and
-MIR JIT (**D8.1.1v18**), using the existing `LAMBDA_EXEC_BACKEND` mechanism.
+MIR JIT (**D8.3.2**), using the existing `LAMBDA_EXEC_BACKEND` mechanism.
 At implementation milestone boundaries, run `make test-lambda-baseline` for
 package changes and `make test-radiant-baseline` for UI/Radiant changes per
 `test/README.md`. Run `make test-drawing` when shared native SVG/DOM behavior

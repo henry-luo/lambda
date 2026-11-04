@@ -125,7 +125,7 @@ uint32_t css_resolved_style_inherited_revision(DomElement* element) {
 }
 
 static uint32_t css_parent_revision(LayoutContext* context, DomElement* element) {
-    // source wrappers above the selected root do not own this view's caches (D4.5.1v4).
+    // source wrappers above the selected root do not own this view's caches (D5.5.1).
     DomElement* parent = element != context->doc->root ? css_style_parent(element) : nullptr;
     CssResolvedStyle* style = parent && parent->layout_cache
         ? parent->layout_cache->resolved_style.get() : nullptr;
@@ -701,7 +701,7 @@ bool css_resolved_style_matches_context(LayoutContext* context, DomElement* elem
 
 bool css_resolved_style_copy_margin(LayoutContext* context, DomElement* element, Margin* margin) {
     if (!margin || !css_resolved_style_matches_context(context, element, true)) return false;
-    // D4.5.1v4: intrinsic queries copy the clean computed baseline, never layout's RTL margin adjustment.
+    // D5.5.1: intrinsic queries copy the clean computed baseline, never layout's RTL margin adjustment.
     *margin = element->layout_cache->resolved_style->geometry.margin;
     return true;
 }

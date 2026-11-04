@@ -2220,7 +2220,7 @@ passes `/` through. Both separators are retired.)*
 path picks its root, and there are three:
 
 1. **A name is a package root.** Names belong to packages: `lambda` is the
-   reserved root for what Lambda ships (D7.2.4), the built-in and registered
+   reserved root for what Lambda ships (D9.3.4), the built-in and registered
    modules keep their bare names (`import math` ≡ `import lambda.math`), and
    every other name is held for packages from the future Lambda package
    registry. A bare root never falls back to a file, so `import
@@ -2236,7 +2236,7 @@ path picks its root, and there are three:
 *What this replaces.* Before this ruling a bare `import a.b` loaded
 `./a/b.ls` from the working directory, as `Lambda_Modules.md` documented, but
 the resolver actually swapped the first segment for the Lambda home (a
-leftover of the pre-D7.2.4 `lambda.package.x` scheme), so `import
+leftover of the pre-D9.3.4 `lambda.package.x` scheme), so `import
 test.benchmark.x` had been loading `lambda/benchmark/x.ls`. Working-directory
 resolution also made a module's meaning depend on where the script was run
 from. Package names and relative files now cannot collide: a bare name is a
@@ -2961,7 +2961,7 @@ import, not new syntax — recorded as SO37.
 
 ### 7.27 Lists, blocks, and the content model (decided 2026-09-21 — ratified as S2.5 + S2.6)
 
-> **Implemented 2026-09-23**, both tiers, by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) P1–P4. The kind of a query result was ruled 2026-09-23 as S8.2.4 (a run; [Expr_Query §4.1](Lambda_Expr_Query.md)). The remaining LaTeX deviation closed on 2026-10-02: S2.6.1v2/D2.6.5v4 require command string runs to be array children and all element appends to merge adjacent strings.
+> **Implemented 2026-09-23**, both tiers, by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) P1–P4. The kind of a query result was ruled 2026-09-23 as S8.2.4 (a run; [Expr_Query §4.1](Lambda_Expr_Query.md)). The remaining LaTeX deviation closed on 2026-10-02: S2.6.1v2/D3.3.1 require command string runs to be array children and all element appends to merge adjacent strings.
 
 **Revision (USER, 2026-09-23): `count(x)` is the size of the run `x` is.**
 S8.3.3v2 had defined `count` as the number of items a value contributes
@@ -3026,7 +3026,7 @@ were raised:
    construction-time courtesy: a normalized element must stay normalized, so
    `e[i] = v`, insertion, and removal renormalize at the write site, and
    positions after the write may shift.
-8. **Parsed documents are bound by the same model** (S2.6.1v2, D2.6.5v4;
+8. **Parsed documents are bound by the same model** (S2.6.1v2, D3.3.1;
    USER, 2026-10-02). Every element append merges adjacent strings. LaTeX
    commands carry consecutive string arguments in an array child,
    `<cmd ["str", "str"]>`, and the package and formatter read its entries as
@@ -3035,7 +3035,7 @@ were raised:
    break a run. Arrays keep the argument boundaries without ambient state.
 
    **Superseded implementation exception:** ~~LaTeX keeps consecutive strings
-   unmerged through MarkBuilder's verbatim element append~~ (D2.6.5v3).
+   unmerged through MarkBuilder's verbatim element append~~ (D3.3.1).
    This exception hid argument boundaries in adjacent element strings; the
    array child now makes those boundaries explicit.
 
@@ -3091,7 +3091,7 @@ parse error, against 14.
 
 **Why S2, not S16.** Normalization decides which value is built, not which
 program a text denotes; and it applies where there is no source text at all
-(input parsers appending through `list_push`, D2.6.5v2). The ruling therefore
+(input parsers appending through `list_push`, D3.3.1). The ruling therefore
 sits in the value domain, and S16.7 keeps only what is top-level-specific: an
 emptied script's value is a single `null`. S2.5 and S2.6 were appended after S2.4
 Paths rather than inserted earlier, so no existing ruling ID is renumbered.
@@ -3172,7 +3172,7 @@ kind rule at all. The rulings:
 25. **S3.3v2**: for a list, `results or default` works (empty is `null`),
     but a single falsy result (`false`, `""`, `null`, error) reads as no
     result; `if (r)` ≡ `if r` always, since `(r)` ≡ `r` even for a list.
-26. **D2.6.5v3**: three append disciplines — content (normalize + splice),
+26. **D3.3.1**: three append disciplines — content (normalize + splice),
     sequence (splice lists, else verbatim), verbatim (arguments, rest, pairs,
     single-value slots with the list → array image); one list flag; spreading
     decided by the value's kind, never by syntax.
@@ -3690,3 +3690,46 @@ and exact previous wording are retained below.
 >   is the *sole* discriminator between propagation and handling. A brace
 >   that carries that grammar burden is structural by construction, like
 >   `fn`'s body brace and `case T { ... }`'s arm brace — not like `if`'s.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.6.5v4 → D3.3.1
+
+**D3.3.1** **The append discipline follows the destination: content,
+sequence, or slot.** Three runtime appends exist and they are not
+interchangeable. The **content** append (`list_push()`) applies S2.6's
+normalization — a `null` or `""` is dropped, a list is spliced in, a string
+or binary is concatenated onto a preceding item of the same kind — and is
+correct only for element content and script top-level content; content
+writes after construction preserve it (S2.6.5). The **sequence** append
+builds lists and array literals: it splices a list (S2.5.1v2) and stores
+every other value verbatim, `null` included, adjacent strings apart. The
+**verbatim** append stores the item as one value whatever it is — argument
+and rest lists, `zip` pairs, and every single-value slot (a map field, an
+attribute, an object field), where a list is first turned into its array
+image (S2.5.6). Which append a site uses is decided by what it builds,
+never by a per-format switch, and a list's spreading is decided by the
+value's kind at run time, never by the syntax around it (S1.6): the one
+list flag is the kind bit.
+The split is **content versus collection**, never per format: every input
+parser yields normalized element content (S2.6.1v2). MarkBuilder's element
+child append uses the owner-aware content append; collection append APIs
+also dispatch element destinations to content normalization, so none can
+preserve adjacent element strings. MarkEditor child writes rebuild through
+the same content append in both edit modes (S2.6.5); web DOM node operations
+have explicit positional-node APIs. LaTeX commands carry consecutive string
+arguments in one array child, `<cmd ["a", "b"]>`, and their consumers read
+the array entries as positional arguments. Arrays remain non-spreading
+values (S2.6.3). The choice belongs at the destination and append site,
+never ambient state: a process-wide "suppress merging" flag leaks across
+allocations and early returns. The former flag on
+`EvalContext`/`InputAllocationContext` is retired. [LR09-R3; Design_Syntax §7.27]

@@ -3,7 +3,7 @@
 **Status:** Initial core HTML profile implemented, 2026-10-15. Broad xslTNG
 coverage remains in progress; this is not the completed full port.
 **Design:** [Lambda_Pkg_Docbook.md](../Lambda_Pkg_Docbook.md).
-**Formal linkage:** D7.2.4 (package namespace), S12.1.1v3 (effects),
+**Formal linkage:** D9.3.4 (package namespace), S12.1.1v3 (effects),
 S2.6.1v2–S2.6.5 (content), S8.2.2v6 (namespaces), S10.4.3v2 (lineage),
 S1.8 (code/data), S7.4.2/S7.4.4 (errors). No formal rulings changed.
 
@@ -79,7 +79,7 @@ Direct source viewing now accepts
 DocBook book with chapters, a table, lists, links and notes. XML dispatch uses
 expanded root names and preserves generic XML's stylesheet/source behavior.
 The source adapter resolves bundled CSS from Lambda's installation and
-captured media through data URIs, without writing an export (D7.2.4,
+captured media through data URIs, without writing an export (D9.3.4,
 S12.1.1v3). The file browser previews it through that route and retains XML
 in the Source tab.
 

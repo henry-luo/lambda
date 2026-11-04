@@ -2,7 +2,7 @@
 
 > **Status:** review, 2026-10-22. Informative: it proposes, it does not rule. Items that would change a ruling need the user's decision and then a revision of the formal spec (`doc/Doc_Convention.md` §3).
 > **Basis:** one working session that implemented Phase 1 (M0–M4) of [Lambda_Pkg_Archive.md](Lambda_Pkg_Archive.md): 21 Lambda modules (about 2,100 lines) under `lmd/package/archive/`, the demo `test/demo/archive/` with its model golden and native replay, about 900 lines of tests, and about 1,300 changed lines of C/C++ in `lambda/`, `lib/` and `radiant/` (the enablers and the defects in §5). Every item below was met in that work, not taken from reading.
-> **Spec linkage:** S7.6.7v4 (procedure handlers are statements), S12.1.1v3 (`fn`/`pn`), S13.2.1 (addresses), S13.3.1v2 (task ownership), S13.3.2 (cancellation), S16.10.1v2 (reserved names), S17.3.1 (`argv`), S11.4.3/D3.3.2v2 (the implicit `any \ error` return contract, E208).
+> **Spec linkage:** S7.6.7v4 (procedure handlers are statements), S12.1.1v3 (`fn`/`pn`), S13.2.1 (addresses), S13.3.1v2 (task ownership), S13.3.2 (cancellation), S16.10.1v2 (reserved names), S17.3.1 (`argv`), S11.4.3/D4.3.2 (the implicit `any \ error` return contract, E208).
 > **IDs:** RV1-1 … RV1-27 are this review's items; §4 ranks them.
 
 ---

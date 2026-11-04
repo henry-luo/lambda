@@ -3,11 +3,11 @@
 **Date**: 2026-08-14  **Status**: **v3 is the only Lambda/LambdaJS
 generated-function convention as of 2026-08-17.** P0 / P1.1–P1.6 / P2 /
 P2.5 / P2.6 / P2.7.0 / P3 / P5a LANDED; P1.7 partial; P2.7 (protocol) and
-P4 remain open. P5a retires the v2 function ABI only; D5.2.2v3 payload-owner
+P4 remain open. P5a retires the v2 function ABI only; D6.2.2 payload-owner
 slots at native and hosted-language boundaries intentionally remain.
 Plan for [`Lambda_Design_Compiling_Return_Value.md`] (RV1–RV18 + addenda
-RV3a / RV10a / RV14a / RV17a; formal spec D5.2.1v3 / **D5.2.2v3** /
-**D5.2.3** / D2.7.2v2 / D8.4.2v3, **v1.25.0**). Open design residue: RVO8
+RV3a / RV10a / RV14a / RV17a; formal spec D6.2.1 / **D6.2.2** /
+**D6.2.3** / D6.2.1 / D7.4.2, **v1.25.0**). Open design residue: RVO8
 (GVN multi-out), RVO9 (dummy lane-2), **RVO11 / DO24** (unnamed wide
 temporaries across a loop back edge — gates P2.7's reclaim), and proposed
 **RVO13/RVO14** (wide-free public-shape refinement and genuinely lazy pending
@@ -102,7 +102,7 @@ Lambda AND LambdaJS; every deletion here gates on both lanes migrating):
 **LambdaJS sites** (RV13 — adopts the convention):
 `js_mir_function_class_lowering.cpp:822/:959/:1356/:1970/:2480`,
 `js_mir_module_batch_lowering.cpp:5814`; LJS already drives `MirValue` /
-`em_require_rep` (D2.4 footnote), which v3's pending tracking plugs into.
+`em_require_rep` (D2.3 footnote), which v3's pending tracking plugs into.
 
 **MIR facts** (vendored, never patched — rule 16): multi-results are core
 (`MIR_new_func_arr` nres, `MIR_CALL` result output operands, interp
@@ -218,7 +218,7 @@ zero emitted-code change (MT7 budgets untouched).
   - **escape** sites (store to binding/container/root, argument
     position, next-call boundary): if `maybe_pending`, emit the 2-insn
     test + out-of-line patch (allocate destination-owned storage per
-    D5.2.2, retag, write back); clear `maybe_pending` on the resolved
+    D6.2.2, retag, write back); clear `maybe_pending` on the resolved
     edge;
   - patch helper: one new runtime function
     `lambda_item_resolve_pending(Item, uint64_t payload)` → boxed Item
@@ -277,8 +277,8 @@ zero emitted-code change (MT7 budgets untouched).
    `generate_native` admission) get `RETURN_SHAPE_NATIVE` when provably
    infallible, else `RETURN_SHAPE_NATIVE_ERROR`. **Admission stays
    conservative**: TE-17's `may_defect` fixed point does not exist yet
-   (D6.1.3 footnote) — use the existing can-raise summary, default to
-   shape 4, and leave admission widening as follow-up gated on D6.1.3.
+   (D7.1.3 footnote) — use the existing can-raise summary, default to
+   shape 4, and leave admission widening as follow-up gated on D7.1.3.
 2. Shape 4 lowering: `[native_value, error_item]`, lane 2 `ItemNull` = no
    error (RV9); caller check = one compare + branch; error arm feeds the
    TE-15 skip machinery exactly where the boxed ItemError arm does today.
@@ -306,7 +306,7 @@ R26 is the named canary — typed must win again); no untyped regression.
   runtime dispatch resolves it before exposing an Item to C++. The trailing
   JS `_scalar_home` parameter and function-pointer casts are deleted.
 - Focused gates: Lambda MIR emission **48/48**, JS MIR emission **21/21**,
-  JS suite **351/351**. This implements D5.2.1v3 / D8.4.2v3.
+  JS suite **351/351**. This implements D6.2.1 / D7.4.2.
 
 ### P2.6 — Read the watermark effect *(RV14a; independent, land first)*
 
@@ -1112,11 +1112,11 @@ alone cannot reach. Windows CI is a consequence, not the motivation.
 
 ### P4 — Formal/doc closure
 
-- Already staged: D5.2.1v2 / D2.7.2v2 / D8.4.2v2, plus **D5.2.2v2** (locals
-  as destination-owned storage, RV16) and **D5.2.3** (watermark ownership
+- Already staged: D6.2.1 / D6.2.1 / D7.4.2, plus **D6.2.2** (locals
+  as destination-owned storage, RV16) and **D6.2.3** (watermark ownership
   selects the transport, RV14/RV14a/RV15) — spec **1.22.0**. At this point
   flip the Appendix A footnotes from "decided, v1 ships" to landed status,
-  record the D5.2.2 discard-home/tail-forward clause lapse, and close
+  record the D6.2.2 discard-home/tail-forward clause lapse, and close
   **DO24** if P2.7.3 settled it.
 - Update `Lambda_Design_Stack_Frame.md` SF14 entry with the v3
   supersession note; refresh LR/JS overview docs' return-ABI sections.
@@ -1127,10 +1127,10 @@ P5a removes the selectable v2 convention and every first-party generated
 return-ABI use of it: `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, direct-call
 home donation, generated `_scalar_home` parameters, the v2 epilogues, and
 the caller-home fields in Lambda/LambdaJS return descriptors. The formal
-record is D5.2.1v3 / D8.4.2v3.
+record is D6.2.1 / D7.4.2.
 
 `em_scalar_home_*`, `em_finalize_scalar_homes`, and C/host `*_into`
-parameters are **not** v2 ABI residue. They provide D5.2.2v3 ownership for a
+parameters are **not** v2 ABI residue. They provide D6.2.2 ownership for a
 wide payload that remains live in a caller's side-number extent, including
 C-helper returns and the separately versioned hosted-language compiler API.
 Deleting them would manufacture dangling `int64`/out-of-band-double Items.
@@ -1229,7 +1229,7 @@ and loop reclaim, not a deletion prerequisite.
         broad-predicate RV16 (+600–800 insns/bench) to recover RV15's ~142.
         Net ≈ +600. Revisit only if int64-heavy code becomes a target.
   - [x] RVO11's container question **VERIFIED 2026-08-15**: `array_set` copies
-        wide payloads into array-owned cells and re-tags (D5.2.2); containers
+        wide payloads into array-owned cells and re-tags (D6.2.2); containers
         are not a hole. Bindings remain the only population.
 - [x] **P3 slot transport (RV12)** — *landed + gated 2026-08-14: 3719/3719
       both configurations. Under v3 the `_scalar_home` parameter and every
@@ -1239,10 +1239,10 @@ and loop reclaim, not a deletion prerequisite.
       the slot path it needs is now the shipping v3 mechanism, so the
       remaining Windows work is `nres` selection, already handled by
       `em_companion_transport`.*
-- [ ] P4 formal-doc closure (footnotes → landed; SF14 note; D5.2.2v2 /
-      D5.2.3 / DO24 status)
+- [ ] P4 formal-doc closure (footnotes → landed; SF14 note; D6.2.2 /
+      D6.2.3 / DO24 status)
 - [x] P5a delete the v2 generated-function ABI — landed 2026-08-17. Payload
-      ownership slots remain intentionally under D5.2.2v3; P2.7 is no longer
+      ownership slots remain intentionally under D6.2.2; P2.7 is no longer
       a deletion gate.
 - [ ] RVO8/RVO9 measurements recorded in this doc's log section
 
@@ -1754,7 +1754,7 @@ settled and one not:
 - **Bindings** — settled: covered iff RV16 is broad (see table).
 - **Container stores** — NOT verified. Whether `arr[i] = <wide>` or
   `push(arr, <wide>)` copies the payload into destination-owned storage
-  (D5.2.2) or retains a pointer into the caller's number extent decides
+  (D6.2.2) or retains a pointer into the caller's number extent decides
   whether containers are a second hole. Today's eager per-call restore hides
   the question; removing it exposes it. **Verify this before any reclaim
   ships** — it is the one fact standing between the current analysis and a
@@ -1839,7 +1839,7 @@ substantial, and not attempted here.
 
 **Also verified this round (RVO11 container question, separate message):**
 `array_set` copies wide payloads into array-owned cells
-(`arr->items[capacity-extra-1]`, the `extra` counter) and re-tags — D5.2.2
+(`arr->items[capacity-extra-1]`, the `extra` counter) and re-tags — D6.2.2
 destination-owned storage implemented in the store itself; native-lane and
 map stores copy by construction. Verified empirically with runtime-computed
 values after producer-frame teardown plus 600-push extent churn (an earlier
@@ -2362,14 +2362,14 @@ speedup:
    though no exit can produce a wide payload. `crypto_sha1`'s hot `sha1_ft`
    and `sha1_kt` calls are examples.
 4. **Resolution is eager, not the normative protocol.** The direct-call path
-   resolves immediately after the call. D5.2.1v2 requires classification at a
+   resolves immediately after the call. D6.2.1 requires classification at a
    wide value's birth site, resolution at first consume, patching only on
    escape, and free tail forwarding. The current implementation is the safe
    P1.3 form recorded in the checklist, but not the RV6 end state. A possible
    additional cost from MIR multi-result GVN/register allocation remains RVO8;
    it is plausible, not yet proven.
 
-D5.2.3 remains the reason helper results may stay in the caller's number
+D6.2.3 remains the reason helper results may stay in the caller's number
 extent without rehoming. That ownership simplification is correct and removes
 real machinery, but it cannot accelerate AWFY's ordinary inline numbers. The
 loop/statement reclaim should therefore remain a **space-bound correctness
@@ -2414,7 +2414,7 @@ propagation.
 - [x] Select `RETURN_SHAPE_ITEM` / `MIR_SCALAR_RETURN_NONE` for a proven
       wide-free boxed result. Do not infer this merely from `pn` versus `fn`,
       and do not change source-level type inference or error containment.
-- [x] Classify at the producer/birth site as required by D5.2.1v2. Reuse the
+- [x] Classify at the producer/birth site as required by D6.2.1. Reuse the
       existing return descriptor as the single ABI source; do not add a second
       shape oracle at call boundaries.
 - [~] Add MIR fixtures proving `sha1_ft` and `sha1_kt` have one result and no
@@ -2434,7 +2434,7 @@ the `crypto_sha1` loss, land it before considering the more invasive Action C.
 
 ### 6.5 Action C — complete RV6 lazy `maybe_pending` propagation
 
-For calls that genuinely remain shape 2, implement the D5.2.1v2 lifecycle on
+For calls that genuinely remain shape 2, implement the D6.2.1 lifecycle on
 the existing `MirValue`; do not create a parallel value abstraction.
 
 - [x] Return `{item, companion, maybe_pending}` from the direct-call lowering
@@ -2447,7 +2447,7 @@ the existing `MirValue`; do not create a parallel value abstraction.
       truthiness, type inspection, and the producer's resolver-free pair.
 - [x] Patch before every escape: memory store, argument to an unknown or C
       boundary, root/spill publication, dynamic dispatch, suspension, or
-      return through an incompatible shape. D5.2.2v2's destination-owned
+      return through an incompatible shape. D6.2.2's destination-owned
       scalar storage remains the ownership endpoint. The wrapper, module-main,
       and root publication paths now materialize at their named escape.
 - [x] Tail-forward both lanes when caller and callee shapes agree. A direct
@@ -2466,7 +2466,7 @@ the existing `MirValue`; do not create a parallel value abstraction.
 - [x] Close the shared LambdaJS direct-call boundary opened by lazy
       propagation: `jm_call_direct_boxed` and `jm_call_direct_native` now
       materialize a pending pair before publishing or handing the register to
-      later lowering. This protects the same D5.2.1v2/D5.2.2v2 invariant for
+      later lowering. This protects the same D6.2.1/D6.2.2 invariant for
       the shared emitter without introducing a second LambdaJS value
       abstraction.
 - [x] Extend forced-GC, async/yield, dynamic-call, error-lane, and slot-wrapper
@@ -2621,10 +2621,10 @@ accidentally changing it under the shared emitter. The root-cause guard is
 the v3 `scalar_home_donation` fixture plus its MT7 frame ratchet: the
 `darwin-debug-v3` `main` frame has **zero** scalar homes for both donation and
 tail-forward. The default profile retains the v2 home budget, so the fallback
-ABI remains covered instead of being silently redefined. This is a D5.2.1v2 /
-D8.4.2v2 ABI
+ABI remains covered instead of being silently redefined. This is a D6.2.1 /
+D7.4.2 ABI
 consistency repair, not a claim that number-stack payload ownership
-(D5.2.2v2) has disappeared.
+(D6.2.2) has disappeared.
 
 **Historical follow-up list.** Section 6.10 closes P2.5 and P5a below; P2.7
 and P4 retain the stated independent scope.
@@ -2644,7 +2644,7 @@ and P4 retain the stated independent scope.
    remove the v2 selector, home-specific descriptor fields, coloring helpers,
    imports, and compatibility ABI; re-run the complete census and ratchet at
    zero physical caller homes. Do not confuse this P5 work with the retained
-   side-number-stack storage that D5.2.2v2 requires for live wide payloads.
+   side-number-stack storage that D6.2.2 requires for live wide payloads.
 
 ### 6.10 LambdaJS P2.5 and P5a closure (2026-08-17)
 
@@ -2658,13 +2658,13 @@ generated signature or C++ function-pointer cast includes a trailing scalar
 home.
 
 P5a then removes the v2 build selector and `FN_COMPANION_HOME` from the
-first-party Lambda/LambdaJS return path, as required by D5.2.1v3 and
-D8.4.2v3. The deleted concepts are the *generated-function* trailing
+first-party Lambda/LambdaJS return path, as required by D6.2.1 and
+D7.4.2. The deleted concepts are the *generated-function* trailing
 parameter, caller donation, and return descriptor lane mask — not all
 number-stack storage. `em_scalar_home_*` and the `*_into` ownership
 parameters remain for C helpers and hosted languages because their returned
 wide Item must point at storage owned by the receiving activation
-(D5.2.2v3). This is an intentional payload-lifetime contract, not a v2
+(D6.2.2). This is an intentional payload-lifetime contract, not a v2
 fallback.
 
 Verification after the deletion: `make build`, Lambda MIR emission **48/48**,
@@ -2681,17 +2681,17 @@ weakening the hosted-language ownership contracts.
   the Python hosted boundary. Python dispatch now checks `Function::entry_abi`
   and routes first-party Lambda entries through `fn_call`; Python-generated
   functions retain their separately versioned explicit-home ABI. This is the
-  D5.2.1v3/D8.4.2v3 split, not a change to Python's ABI.
+  D6.2.1/D7.4.2 split, not a change to Python's ABI.
 - Generated Core dynamic and cross-module calls no longer allocate a scalar
   home merely to pass a null/ignored operand. The `fn_callN_into` APIs and the
   JS export bridge still carry explicit owner storage where a C/host callback
-  actually needs it, as required by D5.2.2v3.
+  actually needs it, as required by D6.2.2.
 - LambdaJS generated signatures contain no `_scalar_home` parameters, but its
   shared helper rehome path remains conservative. A trial global skip was
   reverted after `regression_side_stack_frame_gc` changed both subnormal-float
   results: JS helpers can return scalar Items borrowed from module state, so
   their ownership is not uniformly caller-local. Lambda keeps its proven v3
-  no-rehome rule. D5.2.3 remains open for a per-helper JS ownership proof, the
+  no-rehome rule. D6.2.3 remains open for a per-helper JS ownership proof, the
   independent loop back-edge reclaim proof (`DO24`), and any future measured
   hosted/int64-heavy workload.
 - The MIR sidecars and checker are v3-only: all convention-2 assertions were
@@ -2724,10 +2724,10 @@ Lambda/MIR and GC suites passing. The post-rollback Test262 gate is clean at
 > proves and publishes narrower return shapes; **C2 / RVO14** keeps genuine
 > pairs intact until a consumer or ownership boundary requires materialization.
 > The work remains governed by **D2.2.2**, **D2.2.3**,
-> **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.2.2v3**, **D6.2.1**, and
-> **D8.3.1–D8.3.4**. Because per-function public shapes refine the current
+> **D2.3.4–D2.3.5**, **D6.2.1**, **D6.2.2**, **D7.2.1**, and
+> **D7.3.1–D7.3.4**. Because per-function public shapes refine the current
 > universal-shape-2 ruling, B2 implementation must not start until the formal
-> D5.2.1/D6.2.1 text is revised in place with version suffixes and the formal
+> D6.2.1/D7.2.1 text is revised in place with version suffixes and the formal
 > design document's semver is bumped.
 
 ### 7.1 Baseline and definition of success
@@ -2760,7 +2760,7 @@ starts until all five are clean and fully tuned under that definition.
 
 Before changing return shapes:
 
-- [ ] Accept design §11, revise **D5.2.1v3** and **D6.2.1** in place with
+- [ ] Accept design §11, revise **D6.2.1** and **D7.2.1** in place with
   version suffixes, bump `doc/Lambda_Formal_Design.md` semver, and synchronize
   the ruling/status in both return-value documents.
 - [ ] Extend the existing MIR census tooling rather than create another
@@ -2803,7 +2803,7 @@ classifier across the language boundary.
   unknown.
 - [ ] Make union joining monotone: any capable member makes the union capable;
   all-free members make it free; otherwise it is unknown. Never strengthen a
-  semantic result from its physical `MIR_T_I64` carrier (**D2.4.1**).
+  semantic result from its physical `MIR_T_I64` carrier (**D2.3.4**).
 - [ ] Replace both existing shallow checks with this helper. Sys-function
   metadata and Lambda function analysis must therefore classify the same
   result type identically.
@@ -2858,7 +2858,7 @@ proof.
 
 - [ ] Select the internal boxed-body shape from the completed proof and record
   it in its `FnVariantAnalysis.result`; preserve native-lane and error-lane
-  rules already required by **D8.3.2–D8.3.4**.
+  rules already required by **D7.3.2–D7.3.4**.
 - [ ] Compute the public `_b` descriptor as the join of its selected body,
   boxed slow body, parameter/admission failures, and any native-to-Item boxing.
 - [ ] Remove the hard-coded public shape-2 descriptor. A public shape-1 entry
@@ -3134,7 +3134,7 @@ The first implementation slice is landed and release-built. It contains the
 shared wide-result proof, body-side `maybe_pending` propagation, C2.1 pair
 forwarding into the context slot, fail-closed public-shape metadata, and the
 epilogue fix that reuses an already-forwarded pair instead of rebuilding it
-(D2.4.1, D5.2.1v3). The public shape-1 rule is deliberately limited to a
+(D2.3.4, D6.2.1). The public shape-1 rule is deliberately limited to a
 non-procedural, non-native boxed body whose internal descriptor is already
 `RETURN_SHAPE_ITEM`; native/error and slow-body wrappers remain shape 2 until
 their raw/public boxing costs are separately proven. The local-function
@@ -3198,7 +3198,7 @@ both raw lanes without resolving.  Assignment/error-check paths, memory
 stores, helper calls, branches, async spills, and return boundaries still
 materialize.  Therefore none of the 204 remaining sites is an eligible
 pair-safe consumer; the already-landed body-to-wrapper and same-shape tail
-forwarders remain the active pair corridor (D5.2.1v3, D5.2.2v3).
+forwarders remain the active pair corridor (D6.2.1, D6.2.2).
 
 This remains **not `PRELIM_PASS`**. Both five-row batches are clean and
 stdout-equal; the repeat stays inside the 1% fence (`crypto_sha1` 1.0064 at

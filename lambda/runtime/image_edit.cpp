@@ -7,7 +7,7 @@
 #include "../../lib/image_process.h"
 #include <math.h>
 
-// native kernels operate on owned tiles; the adapter roots only the input values (D5.3.3).
+// native kernels operate on owned tiles; the adapter roots only the input values (D6.3.3).
 struct RasterEdit : RasterOwner {
     const char* error = nullptr;
     uint32_t left = UINT32_MAX, top = UINT32_MAX, right = 0, bottom = 0;

@@ -1,5 +1,5 @@
 // Native Lambda/Radiant port of WordCraft's command-driven writing workspace.
-// S12.1.3 / D7.2.5: handlers own state; the body only projects the model.
+// S12.1.3 / D10.2.1: handlers own state; the body only projects the model.
 import dom
 import lambda.editor.mod_editor
 import lambda.editor.mod_source_pos

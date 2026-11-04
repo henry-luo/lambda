@@ -1,4 +1,4 @@
-// LR07-46 (D5.3.3): iterating a map holds its keys in a native RootFrame that
+// LR07-46 (D6.3.3): iterating a map holds its keys in a native RootFrame that
 // item_keys pushes above the caller's published frame. Each filter loop below
 // has a call-free path (the compare's inline fast path), so publication
 // analysis once failed to prove the loop published and re-stored the caller's

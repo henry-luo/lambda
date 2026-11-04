@@ -1,4 +1,4 @@
-// D5.3.3: for-in key collection and per-key liveness checks allocate while
+// D6.3.3: for-in key collection and per-key liveness checks allocate while
 // retaining the receiver, prototype-chain cursor, result, descriptor, and key.
 const proto = {protoKeep: "keep", inherited: "delete-before-visit"};
 const object = Object.create(proto);

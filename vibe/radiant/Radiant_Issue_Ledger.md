@@ -14,7 +14,7 @@ stable anchors and their verification evidence.
 
 **Updated:** 2026-10-28. The [gaming design](Radiant_Design_Scene3D.md)
 stages native gameplay support while preserving pure authored values and
-document-owned live services (**S12.1.1v3 / S12.1.5v2, D7.3.4–D7.3.5**).
+document-owned live services (**S12.1.1v3 / S12.1.5v2, D9.4.4–D9.4.5**).
 Source relocation and the shared scene coordinator are implemented. The first
 collision extensions add discrete capsule/convex contacts, mass/inertia,
 point/ray tests and named-pair closest-point queries through the shared C
@@ -35,7 +35,7 @@ direct and shared-harness component reruns pass with unchanged checks. The
 failed aggregate is retained in the implementation receipts.
 Convex qualification exposed the live async sanitizer limit
 [LR12-43](<../Lambda_Issue_Ledger (fixed).md#lr12-43>), fixed 2026-10-29 under
-**D5.1.1v3 / D5.3.3 / D5.3.6v2** by reusable-stack lifetime and ASan fiber
+**D6.1.1 / D6.3.3 / D6.3.6** by reusable-stack lifetime and ASan fiber
 bookkeeping. The original runtime and mesh event fixtures now pass **22/22**
 and **17/17** assertions with forced/poisoned GC and stack-use-after-return
 checking. The standing layout/header/boundary debt above is unchanged.
@@ -96,7 +96,7 @@ paint servers and vector export retain geometry. Owned image resources keep
 retained replay independent of temporary SVG font contexts. No stroke expansion
 or global gamma change is used.
 
-Math emits `<text>` with the measured face/style. **D7.2.9** (USER,
+Math emits `<text>` with the measured face/style. **D10.2.4** (USER,
 2026-10-21) makes used bundled faces URL references to the distributed font
 files; supplied bytes without a resource URL retain data-URL embedding.
 Only unencoded OpenType variants/assembly pieces retain
@@ -117,7 +117,7 @@ font-context destruction, and transformed/vector fallback. All 921 math corpus
 cases and the two updated document-math UI cases pass. The focused package
 run passed 66/67 cases; `latex_test_latex_phase3_corpus` still exceeds its
 60-second limit even when rerun alone. That original version embedded full
-font resources in every formula; D7.2.9 replaces that bundled-font policy
+font resources in every formula; D10.2.4 replaces that bundled-font policy
 with shared file references.
 
 The broad Radiant gate stopped at
@@ -198,7 +198,7 @@ stylesheet links. Local reproduction files and font-loading logs are in
 **Fix.** The shared
 [`font_stylesheets`](../../lmd/package/math/css.ls) helper emits links to both
 bundled stylesheets, resolving the installation through `sys.lambda.home`
-and the existing path helper, per **D7.2.4v3**. LaTeX, standalone math, TikZ,
+and the existing path helper, per **D9.3.4**. LaTeX, standalone math, TikZ,
 the document viewer and the edit shell use it. The stylesheets retain their
 own source URLs, so their relative WOFF2 URLs resolve beside the CSS assets.
 Fragment renderers continue to leave stylesheet ownership to their host.

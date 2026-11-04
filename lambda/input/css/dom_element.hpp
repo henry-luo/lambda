@@ -67,7 +67,7 @@ typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct MarkerProp MarkerProp;  // From radiant/view.hpp
 typedef struct CssTransitionTrack CssTransitionTrack;  // From radiant/view.hpp
-// D4.5.1v4: DOM retirement owns the snapshot and its track allocation.
+// D5.5.1: DOM retirement owns the snapshot and its track allocation.
 typedef struct CssTransitionElemState {
     lam::OwnArr<CssTransitionTrack> tracks;
     int track_count;
@@ -407,7 +407,7 @@ struct DomDocument : DomDocumentResourceData {
 
     // An embedded document has one bounded upward browsing-context edge. The
     // owner reference is generation-checked so package traversal cannot keep a
-    // detached iframe alive or follow a recycled node (ES31, D4.5.1v3).
+    // detached iframe alive or follow a recycled node (ES31, D5.5.1).
     lam::Up<DomDocument> embedding_document;
     DomNodeRef embedding_element_ref;
     // The focused browsing context below this document: its iframe element that
@@ -420,6 +420,7 @@ struct DomDocument : DomDocumentResourceData {
 
     // Native extensions retain runtime-backed values through document resources.
     lam::Own<struct DomDocumentResource> resources;
+    bool destroying; // native teardown has started; no new resource owner may attach
 
     // Reactive UI: cached CSS for rebuild_lambda_doc optimization
     lam::OwnArr<struct CssStylesheet*> cached_inline_sheets;  // Parsed inline <style> stylesheets (cached)
@@ -494,7 +495,7 @@ struct DomDocument : DomDocumentResourceData {
     bool behavior_init_pending;
 
     // designMode is document editing state, not a property of whichever JS
-    // realm happens to be active when native input resolves its host (D7.2.5).
+    // realm happens to be active when native input resolves its host (D10.2.1).
     bool design_mode;
 
     // The legacy document.domain override relaxes same-origin checks without
@@ -604,7 +605,7 @@ typedef void (*DomDocumentResourceDestroyFn)(struct DomDocumentResourceData* dat
 typedef struct DomDocumentResource {
     lam::Own<struct DomDocumentResourceData> data;   // released by `destroy`
     DomDocumentResourceDestroyFn destroy;
-    lam::Up<Context> runtime_owner; // release before this evaluator's context retires (D5.3.3).
+    lam::Up<Context> runtime_owner; // release before this evaluator's context retires (D6.3.3).
     DomDocumentResourceDestroyFn retire_runtime; // optional: preserve native state after unrooting.
     lam::Own<DomDocumentResource> next;
     bool (*pending_work)(DomDocumentResourceData* data); // native jobs awaiting execution/publication.
@@ -912,7 +913,7 @@ enum class DomViewSlot {
 
 // tier-1: doc-pool, survives relayout
 struct DomElementExt {
-    // adoption changes ownerDocument, not the pool owning reclaimable metadata (D4.5.1v4).
+    // adoption changes ownerDocument, not the pool owning reclaimable metadata (D5.5.1).
     lam::Up<DomDocument> storage_document;
     NameId name_id;
     FragmentUnion frags[FRAGMENT_UNION_COUNT];
@@ -1704,7 +1705,7 @@ bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool);
  * @return New DomElement or NULL on failure
  */
 DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element);
-// detached, unbacked fragment nodes share the document lifetime (D4.5.1v4).
+// detached, unbacked fragment nodes share the document lifetime (D5.5.1).
 extern "C" DomElement* dom_document_fragment_create(DomDocument* doc);
 DomElement* build_dom_tree_from_element(Element* element, DomDocument* document, DomElement* parent);
 

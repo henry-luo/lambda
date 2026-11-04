@@ -1,0 +1,30 @@
+"1 palettes"
+[["classic", "Curtis classic", ["Quinacridone Rose", "Hansa Yellow", "Cerulean Blue"]], ["gouache", "Gouache", ["Opaque Rose", "Opaque Yellow", "Opaque Blue"]], ["earth", "Earth", ["Burnt Sienna", "Yellow Ochre", "Indigo"]]]
+true
+[0.02, 5.5, 0.81, 0.06, 1, 0.08, 0.01, 5, 0.75]
+"2 colour to K and S: K/S = (1 - R)^2 / 2R, one scattering for every channel"
+["Test", [0.7875, 3.5438, 0.0001], [3.15, 3.15, 3.15], 0.05, 3, 0.4]
+[["Burnt Sienna", [0.393, 2.9333, 8.9148]], ["Yellow Ochre", [0.0427, 0.2824, 2.6337]], ["Indigo", [4.56, 2.8125, 0.9579]]]
+"3 paper: per-cell keyed noise around 0.5, inside [0.25, 0.75]"
+[3072, true, true, 0.5014, 0.5334, 0.4834]
+[true, true]
+"4 sheet tuning at 2.5 display pixels per cell (Washes constants scaled from 2)"
+[40, 30, 2.5, 0.064, 0.0288, 3, 16, 0.8, true, [0, -1], 0]
+[0.1, 0.045, 4, 20, 1]
+[0.2, 0.18, 8, 40, 1.5]
+[200, 0.62, 0.62, 0]
+["too small", "too large"]
+"5 a blank sheet keeps its paper"
+[true, 600, 0.62, true]
+"6 stroke trails: stamps every 0.4 of the radius, ending on the target"
+[[2, 0], [4, 0], [6, 0], [8, 0], [10, 0]]
+[1, [3, 4]]
+283
+"7 a fresh sheet measures empty"
+{
+  suspended: 0,
+  deposited: 0,
+  wet: 0,
+  steps: 0,
+  active: [0, 0]
+}

@@ -77,7 +77,7 @@ static inline bool js_arraybuffer_resizable(const JsArrayBuffer* ab) {
 
 // The one authority for every ArrayBuffer view. DataView and TypedArray keep
 // distinct public operations, but detachment, .buffer identity, byte offset,
-// explicit length, and length-tracking are one mechanism (D2.4.1; JSCU34).
+// explicit length, and length-tracking are one mechanism (D2.3.4; JSCU34).
 typedef struct JsArrayBufferView {
     JsArrayBuffer* buffer;
     uint64_t buffer_item;
@@ -116,7 +116,7 @@ typedef struct JsTypedArray {
 } JsTypedArray;
 
 // Front ends share storage and operation order while retaining their own
-// coercion, error and prototype authorities (D1.3v3, D5.3).
+// coercion, error and prototype authorities (D1.3, D6.3).
 typedef enum JsBufferViewKind {
     JS_BUFFER_VIEW_ARRAY_BUFFER,
     JS_BUFFER_VIEW_DATA_VIEW,

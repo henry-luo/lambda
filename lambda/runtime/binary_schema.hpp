@@ -2,7 +2,7 @@
 
 #include "../lambda-data.hpp"
 
-// Physical layouts are independent of the Velmt carrier (D7.4.5v2).
+// Physical layouts are independent of the Velmt carrier (D9.5.5).
 enum BinaryFieldKind : uint8_t {
     BINARY_FIELD_BOOL, BINARY_FIELD_I8, BINARY_FIELD_U8,
     BINARY_FIELD_I16, BINARY_FIELD_U16, BINARY_FIELD_I32, BINARY_FIELD_U32,

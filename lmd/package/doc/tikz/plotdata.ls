@@ -22,7 +22,7 @@ pub fn inline_table(raw) any^ {
         contains(text, "\t")
 }
 
-// Reject names that would leave the document directory (D7.5.2 path gate).
+// Reject names that would leave the document directory (D11.1.2 path gate).
 fn local_name(name) any^ {
     let segments = split(replace(name, "\\", "/"), "/")
     if (name == "" or starts_with(name, "/") or starts_with(name, "~") or

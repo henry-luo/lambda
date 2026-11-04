@@ -4,7 +4,8 @@
 Usage:
   python3 utils/formal_index.py --write        # regenerate doc/Lambda_Formal_Index.md
   python3 utils/formal_index.py --check        # exit 1 when the index is stale
-  python3 utils/formal_index.py D7.3.6 [S4.5]  # print rulings / sections with file:line
+  python3 utils/formal_index.py D9.4.6 [S4.5]  # print rulings / sections with file:line
+  python3 utils/formal_index.py --old D8.1.1v14  # print the ruling that an old (pre-61.0.0) ID became
 
 Make targets: `make formal-index`, `make check-formal-index` (also run by `make lint`).
 """
@@ -19,9 +20,11 @@ SPECS = [
     ('Design', 'doc/Lambda_Formal_Design.md'),
 ]
 INDEX = 'doc/Lambda_Formal_Index.md'
+# §1 of this record maps design-spec IDs from before the 61.0.0 renumbering
+RENUMBER_MAP = 'vibe/impl/Lambda_Impl_Formal_Design_History.md'
 
 ID_PAT = r'(?:SI|DI|SO|DO|S|D)\d+(?:\.\d+)*'
-# a ruling bullet: `- **S4.5.3v2*** text`, `- **D1.2v2* — Title.** text`, `- **SO7** text`
+# a ruling bullet: `- **S4.5.3v2*** text`, `- **D1.2* — Title.** text`, `- **SO7** text`
 BULLET_RE = re.compile(r'^- \*\*(?P<id>' + ID_PAT + r')(?P<ver>v\d+)?(?P<star>\*)?'
                        r'(?: — (?P<title>.+?))?\*\*\s*(?P<rest>.*)$', re.S)
 HEADING_RE = re.compile(r'^(#{2,4}) (.*)$')
@@ -41,10 +44,21 @@ def read_lines(rel):
 
 
 def bullet_block(lines, i):
-    """Return the source lines of the bullet starting at lines[i] (continuations are indented)."""
+    """Return the source lines of the bullet starting at lines[i] (continuations are indented).
+
+    A blank line stays inside the bullet when the next line is still indented
+    (a nested list followed by more ruling text)."""
     end = i + 1
-    while end < len(lines) and lines[end].startswith('  ') and lines[end].strip():
-        end += 1
+    while end < len(lines):
+        if lines[end].startswith('  ') and lines[end].strip():
+            end += 1
+        elif (not lines[end].strip() and end + 1 < len(lines)
+              and lines[end + 1].startswith('  ') and lines[end + 1].strip()):
+            end += 1
+        else:
+            break
+    while end > i + 1 and not lines[end - 1].strip():
+        end -= 1
     return lines[i:end]
 
 
@@ -105,7 +119,7 @@ def render():
         '(`SO#`/`DO#`), with the spec line where it starts. `*` marks a ruling that is',
         'not or only partly implemented (see the spec\'s Appendix A). To read a ruling',
         'in full — including lines too long for a viewer — run',
-        '`python3 utils/formal_index.py D7.3.6` (an ID or a section such as `S4.5`).',
+        '`python3 utils/formal_index.py D9.4.6` (an ID or a section such as `S4.5`).',
         '',
     ]
     for name, rel in SPECS:
@@ -129,6 +143,29 @@ def render():
                 out.append('| %s | %d | %s |' % (e.label, e.line, e.title))
         out.append('')
     return '\n'.join(out)
+
+
+def old_design_id(label):
+    """New ID for a design-spec ID from before 61.0.0, read from the §1 tables of RENUMBER_MAP.
+
+    Rows are `| D8.1.1v18* | old title | D8.3.1 | new title | note |`; a note may route
+    single versions of a split ruling (`v14, v16 → D8.3.2`). Sections: `| §D2.4 | §D2.3 |`."""
+    m = re.fullmatch(r'§?(D\d+(?:\.\d+)*)(v\d+)?\*?', label.strip())
+    if not m:
+        return None
+    old, ver = m.group(1), m.group(2)
+    section = None
+    for line in read_lines(RENUMBER_MAP):
+        cells = [c.strip() for c in line.strip().strip('|').split('|')]
+        if len(cells) == 2 and cells[0] == '§' + old:
+            section = cells[1].lstrip('§')
+        if len(cells) != 5 or re.sub(r'v\d+|\*', '', cells[0]) != old:
+            continue
+        for vers, new in re.findall(r'((?:v\d+, )*v\d+) → (D[\d.]+)', cells[4]):
+            if ver and ver in vers.split(', '):
+                return new
+        return cells[2]
+    return section
 
 
 def lookup(query):
@@ -172,6 +209,18 @@ def main(argv):
             return 1
         print('formal-index: %s is up to date' % INDEX)
         return 0
+    if argv[0] == '--old':
+        missing = []
+        for q in argv[1:]:
+            new = old_design_id(q)
+            if new is None:
+                missing.append(q)
+                continue
+            print('%s (old numbering) is now %s' % (q, new))
+            lookup(new)
+        for q in missing:
+            print('formal-index: %s is not an old design-spec ID' % q, file=sys.stderr)
+        return 1 if missing else 0
     missing = [q for q in argv if not lookup(re.sub(r'v\d+\*?$|\*$', '', q))]
     for q in missing:
         print('formal-index: no ruling or section %s' % q, file=sys.stderr)

@@ -707,7 +707,7 @@ bool asset_import_glb(SceneAsset& asset,const char* source,size_t length) {
     }
     if(!json||!input_parse_model(asset.ctx.input(),json,json_length,"gltf")||asset.ctx.input()->parse_failed)
         return asset.fail("invalid GLB JSON document");
-    // D4.1.3: import copies decoded values into the destination Input before the source bytes expire.
+    // D5.1.3: import copies decoded values into the destination Input before the source bytes expire.
     return asset_import_gltf(asset,asset.ctx.input()->root,binary,binary_length);
 }
 }

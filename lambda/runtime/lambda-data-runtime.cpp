@@ -313,7 +313,7 @@ static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64
     arr->set_elem_type(elem_type);
     arr->extra = extra;
     if (payload_class >= 0) {
-        // small owned lanes fit in the existing nonmoving object slot (D4.3.1).
+        // small owned lanes fit in the existing nonmoving object slot (D5.3.1).
         // no second allocation/safepoint is needed; growth still uses the data zone.
         arr->data = bytes ? (uint8_t*)arr + sizeof(ArrayNum) : NULL;
         arr->length = length; arr->capacity = length + extra;
@@ -339,7 +339,7 @@ static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64
         for (int i=ndim-1;i>=0;i--) {
             dims[i]=dimensions[i]; strides[i]=stride; stride*=dimensions[i];
         }
-        // the rooted owner carries its shape across the payload's MAY_GC allocation (D5.3.3).
+        // the rooted owner carries its shape across the payload's MAY_GC allocation (D6.3.3).
         arr->is_ndim=1;
         arr->extra=(int64_t)(uintptr_t)shape;
     }
@@ -2007,7 +2007,7 @@ static bool array_push_spread_array_num_items(Array* arr, Item item, bool requir
 }
 
 // push item to array, spreading it if it is a list (the sequence append,
-// D2.6.5v3); skips the item-position marker of an empty list producer
+// D3.3.1); skips the item-position marker of an empty list producer
 void array_push_spread(Array* arr, Item item) {
     if (item.item == ITEM_NULL_SPREADABLE) return;
     if (array_push_spread_array_items(arr, item, true) ||
@@ -2796,7 +2796,7 @@ static bool map_grow_gc_data(Map** map_slot, int byte_cap, int64_t copy_bytes,
     void* new_data = heap_data_calloc((size_t)byte_cap);
     if (!new_data) return false;
     Map* map = (Map*)map_root.get();
-    // D4.1.1v2/D4.3.1: a runtime Map's payload has one GC data-zone owner.
+    // D5.1.1/D5.3.1: a runtime Map's payload has one GC data-zone owner.
     // Descriptor type rebuilds already use that owner; growing through the
     // Input pool afterwards paired pool_free with GC bytes on the next append.
     void* old_data = map->data;
@@ -2872,7 +2872,7 @@ static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
 // every ShapeEntry compared, so a miss on an n-field map cost n strlens; the
 // name-id compare now rejects non-matching fields with a single int test.
 // A1: a spread-free tree node or trusted contract indexes every field it holds
-// (D3.4.3v4; the builder indexes declared shapes), so its table answers a read,
+// (D3.4.3; the builder indexes declared shapes), so its table answers a read,
 // hit or miss. The walk below cost O(n) per read: a 2,048-key object lookup
 // walked every field (LR03-38), a 39-field record every member read.
 static inline bool map_table_answers_reads(TypeMap* map_type) {
@@ -3033,7 +3033,7 @@ static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
             // Some element/input shape transitions preserve an older identity
             // while replacing the spelling. The NameId fast path therefore
             // confirms bytes before selecting a slot; this is the correctness
-            // seam for those shapes (D4.6.1v2-D4.6.2v2).
+            // seam for those shapes (D5.6.1-D5.6.2).
             // Keep the same declaration-order last-writer semantics as the
             // string-key path, including fields stored in immortal input maps.
             *is_found = true;
@@ -3056,7 +3056,7 @@ Item map_get_by_name_id(Container* owner, TypeMap* map_type, void* map_data,
 // must not re-resolve its index against whichever module's list is active
 Element* elmt_with_type(TypeElmt* elmt_type) {
     // File selectors run after allocation; their output extension must be
-    // GC-owned even when a retained document binds its UI arena (D2.6.12v3).
+    // GC-owned even when a retained document binds its UI arena (D3.5.1).
     bool file_candidate = is_file_element_type(elmt_type);
     if (!file_candidate && context->ui_mode && context->arena) {
         // ui_mode: allocate fat DomElement on result arena
@@ -3094,7 +3094,7 @@ Element* elmt_with_tl(int64_t type_index, void* type_list_ptr) {
 
 // The document Input whose arena backs ui_mode content -- the runtime's result
 // Input, or the Input a parser is building -- so list_push can deep-copy
-// non-string content into it (ui_copy_content_to_input, D4.5.2).
+// non-string content into it (ui_copy_content_to_input, D5.5.2).
 Input* ui_result_input(Arena* arena) {
     Runtime* runtime = context ? context->runtime : nullptr;
     if (runtime && runtime->result_input && runtime->result_input->arena == arena) {
@@ -3107,7 +3107,7 @@ Input* ui_result_input(Arena* arena) {
 }
 
 Object* object(int64_t type_index) {
-    // D2.6.6v2 phase 2: allocate under the DECLARED structural kind. The type
+    // D3.1.1 phase 2: allocate under the DECLARED structural kind. The type
     // must be resolved first, so the allocation moves below the lookup.
     ArrayList* type_list = (ArrayList*)context->type_list;
     // type_list stores TypeType wrapper; unwrap to get TypeObject
@@ -3129,7 +3129,7 @@ Object* object(int64_t type_index) {
 static Object* object_alloc_with_type(TypeObject* obj_type) {
     int64_t byte_size = obj_type->byte_size;
     size_t total_size = sizeof(Object) + (byte_size > 0 ? (size_t)byte_size : 0);
-    // D2.6.6v2 phase 2: the value wears its declared structural kind, and the
+    // D3.1.1 phase 2: the value wears its declared structural kind, and the
     // header bit caches "carries a nominal record" so hot checks need no
     // pointer chase. The shape stays authoritative.
     TypeId kind = obj_type->nominal ? obj_type->nominal->struct_kind : LMD_TYPE_MAP;
@@ -3176,7 +3176,7 @@ Object* object_fill(Object* obj, ...) {
     return obj;
 }
 
-// S2.1.3 / D2.6.6: an object IS an element, so its content face is the object
+// S2.1.3 / D3.1.1: an object IS an element, so its content face is the object
 // itself — the same items/length/capacity an element carries. Kept as a named
 // accessor so content-face call sites read the same way for both kinds.
 List* object_content(Object* obj) {
@@ -3184,7 +3184,7 @@ List* object_content(Object* obj) {
 }
 
 // Content append, mirroring element content exactly: the same list_push_spread
-// normalization (D2.6.5 — null dropped, adjacent strings merged, content lists
+// normalization (D3.3.1 — null dropped, adjacent strings merged, content lists
 // spliced). What it must NOT reuse is list_fill, whose list_end tail would run
 // the element branch's frame bookkeeping on a value the caller still owns.
 Object* object_content_fill(Object* obj, int count, ...) {
@@ -3336,7 +3336,7 @@ Item object_fill_checked(Object* obj, uint64_t deferred, ...) {
     return ItemNull;
 }
 
-// D2.6.6v2: an object wears its declared structural kind and reads its
+// D3.1.1: an object wears its declared structural kind and reads its
 // attributes through the shared Map face, so this is map_get under a different
 // static parameter type. It keeps its own symbol because the system-function
 // registry and generated code reference it by name.
@@ -3758,7 +3758,7 @@ extern "C" Item fn_string_ord_at(Item str_item, int64_t index) {
 
 // The MIR caller has certified both operands as strings. This leaf has no
 // allocation or re-entry, so it can compare their indexed character spans
-// directly while preserving absence and UTF-8 equality (D3.3.3v3, S7.1.1v3).
+// directly while preserving absence and UTF-8 equality (D4.3.3, S7.1.1v3).
 extern "C" uint8_t fn_string_char_eq(Item left_item, int64_t left_index,
         Item right_item, int64_t right_index) {
     String* left = left_item.get_safe_string();
@@ -3784,7 +3784,7 @@ Item item_attr(Item data, const char* key) {
         return fn_member(data, key_item);
     }
     case LMD_TYPE_MAP: {
-        // D2.6.6v2 phase 2: a nominal map has a method tier after its fields.
+        // D3.1.1 phase 2: a nominal map has a method tier after its fields.
         if (lambda_value_nominal(type_id, data.map)) {
             return lambda_object_member(data, key);
         }
@@ -3974,7 +3974,7 @@ SymbolKeyList* item_keys(Item data) {
     // S8.1.2v2/S8.3.1v2: an object's attribute names are its `at` axis. There
     // was no OBJECT arm at all, so item_keys returned NULL and `for (v in obj)`
     // yielded nothing while `len(obj)` reported the field count — the two sides
-    // of the S8.3.1 law disagreeing. D2.6.6 puts an object on Element's layout,
+    // of the S8.3.1 law disagreeing. D3.1.1 puts an object on Element's layout,
     // so it shares this walk rather than the map one.
     case LMD_TYPE_ELEMENT: {
         Element* elmt = data.element;

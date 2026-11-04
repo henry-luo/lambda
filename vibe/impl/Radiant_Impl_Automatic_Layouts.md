@@ -1,12 +1,12 @@
 # Automatic package layout connection
 
-**Ruling:** user decision, 2026-10-16; **D7.5.3v2**.
+**Ruling:** user decision, 2026-10-16; **D9.5.6**.
 **Status:** implemented and focused verification complete. Inventories regenerated; aggregate qualification has the failures/limits below.
 
 Graph and TikZ HTML selects its existing layout name; Radiant resolves that name
 to a pure package `layout(parent, children, ctx)` export. This reuses MathML's
 package bridge, retained module state and precise document paint roots
-(**D7.2.4v3 / D5.3.3**). The public `radiant.register_layout`, graph
+(**D9.3.4 / D6.3.3**). The public `radiant.register_layout`, graph
 `transform.install()` and conformance `install()` entry points are removed.
 No application or pure document transform performs callback installation.
 
@@ -16,7 +16,7 @@ extensions and isolated tests; clearing it cannot disconnect shipped layouts.
 Static HTML lazily acquires a package evaluator, while nested Lambda rendering
 uses its live evaluator. Creating a second static document now transfers the
 thread at the quiescent package-loading boundary before initializing its module
-(**D5.4.1**); previously initialization tried to use the first document's owner.
+(**D6.4.1**); previously initialization tried to use the first document's owner.
 
 Acceptance covers direct graph rendering and serialized HTML with no setup;
 measured graph/TikZ paint across reflow; two independent static documents and

@@ -1,4 +1,4 @@
-// Column geometry is document data; projection never splits source paragraphs (D7.2.5).
+// Column geometry is document data; projection never splits source paragraphs (D10.2.1).
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import lambda.editor.mod_transaction

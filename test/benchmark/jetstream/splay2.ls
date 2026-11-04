@@ -52,7 +52,7 @@ pn splay(var tree: SplayTree, key: float) int {
     }
     // Rebuild each rotated subtree through a local owner before returning it.
     // The original top-down cursor links depended on mutable pointer aliases,
-    // which are snapshots under COW (D3.3.1v2).
+    // which are snapshots under COW (D4.3.1).
     var root: SplayNode? = tree.root
     root = splay_node(root, key)
     tree.root = root

@@ -29,7 +29,7 @@ accepted. Other math input returns the existing TeX/AsciiMath AST. Typst input
 remains unimplemented, and other unrecognized flavors still use the legacy
 LaTeX fallback. The math package now lays out a supported Presentation MathML
 subset as measured SVG; Radiant's HTML viewer uses that package while retaining
-the original MathML DOM (**D7.2.8**).
+the original MathML DOM (**D10.2.3**).
 
 ### 1.2 Math in Markdown
 
@@ -64,7 +64,7 @@ let doc = input('./paper.tex', 'latex')^
 
 ### 1.4 Writing Math Back Out
 
-A parsed `<math>` tree can be serialised again with `format(ast, 'math')`, or converted on the command line. All math output formats run through the shipped `lambda.doc.math` scripts, above native IO (**D7.1.1**, **D7.2.8**):
+A parsed `<math>` tree can be serialised again with `format(ast, 'math')`, or converted on the command line. All math output formats run through the shipped `lambda.doc.math` scripts, above native IO (**D9.1.1**, **D10.2.3**):
 
 ```bash
 lambda convert formula.tex -f math -t math-latex -o out.tex     # LaTeX
@@ -133,7 +133,7 @@ browser/assistive-technology conformance remain open.
 
 Math is rendered by `lambda.doc.math.math` as inline SVG with the selected
 font's glyph outlines. Lambda owns layout; `lib/font` reads OpenType MATH and
-Radiant exposes copied font facts (**D7.1.1, D4.2.2v2**). Serialize the result
+Radiant exposes copied font facts (**D9.1.1, D5.2.2**). Serialize the result
 with `format(result, 'html')`.
 
 ### 2.1 Lambda API
@@ -215,7 +215,7 @@ MATH fonts retain their supplied variants and assemblies. An explicit
 default bundle. Text placement follows Radiant's existing SVG support,
 without adding complex-script shaping. For absolute TeX lengths, pass
 `font_size` to provide the CSS-pixel/em conversion; otherwise that conversion
-uses 16px. Resource acquisition stays in Lambda IO (**D7.1.2v2**).
+uses 16px. Resource acquisition stays in Lambda IO (**D9.1.2**).
 
 The legacy MathLive renderer, its stylesheet and fixed metrics tables have
 been removed. Use `lambda.doc.math.math` for all rendering.

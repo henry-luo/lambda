@@ -2,7 +2,7 @@
 
 **Revision:** 7 (2026-10-23) — consolidation of the three string-pattern records into one.
 **Status:** SP1–SP24 are user-ruled and implemented on all three execution tiers (interp, jit, auto); superseded rulings are in Appendix S. `io.grep` is user-ruled and built; file-based `find(path)` and file `replace` are designed but not built (§7.3, §7.4). Open questions are in §9.
-**Formal linkage:** the island surface and domains S11.1.2v4; ranges S11.1.3; value runs against text repetition S11.1.6v3; counts and wildcards S16.8.6v4; the type operators S10.1.1v5; the empty type S11.1.7; `match` S11.2.1; `split` S17.1.1; `find` positions S17.4.1; `replace` S17.6.1; case S17.7.1, S17.7.2; option maps S17.8.1; module-wide pattern names and cycles S11.4.12; open issues SO32, SO47; type values D3.1.1v5, D3.1.2.
+**Formal linkage:** the island surface and domains S11.1.2v4; ranges S11.1.3; value runs against text repetition S11.1.6v3; counts and wildcards S16.8.6v4; the type operators S10.1.1v5; the empty type S11.1.7; `match` S11.2.1; `split` S17.1.1; `find` positions S17.4.1; `replace` S17.6.1; case S17.7.1, S17.7.2; option maps S17.8.1; module-wide pattern names and cycles S11.4.12; open issues SO32, SO47; type values D4.1.1, D4.1.2.
 **Spec mapping:** SP1, SP4–SP8, SP10–SP12, SP24 → S11.1.2v4; SP5 → S11.1.3; SP17–SP20 → S11.1.2v4 and S10.1.1v5; SP21 → S17.6.1; SP22 → S17.7.1; SP23 → S17.7.2; SPO14 → SO47.
 **Scope:** string and symbol patterns end to end — what a pattern is as a type, its surface syntax and domains, the operations that use one, its relation to regular expressions, the matching engine and file search — with the reasons and the history of what was rejected, reversed or superseded.
 **ID series:** SP# (decisions, §8) and SPO# (open questions, §9). GRP# belongs to [Lib_Grep.md](lib/Lib_Grep.md).
@@ -13,7 +13,7 @@
 
 ## 1. A pattern is a type
 
-A string pattern is a **first-class type value** that admits the strings — or, in the symbol domain, the symbols — whose whole content matches it (D3.1.1v5, D3.1.2). It goes wherever a type goes: an annotation, the right side of `is`, a `match` arm, a field type in a schema, a union arm, a constrained base, an operand of the type operators. The search functions `find`, `replace` and `split` accept one wherever they accept a literal needle.
+A string pattern is a **first-class type value** that admits the strings — or, in the symbol domain, the symbols — whose whole content matches it (D4.1.1, D4.1.2). It goes wherever a type goes: an annotation, the right side of `is`, a `match` arm, a field type in a schema, a union arm, a constrained base, an operand of the type operators. The search functions `find`, `replace` and `split` accept one wherever they accept a literal needle.
 
 *Why patterns are types, not a regex library.* Format validation — an email, a version string, an identifier — is a type question: is this value of this shape? Lambda already has the machinery for type questions: `is`, `match`, annotations, schema validation, union and intersection. Making a pattern a type reuses all of it, and lets the compiler parse and check the pattern instead of receiving an opaque runtime string.
 

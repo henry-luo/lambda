@@ -1,4 +1,4 @@
-// D3.2.4v4/S11.4.10: optional roots and returned values retain admitted layouts.
+// D4.2.5/S11.4.10: optional roots and returned values retain admitted layouts.
 type Record = {value: int, next: Record?}
 type Holder = {child: Record?}
 

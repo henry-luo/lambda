@@ -6,11 +6,11 @@ is not yet delivered. Design authority:
 [Lambda_Chart_Plot](../../doc/Lambda_Chart_Plot.md),
 [scientific.ls](../../test/demo/chart/scientific.ls).
 
-Source packages follow **D7.2.1–D7.2.4**. Analysis and presentation construction
+Source packages follow **D9.3.1–D9.3.4**. Analysis and presentation construction
 are pure (**S12.1.1v2**); applied camera state follows **S9.1.4/S12.1.3**.
 Failures are value errors (**S7.4.1**). Rendering uses the existing Radiant
-boundary (**D7.5.3**) and document-owned native resources (**D4.5.1v4/D4.5.2**),
-without new retained GC borrows or conservative stack scanning (**D5.3.3**).
+boundary (**D9.5.6**) and document-owned native resources (**D5.5.1/D5.5.2**),
+without new retained GC borrows or conservative stack scanning (**D6.3.3**).
 Numerical modules reuse the math kernels already landed in `78906d684`.
 
 ## Delivered

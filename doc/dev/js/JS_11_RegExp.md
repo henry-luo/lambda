@@ -44,7 +44,7 @@ The eight standard flags are parsed once in `js_regexp_compile_frontend` (`js_re
 
 Two non-RE2 shortcuts sit in front: a literal-substring fast path (`literal_fast`, no flags, no metacharacters) and the `special_property_kind` codepoint scanner. `js_regex_match_internal` (`js_runtime.cpp:13353`) is the single dispatch point — it tests `special_property_kind`, then `literal_fast`, then `bt`, then `wrapper && has_filters`, then falls through to a direct `re2->Match`. `js_regex_num_groups` (`js_runtime.cpp:13341`) mirrors that ordering to report the correct capture count for each back-end.
 
-**Direct-compiler size limits (2026-10-23; D1.3v3, D1.4v4).** An RE2 candidate
+**Direct-compiler size limits (2026-10-23; D1.3, D1.4).** An RE2 candidate
 rejected with `ErrorPatternTooLarge` or `ErrorRepeatSize` tries the existing spec
 matcher with its normalized JS source and flags. Unicode class expansion and
 nested counted repetitions can exceed RE2's limits without invalidating the
@@ -128,14 +128,14 @@ The string methods delegate to the RegExp object via the well-known symbol proto
   Without `u` a split boundary can also land *between* an astral character's two surrogate halves, a position the UTF-8 subject has no byte offset for. **The subject is not widened for this** — storage stays UTF-8. Only a zero-width match can occur at such a position (a pattern needing surrogate granularity would already have had its subject expanded, and nothing that consumes input can start inside a character), so `@@split` carries the splitter's zero-width answer from the last position it *could* be seated at and stands in for `exec` there, replaying the retained match object so captures behave identically. `js_str_substring_utf16` already slices lone surrogates, so the halves fall out of the normal push path: `"😀b".split(/(?:)/)` is `["\ud83d","\ude00","b"]`, matching V8.
 
   After species construction and limit coercion, native builtin splitters can
-  search past failed positions with the existing matcher (**D8.4.1v2**).
+  search past failed positions with the existing matcher (**D7.4.1**).
   The guard requires builtin `exec`, writable own `lastIndex`, no captures,
   a direct byte matcher, non-Unicode matching and well-formed UTF-8 input.
   Match boundaries convert back to UTF-16 before the ordinary protocol runs;
   surrogate-half replay remains in that protocol. A skipped terminal run of
   failures resets `lastIndex` to zero. Exec overrides, descriptor changes,
   captures, backtracking and lone-surrogate input retain individual probes
-  (**S1.11**, **D5.3.3**).
+  (**S1.11**, **D6.3.3**).
 
 All three observe and write `lastIndex` through the strict spec helper `js_regex_set_lastindex_strict` (`js_runtime.cpp:15804`), which throws a TypeError when `lastIndex` has been made non-writable. `js_regex_exec` (`js_runtime.cpp:15961`) is the shared engine: it reads `lastIndex` via `ToLength` (which can fire `valueOf`), uses it only for global/sticky regexes, matches via `js_regex_match_internal`, updates `lastIndex` to the match end (never auto-advancing on a zero-length match — callers own that), refreshes the static properties, and builds the result array. `js_regex_test` (`js_runtime.cpp:15711`) is a lighter sibling that returns a boolean.
 

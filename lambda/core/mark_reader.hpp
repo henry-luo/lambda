@@ -208,7 +208,7 @@ public:
  */
 class MapReader {
 private:
-    // D2.6.6: a map and an object hold their attribute buffer at different
+    // D3.1.1: a map and an object hold their attribute buffer at different
     // offsets, so this reader holds the shape and buffer directly rather than a
     // Map*. That is what lets one reader serve both kinds.
     Container* container_;
@@ -278,7 +278,7 @@ public:
     EntryIterator entries() const;
 
     // Accessors. There is deliberately no `Map*` accessor: an object read
-    // through this reader is element-shaped and has no valid Map view (D2.6.6).
+    // through this reader is element-shaped and has no valid Map view (D3.1.1).
     Container* container() const { return container_; }
     bool isValid() const { return container_ != nullptr; }
 };

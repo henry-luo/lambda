@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.1.3v27: the trace-schema fixture also executes through the formal Item entry. The terminal CLI plan keeps closed binding facts; counts cover that default entry.",
+  "description": "D8.4.2: the trace-schema fixture also executes through the formal Item entry. The terminal CLI plan keeps closed binding facts; counts cover that default entry.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",

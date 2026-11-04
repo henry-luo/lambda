@@ -34,12 +34,12 @@ S1.4 (values never alias; session state is explicit), S12.1.1v3 and S12.1.3
 (`open()` is `pn`-only resource acquisition that auto-closes at block end),
 S13.1.2v2 (calls may park invisibly), S13.2.2 (`send` never blocks), S13.3.1v2
 (document-owned tasks), S13.3.2 (cancellation at park points).
-[Formal Design](../doc/Lambda_Formal_Design.md) D7.1.2v2 (all resource IO lives
-in `lambda-io`; raw context-free mechanisms stay in `lib`), D7.5.2 (one central
-IO door that carries policy), D7.2.4v4 (shipped `lambda.*` packages and built-in `lambda.io.<leaf>` modules), D7.2.5
-(editing policy lives in the DOM behaviour package), D7.5.3v2 (the
-Lambda↔Radiant boundary), D4.5.1v4 and D4.5.2 (native ownership; Radiant never
-retains GC pointers), D5.3.3 (precise rooting in native helpers). Where no
+[Formal Design](../doc/Lambda_Formal_Design.md) D9.1.2 (all resource IO lives
+in `lambda-io`; raw context-free mechanisms stay in `lib`), D11.1.2 (one central
+IO door that carries policy), D9.3.4 (shipped `lambda.*` packages and built-in `lambda.io.<leaf>` modules), D10.2.1
+(editing policy lives in the DOM behaviour package), D9.5.6 (the
+Lambda↔Radiant boundary), D5.5.1 and D5.5.2 (native ownership; Radiant never
+retains GC pointers), D6.3.3 (precise rooting in native helpers). Where no
 `S#`/`D#` ruling exists, this document cites vibe IDs: RDB11 and JA16 in
 [Lambda_IO_RDB.md](Lambda_IO_RDB.md), AR-E4 and AR-O13 in
 [Lambda_Pkg_Archive.md](Lambda_Pkg_Archive.md), K30g in
@@ -384,7 +384,7 @@ everyday experience, and **S** is a stretch goal.
 - **P1** Plain-text composition, sent through SMTP. The message is built as
   RFC 5322 with MIME and RFC 2047 headers by `doc.misc.eml()`.
 - **P2** Rich-text composition through the shipped DOM editing package
-  (D7.2.5), sent as `multipart/alternative`. Attachments by drag and drop,
+  (D10.2.1), sent as `multipart/alternative`. Attachments by drag and drop,
   signatures per account.
 - **P2** Drafts saved with `APPEND` to `\Drafts`. Sent copies appended to
   `\Sent`, except on Gmail. An outbox for offline sending.
@@ -417,9 +417,9 @@ test/demo/mail/          window: pure fn templates, pn handlers (S12.1.1v3, S12.
   lambda.mail            accounts, sync policy, IMAP response meaning, MIME,
                          threading, quoting, HTML sanitizer          (Lambda, mostly fn)
   lambda.oauth           PKCE, consent URL, loopback code, refresh   (Lambda, pn)
-  lambda.io.mail         open, command, idle, send (§5.3)            (rt, D7.1.2v2, D7.5.2)
+  lambda.io.mail         open, command, idle, send (§5.3)            (rt, D9.1.2, D11.1.2)
   lib                    curl connect/TLS/SASL; IMAP framing and
-                         tokenizer (context-free)                    (C, D7.1.2v2)
+                         tokenizer (context-free)                    (C, D9.1.2)
   mail store             raw .eml files + Mark index per mailbox     (files, §5.4)
 ```
 
@@ -437,10 +437,10 @@ only what has to be native: sockets, TLS, and framing an untrusted byte stream.
 | **ML5v2** | **No script in mail content runs.** Script support for mail waits until Lambda implements sandboxing. Each message renders in an `<iframe srcdoc>` whose document Radiant loads with scripting disabled: no `<script>`, no event-handler attributes, no `javascript:` URLs, and `<noscript>` content rendered. The flag is inherited by every nested document. Remote loads are blocked by a per-document resource policy until the user allows them for a message or a sender. A Lambda sanitizer strips the same constructs as a second layer. | Mail content is controlled by its sender, and remote images are trackers. A sanitizer alone is one missed vector (SVG `<script>`, a nested `srcdoc`, an `on*` attribute) away from running code, so the engine enforces the rule (MG4). The demo's own window chrome is local and trusted, so the flag is per document, not global. | **ruled** (user, 2026-10-22); scripting mechanism ruled (MQ11) and implemented (M1c). Remote loads are blocked by the sanitizer only; the engine-level policy is MQ14 |
 | **ML6** | **Secrets live only in the OS secret store.** Passwords and refresh tokens are kept in the Keychain (macOS first), never in cache files, logs or `log.txt`. Access tokens stay in memory. | A mail password is the key to every other account the user has. | **ruled** (user, 2026-10-22): the store is the built-in module `lambda.io.secret` with `get`, `set` and `delete`, backed by the Keychain on macOS (MG6) |
 | **ML7v3** | **Raw messages are files; each mailbox has a Mark index.** Each downloaded message is stored once as an immutable `.eml` file with a plain-text sidecar. Each mailbox has one index file in Mark notation, saved whole and atomically. Small per-account files hold the mailbox list and the pending-action queue (§5.4). | Uses only what Lambda has today: `input()`, `output(…, {atomic: true})` and `io.move`. It needs no new runtime feature before M1. Its costs, SL1–SL5, are accepted and left to later phases (§5.4.4). Supersedes ML7v2 (Appendix S). | **ruled** (user, 2026-10-22) |
-| **ML8** | **Mail access is a capability.** Opening a mail session or reading a secret is a `pn` effect through the IO door (D7.5.2). It is allowed only to documents whose top-level source is a local file the user opened, never to network-loaded documents. | The same origin gate that D7.5.4 applies to audio. Mail credentials must never be reachable by a web page. | proposed (needs a D-ruling) |
+| **ML8** | **Mail access is a capability.** Opening a mail session or reading a secret is a `pn` effect through the IO door (D11.1.2). It is allowed only to documents whose top-level source is a local file the user opened, never to network-loaded documents. | The same origin gate that D11.3.1 applies to audio. Mail credentials must never be reachable by a web page. | proposed (needs a D-ruling) |
 | **ML9** | **POP3 is a download source.** A POP3 account is read with curl transfers (UIDL, RETR, TOP, DELE) into a local Inbox. Read state, flags and folders for it live only in the local cache. | POP3 has no server-side state beyond the message list. curl covers the protocol completely (§2.3), so POP3 costs only a sync policy in `mod_sync.ls`. | **ruled** (user, 2026-10-22); implemented (ML9 checkpoint): `lambda.mail.pop3` and POP3 accounts in the demo. No server deletion until MQ10 is ruled |
 | **ML10** | **`lambda.io.mail` is four functions.** `open`, `command`, `idle` and `send` (§5.3). The module speaks protocols only: it has no mail model, no store, no MIME and no secrets. Everything above the wire is Lambda code. | Minimal surface, as the user directed. Commands pass through as text plus safely encoded arguments, so new IMAP extensions need no native change. | **ruled** (user, 2026-10-22): name and scope by user direction, signatures as in §5.3; implemented (M0) |
-| **ML11** | **`lambda.io.mail` is a built-in runtime module, not a Jube module.** Its rows live in the runtime beside `io.fetch` and park the calling task the same way. The import path `lambda.io.mail` resolves to them. | A Jube module may not park a task beneath its frame (D7.4.2v2), and every mail call waits on the network. Event-loop-coupled language IO stays in the runtime (D7.1.2v2). D7.2.4v4 (ratified from MQ12) allows a built-in runtime module at `lambda.io.<leaf>`. | **ruled** (user, 2026-10-22; D7.2.4v4) |
+| **ML11** | **`lambda.io.mail` is a built-in runtime module, not a Jube module.** Its rows live in the runtime beside `io.fetch` and park the calling task the same way. The import path `lambda.io.mail` resolves to them. | A Jube module may not park a task beneath its frame (D9.5.2), and every mail call waits on the network. Event-loop-coupled language IO stays in the runtime (D9.1.2). D9.3.4 (ratified from MQ12) allows a built-in runtime module at `lambda.io.<leaf>`. | **ruled** (user, 2026-10-22; D9.3.4) |
 | **ML12** | **Search is Lambda's own.** `io.text_search` for ranked free text, `io.grep` for exact text and string patterns, both over the plain-text sidecars. Header fields are filtered in memory from the loaded index. The server searches mail that is not cached. No database full-text index. | It reuses `lib/fts` and the grep engine rather than adding a second search engine. The cost of rescanning is SL4. | **ruled** (user, 2026-10-22) |
 
 ### 5.3 The `lambda.io.mail` API
@@ -685,7 +685,7 @@ visible rows.
 | `lambda.io.mail` | native | `open`, `command`, `idle`, `send` (§5.3); the IMAP engine, curl POP3 and SMTP |
 | `lib` mail framing | native | Tokenizer and literal spill; context-free |
 
-Package import paths follow D7.2.4v4. The names above are working names.
+Package import paths follow D9.3.4. The names above are working names.
 
 ### 5.7 Reuse
 
@@ -740,7 +740,7 @@ milestone that first needs it, and fixed at its root if real.
 | **MG7** | OAuth enablers. No script can listen on a loopback port: `lambda serve` is a separate process, and its Lambda backend is stubbed. There is no SHA-256, base64url encoder or secure random for PKCE. Opening the system browser through `io.exec("open", [url])` is untested. | M4 | **Resolved** (M4): `lambda.io.loopback` (`listen`, `accept`) waits for one browser request on 127.0.0.1, parked on the event loop; `hash`, `uuid` and `url_encode` are system functions (the names Archive AR-E7 planned); the system browser opens through `io.exec` (`open`, `start`, `xdg-open`). |
 | **MG8** | Scale. Does a 50 000-message mailbox open from its index and scroll within the frame budget with Finder's row window? | M1 | **Partly resolved** (M1d): the list mounts only the rows near its viewport. A 50 000-entry index opens and scrolls in the debug build. Two Radiant grid defects found on the way are fixed (M1 checkpoint). The release-build timing is still to be measured. |
 | **MG9** | Large literals. Does a 25 MB attachment stream to disk without an in-memory copy, from the tokenizer through `input-eml`? | M1 | **Resolved for the store** (M1a): `fetch_message` fetches with `to`, so a large body streams into `incoming/` and moves into place without a copy in memory. Reading it back with `input(…, 'eml')` still holds the decoded parts in memory. |
-| **MG10** | Compose editing. Is contenteditable through the DOM editing package (D7.2.5) good enough for mail: lists, links, pasted HTML, inline images? | M3 | Fix in the editing package. Plain-text compose remains the fallback. |
+| **MG10** | Compose editing. Is contenteditable through the DOM editing package (D10.2.1) good enough for mail: lists, links, pasted HTML, inline images? | M3 | Fix in the editing package. Plain-text compose remains the fallback. |
 | **MG11** | *Withdrawn with ML7v3.* SQLite writes from Lambda code are no longer needed before M1. They return with the later phase that removes SL1–SL3 (Appendix S, ML7v2). | — | — |
 | **MG12** | Is Lambda's own search fast enough? `io.text_search` and `io.grep` over the sidecars of 10 000 messages, within 300 ms in a release build. Both rescan the files on every call. | M5 | Measure and record the result. A miss is SL4, left to the later phase that adds a persistent index to `lib/fts`. No database full-text index (ML12). |
 | **MG13** | Can `lambda.io.mail` resolve as a built-in runtime module? Import resolution checks exact built-in names (`math`, `io`, `mcp`), then static Jube modules, then shipped packages under `lmd/package/` (`build_ast.cpp`). | M0 | **Resolved** (M0): `builtin_module_name` maps the full path `lambda.io.mail` to the `io_mail_*` rows; an unaliased import is refused. |
@@ -812,10 +812,10 @@ increment.
 | **MQ6** | Add JMAP (Fastmail) or Gmail API adapters? | Not in scope. Revisit after M5; both are reachable through `io.fetch` today. |
 | **MQ7** | Secret store on Linux and Windows? | macOS first. The other platforms report a clear "not supported" until a backend lands. |
 | **MQ8** | Where does the cache live? | The user data directory (`~/Library/Application Support/Lambda Mail/` on macOS) for the demo, and `./temp/` for tests. |
-| **MQ9** | ML8 needs a design ruling: mail sessions and secrets only for local-file documents. Extend D7.5.4's origin gate, or write a new D7.5 ruling? | A new D7.5 ruling that generalises the origin gate to credentials and non-HTTP network protocols. |
+| **MQ9** | ML8 needs a design ruling: mail sessions and secrets only for local-file documents. Extend D11.3.1's origin gate, or write a new D11 ruling? | A new D11 ruling that generalises the origin gate to credentials and non-HTTP network protocols. |
 | **MQ10** | POP3: delete messages from the server after download? | Leave them on the server by default, with an account option to delete after a set number of days, as macOS Mail did. |
 | **MQ11** | How does the message iframe request scripting-disabled loading (MG4)? | **Answered** (user, 2026-10-22): the standard `sandbox` attribute, backed by a per-document scripting-disabled flag. Radiant treats any sandboxed frame as script-free, even with `allow-scripts`, and logs that the token is not yet honoured. When sandboxing lands, the attribute gains its full meaning with no change to the demo. |
-| **MQ12** | ML11 needs D7.2.4 amended: a built-in module nested under `lambda.io`. | **Answered: ratified as D7.2.4v4** (user, 2026-10-22; Formal Design 39.1.0). v3 allowed built-in modules only at `lambda.<module>`. v4 adds that `lambda.io.<leaf>` may name a built-in runtime module whose functions park on IO, which a Jube module may not do (D7.4.2v2). It is imported by its full path only, and its leaf may name neither a shipped package nor an `io` system function. Marked `*` until `lambda.io.mail` exists. |
+| **MQ12** | ML11 needs D9.3.4 amended: a built-in module nested under `lambda.io`. | **Answered: ratified as D9.3.4** (user, 2026-10-22; Formal Design 39.1.0). v3 allowed built-in modules only at `lambda.<module>`. v4 adds that `lambda.io.<leaf>` may name a built-in runtime module whose functions park on IO, which a Jube module may not do (D9.5.2). It is imported by its full path only, and its leaf may name neither a shipped package nor an `io` system function. Marked `*` until `lambda.io.mail` exists. |
 | **MQ14** | How does the message frame block remote loads in the engine? Today the sanitizer removes them (ML5v2's second layer), which CSS escapes or `image-set()` strings could slip past. Radiant has a per-document `LOCAL_ONLY` admission policy, but no markup asks for it. | A `<meta http-equiv="Content-Security-Policy">` that the sanitizer writes into the message: Radiant would map a policy whose fetch directives admit no network source to `LOCAL_ONLY`, leaving the rest of CSP unimplemented. A sender's own policy can only narrow it. The alternatives are mapping `sandbox` itself, which is not what the standard means, or the `csp` attribute of CSP Embedded Enforcement, a draft that only Chromium ships. |
 | **MQ13** | Who writes the SQLite index? | **Answered** (user, 2026-10-22): no SQLite index for now. The store is a Mark index per mailbox (ML7v3), written by Lambda code with `output(…, {atomic: true})`. |
 
@@ -837,7 +837,7 @@ increment.
   UTF8=ACCEPT).
 - **`lambda/runtime/io_mail.cpp`**: `open`, `command`, `idle` and `send`, with
   their option-name tables, the `io_mail_*` registry rows and the
-  `lambda.io.mail` import (D7.2.4v4).
+  `lambda.io.mail` import (D9.3.4).
 - **A socket waiter in the scheduler** (`lambda_socket_waiter_*`): it parks a
   task until its socket is ready, on the loop. Closing a waiter wakes a task
   parked on it with an error. `lambda_task_running()` exposes the running task
@@ -1019,7 +1019,7 @@ password over IMAP (`[AUTHENTICATIONFAILED] Invalid credentials`).
   - `hash(value, 'sha256' | 'sha384' | 'sha512')` returns binary, from mbedTLS.
   - `uuid()` is a procedure returning a version 4 UUID from mbedTLS's entropy-seeded CTR_DRBG.
   - `url_encode(text)` keeps the RFC 3986 unreserved characters.
-  - `lambda.io.loopback` (`listen()` with `.port`, and `accept(listener, seconds, page)` returning `{method, path, query}`) is a built-in module under D7.2.4v4. It binds 127.0.0.1 only, and its wait parks the task on the event loop with the socket waiter mail already uses.
+  - `lambda.io.loopback` (`listen()` with `.port`, and `accept(listener, seconds, page)` returning `{method, path, query}`) is a built-in module under D9.3.4. It binds 127.0.0.1 only, and its wait parks the task on the event loop with the socket waiter mail already uses.
 - **`lambda.oauth`** (`lmd/package/oauth.ls`):
   - `sign_in` takes PKCE with an S256 challenge, a verifier of two UUIDs (64 hex characters) and a UUID `state`. It shows the page in the system browser, or through an `open` callback, then receives the redirect and exchanges the code.
   - `refresh` renews tokens. Both raise with the provider's reason.

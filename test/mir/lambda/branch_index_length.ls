@@ -1,4 +1,4 @@
-// S7.1.1v3/D2.5.3: a dominating nonnegative and rank-one length test
+// S7.1.1v3/D2.4.3: a dominating nonnegative and rank-one length test
 // proves the indexed read, but neither test alone proves it.
 fn guarded(a: float[], i: int) float? =>
     if (i >= 0 and i < len(a)) a[i] else null

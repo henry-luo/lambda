@@ -1,5 +1,5 @@
 // PG7.3: the native counting kernel must reproduce the retained Lambda oracle,
-// including contradictions, retries and periodic self-neighbours (D6.4.1).
+// including contradictions, retries and periodic self-neighbours (D7.6.1).
 import rng: lambda.procart.rng
 import wfc: lambda.procart.wfc
 import native_math: lambda.math

@@ -439,7 +439,7 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
     }
     if (context && context != fw->owner_context && context->execution_depth) {
         // a child may pump the shared loop while its parent is suspended; retain
-        // completion roots until the parent's own host checkpoint (D5.4.1).
+        // completion roots until the parent's own host checkpoint (D6.4.1).
         JsFetchRuntimeState* state = (JsFetchRuntimeState*)context_capsule(
             fw->owner_context, CONTEXT_CAPSULE_DOM_FETCH);
         fw->completion_status = status;

@@ -42,7 +42,7 @@ coverage for modes absent from that column.
 | `utils/check_node_module_architecture.py` | Source/config gate and report entry points; the JSON report matched Python, including 38 `node_core` sources. Binary modes remain unavailable. |
 | `utils/check_static_module_architecture.py` | Default, JSON, and boundary-baseline entry points; the JSON inventory matched Python semantically, including 35 weak providers. Arbitrary CLI arguments remain unavailable. |
 | `utils/check_state_machine.py` | Checks 14 complete families and 14 invariant bindings; current output matched Python byte for byte. |
-| `utils/lint/rules/structural/check_dom_editable_architecture.py` | Native gate gathers all 1,250 Python-visible production sources and reports the same current registry-owner failure. The D7.2.5/D7.5.3 boundary is the policy being checked. |
+| `utils/lint/rules/structural/check_dom_editable_architecture.py` | Native gate gathers all 1,250 Python-visible production sources and reports the same current registry-owner failure. The D10.2.1/D9.5.6 boundary is the policy being checked. |
 | `utils/extract_doc_blocks.py` | Extracts 534 runnable units and 5 no-run entries; generated `.ls` files matched byte for byte and the index matched as JSON. Its JSON indentation differs in bytes. |
 | `utils/js_exception_catalog_census.py` | Default, violations, show-void, and Makefile prefix modes have entry points; default and Makefile output matched Python byte for byte across 99 helper files. Arbitrary root/CLI options remain unavailable. |
 | `utils/js_callable_census.py` | Default, check, and JSON modes have entry points; text matched byte for byte and full JSON matched semantically. Arbitrary root/CLI options remain unavailable. |
@@ -110,7 +110,7 @@ iteration truncation, path value and UTF-8 offset mismatches, JSON formatting
 differences, missing procedural regex, and slow string-heavy array growth.
 IL2-I8's imported-`main` execution is fixed in the MIR module-entry path:
 imports now initialize without the driver's `run_main` flag, while the driver
-still invokes its own `main` when requested. D7.2.1 and D7.2.2 govern the
+still invokes its own `main` when requested. D9.3.1 and D9.3.2 govern the
 module initialization boundary; S12.1.1v2 governs procedural `main` work.
 IL2-I19's string-path handling is fixed at the URL-to-filesystem boundary:
 the URL scanner encodes spaces, and local-file operations now decode the

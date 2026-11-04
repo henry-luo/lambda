@@ -3,7 +3,7 @@
 Date: 2026-10-19. Scope: preserve the PDF visual/export suite while reducing
 its 184-second optimized runtime toward 40 seconds. PDF generation remains in
 the pure package (**S2.6.6v3**); retained resources and evaluator lifetime follow
-**D4.5.1v4 / D4.1.4v5 / D5.3.3 / D5.4.1**.
+**D5.5.1 / D5.1.4 / D6.3.3 / D6.4.1**.
 
 ## Milestone and diagnosis
 
@@ -52,7 +52,7 @@ module reuse; it is removed from batch cleanup.
 
 The PDF package borrows the UI's existing loader runtime when no evaluator is
 active. A newly reserved evaluator initializes its heap through the normal
-package loader; live evaluator identity remains unchanged (**D5.4.1**).
+package loader; live evaluator identity remains unchanged (**D6.4.1**).
 POSIX test cases retain a render process for their output jobs, including
 imported PDF page scripts. CLI option/rejection checks remain independent
 commands. Windows keeps ordinary command execution. A new control compares
@@ -65,7 +65,7 @@ takes 6.29 ms. Compression now reuses the existing LRU implementation in an
 optional evaluator-owned capsule: at most 64 entries / 8 MiB, including source
 and compressed bytes. Native copies own all stored bytes; hashes locate an
 entry and a full byte comparison proves identity. No cached Item or GC address
-survives heap retirement (**D5.3.3 / D5.4.2–D5.4.4**). Uncached operation and
+survives heap retirement (**D6.3.3 / D6.4.2–D6.4.4**). Uncached operation and
 compression settings remain the same. Warm Unicode export falls to **1.28 ms**;
 the decorated-text probe falls **23.53 → 4.58 ms**, with unchanged output sizes.
 The source-key/reuse golden passes with collection every 17 allocations and
@@ -164,7 +164,7 @@ The compiler's default eight-thread pool previously multiplied across case
 workers. The harness now defaults `LAMBDA_MODULE_AST_THREADS` to the inherited
 case CPU budget; an explicit user setting remains authoritative. This changes
 the test environment only. Production sources and the optimized host hash are
-identical to the preceding qualification (**D8.1.1v13 / D8.5.1v7**).
+identical to the preceding qualification (**D8.3.5 / D8.3.5**).
 
 Final observations with eight case workers and frozen optimized binaries:
 
@@ -265,7 +265,7 @@ The shared runner supports opt-in `case_batch_size`/`case_batch_size_env`.
 The PDF gate balances batches of at most 16 cases across eight CPU-capped
 workers. This supersedes the preceding milestone's process-per-case choice.
 The exported documents and their JS realms still retire after each render job;
-only loader/module caches span jobs (**D5.4.1**). The batch client restarts its
+only loader/module caches span jobs (**D6.4.1**). The batch client restarts its
 child when the presence of `LAMBDA_HEADLESS_GLFW_WINDOW` changes, matching the
 UI host's initialization contract. `LAMBDA_PDF_TEST_BATCH_SIZE=1` restores
 process isolation for diagnosis. Other suites retain their one-case default.

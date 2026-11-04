@@ -1,4 +1,4 @@
-// Native source census for the D8.4.3 JS exception-effect contract.
+// Native source census for the D7.4.3 JS exception-effect contract.
 import .path_utils
 
 fn ident_char(ch: string) bool =>

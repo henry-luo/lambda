@@ -80,7 +80,7 @@ current writer cannot retain editor lock metadata.
 
 The package's 16-million-pixel/64-MiB per-raster and aggregate PSD budgets apply;
 this demo makes no photo-scale performance claim. The host receives copied pixels,
-never borrowed GC pointers (**D4.5.2 / D5.3.3**), and views retain their canvas and
+never borrowed GC pointers (**D5.5.2 / D6.3.3**), and views retain their canvas and
 focus owners while procedures publish edits (**S12.1.3**).
 
 Image & canvas offers nine canvas anchors. Top left keeps the previous behavior;

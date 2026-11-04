@@ -20,7 +20,7 @@ inline void test_batch_result_free(TestBatchResult* result) {
 }
 
 // decode exactly the assigned scripts in order; success markers alone cannot
-// hide a truncated process, a lost script, or a teardown crash (D5.3.3).
+// hide a truncated process, a lost script, or a teardown crash (D6.3.3).
 inline bool test_batch_decode(const ShellResult& process, const char* const* paths,
         size_t count, TestBatchResult* results, StrBuf* error) {
     const char* cursor = process.stdout_buf ? process.stdout_buf : "";

@@ -5,9 +5,9 @@
 - Input: patched `test/benchmark/Overall_Result41.md` and
   `benchmark_results_v41.json`; cached release `lambda-v41-57addc5cf4`, SHA-256
   `d2c8df4bd4fb1fe8c983ccdef752f2943c6970128e0ce1e33bf04434789c4cf8`.
-- Authority: D3.3.3v3 (array representation certificates), D3.2.4v3 (record
-  reification), D8.3.2–D8.3.3 (boundary proofs), D8.2.6 (producer-owned
-  representations), D5.3.4 (precise roots), S7.1.3v2 (checked writes),
+- Authority: D4.3.3 (array representation certificates), D4.2.5 (record
+  reification), D7.3.2–D7.3.3 (boundary proofs), D8.2.6 (producer-owned
+  representations), D6.3.4 (precise roots), S7.1.3v2 (checked writes),
   S9.1.2/S9.2 (snapshots and exclusive mutable access).
 
 ## Implementation
@@ -20,7 +20,7 @@
    Mutable bindings, aliases, captures, open calls and other uses retain the
    original carrier and admission points. No inferred contract is imposed on
    an observable open array, and no mutable dispatch cache is introduced
-   (D8.4.1v2).
+   (D7.4.1).
 2. **Open array descendants in typed records.** A declared `array` field
    imposes no element contract. Writes below an integer index in that field
    preserve the enclosing record contract without a staged copy of the entire
@@ -61,7 +61,7 @@
    full occurrence/rank contract matches, and neither a pointer lane nor a
    compact ArrayNum rebuild is required. Empty numeric arrays still rebuild.
    Conversions retain the transactional copy path. This preserves the original carrier across repeated `Doc[]`
-   reads; open writes still invalidate its certificate (D3.3.3v3).
+   reads; open writes still invalidate its certificate (D4.3.3).
    Typed appends pass the source binding contract explicitly. Open boxed-array
    appends detach before clearing a certificate left by another alias; a past
    read admission does not constrain the open binding.
@@ -71,7 +71,7 @@
    unless proved redundant.
    Previously the carrier alone could skip a refined string-array or union
    check; the JIT now rejects invalid elements at the original call boundary, matching
-   the interpreter (D8.3.2–D8.3.3). Numeric-array boxed bodies already own
+   the interpreter (D7.3.2–D7.3.3). Numeric-array boxed bodies already own
    their full entry admission, so their direct callers do not add another
    check. A seven-sample three-binary comparison isolated and removed a
    roughly 4% DeltaBlue regression caused by that duplicate boundary.
@@ -183,16 +183,16 @@ The subsequent [Tune24 implementation](Lambda_Impl_Tune24.md) adds branch-local
 proofs, read-only borrowing intervals, and eligible typed record/destination
 lowering. Broader scalar replacement and builder ownership outside that
 eligibility, induction-variable range proofs, and call-site specialization
-remain open (D8.3.1 permits one unboxed version per function).
+remain open (D7.3.1 permits one unboxed version per function).
 They require explicit lifetime, effect and range proofs.
 The [Tune25 implementation](Lambda_Impl_Tune25.md) extends audited scalar-call
 hoisting to initialized locals and counted/indexed loops, removes discarded
 comprehension output, and adds native stores for ten compact/wide numeric
 element kinds. Its checked fallback and precise-root requirements remain
-unchanged (D3.3.3v3, D5.3.4, D8.2.6).
+unchanged (D4.3.3, D6.3.4, D8.2.6).
 Loop-wide bounds/COW proofs and smaller precise-root frames around leaf calls
 remain useful follow-ups beyond those delivered scopes. These are
-implementation opportunities under D3.3.3v3, D5.3.4 and D8.3.1, not a request
+implementation opportunities under D4.3.3, D6.3.4 and D7.3.1, not a request
 to weaken source contracts or add a C-text backend.
 
 The builder itself already exists from earlier tuning rounds. The live-source

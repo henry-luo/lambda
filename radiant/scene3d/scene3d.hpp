@@ -103,7 +103,7 @@ struct Scene3dStats {
     unsigned output_width, output_height;   // the published snapshot, at the page's raster scale
     float camera_aspect;
 };
-// all retained data is document/native-owned (D4.5.2); the DOM is borrowed only during projection.
+// all retained data is document/native-owned (D5.5.2); the DOM is borrowed only during projection.
 ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, float height, float raster_scale);
 // scene3d_snapshot, or with !materialize a frame whose snapshot pixels stay unread until a CPU consumer
 // asks (scene3d_materialize, or any later scene3d_snapshot): the GPU compositor draws the published

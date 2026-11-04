@@ -10,9 +10,9 @@ pending.
 AST backend, pinned to interpretation. Not the separate JS MVP ABI/backend.
 
 **Formal authority:** [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)
-**D1.3v3, D1.4v4, D1.5v2, D4.6.1v3–D4.6.2v2, D5.3.2–D5.3.6,
-D6.2.2v2–D6.2.3v2, D8.1.1v9, D8.1.3v11, D8.2.1–D8.2.5v2,
-D8.4.1v2–D8.4.3v2**; [Lambda Formal Semantics](../../doc/Lambda_Formal_Semantics.md)
+**D1.3, D1.4, D1.5, D5.6.1–D5.6.2, D6.3.2–D6.3.6,
+D7.2.2–D7.2.3, D8.3.3, D8.4.2, D8.2.1–D8.2.5,
+D7.4.1–D7.4.3**; [Lambda Formal Semantics](../../doc/Lambda_Formal_Semantics.md)
 **S1.6, S4.4–S4.5, S9.1.2–S9.1.4, S9.2.2**.
 
 **Related work:** [JS interpreter design](../Lambda_Design_JS_Interpreter.md),
@@ -49,7 +49,7 @@ Non-goals:
 - No auto-tiering, hot-function MIR compilation, bytecode, second executable
   IR, or new unboxed interpreter value stack.
 - No mutable per-site inline caches, feedback vectors, receiver/callee caches
-  or runtime AST rewriting (**D8.4.1v2, D8.2.2**).
+  or runtime AST rewriting (**D7.4.1, D8.2.2**).
 - No language-semantic merger: JS coercion, TDZ, mutable lexical cells,
   completions and iterator closing remain JS-owned. Lambda snapshot/COW,
   error/absence and numeric rules remain Lambda-owned.
@@ -137,7 +137,7 @@ and [interleaved JS confirmation](../../temp/interp_tune/2026-09-18_current_vs_1
 compare the current release executable with the preserved `12b507e51` release
 binary. Every child explicitly used `LAMBDA_EXEC_BACKEND=interp`,
 `JS_EXEC_BACKEND=ast`, `LAMBDA_NO_LOG=1`, and `--no-log`; this excludes
-auto-tier promotion as required by **D8.1.1v9, D8.1.3v11**. Results are
+auto-tier promotion as required by **D8.3.3, D8.4.2**. Results are
 whole-process wall-time medians, so they include parsing and setup as well as
 interpreter execution.
 
@@ -188,7 +188,7 @@ code. Equivalent structural helpers are extracted after both clients work
 | Calls | Existing call entries and rooted argument ownership | JS call/construct/this/newTarget; Lambda signatures and borrows |
 | Control flow | Entry/exit/source ownership helpers | JS finally/IteratorClose and Lambda signal/error semantics |
 
-Fact placement follows **D8.2.4–D8.2.5v2**: effective types remain on
+Fact placement follows **D8.2.4–D8.2.5**: effective types remain on
 `AstNode.type`, declarations own source contracts, and function/scope plans own
 their resource shape. Do not add an ID-keyed per-node fact database or put
 use-specific metadata on shared `TYPE_ANY`/literal type singletons. A capture
@@ -196,9 +196,9 @@ offset is relative to a particular function; it cannot be a universal offset
 on a `NameEntry` shared by several closures.
 
 Runtime name IDs and GC values remain context/realm-owned, not embedded as
-arbitrary process-specific values in reusable AST images (**D4.6.2v2**).
+arbitrary process-specific values in reusable AST images (**D5.6.2**).
 Data-pointer caching across allocation is forbidden: object headers and
-movable backing storage have different lifetimes (**D4.3.1**).
+movable backing storage have different lifetimes (**D5.3.1**).
 
 ## 4. Phases and dependencies
 
@@ -284,7 +284,7 @@ change tier selection, semantic coverage or scheduling.
 
 This phase addresses two specific gaps, not a new general constant-folding
 pass. Preserve existing folds and close the literal paths that still do work
-on each evaluation (**D8.2.4–D8.2.5v2, D8.1.3v11**).
+on each evaluation (**D8.2.4–D8.2.5, D8.4.2**).
 
 ### 6.0 Landed implementation (2026-09-18)
 
@@ -296,8 +296,8 @@ on each evaluation (**D8.2.4–D8.2.5v2, D8.1.3v11**).
   On first evaluation, the interpreter materializes the value into a
   realm-owned `RootVector` cache keyed by the immutable AST image and reuses it
   for subsequent evaluations. The AST holds no runtime pointer, so a cached
-  AST shared by scripts cannot cross a realm boundary (**D5.1.1v2, D5.4.2,
-  D8.1.3v11**).
+  AST shared by scripts cannot cross a realm boundary (**D6.1.1, D6.4.2,
+  D8.4.2**).
 - The JS regression exercises repeated use, forced collection, and
   `runtime_reset_heap` followed by cached-AST reuse. Lambda AST-mode literal
   smoke tests cover hexadecimal integers and booleans. A TypeScript enum
@@ -337,7 +337,7 @@ and existing constant-pool publication/loading helpers.
    constant owner and loader; do not introduce another literal-value table.
 2. Preserve effective literal types and source spans for inference and
    diagnostics. Never place one occurrence's value on shared `LIT_INT`,
-   `LIT_BOOL` or other type singletons (**D8.2.5v2**).
+   `LIT_BOOL` or other type singletons (**D8.2.5**).
 3. Make ordinary bare-literal evaluation load the prepared value, including
    literals inside expressions that cannot fold, such as a mutable local plus
    `1`. This must work with `LAMBDA_CONST_FOLD=0`; literal decoding is source
@@ -371,10 +371,10 @@ Starting points: `js_c_ast_helpers.cpp::build_js_literal_from_source`,
 3. Reuse existing constant slots and ownership-qualified loading. Reusable ASTs
    carry stable literal facts/handles, not foreign heap pointers. Register/trace
    materialized values through the existing owner before any further MAY_GC
-   operation, and retire them with that owner (**D5.3.3, D8.1.3v11**).
+   operation, and retire them with that owner (**D6.3.3, D8.4.2**).
 4. Do not substitute a NamePool property-name identity for an ordinary runtime
    string to avoid an allocation. Preserve the property/value boundary and
-   cross-context lifetime rules (**D4.6.1v3–D4.6.2v2**).
+   cross-context lifetime rules (**D5.6.1–D5.6.2**).
 5. Reuse only immutable primitive values; verify that arithmetic/conversion
    helpers cannot mutate a retained BigInt payload. Keep array/object/regex
    instances fresh and leave template-site identity rules unchanged. No
@@ -417,7 +417,7 @@ memory without bound. Non-admitted cases and their reasons are reported.
   `EvalContext`'s `NamePool` `String`. The first access performs the existing
   pool lookup; later accesses reuse that context's name identity. The map is
   freed on normal runner teardown and the standalone activation guard. The
-  shared AST stores no runtime `String*` (**D4.6.2v2**).
+  shared AST stores no runtime `String*` (**D5.6.2**).
 - The JavaScript static-member path already carries its parser-owned spelling
   through the existing canonical property-lane APIs; it did not repeat source
   spelling interning. The audit also confirmed that `js_get` and `js_set`
@@ -475,7 +475,7 @@ Starting points: `js_runtime.cpp::js_array_index_key`,
 **Exit:** the ordinary sparse-hole diagnostic case does not intern a new name
 for each absent index. Proxy/accessor cases retain exact operation order and
 key spelling. Both AST and MIR consumers of changed shared kernels retain
-correctness (**D4.6.1v3, D8.4.1v2–D8.4.3v2**).
+correctness (**D5.6.1, D7.4.1–D7.4.3**).
 
 ### 7.3 NamePool segment lookup, conditional on residual evidence
 
@@ -487,7 +487,7 @@ If it remains material, evolve the existing NamePool spelling index to serve
 the complete identity scope, or reuse a precomputed hash through segment probes.
 Compare alternatives for lookup cost, memory, publication, rollback and teardown.
 Preserve parent-first lookup, first-definer identity, sealed static roots,
-dynamic-child ownership and ID exhaustion behavior (**D4.6.2v2**). Do not add
+dynamic-child ownership and ID exhaustion behavior (**D5.6.2**). Do not add
 a competing identity registry or a per-access-site cache.
 
 **Exit:** large multi-segment tests preserve identical identity resolution and
@@ -504,12 +504,12 @@ Choose no pool-layout change if the measured benefit does not justify it.
   view overlays, imports, object fields, ordinary locals, and any unlinked
   occurrence retain the generic binding route. This removes the repeated
   `FnCapture` list scan without placing a universal capture index on a shared
-  `NameEntry` (**D6.2.3, D8.2.4–D8.2.5v2**).
+  `NameEntry` (**D7.2.3, D8.2.4–D8.2.5**).
 - The same plan records source argument count and named-argument presence on
   each representable Lambda call. `eval_call` reuses the fact, while unplanned
   calls retain the old scan and malformed oversized calls retain the existing
   runtime arity diagnostic. It does not cache a callee, receiver, resolved
-  argument value, or dynamic dispatch result (**D6.2.2v2**).
+  argument value, or dynamic dispatch result (**D7.2.2**).
 - `InterpWalker.RepeatedCaptureRead` exercises snapshot capture reads in a
   repeated-call loop. Focused interpreter differential tests cover captures,
   static members, named arguments, literals and type binders. JS lexical-cell
@@ -517,18 +517,18 @@ Choose no pool-layout change if the measured benefit does not justify it.
   shared by executions; `js_interp_env_create` consumes the prepared count and
   no longer rewrites `NameEntry::slot` per activation. Lazy synthetic class
   field-initializer functions likewise seal their known zero-slot scope at
-  construction in the execution overlay (**D8.2.4–D8.2.5v2**).
+  construction in the execution overlay (**D8.2.4–D8.2.5**).
   AST callable definitions now retain their source-owned parameter shape and
   resolved formal length in the shared `JsCallableCode`; closures, mapped
   `arguments`, and class constructors consume that immutable record instead
   of rescanning parameters. The same parameter-facts pass now supplies the
   callable's total arity, removing the immediately preceding independent list
-  count (**D8.2.4, D8.2.5v2**).
+  count (**D8.2.4, D8.2.5**).
   `AstCallNode` now has one shared preparation routine for representable
   source arity, named operands, and spread presence. Lambda's plan and every
   JS call constructor use it; the JS walker can select its direct rooted-call
   path without another argument-list scan, while oversized lists retain the
-  existing scan and diagnostics (**D8.2.4, D8.2.5v2**).
+  existing scan and diagnostics (**D8.2.4, D8.2.5**).
   Lazy parameter-diagnostic formatting remains separate work: the current
   contract checker receives an already-built diagnostic string, so a lazy
   descriptor boundary needs a dedicated ownership/error-format design.
@@ -536,7 +536,7 @@ Choose no pool-layout change if the measured benefit does not justify it.
 Starting points: `ast-core.hpp::{NameEntry,NameScope,FnAnalysis,FnFramePlan,
 AstCallNode}`, `compiler_pass.cpp`, `interp_plan.cpp`, and both walkers.
 Use the indexed compilation unit and common child enumeration; no independent
-core-child traversal or alternate pass schedule (**D8.2.4–D8.2.5v2**).
+core-child traversal or alternate pass schedule (**D8.2.4–D8.2.5**).
 
 ### 8.1 Binding access plans
 
@@ -577,7 +577,7 @@ counterexamples still use the generic semantic path and pass their tests.
 
 **Exit:** repeated ordinary calls perform no source argument-list classification
 scan. Existing `fn->invoke`/`fn->construct` and Lambda dynamic-call entries remain
-the sole dispatch authorities (**D6.2.2v2**).
+the sole dispatch authorities (**D7.2.2**).
 
 ### 8.3 Contracts and lazy diagnostics
 
@@ -610,7 +610,7 @@ Starting points: `interp.cpp::{InterpFrameGuard,Scratch}`,
   The window exists only when a function has parameters. Each completed
   binding is owned by the traced function environment, so the reusable slot
   roots only the parameter currently crossing allocation-capable binding work
-  and is cleared before a later rest-array allocation (**D5.3.3**). This
+  and is cleared before a later rest-array allocation (**D6.3.3**). This
   matches the activation-scoped reservation discipline
   already used by Lambda's `InterpFrameGuard`, without falsely merging JS
   suspension/control-frame semantics with Lambda frames.
@@ -624,13 +624,13 @@ Starting points: `interp.cpp::{InterpFrameGuard,Scratch}`,
   source argument plus a possible pipe injection and retains the callee root
   while nested arguments run. Named and special call shapes, and any
   unplanned/oversized activation, retain the established dynamic `RootSpan`
-  route (**D5.3.3, D8.2.5v2**).
+  route (**D6.3.3, D8.2.5**).
 - `RootFrame` now has an activation lifetime that owns the existing root and
   number-stack watermark pair. Lambda's `InterpFrameGuard` uses it instead of
   maintaining a duplicate `LambdaRootFrame`/snapshot teardown sequence;
   ordinary nested JS helpers retain the default root-only lifetime. This is a
   common exact-root primitive, not a merger of JS and Lambda control frames
-  (**D5.1.1v2, D5.3.3, D8.1.3v11**).
+  (**D6.1.1, D6.3.3, D8.4.2**).
 
 ### 9.1 Converge ownership before extraction
 
@@ -653,7 +653,7 @@ These are resource facts, not executable instructions.
 
 - Calculate maximum simultaneously live roots following actual evaluation
   order. Nested arguments add to still-live outer arguments; taking only the
-  maximum arity of any single call is incorrect (**D5.3.5**).
+  maximum arity of any single call is incorrect (**D6.3.5**).
 - Account for receiver/callee/key lifetimes, optional chains, defaults,
   destructuring, named arguments and exceptional exits. The planner's lifetime
   model and the walker's slot acquisition order must agree.
@@ -683,8 +683,8 @@ These are resource facts, not executable instructions.
 
 A return may use the existing no-safepoint interval between frame pop and
 caller store, but only with the precise lifetime proof required by
-**D5.3.3**. Any cleanup before that handoff remains part of the proof.
-Native recovery checkpoints must remain consistent with **D5.3.6**.
+**D6.3.3**. Any cleanup before that handoff remains part of the proof.
+Native recovery checkpoints must remain consistent with **D6.3.6**.
 
 **Exit:** bounded expression temporaries and ordinary call operands stop opening
 per-node/per-call root windows in both clients. Root reservations scale with
@@ -697,7 +697,7 @@ with completed loop iterations. No conservative-root fallback exists.
 This is deliberately later and higher risk than binding-plan lookup removal.
 It optimizes the JS client while exercising a genuinely shared storage service.
 Reuse `GcEnvironmentStorage` and owned scalar-slot helpers; do not add a new
-heap family or copy Lambda's capture semantics (**D6.2.3v2, D8.1.3v11**).
+heap family or copy Lambda's capture semantics (**D7.2.3, D8.4.2**).
 
 ### Admission
 
@@ -716,8 +716,8 @@ stores the proof: no `arguments`/`this`/`new.target` observation, direct eval,
 The call frame borrows the closure outer environment and the existing call
 activation's `this` home. The focused regression verifies that an escaped
 nested closure receives that outer environment, while `arguments` and local
-binding functions retain their environments (**D5.3.3, D6.2.3v2,
-D8.1.3v11, D8.2.4–D8.2.5v2**).
+binding functions retain their environments (**D6.3.3, D7.2.3,
+D8.4.2, D8.2.4–D8.2.5**).
 
 This is deliberately not yet local-slot storage: an actual local binding needs
 separate exact Item roots and owned scalar homes. Reusing one native span for
@@ -758,14 +758,14 @@ remains material after names, preparation and frame costs are removed.
   a proven helper does not authorize a second unboxed interpreter lane.
 - Share mechanics only where profile semantics coincide. Lambda numeric tower,
   saturation, division/modulo and absence differ from JS coercion, Number,
-  BigInt, string addition and equality (**S4.4–S4.5, D1.3v3**).
+  BigInt, string addition and equality (**S4.4–S4.5, D1.3**).
 - Preserve NaN, signed zero, infinities, out-of-band scalar ownership, null/
   undefined and invalid-operand behavior. A guard miss must not repeat operand
   evaluation, user conversion or property access.
 - NO_GC is a mechanically verified transitive property, not a name given to a
-  seemingly simple helper (**D5.3.2**). Do not remove roots across an unaudited call.
+  seemingly simple helper (**D6.3.2**). Do not remove roots across an unaudited call.
 - Use immutable compile-predicted facts and guards; no feedback mutation or
-  per-site cache installation (**D8.4.1v2**).
+  per-site cache installation (**D7.4.1**).
 
 **Exit:** the measured residual cost decreases on Lambda compute cases and a
 JS numeric/library cohort. Edge-case/forced-GC results remain identical. Drop
@@ -914,7 +914,7 @@ specific aggregates. Do not confuse sum-of-fixture medians, median-of-cohort
 times and parallel GTest wall time. Use native samples only for attribution;
 profile runs and diagnostic-counter runs do not enter timing medians.
 
-The one-warm-up/five-sample discipline follows **D8.6.4v2**, but its compiler-
+The one-warm-up/five-sample discipline follows **D8.6.4**, but its compiler-
 time and LOC ratchets are a different gate. This plan does not claim those
 ratchets using interpreter runtime or code movement. No numerical speedup is
 promised before implementation and controlled measurement.

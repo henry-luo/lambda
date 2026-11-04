@@ -78,14 +78,14 @@ state and is not written to disk.
 
 Use **… → Close Notebook** or the OS window control for the save/discard prompt.
 The notebook's explicit close guard opts the view-launched application into
-document-owned Escape and close handling (**D7.2.5 / S12.1.3**).
+document-owned Escape and close handling (**D10.2.1 / S12.1.3**).
 
 Cloud sync, collaboration, file attachments, locked notes, tags, scanning, drawing,
 OS sharing, and timed trash expiry are outside this demo. Narrow windows hide
 the folder sidebar and retain the list/editor panes.
 
 The model follows **S1.4** and **S12.1.3**; native editing uses the shipped
-Lambda policy boundary in **D7.2.5**, and the launcher follows **D7.2.4v3**.
+Lambda policy boundary in **D10.2.1**, and the launcher follows **D9.3.4**.
 No language/runtime ruling changes.
 
 Verification:
@@ -103,7 +103,7 @@ live in `test/ui/note/`. Replays cover navigation, filtering, task hit areas, ed
 history, formatting, folders, trash and local persistence. The selection replay
 uses mouse drags, Shift-arrow ranges and physical typing, checking that native
 and DOM selections survive reactive redraws and formatting-menu changes
-(**D7.2.5**). The checkbox replay checks that activation leaves the caret in
+(**D10.2.1**). The checkbox replay checks that activation leaves the caret in
 editable text, preserves ranges and supports subsequent typing and undo.
 The whitespace replay uses physical typing to verify repeated spaces, consecutive
 empty paragraphs and consecutive soft line breaks.

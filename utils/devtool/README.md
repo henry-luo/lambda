@@ -38,7 +38,7 @@ scope without rerunning previous entries. **Collect** forces GC while inspector
 handles remain rooted. **Clear results** releases all inspector handles and
 clears the transcript; existing REPL bindings remain. **Stop scratch** ends only
 the scratch target. Alt+Up/Down recalls entry history. This uses the existing
-session semantics (S16.7.4–S16.7.6 and D8.1.1v18); it does not inherit a document's
+session semantics (S16.7.4–S16.7.6 and D8.3.2); it does not inherit a document's
 locals. JavaScript evaluation is deferred.
 
 Large results expand in bounded pages. Functions and unsupported live values

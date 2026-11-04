@@ -8,9 +8,9 @@ Element fullscreen is a separate follow-on stage.
 **Scope:** native presentation for Lambda/Radiant's viewer and editor, shared
 by Lambda DOM operations and the future JavaScript Fullscreen API.
 
-**Specification linkage:** D7.5.3 and D7.3.3 govern the DOM catalog/provider
-boundary; D7.1.4v2 governs windowless and null-backend profiles; D4.5.2 and
-D5.3.3 govern retained values and precise roots; S12.1.1v2 and S12.1.3 govern
+**Specification linkage:** D9.5.6 and D9.4.3 govern the DOM catalog/provider
+boundary; D9.2.1 governs windowless and null-backend profiles; D5.5.2 and
+D6.3.3 govern retained values and precise roots; S12.1.1v2 and S12.1.3 govern
 procedural mutations and pure reactive rendering. See [Formal Design](../../doc/Lambda_Formal_Design.md)
 and [Formal Semantics](../../doc/Lambda_Formal_Semantics.md). This adds a Radiant
 capability within those contracts; it changes no existing formal ruling.
@@ -33,7 +33,7 @@ document unload. Stage 1 does not advertise element fullscreen support.
 `UiContext` owns requested and actual mode, pending request, saved normal
 window bounds, maximized state, and pending notifications. Normal bounds are
 tracked while windowed, so a maximized window retains its original restore
-rectangle. No script value or document pointer is retained (D4.5.2).
+rectangle. No script value or document pointer is retained (D5.5.2).
 
 Native transitions use the existing GLFW window and graphics context. Select
 the monitor with the greatest overlap with the window, falling back to the
@@ -79,8 +79,8 @@ accepted transition. Both use existing window notifications and
 `dom.watch_window`; handlers can query actual mode. Logs use `fullscreen:`.
 
 The path is DOM catalog → neutral engine seam → Radiant module provider →
-native controller. No lambda-rt → Radiant dependency is introduced (D7.5.3,
-D7.3.3).
+native controller. No lambda-rt → Radiant dependency is introduced (D9.5.6,
+D9.4.3).
 
 ## 4. Input and launch behavior
 
@@ -94,7 +94,7 @@ D7.3.3).
 - Headless execution reports unavailable. Combining `--headless` and
   `--fullscreen` is a CLI error, even with a hidden graphics window.
   New GLFW symbols have null implementations in `radiant/headless.cpp`
-  (D7.1.4v2).
+  (D9.2.1).
 
 GLFW fullscreen is the initial portable mode. Native macOS Spaces integration
 would be a separate adapter under the same controller contract.
@@ -128,7 +128,7 @@ Implement transient user activation, connected/active-document checks,
 embedded permissions policy, removal/unload cleanup, and the specified
 Promise/event lifecycle before claiming web compatibility. Retained nodes use
 generation-checked `DomNodeRef`; retained Promises use registered precise roots
-(D4.5.2, D5.3.3).
+(D5.5.2, D6.3.3).
 
 Reference: [WHATWG Fullscreen API](https://fullscreen.spec.whatwg.org/).
 

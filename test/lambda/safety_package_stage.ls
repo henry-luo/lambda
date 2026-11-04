@@ -1,4 +1,4 @@
-// D7.5.8: portable inactive image policy and exact captured member bytes.
+// D11.2.4: portable inactive image policy and exact captured member bytes.
 import stage: lambda.security.package_stage
 let first = stage.begin(input("test/safety/stage/package.zip", 'binary')^)^
 let second = stage.advance(first)^

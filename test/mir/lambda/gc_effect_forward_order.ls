@@ -1,4 +1,4 @@
-// D5.3.2: the direct callee is declared after its caller.
+// D6.3.2: the direct callee is declared after its caller.
 pn gc_order_forward_caller(s: string, x: int) int {
     return gc_order_forward_leaf(x) + len(s)
 }

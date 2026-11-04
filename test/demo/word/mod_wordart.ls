@@ -1,4 +1,4 @@
-// Text effects remain editable parameters; SVG carries the exported appearance (D7.2.5).
+// Text effects remain editable parameters; SVG carries the exported appearance (D10.2.1).
 import objects: .mod_objects
 import colors: lambda.ui.core.component
 

@@ -1,4 +1,4 @@
-// S1.4 / D7.2.5: transition edits are one authored transaction, using the player catalog.
+// S1.4 / D10.2.1: transition edits are one authored transaction, using the player catalog.
 import m: .mod_model
 import c: lambda.slide.common
 import fx: lambda.slide.transitions

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ratchet the D7.2.5/D7.5.3 editable protocol ownership boundary."""
+"""Ratchet the D10.2.1/D9.5.6 editable protocol ownership boundary."""
 
 import re
 import sys

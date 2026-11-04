@@ -5,14 +5,14 @@ profiles implemented; live playback verified on macOS. Linux/Windows live
 verification and broader expressive notation remain outside the verified profile.
 
 Design: [Lambda_Pkg_Music.md](../Lambda_Pkg_Music.md).
-The user selected native Lambda and requested implementation. D7.2.4 governs
+The user selected native Lambda and requested implementation. D9.3.4 governs
 the package, S12.1.1v2 separates score transformations from playback effects,
-and D7.1.2v2/D7.5.3 govern resource reads and Radiant calls.
+and D9.1.2/D9.5.6 govern resource reads and Radiant calls.
 
 ## Delivered
 
 - `lmd/package/music.ls`: explicit public `load`, `parse`, `from_xml`, `layout`,
-  `svg`, and `render` facade (D7.2.4/D7.2.6, S7.4.2).
+  `svg`, and `render` facade (D9.3.4/D9.3.5, S7.4.2).
 - `music/musicxml.ls`, `common.ls`, `time.ls`: score-partwise normalization,
   exact rational time, inherited/staff-scoped contexts, voices/chords,
   pickups, backup/forward, bounded validation, diagnostic policy. MXL uses
@@ -21,7 +21,7 @@ and D7.1.2v2/D7.5.3 govern resource reads and Radiant calls.
 - `music/fonts.ls`, `glyphs.ls`, `fonts/`: unmodified pinned Bravura/OFL
   assets, metadata, glyph outlines through existing `radiant.math_metrics`,
   shaped labels through `radiant.measure_text`. CMU Serif is reused from
-  the existing LaTeX distribution (D7.1.2v2/D7.5.3).
+  the existing LaTeX distribution (D9.1.2/D9.5.6).
 - `music/notation.ls`, `header.ls`, `layout.ls`: accidentals, chord seconds,
   context glyphs, shared exact-onset columns, rhythmic spacing, source breaks,
   part filtering, staff geometry, scroll/pages, overflow diagnostics.
@@ -58,7 +58,7 @@ Forced GC found a pre-existing lifetime defect in `fn_parse2`: converting the
 symbol `flavor` could collect the converted `type` string, so
 `{type:'xml',flavor:'strict'}` dispatched to format `strict`. Slot-backed roots
 now retain the source/options and converted strings through dispatch, per
-D5.3.3. `parse_option_roots.ls` and the music layout regression are registered
+D6.3.3. `parse_option_roots.ls` and the music layout regression are registered
 in the existing forced-GC corpus; conservative native-stack scanning remains
 unused.
 
@@ -112,7 +112,7 @@ artifacts are under `temp/music/`; no performance claims use these debug runs.
   and sound damper pedal. Occurrences retain written IDs and repeat passes.
   Invalid same-key overlaps, zero durations, unresolved ties, unsupported
   timing/navigation and channel conflicts fail. Ignored expressive notation
-  is diagnosed; strict mode rejects diagnostics (S7.4.2, D7.2.5).
+  is diagnosed; strict mode rejects diagnostics (S7.4.2, D10.2.1).
 - `music/midi.ls` reads bounded Type 0/1 PPQN SMF, including running status,
   note/program/control/pitch-bend messages and retained metadata. SysEx and
   unsupported sound-changing messages are diagnosed. Export writes Type 1
@@ -124,7 +124,7 @@ artifacts are under `temp/music/`; no performance claims use these debug runs.
   streams through miniaudio. Sample frames own transport time. Play, pause,
   stop, seek, speed, volume, mute and solo mutate only after joining the
   callback. The callback has no Lambda values, DOM access, GC, locks, resource
-  reads or allocation (D4.5.2/D5.3.3). Null device backends are rejected.
+  reads or allocation (D5.5.2/D6.3.3). Null device backends are rejected.
 - Since speech M2 (2026-10-19) these transport mutations run under the session's
   bus voice lock instead of a per-session device stop
   (`vibe/radiant/Radiant_Design_Speech.md` §3.2). `reverb` sets the session's
@@ -134,7 +134,7 @@ artifacts are under `temp/music/`; no performance claims use these debug runs.
   each owner across rebuilds; frame-loop pruning closes disconnected owners,
   even if a wrapper retains the node. Document teardown closes all slots.
   `dom.midi_open`, `midi_command`, `midi_info` extend the existing host seam;
-  `audio_close` closes either resource kind (D7.4.6).
+  `audio_close` closes either resource kind (D7.1.1).
 - `music/player.ls` builds a reactive, initially silent score/standalone MIDI
   player. Only Play loads the SoundFont and opens a device. UI controls and
   stable note-group highlights read the native clock; document frames never
@@ -161,7 +161,7 @@ expression. Recursive evaluation retains one home per source clause, so a
 three-source comprehension with allocating calls could exhaust scratch roots.
 The planner now counts clauses and reserves those homes plus the existing
 iteration temporaries. `cartesian_scratch_roots.ls` reproduces the ownership
-pattern and joins the forced-GC corpus (D5.3.3); no conservative scanning or
+pattern and joins the forced-GC corpus (D6.3.3); no conservative scanning or
 fallback evaluator was introduced.
 
 Package reducers also need explicit raised-error propagation before accessing
@@ -242,7 +242,7 @@ The speed menu closed on the next playback frame because `status` rewrote
 unchanged `data-state` and style attributes, recascading all form controls.
 Status now writes only changed values. Native controls retain click handling;
 the player applies committed values on `change`, and displays native transport
-speed (S12.1.1v2/D7.4.6). A native fixture holds the dropdown open across note
+speed (S12.1.1v2/D7.1.1). A native fixture holds the dropdown open across note
 changes, commits with keyboard and mouse, and checks actual speed before
 playback, while playing and while paused. Existing score/MIDI UI tests and all
 nine music goldens in automatic/JIT modes pass. Narrow PNGs were inspected.
@@ -257,7 +257,7 @@ current notes while playing or paused; Stop restores the original engraving.
 Engraving emits shared beam groups with stable highlight IDs. A pure binding
 map connects each note to its own group, chord-stem owner and shared beams;
 the player caches their DOM handles and colors the union of active bindings.
-Written event IDs and score timing stay unchanged (D7.2.5/S12.1.1v2).
+Written event IDs and score timing stay unchanged (D10.2.1/S12.1.1v2).
 Native tests check all three colors, whole-note strokes, shared beams, paused
 updates, pre-play selection and stop cleanup. Existing speed/resize/playback
 fixtures and all nine music goldens in automatic/JIT modes pass.
@@ -275,7 +275,7 @@ the selection border. Accessible names and exclusive `aria-pressed` state identi
 the active color.
 Action lookup uses the closest button so clicks on its inner color square work;
 native Tab/Space activation uses the same handler. Selection immediately
-repaints active notes without issuing transport commands (S12.1.1v2/D7.4.6).
+repaints active notes without issuing transport commands (S12.1.1v2/D7.1.1).
 
 The five native score/MIDI, speed, resize and highlight fixtures pass 48 assertions
 across 96 events. All nine music goldens pass in automatic and JIT modes.
@@ -291,7 +291,7 @@ width or shift speed/volume controls.
 The player uses a bounded flex column with a fixed control panel and an
 independently scrolling sheet viewport. The sample supplies a full-height
 document and caps its content width at 800px. The pure presentation still opens
-no audio resources; effects remain in handlers (S12.1.1v2/D7.4.6).
+no audio resources; effects remain in handlers (S12.1.1v2/D7.1.1).
 
 The player retains the engraving event index and displayed page handles. Each
 new sounding group scales its indexed bounds through the page's current CSS
@@ -315,7 +315,7 @@ written event IDs and all timing checks. Measures require every declared part
 exactly once. Composite meters sum exact quarter-note fractions and engrave
 each numerator/denominator pair; hidden time signatures retain their timing.
 Omitted graphical note types are inferred from exact duration, dots and tuplet
-ratios. These remain package policies over immutable score data (D7.2.4/D7.2.5).
+ratios. These remain package policies over immutable score data (D9.3.4/D10.2.1).
 
 `lyrics.ls` preserves ordered text/elision fragments, verse identity, visibility,
 placement, repeat passes and extension endpoints. It resolves melismas and tied
@@ -328,7 +328,7 @@ SVG lyric groups expose stable highlight IDs, verse and connector metadata.
 Highlight bindings connect all member notes to their syllable and connectors;
 the player filters repeat-specific verses against the current occurrence pass.
 Pausing, seeking, color selection and Stop use the existing audio-clock path
-(S12.1.1v2/D7.4.6). Local lyric bounds join the event index for score following.
+(S12.1.1v2/D7.1.1). Local lyric bounds join the event index for score following.
 The new Morning Song fixtures exercise partwise, timewise and compressed input.
 `_lyrics_player.ls` uses the same A4 document shell as the original player.
 

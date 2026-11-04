@@ -5,7 +5,7 @@
 #include <cstring>
 #include "../lib/shell.h"
 
-// D8.1.1v15: an unsupported pinned script fails before execution, never in MIR.
+// D8.3.1: an unsupported pinned script fails before execution, never in MIR.
 inline void expect_interp_rejection(const char* executable, const char* script,
         const char* unsupported_kind, bool procedural = true) {
     const char* run_args[] = {executable, "run", script, NULL};

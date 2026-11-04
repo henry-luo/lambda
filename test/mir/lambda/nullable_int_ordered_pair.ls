@@ -28,7 +28,7 @@ pn compare(left: int?, right: int?) {
         select_lt(left, right), select_float_lt(left, right)]) ++ "\n")
 }
 
-// D2.6.2-D2.6.3: valid poison stores retain snapshots; null still fails.
+// D3.2.2-D3.2.1: valid poison stores retain snapshots; null still fails.
 pn store_poison(var values: int[], value: int?) int {
     values[0] = value
     return 1

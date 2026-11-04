@@ -1,4 +1,4 @@
-// S12.1.1v3 / D4.5.2: template values describe passes; native playback owns time/resources.
+// S12.1.1v3 / D5.5.2: template values describe passes; native playback owns time/resources.
 import dom
 import s: lambda.scene3d
 import post: lambda.scene3d.postprocessing

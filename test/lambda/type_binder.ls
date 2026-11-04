@@ -1,4 +1,4 @@
-// S4.2.2/D3.3.3v3: a binder joins its parameter sites and specializes T.
+// S4.2.2/D4.3.3: a binder joins its parameter sites and specializes T.
 fn pick(T: type, a: T) T => a;
 fn selected(T: type) type => T;
 fn merge(a: number as U, b: number as U, c: U) U => c;

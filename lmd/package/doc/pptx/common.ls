@@ -1,4 +1,4 @@
-// PresentationML adapts shared Office/XML helpers to its own namespace and errors (D7.2.4v4).
+// PresentationML adapts shared Office/XML helpers to its own namespace and errors (D9.3.4).
 import office: lambda.doc.docx.common
 import xml: lambda.doc.xml
 pub let P = "http://schemas.openxmlformats.org/presentationml/2006/main"

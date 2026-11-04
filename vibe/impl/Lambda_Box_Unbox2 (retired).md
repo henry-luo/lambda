@@ -1,7 +1,7 @@
 # Lambda Box/Unbox — Structural Fix Proposal
 
 > **Status: RETIRED 2026-10-23.** C-transpiler-era proposal (`transpile.cpp`,
-> removed per AGENTS rule 14), kept for provenance of **D2.3.2**. MIR Direct
+> removed per AGENTS rule 14), kept for provenance of **D2.3.3**. MIR Direct
 > closes the crash by admission rather than by checking helpers: a declared
 > container parameter is admitted at the `_b` boundary (DF2 in
 > [`Lambda_Design_Compiling_Dual_Func.md`](../Lambda_Design_Compiling_Dual_Func.md);

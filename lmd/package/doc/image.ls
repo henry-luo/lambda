@@ -1,4 +1,4 @@
-// D7.2.4v3: image composition belongs to lambda.image; this adapter presents its pixels.
+// D9.3.4: image composition belongs to lambda.image; this adapter presents its pixels.
 import img: lambda.image
 import media: .media
 

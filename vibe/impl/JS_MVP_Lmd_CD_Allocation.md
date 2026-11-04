@@ -17,12 +17,12 @@ construction sites' field types.
   field to zero in Lambda's existing nullable Map pointer lane. Parameter-derived
   nulls keep their original behavior; extra instance fields never enter the
   allocation template. Existing objects and shared shapes remain unchanged
-  (**D3.4.3v5**, **D3.4.5**).
+  (**D3.4.3**, **D3.4.5**).
 - Inlined construction sites retain their completed shared shapes. Learning a
   new nullable link changes a class epoch and invalidates older site templates.
   Constructor identity guards, ordinary retyping and the generic construction
   path remain authoritative. The existing precise root machinery covers all
-  allocations (**D5.2–D5.3**, **D6.2.1**).
+  allocations (**D6.2–D6.3**, **D7.2.1**).
 - Preserve the RHS nullability already known by the compiler, including boxed
   Number/string addition results. Emit the nullable-store exception only when
   null remains possible, on the existing type-mismatch edge.
@@ -45,7 +45,7 @@ that experiment was removed. Artifacts preserve it as `inline-screen`.
 Artifacts: `temp/mvp_cd_structure_20261009/`. The control is the incoming release
 at `024f2a12c`, SHA-256
 `f85933d635f3cdcb60f69b2fc9717dd8195bd50133fd944b3e6ba406ed03c96f`.
-Diagnostic instrumented binaries use **D5.4.4** counters; their timings are not
+Diagnostic instrumented binaries use **D6.4.4** counters; their timings are not
 performance evidence. Native sampling repeats the unchanged CD kernel 80 times
 (344,400 collisions) and captures an eight-second interval. Performance runs
 use unchanged inputs and checked output, release

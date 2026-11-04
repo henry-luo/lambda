@@ -33,7 +33,7 @@ on cell_activate(evt) {
     session = publish(evt.target,session,session)
     return 'handled'
 }
-// frame requests created in a callback wait for the next frame (D7.5.3).
+// frame requests created in a callback wait for the next frame (D9.5.6).
 // paint the loading card before the synchronous HTTP/decode/mount work.
 on cell_prepare(evt) {
     if ((evt.event_phase != 2 or evt.detail != session.load_token)^) { return 'pass' }

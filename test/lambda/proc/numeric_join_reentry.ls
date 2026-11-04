@@ -1,4 +1,4 @@
-// D2.4.1-D2.4.3: scalar-carrier proofs must terminate on local recurrences.
+// D2.3.4-D2.3.5: scalar-carrier proofs must terminate on local recurrences.
 pn bounded_min(limit) {
     var total = 0
     while (total < limit) {

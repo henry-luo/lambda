@@ -1,4 +1,4 @@
-// io_mail.cpp — lambda.io.mail: open, command, idle and send (D7.2.4v4;
+// io_mail.cpp — lambda.io.mail: open, command, idle and send (D9.3.4;
 // vibe/Lambda_Demo_Mail.md §5.3, ML1–ML4, ML9–ML11).
 //
 // curl connects, secures and logs in (ML1). For IMAP it stops there
@@ -66,7 +66,7 @@ struct MailAuth {
 };
 
 // One curl transfer on the offload pool: open's connect and login, a POP3
-// command, an SMTP send. The worker sees only this record (D5.3.3).
+// command, an SMTP send. The worker sees only this record (D6.3.3).
 struct MailTransfer {
     CURL* curl;
     bool owns_curl;             // open's handle, until the session takes it
@@ -1403,7 +1403,7 @@ extern "C" Item pn_io_mail_send(Item url, Item options, Item message) {
         mem_free(from);
         return error;
     }
-    // the message bytes outlive this frame on the worker: copy them (D5.3.3)
+    // the message bytes outlive this frame on the worker: copy them (D6.3.3)
     Binary* bytes = message_type == LMD_TYPE_BINARY ? message.get_safe_binary() : NULL;
     const char* data = bytes ? (const char*)binary_data(bytes) : message.get_chars();
     size_t length = bytes ? binary_length(bytes) : message.get_len();

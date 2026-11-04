@@ -1,4 +1,4 @@
-// A conditional joins the producer's actual Item carrier, not its machine word type (D2.4.1–D2.4.3).
+// A conditional joins the producer's actual Item carrier, not its machine word type (D2.3.4–D2.3.5).
 fn failure(message) => {ok:false,error:message}
 fn success(book) => {ok:true,book:book}
 fn choose(book, category) {

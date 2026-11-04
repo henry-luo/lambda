@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T29-1 (D4.4.4v4): a record place spelled in several statements is navigated once -- one certificate check, one un-sharing slow arm -- and its later reads and writes go through the handle; replacing the container between spellings forces a second navigation.",
+  "description": "T29-1 (D5.4.4): a record place spelled in several statements is navigated once -- one certificate check, one un-sharing slow arm -- and its later reads and writes go through the handle; replacing the container between spellings forces a second navigation.",
   "checks": [
     {
       "in_func": "_step_#",

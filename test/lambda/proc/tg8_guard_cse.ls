@@ -1,4 +1,4 @@
-// D8.3.4/DF16: the second straight-line call reuses the first call's exact
+// D7.3.4/DF16: the second straight-line call reuses the first call's exact
 // variant choice; both calls still execute and the boxed miss stays `_b`.
 fn choose_type(value: any as T) int => len(string(name(T)));
 let int_seed = choose_type(0);

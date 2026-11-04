@@ -1,4 +1,4 @@
-// D4.4.5 move-out bind: `var h = root.path` whose place is overwritten
+// D5.4.5 move-out bind: `var h = root.path` whose place is overwritten
 // (`root.path = e`) before any write through h or escape of h may bind as a
 // borrow. Every case must print what snapshot semantics (S9.1.2) print, on
 // every tier.

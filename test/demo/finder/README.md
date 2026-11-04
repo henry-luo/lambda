@@ -132,7 +132,7 @@ ordering and selection. `mod_io.ls` captures directory metadata and preview text
 at read time (**S12.4.1v3**), validates operation plans and performs filesystem
 changes in procedures (**S12.1.1v3**). `mod_ui.ls` and `finder.css` present the interface;
 `finder.ls` handles events and updates retained regions, keeping native controls
-and row identities stable (**S12.1.3**, **D4.5.1v4**). Procedure errors are captured
+and row identities stable (**S12.1.3**, **D5.5.1**). Procedure errors are captured
 in statement handlers (**S7.6.7v4**). No language or runtime ruling changes.
 `finder.js` activates the session after the first layout and captures non-bubbling
 scroll events from retained columns, relaying them to the Lambda viewport handler.
@@ -150,8 +150,8 @@ payload decoding during directory listing.
 `mod_thumbnails.ls` measures the visible scrollport plus one surrounding row,
 prioritizes Quick Look and the selected preview, and submits one raster decode
 at a time through `radiant.image_job`'s thumbnail channel. Native jobs copy paths
-and own their decoded buffers (**D4.5.2**); source reads use `lambda-io`
-(**D7.1.2v2**). Canvas dimensions are derived from CSS bounds and device scale.
+and own their decoded buffers (**D5.5.2**); source reads use `lambda-io`
+(**D9.1.2**). Canvas dimensions are derived from CSS bounds and device scale.
 Offscreen canvases release their pixels, and retired regions are cleared before
 replacement. Folder generations and native job tokens reject stale completions;
 window closure cancels and joins workers.
@@ -168,7 +168,7 @@ List stripes follow the entry's global position while scrolling.
 Ordered rows are cached by directory snapshot revision and filter/sort settings.
 Revision keys avoid structural equality on lazy archive nodes, which would force
 member payloads (**S14.3.1v3**). Selection and dialogs retain the published rows
-while their window is stable (**S12.1.3**, **D4.5.1v4**). Thumbnail polling reuses
+while their window is stable (**S12.1.3**, **D5.5.1**). Thumbnail polling reuses
 measured slot geometry until publication, scrolling or resizing invalidates it.
 The flex-sized scrollport uses CSS size/layout containment. Radiant derives auto
 grid height from its final tracks, allowing provisional height to shrink after
@@ -177,7 +177,7 @@ rewrapping; inherited cursor values also reach filename glyphs.
 Radiant's post-reflow state cleanup collects matching keys before deleting them,
 so hash-table compaction does not restart a full scan for each focus flag or
 orphan. Registered owners validate their address and follow their parent chain
-instead of searching the document once per state entry (**D4.5.1v4**).
+instead of searching the document once per state entry (**D5.5.1**).
 Detached state is still removed and live values, focus and form caches survive;
 `StateStoreDomMutationTest.BulkPruningPreservesLiveValuesAndRebuildsFocusPath`
 checks bulk removal alongside retained state.
@@ -229,7 +229,7 @@ and rename/move/delete of the outer archive. Filesystem checks independently ver
 the final directory tree and preserved file contents. `--log` retains native
 diagnostics beside the replay. Bundled demo files are never mutated by these tests.
 The native drag transport retains its target and event across callback allocation
-(**D5.3.3**); the forced-GC drag fixture checks cancellation and drop delivery
+(**D6.3.3**); the forced-GC drag fixture checks cancellation and drop delivery
 without changing bundled files.
 
 `large_directory.json` opens `./test`, checks bounded row counts and retained
@@ -243,16 +243,16 @@ The thumbnail UI also runs under forced GC and freed-memory poisoning.
 limits, document widths and text wrapping, retained iframe identity, rendered Markdown/HTML/Lambda documents, source
 fallback and Quick Look cleanup. `preview_formats.json` checks native PDF, DOCX
 and EPUB presentation. Removing an embedded document defers its teardown until
-between event turns, preserving the caller's evaluator ownership (**D5.4.1**);
+between event turns, preserving the caller's evaluator ownership (**D6.4.1**);
 `dom_iframe_retire.json` covers replacement under forced GC and poisoning.
 `dom_iframe_resize.json` checks widening and narrowing asynchronously loaded HTML,
 Markdown and Lambda documents, plus inline `srcdoc` content. Viewport units and
 media queries follow the iframe's content box; document state survives, and resize
-does not repeat its initial load handler (**D4.5.1v4 / D5.4.1**).
+does not repeat its initial load handler (**D5.5.1 / D6.4.1**).
 `item_selection.json` checks filename presses and Shift/Cmd/Ctrl selection in all
 three views, while rename fields and document previews still allow text selection.
 The shared mouse policy honors the cascaded `user-select` value through CSSOM
-(**S12.1.3 / D7.2.5**); `dom_user_select_pointer.json` checks inherited `auto`,
+(**S12.1.3 / D10.2.1**); `dom_user_select_pointer.json` checks inherited `auto`,
 explicit `text` overrides, button focus and editable inputs.
 
 Measure directory navigation through the next animation-frame callback with a

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2/D8.4.3v2: the captured callee's non-MVP ABI goes directly to complete invocation. Retain reference/type failures and one rooted native miss without a duplicate capability failure or argument replay.",
+  "description": "D7.4.1/D7.4.3: the captured callee's non-MVP ABI goes directly to complete invocation. Retain reference/type failures and one rooted native miss without a duplicate capability failure or argument replay.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

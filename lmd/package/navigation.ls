@@ -1,4 +1,4 @@
-// S12.1.1v3/D7.2.4v4: navigation descriptions and bounded queries are pure values.
+// S12.1.1v3/D9.3.4: navigation descriptions and bounded queries are pure values.
 pub fn node(id,position,options = {}) map => {id:id,position:position,*:options}
 pub fn edge(from,to,cost = 1.0,options = {}) map => {from:from,to:to,cost:cost,*:options}
 pub fn link(id,start,end,options = {}) map => {id:id,start:start,end:end,*:options}
