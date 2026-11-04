@@ -1758,7 +1758,8 @@ pn mark_complete() {
 
 Publish a string or binary payload as a new local file and return its byte
 count. The parent directory must already exist. The operation stages and syncs
-the complete payload before an exclusive publication; an existing destination,
+the complete payload before an exclusive publication, requiring macOS
+`F_FULLFSYNC` in addition to `fsync`; an existing destination,
 including a symbolic link, causes an error. If the directory sync fails after
 publication, the error says the file was published but its durability is
 uncertain: inspect the destination before retrying. This immediate I/O effect
@@ -2089,8 +2090,12 @@ UTF-8. Positional rows preserve duplicate column names and nulls. Decimal and
 datetime values need an explicit application conversion.
 
 SQL is limited to one statement per call. Transaction-control statements,
-`ATTACH`, `DETACH`, pragmas, virtual-table creation and extension loading are
-rejected. `execute` accepts statements that expose result metadata but return
+`ATTACH`, `DETACH`, pragmas other than argument-free `foreign_key_check`,
+virtual-table creation and extension loading are rejected. The read-only
+`PRAGMA main.foreign_key_check` checks the transaction's database snapshot,
+including its own pending writes (S12.4.4v4). Its result is subject to the
+same row and byte limits as other queries.
+`execute` accepts statements that expose result metadata but return
 no rows, as SQLite can do for a strict-table alteration; a returned row fails
 the statement and rolls it back. Input SQL is limited to 1 MiB, paths to 1,023 UTF-8 bytes, and parameters to
 1,024 and 16 MiB of text/binary data. A query returns at most 100,000 rows,
@@ -2115,13 +2120,18 @@ a literal filename beginning with `file:` with `./`. `existing` also rejects
 `:memory:` and opens read/write without SQLite's create flag. It is suitable
 when a missing file must remain missing;
 `database` and standalone calls may create a database file.
+File-backed transactions use SQLite's own synchronization behavior; the
+create-only publication barrier described below does not apply to subsequent
+edits of the company file. Their power-loss durability remains unqualified.
 
 `create` runs the transaction on a private in-memory database, then publishes
 its committed image atomically through an authorized parent directory. An
 error or cancellation in the block body publishes nothing. An existing destination, even
 an empty file or symlink, is never replaced. The serialized image is limited
 to 64 MiB, and the final serialization and file publication run on the
-caller. If publication succeeds but directory synchronization fails, the
+caller. On macOS, publication requires `F_FULLFSYNC` as well as `fsync` for
+the staged file and its parent; a failed barrier is not treated as success.
+If publication succeeds but directory synchronization fails, the
 error reports an uncertain durability outcome; inspect the destination before
 retrying. Creation uses the anchored-file implementation and currently fails
 closed on Windows. macOS is tested; Linux remains to be qualified. A crash

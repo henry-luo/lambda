@@ -1359,7 +1359,8 @@ Item pn_io_create_file(Item target_item, Item content) {
     }
     const char* leaf = file_path_basename(path->str);
     char* parent = file_path_dirname(path->str);
-    FileAnchorOptions options = {0, create_file_guard, lambda_task_running(), NULL, NULL};
+    // Confirmed create-only exports require the same durable publication barrier.
+    FileAnchorOptions options = {FILE_ANCHOR_FULL_SYNC, create_file_guard, lambda_task_running(), NULL, NULL};
     FileAnchor* anchor = parent && leaf && *leaf && strcmp(leaf, ".") && strcmp(leaf, "..")
         ? file_anchor_open(parent, &options) : NULL;
     mem_free(parent);

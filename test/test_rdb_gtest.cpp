@@ -2560,6 +2560,16 @@ static bool tx_reject_row(void* user, int count, const char* const* names,
     return false;
 }
 
+static bool tx_foreign_key_row(void* user, int count, const char* const* names,
+                               const RdbValue* values) {
+    (void)names;
+    TxRowCheck* check = (TxRowCheck*)user;
+    check->rows++;
+    check->matches = count == 4 && values[0].type == RDB_TYPE_STRING &&
+        values[0].str_val && strcmp(values[0].str_val, "deferred_fk") == 0;
+    return true;
+}
+
 TEST_F(RdbTest, SqliteSingleStatementAutocommitsAndRollsBackFailure) {
     const char* create = "CREATE TABLE autocommit_entries (n INTEGER NOT NULL)";
     ASSERT_EQ(rdb_sqlite_execute_once(TEST_DB_PATH, create, strlen(create), NULL, 0, NULL, NULL), RDB_OK);
@@ -2665,7 +2675,7 @@ TEST_F(RdbTest, SqliteTransactionPreservesTextAndBlobBytes) {
 TEST_F(RdbTest, SqliteTransactionRejectsUncontrolledStatements) {
     const char* statements[] = {
         "SELECT 1; SELECT 2", "ATTACH DATABASE ':memory:' AS other", "PRAGMA foreign_keys = OFF",
-        "BEGIN", "SAVEPOINT nested", "SELECT load_extension('missing')"
+        "PRAGMA foreign_key_check = 'authors'", "BEGIN", "SAVEPOINT nested", "SELECT load_extension('missing')"
     };
     for (const char* sql : statements) {
         RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
@@ -2673,6 +2683,25 @@ TEST_F(RdbTest, SqliteTransactionRejectsUncontrolledStatements) {
         EXPECT_EQ(tx_sql(tx, sql, NULL, 0, tx_integer_row, NULL), RDB_ERROR) << sql;
         EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR) << sql;
     }
+}
+
+TEST_F(RdbTest, SqliteForeignKeyCheckReadsTheTransactionSnapshot) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE deferred_fk (author_id INTEGER REFERENCES authors(id) DEFERRABLE INITIALLY DEFERRED)"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE pragma_foreign_key_check (n INTEGER)"), RDB_OK);
+    TxRowCheck check = {};
+    ASSERT_EQ(tx_sql(tx, "PRAGMA main.foreign_key_check", NULL, 0, tx_foreign_key_row, &check), RDB_OK);
+    EXPECT_EQ(check.rows, 0);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO deferred_fk VALUES (999)"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "PRAGMA main.foreign_key_check", NULL, 0, tx_foreign_key_row, &check), RDB_OK);
+    EXPECT_EQ(check.rows, 1);
+    EXPECT_TRUE(check.matches);
+    ASSERT_EQ(tx_sql(tx, "DELETE FROM deferred_fk"), RDB_OK);
+    check = {};
+    ASSERT_EQ(tx_sql(tx, "PRAGMA main.foreign_key_check", NULL, 0, tx_foreign_key_row, &check), RDB_OK);
+    EXPECT_EQ(check.rows, 0);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
 }
 
 TEST_F(RdbTest, SqliteTransactionRejectsArityAndForeignKeyErrors) {
