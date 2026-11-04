@@ -4,6 +4,19 @@
 #include "../mir_emitter_shared.hpp"
 #include "../lambda-error.h"
 
+static inline bool mvp_boxed_entry(AstFuncNode* function) {
+    return function && (((TypeFunc*)function->type)->is_public || function->node_type == AST_NODE_FUNC_EXPR);
+}
+
+static inline bool mvp_parameter_receiver(AstFuncNode* function) {
+    if (mvp_boxed_entry(function)) return true;
+    for (AstNamedNode* node = function ? function->param : NULL; node; node = (AstNamedNode*)node->next) {
+        TypeParam* parameter = lambda_type_param(node->type);
+        if (parameter && parameter->is_optional) return true;
+    }
+    return false;
+}
+
 struct MvpFunction {
     AstFuncNode* ast;
     const char* name;
@@ -13,6 +26,7 @@ struct MvpFunction {
     Type* result_contract;
     AstFunctionId id;
     uint32_t inline_cost;
+    bool imported;
 };
 
 struct MvpErrorTarget {
@@ -48,7 +62,10 @@ struct MvpBinding {
     MIR_reg_t array_length;
     int64_t array_extent;
     MIR_item_t module_slot;
+    MIR_item_t module_ref;
     bool module_scalar;
+    bool module_managed;
+    bool iteration_binding;
     bool array_written;
     bool scalar_snapshot;
     bool array_accessed;
@@ -72,6 +89,7 @@ struct LambdaMvpModule {
     HashMap* imports;
     MvpFunction* functions;
     uint32_t function_count;
+    ArrayList* imported_functions;
     MvpBinding* bindings;
     uint32_t binding_count;
     MvpFunction entry;
@@ -119,6 +137,7 @@ struct MvpCompiler {
     MvpScope* scope;
     MvpInline* inlining;
     MvpErrorTarget* condition_failure;
+    MIR_reg_t current_error;
     uint32_t inline_cost;
     MvpFloatConstant* float_constants;
     MvpStringByte* string_bytes;

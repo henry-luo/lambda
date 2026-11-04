@@ -1,0 +1,19 @@
+{
+  "scope": "same source, MVP compiler; normalize only positive numeric operands in native-pointer range 2^32..2^48",
+  "identical": false,
+  "control_sha256": "d654f7f774f3e4147f0c68cf352dd2a3180a3eea8e7b81dada793ebd20e127b8",
+  "candidate_sha256": "6c4d6e2f3418c59078c624ceb842a07273952fbbb21d4e22e8a4d2b00588624d",
+  "diff": "--- \n+++ \n@@ -1214,25 +1214,25 @@\n \tlocal\ti64:%r248, i64:%r249, i64:%r24a, i64:%r24b, i64:%r24c, i64:%r24d, i64:%r24e, i64:%r24f\n \tlocal\ti64:%r250, i64:%r251, i64:%r252, i64:%r253, i64:%r254, i64:%r255, i64:%r256, i64:%r257\n \tlocal\ti64:%r258, i64:%r259, i64:%r25a, i64:%r25b, i64:%r25c, i64:%r25d, i64:%r25e, i64:%r25f\n-\tlocal\ti64:%r260, i64:%r261, i64:%r262, i64:%r263, i64:%r264, i64:%r265\n+\tlocal\ti64:%r260, i64:%r261, i64:%r262, i64:%r263, i64:%r264\n \n-# 1 arg, 614 locals, 0 globals\n-\tmov\t%r25c, 0\n+# 1 arg, 613 locals, 0 globals\n+\tmov\t%r25b, 0\n L451:\n \tmov\t%r0, i64:80(runtime)\n \tmov\t%r2, i64:112(runtime)\n-\tadd\t%r25d, %r2, 8\n-\tmov\t%r25e, i64:120(runtime)\n-\tugt\t%r25f, %r25d, %r25e\n-\tbt\tL450, %r25f\n+\tadd\t%r25c, %r2, 8\n+\tmov\t%r25d, i64:120(runtime)\n+\tugt\t%r25e, %r25c, %r25d\n+\tbt\tL450, %r25e\n \tadd\t%r1, %r0, 48\n-\tmov\t%r260, i64:88(runtime)\n-\tugt\t%r261, %r1, %r260\n-\tbt\tL450, %r261\n-\tmov\ti64:112(runtime), %r25d\n-\tmov\t%r262, i64:56(runtime)\n-\tcall\tlambda_stack_is_exhausted_p, lambda_stack_is_exhausted, %r263, %r262\n-\tbt\tL196, %r263\n+\tmov\t%r25f, i64:88(runtime)\n+\tugt\t%r260, %r1, %r25f\n+\tbt\tL450, %r260\n+\tmov\ti64:112(runtime), %r25c\n+\tmov\t%r261, i64:56(runtime)\n+\tcall\tlambda_stack_is_exhausted_p, lambda_stack_is_exhausted, %r262, %r261\n+\tbt\tL196, %r262\n L194:\n \tdmov\t%r244, 1.00000000000000000000000000000000000000000000000000000e+03\n L197:\n@@ -2652,35 +2652,34 @@\n \tcall\tfn_join_p_r6_n1_a2, fn_join, %r253, %r24e, %r252\n \tmov\ti64:(%r0), %r253\n \tcall\tpn_print_p_r6_n1_a1, pn_print, %r254, %r253\n-\tmov\t%r255, 72057594037927936\n-\tmov\t%r3, %r255\n+\tmov\t%r3, %r254\n \tjmp\tL195\n L195:\n-\tmov\t%r256, %r3\n-\tmov\t%r257, 0\n-\tursh\t%r258, %r3, 56\n-\tsub\t%r259, %r258, 6\n-\tubgt\tL448, %r259, 2\n-\tubgt\tL449, %r259, 1\n-\tand\t%r25a, %r3, 72057594037927935\n-\tmov\t%r257, i64:(%r25a)\n-\tor\t%r256, %r259, 2161727821137838080\n+\tmov\t%r255, %r3\n+\tmov\t%r256, 0\n+\tursh\t%r257, %r3, 56\n+\tsub\t%r258, %r257, 6\n+\tubgt\tL448, %r258, 2\n+\tubgt\tL449, %r258, 1\n+\tand\t%r259, %r3, 72057594037927935\n+\tmov\t%r256, i64:(%r259)\n+\tor\t%r255, %r258, 2161727821137838080\n \tjmp\tL448\n L449:\n-\tand\t%r25b, %r3, 72057594037927935\n-\tuble\tL448, %r25b, 1\n-\tmov\t%r257, i64:(%r25b)\n-\tmov\t%r256, 2161727821137838082\n+\tand\t%r25a, %r3, 72057594037927935\n+\tuble\tL448, %r25a, 1\n+\tmov\t%r256, i64:(%r25a)\n+\tmov\t%r255, 2161727821137838082\n L448:\n \tmov\ti64:80(runtime), %r0\n \tmov\ti64:112(runtime), %r2\n-\tret\t%r256, %r257\n+\tret\t%r255, %r256\n L450:\n-\tne\t%r264, %r25c, 0\n-\tbt\tL196, %r264\n-\tmov\t%r25c, 1\n-\tcall\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, %r265, runtime, 6, 1\n-\tbf\tL196, %r265\n+\tne\t%r263, %r25b, 0\n+\tbt\tL196, %r263\n+\tmov\t%r25b, 1\n+\tcall\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, %r264, runtime, 6, 1\n+\tbf\tL196, %r264\n \tjmp\tL451\n L196:\n \tcall\tlambda_stack_overflow_error_p_r6_n0_a1, lambda_stack_overflow_error, (null)\n",
+  "functions": {
+    "make_tree": {
+      "identical": true,
+      "control_instructions": 87,
+      "candidate_instructions": 87
+    },
+    "check": {
+      "identical": true,
+      "control_instructions": 1018,
+      "candidate_instructions": 1018
+    }
+  }
+}

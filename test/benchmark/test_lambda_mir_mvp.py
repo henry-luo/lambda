@@ -51,7 +51,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         source = self.script_source(source)
         result = self.run_script(source, overrides)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(strip_timing(result.stdout), source.with_suffix(".txt").read_text().strip())
+        self.assertEqual(strip_timing(result.stdout), lambda_mir_mvp.lambda_golden_path(source).read_text().strip())
 
     def function_mir(self, source, name):
         dump = Path(self.scratch.name) / f"{source.stem}.mir"
@@ -65,6 +65,29 @@ class LambdaMirMvpTests(unittest.TestCase):
         for suite, name in CASES:
             with self.subTest(suite=suite, name=name):
                 self.check_golden(ROOT / "test/benchmark" / suite / f"{name}2.ls")
+
+    def test_complete_benchmark_manifest(self):
+        self.assertEqual(len(CASES), len(set(CASES)))
+        self.assertEqual(set(CASES), set(lambda_mir_mvp.REGISTERED_CASES))
+        self.assertTrue(set(lambda_mir_mvp.COVERED_CASES).issubset(CASES))
+        for suite, name in CASES:
+            source = ROOT / "test/benchmark" / suite / f"{name}2.ls"
+            self.assertTrue(source.is_file(), source)
+            self.assertTrue(source.with_suffix(".txt").is_file(), source)
+
+    def test_benchmark_expansion_semantics(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_benchmark_expansion.ls"
+        modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+                 {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
+        for compiler in ("mvp", "production"):
+            for mode in modes:
+                with self.subTest(compiler=compiler, mode=mode):
+                    self.check_golden(source, {**mode, "LAMBDA_MIR_COMPILER": compiler})
+        for mode in modes:
+            with self.subTest(membership_outcomes=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_membership_outcomes.ls", mode)
+            with self.subTest(module_snapshot=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_module_snapshots.ls", mode)
 
     def test_ownership_and_semantics(self):
         fixtures = [ROOT / "test/lambda/proc" / f"mir_mvp_{name}.ls" for name in ("scalar", "roots")]
@@ -136,6 +159,8 @@ class LambdaMirMvpTests(unittest.TestCase):
         for suite, name in CASES:
             with self.subTest(suite=suite, name=name):
                 source = ROOT / "test/benchmark" / suite / "c2mir" / f"{name}.c"
+                if not source.is_file():
+                    continue  # Lambda coverage also includes suite aliases with no C port.
                 result = subprocess.run([str(C2M), "-DC2MIR_KERNEL_TIMING", str(source), "-eg"],
                                         cwd=ROOT, capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -326,6 +351,41 @@ class LambdaMirMvpTests(unittest.TestCase):
         for row in rows:
             self.assertEqual(row["commands"]["c2mir"][0], str(reference))
             self.assertEqual(len(row["samples_ms"]["c2mir"]), 3)
+
+    def test_unported_reference_retains_lambda_case(self):
+        reference = Path(self.scratch.name) / "unported-reference.exe"
+        reference.write_bytes(b"fixture reference identity")
+        report = Path(self.scratch.name) / "unported.json"
+        arguments = ["lambda_mir_mvp.py", "--release", "--exe", str(self.exe), "--c2mir-exe", str(reference),
+                     "--case", "jetstream/richards", "--runs", "3", "--warmups", "1", "--output", str(report)]
+        with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke",
+                return_value="richards: PASS\n__TIMING__:1.0\n"):
+            lambda_mir_mvp.main()
+        row = json.loads(report.read_text())["cases"][0]
+        self.assertEqual(set(row["commands"]), {"mvp", "production"})
+        self.assertEqual(len(row["samples_ms"]["mvp"]), 3)
+        self.assertEqual(len(row["samples_ms"]["production"]), 3)
+        self.assertIsNone(row["median_ms"]["c2mir"])
+        self.assertIsNone(row["performance_gates"]["within_c2mir_allowance"])
+
+    def test_mvp_regression_only_retains_pairs(self):
+        reference = Path(self.scratch.name) / "regression-reference"
+        output = Path(self.scratch.name) / "mvp-regression.json"
+        arguments = ["lambda_mir_mvp.py", "--release", "--regression-only", "--exe", str(self.exe),
+            "--previous-mvp", str(self.exe), "--c2mir-exe", str(reference), "--case", "r7rs/fib",
+            "--runs", "3", "--warmups", "1", "--output", str(output)]
+        with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke",
+                return_value="fib: PASS\n__TIMING__:1.0\n") as invoke:
+            lambda_mir_mvp.main()
+        row = json.loads(output.read_text())["cases"][0]
+        self.assertEqual(invoke.call_count, 8)
+        self.assertEqual(set(row["commands"]), {"mvp", "previous_mvp"})
+        self.assertEqual(len(row["samples_ms"]["previous_mvp"]), 3)
+        self.assertEqual(len(row["samples_ms"]["mvp"]), 3)
+        self.assertEqual(row["samples_ms"]["production"], [])
+        self.assertEqual(row["samples_ms"]["c2mir"], [])
+        self.assertFalse(row["engine_failures"])
+        self.assertIn("c2mir", row["engine_unavailable"])
 
     def test_batch_record_and_decimal_paths(self):
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
@@ -564,11 +624,8 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_admission_precedes_execution(self):
         sources = {
-            "comprehension": 'pn main() { print("EXECUTED"); let a = [for (x in 0 to 2) x]; print(a) }',
-            "builtin": 'pn main() { print("EXECUTED"); print(math.tan(2.0)) }',
             "capture": 'pn outer(x: int) { pn inner() int { return x }; return inner() }; pn main() { print("EXECUTED"); print(outer(7)) }',
             "content": '1; 2',
-            "module_call": 'let A = 1.5; let B = float(2); pn main() { print(A) }',
         }
         for name, code in sources.items():
             with self.subTest(name=name):
@@ -579,6 +636,19 @@ class LambdaMirMvpTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout.strip(), "")
                 self.assertIn("Lambda MIR MVP", result.stderr)
+
+    def test_expanded_admission_executes(self):
+        sources = {
+            "comprehension": ('pn main() { print([for (x in 0 to 2) x]) }', '[0, 1, 2]'),
+            "builtin": ('pn main() { print(abs(math.tan(2.0) + 2.185039863261519) < 0.000000001) }', 'true'),
+            "module_call": ('let A = 1.5; let B = float(2); pn main() { print(A ++ " " ++ B) }', '1.5 2'),
+        }
+        for name, (code, expected) in sources.items():
+            with self.subTest(name=name):
+                source = Path(self.scratch.name) / f"{name}.ls"
+                source.write_text(code + "\n")
+                source.with_suffix(".txt").write_text(expected + "\n")
+                self.check_golden(source)
 
     def test_selector_is_explicit(self):
         source = ROOT / "test/benchmark/r7rs/fib2.ls"

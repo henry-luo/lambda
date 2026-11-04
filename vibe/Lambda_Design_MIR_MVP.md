@@ -2,38 +2,27 @@
 
 **Date:** 2026-11-04
 
-**Status:** experimental typed compiler behind an explicit selector, with
-native scalar/array kernels, typed records, checked mutation and precise `var`
-write-back (**S9.1.3v2, D5.3, D8.4.1v2**). Coverage now extends to **48 rows**:
-the original 28 plus 20 additional recursion, record, allocation, text and
-numerical workloads. Runtime types and data layouts remain unchanged.
+**Status:** experimental typed compiler behind an explicit selector. Coverage
+extends to **all 77 registered typed benchmark entries** across eight suites:
+the previously covered 48 plus 29 additions, including duplicate suite ports.
+Runtime types, data layouts, and precise ownership remain shared
+(**D2.4.1–D2.4.3, D5.2–D5.3, D8.4.2v2**).
 
-The latest batch adds rooted decimal dispatch, bounded recursive inlining,
-admitted record layouts, successful producer domains and guarded float/error
-comparisons (**D3.2.4v4, D5.2–D5.3, D8.2.6v2, S7.7.3**). Runtime types,
-data layouts and the precise ownership model remain shared.
+The expansion adds public/imported calls and values, optional/default arguments,
+noncapturing function values, structured contracts, nested COW places, registry
+builtin ABIs, paths and patterns, membership, recovery, and general collection
+queries with grouping and ordering (**S2.5.2v2, S7.9.3, S9.1.2–S9.2.3,
+S14.1.1v2**). It retains independent MVP planning and lowering; shared physical
+helpers now also construct literal paths and plain function objects.
 
-The complete 30-pair, 48-row primary, including matched batched Sumfp, qualifies
-**46/48 against Full MIR and 22/48 against both targets**, versus 44 and 22 for
-its interleaved fresh control. Its original 28 have **28 Full wins, 15 combined
-wins and no regression flags**. List misses Full and List/Storage have prior-MVP
-regression flags. Full Navier–Stokes remains incorrect and unqualified.
-
-The final six-case follow-up fixes List's Full loss and clears Storage's
-regression flag. Five cases pass the strict Full gate; Permute's faster median
-has an upper confidence bound at parity. List still regresses 18% against the
-previous MVP. **A complete latest-compiler timing requalification remains
-pending**, so these focused results do not replace the older primary's counts.
-The 20% C2MIR target remains open.
-
-All48 latest benchmark goldens, 18 forced-GC benchmarks and nine targeted groups
-pass. The broader 59-group experimental gate retains 57 failing subtests across 16
-groups, with no new failure headers. The private production/shared-runtime
-baseline passes 8,736/8,736, including 2,112 reused unchanged input-parser cases.
-Timings use matched execution windows, excluding startup and compilation,
-with one-sided 95% confidence gates. Primary and follow-up sources, inputs and
-executables are archived separately. See
-[batch measurements and remaining gaps](impl/Lambda_Impl_MIR_MVP.md#2026-11-04-batch-tuning-of-every-full-mir-miss).
+All 77 output goldens pass on the expansion candidate. The original 48 have no
+statistically significant regression detected in 30 paired release measurements
+against the frozen starting MVP. Performance qualification and the passing
+shared-runtime Lambda baseline are recorded in the
+[completion record](impl/Lambda_Impl_MIR_MVP.md#2026-11-04-complete-registered-benchmark-coverage).
+The earlier 48-row tuning campaign and its remaining C2MIR gaps retain their
+own archived sources and measurements; its counts do not qualify this compiler.
+The 20% C2MIR goal remains open.
 
 **Destination:** `lambda/runtime/mvp/`
 

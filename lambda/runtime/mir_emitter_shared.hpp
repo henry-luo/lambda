@@ -1179,7 +1179,9 @@ static inline void em_stage_function_return(MirEmitter* em, MIR_op_t value,
         MIR_new_label_op(em->ctx, frame->return_label)));
 }
 static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
-    mir_append_emit_label(em->ctx, em->func_item, label);
+    // conversions inserted into an earlier branch must keep their labels
+    // beside their instructions, rather than at the function tail.
+    em_emit_insn(em, label);
 }
 
 // Argument spans occupy the suffix after semantic-root coloring (D5.3.1).

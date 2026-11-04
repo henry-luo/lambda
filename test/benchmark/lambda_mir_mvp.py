@@ -16,8 +16,17 @@ import time
 from benchmark_provenance import command_output, hashed_file_corpus, sha256_file
 from run_c2mir_benchmarks import C2M, TIMER_MAIN, build_command, ensure_c2m, parse_timing, strip_timing
 from run_paired_benchmarks import paired_ratio_bootstrap
+from run_benchmarks import STANDARD_SUITES, JETSTREAM_LS, TEXT
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def lambda_golden_path(source):
+    """Prefer the complete stdout oracle when a benchmark also prints its result."""
+    formatted = source.with_suffix(".formatted.txt")
+    return formatted if formatted.is_file() else source.with_suffix(".txt")
+
+
 SCALAR_CASES = (("r7rs", "fib"), ("r7rs", "sum"), ("r7rs", "sumfp"), ("awfy", "mandelbrot"))
 FLOAT_ARRAY_CASES = (("beng", "spectralnorm"), ("awfy", "nbody"))
 CORE_ARRAY_CASES = (("larceny", "array1"), ("awfy", "sieve")) + FLOAT_ARRAY_CASES
@@ -41,7 +50,11 @@ ADDITIONAL_CASES = (("r7rs", "cpstak"), ("larceny", "diviter"), ("larceny", "pri
                     ("awfy", "permute"), ("awfy", "storage"), ("awfy", "towers"),
                     ("kostya", "base64"), ("jetstream", "nbody"), ("jetstream", "navier_stokes"),
                     ("jetstream", "cube3d"), ("jetstream", "raytrace3d"))
-CASES = ORIGINAL_CASES + ADDITIONAL_CASES
+COVERED_CASES = ORIGINAL_CASES + ADDITIONAL_CASES
+REGISTERED_CASES = tuple((suite, entry[0]) for suite, entries in
+    STANDARD_SUITES + [("jetstream", JETSTREAM_LS), ("text", TEXT)] for entry in entries)
+COMPLETION_CASES = tuple(case for case in REGISTERED_CASES if case not in COVERED_CASES)
+CASES = COVERED_CASES + COMPLETION_CASES
 TIMED_OUTPUT_CASES = (("beng", "spectralnorm"), ("beng", "fannkuch"), ("beng", "mandelbrot"),
                       ("kostya", "levenshtein"), ("larceny", "pnpoly"),
                       ("beng", "nbody"), ("beng", "binarytrees"), ("beng", "fasta"),
@@ -65,6 +78,7 @@ def compiler_identity():
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_cow_analysis.hpp",
         "lambda/runtime/mir_bitwise.hpp",
         "lambda/runtime/mir_container_access.hpp",
+        "lambda/runtime/mir_path.hpp", "lambda/runtime/mir_function_value.hpp",
         "lambda/runtime/lambda-vector.cpp", "lambda/runtime/lambda-eval.cpp",
         "lambda/runtime/lambda-eval-num.cpp", "lambda/core/lambda-decimal.cpp",
         "lambda/core/lambda-decimal.hpp",
@@ -169,7 +183,8 @@ def main():
                         help="maximum slowdown against C2MIR, using the one-sided 95%% upper ratio bound")
     subsets = {"scalar": SCALAR_CASES, "array": ARRAY_CASES, "float-array": FLOAT_ARRAY_CASES,
                "core": CORE_CASES, "expansion": EXPANSION_CASES, "extended": EXTENDED_CASES,
-               "original": ORIGINAL_CASES, "additional": ADDITIONAL_CASES, "all": CASES}
+               "original": ORIGINAL_CASES, "additional": ADDITIONAL_CASES, "covered": COVERED_CASES,
+               "completion": COMPLETION_CASES, "all": CASES}
     parser.add_argument("--subset", choices=tuple(subsets), default="all")
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--benchmark-root", type=Path, default=ROOT / "test/benchmark",
@@ -182,23 +197,27 @@ def main():
     parser.add_argument("--release", action="store_true", required=True, help="confirm both Lambda binaries were built in release mode")
     parser.add_argument("--record-failures", action="store_true",
                         help="retain failed engines as unqualified rows, continue other engines, and exit nonzero")
+    parser.add_argument("--regression-only", action="store_true",
+                        help="measure only candidate and --previous-mvp; retain other engines as unmeasured")
     parser.add_argument("--pause-for-jobs", action="store_true",
                         help="wait for competing builds/tests and retry interrupted paired rounds")
     args = parser.parse_args()
     if args.runs < 3 or args.warmups < 1:
         parser.error("use at least three measured runs and one warmup")
+    if args.regression_only and not args.previous_mvp:
+        parser.error("--regression-only requires --previous-mvp")
     if not math.isfinite(args.c2mir_allowance_percent) or args.c2mir_allowance_percent < 0:
         parser.error("C2MIR allowance must be a finite nonnegative percentage")
     if args.sumfp_batch < 1 or args.sumfp_batch > 100000:
         parser.error("use a Sumfp batch count from 1 to 100000")
     if args.sumfp_batch > 1 and (args.case != "r7rs/sumfp" or args.legacy_timer):
         parser.error("batched timing requires --case r7rs/sumfp and matched kernel timers")
-    if not args.c2mir_exe:
+    if not args.c2mir_exe and not args.regression_only:
         error = ensure_c2m()
         if error:
             raise RuntimeError(error)
     reference = (args.c2mir_exe or C2M).resolve()
-    if not reference.is_file():
+    if not args.regression_only and not reference.is_file():
         parser.error("C2MIR executable does not exist")
     executable = args.exe.resolve()
     control = (args.control or executable).resolve()
@@ -226,7 +245,7 @@ def main():
         "benchmark_root": str(args.benchmark_root.resolve()),
         "c2mir_allowance_percent": args.c2mir_allowance_percent,
         "compiler_identity": archived_identity["compiler_identity"] if archived_identity else identity,
-        "executables": {name: {"path": str(path), "sha256": sha256_file(path)}
+        "executables": {name: {"path": str(path), "sha256": sha256_file(path) if path.is_file() else None}
                         for name, path in binaries.items()},
         "timer_sha256": sha256_file(TIMER_MAIN),
         "timer_sources": hashed_file_corpus([TIMER_MAIN, ROOT / "test/benchmark/c2mir/bench_clock.h",
@@ -254,7 +273,9 @@ def main():
     for suite, name in cases:
         source = args.benchmark_root.resolve() / suite / f"{name}2.ls"
         c_source = source.parent / "c2mir" / f"{name}.c"
-        expected = source.with_suffix(".txt").read_text().strip()
+        golden = lambda_golden_path(source)
+        expected = golden.read_text().strip()
+        c_expected = source.with_suffix(".txt").read_text().strip()
         run_source, run_c_source, batch = source, c_source, None
         if args.sumfp_batch > 1:
             run_source, run_c_source, batch = sumfp_batch_sources(source, c_source, args.sumfp_batch)
@@ -265,9 +286,17 @@ def main():
                      [str(reference), "-DC2MIR_KERNEL_TIMING", str(run_c_source), "-eg"],
         }
         commands["c2mir"][0] = str(reference)
+        unavailable = {}
+        if not c_source.is_file():
+            del commands["c2mir"]
+            unavailable["c2mir"] = "no standalone C port for this suite entry"
+        if args.regression_only:
+            for engine in ("production", "c2mir"):
+                commands.pop(engine, None)
+                unavailable[engine] = "not measured in the MVP regression-only campaign"
         if args.previous_mvp:
             commands["previous_mvp"] = [str(binaries["previous_mvp"]), "run", str(run_source), "--no-log"]
-        samples = {engine: [] for engine in commands}
+        samples = {engine: [] for engine in binaries}
         failures = {}
         orders = []
         discarded = []
@@ -285,8 +314,9 @@ def main():
                 env = {**base, "LAMBDA_MIR_COMPILER": "mvp" if engine in ("mvp", "previous_mvp") else "production"}
                 try:
                     stdout = invoke(commands[engine], env)
-                    if strip_timing(stdout) != expected:
-                        raise RuntimeError(f"output differs from {source.with_suffix('.txt')}: {stdout!r}")
+                    oracle = c_expected if engine == "c2mir" else expected
+                    if strip_timing(stdout) != oracle:
+                        raise RuntimeError(f"output differs from {source.with_suffix('.txt') if engine == 'c2mir' else golden}: {stdout!r}")
                     elapsed = parse_timing(stdout)
                     if elapsed is None or elapsed < 0 or not math.isfinite(elapsed):
                         raise RuntimeError(f"invalid timer {elapsed}")
@@ -311,7 +341,7 @@ def main():
                 for engine, elapsed in round_samples.items():
                     samples[engine].append(elapsed)
             iteration += 1
-        medians = {engine: statistics.median(values) if engine not in failures else None
+        medians = {engine: statistics.median(values) if values and engine not in failures else None
                    for engine, values in samples.items()}
         row = {"name": f"{suite}/{name}", "lambda_sha256": sha256_file(source),
                "timer_scope": "C main including final reporting; Lambda uses its script clock pair" if args.legacy_timer else
@@ -320,7 +350,9 @@ def main():
                    "workload plus formatting/output" if (suite, name) in TIMED_OUTPUT_CASES else
                    "setup, sort and sortedness check; final reporting excluded" if name == "quicksort" else
                    "workload including setup; final reporting excluded",
-               "c_sha256": sha256_file(c_source), "golden_sha256": sha256_file(source.with_suffix('.txt')),
+               "c_sha256": sha256_file(c_source) if c_source.is_file() else None,
+               "golden_sha256": sha256_file(golden), "golden_path": str(golden),
+               "c_golden_sha256": sha256_file(source.with_suffix('.txt')), "engine_unavailable": unavailable,
                "commands": commands, "samples_ms": samples, "median_ms": medians,
                "execution_order": orders, "engine_failures": failures, "discarded_rounds": discarded,
                "mvp_over_c2mir": medians["mvp"] / medians["c2mir"] if medians["mvp"] is not None and medians["c2mir"] else None,
@@ -360,7 +392,9 @@ def main():
         args.output.write_text(json.dumps(report, indent=2) + "\n")
         ratio = row["mvp_over_c2mir"]
         ratio_text = f"{ratio:.2f}x" if ratio is not None else "unresolved"
-        timings = ", ".join(f"{engine}={elapsed:.3f}ms" if elapsed is not None else f"{engine}=FAILED"
+        timings = ", ".join(f"{engine}={elapsed:.3f}ms" if elapsed is not None else
+                            f"{engine}=UNMEASURED" if args.regression_only and engine in unavailable else
+                            f"{engine}=UNAVAILABLE" if engine in unavailable else f"{engine}=FAILED"
                             for engine, elapsed in medians.items())
         print(f"{row['name']}: {timings}, ratio={ratio_text}", flush=True)
     for engine in binaries:
@@ -372,6 +406,8 @@ def main():
                 row["median_ms"]["mvp"] / row["median_ms"][engine] for row in report["cases"]) if resolved else None
     report["qualification"] = f"{args.subset} subset; coverage and per-row performance qualification are separate" + (
         "; historical timer scopes differ" if args.legacy_timer else "; matched workload boundaries, paired bootstrap per row")
+    if args.regression_only:
+        report["qualification"] += "; MVP regression comparison only; Full MIR and C2MIR unmeasured"
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     if any(row["engine_failures"] for row in report["cases"]):
         raise SystemExit(1)

@@ -1,5 +1,7 @@
 #include "transpiler.hpp"
 #include "mvp/mvp.hpp"
+#include "mir_path.hpp"
+#include "mir_function_value.hpp"
 #include "../../lib/host_paths.h"
 #include "write_set.hpp"
 #include "lambda-number-types.hpp"
@@ -2326,12 +2328,6 @@ static const char* mir_cow_site_import(const char* ordinary, const char* profile
 static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
         bool uses_wrapper, bool is_proc, AstFuncNode* fn_node) {
     if (!uses_wrapper) return;
-    emit_call_void_1(mt, "lambda_function_mark_mir_context_abi",
-        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
-    emit_call_void_1(mt,
-        is_proc ? "lambda_function_mark_lambda_boxed_procedure"
-                : "lambda_function_mark_lambda_boxed_function",
-        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
     FnVariantAnalysis* public_variant = fn_node && fn_node->analysis
         ? fn_analysis_variant(fn_node->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
     uint32_t public_shape = LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
@@ -2342,21 +2338,7 @@ static void emit_mir_function_abi_markers(MirTranspiler* mt, MIR_reg_t fn_obj,
                 ? LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION
                 : LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
     }
-    // Function values can be created in a hot loop. Publish the two-bit
-    // descriptor in-place instead of adding a third runtime call to every
-    // function allocation; the C helper remains for module/host publication.
-    uint32_t shape_bits = public_shape << LAMBDA_MIR_PUBLIC_RETURN_SHAPE_SHIFT;
-    MIR_reg_t flags = new_reg(mt, "fn_flags", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, flags),
-        MIR_new_mem_op(mt->ctx, MIR_T_U32, offsetof(Function, flags),
-            fn_obj, 0, 1)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
-        MIR_new_reg_op(mt->ctx, flags), MIR_new_reg_op(mt->ctx, flags),
-        MIR_new_uint_op(mt->ctx, shape_bits)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_mem_op(mt->ctx, MIR_T_U32, offsetof(Function, flags),
-            fn_obj, 0, 1), MIR_new_reg_op(mt->ctx, flags)));
+    em_mark_boxed_function(&mt->em, fn_obj, is_proc, public_shape);
 }
 #define emit_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, false)
 #define emit_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, false)
@@ -10138,6 +10120,13 @@ static MIR_reg_t emit_function_object(MirTranspiler* mt, AstFuncNode* function,
         MIR_reg_t address, bool uses_wrapper, bool use_captures) {
     int arity = em_linked_node_count(function->param);
     MIR_reg_t object = 0;
+    if (!use_captures || !function->captures) {
+        FnVariantAnalysis* variant = function->analysis ? fn_analysis_variant(function->analysis, FN_ENTRY_PUBLIC_WRAPPER) : NULL;
+        uint32_t shape = variant && variant->result.shape == RETURN_SHAPE_ITEM ? LAMBDA_MIR_PUBLIC_RETURN_ITEM :
+            variant && variant->result.shape == RETURN_SHAPE_ITEM_SCALAR ? LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION : LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
+        return em_plain_function_value(&mt->em, address, arity, function->name ? function->name->chars : NULL,
+            function->type, function->node_type == AST_NODE_PROC, uses_wrapper, shape);
+    }
     if (use_captures && function->captures) {
         int capture_count = ast_function_capture_count(function);
         MIR_reg_t environment = emit_capture_environment(mt, function->captures, NULL);
@@ -10163,16 +10152,6 @@ static MIR_reg_t emit_function_object(MirTranspiler* mt, AstFuncNode* function,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, object, 0, 1),
             MIR_new_int_op(mt->ctx, capture_count)));
-    } else if (function->name && function->name->len > 0) {
-        MIR_reg_t name = emit_load_string_literal(mt, function->name->chars);
-        object = emit_call_3(mt, "to_fn_named", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, address),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, arity),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, name));
-    } else {
-        object = emit_call_2(mt, "to_fn_n", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, address),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
     }
     emit_mir_function_abi_markers(mt, object, uses_wrapper,
         function->node_type == AST_NODE_PROC, function);
@@ -40286,57 +40265,10 @@ static MirValue transpile_path_value(MirTranspiler* mt, AstNode* node) {
     MIR_reg_t reg = 0;
     ValueRep result_rep = VALUE_REP_ITEM;
     switch (node->node_type) {
-    case AST_NODE_PATH_EXPR: {
-        AstPathNode* path_node = (AstPathNode*)node;
-        MIR_reg_t pool = emit_runtime_pool(mt);
-        MIR_reg_t path;
-        if (path_node->authority) {
-            MIR_reg_t authority = emit_load_string_literal(mt, path_node->authority->chars);
-            path = emit_call_3(mt, "path_new_authority", MIR_T_P,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int)path_node->scheme),
-                MIR_T_P, MIR_new_reg_op(mt->ctx, authority));
-        } else {
-            path = emit_call_2(mt, "path_new", MIR_T_P,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int)path_node->scheme));
-        }
-        for (int i = 0; i < path_node->segment_count; i++) {
-            AstPathSegment* segment = &path_node->segments[i];
-            if (segment->type == LPATH_SEG_WILDCARD) {
-                path = emit_call_2(mt, "path_wildcard", MIR_T_P,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, path));
-            } else if (segment->type == LPATH_SEG_WILDCARD_REC) {
-                path = emit_call_2(mt, "path_wildcard_recursive", MIR_T_P,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, path));
-            } else if (segment->type == LPATH_SEG_PARENT) {
-                path = emit_call_2(mt, "path_select_parent", MIR_T_P,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, path));
-            } else if (segment->type == LPATH_SEG_ROOT) {
-                path = emit_call_2(mt, "path_select_root", MIR_T_P,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, path));
-            } else if (segment->type == LPATH_SEG_INT) {
-                path = emit_call_3(mt, "path_extend_int", MIR_T_P,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, path),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, segment->int_value));
-            } else {
-                const char* name = segment->name ? segment->name->chars : "";
-                MIR_reg_t name_ptr = emit_load_string_literal(mt, name);
-                path = emit_call_3(mt, "path_extend", MIR_T_P,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, path),
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr));
-            }
-        }
-        reg = path;
+    case AST_NODE_PATH_EXPR:
+        reg = em_literal_path(&mt->em, (AstPathNode*)node);
         result_rep = VALUE_REP_RAW_GC_POINTER;
         break;
-    }
     case AST_NODE_PATH_INDEX_EXPR: {
         // S2.4.2v5: a computed `[k]` step of a path literal, then the static
         // steps after it, through the runtime helpers the interpreter calls
