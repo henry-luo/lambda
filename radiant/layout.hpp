@@ -2945,6 +2945,7 @@ CssEnum layout_flex_direction(ViewElement* container);
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout);
 float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width,
                                         float percentage_containing_width = -1.0f);
+float flex_item_explicit_ratio_basis(ViewElement* item, bool main_is_horizontal);
 bool flex_height_is_parent_constrained(LayoutContext* context, ViewBlock* container,
                                        bool include_column_main_size,
                                        bool include_row_cross_stretch);

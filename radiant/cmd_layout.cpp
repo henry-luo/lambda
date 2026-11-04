@@ -939,10 +939,6 @@ static CssStylesheet* parse_and_collect_stylesheet(
     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, source_path);
     annotate_css_stylesheet_source_file(stylesheet, source_path);
     if (!stylesheet) return nullptr;
-    // Keep CSS declaration URLs in document-global form before loader-stage
-    // prefetching and later paint-time resource lookup.
-    radiant_resolve_stylesheet_resource_urls(stylesheet);
-
     if (!lam::pool_grow_array(pool, stylesheets, capacity, *count + 1, 4)) {
         // stylesheet arrays are dereferenced immediately after append; skip this sheet if the pool cannot grow.
         log_error("[CSS] Failed to grow stylesheet array to %d entries", *count + 1);

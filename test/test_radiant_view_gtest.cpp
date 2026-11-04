@@ -7,6 +7,7 @@
 #include <errno.h>
 #include "../lib/log.h"
 #include "../lib/ownership.hpp"
+#include "../lib/str.h"
 
 #include "../radiant/script_timeout.hpp"
 #include "test_radiant_view_helpers.hpp"
@@ -921,6 +922,51 @@ TEST(RadiantViewTest, LoadsXhtmlFeatureGallery) {
     EXPECT_NE(strstr(output, "Assertions: 9 passed, 0 failed"), nullptr) << output;
     EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
     shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, LoadsRelativeStylesheetImagesThroughCustomProperties) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "<!doctype html><link rel='stylesheet' href='/styles/main.css'>"
+        "<div id='hero'></div><div id='icon'></div><script>"
+        "window.addEventListener('load',function(){document.body.setAttribute('data-loaded','yes');});"
+        "</script>";
+    const char* css = ":root{--hero:url(hero.svg)}body{margin:0}"
+        "#hero{width:160px;height:80px;background:var(--hero)}"
+        "@media(min-width:100px){#icon{width:20px;height:20px;background:url(icon.svg)}}";
+    const char* blue = "<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80'>"
+        "<path fill='#0049d7' d='M0 0H160V80H0Z'/></svg>";
+    const char* red = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>"
+        "<path fill='red' d='M0 0H20V20H0Z'/></svg>";
+    const RadiantViewHttpResource resources[] = {
+        {"GET /page ", "text/html", page, strlen(page)},
+        {"GET /styles/main.css ", "text/css", css, strlen(css)},
+        {"GET /styles/hero.svg ", "image/svg+xml", blue, strlen(blue)},
+        {"GET /styles/icon.svg ", "image/svg+xml", red, strlen(red)},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0])));
+    RadiantViewServerScope server_scope = {server.pid};
+    const char* events = "temp/css_network_background_events.json";
+    write_text_file(events, "{\"viewport\":{\"width\":200,\"height\":120},\"events\":["
+        "{\"type\":\"assert_pixel\",\"target\":{\"selector\":\"#hero\",\"offset_x\":10,\"offset_y\":10},"
+        "\"min_r\":0,\"max_r\":0,\"min_g\":73,\"max_g\":73,\"min_b\":215,\"max_b\":215},"
+        "{\"type\":\"assert_pixel\",\"target\":{\"selector\":\"#icon\",\"offset_x\":10,\"offset_y\":10},"
+        "\"min_r\":255,\"max_r\":255,\"min_g\":0,\"max_g\":0,\"min_b\":0,\"max_b\":0},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"body\"},"
+        "\"attribute\":\"data-loaded\",\"equals\":\"yes\"}]}");
+    char url[128];
+    str_fmt(url, sizeof(url), "http://127.0.0.1:%d/page", server.port);
+    const ShellEnvEntry env[] = {{"LAMBDA_LOG_LEVEL", "NOTICE"}, {nullptr, nullptr}};
+    ShellResult result = test_radiant_view_run_logged_headless(url, events, env);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Assertions: 3 passed, 0 failed"), nullptr) << output;
+    shell_result_free(&result);
+#endif
 }
 
 TEST(RadiantViewTest, ResourceTimingBuffersTrackFetchAndXhrAcrossGc) {

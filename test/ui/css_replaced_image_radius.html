@@ -1,0 +1,22 @@
+<!doctype html>
+<style>
+  @page { size: 400px 180px; margin: 0; }
+  body { margin: 0; background: white; }
+  img { position: absolute; top: 0; width: 80px; height: 80px;
+        object-fit: cover; border-radius: 24px; }
+  #raster { left: 0; }
+  #vector { left: 100px; }
+  #padded { left: 200px; border: 4px solid lime; padding: 8px; border-radius: 36px; }
+  button { position: absolute; top: 120px; }
+</style>
+<img id="raster" src="svg_image_assets/split.png">
+<img id="vector" src="svg_image_assets/split.svg">
+<img id="padded" src="svg_image_assets/split.png">
+<button id="square">Remove rounding</button>
+<script>
+  document.getElementById('square').addEventListener('click', function () {
+    document.getElementById('raster').style.borderRadius = '0px';
+    document.getElementById('vector').style.borderRadius = '0px';
+    document.getElementById('padded').style.borderRadius = '0px';
+  });
+</script>

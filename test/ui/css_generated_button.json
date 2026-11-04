@@ -1,0 +1,11 @@
+{
+  "name": "Button generated labels and icons participate in ordered effects and flex sizing",
+  "html": "test/ui/css_generated_button.html",
+  "viewport": {"width": 400, "height": 120},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#label"}, "height": 48, "tolerance": 1},
+    {"type": "assert_rect", "target": {"selector": "#icon"}, "width": 88, "height": 48, "tolerance": 1},
+    {"type": "assert_pixel", "target": {"selector": "#icon", "offset_x": 44, "offset_y": 24},
+     "min_r": 255, "max_r": 255, "min_g": 255, "max_g": 255, "min_b": 255, "max_b": 255}
+  ]
+}

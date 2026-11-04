@@ -4595,8 +4595,10 @@ struct PaintImageBox {
     float raster_scale;
     uint8_t opacity;
     bool overflow_visible;
+    Corner content_radius = {}; // resolved values outlive the source style in paged editions (D4.5.1v4).
 };
-bool render_paint_image_box(PaintList* paint, const PaintImageBox* box);
+bool render_paint_image_box(PaintList* paint, const PaintImageBox* box, UiContext* ui = nullptr);
+Corner render_media_content_corners(ViewBlock* view, Rect content_rect, float raster_scale);
 
 // Synchronous document-owned borrows; retained paint commands snapshot pixels.
 ImageSurface* render_canvas_surface(ViewBlock* view);
@@ -4615,8 +4617,6 @@ Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* image, Rect 
 Rect render_media_positioned_rect(const EmbedProp* embed, Rect viewport, float width, float height, float raster_scale);
 bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect image_rect,
     const Rect* content_rect, float raster_scale, FontContext* fonts, UiContext* ui = nullptr, uint8_t opacity = 255);
-bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
-                                    const Rect* content_rect);
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
                                         int target_height);
 void render_image_view(struct RasterRenderContext* rdcon, ViewBlock* view);

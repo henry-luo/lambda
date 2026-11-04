@@ -1,0 +1,112 @@
+{
+  "name": "Ratio flex items transfer clamped cross sizes and preserve assigned height for percentage children",
+  "html": "test/ui/css_flex_ratio_max_cross.html",
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#transferred"
+      },
+      "width": 200,
+      "height": 100,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#ratio"
+      },
+      "width": 500,
+      "height": 281.25,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#ratio > div"
+      },
+      "height": 281.25,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#section"
+      },
+      "height": 595.25,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tail"
+      },
+      "y": 595.25,
+      "tolerance": 0.1
+    },
+    {
+      "type": "resize",
+      "width": 480,
+      "height": 800
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#ratio"
+      },
+      "width": 480,
+      "height": 270,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#ratio > div"
+      },
+      "height": 270,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#section"
+      },
+      "height": 584,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tail"
+      },
+      "y": 584,
+      "tolerance": 0.1
+    },
+    {
+      "type": "resize",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#tail"
+      },
+      "y": 595.25,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#transferred"
+      },
+      "width": 200,
+      "height": 100,
+      "tolerance": 0.1
+    }
+  ]
+}

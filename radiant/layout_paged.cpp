@@ -5055,6 +5055,7 @@ static TypesetStatus paged_publish_image(PagedFlowState* state, LayoutViewNode* 
     box->raster_scale = tree->model->environment.device_scale;
     box->opacity = 255;
     box->image_rect = render_media_image_rect(block, image, box->content_rect, 1.0f);
+    box->content_radius = render_media_content_corners(block, box->content_rect, 1.0f);
     box->overflow_visible = block->embed && block->embedp()->native_image_sized &&
         (!block->scroller || (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
             block->scroll()->overflow_y == CSS_VALUE_VISIBLE));
@@ -6861,6 +6862,10 @@ static TypesetStatus paged_reference_observe(ViewTree* tree, PagedReferenceSessi
             const PaintImageBox* box = node->image_box;
             paged_signature_rect(signature, {box->content_rect.x, box->content_rect.y, box->content_rect.width, box->content_rect.height});
             paged_signature_rect(signature, {box->image_rect.x, box->image_rect.y, box->image_rect.width, box->image_rect.height});
+            for (unsigned corner = 0; corner < 4; corner++) {
+                paged_signature_value(signature, box->content_radius.horizontal[corner]);
+                paged_signature_value(signature, box->content_radius.vertical[corner]);
+            }
         }
         const PaintGlyphRun* run = node->glyph_run;
         paged_signature_text(signature, run ? run->text.get() : nullptr, run ? (size_t)run->text_len : 0);
