@@ -24,6 +24,8 @@
 #include "../../lib/rdb.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/file.h"
+#include "../../lib/path_str.h"
+#include "../../lib/str.h"
 
 #ifdef _WIN32
 // (no special includes needed)
@@ -222,16 +224,28 @@ Target* item_to_target(uint64_t item, Url* cwd) {
         // RDB9: a URL may carry credentials (database URIs do); never log them
 #if !defined(LAMBDA_NO_RESOURCE_CACHE) && !defined(LAMBDA_IME_RESOURCE_IO)
         char redacted[1024];
-        rdb_redact_uri(url_str, redacted, sizeof(redacted));
-        log_debug("item_to_target: parsing URL '%s'", redacted);
+        if (log_debug_enabled(log_default_category)) {
+            rdb_redact_uri(url_str, redacted, sizeof(redacted));
+            log_debug("item_to_target: parsing URL '%s'", redacted);
+        }
 #endif
 
         // Store original string for relative path preservation
         target->original = url_str;
 
-        // Resolve relative paths from cwd while native absolute paths bypass it.
-        Url* owned_cwd = cwd ? NULL : get_cwd_url();
-        Url* url = url_parse_path_or_url(url_str, cwd ? cwd : owned_cwd);
+        // absolute namespace URLs need no filesystem lookup; retain the resolver's whitespace rules.
+        const char* trimmed = url_str;
+        size_t trimmed_len = strlen(url_str);
+        str_trim(&trimmed, &trimmed_len);
+        bool absolute_url = !cwd && url_is_absolute_url(trimmed);
+#ifdef _WIN32
+        absolute_url = absolute_url && !path_str_win32_is_absolute(trimmed);
+#endif
+        Url* owned_cwd = cwd || absolute_url ? NULL : get_cwd_url();
+        char* absolute_text = absolute_url ? str_dup(trimmed, trimmed_len) : NULL;
+        Url* url = absolute_url ? (absolute_text ? url_parse(absolute_text) : NULL)
+            : url_parse_path_or_url(url_str, cwd ? cwd : owned_cwd);
+        free(absolute_text);
         if (owned_cwd) url_destroy(owned_cwd);
 
         if (!url) {

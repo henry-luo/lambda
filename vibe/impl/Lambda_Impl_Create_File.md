@@ -43,12 +43,8 @@ remain separate work and require their own review and accounting tests.
 
 The interpreter and MIR golden passes with forced collection, and the current
 26 native anchor tests pass, including injected sync failure, revocation,
-ancestor replacement and concurrent creators. The app-safety runtime suite
-passed its bound-client refusal case. A full aggregate before the last defensive
-error-operand guard passed 8,747/8,753; six package-safety tests failed to
-compile against already-modified TUF sources and the prior executable reproduced
-the import failure. A later aggregate overlapped another shared build and
-cannot establish a baseline because `lambda.exe` disappeared during tests.
-Run the final aggregate after other builds complete. Accounting's separate
-non-GST invoice text-export prototype has focused UI and storage tests; it does
-not qualify production invoicing or the bound-client implementation.
+ancestor replacement and concurrent creators. The final full Lambda baseline
+passed 8,754/8,754, including all 96 app-safety runtime tests and the bound-client
+refusal case. Accounting's separate non-GST invoice text-export prototype has
+focused UI and storage tests; it does not qualify production invoicing or the
+bound-client implementation.

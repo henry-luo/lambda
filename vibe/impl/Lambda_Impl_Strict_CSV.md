@@ -1,7 +1,6 @@
 # Strict CSV input for reviewed imports
 
-Status: implemented, 4 November 2026; the full baseline has one unrelated media
-playback failure described below. The accounting bank-import design needs
+Status: implemented, 4 November 2026. The accounting bank-import design needs
 lossless, bounded parsing of user-selected CSV. The existing reader heuristically
 detects the separator and header, warns while dropping extra map fields, and
 accepts a quoted field followed by non-delimiter text as another field. A
@@ -29,10 +28,6 @@ Track any environmental or cross-platform limitations rather than weakening
 checks.
 
 The focused strict CSV cases pass in interpreter and MIR, including forced-GC
-runs. The final unrestricted aggregate passed 8,737 of 8,738 tests, including
-the strict CSV golden, input-parser suite and security runtime suite. Its only
-failure was `JavaScriptTests/JsFileTest.Run/dom_media_playback`; the test also
-failed when rerun alone, stopping after ten successful assertions while awaiting
-media playback. This is not a passing aggregate or a diagnosed CSV regression.
-An earlier unrestricted aggregate had a different chart timeout which passed
-in isolation. Do not weaken either test to obtain a green result.
+runs. A later full unrestricted aggregate passed 8,754/8,754 tests, including
+the strict CSV golden, input-parser suite and security runtime suite. Earlier
+isolated media and chart failures did not recur in that final aggregate.
