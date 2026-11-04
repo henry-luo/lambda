@@ -66,6 +66,7 @@ typedef struct StyleNode {
  * Style Tree
  * Document-wide style management system
  */
+enum { CSS_DECLARATION_PRESENCE_WORDS = 2 };
 typedef struct StyleTree {
     AvlTree* tree;                   // Underlying AVL tree
     Pool* pool;                      // Memory pool
@@ -73,7 +74,8 @@ typedef struct StyleTree {
     int next_source_order;           // Next source order counter
     uint32_t compute_version;        // Global compute version for cache invalidation
     void* canonical_owner;           // StyleCanonicalEntry for epoch-owned immutable trees
-    uint64_t declaration_presence;  // conservative absence filter, stored without a side allocation
+    // a bounded filter improves absence precision without a registry-sized per-tree bitmap.
+    uint64_t declaration_presence[CSS_DECLARATION_PRESENCE_WORDS];
     uint32_t borrow_ref_count;       // Generated pseudo boxes borrowing this tree
     bool retired_borrow_source;      // Detached pseudo tree pending its last borrower
     bool declaration_cache_valid;    // mutations expire all affected cached winners

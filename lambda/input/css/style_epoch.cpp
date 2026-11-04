@@ -1011,6 +1011,12 @@ uint64_t style_epoch_current_id(DomDocument* doc) {
     return manager && manager->current ? manager->current->id : 0;
 }
 
+uint64_t style_epoch_tree_id(const StyleTree* tree) {
+    const StyleCanonicalEntry* entry = tree
+        ? (const StyleCanonicalEntry*)tree->canonical_owner : nullptr;
+    return entry ? entry->entry_id : 0;
+}
+
 void style_epoch_get_stats(DomDocument* doc, StyleEpochStats* out) {
     if (!out) return;
     memset(out, 0, sizeof(*out));

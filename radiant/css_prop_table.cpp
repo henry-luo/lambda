@@ -115,14 +115,16 @@ static const CssPropertyRuntimeMetadata kCssPropertyRuntimeMetadata[] = {
 };
 
 const CssPropertyRuntimeMetadata* css_property_runtime_metadata(CssPropertyCode property) {
-    size_t count = sizeof(kCssPropertyRuntimeMetadata) /
-        sizeof(kCssPropertyRuntimeMetadata[0]);
-    for (size_t i = 0; i < count; i++) {
-        if (kCssPropertyRuntimeMetadata[i].property == property) {
-            return &kCssPropertyRuntimeMetadata[i];
+    struct Index {
+        const CssPropertyRuntimeMetadata* properties[CSS_PROPERTY_COUNT] = {};
+        Index() {
+            for (const auto& metadata : kCssPropertyRuntimeMetadata)
+                properties[metadata.property] = &metadata;
         }
-    }
-    return nullptr;
+    };
+    // motion samples query this immutable registry for every property of every box.
+    static const Index index;
+    return property > 0 && property < CSS_PROPERTY_COUNT ? index.properties[property] : nullptr;
 }
 
 size_t css_property_runtime_metadata_count() {

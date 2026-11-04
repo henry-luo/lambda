@@ -965,6 +965,9 @@ struct DomElementExt {
     // ::marker layout state; markers have no BlockProp
     lam::ViewProp<MarkerProp, DomViewSlot::marker> marker;
     lam::Own<struct CssCustomPropertyIndex> custom_property_index;
+    // positive private-attribute reads borrow their document-owned strings.
+    lam::Up<const char> cached_namespace_uri;
+    lam::Up<const char> cached_namespace_local_name;
 };
 
 /**

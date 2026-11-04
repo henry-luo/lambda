@@ -1023,6 +1023,15 @@ TEST_F(DomIntegrationTest, QualifiedTypeSelectorsMatchElementNamespaces) {
     EXPECT_FALSE(matches(2, svg_rect));
     EXPECT_TRUE(matches(3, svg_rect));
     EXPECT_FALSE(matches(3, html_div));
+    // positive expanded-name reads must expire after backing and synthetic metadata writes.
+    EXPECT_STREQ(dom_element_namespace_uri(svg_rect), "http://www.w3.org/2000/svg");
+    ASSERT_TRUE(svg_rect->set_attribute("__lambda_ns_uri", "http://www.w3.org/1999/xhtml"));
+    EXPECT_TRUE(matches(0, svg_rect));
+    EXPECT_STREQ(dom_element_namespace_uri(svg_rect), "http://www.w3.org/1999/xhtml");
+    ASSERT_TRUE(dom_element_set_namespace_identity(null_div, "urn:probe", "renamed"));
+    EXPECT_STREQ(null_div->local_name(), "renamed");
+    ASSERT_TRUE(dom_element_set_namespace_identity(null_div, "urn:probe", "updated"));
+    EXPECT_STREQ(null_div->local_name(), "updated");
     css_engine_destroy(engine);
 }
 

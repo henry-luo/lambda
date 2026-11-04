@@ -6205,6 +6205,50 @@ TEST_F(RadiantTextQuery, SharedPublicationPreservesScriptGeometryAndInvalidatesI
     EXPECT_EQ(tree->document_layout_count, 6u);
 }
 
+TEST_F(RadiantTextQuery, RecascadeRetainsEqualInputsAndExpiresAuthoredAndInheritedChanges) {
+    ASSERT_NE(load("test/html/layout_recascade_reuse.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    DomElement* target = find("target");
+    DomElement* sibling = find("sibling");
+    ASSERT_NE(target, nullptr);
+    ASSERT_NE(sibling, nullptr);
+    ASSERT_NE(style_epoch_tree_id(sibling->specified_style), 0u);
+    auto recascade = [&]() {
+        radiant_recascade_document_styles(document, document->root);
+        document->incremental_layout = document->skip_style_reset = true;
+        layout_html_doc(&ui, document, true);
+        document->incremental_layout = document->skip_style_reset = false;
+    };
+    uint32_t version = sibling->style_version;
+    recascade();
+    EXPECT_EQ(sibling->style_version, version);
+    EXPECT_FLOAT_EQ(target->width, 100.0f);
+    EXPECT_FLOAT_EQ(sibling->width, 40.0f);
+
+    ASSERT_TRUE(document->root->set_attribute("class", "wide"));
+    recascade();
+    EXPECT_FLOAT_EQ(target->width, 180.0f);
+    EXPECT_EQ(sibling->style_version, version);
+    ASSERT_NE(sibling->pseudo, nullptr);
+    ASSERT_NE(sibling->pseudo->before, nullptr);
+    ASSERT_NE(sibling->pseudo->before->first_child, nullptr);
+    EXPECT_STREQ(sibling->pseudo->before->first_child->as_text()->text, "X");
+
+    ASSERT_TRUE(target->set_attribute("dir", "rtl"));
+    recascade();
+    EXPECT_EQ(target->block()->direction, CSS_VALUE_RTL);
+    ASSERT_TRUE(document->root->set_attribute("class", "large"));
+    recascade();
+    EXPECT_FLOAT_EQ(target->width, 100.0f);
+    EXPECT_FLOAT_EQ(target->font->font_size, 24.0f);
+    EXPECT_FLOAT_EQ(sibling->font->font_size, 24.0f);
+    ASSERT_TRUE(dom_cssom_set_inline_property(target, "width", "210px"));
+    recascade();
+    EXPECT_FLOAT_EQ(target->width, 210.0f);
+}
+
 TEST_F(RadiantTextQuery, SharedPublicationRegeneratesTableListAndPseudoStructure) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
