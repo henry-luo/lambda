@@ -6236,6 +6236,8 @@
               "gtest_main"
             ],
             "parallel": false,
+            "case_workers": 5,
+            "case_batch_size": 50,
             "icon": "\ud83d\udc11"
           },
           {

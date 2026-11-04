@@ -15,4 +15,7 @@ let again = (parse(xml, 'xml')^)[0];
  e[n.a], e[alias.a], e.a, name(e) == alias.root, e is <alias.root>,
  root[n.a], root.a, name(root) == alias.root,
  again[alias.a], again.a, name(again) == alias.root,
- [for (k,v at m) [k == n.a, k == other.a, v]], constructed_again[alias.a]]
+ [for (k,v at m) [k == n.a, k == other.a, v]], constructed_again[alias.a],
+ // absolute namespaces retain URL whitespace/case normalization without a cwd lookup.
+ symbol("a", "urn:lambda:keys \t") == alias.a,
+ symbol("a", "HTTP://example.com/ns \n") == symbol("a", "http://example.com/ns")]

@@ -142,6 +142,15 @@ committed write status and bounded leases when the peer stops reading.
 
 ## 2. Suites (`build_lambda_config.json` → `test.test_suites`)
 
+The Lambda Runtime suite uses five case workers with 50-case batches, scheduling
+previously slow cases first. Each worker caps its nested script and pure tier
+checks at one through `LAMBDA_TEST_MAX_CONCURRENT`, preserving a five-process
+budget. Every discovered golden and explicit interpreter/AUTO/JIT check still
+runs (**D8.1.1v18**). Direct native runs use an internal batch pool and execute
+the explicit GTest cases sequentially. Use
+`node test/test_run.js --target=lambda --category=baseline --include-test=test_lambda_gtest`
+for the scheduled suite; `LAMBDA_TEST_MAX_CONCURRENT=1` selects serial execution.
+
 `node test/test_run.js` runs these. Flags: `--target=<suite>`, `--exclude-target=<suite>`, `--category=baseline|extended`,
 `--exclude-test=<name>[,<name>]`, `--raw`, `--sequential`, `--list` (JSON inventory), `--list-build-targets` (unique native projects). Env: `LAMBDA_TEST_BIN_DIR`, `LAMBDA_TEST_OUTPUT_DIR`, `LAMBDA_TEST_IDLE_TIMEOUT` (s), `LAMBDA_TEST_MAX_CONCURRENT`, `LAMBDA_TEST_HEAVY_LOAD=1`, `LAMBDA_UI_TEST_JOBS`.
 Every Radiant baseline runner receives `LAMBDA_LOG_LEVEL=NOTICE`, inherited by its native and script subprocesses, including case workers. The View fixtures also use NOTICE for their explicit logging settings. Warnings, errors and notice-level profiles remain enabled without parser/layout debug traces.

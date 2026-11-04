@@ -688,16 +688,18 @@ inline size_t lambda_capture_batch_chunk_size() {
 // child before it emits its final BATCH_END record.
 static const size_t MAX_PARALLEL_LAMBDA_BATCHES = 4;
 
-// Timing captures may deliberately cap process fan-out so compiler samples
-// are not lost to host-level process pressure while large AST/MIR batches run.
+// honor the suite allocation as well as capture limits so nested pools cannot
+// multiply the shared runner's process budget.
 static size_t lambda_batch_worker_limit(size_t batch_count) {
     size_t limit = std::min(MAX_PARALLEL_LAMBDA_BATCHES, batch_count);
-    const char* override_value = getenv("AST_TUNE_BATCH_WORKERS");
-    if (override_value && *override_value) {
+    const char* limits[] = {"AST_TUNE_BATCH_WORKERS", "LAMBDA_TEST_MAX_CONCURRENT"};
+    for (const char* name : limits) {
+        const char* override_value = getenv(name);
+        if (!override_value || !*override_value) continue;
         char* end = nullptr;
         unsigned long parsed = strtoul(override_value, &end, 10);
         if (end != override_value && *end == '\0' && parsed > 0) {
-            limit = std::min(limit, (size_t)parsed);
+            if (parsed < limit) limit = (size_t)parsed;
         }
     }
     return limit;

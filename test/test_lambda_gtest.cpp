@@ -10,6 +10,7 @@
 #include "test_ast_tune_capture.hpp"
 #include "../lib/shell.h"
 #include "../lib/strbuf.h"
+#include "../lib/thread_pool.h"
 #include <string.h>
 
 //==============================================================================
@@ -94,47 +95,63 @@ TEST(NumericConversionTests, UntypedU64ConversionAgreesAcrossTiers) {
     }
 }
 
-TEST(ProcartTests, KeyedNoiseIsExactAcrossTiers) {
+struct LambdaTierFixture {
+    const char* directory;
+    const char* name;
+    const char* tier;
+};
+
+static void test_lambda_tier_fixture(void* opaque) {
+    const LambdaTierFixture* fixture = (const LambdaTierFixture*)opaque;
+    SCOPED_TRACE(fixture->tier);
+    SCOPED_TRACE(fixture->name);
+    char script[512], expected[512];
+    snprintf(script, sizeof(script), "%s%s%s.ls", fixture->directory ? fixture->directory : "",
+        fixture->directory ? "/" : "", fixture->name);
+    snprintf(expected, sizeof(expected), "%s%s%s.txt", fixture->directory ? fixture->directory : "",
+        fixture->directory ? "/" : "", fixture->name);
+    test_lambda_script_against_file(script, expected, false, fixture->tier);
+}
+
+// pure fixtures have isolated CLI processes and no shared output files; reuse the batch ceiling.
+static void test_pure_fixtures_across_tiers(const char* const* fixtures,
+        size_t fixture_count, const char* directory = nullptr, const char* demo = nullptr) {
     const char* tiers[] = {"interp", "auto", "jit"};
-    for (const char* tier : tiers) {
-        SCOPED_TRACE(tier);
-        test_lambda_script_against_file("test/lambda/procart/rng.ls", "test/lambda/procart/rng.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/noise.ls", "test/lambda/procart/noise.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/sample.ls", "test/lambda/procart/sample.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/geom.ls", "test/lambda/procart/geom.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/grid.ls", "test/lambda/procart/grid.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/lsystem.ls", "test/lambda/procart/lsystem.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/text.ls", "test/lambda/procart/text.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/wfc.ls", "test/lambda/procart/wfc.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/wfc_native.ls", "test/lambda/procart/wfc_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/erosion_native.ls", "test/lambda/procart/erosion_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/geom_native.ls", "test/lambda/procart/geom_native.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/field.ls", "test/lambda/procart/field.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/extensions.ls", "test/lambda/procart/extensions.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/transpose_singleton.ls", "test/lambda/transpose_singleton.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/interp_ndim_return.ls", "test/lambda/interp_ndim_return.txt", false, tier);
-        test_lambda_script_against_file("test/mir/lambda/u64_bitwise_native.ls", "test/mir/lambda/u64_bitwise_native.txt", false, tier);
-        test_lambda_script_against_file("test/mir/lambda/null_item_comparison.ls", "test/mir/lambda/null_item_comparison.txt", false, tier);
-        test_lambda_script_against_file("test/lambda/procart/terrain.ls", "test/lambda/procart/terrain.txt", false, tier);
+    size_t count = fixture_count + (demo ? 1 : 0);
+    if (count == 0) return;
+    size_t job_count = count * (sizeof(tiers) / sizeof(tiers[0]));
+    LambdaTierFixture* jobs = (LambdaTierFixture*)calloc(job_count, sizeof(LambdaTierFixture));
+    ASSERT_NE(jobs, nullptr);
+    ThreadPool* pool = tp_create((int)lambda_batch_worker_limit(job_count));
+    for (size_t i = 0; i < job_count; i++) {
+        size_t fixture = i % count;
+        jobs[i] = {fixture == fixture_count ? "test/demo/procart/tests" : directory,
+            fixture == fixture_count ? demo : fixtures[fixture], tiers[i / count]};
+        if (!pool || !tp_submit(pool, test_lambda_tier_fixture, &jobs[i])) {
+            if (pool) tp_wait_all(pool);
+            test_lambda_tier_fixture(&jobs[i]);
+        }
     }
+    if (pool) tp_destroy(pool);
+    free(jobs);
+}
+
+TEST(ProcartTests, KeyedNoiseIsExactAcrossTiers) {
+    const char* fixtures[] = {"test/lambda/procart/rng", "test/lambda/procart/noise",
+        "test/lambda/procart/sample", "test/lambda/procart/geom", "test/lambda/procart/grid",
+        "test/lambda/procart/lsystem", "test/lambda/procart/text", "test/lambda/procart/wfc",
+        "test/lambda/procart/wfc_native", "test/lambda/procart/erosion_native",
+        "test/lambda/procart/geom_native", "test/lambda/procart/field", "test/lambda/procart/extensions",
+        "test/lambda/transpose_singleton", "test/lambda/interp_ndim_return",
+        "test/mir/lambda/u64_bitwise_native", "test/mir/lambda/null_item_comparison",
+        "test/lambda/procart/terrain"};
+    test_pure_fixtures_across_tiers(fixtures, sizeof(fixtures) / sizeof(fixtures[0]));
 }
 
 // Reuse the package/demo fixture shape for both procedural expansion gates.
 static void test_procart_fixtures_across_tiers(const char* const* fixtures,
         size_t fixture_count, const char* demo) {
-    const char* tiers[] = {"interp", "auto", "jit"};
-    for (const char* tier : tiers) {
-        SCOPED_TRACE(tier);
-        for (size_t i = 0; i < fixture_count + (demo ? 1 : 0); i++) {
-            const char* fixture = i == fixture_count ? demo : fixtures[i];
-            const char* directory = i == fixture_count ? "test/demo/procart/tests" : "test/lambda/procart";
-            SCOPED_TRACE(fixture);
-            char script[256], expected[256];
-            snprintf(script, sizeof(script), "%s/%s.ls", directory, fixture);
-            snprintf(expected, sizeof(expected), "%s/%s.txt", directory, fixture);
-            test_lambda_script_against_file(script, expected, false, tier);
-        }
-    }
+    test_pure_fixtures_across_tiers(fixtures, fixture_count, "test/lambda/procart", demo);
 }
 
 // Drawing admission and immutable expansion must agree across tiers (PG12 / S1.6).

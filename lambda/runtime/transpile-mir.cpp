@@ -1139,7 +1139,15 @@ static inline HashMap* mir_binding_global_new(size_t capacity) {
 // How many candidate shape sources to keep per argument position / per return.
 #define MIR_SHAPE_SRC_SLOTS 4
 
+struct MirParamBodyEvidence {
+    uint32_t mask;
+    int count;
+    FnParamEvidence* contexts;
+    MirParamBodyEvidence* next;
+};
+
 struct CallSiteEntry {
+    MirParamBodyEvidence* body_evidence;
     AstFuncNode* fn;
     int param_count;
     // joined static type per argument position. LMD_TYPE_ERROR is the "no call
@@ -4356,35 +4364,53 @@ typedef struct MirVarArgScan {
     bool found;
 } MirVarArgScan;
 
+static bool mir_call_borrows_binding(AstCallNode* call, const NameEntry* binding) {
+    AstFuncNode* direct = ast_direct_call_function(call);
+    TypeFunc* signature = direct && ((AstNode*)direct)->type &&
+            ((AstNode*)direct)->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)((AstNode*)direct)->type : NULL;
+    if (!signature || !ast_type_func_has_var_parameter(signature)) return false;
+    TypeParam* param = signature->param;
+    for (AstNode* arg = call->argument; arg && param; arg = arg->next, param = param->next) {
+        if (arg->node_type == AST_NODE_NAMED_ARG) break;
+        if (!param->is_var_param || param->full_type) continue;
+        AstNode* base = ast_unwrap_primary(arg);
+        if (base && base->node_type == AST_NODE_IDENT &&
+                ((AstIdentNode*)base)->entry == binding) return true;
+    }
+    return false;
+}
+
 static void mir_var_arg_scan_visit(AstNode* node, void* opaque) {
     MirVarArgScan* scan = (MirVarArgScan*)opaque;
     if (!node || scan->found) return;
     if (node->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)node;
-        AstFuncNode* direct = ast_direct_call_function(call);
-        TypeFunc* signature = direct && ((AstNode*)direct)->type &&
-                ((AstNode*)direct)->type->type_id == LMD_TYPE_FUNC
-            ? (TypeFunc*)((AstNode*)direct)->type : NULL;
-        if (signature && ast_type_func_has_var_parameter(signature)) {
-            TypeParam* param = signature->param;
-            for (AstNode* arg = call->argument; arg && param;
-                    arg = arg->next, param = param->next) {
-                if (arg->node_type == AST_NODE_NAMED_ARG) break;
-                if (!param->is_var_param || param->full_type) continue;
-                AstNode* base = ast_unwrap_primary(arg);
-                if (base && base->node_type == AST_NODE_IDENT &&
-                        ((AstIdentNode*)base)->entry == scan->binding) {
-                    scan->found = true;
-                    return;
-                }
-            }
-        }
+        scan->found = mir_call_borrows_binding((AstCallNode*)node, scan->binding);
+        if (scan->found) return;
     }
     interp_visit_children(node, mir_var_arg_scan_visit, scan);
 }
 
-static bool mir_binding_borrowed_as_var_argument(AstNode* body,
+static bool mir_binding_borrowed_as_var_argument(MirTranspiler* mt, AstNode* body,
         const NameEntry* binding) {
+    const AstIndex* index = mt->ast_index;
+    AstNodeId body_id = ast_index_find(index, body);
+    AstBindingId binding_id = ast_index_find_binding_entry(index, binding);
+    if (index && index->graph_published && body_id != AST_NODE_ID_INVALID &&
+            binding_id != AST_BINDING_ID_INVALID) {
+        // query only this binding's uses; repeated inference must not rescan every function body (D8.2.4v2).
+        uint32_t count = 0;
+        const AstNodeId* uses = ast_index_binding_uses(index, binding_id, &count);
+        for (uint32_t i = 0; i < count; i++) {
+            if (!ast_index_node_descends(index, uses[i], body_id)) continue;
+            AstNode* use = index->nodes[uses[i]];
+            AstNode* parent = mir_index_use_parent(index, &use);
+            if (parent && parent->node_type == AST_NODE_CALL_EXPR &&
+                    mir_call_borrows_binding((AstCallNode*)parent, binding)) return true;
+        }
+        return false;
+    }
+    // synthetic continuation bodies can precede publication of their index.
     MirVarArgScan scan = {binding, false};
     mir_var_arg_scan_visit(body, &scan);
     return scan.found;
@@ -12360,7 +12386,7 @@ static bool mir_expr_proves_presence(MirTranspiler* mt, AstNode* node,
         if (!mir_expr_proves_presence(mt, init, assumed, depth + 1)) return false;
         if (!entry->is_mutable) return true;
         if (!body || mir_in_inline_context(mt) || mir_body_has_nested_function(body) ||
-                mir_binding_borrowed_as_var_argument(body, entry)) return false;
+                mir_binding_borrowed_as_var_argument(mt, body, entry)) return false;
         // the initializer supplies the base case; every write preserves it.
         return !mir_nested_control_writes_binding(body, entry, mt, LMD_TYPE_ANY,
             false, true, depth + 1);
@@ -12458,7 +12484,7 @@ static bool mir_numeric_join_operand(MirTranspiler* mt, AstNode* node,
                      mir_decl_type_id(binding->declared_type) != LMD_TYPE_INT)) || binding->view_base ||
                     (var && (var->from_env || var->in_scope_env || var->env_offset >= 0 ||
                      var->is_var_param || var->is_state_var)) ||
-                    mir_binding_borrowed_as_var_argument(mt->func_body, binding)) return false;
+                    mir_binding_borrowed_as_var_argument(mt, mt->func_body, binding)) return false;
             for (int i = 0; i < proof->count; i++) {
                 if (proof->visiting[i] == binding) return true;
             }
@@ -20664,9 +20690,7 @@ static bool mir_length_bound_loop_plan(MirTranspiler* mt,
         // after a rank-one receiver qualified, avoiding a full-body scan for
         // ordinary string/map loops (S7.1.1v3, D2.5.3).
         if (ast_body_may_write_entry(item, counter, true, tail)) return false;
-        bool nested = false;
-        walk_lambda_ast(mt->func_body, mir_flow_nested_function, &nested, false);
-        if (nested) return false;
+        if (mir_body_has_nested_function(mt->func_body)) return false;
     }
     *out_counter = counter;
     *out_array = array;
@@ -20687,10 +20711,9 @@ static void mir_of_loop_record_bounds(MirTranspiler* mt, AstLoopNode* loop,
     frame->nonnegative_counter = counter;
     NameEntry* array = mir_ident_binding(loop->as);
     if (!array || array == counter || !mt->in_user_func || mir_in_inline_context(mt)) return;
-    // as the `while` form: a nested function could rebind the receiver
-    bool nested = false;
-    walk_lambda_ast(mt->func_body, mir_flow_nested_function, &nested, false);
-    if (nested || !mir_length_bound_receiver(mt, array)) return;
+    // reject ordinary string/map walks before scanning the whole function for captures.
+    if (!mir_length_bound_receiver(mt, array) ||
+            mir_body_has_nested_function(mt->func_body)) return;
     frame->length_bound_counter = counter;
     frame->length_bound_array = array;
 }
@@ -24006,7 +24029,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         (mir_nested_control_writes_binding(mt->func_body, asn->entry,
                             mt, var_tid, true,
                             ast_unwrap_primary_to_leaf(asn->init)->node_type == AST_NODE_IF_EXPR) ||
-                         mir_binding_borrowed_as_var_argument(mt->func_body,
+                         mir_binding_borrowed_as_var_argument(mt, mt->func_body,
                             asn->entry))) {
                     log_debug("mir: let/var '%.*s' widened at declaration (lane %d)",
                         (int)asn->name->len, asn->name->chars, (int)var_tid);
@@ -42570,6 +42593,17 @@ static void free_param_evidence_bindings(FnParamEvidence* ctxs, int count) {
     }
 }
 
+static void mir_free_param_body_evidence(CallSiteEntry* entry) {
+    MirParamBodyEvidence* facts = entry->body_evidence;
+    while (facts) {
+        MirParamBodyEvidence* next = facts->next;
+        free_param_evidence_bindings(facts->contexts, facts->count);
+        mem_free(facts->contexts);
+        mem_free(facts);
+        facts = next;
+    }
+}
+
 // Classify the "other side" type for a binary op involving our param
 static int classify_other_type(TypeId tid) {
     if (tid == LMD_TYPE_INT) return INFER_INT;
@@ -42931,13 +42965,18 @@ static TypeId resolve_inferred_type(FnParamEvidence* ctx, bool is_proc) {
 // result marks the container's keys dynamic and the witness is withheld
 // (proc_invalid_member_access writes `xs["name"]` through such a parameter).
 static TypeId mir_callsite_arg_type_at(MirTranspiler* mt, AstNode* arg, int depth);
-static bool mir_forward_prepass_seen_sibling(AstNode* first, AstNode* child);
+typedef struct MirSiblingChain {
+    AstNode* first;
+    AstNode* next;
+} MirSiblingChain;
+
+static bool mir_forward_prepass_seen_sibling(MirSiblingChain* chain, AstNode* child);
 
 typedef struct MirParamKeyWalk {
     MirTranspiler* mt;
     FnParamEvidence* ctxs;
     int ctx_count;
-    AstNode* sibling_chain;
+    MirSiblingChain sibling_chain;
 } MirParamKeyWalk;
 
 static void mir_param_key_walk(MirParamKeyWalk* walk, AstNode* node);
@@ -42947,8 +42986,7 @@ static void mir_param_key_walk_child(AstNode* child, void* opaque) {
     if (!walk || !child) return;
     // the shared visitor reports every member of a linked child list; the
     // walk consumes that list itself, so skip only later siblings
-    if (mir_forward_prepass_seen_sibling(walk->sibling_chain, child)) return;
-    walk->sibling_chain = child;
+    if (mir_forward_prepass_seen_sibling(&walk->sibling_chain, child)) return;
     mir_param_key_walk(walk, child);
 }
 
@@ -43002,7 +43040,7 @@ static void mir_param_key_walk(MirParamKeyWalk* walk, AstNode* node) {
             AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
             mir_param_key_note(walk, assign->object, assign->key);
         }
-        MirParamKeyWalk child_walk = {walk->mt, walk->ctxs, walk->ctx_count, NULL};
+        MirParamKeyWalk child_walk = {walk->mt, walk->ctxs, walk->ctx_count, {}};
         interp_visit_children(node, mir_param_key_walk_child, &child_walk);
         node = node->next;
     }
@@ -43042,6 +43080,7 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
     FnParamEvidence ctxs[LAMBDA_MAX_FUNCTION_ARGS];
     int ctx_indices[LAMBDA_MAX_FUNCTION_ARGS];  // maps ctx index → param index
     int ctx_count = 0;
+    uint32_t evidence_mask = 0;
 
     TypeParam* tp = ft ? ft->param : nullptr;
     AstNamedNode* p = fn_node->param;
@@ -43061,7 +43100,7 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
         // A `var` parameter already owns its caller's home, so forwarding it
         // keeps its inferred witness (T21-2d).
         bool borrowed_as_var = p->entry && !(tp && tp->is_var_param) &&
-            mir_binding_borrowed_as_var_argument(fn_node->body, p->entry);
+            mir_binding_borrowed_as_var_argument(mt, fn_node->body, p->entry);
         if (may_be_null || borrowed_as_var) {
             p = (AstNamedNode*)p->next;
             tp = tp ? tp->next : nullptr;
@@ -43080,6 +43119,7 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
         ctx->binding_count = 1;
         ctx->container_store_type = LMD_TYPE_ANY;
         ctx_indices[ctx_count] = i;
+        evidence_mask |= UINT32_C(1) << i;
         ctx_count++;
 
         p = (AstNamedNode*)p->next;
@@ -43088,26 +43128,49 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
 
     if (ctx_count == 0) return;
 
-    // Alias finding: iterate until convergence (single walk per round for ALL params)
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        int prev_counts[LAMBDA_MAX_FUNCTION_ARGS];
-        for (int c = 0; c < ctx_count; c++) prev_counts[c] = ctxs[c].binding_count;
-        find_aliases_multi(fn_node->body, ctxs, ctx_count);
-        for (int c = 0; c < ctx_count; c++) {
-            if (ctxs[c].binding_count != prev_counts[c]) changed = true;
+    CallSiteEntry* facts_owner = mir_callsite_entry(mt, fn_node, false);
+    MirParamBodyEvidence* body_facts = facts_owner ? facts_owner->body_evidence : NULL;
+    while (body_facts && body_facts->mask != evidence_mask) body_facts = body_facts->next;
+    if (body_facts) {
+        free_param_evidence_bindings(ctxs, ctx_count);
+        memcpy(ctxs, body_facts->contexts, (size_t)ctx_count * sizeof(FnParamEvidence));
+    } else {
+        // aliases and body evidence are immutable unit facts, shared across inference rounds (D8.2.4v2).
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            int prev_counts[LAMBDA_MAX_FUNCTION_ARGS];
+            for (int c = 0; c < ctx_count; c++) prev_counts[c] = ctxs[c].binding_count;
+            find_aliases_multi(fn_node->body, ctxs, ctx_count);
+            for (int c = 0; c < ctx_count; c++) {
+                if (ctxs[c].binding_count != prev_counts[c]) changed = true;
+            }
+        }
+        gather_evidence_multi(fn_node->body, ctxs, ctx_count);
+        if (facts_owner) {
+            body_facts = (MirParamBodyEvidence*)mem_calloc(1, sizeof(MirParamBodyEvidence), MEM_CAT_TEMP);
+            if (body_facts) {
+                body_facts->contexts = (FnParamEvidence*)mem_alloc(
+                    (size_t)ctx_count * sizeof(FnParamEvidence), MEM_CAT_TEMP);
+                if (!body_facts->contexts) { mem_free(body_facts); body_facts = NULL; }
+            }
+            if (body_facts) {
+                body_facts->mask = evidence_mask;
+                body_facts->count = ctx_count;
+                memcpy(body_facts->contexts, ctxs, (size_t)ctx_count * sizeof(FnParamEvidence));
+                body_facts->next = facts_owner->body_evidence;
+                facts_owner->body_evidence = body_facts;
+            }
         }
     }
 
-    // Single body walk gathers evidence for ALL params
-    gather_evidence_multi(fn_node->body, ctxs, ctx_count);
     {
+        // key lanes and forwarding depend on this round's call-site evidence; recompute them.
         // T21-2a: subscript keys are typed by the call-site typer, which
         // resolves this function's own parameters through its call-site entry
         AstFuncNode* saved_enclosing = mt->prepass_enclosing;
         mt->prepass_enclosing = fn_node;
-        MirParamKeyWalk key_walk = {mt, ctxs, ctx_count, NULL};
+        MirParamKeyWalk key_walk = {mt, ctxs, ctx_count, {}};
         mir_param_key_walk(&key_walk, fn_node->body);
         mt->prepass_enclosing = saved_enclosing;
     }
@@ -43223,7 +43286,7 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
             out_types[pi] = inferred;
         }
     }
-    free_param_evidence_bindings(ctxs, ctx_count);
+    if (!body_facts) free_param_evidence_bindings(ctxs, ctx_count);
 }
 
 // ============================================================================
@@ -44254,7 +44317,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
             // an untyped var borrow can replace the initializer's kind; its
             // shared home, rather than the initial lane, owns the return value.
             if (!((AstDeclaratorNode*)binding)->declared_type && proof_body &&
-                    mir_binding_borrowed_as_var_argument(proof_body, ident->entry)) {
+                    mir_binding_borrowed_as_var_argument(mt, proof_body, ident->entry)) {
                 return false;
             }
             if (!variable && mir_argument_is_module_binding(mt, node) &&
@@ -48886,7 +48949,7 @@ static void mir_visit_function_siblings_callee_first(MirTranspiler* mt,
 
 typedef struct MirForwardPrepassVisit {
     MirTranspiler* mt;
-    AstNode* sibling_chain;
+    MirSiblingChain sibling_chain;
 } MirForwardPrepassVisit;
 
 static void prepass_forward_declare(MirTranspiler* mt, AstNode* node);
@@ -48898,11 +48961,19 @@ static TypeObject* mir_object_type_owner(AstObjectTypeNode* object_type) {
     return type ? (TypeObject*)type->type : NULL;
 }
 
-static bool mir_forward_prepass_seen_sibling(AstNode* first, AstNode* child) {
-    for (AstNode* current = first; current; current = current->next) {
-        if (current == child) return true;
+static bool mir_forward_prepass_seen_sibling(MirSiblingChain* chain, AstNode* child) {
+    // visitors report linked siblings in order; restarting at the head made long lists quadratic.
+    if (chain->next != child) {
+        AstNode* current = chain->first;
+        while (current && current != child) current = current->next;
+        if (!current) {
+            chain->first = child;
+            chain->next = child->next;
+            return false;
+        }
     }
-    return false;
+    chain->next = child->next;
+    return true;
 }
 
 static void prepass_forward_declare_child(AstNode* child, void* opaque) {
@@ -48910,13 +48981,12 @@ static void prepass_forward_declare_child(AstNode* child, void* opaque) {
     if (!visit || !visit->mt || !child) return;
     // The shared visitor reports every member of a linked child list. The
     // prepass consumes that list in one call, so skip only later siblings.
-    if (mir_forward_prepass_seen_sibling(visit->sibling_chain, child)) return;
-    visit->sibling_chain = child;
+    if (mir_forward_prepass_seen_sibling(&visit->sibling_chain, child)) return;
     prepass_forward_declare(visit->mt, child);
 }
 
 static void prepass_forward_declare_children(MirTranspiler* mt, AstNode* node) {
-    MirForwardPrepassVisit visit = {mt, NULL};
+    MirForwardPrepassVisit visit = {mt, {}};
     interp_visit_children(node, prepass_forward_declare_child, &visit);
 }
 
@@ -50034,7 +50104,7 @@ static void prepass_define_function_node(MirTranspiler* mt, AstNode* node);
 
 typedef struct MirFunctionPrepassVisit {
     MirTranspiler* mt;
-    AstNode* sibling_chain;
+    MirSiblingChain sibling_chain;
 } MirFunctionPrepassVisit;
 
 static void prepass_define_functions(MirTranspiler* mt, AstNode* node);
@@ -50042,8 +50112,7 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node);
 static void prepass_define_function_child(AstNode* child, void* opaque) {
     MirFunctionPrepassVisit* visit = (MirFunctionPrepassVisit*)opaque;
     if (!visit || !visit->mt || !child ||
-            mir_forward_prepass_seen_sibling(visit->sibling_chain, child)) return;
-    visit->sibling_chain = child;
+            mir_forward_prepass_seen_sibling(&visit->sibling_chain, child)) return;
     prepass_define_functions(visit->mt, child);
 }
 
@@ -50074,7 +50143,7 @@ static void prepass_define_function_node(MirTranspiler* mt, AstNode* node) {
         // Legacy retained ASTs can still carry a detached declaration chain.
         prepass_define_functions(mt, ((AstListNode*)node)->declare);
     }
-    MirFunctionPrepassVisit visit = {mt, NULL};
+    MirFunctionPrepassVisit visit = {mt, {}};
     interp_visit_children(node, prepass_define_function_child, &visit);
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_PROC ||
             node->node_type == AST_NODE_FUNC_EXPR) {
@@ -50550,6 +50619,10 @@ static bool transpile_mir_ast_finalize(MirModuleBuild* build,
         }
         arraylist_free(mt.narrowed_gc_variants);
     }
+    size_t evidence_iter = 0;
+    void* evidence_entry = NULL;
+    while (hashmap_iter(mt.callsite_info, &evidence_iter, &evidence_entry))
+        mir_free_param_body_evidence((CallSiteEntry*)evidence_entry);
     hashmap_free(mt.callsite_info);
     if (mt.defect_facts) hashmap_free(mt.defect_facts);
     hashmap_free(mt.shape_hints);
