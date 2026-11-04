@@ -13,7 +13,6 @@
 #include <stddef.h>
 
 bool radiant_platform_init(bool) { return false; }
-void radiant_platform_terminate(void) {}
 double radiant_platform_time(void) { return 0.0; }
 void radiant_platform_poll_events(void) {}
 void radiant_platform_wait_events(double) {}

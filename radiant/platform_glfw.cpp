@@ -62,7 +62,18 @@ static int glfw_mods(int mods) {
 
 // --- library lifetime and event pump ---
 
+struct GlfwApplicationRuntime {
+    bool initialized = false;
+    ~GlfwApplicationRuntime() {
+        if (initialized) glfwTerminate();
+    }
+};
+
 bool radiant_platform_init(bool hidden_host) {
+    // Cocoa's application launch is process-wide; a host must not retire its
+    // delegate and make a later host wait for that one-time notification again.
+    static GlfwApplicationRuntime application;
+    if (application.initialized) return true;
     // Force X11 on Linux so the window is visible in mixed Wayland/XWayland sessions.
 #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
@@ -72,10 +83,10 @@ bool radiant_platform_init(bool hidden_host) {
 #else
     (void)hidden_host;
 #endif
-    return glfwInit() == GLFW_TRUE;
+    application.initialized = glfwInit() == GLFW_TRUE;
+    return application.initialized;
 }
 
-void radiant_platform_terminate(void) { glfwTerminate(); }
 double radiant_platform_time(void) { return glfwGetTime(); }
 void radiant_platform_poll_events(void) { glfwPollEvents(); }
 void radiant_platform_wait_events(double timeout_seconds) { glfwWaitEventsTimeout(timeout_seconds); }

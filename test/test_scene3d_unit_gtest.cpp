@@ -18,6 +18,7 @@
 #include "../lib/procgen/rng.h"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
+#include "../radiant/platform.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/render_css3d.hpp"
@@ -1751,6 +1752,22 @@ struct Scene3dNavigationOwner {
         cache=scene3d_navigation_create(root,runtime);return cache!=nullptr;
     }
 };
+
+TEST(Scene3dPlatform, NativeHostCleanupRetainsTheApplicationRuntime) {
+    for (unsigned cycle = 0; cycle < 8; cycle++) {
+        SCOPED_TRACE(cycle);
+        UiContext host{};
+        ASSERT_EQ(ui_context_init(&host, true, 1), 0);
+        ASSERT_TRUE(ui_context_enable_native_graphics(&host));
+        double ready_time = radiant_platform_time();
+        ui_context_cleanup(&host);
+        // a document host releases its window, not the application's Cocoa delegate or clock.
+        int monitor_count = 0;
+        EXPECT_NE(glfwGetMonitors(&monitor_count), nullptr);
+        EXPECT_GT(monitor_count, 0);
+        EXPECT_GE(radiant_platform_time(), ready_time);
+    }
+}
 
 class Scene3dTest : public ::testing::Test {
 protected:
