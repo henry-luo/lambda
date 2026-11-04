@@ -597,10 +597,16 @@ const CssValue* css_property_initial_value(CssPropertyCode id, Pool* fallback) {
 
 static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
                                      int pseudo_type, StringBuf* out,
-                                     Pool* scratch, bool preserve_color_model,
+                                     Pool*& scratch, bool preserve_color_model,
                                      const CssomValueTarget* native_value,
                                      const CssomInheritanceProjection* inheritance) {
     if (!element) return false;
+    // native keyword/default reads borrow immutable values; only substitution,
+    // allocating shorthand projections and serialization need a temporary pool.
+    auto scratch_pool = [&]() -> Pool* {
+        if (!scratch) scratch = pool_create();
+        return scratch;
+    };
     if (inheritance && element == inheritance->origin && pseudo_type == 0)
         pseudo_type = inheritance->pseudo_type;
     DomElement* receiver = element;
@@ -626,8 +632,8 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
         if (pseudo_type == 0 && (css_animation_longhand_index(id) >= 0 ||
             css_transition_longhand_index(id) >= 0)) {
             if (native_value) return false;
-            const CssValue* animation_value = css_motion_computed_value(scratch, element, id);
-            return format_css_value(element, id, animation_value, out, scratch);
+            const CssValue* animation_value = css_motion_computed_value(scratch_pool(), element, id);
+            return format_css_value(element, id, animation_value, out, scratch_pool());
         }
         // Legacy presentational attributes participate before inherited color is
         // consulted, including for dynamic computed-style reads without layout.
@@ -661,7 +667,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             CssPropertyCode value_property = declaration && declaration->pending_shorthand_code > 0
                 ? declaration->pending_shorthand_code : component_shorthand ? declaration->property_code
                 : background_shorthand ? CSS_PROPERTY_BACKGROUND : id;
-            value = css_resolve_element_var_value(scratch, element, value,
+            value = css_resolve_element_var_value(scratch_pool(), element, value,
                 value_property);
             if (!value || !css_property_validate_value(value_property, value))
                 value = nullptr;
@@ -669,7 +675,8 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
         CssPropertyCode projection = declaration && declaration->pending_shorthand_code > 0
             ? declaration->pending_shorthand_code
             : component_shorthand ? declaration->property_code : id;
-        value = css_project_shorthand_longhand(scratch, value, projection, id);
+        if (projection != id)
+            value = css_project_shorthand_longhand(scratch_pool(), value, projection, id);
         if (cssom_value_inherits(value, id)) {
             DomElement* parent = cssom_inherited_source(element, &pseudo_type, inheritance);
             if (parent) {
@@ -688,7 +695,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
                 ? cssom_inherited_source(element, &color_pseudo) : receiver;
             CssComputedColor current = {CSS_COLOR_RGB, {0.0, 0.0, 0.0, 1.0}};
             if (color_owner) {
-                StringBuf* text = stringbuf_new(scratch);
+                StringBuf* text = stringbuf_new(scratch_pool());
                 if (!text || !serialize_computed(color_owner, CSS_PROPERTY_COLOR, color_pseudo, text)) return false;
                 String* serialized = stringbuf_to_string(text);
                 CssDeclaration* source = serialized ? css_parse_property_declaration("color", 5,
@@ -697,7 +704,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             }
             if (!css_color_compute(value, &computed_color, &current)) return false;
             // CSSOM's temporary tree belongs to this read; authored and registered expressions stay immutable.
-            value = css_value_create_computed_color(scratch, &computed_color);
+            value = css_value_create_computed_color(scratch_pool(), &computed_color);
             if (!value) return false;
         }
         if (!native_value && preserve_color_model) {
@@ -728,11 +735,14 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             value = &computed_bidi;
         }
         if (native_value) {
-            if (!value && property) value = css_property_initial_value(id, scratch);
+            if (!value && property) {
+                value = css_property_initial_value(id, nullptr);
+                if (!value) value = css_property_initial_value(id, scratch_pool());
+            }
             return native_value->consume(element, value, pseudo_type, native_value->result);
         }
-        return value ? format_css_value(element, id, value, out, scratch, pseudo_type)
-                     : !preserve_color_model && format_css_value(element, id, nullptr, out, scratch, pseudo_type);
+        return value ? format_css_value(element, id, value, out, scratch_pool(), pseudo_type)
+                     : !preserve_color_model && format_css_value(element, id, nullptr, out, scratch_pool(), pseudo_type);
     }
     return false;
 }
@@ -741,11 +751,10 @@ static bool consume_cascaded_value(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, StringBuf* out,
                                  bool preserve_color_model, const CssomValueTarget* native_value,
                                  const CssomInheritanceProjection* inheritance = nullptr) {
-    Pool* scratch = pool_create();
-    if (!scratch) return false;
+    Pool* scratch = nullptr;
     bool result = consume_inherited_decl(element, id, pseudo_type, out, scratch,
         preserve_color_model, native_value, inheritance);
-    pool_destroy(scratch);
+    if (scratch) pool_destroy(scratch);
     return result;
 }
 

@@ -197,7 +197,7 @@ For performance measurements, select a release host with `make build-release-com
 | `--target` | Category | Binaries | Notable members |
 |---|---|---|---|
 | `library` | baseline, +1 script | 52 | `test/lib/test_*` (str, arena, gc_heap, mempool, url, font…), `test_rdb_gtest`, `test_avl_tree_perf`; runner contracts: `node test/test_test_run.js` |
-| `radiant` | 24 baseline runs, 13 extended, +3 baseline scripts | 35 | baseline: native scene/map, text-query font cache (`test_radiant_text_query_gtest`), display lists, vector backend, paged media (`test_paged_media_gtest`), CSS cascade memory, animation/media, UI (`baseline,dtna,timeline`, `view`, `dom`), page/view/fuzzy, WPT CSS Syntax and input-events. Scripts: layout baselines, page snapshot, render visual. Extended: remaining WPT/editing runners |
+| `radiant` | 24 baseline runs, 13 extended, +3 baseline scripts | 35 | baseline: native scene/map, document integration (`test_radiant_document_gtest`: text/layout, controls, frames, audio, fullscreen), display lists, vector backend, paged media (`test_paged_media_gtest`), CSS cascade memory, animation/media, UI (`baseline,dtna,timeline`, `view`, `dom`), page/view/fuzzy, WPT CSS Syntax and input-events. Scripts: layout baselines, page snapshot, render visual. Extended: remaining WPT/editing runners |
 | `input` | baseline, +1 script | 70 | mark builder/reader/editor, HTML, markdown, YAML, `test/css/*`, graph parsers, `test_input_model_gtest` (OBJ/MTL/glTF/A3D; fixtures in `test/input/model/`), `test_validator_input_gtest`, `test_lambda_domnode_gtest`, `test_dom_range_gtest`. Script: `test/run_script_format_roundtrip.js` (six `lambda.doc.misc` writers; prose reader gaps currently fail) |
 | `validator` | baseline | 3 | `test_validator_gtest`, `test_ast_validator_gtest`, `test_validator_path_reporting` |
 | `lambda` | 32 baseline, 2 extended, +2 scripts | 34 | `test_serve_gtest`, `test_zip_gtest` (ZIP32/ZIP64, Word/JAR packages, 7z/tar/RAR/RAR5, quotas and ZIP writing), `test_lambda_gtest`, `_std`, `_errors`, `_proc`, `_repl`, `_concurrency`, MIR emission/ratchet/gc-stress, `test_js_gtest`, `test_ts_gtest`, `test_js_test262_gtest --prelim` (runs as `test_js_test262_prelim_gtest`). Scripts: `test/lambda/math/run_corpus.mjs` (baseline), `test/run_js_parity.mjs` (extended) |
@@ -207,10 +207,10 @@ For performance measurements, select a release host with `make build-release-com
 ## 3. Aggregate make targets
 
 Window fullscreen controller/key tests and the windowless Lambda API probe run
-in `test_radiant_text_query_gtest.exe`:
+in `test_radiant_document_gtest.exe`:
 
 ```sh
-./test/test_radiant_text_query_gtest.exe --gtest_filter='WindowFullscreen*.*:RadiantFrameDelivery.Fullscreen*'
+./test/test_radiant_document_gtest.exe --gtest_filter='WindowFullscreen*.*:RadiantFrameDelivery.Fullscreen*'
 ```
 
 Physical-window replays require a desktop session and deliberately live outside
@@ -395,7 +395,7 @@ delay, live/unmonitored rewiring, exact copied PCM, retained/foreign/stale/quota
 tickets, owner/output loss, input revocation, activation fencing and atomic
 live-export rejection. Its imported `test/scene3d/capture-routes.html` case uses
 an injected backend and runs on both JS backends and all Lambda tiers with
-forced/poisoned GC. `RadiantAudioCapture.*` in `test_radiant_text_query_gtest` injects a trusted native
+forced/poisoned GC. `RadiantAudioCapture.*` in `test_radiant_document_gtest` injects a trusted native
 backend for OS/document grant separation, pending denial/stop/teardown,
 revocation, input/output loss, quotas, exact wide counters and copied GC values.
 `test/ui/audio_capture.json` belongs to the baseline UI suite and imports the

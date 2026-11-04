@@ -188,7 +188,7 @@ Automated checks:
   failures reproduce in isolated reruns. No baseline expectations were changed.
 
 ```sh
-./test/test_radiant_text_query_gtest.exe --gtest_filter='WindowFullscreen*.*:RadiantFrameDelivery.Fullscreen*'
+./test/test_radiant_document_gtest.exe --gtest_filter='WindowFullscreen*.*:RadiantFrameDelivery.Fullscreen*'
 ./lambda.exe view test/native/fullscreen/window.ls --event-file test/native/fullscreen/window.json
 ./lambda.exe view test/native/fullscreen/window.ls --fullscreen --event-file test/native/fullscreen/startup.json
 ```

@@ -4246,11 +4246,11 @@
             "parallel": false
           },
           {
-            "source": "test/test_radiant_text_query_gtest.cpp",
+            "source": "test/test_radiant_document_gtest.cpp",
             "additional_sources": [
               "test/test_window_fullscreen_gtest.cpp"
             ],
-            "name": "Radiant Text Query Tests",
+            "name": "Radiant Document Integration Tests",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -4285,7 +4285,7 @@
                 "WebKit"
               ]
             },
-            "binary": "test_radiant_text_query_gtest.exe",
+            "binary": "test_radiant_document_gtest.exe",
             "icon": "\ud83c\udfa8"
           },
           {

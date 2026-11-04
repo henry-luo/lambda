@@ -359,6 +359,22 @@ TEST(TextWhitespace, NativeLineBoundariesUseSourceBytesAndKeepTerminalEdgesClose
     size_t syllable = strlen("애");
     EXPECT_FALSE(layout_text_native_break_allowed(korean, syllable, 0x1162,
         jamo_start + syllable, jamo_start + strlen(jamo), true));
+    // reused source storage and later probes must not change an earlier map.
+    char edited[128];
+    size_t length = strlen(thai);
+    str_copy(edited, sizeof(edited), thai, length);
+    LayoutTextBreaks retained(edited, length, true);
+    memset(edited, 'a', length - strlen("中"));
+    memcpy(edited + length - strlen("中"), "中", strlen("中"));
+    LayoutTextBreaks changed(edited, length, true);
+    EXPECT_FALSE(changed.allows_after(strlen("ภาษา")));
+    EXPECT_TRUE(changed.allows_after(length - strlen("中")));
+    str_copy(edited, sizeof(edited), thai, length);
+    LayoutTextBreaks repeated(edited, length, true);
+    for (size_t offset = 0; offset <= length; offset++) {
+        EXPECT_EQ(repeated.allows_after(offset), boundaries.allows_after(offset));
+        EXPECT_EQ(retained.allows_after(offset), boundaries.allows_after(offset));
+    }
 #else
     GTEST_SKIP() << "native Unicode line-break resource is unavailable";
 #endif

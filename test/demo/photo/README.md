@@ -136,7 +136,7 @@ checks superseded jobs, owned input pixels, painted colors and zero tracked
 allocations at teardown. Reference pixels captured before optimization cover
 20 recipes; non-neutral RGB comparisons allow one 8-bit value of rounding
 difference. Neutral output and untransformed alpha remain exact.
-The in-process `RadiantFrameDelivery` regression in `test_radiant_text_query_gtest`
+The in-process `RadiantFrameDelivery` regression in `test_radiant_document_gtest`
 delivers a frame without the replay host's surrounding state batch. It checks
 that hiding a focused panel clears focus before final interaction validation.
 `RadiantTextLayout` checks Add text's actual label geometry and shared DTNA theme
