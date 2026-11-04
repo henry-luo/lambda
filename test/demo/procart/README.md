@@ -5,7 +5,7 @@
 ```
 
 The header links Form studies, Tree studio, Terrain, Meadow, Plants & foliage, Rocks & crystals,
-Textures & materials, Decorative patterns, and Painterly. Every destination has its own page:
+Textures & materials, Decorative patterns, Painterly, and Watercolor. Every destination has its own page:
 
 | Workshop | Direct entry | Presets |
 | --- | --- | --- |
@@ -18,6 +18,7 @@ Textures & materials, Decorative patterns, and Painterly. Every destination has 
 | Textures & materials | `test/demo/procart/textures.ls` | Wood, marble, granite, brick, linen and ceramic |
 | Decorative patterns | `test/demo/procart/patterns.ls` | Mandalas, stars, Truchet paths, ribbon weave, Voronoi mosaics and golden spirals |
 | Painterly | `test/demo/procart/painterly.ls` | Three sample photos repainted in four brush-stroke modes with three procedural brushes |
+| Watercolor | `test/demo/procart/watercolor.ls` | A live watercolor simulation: four seeded studies that paint themselves, and free painting with three pigments, clear water and a blot |
 
 ## Form studies — a drawing grammar
 
@@ -329,3 +330,40 @@ Deliberate differences from the original:
 ```sh
 ./lambda.exe view test/demo/procart/painterly.ls --headless --event-file test/demo/procart/tests/painterly_events.json --event-result temp/procart-painterly/result.json
 ```
+
+## Watercolor — paint that flows, pools and dries
+
+```sh
+./lambda.exe view test/demo/procart/watercolor.ls
+```
+
+A port of the [Washes](https://github.com/castavridis/washes-js) engine, itself an implementation of Curtis, Anderson, Seims, Fleischer and Salesin, *Computer-Generated Watercolor* (SIGGRAPH 1997). The model lives in the package as `lambda.procart.watercolor` (license: `lmd/package/procart/WASHES_LICENSE.txt`). A shallow-water layer moves over a paper height field. It carries suspended pigment, which diffuses, settles into the paper's hollows by density and granulation, and lifts again by staining. Lowered pressure at drying edges pushes water outward, darkening the rims. Kubelka-Munk optics glaze the three pigment layers over the paper. Each frame applies its stamps, runs two time steps and recomposites the region that changed, then uploads the pixels to a `<canvas>` with `dom.set_canvas_pixels`.
+
+| Study | Shows |
+| --- | --- |
+| Wet-in-wet sky | Overlapping rows of cerulean, rose and yellow on a wetted sheet bleed into one gradient; clouds are blotted out while it is wet |
+| Blossoms | Rose, violet and gold flowers on dry paper; each petal dries with a darker rim, and green stems mix yellow and blue while wet |
+| Glazes | Three transparent washes in a Venn arrangement, each dried before the next; the overlaps mix optically to orange, green, violet and a dark centre |
+| Blooms | Clear water pooled into a damp violet wash makes pale blooms ringed by darker edges |
+| Free painting | A blank dry sheet |
+
+Drag on the paper to paint; hold the brush still and it keeps releasing paint, as in Washes. **Brush** selects one of the palette's three pigments, clear water (re-wets and re-suspends dried pigment) or a blot (lifts pigment). **Smaller / Larger** set the brush radius. **Change palette** cycles Curtis classic (Quinacridone Rose, Hansa Yellow, Cerulean Blue), Gouache (Washes' opaque set) and Earth (Burnt Sienna, Yellow Ochre and Indigo, converted from sRGB by Washes' colour-to-K/S rule); the existing painting re-renders in the new pigments. **Wet the sheet** floods the paper for wet-in-wet work; **Dry now** settles everything for glazing. **Drying speed**, **Pause drying**, **Dark edges** and **Tilt paper** change the physics; **Show water** tints standing water blue. **Replay** restarts the study with the same seed, which paints the same strokes on the same paper; **New seed / Previous** vary the composition. The clock stops when the sheet is at rest.
+
+`lambda.procart.watercolor` keeps the sheet as one `float[]` of 21 per-cell planes (paper, water, pressure, velocity, suspended and deposited pigment, scratch), so each pass borrows a single `var` root (**S9.1.3v3**). Pigments, the paper, stroke trails and the page model are pure (**S12.1.1v3**); `stamp`, `wet_sheet`, `dry`, `step`, `render` and `swatches` are procedures because every time step updates the sheet in place. A pure formulation measured 4-8x slower per pass. `mod_watercolor.ls` holds the studies, controls and the per-frame `advance`. The simulation record refreshes every 15 frames, because changing page text every frame cost more restyle and layout than the simulation.
+
+Differences from Washes:
+
+- The paper's height is per-cell keyed noise (`lambda.procart.rng`) with Washes' octave weights, speckle and compression, rather than Washes' `Math.sin` hash sampled ten lattice units apart. Both make neighbouring cells independent; coherent bumps would channel the water and mottle every wash.
+- Semi-Lagrangian advection samples a 3 x 3 stencil whose weights pick the two cells on each axis. The speed clamp keeps the back-trace within half a cell, so this equals Washes' bilinear sample without converting positions to indices.
+- The sheet carries a hidden 6-cell margin on every side, cropped by CSS (Washes' 5% overscan): boundary cells never flow, so pigment piles up there.
+- `dry(sheet, level)` adds a hair dryer: level 0 settles all pigment; a level just under the 0.04 flow threshold leaves a damp sheet with pigment still suspended, which the Blooms study uses.
+- Masking fluid, open and gravity edge modes, textured brush modes, splashes and the GPU backend are not ported. Tilt is Washes' closed-gravity bias pointing down.
+
+`test/lambda/procart/watercolor.ls` checks the pure parts: palettes, colour-to-K/S, paper, tuning at three scales and trails. `tests/proc/procart_watercolor_sim.ls` checks exact replay, stamps, wet-sheet bleeding against held dry-paper edges, drying, the damp level, water and blot, darker rims with edge darkening, rose granulating more than yellow, tilt, the render and swatches. Semi-Lagrangian transport conserves pigment only approximately (Washes notes the drift); the golden records the totals. `tests/procart_watercolor.ls` checks the studies, plans, controls and pointer input. The replay checks the canvas, the self-painting sky, exact seed replay of the canvas, a painted stroke's colour, the brushes, size bounds, all three palettes, the paper and water controls, the studies and the 390px layout, saving PNGs under `temp/procart-watercolor/`:
+
+```sh
+./lambda.exe view test/demo/procart/watercolor.ls --headless --event-file test/demo/procart/tests/watercolor_events.json --event-result temp/procart-watercolor/result.json
+./test/test_lambda_gtest.exe --gtest_filter='*procart_watercolor*'
+```
+
+On the debug build a frame of the whole-sheet sky study takes about 33 ms (about 30 frames a second); the first frame also pays roughly 4 s of one-time MIR compilation.

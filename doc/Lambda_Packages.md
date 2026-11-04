@@ -77,6 +77,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `procart.plant` | `lambda.procart.{plant,apex,turtle3d,plant_schema}` | Library | Per-level tree architecture, directional growth, tapered branches, instanced leaves, shared-skeleton LODs and parametric L-system plants; see [§26](#26-procart--procedural-art) | Procart → Tree studio |
 | `procart.environment` / `procart.herb` | `lambda.procart.environment`, `lambda.procart.herb` | Library | Global solar/weather data, responsive flowers, reeds and rooted wind; see [§26](#26-procart--procedural-art) | Procart → Meadow |
 | `procart.surface` | `lambda.procart.surface` | Library | Reusable seeded surface patterns, role bindings, leaf/branch UVs and object-space texture atlases; see [§26](#26-procart--procedural-art) | Procart → Form studies → Grain, bark & veins |
+| `procart.watercolor` | `lambda.procart.watercolor` | Library with procedures | Curtis et al.'s watercolor simulation, ported from Washes: water flow over a paper height field, pigment transport, adsorption and granulation, edge darkening, drying and Kubelka-Munk glazing; see [§26](#26-procart--procedural-art) | Procart → Watercolor |
 | `color` | `lambda.color` | Library | Shared hex/RGB/RGBA parsing, HSV conversion and byte-quantized RGB hex formatting; see [§28](#28-color--pure-color-utilities) | Used by slides, UI palettes and procedural art |
 | `music` | `lambda.music` | Experimental notation and MIDI profile | Native MusicXML/MXL, SVG sheet music, SMF import/export and SoundFont playback; see [MusicXML and MIDI](Lambda_Music.md) | `lambda view test/music/_player.ls` |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
@@ -2612,6 +2613,49 @@ changing the four existing arguments. Pure descriptions follow **S12.1.1v3**.
 See [PG16](../vibe/Lambda_Design_Procart.md#13-p11--procedural-animal-specimens-and-markings-pg16)
 for admission and supported profiles. Eden owns model editing/saving and biology;
 P7's general drawing vocabulary is unchanged by this stand-alone profile.
+
+**Watercolor.** `lambda.procart.watercolor` ports the simulation core of the
+[Washes](https://github.com/castavridis/washes-js) engine (MIT; notice in
+`lmd/package/procart/WASHES_LICENSE.txt`), an implementation of Curtis et al.,
+*Computer-Generated Watercolor* (SIGGRAPH 1997). Unlike the rest of the package it
+is mostly procedural: a sheet changes in place every time step, so `stamp`,
+`wet_sheet`, `dry`, `step`, `render` and `swatches` are `pn`s that take the sheet as
+a `var` argument (**S9.1.3v3**). Pigments, the paper and stroke trails are pure
+(**S12.1.1v3**).
+
+```lambda
+import wc: lambda.procart.watercolor
+let Sheet = wc.Sheet
+pn main() {
+    var sheet: Sheet = wc.sheet(240, 160, 2026, 2.5, 0.62)^   // width, height, paper seed, px per cell, wetness
+    for (p in wc.trail(40.0, 80.0, 200.0, 80.0, 12.0)^) {
+        wc.stamp(sheet, {kind:"pigment",channel:2,x:p[0],y:p[1],radius:12.0,strength:0.4})^
+    }
+    var k: int = 0
+    while (k < 300) { wc.step(sheet, wc.adsorption(wc.CLASSIC))^; k = k + 1 }
+    var rgba: float[] = wc.canvas(sheet)^
+    wc.render(rgba, sheet, wc.optics(wc.CLASSIC))^
+    save(wc.pixels(sheet, rgba), "wash.png")^
+}
+```
+
+A sheet is a record with one `float[]` of 21 per-cell planes; `wc.PAPER`, `WET`,
+`PRESSURE`, `U`, `V`, `SUSPENDED` (+0..2) and `DEPOSITED` (+0..2) name them and
+`plane(sheet, index)^` views one. `sheet(width, height, seed, scale=2.5, wetness=0)^`
+scales Washes' constants from 2 display pixels per cell and admits up to 250,000
+cells; `blank(sheet, wetness)^` starts again on the same paper. A brush is
+`{kind:"pigment"|"water"|"lift", x, y, radius, strength, channel}` in cells;
+`stamp(sheet, brush, paint_load=1, water_load=1)`. `step(sheet, adsorption,
+settings)` takes `adsorption(pigments)` and `{evaporation, drying, edges, tilt}`
+(defaults `wc.SETTINGS`). `dry(sheet, level=0)^` removes water above `level`: 0
+settles every suspended pigment, a level under the 0.04 flow threshold leaves the
+sheet damp. `render(rgba, sheet, optics(pigments), full=true, water=false)`
+composites into an RGBA `float[]`; `pixels(sheet, rgba)` gives `(H, W, 4)` ubyte
+pixels for `dom.set_canvas_pixels` or `save`. Palettes: `CLASSIC` (Curtis'
+Quinacridone Rose, Hansa Yellow and Cerulean Blue), `GOUACHE` and `EARTH`;
+`pigment(name, rgb, density, staining, granulation)` converts an sRGB colour to
+K and S. Semi-Lagrangian advection conserves pigment only approximately, as in
+Washes. The [Watercolor demo](../test/demo/procart/watercolor.ls) paints live.
 
 **Articulated avatars (P12 / PG17).** `lambda.procart.avatar` accepts a versioned
 `<avatar>` recipe for plush animals, robots, humans, fairies or genies;

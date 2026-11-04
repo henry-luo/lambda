@@ -356,6 +356,25 @@ and terrain-aware cast placement. Generation and playback retain
 **S12.1.1v3 / S12.1.5v2**; these are authored characters, without biological
 population rules. See [PG17](Lambda_Design_Procart.md#14-p12--articulated-character-recipes-pg17).
 
+### PG18 — In-place watercolor simulation (proposed, awaiting USER ruling)
+
+User direction, 2026-11-04: port the Washes engine (github.com/castavridis/washes-js,
+MIT) as a Procart demo, with the key algorithm in the package. `procart.watercolor`
+implements Curtis et al. (1997) as Washes does: water diffusion, flow-outward edge
+darkening, shallow-water velocity, semi-Lagrangian pigment advection, adsorption and
+desorption with granulation, evaporation and Kubelka-Munk glazing.
+
+This departs from PG6. The time step is a set of `pn` passes over a sheet borrowed
+as `var` (**S9.1.3v3**); pigments, paper, stroke trails and page models stay pure
+(**S12.1.1v3**). *Why:* on the debug build a pure vectorized pass was 4-8x slower
+than a JIT `pn` loop (Laplacian through subviews 3.1 ms against 0.8 ms for 68k
+cells) and allocated about 14 MB per step, which ruled out a live sheet. The sheet
+is one `float[]` of per-cell planes, because exclusivity is checked per `var` root.
+`math.exp` and `sqrt` put the step in the tolerance tier (PG2); runs replay exactly
+on one platform and tier. A pure reference (PG6) or a native `math` batch step
+(PG7) would need a measured release-build budget first. Record:
+[Procart README, Watercolor](../test/demo/procart/README.md#watercolor--paint-that-flows-pools-and-dries).
+
 ## 4. Module map
 
 | Module | Contents | Reuses | Tier | Native candidate |
@@ -376,6 +395,7 @@ population rules. See [PG17](Lambda_Design_Procart.md#14-p12--articulated-charac
 | `procart.herb` | Sunflower, day-flowering lily, daisy, poppy, cosmos and reed; shared organs, UVs and environment-driven poses | `environment`, `rng`, Scene3D | Tolerance poses; exact seeded topology | No |
 | `procart.avatar` | Versioned plush/robot/human/fairy/genie recipes, nested joints and six native pose clips | `rng`, Scene3D shapes/transforms | Tolerance geometry/poses; exact admission and identities | No |
 | `procart.surface` | Pattern admission, seeded fields, whole/role bindings, UV transforms and object-atlas baking | `rng`, `noise`, `lambda.color`, `lambda.image`, Scene3D | Tolerance patterns; exact admission and sharing | No |
+| `procart.watercolor` | Washes/Curtis watercolor: pigments and K/S conversion, paper, sheets, stamps, time steps, drying, Kubelka-Munk render (PG18, proposed) | `rng` | Tolerance (`exp`, `sqrt`); exact replay per platform and tier | Only if a release-build budget is missed (PG7) |
 | `procart.turtle3d` / `procart.apex` | Spatial frame, push/pop, yaw/pitch/roll, tapered forward steps, leaves and tropism; parametric bud development | `lsystem.derive`, Scene3D vectors | Tolerance geometry; exact rewriting | No |
 
 The facade `lambda.procart` re-exports the common entry points so that `import pg: lambda.procart` serves a quick script. Larger scripts import modules directly.
