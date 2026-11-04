@@ -554,6 +554,45 @@ static bool format_legacy_font_color(DomElement* element, CssPropertyCode id,
     return format_color_text(element->get_attribute("color"), out);
 }
 
+struct CssInitialValueCache {
+    Pool* pool = mem_pool_create(mem_context_process(MEM_ROLE_CSS), MEM_ROLE_CSS, "css.initial_values");
+    const CssValue* values[CSS_PROPERTY_CUSTOM] = {};
+    static void retire(void* pointer) {
+        auto* cache = static_cast<CssInitialValueCache*>(pointer);
+        // the process memory root can retire before C++ static destructors run.
+        cache->pool = nullptr;
+        memset(cache->values, 0, sizeof(cache->values));
+    }
+    CssInitialValueCache() {
+        if (!pool) return;
+        if (!pool_add_cleanup(pool, retire, this)) {
+            mem_pool_destroy(pool);
+            pool = nullptr;
+            return;
+        }
+        for (unsigned index = 1; index < CSS_PROPERTY_CUSTOM; index++) {
+            const CssProperty* property = css_property_get_by_code((CssPropertyCode)index);
+            if (!property) continue;
+            CssDeclaration* declaration = css_parse_property_value_declaration(property->name,
+                strlen(property->name), property->initial_value, strlen(property->initial_value), pool);
+            values[index] = declaration ? declaration->value : nullptr;
+        }
+    }
+    ~CssInitialValueCache() { if (pool) mem_pool_destroy(pool); }
+};
+
+const CssValue* css_property_initial_value(CssPropertyCode id, Pool* fallback) {
+    const CssProperty* property = css_property_get_by_code(id);
+    if (!property || id <= 0 || id >= CSS_PROPERTY_CUSTOM) return nullptr;
+    // initialize every built-in before publication: one pool writer, immutable
+    // readers, and no document/view-generation leases (D4.1.4v5, D4.5.1v4).
+    static CssInitialValueCache cache;
+    if (cache.pool) return cache.values[id];
+    CssDeclaration* declaration = css_parse_property_value_declaration(property->name,
+        strlen(property->name), property->initial_value, strlen(property->initial_value), fallback);
+    return declaration ? declaration->value : nullptr;
+}
+
 static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
                                      int pseudo_type, StringBuf* out,
                                      Pool* scratch, bool preserve_color_model,
@@ -687,11 +726,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             value = &computed_bidi;
         }
         if (native_value) {
-            if (!value && property) {
-                CssDeclaration* initial = css_parse_property_value_declaration(property->name,
-                    strlen(property->name), property->initial_value, strlen(property->initial_value), scratch);
-                value = initial ? initial->value : nullptr;
-            }
+            if (!value && property) value = css_property_initial_value(id, scratch);
             return native_value->consume(element, value, pseudo_type, native_value->result);
         }
         return value ? format_css_value(element, id, value, out, scratch, pseudo_type)

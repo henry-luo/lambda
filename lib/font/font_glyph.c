@@ -620,7 +620,7 @@ bool font_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request
         request->width_feature != FONT_TAG('t','w','i','d') &&
         request->width_feature != FONT_TAG('q','w','i','d')) return false;
 #ifdef __APPLE__
-    if (font_platform_visit_face_text(handle->ct_raster_ref, request, visitor, context, metrics)) return true;
+    if (font_platform_visit_face_text(handle, request, visitor, context, metrics)) return true;
 #endif
     size_t length = 0;
     char* normalized = utf8_normalize(request->text, (size_t)request->byte_len, UTF_NORMALIZE_NFC, &length);
@@ -634,7 +634,7 @@ bool font_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request
         free(normalized); return false;
     }
 #ifdef __APPLE__
-    if (font_platform_visit_face_text(handle->ct_raster_ref, &canonical, visitor, context, metrics)) {
+    if (font_platform_visit_face_text(handle, &canonical, visitor, context, metrics)) {
         free(normalized); return true;
     }
 #endif

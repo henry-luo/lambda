@@ -16,6 +16,7 @@
 #include "../memtrack.h"
 #include "../str.h"
 #include "../utf.h"
+#include "../hash.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -1206,9 +1207,8 @@ float font_platform_get_pair_kerning(void* ct_font_ref, uint32_t left_cp, uint32
     return kerning;
 }
 
-static CTLineRef font_platform_create_directed_line(void* ct_font_ref,
+static CTLineRef font_platform_create_directed_line(CTFontRef font,
         const char* text, int byte_len, FontTextDirection direction) {
-    CTFontRef font = (CTFontRef)ct_font_ref;
     CFStringRef str = CFStringCreateWithBytes(NULL, (const UInt8*)text, byte_len,
                                               kCFStringEncodingUTF8, false);
     if (!str) return NULL;
@@ -1319,8 +1319,70 @@ static bool font_platform_text_byte_range(const char* text, int byte_len,
     return valid;
 }
 
-bool font_platform_visit_face_text(void* ct_font_ref, const FontFaceTextRequest* request,
+#define FONT_SHAPED_LINE_CACHE_SIZE 128
+#define FONT_SHAPED_LINE_MAX_BYTES 256
+
+typedef struct FontPlatformLineEntry {
+    CTLineRef line;
+    uint32_t hash;
+    int length;
+    FontTextDirection direction;
+    uint32_t width_feature;
+    char text[FONT_SHAPED_LINE_MAX_BYTES];
+} FontPlatformLineEntry;
+
+struct FontPlatformLineCache {
+    uint64_t generation;
+    FontPlatformLineEntry entries[FONT_SHAPED_LINE_CACHE_SIZE];
+};
+
+void font_platform_clear_shaped_lines(FontHandle* handle) {
+    if (!handle || !handle->shaped_lines) return;
+    for (size_t i = 0; i < FONT_SHAPED_LINE_CACHE_SIZE; i++) {
+        CTLineRef line = handle->shaped_lines->entries[i].line;
+        if (line) CFRelease(line);
+    }
+    mem_free(handle->shaped_lines);
+    handle->shaped_lines = NULL;
+}
+
+static CTLineRef font_platform_face_line(FontHandle* handle, CTFontRef selected,
+        const FontFaceTextRequest* request) {
+    if (request->byte_len > FONT_SHAPED_LINE_MAX_BYTES)
+        return font_platform_create_directed_line(selected, request->text, request->byte_len, request->direction);
+    uint64_t generation = font_context_resource_generation(handle->ctx);
+    if (handle->shaped_lines && handle->shaped_lines->generation != generation)
+        font_platform_clear_shaped_lines(handle);
+    if (!handle->shaped_lines) {
+        handle->shaped_lines = mem_calloc(1, sizeof(struct FontPlatformLineCache), MEM_CAT_FONT);
+        if (handle->shaped_lines) handle->shaped_lines->generation = generation;
+    }
+    if (!handle->shaped_lines)
+        return font_platform_create_directed_line(selected, request->text, request->byte_len, request->direction);
+    uint32_t hash = hash_fnv1a_32(request->text, (size_t)request->byte_len);
+    hash = (hash ^ (uint32_t)request->direction) * 16777619u ^ request->width_feature;
+    FontPlatformLineEntry* entry = &handle->shaped_lines->entries[hash % FONT_SHAPED_LINE_CACHE_SIZE];
+    if (entry->line && entry->hash == hash && entry->length == request->byte_len &&
+        entry->direction == request->direction && entry->width_feature == request->width_feature &&
+        memcmp(entry->text, request->text, (size_t)request->byte_len) == 0)
+        return (CTLineRef)CFRetain(entry->line);
+    CTLineRef line = font_platform_create_directed_line(selected, request->text, request->byte_len, request->direction);
+    if (!line) return NULL;
+    if (entry->line) CFRelease(entry->line);
+    entry->line = (CTLineRef)CFRetain(line);
+    entry->hash = hash;
+    entry->length = request->byte_len;
+    entry->direction = request->direction;
+    entry->width_feature = request->width_feature;
+    // range queries share the complete immutable line; source buffers may be edited
+    // or freed after this call, so the bounded key belongs to the face (D4.1.4v5).
+    memcpy(entry->text, request->text, (size_t)request->byte_len);
+    return line;
+}
+
+bool font_platform_visit_face_text(FontHandle* handle, const FontFaceTextRequest* request,
         FontGlyphVisitFn visitor, void* context, FontFaceTextMetrics* metrics) {
+    void* ct_font_ref = handle ? handle->ct_raster_ref : NULL;
     if (!ct_font_ref || !request || !request->text || request->byte_len <= 0 || !metrics) return false;
     CFRange range = {0, 0};
     if (request->has_range && !font_platform_text_byte_range(request->text, request->byte_len,
@@ -1359,7 +1421,7 @@ bool font_platform_visit_face_text(void* ct_font_ref, const FontFaceTextRequest*
         if (!feature_font) return false;
     }
     CTFontRef selected_font = feature_font ? feature_font : (CTFontRef)ct_font_ref;
-    CTLineRef line = font_platform_create_directed_line(selected_font, request->text, request->byte_len, request->direction);
+    CTLineRef line = font_platform_face_line(handle, selected_font, request);
     if (!line) {
         if (feature_font) CFRelease(feature_font);
         return false;

@@ -131,6 +131,7 @@ struct FontHandle {
     // CoreText font for rasterization
     // Created from raw font data for all fonts on macOS.
     void* ct_raster_ref;  // CTFontRef, void* to avoid CoreText headers
+    struct FontPlatformLineCache* shaped_lines; // bounded owned CoreText lines, released with the face
 #else
     // ThorVG rasterization context (Linux/WASM)
     void* tvg_raster_ctx;  // TvgRasterCtx*, void* to avoid ThorVG headers
@@ -551,7 +552,8 @@ TextExtents         font_platform_measure_text(void* ct_font_ref,
                                                 float fallback_height);
 void*               font_platform_create_text_line(void* ct_font_ref,
                         const char* text, int byte_len);
-bool                font_platform_visit_face_text(void* ct_font_ref,
+void                font_platform_clear_shaped_lines(FontHandle* handle);
+bool                font_platform_visit_face_text(FontHandle* handle,
                         const FontFaceTextRequest* request, FontGlyphVisitFn visitor,
                         void* context, FontFaceTextMetrics* metrics);
 bool                font_platform_vertical_translation(void* ct_font_ref,
