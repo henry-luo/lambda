@@ -406,6 +406,8 @@ NativeGlContext* native_gl_create(bool enabled, char* diagnostic, size_t capacit
         if (!context) return nullptr;
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+        // offscreen contexts need no native titlebar/view hierarchy to create or tear down.
+        glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
         native_gl_core_profile_hints();
         context->window = glfwCreateWindow(1, 1, "Radiant native graphics", nullptr, (GLFWwindow*)share_window);
         glfwDefaultWindowHints();
@@ -863,7 +865,10 @@ void native_gl_release(NativeGlContext* context, NativeGlResource resource) {
 void native_gl_lose(NativeGlContext* context) {
     if (!context || context->lost) return;
 #ifdef NATIVE_GL_ENABLED
-    for (NativeGlSlot& slot : context->slots) if (slot.id) native_gl_release(context, {slot.id});
+    {
+        NativeGlCurrent current(context);
+        for (NativeGlSlot& slot : context->slots) if (slot.id) native_gl_release(context, {slot.id});
+    }
 #endif
     context->lost = true; context->stats.generation = native_gl_id();
     native_gl_error(context, "native graphics generation lost");
@@ -871,18 +876,21 @@ void native_gl_lose(NativeGlContext* context) {
 void native_gl_destroy(NativeGlContext* context) {
     if (!context) return;
 #ifdef NATIVE_GL_ENABLED
-    // ordinary teardown retires resources without reporting a device failure.
-    if (!context->lost) for (NativeGlSlot& slot : context->slots)
-        if (slot.id) native_gl_release(context, {slot.id});
-    if (context->presenter) {
+    // retire all resources under one bind, restoring the caller before the window is destroyed.
+    {
         NativeGlScope scope(context);
         if (scope.valid) {
-            context->gl.DeleteTextures(1 + NATIVE_GL_PRESENT_LAYERS, context->present.textures);
-            context->gl.DeleteTextures(NATIVE_GL_PRESENT_LAYERS, context->present.masks);
-            context->gl.DeleteSamplers(2, context->present.samplers);
-            context->gl.DeleteVertexArrays(1, &context->present.vertex_array);
+            for (NativeGlSlot& slot : context->slots)
+                if (slot.id) native_gl_release(context, {slot.id});
+            if (context->presenter) {
+                context->gl.DeleteTextures(1 + NATIVE_GL_PRESENT_LAYERS, context->present.textures);
+                context->gl.DeleteTextures(NATIVE_GL_PRESENT_LAYERS, context->present.masks);
+                context->gl.DeleteSamplers(2, context->present.samplers);
+                context->gl.DeleteVertexArrays(1, &context->present.vertex_array);
+            }
         }
-    } else if (context->window) { glfwDestroyWindow(context->window); native_gl_context_count--; }
+    }
+    if (!context->presenter && context->window) { glfwDestroyWindow(context->window); native_gl_context_count--; }
     native_gl_track(context, false);
 #endif
     mem_free(context);

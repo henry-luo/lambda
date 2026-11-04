@@ -156,6 +156,27 @@ Phases and gates: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Shar
 
 ---
 
+## 9. Duplicate literal keys (2026-11-04)
+
+**D3.4.1v2 / S2.3.1v2 / S16.8.9v2:** reject repeated explicit names before
+namespace lowering or AST relinking. The check uses normalized name spelling
+and resolved namespace (S8.2.2v6); bracketed entries are always computed, and
+spread contents are not checked as explicit declarations. Apply the same
+validator to map literals and element/object attribute lists. E242 remains a
+compilation failure under `--static-warning`.
+
+The existing computed/spread path builds through `map_literal_put` and
+`fn_map_set` on all tiers. An existing field is written in place or retyped
+through D3.4.5; it never adds a second field for the same name. Preserve first
+insertion order and last value/type. Reads, iteration, length, formatting and
+S5.4.1 equality all consume this normalized shape, with no downstream
+per-operation repair. Other maps sharing the previous shape remain unchanged.
+The input parsers' format-specific policies are outside this literal change.
+The historical duplicate-key shape paths in §3 remain relevant to parsed data.
+
+Rationale and former literal behavior: [C8.6b](Lambda_Semantics_Formal2.md#c86b-duplicate-literal-keys-2026-11-04-user).
+Implementation and checks: [Impl_Duplicate_Keys](impl/Lambda_Impl_Duplicate_Keys.md).
+
 ## Appendix A — Implementation pointers
 
 - `lambda/lambda-data.hpp`: `TypeMap`'s sharing fields (`transitions`, `is_transition_shared_shape`, `is_shared_constructor_shape`, `is_private_clone`), `TypeMapTransition`, `typemap_is_shared_shape`, `TypeTreeStep`; `TypeAlloc`, `type_alloc_zeroed`, `typemap_hash_build_in` (storage); `ShapeEntry::chain_next` and `chain_index`, `typemap_first_field`, `typemap_next_field`, `shape_chain_next_until`, `FOR_EACH_MAP_FIELD`, `typemap_hash_entry_is_own`, `typemap_hash_holds_equal` (prefix sharing).

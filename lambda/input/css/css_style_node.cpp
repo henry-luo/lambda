@@ -1054,15 +1054,17 @@ static CssDeclaration* style_tree_cache_node_winner(StyleTree* tree, StyleNode* 
 // each source contributes its own property and any implicit shorthand members.
 // this static index avoids a registry-sized AVL scan when preparing a tree.
 struct StyleDeclarationPresence {
-    uint64_t members[CSS_PROPERTY_COUNT] = {};
+    static constexpr size_t words = CSS_DECLARATION_PRESENCE_WORDS;
+    uint64_t members[CSS_PROPERTY_COUNT][words] = {};
     StyleDeclarationPresence() {
         for (int property = 1; property < CSS_PROPERTY_COUNT; property++) {
             uint64_t bit = UINT64_C(1) << (property % 64);
-            members[property] |= bit;
+            size_t word = (size_t)property / 64 % words;
+            members[property][word] |= bit;
             CssPropertyCode shorthand = css_property_cascade_shorthand((CssPropertyCode)property);
-            if (shorthand > 0 && shorthand < CSS_PROPERTY_COUNT) members[shorthand] |= bit;
+            if (shorthand > 0 && shorthand < CSS_PROPERTY_COUNT) members[shorthand][word] |= bit;
         }
-        members[CSS_PROPERTY_ALL] = UINT64_MAX;
+        for (size_t word = 0; word < words; word++) members[CSS_PROPERTY_ALL][word] = UINT64_MAX;
     }
 };
 
@@ -1074,8 +1076,10 @@ static bool style_tree_prepare_declaration_node(StyleNode* node, void* context) 
         node->needs_recompute = true;
     }
     node->has_cached_winner = false;
-    if (node->property_code > 0 && node->property_code < CSS_PROPERTY_COUNT)
-        tree->declaration_presence |= index.members[node->property_code];
+    if (node->property_code > 0 && node->property_code < CSS_PROPERTY_COUNT) {
+        for (size_t word = 0; word < StyleDeclarationPresence::words; word++)
+            tree->declaration_presence[word] |= index.members[node->property_code][word];
+    }
     // canonical readers share an immutable epoch; fill every winner before publication.
     if (tree->canonical_owner) style_tree_cache_node_winner(tree, node);
     return true;
@@ -1084,7 +1088,7 @@ static bool style_tree_prepare_declaration_node(StyleNode* node, void* context) 
 void style_tree_init_declaration_cache(StyleTree* tree) {
     if (!tree || tree->declaration_cache_valid) return;
     // tree-wide invalidation also expires winners affected by all or shorthands.
-    tree->declaration_presence = 0;
+    memset(tree->declaration_presence, 0, sizeof(tree->declaration_presence));
     style_tree_foreach(tree, style_tree_prepare_declaration_node, tree);
     tree->declaration_cache_valid = true;
 }
@@ -1124,7 +1128,8 @@ static CssDeclaration* style_tree_lookup_declaration(StyleTree* tree,
         return style_tree_lookup_declaration_uncached(tree, property, authored);
     style_tree_init_declaration_cache(tree);
     uint64_t bit = UINT64_C(1) << ((size_t)property % 64);
-    if (!(tree->declaration_presence & bit)) return NULL;
+    // fold into two words so fewer unrelated declarations trigger absent-property AVL probes.
+    if (!(tree->declaration_presence[(size_t)property / 64 % CSS_DECLARATION_PRESENCE_WORDS] & bit)) return NULL;
     AvlNode* entry = avl_tree_search(tree->tree, property);
     StyleNode* node = entry ? (StyleNode*)entry->declaration : NULL;
     if (node && node->has_cached_winner) return node->cached_winner;

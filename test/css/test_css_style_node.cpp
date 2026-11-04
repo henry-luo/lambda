@@ -599,6 +599,8 @@ TEST_F(CssStyleNodeTest, FrozenCascadeCachePreservesWinnersAndBorrowedFallbacks)
         CssPropertyCode code = (CssPropertyCode)property;
         expected[property][0] = style_tree_get_declaration(style_tree, code);
         expected[property][1] = style_tree_get_authored_declaration(style_tree, code);
+        EXPECT_EQ(expected[property][0],
+            style_tree_get_declaration_with_fallback(style_tree, code, nullptr)) << property;
     }
     EXPECT_EQ(expected[CSS_PROPERTY_COLOR][0], declarations[1]);
     EXPECT_EQ(expected[CSS_PROPERTY_COLOR][1], declarations[0]);

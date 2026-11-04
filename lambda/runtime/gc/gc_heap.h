@@ -277,6 +277,8 @@ typedef struct gc_bump_block {
 #define GC_BUMP_BLOCK_INITIAL_SIZE  (4 * 1024 * 1024)   // 4 MB
 #define GC_BUMP_BLOCK_MAX_SIZE      (64 * 1024 * 1024)   // 64 MB cap
 
+#define GC_MARK_CACHE_SIZE 256
+
 typedef struct gc_heap {
     MemContext* vm_context;         // context used by VM-owned GC extents
     gc_header_t* all_objects;       // linked list head (most recent allocation first)
@@ -398,6 +400,8 @@ typedef struct gc_heap {
     size_t compaction_owner_count;
     size_t compaction_owner_capacity;
     bool compaction_owners_valid;   // allocation failure retains the complete heap walk
+    // validated marked object addresses for this collection only; never roots.
+    void* mark_cache[GC_MARK_CACHE_SIZE];
 } gc_heap_t;
 
 static inline gc_scope_checkpoint_t gc_scope_checkpoint_capture(gc_heap_t* gc) {

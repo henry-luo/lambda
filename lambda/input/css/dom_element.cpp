@@ -1576,12 +1576,19 @@ static const char* lowercase_attr_name(const char* name, char* buf, size_t buf_s
     return buf;
 }
 
+static void dom_element_invalidate_namespace_attributes(DomElement* element) {
+    if (!element || !element->ext) return;
+    element->ext->cached_namespace_uri = nullptr;
+    element->ext->cached_namespace_local_name = nullptr;
+}
+
 static void dom_element_clear_synthetic_attributes(DomElement* element) {
     if (!element || !element->ext || !element->doc ||
         !element->storage_pool()) {
         return;
     }
     DomElementExt* data = element->ext;
+    dom_element_invalidate_namespace_attributes(element);
     for (int i = 0; i < data->synthetic_attribute_count; i++) {
         pool_free(element->storage_pool(),
                   (void*)data->synthetic_attributes[i].name);
@@ -1614,6 +1621,7 @@ static bool dom_element_set_synthetic_attribute(DomElement* element,
     }
     DomElementExt* data = element->ensure_ext();
     if (!data) return false;
+    if (lower_name[0] == '_') dom_element_invalidate_namespace_attributes(element);
     int index = dom_element_find_synthetic_attribute(element, lower_name);
     if (index >= 0) {
         char* next_value = pool_strdup(element->storage_pool(), value);
@@ -1650,6 +1658,7 @@ static bool dom_element_remove_synthetic_attribute(DomElement* element,
         return false;
     }
     DomElementExt* data = element->ext;
+    if (lower_name[0] == '_') dom_element_invalidate_namespace_attributes(element);
     pool_free(element->storage_pool(),
               (void*)data->synthetic_attributes[index].name);
     pool_free(element->storage_pool(),
@@ -1674,6 +1683,7 @@ static void dom_element_attribute_did_set(DomElement* element,
                                           const char* lower_name,
                                           const char* value, bool same_value) {
     if (!element || !element->doc || !lower_name || !value) return;
+    if (lower_name[0] == '_') dom_element_invalidate_namespace_attributes(element);
     if (strcmp(lower_name, "id") == 0) {
         dom_element_release_cached_id(element);
         const char* id_attr = dom_element_attribute_value_ns(element, "", "id");
@@ -1710,6 +1720,7 @@ static void dom_element_attribute_did_set(DomElement* element,
 static void dom_element_attribute_did_remove(DomElement* element,
                                              const char* lower_name) {
     if (!element || !lower_name) return;
+    if (lower_name[0] == '_') dom_element_invalidate_namespace_attributes(element);
     if (strcmp(lower_name, "id") == 0) {
         dom_element_release_cached_id(element);
     } else if (strcmp(lower_name, "class") == 0) {
@@ -1729,7 +1740,7 @@ static void dom_element_attribute_did_remove(DomElement* element,
 // queried name only for HTML elements, so a name stored exactly as asked wins.
 static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder, const char* value);
 
-static const char* dom_element_stored_attribute(DomElement* element, const char* key) {
+static const char* dom_element_stored_attribute_uncached(DomElement* element, const char* key) {
     // recorded public attributes do not replace the private expanded-name metadata.
     if (!dom_attribute_is_internal(key) && element->ext && element->ext->attributes_are_recorded) {
         for (DomNamespacedAttribute* attr = element->ext->namespaced_attributes; attr; attr = attr->next)
@@ -1757,6 +1768,24 @@ static const char* dom_element_stored_attribute(DomElement* element, const char*
     }
     int index = dom_element_find_synthetic_attribute(element, key);
     return index >= 0 ? element->ext->synthetic_attributes[index].value.get() : nullptr;
+}
+
+static const char* dom_element_stored_attribute(DomElement* element, const char* key) {
+    bool uri = key[0] == '_' && strcmp(key, "__lambda_ns_uri") == 0;
+    bool local = key[0] == '_' && strcmp(key, "__lambda_ns_local_name") == 0;
+    if (element->ext) {
+        const char* cached = uri ? element->ext->cached_namespace_uri.get()
+            : local ? element->ext->cached_namespace_local_name.get() : nullptr;
+        if (cached) return cached;
+    }
+    const char* value = dom_element_stored_attribute_uncached(element, key);
+    // expanded-name metadata is read per glyph/property; avoid repeating the
+    // backing shape and synthetic-attribute scans until that metadata is edited.
+    if (value && (uri || local)) {
+        DomElementExt* data = element->ensure_ext();
+        if (data) (uri ? data->cached_namespace_uri : data->cached_namespace_local_name) = lam::up(value);
+    }
+    return value;
 }
 
 static const char* dom_element_attr_key(DomElement* element, const char* name,

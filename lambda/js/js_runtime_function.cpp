@@ -851,6 +851,8 @@ static Item js_new_native_function_impl(JsNativeTarget target,
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
+    // host methods rarely expose metadata; retain the shared lazy reflection/deletion path.
+    if (!constructable) fn->flags |= JS_FUNC_FLAG_LAZY_METADATA;
     js_function_finalize_capabilities(fn);
     if (!has_with_env && !suppress_cache) js_func_cache_insert(cache_key, fn);
     return fn_root.get();

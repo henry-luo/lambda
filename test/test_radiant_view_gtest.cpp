@@ -3987,6 +3987,23 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
     if (!list_only) {
+        if (case_worker) {
+            // each case owns one CPU slot; nested raster/vector pools would oversubscribe it.
+            const ShellEnvEntry render_defaults[] = {
+                {"RADIANT_RENDER_THREADS", "1"}, {"RADIANT_VECTOR_THREADS", "0"},
+            };
+            for (const auto& setting : render_defaults) if (!getenv(setting.key)) {
+#ifdef _WIN32
+                int result = _putenv_s(setting.key, setting.value);
+#else
+                int result = setenv(setting.key, setting.value, 0);
+#endif
+                if (result != 0) {
+                    log_error("radiant_view_render_budget: cannot set %s", setting.key);
+                    return 1;
+                }
+            }
+        }
         g_radiant_view_root = file_getcwd();
         const char* executable = getenv("RADIANT_TEST_EXECUTABLE");
         g_radiant_view_executable = file_realpath(executable ? executable : "./lambda.exe");

@@ -1567,22 +1567,24 @@ static int is_gc_object(gc_heap_t* gc, void* ptr) {
     return !gc->object_zone && gc_bump_block_owns_exact(gc, ptr);
 }
 
-void gc_mark_item(gc_heap_t* gc, uint64_t item) {
-    void* ptr = item_to_ptr(gc, item);
-    if (!ptr) return;
-
-    // only mark objects that are in the GC object zone (have GCHeader)
+static void gc_mark_candidate(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr) return;
+    size_t bucket = (((uintptr_t)ptr >> 4) ^ ((uintptr_t)ptr >> 12)) & (GC_MARK_CACHE_SIZE - 1);
+    // shared globals/prototypes recur on many edges; only validated marks bypass ownership lookup.
+    if (gc->collecting && gc->mark_cache[bucket] == ptr) return;
     if (!is_gc_object(gc, ptr)) return;
-
     gc_header_t* header = gc_get_header(ptr);
     gc_mark_header(gc, header);
+    if (gc->collecting && header->marked && !(header->gc_flags & GC_FLAG_FREED))
+        gc->mark_cache[bucket] = ptr;
+}
+
+void gc_mark_item(gc_heap_t* gc, uint64_t item) {
+    gc_mark_candidate(gc, item_to_ptr(gc, item));
 }
 
 void gc_mark_object_ptr(gc_heap_t* gc, void* ptr) {
-    if (!ptr || !is_gc_object(gc, ptr)) return;
-
-    gc_header_t* header = gc_get_header(ptr);
-    gc_mark_header(gc, header);
+    gc_mark_candidate(gc, ptr);
 }
 
 static int gc_drain_mark_stack(gc_heap_t* gc);
@@ -1679,11 +1681,7 @@ static void gc_process_weak_slots(gc_heap_t* gc) {
 }
 
 static void gc_mark_possible_item(gc_heap_t* gc, uint64_t value) {
-    void* ptr = item_to_ptr(gc, value);
-    if (!ptr || !is_gc_object(gc, ptr)) return;
-
-    gc_header_t* header = gc_get_header(ptr);
-    gc_mark_header(gc, header);
+    gc_mark_item(gc, value);
 }
 
 static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size) {
@@ -2697,6 +2695,7 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     }
     uint64_t gc_total_token = GC_PROFILE_ENTER("gc_collect_total");
     gc->collecting = 1;
+    memset(gc->mark_cache, 0, sizeof(gc->mark_cache));
 
     log_debug("gc_collect: starting collection #%zu (%zu objects, %zu bytes, data_zone=%zu)",
               gc->collections + 1, gc->object_count, gc->total_allocated,

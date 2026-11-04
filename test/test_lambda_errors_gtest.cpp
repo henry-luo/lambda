@@ -1532,6 +1532,34 @@ protected:
 };
 
 // Syntax error tests
+TEST_F(NegativeScriptTest, DuplicateLiteralKeys) {
+    const struct { const char* path; int duplicates; } scripts[] = {
+        {"test/lambda/negative/semantic/duplicate_map_keys.ls", 6},
+        {"test/lambda/negative/semantic/duplicate_attribute_keys.ls", 5},
+        {"test/lambda/negative/semantic/duplicate_namespace_keys.ls", 3}
+    };
+    const char* tiers[] = {"interp", "jit", "auto"};
+    const bool modes[] = {false, true};
+    for (const auto& script : scripts) {
+        for (const char* tier : tiers) {
+            for (bool relaxed : modes) {
+                // every invalid literal is diagnosed, also under --static-warning.
+                ScriptResult result = run_lambda_script(script.path, false, tier, relaxed);
+                EXPECT_NE(result.exit_code, 0) << script.path << " tier=" << tier;
+                int duplicates = 0;
+                const char* cursor = result.output.c_str();
+                while ((cursor = strstr(cursor, "error[E242]"))) {
+                    duplicates++;
+                    cursor++;
+                }
+                EXPECT_EQ(duplicates, script.duplicates) << result.output;
+                EXPECT_EQ(strstr(result.output.c_str(), "\n\"bound:"), nullptr)
+                    << result.output;
+            }
+        }
+    }
+}
+
 TEST_F(NegativeScriptTest, SyntaxErrorMalformedRange) {
     ExpectErrorWithoutCrash("test/lambda/negative/test_syntax_errors.ls");
 }

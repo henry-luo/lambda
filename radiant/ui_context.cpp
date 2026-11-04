@@ -304,7 +304,6 @@ bool ui_context_enable_native_graphics(UiContext* uicon) {
     uicon->window = radiant_platform_create_window(1, 1, "Lambda Headless", false);
     if (!uicon->window) {
         log_error("[NATIVE_GRAPHICS_HOST] hidden window creation failed");
-        radiant_platform_terminate();
         return false;
     }
     log_info("[NATIVE_GRAPHICS_HOST] hidden graphics host ready");
@@ -741,8 +740,7 @@ void UiContext::destroy() {
     window_surface = nullptr;
     surface = nullptr;
 
-    // Only tear down the platform if a window was created (i.e., non-headless
-    // mode); terminating an uninitialized windowing library is undefined.
+    // the host owns its window; the backend's application runtime outlives every host.
     if (window) {
         if (mouse_state.sys_cursor) {
             radiant_platform_destroy_cursor(mouse_state.sys_cursor);
@@ -750,6 +748,5 @@ void UiContext::destroy() {
         }
         radiant_platform_destroy_window(window);
         window = nullptr;
-        radiant_platform_terminate();
     }
 }

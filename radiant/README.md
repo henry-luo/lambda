@@ -189,7 +189,7 @@ python3 utils/generate_css_support_inventory.py --check
 git diff --check
 ```
 
-For an in-process text/layout test, build `test_radiant_text_query_gtest` through
+For an in-process text/layout test, build `test_radiant_document_gtest` through
 the same top-level `build/premake` Makefile, then filter the binary. Build an
 export test target when its native renderer is needed. `make build-test` builds
 unrelated projects too; use it when the required test map calls for that scope.

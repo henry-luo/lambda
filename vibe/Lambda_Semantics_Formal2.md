@@ -924,6 +924,38 @@ unstated equality and ordering language and left decimal scales/ranks exposed
 to hash-table accidents. Two canonical domains keep document names and numeric
 coordinates usable without expanding the language's observable equality model.
 
+#### C8.6b Duplicate literal keys (2026-11-04, user)
+
+**Ratified as S2.3.1v2 and S16.8.9v2; representation D3.4.1v2.**
+Choose option 1: repeated explicitly written names in a map literal or
+an element/object attribute list are compile errors (E242). A bare name and
+its quoted spelling name the same field. Normalize names and resolve namespace
+aliases under S8.2.2v6 before comparing their identities. A repeat remains an
+error when a spread or a computed entry appears between the written names.
+
+Computed entries and spread overlaps remain legal, including known constant
+computed keys and spreads of known literals. Entries evaluate left to right;
+last write wins, first insertion determines position. A collision replaces
+one physical field, including its type, so all observable map operations see
+one entry per key. Equality continues to compare effective fields unordered
+(S5.4.1). The input-format parsers' separate duplicate-admission policies are
+unchanged; spreading their fields constructs a normalized literal.
+
+**Why option 1:** repeated written keys usually signal a mistake, while dynamic
+collisions support generated fields and the defaults/override idiom
+`{*:defaults, key: value}`. Option 2 (accept every duplicate) offers a uniform
+rule but loses an inexpensive diagnostic. The check follows syntax, so
+constant folding cannot change program validity. Explicit names are checked
+only against other explicit names; a spread overlap is intentional even when
+its fields can be inferred statically.
+
+**Earlier implementation:** static literals retained all entries in their
+shape chain. `{a:1,b:2,a:3}` printed three fields, had length 3, read `a` as 3,
+and compared unequal to `{a:3,b:2}`. That behavior is superseded. The dynamic
+literal builder already replaced fields correctly; no new map representation
+or per-read deduplication is needed. Implementation and evidence:
+[Impl_Duplicate_Keys](impl/Lambda_Impl_Duplicate_Keys.md).
+
 #### C8.7 Implementation notes (code-level, 2026-07-04)
 
 From reading the equality implementation (`lambda/lambda-eval.cpp`, dispatcher

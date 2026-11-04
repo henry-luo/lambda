@@ -42,10 +42,11 @@ typedef struct RadiantIconImage {
 } RadiantIconImage;
 
 // --- library lifetime and event pump ---
+// the backend owns the application runtime until process exit (D4.5.1v4).
+// individual hosts destroy their windows without shutting down that runtime.
 // `hidden_host`: a windowless run that only needs a native graphics/webview
 // parent; it must not claim the application menu bar
 bool radiant_platform_init(bool hidden_host);
-void radiant_platform_terminate(void);
 double radiant_platform_time(void);                  // seconds on the backend's clock
 void radiant_platform_poll_events(void);
 void radiant_platform_wait_events(double timeout_seconds);

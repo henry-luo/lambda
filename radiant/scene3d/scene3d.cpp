@@ -3412,16 +3412,20 @@ static void scene3d_entry_destroy(Scene3dEntry* entry) {
     scene3d_physics_destroy(entry->physics);
     scene3d_navigation_destroy(entry->navigation);
     scene3d_animation_destroy(entry->animation);
-    scene3d_particles_destroy(entry->particles);
-    scene3d_particle_gpu_owner_lost(&entry->particle_owners, true);
-    scene3d_runtime_destroy(entry->runtime);
-    for (unsigned i = 0; i < entry->simulation_count; i++)
-        scene3d_simulation_release(entry->graphics, entry->simulations[i]);
-    scene3d_projection_destroy(entry);
-    scene3d_retire_snapshot(entry);
-    for (auto* choice = entry->lod_choices; choice; choice = choice->next)
-        choice->used = false;
-    scene3d_lod_prune(entry);
+    {
+        // resource teardown shares one context bind, which must end before destroying that context.
+        NativeGlCurrent current(entry->graphics);
+        scene3d_particles_destroy(entry->particles);
+        scene3d_particle_gpu_owner_lost(&entry->particle_owners, true);
+        scene3d_runtime_destroy(entry->runtime);
+        for (unsigned i = 0; i < entry->simulation_count; i++)
+            scene3d_simulation_release(entry->graphics, entry->simulations[i]);
+        scene3d_projection_destroy(entry);
+        scene3d_retire_snapshot(entry);
+        for (auto* choice = entry->lod_choices; choice; choice = choice->next)
+            choice->used = false;
+        scene3d_lod_prune(entry);
+    }
     native_gl_destroy(entry->graphics);
     mem_free(entry->mapped_programs);
     mem_free(entry->environment_path);

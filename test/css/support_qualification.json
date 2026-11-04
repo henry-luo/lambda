@@ -417,7 +417,7 @@
         "test/test_rdt_vector_gtest.cpp#CompactRectangleAffineExpansionPreservesContourBounds",
         "test/ui/css_overflow_axes_computed.json",
         "test/test_css_animation_gtest.cpp#OverflowComputedAxesShareCascadeCouplingAndDirtyInheritance",
-        "test/test_radiant_text_query_gtest.cpp#AxisRollbackExcludesSameLayerShorthands",
+        "test/test_radiant_document_gtest.cpp#AxisRollbackExcludesSameLayerShorthands",
         "test/test_pdf_render_visual_gtest.cpp#VisibleOverflowAxesPreserveOpenStripsAcrossOutputs",
         "test/test_pdf_render_visual_gtest.cpp#TransformedVisibleOverflowAxesKeepPaintInsideOwnerStrips",
         "test/test_css_animation_gtest.cpp#OverflowDirtyReadsRetainUaDefaultsAndExplicitInitialResetsThem",
@@ -647,9 +647,9 @@
         "test/test_css_animation_gtest.cpp#PseudoNamesPreserveParserMatcherAndCascadeIdentity",
         "test/ui/css_marker_image_baseline.json",
         "test/html/nested_font_strut.html",
-        "test/test_radiant_text_query_gtest.cpp#NestedInlineFontsKeepTheirOwnLeadingAcrossReflow",
+        "test/test_radiant_document_gtest.cpp#NestedInlineFontsKeepTheirOwnLeadingAcrossReflow",
         "test/html/layout_normal_leading_baselines.html",
-        "test/test_radiant_text_query_gtest.cpp#NormalLeadingBaselinesRetainFontCellRoundingAcrossReflow",
+        "test/test_radiant_document_gtest.cpp#NormalLeadingBaselinesRetainFontCellRoundingAcrossReflow",
         "test/ui/css_nested_font_strut.json",
         "test/test_pdf_render_visual_gtest.cpp#NestedInlineFontStrutsKeepLeadingAcrossOutputs"
       ],
@@ -664,7 +664,7 @@
       "scope": "horizontal adjoining margins across one/two empty children, negative chains and a nested first-content descendant; basic BFC/top-border/padding blockers; owned pre-collapse resolved snapshots for vertical computed reads and spacing inheritance; causal variable, owner-em, percentage and inherited-length changes; matching-source qualification in progress",
       "evidence": [
         "test/html/layout_adjoining_empty_margins.html",
-        "test/test_radiant_text_query_gtest.cpp#AdjoiningEmptyChildrenPreserveMarginChainsAndComputedEdges",
+        "test/test_radiant_document_gtest.cpp#AdjoiningEmptyChildrenPreserveMarginChainsAndComputedEdges",
         "test/ui/css_empty_margin_chain.json",
         "test/test_pdf_render_visual_gtest.cpp#AdjoiningEmptyMarginChainsAgreeAcrossOutputs"
       ],
@@ -681,7 +681,7 @@
       "scope": "horizontal nested auto-filled columns retain forced-break line endpoints at positive column seams; normal leading at 12/16/24px and zero/2px inner gaps agree with browser geometry within subpixel rounding; initial and retained reflow preserve break and atomic-inline bounds (MC1)",
       "evidence": [
         "test/html/layout_nested_multicol_break_endpoints.html",
-        "test/test_radiant_text_query_gtest.cpp#NestedMulticolBreaksRetainTheirLineEndpointsAcrossReflow",
+        "test/test_radiant_document_gtest.cpp#NestedMulticolBreaksRetainTheirLineEndpointsAcrossReflow",
         "test/layout/data/wpt-css-multicol/multicol-nested-015.html"
       ],
       "limits": "explicit line-height break geometry still loses leading and may choose the preceding fragment with negative leading; broader balancing, spanning, mixed/nested fragmentation, vertical/bidi and paged contexts remain unqualified"

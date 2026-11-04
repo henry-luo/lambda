@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 61.0.0 (2026-11-04)
+**Spec version:** 62.0.0 (2026-11-05)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -454,10 +454,13 @@ do the same for null.*
 
 ### D3.4 Shapes
 
-- **D3.4.1 — Shape layout is ABI.** A map or element shape is a `ShapeEntry`
+- **D3.4.1v2 — Shape layout is ABI.** A map or element shape is a `ShapeEntry`
   chain on its type. Map data is a packed struct with precomputed offsets.
-  Transpiled direct access and the runtime read and store paths must read the
-  same bytes. [Shape_Pool §1, Transpile_Map]
+  A map literal or element/object attribute list rejects repeated explicit
+  names as a compile error. Computed entries and spreads may replace earlier
+  values; the first insertion fixes field order, so a shape has one field per
+  effective key (S2.3.1v2). Transpiled direct access and the runtime read and
+  store paths must read the same bytes. [Shape_Pool §1, Transpile_Map]
 - **D3.4.2 — Shape identity is structural.** A shape is identified by its
   ordered sequence of field names and TypeIds. That sequence is its path in
   the transition tree (D3.4.3). Field order is significant. Offsets come from

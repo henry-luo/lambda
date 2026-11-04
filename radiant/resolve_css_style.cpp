@@ -8813,10 +8813,12 @@ CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
 CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,
         const LayoutLogicalSides& sides) {
     if (!style || property <= CSS_PROPERTY_UNKNOWN || property >= CSS_PROPERTY_COUNT) return nullptr;
-    // aliases depend only on the property and logical axes. Reuse their source
-    // set instead of scanning every declaration for every component query.
-    static thread_local LayoutComponentSources cached[CSS_PROPERTY_COUNT] = {};
-    LayoutComponentSources& entry = cached[property];
+    // orthogonal ancestors alternate axes within one pass; retain each mapping
+    // so crossing a writing-mode boundary never rebuilds the property registry.
+    static thread_local LayoutComponentSources cached[8][CSS_PROPERTY_COUNT] = {};
+    unsigned axes = (unsigned)sides.inline_start * 2 +
+        (sides.block_start == CSS_BOX_SIDE_RIGHT || sides.block_start == CSS_BOX_SIDE_BOTTOM);
+    LayoutComponentSources& entry = cached[axes][property];
     if (!entry.valid || entry.sides.inline_start != sides.inline_start ||
         entry.sides.inline_end != sides.inline_end || entry.sides.block_start != sides.block_start ||
         entry.sides.block_end != sides.block_end) {
