@@ -7588,6 +7588,9 @@ static Item dom_focus_method(DomElement* elem, bool focus,
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (focus) {
         dom_ensure_geometry_snapshot(elem->doc);
+        // The first geometry flush can create the document state; focus must
+        // use that owner rather than the null state observed before layout.
+        state = elem->doc ? elem->doc->state : dom_current_state();
         if (dom_is_script_focusable(elem)) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;

@@ -242,7 +242,7 @@ try {
         for (const name of ['test_scene3d_unit_gtest', 'test_map_gtest', 'test_paged_media_gtest',
             'test_ui_automation_gtest',
             'test_page_load_gtest', 'test_radiant_view_gtest', 'test_layout_fuzzy_gtest',
-            'test_wpt_css_syntax_gtest', 'test_wpt_input_events_gtest',
+            'test_wpt_css_syntax_gtest',
             'test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_radiant_render_baseline']) {
             assert.ok(selected.has(name), name);
         }
@@ -252,6 +252,9 @@ try {
         assert.equal(paged.buildTarget, 'test_paged_media_gtest');
         assert.deepEqual(paged.runnerArgs, []);
         const extended = JSON.parse(invoke(['--target=extended', '--list']).stdout);
+        const radiantExtended = JSON.parse(invoke(['--target=radiant', '--category=extended', '--list']).stdout);
+        assert.ok(radiantExtended.some(t => t.baseName === 'test_wpt_input_events_gtest'));
+        assert.ok(require('../build_lambda_config.json').test.layout_baseline_suites.includes('wpt-input-events'));
         const core = extended.find(t => t.baseName === 'test_radiant_core_gtest');
         assert.ok(core);
         assert.equal(core.buildTarget, 'test_radiant_core_gtest');
@@ -272,7 +275,7 @@ try {
         assert.deepEqual(photo.runnerArgs, ['--gtest_filter=RadiantViewTest.Photo*']);
         const extendedUi = extended.find(t => t.baseName === 'test_ui_automation_extended_gtest');
         assert.deepEqual(extendedUi.runnerArgs, ['--suite', 'bold,editor,edit,hit-test,photos']);
-        for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_wpt_input_events_gtest']) {
+        for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot']) {
             const check = inventory.find(t => t.baseName === name);
             assert.equal(check.exclusive, false);
             assert.equal(check.workerSlots, name === 'test_radiant_page_snapshot' ? 2 : 3);
@@ -809,6 +812,37 @@ runCategories(tester, data.categories).then(records => process.stdout.write(JSON
             rows: [{}], baselines: {} });
         assert.equal(child.status, 1);
         assert.match(child.stderr, /inventory does not match/);
+    });
+    check('Input-events layout classification rejects missing or skipped required cases', () => {
+        const { classifyInputEvents } = require('./run_layout_baseline.js');
+        const row = (name, result) => ({ name: `Run/${name}`, result });
+        const data = { tests: 2, testsuites: [{ testsuite: [row('required', 'COMPLETED'),
+            row('known_failure', 'SKIPPED')] }] };
+        const output = { code: 0, signal: null };
+        assert.deepEqual(classifyInputEvents(data, ['required'], output),
+            { passed: 1, partial: 0, failed: 0, skipped: 1 });
+        assert.throws(() => classifyInputEvents(data, ['missing'], output), /inventory/);
+        assert.throws(() => classifyInputEvents(data, ['known_failure'], output), /inventory/);
+        assert.throws(() => classifyInputEvents(data, [], output), /inventory/);
+        assert.equal(classifyInputEvents(data, ['required'], { code: 1 }).failed, 1);
+    });
+    check('Input-events is routed through the layout baseline worker budget', () => {
+        const child = spawnSync(process.execPath, ['-e', `
+const { runCategories } = require('./test/run_layout_baseline.js');
+const tester = {
+    maxConcurrency: 3,
+    _categorySummaries: { visual: { total: 1, successful: 1, failed: 0, skipped: 0 } },
+    testCategories: async cats => { if (cats.join() !== 'visual') throw Error('bad categories'); return [{}]; },
+    loadBaseline: async () => null,
+};
+runCategories(tester, ['wpt-input-events', 'visual'], async jobs => {
+    if (jobs !== 3) throw Error('bad worker budget');
+    return { name: 'wpt-input-events', passed: 20, partial: 0, failed: 0, skipped: 12, duration_ms: 1 };
+}).then(rows => process.stdout.write(JSON.stringify(rows))).catch(e => { console.error(e); process.exitCode = 1; });
+`], { cwd: ROOT, encoding: 'utf8', timeout: 15000 });
+        assert.equal(child.status, 0, child.stderr);
+        assert.deepEqual(JSON.parse(child.stdout).map(row => [row.name, row.passed, row.skipped]),
+            [['wpt-input-events', 20, 12], ['visual', 1, 0]]);
     });
     check('Snapshot comparator owns the aggregate regression verdict', () => {
         const result = snapshot_result({ code: 1, signal: null },

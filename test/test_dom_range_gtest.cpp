@@ -1154,6 +1154,20 @@ TEST_F(DomResolverTest, ResolveLayoutFailsWhenNoTextRect) {
     EXPECT_FALSE(r->layout_valid);
 }
 
+TEST_F(DomResolverTest, ResolveLayoutRejectsRetiredTextView) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end(r, hello, 0, &exc));
+    // A live range can still reference a node after its view is retired.
+    hello->view_type = RDT_VIEW_NONE;
+    EXPECT_FALSE(dom_range_resolve_layout(r));
+    EXPECT_FALSE(r->layout_valid);
+    hello->view_type = RDT_VIEW_TEXT;
+    EXPECT_TRUE(dom_range_resolve_layout(r));
+}
+
 TEST_F(DomResolverTest, HitTestFindsTextNode) {
     // Click at (15+30, 20+30+8) — middle of the rect → byte offset ~half.
     DomBoundary b = dom_hit_test_to_boundary((View*)div, 15.0f + 30.0f, 20.0f + 30.0f + 8.0f);

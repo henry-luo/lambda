@@ -3337,6 +3337,19 @@ TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
         timing_path, "\"document_context_live_bytes\":"));
 }
 
+TEST(RadiantViewTest, InitialScriptFocusSurvivesGeometryInitialization) {
+    const char* output = "temp/initial-script-focus.json";
+    const char* args[] = {"./lambda.exe", "layout",
+        "test/html/js_initial_script_focus.html", "--view-output", output, "--no-log", NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    EXPECT_TRUE(test_radiant_view_file_contains(output, "initial-focus-ok"));
+    EXPECT_FALSE(test_radiant_view_file_contains(output, "initial-focus-lost"));
+}
+
 TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
     // D4.5.2: a UI-mode script result lives in the document's untraced arena.
     // A runtime symbol, a non-spreadable array or a group element left there

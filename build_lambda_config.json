@@ -2932,6 +2932,7 @@
   "test": {
     "output_dir": "test_output",
     "layout_baseline_suites": [
+      "wpt-input-events",
       "form",
       "wpt-css-box",
       "wpt-css-text",
@@ -4794,7 +4795,7 @@
           {
             "source": "test/wpt/test_wpt_input_events_gtest.cpp",
             "name": "WPT Input Events Tests",
-            "category": "baseline",
+            "category": "extended",
             "parallel": true,
             "worker_slots": 3,
             "worker_args": [

@@ -69,7 +69,7 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # known-failure inventories are not part of the fast Radiant baseline gate.
 # Derive native build projects from the same suite selection used for execution.
 RADIANT_BUILD_SELECTION ?= --radiant-baseline
-RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline $(RADIANT_BUILD_SELECTION) --list-build-targets)
+RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline $(RADIANT_BUILD_SELECTION) --list-build-targets) test_wpt_input_events_gtest
 # Native runners can use release code for whole-gate performance measurements.
 RADIANT_TEST_CONFIG ?= debug_native
 PDF_TEST_CONFIG ?= debug_native
@@ -3478,7 +3478,7 @@ capture-layout:
 test-layout:
 	@echo "🎨 Running Lambda CSS Layout Engine Tests"
 	@echo "=========================================="
-	@if ! npm ls --prefix test/layout --omit=dev --depth=0 >/dev/null 2>&1; then \
+	@if [ "$(or $(suite),$(SUITE))" != "wpt-input-events" ] && ! npm ls --prefix test/layout --omit=dev --depth=0 >/dev/null 2>&1; then \
 		echo "📦 Installing layout test dependencies..."; \
 		npm ci --prefix test/layout --no-audit --no-fund; \
 	fi
@@ -3503,7 +3503,16 @@ test-layout:
 		CONCURRENCY_FLAG=""; \
 		if [ -n "$$UPDATE_BASELINE_VAR" ]; then UPDATE_BASELINE_FLAG="--update-baseline"; fi; \
 		if [ -n "$$CONCURRENCY_VAR" ]; then CONCURRENCY_FLAG="-j $$CONCURRENCY_VAR"; fi; \
-		if [ -n "$$TEST_VAR" ]; then \
+		if [ "$$SUITE_VAR" = "wpt-input-events" ]; then \
+			if [ -n "$$TEST_VAR$$PATTERN_VAR$$UPDATE_BASELINE_VAR" ]; then \
+				echo "Use test/test_wpt_input_events_gtest.exe --gtest_filter for individual input-events cases"; exit 1; \
+			fi; \
+			$(MAKE) -C build/premake config=$(RADIANT_TEST_CONFIG) test_wpt_input_events_gtest -j$(TEST_JOBS) || exit $$?; \
+			INPUT_RESULT="temp/wpt_input_layout_results.$$$$.txt"; \
+			$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites wpt-input-events \
+				--jobs "$${CONCURRENCY_VAR:-$(LAYOUT_BASELINE_CONCURRENCY)}" --results "$$INPUT_RESULT"; \
+			INPUT_STATUS=$$?; rm -f "$$INPUT_RESULT"; exit $$INPUT_STATUS; \
+		elif [ -n "$$TEST_VAR" ]; then \
 			case "$$TEST_VAR" in \
 				*.html|*.htm|*.xht|*.xhtml) TEST_FILE="$$TEST_VAR" ;; \
 				*) \
