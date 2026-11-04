@@ -3,7 +3,8 @@ import tuf: lambda.security.tuf
 import meta: lambda.security.tuf.metadata
 import json: lambda.security.tuf.json
 let base = "test/safety/tuf/fixtures/"
-fn fixture_bytes(name) => input(base ++ name, 'binary')^
+// fixture IO failures propagate under the same contract as verifier failures.
+fn fixture_bytes(name) binary^ => input(base ++ name, 'binary')^
 let root = tuf.bootstrap(fixture_bytes("root.json"), "c04e64c95ecf1bf31b5cc92a98bf34d3548da0d85691ab6da3bbc0d169971662")^
 let rotated = tuf.rotate_root(root, fixture_bytes("2.root.json"))^
 let timestamp = tuf.timestamp(root, fixture_bytes("timestamp.json"), null, "2026-11-03T00:00:00Z")^.metadata

@@ -1,8 +1,9 @@
 import updater: lambda.security.tuf.update
 import delegation: lambda.security.tuf.delegation
 let base = "test/safety/tuf/fixtures/"
-fn fixture_bytes(filename) => input(base ++ filename, 'binary')^
-fn fixture_response(action) {
+// fixture IO failures propagate under the same contract as verifier failures.
+fn fixture_bytes(filename) binary^ => input(base ++ filename, 'binary')^
+fn fixture_response(action) map^ {
     if (action.kind == 'checkpoint') {status: 'ok'}
     else if (action.path == "2.root.json") {status: 'not_found'}
     else if (action.path == "timestamp.json") {status: 'ok', bytes: fixture_bytes("timestamp.json")}
@@ -12,7 +13,7 @@ fn fixture_response(action) {
 fn drive(session, steps, trace) map^ {
     if (steps > 20) raise error("fixture refresh loop")
     else if (session.action.kind == 'done') {session: session, trace: trace}
-    else drive(updater.advance(session, fixture_response(session.action))^, steps + 1, [*trace, session.action.kind])^
+    else drive(updater.advance(session, fixture_response(session.action)^)^, steps + 1, [*trace, session.action.kind])^
 }
 let initial = updater.begin_refresh([{role: "root", bytes: fixture_bytes("root.json")}], "2026-11-03T00:00:00Z", "lambda.pkg")^
 let complete = drive(initial, 0, [])^

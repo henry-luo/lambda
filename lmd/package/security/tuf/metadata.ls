@@ -8,8 +8,11 @@ pub fn require_member(node, field) map^ {
 }
 pub fn field_text(node, field) string^ => json.text(require_member(node, field)^)^
 pub fn version(node) string^ => json.positive(require_member(node, "version")^)^
-pub fn hex_valid(text) => text is string and len(text) % 2 == 0 and
-    all([for (c in split(lower(text), "")) contains("0123456789abcdef", c)])
+pub fn hex_valid(text) {
+    if (not (text is string)) { return false }
+    let chars = split(lower(text), "") ^ { return false };
+    len(text) % 2 == 0 and (all([for (c in chars) contains("0123456789abcdef", c)]) ^ { false })
+}
 pub fn unhex(text) binary^ {
     if (not hex_valid(text)) raise invalid("invalid hexadecimal bytes")
     // S2.2.2v2: binary([]) is null; the wire decoder retains a zero-byte carrier.
@@ -18,18 +21,19 @@ pub fn unhex(text) binary^ {
         index_of("0123456789abcdef", lower(slice(text, i * 2, i * 2 + 1))) * 16 +
         index_of("0123456789abcdef", lower(slice(text, i * 2 + 1, i * 2 + 2)))])
 }
-pub fn hex(bytes) => join([for (b in binary(bytes))
+pub fn hex(bytes) string^ => join([for (b in binary(bytes)^)
     slice("0123456789abcdef", int(b / 16), int(b / 16) + 1) ++
     slice("0123456789abcdef", b % 16, b % 16 + 1)], "")
-fn digits(text) => len(text) > 0 and all([for (c in split(text, "")) contains("0123456789", c)])
-fn numeric_identifier(text) => digits(text) and (len(text) == 1 or slice(text, 0, 1) != "0")
-fn identifiers(text, prerelease) => len(text) > 0 and all([for (part in split(text, "."))
+// these predicates consume decoded JSON strings, never generic fallible values.
+fn digits(text: string) bool => len(text) > 0 and all([for (c in split(text, "")) contains("0123456789", c)])
+fn numeric_identifier(text: string) bool => digits(text) and (len(text) == 1 or slice(text, 0, 1) != "0")
+fn identifiers(text: string, prerelease: bool) bool => len(text) > 0 and all([for (part in split(text, "."))
     len(part) > 0 and all([for (c in split(part, "")) contains("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-", c)]) and
     (not prerelease or not digits(part) or numeric_identifier(part))])
-fn spec_version(text) {
+fn spec_version(text: string) bool^ {
     let build = split(text, "+")
-    let pre = split(build[0], "-")
-    let core = split(pre[0], ".")
+    let pre = split(build[0], "-")^
+    let core = split(pre[0], ".")^
     let suffix = join(slice(pre, 1, len(pre)), "-");
     len(text) <= 256 and len(build) <= 2 and len(core) == 3 and core[0] == "1" and
         all([for (part in core) numeric_identifier(part)]) and
@@ -59,7 +63,7 @@ pub fn read(raw, expected_type) map^ {
     let spec = field_text(payload, "spec_version")^
     let revision = version(payload)^
     let expiry = utc(field_text(payload, "expires")^)^;
-    if (tag != expected_type or not spec_version(spec) or len(signatures) > 256) raise invalid("metadata type, specification or signature limit")
+    if (tag != expected_type or not spec_version(spec)^ or len(signatures) > 256) raise invalid("metadata type, specification or signature limit")
     else {
         let ids = [for (sig in signatures) field_text(sig, "keyid")^];
         if (any([for (id in ids) id == "" or len(id) > 256]) or len(unique(ids)) != len(ids))
@@ -90,7 +94,7 @@ pub fn validate_keys(keys) bool^ {
     else {
         let checked = [for (entry in entries)
             (let key = public_key(entry.node)^,
-             entry.name == hex(hash(json.canonical(entry.node)^, 'sha256')^))];
+             entry.name == hex(hash(json.canonical(entry.node)^, 'sha256')^)^)];
         // TUF 4.3: recompute identifiers; a caller-supplied alias is not another key.
         if (not all(checked)) raise invalid("key identifier fingerprint mismatch") else true
     }
@@ -150,8 +154,8 @@ pub fn file_reference(metadata, filename) map^ =>
     file_info(require_member(require_member(metadata.signed, "meta")^, filename)^)^
 pub fn matches(raw, info, required_hash = false) bool^ {
     let bytes = binary(raw)
-    let supported_hashes = [for (entry in info.hashes where contains(["sha256", "sha384", "sha512"], entry.name)) entry]
-    let verified = [for (entry in supported_hashes) hex(hash(bytes, symbol(entry.name))^) == lower(json.text(entry.node)^)];
+    let supported_hashes = [for (entry in info.hashes where contains(["sha256", "sha384", "sha512"], entry.name)^) entry]
+    let verified = [for (entry in supported_hashes) hex(hash(bytes, symbol(entry.name))^)^ == lower(json.text(entry.node)^)];
     if (info.length != null and info.length != string(len(bytes))) raise invalid("signed byte length mismatch")
     else if ((required_hash or len(info.hashes) > 0) and len(supported_hashes) == 0) raise invalid("no supported content hash")
     else if (not all(verified)) raise invalid("signed content hash mismatch") else true

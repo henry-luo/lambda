@@ -751,6 +751,7 @@ TEST_P(SecurityRuntimeTest, UnsupportedMutationsCannotBypassTheBrokerEvenInDryRu
         "io.move(\"@ROOT@/original\", \"@ROOT@/side\")",
         "io.delete(\"@ROOT@/original\")", "io.mkdir(\"@ROOT@/side\")",
         "io.touch(\"@ROOT@/original\")",
+        "io.create_file(\"@ROOT@/side\", \"never-stored\")",
         "io.symlink(\"@ROOT@/original\", \"@ROOT@/side\")",
         "io.chmod(\"@ROOT@/original\", 511)",
         "io.rename(\"@ROOT@/original\", \"@ROOT@/side\")",
