@@ -18,11 +18,11 @@ S1.4v2 (explicit value state), S12.1.1v3 and S12.1.3v2 (pure rendering and
 procedural handlers), S12.4.1v3–S12.4.3 (resource acquisition and scoped
 cleanup), S12.4.4v4 (SQLite transaction boundaries), S13.1.1v3 and
 S13.3.1v2 (tasks and document ownership), S13.3.2 (cancellation).
-[Formal Design](../doc/Lambda_Formal_Design.md) D7.1.2v2 and D7.5.2 (IO
-ownership and policy), D7.2.5 (DOM editing-policy boundary), D7.3.2–D7.3.4
-(Jube loading and module boundaries), D7.4.1v2 (opaque resource IDs),
-D7.5.3v2 (Lambda/Radiant boundary), D4.5.1v4/D4.5.2 (native ownership), and
-D5.3.3 (precise native rooting). Database-specific records without a formal
+[Formal Design](../doc/Lambda_Formal_Design.md) D9.1.2 and D11.1.2 (IO
+ownership and policy), D10.2.1 (DOM editing-policy boundary), D9.4.2–D9.4.4
+(Jube loading and module boundaries), D9.5.1 (opaque resource IDs),
+D9.5.6 (Lambda/Radiant boundary), D5.5.1/D5.5.2 (native ownership), and
+D6.3.3 (precise native rooting). Database-specific records without a formal
 ruling are RDB1–RDB9, RDB11/RDB12 and JA16.1–JA16.4 in
 [Lambda_IO_RDB.md §13](Lambda_IO_RDB.md#13-network--embedded-drivers-the-rdb-drivers-jube-module).
 That section retains its own proposal/ratification status; reuse of its
@@ -155,7 +155,7 @@ The shared grid knows neither spreadsheet formulas nor SQL.
 
 Rendering is a pure transformation of accepted viewport metrics and available
 values. DOM measurement, scroll changes, publication and fetching occur in
-procedural handlers, following S12.1.1v3, S12.1.3v2 and D7.5.3v2. A small shared
+procedural handlers, following S12.1.1v3, S12.1.3v2 and D9.5.6. A small shared
 JS bridge may relay scroll/resize metrics, as Finder does; it owns no workbook
 or database state.
 
@@ -277,7 +277,7 @@ flowchart TB
 SQLite remains in-host. MySQL and PostgreSQL reuse the `rdb-drivers` module,
 its host-owned TLS bridge and its client libraries. Keep all three behind the
 same application adapter. Driver differences belong in dialect/capability
-records, not duplicated application branches (D7.3.2–D7.3.4; RDB1–RDB7).
+records, not duplicated application branches (D9.4.2–D9.4.4; RDB1–RDB7).
 
 | Backend | Connection UI | Metadata boundary and qualification |
 | --- | --- | --- |
@@ -294,7 +294,7 @@ not silently ignored options. The existing bridge's Windows transport is
 unfinished, so cross-platform network support is a qualification dependency.
 
 Native handles stay in the host registry and never enter ordinary UI state
-(D7.4.1v2; JA16.1–JA16.4). A document-owned procedure owns each interactive
+(D9.5.1; JA16.1–JA16.4). A document-owned procedure owns each interactive
 session in a lexical resource scope and processes commands serially. Results
 sent to the view are immutable values. Closing a tab/connection or document
 joins outstanding work and releases statements, batches and connections in
@@ -472,7 +472,7 @@ M1 alone is a useful explorer but is not the completed writable workbench.
   evidence of support.
 - Resource checks cover tab/document close during fetch, repeated result
   replacement, worker cancellation, forced GC and spool cleanup. New native
-  values use precise RootFrame/Rooted ownership (D5.3.3).
+  values use precise RootFrame/Rooted ownership (D6.3.3).
 
 ### Performance gates
 

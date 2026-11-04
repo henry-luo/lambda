@@ -127,8 +127,8 @@ All issues below were first recorded on 2026-09-25.
   `heap_destroy` before the pool ends. CWD is copied from a caller buffer into
   the Input, so it has no separately allocated temporary string. Explicit
   `sys.*` resolution refreshes TTL-managed values and clears a path's old
-  formatted result if a later lookup fails. D4.1.3, D4.2.1v3, D4.2.3, and
-  D5.4.2 govern the ownership boundary.
+  formatted result if a later lookup fails. D5.1.3, D5.2.1, D5.2.1, and
+  D6.4.2 govern the ownership boundary.
 
 ## IL2-I8 — imported port unexpectedly ran its own `main`
 
@@ -152,7 +152,7 @@ All issues below were first recorded on 2026-09-25.
 - **Resolution / ruling:** imported entries now initialize with `run_main`
   false, and MIR emits the automatic `main` call only for an entry script.
   The interpreter already initializes imported modules without calling their
-  `main`. D7.2.1 and D7.2.2 distinguish module initialization from entry
+  `main`. D9.3.1 and D9.3.2 distinguish module initialization from entry
   execution; S12.1.1v2 places procedural top-level work in `main()`.
 
 ## IL2-I9 — Python mutable closures have no Lambda closure equivalent
@@ -366,8 +366,8 @@ All issues below were first recorded on 2026-09-25.
   attributes, and recursive filesystem iteration. Isolated map storage also
   passes forced GC; the separate wildcard-cache lifetime defect is IL2-I26.
   `make test-lambda-baseline` passed 5,918/5,918 combined Lambda/Input cases.
-- **Resolution / ruling:** D2.6.1v3 requires descriptor-selected packed field
-  storage; D2.1.5 requires canonical value reconstruction. The reader now
+- **Resolution / ruling:** D3.2.1 requires descriptor-selected packed field
+  storage; D2.1.4 requires canonical value reconstruction. The reader now
   restores the stored direct path pointer through the existing pointer arm.
 
 ## IL2-I21 — no documented procedural regular-expression API
@@ -472,6 +472,6 @@ All issues below were first recorded on 2026-09-25.
 - **Status:** open; discovered under forced GC while validating IL2-I20.
   The failure also occurs with a plain array of paths and is independent of
   the packed map-field reader fixed there.
-- **Resolution / ruling:** D4.1.3 distinguishes pool ownership from GC
-  ownership; D5.3.3 requires precise native-helper roots. The cache needs an
+- **Resolution / ruling:** D5.1.3 distinguishes pool ownership from GC
+  ownership; D6.3.3 requires precise native-helper roots. The cache needs an
   explicit lifetime owner; native-stack scanning must not be restored.

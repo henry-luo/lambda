@@ -291,7 +291,7 @@ static bool scene3d_runtime_sample_animation(Scene3dRuntime* runtime, double deb
 bool scene3d_runtime_advance(Scene3dRuntime* runtime, double elapsed) {
     if (!runtime || runtime->sampling || runtime->stats.faulted || !isfinite(elapsed) || elapsed < 0)
         return false;
-    // repeated sampling of one host timestamp must not consume another budget of old debt (D2.11.4).
+    // repeated sampling of one host timestamp must not consume another budget of old debt (D10.1.7).
     if (elapsed == 0 || runtime->stats.paused || runtime->stats.time_scale == 0)
         return true;
     if (!scene3d_runtime_admit(runtime))

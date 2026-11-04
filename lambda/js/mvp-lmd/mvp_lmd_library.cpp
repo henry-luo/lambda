@@ -401,7 +401,7 @@ static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64
     if (!roots.valid()) return ItemError;
     Rooted<Item> object(roots, ItemNull), prototype(roots, ItemNull), text(roots, ItemNull), list(roots, ItemNull);
     // GetPrototypeFromConstructor precedes message conversion and preserves the
-    // native Error brand while keeping the live JS prototype independent (D2.6.9v3).
+    // native Error brand while keeping the live JS prototype independent (D3.1.5).
     prototype.set(mvp_lmd_class_values(cls)[1]);
     if (target.item != ITEM_JS_UNDEFINED) {
         prototype.set(mvp_lmd_constructor_prototype(target, mvp_lmd_class_values(cls)[1]));

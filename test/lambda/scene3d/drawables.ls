@@ -1,4 +1,4 @@
-// S12.1.1v3 / D7.2.4v4: drawable constructors and validation remain pure.
+// S12.1.1v3 / D9.3.4: drawable constructors and validation remain pure.
 import s: lambda.scene3d
 let one = s.geometry([0.0,0.0,0.0])
 let two = s.geometry([-1.0,0.0,0.0,1.0,0.0,0.0])

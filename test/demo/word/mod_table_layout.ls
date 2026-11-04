@@ -1,4 +1,4 @@
-// layout commands edit source tables in one history entry (S12.1.3, D7.2.5).
+// layout commands edit source tables in one history entry (S12.1.3, D10.2.1).
 import dom
 import lambda.editor.core.doc
 import lambda.editor.core.step

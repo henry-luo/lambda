@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-17
 **Base revision:** `6c14534a7`
-**Authority:** USER retirement request; **D8.1.3v25**, **D5.3/D5.4**,
-**D6.2.2v2**, **D8.2.3**, **D8.4.1v2**, **D8.5.1v2**.
+**Authority:** USER retirement request; **D8.4.2**, **D6.3/D6.4**,
+**D7.2.2**, **D8.2.3**, **D7.4.1**, **D8.5.1**.
 **Status:** source retirement and release/module builds complete; runtime and
 performance qualification remain outstanding.
 

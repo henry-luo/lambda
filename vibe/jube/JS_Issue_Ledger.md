@@ -34,8 +34,8 @@ numbering spaces cannot collide when the doc sections are folded in later.
 `LAMBDA_GC_FORCE_EVERY=1`. The AST execution backend passes the collection
 probe; that does not make the default MIR path conformant.
 
-**D2.5.2v3** rules that a raw wide-scalar `Item` pointing into a number frame
-must never be retained. **D5.2.2v3** requires destination-owned scalar storage
+**D2.4.2** rules that a raw wide-scalar `Item` pointing into a number frame
+must never be retained. **D6.2.2** requires destination-owned scalar storage
 at every ownership boundary. GC tracing the `Item` is insufficient: a scalar
 home is not a GC allocation, and a trace does not copy its payload into the
 durable destination.
@@ -297,7 +297,7 @@ same reason; the case is recorded here instead.
 
 ### JS05-L5 — a closure created by direct eval loses projected caller locals — **RESOLVED**
 
-**Found:** 2026-09-24 during the JSI35 move of dynamic code to the AST interpreter (**D8.1.3v20**). **Pre-existing:** the MIR eval unit behaved the same way. Both tiers fail it.
+**Found:** 2026-09-24 during the JSI35 move of dynamic code to the AST interpreter (**D8.4.3**). **Pre-existing:** the MIR eval unit behaved the same way. Both tiers fail it.
 
 ```js
 function f(a) { return eval("() => a"); }
@@ -308,7 +308,7 @@ A direct eval sees its caller's bindings only through the `EvalContext` bridge. 
 
 **Retirement path:** link a T0 caller's live environment records to the eval activation (`vibe/Lambda_Design_JS_Interpreter.md` §5.6 residual and §16 item 13). MIR callers keep the bridge until P4 shared environment cells.
 
-**Fixed:** 2026-09-24 for interpreted callers (**D8.1.3v21 / JSI36**, `vibe/Lambda_Design_JS_Interpreter.md` §16 item 13). Regression: `test/js/regression_js05_eval_env_linking.js`. A direct eval from AST code no longer installs the bridge. Its activation gets a boundary record (`JsInterpEnv::eval_script`) holding the eval's lexical declarations, and that record's `outer` is the caller frame's live environment. Free names in eval code — and in closures it creates — resolve by name through that chain (`js_interp_lookup_name`), so `f(7)()` above reads the caller's `a` after the eval returns. The `JsInterpEvalBridge` projection, its write-back, and the per-activation journal frames on T0 functions are deleted. A MIR caller still uses the bridge, so a closure made by its eval code still loses the local; that is the P4 residual of §16 item 13.
+**Fixed:** 2026-09-24 for interpreted callers (**D8.4.3 / JSI36**, `vibe/Lambda_Design_JS_Interpreter.md` §16 item 13). Regression: `test/js/regression_js05_eval_env_linking.js`. A direct eval from AST code no longer installs the bridge. Its activation gets a boundary record (`JsInterpEnv::eval_script`) holding the eval's lexical declarations, and that record's `outer` is the caller frame's live environment. Free names in eval code — and in closures it creates — resolve by name through that chain (`js_interp_lookup_name`), so `f(7)()` above reads the caller's `a` after the eval returns. The `JsInterpEvalBridge` projection, its write-back, and the per-activation journal frames on T0 functions are deleted. A MIR caller still uses the bridge, so a closure made by its eval code still loses the local; that is the P4 residual of §16 item 13.
 
 ### JS05-L6 — `arguments` and `new.target` are unavailable inside direct eval — **RESOLVED**
 

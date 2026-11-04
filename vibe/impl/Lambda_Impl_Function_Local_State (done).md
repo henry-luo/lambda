@@ -7,7 +7,7 @@
 **Authority:** S1.4v2, S2.5.3v3–S2.5.4v3, S7.4.6v3,
 S9.1.2–S9.1.4v2, S9.1.7v2, S12.1.1v3–S12.1.2v3,
 S12.1.4v4, S16.4.3v4, S16.6.5v2–S16.6.9v2;
-D6.1.2v2, D6.2.3v3 and D4.3.3.
+D7.1.2, D7.2.3 and D5.3.2.
 
 ## 1. Delivery boundary
 
@@ -163,7 +163,7 @@ coverage from a program forbidden by S12.1.1v3.
 1. Audit constant evaluation, local CSE, loop transforms, stream fusion and
    parallelization consumers of `is_proc`/pure-colour facts. A local read
    depends on intervening writes even when the enclosing call is pure
-   (D6.1.2v2). Reuse existing dependency analyses or decline the transform
+   (D7.1.2). Reuse existing dependency analyses or decline the transform
    when the proof is absent; never hard-code a function or benchmark name.
 2. Ensure compile-time evaluation terminates under its existing budget or
    declines unsupported loops. Do not compile a literal infinite while by
@@ -260,7 +260,7 @@ Keep temporary output under `./temp/`; preserve unrelated working-tree edits.
 
 | Milestone | State | Evidence |
 |---|---|---|
-| Design and formal rulings | Ratified 2026-11-02 | S9.1.4v2/D6.2.3v3; user's confinement clarification incorporated. |
+| Design and formal rulings | Ratified 2026-11-02 | S9.1.4v2/D7.2.3; user's confinement clarification incorporated. |
 | P1 semantic capabilities | Qualified | Callable ownership, local control targets and fn call colour remain separate. |
 | P2 local execution | Qualified | Functional result collection, early returns, local writes and COW agree across production tiers. |
 | P3 capture modes | Qualified | Shared indexed flow graph, known-call summaries, aliases/aggregates/transitive captures; T0/MIR share actual traced parent homes. Escaping and pure closures snapshot at creation and reject captured writes. |
@@ -293,7 +293,7 @@ member/index COW replacement and sibling access use the same home. A fresh
 execution of a local declaration creates a fresh home, including inside a
 loop. Closure environments keep the home reachable through ordinary precise
 GC edges; no native stack scan, new language reference type or vendor patch
-is involved (D4.3.3). Snapshot reads copy wide scalar payloads and COW-mark
+is involved (D5.3.2). Snapshot reads copy wide scalar payloads and COW-mark
 containers. T0 frame slots hold homes; MIR retains rooted homes and value
 mirrors, refreshing mirrors after calls without clobbering pending scalar
 result companions. AUTO uses the existing satellite refusal contract for
@@ -392,7 +392,7 @@ was changed to conceal a failure. No release/performance claim is made.
 
 ### Additional root causes found during qualification
 
-- **D5.2.1v5 / D5.3.4:** T0 returned Items pointing into C++-local ABI
+- **D6.2.1 / D6.3.4:** T0 returned Items pointing into C++-local ABI
   result homes. A later call overwrote an earlier binding's tiny float. The
   unchanged base reproduces `proc/mir_mvp_roots.ls` as false on interp/auto
   and true on jit. `interp_call_function_result` now uses the existing
@@ -406,7 +406,7 @@ was changed to conceal a failure. No release/performance claim is made.
   That builder also informs the MIR store planner that its source has an
   additional observer. Container captures are covered for returned fn and
   pn values under forced collection.
-- **S9.1.4v2 / D6.2.3v3:** MIR rebuilt a named nested function's env at
+- **S9.1.4v2 / D7.2.3:** MIR rebuilt a named nested function's env at
   each direct call, observing later parent writes. Named captured definitions
   now bind a rooted closure at declaration. Direct calls load that closure's
   env while retaining static argument binding and the proven ABI; value uses
@@ -415,7 +415,7 @@ was changed to conceal a failure. No release/performance claim is made.
   later aliases, sibling calls, repeated calls with intervening writes and
   named arguments; all three tiers pass under forced GC and poisoning.
 
-- **D6.2.3v3 / D4.3.3:** initial capture-count publication read the cached
+- **D7.2.3 / D5.3.2:** initial capture-count publication read the cached
   count before initializing it, so MIR exposed a zero-field environment.
   A shared linked-capture counter now publishes the count before consumers
   use analysis. Live-versus-snapshot equality and forced-GC cases cover the

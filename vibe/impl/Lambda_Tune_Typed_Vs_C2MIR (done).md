@@ -400,7 +400,7 @@ mixed suites (cf. mypyc, Static Hermes typed paths).
 - **No inline caches in Lambda script or LambdaJS — DECIDED 2026-08-01,
   extended to LambdaJS 2026-09-09, recorded as
   [`Lambda_Design_Compiling.md`](Lambda_Design_Compiling.md) LC1v2 and
-  **D8.4.1v2**.** Stated in lane/site terms: specialized lowerings (declared,
+  **D7.4.1**.** Stated in lane/site terms: specialized lowerings (declared,
   or inferred behind a DF-guard) have no dynamic sites by construction; open
   sites in Lambda — untyped functions, partially typed functions' open sites,
   and boxed fallback bodies alike — get plain runtime dispatch now and

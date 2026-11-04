@@ -68,7 +68,7 @@ These are quality improvements to the **synchronous** layer; they do not change 
 
 9. **Keep one native HTTP cache identity.** The enhanced cache already uses a
    SHA-256 path for both scheduler and synchronous HTTP callers, consistent
-   with D1.3v3's shared-host-substrate rule. Do not add a generic short-hash
+   with D1.3's shared-host-substrate rule. Do not add a generic short-hash
    file-cache helper or a compatibility sidecar format.
 
 10. **Streaming reads for large files.** Add `read_text_file_streaming(filename, chunk_cb, user_data)` for files that don't fit comfortably in arena memory (e.g., large PDFs, datasets). Avoids the implicit "whole-file in `MEM_CAT_TEMP`" assumption.
@@ -555,7 +555,7 @@ cryptographically randomized exclusive creation on Windows) rather than merely
 predicting an unused name. Prefixes and suffixes are single validated path
 components, and every result remains under `./temp/`. This prevents races and
 path escape when Section 4's network/cache workers call the helper concurrently,
-and keeps temp creation inside the policy boundary required by **D7.5.2**.
+and keeps temp creation inside the policy boundary required by **D11.1.2**.
 
 ### A.5 Bounded `dir_walk_recursive`
 

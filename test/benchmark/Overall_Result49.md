@@ -13,7 +13,7 @@
 - **Range notation:** per-row timing cells are `median [minimum–maximum]`; the complete ordered sample set is retained in the result JSON's status detail.
 - **Engines in this report:** MIR (untyped), MIR (typed), C2MIR, LambdaJS, Node.js
 - **Results source:** `test/benchmark/benchmark_results_v49.json`
-- **Separately measured:** LambdaJS, LambdaJS (auto) measured on 2026-09-24, 3 run(s) from `test/benchmark/benchmark_results_v49_ljs.json` on Lambda commit `537a867839`. LambdaJS re-measured on the archived v49 binary: Part 1 pinned JS_EXECUTION_BACKEND=mir, Part 2 unpinned AUTO (D8.1.3v19); the original v49 LambdaJS cells ran unpinned AUTO for both parts.
+- **Separately measured:** LambdaJS, LambdaJS (auto) measured on 2026-09-24, 3 run(s) from `test/benchmark/benchmark_results_v49_ljs.json` on Lambda commit `537a867839`. LambdaJS re-measured on the archived v49 binary: Part 1 pinned JS_EXECUTION_BACKEND=mir, Part 2 unpinned AUTO (D8.4.2); the original v49 LambdaJS cells ran unpinned AUTO for both parts.
 - **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists
 
 JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes/hashmap 1). Each Lambda `.ls` port implements exactly one `runIteration()`, so every engine times the same work. A previous revision hard-coded 8 repeats for every file, which made the JS engines run 8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.

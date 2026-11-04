@@ -26,7 +26,7 @@ a language/runtime issue from an application-level failure.
 - **Resolution / ruling:** the catalog row now carries `DOM_F_NEUTRAL`, making
   the core operation callable from the realm-neutral Lambda DOM package. The
   implementation also roots its node, property, and computed-style temporary
-  across nested calls, satisfying D5.3.3's precise-rooting requirement.
+  across nested calls, satisfying D6.3.3's precise-rooting requirement.
 
 ## 2026-09-07 — pending scalar resolution requires intrinsic NO_GC audit handling
 
@@ -42,7 +42,7 @@ a language/runtime issue from an application-level failure.
 - **Resolution / ruling:** retain the intentional `JIT_EFFECT_NO_GC` contract
   protected by `AutoAssertNoGC`; teach the audit that this is a dynamically
   guarded MIR intrinsic rather than a general unchecked no-GC leaf. This
-  preserves the exact-rooting contract in D5.3.3.
+  preserves the exact-rooting contract in D6.3.3.
 
 ## 2026-09-07 — dense-array fast-store import omitted a required safepoint
 
@@ -56,4 +56,4 @@ a language/runtime issue from an application-level failure.
   `make test-radiant-baseline`, and the full lint gate.
 - **Resolution / ruling:** classify the import `JIT_EFFECT_MAY_GC`; the
   localized final write remains no-GC while the native boundary now preserves
-  caller roots under D5.3.3.
+  caller roots under D6.3.3.

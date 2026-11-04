@@ -1,4 +1,4 @@
-// D3.3.3v3: narrow, floating, and wide stores with runtime element arguments.
+// D4.3.3: narrow, floating, and wide stores with runtime element arguments.
 fn update(n: int, byte: i8, small: f32, wide: u64) any^ {
     var a: i8[] = fill(64, 0i8)^
     var b: f32[] = fill(64, 0f32)^

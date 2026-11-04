@@ -3,8 +3,8 @@
 **Status**: Four-mechanism architecture implemented (rpmalloc removed); Pool v2 core implementation landed; §9 remediation and MP-15..MP-18 implementation pending
 **Version**: 2.10.1
 **Date**: 2026-09-17
-**Scope**: **Native heap-based memory management only** — how heap bytes are obtained, owned, shared, and released across Lambda and Radiant. Stack-based memory management (the native C stack, the runtime's side/number stacks, rooting frames, and stack-disciplined value storage) is **out of scope**: see [Lambda_Design_Stack_Frame.md](./Lambda_Design_Stack_Frame.md), [Lambda_Design_Stack_Rooting.md](./Lambda_Design_Stack_Rooting.md), and [Formal Design D5](../doc/Lambda_Formal_Design.md#d5-execution-state-stacks-and-rooting). (ScratchArena, §4.2, remains in scope: its *discipline* is stack-like but its storage is heap-owned arena blocks.)
-**Related**: [Formal Design D4](../doc/Lambda_Formal_Design.md#d4-memory-management), [Memory Context](./Memory_Context.md), [Memory Model](./Lambda_Design_Memory_Model.md), [GC2](./Lambda_Garbage_Collector2.md)
+**Scope**: **Native heap-based memory management only** — how heap bytes are obtained, owned, shared, and released across Lambda and Radiant. Stack-based memory management (the native C stack, the runtime's side/number stacks, rooting frames, and stack-disciplined value storage) is **out of scope**: see [Lambda_Design_Stack_Frame.md](./Lambda_Design_Stack_Frame.md), [Lambda_Design_Stack_Rooting.md](./Lambda_Design_Stack_Rooting.md), and [Formal Design D5](../doc/Lambda_Formal_Design.md#d6-execution-state). (ScratchArena, §4.2, remains in scope: its *discipline* is stack-like but its storage is heap-owned arena blocks.)
+**Related**: [Formal Design D4](../doc/Lambda_Formal_Design.md#d5-memory), [Memory Context](./Memory_Context.md), [Memory Model](./Lambda_Design_Memory_Model.md), [GC2](./Lambda_Garbage_Collector2.md)
 
 **Revision 1.0** (2026-08-08): implemented the rpmalloc exit — hardened `memtrack` as the
 sole system-heap substrate, opaque VM-region identity, explicit allocation edge
@@ -56,8 +56,8 @@ stale-pointer/reset, drain/destroy, forced-move/failure-preserving realloc,
 and randomized alloc/free/realloc-model tests. The boundary validator now
 accepts a valid payload pointer in the final header-sized window of committed
 storage; `pool_block_range_valid` remains the authority for the complete block
-span. These tests exercise the D4.2.5v2 registry-free block path directly.
-**Revision 2.11** (2026-09-17): D4.2.5v3 replaces the formerly roadmap-like
+span. These tests exercise the D5.2.4 registry-free block path directly.
+**Revision 2.11** (2026-09-17): D5.2.4 replaces the formerly roadmap-like
 raw-allocation wording with an explicit application-level prohibition:
 outside the memory-management implementations under `lib/`, code must never
 call libc `malloc`/`calloc`/`realloc`/`free` directly. It selects the matching
@@ -89,7 +89,7 @@ without a new design ruling.
    into `stack_alloc`/`stack_free` for function-scoped temporaries plus
    manager-internal use (MP-18, §2.5).
 2. **GC heap** — the script runtimes' collector-owned storage (§3;
-   D4.3.1–D4.3.2).
+   D5.3.1–D5.3.1).
 3. **Arena** — **sequential allocation, batch free**, in two variants:
    whole-arena free (reset/destroy) and **tail-region free** (mark/rewind —
    alloc, free the tail region, alloc, free the tail region, …, free the
@@ -99,7 +99,7 @@ without a new design ruling.
    teardown as the safety net). Sharing: read-only, multi-threaded readers
    allowed; writing: single thread (§5).
 
-This is a *mechanism* taxonomy, formalized as **D4.1.4v4**. Formal **D4.1.1v2**
+This is a *mechanism* taxonomy, formalized as **D5.1.4**. Formal **D5.1.1**
 enumerates a *content* taxonomy (GC heap / Input arena / AST-const pool /
 NamePool) on a different axis: a content tier states lifetime and collector
 visibility; a mechanism states how bytes are obtained and released. Every
@@ -133,15 +133,15 @@ Consequences worth stating once:
 
 Every arena and pool is created **against a context** — a named `MemContext`
 owner node recording role, label, parent, and thread mode at creation
-(D4.2.1). There are no free-floating arenas or pools. Canonical contexts:
+(D5.2.1). There are no free-floating arenas or pools. Canonical contexts:
 
 - **document/input context** — the Input arena of a parsed document
-  (D4.1.2–D4.1.3);
+  (D5.1.2–D5.1.3);
 - **parse context** — parser/AST scratch and compilation-lifetime storage;
 - **eval context** — per-runtime pools/arenas for evaluation-transient
   structures (one per script isolate);
 - **validation call** — the validator's scratch arena (§9 R4);
-- **layout/render context** — Radiant document/view regions (D4.5.1);
+- **layout/render context** — Radiant document/view regions (D5.5.1);
 - **JIT/module context** — MIR module storage and caches;
 - **session/application context** — the root that ultimately owns the above.
 
@@ -184,7 +184,7 @@ into it), its lifetime is governed by an **allocator-level `ref_count`**:
 - Accounting counts bytes once, at the creating context's node; additional
   holders record non-owning diagnostic edges only (§7.1's count-once rule).
 - **Immortality is the limiting case**: static Mark data "born shared and
-  immortal" (D4.1.2) is a permanent reference — the count never reaches zero.
+  immortal" (D5.1.2) is a permanent reference — the count never reaches zero.
   Ref-counting generalizes the existing immortal-storage discipline to
   shareable-but-finite lifetimes (e.g. session navigation replacing a
   document while older eval contexts still read it — the known
@@ -201,7 +201,7 @@ mechanism that satisfies it:
    owner-wide teardown → **pool**.
 4. If allocation is GC-traced → **GC heap**, never a residual pool.
 5. If a uniform fixed-size type demonstrates measured hot reuse → a
-   specialized type-stable slab pool may be considered (MP-8, D4.5.1) — a
+   specialized type-stable slab pool may be considered (MP-8, D5.5.1) — a
    specialized owner, not a general allocator.
 
 | Lifetime and behavior | Mechanism | Examples |
@@ -212,7 +212,7 @@ mechanism that satisfies it:
 | One explicit owner; independent resize/free | raw memtrack | `StrBuf`/`StringBuf` backing, isolated byte buffers |
 | C library allocator callback | memtrack adapter preserving the callback ABI | FreeType-style alloc/realloc/free |
 | Individual free plus owner-wide teardown | pool | selectively released document/view records |
-| Uniform fixed-size objects, measured churn | type-stable slab pool | eligible Radiant types under D4.5.1 |
+| Uniform fixed-size objects, measured churn | type-stable slab pool | eligible Radiant types under D5.5.1 |
 | Interned/append-only semantic storage | owning arena / append-only store | NamePool/ShapePool entries (MP-20) |
 | String built into a pool destination | pool-backed builder, `realloc` growth (buffer may move) | `StringBuf` general case (§2.3) |
 | String built into an arena destination | arena-backed builder, **tail growth** (buffer stays put) | formatters producing output; parsers building Input/Mark strings (§2.3) |
@@ -307,7 +307,7 @@ subsystem owner has a `MemRole` with one canonical role → default-category
 mapping. Owner-local counters roll up into the owning `MemContext` node
 without one heavyweight node per allocation.
 
-Under **D4.2.2**, `MemContext` is the sole pressure/OOM escalation
+Under **D5.2.2**, `MemContext` is the sole pressure/OOM escalation
 coordinator. Legacy `memtrack` threshold callbacks are compatibility adapters
 that register reclaimers with `MemContext`; they do not run a second pressure
 ladder inside `mem_alloc` (MP-10).
@@ -440,7 +440,7 @@ only through the manager.
 
 ## 3. Mechanism 2 — GC Heap
 
-Under **D4.3.1–D4.3.2** the collector owns allocation policy *and* backing.
+Under **D5.3.1–D5.3.1** the collector owns allocation policy *and* backing.
 The GC obtains VM regions from the platform layer (§6) and owns all object
 slabs, data-zone blocks, and large-object mappings directly. It never calls a
 pool or arena for object, data-zone, slab, or large-object storage.
@@ -450,7 +450,7 @@ pool or arena for object, data-zone, slab, or large-object storage.
   GC policy). Allocation pops a free slot or bumps in the current slab; sweep
   returns dead slots to the slab free list; empty slabs/extents follow a
   deterministic, stats-visible retention policy. Addresses never move
-  (D4.3.1).
+  (D5.3.1).
 - **Data zone** — nursery and tenured zones own page-aligned segments;
   allocation is bump-based; collection resets or replaces segments under the
   existing dual-zone algorithm with its one-fixup-per-surviving-object
@@ -558,11 +558,11 @@ SVG/PDF `text_content`, `layout_counters.cpp` temp array).
 
 ### 4.3 Arena-backed semantic tiers
 
-The D4.1.1 content tiers stay distinct even where they share the arena
-implementation: Input/Mark arenas remain collector-invisible (D4.1.3);
+The D5.1.1 content tiers stay distinct even where they share the arena
+implementation: Input/Mark arenas remain collector-invisible (D5.1.3);
 AST/const storage uses a compilation-lifetime arena; NamePool/ShapePool remain
 semantic owners whose append-only entries live in owned arena blocks; Radiant
-document/view regions continue to act as cycle collectors under D4.5.1.
+document/view regions continue to act as cycle collectors under D5.5.1.
 Sharing a block implementation does not merge ownership tiers or let pointers
 outlive their tier.
 
@@ -784,7 +784,7 @@ failure the old allocation, free-list links, and accounting are untouched.
 ### 5.4 Threading
 
 One writer thread per pool; block-chain and free-list operations are lock-free
-(D4.2.1's hot-path intent without TLS heaps). Pool v2 has no Pool mutex or
+(D5.2.1's hot-path intent without TLS heaps). Pool v2 has no Pool mutex or
 global allocation lock. Extent growth and teardown may enter the VM or
 `MemContext` substrate, but those are slow-path lifecycle operations, not
 per-allocation synchronization. Genuinely shared pools use the §1.4 ref-count
@@ -861,7 +861,7 @@ Two structural observations from the census:
 - **The I2 ordering hazard survives in hand-written form.** `js_scope.cpp:451`,
   `py_scope.cpp:250`, and `rb_scope.cpp:195` each carry the comment "Release
   name_pool BEFORE destroying ast_pool" — manual reverse-dependency ordering
-  that D4.2.1 cascade teardown is supposed to own (§7.2). Converting these
+  that D5.2.1 cascade teardown is supposed to own (§7.2). Converting these
   pools to context-bound arenas (MP-16) removes the hand-ordering, not just
   the allocation cost.
 
@@ -906,8 +906,8 @@ handling.
 
 The owning subsystem (GC heap or arena) is the sole release authority.
 Optional `MEM_KIND_VM_REGION` records are non-owning diagnostics that never
-double-count bytes or unmap during cascade teardown (D4.2.1). The VM layer is
-the future Stage 2 page-allocation choke point (D4.2.2) but stays a thin
+double-count bytes or unmap during cascade teardown (D5.2.1). The VM layer is
+the future Stage 2 page-allocation choke point (D5.2.2) but stays a thin
 portability/accounting layer; reclamation policy lives above it in
 `MemContext`.
 
@@ -916,7 +916,7 @@ portability/accounting layer; reclamation policy lives above it in
 ## 7. Memory Context Integration
 
 `MemContext` is the allocator factory, ownership graph, accounting surface,
-and teardown coordinator (D4.2.1). Context binding (§1.3) makes it the home of
+and teardown coordinator (D5.2.1). Context binding (§1.3) makes it the home of
 every arena and pool.
 
 ### 7.1 Node model
@@ -946,7 +946,7 @@ once.
 ### 7.3 Allocation failure and Stage 2
 
 VM and memtrack failures report upward through one non-recursive entry point;
-`MemContext` runs the D4.2.2 escalation (drop caches, trim arenas, collect GC,
+`MemContext` runs the D5.2.2 escalation (drop caches, trim arenas, collect GC,
 retry, configured fail/park/abort). Reclaimers must not allocate through the
 failing path, re-enter the failing allocator, or take locks in deadlock-prone
 order; deterministic fault injection exists so these paths are tested, not
@@ -967,7 +967,7 @@ Ratified in Phase 0; implemented identically by every mechanism surface.
 | `realloc(NULL, n)` | Equivalent to `alloc(n)`. |
 | `realloc(ptr, 0)` | Release `ptr`, return `NULL`. |
 | failed `realloc(ptr, n)` | Return `NULL`; preserve `ptr`, bytes, linkage, accounting. |
-| allocation failure | Return `NULL` after the configured D4.2.2 retry path; no silent abort. |
+| allocation failure | Return `NULL` after the configured D5.2.2 retry path; no silent abort. |
 | reset/destroy | Invalidate all owned allocations exactly once; repeated destroy unsupported. |
 | rewind(mark) | Invalidate exactly the tail region allocated after the mark (arena only); marks nest LIFO; rewinding to a mark already rewound past is a debug diagnostic. |
 
@@ -1041,7 +1041,7 @@ global-locked registry delete per live block, dominating wall-clock outside
 | **V6** | open | No thread-confinement debug check in `lib/mempool.c` | §5.1; MP-7 |
 | **V7** | open (R4) | The runtime type-check path allocates a `ValidationResult` **per element** — on success as well as failure — because it reuses the reporting-oriented `lambda validate` machinery for what is semantically a predicate. The defect is the allocation itself, not its mechanism: no allocator choice makes O(n) discarded records acceptable on a hot boundary | §1.1 (mechanism must fit the need); R4 |
 | **V8** | **CLOSED** (R3a, 2026-08-10) | `pool_lookup` insert/find/remove terminate only at a NULL slot; tombstones never count toward the resize trigger and removal never restores NULLs, so a table whose NULLs are exhausted spins forever. Exact-algorithm simulation: with varied addresses, **247 alloc/free churn cycles** reach 0 NULLs / 44 tombstones on the 64-slot table and the next insert never terminates. Not reproduced in-process (2M cycles) — system-malloc address recycling bounds the landing-slot set — a **latent** unbounded loop whose probability grows with session length and address diversity (2026-08-10 audit addendum). *Fixed:* the whole class is removed with the table — header arithmetic is O(1) by construction, with no probe loop to fail to terminate. Guarded by `temp/pool_hang_repro.c` | correctness; §5.2 |
-| **V9** | **CLOSED (R7, 2026-08-11)** | `lib/mempool.c` now owns growth extents, boundary-tagged blocks, and segregated free lists. User allocation/free operations no longer call `mem_alloc_loc`/`mem_free_loc`; those APIs remain only at Pool metadata and sub-4 KiB extent boundaries. | §5.1–§5.2; D4.1.4v4; D4.2.1v3 |
+| **V9** | **CLOSED (R7, 2026-08-11)** | `lib/mempool.c` now owns growth extents, boundary-tagged blocks, and segregated free lists. User allocation/free operations no longer call `mem_alloc_loc`/`mem_free_loc`; those APIs remain only at Pool metadata and sub-4 KiB extent boundaries. | §5.1–§5.2; D5.1.4; D5.2.1 |
 
 ### 9.3 Remediation
 
@@ -1257,7 +1257,7 @@ regions; exact large-region accounting; repeated create/destroy; object-slab
 fill/sweep/reuse with multiple slabs per extent and empty-extent trimming;
 data-zone reset/compaction with forced GC at every allocation point;
 large-object churn without double release; pointer stability and precise
-rooting under D4.3.1; empty `MemContext` graph and zero live VM regions at
+rooting under D5.3.1; empty `MemContext` graph and zero live VM regions at
 shutdown; non-owning diagnostic nodes neither double-count nor release.
 
 ### 11.3 Arena and pool tests
@@ -1299,7 +1299,7 @@ accepted with data — and the comparison must run **on the landing commit**
 | Risk | Mitigation |
 |---|---|
 | memtrack/system-heap overhead at formerly pooled hot sites | Move true bulk lifetimes to arena (§1.5); profile release builds; type-stable pool only for measured fixed-size churn. |
-| A second checked-allocation or pressure layer diverges | Improve memtrack in place; `MemContext` sole D4.2.2 coordinator; source checks reject parallel wrappers. |
+| A second checked-allocation or pressure layer diverges | Improve memtrack in place; `MemContext` sole D5.2.2 coordinator; source checks reject parallel wrappers. |
 | Tracking tax returns to release hot paths | §2.1 mode policy is normative; registry is DEBUG-only; benchmark gate on landing commits (§11.4). |
 | Pool re-grows duplicate bookkeeping | §5.2 Pool-owned extent/block rule; any per-user memtrack call, pointer hashmap, allocated-object list, or second header is a review-blocking violation. |
 | Arena retains peak block chain | Bounded warm retention; release excess on reset and pressure trim. |
@@ -1316,7 +1316,7 @@ accepted with data — and the comparison must run **on the landing commit**
 
 ## 13. Formal-Spec Reconciliation
 
-Completed for revision 1.0: D4.2.1 and D4.5.1 revised in place (`v2`) so hot
+Completed for revision 1.0: D5.2.1 and D5.5.1 revised in place (`v2`) so hot
 allocator operations stay free of the `MemContext` registry lock, memtrack is
 the sole system-allocation substrate, and "one substrate" means VM primitives
 + hardened memtrack + Memory Context; related memory docs updated. Completed
@@ -1325,34 +1325,34 @@ here (Appendix A holds its historical record and issue IDs).
 
 Completed for revisions 2.0–2.3 (formal spec **1.8.0**, 2026-08-10):
 
-1. **D4.1.1v2** — mechanism-axis note added: content tiers map onto the four
+1. **D5.1.1** — mechanism-axis note added: content tiers map onto the four
    mechanisms.
-2. **D4.1.4*** (new) — the four-mechanism taxonomy and the arena/pool
+2. **D5.1.4*** (new) — the four-mechanism taxonomy and the arena/pool
    semantic contracts, including arena's two batch-free variants (MP-12,
    MP-15).
-3. **D4.2.3*** (new) — context binding (MP-16); **D4.2.4*** (new) —
+3. **D5.2.1*** (new) — context binding (MP-16); **D5.2.3*** (new) —
    allocator-level ref-counting for shared arenas/pools, generalizing
-   D4.1.2's born-shared-immortal discipline (MP-17); **D4.2.5*** (new) —
+   D5.1.2's born-shared-immortal discipline (MP-17); **D5.2.4*** (new) —
    tracking-is-a-diagnostic policy and the raw-surface roadmap (MP-13,
    MP-14, MP-18).
-4. **D4.5.1v3** — arena's Radiant-seam wording tightened to batch-only
+4. **D5.5.1** — arena's Radiant-seam wording tightened to batch-only
    lifetime; the "audited compatibility users" individual-free carve-out
    removed.
-5. **D4.1.3**, **D4.3.1**, **D4.3.2** semantically unchanged; Appendix A
+5. **D5.1.3**, **D5.3.1**, **D5.3.1** semantically unchanged; Appendix A
    footnotes record implementation status for every `*`-marked ruling;
-   Appendix C maps D4.1/D4.2 to this document.
+   Appendix C maps D5.1/D5.2 to this document.
 
 No formal language-semantics ruling changes.
 
 Revision 2.6 updates the formal memory rulings to **spec 1.11.0** (2026-08-11):
 
-1. **D4.1.4v2** made Pool-owned VM extents, boundary-tagged variable-size
+1. **D5.1.4** made Pool-owned VM extents, boundary-tagged variable-size
    blocks, and segregated free lists the normative implementation shape. The
    semantic distinction remains unchanged: arena has batch/tail free, Pool has
    individual free.
-2. **D4.2.1v3** separates direct raw memtrack allocations from Pool extent
+2. **D5.2.1** separates direct raw memtrack allocations from Pool extent
    allocation; Pool user blocks are not `memtrack_pool_*` allocations.
-3. **D4.2.5v3** states that Pool block operations are registry-free and
+3. **D5.2.4** states that Pool block operations are registry-free and
    mutex-free on the single-writer hot path; diagnostics and accounting occur
    at extent/context boundaries.
 
@@ -1360,17 +1360,17 @@ The Pool v2 code migration is complete for the §5 owner/block contract. The
 remaining §9 items are independent policy and evidence work; they must not
 reintroduce a per-user `memtrack` wrapper or pointer index.
 
-Revision 2.7 updates the same Pool backing ruling to **D4.1.4v3** in formal
+Revision 2.7 updates the same Pool backing ruling to **D5.1.4** in formal
 spec **1.12.0**: the initial reservation defaults to 1 KiB, reservations
 double, sub-4 KiB growth uses the context/memtrack path, 4 KiB-and-larger
 growth uses page-backed VM, and each VM commit starts at the page-rounded
 `max(4 KiB, required block bytes)`. Revision 2.8 further revises this to
-**D4.1.4v4** in formal spec **1.13.0**, requiring the configured initial size
+**D5.1.4** in formal spec **1.13.0**, requiring the configured initial size
 to be clamped and rounded to `1 KiB * 2^n` before doubling begins.
 Revision 2.9 records the R7 implementation: the code now satisfies the
 Pool-owned extent/block/free-list contract, with the verification gates listed
-in §9.3. The formal ruling remains marked partial because D4.1.4 also covers
-the separate arena mark/rewind work, and D4.2.3–D4.2.5 retain their unrelated
+in §9.3. The formal ruling remains marked partial because D5.1.4 also covers
+the separate arena mark/rewind work, and D5.2.1–D5.2.4 retain their unrelated
 context/ref-count/STATS follow-ups.
 
 ---
@@ -1380,32 +1380,32 @@ context/ref-count/STATS follow-ups.
 MP-1..MP-11 are the accepted revision-1.0 decisions; MP-12..MP-21 are the
 revision-2.x rulings. MP-21 is the 2026-08-11 correction of the transitional
 owner-group implementation. The memory decisions are formalized in Formal
-Design 9.0.1 (D4.1.1v2, D4.1.4v4, D4.2.1v3, D4.2.3, D4.2.4, D4.2.5v3,
-D4.5.1v3).
+Design 9.0.1 (D5.1.1, D5.1.4, D5.2.1, D5.2.1, D5.2.3, D5.2.4,
+D5.5.1).
 
 | ID | Decision | Formal basis |
 |---|---|---|
-| **MP-1** | Retire rpmalloc without adopting another general-purpose allocator. | D4.1.1, D4.2.1 |
-| **MP-2** | The VM layer provides opaque region identities and accounting only; the owning subsystem is the sole release authority. | D4.2.1, D4.2.2 |
-| **MP-3** | GC owns its VM extents, object slabs, data blocks, and large-object records directly; an extent may hold multiple slabs. | D4.3.1–D4.3.2 |
-| **MP-4** | Ordinary arena owns blocks directly and exposes region lifetime, not arbitrary individual free. | D4.1.1, D4.1.3, D4.5.1 |
-| **MP-5** | Singular resizable buffers and allocator callbacks use the hardened memtrack API; no parallel system-allocation wrapper. | D4.2.1 |
-| **MP-6** | Pool is an owner-local variable-size allocator: it owns its blocks and individual-free policy; `memtrack`/VM provide system bytes and extent-level diagnostics, not per-user allocation ownership. | D4.2.1v3; §5.1–§5.2 |
-| **MP-7** | Pools are thread-confined by default; shared ownership must be explicit. | D4.2.1 |
-| **MP-8** | Specialized type-stable pools only for audited fixed-size workloads. | D4.5.1 |
-| **MP-9** | Correctness migration precedes optimization; new allocator machinery requires release-build evidence **measured on the landing commit**. | D4.2.1 |
-| **MP-10** | `MemContext` is the sole memory-pressure/OOM coordinator; legacy memtrack callbacks are adapters. | D4.2.2 |
-| **MP-11** | All backends obey the common edge contract (§8). | D4.2.1–D4.2.2 |
-| **MP-12** | The four-mechanism model (§1.1: raw-tracked / GC / arena / pool) is the governing memory-mechanism taxonomy. | D4.1.1v2, D4.1.4 |
-| **MP-13** | Tracked-mode policy: release default OFF; STATS is counters-only; allocation-level records exist only in DEBUG. | D4.2.5 |
-| **MP-14** | The Pool hot path is registry-free and mutex-free: fixed-header recovery plus Pool-owned free-list operations; no pointer hashmap or allocated-block index. Diagnostic registries are DEBUG-only and never the ownership mechanism. | D4.2.5v3; §5.2 |
-| **MP-15** | Semantic split: arena = sequential allocation + batch free only, where batch free has exactly two variants — whole-arena (reset/destroy) and tail-region (mark/rewind, the sidecar-stack pattern); pool = individual allocation + individual free. A non-tail-free need reclassifies the site, never adds free lists to arena. | D4.1.4v4, D4.5.1v3; §1.2, §4.1 |
-| **MP-16** | Every arena and pool is bound at creation to a `MemContext` owner context (document/input, parse, eval, validation, layout/render, JIT, session); no free-floating allocators. | D4.2.3 |
-| **MP-17** | Shared arenas/pools carry an allocator-level atomic `ref_count` (acquire/release; destroy at zero; reset requires exclusivity). Mutation remains single-writer; the count is the only cross-thread-mutable allocator field. | D4.2.4, D4.1.2 |
-| **MP-18** | Outside the memory-management implementations under `lib/`, application code must never call libc `malloc`/`calloc`/`realloc`/`free` directly: it uses the matching `memtrack` API or an owning allocator API. The raw memtrack surface later splits into `stack_alloc`/`stack_free` (function-scoped LIFO temporaries, heap-backed by a thread-confined sidecar stack) and manager-internal use; source audit enforces the prohibition. | D4.2.5v3; §2.5 |
-| **MP-19** | String builders have two legitimate cases: standalone (`StrBuf`, raw memtrack) and owner-backed (`StringBuf`, allocated from the destination pool/arena so the finished string needs no copy). Owner-backed splits by growth mechanism: **pool-backed grows by `realloc`** (buffer may move; no ordering discipline), **arena-backed grows by tail extension** (buffer stays put; requires the string to own the arena tail — formatters fit cleanly, parsers must avoid interleaving node allocation), with grow-and-abandon or size-then-build as the fallbacks when it cannot. Never build standalone and copy into an owner merely for API convenience. | D4.1.4; §2.3 |
-| **MP-20** | NamePool and ShapePool are append-only interning stores with no eviction: their entry storage is an **arena**, not a pool. They remain distinct semantic owners and `MemContext` nodes; only the backing mechanism changes. | D4.1.1v2, D4.1.4; §4.3 |
-| **MP-21** | Pool v2 owns growth extents and subdivides them into boundary-tagged variable-size blocks. The optional initial reservation is clamped to 1 KiB and rounded to `1 KiB * 2^n`; each later reservation doubles, reservations below 4 KiB use the context/memtrack block path, and reservations at/above 4 KiB use page-backed VM. Each VM commit starts at `max(4 KiB, required block bytes)`, page-rounded. Segregated free lists index free blocks by span; allocation splits, free coalesces, realloc may resize in place, reset rebuilds extent-wide free blocks, and no user allocation calls `mem_alloc_loc`/`mem_free_loc`. | D4.1.4v4, D4.2.1v3, D4.2.5v3; §5 |
+| **MP-1** | Retire rpmalloc without adopting another general-purpose allocator. | D5.1.1, D5.2.1 |
+| **MP-2** | The VM layer provides opaque region identities and accounting only; the owning subsystem is the sole release authority. | D5.2.1, D5.2.2 |
+| **MP-3** | GC owns its VM extents, object slabs, data blocks, and large-object records directly; an extent may hold multiple slabs. | D5.3.1–D5.3.1 |
+| **MP-4** | Ordinary arena owns blocks directly and exposes region lifetime, not arbitrary individual free. | D5.1.1, D5.1.3, D5.5.1 |
+| **MP-5** | Singular resizable buffers and allocator callbacks use the hardened memtrack API; no parallel system-allocation wrapper. | D5.2.1 |
+| **MP-6** | Pool is an owner-local variable-size allocator: it owns its blocks and individual-free policy; `memtrack`/VM provide system bytes and extent-level diagnostics, not per-user allocation ownership. | D5.2.1; §5.1–§5.2 |
+| **MP-7** | Pools are thread-confined by default; shared ownership must be explicit. | D5.2.1 |
+| **MP-8** | Specialized type-stable pools only for audited fixed-size workloads. | D5.5.1 |
+| **MP-9** | Correctness migration precedes optimization; new allocator machinery requires release-build evidence **measured on the landing commit**. | D5.2.1 |
+| **MP-10** | `MemContext` is the sole memory-pressure/OOM coordinator; legacy memtrack callbacks are adapters. | D5.2.2 |
+| **MP-11** | All backends obey the common edge contract (§8). | D5.2.1–D5.2.2 |
+| **MP-12** | The four-mechanism model (§1.1: raw-tracked / GC / arena / pool) is the governing memory-mechanism taxonomy. | D5.1.1, D5.1.4 |
+| **MP-13** | Tracked-mode policy: release default OFF; STATS is counters-only; allocation-level records exist only in DEBUG. | D5.2.4 |
+| **MP-14** | The Pool hot path is registry-free and mutex-free: fixed-header recovery plus Pool-owned free-list operations; no pointer hashmap or allocated-block index. Diagnostic registries are DEBUG-only and never the ownership mechanism. | D5.2.4; §5.2 |
+| **MP-15** | Semantic split: arena = sequential allocation + batch free only, where batch free has exactly two variants — whole-arena (reset/destroy) and tail-region (mark/rewind, the sidecar-stack pattern); pool = individual allocation + individual free. A non-tail-free need reclassifies the site, never adds free lists to arena. | D5.1.4, D5.5.1; §1.2, §4.1 |
+| **MP-16** | Every arena and pool is bound at creation to a `MemContext` owner context (document/input, parse, eval, validation, layout/render, JIT, session); no free-floating allocators. | D5.2.1 |
+| **MP-17** | Shared arenas/pools carry an allocator-level atomic `ref_count` (acquire/release; destroy at zero; reset requires exclusivity). Mutation remains single-writer; the count is the only cross-thread-mutable allocator field. | D5.2.3, D5.1.2 |
+| **MP-18** | Outside the memory-management implementations under `lib/`, application code must never call libc `malloc`/`calloc`/`realloc`/`free` directly: it uses the matching `memtrack` API or an owning allocator API. The raw memtrack surface later splits into `stack_alloc`/`stack_free` (function-scoped LIFO temporaries, heap-backed by a thread-confined sidecar stack) and manager-internal use; source audit enforces the prohibition. | D5.2.4; §2.5 |
+| **MP-19** | String builders have two legitimate cases: standalone (`StrBuf`, raw memtrack) and owner-backed (`StringBuf`, allocated from the destination pool/arena so the finished string needs no copy). Owner-backed splits by growth mechanism: **pool-backed grows by `realloc`** (buffer may move; no ordering discipline), **arena-backed grows by tail extension** (buffer stays put; requires the string to own the arena tail — formatters fit cleanly, parsers must avoid interleaving node allocation), with grow-and-abandon or size-then-build as the fallbacks when it cannot. Never build standalone and copy into an owner merely for API convenience. | D5.1.4; §2.3 |
+| **MP-20** | NamePool and ShapePool are append-only interning stores with no eviction: their entry storage is an **arena**, not a pool. They remain distinct semantic owners and `MemContext` nodes; only the backing mechanism changes. | D5.1.1, D5.1.4; §4.3 |
+| **MP-21** | Pool v2 owns growth extents and subdivides them into boundary-tagged variable-size blocks. The optional initial reservation is clamped to 1 KiB and rounded to `1 KiB * 2^n`; each later reservation doubles, reservations below 4 KiB use the context/memtrack block path, and reservations at/above 4 KiB use page-backed VM. Each VM commit starts at `max(4 KiB, required block bytes)`, page-rounded. Segregated free lists index free blocks by span; allocation splits, free coalesces, realloc may resize in place, reset rebuilds extent-wide free blocks, and no user allocation calls `mem_alloc_loc`/`mem_free_loc`. | D5.1.4, D5.2.1, D5.2.4; §5 |
 
 ---
 
@@ -1519,8 +1519,8 @@ Revision 2.0 — done when:
 - Context-binding audit complete: every `arena_create`/`pool_create` names its
   owner context (MP-16), and the shared-allocator census (§15 Q7) classifies
   every sharer as immortal or ref-counted (MP-17).
-- Formal D4 reconciliation merged (spec 9.0.1, 2026-09-17): D4.1.1v2,
-  D4.1.4v4, D4.2.1v3, D4.2.3–D4.2.5v3, D4.5.1v3. ✅ for the design;
+- Formal D4 reconciliation merged (spec 9.0.1, 2026-09-17): D5.1.1,
+  D5.1.4, D5.2.1, D5.2.1–D5.2.4, D5.5.1. ✅ for the design;
   Pool v2 core implementation ✅ (R7); thread/lifetime/STATS follow-ups remain.
 
 At that point Lambda owns only the policies unique to Lambda: GC allocation,
@@ -1598,3 +1598,83 @@ Pool itself owns VM-backed extents, boundary-tagged blocks, and free lists.
 
 `Memory_Pooling.md` was retired on 2026-08-10 with this revision; its
 surviving design content lives in §1.5, §4.2, §5.1, and this appendix.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D4.1.4v5 → D5.1.4
+
+**D5.1.4*** Heap bytes are kept by exactly **four mechanisms** — tracked
+raw allocation (`memtrack`), GC heap, arena, pool — and no fifth may be
+added without a new ruling. **Arena = sequential allocation + batch
+release**, where batch release has exactly two variants: whole-arena
+(reset/destroy) and tail-region (mark/rewind — the sidecar-stack
+pattern). An arena block is **never individually freed or discarded**; it
+may only be **retained for reuse** — kept on the arena's retired list and
+handed back to a later allocation from the same arena, its bytes released
+with the arena. *Retain, never discard.* Retention is the exception, not a
+second free path: its sanctioned user is DOM node retirement, which
+recycles node slots inside their document or `Input` arena. Any other site
+needing individual free is reclassified to pool. A tail-rewound arena has
+**one owner** (a scratch stack) that owns its tail: no other allocation and
+no retention may land in it. **Pool = individual allocation + individual
+free** (plus owner-wide teardown as the safety net). Both share
+single-writer/multi-reader: published allocations are readable from any
+thread; all mutation (alloc, retire, free, reset, rewind, destroy) stays on
+the one writer thread. The general variable-size Pool
+implementation owns growth extents, subdivides them into boundary-tagged
+blocks, and indexes **free blocks by span** in segregated free lists. Its
+optional initial reservation is clamped to at least 1 KiB and rounded up to
+the sequence `1 KiB * 2^n`; each later reservation doubles. Reservations
+below 4 KiB use the context/memtrack block path, and reservations at or
+above 4 KiB use page-backed VM. Each VM commit starts at `max(4 KiB,
+required block bytes)` rounded to the platform page size. A Pool
+user allocation is carved from one of those blocks; it does not call
+`mem_alloc_loc`/`mem_free_loc`, use a pointer hashmap, or maintain an
+allocated-object index. Extent acquisition, release, and context accounting
+remain outside the per-block hot path. [Mem_Heap §1.1–§1.2, §4–§5; MP-12,
+MP-15, MP-21]
+
+### ex-D4.1.5 → D5.1.5
+
+**D5.1.5*** Two mechanism-selection corollaries of D5.1.4. **String
+builders** have two legitimate cases: *standalone* (raw `memtrack`, result
+copied to its destination) and *owner-backed* (buffer allocated from the
+destination pool/arena, so the finished string is handed over with **no
+copy**); pick by whether the destination lifetime is known at build time.
+Owner-backed splits by growth mechanism: **pool-backed grows by `realloc`**
+(buffer may move, no ordering discipline), **arena-backed grows by tail
+extension** (buffer stays put; the string must own the arena tail —
+formatters fit cleanly, parsers must not interleave node allocation),
+falling back to grow-and-abandon or size-then-build when it cannot. An arena-backed builder never `realloc`s. **Interning stores** (NamePool)
+are append-only with no eviction and therefore take an
+**arena**, not a pool; they remain distinct semantic owners and
+`MemContext` nodes. [Mem_Heap §2.3, §4.3; MP-19, MP-20]
+
+### ex-D4.2.5v3 → D5.2.4
+
+**D5.2.4*** Allocation tracking is a **diagnostic, never the mechanism**:
+release builds default `memtrack` OFF; STATS is counters-only;
+allocation-level registry records are DEBUG-exclusive — no tracked mode
+may impose a per-allocation global lock on release hot paths, and the
+Pool hot path is registry-free and mutex-free (fixed-header recovery,
+boundary tags, and free-list links owned by the Pool). Pool extent
+reservation/commit and teardown may enter the VM/context slow path, but
+per-block operations do not. **Outside the memory-management implementations
+under `lib/`, application code MUST NEVER call libc `malloc`, `calloc`,
+`realloc`, or `free` directly. It MUST use the corresponding hardened
+`memtrack` API (`mem_alloc`, `mem_calloc`, `mem_realloc`, `mem_free`) or an
+owning GC/Arena/Pool API; direct libc allocation is confined to implementing
+those memory-management APIs in `lib/`.** The raw surface splits into
+`stack_alloc`/`stack_free`
+(function-scoped LIFO temporaries on a thread-confined sidecar stack)
+plus manager-internal use; the source audit enforces the prohibition.
+[Mem_Heap §2.1, §2.4, §5.2; MP-13, MP-14, MP-18, MP-21]

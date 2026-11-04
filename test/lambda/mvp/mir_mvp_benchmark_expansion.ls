@@ -241,7 +241,7 @@ pn main() {
     print("null-branch: " ++ optional_rows(null) ++ " " ++ optional_rows(counter_rows) ++ " " ++ optional_counter(null) ++ " " ++ optional_counter(counter) ++ " " ++ optional_flag(null) ++ " " ++ optional_flag(true) ++ "\n")
     print("null-branch-error: " ++ (optional_counter_outcome(failed_counter_value()) ^ { ^.message }) ++ "\n")
     // present native lanes skip validation; absence and error payloads retain
-    // the ordinary checked boundary (D2.4.3, S11.4.1v5).
+    // the ordinary checked boundary (D2.3.5, S11.4.1v5).
     print("scalar-admission: " ++ required_flag(false) ++ " " ++ required_flag(true) ++ " " ++ (type(required_flag(null)) == error) ++ " " ++ required_text("ready") ++ " " ++ (type(required_text(null)) == error) ++ " " ++ (required_text_outcome(failed_text("scalar")) ^ { ^.message }) ++ "\n")
     print("container-admission: " ++ plain_map({value: 3}).value ++ " " ++ len(plain_array([1, 2])) ++ " " ++ len(plain_array([[1, 2], [3, 4]])) ++ " " ++ (type(plain_map(7)) == error) ++ " " ++ (type(plain_map(null)) == error) ++ " " ++ (type(plain_array(7)) == error) ++ " " ++ (type(plain_array(null)) == error) ++ "\n")
     print("member-key: " ++ dynamic_member({mvp_extra_payload: 7}) ++ " " ++ (dynamic_member({other: 8}) == null) ++ " " ++ (dynamic_member(failed_text("member")) ^ { ^.message }) ++ "\n")
@@ -281,7 +281,7 @@ pn main() {
     print("container-field: " ++ container_field_captures() ++ "\n")
     print("integer-text: " ++ integer_text(4294967296) ++ " " ++ (integer_text(raised_number(7)) ^ { ^.message }) ++ "\n")
     // a record outcome's field write may change its layout; the typed call
-    // re-admits the updated owner without altering the retained input (D3.3.4, S9.1.2).
+    // re-admits the updated owner without altering the retained input (D2.4.3, S9.1.2).
     let original_box: Box = {values: [1, 2], extra: []}
     print("record-layout: " ++ updated_box(original_box) ++ " " ++ len(original_box.values) ++ "\n")
 

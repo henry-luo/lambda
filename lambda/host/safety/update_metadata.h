@@ -13,7 +13,7 @@ typedef struct SecurityUpdateMetadataSnapshot {
     SecurityUpdateMetadata* entries;
 } SecurityUpdateMetadataSnapshot;
 
-// D7.5.7-D7.5.8: trusted installer/verifier only, never worker ABI. This store
+// D11.2.3-D11.2.4: trusted installer/verifier only, never worker ABI. This store
 // does NOT verify signatures or grant a target execution/installation right.
 // Initial root bytes must match the admitted out-of-band bootstrap fingerprint.
 // Missing state requires this explicit create-only installer action; no fetch,

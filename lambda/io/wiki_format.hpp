@@ -2,7 +2,7 @@
 #define LAMBDA_WIKI_FORMAT_HPP
 #include <string.h>
 
-// Routing only: wiki serialization belongs to lambda.doc.wiki (D7.1.1).
+// Routing only: wiki serialization belongs to lambda.doc.wiki (D9.1.1).
 inline const char* wiki_format_flavor(const char* type, const char* flavor = nullptr) {
     if (!type) return nullptr;
     if (!strcmp(type, "wiki")) return !flavor || !*flavor || !strcmp(flavor, "standard") || !strcmp(flavor, "wiki")

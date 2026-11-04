@@ -70,7 +70,7 @@ bool input_path_is_ebook(const char* path);
 
 // Release an Input's owned allocators (its context, arena and registries).
 // Idempotent. The pool the Input lives in calls it when the pool is destroyed
-// or reset (D4.2.6); call it directly only to release earlier. The caller
+// or reset (D5.2.5); call it directly only to release earlier. The caller
 // still owns the backing pool and URL carrier.
 void input_release_document_resources(Input* input);
 
@@ -90,7 +90,7 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id,
 ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
                                  ShapeEntry* prev_entry);
 
-// D3.4.3v5: detach a shared shape into its explicit mutation owner's pool.
+// D3.4.3: detach a shared shape into its explicit mutation owner's pool.
 TypeMap* map_clone_typemap_for_mutation(Map* map, Pool* pool, bool force = false);
 TypeElmt* elmt_clone_type_for_mutation(Element* element, Pool* pool, bool force = false);
 void elmt_put_ns(Element* element, String* key, Target* ns, Item value, Pool* pool);
@@ -103,7 +103,7 @@ ShapeEntry* clone_shape_entries(TypeAlloc alloc, const TypeMap* source,
 ShapeEntry* shape_entry_copy_as(TypeAlloc alloc, const ShapeEntry* like, TypeId type_id,
                                 ShapeEntry* prev_entry);
 
-// D3.4.3v4: the runtime-grown map's step through a transition tree. NULL
+// D3.4.3: the runtime-grown map's step through a transition tree. NULL
 // `parent` starts at the root; a non-NULL one must satisfy type_tree_owns.
 // Returns NULL when the key, the fan-out or the budget rules the tree out.
 TypeMap* type_tree_add_map_field(Input* input, TypeMap* parent, String* key,
@@ -121,7 +121,7 @@ TypeMap* type_tree_map_root(Input* input, const JsClassMeta* js_meta = nullptr);
 // laid out for `value_type` (D3.4.5 through the tree); NULL when declined.
 TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry* field,
                                 TypeId value_type, const TypeMapRetypePlan** plan = NULL);
-// D3.4.3v5: data-attribute transitions retain the field contract and payload offsets.
+// D3.4.3: data-attribute transitions retain the field contract and payload offsets.
 TypeMap* type_tree_reflag_field(Input* input, TypeMap* parent, const ShapeEntry* field, uint8_t flags);
 // Boundary admission uses the same bounded tree with the full field contract (D3.4.5).
 TypeMap* type_tree_retype_contract(Input* input, TypeMap* parent, const ShapeEntry* field,
@@ -237,7 +237,7 @@ typedef struct {
     // io.fetch {to, resume, progress} (AR-E3v2): stream the body into
     // sink_path (appended after resume_from bytes, a Range request) instead
     // of memory, and report transfer progress; both hooks run on the
-    // transfer thread and must not touch managed values (D5.3.3)
+    // transfer thread and must not touch managed values (D6.3.3)
     const char* sink_path;
     int64_t resume_from;
     int (*progress)(void* data, int64_t received, int64_t total);  // nonzero aborts

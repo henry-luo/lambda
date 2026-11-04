@@ -1,4 +1,4 @@
-// Focused-item actions reuse the ribbon's commands and source selection (D7.2.5).
+// Focused-item actions reuse the ribbon's commands and source selection (D10.2.1).
 import dom
 import lambda.editor.core.doc
 import lambda.editor.core.step

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.6.1v2/D4.6.2v2: formal named Set precedes Get, retaining descriptor/prototype fallback and packed-field reads. D8.4.1v2: cache machinery and cache arguments are removed; shared own-data branches retain canonical decoding. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
+  "description": "D5.6.1/D5.6.2: formal named Set precedes Get, retaining descriptor/prototype fallback and packed-field reads. D7.4.1: cache machinery and cache arguments are removed; shared own-data branches retain canonical decoding. D8.4.2: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

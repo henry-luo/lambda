@@ -24,17 +24,17 @@ layout, hit testing, text shaping, or caret geometry into Lambda.
 - [RAD_18](../doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md) describes the
   implemented native Selection/Range and caret substrate.
 
-> **Formal linkage.** D7.2.5 requires all UA editing policy to remain in the
+> **Formal linkage.** D10.2.1 requires all UA editing policy to remain in the
 > shipped Lambda DOM behavior package and user input plus legacy commands to
-> lower through one package operation model. D7.5.3 requires Lambda to reach
+> lower through one package operation model. D9.5.6 requires Lambda to reach
 > Radiant only through the explicit `radiant-dom` module waist. S12.1.3 keeps
 > reactive-template mutation in `on` handlers, while S12.2.2 defines element
-> mutation. D5.3.3 requires continuously rooted native handoffs. D1.10 and
-> D7.3.5 require executable conformance gates. This implementation refines those
+> mutation. D6.3.3 requires continuously rooted native handoffs. D1.10 and
+> D9.4.5 require executable conformance gates. This implementation refines those
 > rulings and introduces no formal-spec conflict.
 
-> **Specification linkage map.** D7.2.5 → §§1, 4–6, 8; D7.5.3 and D5.3.3 →
-> §7; S12.1.3 and S12.2.2 → §§6, 8; D1.10 and D7.3.5 → §11. The design does
+> **Specification linkage map.** D10.2.1 → §§1, 4–6, 8; D9.5.6 and D6.3.3 →
+> §7; S12.1.3 and S12.2.2 → §§6, 8; D1.10 and D9.4.5 → §11. The design does
 > not mint a new ledger series; the existing CE1–CE3 lineage remains at its
 > parent design home.
 
@@ -104,7 +104,7 @@ The design adopts these parts of the UA path:
 3. the browser-compatible native event, target-range, Selection/Range, IME,
    clipboard, drag, and caret substrate;
 4. an explicit, generation-checked capability for every native edit; and
-5. command policy above a mechanism-only native waist (D7.2.5, D7.5.3).
+5. command policy above a mechanism-only native waist (D10.2.1, D9.5.6).
 
 It adopts these parts of the model editor:
 
@@ -142,7 +142,7 @@ The concise answer to the selection question is therefore:
 | §8.2 `PASS` has no fallback | unsupported model action is an unhandled/error result, never permission to invoke the UA handler |
 | §9.2 structured transaction result | common package `EditResult` maps to `EditingHandleResult`, then into the gate's `EditingTransactionResult` |
 | §11 source-model reconciliation | editor Steps/history remain private; returned source selection is projected only after the matching regeneration |
-| §20 D7.2.5 UA ownership | the existing DOM `EditContext`/`EditPlan`, normalization, history, and conformance behavior remain the UA backend |
+| §20 D10.2.1 UA ownership | the existing DOM `EditContext`/`EditPlan`, normalization, history, and conformance behavior remain the UA backend |
 
 This matrix is a constraint on the implementation, not a competing summary of the
 parent design.
@@ -237,7 +237,7 @@ rather than representing independent editor features.
 5. Make DOM↔source selection projection explicit, revisioned, and free of
    feedback loops.
 6. Replace the ambient `set_selection()` channel with an explicit
-   `radiant-dom` capability operation (D7.5.3).
+   `radiant-dom` capability operation (D9.5.6).
 7. Reduce `rte_prototype.ls` to rendering, app state, command presentation,
    and calls into the editor/DOM adapters.
 
@@ -267,7 +267,7 @@ rather than representing independent editor features.
    An uncanceled model-owned operation invokes the registered model action,
    creates no UA DOM mutation/history entry, then receives the common gate's
    post-action `input` when it was applied or explicitly claimed. An
-   uncanceled UA operation follows D7.2.5 and the descriptor event contract.
+   uncanceled UA operation follows D10.2.1 and the descriptor event contract.
 3. **No universal coordinate fiction.** A DOM boundary and a source position
    remain distinct tagged spaces. Conversion occurs only through the render
    map and checked source-position bridge.
@@ -283,10 +283,10 @@ rather than representing independent editor features.
    positions, node selections, and collapsed positions are not reduced to an
    ordered `{start,end}` pair.
 7. **Native remains mechanism-only.** No C/C++ switch on a command name or
-   model schema is added (D7.2.5).
+   model schema is added (D10.2.1).
 8. **Explicit rooted handoff.** Every snapshot, host handle, and completion
    value is generation-checked and continuously rooted across handler calls
-   and reactive regeneration (D5.3.3).
+   and reactive regeneration (D6.3.3).
 
 ## 4. The shared editing core under `lambda/dom`
 
@@ -306,13 +306,13 @@ editor model:
 The existing `lambda/dom/commands.ls` remains the UA orchestration facade. It
 imports the shared modules and the DOM-specific modules. The editor imports
 only the pure shared modules; importing them must not load a document session,
-touch a host object, or create package-global mutable state (D7.2.1,
-D5.4.3, S9.1.7).
+touch a host object, or create package-global mutable state (D9.3.1,
+D6.4.3, S9.1.7).
 
 The existing `lambda/dom/edit_context.ls` and `edit_plan.ls` remain
 DOM-backend records because they carry a live host, invocation token, mutation
 epoch, DOM step kinds, and UA normalization/history facts. Calling that record
-an `EditPlan` remains consistent with D7.2.5. The common record is named
+an `EditPlan` remains consistent with D10.2.1. The common record is named
 `EditAction` so it does not pretend a DOM plan and an editor Transaction are
 the same artifact.
 
@@ -451,7 +451,7 @@ EditResult = {
 model backend name what a copy or cut puts on the clipboard. A model's
 selection can reach past what the DOM shows (the source editor renders only
 a window of lines), so the DOM selection is not always the text to copy. The
-transport stays native (D7.2.5). Radiant copies the DOM selection before it
+transport stays native (D10.2.1). Radiant copies the DOM selection before it
 invokes the model handler for a copy or cut, because the handler's own render
 can retire the selected nodes; a non-null `clipboard_text` then replaces that
 copy after the handler returns. A model with nothing to add (the rich editor)
@@ -536,7 +536,7 @@ Refactor:
 - `edit_context.ls`, DOM family modules, `edit_plan.ls`, normalization, and UA
   history remain backend-specific;
 - command-shaped native exports continue to narrow toward generic operations
-  as required by D7.2.5.
+  as required by D10.2.1.
 
 ### 5.2 Model backend
 
@@ -737,7 +737,7 @@ a replacement handler. A Selection-only change is revisioned and observable,
 but it neither reroutes the snapshotted owner nor rewrites the immutable target
 ranges. This is the fail-closed resolution of the stale-range case identified
 by the parent design §8.2/§16 Q2 while retaining ordinary observational
-`beforeinput` listeners (D7.2.5, D7.5.3).
+`beforeinput` listeners (D10.2.1, D9.5.6).
 
 #### Phase B — invoke the snapshotted action
 
@@ -801,7 +801,7 @@ transaction; no borrowed handle or package plan crosses an `await`.
 The old `SYSPROC_SET_SELECTION`, `pn_set_selection`,
 `lambda_radiant_set_selection`, `dispatch_set_selection`, and thread-local
 `pending_selection` channel have been removed. That removal is required by
-D7.5.3: runtime code must not reach Radiant through a bespoke callback when a
+D9.5.6: runtime code must not reach Radiant through a bespoke callback when a
 versioned `radiant-dom` operation is the defined boundary.
 
 ### 7.3 Stable `EditSurfaceHandle`
@@ -851,7 +851,7 @@ it does not store a DOM wrapper or Range.
 
 All Item-bearing native handoffs use `RootFrame`/`Rooted` or a persistent root
 for a genuinely persistent handle; no conservative stack scan or borrowed
-unrooted Item is introduced (D5.3.3).
+unrooted Item is introduced (D6.3.3).
 
 ## 8. Unified flows and prototype surface
 
@@ -1086,7 +1086,7 @@ all pass without fixture-local edit logic.
   regeneration and tag the resulting native revision `model-commit`.
 - `utils/lint/rules/structural/check_dom_editable_architecture.py` enforces the
   one-registry owner and prevents the retired ambient selection ABI from
-  returning (D1.10, D7.5.3).
+  returning (D1.10, D9.5.6).
 
 ## 11. Verification and acceptance
 
@@ -1107,7 +1107,7 @@ all pass without fixture-local edit logic.
 
 The UA backend remains gated by the applicable WPT `contenteditable`, Input
 Events, Selection/Range, and pinned Chromium editing corpus required by
-D7.2.5 and D7.3.5. Exact DOM, Selection, MutationObserver, event ordering,
+D10.2.1 and D9.4.5. Exact DOM, Selection, MutationObserver, event ordering,
 history, and command-query results remain its authority.
 
 The model backend remains gated by editor schema, command, Step mapping,
@@ -1148,7 +1148,7 @@ both backends advertise that capability.
 - backward direction and element boundaries survive round trips;
 - selection completion produces at most one `selectionchange` and an echo
   does not clear editor stored marks;
-- forced-GC stress covers every Item-bearing call (D5.3.3);
+- forced-GC stress covers every Item-bearing call (D6.3.3);
 - package-disabled mode does not activate a hidden native editing policy.
 
 ### 11.5 Acceptance statement
@@ -1173,7 +1173,7 @@ The implemented unification satisfies the following acceptance conditions:
 ### 11.6 Implementation verification record
 
 The 2026-09-08 cutover was verified with these executable gates (D1.10,
-D7.3.5):
+D9.4.5):
 
 - exact Lambda goldens for `test/lambda/dom_edit_protocol.ls` and
   `test/lambda/editor/dom_adapter.ls`, including descriptor collisions,
@@ -1228,7 +1228,7 @@ semantics. Leaving those switches preserves the root duplication.
 Rejected. It has no explicit document/host/revision capability, is valid only
 inside a thread-local handler context, and reaches Radiant outside the
 `radiant-dom` module contract. An explicit deferred completion is safer and
-composable with toolbar commands (D7.5.3).
+composable with toolbar commands (D9.5.6).
 
 ### Compute model target ranges independently
 

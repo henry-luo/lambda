@@ -1,5 +1,5 @@
 // browser WebSocket adapter: synchronous WebIDL entry points enqueue work;
-// only native task activations may park on the shared transport (D7.4.2).
+// only native task activations may park on the shared transport (D9.5.2).
 #ifndef LAMBDA_NO_NETWORK
 #include "../dom/dom_websocket.h"
 #include "../dom/dom.h"
@@ -244,7 +244,7 @@ static Item browser_writer(Activation*, Item wrapper) {
 }
 
 // completion and scheduler abandonment both clear borrowed task pointers before
-// the wrapper's native finalizer can run (D5.3.3).
+// the wrapper's native finalizer can run (D6.3.3).
 static void browser_task_done(LambdaTask*, Item, void*) {}
 static void browser_task_release(void* data) { *(LambdaTask**)data = nullptr; }
 static LambdaTask* browser_task_start(ActivationEntry entry, Item wrapper, LambdaTask** slot) {

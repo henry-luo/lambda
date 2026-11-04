@@ -1,4 +1,4 @@
-// Tune26 / D2.4.1-D2.4.3 / D3.3.3v3: a strict previous-index recurrence
+// Tune26 / D2.3.4-D2.3.5 / D4.3.3: a strict previous-index recurrence
 // shares one dense extent proof across a complete float expression tree.
 
 pn tune26_dense_carried_index(values: float[], n: int) float^ {

@@ -58,7 +58,7 @@ own immutable metadata under **D3.4.7** rather than hidden class-map fields.
 
 **Body — `this.prop =`.** Inside the body, `this` is a normal receiver; `this.prop = v` lowers to either a shaped-slot write (when the slot was pre-allocated) or `js_property_set`. Instance-field initializers run **before** the constructor body, base-class-first, with `this` bound to the partially-constructed object (`:2850`).
 
-**Epilogue / return rules.** After the constructor call, `js_new_check_constructor_return(obj, result)` implements the ES rule: if the constructor explicitly returned an object (MAP/ARRAY/ELEMENT/FUNC/OBJECT/VMAP) that value becomes the instance, otherwise the freshly-created `obj` is used. Per **D6.2.2v2**, all dynamic `new`, `Reflect.construct`, bound construction, Proxy construction, and `super()` paths pass `newTarget` as an explicit `js_construct_value` operand. The selected construct entry scopes the active binding read by `js_get_new_target` and restores it on every success/ERROR exit; there is no pending handoff.
+**Epilogue / return rules.** After the constructor call, `js_new_check_constructor_return(obj, result)` implements the ES rule: if the constructor explicitly returned an object (MAP/ARRAY/ELEMENT/FUNC/OBJECT/VMAP) that value becomes the instance, otherwise the freshly-created `obj` is used. Per **D7.2.2**, all dynamic `new`, `Reflect.construct`, bound construction, Proxy construction, and `super()` paths pass `newTarget` as an explicit `js_construct_value` operand. The selected construct entry scopes the active binding read by `js_get_new_target` and restores it on every success/ERROR exit; there is no pending handoff.
 
 ---
 
@@ -115,7 +115,7 @@ A computed key (`[expr]`) is stored on the relevant entry as `computed = true` w
 
 ## 8. Subclassable builtins
 
-`class MyArr extends Array {}` cannot start life as a plain `Map` — the instance needs the builtin's internal behaviour (exotic length, primitive slot, typed-array backing) *and* the subclass prototype. `js_construct_value` is the sole dynamic boundary: intrinsic constructors carry direct typed construct bodies, and the concrete body allocates its internal-slot-bearing instance using the explicit `newTarget` prototype. Bound and Proxy construct entries forward the same operand. Source classes are function values, so construction enters the ordinary capability path and delegates inherited builtin construction back into `js_construct_value` (**D6.2.2v2**).
+`class MyArr extends Array {}` cannot start life as a plain `Map` — the instance needs the builtin's internal behaviour (exotic length, primitive slot, typed-array backing) *and* the subclass prototype. `js_construct_value` is the sole dynamic boundary: intrinsic constructors carry direct typed construct bodies, and the concrete body allocates its internal-slot-bearing instance using the explicit `newTarget` prototype. Bound and Proxy construct entries forward the same operand. Source classes are function values, so construction enters the ordinary capability path and delegates inherited builtin construction back into `js_construct_value` (**D7.2.2**).
 
 The `Array`-extends case also has a compile-time fast path: when the (sole, unique) superclass identifier is `Array`, `new` emits `js_array_new(0)` directly (`js_mir_statement_lowering.cpp:2800`). Exotic get/set behaviour on the resulting instances is [JS_12 — TypedArrays](JS_12_TypedArrays.md).
 
@@ -123,7 +123,7 @@ The `Array`-extends case also has a compile-time fast path: when the (sole, uniq
 
 ## 9. Method-call lowering boundary
 
-An ordinary `obj.method(args)` always evaluates the receiver, performs the observable property `Get`, evaluates arguments, and calls the resulting value with `obj` as `this`. The former P7 receiver-class/property-name direct lane was removed: a known source class and spelling do not prove current function identity after replacement, deletion, accessor installation, prototype mutation, or Proxy interception. `jm_resolve_native_call` now permits native/direct lowering only for exact lexical function bindings; future JR8 feedback may devirtualize a proven callee identity with a guard and ordinary fallback (**D6.2.2v2**).
+An ordinary `obj.method(args)` always evaluates the receiver, performs the observable property `Get`, evaluates arguments, and calls the resulting value with `obj` as `this`. The former P7 receiver-class/property-name direct lane was removed: a known source class and spelling do not prove current function identity after replacement, deletion, accessor installation, prototype mutation, or Proxy interception. `jm_resolve_native_call` now permits native/direct lowering only for exact lexical function bindings; future JR8 feedback may devirtualize a proven callee identity with a guard and ordinary fallback (**D7.2.2**).
 
 ---
 

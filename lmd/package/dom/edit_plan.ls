@@ -1,6 +1,6 @@
 // Immutable package plan records.  The current waist applies the supported
 // step shapes synchronously; keeping the plan data explicit prevents command
-// aliases from growing their own native mutation paths (D7.2.5).
+// aliases from growing their own native mutation paths (D10.2.1).
 
 pub fn make(context, descriptor, value, session) {
     {

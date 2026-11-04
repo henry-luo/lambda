@@ -11,8 +11,8 @@ implementation is measured separately in the closeout below.
 This follows the [completed round](JS_MVP_Release_Profile_Comparison_20260928.md).
 It proposes implementation under existing rulings: **S1.11** preserves hosted
 ECMAScript semantics; **D8.2.3** requires extraction after two working clients;
-**D8.2.4v2–D8.2.6** govern shared indexing, inference, and demand-driven MIR;
-**D8.3.1v2**, **D8.4.1v2–D8.4.3v2**, and **D5.3** govern guarded variants,
+**D8.2.4–D8.2.6** govern shared indexing, inference, and demand-driven MIR;
+**D7.3.1**, **D7.4.1–D7.4.3**, and **D6.3** govern guarded variants,
 immutable code, direct calls, explicit completions, and precise roots.
 No normative ruling changes are proposed.
 
@@ -22,12 +22,12 @@ retained after the required semantic and release-timing gates.
 
 ## Implementation closeout (2026-09-29)
 
-The [implementation and exact-archive evidence](../../test/benchmark/js_mvp/untyped_tuning_20260929/README.md) records retained code, rejected screens, MIR examples, provenance, and validation. The final O3/LTO/NDEBUG release-profile archive is `temp/js-untyped-tune-20260929/final-guarded-profile.exe`, SHA-256 `b1f79a45f35d28309d320f1d36d827446b4e5bf63dbfba5ef3b9708f05cfcdc9`. Every attributed full-JS pair pins `JS_EXECUTION_BACKEND=mir`; early AUTO screens are retained only as diagnostics. **S1.11**, **D5.3**, **D8.2.3**, **D8.2.6**, **D8.3.1v2**, and **D8.4.3v2** still govern the retained admissions and generic continuations.
+The [implementation and exact-archive evidence](../../test/benchmark/js_mvp/untyped_tuning_20260929/README.md) records retained code, rejected screens, MIR examples, provenance, and validation. The final O3/LTO/NDEBUG release-profile archive is `temp/js-untyped-tune-20260929/final-guarded-profile.exe`, SHA-256 `b1f79a45f35d28309d320f1d36d827446b4e5bf63dbfba5ef3b9708f05cfcdc9`. Every attributed full-JS pair pins `JS_EXECUTION_BACKEND=mir`; early AUTO screens are retained only as diagnostics. **S1.11**, **D6.3**, **D8.2.3**, **D8.2.6**, **D7.3.1**, and **D7.4.3** still govern the retained admissions and generic continuations.
 
-* **Priority 1:** the tagged-array fast reader now admits rooted Float-home computed keys, while length expansion invalidates packed evidence and holes still perform inherited Get. The common Float Item decoder was extracted into `mir_emitter_shared.hpp` and called by both Lambda and JS. Text search's own-element helper count dropped from 195.25M to 36,864 in the focused profile; direct old/final MIR timing is 35,398 → 28,822 ms (0.8142, 5/5 faster, identical output). A companion direct reader failed the paired gain gate. Ordinary JS Arrays have no exact ArrayNum physical proof merely from homogeneous examples, so cross-function promotion to Lambda's ArrayNum witness was not admitted; the guarded tagged representation supplies the useful hit without importing Lambda's COW/null rules (**S1.11**, **D8.2.4v2–D8.2.6**).
-* **Priority 2:** passing additional JS scalar lists to the shared hoister found no hot hoists and was not retained. A bounded, uncaptured lexical Number `while` copy with a runtime entry guard and complete generic sibling is retained. Triangl's copy adds native `dadd` sites while preserving the boxed `js_increment` fallback. Its isolated completion-only/final archive replay is 0.8982 with 5/5 faster pairs and identical output; the direct original/final median is 0.9223. Lambda's int53/null accumulator proof is not JS semantics, so only the existing shared physical emitters and hoister are reused; the language-owned proof scope stays separate (**S1.11**, **D8.2.3**, **D8.3.1v2**).
-* **Priority 3:** guarded numeric-field reads and the individual-operand exact method ABI failed the NBody/Bounce and broader AWFY gates and were removed. A narrower exact `Math.max` method edge was retained: after original Get and both argument evaluations, it guards the retrieved callable and Number arguments, calls the shared scalar max, and falls back to the same retrieved callable and rooted arguments. Its text-search screen was 0.9190, 5/5 faster against the preceding shared-decoder archive. Coercing binary and branch comparisons now carry Error Items through catch routing instead of swallowing throwing ToPrimitive completions (**S1.11**, **D5.3**, **D8.4.2v2–D8.4.3v2**).
-* **Priority 4:** log-pipeline profiling recorded 2.16M ASCII splits, 28.8M ASCII slices, 24.66M substring-cache hits, 4.12M misses, and 42.09M named probes. Extra cache and split-append experiments did not pass exact paired timing and were removed. Triangl's whole-module MIR grows from 5,444 to 7,926 lines from the bounded loop copy, while direct old/final wall medians improve 6,800 → 6,271 ms. The 62-row full/MVP wall geomean is 1.908× versus the earlier snapshot's 1.827×; those one-pair separate-session snapshots are descriptive, not causal compiler-cost evidence (**D8.2.6**, **D8.3.1v2**).
+* **Priority 1:** the tagged-array fast reader now admits rooted Float-home computed keys, while length expansion invalidates packed evidence and holes still perform inherited Get. The common Float Item decoder was extracted into `mir_emitter_shared.hpp` and called by both Lambda and JS. Text search's own-element helper count dropped from 195.25M to 36,864 in the focused profile; direct old/final MIR timing is 35,398 → 28,822 ms (0.8142, 5/5 faster, identical output). A companion direct reader failed the paired gain gate. Ordinary JS Arrays have no exact ArrayNum physical proof merely from homogeneous examples, so cross-function promotion to Lambda's ArrayNum witness was not admitted; the guarded tagged representation supplies the useful hit without importing Lambda's COW/null rules (**S1.11**, **D8.2.4–D8.2.6**).
+* **Priority 2:** passing additional JS scalar lists to the shared hoister found no hot hoists and was not retained. A bounded, uncaptured lexical Number `while` copy with a runtime entry guard and complete generic sibling is retained. Triangl's copy adds native `dadd` sites while preserving the boxed `js_increment` fallback. Its isolated completion-only/final archive replay is 0.8982 with 5/5 faster pairs and identical output; the direct original/final median is 0.9223. Lambda's int53/null accumulator proof is not JS semantics, so only the existing shared physical emitters and hoister are reused; the language-owned proof scope stays separate (**S1.11**, **D8.2.3**, **D7.3.1**).
+* **Priority 3:** guarded numeric-field reads and the individual-operand exact method ABI failed the NBody/Bounce and broader AWFY gates and were removed. A narrower exact `Math.max` method edge was retained: after original Get and both argument evaluations, it guards the retrieved callable and Number arguments, calls the shared scalar max, and falls back to the same retrieved callable and rooted arguments. Its text-search screen was 0.9190, 5/5 faster against the preceding shared-decoder archive. Coercing binary and branch comparisons now carry Error Items through catch routing instead of swallowing throwing ToPrimitive completions (**S1.11**, **D6.3**, **D7.4.2–D7.4.3**).
+* **Priority 4:** log-pipeline profiling recorded 2.16M ASCII splits, 28.8M ASCII slices, 24.66M substring-cache hits, 4.12M misses, and 42.09M named probes. Extra cache and split-append experiments did not pass exact paired timing and were removed. Triangl's whole-module MIR grows from 5,444 to 7,926 lines from the bounded loop copy, while direct old/final wall medians improve 6,800 → 6,271 ms. The 62-row full/MVP wall geomean is 1.908× versus the earlier snapshot's 1.827×; those one-pair separate-session snapshots are descriptive, not causal compiler-cost evidence (**D8.2.6**, **D7.3.1**).
 
 Acceptance on the final source: 91/91 JS optimizer tests, six changed-path tests under forced/poisoned GC, 20/20 MIR ratchet probes, 6,011/6,011 Lambda baseline, and 40,261/40,261 fully passing Test262 with zero regressions. The canonical final screen attempted 63 rows and validated 62 against Node 22.13.0; Navier–Stokes remains the explicit MVP post-timing preflight failure. The fixed 62-row full/MVP execution geomean is 1.550×, versus 1.544× in the earlier separate-session snapshot, with 17 full-JS wins in each. Exact interleaved old/final replay, not the snapshot difference, supports retained tuning attribution.
 
@@ -190,13 +190,13 @@ function/closure creation in `js_runtime_function.cpp`; it does **not** mean
 Start with text search and Triangl. Reuse the untyped Lambda pattern of
 call-site/return evidence feeding an immutable native entry and indexed
 consumer. Admit only a complete proven or guarded signature, retaining the
-boxed fallback (**D8.3.1v2**, **D8.4.1v2**). A JS ordinary Array is not a
+boxed fallback (**D7.3.1**, **D7.4.1**). A JS ordinary Array is not a
 Lambda ArrayNum merely because its current examples contain numbers.
 
 1. Trace exactly where numeric-element, index-range, and representation facts
    disappear through array construction, returns, parameters, and local
    initializers. Publish inferred runtime types through the existing AST/type
-   authority, using the shared compilation indexes (**D8.2.4v2–D8.2.5v3**).
+   authority, using the shared compilation indexes (**D8.2.4–D8.2.5**).
 2. Admit native array storage where an exact physical representation proves
    it, or where nonescaping construction and every possible write prove it.
    Tagged arrays with unknown elements keep element guards. A builtin name
@@ -250,11 +250,11 @@ pure-function/value semantics and cannot be copied as a JS rule.
 Treat direct method calls as a separate measured slice. After the original
 Get and argument evaluation, an exact compile-predicted callable may use the
 existing individual-operand direct ABI and `MirFunctionPlan`/`FnVariantAnalysis`
-(**D8.4.2v2**). Preserve receiver, closure environment, realm, private home,
+(**D7.4.2**). Preserve receiver, closure environment, realm, private home,
 stack limits, roots, and explicit error completion. Guard the callable actually
 retrieved; do not repeat Get or assume method identity from receiver shape.
 Ineligible, spread, async/generator, bound/proxy, or mutable cases retain the
-existing dynamic boundary. There is no mutable method cache (**D8.4.1v2**).
+existing dynamic boundary. There is no mutable method cache (**D7.4.1**).
 
 Do not repeat the failed no-home/capability-check micro-optimizations. The new
 mechanism must remove argument-vector construction or a complete dynamic
@@ -292,7 +292,7 @@ language proof and semantic admission
 The common code owns addressing, representation transport, roots, and emitted
 control/call mechanics. JS owns coercion, reference evaluation order, mutable
 identity, prototype/exotic behavior, and exceptions; Lambda owns its value,
-nullability, and COW contracts (**S1.11**, **D5.3**, **D8.2.3**, **D8.4.3v2**).
+nullability, and COW contracts (**S1.11**, **D6.3**, **D8.2.3**, **D7.4.3**).
 Explicit-contract-only Lambda array guards and scalar-record paths are not
 automatically applicable to untyped inputs.
 

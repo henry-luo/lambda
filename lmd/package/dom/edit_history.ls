@@ -1,7 +1,7 @@
-// Package-owned UA editing history (D7.2.5). Text entries retain a node
+// Package-owned UA editing history (D10.2.1). Text entries retain a node
 // wrapper plus changed text; structural entries retain only an opaque native
 // delta id. Neither form serializes host HTML. The document session root owns
-// package data (D5.3.3), and a generic transaction restores it on rollback.
+// package data (D6.3.3), and a generic transaction restores it on rollback.
 import dom
 import session: lambda.dom.edit_session
 
@@ -168,7 +168,7 @@ fn record_stack(history, entry) {
 
 // Capture is before package mutation, record is after it. Generic native
 // retention preserves structural identity; the package still chooses its
-// history class, coalescing boundary, and stack ownership (D7.2.5).
+// history class, coalescing boundary, and stack ownership (D10.2.1).
 pub pn record(host, snapshot, phase = null, edit_context = null) {
     if (snapshot == null) { return false }
     let current = session.read(host);
@@ -224,7 +224,7 @@ pn restore_selection(host, entry, is_undo) {
     if (selection == null or value == null) false
     else {
         // Selection APIs use UTF-16 offsets while all package text policy uses
-        // codepoints. Convert at this one explicit boundary (D7.2.5).
+        // codepoints. Convert at this one explicit boundary (D10.2.1).
         dom.set_base_and_extent(selection, entry.node,
                                 utf16_from_codepoint(value, point.anchor, 0, 0)^,
                                 entry.node,
@@ -273,7 +273,7 @@ pn replay_step(host, edit_context, entry, is_undo) {
     restored and dom.edit_sync_selection(host,edit_context.token)
 }
 
-// Provisional updates never become standalone undo entries (D7.2.5, IME9).
+// Provisional updates never become standalone undo entries (D10.2.1, IME9).
 pn record_composition(host,current,entry,phase,edit_context) {
     let previous = if (current.composition == null) [] else current.composition.steps
     let steps = if (entry == null) previous else [*previous,entry];

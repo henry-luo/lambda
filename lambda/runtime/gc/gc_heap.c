@@ -1567,22 +1567,24 @@ static int is_gc_object(gc_heap_t* gc, void* ptr) {
     return !gc->object_zone && gc_bump_block_owns_exact(gc, ptr);
 }
 
-void gc_mark_item(gc_heap_t* gc, uint64_t item) {
-    void* ptr = item_to_ptr(gc, item);
-    if (!ptr) return;
-
-    // only mark objects that are in the GC object zone (have GCHeader)
+static void gc_mark_candidate(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr) return;
+    size_t bucket = (((uintptr_t)ptr >> 4) ^ ((uintptr_t)ptr >> 12)) & (GC_MARK_CACHE_SIZE - 1);
+    // shared globals/prototypes recur on many edges; only validated marks bypass ownership lookup.
+    if (gc->collecting && gc->mark_cache[bucket] == ptr) return;
     if (!is_gc_object(gc, ptr)) return;
-
     gc_header_t* header = gc_get_header(ptr);
     gc_mark_header(gc, header);
+    if (gc->collecting && header->marked && !(header->gc_flags & GC_FLAG_FREED))
+        gc->mark_cache[bucket] = ptr;
+}
+
+void gc_mark_item(gc_heap_t* gc, uint64_t item) {
+    gc_mark_candidate(gc, item_to_ptr(gc, item));
 }
 
 void gc_mark_object_ptr(gc_heap_t* gc, void* ptr) {
-    if (!ptr || !is_gc_object(gc, ptr)) return;
-
-    gc_header_t* header = gc_get_header(ptr);
-    gc_mark_header(gc, header);
+    gc_mark_candidate(gc, ptr);
 }
 
 static int gc_drain_mark_stack(gc_heap_t* gc);
@@ -1679,11 +1681,7 @@ static void gc_process_weak_slots(gc_heap_t* gc) {
 }
 
 static void gc_mark_possible_item(gc_heap_t* gc, uint64_t value) {
-    void* ptr = item_to_ptr(gc, value);
-    if (!ptr || !is_gc_object(gc, ptr)) return;
-
-    gc_header_t* header = gc_get_header(ptr);
-    gc_mark_header(gc, header);
+    gc_mark_item(gc, value);
 }
 
 static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size) {
@@ -1698,7 +1696,7 @@ static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size
 // attributes share the identical ShapeEntry walk, so they share this.
 //
 // D3.4.1 makes the packed layout an ABI: every reader must decode the same
-// bytes the store path wrote, and D3.4.6/D2.6.1 put the one shared descriptor
+// bytes the store path wrote, and D3.4.6/D3.2.1 put the one shared descriptor
 // resolver in charge of which lane that is. SCU9 stores that descriptor on the
 // ShapeEntry, so the collector reads it (lambda_shape_entry_lane) and never
 // classifies from Type::type_id: a non-simple `type` contract (`T?`, a union,
@@ -1767,10 +1765,10 @@ static void gc_trace_shape_field(gc_heap_t* gc, const void* shape_entry,
 // lambda.h; the collector must not re-declare either C++ layout locally.
 static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
                                   int64_t byte_size) {
-    // nominal metadata can own a guest constructor/prototype environment (D5.3).
+    // nominal metadata can own a guest constructor/prototype environment (D6.3).
     gc_mark_item(gc, lambda_shape_nominal_owner(type_ptr));
     uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_SHAPE);
-    // D3.4.3v3: a tree node's chain continues past its last field into a
+    // D3.4.3: a tree node's chain continues past its last field into a
     // descendant's, whose offsets lie outside this map's data.
     uint8_t* last = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_LAST);
     while (shape) {
@@ -1861,10 +1859,10 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t* p = (uint8_t*)obj;
         uint8_t flags = p[LAMBDA_GC_OFF_CONTAINER_FLAGS];
         uint8_t array_flags = p[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS];
-        // D2.6.6v2: the JS companion map moved to the attribute face traced
+        // D3.1.1: the JS companion map moved to the attribute face traced
         // below, so there is no reserved elements slot to mark here.
         (void)flags;
-        // D2.6.6v2: ArrayNum extends Map, so it can carry attributes too.
+        // D3.1.1: ArrayNum extends Map, so it can carry attributes too.
         {
             void* attr_type = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
             void* attr_data = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
@@ -1889,7 +1887,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_ARRAY_: {
-        // Array extends Map (D2.6.6v2): the 8-byte Container header, then the
+        // Array extends Map (D3.1.1): the 8-byte Container header, then the
         // attribute face, then the shared List content face.
         uint8_t* p = (uint8_t*)obj;
         void* items_ptr = *(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS);
@@ -1923,7 +1921,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 gc_mark_item(gc, items[i]);
             }
         }
-        // D2.6.6v2: an array now carries Map's attribute face too. It is NULL
+        // D3.1.1: an array now carries Map's attribute face too. It is NULL
         // for a plain array, so this costs one branch; it is what lets array
         // properties live in the array itself rather than a reserved tail slot.
         {
@@ -1951,7 +1949,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
             gc_mark_object_ptr(gc, ((LambdaGcOrderedMapLayout*)obj)->entries);
         }
         if (map_kind == MAP_KIND_PROXY) {
-            // both JS front ends share these three inline Item edges (D1.5v2).
+            // both JS front ends share these three inline Item edges (D1.5).
             uint64_t* edges = (uint64_t*)(p + sizeof(LambdaGcMapLayout));
             for (int i = 0; i < 3; i++) gc_mark_item(gc, edges[i]);
         }
@@ -1965,7 +1963,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         }
         if (!type_ptr) break;
 
-        // D4.3.1: the object owns one fixup for its complete data allocation.
+        // D5.3.1: the object owns one fixup for its complete data allocation.
         // Dynamic JS shapes may reserve pointer-width slots beyond byte_size;
         // bounding tracing by the packed logical size skipped those live slots.
         int64_t byte_size = data_ptr
@@ -1976,7 +1974,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_ELEMENT_: {
-        // Element extends Array extends Map (D2.6.6v2): the attribute face is
+        // Element extends Array extends Map (D3.1.1): the attribute face is
         // FIRST, and the content face follows. Object
         // is Element, hence the shared case.
         uint8_t* p = (uint8_t*)obj;
@@ -2077,7 +2075,7 @@ static void gc_record_compaction_owner(gc_heap_t* gc, gc_header_t* header) {
                 &gc->compaction_owner_capacity, gc->compaction_owner_count + 1,
                 GC_MARK_STACK_INITIAL, MEM_CAT_CONTAINER)) {
         // liveness is already established; an optional worklist must not lose
-        // owners when its allocation fails (D4.3.1, D5.3.3).
+        // owners when its allocation fails (D5.3.1, D6.3.3).
         gc->compaction_owners_valid = false;
         return;
     }
@@ -2138,7 +2136,7 @@ static size_t gc_array_num_elem_bytes(uint8_t elem_type) {
     return elem_bytes ? elem_bytes : 8;
 }
 
-// D2.6.6v2: every container in the Map -> Array -> Element chain carries the
+// D3.1.1: every container in the Map -> Array -> Element chain carries the
 // same attribute face at the same offsets, so ONE helper promotes it for all of
 // them. Returns the number of buffers moved.
 static int gc_compact_attr_face(gc_heap_t* gc, uint8_t* p) {
@@ -2290,7 +2288,7 @@ static void gc_compact_data(gc_heap_t* gc) {
         switch (tag) {
         case LMD_TYPE_ARRAY_: {
             uint8_t* p = (uint8_t*)obj;
-            // D2.6.6v2: an array carries Map's attribute face, and the trace
+            // D3.1.1: an array carries Map's attribute face, and the trace
             // pass follows it, so compaction must promote that buffer too or a
             // live array keeps a dangling `data` pointer after the nursery reset.
             {
@@ -2397,7 +2395,7 @@ static void gc_compact_data(gc_heap_t* gc) {
             void* type_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
             if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
                 int data_cap = *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP);
-                // D4.3.1: data_cap is the allocation contract. TypeMap.byte_size
+                // D5.3.1: data_cap is the allocation contract. TypeMap.byte_size
                 // can be smaller than a JS constructor's reserved fixed slots;
                 // copying only byte_size left the live object pointing at a
                 // truncated buffer after the nursery reset.
@@ -2485,7 +2483,7 @@ static void gc_compact_data(gc_heap_t* gc) {
 
 // Evacuate marked nursery and tenured data directly into one fresh zone once
 // tenured storage has grown beyond two mature nursery blocks. Reusing the
-// normal compactor with each source in turn preserves D4.3.1: every surviving
+// normal compactor with each source in turn preserves D5.3.1: every surviving
 // buffer receives exactly one owner-slot fixup in this collection.
 static int gc_full_compact_tenured_data(gc_heap_t* gc,
         size_t* nursery_survivor_bytes) {
@@ -2574,7 +2572,7 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
             hashmap_free(ordered->index); ordered->index = NULL;
         }
         if (kind != MAP_KIND_ORDERED && kind != MAP_KIND_PLAIN && gc->js_native_destroy) {
-            // D4.1.4v4: Map wrappers can own tracked raw allocations, so sweep
+            // D5.1.4: Map wrappers can own tracked raw allocations, so sweep
             // must release those payloads when the GC owner dies.
             gc->js_native_destroy(obj);
         }
@@ -2697,6 +2695,7 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     }
     uint64_t gc_total_token = GC_PROFILE_ENTER("gc_collect_total");
     gc->collecting = 1;
+    memset(gc->mark_cache, 0, sizeof(gc->mark_cache));
 
     log_debug("gc_collect: starting collection #%zu (%zu objects, %zu bytes, data_zone=%zu)",
               gc->collections + 1, gc->object_count, gc->total_allocated,
@@ -2805,9 +2804,9 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     size_t nursery_used_before = gc_data_zone_used(gc->data_zone);
     size_t tenured_before = gc_data_zone_used(gc->tenured_data);
 
-    // Finalizers run while both source zones are intact (D4.3.3). Retaining
+    // Finalizers run while both source zones are intact (D5.3.2). Retaining
     // survivor marks lets compaction visit only the swept live list, avoiding
-    // a second pointer chase over fragmented dead slots (D4.3.1).
+    // a second pointer chase over fragmented dead slots (D5.3.1).
     uint64_t gc_sweep_token = GC_PROFILE_ENTER("gc_sweep");
     gc_sweep(gc);
     GC_PROFILE_LEAVE("gc_sweep", gc_sweep_token);

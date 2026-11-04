@@ -1,4 +1,4 @@
-// D4.4.7/D8.1.1: transported place homes survive AUTO publication and loop handoff.
+// D5.4.6/D8.3.1: transported place homes survive AUTO publication and loop handoff.
 import helper: .place_borrow_homes
 type Cell = {k: int}
 type Box = {cell: Cell, count: int, values: int[]}

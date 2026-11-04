@@ -56,7 +56,7 @@ static int64_t scratch_retain(ScratchInspector* inspector, Item value) {
     if (inspector->live_handles >= SCRATCH_HANDLES || inspector->homes->length >= 65536) return 0;
     ScratchValue* home = (ScratchValue*)mem_calloc(1, sizeof(ScratchValue), MEM_CAT_TEMP);
     if (!home) return 0;
-    // D5.2/D5.3.3: number homes and precise Item slots both outlive the request.
+    // D6.2/D6.3.3: number homes and precise Item slots both outlive the request.
     value = lambda_item_adopt_scalar_home(value, &home->scalar_home);
     if (!root_vector_push(&inspector->values, value)) { mem_free(home); return 0; }
     if (!arraylist_append(inspector->homes, home)) {

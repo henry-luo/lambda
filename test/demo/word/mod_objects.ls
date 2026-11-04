@@ -1,4 +1,4 @@
-// Generated objects share image ownership, selection, and history (S1.4, D7.2.5).
+// Generated objects share image ownership, selection, and history (S1.4, D10.2.1).
 import lambda.editor.core.doc
 import lambda.editor.core.step
 import lambda.editor.core.transaction

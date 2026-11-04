@@ -1,4 +1,4 @@
-// Object layout is source-owned; native geometry only supplies the anchor frame (D7.2.5).
+// Object layout is source-owned; native geometry only supplies the anchor frame (D10.2.1).
 import dom
 import lambda.editor.core.doc
 import lambda.editor.core.step

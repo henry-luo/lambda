@@ -1,4 +1,4 @@
-// DOCX uses ordinary immutable Items (D7.2.1/D7.2.4); XML names are expanded before interpretation.
+// DOCX uses ordinary immutable Items (D9.3.1/D9.3.4); XML names are expanded before interpretation.
 import xml: lambda.doc.xml
 import package_uri: lambda.doc.uri
 pub let W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"

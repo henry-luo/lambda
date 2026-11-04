@@ -3,7 +3,7 @@
 - **Date:** 2026-08-28
 - **Status:** **PRODUCTION CUTOVER COMPLETE (2026-08-29).** Normal LambdaJS and TypeScript compilation uses the first-party C lexer plus hybrid recursive-descent/Pratt parser and direct `JsAstNode` sink. The vendored Tree-sitter JavaScript and TypeScript grammars remain unchanged and link only into `lambda-cst` for reference/differential checks.
 - **Scope:** replace the production JavaScript and TypeScript Tree-sitter front ends with one small first-party C lexer plus hybrid recursive-descent/Pratt parser that reduces directly into the retained `JsAstNode` graph.
-- **Formal linkage:** **D1.1** (a guest is grammar + AST builder + `LangProfile`), **D1.3** (guests reuse contracts below their semantic boundary), **D4.1.1v2/D4.1.4v4** (AST-pool lifetime and the closed allocator-mechanism set), **D8.1.3v10** (retained `JsScript`/JavaScript AST and first-party source parser), **D8.2.1–D8.2.5** (one core-node catalog, no tree rewriting, indexed compilation unit, typed pass schedule), and **D8.6.4v2** (release timing methodology).
+- **Formal linkage:** **D1.1** (a guest is grammar + AST builder + `LangProfile`), **D1.3** (guests reuse contracts below their semantic boundary), **D5.1.1/D5.1.4** (AST-pool lifetime and the closed allocator-mechanism set), **D8.4.1** (retained `JsScript`/JavaScript AST and first-party source parser), **D8.2.1–D8.2.5** (one core-node catalog, no tree rewriting, indexed compilation unit, typed pass schedule), and **D8.6.4** (release timing methodology).
 - **Related:** `vibe/Lambda_Grammar_Parser.md`, `vibe/jube/TS_Grammar_Reduce2.md`, `doc/dev/js/JS_02_Parsing_AST.md`, `doc/dev/js/JS_16_Testing.md`, `lambda/runtime/parser/`, `lambda/js/build_js_ast.cpp`, `lambda/js/js_scope.cpp`, `lambda/ts/`, and the checked-in reference grammars under `lambda/tree-sitter-{javascript,typescript}/`.
 
 The historical phased proposal below records the cutover criteria. Its P5
@@ -106,7 +106,7 @@ Source line count is a maintainability diagnostic, not a binary-size result.
 ### 3.1 Goals
 
 - **Admitted-language parity.** Preserve the exact syntax and early-error behavior the current JS and TS production pipelines admit. Reference grammars alone are not enough when the current AST builder rejects or reinterprets a Tree-sitter-valid CST.
-- **Alignment with Lambda parsing.** Use the same source-span, bounded-lookahead, RD/Pratt, reduction-sink, fail-closed, reference-oracle, and release-measurement architecture as the Lambda C parser under **D8.1.1v5**, without importing Lambda-language semantics into JavaScript.
+- **Alignment with Lambda parsing.** Use the same source-span, bounded-lookahead, RD/Pratt, reduction-sink, fail-closed, reference-oracle, and release-measurement architecture as the Lambda C parser under **D8.3.2**, without importing Lambda-language semantics into JavaScript.
 - **Maximum safe reuse.** Promote or generalize the Lambda parser's language-neutral mechanics and reuse current JS/TS AST constructors and semantic passes. **D1.3** requires reuse below the semantic boundary, not reuse of Lambda token or grammar accidents.
 - **One JS/TS parser flow.** JavaScript is the base grammar; TypeScript is a mode plus extensions. There is no second copy of statement, declaration, class, function, pattern, list, or expression parsing.
 - **Minimum retained parser code.** Common parsing flows have one owner function/table. The third near-identical case triggers extraction before it lands.
@@ -180,7 +180,7 @@ There is one parser core with two sinks during migration:
 
 The sink ABI carries committed syntax facts—form, source span, operator/token, flags, and child values—so the sink never reparses a source span to discover what the parser already knew. Speculative probes never call the sink.
 
-The AST sink may return `JsAstNode*`-backed opaque values. Short-lived descriptors for property/method/parameter/list assembly live only until their parent reduction and use existing pool/tail-rewind ownership under **D4.1.1v2/D4.1.4v4**. No partial AST is published after an error.
+The AST sink may return `JsAstNode*`-backed opaque values. Short-lived descriptors for property/method/parameter/list assembly live only until their parent reduction and use existing pool/tail-rewind ownership under **D5.1.1/D5.1.4**. No partial AST is published after an error.
 
 ### 5.1 Proposed source boundary
 
@@ -317,7 +317,7 @@ No statement parser implements its own ASI variation. ASI decisions are recorded
 
 The lexer is streaming with bounded lookahead. Checkpoints copy byte offset, line/column, lexical goal, template/brace depth, and current token state. They allocate no AST nodes and emit no diagnostics until commit.
 
-Token text is a borrowed slice of the synchronously owned source. Cooked names/literals are allocated only by the AST sink in the existing AST/name pools. This preserves **D4.1.1v2** and adds no allocator mechanism under **D4.1.4v4**.
+Token text is a borrowed slice of the synchronously owned source. Cooked names/literals are allocated only by the AST sink in the existing AST/name pools. This preserves **D5.1.1** and adds no allocator mechanism under **D5.1.4**.
 
 ## 8. Parser design
 
@@ -562,7 +562,7 @@ Against the current non-authoritative archive snapshot, the provisional 50% ceil
 
 ### 12.3 Performance gate
 
-Performance testing uses `make release`; debug results are invalid. The benchmark follows **D8.6.4v2** methodology: identical preloaded manifests, one warm-up, five complete measured runs, median comparison, and no file IO/execution/process/cleanup time.
+Performance testing uses `make release`; debug results are invalid. The benchmark follows **D8.6.4** methodology: identical preloaded manifests, one warm-up, five complete measured runs, median comparison, and no file IO/execution/process/cleanup time.
 
 Measure two distinct questions:
 

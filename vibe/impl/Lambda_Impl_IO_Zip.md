@@ -5,8 +5,8 @@
 > sources and the authorized embedding delta directly under `lib/zip`.
 > **Design:** [Lambda_IO_Zip.md](../Lambda_IO_Zip.md).
 > **Formal anchors:** **S12.4.1v3/S14.3.1v3** (captured ZIP32/ZIP64 input and
-> lazy member decoding), **D7.4.5v2** (virtual carriers), **D7.1.2v2/D7.5.2**
-> (I/O layering), **D4.1.3/D4.2.4/D5.3.3** (ownership and rooting).
+> lazy member decoding), **D9.5.5** (virtual carriers), **D9.1.2/D11.1.2**
+> (I/O layering), **D5.1.3/D5.2.3/D6.3.3** (ownership and rooting).
 
 ## Delivered behavior
 
@@ -26,7 +26,7 @@ The published limits bound archive/index bytes, entries, names, path depth,
 member/aggregate expansion and explicitly opened nested archives.
 
 The shared `fs` contract exposes archive/file/directory `Velmt` nodes and
-`VArray` child views (**D7.4.5v2**). Missing parents are synthesized, child order
+`VArray` child views (**D9.5.5**). Missing parents are synthesized, child order
 follows first central-directory appearance, and wrappers initialize on access.
 Listing, indexing, counting and metadata access decode no member payloads.
 Member access lazily checks expansion size and CRC, then parses as requested.
@@ -58,19 +58,19 @@ and the general local `fs(path)` factory remain outside this work's scope.
 | Runtime | `lambda.hpp`, interpreter, MIR and builtins: virtual preparation/error propagation, member `input`, checked content/count operations and output dispatch. |
 | Formatting | Public formatting boundaries preserve deferred virtual failures and finish formatting before opening ordinary output targets. |
 
-Input-owned pool/arena nodes and parsed Inputs follow **D4.1.3/D4.2.4**.
+Input-owned pool/arena nodes and parsed Inputs follow **D5.1.3/D5.2.3**.
 Pool cleanup releases the retained archive once; a child survives after the
 root goes out of scope. Runtime-owned generic content views trace their owner
-and use precise **D5.3.3** roots. Shared error data lives in the core layer so
+and use precise **D6.3.3** roots. Shared error data lives in the core layer so
 the I/O module does not depend on runtime error implementation
-(**D7.1.2v2/D7.5.2**).
+(**D9.1.2/D11.1.2**).
 
 The optional fallible virtual `prepare` callback advances the virtual ABI to 2
-and Jube ABI to 9 (**D7.4.5v2**). All five bundled native modules were rebuilt
+and Jube ABI to 9 (**D9.5.5**). All five bundled native modules were rebuilt
 with matching manifests. Deferred failures remain visible through content,
 indexing, iteration, query and formatting. `len` retains its `int` contract;
 lazy host failures use the existing defect channel and compiler `may_defect`
-fact (**S7.4.3/S14.3.1v3/D6.1.3v2**). Concrete string/array length paths retain
+fact (**S7.4.3/S14.3.1v3/D7.1.3**). Concrete string/array length paths retain
 their native treatment, with physical virtual-array dispatch checked first.
 Ordinary file and directory input results are preserved.
 
@@ -78,7 +78,7 @@ Reviewed MIR changes: DeltaBlue adds 14 instructions in `incremental_add`;
 Prettier adds 154 across checked lengths and scalar consumers, while its
 `print_node` body shrinks by 14. Updated default ratchets record the measured
 counts without slack; unmeasured platform budgets were left unchanged
-(**D6.1.3v2**).
+(**D7.1.3**).
 
 ## Verification
 
@@ -144,7 +144,7 @@ contents are documented in `test/input/zip/README.md`.
 ## Interactive archive browsing (2026-10-08)
 
 `lambda view <path>` routes directories and ZIP32/ZIP64 archives through the
-bundled `lambda.doc.doc_viewer.open_browser` path transform (**D7.2.4**).
+bundled `lambda.doc.doc_viewer.open_browser` path transform (**D9.3.4**).
 Routing uses the shared extension/signature detector; `input()` still performs
 validation and immutable capture (**S12.4.1v3**). DOCX, JAR, renamed and
 extensionless archives open the same tree. The existing HTTP probe recognizes
@@ -152,7 +152,7 @@ ZIP bytes before staging its local input.
 
 Tree rows retain the actual host Path or archive `fs` node, with display paths
 kept separately. Expanding directories enumerates child metadata; selecting a
-member requests its content (**S14.3.1v3/D7.4.5v2**). Nested archive rows open
+member requests its content (**S14.3.1v3/D9.5.5**). Nested archive rows open
 explicitly as ZIP. Member dotfiles remain visible, parse errors preserve raw
 source access, and deferred CRC failures appear at the affected row/preview.
 Images use existing binary-to-base64 formatting for data URLs; HTML previews
@@ -193,11 +193,11 @@ ZIP input; the native backends return an unavailable-format error there.
 |---|---|
 | Upstream import | **DONE:** libarchive 3.8.10, 58 C/header files plus upstream `COPYING`, flat in `lib/zip`. Release hash, pristine/applied manifests and patch reproduction verified. |
 | Evaluation contract | **DONE:** **S12.4.1v3/S14.3.1v3** ratify eager snapshots/indexes, compressed 7z metadata, lazy 7z/legacy-RAR bodies, and eager compressed-tar/RAR5 capture. |
-| Native build | **DONE:** selected C sources and generated platform header configured in JSON; native zlib/liblzma/bzip2/zstd/iconv; no external-program filters (**D7.5.2**). |
-| Shared archive layer | **DONE:** `archive.cpp` owns snapshot/index/name validation, quotas and payload/error caches; ZIP retains its decoder/writer; `archive_native.cpp` supplies native readers. Existing `fs` carriers, parse caches and precise lifetime ownership are reused (**D7.4.5v2/D4.1.3/D4.2.4/D5.3.3**). |
+| Native build | **DONE:** selected C sources and generated platform header configured in JSON; native zlib/liblzma/bzip2/zstd/iconv; no external-program filters (**D11.1.2**). |
+| Shared archive layer | **DONE:** `archive.cpp` owns snapshot/index/name validation, quotas and payload/error caches; ZIP retains its decoder/writer; `archive_native.cpp` supplies native readers. Existing `fs` carriers, parse caches and precise lifetime ownership are reused (**D9.5.5/D5.1.3/D5.2.3/D6.3.3**). |
 | Embedding controls | **DONE:** the user authorized direct edits under `lib/zip`. The recorded patch fixes per-reader charset/Unicode preservation and entry reuse, recoverable fatal allocation errors, 7z method/output policy, split/solid-RAR rejection, RAR5 Stored/zero-CRC finalization, and strict overridden names. See `lib/zip/VENDOR.md`. |
 | Decoder accounting | **DONE:** native parser allocations and partial-reader cleanup are tracked; codec workspace is bounded. Actual solid 7z predecessor/repeated output is charged, including Copy; terminal failures and cached reads cannot reset the ledger. gzip uses zlib's verified gzip wrapper rather than upstream's unchecked trailer adapter. |
-| Public dispatch | **DONE:** explicit/automatic format selection, raw binary reads, explicit mixed-format nesting, shared limits and archive viewer routing. Image/HTTP embedded streams keep native codec APIs; acquisition/member/image composition stays at Lambda's I/O boundary (**D7.5.2**). |
+| Public dispatch | **DONE:** explicit/automatic format selection, raw binary reads, explicit mixed-format nesting, shared limits and archive viewer routing. Image/HTTP embedded streams keep native codec APIs; acquisition/member/image composition stays at Lambda's I/O boundary (**D11.1.2**). |
 | Regression fixtures | **DONE:** pinned upstream independent 7z/RAR fixtures plus reproducible Python tar/wrappers, corrupt/unsafe/unsupported cases, four new `.ls`/`.txt` pairs in tier parity, and viewer fixtures. |
 
 Verification on macOS:

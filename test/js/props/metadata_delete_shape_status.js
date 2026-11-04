@@ -62,7 +62,7 @@ ok(vf.length === 4 && vf.hasOwnProperty("length") && hasKey(vf, "length"));
 
 function nf() {}
 delete nf.name;
-// D6.2.2v2 makes Function.prototype a real callable with ordinary properties;
+// D7.2.2 makes Function.prototype a real callable with ordinary properties;
 // deleting the own name therefore reveals its inherited empty-string name.
 ok(!nf.hasOwnProperty("name") && !hasName(nf, "name") && nf.name === "");
 Object.defineProperty(nf, "name", {

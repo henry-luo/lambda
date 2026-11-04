@@ -3,7 +3,7 @@
 `lambda.ime.chinese` provides the candidate engine and session reducer: full pinyin, incomplete
 last syllables, orthographic initials, mixed input, apostrophe boundaries and
 configurable fuzzy pairs. Importing the package reads no dictionary
-(D7.2.1/D7.2.3). Resource acquisition is an explicit procedure; candidate
+(D9.3.1/D9.3.3). Resource acquisition is an explicit procedure; candidate
 queries and session transitions are pure functions (S12.1.1v3). The caller
 applies composition/candidate actions and explicitly persists learned words.
 The M3 Radiant adapter supplies composition transport and a native candidate popup.
@@ -85,7 +85,7 @@ the existing OpenCC conversion with all unresolved forms retained (IME11).
 Both profile buttons select the corresponding combined pack; explicit host
 or test-fixture directory overrides are preserved. Use `validate --with-base`
 with the same `--profile` for full offline validation of either union.
-Acquisition remains lazy on enable/focus (D7.2.4v4/S12.1.1v3).
+Acquisition remains lazy on enable/focus (D9.3.4/S12.1.1v3).
 
 Load the standalone Bible pack explicitly using the existing directory option:
 
@@ -345,7 +345,7 @@ Optional body attributes configure the initial session:
 
 The adapter imports the engine directly (IME-O1) and loads on first enable
 for an eligible focused surface, or on explicit host configuration. It keeps the engine and session in the owning
-document runtime (D5.4.1), then reuses them across that document's controls.
+document runtime (D6.4.1), then reuses them across that document's controls.
 Changing profile/directory loads the requested engine and starts a fresh session;
 any previous provisional range is canceled first. Existing committed document
 text is preserved. Save a learned overlay explicitly before switching if it
@@ -396,7 +396,7 @@ has independent edits, restored on first use and after profile changes.
 These files are gitignored and persist until removed or `temp/` is cleaned.
 The original downloaded/prepared packs stay intact: demo helpers construct
 an edited engine value and rebuild its two line indexes on explicit edits
-(IME6/IME8, D7.2.4v4/S12.1.1v3). No package query or pack-format change is
+(IME6/IME8, D9.3.4/S12.1.1v3). No package query or pack-format change is
 required. This editor targets small personal change lists; it replays edits
 on load, rather than preparing a replacement bulk dictionary.
 
@@ -439,5 +439,5 @@ after the requesting handler has unwound, including from host-loop callbacks
 delivery. The same DOM composition/beforeinput/input pipeline supplies
 preedit, maxlength and history; a completed composition is one undo entry.
 The caret remains a code-point offset (S2.5.8/S17.4.1). Input policy stays in
-the Lambda package (D7.2.5); native code retains its opaque session through
-precise roots (D5.3.3).
+the Lambda package (D10.2.1); native code retains its opaque session through
+precise roots (D6.3.3).

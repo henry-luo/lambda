@@ -1,4 +1,4 @@
-// Keep editable LaTeX beside a self-contained typeset SVG (D7.2.5).
+// Keep editable LaTeX beside a self-contained typeset SVG (D10.2.1).
 import rendering: lambda.editor.math.render
 import objects: .mod_objects
 import lambda.editor.core.doc

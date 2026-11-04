@@ -1,4 +1,4 @@
-// Tune26 / D2.2.2 / D3.2.2: inferred numeric fill sources and scalar swap
+// Tune26 / D2.2.2 / D4.2.3: inferred numeric fill sources and scalar swap
 // temporaries preserve a declared int[] lane without repeated representation
 // guards on the successful store path.
 

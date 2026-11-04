@@ -10,16 +10,16 @@ and excludes TIFF JPEG12, PixarLog, LogLuv, NeXT, and ThunderScan. Ordinary
 dependency inventory, profile decisions, and size policy are in
 [section 5.4](#54-build-profile-dependencies-and-size-policy); measurements and
 audit evidence are in the [retired build review](<../impl/Lib_Image_Build (retired).md>). The byte-codec boundary remains
-**D7.1.2v2**; JPEG12 pixel requests return an explicit checked-channel error
+**D9.1.2**; JPEG12 pixel requests return an explicit checked-channel error
 under **S7.4.4**. No formal ruling changes are introduced.
 
 **Confirmed source policy (2026-10-15):** the user directs that official codec source be imported under `./lib/image/` and modified directly, following the local-source approach of `lib/re2/`. Separate vendor patch files are not required for this image-library work.
 
-**Confirmed build policy (2026-10-15):** image sources, generated feature headers, CPU/platform selection, and linking are declared only in the build configuration (`build_lambda_config.json`, whose image targets and generators live in its imported `build_deps_config.json`). The ordinary Lambda build compiles the explicit image I/O source subset into one static archive. All upstream CMake and related build configurations are removed; no separate codec build system or installed-codec prefix is used (**D7.1.1**, **D7.1.6–D7.1.7v6**).
+**Confirmed build policy (2026-10-15):** image sources, generated feature headers, CPU/platform selection, and linking are declared only in the build configuration (`build_lambda_config.json`, whose image targets and generators live in its imported `build_deps_config.json`). The ordinary Lambda build compiles the explicit image I/O source subset into one static archive. All upstream CMake and related build configurations are removed; no separate codec build system or installed-codec prefix is used (**D9.1.1**, **D9.2.2–D9.2.3**).
 
 **Scope:** one shared raster image library for Lambda, Radiant, bitmap fonts, and document import/export; retain PNG, JPEG, GIF, and WebP, and add AVIF, BMP, TIFF, and ICO.
 
-**Spec linkage:** D7.1.1–D7.1.3 (layering and resource I/O), D7.1.6–D7.1.7v6 (build profiles), D4.1.3–D4.1.4v5 and D4.2.6 (allocation and ownership), D5.3.3 (native rooting), S7.4.1–S7.4.5 (failure channels), S17.8.1 (option validation). See the [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), and [documentation convention](../../doc/Doc_Convention.md).
+**Spec linkage:** D9.1.1–D9.1.3 (layering and resource I/O), D9.2.2–D9.2.3 (build profiles), D5.1.3–D5.1.4 and D5.2.5 (allocation and ownership), D6.3.3 (native rooting), S7.4.1–S7.4.5 (failure channels), S17.8.1 (option validation). See the [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), and [documentation convention](../../doc/Doc_Convention.md).
 
 This records the approved image-library scope within the existing formal rulings. It does not change the language semantics or amend the formal specs.
 
@@ -54,7 +54,7 @@ Bitmap font decoder -------+------ lib/image   byte/stream codecs
                          libavif / libtiff / libnsbmp
 ```
 
-This follows **D7.1.1** and **D7.1.2v2**: raw context-free mechanisms belong in `lib`; resource I/O belongs in `lambda-io`; Radiant consumes acquired sources. Keeping byte decoding below Lambda also lets `lib/font/font_rasterize_tvg.cpp` decode embedded PNG glyphs without an upward dependency. The project gets one implementation even though resource ownership requires two entry layers.
+This follows **D9.1.1** and **D9.1.2**: raw context-free mechanisms belong in `lib`; resource I/O belongs in `lambda-io`; Radiant consumes acquired sources. Keeping byte decoding below Lambda also lets `lib/font/font_rasterize_tvg.cpp` decode embedded PNG glyphs without an upward dependency. The project gets one implementation even though resource ownership requires two entry layers.
 
 The codec core has no dependency on `Item`, `Input`, the GC, `ImageSurface`, DOM, GPU textures, URLs, or event loops. It reads a borrowed memory span or a caller-supplied reader and writes to a caller-supplied sink. HTTP/data-URI acquisition stays in the existing resource infrastructure; codecs never fetch.
 
@@ -130,9 +130,9 @@ For multi-image data, distinguish **animation frames**, **document pages**, and 
 
 Sources and sinks are borrowed for synchronous operations. An open decoder borrows its source and context until closed; the caller must retain both. Each successful decoded result owns its pixels and any retained metadata, and remains valid after closing the decoder. `image_decoded_dispose` is the single public release operation and is safe on an empty result.
 
-Use existing tracked allocation for Lambda-owned native pixels and scratch; do not introduce another allocator mechanism (**D4.1.4v5**). Prefer codec APIs that write into provided buffers or accept allocation callbacks. Where a vendor owns internal allocations, close them with the vendor's matching release API and document the portion of memory the adapter cannot directly account for. Source limits, codec-native limits, and conservative admission estimates supplement tracked budgets; do not claim that a pixel quota bounds all codec memory.
+Use existing tracked allocation for Lambda-owned native pixels and scratch; do not introduce another allocator mechanism (**D5.1.4**). Prefer codec APIs that write into provided buffers or accept allocation callbacks. Where a vendor owns internal allocations, close them with the vendor's matching release API and document the portion of memory the adapter cannot directly account for. Source limits, codec-native limits, and conservative admission estimates supplement tracked budgets; do not claim that a pixel quota bounds all codec memory.
 
-Input-owned resources may register cleanup with the existing pool lifecycle (**D4.1.3**, **D4.2.6**). Runtime adapters root Lambda values with `RootFrame`/`Rooted` across allocations and reload borrowed GC pointers after safepoints (**D5.3.3**). A worker must hold a native snapshot or another sanctioned stable owner; it must not retain a bare pointer into a movable Lambda binary. No native-stack scanning is introduced.
+Input-owned resources may register cleanup with the existing pool lifecycle (**D5.1.3**, **D5.2.5**). Runtime adapters root Lambda values with `RootFrame`/`Rooted` across allocations and reload borrowed GC pointers after safepoints (**D6.3.3**). A worker must hold a native snapshot or another sanctioned stable owner; it must not retain a bare pointer into a movable Lambda binary. No native-stack scanning is introduced.
 
 ## 4. Uniform errors and diagnostics
 
@@ -207,7 +207,7 @@ Trim the imported source/build subset to the supported feature matrix, retaining
 
 Record the upstream URL, imported release/commit, retained license notices, and a brief summary of local adaptations in each imported library's source record. Modify the checked-in source directly and use ordinary Git history for review and maintenance. No separate `patches/` files or patch-replay workflow is required. The user's explicit source policy above authorizes this approach for the image-library work when applying the general vendor instructions.
 
-Build the imported sources through `build_lambda_config.json` and generated build machinery, with explicit dependency versions and feature checks. Avoid linking an additional system copy of a codec already built from the local source. Required release formats must not silently disappear when a package is absent. Deliberately reduced profiles expose their capability set. Image support remains excluded from the current WASM evaluation profile (**D7.1.7v6**); runtime-only native CLI builds can use the codec core without Radiant (**D7.1.6**).
+Build the imported sources through `build_lambda_config.json` and generated build machinery, with explicit dependency versions and feature checks. Avoid linking an additional system copy of a codec already built from the local source. Required release formats must not silently disappear when a package is absent. Deliberately reduced profiles expose their capability set. Image support remains excluded from the current WASM evaluation profile (**D9.2.3**); runtime-only native CLI builds can use the codec core without Radiant (**D9.2.2**).
 
 ### 5.4 Build profile, dependencies, and size policy
 
@@ -231,7 +231,7 @@ Status (2026-10-16, macOS ARM64): decoder-only AVIF, size optimization for every
 
 **AVIF is decoder-only.** `CONFIG_AV1_ENCODER=0`, `CONFIG_AV1_DECODER=1`, high-bit-depth decoding and ARM64 runtime dispatch on; libavif defines `AVIF_CODEC_AOM` and `AVIF_CODEC_AOM_DECODE` but not `AVIF_CODEC_AOM_ENCODE`; `libavif/src/write.c` and the AOM encoder closure are excluded. AVIF writing reports `CODEC_UNAVAILABLE`.
 
-**TIFF compression profile.** Built: uncompressed, LZW, PackBits, CCITT RLE/Fax3/Fax4, ordinary 8-bit JPEG, and Deflate. Excluded: JPEG12, PixarLog, SGILog/LogLuv, NeXT, and ThunderScan (their sources and enabling definitions are removed from the build configuration); WebP, LZMA, Zstd, OJPEG, JBIG, and LERC were never enabled. CCITT stays for scanned bilevel documents despite its table size. JPEG12 is specialist geospatial compatibility: Lambda's RGBA strip/tile path rejects 12-bit samples and the writer is 8-bit Deflate, so the codec never produced working pixels through the public API. A 12-bit JPEG TIFF is recognized before pixel allocation and returns an explicit `unsupported_feature` with a specific message, preserving the rich-diagnostic rule (**S7.4.4**) while the raw mechanism stays in `lib` (**D7.1.2v2**). The `tif_jpeg_12.c` source stays imported for a future GeoTIFF/high-depth profile. Removing a TIFF codec must remove its registry reference in `tif_codec.c:_TIFFBuiltinCODECS` through JSON feature definitions, because dead stripping cannot see which compression tags future files use.
+**TIFF compression profile.** Built: uncompressed, LZW, PackBits, CCITT RLE/Fax3/Fax4, ordinary 8-bit JPEG, and Deflate. Excluded: JPEG12, PixarLog, SGILog/LogLuv, NeXT, and ThunderScan (their sources and enabling definitions are removed from the build configuration); WebP, LZMA, Zstd, OJPEG, JBIG, and LERC were never enabled. CCITT stays for scanned bilevel documents despite its table size. JPEG12 is specialist geospatial compatibility: Lambda's RGBA strip/tile path rejects 12-bit samples and the writer is 8-bit Deflate, so the codec never produced working pixels through the public API. A 12-bit JPEG TIFF is recognized before pixel allocation and returns an explicit `unsupported_feature` with a specific message, preserving the rich-diagnostic rule (**S7.4.4**) while the raw mechanism stays in `lib` (**D9.1.2**). The `tif_jpeg_12.c` source stays imported for a future GeoTIFF/high-depth profile. Removing a TIFF codec must remove its registry reference in `tif_codec.c:_TIFFBuiltinCODECS` through JSON feature definitions, because dead stripping cannot see which compression tags future files use.
 
 **Feature macros.** Never define a feature to 0 when the upstream condition is `#ifdef` or `defined(...)`; omit the definition entirely.
 
@@ -336,7 +336,7 @@ Historical inventory captured before the migration on 2026-10-15. The replacemen
 
 The following was the adoption plan. Current completion and verification evidence live in [the implementation record](../impl/Lib_Image_Impl.md):
 
-1. **Common core and diagnostics:** import the existing four upstream codec bases under `./lib/image/`, record their versions/licenses, modify the source directly to use shared types/readers/sinks/diagnostics, and migrate the existing formats while preserving output. Move resource entry points to their proper provider. Do not leave a `lib` shim forwarding upward into Lambda (**D7.1.3**); memory compatibility wrappers may remain within `lib` temporarily.
+1. **Common core and diagnostics:** import the existing four upstream codec bases under `./lib/image/`, record their versions/licenses, modify the source directly to use shared types/readers/sinks/diagnostics, and migrate the existing formats while preserving output. Move resource entry points to their proper provider. Do not leave a `lib` shim forwarding upward into Lambda (**D9.1.3**); memory compatibility wrappers may remain within `lib` temporarily.
 2. **Thumbnail planner:** share file/memory JPEG and PNG paths, add WebP scaling and final bounded resize, expose strategy/fallback, and preserve Radiant's at-least mode. Establish honest per-format performance baselines.
 3. **New readers:** import the BMP/ICO, TIFF, and AVIF implementations and required codec dependencies under `./lib/image/`, adapt their source directly, and integrate documented feature subsets with matching file/memory diagnostics. Reading all eight formats completes the format-expansion milestone.
 4. **Common writers and cleanup:** migrate all existing PNG/JPEG writers; add WebP/BMP/TIFF/ICO output using the locally adapted upstream implementations and common sink. Keep AVIF read-only to bound the native codec footprint. Remove superseded paths and unused sourced features after callers migrate. Verify builds use the intended local source and preserve required license notices. Report binary/dependency changes and actual duplication removed, rather than reducing lines by reformatting.

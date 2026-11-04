@@ -1289,7 +1289,7 @@ TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int
     mt->length = count;
     mt->byte_size = byte_size;
     // result shapes die with the execution pool and must not enter a cached
-    // module's compiler registry (D8.5.1v7).
+    // module's compiler registry (D8.3.5).
     mt->type_index = -1;
     typemap_hash_build(mt, pool);
     return mt;
@@ -1505,7 +1505,7 @@ static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset
 
 // Split string by pattern matches
 // Split segments are separate elements by definition, so every append here uses
-// array_push, which stores the item verbatim (D2.6.5). list_push applies
+// array_push, which stores the item verbatim (D3.3.1). list_push applies
 // S16.7's content rules — it concatenates a string onto the previous element —
 // which collapsed every pattern split into one string, and with keep_delim
 // reassembled the input.

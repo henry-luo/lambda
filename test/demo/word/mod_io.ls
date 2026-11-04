@@ -1,4 +1,4 @@
-// Lossless editable snapshots reuse lambda.edit's atomic/conflict-aware saves.
+// Lossless editable snapshots reuse the editor's atomic/conflict-aware saves.
 // Imported office documents are semantic copies; they never overwrite their source.
 import lambda.editor.core.doc
 import lambda.editor.core.step

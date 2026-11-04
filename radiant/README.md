@@ -95,9 +95,9 @@ Use `rg` to find an existing helper and its callers before adding another path.
 | Input/state | `event.hpp`, `event.cpp`, `scroller.cpp` |
 | Script readiness/shell | `radiant.hpp`, `script_runner.cpp`, `cmd_layout.cpp` |
 
-Preserve selected-view/style ownership (**D4.5.1v4 / D4.1.4v5**), precise roots
-and evaluator lifetime (**D5.3.3 / D5.4.1**), and module boundaries
-(**D7.3.3–D7.3.4**) from the
+Preserve selected-view/style ownership (**D5.5.1 / D5.1.4**), precise roots
+and evaluator lifetime (**D6.3.3 / D6.4.1**), and module boundaries
+(**D9.4.3–D9.4.4**) from the
 [formal design](../doc/Lambda_Formal_Design.md). Keep layout coordinates and
 dimensions as `float`, reuse shared computation/paint geometry, and fix causes
 instead of adding fixture-specific offsets or timing delays.
@@ -189,7 +189,7 @@ python3 utils/generate_css_support_inventory.py --check
 git diff --check
 ```
 
-For an in-process text/layout test, build `test_radiant_text_query_gtest` through
+For an in-process text/layout test, build `test_radiant_document_gtest` through
 the same top-level `build/premake` Makefile, then filter the binary. Build an
 export test target when its native renderer is needed. `make build-test` builds
 unrelated projects too; use it when the required test map calls for that scope.

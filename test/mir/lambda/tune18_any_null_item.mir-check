@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S5.1.1v2 / D2.4.1–D2.4.3: erased null inequality preserves Error, guards Type-value fallback, compares the null tag or zero pointer, then inverts the predicate.",
+  "description": "S5.1.1v2 / D2.3.4–D2.3.5: erased null inequality preserves Error, guards Type-value fallback, compares the null tag or zero pointer, then inverts the predicate.",
   "checks": [
     {
       "in_func": "_walk_any_chain18_#",

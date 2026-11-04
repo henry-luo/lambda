@@ -169,7 +169,7 @@ check the shared runtime and are **not additional MVP workloads**.
 - **67/67 MVP tests pass normally and with forced GC** (`LAMBDA_GC_FORCE_EVERY=1`, `LAMBDA_GC_POISON_FREED=1`).
 - **6,487/6,487 Lambda/input checks pass on a full rerun**: 2,112 input and 4,375 runtime checks. The initial attempt passed 6,486/6,487 and timed out on the LaTeX corpus. The rerun's corpus takes about 58 seconds against a 60-second limit; that narrow margin remains unresolved. Aggregate evidence is `lambda-gate-final.log`; the similarly named JSON covers the 1,266-test Lambda runtime executable only.
 - **40,261/40,261 Test262 cases pass**, zero retries or unstable cases; 2,652 excluded cases. This validates the shared runtime/full LambdaJS, not the bounded MVP's conformance coverage.
-- The release restored after validation matches the measured candidate, and all frozen implementation source hashes match. Diagnostic counters and code-size/frame audits are retained separately from performance timing (**D5.4.4**).
+- The release restored after validation matches the measured candidate, and all frozen implementation source hashes match. Diagnostic counters and code-size/frame audits are retained separately from performance timing (**D6.4.4**).
 
 | Binary | SHA-256 |
 | --- | ---: |

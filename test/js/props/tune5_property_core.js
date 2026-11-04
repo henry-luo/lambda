@@ -1,5 +1,5 @@
 // Tune5 P0/P1 behavior locks: key boundaries, receiver identity, and the
-// DefineOwn/HasProperty separation required by S#7.1.14 and D6.2.2v2.
+// DefineOwn/HasProperty separation required by S#7.1.14 and D7.2.2.
 let a = [];
 let names = ["0", "1", "4294967294", "4294967295", "00", "01", "-0", "1.0"];
 for (let i = 0; i < names.length; i++) a[names[i]] = names[i];

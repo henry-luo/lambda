@@ -1,4 +1,4 @@
-// D3.3.3v3: same-contract calls reuse admission; dynamic boundaries still convert.
+// D4.3.3: same-contract calls reuse admission; dynamic boundaries still convert.
 type Vec = int[]
 
 pn add(var values: Vec, value: int) any {

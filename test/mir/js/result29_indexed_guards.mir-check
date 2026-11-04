@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2/D8.4.3v2: descriptor-visible indexed reads and writes retain their canonical array and prototype fallback.",
+  "description": "D7.4.1/D7.4.3: descriptor-visible indexed reads and writes retain their canonical array and prototype fallback.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

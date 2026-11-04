@@ -1,4 +1,4 @@
-// D7.2.5: Insert shares the Home/Word ribbon widgets and typed dialog descriptors.
+// D10.2.1: Insert shares the Home/Word ribbon widgets and typed dialog descriptors.
 import ribbon: lambda.ui.workspace.ribbon
 import data: .mod_insert_data
 import shapes: lambda.editor.graphics.shapes

@@ -1,11 +1,11 @@
 # Native map acceptance and supported style manifest
 
-The public package is `lambda.map` (D7.2.4). Its pure validation, evaluation,
-queries and export use declared Radiant functions (S12.1.1v2, D7.5.3).
+The public package is `lambda.map` (D9.3.4). Its pure validation, evaluation,
+queries and export use declared Radiant functions (S12.1.1v2, D9.5.6).
 Displayed frames own an Input arena, compiled expressions, evaluated paths and
-a balanced bounding-box index (D4.5.2). The document registry retains those
+a balanced bounding-box index (D5.5.2). The document registry retains those
 native owners; public snapshots copy their feature metadata to precisely rooted
-Lambda values (D5.3.3). No native frame retains GC pointers.
+Lambda values (D6.3.3). No native frame retains GC pointers.
 
 ## Implemented properties
 

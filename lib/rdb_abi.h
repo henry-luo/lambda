@@ -4,7 +4,7 @@
  *
  * Plain C records only: no lib functions, no host types. The in-host SQLite
  * driver and every driver in the `rdb-drivers` Jube module implement the same
- * RdbDriver table, reaching the host only through RdbHostAPI (RDB3, D7.3.3).
+ * RdbDriver table, reaching the host only through RdbHostAPI (RDB3, D9.4.3).
  * Records here are ABI: they evolve additively behind RDB_DRIVER_API_VERSION
  * and the struct_size fields.
  *
@@ -307,7 +307,7 @@ typedef struct RdbHostAPI {
     /* every native connection registers before first use (JA16.1). A refusal
        (RDB_ERROR) obliges the driver to close it and fail the open. */
     int   (*conn_register)(void* open_ctx, void* native_conn, const RdbConnInfo* info);
-    /* drivers never call log_* directly (D7.3.3); messages must be redacted */
+    /* drivers never call log_* directly (D9.4.3); messages must be redacted */
     void  (*log)(int level, const char* message);
     /* RDB11: open a host-owned upstream to an authorised target and return
        the local endpoint the client library connects to in plaintext:

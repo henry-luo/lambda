@@ -3,7 +3,7 @@
 `lambda.ui.wired` is an experimental native UI theme inspired by
 [Wired Elements](https://wiredjs.com/): paper surfaces, handwritten font
 fallbacks, irregular double pencil strokes, and hatched progress fills.
-It is an ordinary shipped Lambda source package (**D7.2.4**).
+It is an ordinary shipped Lambda source package (**D9.3.4**).
 
 ```lambda
 import ui: lambda.ui.wired
@@ -79,7 +79,7 @@ editing state. Installed fonts determine the handwritten appearance; no font
 or JavaScript download is required.
 
 Native DOM controls own editing, radio exclusivity, submission, and reset
-(**D7.2.5**). `value` / `checked` presence selects application ownership,
+(**D10.2.1**). `value` / `checked` presence selects application ownership,
 including empty strings and `false` (**S8.2.2v5**). Handlers emit `ui_action` or
 `ui_change` with `{component,id,action,value}` requests. Controlled values are
 reasserted after the application handles the request. Behavior is shared with
@@ -92,4 +92,4 @@ remains tracked as **UI-2** in [the issue ledger](../vibe/Lambda_Issue_Ledger.md
 
 Run `make test-ui-wired` for source contracts, sketch geometry, native
 interactions, and the gallery across interpreter, automatic, and JIT execution
-(**D8.1.1v17**).
+(**D8.3.6**).

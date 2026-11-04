@@ -1,4 +1,4 @@
-// D3.3.3v3: an inferred bool fill owns a lane witness, not a bool[] contract.
+// D4.3.3: an inferred bool fill owns a lane witness, not a bool[] contract.
 pn tune32_bool_hot(n: int) {
     var flags = fill(n, true)^
     var i = 0

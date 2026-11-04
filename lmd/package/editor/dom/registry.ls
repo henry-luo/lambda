@@ -1,5 +1,5 @@
 // The editor adds schema commands to the common web editing registry without
-// teaching the DOM package about model policy (D7.2.5, D7.5.3).
+// teaching the DOM package about model policy (D10.2.1, D9.5.6).
 import common: lambda.dom.edit_registry
 
 pub let extensions = [

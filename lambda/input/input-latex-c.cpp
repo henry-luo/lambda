@@ -2510,7 +2510,7 @@ static InputParseOptions tex_options_from_input(Input* input, char** url_base) {
     InputParseOptions options = input->parse_options ? *input->parse_options : InputParseOptions{};
     *url_base = nullptr;
     if (!options.tex_base && input->url) {
-        // D7.2.7v2: both tex expansion and latex digestion resolve beside the
+        // D10.2.2: both tex expansion and latex digestion resolve beside the
         // acquired document, carrying the same explicit resource client.
         *url_base = url_to_local_path((const Url*)input->url);
         options.tex_base = *url_base;
@@ -2518,7 +2518,7 @@ static InputParseOptions tex_options_from_input(Input* input, char** url_base) {
     return options;
 }
 
-// D7.2.7: every LaTeX parse expands before digestion; there is no unexpanded
+// D10.2.2: every LaTeX parse expands before digestion; there is no unexpanded
 // front end, so one source yields one AST whatever the entry point.
 void parse_latex_direct(Input* input, const char* latex_string) {
     if (!input || !latex_string) return;

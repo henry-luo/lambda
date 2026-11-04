@@ -16,7 +16,7 @@ extern "C" {
 #define JUBE_HOST_API_VERSION 5
 
 // The loader resolves this entry by name from each Jube DLL/DSO; release
-// builds compile modules with hidden default visibility (D7.3.6).
+// builds compile modules with hidden default visibility (D9.4.6).
 #ifdef _WIN32
 #define JUBE_MODULE_EXPORT __declspec(dllexport)
 #else
@@ -113,7 +113,7 @@ typedef enum JubeTypeFlags {
 
 // Executable DOM host capabilities are selected when a member function is
 // published. Property spellings remain metadata and never cross the call ABI
-// as semantic selectors (D6.2.2v2).
+// as semantic selectors (D7.2.2).
 typedef enum JubeDomElementOperation {
 #define DOM_ELEMENT_OP(NAME, thunk) JUBE_DOM_##NAME,
 #include "../dom/dom_element_ops.def"
@@ -199,7 +199,7 @@ struct JubeModuleRequirements {
 // DOM3: binding-table halves of the module interface declaration.
 // Shape (names, types, purity, arity, defaults) lives in Lambda type syntax in
 // JubeModuleDef.interface_decl; behavior lives here as handler pointers.
-// Handlers return 1 when handled, 0 to fall through. D8.4.3 routes abrupt
+// Handlers return 1 when handled, 0 to fall through. D7.4.3 routes abrupt
 // completion as the returned ERROR Item; no ambient exception state crosses
 // the module boundary.
 typedef enum JubeMemberFlags {
@@ -388,7 +388,7 @@ static inline void jube_persistent_value_slots_forget(JubePersistentValueSlots* 
 
 // Plain descriptors are copied into the mounted Lambda heap before dispatch.
 // A guest must not pass JS Items as template payloads or retain borrowed
-// Lambda Items after the synchronous emit callback returns (D7.4.2v2).
+// Lambda Items after the synchronous emit callback returns (D9.5.2).
 typedef enum JubeTemplateValueKind {
     JUBE_TEMPLATE_NULL = 0,
     JUBE_TEMPLATE_BOOL,
@@ -1203,11 +1203,11 @@ struct JubeModuleDef {
 
     // Host-subsystem providers (RDB2/RDB3): RDB driver tables this module
     // registers behind lib/rdb.h. The manifest's `rdb:<name>` provides must
-    // name exactly these drivers (D7.3.4: the descriptor is ground truth).
+    // name exactly these drivers (D9.4.4: the descriptor is ground truth).
     const RdbDriver* const* rdb_drivers;
     int32_t rdb_driver_count;
 
-    // D8.1.3v27: no eval, source loading, or externally supplied script entry.
+    // D8.4.2: no eval, source loading, or externally supplied script entry.
     // Calling callbacks supplied by the current script is allowed. Absent/zero
     // means unknown; older descriptors retain conservative source effects.
     uint32_t script_source_closed;

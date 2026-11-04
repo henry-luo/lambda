@@ -1,4 +1,4 @@
-// S1.4 / D7.2.5: retained Insert settings lower to ordinary authored slide objects.
+// S1.4 / D10.2.1: retained Insert settings lower to ordinary authored slide objects.
 import m: .mod_model
 import data: .mod_insert_data
 import c: lambda.slide.common

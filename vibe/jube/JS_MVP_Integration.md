@@ -3,7 +3,7 @@
 **Date:** 2026-10-20
 
 **Status:** ratified by the user's implementation request; implementation and
-qualification in progress under **D8.1.3v29** (AUTO-default clarification, 2026-10-21).
+qualification in progress under **D8.4.2** (AUTO-default clarification, 2026-10-21).
 
 Implementation progress and gate results:
 [JS MVP integration implementation](../impl/JS_MVP_Integration.md).
@@ -21,7 +21,7 @@ The user directs this rework in the following order:
 1. **Preserve the performance of the rewritten JS MVP.** The fast
    former explicit MVP behavior becomes the MIR implementation for explicit
    `mir`, AUTO fallback and hot promotion. JavaScript still defaults to AUTO;
-   **D8.1.3v29** clarifies the distinction and retains removal of the redundant
+   **D8.4.2** clarifies the distinction and retains removal of the redundant
    runtime option.
    Performance preservation is the first implementation milestone and a
    continuing acceptance gate for every subsequent milestone.
@@ -58,17 +58,17 @@ closure.
 
 | Contract | Formal authority |
 |---|---|
-| AUTO is the default tier policy; activated MIR uses fast MVP-Lmd; dynamic source uses the retained AST interpreter | **D8.1.3v29** |
-| Shared Lambda host substrate and `Item` boundary; retain JS semantics | **D1.2v2**, **D1.3v3**, **S1.11** |
-| One canonical `EvalContext`, stable context storage and one event loop per context | **D5.4.1–D5.4.4** |
-| Precise roots and explicit ownership at every fallback/host boundary | **D1.5v2**, **D5.3.1–D5.3.6v2** |
-| Direct native operands; boxed dynamic call boundary and explicit call/construct capabilities | **D6.2.2v2**, **D8.4.2v2** |
-| Compile-predicted specialization, immutable code, semantic kernel on a miss; no inline caches | **D8.4.1v2** |
-| Errors propagate by explicit completion through each caller | **D1.4v4**, **D8.4.3v2** |
+| AUTO is the default tier policy; activated MIR uses fast MVP-Lmd; dynamic source uses the retained AST interpreter | **D8.4.2** |
+| Shared Lambda host substrate and `Item` boundary; retain JS semantics | **D1.2**, **D1.3**, **S1.11** |
+| One canonical `EvalContext`, stable context storage and one event loop per context | **D6.4.1–D6.4.4** |
+| Precise roots and explicit ownership at every fallback/host boundary | **D1.5**, **D6.3.1–D6.3.6** |
+| Direct native operands; boxed dynamic call boundary and explicit call/construct capabilities | **D7.2.2**, **D7.4.2** |
+| Compile-predicted specialization, immutable code, semantic kernel on a miss; no inline caches | **D7.4.1** |
+| Errors propagate by explicit completion through each caller | **D1.4**, **D7.4.3** |
 
 The [formal design](../../doc/Lambda_Formal_Design.md) and
 [formal semantics](../../doc/Lambda_Formal_Semantics.md) remain authoritative.
-The integration contract is ratified in **D8.1.3v27**. This does not claim that
+The integration contract is ratified in **D8.4.2**. This does not claim that
 implementation or qualification is complete. The formal spec and this working
 record follow [Doc Convention](../../doc/Doc_Convention.md); no new decision-ID
 series is introduced here.
@@ -119,7 +119,7 @@ After this rework, under the same backend policy:
 ./lambda.exe js app.js
 ```
 
-selects AUTO under **D8.1.3v29**: supported units begin in the AST interpreter;
+selects AUTO under **D8.4.2**: supported units begin in the AST interpreter;
 unsupported units and eligible hot definitions use the integrated fast MVP MIR
 engine. An unset or empty `JS_EXEC_BACKEND` has the same policy as `auto`.
 Explicit `ast` forces the interpreter; explicit `mir` selects whole-unit MVP
@@ -184,7 +184,7 @@ that owner. Remove the embedded standalone `EvalContext` from the final
 execution record and consolidate initialization, reset and destruction.
 
 Use existing context capsules for JS state, with stable addresses and lazy
-construction (**D5.4**). Resolve the owner and required capsules at entry.
+construction (**D6.4**). Resolve the owner and required capsules at entry.
 Do not insert TLS rebinding, generic context searches, locks or atomics into
 numeric loops or direct calls.
 
@@ -205,8 +205,8 @@ that require import, copy or synchronization.
 
 Preserve the distinction between Script global object bindings, top-level
 lexicals and module live bindings. Sharing substrate with Lambda must not
-impose Lambda's immutable capture/global semantics on JS (**D6.2.3v2**,
-**D5.4.4**, **S1.11**).
+impose Lambda's immutable capture/global semantics on JS (**D7.2.3**,
+**D6.4.4**, **S1.11**).
 
 Addressability and performance are compatible:
 
@@ -215,7 +215,7 @@ Addressability and performance are compatible:
 - A nonescaping local can stay in a native register or native storage lane.
 - A native value exposed to dynamic code is published to its canonical cell
   before the observing boundary, and reloaded where that boundary can write it.
-  Direct eval uses the live environment contract in **D8.1.3v26**, not a
+  Direct eval uses the live environment contract in **D8.4.3**, not a
   separate environment with projection/write-back journals.
 - Builtin, prototype and constructor identities are shared by all consumers
   in one realm. Lazy setup must preserve identity, property descriptors,
@@ -248,7 +248,7 @@ callbacks are conservative at their call boundary.
 ### Callable and code lifetime
 
 An escaping function keeps its ordinary callable identity and explicit
-`[[Call]]`/`[[Construct]]` entries (**D6.2.2v2**). A boxed entry may check
+`[[Call]]`/`[[Construct]]` entries (**D7.2.2**). A boxed entry may check
 arguments and enter a native body. Proven internal calls can use that body
 directly. Escape to a host callback does not by itself require every internal
 recursive call to use a boxed argument vector.
@@ -256,7 +256,7 @@ recursive call to use a boxed argument vector.
 Retain AST, MIR, shapes and per-unit metadata through shared Script/runtime
 ownership while any result, closure, module or scheduled job can use them.
 Keep mutable state in context storage, separate from immutable reusable code
-(**D5.4.3**).
+(**D6.4.3**).
 
 Consolidate teardown in the established runtime lifecycle: retire queued users
 and active callbacks safely, release heap-owned resources with their metadata
@@ -314,7 +314,7 @@ unknown callback may need to recheck an array or binding afterward. Checks
 must not invoke getters or coercion merely to decide whether the fast path
 is admissible.
 
-All specializations obey **D8.4.1v2**: compile-predicted cases, immutable
+All specializations obey **D7.4.1**: compile-predicted cases, immutable
 generated code, and a semantic miss path. Do not reintroduce feedback vectors,
 mutable per-site caches or self-modifying dispatch.
 
@@ -340,7 +340,7 @@ Use the narrowest sufficient boundary:
 The full slow operation/body shares the same context, cells, object identities,
 completion rules and GC roots as the fast body. A generic body should reuse
 existing MVP lowering and audited JS semantic kernels. Dynamic source remains
-in the retained AST interpreter under **D8.1.3v26**. Do not add automatic
+in the retained AST interpreter under **D8.4.3**. Do not add automatic
 whole-script AST retry or resurrect retired compiler/runtime machinery.
 
 An ordinary JS throw is an outcome to propagate, not a request to retry.
@@ -351,7 +351,7 @@ they must not be encoded as language exceptions or nonlocal unwinds.
 Fallback must preserve evaluation order, receiver and `new.target`, strict
 mode, property effects, live bindings, exception identity, finally blocks and
 iterator cleanup. Publish live roots and owned scalar values at each
-`MAY_GC` boundary through the shared emitter (**D5.3**, **D8.4.3v2**).
+`MAY_GC` boundary through the shared emitter (**D6.3**, **D7.4.3**).
 
 Each correctness repair includes three demonstrations: the triggering case
 now has the right behavior; the guard/miss path runs exactly once with the
@@ -381,7 +381,7 @@ Measure these comparisons:
 | Comparison | Purpose |
 |---|---|
 | Candidate explicit `mir` vs archived fast explicit MVP | Required MIR performance preservation |
-| Candidate AUTO default and removed-selector rejection | **D8.1.3v29** CLI contract across unset/empty/MIR/AST/AUTO policy |
+| Candidate AUTO default and removed-selector rejection | **D8.4.2** CLI contract across unset/empty/MIR/AST/AUTO policy |
 | Candidate explicit `mir` vs archived normal Result52 MIR | Quantify the recovered MIR integration loss |
 | Candidate Lambda untyped/typed vs archived release | Protect the shared Lambda substrate from the unification |
 
@@ -469,7 +469,7 @@ Final closure requires all of the following:
 
 - The ordinary command defaults to AUTO, activated MIR uses the integrated fast
   MVP engine, explicit backend choices are honored, and the removed runtime
-  option is rejected (**D8.1.3v29**).
+  option is rejected (**D8.4.2**).
 - Fast MVP performance survives normal CLI and host integration.
 - Each semantic binding/intrinsic has one owner and authoritative storage per
   realm; standalone and public execution no longer maintain parallel sets.

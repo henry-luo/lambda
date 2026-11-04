@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// D7.2.4: exercise lambda.doc.math, then compare native PNGs with real pdfLaTeX.
+// D9.3.4: exercise lambda.doc.math, then compare native PNGs with real pdfLaTeX.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';

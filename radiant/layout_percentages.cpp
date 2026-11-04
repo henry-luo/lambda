@@ -464,9 +464,13 @@ static bool layout_display_is_table_track(CssEnum inner) {
         inner == CSS_VALUE_TABLE_COLUMN || inner == CSS_VALUE_TABLE_COLUMN_GROUP;
 }
 
-static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
+static DomElement* layout_block_used_writing_mode_source(ViewBlock* block,
+        CssEnum* writing_mode = nullptr) {
     DomElement* source = layout_block_used_flow_source(block);
+    if (writing_mode) *writing_mode = CSS_VALUE_HORIZONTAL_TB;
     for (DomElement* ancestor = source; ancestor; ancestor = dom_parent_element(ancestor)) {
+        // the existing generation/epoch-keyed mask proves the default throughout this ancestry.
+        if (layout_cached_inheritance_excludes(ancestor, CSS_PROPERTY_WRITING_MODE)) return source;
         // resolved ancestors already own their used display; repeated axis
         // queries need only its table-track kind, not a fresh display cascade.
         DisplayValue display = layout_resolved_display(ancestor);
@@ -481,13 +485,17 @@ static DomElement* layout_block_used_writing_mode_source(ViewBlock* block) {
         if (declaration->value->type == CSS_VALUE_TYPE_KEYWORD &&
             (declaration->value->data.keyword == CSS_VALUE_INHERIT ||
              declaration->value->data.keyword == CSS_VALUE_UNSET)) continue;
+        // the source scan already found the inherited keyword; avoid walking twice.
+        if (writing_mode) *writing_mode = layout_element_css_writing_mode(ancestor);
         break;
     }
     return source;
 }
 
 CssEnum layout_block_used_css_writing_mode(ViewBlock* block) {
-    return layout_element_css_writing_mode(layout_block_used_writing_mode_source(block));
+    CssEnum mode;
+    layout_block_used_writing_mode_source(block, &mode);
+    return mode;
 }
 
 CssEnum layout_block_used_css_direction(ViewBlock* block) {
@@ -558,14 +566,15 @@ CssEnum layout_text_used_direction(DomNode* node) {
     DomElement* source = block ? layout_block_used_flow_source(block) : element;
     if (source && source->is_synthetic() && source->blk &&
         (source->block()->direction == CSS_VALUE_LTR || source->block()->direction == CSS_VALUE_RTL)) {
-        // synthetic style carriers publish resolved view properties without an authored declaration tree (D4.5.1v4).
+        // synthetic style carriers publish resolved view properties without an authored declaration tree (D5.5.1).
         return source->block()->direction;
     }
     return layout_element_css_direction(source);
 }
 
 WritingMode layout_block_writing_mode(ViewBlock* block) {
-    DomElement* source = layout_block_used_writing_mode_source(block);
+    CssEnum inherited_mode;
+    DomElement* source = layout_block_used_writing_mode_source(block, &inherited_mode);
     if (block && source != block) {
         ViewBlock* owner = source ? lam::view_as_block(static_cast<View*>(source)) : nullptr;
         return owner ? layout_block_writing_mode(owner) : layout_element_writing_mode(source);
@@ -574,7 +583,7 @@ WritingMode layout_block_writing_mode(ViewBlock* block) {
     if (mode != WM_HORIZONTAL_TB || !block) return mode;
     // intrinsic sizing can precede BlockProp resolution; share computed
     // inheritance with logical-property mapping instead of reparsing it here.
-    return layout_element_writing_mode(block->as_element());
+    return layout_writing_mode_from_css(inherited_mode);
 }
 
 bool layout_block_inline_axis_is_vertical(ViewBlock* block) {

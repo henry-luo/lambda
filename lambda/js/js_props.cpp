@@ -163,7 +163,7 @@ extern "C" const char* js_property_index_chars(int64_t index, int* out_len) {
 
 static Map* js_props_storage_map_fallback(Item object);
 
-// D2.6.6: an object is element-shaped, so it has no valid Map* view. Callers
+// D3.1.1: an object is element-shaped, so it has no valid Map* view. Callers
 // need only the packed buffer and its capacity, so those are returned directly;
 // returning `object.map` for an object read its `items` pointer as `type` and
 // made private-field Set miss the actual slot.
@@ -237,7 +237,7 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
     if (!allow_ext || !name) return JS_SHAPE_SLOT_ABSENT;
     // The extension table is a Map-only structure; a nominal Lambda object has
     // a fixed declared shape and no JS extension slots, and is element-shaped
-    // so it has no Map* view at all (D2.6.6).
+    // so it has no Map* view at all (D3.1.1).
     if (get_type_id(object) != LMD_TYPE_MAP) return JS_SHAPE_SLOT_ABSENT;
     bool found = false;
     Item slot = js_map_shape_lookup_ext(object.map, name, name_len, &found);
@@ -607,7 +607,7 @@ static bool js_get_own_property_descriptor_impl(Item object, NameId name_id,
             : js_props_desc_from_storage(object, object.map, name, name_len, out);
     }
     if (t == LMD_TYPE_FUNC) {
-        // D6.2.2v2: every public FUNC property lives in properties_map; the
+        // D7.2.2: every public FUNC property lives in properties_map; the
         // executable payload supplies behavior, never synthetic descriptors.
         JsFunction* fn = (JsFunction*)object.function;
         if (!fn || fn->properties_map.item == 0) return false;
@@ -761,7 +761,7 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
         int entry_name_len = entry->name ? (int)entry->name->length : 0;
         // Accessor-to-data conversion changes the descriptor's tracing/read type.
         // Detach the intrinsic snapshot blueprint before retagging it, or a
-        // later reset inherits this test's descriptor mutation (D6.2.2v2).
+        // later reset inherits this test's descriptor mutation (D7.2.2).
         if (!js_typemap_clone_for_mutation_pub(target)) return false;
         entry = entry_name_id != NAME_ID_NONE
             ? js_find_shape_entry_name_id(target, entry_name_id)
@@ -904,7 +904,7 @@ static void js_props_set_descriptor_attribute(Item object, Item name_item,
     }
     // Dense Array indices and `length` acquire descriptor entries in their
     // companion map. A NameId update against the Array itself finds no shape,
-    // silently dropping every attribute requested by DefineProperty (D3.4.4v2).
+    // silently dropping every attribute requested by DefineProperty (D3.4.4).
     if (attr_flag == JSPD_NON_WRITABLE) {
         js_attr_set_writable(object, name, name_len, enabled);
     } else if (attr_flag == JSPD_NON_ENUMERABLE) {
@@ -945,7 +945,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
         Rooted<Item> setter_root(roots, (pd->flags & JS_PD_HAS_SET) ? pd->setter : ItemNull);
         Rooted<Item> properties_root(roots, js_error_properties_map(error_root.get(), true));
         if (get_type_id(properties_root.get()) != LMD_TYPE_MAP) return js_status_ok();
-        // D8.4.3v2: the Error carrier is not a full Map. Move a standard field
+        // D7.4.3: the Error carrier is not a full Map. Move a standard field
         // into its property Map before changing descriptors, preserving its defaults.
         Item old_value = ItemNull;
         if (js_props_error_standard_field(name, name_len) &&
@@ -985,7 +985,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
             !js_typemap_detach_snapshot_for_mutation(object)) {
         // Adding a property appends to the active TypeMap. Detach the reset
         // blueprint first, or the next test restores the enlarged shape and
-        // inherits this property (D6.2.2v2).
+        // inherits this property (D7.2.2).
         return js_throw_range_error("Out of memory while detaching property shape");
     }
 
@@ -1301,7 +1301,7 @@ extern "C" Item js_delete(Item target, JsPropertyLane lane,
     if (!object_like && target_type != LMD_TYPE_NULL &&
             target_type != LMD_TYPE_UNDEFINED) {
         // DeleteProperty on a primitive property reference succeeds after the
-        // reference base has been evaluated; only nullish bases throw (D8.4.3).
+        // reference base has been evaluated; only nullish bases throw (D7.4.3).
         return (Item){.item = b2it(true)};
     }
     return js_reflect_delete_property(target_root.get(), key_root.get());

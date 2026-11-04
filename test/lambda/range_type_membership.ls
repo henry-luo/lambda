@@ -1,7 +1,7 @@
 // S11.1.3 (LR03-18, LR03-14): a range type admits the values between its
 // bounds wherever it sits -- inside a union, a map or array type, an
 // annotation or a parameter. It wore the range VALUE tag instead of the shared
-// type tag (D3.1.1v4), so `is` never matched a range inside a larger type,
+// type tag (D4.1.1), so `is` never matched a range inside a larger type,
 // range-typed parameters rejected every integer, and a range-typed map field
 // read an int as a pointer.
 type R = 1 to 5 | 10

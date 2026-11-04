@@ -1,4 +1,4 @@
-// S12.1.5v2/D4.5.2: source-bake descriptors reconcile with the retained native owner.
+// S12.1.5v2/D5.5.2: source-bake descriptors reconcile with the retained native owner.
 import dom
 import scene: lambda.navigation.scene
 import nav: lambda.navigation

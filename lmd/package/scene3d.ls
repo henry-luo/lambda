@@ -1,4 +1,4 @@
-// D7.2.4/S12.1.1v2: a source package builds values; the Radiant host owns GPU effects.
+// D9.3.4/S12.1.1v2: a source package builds values; the Radiant host owns GPU effects.
 import model: lambda.scene3d.model
 import transforms: lambda.scene3d.transform
 import clips: lambda.scene3d.animation

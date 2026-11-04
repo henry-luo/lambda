@@ -1,6 +1,6 @@
 // Protocol-only legacy assertion adapter for the Chromium contenteditable
 // smoke set. It records assertions and page result text; it never selects an
-// edit target, mutates DOM content, or repairs Selection (D7.2.5).
+// edit target, mutates DOM content, or repairs Selection (D10.2.1).
 function _chromium_protocol_record(ok, name, detail) {
     _wpt_total++;
     if (ok) {

@@ -1,17 +1,17 @@
 # Lambda Design: Type Narrowing, Specialization, and Generics
 
 **Status**: PARTIALLY IMPLEMENTED (rev 16, 2026-09-16; TG19 `<:` is implemented in the direct parser, interpreter, and MIR boxed entry; TGO14(a) is CLOSED: its spelling is `<:`; TGO14(c) is CLOSED by S9.2.1's value-semantics covariance ruling. TGO14(b) function-type variance remains open. TG2, TG3, TG3a's parameter-only `x: as T` shorthand, TG5, TG6v2, TG7 boundary admission, TG9, TG13v2, TG15–TG18 are implemented across the interpreter and MIR boxed entry. TG8 has a fixed four-variant raw plan; `_b` retains its ordered exact guards and boxed fallback, including descriptor-pointer guards for named/nominal maps and concrete elements. Statically exact tag-safe local edges select raw bodies directly; `LAMBDA_MIR_TG8_HOIST_GUARDS=1` enables that guard chain at eligible dynamic local edges, selects one of the bounded raw siblings or the `_b` sibling for an invariant identifier call in a synchronous `while`, and shares a raw-index or boxed choice for repeated same-callee/same-identifier calls in one content sequence; every miss falls through to `_b`. rev 8: TG13v2 multiple binder sites for one name = JOIN over the S4.4 lattice + nominal base chain, never unions, two-pass bind-then-check, same bound at every site (single-binder TG4 asymmetry kept as the "dictating parameter" form); TG20v2 static binds the narrowest statically known type, exact bindings authoritative, abstract bindings never elide the runtime check (TG7 and the gradual guarantee hold); TG22 binders confined to `fn`/`pn` signatures for now (levels 2/3 deferred); TG19 relation ratified; expression-position cast `x as T` anticipated (TGO2 note); TG21 explicit type parameters are never elided, TGO3 CLOSED; TG20 two-tier binding RATIFIED, TGO1 CLOSED; TG18 container/unbound binding and TG19 `<:` operator RATIFIED, TGO4/TGO11/TGO13 CLOSED; TGO2 CLOSED — the binder keyword is `as`; TG5 RATIFIED; TG6v2 bound is a direct field of the binder record; TG14v2 inter-binder relations are ordinary `that` value predicates; TG15 `as` precedence; TG16 `that` before `as`; TG17 binder scope, return-position and `var` rules; TGO7 let/var binders confirmed out; TGO11–TGO13 added; Appendix S superseded rulings; Appendix I implementation notes. rev 6, 2026-08-08: TG4 RATIFIED, TG10 three binder levels, TG12 "Type Binder" RATIFIED, TG13 unification road reserved, TG14, §6 catalog → TGO10)
-**Revision 16 (2026-09-16).** D8.3.4v2 admits fixed-arity task-free
+**Revision 16 (2026-09-16).** D7.3.4 admits fixed-arity task-free
 synchronous `pn` binder functions with immutable parameters to TG8's direct
 raw variants. `var` parameters and procedures that may await or require a task
-context remain boxed; D8.3.4v2 guard hoisting remains `fn`-only.
+context remain boxed; D7.3.4 guard hoisting remains `fn`-only.
 
 **Ledger prefix**: `TG#` (decisions), `TGO#` (open issues)
 **Related**:
 - `doc/Lambda_Formal_Semantics.md` — S1.6 (representation invisible), S1.7 (one
   symbol one concept), S4.2.2 (value types as its narrowest), SO9 (generics /
   flow-sensitive narrowing unowned), SO33 (aspirational generics text in docs)
-- `doc/Lambda_Formal_Design.md` — D3.3.3 (narrowing dies with binding), D3.4.2
+- `doc/Lambda_Formal_Design.md` — D4.3.3 (narrowing dies with binding), D3.4.2
   (structural shape identity), D7 (modules)
 - `vibe/Lambda_Design_Type_Enforcement.md` — TE-15/17/18 (boundary enforcement)
 - `vibe/Lambda_Design_Dual_Func_Compiling.md` — DF8 (check lives in callee),
@@ -114,7 +114,7 @@ subsection expands into its own design pass later.
   type) inside the guarded branch. Same for `match` arms with type patterns,
   `is` guards in conditions, and exclusion (`x is !null` → non-null branch).
 - Narrowing is a property of a **binding within a scope** and dies with it —
-  this is already ruled: D3.3.3. No narrowing survives assignment through a
+  this is already ruled: D4.3.3. No narrowing survives assignment through a
   container, escape into a closure, or a call boundary.
 - Union consumption is the payoff: `int | string` parameters become pleasant
   without any generics at all.
@@ -282,7 +282,7 @@ TG17 spelling until their unbound-frame completion is implemented. It is not
 a general type atom, and therefore does not alter declaration, schema,
 return-type, nested-type, or future-cast syntax. The parser elaborates it
 directly to the ordinary binder record; no separate runtime, inference, or
-specialization rule exists. [S4.2.2, S11.4.8v2, D3.3.3v3]
+specialization rule exists. [S4.2.2, S11.4.8v2, D4.3.3]
 
 #### TG3b — System functions declare result relations, not binders **[RATIFIED 2026-09-15]**
 
@@ -294,7 +294,7 @@ selects a call argument and instantiates an audited result pattern from its
 inferred type. `fill` constructs `T[]` from its value argument; collection
 transforms retain only source families the runtime retains, so a range result
 is an array rather than a fictitious range. This is static result propagation,
-not generic-function invocation. [S11.4.9, D3.3.5, SI3v2]
+not generic-function invocation. [S11.4.9, D4.3.4, SI3v2]
 
 #### TG4 — First-occurrence-binds; no unification **[RATIFIED 2026-08-08]**
 
@@ -381,7 +381,7 @@ statically known `type`-valued argument (a type literal or module-level type
 binding) is therefore part of the key — Zig's comptime tier as an optimization
 rather than a semantic. S1.6 makes all of it unobservable.
 
-**Bounded admission (D8.3.1v2, D8.3.4v2).** The compiler walks qualifying direct call
+**Bounded admission (D7.3.1, D7.3.4).** The compiler walks qualifying direct call
 sites in source order, deduplicates exact keys, and admits the first four per
 function in the initial implementation. A key is never replaced or evicted;
 later, dynamic, partial, or ineligible calls use `_b`. `_b` checks variants in
@@ -392,7 +392,7 @@ semantic limit; it may change only with measurements and updated implementation
 evidence. Fixed-arity task-free synchronous `pn` functions with immutable
 parameters participate at statically exact edges only; `var` parameters,
 procedures that may await or require a task context, and all guard hoists stay
-boxed. [S1.6, D8.3.1v2–D8.3.4v2, D8.4.1v2]
+boxed. [S1.6, D7.3.1–D7.3.4, D7.4.1]
 
 #### TG9 — `T` is a value in body scope
 
@@ -455,7 +455,7 @@ already per-value checking.
 
 Scope rule across all levels: a binder scopes over the **entire enclosing
 type expression / signature / type body** in which it appears; it never
-escapes it (the D3.3.3 discipline — the relation lives and dies with the
+escapes it (the D4.3.3 discipline — the relation lives and dies with the
 construct that declared it).
 
 #### TG11 — Type-level computation is permanently out of scope
@@ -635,7 +635,7 @@ TG14v2 relations use this same clause; nothing else is needed.
   it. This is TG4's first-occurrence rule applied inside the container — the
   join-of-elements alternative was rejected for the same reason unification
   was (silent widening, surprise at the use site). A typed carrier whose leaf
-  lane is already proven binds that lane without walking elements (D3.3.3v3
+  lane is already proven binds that lane without walking elements (D4.3.3
   certificate); the observable answer is identical. Closes TGO4.
 - **An empty container leaves `T` unbound.**
 - **A binder site that admission never reaches stays unbound.** The
@@ -666,7 +666,7 @@ TG14v2 relations use this same clause; nothing else is needed.
   `b` and the result against `number?`. A binder with bound `any` that is
   unbound is `any` — exactly what the signature promised without the binder.
 
-#### TG19 — The subtype test is a type operator **[IMPLEMENTED 2026-09-15; S11.1.4v2 / D3.2.5v2; `<:` spelling CLOSED by TGO14(a)]**
+#### TG19 — The subtype test is a type operator **[IMPLEMENTED 2026-09-15; S11.1.4v2 / D4.2.2; `<:` spelling CLOSED by TGO14(a)]**
 
 `A <: B` is a binary operator on type values, yielding `bool`. It holds
 when **every value `A` admits, `B` admits** — the conversion-free static
@@ -708,7 +708,7 @@ max(x, 2.5)        // static: x is known to hold an int, T := int,
 **Exact versus provisional bindings.** A static binding is **exact** when it
 is a type the dynamic oracle itself could bind: a concrete scalar kind
 (`int`, `float`, sized numerics, `bool`, `string`, `symbol`, `null`, …) or a
-typed array whose leaf lane is certified (D3.3.3v3). An exact binding is
+typed array whose leaf lane is certified (D4.3.3). An exact binding is
 authoritative: mismatches are compile errors and proven checks are elided
 (TE-17). A static binding that is **abstract** — `number`, `integer`, `any`,
 a union, an optional, an open `map`/`array`, or a nominal record (whose
@@ -752,7 +752,7 @@ Consequences:
   acceptable: such functions take the boxed entry anyway (impl plan §2), and
   TG-P3.4 elides exactly the exact cases.
 - Static narrowing through `let` initializers is the §2.1 flow-narrowing
-  mechanism (D3.3.3: a property of the binding, dies with it); `var`
+  mechanism (D4.3.3: a property of the binding, dies with it); `var`
   bindings and anything written through a container fall back to the
   declared contract, which is then provisional unless exact.
 - Diagnostics name the evidence (`T` bound to `int` from the initializer of
@@ -1073,7 +1073,7 @@ current ruling.
 Kept brief per `doc/Doc_Convention.md` §4; the full plan is
 `vibe/impl/Lambda_Impl_Type_Binder.md` (phases TG-P0 … TG-P4).
 
-- **Representation** (D3.1.1v4 kinds): two new `TypeKind`s — a *binder*
+- **Representation** (D4.1.1 kinds): two new `TypeKind`s — a *binder*
   (site: bound type, name, slot index within its signature, no predicate; the
   bound is checked directly per TG6v2) and a *bound-name reference* (use:
   slot index). An explicit `T: type` parameter (TG2) is a binder whose site is
@@ -1103,7 +1103,7 @@ Kept brief per `doc/Doc_Convention.md` §4; the full plan is
   instead emit a bound-name reference to that parameter's slot.
 - **Lanes**: a parameter whose contract contains a binder or reference has no
   static native lane; it stays a boxed Item exactly like an `any` parameter
-  under D8.1.1's satellite admission. Specialization keyed on the env is P4.
+  under D8.3.1's satellite admission. Specialization keyed on the env is P4.
 - **Static tier** (P3): substitute known argument types into references in
   the return contract at call sites; type `T` as its bound inside the body
   (TGO5 interim).
@@ -1112,3 +1112,29 @@ Kept brief per `doc/Doc_Convention.md` §4; the full plan is
   TG4 ("`b` must have the same type as `a` (int); got float").
 - **Fixtures**: `test/lambda/type_binder_*.ls` with `.txt` goldens, byte-
   identical across the three tiers.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D3.1.4v2 → D4.1.4
+
+**D4.1.4** A type-binder site stores its written bound, name, and stable
+signature-local slot; a bound-name reference stores that slot and a copied
+bound, never a mutable back-pointer. The parameter-only source shorthand
+`x: as T` elaborates to this same site with `TYPE_ANY_NO_ERROR` as its bound;
+it adds no `TypeKind`, runtime rule, or specialization key. `TypeFunc` owns
+the slot-ordered canonical-site table. Every interpreter or MIR activation
+owns an exact rooted environment for selected `Type*` values, and
+binder-carrying parameters use the boxed entry boundary until a future
+specialization can prove an equivalent direct path. Cached container
+certificates prove a written contract only; they never skip the walk that
+publishes an invocation's binder slot. [S11.4.8v2, D1.5, D4.3.3,
+D8.3.3]

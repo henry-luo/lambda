@@ -1132,3 +1132,36 @@ The final adaptive configuration achieves **210–220 ms** — actually **faster
 | `lib/gc_data_zone.h` | `GC_DATA_ZONE_BLOCK_SIZE`: 256 KB → 4 MB |
 | `lib/gc_heap.h` | `GC_DATA_ZONE_THRESHOLD`: unchanged formula (75% of block size), now 3 MB |
 | `lib/gc_heap.c` | Adaptive threshold logic in `gc_collect()`: measure per-cycle freed %, grow 4×/2×/hold |
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D4.3.2v2 → D5.3.1
+
+**D5.3.1** Object zone = size-class segregated free lists backed by
+VM-owned extents; data zone = bump allocator fully reset per GC; strings
+keep inline `chars[]` in the object zone. Multiple slabs may share an
+extent, large objects use dedicated regions, and only the owning GC heap
+releases its regions. Adaptive growth threshold (×4 under 40% freed, ×2
+to 74%, hold at ≥75%, capped). [GC2 §5, §12]
+
+### ex-D4.3.4 → D5.3.3
+
+**D5.3.3** A shaped field whose declared lane is `null` is traced
+**conservatively**: the collector marks the eight-byte word it holds when
+that word is a managed object. The store path upgrades a `null` field to
+a container pointer in place (the same-width fast path of `fn_map_set`),
+and a literal shape shared by every instance of its site keeps `null` for
+the others, so the declared lane says nothing about the word; a `null`
+lane that follows a nine-byte `any` lane also sits at an offset the
+eight-byte word sweep never visits. Decided 2026-09-07 after splay's right
+subtrees were freed while linked on every tier (D5.3.1's precise trace had
+a hole, not the roots). A real `null` is zero and marks nothing.

@@ -62,7 +62,7 @@ including `outline:none`, override it through the ordinary cascade.
 
 `caret_is_visible` and the render/debug snapshot derive insertion-caret
 visibility from the canonical collapsed selection, the focused editing owner,
-and the shared editing-surface lookup (D7.2.5). Ordinary document text retains
+and the shared editing-surface lookup (D10.2.1). Ordinary document text retains
 Selection boundaries for dragging/copying without painting a caret. Readonly
 or disabled controls, noneditable islands, and blurred editors suppress the
 insertion caret. The native `browser_focus_caret` UI fixture covers these

@@ -203,7 +203,7 @@ second click is ignored, so only that word moves and it is the word you hear.
 
 Speech runs locally through the Radiant speech service
 (`vibe/radiant/Radiant_Design_Speech.md`). The demo is a local document, so it
-may start audio from any handler (**D7.5.4**). Where no speech engine is
+may start audio from any handler (**D11.3.1**). Where no speech engine is
 available, reading stays silent and the button returns to **Read aloud**.
 
 ### Further advanced pattern ideas

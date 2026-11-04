@@ -9,7 +9,7 @@ namespace lambda {
 static constexpr size_t SCENE_ASSET_BUFFER_LIMIT = 64 * 1024 * 1024;
 // bones per skeleton, the native skinning palette's capacity (radiant/scene3d/scene3d.cpp)
 static constexpr unsigned SCENE_ASSET_BONE_LIMIT = 256;
-// D4.1.3: imported values belong to the destination Input, including decoded buffers.
+// D5.1.3: imported values belong to the destination Input, including decoded buffers.
 struct SceneAsset {
     InputContext ctx;
     Item root, resources;

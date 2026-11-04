@@ -1,4 +1,4 @@
-// S12.1.3 / D7.5.3: editor commands publish through the existing DOM host boundary.
+// S12.1.3 / D9.5.6: editor commands publish through the existing DOM host boundary.
 import dom
 import m: .mod_model
 import v: .mod_view

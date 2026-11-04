@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.2.4-D8.2.6: a boxed object producer does not narrow its return to a Number; its formal caller uses the Item callable entry. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
+  "description": "D8.2.4-D8.2.6: a boxed object producer does not narrow its return to a Number; its formal caller uses the Item callable entry. D8.4.2: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

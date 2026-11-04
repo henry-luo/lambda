@@ -142,7 +142,7 @@ Two suspended call chains cannot interleave on one contiguous stack (stacks are 
 
 #### 4.2.3 ADOPTED (2026-07-08, K2-R): may-await state-machine compilation
 
-*[Retired 2026-10-05 by K14v2: suspension is stackful (`Lambda_Design_Runtime_Async.md` RA1, D5.1.1v3). Built and then deleted for both languages; the section is kept as the record of why it was first chosen. The comparison that reversed it is in that doc's §14.]*
+*[Retired 2026-10-05 by K14v2: suspension is stackful (`Lambda_Design_Runtime_Async.md` RA1, D6.1.1). Built and then deleted for both languages; the section is kept as the record of why it was first chosen. The comparison that reversed it is in that doc's §14.]*
 
 The color goes **into the compiler**, along exactly the calls that need it:
 
@@ -188,14 +188,14 @@ The decisive rows are GC interaction (factor 4 — G1 was the scariest dependenc
 
 ### 4.3 GC interaction (revised under K2-R)
 
-*[Revised again 2026-10-05: parked state is an activation's root segment, traced through its task or carrier (D5.1.1v3, RA3); cold parked stacks are compacted (RA13). The paragraph below describes the retired state-machine frames.]*
+*[Revised again 2026-10-05: parked state is an activation's root segment, traced through its task or carrier (D6.1.1, RA3); cold parked stacks are compacted (RA13). The paragraph below describes the retired state-machine frames.]*
 
 - Parked state = **ordinary heap objects** (state-machine frames holding boxed Items). They are rooted, traced, and collected like any other value — **no parked-stack scanning exists, and level 1 is no longer gated on G1**.
 - G1 (`Lambda_GC_Root_Issue.md`) remains the top runtime-honesty work item for the *running* frame's rooting — unchanged by this design, neither worsened nor gated. The fiber alternative (§4.2.4) would reinstate the gate; that asymmetry was decision-relevant (factor 4).
 
 ### 4.4 Native frames — the module-ABI clause (unretrofittable; write into JubeHostAPI v1)
 
-*[2026-10-05: with stackful activations the clause is no longer true by construction, so it is enforced at run time (D7.4.2v2, RA10): the host's call into script raises a native barrier on the running activation, and a suspension beneath it is a reported fault.]*
+*[2026-10-05: with stackful activations the clause is no longer true by construction, so it is enforced at run time (D9.5.2, RA10): the host's call into script raises a native barrier on the running activation, and a suspension beneath it is a reported fault.]*
 
 - A task **must not suspend while a `JubeHostAPI` frame is on the stack**, unless the module declares that entry point await-safe. Under K2-R this is *impossible by construction* (a state machine can only suspend at Lambda-level await points, never inside a C frame) — under the fiber alternative it was a rule to enforce (Loom's pinning problem, Go's cgo case). Either way the clause stays in the ABI: it documents the invariant modules may rely on.
 - A host call that genuinely blocks (sync file I/O in a module, a C library call) **detaches the OS thread** Go-style: the context's loop continues on another thread, the blocking call completes on the detached one. v1 may simplify to "blocking host calls pin the context" with a documented list, but the ABI *clause* — modules must declare blocking/await-safety — goes in v1, because it cannot be retrofitted once modules exist.
@@ -537,7 +537,7 @@ The important consequence: **worker isolates deliver real multicore without Stag
 
 ### 10.7 Unifying with JS async at the implementation level (K17)
 
-*[K17v2, 2026-10-05: layers 1, 2 and 4 cease to exist. There is no transform and no resume frame, and both languages use one calling convention: a call that parks simply has not returned yet. Layer 3 stays per language (RA9: a JS activation resumes from its reaction job on the microtask lane, a Lambda task from the run queue, D6.3.1). Layer 5 is unchanged.]*
+*[K17v2, 2026-10-05: layers 1, 2 and 4 cease to exist. There is no transform and no resume frame, and both languages use one calling convention: a call that parks simply has not returned yet. Layer 3 stays per language (RA9: a JS activation resumes from its reaction job on the microtask lane, a Lambda task from the run queue, D7.5.1). Layer 5 is unchanged.]*
 
 Both languages' async decomposes into five layers; **three unify, two must not**:
 
@@ -605,7 +605,7 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 - **K15** — Multicore is committed: **Stage A** fork-join parallel-`fn` (arenas + GC blackout + runtime-globals audit; internal, invisible) → **Stage B** M:N `pn` tasks (thread-safe runtime); BEAM-style M:N isolates recorded as the Stage-B alternative. *(user: "run pn on thread is 100% what I want"; fn too, internal)*
 - **K16** — `async` removed from user grammar; async-ness declared only in native-module signatures; **JS membrane: all exposed `pn`s uniformly Promise-returning** (opt-in `sync` annotation possible later). *(user)*
 - **K17** — JS implementation unification per §10.7: share layers 1/2/5, keep 3/4 per-language; Lambda transform built first, common core extracted after two working clients. *(user)* — **revised by K17v2**.
-- **K14v2** *(2026-10-05, user)* — Mechanism: **stackful activations** for both languages and both tiers (`Lambda_Design_Runtime_Async.md` RA1); the K2-R state machines are retired and K14 is superseded. D5.1.1v3, D5.3.6v2, D6.3.3v2.
+- **K14v2** *(2026-10-05, user)* — Mechanism: **stackful activations** for both languages and both tiers (`Lambda_Design_Runtime_Async.md` RA1); the K2-R state machines are retired and K14 is superseded. D6.1.1, D6.3.6, D7.5.3.
 - **K15v2** *(2026-10-05, user)* — Stage B (M:N `pn` tasks over a thread pool) is withdrawn as a road; Stage A and worker isolates (K31) carry multicore. K7 and K31 stand.
 - **K17v2** *(2026-10-05, user)* — Layers 1, 2 and 4 of §10.7 cease to exist; layer 3 stays per language (RA9); layer 5 as is.
 - **K18** — Tier-2 units are simple: no supervision trees, links, green processes, or distribution in v1; handle-as-`T^E` is the entire failure surface. BEAM-likeness caveat recorded. *(user: "simple child process, not BEAM's kind")* — **scoped by K31**: the `T^E` surface is *total* only under process isolation; under thread isolation a hard fault is a process-wide fatal, not a value (§10.3.2).

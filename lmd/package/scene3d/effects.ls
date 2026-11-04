@@ -1,4 +1,4 @@
-// D7.2.4v4 / S12.1.1v3: effects build pure shader/clip descriptions; Radiant owns playback.
+// D9.3.4 / S12.1.1v3: effects build pure shader/clip descriptions; Radiant owns playback.
 import animation: .animation
 import transforms: .transform
 

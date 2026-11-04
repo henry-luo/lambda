@@ -401,7 +401,7 @@ task-context procs, and typed-array (`ARRAY_NUM`) params get boxed-only. Closure
 are the most valuable relaxation (captures are Items regardless of the param
 ABI); deferred to keep Stage 1 measurable.
 
-**Superseded in part by O11v2 / D8.3.4v3 (2026-09-16):** methods and `var`
+**Superseded in part by O11v2 / D7.3.4 (2026-09-16):** methods and `var`
 parameters are no longer boxed-only for raw variants. Closures, variadics and
 may-await/task-context procedures remain.
 
@@ -432,7 +432,7 @@ raw ABI, and a float, other scalar, or dynamic non-match executes the complete
 boxed slow body. Direct float call-site evidence continues to select `float`
 before this fallback rule. The flag preserves the prior policy by default while
 the Result-suite cost is measured; broader shapes remain deferred. [S1.6,
-D3.3.2v2, D8.3.1v2]
+D4.3.2, D7.3.1]
 
 ### DF13 — LambdaJS adopts the same planning matrix
 
@@ -551,7 +551,7 @@ ordinary loop-invariance test, not a new analysis.
   it branches on the cached variant index (or boxed sentinel) rather than
   re-emitting the guard chain.
 
-**Implemented first slice (D8.3.4).** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` is off by
+**Implemented first slice (D7.3.4).** `LAMBDA_MIR_TG8_HOIST_GUARDS=1` is off by
 default and emits this same predicate at an eligible fixed-arity local binder
 edge. Each matching arm calls the immutable raw variant, while every miss calls
 `_b`; the matcher is shared with `_b`, so no second guard definition exists.
@@ -566,7 +566,7 @@ enabled. Straight-line CSE is restricted to an identical direct binder callee
 and one identifier argument within a content sequence; content/control and
 side-effect boundaries clear the cached choice. Before enabling it at a new
 site, prefer a static proof, which removes the guard entirely. [S1.6,
-D8.3.1v2–D8.3.4, D8.4.1v2]
+D7.3.1–D7.3.4, D7.4.1]
 
 **Interaction with DF14.** Hoisting introduces a third syntactic path into the
 unboxed version, but not a third *semantic* one: the hoisted guard is the same
@@ -919,20 +919,20 @@ a raw **scalar** carrier has no connection back to the caller's storage, so a
 borrowed position lowered that way loses its write-back. Two things changed
 since.
 
-- **CW33 / D8.1.1v10 built the transport.** Every publishable `var` position
+- **CW33 / D8.3.3 built the transport.** Every publishable `var` position
   now consumes a home cell in the callee prologue and publishes its final value
   through that cell in the epilogue, and `_b` already forwards the cell it
   consumed to the body it calls. The write-back is a property of the home, not
   of the argument's representation, so an edge that carries the home preserves
   it whatever form the value travels in.
-- **D8.3.3 fixed the proof discipline.** A raw body has exactly two
+- **D7.3.3 fixed the proof discipline.** A raw body has exactly two
   proof-producing paths, a statically exact edge or `_b`. Methods were excluded
-  because dispatch decides the target; under D8.3.3 a method is eligible only
+  because dispatch decides the target; under D7.3.3 a method is eligible only
   where the receiver's exact shape is *proven* at the edge, which is the same
   condition every other raw argument already meets. That is not a dispatch
   guess and it does not add a third path.
 
-**The ruling (D8.3.4v3).** `var` parameters and methods leave the boxed-only
+**The ruling (D7.3.4).** `var` parameters and methods leave the boxed-only
 exclusion list. A raw variant may take a `var` position when the edge carries
 that position's CW33 home exactly as `_b` does, and may take a method receiver
 when its exact shape is proven at the edge. Closures, variadics and
@@ -943,13 +943,13 @@ ruling, not commentary on it:
 
 1. The home is consumed in the prologue and published in the epilogue, for
    every `var` position on the raw edge, exactly as the boxed path does
-   (D8.1.1v10). A raw position that cannot carry its home is not eligible.
+   (D8.3.3). A raw position that cannot carry its home is not eligible.
 2. S9.1.2 and S9.1.3 are unchanged: the borrow's observable writes, the
    writer-vs-writer exclusivity check, and the plain-parameter snapshot all
    behave as before. The snapshot is a separate mechanism and is not touched.
 3. A pointer lane retains a boxed source root for the duration of the call
-   (D8.3.1v2), so a raw record or array pointer is never the GC's only view.
-4. D8.3.3 holds: no third path into a raw body, and `_b` keeps the complete
+   (D7.3.1), so a raw record or array pointer is never the GC's only view.
+4. D7.3.3 holds: no third path into a raw body, and `_b` keeps the complete
    source-equivalent boxed fallback.
 5. Per-position eligibility, not per-function: a signature with one ineligible
    position routes that call to `_b` rather than disabling the others.
@@ -1078,7 +1078,7 @@ slice changes optimization policy, not the source-correct fast/slow behavior.
 
 ## 10. Stage 2: bounded multiple raw versions
 
-D8.3.1v2 authorizes a bounded set of immutable raw variants, not profiling- or
+D7.3.1 authorizes a bounded set of immutable raw variants, not profiling- or
 feedback-driven specialization. The implemented binder slice uses a cap of four
 variants per source function. During compile-time call-site collection, direct
 calls are visited in lexical source order; the compiler forms the complete exact
@@ -1097,14 +1097,14 @@ signature and either native scalar lanes, normalized `array`/`map`/`range`
 pointer lanes, or a named/nominal map or concrete-element descriptor key. The
 shared guard compares the latter by authoritative descriptor pointer. Static
 direct raw calls remain limited to tag-safe keys; shape-bearing or otherwise
-unproven calls use `_b` or, when the D8.3.4 flag is enabled, its identical
-caller-side guard chain. [S1.6, D8.3.1v2–D8.3.4]
+unproven calls use `_b` or, when the D7.3.4 flag is enabled, its identical
+caller-side guard chain. [S1.6, D7.3.1–D7.3.4]
 
 The cap bounds both code size and dispatch length: at most four guards and four
 private bodies per function. It is a compiler-policy constant rather than a
 language promise; adjusting it requires profiling evidence and a revised
 implementation record, while the immutable exact-guard/fallback rules remain
-fixed. [S1.6, D8.3.1v2–D8.3.3, D8.4.1v2]
+fixed. [S1.6, D7.3.1–D7.3.3, D7.4.1]
 
 ---
 
@@ -1268,3 +1268,53 @@ module-private function whenever the existing escape analysis and three-way
 call-site audit prove the caller set closed. The opportunity comes from a
 language decision made elsewhere; the proof still belongs to Lambda's own
 escape analysis, not to analogy with another compiler.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D8.3.1v2 → D7.3.1
+
+**D7.3.1*** Plan-dependent entries comprise the boxed `<name>_b` boundary
+and a **bounded set of immutable raw variants**. Every raw variant has one
+complete exact semantic-shape key; dynamic selection reaches it only through
+that key's exact guard, while a statically proven direct edge is the
+equivalent proof. A multi-variant plan retains `_b` as its complete boxed
+fallback; no variant is evicted, replaced, or selected from runtime feedback.
+The compiler admits distinct qualifying keys in deterministic source order up
+to its fixed implementation cap, then routes later, dynamic, partial, or
+ineligible shapes to `_b`. Per-parameter partial specialization remains
+rejected. D7.3.4 still permits the single closed-world raw-only case. A
+declared, native-eligible function has **no boxed slow body**; a slow body
+exists iff a param is inference-specialized, unboxing is profitable, and the
+caller set is open. [S1.6, DF1–DF3]
+
+### ex-D8.3.4v4 → D7.3.4
+
+**D7.3.4** **Visibility decides which versions exist**: exported ⇒ `_b`
+mandatory; non-exported with one exact visible call shape ⇒ unboxed
+only, no guard, no slow body. Caller-side guards are accepted **only as
+guard hoisting** (same predicate, failure edge lands on the `_b` path,
+flag-gated, benchmark-justified).* A fixed-arity `pn` may admit D7.3.1 raw
+variants at a direct exact edge whether or not it can suspend (v4,
+2026-10-05: a parking `pn` keeps one entry protocol, D6.1.1); it retains
+`_b`, and it is not guard-hoist eligible. **`var` parameters and methods are
+eligible** (v3, 2026-09-16): a raw variant may take a `var` position when
+that edge carries the position's CW33 home exactly as `_b` does, so the
+callee consumes the home in its prologue and publishes through it in its
+epilogue (D8.3.3) — the borrow's observable write-back, exclusivity and
+plain-parameter snapshot are unchanged (S9.1.2, S9.1.3, S9.2.2); and a
+method may take one when the receiver's exact shape is proven at the edge,
+which is the same proof every other raw argument needs, never a dispatch
+guess. A pointer lane retains a boxed source root for the call (D7.3.1),
+and D7.3.3's two-proof-paths invariant is unchanged: a raw body is reached
+only from a statically exact edge or through `_b`. Remaining boxed-only
+exclusions are closures, variadics, and procedures that may await or
+require a task context. [DF15, DF16, DF11; O11v2]

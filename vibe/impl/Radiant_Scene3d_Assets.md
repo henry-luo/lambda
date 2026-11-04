@@ -1,7 +1,7 @@
 # Native scene asset loading
 
 Implemented against [WebGL design §15](../radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes).
-Ownership and module boundaries follow **D4.1.3**, **D7.2.4**, and
+Ownership and module boundaries follow **D5.1.3**, **D9.3.4**, and
 **S12.1.1v2**; no new Lambda value domain or formal ruling is introduced.
 
 `lambda.scene3d.load()` adapts the raw OBJ/MTL, glTF JSON/GLB, and A3D mappings into
@@ -83,7 +83,7 @@ vendor source was patched.
 
 GLB v2 JSON/BIN chunks now enter the existing glTF adapter. Header/version,
 chunk alignment and bounds, duplicate chunks, and declared BIN size are checked;
-geometry is copied into Input-owned values (**D4.1.3**). Static primitives over
+geometry is copied into Input-owned values (**D5.1.3**). Static primitives over
 native draw limits are partitioned with original UV/normal/color seams retained.
 Static glTF primitives without normals receive per-face normals, as required by
 [glTF §3.7.2.1](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#meshes-overview);
@@ -129,7 +129,7 @@ and 9,152 triangles. Fine structures show more facets when enlarged.
 The adapter now recognizes required `KHR_mesh_quantization` and applies its
 component-encoding rules to positions, normals, UVs, and supported morph
 attributes. Existing accessor decoding, node/skin transforms, and destination
-Input ownership (**D4.1.3**) handle dequantization. Integer normals without
+Input ownership (**D5.1.3**) handle dequantization. Integer normals without
 normalization, unsigned normals/morph displacements, and undeclared quantized
 attributes remain errors. Model input tests passed **30/30**; the updated
 asset/package goldens passed **9/9** runs across all execution tiers. All
@@ -178,7 +178,7 @@ the shipped assets and preparation instructions are self-contained.
 
 ## STL, PLY, meshopt, glTF extensions and export (2026-10-26)
 
-Implemented against [WebGL design §4, §14 and §15](../radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes), including its new "glTF and GLB export" subsection. **D4.1.3**, **D7.1.1** and **D7.2.4** apply; no formal ruling changed.
+Implemented against [WebGL design §4, §14 and §15](../radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes), including its new "glTF and GLB export" subsection. **D5.1.3**, **D9.1.1** and **D9.3.4** apply; no formal ruling changed.
 
 - **`EXT_meshopt_compression`** (`lambda/input/input-meshopt.cpp`): the attribute (version 0), triangle and index-sequence (version 1) codecs and the octahedral, quaternion and exponential filters, every read bounded by the declared compressed length. Compressed views decode once into loader scratch before any accessor; fallback buffers are placeholders and are never read.
 - **`KHR_texture_transform`** on the base-color texture is baked into the primitive's UVs. **`emissiveFactor`** with **`KHR_materials_emissive_strength`** becomes material `emissive` / `emissive-intensity`, omitted with a warning when an emissive texture would modulate it. **`KHR_lights_punctual`** lights become `<light>` children of their nodes; `lambda.scene3d.load(..., {lights: false})` drops them.
@@ -208,7 +208,7 @@ checks authored channels before decoding and generated tracks as they append.
 `lib/scene3d_animation.h` shares that limit
 with native clip admission; skin, keyframe, clip and property-binding quotas are
 unchanged. No animation data is removed or approximated. This repairs admission
-within the existing asset profile; **D4.1.3**, **D7.3.5** and **S12.1.1v3** apply,
+within the existing asset profile; **D5.1.3**, **D9.4.5** and **S12.1.1v3** apply,
 with no formal ruling or animation-clock change.
 
 The larger DemonBee also exceeded the existing 1,048,576-component native key
@@ -217,7 +217,7 @@ buffers. Native animation states now intern decoded numeric streams by float-bit
 hash plus exact content confirmation. Only distinct retained components consume
 the unchanged 8 MiB budget; bindings, tracks and actions stay independent. The
 cache belongs to the animation state's pool and is rebuilt for a new source
-generation (**D4.5.1v4–D4.5.3v2**). No source pointer is retained. The packed model's
+generation (**D5.5.1–D5.5.3**). No source pointer is retained. The packed model's
 1,341,650 duplicated components become 580,818 retained components, keeping every
 source key. Genuine overflow reports `animation key data quota exceeded`.
 
@@ -258,7 +258,7 @@ Animation commands now prepare the current physics/animation owners through the
 same shared helper used by public scene controls and projection, before touching
 playback. Preparation does not rasterize. Read-only statistics retain their
 observer behavior. The mixer, skinning, sampling rules and image assertion are
-unchanged (**D2.11.4**, **D4.5.2**).
+unchanged (**D10.1.7**, **D5.5.2**).
 
 The isolated release passes **19/19** focused native animation cases, including
 cold commands and source replacement/restoration before painting. The full Eden

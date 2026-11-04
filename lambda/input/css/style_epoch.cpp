@@ -750,7 +750,8 @@ static StyleCanonicalEntry* style_epoch_create_entry(
     entry->tree = tree;
     entry->recipe_count = builder->count;
     tree->canonical_owner = entry;
-    // charge the property filter before enforcing the cold-epoch cap
+    // D5.1.4: shared canonical trees finish their cache writes before publication.
+    tree->declaration_cache_valid = false;
     style_tree_init_declaration_cache(tree);
     PoolStats after = {};
     pool_get_detailed_stats(epoch->pool, &after);
@@ -1008,6 +1009,12 @@ void style_epoch_mark_global_change(DomDocument* doc) {
 uint64_t style_epoch_current_id(DomDocument* doc) {
     StyleEpochManager* manager = style_manager(doc);
     return manager && manager->current ? manager->current->id : 0;
+}
+
+uint64_t style_epoch_tree_id(const StyleTree* tree) {
+    const StyleCanonicalEntry* entry = tree
+        ? (const StyleCanonicalEntry*)tree->canonical_owner : nullptr;
+    return entry ? entry->entry_id : 0;
 }
 
 void style_epoch_get_stats(DomDocument* doc, StyleEpochStats* out) {

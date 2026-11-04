@@ -1,4 +1,4 @@
-// D7.5.8: strict JSON and OLPC signing bytes. Keep integer lexemes exact:
+// D11.2.4: strict JSON and OLPC signing bytes. Keep integer lexemes exact:
 // metadata versions and unknown signed fields need not fit a machine integer.
 import utf8: lambda.io.utf8
 

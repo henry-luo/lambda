@@ -1,4 +1,4 @@
-// Public PresentationML import is a shipped script package, like DOCX (D7.2.1/D7.2.4v4).
+// Public PresentationML import is a shipped script package, like DOCX (D9.3.1/D9.3.4).
 import c: .pptx.common
 import package: .pptx.package
 import model: .pptx.model

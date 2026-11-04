@@ -16,11 +16,11 @@ for later document types.
 informed by [Stage 5](../editing/Radiant_Editor_Stage5.md) and
 [Editable Drawing Compatibility](Radiant_Design_Editable_Drawing.md).
 
-**Specification linkage:** D7.2.1–D7.2.4 → package loading and state (§3–§4);
-D7.2.5 and D7.5.3 → editing-policy and native-mechanism boundaries (§3, §5);
+**Specification linkage:** D9.3.1–D9.3.4 → package loading and state (§3–§4);
+D10.2.1 and D9.5.6 → editing-policy and native-mechanism boundaries (§3, §5);
 S12.1.1v2 and S12.1.3 → effectful loading/saving and pure rendering (§4);
-D1.5v2 and D5.3.3 → retained runtime and precise ownership (§4);
-D7.5.2 → persistence through the shared IO boundary (§8). These refer to
+D1.5 and D6.3.3 → retained runtime and precise ownership (§4);
+D11.1.2 → persistence through the shared IO boundary (§8). These refer to
 [Formal Design](../../doc/Lambda_Formal_Design.md) and
 [Formal Semantics](../../doc/Lambda_Formal_Semantics.md).
 
@@ -31,7 +31,7 @@ claim that the capability already exists.
 
 **Package organization update, 2026-11-04:** the CLI application and its
 reusable format, surface and session helpers now belong to the
-`lambda.editor` family (D7.2.4v4, D7.2.6). The original `lambda.edit` /
+`lambda.editor` family (D9.3.4, D9.3.5). The original `lambda.edit` /
 `lambda.editor` namespace split is superseded; the application and model
 layers remain distinct. Migration and verification are tracked in
 [Package Structure](../impl/Lambda_Impl_Package_Structure.md).
@@ -116,7 +116,7 @@ surfaces and document-session operations are sibling editor modules.
 | `lambda.dom` behavior package | Shared editing descriptors, requests/actions/results, and the existing UA editing backend |
 | Native `radiant-dom` and Radiant | DOM mechanisms, input gate, Selection/Range, IME/clipboard transport, geometry, layout, paint, and lifecycle |
 
-D7.2.5 keeps editing policy in scripts; D7.5.3 keeps Lambda-to-Radiant access
+D10.2.1 keeps editing policy in scripts; D9.5.6 keeps Lambda-to-Radiant access
 on the declared native waist. Consequently, adding `edit` must not introduce
 native Bold/List/Undo algorithms, a second text-input path, or duplicated
 command switches in every toolbar.
@@ -144,7 +144,7 @@ existing backend. This follows the implemented split in
 
 ### Package organization
 
-D7.2.4v4 maps shipped `lambda.*` packages to `<lambda-home>/package/`. The
+D9.3.4 maps shipped `lambda.*` packages to `<lambda-home>/package/`. The
 source organization is:
 
 ```text
@@ -185,7 +185,7 @@ to retain source metadata and instantiate an interactive edit session.
 1. Resolve the input file and retain its canonical identity, original base
    URL, format, and file version used for overwrite checks.
 2. Load the shipped `lambda.editor.app` entry through ordinary package/public-export
-   resolution (D7.2.1–D7.2.3). Pass the source path and options as values.
+   resolution (D9.3.1–D9.3.3). Pass the source path and options as values.
 3. In an effectful initialization step, read the source and select its format
    adapter. Parse once; validate import and preservation coverage before
    exposing an editable document.
@@ -199,11 +199,11 @@ S1.8 forbids turning the path or document text into generated Lambda source.
 S12.1.1v2 keeps file IO out of module-top-level and pure template evaluation;
 initialization and save use a procedural entry/handler. S12.1.3 keeps template
 bodies pure and state updates in `on` handlers. Mutable session state is
-instance-owned, never module-global (S1.4, D7.2.1).
+instance-owned, never module-global (S1.4, D9.3.1).
 
 Retaining a runtime does not by itself root every session value. Native
 handoffs and persistent document references must remain precisely rooted
-under D1.5v2 and D5.3.3, including selection/history and pending save results.
+under D1.5 and D6.3.3, including selection/history and pending save results.
 
 ## 5. Rich-text surfaces
 
@@ -218,7 +218,7 @@ The native gate owns `beforeinput` and `input`. Public `beforeinput` remains
 notification-only; the selected registered model action applies the edit
 after uncanceled notification. Toolbar actions use their descriptor-defined
 entry contract and the existing model-completion bridge. They do not mutate
-DOM first or dispatch a second pair of input events. See D7.2.5 and
+DOM first or dispatch a second pair of input events. See D10.2.1 and
 [Lambda DOM Editable §8](../Lambda_Design_DOM_Editable.md).
 
 Source selection remains mapped through model Steps and back into native
@@ -344,7 +344,7 @@ when `dirty` is false: Escape continues to reach the document after saving.
 An armed guard defers platform close to `closerequest`; the package approves with
 `dom.request_window_close`. Embedded or retired documents cannot opt in. Ordinary
 viewers that never request a guard retain their existing Escape/close behavior.
-This extends the existing package-owned interaction boundary (**D7.2.5 /
+This extends the existing package-owned interaction boundary (**D10.2.1 /
 S12.1.3**) to Photos and other view-launched editors; no format policy enters the
 native window host.
 
@@ -370,7 +370,7 @@ Save performs these steps:
 3. Check whether the source file changed externally since load/last save.
    A conflict keeps edits in memory and offers an explicit overwrite, reload,
    or Save As decision.
-4. Write through the central IO boundary (D7.5.2), using a failure-safe file
+4. Write through the central IO boundary (D11.1.2), using a failure-safe file
    replacement operation. A failed save leaves the original file and the
    unsaved in-memory document intact.
 5. Update the saved checkpoint only after persistence succeeds. If editing
@@ -469,4 +469,4 @@ that document's proposed replacement of form-control history.
 
 | Superseded | Replaced by |
 |---|---|
-| ~~The `lambda.edit` family owns the application, format adapters and reusable surfaces beside a separate `lambda.editor` model family.~~ | `lambda.editor.app`, `format`, `surface`, `session`, `core`, `schema` and `dom` retain those separate responsibilities under one family (§3–§4; D7.2.4v4, D7.2.6; package-structure implementation 2026-11-04). |
+| ~~The `lambda.edit` family owns the application, format adapters and reusable surfaces beside a separate `lambda.editor` model family.~~ | `lambda.editor.app`, `format`, `surface`, `session`, `core`, `schema` and `dom` retain those separate responsibilities under one family (§3–§4; D9.3.4, D9.3.5; package-structure implementation 2026-11-04). |

@@ -148,14 +148,14 @@ The remaining gap is concentrated elsewhere:
 | Bottleneck | Result47 typed / C examples | Evidence and next mechanism |
 |---|---|---|
 | Runtime call plus boxing/root traffic for scalar operations | pnpoly 6.2x, crypto_sha1 8.2x, bounce 4.0x, levenshtein 7.2x | Current pnpoly MIR still calls `fn_ne` for two native comparison results. Tune31's MIR review also identifies boxed bitwise operations, `abs`, and character reads. Native lowering removes the whole call boundary. |
-| Ownership/path operations on records and arrays | havlak 32.7x, deltablue 21.9x, splay 17.1x, hashmap 13.2x, richards 11.1x | Re-navigation, checked stores, home transport, and real copies. Carry layout/ownership facts on handles and fix their invalidation; separate excess checks from required two-owner snapshots. **D4.4.4v4, D4.4.6, S9.1.2–S9.1.3**. |
-| Construction, conversion and allocation | cube3d 13.2x, brainfuck 7.1x, storage 3.7x | Repeated `fill`, returned small arrays, and array admission. Produce the required representation/certificate once. Buffer reuse needs an actual lifetime/escape proof. **D3.3.3v3, D4.1.4v4**. |
+| Ownership/path operations on records and arrays | havlak 32.7x, deltablue 21.9x, splay 17.1x, hashmap 13.2x, richards 11.1x | Re-navigation, checked stores, home transport, and real copies. Carry layout/ownership facts on handles and fix their invalidation; separate excess checks from required two-owner snapshots. **D5.4.4, D5.4.5, S9.1.2–S9.1.3**. |
+| Construction, conversion and allocation | cube3d 13.2x, brainfuck 7.1x, storage 3.7x | Repeated `fill`, returned small arrays, and array admission. Produce the required representation/certificate once. Buffer reuse needs an actual lifetime/escape proof. **D4.3.3, D5.1.4**. |
 | Strings and dynamic collections | hyphen 46.7x, microdiff 22.6x, knucleotide 17.3x, base64 15.1x, prettier_ast 14.6x | Character helpers, split/substring, hash-map updates, construction and concatenation. Require current profiles before assigning percentages to each. |
 | Residual code size/register pressure | fft 3.7x, quicksort 3.6x, nbody 2.3x | Native paths still carry null/band/bounds/ownership control flow and cold siblings. Tune30's machine-code investigation found register spills and bounded additional index-check removal below roughly 10% on its probes. |
 
 The boundary cost is multiplicative: boxed operands → publish live roots →
 helper → reload roots → inspect/unbox result. A one-instruction operation
-can acquire many surrounding instructions. **D5.3.1–D5.3.2** permit
+can acquire many surrounding instructions. **D6.3.1–D6.3.2** permit
 root-traffic reduction at proven `NO_GC` calls and require live precise
 roots at collecting calls. Do not assume generic comparisons/conversions
 are `NO_GC`; prove their transitive effects or lower a proven primitive
@@ -268,9 +268,9 @@ annotations that would narrow the program's accepted values. A growing
 untyped array must retain its legal widening behavior. Hoisting a
 conversion also needs an unchanged-value/ownership proof across the uses.
 Do not simply weaken the existing guards: they prevent real mixed-carrier
-miscompilations. **D3.3.2v2–D3.3.4, D8.3.1v2–D8.3.4v3** require inferred
+miscompilations. **D4.3.2–D2.4.3, D7.3.1–D7.3.4** require inferred
 specialization to retain exact entry proof and a complete boxed fallback
-where the caller set is open. **D8.4.1v2** prohibits adding mutable inline
+where the caller set is open. **D7.4.1** prohibits adding mutable inline
 caches as a shortcut. The existing DF12 speculative-lift and TG8
 guard-hoist experiments remain opt-in; enabling them wholesale is not an
 established performance fix.
@@ -290,7 +290,7 @@ established performance fix.
 3. **Remove scalar helper boundaries shared by both variants.** Native
    boolean equality, safe bitwise operations, scalar `abs`, and proven
    character reads; then extend leaf inlining to those operations. Retain
-   numeric-band/null/error behavior under **S4.1.2, D2.5.3, D2.8.1–D2.8.3**.
+   numeric-band/null/error behavior under **S4.1.2, D2.4.3, D2.5.1–D2.5.3**.
 4. **Reduce ownership work and allocation in the expensive rows.** Carry
    handle facts through valid regions; avoid unnecessary re-navigation and
    repeated admission; construct certified arrays directly. Profile

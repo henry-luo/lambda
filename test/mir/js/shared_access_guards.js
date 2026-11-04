@@ -1,4 +1,4 @@
-// D8.4.1v2: source candidates choose guards; every miss retains JS semantics.
+// D7.4.1: source candidates choose guards; every miss retains JS semantics.
 function makeRecord(value) { return { number: value, link: null }; }
 function readRecord(record) { return record.number; }
 function writeRecord(record, value) { record.number = value; return record.number; }

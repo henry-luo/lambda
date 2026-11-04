@@ -6,9 +6,9 @@
 selection geometry, mutation survival, and the selection-facing editing event
 contract.
 
-**Spec linkage:** **D7.2.5** assigns user-agent editing policy to the shipped
+**Spec linkage:** **D10.2.1** assigns user-agent editing policy to the shipped
 DOM package while Radiant provides checked DOM/Selection mechanisms.
-**D7.5.3** keeps the Lambda/Radiant selection bridge explicit, revisioned, and
+**D9.5.6** keeps the Lambda/Radiant selection bridge explicit, revisioned, and
 one-way at each boundary.
 
 This record supersedes the former Phase-8 and unified-API proposals. It states
@@ -90,7 +90,7 @@ character and word movement. Supported granularities are `character`, `word`,
 `paragraphboundary`, and `documentboundary`. Empty selections are no-ops and
 unknown values raise `SyntaxError`.
 
-Selection mutation is not a contenteditable default action. Under **D7.2.5**,
+Selection mutation is not a contenteditable default action. Under **D10.2.1**,
 the DOM package owns editing policy; Radiant exposes the checked range,
 selection, geometry, and notification mechanisms that the package and page
 scripts use.
@@ -110,7 +110,7 @@ geometry projections, which are resolved again from the retained DOM boundary
 and current layout. If a source-model commit regenerates a projected DOM, the
 revisioned Lambda/Radiant bridge resolves and commits the replacement boundary
 once; stale model revisions cannot overwrite a newer user selection
-(**D7.5.3**).
+(**D9.5.6**).
 
 ## 5. Text controls and contenteditable
 

@@ -1,4 +1,4 @@
-// D7.2.5: both editing backends consume one pure descriptor/request/action
+// D10.2.1: both editing backends consume one pure descriptor/request/action
 // protocol; representation-specific state is absent from these values.
 import registry: lambda.dom.edit_registry
 import request: lambda.dom.edit_request

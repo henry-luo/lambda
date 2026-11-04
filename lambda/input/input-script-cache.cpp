@@ -624,7 +624,7 @@ void input_script_cache_destroy(InputScriptCache* cache) {
         (unsigned long long)(stats.retained_source_bytes +
             stats.retained_ast_bytes + stats.retained_mir_bytes),
         (unsigned long long)stats.peak_bytes);
-    // D8.5.1v2: releasing a cached template closes its retained lease. Move
+    // D8.5.1: releasing a cached template closes its retained lease. Move
     // the owners out before callbacks run so lease release can take this
     // mutex without recursively locking cache teardown.
     HashMap* entries = cache->entries;
@@ -856,7 +856,7 @@ static size_t cache_invalidate_input_cone_locked(InputScriptCache* cache,
     }
     // Every map owner is detached before an unleased image is destroyed: a
     // dependency and an importer can otherwise observe each other's edge
-    // during one cone teardown (D8.5.1v3).
+    // during one cone teardown (D8.5.1).
     for (int i = 0; i < cone->length; i++) {
         ScriptInput* input = (ScriptInput*)cone->data[i];
         if (input && input->lease_count == 0) cache_destroy_input(input);

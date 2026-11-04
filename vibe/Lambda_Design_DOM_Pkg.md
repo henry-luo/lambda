@@ -150,7 +150,7 @@ precise only about the *JS surface presentation*, never about the DOM behavior u
 argued away. **Live collections** are an acknowledged breach: §6.6 / §9 Q4 allow L4 to keep them
 native in shape *and* behavior, because liveness is hot (frequency test) and the VMap laziness
 model is unsettled. **Ownership** (`destroy` must be a non-owning no-op for DOM nodes) and
-**handler rooting** are filed with the eight but are really D4.5.1v3 memory-seam obligations, not
+**handler rooting** are filed with the eight but are really D5.5.1 memory-seam obligations, not
 JS-shape items. Of the remainder, `element.animate` (A/N) is not a placement argument at all —
 its behavior is native by the frequency and coupling tests, so L4 only presents it — and
 `StaticRange` (**L**/A) is the split working as intended: a value object in Lambda, a constructor

@@ -1,8 +1,8 @@
 // Native retained UI: the tree stays stable while procedures update its controls
-// and canvas (S12.1.3, D4.5.1v4); history contains immutable recipes (S1.4).
+// and canvas (S12.1.3, D5.5.1); history contains immutable recipes (S1.4).
 import dom
 import radiant
-// keep stylesheet loading independent of unused component implementations (D8.1.1v18).
+// keep stylesheet loading independent of unused component implementations (D8.3.2).
 import ui_styles: lambda.ui.dtna.style
 import resources: ~~.mod_resources
 import files: .mod_io

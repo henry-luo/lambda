@@ -1,4 +1,4 @@
-// JS05-L5..L7 (D8.1.3v21): a direct eval from interpreted code links to its
+// JS05-L5..L7 (D8.4.3): a direct eval from interpreted code links to its
 // caller's live environments instead of projecting them through the bridge.
 function t(label, fn) {
   try { console.log(label, fn()); } catch (e) { console.log(label, "THROWS", e.name); }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune31 T31-3 / S5.1.1, S6.1.2, D2.5.2v3: stable boxed Bool-or-null comparison bindings use canonical Item equality, so null/null, null/bool and bool/bool keep their total equality results without fn_eq/fn_ne.",
+  "description": "Tune31 T31-3 / S5.1.1, S6.1.2, D2.4.2: stable boxed Bool-or-null comparison bindings use canonical Item equality, so null/null, null/bool and bool/bool keep their total equality results without fn_eq/fn_ne.",
   "checks": [
     {
       "in_func": "_compare_neighbors_#",

@@ -44,7 +44,7 @@ Unlike GIF, each `lottie_animation_tick` (`lottie_player.cpp:17`) genuinely re-r
 ### 2.3 Video — mac AVFoundation, STUB elsewhere
 
 `HTMLMediaElement.prototype.canPlayType` is shared by audio and video elements.
-The JS realm adapter validates the native element identity (D7.4.5v2), converts
+The JS realm adapter validates the native element identity (D9.5.5), converts
 the required DOMString argument, and calls `dom_platform_can_play_type`.
 `rdt_video_can_play_type` parses MIME essence and codec parameters using
 [MIME Sniffing §4.4](https://mimesniff.spec.whatwg.org/#parsing-a-mime-type).
@@ -74,7 +74,7 @@ the authored source list retires the decoder and advances its generation while
 preserving the element's volume and muting, as required by the
 [HTML media model](https://html.spec.whatwg.org/multipage/media.html#dom-media-volume).
 Layout resolves sources against
-its own document, including iframe documents (**D4.5.1v4, D7.5.3**).
+its own document, including iframe documents (**D5.5.1, D9.5.6**).
 Removing a connected media element pauses it at the stable-state reconciliation
 boundary even if a retained script wrapper keeps its decoder alive. Retirement
 releases the decoder. This follows the

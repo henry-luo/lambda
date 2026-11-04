@@ -1,4 +1,4 @@
-// D7.2.5: Word's ribbon contours, typography, presets and group layout are shared.
+// D10.2.1: Word's ribbon contours, typography, presets and group layout are shared.
 import ribbon: lambda.ui.workspace.ribbon
 import icons: lambda.ui.workspace.ribbon_icons
 import text_format: lambda.ui.workspace.text_format

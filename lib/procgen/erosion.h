@@ -1,4 +1,4 @@
-// batch hydraulic erosion; all storage and parameters are numeric (D7.1.1).
+// batch hydraulic erosion; all storage and parameters are numeric (D9.1.1).
 #ifndef LIB_PROCGEN_EROSION_H
 #define LIB_PROCGEN_EROSION_H
 #include <stdbool.h>

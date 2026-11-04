@@ -1,4 +1,4 @@
-// T29-3 (D2.5.3): an int tree over a possibly out-of-range read tests the read
+// T29-3 (D2.4.3): an int tree over a possibly out-of-range read tests the read
 // once and branches to one null result. The result is still null end to end
 // (S7.1.1v3), a nan still compares unequal to itself, and a nan or infinity
 // operand still poisons the in-range result (S4.1.2).

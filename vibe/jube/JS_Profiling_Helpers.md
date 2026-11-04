@@ -39,7 +39,7 @@ indistinguishable until execution is counted. Two questions needed dynamic data:
    everything else (JIT-generated code, compilation, GC, allocator)?
 2. Which helpers are called most often?
 
-D7.4.3 already requires that "every callable runtime helper carries catalog
+D9.5.3 already requires that "every callable runtime helper carries catalog
 metadata"; this pass adds the execution-side counterpart — what those catalog
 rows actually cost at run time.
 
@@ -61,7 +61,7 @@ Properties that make this measurement trustworthy:
 - **No GC or safepoint interaction.** The increment is three plain integer
   instructions on a non-GC global, emitted before `em_before_resolved_call`, so
   root-slot bookkeeping and the `MAY_GC` call-site record are untouched
-  (D5.3.1, D5.3.2 preserved).
+  (D6.3.1, D6.3.2 preserved).
 - **Opt-in.** Installed only under `LAMBDA_JS_EXEC_PROFILE` and only when
   `JS_EXEC_PROFILE` is truthy at emission time.
 
@@ -300,7 +300,7 @@ means the tracker reaches `UNKNOWN` at most executed polls, expected since every
 
 **`lambda_restore_number_frame_top` (20.6M)** and
 **`lambda_item_adopt_scalar_home` (12.7M)** are the scalar-home epilogue and
-adoption steps (D5.2.1, D5.2.2).
+adoption steps (D6.2.1, D6.2.2).
 
 Together: **50.4% of all helper calls.**
 
@@ -320,7 +320,7 @@ The helpers that actually cost time sit at the opposite corner of the table:
 thousands of calls, hundreds of microseconds each, and for the heaviest, **not
 called from JIT code at all**.
 
-The design implication is *not* that D5.2's caller-donated-home protocol needs a
+The design implication is *not* that D6.2's caller-donated-home protocol needs a
 cheaper lowering. It bounds scalar space by peak liveness rather than call
 count, which is the right trade, and the measured price of its per-call C-call
 form is under 0.1% of runtime. **The levers are promise-allocation GC root
@@ -333,13 +333,13 @@ Ordered by measured time. The ordering deliberately inverts the frequency
 ranking, for the reasons in §4.1. None of this is implemented.
 
 1. **GC root-range registration in `js_alloc_promise` — 7.1% of working CPU,
-   100% from one caller.** Every promise allocation registers a root range. D5.3.1
+   100% from one caller.** Every promise allocation registers a root range. D6.3.1
    requires root stores be "proportional to dirty live homes at `MAY_GC`
    boundaries — not to instructions"; a per-allocation range registration is
    exactly the shape that ruling wants bounded. Highest-value item here and the
    most sharply localized.
 2. **Name/shape lookup as one cost rather than per-call-site — 8.3%.** Reached
-   from property access, builtin dispatch, and prototype walking alike. D4.6
+   from property access, builtin dispatch, and prototype walking alike. D5.6
    (name identity) and DO16's dynamic-intern growth bound are the relevant
    rulings. `name_pool_create_strview` at 838 samples is the largest single
    contributor and suggests lookups are re-deriving `StrView`s that could be
@@ -353,7 +353,7 @@ ranking, for the reasons in §4.1. None of this is implemented.
    across instantiations is the obvious question (adjacent to Tune12 P2).
 5. **Tighten `exception_effect` catalog rows.** Removes polls rather than
    cheapening them. Worth ≤0.11% of time, but it is metadata work with no
-   codegen risk, and D7.4.3 already requires accurate exception behavior in
+   codegen risk, and D9.5.3 already requires accurate exception behavior in
    catalog rows — enforcement of an existing ruling.
 6. **Do *not* prioritize inlining the ABI helpers.** Ceiling is ~0.2% (§4.1).
    Worth doing only as code-size/instruction-count hygiene.
@@ -419,12 +419,12 @@ python3 temp/build_symbol_map.py && python3 temp/parse_sample2.py temp/samples/r
 1. Why does `js_alloc_promise` register a GC root range per allocation, and can
    promise slots live in an existing rooted structure instead? At 7.1% of
    working CPU with a single caller, this is the highest-value open question
-   here (D5.3.1).
+   here (D6.3.1).
 2. Is a per-shape prototype-slot cache the right answer to §5 item 3, and can it
    be invalidated correctly against `js_intrinsic_note_property_mutation`?
 3. Is there a principled way to make the emitter's default exception effect
    `PRESERVES` for helpers that provably cannot throw, rather than auditing
-   catalog rows by hand? D6.1.3 sets the polarity rule for *missing* analyses
+   catalog rows by hand? D7.1.3 sets the polarity rule for *missing* analyses
    (missing must mean defect-capable), which argues for mechanical verification
    rather than flipping the default.
 4. Should `release_profile` also carry `-g`? It would restore `file:line` and

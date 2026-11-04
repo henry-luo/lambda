@@ -1,4 +1,4 @@
-// Shipped wiki syntax data (D7.2.4); traversal lives in writer.ls.
+// Shipped wiki syntax data (D9.3.4); traversal lives in writer.ls.
 let base = {heading:"equals",strong:"**",em:"//",code:"{{{",code_end:"}}}",
     block:"braces",links:"brackets",lists:"repeat",indent:2,escape:"\\",table:"pipe",
     underline:null,del:null,sup:null,sub:null,cite:null,br:"\\\\"}

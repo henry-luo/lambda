@@ -28,7 +28,7 @@ typedef enum LambdaFaultReason {
     LAMBDA_FAULT_SIDE_STACK_EXHAUSTION,
     LAMBDA_FAULT_OUT_OF_MEMORY,
     LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT,
-    // D8.1.1v17: a REPL entry interrupted by SIGINT; the session rolls it back
+    // D8.3.6: a REPL entry interrupted by SIGINT; the session rolls it back
     LAMBDA_FAULT_INTERRUPTED,
 } LambdaFaultReason;
 

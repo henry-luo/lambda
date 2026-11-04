@@ -11,10 +11,10 @@
 
 ## 1. Purpose & scope
 
-JS objects are Lambda `Map` structs (`LMD_TYPE_MAP`) carrying a `TypeMap` "shape" descriptor — **never Lambda `Object`s** (`LMD_TYPE_OBJECT`), which today is a separate kind produced only by a Lambda `type T { … }` declaration and reaches guest code only inbound (**D2.6.9v2**, the shipped state). **Ruled forward as D2.6.9v3:** once nominal-ness becomes a descriptor property and the object TypeId retires (D2.6.6v2 phase 2), a JS object is a *nominal* Lambda map — its class is its nominal record — and therefore IS a Lambda object; the naming trap below then dissolves. The naming is the trap: "object" here means Lambda's nominal kind, while the thing a JS program calls an object is a map. Since D2.6.6 made `Object` an alias of `struct Element`, an inbound Lambda object is element-shaped, so any guest path that accepts `LMD_TYPE_OBJECT` must read its attribute face through `lambda_attr_shape`/`lambda_attr_data` — punning it to a `Map*` reads its `items` pointer as `type`. Map-only machinery (the property extension table, iterator/proxy/sparse map kinds, the `js_native_trace` hook) stays gated to `LMD_TYPE_MAP`.
+JS objects are Lambda `Map` structs (`LMD_TYPE_MAP`) carrying a `TypeMap` "shape" descriptor — **never Lambda `Object`s** (`LMD_TYPE_OBJECT`), which today is a separate kind produced only by a Lambda `type T { … }` declaration and reaches guest code only inbound (**D3.1.5**, the shipped state). **Ruled forward as D3.1.5:** once nominal-ness becomes a descriptor property and the object TypeId retires (D3.1.1 phase 2), a JS object is a *nominal* Lambda map — its class is its nominal record — and therefore IS a Lambda object; the naming trap below then dissolves. The naming is the trap: "object" here means Lambda's nominal kind, while the thing a JS program calls an object is a map. Since D3.1.1 made `Object` an alias of `struct Element`, an inbound Lambda object is element-shaped, so any guest path that accepts `LMD_TYPE_OBJECT` must read its attribute face through `lambda_attr_shape`/`lambda_attr_data` — punning it to a `Map*` reads its `items` pointer as `type`. Map-only machinery (the property extension table, iterator/proxy/sparse map kinds, the `js_native_trace` hook) stays gated to `LMD_TYPE_MAP`.
 Functions (`LMD_TYPE_FUNC`) and arrays (`LMD_TYPE_ARRAY`) keep ordinary properties in side maps. Property semantics (attributes, accessors, prototype lookup, exotic objects) are layered on top of this representation. The shape *layout* and GC handling are shared with [JS_03 — Value Model & Memory](JS_03_Value_Model.md); this document focuses on the property/prototype machinery. Symbol *values* (the `Symbol` builtin) are in [JS_10 — Standard Built-in Library](JS_10_Builtins.md); here we cover only their use as property keys.
 
-The Tune6 object migration applies **D3.4.7/D3.4.8**: descriptor metadata is
+The Tune6 object migration applies **D3.4.7/D3.4.7**: descriptor metadata is
 `ShapeEntry::flags`, accessors are virtual `JsAccessorCell` descriptors on
 private shapes, and built-in brands resolve through immutable `TypeMap::js_meta`
 via `js_object_meta(Item)`.
@@ -29,7 +29,7 @@ NamePool identity rather than spelling prefixes.
 <img alt="Object & shape layout" src="diagram/object_layout.svg" width="325">
 
 - **`Container`** (`lambda.h`) — base header plus the physical flags union. `map_kind` remains a four-bit storage/allocation tag; it is not an object classifier.
-- **`Map`** (`lambda.hpp` / mirror `lambda.h`) — `Container` header + `void* type` (a valid `TypeMap*` for runtime JS Maps), `void* data` (packed field-value buffer), and `data_cap`. Native engine state is held in typed trailing carrier storage; host state remains in VMaps. `Map.data` contains physical fields only under **D3.4.1/D3.4.5/D3.4.8**.
+- **`Map`** (`lambda.hpp` / mirror `lambda.h`) — `Container` header + `void* type` (a valid `TypeMap*` for runtime JS Maps), `void* data` (packed field-value buffer), and `data_cap`. Native engine state is held in typed trailing carrier storage; host state remains in VMaps. `Map.data` contains physical fields only under **D3.4.1/D3.4.5/D3.4.7**.
 - **`TypeMap`** (`lambda-data.hpp`) — the shape plus its immutable `const JsClassMeta* js_meta` refinement. The metadata is selected before publication and preserved by shape/descriptor transitions under **D3.4.7**; it contains no realm `Item`, GC edge, mutable cache, or context-owned pointer.
 - **`ShapeEntry`** (`lambda-data.hpp`) — a physical field has a non-negative `byte_offset` into `Map.data`. A JS accessor has `byte_offset == -1`, `JSPD_IS_ACCESSOR`, and an `accessor` pointer instead. That entry is virtual and its `TypeMap` is private to the one owner object.
 - **`JsAccessorCell`** (`lambda-data.hpp`) — a `GC_TYPE_JS_ACCESSOR` object containing getter/setter `Item` edges. The collector follows `Map → TypeMap → ShapeEntry → cell`; the cell is never encoded as an `Item`, never stored in `Map.data`, and never reaches the Function tracer. Setup holds it in an exact temporary object root only until the shape publishes that edge. `JsAccessorPair` remains the property-layer compatibility alias.
@@ -41,10 +41,10 @@ occupancy fields allow large property caches to keep growing beyond 32,768
 slots. The capacity remains a representable power of two, and allocation
 failure, an absent index, or saturation uses the authoritative field chain.
 Shared-table lookups reject descendant entries outside the current shape's
-length (**D3.4.3v5**). An indexed spelling miss also proves the absence of an
+length (**D3.4.3**). An indexed spelling miss also proves the absence of an
 Input-owned id-less entry; when a runtime entry shadows that spelling, the
 id-less compatibility lookup still walks the chain for the prior Input entry
-(**D3.4.4v4**). Plain JS map misses skip spread-link scanning when the shape's
+(**D3.4.4**). Plain JS map misses skip spread-link scanning when the shape's
 `has_spread` certificate is clear.
 
 ---
@@ -113,7 +113,7 @@ is documented in [JS_12 TypedArrays](JS_12_TypedArrays.md), [JS_13 Web DOM](JS_1
 An explicitly defined own `__proto__` data property has an ordinary descriptor
 and governs subsequent Set operations. Its public slot is independent of
 `JS_INTERNAL_PROTO_KEY`; hiding that data descriptor incorrectly routes writes
-to the inherited Annex B setter (**D3.4.7**, **D6.2.2v2**).
+to the inherited Annex B setter (**D3.4.7**, **D7.2.2**).
 
 ---
 
@@ -149,14 +149,14 @@ The spec-named kernels `js_ordinary_set` / `js_ordinary_set_via_accessor` live i
 
 ## 8. Prototype chain & realm-local intrinsic properties
 
-Per **D6.2.2v2**, intrinsic methods and accessors are ordinary realm-local function values installed as real properties before publication of their owner object.
+Per **D7.2.2**, intrinsic methods and accessors are ordinary realm-local function values installed as real properties before publication of their owner object.
 
 - **Class identity** — `js_object_meta(Item)` resolves the immutable
   `TypeMap::js_meta` family/class policy. It does not grant callability or
   select a method body at call time. Class constructors are `JsFunction` values
-  with explicit call/construct capability under **D6.2.2v2**.
+  with explicit call/construct capability under **D7.2.2**.
 - **Target specs** — `JsIntrinsicTargetSpec` binds a catalog ID to typed call and optional construct bodies plus compiler metadata. The target is copied into the `JsFunction` when the binding is created; the ID remains diagnostic/catalog metadata.
-- **Binding specs** — `JsBuiltinMethodSpec` records owner, NameId spelling, descriptors, formal length, and an explicit identity-alias key. `js_create_builtin_function_from_spec` creates one function per realm binding (or declared alias), finalizes its call/construct capabilities, and caches that identity in context-owned rooted state under **D5.4.1–D5.4.4**.
+- **Binding specs** — `JsBuiltinMethodSpec` records owner, NameId spelling, descriptors, formal length, and an explicit identity-alias key. `js_create_builtin_function_from_spec` creates one function per realm binding (or declared alias), finalizes its call/construct capabilities, and caches that identity in context-owned rooted state under **D6.4.1–D6.4.4**.
 - **Installation** — `js_install_builtin_method_specs`, `js_install_builtin_accessor_specs`, and owner-binding population store those values on constructors/prototypes/namespaces with the required descriptors. Ordinary `Get` and the normal prototype walk then find them. Replacement, deletion, accessors, extraction, and Proxy traps are therefore observed before `Call`.
 
 The catalog is the single construction-time source of target and binding metadata; it is not a property-miss oracle or a runtime semantic dispatcher. See [JS_10 — Standard Built-in Library](JS_10_Builtins.md).
@@ -172,7 +172,7 @@ For ordinary storage/lookup, `js_symbol_to_key` resolves the Symbol's temporary
 retained for Proxy/reflection boundaries, and `Object.getOwnPropertySymbols`
 recovers it through the per-realm `NameId → Symbol*` index. Thus `NameId` is
 property identity while the pointer is JS value identity, as required by
-**D4.6.1v3**.
+**D5.6.1**.
 
 Enumeration filters identity-kind Symbol properties and exact owner-defined
 engine keys; private names are recognized by NamePool private identity.
@@ -192,7 +192,7 @@ from the tree. Without it every `this.prop = …` in a constructor is a property
 `Reflect.defineProperty` path; that is 25–40% of `havlak`, `cd`, `deltablue`,
 and `prettier_ast` in Result38.
 
-The replacement must not reintroduce a cache: **D8.4.1v2** and **LC1v2** ban
+The replacement must not reintroduce a cache: **D7.4.1** and **LC1v2** ban
 per-site mutable state in LambdaJS as well as in the Lambda lane. The
 sanctioned design is a **compile-predicted** shape — immutable metadata derived
 from the constructor's `this.x = …` prefix and from each object-literal site —
@@ -209,7 +209,7 @@ on the first `new`, so later instances from that site shared the blueprint; and
 writing the raw native value into `Map.data + byte_offset`. Because instances
 shared the cached `TypeMap`, a per-instance attribute change had to
 `js_typemap_clone_for_mutation` (`js_property_attrs.cpp:129`) first. The
-per-call-site cache cell is exactly what **D8.4.1v2** now forbids; the
+per-call-site cache cell is exactly what **D7.4.1** now forbids; the
 compile-time ctor field scan ("A5") it depended on still exists and is
 described in [JS_07 — Classes](JS_07_Classes.md); the perf rationale is in [JS_15 — Performance](JS_15_Performance.md).
 

@@ -1,5 +1,5 @@
 import typography: lambda.doc.typography
-// S1.4 / D7.2.5: Home adapts shared formatting rules to authored slide values.
+// S1.4 / D10.2.1: Home adapts shared formatting rules to authored slide values.
 import m: .mod_model
 import c: lambda.slide.common
 import css: lambda.editor.core.inline_format

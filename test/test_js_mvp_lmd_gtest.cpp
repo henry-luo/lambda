@@ -3797,7 +3797,7 @@ TEST_F(JsMvpLmd, CoreGlobalBindings) {
     boolean("globalThis.loopBinding=0;let total=0;for(let i=0;i<12;i++){globalThis.loopBinding=i;total+=loopBinding}total===66");
     mir = dump("temp/mvp_lmd_loop_global.mir");
     ASSERT_NE(mir, nullptr);
-    // D8.4.1v2: repeated globals use shared dispatch without a site-cache decoder.
+    // D7.4.1: repeated globals use shared dispatch without a site-cache decoder.
     EXPECT_EQ(strstr(mir, "\timport\tmap_shape_field_to_item\n"), nullptr);
     EXPECT_NE(strstr(mir, "\timport\tmvp_lmd_class_property\n"), nullptr);
     mem_free(mir);

@@ -278,7 +278,7 @@ pn cfg_add_edge(var cfg, fromName, toName) {
         return 0
     }
     // Edges retain block ids, never a copied block value; bbMap is the sole
-    // owner of a block's evolving in/out-edge lists (D3.3.1).
+    // owner of a block's evolving in/out-edge lists (D4.3.1).
     var from_out = fromNode.outEdges
     vec_add(from_out, toName)^
     fromNode.outEdges = from_out

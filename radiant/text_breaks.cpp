@@ -1,9 +1,38 @@
 #include "text_breaks.hpp"
+#include "../lib/hash.h"
 #include "../lib/memtrack.h"
 #include <limits.h>
+#include <string.h>
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
+
+static constexpr size_t TEXT_BREAK_CACHE_BYTES = 256;
+
+struct NativeTextBreakEntry {
+    uint32_t hash;
+    size_t length;
+    bool valid;
+    char text[TEXT_BREAK_CACHE_BYTES];
+    uint8_t boundaries[TEXT_BREAK_CACHE_BYTES + 1];
+};
+
+struct NativeTextBreakCache {
+    CFLocaleRef locale = nullptr;
+    NativeTextBreakEntry entries[64] = {};
+    ~NativeTextBreakCache() { if (locale) CFRelease(locale); }
+    NativeTextBreakEntry* find(size_t length, uint32_t hash) {
+        if (length > TEXT_BREAK_CACHE_BYTES) return nullptr;
+        CFLocaleRef current = CFLocaleCopyCurrent();
+        if (!current) return nullptr;
+        if (!locale || !CFEqual(locale, current)) {
+            for (auto& entry : entries) entry.valid = false;
+            if (locale) CFRelease(locale);
+            locale = current;
+        } else CFRelease(current);
+        return &entries[hash % (sizeof(entries) / sizeof(entries[0]))];
+    }
+};
 #endif
 
 LayoutTextBreaks::LayoutTextBreaks(const char* text, size_t length, bool enabled) {
@@ -14,6 +43,21 @@ LayoutTextBreaks::LayoutTextBreaks(const char* text, size_t length, bool enabled
         if ((unsigned char)text[i] >= 0x80) { non_ascii = true; break; }
     }
     if (!non_ascii) return;
+    // reflow changes widths/fonts without changing Unicode break opportunities.
+    // cache owned bytes/maps, then copy into this probe so nested probes cannot
+    // invalidate its boundaries through eviction (D4.1.4v5 / D4.5.1v4).
+    static thread_local NativeTextBreakCache cache;
+    uint32_t hash = length <= TEXT_BREAK_CACHE_BYTES ? hash_fnv1a_32(text, length) : 0;
+    NativeTextBreakEntry* cached = cache.find(length, hash);
+    if (cached && cached->valid && cached->hash == hash && cached->length == length &&
+        memcmp(cached->text, text, length) == 0) {
+        boundaries_ = (uint8_t*)mem_alloc(length + 1, MEM_CAT_LAYOUT);
+        if (boundaries_) {
+            memcpy(boundaries_, cached->boundaries, length + 1);
+            length_ = length;
+        }
+        return;
+    }
     CFStringRef source = CFStringCreateWithBytes(kCFAllocatorDefault,
         (const UInt8*)text, (CFIndex)length, kCFStringEncodingUTF8, false);
     if (!source) return;
@@ -44,6 +88,13 @@ LayoutTextBreaks::LayoutTextBreaks(const char* text, size_t length, bool enabled
         CFRelease(tokenizer);
     }
     CFRelease(source);
+    if (cached && boundaries_) {
+        memcpy(cached->text, text, length);
+        memcpy(cached->boundaries, boundaries_, length + 1);
+        cached->hash = hash;
+        cached->length = length;
+        cached->valid = true;
+    }
 #else
     (void)text; (void)length; (void)enabled;
 #endif

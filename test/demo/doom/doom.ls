@@ -1,6 +1,6 @@
 // Run: ./lambda.exe view test/demo/doom/doom.ls
 // The template is cached; handlers publish simulation state without rebuilding
-// level geometry (S9.1.7, S12.1.3, D4.5.1v4).
+// level geometry (S9.1.7, S12.1.3, D5.5.1).
 import dom
 import data: .mod_data
 import game_state: .mod_state

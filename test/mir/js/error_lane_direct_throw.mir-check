@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3v2: a known source throw transfers directly to catch without testing its known ERROR result. Catch materialization is checked independently.",
+  "description": "D7.4.3: a known source throw transfers directly to catch without testing its known ERROR result. Catch materialization is checked independently.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

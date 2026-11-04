@@ -3,7 +3,7 @@
 #include "../lambda-data.hpp"
 
 // Output builders own bytes, never retained Items. Host-readable virtual
-// containers (VArray/Velmt) have a separate contract (D7.4.5v2).
+// containers (VArray/Velmt) have a separate contract (D9.5.5).
 struct MarkOutputBuilder;
 struct MarkOutputBuilderOps {
     void (*append)(MarkOutputBuilder* builder, Item item);

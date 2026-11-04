@@ -1,4 +1,4 @@
-// ruler gestures preview DOM geometry; only completed commands enter source history (D7.2.5).
+// ruler gestures preview DOM geometry; only completed commands enter source history (D10.2.1).
 import dom
 import page: .mod_page
 import columns: .mod_columns

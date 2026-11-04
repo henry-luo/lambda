@@ -1,4 +1,4 @@
-// S12.1.3 / D7.2.5: geometry previews are transient; one completed gesture authors one change.
+// S12.1.3 / D10.2.1: geometry previews are transient; one completed gesture authors one change.
 import dom
 import m: .mod_model
 import f: .mod_formula

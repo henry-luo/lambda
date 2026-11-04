@@ -3,7 +3,7 @@
 - **Status:** Phase 1/2 implementation in progress
 - **Date:** 2026-09-01
 - **Scope:** event-driven Radiant UI fixtures executed through `lambda.exe view`
-- **Formal linkage:** no new language or runtime ruling. The runner's use and teardown of Lambda's strict JSON parser must follow **D4.2.1v3**: allocator parent/backing edges are established at creation and released in reverse-dependency order.
+- **Formal linkage:** no new language or runtime ruling. The runner's use and teardown of Lambda's strict JSON parser must follow **D5.2.1**: allocator parent/backing edges are established at creation and released in reverse-dependency order.
 
 ## Executive decision
 
@@ -232,7 +232,7 @@ The checked-in manifest is the executable ownership contract. It must enumerate 
 
 The runner, manifest loader, fixture preflight, event simulator, and machine-result reader shall use Lambda's strict JSON parser through one small test-harness adapter. The runner must not add another JSON lexer or copy parser logic.
 
-The adapter should wrap `parse_json_to_item_strict()` and expose typed field readers with path-aware diagnostics. It must use Lambda `Str`, `ArrayList`, and `HashMap` rather than introducing new `std::` containers. Parser Inputs and their allocator graph are released in reverse-dependency order as required by **D4.2.1v3**.
+The adapter should wrap `parse_json_to_item_strict()` and expose typed field readers with path-aware diagnostics. It must use Lambda `Str`, `ArrayList`, and `HashMap` rather than introducing new `std::` containers. Parser Inputs and their allocator graph are released in reverse-dependency order as required by **D5.2.1**.
 
 Preflight runs before any child process. Every normal suite invocation preflights the complete managed fixture universe; selecting `--suite dom` must not hide a duplicate owner in another suite.
 

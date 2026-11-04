@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3/S8.2.4v3: an indexed trusted record layout may be speculated across an untyped key only behind a runtime map-shape guard and a generic fallback.",
+  "description": "D4.3.3/S8.2.4v3: an indexed trusted record layout may be speculated across an untyped key only behind a runtime map-shape guard and a generic fallback.",
   "checks": [
     {
       "in_func": "_local_key_#",

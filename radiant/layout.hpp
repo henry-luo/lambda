@@ -374,6 +374,7 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
 
 bool layout_element_inline_axis_is_vertical(DomElement* element);
 CssEnum layout_element_css_writing_mode(DomElement* element);
+bool layout_cached_inheritance_excludes(DomElement* element, CssPropertyCode property);
 WritingMode layout_element_writing_mode(DomElement* element);
 int css_logical_corner_index(CssPropertyCode property, DomElement* element);
 bool layout_inline_element_is_orthogonal(DomElement* element);
@@ -1938,7 +1939,7 @@ bool text_get_grapheme_cluster(const unsigned char* start, const unsigned char* 
 bool text_get_emoji_cluster(const unsigned char* start, const unsigned char* end,
     TextGraphemeCluster* cluster);
 TextGlyphOrientation text_glyph_orientation(TextOrientationPolicy policy, uint32_t codepoint);
-// selected faces are borrowed during the synchronous visit; no mutable style is retained (D4.5.1v4).
+// selected faces are borrowed during the synchronous visit; no mutable style is retained (D5.5.1).
 typedef void (*TextUnitGlyphFn)(void* context, FontHandle* face, uint32_t glyph,
     float x, float y, float advance);
 enum TextGlyphShapingMode {
@@ -2945,6 +2946,7 @@ CssEnum layout_flex_direction(ViewElement* container);
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout);
 float flex_measure_intrinsic_max_height(LayoutContext* lycon, DomNode* node, float width,
                                         float percentage_containing_width = -1.0f);
+float flex_item_explicit_ratio_basis(ViewElement* item, bool main_is_horizontal);
 bool flex_height_is_parent_constrained(LayoutContext* context, ViewBlock* container,
                                        bool include_column_main_size,
                                        bool include_row_cross_stretch);
@@ -5143,7 +5145,7 @@ CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyC
     const LayoutLogicalSides& sides);
 const CssValue* layout_box_component_value(const CssValue* value, CssPropertyCode source,
     CssBoxSide side, const LayoutLogicalSides& sides);
-// borrowed from the caller's computed-value scratch or selected style owner (D4.5.1v4).
+// borrowed from the caller's computed-value scratch or selected style owner (D5.5.1).
 const CssValue* layout_resolve_box_component_value(LayoutContext* context, DomElement* element,
     const CssDeclaration* declaration, CssBoxSide side);
 bool layout_compute_scroll_keyword_axes(LayoutContext* context, StyleTree* style,
@@ -5260,10 +5262,13 @@ static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
 
 inline LayoutLogicalSides layout_element_logical_sides(DomElement* element) {
     bool rtl = layout_element_css_direction(element) == CSS_VALUE_RTL;
+    // resolve inherited writing-mode once for all three physical-axis decisions.
+    CssEnum css_mode = layout_element_css_writing_mode(element);
+    WritingMode mode = layout_writing_mode_from_css(css_mode);
     // CSS Writing Modes 4 maps sideways-lr inline-start to bottom in LTR and top in RTL.
-    if (layout_writing_mode_reverses_line_axis(layout_element_css_writing_mode(element))) rtl = !rtl;
-    return layout_logical_sides(layout_element_inline_axis_is_vertical(element),
-        layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl);
+    if (layout_writing_mode_reverses_line_axis(css_mode)) rtl = !rtl;
+    return layout_logical_sides(mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL,
+        mode == WM_VERTICAL_RL, rtl);
 }
 // Logical box properties all resolve to the same physical side pair. Keeping
 // the pair selection here prevents margin, padding, and inset from drifting

@@ -1,4 +1,4 @@
-// Modal focus uses the same eligibility and tabindex ordering as native Tab (D7.2.5).
+// Modal focus uses the same eligibility and tabindex ordering as native Tab (D10.2.1).
 import dom
 import focus: lambda.dom.focus
 

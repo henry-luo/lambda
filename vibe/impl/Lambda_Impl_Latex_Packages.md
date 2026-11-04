@@ -1,8 +1,8 @@
 # LaTeX Phase V: package coverage implementation plan
 
 **Design:** [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md) (§6 package model, §9 compatibility matrix, §10 verification rules, §11 outstanding work); [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) §5 and §10; [Lambda_Pkg_Math.md](../Lambda_Pkg_Math.md) §3, §7 and §10.2; [Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) for beamer.
-**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. All eleven milestones (M0, M1, M2, M4, M8, M3, M5, M6, M7, M9 and M10) were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
-**Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4v3** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
+**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. All eleven milestones (M0, M1, M2, M4, M8, M3, M5, M6, M7, M9 and M10) were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D10.2.2** when the first binding (physics) landed.
+**Formal linkage:** **D10.2.2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D9.3.1–D9.3.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D9.1.2** and **D11.1.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
 **Scope:** the commonly used LaTeX packages and classes that `lambda.doc.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
 
 ## 1. Baseline
@@ -47,7 +47,7 @@ The 31-sample corpus (`test/latex/samples/`) declares 21 unknown packages. `wrap
 | `hyperref` (supported) | `\hyperlink`, `\hypertarget`, `\phantomsection`, `\texorpdfstring` |
 | `graphicx` (supported) | `\resizebox`, `\scalebox`, `\rotatebox`, `\reflectbox` |
 
-**Classes.** Profiles exist for `article`, `report`, `book`, `amsart` and `standalone` ([registry.ls:88](../../lmd/package/doc/latex/packages/registry.ls)). Any other class without a beside-document `.cls` (`scrartcl`, `memoir`, `IEEEtran`, `beamer`, …) renders as `article` with no diagnostic. D7.2.7 resolves a class name like a package name and ends in the located `unknown-package` diagnostic, so this is a conformance gap.
+**Classes.** Profiles exist for `article`, `report`, `book`, `amsart` and `standalone` ([registry.ls:88](../../lmd/package/doc/latex/packages/registry.ls)). Any other class without a beside-document `.cls` (`scrartcl`, `memoir`, `IEEEtran`, `beamer`, …) renders as `article` with no diagnostic. D10.2.2 resolves a class name like a package name and ends in the located `unknown-package` diagnostic, so this is a conformance gap.
 
 **Already in place.** Some missing pieces are smaller than they look:
 
@@ -148,7 +148,7 @@ The font packages of M9 and the NFSS family codes of M1 become data rows.
 
 ### M0.5 Unknown classes
 
-Report the located `unknown-package` diagnostic for a class name that has neither a profile nor a beside-document `.cls`, as D7.2.7 already rules. The document still renders with the `article` profile.
+Report the located `unknown-package` diagnostic for a class name that has neither a profile nor a beside-document `.cls`, as D10.2.2 already rules. The document still renders with the `article` profile.
 
 ### M0.6 `xparse` from the kernel
 
@@ -334,7 +334,7 @@ As built on 2026-10-13:
 - **`pdfpages`.** `\includepdf[pages=…, scale, angle]` embeds each page through the existing graphicx PDF path as a page-sized block. `nup`, `pagecommand` and `landscape` are diagnosed.
 - **`csvsimple`.**
   - `\csvautotabular`, `\csvautobooktabular` and `\csvreader`.
-  - The CSV file is acquired at the input boundary like a `.bib` file (**D7.1.2v2**, **D7.5.2**) and read with Lambda's CSV input.
+  - The CSV file is acquired at the input boundary like a `.bib` file (**D9.1.2**, **D11.1.2**) and read with Lambda's CSV input.
   - `\csvreader` row templates need per-row substitution. Running `csvsimple-l3` on the engine, which already has expl3 and path-gated reads, is the cleaner route and falls under §17.1. Otherwise the script supports `\csvautotabular` only.
 
 As built on 2026-10-13:
@@ -481,7 +481,7 @@ This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
 - **`mhchem`**: §17.2.
 - **`unicode-math`**: M9.
 
-As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratified the same day:
+As built on 2026-10-13, with route (a) chosen by the user and **D10.2.2** ratified the same day:
 
 - **Bindings.** The engine searches `lmd/package/doc/latex/tex/binding/` after the upstream files. Bindings are written from the package manuals, so the vendor rule does not apply; each is also a `CATALOG` row, so options are validated and the declaration reaches the script.
   - Upstream `physics.sty` is not installed locally and leans on xparse embellishments the kernel diagnoses, so `physics.sty` is a Lambda-owned binding of the physics 1.3 manual. It covers every group above plus `\dd`, `\var`, the quick-quad words, `\Pmqty`/`\smqty` forms and `\zmat`/`\pmat`/`\admat`, and the `arrowdel`, `italicdiff` and `notrig` options.
@@ -603,7 +603,7 @@ As built on 2026-10-13, profiles first (§17.4):
 - **`lineno`.** Line numbers depend on Radiant's line breaking and need a layout-time line-counter host capability (Pkg_Latex §11.3 class).
 - **`xr` and `xr-hyper`.** Cross-document labels need analysis of a second document.
 - **Low frequency:** `floatrow`, `datetime2`, `glossaries-extra`, `maybemath`, `answers`, `arcs`. Add each when a corpus document needs it.
-- **`luacode`**: never (**D7.2.7**, **S1.8**).
+- **`luacode`**: never (**D10.2.2**, **S1.8**).
 
 ## 16. Verification and acceptance
 
@@ -619,11 +619,11 @@ As built on 2026-10-13, profiles first (§17.4):
 
 ## 17. Decisions for the user
 
-1. **Bundled packages that emit document tokens.** D7.2.7 bundles *programming* packages. Should `.sty` files whose expansion produces document material also run on the engine as bundled packages? Candidates are upstream `physics.sty`, a Lambda-owned `mathtools` binding, `xspace`, `lipsum` and `csvsimple-l3`. Pkg_Latex §6.3 calls these "thin bindings" and has not applied one yet.
+1. **Bundled packages that emit document tokens.** D10.2.2 bundles *programming* packages. Should `.sty` files whose expansion produces document material also run on the engine as bundled packages? Candidates are upstream `physics.sty`, a Lambda-owned `mathtools` binding, `xspace`, `lipsum` and `csvsimple-l3`. Pkg_Latex §6.3 calls these "thin bindings" and has not applied one yet.
    - *Recommendation:* allow pure macro layers, meaning expansion only, with no font, box or page primitives. User `\renewcommand` keeps working, and no macro language is reimplemented in script.
-   - This may need D7.2.7's wording revised. That ruling is yours to make.
-   - *Approved 2026-10-13.* The D7.2.7 revision will be proposed verbatim, with its companion edits, when the first such binding lands (M3 `xspace` or M8 `physics`), and applied only after the user confirms it.
-   - *Ratified 2026-10-13 as **D7.2.7v2*** (spec 30.0.0) when the physics binding landed: bundled packages are upstream programming packages or Lambda-owned bindings that only expand user commands into constructs the digester and adapters own.
+   - This may need D10.2.2's wording revised. That ruling is yours to make.
+   - *Approved 2026-10-13.* The D10.2.2 revision will be proposed verbatim, with its companion edits, when the first such binding lands (M3 `xspace` or M8 `physics`), and applied only after the user confirms it.
+   - *Ratified 2026-10-13 as **D10.2.2*** (spec 30.0.0) when the physics binding landed: bundled packages are upstream programming packages or Lambda-owned bindings that only expand user commands into constructs the digester and adapters own.
 2. **`mhchem`.** Should `\ce` and `\pu` get a bounded script parser (formulas, charges, states, arrows), or stay unsupported? Pkg_Math §7 and §10.3 currently exclude general chemistry.
    - *Recommendation:* a bounded profile owned by `lambda.doc.math`. *Approved 2026-10-13*; Pkg_Math §7 and §10.3 are revised when the profile is built.
 3. **Fonts.** Should Lambda bundle OFL faces (TeX Gyre Termes, Pagella and Heros; Libertinus; Font Awesome Free), or only report substitution?
@@ -653,7 +653,7 @@ As built on 2026-10-13, profiles first (§17.4):
 - 2026-10-13: M2 committed (1ec9a2aa8). M4 was built as recorded in §8.
   - New modules: `packages/algorithmic.ls` and `packages/algorithm2e.ls`.
   - New test `test/lambda/latex/test_latex_phase5_floats.ls` with its golden. The other 64 LaTeX scripts and the 32 math scripts match their goldens.
-- 2026-10-13: M4 committed (1e7ca8a77). The user chose route (a) for physics. M8 was built as recorded in §12, and **D7.2.7v2** was ratified.
+- 2026-10-13: M4 committed (1e7ca8a77). The user chose route (a) for physics. M8 was built as recorded in §12, and **D10.2.2** was ratified.
   - New files: the bindings `lmd/package/doc/latex/tex/binding/physics.sty` and `mathtools.sty`, and `lmd/package/doc/math/mhchem.ls`.
   - New tests: `test/lambda/latex/test_latex_phase5_math.ls` and `test/lambda/math/test_math_phase5_packages.ls`, with goldens. The other 65 LaTeX scripts and 32 math scripts match their goldens, and `make test-lambda-baseline` passes 6807/6807.
   - The parser changes are in `input-latex-c.cpp`: environment names, `ignored_begin` names, starred-cases text columns, `\cancelto`, slanted fractions and `chemistry` nodes. The engine change is the `binding/` search in `bundled_path`.

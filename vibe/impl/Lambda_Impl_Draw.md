@@ -8,10 +8,10 @@ not full maxGraph parity.
 
 **Design:** [drawing proposal](../Lambda_Pkg_Draw.md).
 **Public API:** [package reference](../../lmd/package/editor/draw/README.md).
-**Spec linkage:** **D7.2.4v3, D7.2.6** for source/package ownership;
+**Spec linkage:** **D9.3.4, D9.3.5** for source/package ownership;
 **S1.4, S12.1.1v3, S12.1.3** for values, effects, and handlers;
-**D4.5.1v4–D4.5.3v2** for retained native presentation;
-**D8.1.1v18** for tier qualification. No formal ruling changed.
+**D5.5.1–D5.5.3** for retained native presentation;
+**D8.3.2** for tier qualification. No formal ruling changed.
 
 ## Delivered behavior
 
@@ -22,7 +22,7 @@ controls beside a selected connector. Preserve cancel, one-step undo, JSON
 round trips, zoom and pointer capture. The application currently republishes
 the complete SVG and inspector for each pointer move; measure that path with
 an isolated release host, then retain unaffected drawing nodes during connector
-previews (**S12.1.3, D4.5.1v4–D4.5.3v2**). Qualification budget: focused route
+previews (**S12.1.3, D5.5.1–D5.5.3**). Qualification budget: focused route
 goldens in interpreter/auto/JIT, Draw UI replays, before/after release drag
 measurements and the existing aggregate gates. Custom cubic path control-point
 editing remains outside this polyline-segment milestone.
@@ -160,7 +160,7 @@ Profiling isolated two costs: whole-scene SVG/inspector publication on every
 pointer move, and rebuilding every target contour during endpoint picking.
 Connector previews now update only the changed edge's children, selection
 overlay and four endpoint fields. Static shapes, unrelated edges, SVG definitions
-and the native capture owner retain identity (**D4.5.1v4–D4.5.3v2**). Target
+and the native capture owner retain identity (**D5.5.1–D5.5.3**). Target
 contours come from the immutable press document (**S1.4**). The cached page
 transform adjusts for native scroll positions and refreshes on resize. Selected
 handle picking also avoids a full-scene hit test on press. These changes stay in
@@ -177,7 +177,7 @@ per-run p95s. They measure pointer-handler time, excluding subsequent rendering.
 | Starter, 9 objects | 10.181 ms | 3.059 ms | 12.544 ms | 5.200 ms |
 | Dense, 127 objects | 193.620 ms | 5.933 ms | 217.366 ms | 8.604 ms |
 
-Qualification (**D8.1.1v18**): all 14 focused package/legacy/embedded golden
+Qualification (**D8.3.2**): all 14 focused package/legacy/embedded golden
 cases and all 13 Draw UI fixtures pass in interpreter, automatic and JIT modes.
 The new `draw_segments.ls`/`.txt` covers terminal/internal/diagonal moves, fixed
 endpoints, no-op/zoom/scroll gestures, cancel, one-step history, codecs and clean
@@ -211,7 +211,7 @@ measuring the previous layout (height zero) after its size declarations changed.
 The same callback clamped both intended scroll offsets to zero, leaving the
 page at the half-viewport spacer origin. DOM geometry reads expose committed
 state; treating them as a synchronous layout flush was the application defect
-(**D7.4.6, S12.1.3**).
+(**D7.1.1, S12.1.3**).
 
 `mod_present.sync` now publishes page dimensions and requests `draw_camera`.
 That frame calls `apply_camera` after layout, applies the intended pan/centering,
@@ -239,7 +239,7 @@ limits. The original tool returned from pointerdown after choosing a source,
 without establishing a drag; pointermove therefore cannot produce a preview.
 Implement the gesture transition in the shared package, reuse the existing
 endpoint editor and transaction path, and retain the demo's incremental paint
-path (**S1.4, S12.1.3, D4.5.3v2**). Verification budget: focused creation goldens
+path (**S1.4, S12.1.3, D5.5.3**). Verification budget: focused creation goldens
 in all tiers, native creation/cancel replays, full Draw UI and adjacent drawing
 goldens. This milestone exposed a native state prerequisite, described below.
 
@@ -266,18 +266,18 @@ changed correctly while the inspector was hidden, but
 existing native form-state cache therefore kept the old painted index even
 after revealing the inspector. The setter now updates retained form state
 without requiring a layout box; it also preserves that update after layout
-releases `FormControlProp` (**D4.5.1v4**). DOM setters normalize the index before
+releases `FormControlProp` (**D5.5.1**). DOM setters normalize the index before
 the cache update when no layout-owned option count exists. The new native test
 failed before the fix and passes with both retained and released form properties.
 Select layout initialization now uses the retained selection getter, which reads
 DOM defaults only for a new state owner. Rebuilding a layout property must not
 reset an uncontrolled user's choice. DTNA pagination explicitly synchronizes
 its page-size selector on render so a controlled request that the parent rejects
-returns to the accepted value (**S8.2.2v5, D7.2.5**). Existing control/navigation
+returns to the accepted value (**S8.2.2v5, D10.2.1**). Existing control/navigation
 replays exposed and verify both cases. No vendor code or formal ruling changed.
 
 Qualification: all 15 focused golden cases and all 15 Draw UI fixtures pass in
-interpreter, auto and JIT modes (**D8.1.1v18**). The new `draw_connect.ls`/`.txt`
+interpreter, auto and JIT modes (**D8.3.2**). The new `draw_connect.ls`/`.txt`
 checks attached/free drawing, previews, one-step undo, cancel, click jitter and
 two-click compatibility, invalid/zero-length paths, capacity, unique IDs, archive
 round trips and zoom. `create_connector.json` passes 40 assertions for live
@@ -321,7 +321,7 @@ incoming motion intervals, dispatch can consume the entire turn. Retain the
 latest native motion sample while collecting input, then dispatch it before
 the frame's normal script/layout/paint work. Flush pending motion before ordered
 button, keyboard, scroll and focus events so release and cancellation see the
-latest position (**S12.1.3, D7.4.6, D4.5.1v4**).
+latest position (**S12.1.3, D7.1.1, D5.5.1**).
 
 Acceptance cases: consecutive motion bursts advance before release, a quick
 release retains the last endpoint, Escape still cancels, and hover/relative

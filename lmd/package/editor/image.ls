@@ -1,4 +1,4 @@
-// Image selection and sizing are model transactions, so one resize is one undo (D7.2.5).
+// Image selection and sizing are model transactions, so one resize is one undo (D10.2.1).
 import lambda.editor.core.doc
 import lambda.editor.core.step
 import lambda.editor.core.source_pos

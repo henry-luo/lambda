@@ -1,4 +1,4 @@
-// S1.6 / D2.4: an erased value must be boxed through MirValue before
+// S1.6 / D2.3: an erased value must be boxed through MirValue before
 // a null-tag comparison; preserve the guarded Type-value equality fallback.
 
 pn make_any_chain18(length: int) any {

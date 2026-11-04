@@ -3,7 +3,7 @@
 > **Implemented — 2026-09-10; validation results below.** Tasks 1 and 2 from
 > the JS tuning follow-up, implementing the bounded field/indexing steps of
 > [JSCU38–JSCU39](../Lambda_Design_Structs_JS.md#11-jscu38--shared-guarded-field-reads-and-writes).
-> Authority: **D3.4.5–D3.4.6**, **D5.1–D5.4**, **D8.4.1v2**, **D8.4.3v2**
+> Authority: **D3.4.5–D3.4.6**, **D6.1–D6.4**, **D7.4.1**, **D7.4.3**
 > and **D8.6.1–D8.6.3**. No language ruling changes.
 > Source base: `a436d168f`, including the separate callable/realm consolidation
 > and the earlier [null-slot repair](Lambda_Impl_JS2_Performance.md).
@@ -19,7 +19,7 @@ can use a module-wide candidate when exactly one eligible literal defines it.
 Literal recipes and the unique-field lookup are indexed once with the existing
 `lib` hashmap helpers; property accesses do not repeatedly scan the AST.
 
-The candidate is only a prediction (**D8.4.1v2**). Generated code resolves the
+The candidate is only a prediction (**D7.4.1**). Generated code resolves the
 existing module recipe lazily once per function activation, then checks the
 actual receiver kind, exact shape, plain-map policy, reservation state, data
 bounds, slot flags, byte offset and current `LaneStorageDesc`. The shape handle
@@ -78,7 +78,7 @@ number. Float boxing still handles signed zero, NaN and out-of-band values.
 The first large-library run exposed an error in the new emitted guard joins:
 a successful hit reached a check of the fallback's uninitialized call register.
 The fix publishes the joined Item through the existing error-result mechanism
-(**D8.4.3v2**). Native results check the fallback before conversion and join with
+(**D7.4.3**). Native results check the fallback before conversion and join with
 a clean completion. CodeMirror's editor-construction regression exercises this.
 
 Compound assignments also revealed an existing suspension bug: the old value
@@ -86,7 +86,7 @@ was held in a native activation across `yield`. The existing spill/root helpers
 now preserve that value, and resumed references reconstruct their numeric key
 from the spilled Item. A single helper is shared with binary-expression
 preservation. No raw element or field address survives re-entry or suspension
-(**D5.1–D5.4**).
+(**D6.1–D6.4**).
 
 ## Validation
 
@@ -165,7 +165,7 @@ unchanged JS program on macOS arm64, using release binaries on AC power.
 No tests or builds were launched alongside this measurement. Every pair has matching
 normalized stdout, with the timing marker removed. The artifact retains binary
 and source hashes, individual execution/wall samples and exit status. These are
-execution measurements; **D8.6.4v2**'s compiler-only consolidation gates require
+execution measurements; **D8.6.4**'s compiler-only consolidation gates require
 separate captures. Times below are median execution milliseconds; speedup is
 control divided by candidate, so values below 1 mean slower execution.
 
@@ -241,7 +241,7 @@ The full JS2 program remains larger than these two tasks. Follow-on work is:
 - Constructor-prefix and shared-transition candidates, plus a common operation
   plan that can reduce the remaining frontend-specific admission code.
 - Guard and bounds hoisting only where shared effect facts prove that the owner,
-  payload and storage witness survive the region (**D5.1–D5.4**, **D8.4.1v2**).
+  payload and storage witness survive the region (**D6.1–D6.4**, **D7.4.1**).
 - The broader construction, native-call and completion consolidation described
   in the proposal. The separate phase-3 callable/realm work is already included
   in the source base and in both performance binaries.

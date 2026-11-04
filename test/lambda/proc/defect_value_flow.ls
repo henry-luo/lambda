@@ -1,4 +1,4 @@
-// LR12-24 (TE-17 I3, D6.1.3): a call whose result may be an error its
+// LR12-24 (TE-17 I3, D7.1.3): a call whose result may be an error its
 // signature does not declare -- a contained defect -- is `T | error` to its
 // caller, never a native lane. The JIT had read such an error's bits as a
 // number (`inf`, `nan`, `0`) wherever the call fed a lane: an operand, an

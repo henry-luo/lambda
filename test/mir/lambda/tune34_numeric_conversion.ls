@@ -1,4 +1,4 @@
-// S4.2/D2.4: native conversion guards preserve negative, poison and null paths.
+// S4.2/D2.3: native conversion guards preserve negative, poison and null paths.
 pn truncate_value(value: float) { return int(value) }
 pn floor_value(value: float) { return int(floor(value)) }
 pn optional_value(value: float?) {

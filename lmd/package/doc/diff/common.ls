@@ -1,4 +1,4 @@
-// D7.2.4/S12.1.1v3: package computation stays pure; IO is confined to procedures.
+// D9.3.4/S12.1.1v3: package computation stays pure; IO is confined to procedures.
 pub fn fail(message, offset = null) error => error({code:7810,message:"diff: " ++ message ++
     (if (offset == null) "" else " at byte " ++ string(offset))})
 pub fn require(ok,message,offset = null) bool^ => if (ok) true else raise fail(message,offset)

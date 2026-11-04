@@ -3,8 +3,8 @@
 > **Status:** initial unified package implemented, 2026-10-16. Verification
 > results and remaining gate failures are recorded below. Authorized by the user on 2026-10-15.
 > **Design:** [Lambda_Pkg_Diff.md](../Lambda_Pkg_Diff.md).
-> **Public package:** `lambda.doc.diff` (D7.2.4/D7.2.6).
-> **Contracts:** S12.1.1v3/S12.1.3, S11.1.2v4, D4.2.6, D5.3.3;
+> **Public package:** `lambda.doc.diff` (D9.3.4/D9.3.5).
+> **Contracts:** S12.1.1v3/S12.1.3, S11.1.2v4, D5.2.5, D6.3.3;
 > grammar facilities follow GM1–GM4/GM10/GM11v2/GM14.
 
 ## Delivered surface
@@ -49,9 +49,9 @@ loaded file and row, independent of viewport size.
 
 ## Generic native support
 
-These mechanisms contain no Git parsing or review policy (D7.5.2/D7.5.3).
+These mechanisms contain no Git parsing or review policy (D11.1.2/D9.5.6).
 
-- **Binary grammar and result ownership (GM14, D5.3.3).** Byte matchers lower
+- **Binary grammar and result ownership (GM14, D6.3.3).** Byte matchers lower
   token ASTs to a byte alphabet and Latin-1 RE2. Binary captures remain binary;
   text parsing retains Unicode behavior. Public grammar calls use a private
   parse pool and rooted GC-owned result graphs instead of registering an
@@ -69,19 +69,19 @@ These mechanisms contain no Git parsing or review policy (D7.5.2/D7.5.3).
   group termination and bounded drain turns. Git policy disables external
   diff, textconv, configured attribute filters, color and optional index locks;
   paths use literal pathspecs and commands use no shell.
-- **Task lifetime (D5.3.3).** Completed result/mailbox graphs are traced through
+- **Task lifetime (D6.3.3).** Completed result/mailbox graphs are traced through
   reachable handles instead of remaining scheduler roots forever. Scope-owned
   handles stay rooted until scope exit. Small native task records and scalar/
   fault homes remain until scheduler teardown.
-- **Escaped callback activation (D5.3.3, D6.3.1).** Each fresh activation owns
+- **Escaped callback activation (D6.3.3, D7.5.1).** Each fresh activation owns
   its interpreter state. An escaped task no longer inherits a pointer to a
   retained event callback's stack-local state guard. The ambient hook has a
   destroy callback for owned caches, including abandoned stacks.
-- **DOM transport (D7.5.3).** Clipboard writing reuses the platform clipboard.
+- **DOM transport (D9.5.6).** Clipboard writing reuses the platform clipboard.
   The existing boundary hit test is exposed to Lambda-only documents through
   the shared realm-neutral geometry result builder. No application state or
   selection policy lives in native code.
-- **AUTO imports (D7.2.2, D8.1.1).** Imported type/grammar declarations resolve
+- **AUTO imports (D9.3.2, D8.3.1).** Imported type/grammar declarations resolve
   before T0 runtime-variable slots in a promoted function; these compile-time
   bindings have no value slab slot. A hot imported-grammar fixture covers this.
 

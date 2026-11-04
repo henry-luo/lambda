@@ -14,14 +14,14 @@ Per **D1.6**, implementation and verification cover MIR Direct only; the
 retired C2MIR compatibility path received no NameId-first extension, and has
 since been removed.
 
-**Current formal authority:** **D1.4v3** (language failures return as explicit
+**Current formal authority:** **D1.4** (language failures return as explicit
 completions through every frame), **D1.5** (precise rooting only), **D1.6** (C2MIR is frozen), **D1.7**
-(MIR is a local derived cache, not a distribution format), **D3.4.4v2**
-(`ShapeEntry` identity is one `NameId`), **D4.2.1v2** (MemContext factory
-owns every allocator), **D4.6.1v2** (`NameId` is the semantic property
-identity), **D4.6.2v2** (evolve NamePool, per-context property-key table, no
-arbitrary Mark/Input NameIds), **D5.4.3** (no
-context-dependent value at a code-baked address), **D5.4.4** (no
+(MIR is a local derived cache, not a distribution format), **D3.4.4**
+(`ShapeEntry` identity is one `NameId`), **D5.2.1** (MemContext factory
+owns every allocator), **D5.6.1** (`NameId` is the semantic property
+identity), **D5.6.2** (evolve NamePool, per-context property-key table, no
+arbitrary Mark/Input NameIds), **D6.4.3** (no
+context-dependent value at a code-baked address), **D6.4.4** (no
 synchronization on repeated execution paths), and **DO16** (name growth and
 MIR-cache reconciliation). The `v2` rulings are adopted in
 `doc/Lambda_Formal_Design.md` 1.8.0. Cross-context Input ownership/rebinding
@@ -115,22 +115,22 @@ lowering registers its static property names through the same table.
 
 | ID | Decision |
 |---|---|
-| **RN1** | **One runtime identity:** every property operation, runtime JS shape, and named IC compares `NameId`; pointer equality is forbidden as property identity. Proposed revision: D4.6.1v2. |
-| **RN2** | **One authority:** NamePool assigns, owns, and resolves NameIds. Existing generated catalogs, sealed static pools, and dynamic pools are segments of the same abstraction. Proposed revision: D4.6.2v2. |
+| **RN1** | **One runtime identity:** every property operation, runtime JS shape, and named IC compares `NameId`; pointer equality is forbidden as property identity. Proposed revision: D5.6.1. |
+| **RN2** | **One authority:** NamePool assigns, owns, and resolves NameIds. Existing generated catalogs, sealed static pools, and dynamic pools are segments of the same abstraction. Proposed revision: D5.6.2. |
 | **RN3** | **Three allocation origins, one type:** generated catalog IDs are engine-build identities; static script/schema IDs allocate from the lower pool16 half; dynamic IDs allocate from the upper half. Arbitrary static and dynamic IDs are valid only within their owning identity-scope lifetime. |
-| **RN4** | **Generated IDs may be MIR immediates; arbitrary IDs are linked values.** Shared MIR bakes the existing dense module-table index for arbitrary static names and loads the context's NameId, whether that ID links to a lower-half static record or an upper-half dynamic record. D5.4.3 forbids baking either context-linked value. |
+| **RN4** | **Generated IDs may be MIR immediates; arbitrary IDs are linked values.** Shared MIR bakes the existing dense module-table index for arbitrary static names and loads the context's NameId, whether that ID links to a lower-half static record or an upper-half dynamic record. D6.4.3 forbids baking either context-linked value. |
 | **RN5** | **NameRef is materialization, never identity.** NamePool may return a `String*` for spelling, formatting, diagnostics, Proxy arguments, or reflection. No shape, IC, registry, or routing decision compares that pointer. |
-| **RN6** | **One ShapeEntry identity field:** every entry born from a JS property operation carries non-zero `name_id`; arbitrary Input-origin entries carry `NAME_ID_NONE` and remain id-less through shape-preserving COW/type transitions. `name_hash` remains hash-only; no bulk document-name promotion occurs. Proposed revision: D3.4.4v2. |
-| **RN7** | **Input does not mint runtime IDs.** A schema-backed Input reuses IDs from its retained shared static parent, or from the runtime dynamic parent for a late schema; misses stay Input-local with `NAME_ID_NONE`. A schemaless Input gives every non-generated name an Input-local id-less record. This preserves D4.6.2's million-key document boundary. |
+| **RN6** | **One ShapeEntry identity field:** every entry born from a JS property operation carries non-zero `name_id`; arbitrary Input-origin entries carry `NAME_ID_NONE` and remain id-less through shape-preserving COW/type transitions. `name_hash` remains hash-only; no bulk document-name promotion occurs. Proposed revision: D3.4.4. |
+| **RN7** | **Input does not mint runtime IDs.** A schema-backed Input reuses IDs from its retained shared static parent, or from the runtime dynamic parent for a late schema; misses stay Input-local with `NAME_ID_NONE`. A schemaless Input gives every non-generated name an Input-local id-less record. This preserves D5.6.2's million-key document boundary. |
 | **RN8** | **Key kind is orthogonal to ID.** Ordinary STRING names content-intern; SYMBOL and PRIVATE names receive fresh NameIds from existing unique NamePool allocation. Equal diagnostic bytes never imply equal IDs. |
-| **RN9** | **No mutable process-global interner.** Generated catalogs are immutable process data; static and dynamic NamePools are context/identity-scope owned and single-writer. Shared code is achieved through per-context linking, not synchronized interning. D5.4.4 remains unchanged. |
+| **RN9** | **No mutable process-global interner.** Generated catalogs are immutable process data; static and dynamic NamePools are context/identity-scope owned and single-writer. Shared code is achieved through per-context linking, not synchronized interning. D6.4.4 remains unchanged. |
 | **RN10** | **One compile/link pipeline:** initial Lambda/JS documents, scripts, and schemas are scanned into the static pool before it is sealed; module tables then link against it. Eval, `new Function`, REPL, late imports, fresh compilation, and L1 cache re-entry use the same table but allocate a missing spelling only in the dynamic child. No pointer-bearing fast path is allowed. |
 | **RN11** | **Hash is routing metadata only.** NamePool owns the cached FNV/identity hash and array-index classification. Hash collision confirmation is NameId equality for runtime shapes and byte equality only at the id-less Input/raw boundary. |
 | **RN12** | **Dynamic ID growth is append-only for now.** Upper-half IDs are never reused during the identity-scope lifetime. Allocation count, interner attempts, and new insertions are measured under DO16; dynamic-pool GC/compaction is explicitly deferred. |
 | **RN13** | **Parent-first lookup plus sealing establishes priority.** Every ordinary dynamic intern checks the static root first. The root becomes immutable before dynamic allocation begins, so one spelling cannot later acquire both a static and a dynamic ID in the same identity scope. |
 | **RN14** | **Pool halves are allocation origin, not identity domains.** Equality does not depend on whether an ID is lower- or upper-half. Existing ancestry records always win; a source-static name first seen after sealing legitimately receives an upper-half ID. |
 | **RN15** | **Arbitrary IDs are scope-confined.** The initial implementation supports ID-bearing Inputs only in their creating identity scope. Cross-context ownership, cache reuse, rebinding, and enforcement are deferred as RN-D5; a bare 32-bit ID has no scope tag. |
-| **RN16** | **Mutable pools remain single-writer.** Synchronous parsing on the owner thread may inherit the dynamic pool. Before worker dispatch, the owner constructs the Input-local child and retains only the sealed static root; the worker mutates neither parent state nor its refcount, and absent names remain id-less. No completion-time rebinding is required, and D5.4.4 adds no hot-path lock. |
+| **RN16** | **Mutable pools remain single-writer.** Synchronous parsing on the owner thread may inherit the dynamic pool. Before worker dispatch, the owner constructs the Input-local child and retains only the sealed static root; the worker mutates neither parent state nor its refcount, and absent names remain id-less. No completion-time rebinding is required, and D6.4.4 adds no hot-path lock. |
 
 ## 4. Identity scopes and encoding
 
@@ -200,7 +200,7 @@ static or dynamic ID in two processes. With respect to name identity, the MIR
 module remains shareable because it contains the spelling in `PropertyKeySpec`
 and a dense table index in code. Each module instance links that spelling into
 its context's NamePool before execution. Only generated catalog IDs are durable
-MIR immediates; the broader cache/module-cell contract remains D5.4.3 and DO16.
+MIR immediates; the broader cache/module-cell contract remains D6.4.3 and DO16.
 
 Making arbitrary numeric IDs durable across processes would require a
 persistent global allocator, a collision-management protocol, or a global
@@ -503,7 +503,7 @@ dedicated root-context backing Pool, creates the static root inside it, and
 marks that root as the backing owner. `DYNAMIC` allocation uses the same root
 backing; an Input/compiler `IDLESS` pool continues to use its caller-owned
 backing. The factory registers both allocator and logical NamePool nodes under
-MemContext as required by D4.2.1v2. When the static root's retain count reaches
+MemContext as required by D5.2.1. When the static root's retain count reaches
 zero, `name_pool_release` first releases its hash/segment metadata and
 MemContext registration, then destroys that dedicated backing Pool. It must not
 touch the root afterward.
@@ -691,7 +691,7 @@ failed-link growth under RN12/DO16, and does not add a rollback interner.
 
 An L1 in-memory cache hit must execute this linking step for every new
 `EvalContext`; retaining a prior context's table is invalid. This preserves
-DO16 and D5.4.3.
+DO16 and D6.4.3.
 
 `lambda_module_state_reset()` clears the IC slab as well as variable storage.
 `lambda_module_state_destroy()` frees the NameId table and slab. Direct eval
@@ -920,7 +920,7 @@ identity shortcut, and a non-zero mismatch never falls back to spelling.
 ### 7.5 Inline caches — **RETIRED 2026-08-15**
 
 > `JsLoadIC`/`JsStoreIC` no longer exist (`../Lambda_Design_JS_IC_Retire.md`
-> IR6), and **D8.4.1v2**/LC1v2 now ban per-site caches in LambdaJS. The
+> IR6), and **D7.4.1**/LC1v2 now ban per-site caches in LambdaJS. The
 > NameId-only rule below survives its carrier: the stateless named heads
 > `js_get_name_id`/`js_set_name_id` and any future compile-predicted site
 > descriptor carry `NameId`, never name bytes or pointer-valued key identity.
@@ -946,7 +946,7 @@ when needed, is integer `key_id` equality. IC reset zeroes the whole slab, so
 no stale shape/entry pointers survive module-state reset.
 
 IC cells themselves must move to the existing per-context module-state slab
-required by D5.4.3. Replacing the key pointer while continuing to bake a
+required by D6.4.3. Replacing the key pointer while continuing to bake a
 compiler-owned mutable IC address would not make MIR shareable.
 
 The module-state slab and layout contract in §6.2 are the only IC ownership
@@ -984,7 +984,7 @@ exclusively to the worker for parsing. The worker performs only immutable
 parent lookups and local id-less allocation—it does not retain/release the
 parent or mutate its refcount. Startup-schema/static hits still receive IDs;
 late-schema names absent there remain id-less. The completed Input is not
-rebound. This deterministic loss of an optimization preserves D5.4.4 and keeps
+rebound. This deterministic loss of an optimization preserves D6.4.4 and keeps
 worker parsing independent of context mutation.
 
 A schemaless Input has no arbitrary-ID-bearing parent. Generated-catalog hits
@@ -1049,7 +1049,7 @@ append-only failure rule as §6.2.
 
 The walker does not write context-linked IDs back into compiler/sealed
 `Type*`, `ShapeEntry`, or `TypeElmt` objects. That would put an arbitrary
-NameId at a code/shared-metadata address forbidden by D5.4.3. Its only effect is
+NameId at a code/shared-metadata address forbidden by D6.4.3. Its only effect is
 preallocating records in the candidate NamePool; a parsed Input obtains the ID
 later through parent lookup, while the shared schema graph may continue to use
 its spelling at validation time.
@@ -1195,7 +1195,7 @@ environments never outlive the active scope. Schema-backed Input pools retain
 their selected static/dynamic parent through the existing NamePool
 retain/release edge, which now also keeps the root-owned name backing alive.
 
-NamePool remains outside GC under D4.1.1. A NameId is an integer and is not a
+NamePool remains outside GC under D5.1.1. A NameId is an integer and is not a
 GC root; NameRecords and NamePool segment tables follow pool lifetime.
 
 Active-runtime teardown order is:
@@ -1242,7 +1242,7 @@ before dispatch; worker parsing receives only that prepared child, late names
 remain id-less, and no worker mutates the parent refcount or performs a
 completion-time rebind.
 
-This preserves D5.4.4: ordinary runtime lookup takes no process-global lock,
+This preserves D6.4.4: ordinary runtime lookup takes no process-global lock,
 atomic RMW, publication check, or cache-coherence operation.
 
 ### 9.3 Parent pools
@@ -1292,7 +1292,7 @@ mismatch invalidates the artifact.
 An L1 hit may reuse sealed code and immutable module metadata. It must allocate
 fresh context-owned module/IC state and rebuild every property NameId entry.
 Skipping relink because a prior execution populated the table is a lifetime
-and cross-context bug under DO16 and D5.4.3.
+and cross-context bug under DO16 and D6.4.3.
 
 ### 10.3 ABI changes
 
@@ -1418,7 +1418,7 @@ may bridge callers, but they must delegate to the same NamePool operation.
 3. Emit generated NameId immediates or module-table loads.
 4. Convert static property helpers and IC metadata to NameId.
 5. Assign dense load/store site indices and address cells through the opaque
-   module-state slab required by D5.4.3.
+   module-state slab required by D6.4.3.
 6. Remove pointer-valued key fields from ICs and move profile-label bytes into
    immutable sealed module data.
 7. Delete compiler-pool key/IC pointer operands from emitted MIR.
@@ -1507,7 +1507,7 @@ may bridge callers, but they must delegate to the same NamePool operation.
 - collision fixtures proving an Input-local id-less name cannot accidentally
   equal a context-local NameId from another scope; and
 - forced-GC and teardown tests, although NamePool itself remains outside GC
-  under D4.1.1.
+  under D5.1.1.
 
 ### 12.3 Performance and growth gates
 
@@ -1539,10 +1539,10 @@ by §11–§12.
 |---|---|
 | **RN-O1** | **Resolved by §5.3 and §6.2:** the first fresh-Runtime import cone/module batch compiles the complete initial closure without execution; the owner assigns stable module IDs; name and module-state publication follows complete prelink/sealing/staging; JS realm/bootstrap and serial execution occur afterward. |
 | **RN-O2** | **Resolved by §7.7:** one recursive Type walker extracts exact map/element/object names with pointer-cycle detection, and explicit `name_parent` arguments carry the selected pool into `Input::create` before parsing. |
-| **RN-O4** | **Resolved by §7.6 and §9.2 (D5.4.4):** owner-thread parsing may use the dynamic parent; a worker receives an owner-prepared Input child retaining only the sealed static root, keeps misses id-less, mutates no parent/refcount, and performs no rebind. |
+| **RN-O4** | **Resolved by §7.6 and §9.2 (D6.4.4):** owner-thread parsing may use the dynamic parent; a worker receives an owner-prepared Input child retaining only the sealed static root, keeps misses id-less, mutates no parent/refcount, and performs no rebind. |
 | **RN-O5** | **Resolved by §5.5–§5.6 and §9.1–§9.3:** one mode-aware NamePool initializer, one static root and one dynamic allocator with dedicated refcount-owned backing, two root-owned `ArrayList` segment directories, dense resolution, no reuse, explicit Input parent release, and `ERR_OUT_OF_MEMORY` exhaustion behavior. |
-| **RN-O6** | **Resolved by §6.2, §7.5, and §10.3 (D5.4.3):** `NameId[]` plus one opaque context IC slab, sealed site indices/offsets, transactional publication, reset/destroy behavior, and one module-state ABI fingerprint. |
-| **RN-O7** | **Resolved by §7.4 and §7.6 (proposed D3.4.4v2):** one NameId TypeMap probe/matcher owns direct-ID and id-less byte confirmation; JS/parser transitions use that same split, Input-origin entries stay id-less through COW/type changes, and host adapters/Proxy materialization cannot define another identity relation. |
+| **RN-O6** | **Resolved by §6.2, §7.5, and §10.3 (D6.4.3):** `NameId[]` plus one opaque context IC slab, sealed site indices/offsets, transactional publication, reset/destroy behavior, and one module-state ABI fingerprint. |
+| **RN-O7** | **Resolved by §7.4 and §7.6 (proposed D3.4.4):** one NameId TypeMap probe/matcher owns direct-ID and id-less byte confirmation; JS/parser transitions use that same split, Input-origin entries stay id-less through COW/type changes, and host adapters/Proxy materialization cannot define another identity relation. |
 | **RN-O8** | **Resolved by §8:** existing Symbol registries store NameId and provide initial reverse scans; existing class/eval private environments store fresh PRIVATE NameIds from the runtime dynamic pool. |
 
 RN-O3 is closed as a blocking item and reclassified as deferred RN-D5.
@@ -1550,8 +1550,8 @@ RN-O3 is closed as a blocking item and reclassified as deferred RN-D5.
 ### 13.2 Closed adoption gate
 
 **RN-O9 — Formal adoption and dependent docs (closed).**
-`doc/Lambda_Formal_Design.md` 1.8.0 adopted D3.4.4v2, D4.6.1v2, and
-D4.6.2v2, and this document and the Tune3 execution plan now cite those
+`doc/Lambda_Formal_Design.md` 1.8.0 adopted D3.4.4, D5.6.1, and
+D5.6.2, and this document and the Tune3 execution plan now cite those
 normative rulings. No remaining runtime decision depends on adoption.
 
 ### 13.3 Post-audit implementation closure
@@ -1573,7 +1573,7 @@ adding a new name mechanism:
   handoff was removed. The schema walker unwraps declarations and includes
   `TypeElmt.name` as well as fields.
 
-These preserve the id-less Input seam in D3.4.4v2/D4.6.2v2 while making the
+These preserve the id-less Input seam in D3.4.4/D5.6.2 while making the
 runtime side fully NameId-first.
 
 ### 13.4 Explicitly deferred work
@@ -1604,9 +1604,9 @@ runtime side fully NameId-first.
 Acceptance of this proposal requires a semver bump in
 `doc/Lambda_Formal_Design.md` and the following in-place `v2` revisions.
 
-### D3.4.4v2 — Shape name identity
+### D3.4.4 — Shape name identity
 
-> **D3.4.4v2** `ShapeEntry.name_hash` is lookup metadata, never identity;
+> **D3.4.4** `ShapeEntry.name_hash` is lookup metadata, never identity;
 > `name_id` is the definitive generated or runtime NameId when non-zero.
 > Every entry born from a JS property operation carries a non-zero NameId;
 > arbitrary Input-origin entries preserve `NAME_ID_NONE` through
@@ -1624,9 +1624,9 @@ Acceptance of this proposal requires a semver bump in
 > the same ID/id-less confirmation contract for parser-built transitions;
 > transition pointer equality is never identity.
 
-### D4.6.1v2 — NameId identity
+### D5.6.1 — NameId identity
 
-> **D4.6.1v2** Every semantic runtime property name is identified by a
+> **D5.6.1** Every semantic runtime property name is identified by a
 > 32-bit `NameId = [pool16][ordinal16]`; equality of valid NameIds within their
 > catalog/runtime scope is definitive. Generated catalog IDs are immutable
 > engine-build identities and may be compared or emitted directly. Pool
@@ -1638,9 +1638,9 @@ Acceptance of this proposal requires a semver bump in
 > and is never property identity. `SectionNameId = [slot16][offset16]` is
 > serialized location only.
 
-### D4.6.2v2 — NamePool and module linking
+### D5.6.2 — NamePool and module linking
 
-> **D4.6.2v2** Evolve NamePool rather than replacing it: its existing spelling
+> **D5.6.2** Evolve NamePool rather than replacing it: its existing spelling
 > hashmap content-interns ordinary names; its unique allocation creates Symbol
 > and private names; identity-scope roots assign and resolve static and dynamic
 > NameIds. The complete initial loader closure finalizes sealed module metadata
@@ -1682,11 +1682,11 @@ never reuses an upper-half ID.
 - **Pointer identity with longer-lived pools:** solves lifetime only, not code
   sharing, context ownership, or unified generated/dynamic comparison.
 - **Process-global mutable dynamic NamePool:** introduces synchronization and
-  cross-context growth into repeated paths, violating D5.4.4.
+  cross-context growth into repeated paths, violating D6.4.4.
 - **FNV/content hash as NameId:** collisions make it routing metadata, not
   semantic identity.
 - **Bake arbitrary dynamic IDs into persistent MIR:** context/process-specific
-  values violate D5.4.3 and cannot survive restart.
+  values violate D6.4.3 and cannot survive restart.
 - **Bake arbitrary lower-half static IDs into persistent MIR:** the static
   number is still identity-scope linked and may differ across processes;
   persistence uses the existing spelling/table relocation.
@@ -1694,7 +1694,7 @@ never reuses an upper-half ID.
   one spelling because existing child lookup and parent-first creation no
   longer observe a consistent interner state.
 - **Assign IDs to every Input key:** allows document cardinality to bloat
-  runtime identity state, violating D4.6.2.
+  runtime identity state, violating D5.6.2.
 - **Assign independent Input-local NameIds:** an unrelated runtime scope may
   reuse the same numeric value for another spelling, making direct equality
   unsound; local misses remain `NAME_ID_NONE`.

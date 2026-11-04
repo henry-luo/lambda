@@ -3,7 +3,7 @@
 // `exports_item`, `imports_item` and `raw_item` point into the parsed JSON, and
 // resolution (npm_resolve_exports) reads them after parsing returns. The parse
 // used to destroy its pool on return, so those reads found freed memory; the
-// package now owns the pool until npm_package_json_free (D4.2.6;
+// package now owns the pool until npm_package_json_free (D5.2.5;
 // vibe/Memory_Context.md §16.4).
 
 #include <gtest/gtest.h>

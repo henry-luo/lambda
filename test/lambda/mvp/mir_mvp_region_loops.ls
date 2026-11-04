@@ -1,4 +1,4 @@
-// D4.4.4v4, S7.1.1v3: whole-loop guards preserve shared owners and checked misses.
+// D5.4.4, S7.1.1v3: whole-loop guards preserve shared owners and checked misses.
 pn evolve(var a: int[], b: int[], repeats: int) int {
     var marker: int[] = [1]
     for pass in 0 to repeats - 1 {

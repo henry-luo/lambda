@@ -124,7 +124,7 @@ Repeated `as T` sites in one signature join compatible selections; a later
 reference never infers a type. The name is unavailable before its first site.
 Binders are restricted to `fn`/`pn` parameter contracts: a return annotation
 may refer to `T`, but cannot introduce `as T`; type bodies and schemas do not
-yet admit binders. [S11.4.8, D3.1.4]
+yet admit binders. [S11.4.8, D4.1.4]
 
 ### Type Inspection
 
@@ -212,7 +212,7 @@ type Numbers = number[];
 Non-type operands are errors — in an expression a map literal such as
 `{a: int}` is a map *value* holding types, so name such types with `type`
 before comparing them. Function type operands are also rejected until
-their parameter and result variance is specified. [S11.1.4v2, D3.2.5v2]
+their parameter and result variance is specified. [S11.1.4v2, D4.2.2]
 
 The schema validator historically spells its catch-all *valid data* pattern as
 `any`; in validation position that pattern intentionally means
@@ -614,7 +614,7 @@ let p2 = <Point *:p, x: 10.0>   // copy p, override x
 ### Physical binary schemas
 
 Binary schemas declare a physical layout while exposing its logical fields as
-read-only element attributes (**S11.5.1v2, S11.5.2, S11.5.3v3 / D3.5.1v2–D3.5.2v2**):
+read-only element attributes (**S11.5.1v2, S11.5.2, S11.5.3v3 / D4.4.1–D4.4.2**):
 
 ```lambda
 type Header : binary & {endian: 'big'} {

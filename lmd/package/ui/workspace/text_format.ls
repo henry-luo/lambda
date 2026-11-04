@@ -1,4 +1,4 @@
-// D7.2.5: shared typography and palettes, promoted from Word Home.
+// D10.2.1: shared typography and palettes, promoted from Word Home.
 import colors: lambda.ui.core.component
 import typography: lambda.doc.typography
 

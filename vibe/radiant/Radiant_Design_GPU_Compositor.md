@@ -24,11 +24,11 @@ them. Every CPU output path keeps the published-snapshot path: PNG/JPEG/SVG/PDF
 export, paged output, headless replays, and pixels read by tests or scripts.
 
 **Governing rulings:**
-- **D4.5.1v4:** Radiant owns native lifetimes; its seam is "pin, gen-check,
+- **D5.5.1:** Radiant owns native lifetimes; its seam is "pin, gen-check,
   copy-as-value". GPU textures shared with the presenter follow it.
-- **D4.5.3v2:** "restyle, reflow and repaint reuse every retained structure that
+- **D5.5.3:** "restyle, reflow and repaint reuse every retained structure that
   is still valid"; retained segment surfaces and textures are such structures.
-- **D7.4.1v2:** raw native handles never become script-visible. GL names stay
+- **D9.5.1:** raw native handles never become script-visible. GL names stay
   inside `gl_core`; the compositor sees branded resource IDs only.
 - **RC1** ([Radiant_Design_Concurrency](Radiant_Design_Concurrency.md#4-decision-ledger-rc)):
   script, style, layout and display-list build share the page thread. Stage C
@@ -217,7 +217,7 @@ or the presenter) holds. What changes is the object namespace: textures created
 by a producer become sampleable by the presenter.
 
 That namespace is invisible to scripts and packages: GL names never leave
-`gl_core` (**D7.4.1v2**). Resource budgets stay per context, as today. Loss of
+`gl_core` (**D9.5.1**). Resource budgets stay per context, as today. Loss of
 the presenter context is loss of the whole group: every producer falls back and
 recreates. Loss of one producer affects only its viewports.
 
@@ -261,7 +261,7 @@ target is then needed only for snapshots.
 when a CPU consumer asks: an export, a test assertion, a script-visible pixel
 read, or a fallback frame. Materialization reads back the current external
 image synchronously and publishes it with today's lease semantics
-(**D4.5.1v4**). Consumers observe the same pixels as today; they no longer pay
+(**D5.5.1**). Consumers observe the same pixels as today; they no longer pay
 for a readback in frames that nobody reads (Q13).
 
 ### C5. The presenter
@@ -351,7 +351,7 @@ the ruling.
 
 | ID | Question | Ruling (USER, 2026-11-02) |
 |---|---|---|
-| Q7 | Revise the WebGL design's "isolated contexts per viewport" to "one share group per window; one context per viewport"? | Yes. State isolation remains; only the object namespace is shared, and it never reaches scripts (**D7.4.1v2**). |
+| Q7 | Revise the WebGL design's "isolated contexts per viewport" to "one share group per window; one context per viewport"? | Yes. State isolation remains; only the object namespace is shared, and it never reaches scripts (**D9.5.1**). |
 | Q8 | Share textures through the GL share group now, with platform surfaces (IOSurface, dmabuf, DXGI) later? | Yes. The share group is portable and small; C4's external image keeps the platform route open. |
 | Q9 | Rasterize transparent segments with stage B's policy (qualified single pass, black/white reconstruction otherwise)? | Yes. It adds no painter contract. **Exception until step 3 (USER, 2026-11-02):** a frame whose upper segment needs black/white reconstruction paints on the CPU instead; step 3 adds the reconstruction for damage-limited segments. Step 3 added it (2026-11-03), which ended the exception. |
 | Q10 | First release: rectangular clips only, or rounded rectangles too? | Rectangles in step 3, rounded rectangles in step 5. Rounded clips are common on cards, so they come next. |
@@ -388,7 +388,7 @@ the ruling.
 
 1. **The presenter lives in `gl_core`, not the platform backend.** Step 2's
    presenter must sample producer textures by resource ID, which only `gl_core`
-   can resolve (**D7.4.1v2**). Each window's presenter costs one context table,
+   can resolve (**D9.5.1**). Each window's presenter costs one context table,
    about 2.5 MB of CPU memory.
 2. **Dirty-region selective frames are rare today.** None of the live replays
    below produced one. CSS color and transform animations, a JS text counter,

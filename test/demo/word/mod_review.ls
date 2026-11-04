@@ -1,4 +1,4 @@
-// Thread metadata and text marks travel with the immutable document (S1.4, D7.2.5).
+// Thread metadata and text marks travel with the immutable document (S1.4, D10.2.1).
 import lambda.editor.core.doc
 import lambda.editor.core.step
 import lambda.editor.core.transaction

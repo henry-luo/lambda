@@ -1,0 +1,10 @@
+<!doctype html>
+<html><body>
+<textarea id="field">text</textarea><span id="result">pending</span>
+<script>
+const field = document.getElementById('field');
+field.focus();
+document.getElementById('result').textContent =
+    document.activeElement === field ? 'initial-focus-ok' : 'initial-focus-lost';
+</script>
+</body></html>

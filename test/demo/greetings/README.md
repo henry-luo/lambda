@@ -61,7 +61,7 @@ cutting patterns or assembly instructions for a physical pop-up mechanism.
 | --- | --- |
 | `greetings.ls` | The studio's state, its commands, the canvas gestures and the file exports |
 | `mod_templates.ls` | Formats, pages, occasions, verses and the thirty-two designs; `assemble` adds the inside spread and the back to a design's front |
-| `mod_effects.ls`, `mod_music.ls` | Effect catalogs, legacy defaults, and document-owned native music playback and cleanup (D7.5.4) |
+| `mod_effects.ls`, `mod_music.ls` | Effect catalogs, legacy defaults, and document-owned native music playback and cleanup (D11.3.1) |
 | `mod_popup.ls` | Pop-up scene catalogs, validated saved settings and a shared three-plane illustration for flat and live views |
 | `mod_preview.ls` | Persistent two-sided leaf, frame-driven presentation transforms and shading, interrupted turns and cleanup |
 | `_generate_music.py`, `assets/music/` | Reproducible original music-box miniatures; no downloaded music or runtime network requests |
@@ -92,7 +92,7 @@ including perspective between resting poses, and the stage reserves space for
 both leaves. Reversing starts at the displayed progress; music and artwork
 controls keep those surfaces mounted.
 Frame callbacks belong to this document and are cancelled on exit, following
-**D5.4.4**'s "one event loop per context" ruling. Reduced-motion preferences
+**D6.4.4**'s "one event loop per context" ruling. Reduced-motion preferences
 apply the selected open/closed pose immediately.
 
 Fonts are macOS families (Snell Roundhand, Savoye, Bradley Hand, Didot and others) with portable fallbacks. The sample photographs are the Photo Studio demo's, under the Unsplash License; see [ATTRIBUTION.md](../photo/assets/ATTRIBUTION.md).

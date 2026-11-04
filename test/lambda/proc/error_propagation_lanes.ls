@@ -1,4 +1,4 @@
-// S7.6.3v3/D2.8.3: explicit propagation owns a callable's early error lane.
+// S7.6.3v3/D2.5.3: explicit propagation owns a callable's early error lane.
 fn fail() int^ => error("returned")
 pn unary_after(value: any) {
     let carried = value^

@@ -12,11 +12,11 @@
 > write operations, streams, or a new URL scheme. The ZIP profile and later
 > output phase are detailed in [`Lambda_IO_Zip.md`](Lambda_IO_Zip.md).
 >
-> **Formal anchors:** **D7.4.5v2** (Velmt and VArray are virtual forms of the
-> element and array semantic kinds), **D7.5.2** (one central I/O door),
+> **Formal anchors:** **D9.5.5** (Velmt and VArray are virtual forms of the
+> element and array semantic kinds), **D11.1.2** (one central I/O door),
 > **S8.1.2v2** (element iteration includes attributes before children),
 > **S2.2.4** (empty-file content), **S12.4.1v2** and **S14.3.1v2** (eager
-> archive capture with lazy member decompression), and **D5.3.3** (precise
+> archive capture with lazy member decompression), and **D6.3.3** (precise
 > tracing/rooting).
 >
 > **Related records:** [`Module_IO_File.md`](Module_IO_File.md) is the
@@ -43,7 +43,7 @@ proposed factory. `content` is the existing child-axis operation, extended to
 accept the filesystem Velmt backend; it is not a second `fs.children` API.
 `fs.refresh(node)^` is the one proposed new maintenance operation.
 
-The public node is an element semantic value under **D7.4.5v2**, not a fourth
+The public node is an element semantic value under **D9.5.5**, not a fourth
 container kind. Its tag is the stable implementation-neutral tag `fs`; its
 attributes describe the filesystem object and its children are its content.
 Using one stable tag means constructing a node does not need to stat a path
@@ -168,7 +168,7 @@ is a separately timed observation, not proof that earlier attributes are
 still current.
 
 The returned value is a read-only VArray, as required by the virtual carrier
-shape in **D7.4.5v2**. A filesystem backend must not build an ordinary Lambda
+shape in **D9.5.5**. A filesystem backend must not build an ordinary Lambda
 array merely to simulate laziness.
 
 ### 4.1 Directory content
@@ -208,7 +208,7 @@ the platform's directory-iteration behavior applies; a later
 ### 4.2 Ordinary file content
 
 At first `content(file)^`, the backend reads the source bytes once through the
-central I/O door of **D7.5.2**, retains that byte snapshot, and invokes the
+central I/O door of **D11.1.2**, retains that byte snapshot, and invokes the
 existing input parser against those bytes with the file's effective source
 location/type. The parsed root is then retained as the file's content
 snapshot.
@@ -231,7 +231,7 @@ source file.
 
 The retained parsed `Input` owner and every cached child `Item` must be traced
 by the Velmt state. Raw pointers into an Input arena are not sufficient under
-the precise-rooting/GC contract in **D5.3.3**.
+the precise-rooting/GC contract in **D6.3.3**.
 
 ## 5. ZIP archive content
 
@@ -293,7 +293,7 @@ can ship, the virtual-array protocol needs an error-bearing count path (or an
 equivalent checked sequence-boundary operation). Encoding failure as `-1` or
 silently treating it as zero would violate the error contract and make a
 directory access failure appear to be an empty directory. This is a required
-**D7.4.5v2** follow-up, not a backend-local workaround.
+**D9.5.5** follow-up, not a backend-local workaround.
 
 ## 7. Current implementation versus proposed behavior
 
@@ -320,7 +320,7 @@ follows the archive-specific boundary in **S12.4.1v2/S14.3.1v2**.
 1. Add a core-owned filesystem Velmt factory and state object; do not expose
    virtual headers for modules to initialize directly.
 2. Reuse/extend the central `lib/file.*` and input dispatcher behind the one
-   I/O gate required by **D7.5.2**. ZIP parsing/decompression belongs on the
+   I/O gate required by **D11.1.2**. ZIP parsing/decompression belongs on the
    Lambda side of that gate, not in a Node-only binding or vendored source.
 3. Implement precise `trace`, `destroy`, and snapshot-version callbacks. The
    tracer roots cached parsed results, archive buffers/indexes, child locator
@@ -351,7 +351,7 @@ rulings and reflected back here.
   surface prematurely.
 - **Use `stat().st_size` as directory size.** Rejected: it is raw,
   platform-specific directory-entry storage, not meaningful recursive data.
-- **Build an eager List then call it a VArray.** Rejected by **D7.4.5v2** and
+- **Build an eager List then call it a VArray.** Rejected by **D9.5.5** and
   by the lazy directory requirement.
 - **Follow symlinks only during content access.** Rejected: requested link
   attributes must resolve automatically and independently of content.

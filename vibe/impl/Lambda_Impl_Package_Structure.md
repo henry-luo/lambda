@@ -35,8 +35,8 @@ organization, shipped-script naming, and package dependency hygiene.
   `lambda.ui.workspace` is a desktop UI family built directly on
   `lambda.ui.core`, with dtna as a reference. UI extraction details and the
   editor consolidation remain proposals under the existing formal contracts.
-- Constraints: retain D7.2.4v4's namespace/source mapping, D7.2.6's file
-  resolution, D7.2.5's DOM behavior ownership, and the effect/state contracts
+- Constraints: retain D9.3.4's namespace/source mapping, D9.3.5's file
+  resolution, D10.2.1's DOM behavior ownership, and the effect/state contracts
   S12.1.1v3, S12.1.3v2 and S9.1.7v2.
 - Evidence: `make build` passed on the uncommitted tree, debug native host;
   124 editor/edit/UI goldens, 56 demo model goldens, and focused controlled
@@ -135,7 +135,7 @@ organization, shipped-script naming, and package dependency hygiene.
 | Unify demo UI handling under `lambda.ui.core`? | Yes: extract common interaction policy and small DOM adapters into existing core leaves. Keep visual composition in a workspace package and app commands in their domain. | The demos already share useful implementations; their location and hidden dependencies prevent clean reuse. |
 | New common theme or dtna everywhere? | Build **`lambda.ui.workspace`** as a desktop application UI family directly on `lambda.ui.core`, alongside dtna. | The user selected independent desktop controls, tokens and shell recipes. Shared behavior belongs in core; dtna supplies design references rather than a package dependency. |
 | Combine `lambda.edit` and `lambda.editor`? | Yes at the namespace level: make **`lambda.editor.*`** the canonical editing family, with explicit kernel, format, surface and application layers. | Reusable controller, file-session and spelling facilities already serve Word, Note and Slides; `edit` no longer describes only a standalone app. |
-| Remove `mod_` from shipped scripts? | Yes: ordinary `snake_case.ls` filenames, with coordinated import migration. | Every `.ls` file is already a compilation unit under D7.2.1. The prefix conveys neither visibility nor ownership. |
+| Remove `mod_` from shipped scripts? | Yes: ordinary `snake_case.ls` filenames, with coordinated import migration. | Every `.ls` file is already a compilation unit under D9.3.1. The prefix conveys neither visibility nor ownership. |
 | Other structural improvements? | Eliminate demo-to-demo library dependencies; define package contracts and assets; enforce dependency direction; retain narrow imports and shared acceptance fixtures. | Moving files alone would preserve the current coupling. |
 
 This is an implementation proposal under existing semantics. It does not
@@ -193,7 +193,7 @@ flowchart TD
 The editor application's shell may opt into `ui.workspace`. The pure model
 kernel, format model and value-only Draw/Raster APIs must remain usable
 without loading an application shell or querying native fonts. Native
-mechanisms remain behind the declared waist (D7.2.5, D7.5.3v2).
+mechanisms remain behind the declared waist (D10.2.1, D9.5.6).
 
 Workspace and dtna are peer UI families. Neither workspace nor its transitive
 package dependencies may require dtna components, styles, tag factories,
@@ -234,7 +234,7 @@ lmd/package/
 They do not become importable directories. A facade such as
 `lambda.ui.workspace` has an actual `ui/workspace.ls`; a caller needing only
 splitter behavior imports `lambda.ui.core.splitter`. Do not require the open
-directory/index-file proposal in `Lambda_Package` §10.3 (D7.2.6).
+directory/index-file proposal in `Lambda_Package` §10.3 (D9.3.5).
 
 ## 4. What to extract from demo UI code
 
@@ -268,7 +268,7 @@ it has a coherent contract and actual consumers.
 2. **State:** app models and long-lived sessions are values owned by the
    calling template; view-local state belongs to the component instance.
    No mutable package singleton or hidden cross-window state
-   (D7.2.1, S9.1.7v2, S12.1.3v2).
+   (D9.3.1, S9.1.7v2, S12.1.3v2).
 3. **Commands:** toolbar, menu and shortcut requests share the same app
    eligibility/state query. Disabled actions cannot execute through another
    entry point. UI bindings request changes; domain code makes them.
@@ -282,7 +282,7 @@ it has a coherent contract and actual consumers.
    commit, cancellation none; stray compatibility clicks cannot commit twice.
 6. **Input:** respect existing dispatch cancellation and IME/composition.
    Standard native controls and contenteditable continue through the DOM
-   behavior protocol, not a UI-level text-edit implementation (D7.2.5).
+   behavior protocol, not a UI-level text-edit implementation (D10.2.1).
 7. **Rendering:** keep pure presentation separate from procedural DOM writes
    and I/O (S12.1.1v3, S12.1.3v2). Retain hot surfaces during small updates;
    redundant publication must not trigger broad restyle/rebuild work.
@@ -332,7 +332,7 @@ status bars and document/canvas work areas. Keyboard navigation, platform
 shortcut labels, active/inactive selection and editor focus preservation
 are first-class requirements. Desktop describes the app experience; output
 still uses ordinary HTML/SVG and the existing Radiant DOM mechanisms
-(D7.2.5, D7.5.3v2).
+(D10.2.1, D9.5.6).
 
 The first delivery needs the controls used by the named pilots: buttons and
 icon buttons, text/select/check controls, menus, dialogs, toolbars/ribbons,
@@ -414,13 +414,13 @@ the structure rather than in two near-synonymous top-level families.
 The command remains `lambda edit`. Update its explicit transform registration
 from `lambda.edit.edit` to `lambda.editor.app`, retaining `open_document` and
 the existing source-path argument contract. No resolver alias or native
-format dispatch is needed (D7.2.4v4, D7.2.6).
+format dispatch is needed (D9.3.4, D9.3.5).
 
 Before implementing this change, reconcile the namespace table in
 `vibe/radiant/Radiant_Design_Edit_Mode.md` §3–§4 and current package/reference
 docs. That earlier working proposal describes the existing split; this
 review proposes its successor, not a silently ratified replacement. The
-formal DOM/mechanism boundary in D7.2.5 is unchanged.
+formal DOM/mechanism boundary in D10.2.1 is unchanged.
 
 ### 6.2 More demo editing code that can become shared
 
@@ -472,7 +472,7 @@ Perform a coordinated move/import update, covering internal relative imports,
 demo/test imports, native loader strings, resource references, current docs
 and packaging/install inputs. Verify the actual installed `LAMBDA_HOME` tree
 and run a checked-in consumer from another working directory. Do not add
-special lookup rules or implicit index files (D7.2.4v4, D7.2.6).
+special lookup rules or implicit index files (D9.3.4, D9.3.5).
 
 Use a checked migration map: old canonical path, new canonical path, exported
 names/types/templates, known consumers and compatibility disposition. Prefer
@@ -480,7 +480,7 @@ one repository cutover. For documented paths that must remain externally
 compatible, retain forwarding-only files for one explicitly recorded
 migration window. They import the canonical declaration; they must not copy
 types, templates, mutable state or implementations. Imported type identity
-must remain the canonical type's identity (S2.1.4, D7.2.3). Use ordinary
+must remain the canonical type's identity (S2.1.4, D9.3.3). Use ordinary
 explicit forwarding declarations; the proposed re-export syntax in
 `Lambda_Package` §10.2 is not assumed to exist.
 

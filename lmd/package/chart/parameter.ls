@@ -1,4 +1,4 @@
-// Declarative parameters are values owned by a view instance (S9.1.4, D6.2.3v2).
+// Declarative parameters are values owned by a view instance (S9.1.4, D7.2.3).
 import expr: .expression
 import parse: .parse
 import util: .util

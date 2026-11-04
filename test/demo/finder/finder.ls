@@ -1,4 +1,4 @@
-// S12.1.3 / D4.5.1v4: keep the native shell and controls; update retained regions in handlers.
+// S12.1.3 / D5.5.1: keep the native shell and controls; update retained regions in handlers.
 import dom
 import resources: ~~.mod_resources
 import model: .mod_model

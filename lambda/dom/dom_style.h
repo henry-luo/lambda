@@ -10,7 +10,7 @@ typedef bool (*DomStyleUsedValueSync)(DomDocument* document);
 
 // Native CSS providers borrow elements/names. Serialized strings use the caller's
 // pool; computed values may borrow document storage and are consumed synchronously
-// (D4.5.1v4 / D4.1.4v5, D7.1.3 / D7.5.3).
+// (D5.5.1 / D5.1.4, D9.1.3 / D9.5.6).
 #define DOM_STYLE_ENGINE_OPERATIONS(OP) \
     OP(bool, ensure_computed, (DomElement* element, bool needs_used_value)) \
     OP(String*, serialize_computed_value, (Pool* pool, DomElement* element, CssPropertyCode property, int pseudo_type)) \

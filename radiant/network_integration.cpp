@@ -363,30 +363,36 @@ void radiant_prefetch_document_font_resources(DomDocument* doc) {
 
 typedef struct CssResourcePrefetchContext {
     DomDocument* doc;
+    const Url* base_url;
     int queued;
 } CssResourcePrefetchContext;
 
 static void prefetch_css_resource_url(CssValue* value, void* context) {
     CssResourcePrefetchContext* prefetch = (CssResourcePrefetchContext*)context;
     if (!prefetch || !prefetch->doc || !prefetch->doc->resource_manager ||
-        !value || !value->data.url || !radiant_url_is_http(value->data.url)) {
+        !value || !value->data.url || !*value->data.url || *value->data.url == '#') {
         return;
     }
-    if (resource_manager_prefetch(prefetch->doc->resource_manager, value->data.url,
-                                  PRIORITY_LOW)) {
+    // resolve the request without rewriting custom tokens, whose base belongs to their consumer.
+    Url* url = url_parse_with_base(value->data.url, prefetch->base_url);
+    if (radiant_url_is_http(url) && resource_manager_prefetch(
+            prefetch->doc->resource_manager, url_get_href(url), PRIORITY_LOW)) {
         prefetch->queued++;
     }
+    if (url) url_destroy(url);
 }
 
 void radiant_prefetch_document_stylesheet_resources(DomDocument* doc) {
     if (!doc || !doc->resource_manager || !doc->stylesheets) return;
 
-    CssResourcePrefetchContext context = {doc, 0};
+    CssResourcePrefetchContext context = {doc, nullptr, 0};
     for (int s = 0; s < doc->stylesheet_count; s++) {
         CssStylesheet* sheet = doc->stylesheets[s];
         if (!sheet) continue;
-        radiant_resolve_stylesheet_resource_urls(sheet);
+        Url* source = sheet->origin_url ? url_parse(sheet->origin_url) : nullptr;
+        context.base_url = source ? source : doc->url.get();
         radiant_for_each_stylesheet_resource_url(sheet, prefetch_css_resource_url, &context);
+        if (source) url_destroy(source);
     }
     if (context.queued > 0) {
         log_info("[PREFETCH] queued %d CSS declaration resources", context.queued);

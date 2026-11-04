@@ -1479,12 +1479,12 @@ module.exports = grammar({
     // A type binder is a parameter-boundary construct. Its base is a complete
     // annotation (including a `that` refinement), so `as T` binds looser than
     // type operators while declarations, schemas, and return contracts retain
-    // their ordinary type grammar (S4.2.2, D3.3.3v3).
+    // their ordinary type grammar (S4.2.2, D4.3.3).
     _parameter_annotation_type: $ => choice($.leading_binder_type,
       $.binder_type, $._annotation_type),
     // A level-1 binder can occur below an array, map, element, or tuple in a
     // parameter annotation. The production parser still reserves that syntax
-    // outside parameter annotations (S4.2.2, D3.3.3v3).
+    // outside parameter annotations (S4.2.2, D4.3.3).
     _binder_capable_type: $ => choice($.binder_type, $._type_pattern, $.value_error_type),
     // Base-type spellings are parsed here only so the direct binder builder
     // can issue its dedicated collision diagnostic (S11.4.8).

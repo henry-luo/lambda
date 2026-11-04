@@ -5,7 +5,7 @@
 > Node-family Velmt migration, and primary DOM collection VArrays are landed.
 > Specialized File/DataTransfer and SVG-transform collection backends, generic
 > VArray splice/materialization tests, and the full GC/WPT exit matrix remain
-> open, so **D7.4.5v2*** remains marked partially implemented.
+> open, so **D9.5.5*** remains marked partially implemented.
 > **Scope:** the Lambda value model, runtime dispatch, Jube carrier selection,
 > and migration of DOM nodes and DOM collection values. JavaScript prototype
 > behavior remains in the JavaScript/Jube adapter.
@@ -14,14 +14,14 @@
 > equality), **S9.2.2–S9.2.3** (Lambda-owned read views and entry-time
 > iteration),
 > **S12.1.3** (mutation boundary), **D1.3** (shared runtime without shared
-> language semantics), **D2.3.2** (safe container decoding), **D2.6.6v2**
-> (map → array → element container taxonomy), **D2.6.8** (identity is data,
-> not an address), **D5.2.1v3** (precise GC/rooting), and
-> **D7.4.1v2/D7.4.4/D7.4.5v2** (Item boundary, record-owned host protocol, and
+> language semantics), **D2.3.3** (safe container decoding), **D3.1.1**
+> (map → array → element container taxonomy), **D3.1.3** (identity is data,
+> not an address), **D6.2.1** (precise GC/rooting), and
+> **D9.5.1/D9.5.4/D9.5.5** (Item boundary, record-owned host protocol, and
 > three virtual carriers).
 > **Design record:** extends D4l from
 > [`Lambda_Jube_DOM4.md`](Lambda_Jube_DOM4.md). Refinements are numbered
-> D4l.1–D4l.10; the formal authority is **D7.4.5v2***, whose implementation mark
+> D4l.1–D4l.10; the formal authority is **D9.5.5***, whose implementation mark
 > remains until the exit gates below close.
 
 ---
@@ -73,12 +73,12 @@ host carrier. That flattens two different shapes:
 
 The first arrangement copies on read and sweeps on write. The second loses the
 element's structural identity and makes generic Lambda element operations
-unavailable. Both are the mismatch identified by **D7.4.5v2**.
+unavailable. Both are the mismatch identified by **D9.5.5**.
 
 The fix is not three names for one object shell. Each carrier must implement
 the structural face of the semantic kind it represents, while the declared
 Jube interface continues to provide nominal members and methods under
-**D7.4.4**.
+**D9.5.4**.
 
 ## 2. Proposed decisions
 
@@ -112,9 +112,9 @@ container band is `RANGE ... VELMT`, and Error is the last valid TypeId. These
 ordering invariants are compile-time assertions. Every physical decode must
 still use an exact representation test: VArray is not layout-compatible with
 Array, and Velmt is not layout-compatible with Element. A raw `Item` cast based
-only on semantic family remains forbidden by **D2.3.2**.
+only on semantic family remains forbidden by **D2.3.3**.
 
-`D2.6.6v2` continues to define the packed layout of materialized containers.
+`D3.1.1` continues to define the packed layout of materialized containers.
 Virtual carriers are alternate representations of those same three semantic
 kinds; they do not pretend to inherit the packed `Map`/`Array`/`Element`
 storage bodies.
@@ -166,7 +166,7 @@ modules receive constructors/accessors and never write the header directly.
 The status result separates an absent value from a present `null`, and a
 read-only operation from an exception. `ItemNull` alone cannot express those
 four outcomes. `VIRTUAL_OP_ERROR` places the explicit error Item in `out`, in
-line with **D1.4v3** and **D8.4.3v2**.
+line with **D1.4** and **D7.4.3**.
 
 ### D4l.3 — Lifecycle is precise and centralized
 
@@ -179,7 +179,7 @@ owner's generation/pin protocol. Teardown neuters the common `host_data` slot
 through one `virtual_host_invalidate()` helper. Reads from a neutered host
 return the door's missing/undefined result without dereferencing freed native
 state. This generalizes the existing DOM VMap husk protocol and follows
-**D5.2.1v3** and **D2.6.8**.
+**D6.2.1** and **D3.1.3**.
 
 ### D4l.4 — VMap is the virtual form of the complete map contract
 
@@ -245,7 +245,7 @@ fallible `prepare` hook. Accessors invoke it before a cached, infallible count;
 errors remain Items through content, indexing, iteration, query and formatting.
 A failed preparation is never an empty container. Existing eager backends leave
 the hook null. Jube ABI 9 rejects earlier module callback layouts; the carrier
-TypeIds and common header remain those of **D7.4.5v2**.
+TypeIds and common header remain those of **D9.5.5**.
 
 `count` backs `len`; `get_at` backs indexing and iteration; `set_at` backs a
 procedural indexed write; `splice` is the one mutation primitive from which
@@ -325,7 +325,7 @@ The host factory allocates the selected carrier and attaches `host_type` and
 - native payload access and invalidation;
 - native owning-type destruction.
 
-`JubeTypeBinding` remains the only named-member protocol under **D7.4.4**.
+`JubeTypeBinding` remains the only named-member protocol under **D9.5.4**.
 The VArray/Velmt structural vtables do not reintroduce the retired
 `JubeHostObjectOps` fallback. Resolution order is:
 
@@ -346,19 +346,19 @@ atomically, bump the relevant runtime and `JUBE_ABI_VERSION` values, and reject
 modules compiled against the older layout. It must not infer the carrier from
 header size or silently fall back to VMap.
 
-The **D7.4.5v2** ABI intentionally renumbers the container-and-later band so the
+The **D9.5.5** ABI intentionally renumbers the container-and-later band so the
 classification order is structural: `RANGE=16`, `ARRAY_NUM=17`, `ARRAY=18`,
 `VARRAY=19`, `MAP=20`, `VMAP=21`, `ELEMENT=22`, `VELMT=23`, `TYPE=24`,
 `FUNC=25`, `ANY=26`, and `ERROR=27`. `LMD_TYPE_ERROR` is the last valid type;
 `LMD_TYPE_COUNT=28` is only the exclusive bound. `JUBE_ABI_VERSION = 6` rejects
 modules compiled against the previous tag layout. The two MIR checks that pin
 the Error tag use 27. Exact physical guards remain mandatory under
-**D2.3.2/D7.4.5v2** even though family classification can use the new ranges.
+**D2.3.3/D9.5.5** even though family classification can use the new ranges.
 
 ### D4l.8 — Lambda reads the native DOM under a fixed-DOM execution contract
 
 DOM-backed VArray and Velmt do not implement `snapshot_for_lambda` and do not
-copy collection membership at the Lambda boundary. This follows **D7.4.5v2**:
+copy collection membership at the Lambda boundary. This follows **D9.5.5**:
 host collections are live by reading, not materialized copies kept coherent by
 refresh sweeps.
 
@@ -391,14 +391,14 @@ be written by the loop.
 A retained DOM carrier may observe newer native state in a later Lambda run.
 Within any one run it is stable. `version()` supports JavaScript iterators and
 shape/version guards across host mutations (there are no inline caches in
-either lane — D8.4.1v2/LC1v2); it is not observable identity and does not
+either lane — D7.4.1/LC1v2); it is not observable identity and does not
 participate in equality.
 
 ### D4l.9 — Identity is independent of the carrier address
 
 Wrapper caching may preserve host wrapper reuse, but neither the GC address nor
 `host_data` pointer becomes Lambda identity. Lambda `===` remains governed by
-**S5.1.4v2/D2.6.8** and DO25. DOM `isSameNode` and JavaScript strict identity
+**S5.1.4v2/D3.1.3** and DO25. DOM `isSameNode` and JavaScript strict identity
 continue to use their host-language contracts. VArray/Velmt implementation
 must not pre-empt the universal node-identity ruling.
 
@@ -692,7 +692,7 @@ and teardown remain correct.
 - Teach MIR type facts to retain semantic array/element information while
   guarding packed-storage specializations.
 - Replace remaining repeated TypeId lists with semantic helpers.
-- Update formal D7.4.5v2 implementation status only after every exit gate passes.
+- Update formal D9.5.5 implementation status only after every exit gate passes.
 - Distill the landed design into the relevant `doc/dev` runtime/DOM documents.
 
 ### 6.1 Implementation status (2026-09-08)
@@ -751,7 +751,7 @@ Use release builds for every performance result.
 - Full JavaScript regression suite: 371/371 passed. Focused DOM collection
   coverage includes live/fixed indexing, descriptors, iteration, `for...in`,
   prototypes, `instanceof`, and `Array.isArray` guest-boundary behavior under
-  **D1.3** and **D7.4.5v2**.
+  **D1.3** and **D9.5.5**.
 - `make test-radiant-baseline`: all 7,771 recorded layout assertions passed
   (7,410 full and 361 partial-baseline assertions). Its six reported failures
   reproduce with an unmodified clean-HEAD executable: one page snapshot gate,
@@ -763,12 +763,12 @@ Use release builds for every performance result.
 These results close the repository baseline regression check for the landed
 scope. They do not close the specialized WPT, remaining collection migration,
 generic mutable-splice/materialization, or release-performance gates listed
-above, so **D7.4.5v2*** remains partially implemented.
+above, so **D9.5.5*** remains partially implemented.
 
 ## 8. Resolved decisions and remaining open question
 
 1. Resolved: `LMD_TYPE_VARRAY` and `LMD_TYPE_VELMT` use distinct ABI tags so
-   every physical decode is explicit (**D2.3.2**, **D7.4.5v2**).
+   every physical decode is explicit (**D2.3.3**, **D9.5.5**).
 2. Resolved for this stage: NamedNodeMap is VArray, while each attribute entry
    remains a map-shaped record until Attr identity/lifecycle is implemented.
 3. Resolved for the carrier ABI: generic Velmt retains optional child
@@ -780,4 +780,40 @@ above, so **D7.4.5v2*** remains partially implemented.
 
 The hashing question does not block structural reads or host collection use,
 but it must be settled before mutable virtual values are admitted as hash keys
-or **D7.4.5v2*** loses its implementation mark.
+or **D9.5.5*** loses its implementation mark.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D7.4.5v2 → D9.5.5
+
+**D9.5.5*** **Three virtual carriers mirror the container taxonomy and
+occupy their structural TypeId bands: `vmap`, `varray`, `velmt`.** The
+valid TypeIds end at `LMD_TYPE_ERROR`; no valid type follows it. The
+sequence-family tags are one closed numeric band,
+`LMD_TYPE_RANGE <= type_id <= LMD_TYPE_VARRAY`, with VArray immediately
+after Array. Velmt immediately follows Element. This ordering is an Item ABI
+contract, enforced by static assertions; consumers may use the sequence
+range for family classification, but a physical storage decode still needs
+an exact representation guard under D2.3.3.
+Host data crosses as the virtual carrier
+matching its shape — virtual map (exists), virtual array (indexed face +
+length via vtable, `type()` = "array"; live by reading, not materialized
+copies kept fresh by mutation sweeps), virtual element (Lambda
+`Element`'s dual list+map nature: children list face, named map face,
+tag). Refines D9.5.1's "VMap projections": VMap was never the shape
+ruling, only the first carrier; representation still selects the
+carrier. Declared interfaces / member records (D9.5.4) are the
+named-member protocol on ALL carriers; the carrier decides which
+structural faces exist virtually. Flattening element-shaped data into a
+map projection, or materializing array-shaped host state into real
+arrays with liveness-by-invalidation, are both anti-patterns this
+ruling retires. [DOM4 D4l, D9.5.1, D9.5.4]

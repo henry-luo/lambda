@@ -14,7 +14,7 @@
   `vibe/Lambda_Design_Type_Boundary.md`.
 - **Input:** `test/benchmark/Overall_Result32.md` / `benchmark_results_v32.json` (commit `a6192c1086`, archived binary `test/benchmark/exe/lambda-v32-a6192c1086`), paired against `benchmark_results_v31.json`; fresh finalized-MIR dumps of 13 untyped/typed pairs under `temp/r32/` taken with `LAMBDA_MIR_DUMP_PATH=… ./lambda.exe run <bench>[2].ls` on the same binary; §7 uses `test/benchmark/Overall_Result33.md` / `benchmark_results_v33.json` (commit `8705d85c5a`, archived binary `test/benchmark/exe/lambda-v33-8705d85c5a`)
 - **Related:** `vibe/impl/Lambda_Impl_Tune18.md` (E1–E6, landed), `vibe/impl/Lambda_Impl_Tune17 (done).md` (T1–T5, lane unification), `vibe/impl/Lambda_Impl_Tune16 (done).md` (categorical bar), `vibe/Lambda_Design_Compiling_Lane.md` (ValueRep), `vibe/Lambda_Design_Compiling.md` (LC1), `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (M1–M8, T-A/T-B)
-- **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1.1–S4.1.2, S7.1, S7.2.1; `doc/Lambda_Formal_Design.md` D2.2.2–D2.2.3, D2.5.1, D2.5.3, D2.6.2–D2.6.3, D3.2.1, D3.3.1, D3.3.3, D4.6.1v2–D4.6.2v2, D4.7.1, D5.3.1, D5.3.4, D8.1.1v2, D8.3.3, D8.6.1–D8.6.3
+- **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1.1–S4.1.2, S7.1, S7.2.1; `doc/Lambda_Formal_Design.md` D2.2.2–D2.2.3, D2.4.1, D2.4.3, D3.2.2–D3.2.1, D4.2.1, D4.3.1, D4.3.3, D5.6.1–D5.6.2, D5.7.1, D6.3.1, D6.3.4, D8.3.1, D7.3.3, D8.6.1–D8.6.3
 - **ID series:** `T19-#` (round-prefixed; extends the tune-round convention without colliding with Tune14 `F#`, Tune15 `B#`, Tune16 `C#`, Tune17 `T#`, Tune18 `E#`)
 
 ## 1. Where v32 stands
@@ -69,9 +69,9 @@ A second, quieter cohort: **14 rows where a typed source exists and buys nothing
 
 **T19-A — declared-type bindings re-check what the lane already proved.** `lambda_type_check` call counts, untyped → typed: fannkuch 0→7, splay 20→**55**, brainfuck 0→10, mbrot 5→12, spectralnorm 0→13. `ensure_typed_array` likewise 0→3 (fannkuch), 0→16 (spectralnorm), 0→6 (bounce). Tune18 E1 taught `emit_checked_boundary` to consume the *array-read* proof; it did not teach it to consume the *declared-binding* proof when the initializer is already lane-native, and it does not reach record/`map?` field contracts at all — which is the whole of splay's 20→55 (`type SplayNode = {key: float, left: map?, …}`: every node handoff is a runtime admission).
 
-**T19-B — an `int[]` annotation can *demote* a read that inference kept inline.** In `bounce2.ls` the `int[]` binding emits a witness-guarded read whose fallback edge calls `item_at`; `bounce.ls` (no annotation) emits a bare `mul/add/mov i64:(…)`. Typed bounce shows `item_at_p` ×12 and `lambda_item_to_int_lane_c_p` ×42 (untyped: 0 and 16). The declared witness is not satisfied by the `fill(n, 0)` producer, so the annotated program pays a guard *and* a generic call where the inferred program paid neither [D2.6.2, D3.2.1].
+**T19-B — an `int[]` annotation can *demote* a read that inference kept inline.** In `bounce2.ls` the `int[]` binding emits a witness-guarded read whose fallback edge calls `item_at`; `bounce.ls` (no annotation) emits a bare `mul/add/mov i64:(…)`. Typed bounce shows `item_at_p` ×12 and `lambda_item_to_int_lane_c_p` ×42 (untyped: 0 and 16). The declared witness is not satisfied by the `fill(n, 0)` producer, so the annotated program pays a guard *and* a generic call where the inferred program paid neither [D3.2.2, D4.2.1].
 
-**T19-C — int-lane comparison lowered through `double`.** `bounce2.mir` L210–L213 lowers `bxv[j] < 0` as: range-check operand, `i2d` (slow edge `lambda_int_lane_to_double_c`), range-check the *literal 0*, `i2d` it too, then `dlt`. Fourteen instructions and two potential calls for one `blts`. `lambda_int_lane_to_double_c` count: bounce untyped **0**, bounce typed **10**. The comparison sees the subscript's public type `int?` (D2.5.3) and falls to the numeric tower; the inferred lane sees a plain in-band int and emits `lts`. This is the same fact reaching two different lowerings — exactly what Tune17's same-facts-same-code invariant forbids.
+**T19-C — int-lane comparison lowered through `double`.** `bounce2.mir` L210–L213 lowers `bxv[j] < 0` as: range-check operand, `i2d` (slow edge `lambda_int_lane_to_double_c`), range-check the *literal 0*, `i2d` it too, then `dlt`. Fourteen instructions and two potential calls for one `blts`. `lambda_int_lane_to_double_c` count: bounce untyped **0**, bounce typed **10**. The comparison sees the subscript's public type `int?` (D2.4.3) and falls to the numeric tower; the inferred lane sees a plain in-band int and emits `lts`. This is the same fact reaching two different lowerings — exactly what Tune17's same-facts-same-code invariant forbids.
 
 ## 3. The untyped lane is the round's biggest single lever
 
@@ -96,9 +96,9 @@ A second, quieter cohort: **14 rows where a typed source exists and buys nothing
 
 ### 3.2 T19-E — scalar parameter lanes stop at the first unproven argument
 
-`ray.ls` untyped raw entry: `func i64, i64, p:runtime, d:%p1, d:%p2, d:%p3, i64:%p4 … i64:%pa`. The inference lane **already specializes scalar params** — it got the three that receive float literals and gave up on the seven fed by `sx[s]` array reads, which infer `float?` under D2.5.3 and get boxed through `push_d`/`lambda_float_null_lane_c` at the call edge. `ray2.ls` annotates all ten and gets `d:` for all ten: 31x. Same story on `_eval_A` (spectralnorm): untyped returns `i64`, typed returns `d`.
+`ray.ls` untyped raw entry: `func i64, i64, p:runtime, d:%p1, d:%p2, d:%p3, i64:%p4 … i64:%pa`. The inference lane **already specializes scalar params** — it got the three that receive float literals and gave up on the seven fed by `sx[s]` array reads, which infer `float?` under D2.4.3 and get boxed through `push_d`/`lambda_float_null_lane_c` at the call edge. `ray2.ls` annotates all ten and gets `d:` for all ten: 31x. Same story on `_eval_A` (spectralnorm): untyped returns `i64`, typed returns `d`.
 
-The machinery to fix this exists and shipped last round: Tune18's follow-on *closed inferred ArrayNum entry* proves a raw entry's array carrier when **every non-escaped direct caller** supplies the exact witness [D3.3.1, D3.3.3, D8.3.3]. T19-E is the same analysis applied to scalar param/return lanes.
+The machinery to fix this exists and shipped last round: Tune18's follow-on *closed inferred ArrayNum entry* proves a raw entry's array carrier when **every non-escaped direct caller** supplies the exact witness [D4.3.1, D4.3.3, D7.3.3]. T19-E is the same analysis applied to scalar param/return lanes.
 
 ### 3.3 T19-F — the store edge needs a value-side native proof, not a static type
 
@@ -113,12 +113,12 @@ T19-B, T19-C, T19-F and the E1 residue are one defect wearing four hats. `ValueR
 ## 5. Tracks (ranked; each separately land-able and gate-able)
 
 ### T19-1 — ValueRep on expression results (structural; unblocks 2/3/4) — **OPEN, not started**
-Carry `(static type, lane, nullability, in-band proof)` on every expression result through the emitter; every consumer (boundary, compare, store, call arg, array element) reads the carried rep instead of re-proving it; delete the shape whitelists as each consumer converts. No semantic change [D2.5.1, D2.5.3, S4.1.1–S4.1.2 all unchanged — only the emission consumes the proof].
+Carry `(static type, lane, nullability, in-band proof)` on every expression result through the emitter; every consumer (boundary, compare, store, call arg, array element) reads the carried rep instead of re-proving it; delete the shape whitelists as each consumer converts. No semantic change [D2.4.1, D2.4.3, S4.1.1–S4.1.2 all unchanged — only the emission consumes the proof].
 **Acceptance:** the four whitelist helpers named in §4 have zero callers; emission ratchet shrinks [D8.6.1]; no row regresses >5%.
 
 ### T19-2 — Kill the annotation tax — **PARTIALLY LANDED (2026-08-19): items 1, 3, 4 done; item 2 open**
 1. Declared-binding boundary consumes a lane-native initializer's proof — the `lambda_type_check` survives only where the initializer's rep cannot satisfy the declaration. **DONE**
-2. Record/`map?` field contracts: a store whose source shape is the declared shape needs no runtime admission (splay's 20→55) [D3.2.1]. **OPEN — owns the residual tax on splay (1.83x) and is shared with T19-6.**
+2. Record/`map?` field contracts: a store whose source shape is the declared shape needs no runtime admission (splay's 20→55) [D4.2.1]. **OPEN — owns the residual tax on splay (1.83x) and is shared with T19-6.**
 3. Comparison lowering reads the carried int lane instead of falling to the numeric tower (T19-C). **DONE**
 4. A declared `T[]` must never emit a *worse* read than the inferred one — when the witness cannot be proven, fall back to the inferred lowering, not to `item_at` (T19-B). **DONE**
 **Acceptance:** all 9 rows in §2 within 5% of their untyped twin (categorical bar restored); bounce ≤0.30, fannkuch ≤0.36, splay ≤145, brainfuck ≤320 ms; `mir-check` fixtures assert both elision edges with the unproven twins still checking. **Fixtures met; the bar is NOT yet restored — see the ledger below.**
@@ -162,7 +162,7 @@ bounce2: header probes 22 → 0, `item_at` 12 → 0.
 **(c) T19-C was a missing block, and the literal was paying too.** An ordered
 comparison whose operands are both int lanes fell to the generic float tower
 whenever either side admitted a sentinel — which a declared `int[]` read always
-does (`int?`, D2.5.3). That tower widens through `emit_int_lane_to_double`: a
+does (`int?`, D2.4.3). That tower widens through `emit_int_lane_to_double`: a
 band test, an `i2d` and a cold call PER OPERAND, *including for the literal `0`*
 whose value the compiler already knows. For two in-band lanes the widening is
 exact, so the integer compare is the identical predicate; only the sentinel arm
@@ -483,7 +483,7 @@ latent crash, not a symptom of the inference work. Two independent causes:
 if …)` appearing in tail position lowered its *initializer* as if it were the function's tail
 expression. The direct-call emitter's tail-forward path then handed the callee's shape-2 pair
 to the return epilogue for a value that never reaches a return, and `finish_function_epilogue`
-aborted on the D5.2.1v3 one-live-pair assertion. A binding is a side effect of the enclosing
+aborted on the D6.2.1 one-live-pair assertion. A binding is a side effect of the enclosing
 expression, not its result — `transpile_binary_out` already clears the same flag for operands,
 and `transpile_let_stam` now does too.
 
@@ -538,18 +538,18 @@ archived control binary run back-to-back before believing a broad regression.
 (Originally drafted as a second T19-4 section; renumbered to keep one ID per track. The landed
 T19-4 covers container witnesses, unannotated int locals, and closed INT call edges; this track
 is the *float* param **and return** lane extension.)
-Extend Tune18's closed-caller witness analysis from array carriers to scalar float param and return lanes: when every non-escaped direct caller supplies a proven `int`/`float` lane, the raw entry takes `i64`/`d` natively; open/escaped callees keep the boxed entry unchanged [D3.3.1, D3.3.3, D8.3.3]. Combine with T19-1 so an `sx[s]` float-array read counts as a proven producer on the call edge. Still live at v33: untyped ray 8.94 vs typed 0.30 (30x), untyped spectralnorm 21.9 vs typed 1.62 (13.6x).
+Extend Tune18's closed-caller witness analysis from array carriers to scalar float param and return lanes: when every non-escaped direct caller supplies a proven `int`/`float` lane, the raw entry takes `i64`/`d` natively; open/escaped callees keep the boxed entry unchanged [D4.3.1, D4.3.3, D7.3.3]. Combine with T19-1 so an `sx[s]` float-array read counts as a proven producer on the call edge. Still live at v33: untyped ray 8.94 vs typed 0.30 (30x), untyped spectralnorm 21.9 vs typed 1.62 (13.6x).
 **Acceptance:** untyped ray ≤0.6, spectralnorm ≤2.5, fft ≤0.4, navier_stokes ≤250 ms; untyped `_sphere_intersect` entry shows `d:` for all ten params.
 
 ### T19-5 — The store edge — **REFUTED by profiling 2026-08-19; do not implement (§7.9)**
 ⚠ Ranked from static `fn_array_set` counts in the dumps. Sampled, its three nominated rows spend 0% (fannkuch2), 3.2% (navier_stokes2) and 0% (hashmap2) in that helper; hashmap2's real cost is the generic READ chain and navier_stokes2's hot loop already emits a bare inline `dmov` store. The acceptance below is unreachable through the store edge.
-Rebuild the indexed-store lowering on the T19-1 rep: inline lane store whenever the value's carried rep matches the array's element lane; `fn_array_set` only for genuinely generic values or demotion-capable carriers [D2.2.2, D2.6.2–D2.6.3].
+Rebuild the indexed-store lowering on the T19-1 rep: inline lane store whenever the value's carried rep matches the array's element lane; `fn_array_set` only for genuinely generic values or demotion-capable carriers [D2.2.2, D3.2.2–D3.2.1].
 **Acceptance:** `fn_array_set` gone from the navier_stokes2/hashmap2/fannkuch2 hot bodies; hashmap typed ≤25 ms, navier_stokes typed ≤80 ms.
 
 ### T19-6 — Record access residue (owns richards, deltablue, cd, splay) — **PARTIALLY LANDED 2026-08-19 (§7.9); the shape walk is still open**
 Confirmed by profiling and promoted to the round's top lever: richards2 was 96% runtime helpers with 40% in `memcmp` from map field lookup. The identifier-compare half landed (json untyped 0.648, richards 0.823, deltablue 0.863). `fn_map_set` is now 46.3% of richards2 on its own — the largest single cost in the corpus.
 ⚠ The obvious follow-up, an O(1) probe of `TypeMap`'s existing property table, was built and **reverted**: it lost 6% at 0/11 wins because half the corpus has no named type to certify and, at 5–8 fields, hashing the key bytes costs what walking them costs. It only becomes viable with a precomputed site hash or a NameId-keyed index (§7.9).
-E3 landed `fn_member_by_id` but the dumps still show `lambda_module_name_id_at` ×30 (richards2) and ×72 (deltablue2) — the per-site NameId hoist did not reach these shapes — plus `fn_map_set` ×60/×71 (generic COW-per-write) and `fn_eq` ×30/×89 on `map?` operands that D2.5.1 makes a tag test. Finish E3's hoist for these shapes; give a declared-shape map store a direct slot write [D4.6.1v2–D4.6.2v2; LC1 stands — no inline caches].
+E3 landed `fn_member_by_id` but the dumps still show `lambda_module_name_id_at` ×30 (richards2) and ×72 (deltablue2) — the per-site NameId hoist did not reach these shapes — plus `fn_map_set` ×60/×71 (generic COW-per-write) and `fn_eq` ×30/×89 on `map?` operands that D2.4.1 makes a tag test. Finish E3's hoist for these shapes; give a declared-shape map store a direct slot write [D5.6.1–D5.6.2; LC1 stands — no inline caches].
 **Acceptance:** richards typed ≤120, deltablue typed ≤45, cd typed ≤120 ms; `lambda_module_name_id_at` count in the hot bodies is O(1) per function, not per site.
 
 ### T19-7 — Strings (the >20x tail: base64 31.7x, hyphen 24.0x, microdiff 36.6x) — **PROMOTED to design (§7.5)**
@@ -560,11 +560,11 @@ Original disposition (v32): unchanged from Tune18 E4 — the two cheap slices la
 
 Targets: MIR (untyped)/Node **1.81x → ≤1.0x** (T19-3 + T19-4 alone are worth 1.81→~0.9 by the §3 counterfactual); MIR (typed)/Node **0.85x → ≤0.70x**; MIR (typed)/C2MIR **4.39x → ≤3.0x**; **zero rows where typed is >5% slower than untyped**; no row >10% above its v32 value at round close.
 
-Non-goals: no inline caches [LC1, D8.4.1]; no change to int53 saturation semantics [S4.1.2]; no change to `a[i] : T?` inference [D2.5.3] — only its emission; no benchmark-source annotation edits to dodge a cost the compiler should elide (the §2 rows must be fixed in the compiler, not by deleting annotations); no vendored-dependency edits.
+Non-goals: no inline caches [LC1, D7.4.1]; no change to int53 saturation semantics [S4.1.2]; no change to `a[i] : T?` inference [D2.4.3] — only its emission; no benchmark-source annotation edits to dodge a cost the compiler should elide (the §2 rows must be fixed in the compiler, not by deleting annotations); no vendored-dependency edits.
 
 Gates (unchanged house rules): `make test-lambda-baseline` 100% and `make test262-baseline` fully green after each retained slice; a `mir-check` fixture for every elision edge asserting both the fast path and the surviving check on the unproven twin [D8.6.2]; forced-GC + poison sweeps for representation changes [D8.6.3]; release-build paired A/B against the archived `lambda-v32-a6192c1086` control, three runs, medians [`run_paired_benchmarks.py`].
 
-Interaction: T19-1's rep carrying is a prerequisite the D8.1.1v2 tier-up plan will want anyway — a per-function promotion needs a representation it can hand across the tier boundary without re-proving it.
+Interaction: T19-1's rep carrying is a prerequisite the D8.3.1 tier-up plan will want anyway — a per-function promotion needs a representation it can hand across the tier boundary without re-proving it.
 
 ## 7. Result33 re-assessment (2026-08-19) — after T19-3 + T19-4
 
@@ -796,7 +796,7 @@ comparison it performs.
 One shared `shape_field_name_equals()` next to `ShapeEntry` (promoted to the
 header rather than copied into both walks) compares inline up to 32 bytes and
 keeps `memcmp` only above it. It reads the same authoritative bytes, so every
-shape resolves exactly as before [D4.6.1v2–D4.6.2v2].
+shape resolves exactly as before [D5.6.1–D5.6.2].
 
 ⚠ A first-byte-reject variant that still called `memcmp` for the tail was built
 and measured, and it is **half the win**: richards 0.905 vs 0.823, json untyped
@@ -1066,7 +1066,7 @@ shape; its slots are that shape's slots, so walking its fields cannot discover a
 disagreement its construction did not already prevent. Added at the top of
 fast-mode `validate_against_map_type`, and deliberately **fast-mode only** —
 that is the runtime admission predicate, while the reporting validator owes a
-per-field diagnosis rather than a verdict [D3.2.1, D4.6.1v2].
+per-field diagnosis rather than a verdict [D4.2.1, D5.6.1].
 
 Worth 38.0 s → 15.0 s at TREE_SIZE 8000, and it pays on the existing corpus too:
 **splay typed 0.9252 at 9/9 wins**, cd typed 0.955, deltablue typed 0.985.
@@ -1201,7 +1201,7 @@ sessions.
 
 ## 9. Design note: validating recursive and structural contracts (2026-08-19)
 
-D3.2.2* is right on the principle — *"the validator is the runtime enforcer for
+D4.2.3* is right on the principle — *"the validator is the runtime enforcer for
 user-defined types: deep, on first crossing"* — and the implementation diverges
 from it in a way that is worth spelling out, because the divergence is what makes
 recursive types unusable. Three measured facts frame the design.
@@ -1281,7 +1281,7 @@ are many. So:
   never by data size, and one entry serves every instance;
 - the deep walk's product is not a bool but a **more precise interned shape `S'`**
   describing the data as it actually is. Afterwards **any** contract `T` is
-  answered by `subtype(S', T)` — the static relation D3.2.1 already names. One
+  answered by `subtype(S', T)` — the static relation D4.2.1 already names. One
   shape, many contracts. That is the many-types answer.
 
 A side table keyed on the *value* (option b) is then unnecessary at the value
@@ -1296,7 +1296,7 @@ table carries.
 | 0 | `S == T`? | pointer compare | landed (§7.13) |
 | 1 | `subtype(S, T)`? memoized on the shape pair | O(1) after first | settles case 1 entirely |
 | 2 | deep walk, then **refine** the value to interned `S'` | O(n) once per datum | case 2, first crossing only |
-| 3 | value-level predicates (`T where …`) | per crossing, uncacheable | D3.2.2 already scopes these out |
+| 3 | value-level predicates (`T where …`) | per crossing, uncacheable | D4.2.3 already scopes these out |
 
 Cycles are handled at layer 2 by marking a node in-progress: a back-edge is
 `subtype`-checked against the in-progress contract rather than re-descended —
@@ -1311,25 +1311,25 @@ that table is the enabling change, and it independently removes the per-instance
 
 ### 9.5 What this asks of the spec
 
-D3.2.2's *principle* stands; it needs its details separated, roughly:
+D4.2.3's *principle* stands; it needs its details separated, roughly:
 
-- **D3.2.2v2 (a)** A declared field store is a contract boundary and enforces the
+- **D4.2.3 (a)** A declared field store is a contract boundary and enforces the
   field's declared type. (Today it does not — finding 2.)
-- **D3.2.2v2 (b)** Given (a), a value built under a declared contract is valid by
+- **D4.2.3 (b)** Given (a), a value built under a declared contract is valid by
   construction; a crossing checks it **shallowly**.
-- **D3.2.2v2 (c)** A value of generic or ingested origin is validated **deeply on
+- **D4.2.3 (c)** A value of generic or ingested origin is validated **deeply on
   first crossing**, and the result is retained by refining the value's shape —
   restoring the ruling's own "on first crossing" wording, which the
   implementation does not honour today.
-- **D3.2.2v2 (d)** Deep validation is cycle-aware: a back-edge is resolved by
+- **D4.2.3 (d)** Deep validation is cycle-aware: a back-edge is resolved by
   `subtype` against the in-progress contract, never by re-descent. A depth bound
   must never produce a type verdict (finding 3).
 
 Requires a `v2` revision in `doc/Lambda_Formal_Design.md` with a doc semver bump,
-plus this note as the working record [D3.2.1, D3.2.2*, D4.6.1v2].
+plus this note as the working record [D4.2.1, D4.2.3*, D5.6.1].
 
 
-## 10. Implementing D3.2.2v2 — findings that reorder the plan (2026-08-19)
+## 10. Implementing D4.2.3 — findings that reorder the plan (2026-08-19)
 
 Target order was: intern/share shapes → enforce stores → validate shallowly.
 Investigating the first step showed the three are not independent, and that the
@@ -1371,7 +1371,7 @@ construct the literal directly in the contract's shape and **admit each field
 value against its field contract as it is written**. Then the map has the
 contract's shape by construction, whatever the static knowledge was.
 
-That is D3.2.2v2 (a) — the store check — applied at construction, and it is the
+That is D4.2.3 (a) — the store check — applied at construction, and it is the
 same mechanism the mutation path needs (§9.1 finding 2: `a.nxt = bogus` is
 accepted today). One mechanism, two call sites: literal construction and field
 store. Once it exists:
@@ -1381,7 +1381,7 @@ store. Once it exists:
 - retags stop happening for declared fields, because the slot already has the
   declared contract's type — which removes the per-instance shape divergence at
   its source rather than de-duplicating it afterwards;
-- shallow validation (D3.2.2v2 (b)) becomes sound, because construction is now
+- shallow validation (D4.2.3 (b)) becomes sound, because construction is now
   the enforcer;
 - the shape-identity check already landed (§7.13) then fires universally, and
   the deep walk survives only for genuinely generic/ingested data (case 2).
@@ -1406,7 +1406,7 @@ this work that is four places, and only one of them is new:
 
 | what | where |
 |---|---|
-| the ruling D3.2.2v2 (terse, normative, `v2` + doc semver bump) | `doc/Lambda_Formal_Design.md` |
+| the ruling D4.2.3 (terse, normative, `v2` + doc semver bump) | `doc/Lambda_Formal_Design.md` |
 | validation engine: the layering of §9.4, cycle rule, `(S,T)` memo | `doc/dev/lambda/LR_13_Schema_Validator.md` §3 |
 | shape/TypeMap interning, adoption, retag transitions | `doc/dev/lambda/LR_03_Value_and_Type_Model.md`, "Map shape: `TypeMap` & `ShapeEntry`" |
 | the decision record — options weighed, measurements, rejected routes | **`vibe/Lambda_Design_Type_Boundary.md`** (new) |

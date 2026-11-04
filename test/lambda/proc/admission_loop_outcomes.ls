@@ -1,4 +1,4 @@
-// SI14v3/D2.8.3v3: an admitted error remains safe across branch/loop joins.
+// SI14v3/D2.5.3: an admitted error remains safe across branch/loop joins.
 fn opaque(value) => value
 fn checked(value: int) int => value
 

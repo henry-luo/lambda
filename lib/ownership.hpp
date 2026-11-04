@@ -45,7 +45,7 @@ template<> struct DomainOutlives<GcHeapDomain, GcHeapDomain> : TrueType {};
 template<> struct DomainOutlives<LayoutSessionDomain, LayoutSessionDomain> : TrueType {};
 template<> struct DomainOutlives<PoolDomain, LayoutSessionDomain> : TrueType {};
 template<> struct DomainOutlives<GcHeapDomain, LayoutSessionDomain> : TrueType {};
-// No GcHeapDomain -> PoolDomain edge (D4.5.2): the collector never traces pool or
+// No GcHeapDomain -> PoolDomain edge (D5.5.2): the collector never traces pool or
 // arena storage, so a pool holder keeps a GC value only by copying it into its pool.
 template<> struct DomainOutlives<InputScratchDomain, InputScratchDomain> : TrueType {};
 template<> struct DomainOutlives<GcHeapDomain, InputScratchDomain> : TrueType {};

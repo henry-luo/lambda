@@ -30,7 +30,7 @@ uint64_t radiant_audio_source_start(DomDocument* document, uint64_t asset, uint6
 struct AudioPlayerRoute { uint64_t token; AudioRouteId route; };
 // staged graph and live/paused source routes publish together; failed admission keeps ownership with the caller.
 bool radiant_audio_graph_may_edit(DomDocument* document, AudioGraphId graph);
-// dry providers still express audible intent when a muted bus has no DSP history (D7.5.4).
+// dry providers still express audible intent when a muted bus has no DSP history (D11.3.1).
 bool radiant_audio_graph_input_audible(AudioSubmixId submix, AudioGraphId graph, AudioRouteId route, bool active, double gain);
 bool radiant_audio_graph_commit(DomDocument* document, AudioGraphId graph, AudioGraph* prepared,
     const AudioPlayerRoute* routes, unsigned count, const char** error = nullptr);
@@ -89,7 +89,7 @@ uint64_t radiant_audio_frame(DomDocument* document);
 bool radiant_audio_tick(DomDocument* document, double now_ms);
 // voices/tails keep owner polling alive; offline output also consumes those frame intervals.
 bool radiant_audio_frames_pending(DomDocument* document);
-// D7.5.4 audible-output gate. A local document may start audio; a network
+// D11.3.1 audible-output gate. A local document may start audio; a network
 // document needs sticky activation from trusted host input; only the host
 // grants activation up front (`view --autoplay`).
 void radiant_audio_grant_activation(bool granted);

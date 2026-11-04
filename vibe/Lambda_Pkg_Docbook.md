@@ -9,8 +9,8 @@
 > publication structure. XSLT **3.0** is the source language version, not a
 > requirement to target an xslTNG release numbered 3.0.
 
-**Formal linkage.** D7.2.1–D7.2.4 govern source packages and the reserved
-`lambda.doc.*` namespace. S12.1.1v3, S12.4.1v2, and D7.1.2v2 govern the
+**Formal linkage.** D9.3.1–D9.3.4 govern source packages and the reserved
+`lambda.doc.*` namespace. S12.1.1v3, S12.4.1v2, and D9.1.2 govern the
 separation of pure transformation from resource acquisition and output.
 S2.6.1v2–S2.6.5 govern ordered, normalized element content; S5.4.3 and
 S8.2.2v6 govern namespace-sensitive names. S10.4.3v2 governs contextual
@@ -136,7 +136,7 @@ analysis, rendering, and publication assembly are pure transformations
 (S12.1.1v3). A conversion call receives all inputs it needs and never resolves
 a missing resource through hidden I/O. Eager input closes its acquisition
 within the call (S12.4.1v2); resource mechanisms belong to `lambda-io`
-(D7.1.2v2).
+(D9.1.2).
 
 ### 4.1 XML adaptation and source fidelity
 
@@ -192,7 +192,7 @@ Construct document-wide indexes once after structure-changing preprocessing:
 source IDs, generated IDs, parent/ancestor context, document order, numbering,
 titles, reference targets, notes, generated-material entries, and eventual
 chunk ownership. Keep derived caches local to one conversion, rather than
-in mutable package globals (D7.2.1).
+in mutable package globals (D9.3.1).
 
 Use occurrence keys based on document identity and traversal paths. Two
 equal-looking sections are still distinct source occurrences. Carry parent
@@ -314,7 +314,7 @@ behavioral differences before changing the package's advertised baseline.
 ## 7. Proposed public API
 
 The package import is `lambda.doc.docbook`; its source location follows
-D7.2.4 without a special runtime module or new language syntax.
+D9.3.4 without a special runtime module or new language syntax.
 
 | Function | Effect and contract |
 |---|---|
@@ -499,7 +499,7 @@ does not require one file per upstream module. Reuse `lambda.doc.math` and
 existing media capabilities where appropriate without changing the source
 HTML/CSS contract. Any necessary C/C++ work remains neutral, uses the
 project's library types, and follows precise ownership/rooting rules
-(D4.1.3, D4.1.4v5); it must not add an xslTNG-specific native runtime.
+(D5.1.3, D5.1.4); it must not add an xslTNG-specific native runtime.
 
 ## Appendix B. Proposed implementation milestones
 

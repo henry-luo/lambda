@@ -36,7 +36,7 @@ does not verify CRC/ISIZE. Lambda uses zlib's verified gzip mode instead.
 
 ## Embedding policy
 
-**D7.5.2/S12.4.1v3:** Lambda acquires bounded immutable bytes and supplies only
+**D11.1.2/S12.4.1v3:** Lambda acquires bounded immutable bytes and supplies only
 retained memory buffers. The JSON build configuration generates
 `build_temp/archive-config/include/lambda_archive_config.h` through upstream's
 `PLATFORM_CONFIG_H` hook. Only the selected native readers/filters are registered;

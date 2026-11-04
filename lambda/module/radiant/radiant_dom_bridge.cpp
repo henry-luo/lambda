@@ -57,7 +57,7 @@ Context* radiant_dom_resource_owner(DomDocument* document) {
     Runtime* runtime = dom_document_script_runtime(document);
     if (runtime) return (Context*)runtime_get_eval_context(runtime);
     // bootstrap can precede publication of js.runtime; an iframe's ambient
-    // evaluator cannot own roots retained by another document (D5.3.3).
+    // evaluator cannot own roots retained by another document (D6.3.3).
     return context && context->runtime && context->runtime->dom_doc == document
         ? (Context*)context : nullptr;
 }
@@ -785,7 +785,7 @@ RADIANT_C_API Item radiant_dom_lookup_cached_node(void* dom_node) {
 void dom_retire_release_render_result(DomDocument* doc, Item result) {
     Runtime* runtime = dom_document_script_runtime(doc);
     // Embedded-document cleanup can change the ambient runtime; use the
-    // retiring document's capsule without switching an evaluator (D5.4.1).
+    // retiring document's capsule without switching an evaluator (D6.4.1).
     if (runtime) render_map_forget_retired_result(runtime_get_eval_context(runtime), result);
 }
 
@@ -2378,7 +2378,7 @@ RADIANT_C_API int radiant_dom_member_text_content(Item receiver, Item* out) {
 //
 // childNodes remains module-owned because its live NodeList brand is a Jube
 // adapter concern; both JS and Lambda read the same direct VArray backend
-// while Lambda holds the DOM fixed under D7.4.5v2.
+// while Lambda holds the DOM fixed under D9.5.5.
 // ---------------------------------------------------------------------------
 #define RADIANT_DOM_MEMBER_FROM_CATALOG(fn_name, catalog_op)                  \
     RADIANT_C_API int fn_name(Item receiver, Item* out) {                     \

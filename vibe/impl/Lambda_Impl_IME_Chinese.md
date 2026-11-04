@@ -9,10 +9,10 @@
 > held-out coverage are qualified; retained-heap accounting and compressed-only loading remain open.
 > The first release remains unqualified against the provisional performance targets.
 > **Design:** [Lambda_Pkg_IME_Chinese.md](../Lambda_Pkg_IME_Chinese.md).
-> **Spec linkage:** D7.2.4v4 places the package under
-> `lmd/package/ime/chinese/`; D7.1.2v2 governs resource IO when the runtime
+> **Spec linkage:** D9.3.4 places the package under
+> `lmd/package/ime/chinese/`; D9.1.2 governs resource IO when the runtime
 > loader is added. The engine/IO split follows S12.1.1v3 and explicit
-> dictionary loading follows D7.2.1/D7.2.3. Sorting uses S6.2.2v3's byte
+> dictionary loading follows D9.3.1/D9.3.3. Sorting uses S6.2.2v3's byte
 > order, and word lengths use S2.5.8's code points. No formal rulings changed.
 
 ## 1. Implemented scope
@@ -305,8 +305,8 @@ its binary/source identities. The two-leader controls are retained as
 attachment. `user.ls` validates, indexes, matches and learns user words;
 `query.ls` is the shared M1/M2 query path. The public entry exports `session`,
 `key`, `configure`, `settings`, `with_user`, `load_user` and `save_user`.
-Effects remain explicit procedures (S12.1.1v3, D7.1.2v2); importing the package
-does not read a dictionary or user file (D7.2.1/D7.2.3).
+Effects remain explicit procedures (S12.1.1v3, D9.1.2); importing the package
+does not read a dictionary or user file (D9.3.1/D9.3.3).
 
 The reducer handles partial selection, exact-prefix undo, digits/Space,
 paging and highlight movement, punctuation and paired quotes, Shift-tap mode
@@ -407,8 +407,8 @@ Traditional profile and document selection; its evidence follows in §7.
 **Scope and acceptance (2026-10-26):** IME-E1 deferred composition through the
 existing controller, IME-E2 native numbered popup/page indicator with click
 selection, and IME-E3 Chinese/English indicator plus window opt-in and document
-override (IME-O1/IME-O2). Input policy stays in `lambda.dom.ime` (D7.2.5),
-with a document-owned exact root for the opaque adapter value (D5.3.3).
+override (IME-O1/IME-O2). Input policy stays in `lambda.dom.ime` (D10.2.1),
+with a document-owned exact root for the opaque adapter value (D6.3.3).
 
 ### 6.1 Implementation
 
@@ -416,7 +416,7 @@ with a document-owned exact root for the opaque adapter value (D5.3.3).
 `lambda.dom.ime`. The adapter loads the dictionary on first eligible focus,
 reuses it across the document's controls, applies live fuzzy/page preferences,
 and retains mode and learning across focus changes. The engine value belongs
-to its document runtime; it does not cross GC heaps (D5.4.1). Document
+to its document runtime; it does not cross GC heaps (D6.4.1). Document
 `data-ime="chinese"` / `"off"` overrides the opt-in window setting exposed by
 `radiant.set_chinese_ime`. Native window state survives navigation; document
 sessions are released with their owning script runtime.
@@ -443,13 +443,13 @@ structural deltas, commits one undo entry, and replays cancellation to restore
 the original selection/content. The generic `dom.edit_sync_selection` waist
 copies an explicitly restored DOM Selection into the live edit capability so
 cached mutation coordinates cannot overwrite it. History policy remains in
-Lambda (D7.2.5); native code only replays opaque deltas and selection state.
+Lambda (D10.2.1); native code only replays opaque deltas and selection state.
 
 Forced GC then exposed a separate native event-construction defect: allocating
 a property name could collect the event/value or initialization record, so
 the first keyboard event sometimes had an empty type. A native regression
 failed before the fix. Event property writes and keyboard/composition/input
-construction now use precise roots across allocations (D5.3.3), and that
+construction now use precise roots across allocations (D6.3.3), and that
 regression passes alongside the existing focus/mouse lifetime regressions.
 No conservative stack scanning or vendor changes were introduced.
 
@@ -544,7 +544,7 @@ delivery does not establish completion of those broader release gates.
 **Scope (2026-10-26):** IME11 / proposal §5.6. M4 adds a preparation-time
 Traditional profile to the existing pure engine and M3 adapter; no native
 engine code, pack-format version or formal ruling changes. Effects remain
-explicit procedures (S12.1.1v3, D7.1.2v2), word lengths remain code points
+explicit procedures (S12.1.1v3, D9.1.2), word lengths remain code points
 (S2.5.8), and deterministic posting order uses S6.2.2v3.
 
 ### 7.1 Conversion and installation
@@ -587,7 +587,7 @@ has 简体/繁體 buttons. Changing profile/directory first loads the requested
 engine, cancels any old provisional range, then creates a fresh session.
 Committed document text stays as authored. Learned overlays remain explicitly
 saved, profile-specific values; switching never implicitly converts them.
-The native root remains opaque (D7.2.5 / D5.3.3).
+The native root remains opaque (D10.2.1 / D6.3.3).
 
 ### 7.2 Quality report
 
@@ -735,7 +735,7 @@ records the focused and aggregate results. Visual evidence includes
 text. The popup previously measured and painted with `UiContext::default_font`,
 which selected the default serif face despite the editor's computed font.
 Popup placement now borrows the active editor's selected-tree font for both
-measurement and painting (D4.5.1v4), including its used size. It resolves the
+measurement and painting (D5.5.1), including its used size. It resolves the
 font on each placement instead of retaining a pointer across reflows.
 
 Acceptance is the supplied `da` textarea case with sans-serif numerals and
@@ -764,7 +764,7 @@ font follow-up separately from the earlier horizontal-strip checkpoint;
 **Scope (USER, 2026-10-26):** Left/Right move within the remaining pinyin,
 while Up/Down retain candidate navigation. Typing, Backspace and Delete use
 that cursor; candidate selection maps it past the consumed prefix. Positions
-remain code points (S2.5.8/S17.4.1), and policy stays in Lambda (D7.2.5).
+remain code points (S2.5.8/S17.4.1), and policy stays in Lambda (D10.2.1).
 Acceptance covers both bounds, insertion/deletion in the middle, separators,
 selected Chinese prefixes, selection/undo and all three editing surfaces.
 
@@ -802,7 +802,7 @@ previous syllable boundary while Right advances one letter, and use Down to
 open a complete candidate grid where all four arrows navigate options.
 Syllable boundaries reuse the engine's ordered segmentation lattice; positions
 remain code points (S2.5.8/S17.4.1). Lambda owns expansion and selection policy
-(D7.2.5), while native layout reports responsive grid columns.
+(D10.2.1), while native layout reports responsive grid columns.
 
 Acceptance covers ambiguous/explicit syllables, incomplete input, compact
 versus expanded arrow behavior, all returned candidates beyond the old native
@@ -1046,7 +1046,7 @@ candidate menu returns to the compact strip. The old navigation path clamped
 Up to candidate zero and kept the grid open. The reducer now uses the existing
 rendered-column count to detect that boundary, keeps the absolute selection,
 and emits only the collapsed candidate frame. Preedit and its code-point caret
-are unchanged (S2.5.8/S17.4.1); policy remains in Lambda (D7.2.5, IME-E2).
+are unchanged (S2.5.8/S17.4.1); policy remains in Lambda (D10.2.1, IME-E2).
 Up from lower rows continues row navigation, repeated Up in the strip is a
 no-op, and Down reopens at the retained candidate.
 
@@ -1088,7 +1088,7 @@ from the author DOM (IME-E2). The focused pre-change reproducer records
 The DOM adapter now exposes `suspend_popup(body, suspended)`. Every normal
 presentation path honors the document's transient flag. Resuming snapshots the
 existing reducer frame rather than reconfiguring or requerying it, retaining
-mode, selection, expansion, preedit and caret (D7.2.5, S2.5.8/S17.4.1). The
+mode, selection, expansion, preedit and caret (D10.2.1, S2.5.8/S17.4.1). The
 reducer's existing frame helper is shared with the adapter instead of copying
 its slicing/highlight rules. Resume checks focused-target eligibility and OS
 composition priority (IME10). No native painting or global popup order changes.
@@ -1176,7 +1176,7 @@ is tracked. Both preparations pass full source/table validation.
 The demo's initial directory selects `zh-Hans-bible-combined`. Profile buttons
 switch to the corresponding `zh-Hant-bible-combined` or Simplified directory,
 while retaining explicit fixture/host directory overrides. Acquisition still
-occurs on enable/focus (D7.2.4v4/S12.1.1v3). The previous page fails the focused
+occurs on enable/focus (D9.3.4/S12.1.1v3). The previous page fails the focused
 Bible conversion reproducer; the updated page converts both standard words
 and Bible names/phrases on input, textarea and contenteditable surfaces.
 
@@ -1207,7 +1207,7 @@ input method. The native IME overlay is suspended while the modal owns focus.
 `test/demo/ime/mod_dictionary.ls` reuses the pack's binary search/posting
 decoder, line index and existing user-word validation. It creates new lexicon
 and abbreviation byte/index values without modifying installed resources
-(IME6/IME8, D7.2.4v4/S12.1.1v3). Browsing decodes one page, not the whole pack.
+(IME6/IME8, D9.3.4/S12.1.1v3). Browsing decodes one page, not the whole pack.
 Explicit edits reindex both affected tables; this is a small personal edit
 list, not a bulk dictionary preparation path. New pairs carry zero weight;
 re-added built-in pairs retain their original weight. Deletion also removes the
@@ -1249,7 +1249,7 @@ one toggle per scope. Window flips the window setting and clears the document
 override; Document flips the effective document setting and sets an override.
 Use window setting retains its existing inheritance action. Both toggle labels
 and `aria-pressed` reflect current on/off values, including when the window is
-on beneath a document-off override. Policy remains in the page (D7.2.5).
+on beneath a document-off override. Policy remains in the page (D10.2.1).
 The updated buttons/controls and dictionary-modal fixtures pass **111 assertions
 per tier** in interpreter and JIT. Cold toggling, focused composition cancellation,
 actual conversion, inheritance and modal restoration are covered. The native
@@ -1288,7 +1288,7 @@ The demo model scans native-decoded lines for a new word query, then reuses the
 shared posting/page walker to filter only matching words. Its cursor retains
 matching line positions for later pages; pinyin keeps indexed key lookup.
 Search reads the current in-memory bytes, so edits are visible immediately.
-Acquisition and pack formats are unchanged (IME6, D7.2.4v4/S12.1.1v3).
+Acquisition and pack formats are unchanged (IME6, D9.3.4/S12.1.1v3).
 
 Both interpreter and JIT pass **21 IME goldens**, including the expanded
 45-check dictionary model: whole-word/substrings, multiple readings, pagination,
@@ -1312,8 +1312,8 @@ tree. `make build-ime-macos` stages
 `temp/ime_chinese/m5/LambdaChineseIME.app`; `make build-ime-macos-debug` builds
 the separate debug binary without replacing the release app. The host imports
 the existing `lambda.ime.chinese` reducer (S12.1.1v3) with explicit resource
-paths (D7.2.4v4/D7.2.6) and precisely rooted per-profile engines and
-per-controller sessions (D5.3.3/D5.4.1). It converts the reducer's code-point
+paths (D9.3.4/D9.3.5) and precisely rooted per-profile engines and
+per-controller sessions (D6.3.3/D6.4.1). It converts the reducer's code-point
 caret to the InputMethodKit UTF-16 marked range (S2.5.8/S17.4.1), uses the
 native candidate panel, and finishes marked text once on focus loss. The input
 source menu offers Simplified/Traditional, fuzzy on/off and each package

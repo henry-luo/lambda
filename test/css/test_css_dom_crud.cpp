@@ -1903,7 +1903,7 @@ TEST_F(DomIntegrationTest, UiRepeatedValuesHaveIndependentDomOccurrences) {
     EXPECT_EQ(second->next_sibling, nullptr);
     EXPECT_EQ(third->next_sibling, nullptr);
 
-    // a new presentation boundary copies ordinary values, even in the same arena (D4.5.3v2).
+    // a new presentation boundary copies ordinary values, even in the same arena (D5.5.3).
     DomElement* next_root = build_dom_tree_from_element(tree.element, doc, nullptr);
     ASSERT_NE(next_root, nullptr);
     EXPECT_NE(next_root, root);
@@ -1956,10 +1956,10 @@ TEST_F(DomIntegrationTest, UiChildRelinkRetainsCommentIdentity) {
         DomNode* span = original->next_sibling;
         ASSERT_NE(span, nullptr);
 
-        // a sibling edit must preserve the comment wrapper and its generation (D4.5.1v4).
+        // a sibling edit must preserve the comment wrapper and its generation (D5.5.1).
         MarkEditor editor(input, EDIT_MODE_INLINE);
         Item prefix = editor.builder()->createStringItem("prefix");
-        // edit the mutable occurrence; the evaluator's ordinary value stays separate (D4.5.3v2).
+        // edit the mutable occurrence; the evaluator's ordinary value stays separate (D5.5.3).
         ASSERT_EQ(editor.dom_insert_child(occurrence, 0, prefix).element, occurrence.element);
         ASSERT_TRUE(root->first_child->is_text());
         EXPECT_EQ(root->first_child->next_sibling, original);

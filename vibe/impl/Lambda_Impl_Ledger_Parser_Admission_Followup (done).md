@@ -3,7 +3,7 @@
 **Status:** done for this bounded ledger pass; both required aggregate gates pass. **Base:** `33d98cb08`.
 
 Existing rulings: **S7.6.2v2 / S7.11.1v2–S7.11.2v2 / S16.9.5 /
-S16.10.1v3 / S11.1.6v3 / S17.8.1 / D3.2.4v4 / D5.3.3**;
+S16.10.1v3 / S11.1.6v3 / S17.8.1 / D4.2.5 / D6.3.3**;
 force-fragment spelling is **PTH33**. No ruling changes.
 
 | Selected defect | Root-cause repair |

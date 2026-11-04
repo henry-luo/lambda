@@ -7,8 +7,8 @@ Latest gate counts, release measurements and limitations are in
 [JS_MVP_Lmd §17](../jube/JS_MVP_Lmd.md#17-slow-kernel-tuning).
 
 **Scope authority:** [JS_MVP_Lmd §10](../jube/JS_MVP_Lmd.md#10-map-and-plain-object-phase),
-**S1.11**, **S8.2.2v5**, **D1.3v3**, **D2.6.6v3**, **D2.6.9v3**,
-**D3.4.3v5–D3.4.6**, **D4.6.1v4**, **D5.3**.
+**S1.11**, **S8.2.2v5**, **D1.3**, **D3.1.1**, **D3.1.5**,
+**D3.4.3–D3.4.6**, **D5.6.1**, **D6.3**.
 
 ## 1. Shared storage and execution contracts
 
@@ -19,14 +19,14 @@ The bounded transition tree retains a private fallback. Empty nominal replay
 roots are shared within the existing tree metadata, avoiding a new root on
 every delete. Existing field growth and transactional data repacking are reused
 from `lambda/runtime/lambda-eval.cpp`; the MVP does not call `fn_map_set` or
-its descriptor/JS policy path (**D3.4.3v5**, **D3.4.5**).
+its descriptor/JS policy path (**D3.4.3**, **D3.4.5**).
 
 Static literal plans contain immutable layouts. Execution setup resolves their
 shared transition nodes before entering generated MIR. Reads guard the current
 shape and load packed lanes; writes guard again after the RHS and store only a
 matching lane. A miss uses the same shared mutation kernel. These are retained
 syntax/type plans, with no execution feedback, inline cache, body cloning, or
-shadow AST (**D8.2**, **D8.4.1v2**).
+shadow AST (**D8.2**, **D7.4.1**).
 
 ES Map uses an ordinary Map attribute face plus `OrderedMap` trailing storage.
 Strong keys/values live in an ordinary Array; each entry has key, value,
@@ -39,7 +39,7 @@ The shared collector traces the entry Array and frees the native hash index
 on sweep or heap destruction. It skips older JS native hooks for these
 carriers. GC layout assertions cover the C/C++ boundary. Native mutation
 publishes an index entry only after owned slot stores succeed; compaction
-builds replacement entries/index before publishing either (**D5.3**).
+builds replacement entries/index before publishing either (**D6.3**).
 
 Direct `for...of` uses an owner and a cursor. Deleted slots are skipped and
 new slots remain visible until exhaustion. Keys/values and `[k,v]` bindings
@@ -47,13 +47,13 @@ load slots directly; an observable entry pair is a fresh Array. Cursor
 accounting covers normal exhaustion, break/continue across nested loops,
 returns, tail calls, and errors. Tombstones can compact only with no active
 cursor. Ordinary projection methods returning Arrays remain ordinary calls
-when their receiver/binding is shadowed (**S1.11**, **D8.4.1v2**).
+when their receiver/binding is shadowed (**S1.11**, **D7.4.1**).
 
 Canonical key encoding is shared in `lib/utf` and NamePool. Adjacent valid
 surrogate units combine; lone units remain lossless WTF-8. No normalization,
 case folding, locale conversion, or replacement participates. Shared map
 lookup, mutation, membership, and transition additions use the same boundary;
-length-bearing lookup preserves embedded NUL (**S8.2.2v5**, **D4.6.1v4**).
+length-bearing lookup preserves embedded NUL (**S8.2.2v5**, **D5.6.1**).
 Full-JS string equality also uses the shared UTF-16 comparison when bytes
 differ: iterators can materialize canonical names while concatenation retains
 WTF-8 units. Strict/loose equality and SameValue must agree across those
@@ -144,8 +144,8 @@ existing formal-spec status.
 ## 6. Bounded tuning implementation
 
 The tuning phases in `JS_MVP_Lmd.md` preserve immutable generated code and
-shape guards (**D8.4.1v2**), the direct-call ABI (**D8.4.2v2**), and precise
-ownership (**D5.3**). There are still 20 MVP runtime imports; this round adds
+shape guards (**D7.4.1**), the direct-call ABI (**D7.4.2**), and precise
+ownership (**D6.3**). There are still 20 MVP runtime imports; this round adds
 none and retains one standalone MIR body per function.
 
 - Literal plans use inferred lanes and canonical static names. Bindings and
@@ -178,7 +178,7 @@ none and retains one standalone MIR body per function.
   skips structural fingerprinting and repeated layout scans. External parents
   still use the structural table and full contract checks. Reuse commits the
   value and exact shape without GC; incompatible layouts retain repacking
-  (**D3.4.3v5**, **D3.4.5–D3.4.6**).
+  (**D3.4.3**, **D3.4.5–D3.4.6**).
 - Canonical-key Map reads, membership, deletion and immediate updates avoid
   root-frame setup. Canonicalization, wide scalar stores, compaction and growth
   retain precise roots. Lookup returns the collision-chain head for insertion;
@@ -222,7 +222,7 @@ excluded from performance claims.
 ## 7. Numeric loops and array parameters
 
 The broader admitted-workload comparison exposed two retained-fact losses in
-`mvp_lmd_mir.cpp` (**D8.2.4v2**, **D8.2.5v3**, **D8.2.6**):
+`mvp_lmd_mir.cpp` (**D8.2.4**, **D8.2.5**, **D8.2.6**):
 
 - `diviter`: literal lowering used the enclosing caller's numeric region
   during inlining. An integer callee's `q++` consequently converted i64 to
@@ -238,8 +238,8 @@ The broader admitted-workload comparison exposed two retained-fact losses in
   unknown. Array bounds and capability checks use the existing lowering.
 
 Owned snapshots still adopt scalar homes and retain their precise roots
-(**D5.3**). There are no additional runtime imports, mutable caches, inferred
-array element types or ArrayNum promotion (**D8.4.1v2**). Generic element
+(**D6.3**). There are no additional runtime imports, mutable caches, inferred
+array element types or ArrayNum promotion (**D7.4.1**). Generic element
 coercion and scalar ownership remain the next `pnpoly` costs to investigate.
 
 `InlinedNumericRegions` covers integer callees inside floating callers,
@@ -270,7 +270,7 @@ preserve the evidence without changing the Test262 harness or timeout policy.
 
 ## 8. Generic element coercion and scalar ownership
 
-This round implements §14 of the working design (**D2.2.5**, **D5.3**,
+This round implements §14 of the working design (**D2.2.5**, **D6.3**,
 **D8.2.6**):
 
 - Generic numeric coercion enters `em_unbox_f64_item` directly. Its inline
@@ -298,7 +298,7 @@ These borrows do not cross mutation, safepoints, argument publication or value
 escape. Array bounds, length, aliases and mixed element types remain dynamic.
 The changes add no array element-type inference, ArrayNum promotion, mutable
 cache or new object surface. Destination homes remain independent wherever a
-value can survive a source overwrite (**D5.3.1–D5.3.4**).
+value can survive a source overwrite (**D6.3.1–D6.3.4**).
 
 `GenericElementCoercion` covers mixed primitives, signed zero, subnormals,
 nonfinite values, absent elements, string addition/comparison and excluded

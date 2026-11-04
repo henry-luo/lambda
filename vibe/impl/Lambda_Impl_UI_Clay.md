@@ -2,7 +2,7 @@
 
 ## Architecture
 
-`lambda.ui.clay` is an ordinary source package (**D7.2.4**) with 59 qualified
+`lambda.ui.clay` is an ordinary source package (**D9.3.4**) with 59 qualified
 component tags (**S2.4.3v3**). Its facade and catalog preserve authored Clay
 descriptors. The presentation view lowers component children and nested data
 slots into validated Ant-inspired descriptors, then applies their existing
@@ -23,7 +23,7 @@ The public renderer propagates child diagnostics through arrays and page shells
 (**S7.6.3v2**), so invalid components cannot become inert error children.
 
 Native input ownership, frame synchronization and radio exclusivity remain in
-the shared control layer (**D7.2.5**, **S8.2.2v5**). Application effects stay in
+the shared control layer (**D10.2.1**, **S8.2.2v5**). Application effects stay in
 event procedures (**S12.1.1v2–S12.1.3**). No language semantics were changed.
 
 ## Appearance
@@ -56,8 +56,8 @@ The retained Tabs fixture exposed a shared runtime defect. An external panel
 array copied into the result Input also cloned template results that already
 belonged to that Input. Those new addresses had no native handler binding.
 UI content copying now reuses owned descendants while adopting external values
-(**D4.5.2**); the separate DOM occurrence copy still creates distinct nodes
-(**D4.5.3**). The MarkBuilder regression checks both ownership boundaries, and
+(**D5.5.2**); the separate DOM occurrence copy still creates distinct nodes
+(**D5.5.3**). The MarkBuilder regression checks both ownership boundaries, and
 the native fixture clicks a button after activating its retained panel.
 
 ## Validation
@@ -65,7 +65,7 @@ the native fixture clicks a button after activating its retained panel.
 Source contracts live in `test/lambda/ui_clay/`, each with a checked-in golden.
 Native checks live in `test/ui/clay/`, plus the dashboard and component gallery.
 `make test-ui-clay` runs interpreter, automatic and MIR JIT paths
-(**D8.1.1v17**). `RadiantTextLayout.ShadowMathKeepsLengthsDistinctFromColors`
+(**D8.3.6**). `RadiantTextLayout.ShadowMathKeepsLengthsDistinctFromColors`
 checks the underlying shadow values directly.
 
 Validated on 2026-10-13:

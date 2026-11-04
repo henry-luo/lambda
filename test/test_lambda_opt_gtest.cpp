@@ -329,7 +329,7 @@ TEST(LambdaOptStrings, TailAccumulatorCopiesLinearBytes) {
 }
 
 // Tune31 Phase II: S7.1.2 string spans avoid a call per character, and
-// D3.3.3v3 admits the flat table record once before the repeated traversal.
+// D4.3.3 admits the flat table record once before the repeated traversal.
 TEST(LambdaOptStrings, TypedHyphenUsesStringSpansAndOneTableAdmission) {
     auto run = run_source_fixture("tune31_hyphen_typed_benchmark",
         "test/benchmark/text/hyphen2.ls", "jit");
@@ -346,7 +346,7 @@ TEST(LambdaOptStrings, TypedHyphenUsesStringSpansAndOneTableAdmission) {
 
 // The typed log port keeps its generated string corpus, but parses each row
 // into scalar state instead of repeatedly admitting and mutating LogRecord
-// maps. D3.3.3v3 permits this representation choice within the closed
+// maps. D4.3.3 permits this representation choice within the closed
 // benchmark schema; the checksum remains the behavioral oracle.
 TEST(LambdaOptStrings, TypedLogPipelineStreamsWithoutRecordMapTraffic) {
     auto run = run_source_fixture("log_pipeline_typed_stream",
@@ -360,7 +360,7 @@ TEST(LambdaOptStrings, TypedLogPipelineStreamsWithoutRecordMapTraffic) {
 }
 
 // The fixed benchmark corpus has the closed A/C/G/T domain represented by
-// D3.3.3v3's admitted int[] lanes. Keep the full output oracle so table
+// D4.3.3's admitted int[] lanes. Keep the full output oracle so table
 // ordering and the longer literal-query scans cannot be simplified away.
 TEST(LambdaOptStrings, TypedKnucleotideUsesClosedAlphabetTables) {
     auto run = run_source_fixture("knucleotide_typed_table",
@@ -386,7 +386,7 @@ TEST(LambdaOptStrings, TypedKnucleotideUsesClosedAlphabetTables) {
 }
 
 // Fast Diff admits its fixed source strings once, then its repeated LCS loop
-// compares D3.3.3v3 int[] lanes. The companion MIR fixture pins the raw
+// compares D4.3.3 int[] lanes. The companion MIR fixture pins the raw
 // equality arm; this benchmark-level test pins the complete checksum.
 TEST(LambdaOptStrings, TypedFastDiffPrecodesStaticTextBeforeLcsLoop) {
     auto run = run_source_fixture("fast_diff_typed_code_tables",
@@ -580,7 +580,7 @@ static void expect_no_unresolved_type_warning(const FixtureRun& run, const char*
 // fixture was calls=20, reifications=20; what separates health from that is the
 // reification/copy counters, not the call count.
 //
-// Tune27 T27-8 (S11.4.1v3, D3.2.4v3): the JIT no longer crosses at all. The
+// Tune27 T27-8 (S11.4.1v3, D4.2.5): the JIT no longer crosses at all. The
 // argument `n.next` is a field read of a trusted record whose field contract
 // is structurally the parameter's `Node?`, and `head` is a declared binding
 // admitted at its own declaration -- both proofs are reached through the
@@ -606,7 +606,7 @@ TEST(LambdaOptAdmission, RecursiveContractJitFullyStatic) {
 }
 
 // T0 destination construction and boundary plans reuse exact shape proofs
-// without entering admission or copying the recursive graph (D3.2.4v4).
+// without entering admission or copying the recursive graph (D4.2.5).
 TEST(LambdaOptAdmission, RecursiveContractInterpAdmitsWithoutCopy) {
     FixtureRun run = run_fixture("recursive_link", "interp", kRecursiveLinkSource, true);
     ASSERT_TRUE(run.ok);
@@ -648,7 +648,7 @@ TEST(LambdaOptNumeric, U32ShiftWidthZeroArmMatchesInterpreter) {
     }
 }
 
-// D2.4.1-D2.4.3: the guarded identity and the original admission agree on
+// D2.3.4-D2.3.5: the guarded identity and the original admission agree on
 // observable values at direct and boxed calls.
 TEST(LambdaOptNumeric, ExactSizedParameterAdmissionMatchesInterpreter) {
     const std::string source = fixture_source("test/mir/lambda/sized_param_exact_admission.ls");
@@ -663,7 +663,7 @@ TEST(LambdaOptNumeric, ExactSizedParameterAdmissionMatchesInterpreter) {
     }
 }
 
-// D5.4.4: diagnostic call counters are emitted only for the opted-in JIT;
+// D6.4.4: diagnostic call counters are emitted only for the opted-in JIT;
 // the same source and tier must retain identical observable output.
 TEST(LambdaOptProfile, ExecutedCallsAreCountedOnlyWhenEnabled) {
     ensure_opt_dir();
@@ -714,7 +714,7 @@ TEST(LambdaOptProfile, ExecutedCallsAreCountedOnlyWhenEnabled) {
     }
 }
 
-// D5.4.4: caller attribution is a separate diagnostic compile mode; ordinary
+// D6.4.4: caller attribution is a separate diagnostic compile mode; ordinary
 // call profiles retain their aggregate target names.
 TEST(LambdaOptProfile, ExecutedCallsCanBeAttributedToCaller) {
     ensure_opt_dir();
@@ -804,7 +804,7 @@ static char* run_profiled_lambda_fixture(const char* script,
     return read_text_file(profile_path);
 }
 
-// D5.4.3/D8.5.1v2: the current JIT module reads its context-owned slab
+// D6.4.3/D8.5.1: the current JIT module reads its context-owned slab
 // directly, while imported functions keep the checked logical-unit lookup.
 TEST(LambdaOptProfile, JitModuleHintRetainsCrossModuleFallback) {
     char* own = run_profiled_lambda_fixture(
@@ -838,7 +838,7 @@ TEST(LambdaOptProfile, JitModuleHintRetainsCrossModuleFallback) {
     free(repeated);
 }
 
-// D5.4.4/D3.2.6: a speculative field read reports both guard entries and
+// D6.4.4/D4.2.6: a speculative field read reports both guard entries and
 // actual fast-arm entries, so a persistent wrong shape is visible in P0.
 TEST(LambdaOptProfile, FieldGuardDistinguishesFastAndFallback) {
     char* profile = run_profiled_lambda_fixture(
@@ -854,7 +854,7 @@ TEST(LambdaOptProfile, FieldGuardDistinguishesFastAndFallback) {
     free(profile);
 }
 
-// D3.3.3v3/S8.2.4v3: an open array erases its elements' declared layout, so
+// D4.3.3/S8.2.4v3: an open array erases its elements' declared layout, so
 // only the exact runtime shape may take the packed-field read.
 TEST(LambdaOptProfile, OpenArrayTrustedRecordFieldKeepsGenericFallback) {
     char* profile = run_profiled_lambda_fixture(
@@ -871,7 +871,7 @@ TEST(LambdaOptProfile, OpenArrayTrustedRecordFieldKeepsGenericFallback) {
     free(profile);
 }
 
-// D3.3.3v3/S7.1.1v3: packed ints after bool fields require an exact shape hit.
+// D4.3.3/S7.1.1v3: packed ints after bool fields require an exact shape hit.
 // Both admitted records acquire that shape; the two out-of-range reads stay generic.
 TEST(LambdaOptProfile, UnalignedTrustedArrayIntFieldGuardsAndFallsBack) {
     char* profile = run_profiled_lambda_fixture(
@@ -886,7 +886,7 @@ TEST(LambdaOptProfile, UnalignedTrustedArrayIntFieldGuardsAndFallsBack) {
     free(profile);
 }
 
-// D2.4.1–D2.4.3: a parameter with several unresolved callers has no layout
+// D2.3.4–D2.3.5: a parameter with several unresolved callers has no layout
 // evidence, so its member reads must not spend hot work on a module-wide guess.
 TEST(LambdaOptProfile, MultiSourceParameterAvoidsWrongShapeGuard) {
     char* profile = run_profiled_lambda_fixture(
@@ -920,7 +920,7 @@ TEST(LambdaOptProfile, CheckedScalarBracedTailElidesRecursiveFrames) {
     free(profile);
 }
 
-// D5.3.1: reads of a live array and string cannot collect, so their helper
+// D6.3.1: reads of a live array and string cannot collect, so their helper
 // calls must not force publication/reload of the other live argument.
 TEST(LambdaOptProfile, ReadOnlyLengthAvoidsGcRootTraffic) {
     const char* profile_path = "temp/lambda_opt_contract/readonly_length.tsv";
@@ -938,7 +938,7 @@ TEST(LambdaOptProfile, ReadOnlyLengthAvoidsGcRootTraffic) {
     free(profile);
 }
 
-// D3.3.3v3/S4.1.2: a literal's finite lanes need no setters after their
+// D4.3.3/S4.1.2: a literal's finite lanes need no setters after their
 // fresh array allocation; an expression-valued member keeps checked stores.
 TEST(LambdaOptProfile, FiniteIntLiteralArraySkipsPerElementSetters) {
     char* profile = run_profiled_lambda_fixture(
@@ -951,7 +951,7 @@ TEST(LambdaOptProfile, FiniteIntLiteralArraySkipsPerElementSetters) {
     free(profile);
 }
 
-// D5.3.1/D3.3.3v3: a packed float literal fills its buffer before the next
+// D6.3.1/D4.3.3: a packed float literal fills its buffer before the next
 // safepoint; the one nullable arm still builds a generic array on demand.
 TEST(LambdaOptProfile, FloatLiteralFillsBeforeNullableFallback) {
     char* profile = run_profiled_lambda_fixture(
@@ -967,7 +967,7 @@ TEST(LambdaOptProfile, FloatLiteralFillsBeforeNullableFallback) {
     free(profile);
 }
 
-// D4.4.4v4/D5.4.4: only the live relocating data-pointer reload executes
+// D5.4.4/D6.4.4: only the live relocating data-pointer reload executes
 // after the collecting call for a stable typed-array parameter.
 TEST(LambdaOptProfile, StableArrayLengthSurvivesCollectingCall) {
     char* profile = run_profiled_lambda_fixture(
@@ -982,7 +982,7 @@ TEST(LambdaOptProfile, StableArrayLengthSurvivesCollectingCall) {
     free(profile);
 }
 
-// D5.3.2/S9.1.2: a dynamic binding still marks the owner, but that
+// D6.3.2/S9.1.2: a dynamic binding still marks the owner, but that
 // non-allocating mark must not force a post-call GC-root reload.
 TEST(LambdaOptProfile, CowBindingDoesNotReloadLiveOwner) {
     char* profile = run_profiled_lambda_fixture(
@@ -997,7 +997,7 @@ TEST(LambdaOptProfile, CowBindingDoesNotReloadLiveOwner) {
     free(profile);
 }
 
-// D3.3.3v3/S7.1.1v3: a valid dense carrier enters the fast loop, while a
+// D4.3.3/S7.1.1v3: a valid dense carrier enters the fast loop, while a
 // short carrier reaches the checked sibling without suppressing its error.
 TEST(LambdaOptProfile, DenseGuardSelectsFastAndCheckedCopies) {
     char* profile = run_profiled_lambda_fixture(
@@ -1012,7 +1012,7 @@ TEST(LambdaOptProfile, DenseGuardSelectsFastAndCheckedCopies) {
     free(profile);
 }
 
-// D4.4.4v2 sibling-field handles + early return (cd's rbt_put): 29 array
+// D5.4.4 sibling-field handles + early return (cd's rbt_put): 29 array
 // copies are the fixture's deliberate snapshots (S9.1.2), down from 90 before
 // the ruling; the one map copy is `let before = t`.
 TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
@@ -1026,15 +1026,15 @@ TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
     }
 }
 
-// D4.4.5 move-out binds (splay rotations): every rotation in the 40-iteration
+// D5.4.5 move-out binds (splay rotations): every rotation in the 40-iteration
 // loop borrows (123 -> 83 map copies). LR12-11 adds 42 share marks, no copies:
 // a rotation returns part of its `var` parameter, so the call site marks the
 // result (164 -> 206). make()'s `N?` literal declarations now cross their
-// deferred boundary and reify there (S11.4.1v3, D3.2.4v4) instead of at the
+// deferred boundary and reify there (S11.4.1v3, D4.2.5) instead of at the
 // rotation's `var` admission, leaving one fewer shared map per rotation
 // (83 -> 43 copies, 206 -> 166 marks).
 TEST(LambdaOptCow, MoveOutBindsBorrow) {
-    // optional record roots now reach T0's checked setter (D3.2.4v4).
+    // optional record roots now reach T0's checked setter (D4.2.5).
     FixtureRun interp = run_source_fixture("cow_move_out_bind",
         "test/lambda/proc/cow_move_out_bind.ls", "interp");
     ASSERT_TRUE(interp.ok);
@@ -1054,7 +1054,7 @@ TEST(LambdaOptCow, MoveOutBindsBorrow) {
 // slot detaches exactly once; the 1,000 appends through one unique place
 // never copy (array_unique_mutations counts them).
 TEST(LambdaOptCow, PlaceMutatorDetachesEachAliasedSlotOnce) {
-    // this construct needs MIR; a strict T0 pin must reject it (D8.1.1v15)
+    // this construct needs MIR; a strict T0 pin must reject it (D8.3.1)
     expect_interp_rejection(opt_executable(), "test/lambda/proc/cow_place_mutator.ls",
         "AST_NODE_SYS_FUNC");
     static const char* const tiers[] = {"jit", "auto"};
@@ -1070,7 +1070,7 @@ TEST(LambdaOptCow, PlaceMutatorDetachesEachAliasedSlotOnce) {
     }
 }
 
-// D8.1.1v10: a typed `var` rebind reaches the caller through its home on
+// D8.3.3: a typed `var` rebind reaches the caller through its home on
 // every tier without copying the array; the one map copy is `let` snapshot.
 TEST(LambdaOptCow, TypedVarRebindPublishesWithoutArrayCopies) {
     static const char* const tiers[] = {"jit", "interp"};
@@ -1145,7 +1145,7 @@ TEST(LambdaOptAdmission, RecursiveShapeIdentityInterpExactHits) {
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
 }
 
-// D3.2.4v4/S7.7.2: fresh call arguments adopt a known layout before entry.
+// D4.2.5/S7.7.2: fresh call arguments adopt a known layout before entry.
 TEST(LambdaOptAdmission, FreshRecordCallArgumentsInterpAvoidReification) {
     const char* source =
         "type Context = {column: int, indent: int}\n"
@@ -1166,7 +1166,7 @@ TEST(LambdaOptAdmission, FreshRecordCallArgumentsInterpAvoidReification) {
 }
 
 // A nullable record-array path must not re-admit its owning graph after each
-// scalar store or same-contract array relink (D3.2.4v3, D3.3.3v3).
+// scalar store or same-contract array relink (D4.2.5, D4.3.3).
 static const char* kTypedPathSource =
     "type Row = {value: int, values: int[]}\n"
     "type World = {rows: Row?[]}\n"
@@ -1193,7 +1193,7 @@ TEST(LambdaOptAdmission, TypedArrayPathPreservesGraphProof) {
     EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 2u);
     EXPECT_EQ(run.profile.get("map_admit_bytes_copied"), 48u);
-    // Admission copies the uncertified `rows` literal one level (D4.4.2), so
+    // Admission copies the uncertified `rows` literal one level (D5.4.2), so
     // its Row children are shared and marked; the first `values` write then
     // detaches that one-element array once. The count stays 1 for any number
     // of updates -- it replaces the deep clone of the whole graph that
@@ -1402,7 +1402,7 @@ TEST(LambdaOptAdmission, OpenUnionMemberShapeCachesAdmissionProof) {
     EXPECT_EQ(run.std_out, "[220, true]\n");
     // The open first arm cannot statically certify `child`, so the recursive
     // boundary remains. A compiler-built member carrier proves it once per
-    // shape and the context cache reuses that proof (D3.2.4v3, D8.3.2-D8.3.3).
+    // shape and the context cache reuses that proof (D4.2.5, D7.3.2-D7.3.3).
     EXPECT_GT(run.profile.get("union_map_rep_cache_hits"), 200u);
     EXPECT_LE(run.profile.get("union_map_rep_cache_misses"), 4u);
     EXPECT_EQ(run.profile.get("map_admit_relation_cache_hits"), 0u);
@@ -1418,7 +1418,7 @@ TEST(LambdaOptAdmission, SplitBuildsInferredStringLane) {
     EXPECT_EQ(run.std_out, "[[\"alpha\", \"beta\", 7], \"gamma\"]\n");
     // The open first result must widen for the int append. The second result
     // already owns the string pointer lane, so its explicit string[] crossing
-    // certifies in place instead of cloning (D3.3.1v2, D3.3.3v3, D3.3.4).
+    // certifies in place instead of cloning (D4.3.1, D4.3.3, D2.4.3).
     EXPECT_EQ(run.profile.get("fn_mutable_value_calls"), 0u);
 }
 
@@ -1448,7 +1448,7 @@ TEST(LambdaOptAdmission, PreplannedInterpPathRetainsGraphProof) {
     ASSERT_TRUE(run.ok);
     EXPECT_EQ(run.std_out, "[100, 100]\n");
     // only the initial nullable Row reifies; writes retain its graph proof
-    // and detach the shared leaf array once (D3.3.3v3, S9.1.3)
+    // and detach the shared leaf array once (D4.3.3, S9.1.3)
     EXPECT_EQ(run.profile.get("map_admit_calls"), 1u);
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 1u);
     EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);

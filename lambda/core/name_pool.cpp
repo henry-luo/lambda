@@ -541,7 +541,7 @@ static String* name_pool_create_canonical_view(NamePool* pool, StrView name) {
 
     // 2. Allocation can spill into an overflow segment. Search the complete
     // identity scope before assigning another NameId for the same spelling
-    // (D4.6.1v2).
+    // (D5.6.1).
     String* existing = name_pool_lookup_local_strview(pool, name);
     if (existing) {
         return existing;

@@ -3,16 +3,16 @@
 **Date:** 2026-09-14
 
 **Status:** **IMPLEMENTED** on 2026-09-14. The parser-reference contract in §3
-is **DECIDED by user ruling on 2026-09-14** and ratified as **D8.1.2v3**.
+is **DECIDED by user ruling on 2026-09-14** and ratified as **D8.1.1**.
 
 **Formal linkage:** `doc/Lambda_Formal_Design.md` — **D1.6** (MIR Direct is the
 only native backend), **D1.9** (malformed input must fail closed, never reach
 undefined behavior), **D1.10** (invariants require executable enforcement),
-**D2.5–D2.6** (native/nullable lanes and container representation),
-**D3.3.1v2** (inference and representation do not change a type-error-free
-result), **D4.4** (COW), **D5.3** (precise rooting), **D8.1.1v10** (explicit
-T0/AUTO/eager-JIT modes), **D8.1.2v3** (parser/reference contract),
-**D8.2.5v2** (front-end pass order), and **D8.6.3** (dynamic liveness oracles).
+**D2.4–D3** (native/nullable lanes and container representation),
+**D4.3.1** (inference and representation do not change a type-error-free
+result), **D5.4** (COW), **D6.3** (precise rooting), **D8.3.3** (explicit
+T0/AUTO/eager-JIT modes), **D8.1.1** (parser/reference contract),
+**D8.2.5** (front-end pass order), and **D8.6.3** (dynamic liveness oracles).
 `doc/Lambda_Formal_Semantics.md` — **S1.6**, **S4–S14**, and **S16**.
 
 **Scope:** Lambda source text through lexing, parsing, AST construction,
@@ -161,7 +161,7 @@ resource-limit terminations need their own classifications.
 
 #### Execution-tier blindness
 
-The runner does not set `LAMBDA_EXEC_BACKEND`. Under **D8.1.1v10**, the default is AUTO
+The runner does not set `LAMBDA_EXEC_BACKEND`. Under **D8.3.3**, the default is AUTO
 and a fresh process begins in T0. Many generated cases are too small or too
 short-lived to promote, so a nominal “runtime fuzz” campaign can cover parsing,
 front-end analysis, and T0 while never exercising eager whole-module MIR
@@ -214,13 +214,13 @@ regression asset.
   semantic mismatch, sanitizer violation, crash, timeout, resource exhaustion,
   or harness failure.
 - Exercise the full production front end in its normative pass order under
-  **D8.2.5v2**.
+  **D8.2.5**.
 - Give both T0 and eager MIR Direct unavoidable coverage and test AUTO as a
-  distinct promotion policy under **D8.1.1v10**.
+  distinct promotion policy under **D8.3.3**.
 - Continuously enforce the boxed/native equivalence required by
-  **D3.3.1v2** and representation invisibility required by **S1.6**.
+  **D4.3.1** and representation invisibility required by **S1.6**.
 - Turn GC lifetime and COW defects into deterministic failures through
-  **D4.4**, **D5.3**, and **D8.6.3** stress modes.
+  **D5.4**, **D6.3**, and **D8.6.3** stress modes.
 - Detect when new tokens, AST forms, system functions, or semantic families
   have no corresponding generator or seed category, satisfying **D1.10**.
 - Preserve exact reproduction and provide oracle-preserving minimization.
@@ -246,7 +246,7 @@ regression asset.
 
 ### 3.1 Authority and responsibility
 
-The parser relationship is governed by **D8.1.2v3**:
+The parser relationship is governed by **D8.1.1**:
 
 1. Formal syntax rulings, especially **S16**, are authoritative.
 2. Current `vibe/` syntax decisions fill gaps below the formal specs.
@@ -465,15 +465,15 @@ Mutations are recorded as operations with stable names and parameters:
   nullable toggles, constrained/recursive types, container element changes;
 - **representation:** `int`/`i64`/`u64`/`f32`/`float`/`decimal` boundaries,
   typed versus boxed containers, optional native fields, and poison values
-  under **S4** and **D2.5–D2.6**;
+  under **S4** and **D2.4–D3**;
 - **calls/errors:** arity boundaries 0/4/5/16/17, direct/dynamic calls,
   `fn`/`pn`, user shadowing, error values, `raise`, handlers, and postfix `^`
   under **S7** and **S12**;
 - **COW/lifetime:** nested aliases, path writes, append/splice/delete,
   read-modify-write handles, closure capture, return across allocation, and
-  container promotion under **S9**, **D4.4**, and **D5.3**;
+  container promotion under **S9**, **D5.4**, and **D6.3**;
 - **tiering:** hot-loop/call thresholds, mixed eligible and pinned functions,
-  recursive edges, dynamic edges, and module-state reuse under **D8.1.1v10**;
+  recursive edges, dynamic edges, and module-state reuse under **D8.3.3**;
 - **query/data:** `where`, `order`, `group`, joins, windows, and streams under
   **S14**; and
 - **concurrency:** task trees, cancellation points, mailbox/message sequences,
@@ -566,7 +566,7 @@ locale/timezone policy, and bounded output capture. They compare:
 The T0 row must report actual interpreter execution with fallback zero. A
 fallback comparison is inconclusive, not parity. The eager row must explicitly
 select `jit`; unsetting `LAMBDA_EXEC_BACKEND` selects AUTO and cannot serve as the JIT
-oracle under **D8.1.1v10**.
+oracle under **D8.3.3**.
 
 AUTO is then compared against the agreed explicit result. Its oracle also
 checks expected promotion and fallback classes. Optimized/unoptimized build
@@ -581,7 +581,7 @@ useful oracles:
 
 - alpha-renaming of a non-exported, non-reflected binding preserves output;
 - adding an erased type annotation that the original value satisfies preserves
-  output under **D3.3.1v2**;
+  output under **D4.3.1**;
 - a typed/boxed representation variant preserves output under **S1.6**;
 - equality symmetry, hash consistency for equal values, and total-order laws
   hold under **S5–S6**; and
@@ -627,7 +627,7 @@ the engine is classified as resource-limit noise and minimized or discarded.
 
 Coverage is organized by formal contract, not only by syntax token.
 
-### 8.1 Syntax and parser — S16, D8.1.2v3
+### 8.1 Syntax and parser — S16, D8.1.1
 
 - whitespace and strict separation, including line-start continuation;
 - braces as map/object/element/body/handler delimiters;
@@ -640,7 +640,7 @@ Coverage is organized by formal contract, not only by syntax token.
 - malformed UTF-8, comments, escapes, numbers, and delimiters; and
 - reviewed Tree-sitter corner cases from §3.
 
-### 8.2 Values, types, and representation — S4, S11, D2.5–D2.6
+### 8.2 Values, types, and representation — S4, S11, D2.4–D3
 
 - numeric boundaries and promotion across `int`, wide integers, floats,
   decimals, imaginary values, infinities, NaN, and poison;
@@ -671,7 +671,7 @@ Coverage is organized by formal contract, not only by syntax token.
 - `fn`/`pn` effect coloring and assignment restrictions; and
 - dry-run-safe resource acquisition, formatting, and failure contracts.
 
-### 8.5 Mutation and lifetime — S9, D4.4, D5.3, D8.6.3
+### 8.5 Mutation and lifetime — S9, D5.4, D6.3, D8.6.3
 
 - snapshot versus borrow behavior, nested writes, iteration during mutation,
   read-modify-write handles, and var-parameter writeback;
@@ -890,7 +890,7 @@ their named boundary.
 1. Run deterministic valid programs under explicit T0, eager JIT, and AUTO.
 2. Reject interpreter fallback from comparable rows.
 3. Add inferred/typed/erased and representation-lane variants under
-   **D3.3.1v2**.
+   **D4.3.1**.
 4. Wire the existing ASan binary, forced-GC interval/seed, poison, and root
    witness into baseline-equality runs under **D8.6.3**.
 5. Add oracle-preserving minimization and signature deduplication.
@@ -966,13 +966,13 @@ lane.
 
 ### Treat `grammar.js` as the sole oracle
 
-Rejected by **D8.1.2v3**. It is the best first cut and should guide generation,
+Rejected by **D8.1.1**. It is the best first cut and should guide generation,
 but known corner cases would be mislabeled or excluded. The reviewed fixture
 manifest preserves those cases without pretending the reference is complete.
 
 ### Treat the C parser as the sole oracle
 
-Rejected by **D8.1.2v3**. It is the final shipped implementation, so every valid
+Rejected by **D8.1.1**. It is the final shipped implementation, so every valid
 execution candidate must pass it, but using implementation behavior to define
 the language would fossilize C-parser defects. Differential review against
 formal rulings is more work and is the only trustworthy resolution.
@@ -1032,7 +1032,7 @@ named symbols and targets are the verification points.
 | Maintained runner | `test/fuzzy/lambda/run_fuzz.py`, `test/interp/lambda_process.py` | Deterministic seed contracts, process isolation, classification, artifacts, replay, and minimization. |
 | Make integration | `Makefile`, `fuzz-lambda`, `fuzz-lambda-extended`, `fuzz-lambda-asan` | Builds the required executable matrix and invokes the shared runner. |
 | Parser API | `lambda/runtime/parser/lambda_rd_parser.h`, `lambda_rd_parse_source`, `lambda_rd_parse_recovering` | Isolated byte-input target with stable metrics, recovery, and structural-signature feedback. |
-| Reference grammar | `lambda/tree-sitter-lambda/grammar.js` | Best first-cut structural reference under D8.1.2v3. |
+| Reference grammar | `lambda/tree-sitter-lambda/grammar.js` | Best first-cut structural reference under D8.1.1. |
 | Parser differential | `test/lambda_parser_diff.sh`, `test/lambda_parser_poc_diff.c`, `parser_differential.py` | grammar.js first cut, C-parser production comparison, reviewed differences, stability, and structural feedback. |
 | Tier sweep | `test/interp/tier_sweep.py`, `test/interp/lambda_process.py` | Explicit interpreter/JIT/AUTO selection and reusable process isolation. |
 | Production pipeline | `lambda/runtime/runner.cpp` | Parse/build/bind/validate, T0, and MIR Direct phase boundaries. |

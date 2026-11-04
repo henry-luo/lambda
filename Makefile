@@ -68,7 +68,8 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
 # Derive native build projects from the same suite selection used for execution.
-RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline --list-build-targets)
+RADIANT_BUILD_SELECTION ?= --radiant-baseline
+RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline $(RADIANT_BUILD_SELECTION) --list-build-targets) test_wpt_input_events_gtest
 # Native runners can use release code for whole-gate performance measurements.
 RADIANT_TEST_CONFIG ?= debug_native
 PDF_TEST_CONFIG ?= debug_native
@@ -510,11 +511,11 @@ tree-sitter-libs: tree-sitter-jube-libs
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
-	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-input-baseline test-radiant-baseline test-radiant-full test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-headless build-headless lambda-nomir build-nomir lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs \
-	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test run-radiant-baseline run-layout-baseline-suites \
+	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test run-radiant-baseline run-radiant-full run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-lambda-inventory fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches verify-re2-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-parity test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
@@ -594,7 +595,8 @@ help:
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-math-corpus - Run the font-driven SVG math formula corpus"
 	@echo "  test-mathcmp     - Compare Lambda math PNGs against pdfLaTeX (ARGS='--case Functions')"
-	@echo "  test-radiant-baseline - Run the radiant suite baseline (native, layout, UI/DOM, render), with one report"
+	@echo "  test-radiant-baseline - Run the reduced Radiant baseline with one report"
+	@echo "  test-radiant-full - Run the complete former Radiant baseline with one report"
 	@echo "  test-ui-dtna        - Run dtna catalog, tier contracts and native interaction tests"
 	@echo "  test-ui-bold        - Run bold package contracts and native interaction tests across tiers"
 	@echo "  test-ui-wired       - Run wired package contracts and native interaction tests across tiers"
@@ -1702,6 +1704,8 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
+	@$(PYTHON) test/sqlite_fullsync_failure_test.py
+	@$(PYTHON) test/sqlite_commit_sync_test.py
 	@echo "Running LAMBDA baseline test suite..."
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
@@ -1851,12 +1855,12 @@ test-js262-prelim: ensure-test262-gtest
 	@$(MAKE) -C build/premake config=debug_native test_js_test262_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@./test/test_js_test262_gtest.exe --prelim
 
-# D8.4.3 standing gate: a raw scalar or void helper must not silently regain
+# D7.4.3 standing gate: a raw scalar or void helper must not silently regain
 # an in-band error-lane contract that the emitter cannot transport.
 test-js-exception-catalog:
 	@python3 utils/js_exception_catalog_census.py --prefix js_ --violations
 
-# D6.2.2v2 standing gate: executable targets, visible bindings, identity
+# D7.2.2 standing gate: executable targets, visible bindings, identity
 # aliases, and call/construct capabilities remain one coherent catalog.
 test-js-callable-catalog:
 	@python3 utils/js_callable_census.py --check
@@ -2175,12 +2179,18 @@ run-layout-baseline-suites:
 test-radiant-baseline: build-radiant-baseline
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
+# The full gate preserves the previous baseline inventory and unfiltered cases.
+test-radiant-full: RADIANT_BUILD_SELECTION =
+test-radiant-full: build-radiant-baseline
+	@$(MAKE) --no-print-directory run-radiant-full
+
 .PHONY: test-scene3d
 test-scene3d: build-radiant-baseline
 	@./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.*:EventSimRenderTest.*'
 	@./test/test_scene3d_unit_gtest.exe
 
 .PHONY: test-map
+test-map: RADIANT_BUILD_SELECTION =
 test-map: build-radiant-baseline
 	@./test/test_map_gtest.exe
 	@$(MAKE) -C build/premake config=debug_native test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
@@ -2239,6 +2249,9 @@ test-svg-smil: build
 # All Radiant checks use the shared runner's JSON artifacts and final report.
 # Native and script pools share a worker budget; artifact-sharing checks remain exclusive.
 run-radiant-baseline:
+	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline --radiant-baseline $(ARGS)
+
+run-radiant-full:
 	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(ARGS)
 
 # Run only the shared layout baseline inventory; page snapshots belong to the
@@ -2358,7 +2371,7 @@ UI_TEST_RUNNER := ./test/test_ui_automation_gtest.exe
 EDITABLE_UNIT_TESTS := test_editing_contenteditable_dom_action,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,editable_template_gate
 EDITABLE_UI_TESTS := test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,rte_typing_at_caret,editable_mixed_routes
 EDITABLE_EDITOR_TESTS := editable_editors_*
-# D7.2.5 requires package failure to leave rich-edit defaults unavailable,
+# D10.2.1 requires package failure to leave rich-edit defaults unavailable,
 # while author beforeinput listeners still observe the platform request; the
 # fixture sets RADIANT_DOM_PKG=0 for its own child.
 EDITABLE_PACKAGE_DISABLED_TESTS := test_editing_contenteditable_package_disabled
@@ -3059,7 +3072,7 @@ check-tutorial:
 	@python3 utils/check_tutorial.py $(ARGS)
 
 # Ruling index for the formal specs (Doc_Convention §3): regenerate after editing
-# either spec; `python3 utils/formal_index.py D7.3.6` prints one ruling.
+# either spec; `python3 utils/formal_index.py D9.4.6` prints one ruling.
 formal-index:
 	@python3 utils/formal_index.py --write
 
@@ -3082,7 +3095,7 @@ check-node-module-architecture:
 hosted-node-coupling-inventory:
 	@python3 utils/check_node_module_architecture.py --report
 
-# D7.3.6: the host exports exactly lambda/jube/jube_host_exports.txt, and the
+# D9.4.6: the host exports exactly lambda/jube/jube_host_exports.txt, and the
 # built Jube modules import nothing else from it.
 check-host-exports:
 	@$(PYTHON) utils/check_host_exports.py --host lambda.exe --modules
@@ -3475,7 +3488,7 @@ capture-layout:
 test-layout:
 	@echo "🎨 Running Lambda CSS Layout Engine Tests"
 	@echo "=========================================="
-	@if ! npm ls --prefix test/layout --omit=dev --depth=0 >/dev/null 2>&1; then \
+	@if [ "$(or $(suite),$(SUITE))" != "wpt-input-events" ] && ! npm ls --prefix test/layout --omit=dev --depth=0 >/dev/null 2>&1; then \
 		echo "📦 Installing layout test dependencies..."; \
 		npm ci --prefix test/layout --no-audit --no-fund; \
 	fi
@@ -3500,7 +3513,16 @@ test-layout:
 		CONCURRENCY_FLAG=""; \
 		if [ -n "$$UPDATE_BASELINE_VAR" ]; then UPDATE_BASELINE_FLAG="--update-baseline"; fi; \
 		if [ -n "$$CONCURRENCY_VAR" ]; then CONCURRENCY_FLAG="-j $$CONCURRENCY_VAR"; fi; \
-		if [ -n "$$TEST_VAR" ]; then \
+		if [ "$$SUITE_VAR" = "wpt-input-events" ]; then \
+			if [ -n "$$TEST_VAR$$PATTERN_VAR$$UPDATE_BASELINE_VAR" ]; then \
+				echo "Use test/test_wpt_input_events_gtest.exe --gtest_filter for individual input-events cases"; exit 1; \
+			fi; \
+			$(MAKE) -C build/premake config=$(RADIANT_TEST_CONFIG) test_wpt_input_events_gtest -j$(TEST_JOBS) || exit $$?; \
+			INPUT_RESULT="temp/wpt_input_layout_results.$$$$.txt"; \
+			$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites wpt-input-events \
+				--jobs "$${CONCURRENCY_VAR:-$(LAYOUT_BASELINE_CONCURRENCY)}" --results "$$INPUT_RESULT"; \
+			INPUT_STATUS=$$?; rm -f "$$INPUT_RESULT"; exit $$INPUT_STATUS; \
+		elif [ -n "$$TEST_VAR" ]; then \
 			case "$$TEST_VAR" in \
 				*.html|*.htm|*.xht|*.xhtml) TEST_FILE="$$TEST_VAR" ;; \
 				*) \

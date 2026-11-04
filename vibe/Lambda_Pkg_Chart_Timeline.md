@@ -11,13 +11,13 @@
 
 | Subject | Formal linkage | Consequence |
 |---|---|---|
-| Shipped source package and import path | **D7.2.1–D7.2.4, D7.2.6** | Use ordinary modules under `lmd/package/chart/`; no resolver exception or native timeline widget. |
+| Shipped source package and import path | **D9.3.1–D9.3.4, D9.3.5** | Use ordinary modules under `lmd/package/chart/`; no resolver exception or native timeline widget. |
 | Logical elements and presentation | **S2.4.3v3, S12.1.3** | Qualified timeline elements are ordinary data, presented by imported views. |
 | Pure rendering and procedural effects | **S12.1.1v2–S12.1.3** | Rendering consumes explicit inputs; handlers own input and playback effects. |
-| State, captures, and value semantics | **S9.1.4, S9.1.7, S9.2.4v2, S9.3.1; D6.2.3v2** | State belongs to each live source/template instance, with immutable specifications and no mutable package singleton. |
+| State, captures, and value semantics | **S9.1.4, S9.1.7, S9.2.4v2, S9.3.1; D7.2.3** | State belongs to each live source/template instance, with immutable specifications and no mutable package singleton. |
 | Ordering and errors | **S6.2.2v3–S6.2.3, S7.4.1–S7.4.2** | Preserve exact comparisons and stable ties; diagnose invalid specifications through the documented error channel. |
-| Native ownership and host boundary | **D4.5.1v4, D5.3.3, D7.5.3** | Reuse general Radiant mechanisms through the established boundary; precisely root retained values. |
-| Execution tiers | **D8.1.1v17** | Package behavior must agree in T0, AUTO, and MIR Direct execution. |
+| Native ownership and host boundary | **D5.5.1, D6.3.3, D9.5.6** | Reuse general Radiant mechanisms through the established boundary; precisely root retained values. |
+| Execution tiers | **D8.3.6** | Package behavior must agree in T0, AUTO, and MIR Direct execution. |
 
 The formal specifications remain authoritative. This proposal introduces package
 contracts within those rulings; it does not ratify a new language, identity,
@@ -396,7 +396,7 @@ the current slide fraction and repeat cycle when source order/durations change.
 Controls and external calls use the same reducer. Pointer, keyboard, touch,
 programmatic commands, and navigator gestures must not maintain separate versions
 of the visible window or selected events. Pointer capture and default text/control
-editing reuse generic DOM mechanisms; DOM editing policy remains where **D7.2.5**
+editing reuse generic DOM mechanisms; DOM editing policy remains where **D10.2.1**
 places it.
 
 `search.controls` is `false`/absent, `true` (all group, tag, from, and to
@@ -412,7 +412,7 @@ receive the card's chart/locale context. Callback errors remain value errors and
 match predicates must return booleans. A marked typed element is presented as a
 new structural value with the same qualified tag and attributes. The original
 nominal value and its declared content pattern remain unchanged (S2.1.4,
-S2.6.2–S2.6.4, S17.4.1/S17.7.1, D4.5.2).
+S2.6.2–S2.6.4, S17.4.1/S17.7.1, D5.5.2).
 Controlled `value.filters` and `value.query` retain authoritative control values
 while emitting ordinary state-change requests. Invalid date commits restore the
 accepted value and report `timeline_error` (S7.4.1/S7.4.2).
@@ -587,7 +587,7 @@ The retained displayed geometry and SVG are the source of an interrupted
 transition. Exiting cards are passive and retire at completion. Frame work stops
 when animation and playback settle. `render_frame` accepts `{time_ms, previous}`,
 where `previous` is `{plan, svg}`, for deterministic explicit sampling
-(S12.1.1v2/S12.1.3, S9.1.4/S9.3.1, D7.5.3).
+(S12.1.1v2/S12.1.3, S9.1.4/S9.3.1, D9.5.6).
 
 ### 3.2 Parity accounting
 
@@ -657,7 +657,7 @@ media `id`, `token`, `source_revision`, `status`, and `origin`; duplicate or ret
 completions emit nothing. A live native model executes built-in local audio/video
 requests after rendering. `model` option `media:false` selects application-owned
 controllers, which answer the same token/revision contract. Provider controllers
-stay outside pure rendering (**S12.1.1v2/S12.1.3, D7.5.3**).
+stay outside pure rendering (**S12.1.1v2/S12.1.3, D9.5.6**).
 
 Event IDs relate data across updates; they do not create a new runtime identity
 mechanism. Stable source/template ownership follows **S9.1.4/S12.1.3** and the
@@ -750,11 +750,11 @@ playback, provider embeds, fullscreen and posters need
 explicit capability tests and potentially general engine work. Their full
 requirements remain in scope.
 
-Use the established embed/DOM boundary (**D7.5.3**). No timeline-specific native
+Use the established embed/DOM boundary (**D9.5.6**). No timeline-specific native
 tags, ad hoc JavaScript engine, direct `lambda-rt`→Radiant link, vendor patch, or
 conservative stack scanning is introduced. General engine fixes require a root
 cause and focused regression evidence, with retained data owned according to
-**D4.5.1v4/D5.3.3**.
+**D5.5.1/D6.3.3**.
 
 ## 7. Prior art and reference sources
 
@@ -785,7 +785,7 @@ Lambda or adding an upstream JavaScript runtime dependency.
 `lmd/package/chart/timeline.ls` currently implements **animation playback** and
 exports `configure`, `inherit`, `target`, `position`, `segment`, `initial`, and
 `command`. `chart.ls` and chart animation tests import it. Its filename already
-maps to the requested public history-timeline namespace under **D7.2.4**.
+maps to the requested public history-timeline namespace under **D9.3.4**.
 
 Move that implementation once to `lmd/package/chart/playback.ls`, exporting the
 same animation helpers, and update internal animation consumers/tests to import

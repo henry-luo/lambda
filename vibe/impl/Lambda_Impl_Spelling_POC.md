@@ -6,7 +6,7 @@
 > **Status:** text dictionary format adopted 2026-10-22 (USER); a Lambda text
 > lookup POC is implemented (§8). In-process standalone XZ loading is pending.
 > **Design:** [Lambda_Pkg_Spelling.md](../Lambda_Pkg_Spelling.md), §4.3.
-> **Spec linkage:** D7.2.4v3/D7.2.6 for source-module paths; S12.1.1v3 for
+> **Spec linkage:** D9.3.4/D9.3.5 for source-module paths; S12.1.1v3 for
 > procedural loading; S2.5.8/S17.4.1 for text; S6.2.2v3 for ordering. The general
 > binary-Mark design remains deferred under K29c.
 
@@ -37,7 +37,7 @@ is not a claim of fidelity to upstream case rules.
 The logical row schema is `[word, case_policy, commonness?, flags?]`. Two fields
 are sufficient for this experiment. Optional commonness and restriction flags
 are exercised in the small fixture, not included in the measured dictionaries.
-Both keys and rows remain positional Lambda arrays, consistent with D7.2.4v3's
+Both keys and rows remain positional Lambda arrays, consistent with D9.3.4's
 ordinary source-package mechanism; no runtime data representation change occurs.
 
 ## 2. Measured vocabulary sizes

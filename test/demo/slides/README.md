@@ -26,7 +26,7 @@ a document-owned task and isolated process, so dictionary work does not delay
 typing or formatting (**S13.1.3v2**, **S13.3.1v2**). Existing underlines remain
 visible during a pending edit, then the latest result replaces them. New edits cancel pending
 checks. Underlines are geometry overlays outside the deck and its undo history
-(**D7.2.5**, **S2.5.8**). Rendered regions with `spellcheck=false` and
+(**D10.2.1**, **S2.5.8**). Rendered regions with `spellcheck=false` and
 non-English `lang` are excluded. Correction suggestions are not yet available.
 Spelling checks preserve heading and paragraph boundaries and join words split
 across inline formatting. The `slide_spelling_blocks` replay checks
@@ -184,7 +184,7 @@ Fill Color animates native shape fill or text color. Line Color requires a
 native shape with a visible outline. These choices are disabled for embedded
 HTML/SVG graphics; movement, opacity, clipping, growth and rotation work on
 those objects. The package catalog and sampler supply the gallery and playback;
-shared Word ribbon controls provide the chrome (D7.2.5, S12.1.1v3/S12.1.3).
+shared Word ribbon controls provide the chrome (D10.2.1, S12.1.1v3/S12.1.3).
 
 ## Transitions
 

@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-13. **Status:** initial 3D profile implemented; later design stages remain open.
 Design: [Lambda_Pkg_Physics.md](../Lambda_Pkg_Physics.md).
-Applies **D7.1.1–D7.1.3**, **D6.4.1**, **D7.2.4 / S17.2.1**,
-**S12.1.1v2 / S12.1.5v2**, **D4.5.1v4 / D5.3.3 / D7.5.3**.
+Applies **D9.1.1–D9.1.3**, **D7.6.1**, **D9.3.4 / S17.2.1**,
+**S12.1.1v2 / S12.1.5v2**, **D5.5.1 / D6.3.3 / D9.5.6**.
 
 ## Implemented surface
 
@@ -70,12 +70,12 @@ filesystem access and canonical registry key formation. The scene fixture
 exercises this path through an ordinary imported Lambda control module.
 The same bridge now binds each imported MIR module's defining constant image
 before publishing callable exports; previously a procedure reading literal
-arrays could dereference an unbound constant slab (**D7.2.1–D7.2.2**).
+arrays could dereference an unbound constant slab (**D9.3.1–D9.3.2**).
 
 JavaScript property reads now dispatch ordinary Lambda VMaps as well as host
 objects and Promise carriers. Missing properties become `undefined` while
 present `null` values stay `null`. Promise reaction construction reserves all
-seven exact roots, including the asynchronous domain (**D5.3.3**).
+seven exact roots, including the asynchronous domain (**D6.3.3**).
 
 The expanded demo suite exposed a pose-conversion defect: animation quaternion
 matrices use row-major storage, while Scene3D uses column-major matrices. The
@@ -183,17 +183,17 @@ from the gallery. Retiring the old document polls the shared libuv loop while
 its evaluator is current. A new document's wake callback previously dequeued
 its task before the activation rejected that foreign owner. Schedulers now
 retain runnable work until their owning `EvalContext` is current
-(**D5.4.1**). Navigation workers release the derived JS binding alongside the
+(**D6.4.1**). Navigation workers release the derived JS binding alongside the
 evaluator before returning to the worker pool.
 
 Host eval initialization also retains pending Promise and next-tick jobs when
-no timer exists yet (**D6.3.1**). Otherwise the assertion turn could discard
+no timer exists yet (**D7.5.1**). Otherwise the assertion turn could discard
 the initial native read's completion before the demo started telemetry.
 Repeated navigation exposed a separate cache-hit path: a fresh runtime kept
 the Lambda import's loading namespace because export publication ran only
 after compilation. One shared publication helper now fills uninitialized
 namespaces after cross-language loads, including cached MIR shells
-(**D5.4.3 / D8.5.1v7**).
+(**D6.4.3 / D8.3.5**).
 
 The four experiment replays now use native mouse clicks for their buttons.
 A fifth replay visits every experiment from the gallery, verifying start,

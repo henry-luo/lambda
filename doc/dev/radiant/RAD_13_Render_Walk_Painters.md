@@ -26,7 +26,7 @@ Radiant renders the *same* view tree that layout tagged in place ([RAD_01](RAD_0
 There are two lowering strategies behind that one walk:
 
 - **Raster** (screen, PNG, JPEG, tiled/strip PNG) records a **semantic paint IR** (`PaintList`), lowers each fragment into a **DisplayList**, then replays that list to pixels in an `ImageSurface`. The painters never touch the surface directly — they emit through the `rc_*` gateway ([§5](#5-the-rc_-paint-ir-seam)).
-- **SVG export** records PaintIR and lowers it directly to SVG markup. **PDF export** invokes pure Lambda callbacks with schema-backed view records; Lambda emits PDF operators and objects. Native helpers resolve bounded geometry, glyphs and images, and replay complex graphics/effect groups when necessary (S2.6.6v3, D7.4.4).
+- **SVG export** records PaintIR and lowers it directly to SVG markup. **PDF export** invokes pure Lambda callbacks with schema-backed view records; Lambda emits PDF operators and objects. Native helpers resolve bounded geometry, glyphs and images, and replay complex graphics/effect groups when necessary (S2.6.6v3, D9.5.4).
 
 PaintIR remains private native machinery for shared raster/SVG helpers; the PDF callback ABI exposes declared views and owned resource values rather than a document paint-command stream. SVG export is a sibling of the PDF path and is documented in [RAD_14](RAD_14_SVG_Vector_Graph.md); this doc treats it as one more backend on the same walker.
 
@@ -82,7 +82,7 @@ layer sequence in [CSS Appendix E](https://www.w3.org/TR/CSS22/zindex.html#paint
 All collections exclude `RDT_VIEW_NONE` records before classifying their retained
 styles. Signed traversal also stops at a hidden ancestor. A `display:none` record
 can retain border/shadow properties and old dimensions in the selected view's
-storage (D4.1.4v5); these records cannot contribute stacking paint or hit layers.
+storage (D5.1.4); these records cannot contribute stacking paint or hit layers.
 `RadiantTextQuery.HiddenPositionedPopupDoesNotPaintRetainedDecoration` and
 `test/ui/slide_menu_dismiss.json` cover closing and reopening styled popups.
 
@@ -113,8 +113,8 @@ frame's content layer, rather than inheriting an outer foreground-only visit.
 `visit_element` accompanies foreground once per logical element: repeated scope
 visits must not duplicate PDF destinations, links or callback events. Native
 paint, generic SVG/PDF walking and reverse hit testing share this phase policy.
-The view/style and cached resource ownership remains **D4.5.1v4 /D4.1.4v5**;
-module placement remains **D7.3.3–D7.3.4**.
+The view/style and cached resource ownership remains **D5.5.1 /D5.1.4**;
+module placement remains **D9.4.3–D9.4.4**.
 
 `layout_float_paint_order.html` exercises opaque/translucent and nested floats,
 overlapping inline ink, positioned overlays, clipping, an opacity owner,
@@ -157,7 +157,7 @@ Positioned and positive-z children have their own raster entry points (`render_r
    declared-border fast paths defer these cells to the resolved producer, even
    when the cell has no authored boundary. Styled edges reuse
    `render_border_emit_side`; PaintIR owns emitted paths and copied dash arrays
-   under **D4.5.1v4 / D4.1.4v5**. The PDF walker's simple-boundary callback also
+   under **D5.5.1 / D5.1.4**. The PDF walker's simple-boundary callback also
    defers collapsed cells so it cannot replay declared borders after conflict
    resolution. Fragment composition supplies an explicit resolved boundary
    and its already expanded border rectangle to `render_paint_boundary_box`;
@@ -171,14 +171,14 @@ UI overlay no longer add independent blue rings; inline links share the deferred
 outline painter. UA `:focus-visible` defaults
 and author rules share cascade, clipping, and export behavior. Insertion-caret
 paint reads the editable-only visibility projection described in
-[RAD_17](RAD_17_Interaction_State.md#3-the-data-model) (D7.2.5).
+[RAD_17](RAD_17_Interaction_State.md#3-the-data-model) (D10.2.1).
 
 The DOM-text caret in `render_overlay.cpp` maps its containing-block snapshot
 through the view's client matrix, embedding offset and raster scale. It uses
 `render_painter_fill_transformed_rect`, shared with the context-rectangle
 painter, inside the existing overflow clips. This keeps a scaled or rotated
 editor's caret beside its glyphs instead of painting at untransformed layout
-coordinates (D7.2.5/D4.5.1v4).
+coordinates (D10.2.1/D5.5.1).
 
 <img alt="render_bound painter order for a box" src="diagram/rad13_render_bound_order.svg" width="490">
 
@@ -244,10 +244,10 @@ in `RdtVectorTest.GaussianFlatRunsPreserveEdgesChannelsAndPitches`.
 ## 8. PDF export
 
 PDF generation is functional through the completed file value (S2.6.6v3,
-D2.6.12v3, D8.2.6v2). `render_pdf.cpp` lends an already committed
+D3.5.1, D8.2.6). `render_pdf.cpp` lends an already committed
 `RenderExportSession` to the bundled `lambda.doc.pdf.output.render_view` function
 and saves its result atomically. It reuses an active runtime, or owns a runtime
-at a quiescent host boundary; it never replaces an active evaluator (D5.4.1).
+at a quiescent host boundary; it never replaces an active evaluator (D6.4.1).
 The old HPDF renderer and `lib/pdf_writer.{c,h}` have been retired.
 
 `radiant_pdf_walk.cpp` supplies the shared `RenderBackend` and secondary-page
@@ -285,13 +285,13 @@ Pure `lambda.doc.pdf.output.render(source, options)` returns the completed PDF f
 only `output(file, destination)` performs file I/O (S2.6.6v3).
 
 `radiant.export_document(html, destination, options)` remains a procedural native
-module operation (D7.5.3/S12.1.1v2). Its required `format` selects `png`, `jpeg`,
+module operation (D9.5.6/S12.1.1v2). Its required `format` selects `png`, `jpeg`,
 `svg`, or `pdf`; optional positive integral `width`/`height`, `scale`,
 `device_scale`, JPEG `quality`, `pagination`, `base_url`, and `local_resources`
 configure the same export sessions as the CLI. It returns `true` or a diagnostic
 string; package facades convert diagnostics to raised errors (S7.4.2).
 `source_format:"xhtml"` explicitly selects the XML HTML loader for in-memory
-source, preserving foreign and native page-control namespaces (**D2.10**).
+source, preserving foreign and native page-control namespaces (**D10.1**).
 The default `"html"` uses HTML parsing. XHTML must be well formed, including
 escaped CSS/text and closed void elements; both syntaxes use the same export
 session, ownership and resource policy.
@@ -305,7 +305,7 @@ through one shared row conversion; retained source pixels remain unchanged.
 document; it disables embedded scripts. `render_html_source_to_output_target`
 shares font admission, continuous/paged layout, and existing encoders. Native
 copies keep source/path strings valid across allocating layout callbacks
-(D4.5.1v4/D5.3.3). Normal and strip PNG/JPEG encoder failures reach the caller.
+(D5.5.1/D6.3.3). Normal and strip PNG/JPEG encoder failures reach the caller.
 The procedural timeline export regression checks valid encodings and invalid
 destinations in `test/lambda/proc/timeline_export.ls`.
 
@@ -340,7 +340,7 @@ cross-fragment clipping regressions pass (verified 2026-10-11).
 
 ## 11. Scoped text overflow and visible export bounds (2026-10-11)
 
-The block children paint phases install a shared `RenderTextPaintScope`; nested block scopes restore their parent's plan on exit. The plan borrows live views/fonts and owns only per-paint scratch, following **D4.5.1v4 / D4.1.4v5**. Raster, SVG and PDF iterate the same projections, including a separate marker when its block font/color differs from the last visible run. Compatible prefixes and markers stay in one run to preserve fractional positioning. PDF now consumes generated ellipsis as well as generated hyphens.
+The block children paint phases install a shared `RenderTextPaintScope`; nested block scopes restore their parent's plan on exit. The plan borrows live views/fonts and owns only per-paint scratch, following **D5.5.1 / D5.1.4**. Raster, SVG and PDF iterate the same projections, including a separate marker when its block font/color differs from the last visible run. Compatible prefixes and markers stay in one run to preserve fractional positioning. PDF now consumes generated ellipsis as well as generated hyphens.
 
 `calculate_content_bounds()` obtains untransformed layout origins through `view_get_layout_position`, which respects inline children's containing-flow coordinates instead of adding inline ancestor offsets twice. It then uses document geometry and the existing ancestor overflow-clip helper, retaining float coordinates until conversion to integral export extents. It composes the paint transform matrices before projecting each box and its overflow clip; translated list content therefore contributes its translated bottom edge. Projective rectangles crossing `w=0` retain the prior finite-box fallback and remain unqualified. Clipped text below a clamp no longer enlarges the exported canvas. `OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs` and `RtlOverflowMatchesVisibleSuffixesAcrossOutputs` each check 14 browser-verified references at both densities; mixed bidi, RTL clamp, atomic/scroll/vertical and decorated-inline contexts remain partial. See [the text design contract](../../../vibe/radiant/Radiant_Design_Font_Text.md#11-text-overflow-paint-contract-2026-10-11).
 
@@ -350,7 +350,7 @@ semantic-group commands preserve escaped accessible titles for outlined labels. 
 font substitution previously let the ellipsis overlap retained RTL text. Effect
 fallback keeps glyph runs; decorations, shadows and missing-outline fallback can
 still emit live text. Outlined SVG text loses search/selection. Existing command
-path ownership releases temporary outlines after lowering (**D4.5.1v4 / D4.1.4v5**).
+path ownership releases temporary outlines after lowering (**D5.5.1 / D5.1.4**).
 The focused source verification is 2026-10-11; other sections retain their earlier
 verification stamp. See [FT-15](../../../vibe/radiant/Radiant_Design_Font_Text.md#15-selected-font-svg-text-contract-2026-10-11).
 
@@ -372,7 +372,7 @@ origin/clip/attachment rectangles and tile plan. SVG and PDF lower its owned
 rounded clip and common image/picture commands, including natural raster size
 divided by the selected `image-set()` resolution. URL-less raster resources
 embed their decoded pixels in SVG. Retained clips and image payloads follow
-**D4.5.1v4 / D4.1.4v5**. See
+**D5.5.1 / D5.1.4**. See
 [CI-17](../../../vibe/radiant/Radiant_CSS_Cascade.md#317-css-image-selection-and-retained-paint-payloads-partially-implemented).
 
 `RenderExportSession` receives the caller's explicit device environment for
@@ -397,7 +397,7 @@ paths and stops. `render_paint_boundary_emit_box()` yields its solid-ring fast
 path to an image source. `render_paint_marker_image()` shares URL-marker image
 rectangles with raster and uses the common image resource producer. The raster
 marker painter converts logical marker dimensions once; retained marker source
-and suppression refresh during layout (**D4.5.1v4 / D4.1.4v5**, CI-17).
+and suppression refresh during layout (**D5.5.1 / D5.1.4**, CI-17).
 Geometric raster markers share the text's CSS transform while their inherited
 scroll clip remains in destination coordinates. A shared contour builder feeds
 the fill/stroke path. `ZoomedListBulletsShareTextTransformsAndScrollClipping`

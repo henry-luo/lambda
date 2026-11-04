@@ -1,4 +1,4 @@
-// Model-backend coverage for the common DOM editing protocol (D7.2.5).
+// Model-backend coverage for the common DOM editing protocol (D10.2.1).
 import lambda.editor.core.doc
 import lambda.editor.model
 import lambda.editor.core.source_pos

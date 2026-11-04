@@ -1,4 +1,4 @@
-// native illustration demo. Views are pure; all DOM/file effects live in procedures (S12.1.3, D7.4.6).
+// native illustration demo. Views are pure; all DOM/file effects live in procedures (S12.1.3, D7.1.1).
 import dom
 import resources: ~~.mod_resources
 import m: .mod_model
@@ -105,7 +105,7 @@ on sketch_activate(evt) {
 }
 on sketch_menu_ready(evt) {
     if ((evt.event_phase!=2 or session.context==null)^) { return 'pass' }
-    // placement and focus wait for the newly visible menu's committed layout (D7.4.6).
+    // placement and focus wait for the newly visible menu's committed layout (D7.1.1).
     menus.fit(evt.target,"sketch-context-menu","sketch")^
     menus.focus(evt.target,"sketch-context-menu")
     return 'handled'

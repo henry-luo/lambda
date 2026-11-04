@@ -1,4 +1,4 @@
-// D5.2.3, D5.3.3: dynamic arguments must outlive a moving argument List.
+// D6.2.3, D6.3.3: dynamic arguments must outlive a moving argument List.
 fn inspect(value, a, b, c) map {
     let before = string(value)
     let keep = [for (i in 0 to 1200) {index:i, values:[float(i), float(i)*0.3], label:string(i)}];

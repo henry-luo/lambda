@@ -94,16 +94,16 @@ Older proposal sections are not evidence that their future stages shipped.
 |---|---|
 | **S12.1.1v3 / S12.1.3** | Scene constructors, validation and graph descriptions are pure; live commands, input/capture acquisition and scene mutations are procedural. No hidden script execution in a constructor. |
 | **S12.1.5v2** | The template owns authored intent; native playback/simulation owns transient state. A higher-tier edit overrides the state it touches, rather than competing with another writer. |
-| **D4.5.1v4 / D4.5.2 / D4.5.3v2** | Retain native/document-owned copies and generation handles; borrow GC values only during a call, or keep them through an explicit registered root. Preserve compatible downstream state through regeneration. |
-| **D5.3.3** | Script callbacks and result conversion use precise `RootFrame` / `Rooted` ownership. No conservative native-stack scanning. |
-| **D2.11.4** | A capture settles the frame selected by the virtual timer. Reading the same frame does not independently advance playback or simulation. |
-| **D7.1.1–D7.1.3 / D7.3.3–D7.3.4** | Keep static-library/provider layering. Neither the runtime nor a pure package gains a direct dependency on Radiant internals. Source relocation does not relocate lower-layer providers. |
-| **D7.4.1v2 / D7.4.2v2 / D7.4.4** | Use branded handles and the existing host-object protocol. Async delivery crosses the established host boundary, with copied results rather than borrowed runtime/DOM pointers. |
-| **D7.2.4v4 / D7.5.3v2** | Public helpers use existing package namespaces; live operations reach Radiant through `radiant-dom`. No second public graphics or callback-registration waist. |
-| **D7.1.2v2 / D7.5.2** | Resource acquisition uses existing IO providers. Physics, navigation, baking and audio processing do not open files or sockets themselves. |
-| **D7.5.4** | All audible game output keeps the document-origin activation policy. Microphone acquisition requires a separate explicit permission contract (§9). |
-| **D7.1.4v2 / D7.1.7v6** | Preserve full-host, runtime-only, null-backend and browser-WASM distinctions. This proposal does not add graphics or capture to an excluded profile. |
-| **D7.3.5** | Advertised profiles have registered acceptance cases and applicable aggregate gates. A parsed tag is not feature support. |
+| **D5.5.1 / D5.5.2 / D5.5.3** | Retain native/document-owned copies and generation handles; borrow GC values only during a call, or keep them through an explicit registered root. Preserve compatible downstream state through regeneration. |
+| **D6.3.3** | Script callbacks and result conversion use precise `RootFrame` / `Rooted` ownership. No conservative native-stack scanning. |
+| **D10.1.7** | A capture settles the frame selected by the virtual timer. Reading the same frame does not independently advance playback or simulation. |
+| **D9.1.1–D9.1.3 / D9.4.3–D9.4.4** | Keep static-library/provider layering. Neither the runtime nor a pure package gains a direct dependency on Radiant internals. Source relocation does not relocate lower-layer providers. |
+| **D9.5.1 / D9.5.2 / D9.5.4** | Use branded handles and the existing host-object protocol. Async delivery crosses the established host boundary, with copied results rather than borrowed runtime/DOM pointers. |
+| **D9.3.4 / D9.5.6** | Public helpers use existing package namespaces; live operations reach Radiant through `radiant-dom`. No second public graphics or callback-registration waist. |
+| **D9.1.2 / D11.1.2** | Resource acquisition uses existing IO providers. Physics, navigation, baking and audio processing do not open files or sockets themselves. |
+| **D11.3.1** | All audible game output keeps the document-origin activation policy. Microphone acquisition requires a separate explicit permission contract (§9). |
+| **D9.2.1 / D9.2.3** | Preserve full-host, runtime-only, null-backend and browser-WASM distinctions. This proposal does not add graphics or capture to an excluded profile. |
+| **D9.4.5** | Advertised profiles have registered acceptance cases and applicable aggregate gates. A parsed tag is not feature support. |
 
 See [Formal Semantics](../../doc/Lambda_Formal_Semantics.md) and
 [Formal Design](../../doc/Lambda_Formal_Design.md). This proposal revises no
@@ -150,7 +150,7 @@ fraction. Existing independently timed SVG/CSS animations retain their current
 contracts; joining a scene timeline is explicit.
 
 Animation-only native views also retain exact selected-frame sampling
-(**D2.11.4**): without active physics, one mixer evaluation can consume the
+(**D10.1.7**): without active physics, one mixer evaluation can consume the
 frame interval directly. When physics joins, account for the animation's already
 sampled fractional tick before advancing the shared fixed stages. This preserves
 existing native visual timelines without creating another scheduler driver.
@@ -176,7 +176,7 @@ Invalid authored edits reject that advance without faulting the retained
 working solver. Animation-only views keep the selected-frame path when neither
 physics, navigation nor native particles require fixed ticks. The new navigation phase and
 route-follower/controller foundations do not yet advertise complete agent or
-avoidance support (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3**).
+avoidance support (**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3**).
 
 The first copied command consumer now queues bounded native animation batches
 with runtime/session/service/source/world identities and explicit target ticks.
@@ -200,7 +200,7 @@ subsequent tick; there are no script callbacks inside a native service step or
 audio callback. A batched step must expose those boundaries when package logic
 needs to run between ticks. The package owns logical control state; native
 services own playheads, poses, solver state and resource lifetimes
-(**S12.1.1v3 / S12.1.5v2 / D2.11.4 / D5.3.3 / D7.5.3v2**).
+(**S12.1.1v3 / S12.1.5v2 / D10.1.7 / D6.3.3 / D9.5.6**).
 
 Keep the existing physics overload policy: bound steps per presentation,
 retain unprocessed tick debt, report lag, and pause with a diagnostic if the
@@ -240,8 +240,8 @@ Bake/rebuild workers consume immutable native snapshots and return owned,
 generation-tagged results. They never traverse the live DOM or enter its
 evaluator. Cancellation, document teardown or a newer source generation prevents
 publication; the worker still releases its buffers. Publish only on the owning
-host thread through the established completion route (**D7.4.2v2**). When a job
-uses a Lambda worker, retain **D6.3.2** share-nothing isolation rather than
+host thread through the established completion route (**D9.5.2**). When a job
+uses a Lambda worker, retain **D7.5.2** share-nothing isolation rather than
 sharing a document's execution state.
 
 Replace the current per-service scene scheduling registrations incrementally
@@ -256,7 +256,7 @@ Extend the selected native C engine in `lib/physics/`; keep its header free of
 `Item`, DOM, GL and scheduler types. Scene-specific bindings, controllers and
 pose publication belong in `radiant/scene3d/`. Preserve pure batch simulation
 and headless consumers through the existing lower-layer scene compiler.
-This follows **D7.1.1–D7.1.3**, rather than moving the shared solver upward.
+This follows **D9.1.1–D9.1.3**, rather than moving the shared solver upward.
 
 ### 4.1 Bodies, collision and CCD
 
@@ -294,7 +294,7 @@ concave bodies and mesh/mesh distances reject explicitly. Sharp creases retain
 triangle features; general crease-fan smoothing remains partial. Limits,
 description formats and qualification are recorded in
 [Lambda Physics](../../doc/Lambda_Physics.md) and the implementation record.
-Native/runtime ownership remains **D7.1.1–D7.1.3 / S12.1.5v2**.
+Native/runtime ownership remains **D9.1.1–D9.1.3 / S12.1.5v2**.
 
 The fourth M2 delivery resolves same-scene collider `geometry` references in
 that shared compiler. Existing static buffer geometry supplies convex points or
@@ -302,13 +302,13 @@ indexed/unindexed mesh triangles. Version-1 `collision-geometry` definitions
 inside `resources` also supply the existing convex, mesh and heightfield data.
 Forward/shared references, copied ownership, matching shapes and unchanged
 storage quotas apply to batch, metadata and live DOM. Compatible edits preserve
-runtime motion; rejected edits keep the working world (**S12.1.5v2 / D4.5.3v2**).
+runtime motion; rejected edits keep the working world (**S12.1.5v2 / D5.5.3**).
 The fifth M2 delivery adds exact named-convex overlaps, fixed-orientation
 translation casts against convex and environment targets, world offsets and
 sorted all-hit query output. Source-body colliders are excluded, mesh casts
 honor sidedness/internal seams, and bounded iteration/work/output exhaustion
 reports errors. Queries share the pure/live conversion without advancing the
-world (**S12.1.1v3 / D2.11.4**).
+world (**S12.1.1v3 / D10.1.7**).
 
 The sixth M2 delivery starts CCD with one solid sphere per dynamic body,
 against other single-sphere dynamics and fixed/translating kinematic convex or
@@ -351,7 +351,7 @@ inspection. Pure `physics.move` computes a target; the live procedure atomically
 queues it for the existing coordinator. Physical bone bindings now feed the
 existing skin palette, and the first live ragdoll modes implement measured
 velocity handoff and recovery toward moving animation through that same pose
-owner (**S12.1.5v2 / D4.5.3v2**). Staged scene seek replays authored modes and
+owner (**S12.1.5v2 / D5.5.3**). Staged scene seek replays authored modes and
 animation without gameplay cues and commits both owners after success.
 Animated batch simulation, dynamic pushing, future-motion coupling and
 joint/CCD TOI solving remain subsequent work;
@@ -427,12 +427,12 @@ Report complete, partial, unreachable and budget-exhausted results distinctly.
 The first M4 graph/grid provider implements these bounded queries through the
 pure `lambda.navigation` package, with immutable owned graph data, weighted
 admissible A*, stable ties and 2D/3D corner clearance (**S12.1.1v3 /
-D7.1.1–D7.1.3 / D7.2.4v4**). Scene3D graph/grid assets now reuse that provider
+D9.1.1–D9.1.3 / D9.3.4**). Scene3D graph/grid assets now reuse that provider
 through `lambda.navigation.scene` and the existing `radiant.scene3d` host waist.
 The document owns copied graphs separately from GPU projection/physics; staged
 multi-asset reconciliation retains the prior cache on invalid edits, and path
-results carry integer asset generations (**D2.11.4 / D4.5.2 / D5.3.3 /
-D7.5.3v2**). Camera changes/context recovery preserve compiled navigation;
+results carry integer asset generations (**D10.1.7 / D5.5.2 / D6.3.3 /
+D9.5.6**). Camera changes/context recovery preserve compiled navigation;
 equivalent template data preserves its generation. The broader navigation
 capability remains pending until the remaining profiles and qualification close.
 The point-agent surface component now supplies immutable triangulated 2D/3D
@@ -440,7 +440,7 @@ assets, slope/area filtering, bounded endpoint projection, centroid-graph
 corridors and grounded funnel waypoints. It reports graph cost separately
 from grounded travel and retains 3D height changes. Positive-radius clearance,
 links, bake jobs and agents are not implied by this component
-(**D7.1.1–D7.1.3 / D7.2.4v4 / D7.5.3v2**).
+(**D9.1.1–D9.1.3 / D9.3.4 / D9.5.6**).
 The next component now provides a conservative 3D cell bake: copied triangles,
 whole-cell floor coverage, vertical-span headroom, radius erosion, step-limited
 four-neighbor connectivity and compatible-profile queries. `lambda.navigation`
@@ -483,7 +483,7 @@ reuse immutable raw clearance/source snapshots and rerasterize changed tiles;
 erosion and connectivity rebuild under the existing work quota. Publication
 rechecks source/asset generations and never exposes a partial tile result.
 Broader agent profiles and qualification remain pending
-(**D4.5.2 / D5.3.3 / D7.1.1–D7.1.3 / D7.5.3v2**).
+(**D5.5.2 / D6.3.3 / D9.1.1–D9.1.3 / D9.5.6**).
 See the [graph/grid profile](../../doc/Lambda_Navigation.md).
 
 Add navigation assets containing 2D polygons or connected 3D walkable surfaces,
@@ -577,7 +577,7 @@ snapshots. M13 adds versioned Mark graph descriptions, normalization,
 serialization, parameter control and logical-state traces. Package logical
 state and native playheads have separate owners. Compatible plan changes
 preserve playback; invalid changes retain working state
-(**S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 The first bounded M5 component adds native per-track masks and copied additive
 reference poses to the existing mixer. Numeric references subtract from sampled
@@ -704,7 +704,7 @@ Temporal resources, when enabled, key on scene/camera/projection, viewport,
 density and relevant content generations. Resize, camera cuts, scene edits,
 seek and context recovery invalidate the appropriate histories. A deterministic
 capture resets/warms a declared history sequence or uses the non-temporal profile
-(**D2.11.4**); a repeated read does not accumulate extra samples.
+(**D10.1.7**); a repeated read does not accumulate extra samples.
 
 Bake results and runtime metadata expose coverage/staleness, UV charts, probe
 locations, effect quality and actual resource cost. Quality settings bound
@@ -785,7 +785,7 @@ collision remains dependent on M9.
 See the [GPU component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-gpu-mesh-emitter-kernels--2026-10-31).
 See the [CPU component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-native-cpu-mesh-emitters--2026-10-31)
 and [native particle contract](../../doc/Lambda_Packages.md#native-cpugpu-mesh-particles)
-(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 The CPU scene-collision component now adds inline sphere sweeps through the
 sampled post-physics world, bounce/slide/kill responses, mask/sensor/ancestor
@@ -798,7 +798,7 @@ GPU depth collision,
 trails and child-spawn queues remain M6. See the
 [collision component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpu-scene-collision-and-contact-batches--2026-10-31)
 and [native contract](../../doc/Lambda_Packages.md#native-cpu-particle-scene-collisions)
-(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 The GPU analytic component adds explicit simulation-space planes/spheres,
 swept sphere bounce/slide, copied stopped-state diagnostics and bounded native
@@ -808,7 +808,7 @@ checkpoint path; 4096 retained recovery ticks bound history and exhaustion
 rejects publication. This visual profile emits no authoritative gameplay
 contacts. See the [native contract](../../doc/Lambda_Packages.md#native-gpu-analytic-particle-collisions)
 and [implementation record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-gpu-analytic-particle-collision--2026-11-02)
-(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native CPU/GPU `space="world"` now retains each fixed-tick birth frame for shape,
 initial velocity and mesh basis; later emitter movement affects subsequent births.
@@ -820,7 +820,7 @@ emitter. Finite invertible frames and one winding per live emitter batch are the
 current profile; mixed-winding presentation remains open. See the
 [world-space component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-world-space-cpugpu-emission--2026-10-31)
 and [contract](../../doc/Lambda_Packages.md#world-space-particle-emission)
-(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native mesh-surface emission now samples area-weighted triangles through the
 shared geometry decoder and a bounded owned float table. CPU/GPU local/world
@@ -833,7 +833,7 @@ geometry and rejects stale source epochs. Deformed intake requires an explicit
 static snapshot; precision and quota limits remain visible. See the
 [surface component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpugpu-mesh-surface-emission--2026-10-31)
 and [contract](../../doc/Lambda_Packages.md#mesh-surface-particle-emission)
-(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native CPU/GPU rotation-over-life now uses shared bounded three-axis curves,
 with unwrapped Euler XYZ radians applied inside the frozen affine birth basis.
@@ -843,7 +843,7 @@ replay, templates and context recovery preserve the documented ownership rules.
 Rotated offset geometry uses conservative GPU bounds. See the
 [rotation component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpugpu-rotation-curves--2026-10-31)
 and [native particle contract](../../doc/Lambda_Packages.md#native-cpugpu-mesh-particles)
-(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native CPU/GPU bounded noise now adds per-particle smooth temporal value-noise
 acceleration in simulation-space axes. The native kernels reuse shared keyed
@@ -854,7 +854,7 @@ motion, and conservative bounds include the full acceleration envelope.
 This component does not claim spatial/curl fields. See the
 [native contract](../../doc/Lambda_Packages.md#native-cpugpu-mesh-particles)
 and [implementation record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-seeded-particle-noise--2026-11-02)
-(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native CPU/GPU color/opacity curves now use bounded shared sampling and copied
 RGBA samples, with the existing material opaque/mask rules and alpha-tested
@@ -865,7 +865,7 @@ palette. Cross-emitter/intersecting geometry retains draw-record ordering,
 and the fixed capacity/network/overdraw costs remain explicit. See the
 [native contract](../../doc/Lambda_Packages.md#particle-color-opacity-and-presentation-ordering)
 and [component record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-particle-color-opacity-and-depth-ordering--2026-11-02)
-(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native CPU/GPU texture sheets now select top-left row-major atlas cells by
 lifetime cycles or FPS, with bounded subranges, looping/clamping, keyed random
@@ -877,7 +877,7 @@ use an existing spare lane, with no ordinary readback or target growth. Whole-
 atlas wrapping and authored gutters remain explicit filtering limits. See the
 [contract](../../doc/Lambda_Packages.md#particle-texture-sheets) and
 [component record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-particle-texture-sheets--2026-11-02)
-(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native CPU/GPU velocity-over-life curves now add sampled simulation-space
 transport beside retained dynamic velocity. Fixed updates hold the starting-age
@@ -889,7 +889,7 @@ authored offset. Templates, replay, recovery, rejected phases and finite storage
 retain their contracts. See the
 [contract](../../doc/Lambda_Packages.md#particle-velocity-over-life-curves) and
 [component record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-particle-velocity-curves--2026-11-02)
-(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native CPU/GPU billboard presentation now builds camera-facing planar mesh
 matrices from committed scale, Z roll and native centers. UV/atlas/color/
@@ -901,7 +901,7 @@ spare retained palette lanes, and GPU draws keep device-owned poses and the
 existing target layout. See the
 [contract](../../doc/Lambda_Packages.md#particle-billboard-presentation) and
 [component record](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-cpugpu-billboard-particles--2026-11-02)
-(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 Native CPU/GPU trails now retain 2–64 post-successful-tick points per physical
 head slot, with bounded relative ages, exact visible-window clipping, optional
@@ -924,7 +924,7 @@ effect rules remain M13; GPU depth collision remains dependent on M9. See the
 [spawn component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-native-particle-spawn-commands--2026-11-02) and
 [trail contract](../../doc/Lambda_Packages.md#bounded-native-cpugpu-particle-trails)
 and [trail component](../impl/Radiant_Impl_Scene3D_Gaming.md#m6-bounded-native-cpugpu-ribbon-trails--2026-11-02)
-(**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 **M6 acceptance:** a seeded CPU burst replays its spawn sequence; CPU/GPU emitters
 share documented timing and shape statistics; a rate edit preserves compatible
@@ -941,7 +941,7 @@ Keep one window output device and document-owned submixes. Add Scene3D source,
 listener and routing integration under `radiant/scene3d/`; extend the shared
 audio provider only where MIDI, speech, media or other documents need the same
 mechanism. Do not create a device/mixer for every viewport or bypass
-**D7.5.4**. Existing decoded-audio paths must be connected through the shared
+**D11.3.1**. Existing decoded-audio paths must be connected through the shared
 bus as needed; their present routing is not proof that every source already
 uses the same path.
 
@@ -972,7 +972,7 @@ Prepared provider export now reuses these native readers and the private job
 graph; explicit capture has the qualified core profile in §9.3. See the
 [decoded-audio contract](../../doc/Lambda_Packages.md#shared-decoded-audio-foundation)
 and [qualified component](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-shared-audio-playback-foundation--2026-11-03)
-(**D4.5.2 / D7.5.3v2 / D7.5.4**).
+(**D5.5.2 / D9.5.6 / D11.3.1**).
 
 Each scene selects one listener initially, either camera-following or explicit.
 Support nonpositional UI/music sources, 2D positional panning/attenuation, and
@@ -1013,7 +1013,7 @@ The bounded native cue profile now admits copied sample/scene deadlines,
 prepared retained readers, stable last-batch retry receipts, explicit late
 policies and scene pause/scale/step/reset mapping. It splits the existing submix
 callback at sample boundaries, and retires displaced readers on the main owner
-(**D4.5.2 / D5.3.3 / D7.5.3v2**). Armed gain and starts retain **D7.5.4**;
+(**D5.5.2 / D6.3.3 / D9.5.6**). Armed gain and starts retain **D11.3.1**;
 pitch-following remains opt-in. See the [public cue contract](../../doc/Lambda_Packages.md#native-scene3d-sample-time-cues)
 for finite bounds, history/overflow behavior and remaining render/provider/
 capture qualification scope.
@@ -1021,11 +1021,11 @@ capture qualification scope.
 Explicit render jobs now reuse private virtual submixes, copied cue plans,
 accounted clip readers and fresh graph histories for bounded PCM/WAV output.
 They stay outside device callbacks and live document clocks, require no audible
-activation under **D7.5.4**, and stream completed output through existing
-procedural IO (**S12.1.1v3 / D7.5.3v2**). Referenced authored audio controls are
+activation under **D11.3.1**, and stream completed output through existing
+procedural IO (**S12.1.1v3 / D9.5.6**). Referenced authored audio controls are
 copied without publishing live gain/routing changes. The [render-job contract](../../doc/Lambda_Packages.md#native-scene3d-offline-audio-render-jobs)
 records static-pose scope, virtual scaling, native limits and cancellation/
-teardown behavior (**D4.5.2 / D5.3.3**). Prepared MIDI/speech/video inputs now
+teardown behavior (**D5.5.2 / D6.3.3**). Prepared MIDI/speech/video inputs now
 materialize finite independent PCM intervals before job publication, then reuse
 the same cue/render path. Live source disposal cannot change their output. See
 the [qualified provider-export profile](../impl/Radiant_Impl_Scene3D_Gaming.md#m7-provider-export--qualified-2026-11-03).
@@ -1037,8 +1037,8 @@ combined scene-motion/release qualification remains open.
 Capture is an explicit procedural acquisition through the existing IO/host
 capability route, with OS permission and a per-document grant. A scene tag may
 describe a capture binding but cannot open a microphone during pure evaluation.
-The output activation ruling **D7.5.4** is not a microphone permission grant.
-The capture policy is ratified in **D7.5.10** (USER, 2026-11-03). Permission
+The output activation ruling **D11.3.1** is not a microphone permission grant.
+The capture policy is ratified in **D11.3.2** (USER, 2026-11-03). Permission
 grants remain host-owned and cannot be serialized into scene data.
 
 The macOS core now implements explicit `dom.audio_capture` acquisition,
@@ -1077,7 +1077,7 @@ distance loss; Doppler matches a known velocity case and ignores a teleport;
 music/effects routing, mute/solo, ducking and reverb tails work; offline output
 matches numeric mixer controls; denied/revoked capture and device loss release
 resources; captured PCM arrives with bounded storage. Local/network documents
-retain **D7.5.4** activation behavior for every audible game source.
+retain **D11.3.1** activation behavior for every audible game source.
 
 ## 10. Public descriptions and runtime boundary
 
@@ -1099,7 +1099,7 @@ the required native descriptions, safety validation, copied snapshots/events
 and batched command operations through the existing host waist. Thin bindings
 and qualification fixtures may accompany each native feature. Already shipped
 packages/APIs keep their behavior; no migration or rewrite is required just to
-enforce the phase boundary (**D7.1.3 / D7.2.4v4 / D7.5.3v2**).
+enforce the phase boundary (**D9.1.3 / D9.3.4 / D9.5.6**).
 
 | Operation category | Contract |
 |---|---|
@@ -1111,12 +1111,12 @@ enforce the phase boundary (**D7.1.3 / D7.2.4v4 / D7.5.3v2**).
 
 Do not expose a pure function that reads a live world's ambient state. A future
 pure native navigation helper must live in an appropriate lower provider; it
-cannot make `lambda-rt` call into `radiant.a` (**D7.1.3 / D7.3.4**).
+cannot make `lambda-rt` call into `radiant.a` (**D9.1.3 / D9.4.4**).
 
 Descriptions reuse the same validators, schema and serialization format across
 pure helpers and live services. Compatible updates retain runtime state;
 incompatible changes require explicit reset/replay. Rejected descriptions
-retain the last working native state (**S12.1.5v2 / D4.5.2 / D4.5.3v2**).
+retain the last working native state (**S12.1.5v2 / D5.5.2 / D5.5.3**).
 
 ## 11. Delivery sequence and acceptance boundaries
 
@@ -1176,7 +1176,7 @@ resource ownership and stale-result rejection stay in the earlier phases.
 Package policy executes outside native steps, using the boundary in §3.2.
 Do not add a parallel C++ policy implementation while waiting for M13. A later
 native optimization needs measured evidence and extraction of a shared kernel
-under **D7.1.3 / D7.5.3v2**, while preserving **S12.1.1v3 / S12.1.5v2**.
+under **D9.1.3 / D9.5.6**, while preserving **S12.1.1v3 / S12.1.5v2**.
 
 **M13 acceptance:** golden tests cover state/transition and blend-weight math,
 description round-trips, effect/audio/physics factories and replayable decisions.
@@ -1192,7 +1192,7 @@ promote perception, planning, formations/shared reservations or AI inspection.
 
 Use independent evidence at the owning layer, then one integrated consumer.
 Register meaningful fixtures in the existing test map; do not create a parallel
-runner or change tolerances to hide unsupported behavior (**D7.3.5**).
+runner or change tolerances to hide unsupported behavior (**D9.4.5**).
 
 | Area | Focused evidence |
 |---|---|
@@ -1253,7 +1253,7 @@ to be designed when a concrete game needs them.
 ### 13.1 Package and state ownership
 
 Candidate source home: `lmd/package/scene3d/gameplay/`, imported through the
-existing `lambda.scene3d.*` namespace (**D7.2.4v4**). This is a proposed package
+existing `lambda.scene3d.*` namespace (**D9.3.4**). This is a proposed package
 location, not a shipped API. Reuse existing package helpers before
 introducing another blackboard, history store or reservation
 implementation.
@@ -1262,7 +1262,7 @@ Keep policy as pure transformations over explicit state, observations, tick/time
 and seeded random input. A decision step returns updated gameplay state,
 action intents and optional trace records. The procedural handler gathers live
 observations and applies the resulting intents through `radiant-dom`
-(**S12.1.1v3 / S12.1.3 / D7.5.3v2**). Pure perception/planning functions never
+(**S12.1.1v3 / S12.1.3 / D9.5.6**). Pure perception/planning functions never
 read an ambient live world or call procedural query functions themselves.
 
 Gameplay memory, goals, blackboards and reservations belong to the Lambda
@@ -1301,7 +1301,7 @@ requires the native reset/replay or compatible-checkpoint contract in §3.2.
 Expose inspection records through script APIs and serialized traces.
 
 If profiling later identifies a shared hot kernel, extract that kernel under
-the existing provider/ownership rules (**D7.1.3 / D7.5.3v2**) while retaining the
+the existing provider/ownership rules (**D9.1.3 / D9.5.6**) while retaining the
 gameplay policy in script. Native support remains spatial queries, simulation,
 presentation and explicit host operations; avoid introducing a parallel C++
 gameplay framework in `radiant/scene3d/` for these KIV scopes.
@@ -1354,7 +1354,7 @@ consolidated subsystem declarations; do not introduce one header per source.
 
 The folder requirement applies to Scene3D-owned code. Moving shared providers
 or codecs upward merely to gather all related filenames would break
-**D7.1.3 / D7.5.3v2** and remove headless/shared consumers. Newly discovered
+**D9.1.3 / D9.5.6** and remove headless/shared consumers. Newly discovered
 cross-layer primitives are promoted to the correct existing lower provider;
 their extraction is reviewed explicitly, never hidden behind a forwarding shim.
 
@@ -1400,7 +1400,7 @@ implementation, without treating this proposal as formal-spec ratification.
 | Renderer profile | Preserve native OpenGL first; CPU/fragment-pass techniques and explicit required/auto capabilities for M9–M11. |
 | Lighting quality | Finite-bounce diffuse lightmaps, probe-lit dynamic objects and budgeted probe-cache dynamic GI; no unbounded ray tracing claim. |
 | Particle authority | CPU gameplay events; GPU analytic/depth collision explicitly visual where it cannot provide authoritative contacts in M6. |
-| Capture and output | USER ratified D7.5.10 on 2026-11-03: explicit procedural acquisition, separate document/OS grants, bounded copied buffers and close on stop/teardown/revocation/loss. Preserve D7.5.4 output gating for monitoring. |
+| Capture and output | USER ratified D11.3.2 on 2026-11-03: explicit procedural acquisition, separate document/OS grants, bounded copied buffers and close on stop/teardown/revocation/loss. Preserve D11.3.1 output gating for monitoring. |
 | Work/resource limits | Set measured workload budgets and supported platform matrices at each milestone; preserve explicit errors and reproducible smaller profiles. |
 
 Principal risks are solver stability and collision coverage, navigation deadlocks,
@@ -1425,3 +1425,29 @@ from production providers.
 - [Godot particle systems](https://docs.godotengine.org/en/stable/tutorials/3d/particles/index.html): emitters, CPU/GPU processing and lifetime controls.
 - [Godot audio buses](https://docs.godotengine.org/en/stable/tutorials/audio/audio_buses.html): routing, inserts and effect chains.
 - [Godot audio feature inventory](https://docs.godotengine.org/en/stable/about/list_of_features.html#audio): positional playback, Doppler and microphone input.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](../impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D7.5.10 → D11.3.2
+
+**D11.3.2*** **Microphone input requires explicit acquisition and separate
+grants.** Acquisition is procedural through the existing IO/host capability
+route and requires both OS permission and a grant for the requesting
+document. Pure evaluation and scene descriptions cannot open a microphone;
+D11.3.1 activation grants output only. The trusted host owns permission UI
+and grants; a document cannot grant itself access or serialize permission
+into a scene. Capture uses bounded native PCM storage and copied host-boundary
+buffers/meters with timestamps and overrun diagnostics. Explicit stop,
+document teardown, revocation and device loss close the capture owner;
+denied/unavailable states are visible. Monitoring is off by default and,
+when enabled, separately obeys D11.3.1. (USER, 2026-11-03; ID disambiguated 2026-11-04)
+[Scene3D §9.3](Radiant_Design_Scene3D.md#93-microphone-input)

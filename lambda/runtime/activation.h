@@ -61,7 +61,7 @@ void activation_destroy(Activation* activation);
 Item activation_suspend(Item value);
 // A native host frame (a module calling back into script) pins the
 // activation whose stack holds it: suspending beneath one is a fault (RA10,
-// D7.4.2). Enter and leave bracket the call-in; on the base stack they do
+// D9.5.2). Enter and leave bracket the call-in; on the base stack they do
 // nothing.
 void activation_barrier_enter(void);
 void activation_barrier_leave(void);

@@ -1,4 +1,4 @@
-// CW36 / D4.4.4v3 (S9.1.2): a read-modify-write handle may borrow its place
+// CW36 / D5.4.4 (S9.1.2): a read-modify-write handle may borrow its place
 // when the store-back sits inside a branch, provided no path observes the
 // place between an in-place write and its store-back, and no path leaves the
 // handle's scope with a write unstored. A store-back followed by more uses of

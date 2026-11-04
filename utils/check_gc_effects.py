@@ -158,7 +158,7 @@ VERIFIED_READER_METHODS = {
 # These helpers encode scalars or write only the reserved number side stack.
 # Their debug `AutoAssertNoGC` guard catches an unexpected collection; lexical
 # expansion reaches OS page reservation and pre-reserved stack-fault recovery,
-# neither of which enters Lambda GC (D5.2.2v3, D5.3.2). Keep the guard check
+# neither of which enters Lambda GC (D6.2.2, D6.3.2). Keep the guard check
 # below fail-closed if any audited boundary loses its assertion.
 DYNAMICALLY_GUARDED_NO_GC = {
     "lambda_item_resolve_pending",

@@ -1,7 +1,7 @@
 # Lambda Script Source Formatters
 
 `lambda.doc.misc` provides **AsciiDoc, troff/man, Typst, EML, vCard, and
-iCalendar** writers. These are shipped Lambda Script modules (D7.2.4).
+iCalendar** writers. These are shipped Lambda Script modules (D9.3.4).
 The prose writers consume normalized Mark Doc; record writers consume the
 existing email/contact/calendar maps. Content normalization follows
 S2.6.1v2 and S2.6.2–S2.6.5.
@@ -61,7 +61,7 @@ CLI `--loss error|allow` covers these writers and wiki writers. File output
 detects `.adoc/.asciidoc/.asc`, `.man/.1`–`.9`, `.typ/.typst`, `.eml`,
 `.vcf/.vcard`, and `.ics/.ical`; it uses strict defaults. For permissive file
 output, call the package formatter first and write its resulting string as
-`text`. No native C++ emission rules are added (D7.1.1); the lower
+`text`. No native C++ emission rules are added (D9.1.1); the lower
 runtime-free `format_data` API refuses these targets.
 
 ## Prose coverage
@@ -216,7 +216,7 @@ python3 test/script_format_roundtrip.py --report temp/script-format-roundtrip.js
 The Python suite is registered in the `input` baseline through
 `test/run_script_format_roundtrip.js`. It checks the package, built-in
 `format`, automatic file `output`, and CLI paths. Record comparisons retain
-duplicate map keys and ordered entries (D2.6.5v3); prose comparisons retain
+duplicate map keys and ordered entries (D3.3.1); prose comparisons retain
 element names, attributes, whitespace, and content, allowing transparent
 parser spans and adjacent text chunk merging (S2.6.4).
 
@@ -235,7 +235,7 @@ with failure; they are not skipped or accepted as golden output.
 The Lambda golden test separately passes 31 checks for authored contact,
 event/alarm, and MIME values, all six built-in routes, strict loss handling,
 and invalid inputs. It passes under the interpreter, JIT, and JIT with
-`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` (D5.3.3).
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` (D6.3.3).
 Fixtures also cover Unicode folding, empty/repeated
 fields, quoted parameters, multiple vCards, VTIMEZONE/VTODO/VALARM, MIME
 alternatives, and binary attachment source retention. These checks establish

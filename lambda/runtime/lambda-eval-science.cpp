@@ -1,4 +1,4 @@
-// Pure scientific kernels shared by T0 and MIR (D6.4.1, D8.1.1).
+// Pure scientific kernels shared by T0 and MIR (D7.6.1, D8.3.1).
 #include "transpiler.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
@@ -91,7 +91,7 @@ Item fn_math_rng_uniform(Item keys, Item counters) {
             vector_is_ndim(input.get()) || vector_is_ndim(indices.get()) ||
             (rows && columns > 1000000 / rows))
         return science_error("math.rng_uniform: expected flat keys/counters, at most 1,000,000 draws");
-    // retain inputs and result while vector access boxes packed u64 lanes (D5.3.3).
+    // retain inputs and result while vector access boxes packed u64 lanes (D6.3.3).
     Rooted<ArrayNum*> result(roots, array_num_new(ELEM_FLOAT64, rows * columns));
     if (!result.get()) return ItemError;
     for (int64_t j = 0; j < columns; j++) {
@@ -480,7 +480,7 @@ Item fn_math_incircle(Item a, Item b, Item c, Item d) {
 }
 
 // the native kernel sees only flat numbers; keep every source/row rooted while
-// vector_get boxes lanes, and publish a boxed int array (D5.3.3, D6.4.1).
+// vector_get boxes lanes, and publish a boxed int array (D6.3.3, D7.6.1).
 Item fn_math_wfc(Item key, Item weights, Item masks, Item control) {
     GUARD_ERROR3(key, weights, masks);
     GUARD_ERROR1(control);
@@ -566,7 +566,7 @@ Item fn_math_wfc(Item key, Item weights, Item masks, Item control) {
     return {.array_num = result};
 }
 
-// native buffers contain no Items; matrix readers retain their sources during boxing (D5.3.3).
+// native buffers contain no Items; matrix readers retain their sources during boxing (D6.3.3).
 Item fn_math_hydraulic(Item key, Item field, Item control, Item settings) {
     GUARD_ERROR3(key, field, control); GUARD_ERROR1(settings);
     GUARD_NULL1(key); GUARD_NULL1(field); GUARD_NULL1(control); GUARD_NULL1(settings);

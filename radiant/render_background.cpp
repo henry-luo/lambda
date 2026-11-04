@@ -148,7 +148,7 @@ static bool background_sources(ViewBlock* view, Rect rect,
                 Rect position = {rect.x + origin.x - cell_origin.x,
                     rect.y + origin.y - cell_origin.y, source->width, source->height};
                 BoundaryProp boundary = *source->boundary();
-                // track insets do not apply; keep their computed values on the canonical owner (D4.1.4v5).
+                // track insets do not apply; keep their computed values on the canonical owner (D5.1.4).
                 boundary.padding = {};
                 boundary.border = nullptr;
                 ViewBlock box = view_with_boundary(source, &boundary);

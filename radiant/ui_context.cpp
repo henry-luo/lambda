@@ -304,7 +304,6 @@ bool ui_context_enable_native_graphics(UiContext* uicon) {
     uicon->window = radiant_platform_create_window(1, 1, "Lambda Headless", false);
     if (!uicon->window) {
         log_error("[NATIVE_GRAPHICS_HOST] hidden window creation failed");
-        radiant_platform_terminate();
         return false;
     }
     log_info("[NATIVE_GRAPHICS_HOST] hidden graphics host ready");
@@ -512,23 +511,54 @@ void free_document(DomDocument* doc) {
     free_document_profiled(doc, nullptr);
 }
 
-bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
-    if (!doc) return true;
-    // Every check that can refuse teardown runs before the first release, so a
-    // refused document stays whole and owned instead of half torn down (its
-    // Input and loader pool used to be detached and then dropped on return).
-    // native timing jobs may be retained by a Lambda-only evaluator.
+struct DocumentCleanupOwners {
+    EvalContext* timer;
+    EvalContext* state;
+};
+
+static bool document_cleanup_owners(DomDocument* doc, DocumentCleanupOwners* owners) {
     Runtime* timer_runtime = doc->js.runtime ? doc->js.runtime : doc->lambda_runtime;
-    EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
     Runtime* state_runtime = dom_document_script_runtime(doc);
-    EvalContext* state_owner = state_runtime
-        ? runtime_get_eval_context(state_runtime) : nullptr;
-    if (timer_owner && state_owner && timer_owner != state_owner) {
-        // One document cannot multiplex independent evaluators on one host
-        // thread. Such documents need a shared owner or separate worker.
+    // A partially retired evaluator cannot safely service document teardown.
+    if ((timer_runtime && timer_runtime->cleanup_incomplete) ||
+            (state_runtime && state_runtime->cleanup_incomplete)) {
+        log_error("free_document: document evaluator cleanup is incomplete; document retained");
+        return false;
+    }
+    owners->timer = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
+    owners->state = state_runtime == timer_runtime ? owners->timer :
+        (state_runtime ? runtime_get_eval_context(state_runtime) : nullptr);
+    if ((timer_runtime && !owners->timer) || (state_runtime && !owners->state)) {
+        log_error("free_document: could not obtain document evaluator; document retained");
+        return false;
+    }
+    if (owners->timer && owners->state && owners->timer != owners->state) {
+        // One document cannot multiplex independent evaluators on one host thread.
         log_error("free_document: Lambda and JS runtimes have different EvalContexts; document retained");
         return false;
     }
+    return true;
+}
+
+bool document_runtime_cleanup_ready(DomDocument* doc) {
+    if (!doc) return true;
+    // A document resource callback must not retire the heap under its own walk.
+    if (doc->destroying) return false;
+    DocumentCleanupOwners owners = {};
+    return document_cleanup_owners(doc, &owners);
+}
+
+bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
+    if (!doc) return true;
+    if (doc->destroying) return true;
+    // Every check that can refuse teardown runs before the first release, so a
+    // refused document stays whole and owned instead of half torn down (its
+    // Input and loader pool used to be detached and then dropped on return).
+    // Native timing jobs may be retained by a Lambda-only evaluator.
+    DocumentCleanupOwners owners = {};
+    if (!document_cleanup_owners(doc, &owners)) return false;
+    EvalContext* timer_owner = owners.timer;
+    EvalContext* state_owner = owners.state;
     EvalContext* document_owner = state_owner ? state_owner : timer_owner;
     // EO5v2: another document may hold the thread (each manages its own
     // EvalContext). Teardown is a quiescent point, so take the binding rather
@@ -552,6 +582,8 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // S13.3.1v2: tasks the document owns are cancelled, then joined, while its
     // state and DOM still exist, so their cleanup runs against a live document
     if (state_owner) lambda_document_tasks_release(doc);
+    // Cancellation cleanup may attach resources before native teardown starts.
+    doc->destroying = true;
 
     {
         DocumentCleanupTimer phase(timing ? &timing->network_ms : nullptr);
@@ -568,7 +600,7 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);
     // the realm can outlive this arena; retire its listener pins while the
-    // document registry and precise-root owner are still valid (D4.5.2).
+    // document registry and precise-root owner are still valid (D5.5.2).
     dom_events_release_document(doc);
 
     if (timer_owner && js_runtime_state_for(timer_owner)) {
@@ -632,7 +664,11 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // came from a loader (a `.ls` page, a script-bearing page) are owned by
     // that loader and must not be freed twice (ESO25).
     lam::Temp<Runtime> owned_runtime;
-    if (doc->owns_script_runtime && doc->lambda_runtime) {
+    if (doc->lambda_runtime && doc->lambda_runtime->cleanup_in_progress) {
+        // An outer runtime cleanup remains responsible for its own allocation.
+        doc->lambda_runtime = nullptr;
+        doc->owns_script_runtime = false;
+    } else if (doc->owns_script_runtime && doc->lambda_runtime) {
         owned_runtime.reset(doc->lambda_runtime);
         doc->lambda_runtime = nullptr;
         doc->owns_script_runtime = false;
@@ -644,7 +680,7 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
     if (owned_runtime) {
-        // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D5.4.1).
+        // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D6.4.1).
         if (!radiant_eval_context_switch(runtime_get_eval_context(owned_runtime.get()))) {
             log_error("free_document: could not rebind owned runtime for cleanup; runtime retained");
             owned_runtime.release();
@@ -663,19 +699,26 @@ void ui_context_cleanup(UiContext* uicon) {
     uicon->destroy();
 }
 
-void ui_context_release_loader_runtime(UiContext* uicon) {
-    if (!uicon || !uicon->loader_runtime) return;
+bool ui_context_release_loader_runtime(UiContext* uicon) {
+    if (!uicon || !uicon->loader_runtime) return true;
     Runtime* runtime = uicon->loader_runtime.get();
-    uicon->loader_runtime = nullptr;
     // Teardown is quiescent: take the thread from whichever document
     // evaluator ran last, so cleanup binds the loader's own context (EO5v2).
     EvalContext* owner = runtime_get_eval_context(runtime);
-    if (owner && !radiant_eval_context_switch(owner)) {
+    if (!owner || !radiant_eval_context_switch(owner)) {
         log_error("loader-runtime: could not bind the window loader runtime for release");
+        return false;
     }
-    runtime_cleanup(runtime);
+    RuntimeCleanupResult result = runtime_try_cleanup(runtime);
+    if (result != RUNTIME_CLEANUP_COMPLETE) {
+        log_error("loader-runtime: cleanup %s; window retains the runtime",
+            result == RUNTIME_CLEANUP_RETRY ? "needs a quiescent retry" : "is incomplete");
+        return false;
+    }
+    uicon->loader_runtime = nullptr;
     mem_free(runtime);
     log_debug("loader-runtime: released the window loader runtime");
+    return true;
 }
 
 // the window shell owns the top-level document and releases it here; other
@@ -700,7 +743,10 @@ void UiContext::destroy() {
 
     destroy_document();
     // its documents borrowed the loader runtime, so it goes after them
-    ui_context_release_loader_runtime(this);
+    if (!ui_context_release_loader_runtime(this)) {
+        log_error("ui-context: loader runtime retained; remaining teardown stopped");
+        return;
+    }
 
     log_debug("cleaning up font resources");
     fontface_cleanup(this);  // free font cache
@@ -741,8 +787,7 @@ void UiContext::destroy() {
     window_surface = nullptr;
     surface = nullptr;
 
-    // Only tear down the platform if a window was created (i.e., non-headless
-    // mode); terminating an uninitialized windowing library is undefined.
+    // the host owns its window; the backend's application runtime outlives every host.
     if (window) {
         if (mouse_state.sys_cursor) {
             radiant_platform_destroy_cursor(mouse_state.sys_cursor);
@@ -750,6 +795,5 @@ void UiContext::destroy() {
         }
         radiant_platform_destroy_window(window);
         window = nullptr;
-        radiant_platform_terminate();
     }
 }

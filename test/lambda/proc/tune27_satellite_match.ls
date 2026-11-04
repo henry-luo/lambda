@@ -1,6 +1,6 @@
 // Tune27 T27-6: a `match` whose arms are type names and literals is admitted to
 // the auto-tier satellite; the value, error and default arms must give the same
-// results as T0 (D8.1.1v9).
+// results as T0 (D8.3.3).
 pn tune27_step(x: int) int {
     if (x % 7 == 0) { return x + 3 }
     return x * 2

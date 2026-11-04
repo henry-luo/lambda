@@ -28,7 +28,7 @@ Large-bundle AST publication uses an index-owned pointer/identity table for
 bindings, scopes, and classes (`ast-core.cpp`). Repeated identifier uses no
 longer scan every prior declaration. Clones retain their own lookup table,
 appends preserve existing dense IDs, and rebinding clears the old identities
-(**D8.2.4v2**).
+(**D8.2.4**).
 
 ### 2.1 Call & dispatch tier
 
@@ -36,8 +36,8 @@ appends preserve existing dense IDs, and rebinding clears the old identities
 
 - **Call-argument frame slots.** A compiled call site builds its argument span in fixed slots at the end of the calling function's own side-root frame. `JsMirArgStackScope` (`js_mir_context.hpp`) assigns the slots at compile time: nested calls take higher slots and sibling calls reuse the same range. The scope zeroes them when the expression completes and on every error-lane exit. The span is rooted by the frame itself, so the call passes `args_prerooted = 1` and nothing is registered, pushed or popped at run time. *Owner:* [JS_03 §7](JS_03_Value_Model.md), [JS_05 §8](JS_05_Functions_Closures.md). *History (Tune1):* this replaced the `js_args_push`/`save`/`restore` bump stack, which had itself replaced a per-call pool allocation that registered a permanent GC root range and was never freed, making call-heavy loops O(n²) in registration and GC marking. The bump stack cut a 160k-iteration dynamic-call loop from 6008 ms to 12.5 ms (quadratic to linear), an `assert.sameValue` ×65536 loop from 4154 ms to 83 ms (≈50×), and a regex character-class test from 9.6 s to 0.22 s.
 - **Const-bound static dispatch.** The resolver in `jm_transpile_call` emits a direct MIR call (skipping the dynamic call path and the argument span) not only for `function f(){}` declarations but also for a `const`-bound function expression or arrow whose call site is textually after the initializer — gated on the binding being immutable and the call being past its TDZ window. *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_05 — Functions & Closures](JS_05_Functions_Closures.md). *Measured (Tune1):* a 2M-iteration 1-arg call dropped from ≈99 ms to ≈63 ms on const-bound forms (≈50 ns → ≈31 ns/call), matching the `function`-declaration baseline; the full test262 baseline summed elapsed fell ≈34%.
-- **Per-callee callable entries.** Dynamic calls and construction enter one ownership-aware kernel, then the stored `invoke` or optional `construct` capability. Native ABI selection and intrinsic target selection happen when the function is created, so repeated calls do not interpret a builtin ID, mutable `.name`, receiver category, or constructor spelling. Caller result homes and pre-rooted argument spans are adapters to the same entries (**D5.2–D5.3, D6.2.2v2**). *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_05 — Functions & Closures](JS_05_Functions_Closures.md). Tune4 removed the large builtin dispatcher and name-selected constructor path; exact lexical user-function calls may still inline/direct-call. *Call flatten (2026-09-15, JC13–JC22, `vibe/jube/JS_Runtime_Call_Flatten.md`):* a compiled dynamic call now goes from the call site to `invoke` (the call kernel `js_call_entry_generic`), then to the callee's MIR span entry, then to its body. That is 3 hops instead of 10, because the site calls `invoke` directly behind a layout guard with `js_call` as the miss arm. Argument adaptation is generated per function in the span entry, so the old C arity switch and its 32/16-argument caps are gone. Arguments are rooted once. C stack per dynamic level (debug `-O3`, lldb) fell from 1,328 B to 672 B; direct calls are unchanged at 96 B. Plain-argument AST→AST calls take `js_call_from_ast`, a guarded kernel instance that calls `js_interp_call_function` directly (5 hops → 2). Release loop A/Bs were within noise for the MIR site guard and about 3% faster on the AST path; the full P0 ns/call baseline has not been taken.
-- **Historical P3 receiver/name lane — retired.** The Js26 measurements found large gains by resolving `obj.method(...)` from an inferred class and property spelling, but that route skipped observable `Get` under replacement, accessors, prototype mutation, and Proxy. Tune4 removed it under **D6.2.2v2**. The figures in §4 remain historical evidence of the potential upside for a future guarded callee-identity feedback design, not a description of current semantics.
+- **Per-callee callable entries.** Dynamic calls and construction enter one ownership-aware kernel, then the stored `invoke` or optional `construct` capability. Native ABI selection and intrinsic target selection happen when the function is created, so repeated calls do not interpret a builtin ID, mutable `.name`, receiver category, or constructor spelling. Caller result homes and pre-rooted argument spans are adapters to the same entries (**D6.2–D6.3, D7.2.2**). *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_05 — Functions & Closures](JS_05_Functions_Closures.md). Tune4 removed the large builtin dispatcher and name-selected constructor path; exact lexical user-function calls may still inline/direct-call. *Call flatten (2026-09-15, JC13–JC22, `vibe/jube/JS_Runtime_Call_Flatten.md`):* a compiled dynamic call now goes from the call site to `invoke` (the call kernel `js_call_entry_generic`), then to the callee's MIR span entry, then to its body. That is 3 hops instead of 10, because the site calls `invoke` directly behind a layout guard with `js_call` as the miss arm. Argument adaptation is generated per function in the span entry, so the old C arity switch and its 32/16-argument caps are gone. Arguments are rooted once. C stack per dynamic level (debug `-O3`, lldb) fell from 1,328 B to 672 B; direct calls are unchanged at 96 B. Plain-argument AST→AST calls take `js_call_from_ast`, a guarded kernel instance that calls `js_interp_call_function` directly (5 hops → 2). Release loop A/Bs were within noise for the MIR site guard and about 3% faster on the AST path; the full P0 ns/call baseline has not been taken.
+- **Historical P3 receiver/name lane — retired.** The Js26 measurements found large gains by resolving `obj.method(...)` from an inferred class and property spelling, but that route skipped observable `Get` under replacement, accessors, prototype mutation, and Proxy. Tune4 removed it under **D7.2.2**. The figures in §4 remain historical evidence of the potential upside for a future guarded callee-identity feedback design, not a description of current semantics.
 
 #### Tune4 callable release A/B (2026-08-12)
 
@@ -57,7 +57,7 @@ corpus, 11 measured repetitions per side, and medians. Lower is better.
 
 The static-method C0 lane was the retired receiver/spelling shortcut: it did
 not perform observable property `Get`, so its timing is not a valid
-**D6.2.2v2** semantic baseline. The computed-method control exercises the
+**D7.2.2** semantic baseline. The computed-method control exercises the
 canonical path on both sides and improves 5.47%. Dynamic C0 construction
 likewise skipped the observable `Get(newTarget, "prototype")` when
 `newTarget === callee`; C8 must preserve replacement/accessor/Proxy effects.
@@ -86,8 +86,8 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   packed tagged literal read then pays only its receiver/layout/bounds/presence
   checks and the shared element-address/load. Exact literal/constructor
   TypeMap recipes similarly select a guarded direct own-field slot, with one
-  NameId fallback. These are immutable plans, not ICs (**D1.3**, **D5.3.4**,
-  **D8.4.1v2–D8.4.3v2**). *Owner:* [JS_04 §4–4.1](JS_04_MIR_Lowering.md),
+  NameId fallback. These are immutable plans, not ICs (**D1.3**, **D6.3.4**,
+  **D7.4.1–D7.4.3**). *Owner:* [JS_04 §4–4.1](JS_04_MIR_Lowering.md),
   [JS Tune History §4.4](../../../vibe/jube/JS_Tune_History.md). *Measured:* the same-source
   11-pair A/B gives `spectralnorm` 0.5048x, `matmul` 0.5546x, and `array1`
   0.5785x candidate/control, with exact output on every pair.
@@ -102,7 +102,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   boxed body. Native local stores use those binding facts, and an actual
   closure capture triggers the existing boxing path lazily. The guard performs
   no `ToNumber`, excluding Symbols and BigInts as required by **S1.11**,
-  **D2.4.1–D2.4.3**, **D3.3.2v2**, and **D8.4.1v2–D8.4.3v2**. *Measured
+  **D2.3.4–D2.3.5**, **D4.3.2**, and **D7.4.1–D7.4.3**. *Measured
   (Tune12 final):* 3-pair A/B gives `fib` 0.1262x, `sum` 0.0249x, and
   `sumfp` 0.0244x, with equal output on every pair.
 - **1-character ASCII interning.** A single-byte ASCII result of `str[i]` / `charAt` is returned from a process-wide 128-entry pool `g_ascii_char_pool` via `js_intern_ascii_char` (`js_globals.cpp:4356`, `:4394`), used by the string-index fast path (`js_runtime.cpp:6410`), instead of allocating a fresh `String`. Strings are immutable so reference identity is unobservable, making interning behaviorally identical. *Owner:* [JS_10 — Built-ins](JS_10_Builtins.md). *Measured (Tune1 §7.2.B):* 2M `str[i]` calls −14%, 2M of a hex-format helper −12%; the only piece of that round's string-alloc proposals that survived verification (the multi-operand concat fusion and an inliner widening were both reverted).
@@ -145,7 +145,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   Float64Array arms, each with one existing semantic continuation. This
   shares only physical work, retains precisely rooted fallback state, and
   leaves descriptor, host, coercion, and growth cases in the full kernel
-  (**S1.11**, **D1.3v3**, **D5.3.2–D5.3.5**, **D8.4.1v2**). *Measured
+  (**S1.11**, **D1.3**, **D6.3.2–D6.3.5**, **D7.4.1**). *Measured
   (Tune12):* `knucleotide` is 0.1400x control; direct 8K-key update/reinsert
   probes fall from 132/259 ms to 4/7 ms.
 - **AST primitive numeric indices.** Computed reads and simple writes with
@@ -153,7 +153,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   kernels before interning a property string. Proxies, object keys, super,
   host hooks, holes, and descriptor overlays retain their semantic continuation;
   the shared TypedArray setter revalidates bounds after value coercion.
-  Receiver, key, and value ownership remains precise (**D5.3.3**). An optimized
+  Receiver, key, and value ownership remains precise (**D6.3.3**). An optimized
   196,608-iteration Uint32Array/Uint8Array indexing probe fell from 634 ms to
   92 ms with the same checksum. Numeric indexing alone did not resolve the
   overview page's script watchdog; this measurement covers the isolated kernel.
@@ -166,7 +166,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   preserves snapshots when parked appends resume out of order. Property, global,
   module, parameter, hosted, and observable eval-completion assignments retain
   their general operation. String values remain immutable to readers
-  (**S1.4**, **S1.6**, **D5.3.3**, **D8.1.3v29**).
+  (**S1.4**, **S1.6**, **D6.3.3**, **D8.4.2**).
 - **AST parameter expression calls.** A definition-owned proof admits numeric
   predicates over primitive Number parameters without a lexical environment.
   Strict single-return expressions also borrow the call activation's rooted
@@ -176,13 +176,13 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   still use the ordinary evaluator and its getter, coercion, receiver and error
   behavior. Non-simple parameters, missing arguments, object environments and
   hosted calls retain their general path. The callee and argument span own values
-  across allocating getters and callbacks (**S1.6**, **D5.3.3**, **D8.4.1v2**).
+  across allocating getters and callbacks (**S1.6**, **D6.3.3**, **D7.4.1**).
   `parameter_expression_calls.js` checks both admitted expressions and fallbacks.
   Comparisons whose leaves are borrowed Number parameters or primitive literals
   use the same binary kernels with local scalar homes and an asserted no-GC
   boundary. Logical operators discard their unused left operand before evaluating
   the right operand, so no root window retains it across callbacks or collection
-  (**D5.3.3**, **D8.4.1v2**).
+  (**D6.3.3**, **D7.4.1**).
 
 - **Module hot-entry promotion.** AUTO admits synchronous top-level ES-module
   function declarations and expressions under the classic admission checks,
@@ -193,7 +193,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   nested definitions, eval and suspended definitions retain their existing
   implementation boundaries. The existing boxed satellite preserves namespace/
   callable identity and the source module's binding slab; forced AST stays
-  interpreted (**D8.1.3v34**). Its approved class-method extension, including
+  interpreted (**D8.4.5**). Its approved class-method extension, including
   one-wrapper sites with only module-slab free bindings, remains unimplemented:
   both release experiments were neutral and removed. Object methods carry method
   syntax on function-expression AST nodes and are rejected before satellite
@@ -204,7 +204,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   the admission scan's activation observations as callable analysis flags.
   The existing light or receiver call entry consumes that proof while retaining
   callee/argument roots and its realm, module and `with` guards
-  (**D5.3.3**, **D8.4.1v2**).
+  (**D6.3.3**, **D7.4.1**).
   Hot-entry clones use the selected function's indexed binding references
   (**D8.2.4**) to declare only its dependencies, retaining the original live
   slots. This bounds satellite planning by the function rather than every
@@ -220,26 +220,26 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   independent of Receiver. Accessors, deleted/reserved slots, global/nominal
   owners, exotic carriers and id-less keys retain the full operation.
   Packed numeric fields publish a number home before leaving the read
-  (**D5.3.3**, **D5.3.5**, **D6.2.2v2**).
+  (**D6.3.3**, **D6.3.5**, **D7.2.2**).
 - **Existing ordinary field stores.** After the shared Set kernel proves a
   default writable own slot, `js_ordinary_add_own_data_property` reuses
   `js_shape_write_same_size_slot` for an unchanged concrete storage type.
   Intrinsic invalidation and event-handler publication still run. Reserved
   constructor slots, global/nominal/static owners, nonextensible objects,
   descriptors, list images and storage transitions retain their owner paths
-  (**D3.4.3v5**, **D5.3.3**, **D6.2.2v2**).
+  (**D3.4.3**, **D6.3.3**, **D7.2.2**).
 
 - **Guarded packed-array splice.** After length/index coercion and species
   construction, `js_array_try_fast_splice` revalidates the captured length and
   admits only extensible packed tagged arrays with writable lengths, clean
   indexed prototypes, no descriptor companions, and no scalar-home tails.
   Precisely rooted owners reserve both buffers before a no-GC word shift
-  (**D5.3.3**). Holes, inherited setters, custom species, coercion mutations,
+  (**D6.3.3**). Holes, inherited setters, custom species, coercion mutations,
   and out-of-band scalar ownership keep the shared property algorithm. The
   real Kafka Lunr index exposed repeated `Vector.insert` shifts; its isolated
   1,000-insert probe fell from 8,805 ms in release to 15 ms in optimized
   `release_profile`. With scalable TypeMap indexes and negative-lookup fixes
-  (**D3.4.3v5**, **D3.4.4v4**), the actual 107-document corpus fell from
+  (**D3.4.3**, **D3.4.4**), the actual 107-document corpus fell from
   364,516 ms to 58,227 ms in ordinary release builds, retaining the same 104
   query matches and zero tracked shutdown allocations. The Kafka page also
   completes under the unchanged online watchdog. These runs include
@@ -249,7 +249,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
 - **Regex property-walk cursor.** `js_regexp_test_property_all` (`js_runtime.cpp:15653`) threads a resumable range cursor (`js_regex_sorted_range_contains_cursor`, `:12656`) through the generated-property walk for `^\p{X}+$` / `^\P{X}+$` forms; near-monotonic input advances the cursor in O(1), collapsing a per-code-point binary search to near-linear. The cursor is engaged only for the generated gc/script/scx/binary kinds (`:15674`); other kinds keep the flat binary search. *Owner:* [JS_11 — RegExp](JS_11_RegExp.md). *Measured (Tune3 §2.5, kept):* the generated-property test cluster (439 tests) fell 61.84 s → 37.67 s (−39%) on a quiet machine, with zero flipped exit codes across 583 property tests.
 - **RegExp UTF-16 coordinates.** Native `exec` and `test` reuse the existing
   precisely rooted string-position cursor for byte/code-unit conversion in
-  both directions (**D5.3.3**, **D5.3.5**). Repeated sticky probes during split
+  both directions (**D6.3.3**, **D6.3.5**). Repeated sticky probes during split
   previously rescanned the entire prefix; Atlas profiles spent almost all
   sampled execution time in that conversion. A release-profile control
   splitting 120,000 ASCII characters followed by an accented character fell
@@ -264,7 +264,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   surrogate-half replay, terminal boundaries and final `lastIndex` remain
   unchanged. Custom exec/species results that fail the guard, captures,
   backtracking and Unicode-mode matchers retain the existing loop
-  (**S1.11**, **D5.3.3**, **D8.4.1v2**). This removes repeated failed probes
+  (**S1.11**, **D6.3.3**, **D7.4.1**). This removes repeated failed probes
   from CSS source-fragment line splitting without changing tier admission.
 - **Tune12 admitted bulk RegExp match/replace.**
   `js_regexp_symbol_match` and `js_regexp_symbol_replace` (`js_runtime.cpp`)
@@ -275,7 +275,7 @@ capture was 65 MiB at C0 and 68 MiB at C8 (about +4.6%).
   roots; captures, Unicode, callback replacements, descriptor changes, and
   symbol/exec overrides take the existing protocol. Bulk admission therefore
   does not skip observable dispatch or replay it on a miss (**S1.11**,
-  **D5.3.2–D5.3.5**, **D6.2.2v2**). *Measured (Tune12):* `regexredux` is
+  **D6.3.2–D6.3.5**, **D7.2.2**). *Measured (Tune12):* `regexredux` is
   0.3018x control in the 3-pair full-runtime A/B.
 - **Sys-func registry reduction.** The JIT import table in `sys_func_registry.c` currently holds 476 `js_*` entries (down from a peak past 547). Tune8 removed entries that telemetry confirmed were never emitted by any lowering file and were never folded into a dispatcher (the C functions stay linked; only the `{"name", FPTR(name)}` rows go), plus inverse-pair folds (`js_ne_raw` → `js_eq_raw` + an inline `MIR_XOR`). A smaller import table means shorter `import_cache` probe chains during JIT compile. *Owner:* [JS_04 §8](JS_04_MIR_Lowering.md), [JS_10](JS_10_Builtins.md). *Measured (Tune8):* −91 entries from the telemetry pass alone moved aggregate test262 per-test wall-clock −7.24% versus the same-HEAD baseline, at 0 regressions; the win is in compile time, not run time. MIR cannot inline through native-C imports (`process_inlines` only inlines `MIR_func_item`s), so a wide single dispatcher would pay its `switch` on every call — which is why hot entries (`js_property_set`, `js_property_get`, `js_add`) deliberately stay direct.
 
@@ -338,13 +338,13 @@ The pattern across all suites: **pure integer/float arithmetic in locals, and si
 Grounded in the tuning logs; these are known-open or accepted-cost, not claims of a bug.
 
 1. **Float boxing in hot loops.** Shaped float fields round-trip through boxed `Item`s on every read/write (`jm_box_float` → `push_d` — now an inline-double encode, with only the out-of-band residue taking a frame-reclaimed number-side-stack slot; the old GC-nursery allocation is retired). The remaining cost is the boxing *traffic* itself: values bounce between native registers and Item-typed storage instead of staying register-resident across iterations. This is the dominant residual on float-field-in-loop benchmarks (nbody, matmul, mandelbrot, spectralnorm) — the class-based nbody variant is ≈2× faster than the object-literal one precisely because the shaped-slot path removes some boxing, and eliminating the remaining boxing round-trips is the next target (Js27 §7.11, Js26 §6b; tracked as JO13 in `vibe/Lambda_Design_Stack_Frame_JS.md`). Native multiply also routes INT×INT through doubles to match JS semantics (JS_04 §4), so a pure-integer hot loop pays `I2D`/`DMUL`/`D2I` rather than an integer multiply.
-2. **Observable `Get -> Call` is unspecialized.** Every ordinary method call performs the required property lookup before invoking the resulting function. This removed the unsound receiver/name shortcut, but hot pristine-prototype calls such as `arr.push(x)` pay the full lookup. **The JR8 feedback-vector/callee-cache answer is retired**: **D8.4.1v2** and **LC1v2** ban per-site caches in LambdaJS as well as in the Lambda lane (2026-09-09). The sanctioned route is a compile-predicted shape/prototype guard emitted inline, with the shared kernel on a miss — `vibe/jube/JS_Tune_History.md` §4.3 T10-2/T10-5. A process-global intrinsic cache remains separately forbidden by **D5.4**.
+2. **Observable `Get -> Call` is unspecialized.** Every ordinary method call performs the required property lookup before invoking the resulting function. This removed the unsound receiver/name shortcut, but hot pristine-prototype calls such as `arr.push(x)` pay the full lookup. **The JR8 feedback-vector/callee-cache answer is retired**: **D7.4.1** and **LC1v2** ban per-site caches in LambdaJS as well as in the Lambda lane (2026-09-09). The sanctioned route is a compile-predicted shape/prototype guard emitted inline, with the shared kernel on a miss — `vibe/jube/JS_Tune_History.md` §4.3 T10-2/T10-5. A process-global intrinsic cache remains separately forbidden by **D6.4**.
 3. **Prototype method calls remain unspecialized.** Tune11 directly serves
    predicted *own data fields* with immutable TypeMap recipes, but it does not
    cache callees or skip observable prototype `Get -> Call`. The former
-   mono/poly call-site cache (JR8) remains rejected by **D8.4.1v2/LC1v2**. Any
+   mono/poly call-site cache (JR8) remains rejected by **D7.4.1/LC1v2**. Any
    future method work must be a compile-time guarded shape/prototype plan with
-   the ordinary observable `Get -> Call` on a miss (**D6.2.2v2**); it must
+   the ordinary observable `Get -> Call` on a miss (**D7.2.2**); it must
    never infer a target from class plus spelling.
 4. **Conservative ADD inference loses native typing.** A correctness fix made `+` inference conservative (a param used in `x + y` is no longer inferred numeric, since `+` is overloaded add/concat), which boxed arithmetic in additive/recursive numeric functions — ack went ≈12 ns/call → ≈208 ns/call (Tune5 §6c). The safe fix (infer ADD numeric only when both operands are provably non-string, plus fixed-point return-type inference for self-recursion) is deferred behind a 0-regression gate.
 5. **Destination-passing lowering deferred.** A per-opcode histogram showed emitted MIR is 66–88% data-movement MOVs (lodash 88%), from the value-returning "materialize into a temp, then MOV into the destination" style. A destination-passing rewrite (caller names the target register) could roughly halve MOVs but touches every expression-lowering path and is a deep codegen project, explicitly not scheduled (Tune6 §3.3, JS_04 "Known Issues" #1).
@@ -416,13 +416,13 @@ Still-open performance work, distilled from the logs:
    eligible constructor recipes now serve exact ordinary fields with a guarded
    direct slot and one NameId miss. Do not revive a runtime shape cache;
    additional construction/field families need a profile, a fixed MIR contract,
-   and the same immutable metadata rule (**D8.4.1v2**, **LC1v2**).
+   and the same immutable metadata rule (**D7.4.1**, **LC1v2**).
 3. **Broaden native-index physical hits only where warranted.** A computed
    Number key now stays native to the selector and packed tagged literal reads
    use the shared address/load plan. Other receivers correctly use their
    existing native-key or generic semantic kernels. A new direct family must
    prove its receiver invariants and preserve the one-miss structure; the
-   former bounded polymorphic call IC (JR8) remains retired by **D8.4.1v2**.
+   former bounded polymorphic call IC (JR8) remains retired by **D7.4.1**.
 4. **Two-operand-non-string ADD inference + fixed-point return types** (§5.4) — recover native integer typing for additive/recursive numeric functions without resurrecting the string-concat unsoundness.
 5. **Destination-passing lowering** (§5.5) — the structural fix for the 66–88% MOV volume; a scoped codegen-quality project, gated on full test262 + Radiant re-validation.
 6. **De-pointered relocatable MIR + module cache** (§6) — unblock cross-compile/cross-realm artifact reuse for the repeated-vendor-JS workload.
@@ -461,7 +461,7 @@ Still-open performance work, distilled from the logs:
 - [JS_16 — Testing](JS_16_Testing.md) — the test262 harness and benchmark drivers behind these numbers.
 
 Calls with an explicit caller result home retire their temporary number
-homes at the call boundary after scalar adoption (**D5.3.3**). Calls without
+homes at the call boundary after scalar adoption (**D6.3.3**). Calls without
 a caller home retain the existing enclosing lifetime; proxy application
 keeps its ordinary return path. This applies to the generic, AST-direct,
 compiled light/receiver and compact MVP call entries.

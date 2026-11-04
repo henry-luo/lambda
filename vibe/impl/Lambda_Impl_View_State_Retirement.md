@@ -5,8 +5,8 @@
 Closing Word dialogs must leave the interaction registry valid in release builds.
 Detached live controls retain their values; retiring their native identities
 releases their state without requiring another layout pass. This follows the
-generation-checked ownership boundary in **D4.5.1v4** and the retained presentation
-policy in **D4.5.3v2**.
+generation-checked ownership boundary in **D5.5.1** and the retained presentation
+policy in **D5.5.3**.
 
 ## Cause and repair
 

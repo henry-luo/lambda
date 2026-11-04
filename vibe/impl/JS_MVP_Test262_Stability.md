@@ -1,7 +1,7 @@
 # JS MVP Test262 stability audit
 
 **Date:** 2026-10-19  
-**Authority:** **D8.1.3v26** (MVP is the JavaScript MIR engine; dynamic source uses the retained interpreter). No semantic ruling changes.  
+**Authority:** **D8.4.3** (MVP is the JavaScript MIR engine; dynamic source uses the retained interpreter). No semantic ruling changes.  
 **Acceptance:** the complete configured suite must finish with zero failures,
 timeouts, crashes, missing results or retries. A successful process exit alone
 does not satisfy this gate.
@@ -30,7 +30,7 @@ LAMBDA_TEST262_EXE="$PWD/temp/js_mvp_test262_stability/final_release.exe" \
   --feature-summary --gtest_brief=1
 ```
 
-Under **D8.1.3v26**, `--mir-only` selects production MVP execution, with no
+Under **D8.4.3**, `--mir-only` selects production MVP execution, with no
 whole-program AST fallback. The run schedules **16,673 MIR-native assertion
 jobs + 24,109 JavaScript-harness jobs**, with zero AST-routed jobs. Dynamic
 `eval`/Function source still uses the specified retained interpreter. Original

@@ -13,7 +13,7 @@
 
 ## 1. Purpose and shape
 
-**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: the existing embedded
+**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2**: the existing embedded
 document walk commits pending child mutations through `layout_update_document`
 before sampling that child's animation. A parent callback can change child CSS
 without dirtying parent geometry; the host viewport is temporarily rebound and
@@ -133,8 +133,8 @@ The contract is simple and strict: **the native frame clock only wakes the loop;
 
 ## 8. Lambda document frame events
 
-> **This section verified:** 2026-10-09. D7.5.3 shared host boundary;
-> D4.5.1v4 document ownership; D5.3.3 precise script roots.
+> **This section verified:** 2026-10-09. D9.5.6 shared host boundary;
+> D5.5.1 document ownership; D6.3.3 precise script roots.
 
 Presentation commits also coalesce a `render` event for each owning Lambda
 view template that declares an `on render` handler. Initial document layout
@@ -171,7 +171,7 @@ retaining a Lambda closure or `Item` in native storage.
 
 Native pointer capture follows the same retained presentation correspondence
 through `radiant_pointer_capture_follow_rebuild`, using the shared
-`view_state_corresponding_node` path helper (D7.5.3/S9.1.4). Both pending and
+`view_state_corresponding_node` path helper (D9.5.6/S9.1.4). Both pending and
 current capture owners move before the old result is retired. Explicit DOM
 removal still releases capture normally. The timeline editing fixture verifies a
 drag across repeated live redraws, intentional clicks after dragging, keyboard
@@ -200,51 +200,51 @@ records with CPU record/replay/total times and operation counters. Automated
 use separate one-step events when pairing every callback with a paint. Exclude
 initial/input-drain callbacks explicitly rather than aligning by record count.
 Input and DOM-node arena byte counts accompany pool counts so retained arena
-allocations cannot be mistaken for bounded document storage (D4.1.4v5).
+allocations cannot be mistaken for bounded document storage (D5.1.4).
 The trace also separates DOM-pool growth during cascade from total commit growth.
 Journal capacity and canonical style counts/live/cold bytes accompany the trace
 so cache growth can be distinguished from allocations outside the style epoch.
 Source-position/selection event snapshots use rooted GC maps/arrays, cloned from
-private immutable per-document schemas (D4.1.1v2, D5.3.3). Retaining an event
+private immutable per-document schemas (D5.1.1, D6.3.3). Retaining an event
 snapshot does not force new Input-arena allocations on every frame.
 Native FocusEvent creation also retains its `relatedTarget` before allocating
 the init record. The trusted native-event factory roots init/type/result, and
 the FocusEvent constructor roots its inputs and result while adding fields
 (`lambda/dom/dom_events.cpp:1492`, `js_ctor_focus_event_fn`,
-`js_create_trusted_native_event`, `js_create_native_focus_event`; D5.3.3).
+`js_create_trusted_native_event`, `js_create_native_focus_event`; D6.3.3).
 Handler-created temporary elements use runtime GC ownership. Only template body
 retransform temporarily enables the retained UI output arena; nested scopes
-restore the prior allocation owner (D4.1.1v2, D4.5.1v4). GC values retained in
-model state remain rooted through subsequent rendering (D5.3.3).
+restore the prior allocation owner (D5.1.1, D5.5.1). GC values retained in
+model state remain rooted through subsequent rendering (D6.3.3).
 Native DOM nodes also retain managed backing Elements and text Strings in precise
 registry slots, including detached nodes pinned by retained wrappers. Comments
 retain their source Element. Retirement and runtime teardown release those roots;
 Input-backed values need none
-(D4.1.1v2, D4.1.3). A copied DOM header reloads borrowed data/content pointers
+(D5.1.1, D5.1.3). A copied DOM header reloads borrowed data/content pointers
 through `dom_element_to_element()` after its GC owner compacts. Independent
 DOM edits end the corresponding borrow. The collector still fixes only its
-surviving owners, as required by D4.3.1; native headers are never traced.
+surviving owners, as required by D5.3.1; native headers are never traced.
 Adoption transfers the root against its physical GC heap, including between
 documents with different runtimes. Document destruction withdraws roots before
 resource callbacks can destroy an adopted source document and its heap.
-Replacing a text backing String updates its registry root (D5.3.3).
+Replacing a text backing String updates its registry root (D6.3.3).
 
 The reconcile journal grows reusable document-owned storage for larger turns;
 reset releases generation-checked node pins and retains capacity. Document
 teardown frees the grown buffer. Allocation failure uses the established broad
 fallback. Reconcile selector matchers use caller-owned storage through the
-shared initializer. Neither mechanism depends on a slide scene model (D7.5.3).
+shared initializer. Neither mechanism depends on a slide scene model (D9.5.6).
 
 When every recorded mutation affects only detached nodes, reconciliation retires
 the journal without recascading, laying out or repainting the connected document
-(`post_html_handler_detached_only_commit`, D1.3v3). Node state and MutationObserver
+(`post_html_handler_detached_only_commit`, D1.3). Node state and MutationObserver
 delivery remain intact; subsequent insertion emits a connected mutation that
 resolves and lays out the subtree. This path requires an existing layout snapshot
 and declines unknown or overflowed records, stylesheet changes and pre-existing
 reflow requests (`test/ui/dom_mutation_detached_geometry.json`).
 
 The shared DOM catalog also publishes `presentation_style_set_property(node,
-property, value)` and `presentation_style_clear(node)` (D7.5.3). Transient samples
+property, value)` and `presentation_style_clear(node)` (D9.5.6). Transient samples
 are owned CSS declarations at animation origin, preserved across recascade and
 released through normal node/document teardown. Author attributes remain intact;
 author `!important` values retain precedence. Same-value writes do not invalidate

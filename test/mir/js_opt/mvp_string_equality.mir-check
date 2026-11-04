@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S1.11, D8.4.1v2: string equality uses the shared allocation-free UTF-16 equality kernel; relational comparisons retain their ordering helper. The equality fixture has four operand comparisons and four comparisons with the boxed expected parameter.",
+  "description": "S1.11, D7.4.1: string equality uses the shared allocation-free UTF-16 equality kernel; relational comparisons retain their ordering helper. The equality fixture has four operand comparisons and four comparisons with the boxed expected parameter.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

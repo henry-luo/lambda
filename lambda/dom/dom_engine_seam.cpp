@@ -11,7 +11,7 @@
 #include "dom_event_host.h"
 
 // Native providers belong to the lower runtime; native module registration
-// publishes immutable process-lifetime tables without an upward link (D7.1.3).
+// publishes immutable process-lifetime tables without an upward link (D9.1.3).
 static const DomCanvasEngineOps* canvas_engine_operations = nullptr;
 static const DomWebGlEngineOps* webgl_engine_operations = nullptr;
 static const DomStyleEngineOps* style_engine_operations = nullptr;
@@ -204,6 +204,10 @@ DOM_ENGINE_WEAK bool dom_engine_element_viewport_origin(DomElement* e, float* x,
 DOM_ENGINE_WEAK bool dom_engine_attribute_has_relational_css_dependency(DomDocument* d, const char* n) {
     (void)d; (void)n; return true;
 }
+DOM_ENGINE_WEAK bool dom_engine_attribute_has_css_dependency(DomDocument* d, DomElement* e, const char* n) {
+    (void)d; (void)e; (void)n; return true;
+}
+DOM_ENGINE_WEAK void dom_engine_publish_metadata_change(DomDocument* d) { (void)d; }
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {
     (void)v; (void)f; (void)set;
 }

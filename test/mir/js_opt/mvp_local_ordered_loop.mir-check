@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2/D8.4.2v2: an ordered local comparison proves Number presence beside unrelated eval. Keep the numeric index path and invalidate the fact after a conditional write. A separate function's direct eval retains live generic bindings.",
+  "description": "D7.4.1/D7.4.2: an ordered local comparison proves Number presence beside unrelated eval. Keep the numeric index path and invalidate the fact after a conditional write. A separate function's direct eval retains live generic bindings.",
   "checks": [
     {
       "in_func": "mvp_lmd_f2",

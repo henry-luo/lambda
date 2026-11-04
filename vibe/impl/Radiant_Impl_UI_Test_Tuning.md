@@ -75,7 +75,7 @@ Tried and reverted: a thread-local last-range cache in front of the GC page inde
 
 After this round the 127 heavy fixtures run alone in 248 s (393 s at the start, −37%). By family: doc −39%, dtna −42%, timeline −61%, superlambda −41%, tetris −40%, chart −34%.
 
-Unit test for the font-key fix: `test_radiant_text_query_gtest` (commit ee56c3536). It fails with 24 context builds against the old key and passes with at most 1.
+Unit test for the font-key fix: `test_radiant_document_gtest` (commit ee56c3536). It fails with 24 context builds against the old key and passes with at most 1.
 
 ### 4.2 Doc tree round (2026-10-13)
 
@@ -115,6 +115,31 @@ Verification: a differential run of every UI fixture with replay on and off, wit
 - UI gate: 720/720. Extended suites: 69 of 302 fail, the same count as 2026-10-12 master.
 - Layout baseline: every suite passes except `markdown` `md_nuxt-readme` (100% → 99.3% elements). That regression reproduces with all of this round's full-layout changes disabled, so it comes from code outside this round.
 
+### 4.3 Document integration runner (2026-11-04)
+
+Renamed `test_radiant_text_query_gtest` to `test_radiant_document_gtest`, displayed
+as **Radiant Document Integration Tests**, to reflect its text/layout, controls,
+frame, audio and fullscreen coverage. Build configuration, documentation and CSS
+qualification references use the new name.
+
+Production tuning retains each logical-axis mapping in the component-source
+cache instead of rebuilding it at orthogonal boundaries, allocates native CSS
+query scratch only when needed, and caches short macOS Unicode line-break maps
+with owned text bytes and locale invalidation. Each boundary query owns a copy
+of its map, preserving nested-query lifetime (**D4.1.4v5 / D4.5.1v4**).
+
+The user specified the **standalone debug** run as the 30-second acceptance
+gate. Three alternating runs of pinned binaries, with unchanged `debug_native`
+flags, passed all 530 cases each: original **25.74 / 25.99 / 26.89 s**, final
+**20.94 / 19.38 / 19.48 s**. Median wall time fell **25.0%**, to **19.48 s**.
+All original cases and assertions remain; the existing Unicode-boundary case
+also checks reused source storage and retained maps.
+
+The required Radiant baseline passed with **9,197 passed, 303 partial, zero
+failed and two skipped**. Under the original parallel scheduling history, this
+runner passed in **46.41 s wall**; that contention measurement is separate from the
+standalone target. Evidence: `temp/radiant-document-tuning/report.md`.
+
 ## 5. What remains heavy
 
 - `view/radiant_view_math_intensive_scroll` (~21 s):
@@ -125,7 +150,7 @@ Verification: a differential run of every UI fixture with replay on and off, wit
   - Further gains need an old generation with write barriers.
 - Doc fixtures:
   - Pane clicks replay the file panel (§4.2). A file selection still re-renders the whole tree, because the selection highlight is app state; moving it into the rows would let a selection re-render only the two affected rows.
-  - The incremental rebuild still deep-copies every re-render into fresh DOM, so a re-rendered subtree is always fully restyled and relaid. That copy is an implementation choice, not a ruling: **D4.5.3v2** governs only DOM construction from Lambda scripts and embraces retention downstream. [Lambda_Proposal_DOM_Reconciliation](../Lambda_Proposal_DOM_Reconciliation.md) designs keeping and patching existing occurrences; its condition for reuse (Q2) and phasing (Q4) await review.
+  - The incremental rebuild still deep-copies every re-render into fresh DOM, so a re-rendered subtree is always fully restyled and relaid. That copy is an implementation choice, not a ruling: **D5.5.3** governs only DOM construction from Lambda scripts and embraces retention downstream. [Lambda_Proposal_DOM_Reconciliation](../Lambda_Proposal_DOM_Reconciliation.md) designs keeping and patching existing occurrences; its condition for reuse (Q2) and phasing (Q4) await review.
   - `test/ui/doc_editor.ls` is an 86% fork of the shipped `lmd/package/doc/doc_viewer.ls`. Retiring it is the owner's decision.
 - dtna `rate_modes` and `button_modes` (6–7 s): not profiled yet.
 

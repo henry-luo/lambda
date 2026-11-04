@@ -215,7 +215,7 @@ saves the current value; address folding must not bypass that saved value in
 another block. The old test noticed only a PHI with a same-block predecessor,
 missing multi-block loops. Reject cross-block PHI forwarding in the shared
 address-folding guard; local PHIs and other stable expressions still fold.
-All optimization passes remain enabled (S1.6, D8.2.6v2).
+All optimization passes remain enabled (S1.6, D8.2.6).
 
 Touches `mir-gen.c`. The standalone `phi_saved_loop_value.mir` fixture and
 `MirOptimizer.CrossBlockPhiAddressFoldingKeepsSavedValue` test cover both loop

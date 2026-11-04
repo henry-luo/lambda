@@ -2,8 +2,8 @@
 
 - **Date:** 2026-08-20
 - **Last updated:** 2026-09-24
-- **Status:** **PRODUCTION CUTOVER COMPLETE FOR NORMAL LAMBDA FILES/MODULES.** P2.1 source spans, P2.2 shared construction seams, P2.3 direct AST reduction, and the normal-runner P2.4 selector are landed. With `LAMBDA_PARSER` unset (or `c`), the first-party C hybrid recursive-descent + Pratt parser builds the existing typed AST directly. `LAMBDA_PARSER=tree`/`tree-sitter` is an explicit reference/rollback mode; `compare` records Tree-sitter syntax acceptance after the C AST is built and routes disagreements to D8.1.2v3 review. The REPL and a few legacy inspection paths still retain Tree-sitter fragment trees because their append-only source/span transaction is separate from the file cutover.
-- **Formal authority:** **D8.1.1v10** (first-party C parser → shared typed AST pipeline), **D8.1.2v3** (`grammar.js` as the best first-cut structural reference, C as the final production implementation, disagreements manually reviewed), **D8.2.1–D8.2.5** (one core AST, no tree rewriting, indexed compilation unit, typed pass schedule), and **D4.1.1v2** (AST/const-pool ownership). The accepted language and S2.4.3v3/S7.6.3v2 syntax rulings are unchanged.
+- **Status:** **PRODUCTION CUTOVER COMPLETE FOR NORMAL LAMBDA FILES/MODULES.** P2.1 source spans, P2.2 shared construction seams, P2.3 direct AST reduction, and the normal-runner P2.4 selector are landed. With `LAMBDA_PARSER` unset (or `c`), the first-party C hybrid recursive-descent + Pratt parser builds the existing typed AST directly. `LAMBDA_PARSER=tree`/`tree-sitter` is an explicit reference/rollback mode; `compare` records Tree-sitter syntax acceptance after the C AST is built and routes disagreements to D8.1.1 review. The REPL and a few legacy inspection paths still retain Tree-sitter fragment trees because their append-only source/span transaction is separate from the file cutover.
+- **Formal authority:** **D8.3.3** (first-party C parser → shared typed AST pipeline), **D8.1.1** (`grammar.js` as the best first-cut structural reference, C as the final production implementation, disagreements manually reviewed), **D8.2.1–D8.2.5** (one core AST, no tree rewriting, indexed compilation unit, typed pass schedule), and **D5.1.1** (AST/const-pool ownership). The accepted language and S2.4.3v3/S7.6.3v2 syntax rulings are unchanged.
 - **Surface-syntax authority:** the formal syntax rulings win. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut verifier, but it misses reviewed corner cases; the production C parser is the shipped implementation and can also be wrong. A disagreement is therefore a manual-review case, not an automatic verdict for either parser. S2.4.3v3 governs greedy namespace-qualified names, and S7.6.3v2 governs query at the postfix/member tier.
 - **Related:** [grammar-reduction reference](Lambda_Grammar_Reduce.md) (historical techniques and Tree-sitter size measurements), `doc/dev/lambda/LR_02_Parsing_AST.md` (C parser and reference builder), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp`, `lambda/runtime/ast-core.hpp`, `lambda/runtime/parse_type_pattern.cpp` (and, until 2026-09-21, `lambda/runtime/parse_path_expr.cpp`).
 - **Proposal IDs:** CGP1–CGP21.
@@ -48,7 +48,7 @@ The remaining size is therefore architectural rather than a missed compiler or g
 
 - **G1 — current-language parity.** Accept every reviewed valid fixture and
   reject every reviewed invalid syntax fixture; parser disagreements remain
-  review items until adjudicated under D8.1.2v3.
+  review items until adjudicated under D8.1.1.
 - **G2 — materially smaller code.** Measure the complete unique lexer/parser contribution, not source-line count or a stripped test harness.
 - **G3 — comparable parse speed.** Compare on identical preloaded sources in a release build, with repeatable aggregate and per-file measurements.
 - **G4 — same semantic AST.** Phase 2 must produce the same node kinds, child order, sibling links, operators, source spans, names, types/contracts, scopes, bindings, captures, and compiler-pass inputs.
@@ -59,18 +59,18 @@ The remaining size is therefore architectural rather than a missed compiler or g
   editor grammar, bindings artifact, and one side of differential testing after
   leaving the production path. C/Tree-sitter disagreements require manual
   review against the governing syntax records because either side may contain
-  the defect (D8.1.2v3).
+  the defect (D8.1.1).
 - **G8 — one implementation of each semantic constructor.** The direct parser and temporary Tree-sitter path share extracted AST/type/path construction helpers; Phase 2 must not copy the large `build_ast.cpp` cases.
 
 ### 3.2 Non-goals
 
 - No Lambda syntax or semantic change is part of this migration.
-- The normal file/module switch is landed under D8.1.1v10; remaining Tree-sitter
+- The normal file/module switch is landed under D8.3.3; remaining Tree-sitter
   use is explicit reference/rollback or a separate REPL/inspection consumer.
 - The POC does not replace Tree-sitter for JavaScript, TypeScript, Python, Ruby, Bash, LaTeX, or other guest/input grammars.
 - The runtime parser does not need Tree-sitter's incremental-edit API. Tree-sitter may remain the editor-facing grammar.
 - The parser will not silently accept a simpler language to win size.
-- The parser will not introduce a fifth allocator mechanism; parser scratch state is bounded stack state or existing pool/arena-owned state under D4.1.1v2/D4.1.4v4.
+- The parser will not introduce a fifth allocator mechanism; parser scratch state is bounded stack state or existing pool/arena-owned state under D5.1.1/D5.1.4.
 - The frozen C2MIR path receives no special support.
 
 ## 4. Current pipeline and compatibility boundary
@@ -270,7 +270,7 @@ Phase 1 requires reject/status/span parity, not byte-identical Tree-sitter recov
 
 - Parser recursion is capped at the existing effective nesting limit (`MAX_BUILD_DEPTH` is currently 1000); exceeding it returns a structured syntax error rather than overflowing the native stack.
 - Repetition lists use the existing `ArrayList`, pool, or arena facilities only where a list cannot be reduced incrementally.
-- Phase 2 AST nodes and compiler-owned constants remain in the AST/const pool under D4.1.1v2.
+- Phase 2 AST nodes and compiler-owned constants remain in the AST/const pool under D5.1.1.
 - Speculative lookahead is allocation-free. Committed AST construction may allocate; on failure the whole compilation pool is released.
 - The lexer validates offsets and UTF-8 progress so malformed input cannot create an infinite loop.
 
@@ -291,7 +291,7 @@ The current snapshot has 1,472 tracked `.ls` files, of which 921 are under
 `test/lambda`; the generated manifest, not these prose counts, is authoritative
 for corpus membership. It records both Tree-sitter and C classifications. The
 expected language classification comes from reviewed fixtures under
-**D8.1.2v3**, not from whichever parser processed the file first.
+**D8.1.1**, not from whichever parser processed the file first.
 
 **Initial P1.0 artifact (2026-08-19):** `bash utils/lambda_parser_manifest.sh temp/lambda-parser-poc/manifest.tsv` produced the 1,472-source / 921-`test/lambda` snapshot above. Its header records the Git commit and SHA-256 hashes of both grammar layers and `scanner.c`; each source row records path, byte count, and SHA-256. The generated manifest remains untracked under `temp/` and is regenerated for each differential run.
 
@@ -351,7 +351,7 @@ schema/OpenAPI sources, three positive source tests, one semantic-negative
 fixture, and one validator fixture. The known syntax-negative fixtures for
 empty parenthesized expressions and bare string `<` comparison now return
 non-OK. This historical checkpoint established the recognizer comparison; under
-**D8.1.2v3**, the correctness gate remains open until every disagreement is
+**D8.1.1**, the correctness gate remains open until every disagreement is
 reviewed against the formal syntax rulings and pinned in the fixture manifest.
 
 ### P1.4 — size measurement
@@ -375,7 +375,7 @@ Performance testing uses a release build only. Sources are preloaded so disk I/O
 - Tree-sitter parse with `old_tree = NULL`, deleting each result tree;
 - C parse with the POC sink, resetting parser scratch state between sources.
 
-Use one warm-up followed by five complete measured runs, reporting the median, matching D8.6.4v2's timing discipline. Record:
+Use one warm-up followed by five complete measured runs, reporting the median, matching D8.6.4's timing discipline. Record:
 
 - total corpus time and source MB/s;
 - median and p95 per-file latency;
@@ -452,8 +452,8 @@ consumer-migration task, not a prerequisite for the normal C parser default.
 
 ### P2.0 — revise the formal pipeline ruling (landed)
 
-The initial cutover recorded D8.1.1v3 and D8.1.2v2. The governing formal
-ruling is now **D8.1.1v10** / **D8.1.2v3** in spec version 6.0.0; S15.3 remains
+The initial cutover recorded D8.3.1 and D8.1.1. The governing formal
+ruling is now **D8.3.3** / **D8.1.1** in spec version 6.0.0; S15.3 remains
 unchanged: `input(f, 'lambda')` still produces the canonical `lm.` AST.
 
 ### P2.1 — make retained AST source locations parser-neutral
@@ -522,7 +522,7 @@ future sink. `ast_build.hpp` is now the shared construction boundary for:
   implicit-`~.field` lookup rule while the expression is being reduced.
 - Optional typed parameters retain their scalar ABI lane but publish a nullable
   contract; omitted arguments therefore enter direct native calls as semantic
-  `null`, matching the reference AST/runtime boundary (D2.5.1).
+  `null`, matching the reference AST/runtime boundary (D2.4.1).
 
 The Tree-sitter walker and direct sink use those literal/container/named-
 argument and scope/forward-definition helpers, including function/procedure
@@ -579,7 +579,7 @@ modules is now performed by the direct AST/import reductions; REPL fragment
 parsing remains a retained Tree-sitter transaction until its source-offset
 contract is migrated.
 
-This design is implemented under D8.1.1v10 and preserves D8.2.1/D8.2.2's one
+This design is implemented under D8.3.3 and preserves D8.2.1/D8.2.2's one
 core AST/no-rewriting rules.
 
 #### P2.3 reduction-contract design (2026-08-20)
@@ -654,7 +654,7 @@ LAMBDA_PARSER=compare
 ```
 
 `compare` currently parses the direct AST and then runs Tree-sitter for a
-first-cut reference classification. A disagreement requires the **D8.1.2v3**
+first-cut reference classification. A disagreement requires the **D8.1.1**
 manual-review path; it is not an automatic verdict for either front end. The
 mode does not claim canonical AST equality: AST pools, scopes, names, imports,
 and type objects are owned state, and a complete pointer-free serializer is not
@@ -712,7 +712,7 @@ The cutover gate used for the normal runner is:
 
 The full canonical AST serializer, release timing ratchet, and removal of the
 Tree-sitter archive remain follow-up gates for deleting the reference path. They
-are not prerequisites for the production-default cutover recorded by D8.1.1v10.
+are not prerequisites for the production-default cutover recorded by D8.3.3.
 
 ### P2.7 — parser-neutral source, cursor, and diagnostic substrate
 
@@ -725,10 +725,10 @@ the AST and Mark construction layers, not by making the Lambda parser depend on
 `Input` or `MarkBuilder`.
 
 That split follows the formal ownership boundary: the C parser reduces directly
-to the shared typed AST under **D8.1.1v10**, whereas `MarkBuilder` remains an IO
-API that owns values through its `Input*` under **D7.1.5**. Parsed document
-values remain Input-arena owned and outside GC rooting under **D4.1.2** and
-**D4.1.3**.
+to the shared typed AST under **D8.3.3**, whereas `MarkBuilder` remains an IO
+API that owns values through its `Input*` under **D9.1.4**. Parsed document
+values remain Input-arena owned and outside GC rooting under **D5.1.2** and
+**D5.1.3**.
 
 Introduce a C-compatible syntax substrate with these responsibilities:
 
@@ -778,7 +778,7 @@ remain fail-closed.
 
 The direct parser receives the same report through a C callback; its AST sink
 does not receive `Input`, `MarkBuilder`, or format-specific recovery state.
-This preserves the no-replacement-tree rule of **D8.1.1v10** and prevents an IO
+This preserves the no-replacement-tree rule of **D8.3.3** and prevents an IO
 builder from becoming a compiler dependency.
 
 ### P2.8 — unify Input parsing; migrate Mark first
@@ -812,7 +812,7 @@ an error flag as an incidental parser side effect.
 
 Mark element content must also choose one append semantic. The present mixture
 of `MarkBuilder` and direct `list_push()` has the known normalization ambiguity
-recorded in **D2.6.5**. The migration decides this at the append site and uses
+recorded in **D3.3.1**. The migration decides this at the append site and uses
 the corresponding builder helper consistently; it does not recreate an ambient
 "disable string merging" flag.
 
@@ -909,9 +909,9 @@ scope and forward-binding side effects, so continuing after a bad production
 would otherwise require transactional rollback for every sink callback. A
 syntax-only recovery pass gives editor/CLI users useful multi-error diagnostics
 without making a partial typed AST executable or adding a replacement syntax
-tree, as required by **D8.1.1v10**.
+tree, as required by **D8.3.3**.
 
-Tree-sitter remains available for editor incremental trees under **D8.1.2v3**;
+Tree-sitter remains available for editor incremental trees under **D8.1.1**;
 the C parser need not replicate Tree-sitter `ERROR`/`MISSING` nodes to provide
 compiler diagnostics.
 
@@ -972,7 +972,7 @@ skip layer because `parser_next_significant()` already folds NEWLINE into
 `nl_before`. The direct parser POC remains green (32/32), and the full baseline
 gate is green (3,900/3,900: 2,104 input plus 1,796 Lambda runtime tests).
 This preserves the fail-fast direct-AST and syntax-only recovery split required
-by **D8.1.1v10**. A Mark compatibility correction retained semicolon separators
+by **D8.3.3**. A Mark compatibility correction retained semicolon separators
 immediately before an element close, preserving existing graph fixture syntax.
 
 **P2.13 implementation checkpoint (2026-08-26):** a second C-parser
@@ -984,7 +984,7 @@ Pratt precedence and type-delimiter dispatch are now table-driven. The focused
 parser suite remains green (32/32), parser robustness is green (84/84), and
 the complete baseline gate is green (3,900/3,900). The physical LOC metric
 includes mechanical continuation compaction after these semantic
-consolidations; behavior remains governed by **D8.1.1v10**.
+consolidations; behavior remains governed by **D8.3.3**.
 
 ## 8. Performance and size interpretation
 
@@ -994,7 +994,7 @@ The two phases answer different performance questions:
 |---|---|
 | Phase 1 C recognizer versus Tree-sitter parse | Is the parser architecture itself viable? |
 | Phase 2 C parse→AST versus Tree-sitter parse+CST→AST | Does skipping the CST improve the real front-end path? |
-| full compiler parse-through-link timing | Ensure the switch does not disturb the D8.6.4v2 compiler timing ratchets |
+| full compiler parse-through-link timing | Ensure the switch does not disturb the D8.6.4 compiler timing ratchets |
 
 Tree-sitter creates a CST while the C POC sink does not. That is not an accidental benchmark advantage; eliminating the CST is part of the proposed architecture. Phase 2 nevertheless repeats the end-to-end comparison because direct semantic construction, names, types, and scopes are real costs that Phase 1 intentionally excludes.
 
@@ -1004,7 +1004,7 @@ The 818,048-byte archive is the fair current **Lambda grammar** baseline. Do not
 
 | Risk | Mitigation |
 |---|---|
-| grammar drift between C and Tree-sitter | use `grammar.js` for the first cut; place every disagreement in the reviewed manifest, adjudicate it against the formal syntax rulings, then fix the incorrect side and pin the case (D8.1.2v3) |
+| grammar drift between C and Tree-sitter | use `grammar.js` for the first cut; place every disagreement in the reviewed manifest, adjudicate it against the formal syntax rulings, then fix the incorrect side and pin the case (D8.1.1) |
 | hand parser accepts only the happy-path corpus | include negative fixtures, delimiter/operator mutation, full-source consumption, and randomized corpus tests |
 | arrow/element/block ambiguities cause backtracking or semantic side effects | bounded side-effect-free probes and explicit commit points only |
 | direct AST differs in invisible metadata | canonical comparator covers types, bindings, scopes, captures, spans, constants, and index ownership |
@@ -1021,12 +1021,12 @@ The 818,048-byte archive is the fair current **Lambda grammar** baseline. Do not
 The normal production switch is now landed. The formal and working records were
 updated together:
 
-1. `doc/Lambda_Formal_Design.md`: D8.1.1v10, D8.1.2v3, semver, implementation status.
+1. `doc/Lambda_Formal_Design.md`: D8.3.3, D8.1.1, semver, implementation status.
 2. `doc/dev/lambda/LR_01_Compilation_Pipeline.md`: production source→AST pipeline and explicit reference selector.
 3. `doc/dev/lambda/LR_02_Parsing_AST.md`: C lexer/Pratt/RD parser and direct AST sink, with the reference CST adapter retained.
 4. [Grammar-reduction reference](Lambda_Grammar_Reduce.md): preserves historical
    tuning results; Tree-sitter is a structural reference and the C parser is the
-   production front end under D8.1.1v18 / D8.1.2v3.
+   production front end under D8.3.2 / D8.1.1.
 5. `vibe/Lambda_Repl.md`: explicitly records its transitional retained Tree-sitter fragment transaction.
 6. Build/developer documentation: identifies `grammar.js` as the best first-cut
    structural reference/editor grammar and the C files as the final production
@@ -1043,7 +1043,7 @@ Language-reference documents do not need a syntax rewrite because the accepted l
 | **CGP2** | The final runtime parser builds the existing typed AST directly and retains no replacement syntax tree. | landed for normal files/modules |
 | **CGP3** | Phase 1 implements the complete current language before size/performance can authorize Phase 2. | landed |
 | **CGP4** | Phase 1 does not switch production or construct the final AST. | historical phase rule |
-| **CGP5v2** | `grammar.js` is the best structural reference, editor/bindings grammar, and first-cut verifier, while the C parser is the final production implementation. Neither is unquestioned: every disagreement is manually adjudicated against the formal syntax rulings and pinned by a fixture. | decided 2026-09-14; D8.1.2v3 |
+| **CGP5v2** | `grammar.js` is the best structural reference, editor/bindings grammar, and first-cut verifier, while the C parser is the final production implementation. Neither is unquestioned: every disagreement is manually adjudicated against the formal syntax rulings and pinned by a fixture. | decided 2026-09-14; D8.1.1 |
 | **CGP6** | Expressions use one Pratt operator table; declarations/statements/delimited forms use recursive descent. | landed |
 | **CGP7** | Ambiguity uses bounded, allocation-free lookahead, not general backtracking or GLR. | landed |
 | **CGP8** | Source ranges become parser-neutral before direct AST integration; synthetic `TSNode` is forbidden. | landed for direct AST |
@@ -1053,10 +1053,10 @@ Language-reference documents do not need a syntax rewrite because the accepted l
 | **CGP12** | Phase 2 requires canonical AST, diagnostic, execution, baseline, size, and end-to-end timing parity. | follow-up for reference-path removal |
 | **CGP13** | Tree-sitter may remain for editor/reference tooling and other languages, but leaves the production Lambda parse path after the switch gate. | normal path switched; archive retained for REPL/tools |
 | **CGP14** | REPL completeness becomes an explicit parser result, not a recovered-tree inspection. | follow-up |
-| **CGP15** | The formal D8.1 rulings are revised only with a production-pipeline decision or an explicit user ruling about the parser/reference contract. | landed: D8.1.1v10/D8.1.2v3 |
+| **CGP15** | The formal D8.3 rulings are revised only with a production-pipeline decision or an explicit user ruling about the parser/reference contract. | landed: D8.3.3/D8.1.1 |
 | **CGP16** | A failed size, correctness, or performance gate stops the migration without weakening the language or hard-coding corpus cases. | landed |
 | **CGP17** | Phase 2 adapts existing type/path parsers from `TSNode` diagnostics to parser-neutral spans; synthetic `TSNode` and a copied C type/path grammar are forbidden. | landed |
-| **CGP18** | Source access, cursor movement, and diagnostics are parser-neutral infrastructure; `InputParseSession` and the direct AST parser consume it without crossing the D7.1.5 IO boundary. | compatibility bridge landed; final zero-copy session pending |
+| **CGP18** | Source access, cursor movement, and diagnostics are parser-neutral infrastructure; `InputParseSession` and the direct AST parser consume it without crossing the D9.1.4 IO boundary. | compatibility bridge landed; final zero-copy session pending |
 | **CGP19** | Mark is migrated first to strict full-source parsing with an explicit result status, then other Input parsers adopt the same session/finalization contract. | Mark strict slice landed; other formats pending |
 | **CGP20** | Type/path parsers retain their specialised grammar and AST ownership but consume the shared bounded lexer cursor rather than duplicating lexical rules. | shared lexical primitives landed; cursor/table completion pending |
 | **CGP21** | Invalid Lambda source receives a syntax-only recovering diagnostic pass after the fail-fast AST pass; no partial typed AST is published or executed. | landed for top-level separator recovery; nested-context recovery pending |
@@ -1078,7 +1078,7 @@ Tree-sitter archive.
 ## Appendix S — Superseded rulings
 
 - ~~**CGP5** `grammar-lambda.js` remains the structural syntax oracle and
-  editor/bindings grammar.~~ Superseded by **CGP5v2** / **D8.1.2v3** on
+  editor/bindings grammar.~~ Superseded by **CGP5v2** / **D8.1.1** on
   2026-09-14: that file is stale, `grammar.js` is the best first-cut structural
   reference, and neither Tree-sitter nor the production C parser decides a
   disagreement without review against the formal syntax rulings.

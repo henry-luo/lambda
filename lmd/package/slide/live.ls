@@ -1,5 +1,5 @@
 // The cached rendered tree keeps reactive state writes from regenerating scenes.
-// Frame handlers patch live wrappers only (S12.1.3, D4.5.1v4).
+// Frame handlers patch live wrappers only (S12.1.3, D5.5.1).
 import dom
 import c: .common
 import html: .html

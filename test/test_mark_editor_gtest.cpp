@@ -1483,7 +1483,7 @@ int main(int argc, char **argv) {
 // ============================================================================
 // SCU7–SCU9: one storage resolver, cached on the ShapeEntry.
 // The table pins scalar carriers and persistent field descriptors separately
-// where D2.5.2v3 gives them different widths. The projections are checked
+// where D2.4.2 gives them different widths. The projections are checked
 // against the corresponding record.
 // ============================================================================
 #include "../lambda/core/shape_builder.hpp"
@@ -1536,7 +1536,7 @@ TEST(LaneStorageResolverTests, TableAndProjectionsAgree) {
         {"bool?",    mk_optional(pool, &TYPE_BOOL),       LANE_STORAGE_BOOL,       1, 1, 1,  LMD_TYPE_BOOL},
         {"float",    &TYPE_FLOAT,                         LANE_STORAGE_FLOAT64,    0, 1, 8,  LMD_TYPE_FLOAT},
         {"float?",   mk_optional(pool, &TYPE_FLOAT),      LANE_STORAGE_FLOAT64,    1, 1, 8,  LMD_TYPE_FLOAT},
-        // D2.5.2v3: the nullable scalar carrier is an Item; persistent fields own a TypedItem
+        // D2.4.2: the nullable scalar carrier is an Item; persistent fields own a TypedItem
         {"int64",    &TYPE_INT64,                         LANE_STORAGE_SIZED_I64,  0, 0, 8,  LMD_TYPE_INT64},
         {"int64?",   mk_optional(pool, &TYPE_INT64),      LANE_STORAGE_ITEM,       1, 1, 8,  LMD_TYPE_INT64,
                     LANE_STORAGE_TYPED_ITEM, 9},
@@ -1624,7 +1624,7 @@ TEST(LaneStorageResolverTests, ShapeBuilderHasNoFieldLimit) {
 }
 
 //==============================================================================
-// SHARED TYPES (D3.4.3v3): an edit never rewrites a type another value uses
+// SHARED TYPES (D3.4.3): an edit never rewrites a type another value uses
 //==============================================================================
 
 // Two maps built by the same adds share one transition-tree TypeMap. An inline

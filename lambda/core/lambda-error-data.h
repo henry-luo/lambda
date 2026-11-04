@@ -100,6 +100,7 @@ typedef enum LambdaErrorCode {
     ERR_FOR_CLAUSE = 239,             // S14.1: misplaced, repeated or malformed for-header clause
     ERR_TYPE_CYCLE = 240,             // S11.4.12: a type refers to itself through no structural position
     ERR_DEFERRED_ADMISSION = 241,     // advisory: explicit local admission needs runtime validation
+    ERR_DUPLICATE_KEY = 242,          // repeated explicit key in one literal
 
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors

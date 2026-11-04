@@ -1,4 +1,4 @@
-// Tune29 §19.1 item 2 (D3.2.4v4, D3.3.3v3): `[]` crossing a T[] boundary is
+// Tune29 §19.1 item 2 (D4.2.5, D4.3.3): `[]` crossing a T[] boundary is
 // built already admitted, and a declared T[] read from an admitted record's
 // field skips the full check for any container value. Every value below must
 // behave exactly as through the checked boundary.

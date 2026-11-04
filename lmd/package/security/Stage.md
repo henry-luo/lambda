@@ -1,6 +1,6 @@
 # Inactive package decoder
 
-Authority: **D7.5.2, D7.5.8**. `lambda.security.package_stage` implements the
+Authority: **D11.1.2, D11.2.4**. `lambda.security.package_stage` implements the
 initial ZIP image policy in Lambda Script. It parses captured bytes using the
 existing bounded native archive reader (**S12.1.1v3, S14.3.1v3**), validates the
 complete namespace, then emits exact member bytes. It executes no package code,
@@ -87,7 +87,7 @@ a corrupt-record repair interface.
 Authentic archive bytes and a host receipt still require managed-image admission
 before installation. The installer must validate its package/code/publisher and
 capability contract, recheck current trust/policy, publish a crash-safe version
-selection, and pin live native versions (**D7.3.2, D7.5.8**). The receipt is not an
+selection, and pin live native versions (**D9.4.2, D11.2.4**). The receipt is not an
 independent publisher signature over the extracted file table. Activation,
 installed-catalog coordination, image/admission format and associated restart,
 revocation and power-loss qualification remain open. Hardened publisher launch

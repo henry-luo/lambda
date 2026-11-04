@@ -1,4 +1,4 @@
-// S9.1.4v2/D6.2.3v3: aliases, aggregates and known non-retaining calls stay local.
+// S9.1.4v2/D7.2.3: aliases, aggregates and known non-retaining calls stay local.
 fn discard(value) => 0
 fn relay(value) => value
 fn forward(value) => relay(value)

@@ -1,4 +1,4 @@
-// static non-int carriers use their value helper; erased ints retain guarded speculation (D2.4.3, S4.4).
+// static non-int carriers use their value helper; erased ints retain guarded speculation (D2.3.5, S4.4).
 fn decimal_sum(a: decimal, b: decimal) any { return a + b }
 fn decimal_remainder(a: decimal, b: decimal) any { return a % b }
 fn decimal_quotient(a: decimal, b: decimal) decimal { return (a - a % b) / b }

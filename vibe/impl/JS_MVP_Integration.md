@@ -2,15 +2,15 @@
 
 **Date:** 2026-10-22
 
-**Authority:** **D8.1.3v29**, **D5.3–D5.4**, **D8.4.1v2–D8.4.3v2**
+**Authority:** **D8.4.2**, **D6.3–D6.4**, **D7.4.1–D7.4.3**
 **Design:** [JS MVP integration](../jube/JS_MVP_Integration.md)  
 **Status:** implementation and qualification in progress; integration is not closed.
 
 ## AUTO default checkpoint (2026-10-22)
 
-**D8.1.3v29** corrects the tier-policy interpretation: AUTO is the default;
+**D8.4.2** corrects the tier-policy interpretation: AUTO is the default;
 activated MIR uses fast MVP. The remaining AUTO failures had two lifetime causes
-(**D5.3.3**, **D5.4.2–D5.4.3**):
+(**D6.3.3**, **D6.4.2–D6.4.3**):
 
 - Retained AST definitions kept promoted callable Items after heap replacement.
   Full realm reset now unregisters their precise roots and clears heap-derived
@@ -42,7 +42,7 @@ qualification; the existing timing limit remains a qualification caveat.
 
 ### Debug compilation latency (2026-10-22)
 
-**D8.1.3v29** keeps AUTO's five-call promotion policy and native MVP entries.
+**D8.4.2** keeps AUTO's five-call promotion policy and native MVP entries.
 Promoted function/loop units now use O1 generation to bound the first hot-entry
 cost. Other MVP units retain O2, with the shared native O1 cap above 20,000
 instructions in their largest finalized function. The linker reuses each
@@ -70,7 +70,7 @@ hashes, profiles and per-file comparisons are under
 
 ### Common entry and ownership
 
-- **D8.1.3v29** keeps AUTO as JavaScript's default tier policy. Unset, empty
+- **D8.4.2** keeps AUTO as JavaScript's default tier policy. Unset, empty
   and `auto` selectors start supported units in AST; whole-unit fallback,
   eligible hot promotion and explicit `mir` use the fast MVP MIR engine.
   `ast` forces the interpreter. The common backend helper applies this policy
@@ -84,7 +84,7 @@ hashes, profiles and per-file comparisons are under
 - AUTO satellites that adopt native Promise intrinsics retain the native job
   policy. Installing MVP callbacks during promotion left suspended AST
   activations with a null MVP job owner; preserving the existing policy fixes
-  that ownership mismatch (**D5.3–D5.4**, **D8.1.3v29**).
+  that ownership mismatch (**D6.3–D6.4**, **D8.4.2**).
 - `-p` prints the actual Script completion after execution. It no longer
   changes the source grammar by wrapping the program in `console.log(...)`.
   The common entry uses the former explicit MVP value formatter, including
@@ -113,7 +113,7 @@ hashes, profiles and per-file comparisons are under
 - Native constructor and prototype lookups borrow initialized MVP intrinsic
   slots. Guest replacement of `Object` or another global does not alter
   intrinsic identity. Prototype lookup checks callable ABI before accessing a
-  `JsFunction` tail, as required by **D6.2.2v2**.
+  `JsFunction` tail, as required by **D7.2.2**.
 - Native Math, JSON, Reflect, Atomics and console getters consult those same
   slots. A prepared native realm retains its existing console and performance
   objects and methods. This consolidates lookup; remaining construction and
@@ -147,7 +147,7 @@ hashes, profiles and per-file comparisons are under
   chain. The interpreter chain remains solely as the precise lifetime owner
   of its cells. Child realms use the same registry implementation with their
   own records. Retiring an MVP realm removes borrowed storage references
-  before releasing interpreter environment roots (**D5.3**, **D5.4**).
+  before releasing interpreter environment roots (**D6.3**, **D6.4**).
 - Compiled local and resolved-cell accesses are unchanged. Registry creation
   and publication occur at entry for programs requiring dynamic source.
   V22 passes all 815 MVP/public execution cases, including cross-entry,
@@ -176,8 +176,8 @@ hashes, profiles and per-file comparisons are under
 - V57's five focused cases pass, including equal pooled/unpooled keys,
   deliberate hash collisions, upsert identity, binding kinds, borrowed
   storage, row compaction, and heap replacement
-  (`binding-index-focused-v57.json`). This preserves **D5.3/D5.4** ownership
-  and the semantic-miss contract of **D8.4.1v2**. The complete MVP suite
+  (`binding-index-focused-v57.json`). This preserves **D6.3/D6.4** ownership
+  and the semantic-miss contract of **D7.4.1**. The complete MVP suite
   passes **824/824**, optimization contracts pass **111/111**, and both CLI
   spellings pass **136/136 pairs** (`mvp-v57.json`, `opt-v57.json`,
   `entry-v57/results.json`). Fresh aggregate gates and release performance
@@ -197,7 +197,7 @@ hashes, profiles and per-file comparisons are under
   realm's constructor and prototype records. Native factories likewise
   consult an initialized MVP realm. Intrinsic constructors have precise
   slots independent of guest changes to a prototype's `constructor`
-  property (**D5.3**, **D5.4**).
+  property (**D6.3**, **D6.4**).
 - Native generator methods dispatch to the receiver's existing activation
   implementation; the extracted MVP resume helper keeps its original
   completion and scalar ownership behavior. V24 passes 815/815, including
@@ -213,7 +213,7 @@ hashes, profiles and per-file comparisons are under
   document setter could store `defaultView` before lazy root registration,
   which then cleared it. V25 also fails when the test uses that public setter.
   V26 registers the shared cache before publishing and limits its root span
-  to the four actual `Item` fields (**D5.3–D5.4**).
+  to the four actual `Item` fields (**D6.3–D6.4**).
 - A separate native-first probe found two strict-arguments thrower identities.
   V27 adopts the canonical Function constructor, prototype and immutable
   method/thrower bindings before initialization. It also borrows the prepared
@@ -232,7 +232,7 @@ hashes, profiles and per-file comparisons are under
   the new subclass assertion remains failing rather than being excluded.
 - V29 lets native constructors retain their allocation and `newTarget`
   handling through the common ABI, with explicit live ancestry links.
-  This follows the callable-layout distinction in **D6.2.2v2**.
+  This follows the callable-layout distinction in **D7.2.2**.
 - A separate v27 probe found that native RegExp methods/getters rejected
   compiled literals, and native Number methods rejected MVP's boxed `this`.
   V29 adopts the existing RegExp family and iterator prototype, routes
@@ -249,7 +249,7 @@ hashes, profiles and per-file comparisons are under
   reproduces distinct strict-arguments throwers and separate regex capture
   records. V30 reads canonical Function slots in either entry order and uses
   the context's one top-level match record; child realms retain separate
-  records (**D5.4**, **D6.2.2v2**). V30 passes 815/815 and all 17 expanded
+  records (**D6.4**, **D7.2.2**). V30 passes 815/815 and all 17 expanded
   native-first diagnostic checks.
 - V31 adopts primitive and error constructors before installing methods,
   removes their late prototype replacement, and dispatches caught-error
@@ -275,7 +275,7 @@ hashes, profiles and per-file comparisons are under
   alternatives to MVP intrinsics, and the import path wraps native callables
   despite their supported ABI. V34 shares immutable global-function records,
   preserves native callable identity and borrows prepared timer functions
-  before construction (**D6.2.2v2**, **D8.1.3v27**). Its aggregate run stops
+  before construction (**D7.2.2**, **D8.4.2**). Its aggregate run stops
   after 32 MVP passes and at the first Script case; entry checks pass 78/80.
   The invocation dispatcher still expects import to return a wrapper and
   recursively invokes the unchanged native callable. The release debugger
@@ -291,7 +291,7 @@ hashes, profiles and per-file comparisons are under
   V36 leaves native descriptors with their existing kernel and restores the
   callee's home realm at native invocation. The import check now requires
   canonical callable identity and a successful call after GC, alongside its
-  existing early-error and namespace assertions (**D5.4**, **D6.2.2v2**).
+  existing early-error and namespace assertions (**D6.4**, **D7.2.2**).
   V36 passes 815/815 MVP cases, 213/213 Script/AUTO cases and 80/80 CLI
   entry pairs. Its first MVP run passes 814/815: the new post-GC assertion
   assumes a field that the existing Lambda fixture does not expose on either
@@ -301,7 +301,7 @@ hashes, profiles and per-file comparisons are under
 - V37 removes the native RegExp operation dispatcher introduced while
   unifying receiver carriers. Each published callable now enters its
   semantic kernel directly; getter entries share the carrier/brand check,
-  and protocol callbacks use the catalog's executable getter (**D6.2.2v2**).
+  and protocol callbacks use the catalog's executable getter (**D7.2.2**).
   It passes 815/815 MVP cases, 213/213 Script/AUTO cases and 80/80 CLI entry
   pairs. The callable census falls from 66 to 38 semantic cases, matching
   HEAD's remaining cases; its zero-case ratchet still fails. The census
@@ -313,7 +313,7 @@ hashes, profiles and per-file comparisons are under
   enabled property callbacks. V26 removes that unit-level veto and explicitly
   rejects functions needing an eval environment. The existing per-function
   effect proof and own-data descriptor/type guards still decide admission
-  (**D8.4.1v2**, **D8.4.2v2**).
+  (**D7.4.1**, **D7.4.2**).
 - This change preserves the generic body on a guard miss and does not replay
   source. It does not yet broaden the planner to loops or indexed arrays.
   Qualification includes dynamic source beside a numeric kernel, accessor
@@ -330,7 +330,7 @@ hashes, profiles and per-file comparisons are under
   still exclude captured/external bindings and observable operations. Dense
   misses restore only unobservable local writes before entering the complete
   generic continuation; ordered facts are invalidated by writes
-  (**D8.4.1v2**, **D8.4.2v2**).
+  (**D7.4.1**, **D7.4.2**).
 - New emission/behavior fixtures retain holes, throwing inherited getters,
   NaN, infinity, negative zero, conditional writes and a function with its
   own direct eval. Node, V39 and V42 agree on both outputs. The dense fixture
@@ -349,13 +349,13 @@ hashes, profiles and per-file comparisons are under
   negative zero and fractional writes; both V54 and V55 produce the same
   checked output (`integral-index-v55-comparison.json`). The complete MVP
   suite passes **822/822** (`mvp-v55.json`). This implements the local-proof
-  requirement in **D8.1.3v27** and **D8.4.1v2**; release performance
+  requirement in **D8.4.2** and **D7.4.1**; release performance
   qualification remains outstanding.
 - V58 removes a redundant object-to-primitive stage from relational
   comparisons with one proven Number operand and no admitted BigInt domain.
   Such comparisons cannot select string ordering. The existing ToNumber
   miss still owns the other operand's conversion and exception; neither
-  operand is reevaluated (**D8.4.1v2**, **D8.4.2v2**).
+  operand is reevaluated (**D7.4.1**, **D7.4.2**).
 - The new fixture checks all four operators in both directions, numeric
   strings, holes, NaN, infinities, negative zero, conversion counts, Symbol
   errors, thrown-value identity and operand evaluation order. Node, V57 and
@@ -388,8 +388,8 @@ hashes, profiles and per-file comparisons are under
   Number arguments once at the callable entry. A miss selects the original
   generic body before any iteration. Eval environments, captured locals,
   parameter writes, property paths, calls, allocations and receiver
-  observations remain outside this loop proof (**D8.1.3v27**,
-  **D8.4.1v2**, **D8.4.2v2**).
+  observations remain outside this loop proof (**D8.4.2**,
+  **D7.4.1**, **D7.4.2**).
 - The initial V67 diagnostic matches Node and V66, including conversion counts
   and thrown identity, but its new region also enabled repeated call-site
   expansion. V68 keeps this new guard at the callable entry while preserving
@@ -434,11 +434,11 @@ hashes, profiles and per-file comparisons are under
   dense and sparse element storage when the companion accessor owns the
   index. The existing hole miss reaches the complete property operation;
   there is no new hot-loop guard or global optimization veto
-  (**D8.4.1v2**, **D8.4.2v2**).
+  (**D7.4.1**, **D7.4.2**).
 - Expanded AUTO coverage finds that a native Error thrown by the getter loses
   identity when MVP catch materialization constructs a replacement. V44
   recognizes the shared Error carrier's existing object representation and
-  preserves it across the propagation boundary (**D8.4.3v2**). The regression
+  preserves it across the propagation boundary (**D7.4.3**). The regression
   retains getter counts, exact thrown identity, GC, accessor-to-data updates,
   undefined getters and sparse indices. V43's failed run remains recorded in
   `descriptor-focused-v43.json` and `native-array-v43.json`.
@@ -480,9 +480,9 @@ hashes, profiles and per-file comparisons are under
 - Canonical host functions retain their native ABI. The closed-script call
   emitter still rejects that ABI unless the unit enables property callbacks.
   V45 sends this ABI miss to the existing complete invocation helper, with
-  the original receiver and already evaluated arguments (**D6.2.2v2**,
-  **D8.4.3v2**). Its cold entry fills the same precise argument-root span;
-  the successful MVP guard and call sequence remain intact (**D5.3**).
+  the original receiver and already evaluated arguments (**D7.2.2**,
+  **D7.4.3**). Its cold entry fills the same precise argument-root span;
+  the successful MVP guard and call sequence remain intact (**D6.3**).
 - Argument-span emission is shared with sequence methods. New native-host
   coverage uses the default output sink, a captured writer and the closed FS
   module. The previous host-output fixture installed an MVP writer for its
@@ -508,7 +508,7 @@ hashes, profiles and per-file comparisons are under
 - V60 routes a captured non-MVP callable ABI directly to the existing complete
   invocation helper. That helper already validates native JS and unsupported
   ABIs before accessing MVP storage, so a second emitted ABI comparison and
-  capability failure are redundant (**D8.4.1v2–D8.4.3v2**). The native miss
+  capability failure are redundant (**D7.4.1–D7.4.3**). The native miss
   continues to fill the original argument-root span without re-evaluation.
   The new `NativeCallGuard` contract checks native and guest callees, invalid
   calls, argument effects and thrown-value identity against Node and V59.
@@ -532,7 +532,7 @@ hashes, profiles and per-file comparisons are under
   retains that key on the semantic miss. The final fixture matches Node,
   while its V60 control remains failed (`primitive-receiver-v63-audit/`).
   These repairs reuse the full realm prototype lookup and preserve direct
-  string indices and method calls (**D8.1.3v27**, **D8.4.1v2**).
+  string indices and method calls (**D8.4.2**, **D7.4.1**).
   Fresh embedded and closed-entry cases cover strings, numbers, booleans,
   BigInts, Symbols, method values and mixed primitive parameters.
   V63 passes **826/826 MVP cases** and **114/114 optimization contracts**
@@ -552,7 +552,7 @@ hashes, profiles and per-file comparisons are under
   V64 reads the same nominal extension from the proven shape and branches
   to the existing semantic miss for foreign ownership. It reuses this guard
   with ordinary-function instance checks. Descriptor, accessor, scalar-home
-  and GC ownership rules remain unchanged (**D8.4.1v2**, **D3.4.6**, **D5.3**).
+  and GC ownership rules remain unchanged (**D7.4.1**, **D3.4.6**, **D6.3**).
 - Five affected sources match Node and V63 exactly. Helper-census differences
   contain only the removed ownership calls; the primary contract now checks
   the nominal load and extension branches before shared shape lookup.
@@ -583,7 +583,7 @@ hashes, profiles and per-file comparisons are under
   concatenated WTF-8 surrogate pairs can represent equal JS strings despite
   different byte lengths (**S1.11**). The helper allocates nothing, invokes no
   guest code and returns the scalar MIR ABI. Relational ordering still uses
-  its original comparator (**D8.4.1v2**, **D5.3**).
+  its original comparator (**D7.4.1**, **D6.3**).
 - New coverage checks both physical encodings across a forced collection,
   embedded NULs, unequal prefixes, lone surrogates, equality operators,
   switch cases, operand evaluation and UTF-16 relational ordering. The MIR
@@ -629,7 +629,7 @@ hashes, profiles and per-file comparisons are under
   reflection, dynamic source, constructor access and unknown property keys
   retain the complete profile. Numeric indexing remains admissible.
   This changes initialization dependencies, not namespace ownership
-  (**D5.4**, **D8.1.3v27**). The three focused host cases pass, including
+  (**D6.4**, **D8.4.2**). The three focused host cases pass, including
   ten admission/refusal probes that inspect actual Node-core attachment
   (`process-focused-v47.json`). Release qualification is pending.
 - The source review also exposes failures for direct and computed
@@ -644,7 +644,7 @@ hashes, profiles and per-file comparisons are under
   keys require a solved function receiver and a key that can name the
   constructor. Numeric indexing and constructor assignments alone do not
   trigger this admission. The selected backend remains MIR, with no guest
-  execution or side-effect replay before replanning (**D8.1.3v27**).
+  execution or side-effect replay before replanning (**D8.4.2**).
   V48 passes **819/819 MVP cases**, including ten constructor probes
   covering aliases, closed-call parameters, returned functions, class
   constructors, lexical updates and exactly-once effects. Its release CLI
@@ -687,7 +687,7 @@ hashes, profiles and per-file comparisons are under
   `this` and property callbacks, and reuses `plan_fixed_global_bindings` to
   prove that computed keys cannot reach native names or realm bindings.
   A failed proof selects the complete realm before lowering and execution.
-  This follows **D8.1.3v27** and **D8.4.1v2** without replay or a second
+  This follows **D8.4.2** and **D7.4.1** without replay or a second
   environment.
 - V50 passes **820/820 MVP cases**, including semantic and MIR checks for the
   admitted store and refusal cases involving observed aliases, descriptors,
@@ -730,7 +730,7 @@ hashes, profiles and per-file comparisons are under
   output, binary, build and private-module checks passing
   (`text-diagnostic-v52.json`). Complete performance qualification remains
   open.
-  These are refinements of **D8.1.3v27** and **D8.4.1v2**, with no effect
+  These are refinements of **D8.4.2** and **D7.4.1**, with no effect
   replay or additional runtime environment.
 - Havlak's MIR capture shows 851 ordinary class-property calls selecting
   the host-capable helper because the source writes to `process.stdout`.
@@ -882,7 +882,7 @@ population and queued V70 follow-ups did not run.
 ### Merged revision V71
 
 V71 freezes merge `f3ec82c3471d914082268989225bff283aaaaabb` under
-**D8.1.3v27**. `make build-release-compile CC=gcc CXX=g++` succeeds; the
+**D8.4.2**. `make build-release-compile CC=gcc CXX=g++` succeeds; the
 archived release SHA-256 is
 `e6fbc06a90787666c7bcf92c4344046e0756339380f3f0dab5c74deaaa4d9f5e`.
 The private `modules-v71` bundle rebuilds all four selected native modules in
@@ -921,7 +921,7 @@ archive-reader outputs and every configured consumer now resolve through
 `build/lib/<platform>/<configuration>/`. No vendor or runtime source changes.
 The exact configuration and regression-test delta is retained in
 `source-delta-v72.patch` and `source-delta-v72.json`, alongside the full
-16,552-input source pin. This preserves **D8.1.3v27**'s release qualification
+16,552-input source pin. This preserves **D8.4.2**'s release qualification
 requirement instead of accepting a mixed-profile build.
 
 The new native regression in `utils/test_premake_generator.py` builds and
@@ -991,7 +991,7 @@ establish any performance result. The final standalone report is written as
 
 ### Remove the redundant runtime selector: V73
 
-**D8.1.3v28** (2026-10-21, USER) removes `--runtime=mvp-lmd` from
+**D8.4.2** (2026-10-21, USER) removes `--runtime=mvp-lmd` from
 `js` and `js-test-batch`; the ordinary entry already selects MVP. The option
 is absent from help and fails before guest execution. Explicit
 `JS_EXEC_BACKEND=ast|auto|mir` policy is preserved. Optimization fixtures and
@@ -1032,7 +1032,7 @@ not relabeled as V73 results.
 
 #### Why the previous performance update showed about 1%
 
-There are two comparison questions under **D8.1.3v28**:
+There are two comparison questions under **D8.4.2**:
 
 | Comparison | Purpose | Current evidence |
 |---|---|---|
@@ -1067,7 +1067,7 @@ queued timing workflow are stopped before production source changes.
 scope and verified process identities. The separate Lambda-opus baseline is
 left running. V73's completed source-specific result is not relabeled as V74.
 
-Under **D8.1.3v28** and **D5.3–D5.4**, the current host initialization
+Under **D8.4.2** and **D6.3–D6.4**, the current host initialization
 still creates the entire canonical process namespace for an unobserved,
 closed `process.stdout.write(value)` use. That constructs `env`, configuration,
 report and other objects that the script never observes. The release
@@ -1124,8 +1124,8 @@ bootstrap before eliding process setup. Custom embedder arguments retain the
 existing full initialization so later host factories observe the published
 `process.argv`. Normal CLI execution already supplies the canonical tuple.
 The updated complete native MVP suite passes **834/834** in `mvp-v75.json`,
-including the new custom-argument subcase. This preserves **D8.1.3v28**'s
-shared host state and **D5.3–D5.4**'s ownership boundaries.
+including the new custom-argument subcase. This preserves **D8.4.2**'s
+shared host state and **D6.3–D6.4**'s ownership boundaries.
 
 V75's frozen release SHA-256 is
 `c147951dea48c99a6ad8abc4efffb927979eeaeb228beddd6d3cd42ab3d539ef`.
@@ -1142,7 +1142,7 @@ aggregate or performance acceptance.
 
 V76 restricts the new computed own-field head to unresolved nonnumeric keys.
 Literal and proven Number keys keep their existing indexed handling; named
-own-field heads are unchanged. This preserves **D8.4.1v2–D8.4.3v2**'s local
+own-field heads are unchanged. This preserves **D7.4.1–D7.4.3**'s local
 specialization while retaining the complete property miss. The existing
 typed-array emission expectation remains unchanged.
 The complete focused suites pass **834/834 MVP**, **116/116 optimization**
@@ -1190,11 +1190,11 @@ collection hash storage for interpreter-created private-name tables. Its
 internal factory avoids constructor/prototype lookup, so a replaced `Map`
 global cannot become observable. The same `JsInterpEnv` Item word retains the
 table, and the existing collection GC visitor owns its keys and values under
-**D5.3–D5.4**. Compiled direct-eval bridges keep their existing pair format;
+**D6.3–D6.4**. Compiled direct-eval bridges keep their existing pair format;
 lookup accepts both carriers without adding another environment.
 The regression covers a large class, nested private shadowing, getter/setter
 identity, escaped closures, direct eval and forced GC on AST and MIR entries
-under **D8.1.3v28**. Fresh focused and aggregate gates are required for V78.
+under **D8.4.2**. Fresh focused and aggregate gates are required for V78.
 The first focused check (`private-env-focused-v78.json`) detects that the
 direct-eval bridge must enumerate the new carrier too. Its corrected path
 reuses the canonical collection cursor, retains insertion order and binds
@@ -1286,7 +1286,7 @@ beside native host values. Its former `primitives` admission requirement made
 these operations emit every carrier branch even when no such specialization
 could amortize compilation. Function bodies, loop operations, known shapes,
 deferred keys and existing numeric consumers retain their lowering
-(**D8.4.1v2–D8.4.3v2**). Revcomp's entry shrinks from 3,620 to 3,283 MIR
+(**D7.4.1–D7.4.3**). Revcomp's entry shrinks from 3,620 to 3,283 MIR
 instructions; its 1,951-instruction function remains unchanged. The five-row
 seven-pair V79/V78 diagnostic has correct outputs and stable inputs; revcomp
 wall medians are 42.638/44.476 ms, ratio 0.95867, upper 0.98886.
@@ -1307,12 +1307,12 @@ V81 addresses work identified in the native samples. Shared string joining
 reuses its established String classification to read length and ASCII metadata,
 instead of calling a general text classifier for each String. Symbol handling,
 native-lane reads, overflow checks, exact input roots and allocation/copy order
-remain in the existing kernel (**D2.6.5v4**, **D5.3–D5.4**). This removes a
+remain in the existing kernel (**D3.3.1**, **D6.3–D6.4**). This removes a
 measured hot cost; it is not an attribution of V78's entire base64 difference.
 Unicode, separator, empty and coercing join cases cover the metadata boundary.
 
 The core runtime shape tree moves from the optional extension linked list to
-the existing indexed capsule directory (**D3.4.3**, **D5.4.2–D5.4.4**).
+the existing indexed capsule directory (**D3.4.3**, **D6.4.2–D6.4.4**).
 Type-changing field writes reach that owner repeatedly in the escaped-retyping
 profile. Indexed ownership removes lookup work that grows with optional host
 registrations, without a TLS pointer cache, alternate tree, or new lifetime.
@@ -1377,7 +1377,7 @@ Revcomp diagnostics show additional precise GC ownership checks, but the
 pooled-name hypothesis accounts for only five foreign pooled strings. A
 private negative-range-filter prototype reduces exact large-object lookups
 without a demonstrated timing benefit. Neither diagnostic changes production
-GC ownership or the frozen V81 source (**D4.1.1v2**, **D5.3–D5.4**).
+GC ownership or the frozen V81 source (**D5.1.1**, **D6.3–D6.4**).
 
 At 15:06 on 2026-10-21, the complete capture has **61/71** JS rows with
 correct output. The initial seven pairs identify a `kostya/json_gen`
@@ -1463,7 +1463,7 @@ The v36 debugger reproduces that assertion through
 carriers can legitimately omit an inherited font group. V38 also borrows the
 active layout context's resolved font in that case. It retains the existing
 layout-lifetime borrow and avoids requesting persistent pool storage for the
-scratch item (**D4.5.1v4**). A focused native test covers context, parent and
+scratch item (**D5.5.1**). A focused native test covers context, parent and
 text font precedence. The scope is this ownership defect blocking the core
 gate; no geometry algorithm or rendering golden is changed.
 The Mermaid golden rerun passes 1/1; the new font test and existing anonymous
@@ -1489,7 +1489,7 @@ stack, as required by [SVG 2 §3.4.1](https://www.w3.org/TR/SVG2/render.html#Ren
 while the later producer-phase test enters through the parent traversal.
 V39 retains the original internal-phase pixel expectations at the producer
 entry and adds both parent-stack phases. Production painting and pixel
-tolerances are unchanged; the ownership boundary follows **D4.5.1v4**.
+tolerances are unchanged; the ownership boundary follows **D5.5.1**.
 
 The full access run also exposes four input-event WPT failures. Isolated
 replay passes the two cases killed by signal 9 during the aggregate, but
@@ -1501,7 +1501,7 @@ The two reproducible failures reduce to `window.event`: native dispatch writes
 the canonical host slot, while MVP's native-object read adapter reads the
 ordinary placeholder. V39 routes native global reads through the existing
 complete property kernel, also preserving live viewport fields. Ordinary MVP
-object reads keep their existing path (**D8.1.3v27**, **D6.2.2v2**).
+object reads keep their existing path (**D8.4.2**, **D7.2.2**).
 Focused tests cover both initialization orders, nested dispatch, restoration,
 and GC inside listeners: 2/2 pass. All four original WPT scripts pass unchanged,
 with stable binary hashes, and the complete vector suite passes 196/196.
@@ -1522,7 +1522,7 @@ accessors exposed the shared-kernel defect in the configured baseline.
 V40 supplies the default `undefined` value when a data descriptor converts
 an accessor, reusing the existing complete storage path. Lazy function-field
 materialization is now limited to data properties, so generic and data updates
-do not call an existing getter (**D8.1.3v27**, **D6.2.2v2**).
+do not call an existing getter (**D8.4.2**, **D7.2.2**).
 The new cross-backend regression covers both descriptor categories, sealing,
 symbol keys, native callable fields, RegExp and GC between Script entries.
 The expanded regression also exposes Error reflection rebuilding every
@@ -1644,7 +1644,7 @@ failures and the V38 repairs are recorded above.
   samples, map and symbolization evidence.
 - V46 specializes `Set` through the existing property implementation,
   preserving the strict flag and complete foreign/property fallback
-  (**D8.4.1v2**, **D8.4.2v2**). This removes unrelated operation branches
+  (**D7.4.1**, **D7.4.2**). This removes unrelated operation branches
   from writes just as the existing read specialization does. Seven paired
   diagnostic runs with 1,000 checked iterations compare V46 directly with
   V45: Bounce is **0.98108×** (upper **0.99362×**), and Permute is
@@ -1727,7 +1727,7 @@ and event loop.
 ### Consolidation boundaries and open checks
 
 The following boundaries track implemented consolidation and open work for
-milestones 2–3 under **D5.4** and **D8.1.3v27**. V70 completes the current
+milestones 2–3 under **D6.4** and **D8.4.2**. V70 completes the current
 correctness gates above; performance acceptance remains pending.
 
 | Current boundary | Open work |
@@ -1745,7 +1745,7 @@ the long jq workloads; a timeout cannot remove them from the final report.
 
 ### Shared Unicode cursor follow-up (2026-10-21)
 
-**D5.3.3 / D5.3.5 / D5.4**: MVP character reads, normalized slice/substring
+**D6.3.3 / D6.3.5 / D6.4**: MVP character reads, normalized slice/substring
 ranges and String-owned UTF-16 length reads now use the existing realm-owned
 native string helpers. MIR keeps its ASCII length fast path and imports the
 non-allocating cached length helper with a GC-pointer argument contract. Raw
@@ -1763,13 +1763,13 @@ This does not activate a different browser backend. An experimental eager MVP
 browser entry spent its sampled time in MIR linking/register allocation and
 peaked at 8.6 GiB on Kafka's bundled scripts. The established browser AST
 adapter is retained; changing that policy requires separate performance
-qualification under **D8.1.3v28**.
+qualification under **D8.4.2**.
 
 
 **RegExp protocol allocation:** flag inspection now reads the existing
 `JsPropertyDescriptor` representation directly instead of materializing a
 guest Map and then reading its `get`/`value` fields. Getter/data policy is
-unchanged (**D6.2.2v2**); existing protocol-override regressions remain required.
+unchanged (**D7.2.2**); existing protocol-override regressions remain required.
 
 **Release scaling evidence:** a mixed-Unicode source scanned with `charCodeAt`,
 UTF-16 `length` and one-unit `substring` takes 3,060→4 ms at 32,768 ASCII

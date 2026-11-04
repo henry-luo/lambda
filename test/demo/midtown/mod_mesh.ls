@@ -91,10 +91,41 @@ pub fn wedge(r, base) {
 // ---- vehicles: one buffer per material; kinds share proportions with mod_traffic.KINDS
 fn wheels_at(hl, hw, r) => merge([for (zs in [1.0, -1.0], xs in [1.0, -1.0])
     prim.sweep([[xs * (hw - 0.14), r, zs * (hl - 0.85)], [xs * (hw + 0.02), r, zs * (hl - 0.85)]], r, 12, true)])
-fn lamps(hl, y, w, front) {
-    let z = if (front) hl - 0.01 else 0.0 - hl - 0.03;
-    merge([for (xs in [-1.0, 1.0]) cuboid(xs * 0.55 - (if (xs > 0.0) 0.0 else w), y, z, xs * 0.55 + (if (xs > 0.0) w else 0.0), y + 0.14, z + 0.04)])
+// a car body: a full-length centre tub, and side panels that open over the wheel arches (centred
+// wz either side of the middle) and under the bumper corners, so the tyres show from the side and behind
+// The tub sits higher (skirt) past the arches, so the bumpers stay short and the tyres show under them.
+pub let SKIRT = 0.44
+pub let CORNER = 0.6
+fn body_shell(hl, hw, wz, sill, belt) {
+    let tub = hw - 0.31, arch = 0.48, crown = 0.78, corner = CORNER, ends = wz + arch;
+    merge([cuboid(0.0 - tub, sill, 0.0 - ends, tub, belt, ends),
+        cuboid(0.0 - tub, SKIRT, ends, tub, belt, hl), cuboid(0.0 - tub, SKIRT, 0.0 - hl, tub, belt, 0.0 - ends),
+        *[for (xs in [-1.0, 1.0], let x0 = if (xs > 0.0) tub else 0.0 - hw, let x1 = if (xs > 0.0) hw else 0.0 - tub) *[
+            cuboid(x0, sill, arch - wz, x1, belt, wz - arch),
+            cuboid(x0, crown, 0.0 - hl, x1, belt, arch - wz), cuboid(x0, crown, wz - arch, x1, belt, hl),
+            cuboid(x0, corner, 0.0 - hl, x1, crown, 0.0 - wz - arch), cuboid(x0, corner, wz + arch, x1, crown, hl)]]])
 }
+// dark liners inside the arches, slim lips under the bumpers and a rub strip along each bumper's
+// lower edge, in place of full-width bumper slabs
+fn body_trim(hl, hw, wz, sill) {
+    let tub = hw - 0.31, arch = 0.48;
+    merge([*[for (xs in [-1.0, 1.0], zs in [-1.0, 1.0], let x = xs * tub)
+            cuboid(min(x, x + xs * 0.02), sill, zs * wz - arch, max(x, x + xs * 0.02), 0.78, zs * wz + arch)],
+        // each piece runs from inside the body (in) to just proud of the bumper face (out)
+        *[for (zs in [-1.0, 1.0], piece in [[0.18 - tub, SKIRT - 0.02, tub - 0.18, SKIRT + 0.03, 0.2, 0.025],
+                [0.0 - hw - 0.01, CORNER - 0.02, hw + 0.01, CORNER + 0.025, 0.35, 0.025]], let zin = zs * (hl - piece[4]), let zout = zs * (hl + piece[5]))
+            cuboid(piece[0], piece[1], min(zin, zout), piece[2], piece[3], max(zin, zout))]])
+}
+// one lamp on side xs (+1 is the car's left), optionally grown by `grow` on every face
+fn lamp(xs, hl, y, w, front, grow = 0.0) {
+    let z = if (front) hl - 0.01 else 0.0 - hl - 0.03;
+    cuboid(xs * 0.55 - (if (xs > 0.0) 0.0 else w) - grow, y - grow, z - grow, xs * 0.55 + (if (xs > 0.0) w else 0.0) + grow, y + 0.14 + grow, z + 0.04 + grow)
+}
+fn lamps(hl, y, w, front) => merge([for (xs in [-1.0, 1.0]) lamp(xs, hl, y, w, front)])
+let SEDAN_HL = 2.25
+let TAIL_Y = 0.66, TAIL_W = 0.33
+// the player sedan's rear indicator: its tail lamp grown just enough to cover it when lit
+pub fn indicator(xs) => lamp(xs, SEDAN_HL, TAIL_Y, TAIL_W, false, 0.006)
 pub fn vehicle(kind, wheels = true) {
     if (kind == "van") {
         let hl = 2.45, hw = 1.0;
@@ -113,18 +144,18 @@ pub fn vehicle(kind, wheels = true) {
             *(if (wheels) [wheels_at(hl, hw, 0.4)] else [])]),
          head: lamps(hl, 0.74, 0.3, true), tail: lamps(hl, 0.78, 0.2, false)}
     } else {
-        // sedans, taxis and hatchbacks: a low body, a glasshouse and a roof panel
+        // sedans, taxis and hatchbacks: a low body open over the wheels, a glasshouse and a roof panel
         let hatch = kind == "hatch"
-        let hl = if (hatch) 2.0 else 2.25, hw = if (hatch) 0.9 else 0.93
+        let hl = if (hatch) 2.0 else SEDAN_HL, hw = if (hatch) 0.9 else 0.93, wz = hl - 0.85
         let back0 = if (hatch) 0.0 - hl + 0.15 else -1.35, back1 = if (hatch) 0.0 - hl + 0.3 else -0.95
         let front0 = if (hatch) 0.75 else 0.95, front1 = if (hatch) 0.05 else 0.25;
-        {paint: merge([cuboid(0.0 - hw, 0.32, 0.0 - hl, hw, 0.86, hl), cuboid(-0.71, 1.36, back1 + 0.03, 0.71, 1.42, front1 - 0.03),
+        {paint: merge([body_shell(hl, hw, wz, 0.32, 0.86), cuboid(-0.71, 1.36, back1 + 0.03, 0.71, 1.42, front1 - 0.03),
             block(hw + 0.07, 0.93, 0.62, 0.14, 0.1, 0.18), block(0.0 - hw - 0.07, 0.93, 0.62, 0.14, 0.1, 0.18)]),
          glass: hexa(ring(-0.86, back0, 0.86, front0, 0.86), ring(-0.72, back1, 0.72, front1, 1.36)),
-         trim: merge([cuboid(-0.95, 0.24, hl - 0.06, 0.95, 0.52, hl + 0.07), cuboid(-0.95, 0.24, 0.0 - hl - 0.07, 0.95, 0.52, 0.0 - hl + 0.06),
-            cuboid(-0.42, 0.5, hl - 0.02, 0.42, 0.66, hl + 0.02), *(if (wheels) [wheels_at(hl, hw, 0.34)] else [])]),
+         trim: merge([body_trim(hl, hw, wz, 0.32), cuboid(-0.42, 0.5, hl - 0.02, 0.42, 0.66, hl + 0.02),
+            *(if (wheels) [wheels_at(hl, hw, 0.34)] else [])]),
          head: merge([lamps(hl, 0.62, 0.3, true), *(if (kind == "taxi") [cuboid(-0.32, 1.42, -0.5, 0.32, 1.62, -0.2)] else [])]),
-         tail: lamps(hl, 0.66, 0.33, false)}
+         tail: lamps(hl, TAIL_Y, TAIL_W, false)}
     }
 }
 // the player's road wheel: a tyre around a hub with five spokes, axle along X
@@ -133,12 +164,62 @@ pub fn hub() => merge([for (xs in [-1.0, 1.0]) *[prim.sweep([[xs * 0.125, 0.0, 0
     *[for (k in 0 to 4, let a = k * u.TAU / 5.0) placed(cuboid(xs * 0.148 - 0.012, -0.03, 0.0, xs * 0.148 + 0.012, 0.03, 0.21),
         t.compose([0.0, 0.0, 0.0], [sin(a / 2.0), 0.0, 0.0, cos(a / 2.0)], [1.0, 1.0, 1.0]))]]])
 
-// ---- people: legs, torso and arms, head and hair, coloured per vertex
-pub fn person(shirt, pants, skin, hair) => merge([
-    tinted(merge([block(-0.11, 0.0, 0.0, 0.16, 0.86, 0.2), block(0.11, 0.0, 0.0, 0.16, 0.86, 0.2)]), pants),
-    tinted(merge([block(0.0, 0.86, 0.0, 0.44, 0.58, 0.26), block(-0.29, 0.9, 0.0, 0.11, 0.5, 0.13), block(0.29, 0.9, 0.0, 0.11, 0.5, 0.13)]), shirt),
-    tinted(block(0.0, 1.44, 0.0, 0.24, 0.27, 0.24), skin),
-    tinted(block(0.0, 1.66, -0.01, 0.26, 0.08, 0.26), hair)])
+// ---- people, coloured per vertex and facing +Z. A look is {skin, hair, style, top, top_color, under,
+// bottom, bottom_color, shoes, glasses, hat, bag}: style is short|long|bun|buzz|cap, top tee|long|jacket|dress,
+// bottom pants|shorts|skirt, glasses null|clear|sun; hat and bag are colours or null.
+fn dye(rgb, parts) any^ => tinted(merge(parts), rgb)
+fn shade(rgb, k) => [for (c in rgb) c * k]
+fn mirrored(x, y0, z, w, h, d) => [block(0.0 - x, y0, z, w, h, d), block(x, y0, z, w, h, d)]
+fn moved(b, offset) => {*: b, positions: [for (i, x in b.positions) x + offset[i % 3]]}
+// limbs swing about these pivots (+X is the person's left); each limb buffer is modelled around its pivot
+pub let LIMBS = ["leg-l", "leg-r", "arm-l", "arm-r"]
+pub let PIVOTS = {'leg-l': [0.1, 0.9, 0.0], 'leg-r': [-0.1, 0.9, 0.0], 'arm-l': [0.27, 1.38, 0.0], 'arm-r': [-0.27, 1.38, 0.0]}
+fn about(part, b) => moved(b, [for (c in PIVOTS[part]) 0.0 - c])
+// a shoe and a leg to the hip; shorts cover the thigh, and a skirt (on the body) hides the top of a bare leg
+fn leg(p, part) any^ {
+    let x = PIVOTS[part][0], bare = p.bottom != "pants";
+    about(part, merge([dye(p.shoes, [block(x, 0.0, 0.025, 0.14, 0.07, 0.26)])^,
+        dye(if (bare) p.skin else p.bottom_color, [block(x, 0.07, 0.0, if (p.bottom == "skirt") 0.12 else 0.15, 0.83, 0.16)])^,
+        *(if (p.bottom == "shorts") [dye(p.bottom_color, [block(x, 0.52, 0.0, 0.16, 0.38, 0.18)])^] else [])]))
+}
+// tees stop above the elbow; long sleeves and jackets reach the wrist
+fn cuff(p) => if (p.top == "tee" or p.top == "dress") 1.2 else 0.86
+fn arm(p, part) any^ {
+    let x = PIVOTS[part][0], c = cuff(p);
+    about(part, merge([dye(p.top_color, [block(x, c, 0.0, 0.12, 1.42 - c, 0.14)])^,
+        dye(p.skin, [block(x, 0.76, 0.0, 0.095, 0.1, 0.11), *(if (c > 1.0) [block(x, 0.86, 0.0, 0.105, c - 0.86, 0.12)] else [])])^]))
+}
+// the torso (a jacket opens over its shirt), skirt, neck, head and ears
+fn torso(p) any^ => [dye(p.top_color, [hexa(ring(-0.17, -0.12, 0.17, 0.12, 0.88), ring(-0.2, -0.12, 0.2, 0.12, 1.42))])^,
+    *(if (p.top == "jacket") [dye(p.under, [block(0.0, 0.9, 0.12, 0.11, 0.52, 0.012)])^] else []),
+    *(if (p.bottom == "skirt") [dye(p.bottom_color, [hexa(ring(-0.25, -0.17, 0.25, 0.17, 0.48), ring(-0.2, -0.13, 0.2, 0.13, 0.92))])^] else []),
+    dye(p.skin, [block(0.0, 1.42, 0.0, 0.1, 0.05, 0.1), block(0.0, 1.47, 0.0, 0.22, 0.25, 0.23), *mirrored(0.115, 1.56, 0.0, 0.02, 0.06, 0.05)])^]
+// eyes, brows, nose and mouth on the head's front face (z = 0.115)
+fn face(p) any^ => [dye([0.07, 0.06, 0.07], mirrored(0.05, 1.6, 0.115, 0.035, 0.03, 0.012))^,
+    dye(shade(p.hair, 0.9), mirrored(0.05, 1.643, 0.116, 0.05, 0.014, 0.012))^,
+    dye(shade(p.skin, 0.92), [block(0.0, 1.545, 0.125, 0.032, 0.05, 0.03)])^,
+    dye([p.skin[0] * 0.72, p.skin[1] * 0.45, p.skin[2] * 0.45], [block(0.0, 1.515, 0.115, 0.07, 0.016, 0.012)])^]
+fn hair(p) any^ {
+    let crown = if (p.style == "buzz") [block(0.0, 1.715, -0.005, 0.23, 0.025, 0.24)]
+        else [block(0.0, 1.71, -0.005, 0.235, 0.05, 0.245), block(0.0, 1.56, -0.12, 0.235, 0.16, 0.02), *mirrored(0.12, 1.62, -0.03, 0.02, 0.1, 0.17),
+            *(if (p.style == "cap") [] else [block(0.0, 1.68, 0.11, 0.235, 0.04, 0.03)])]
+    let extra = if (p.style == "long") [block(0.0, 1.3, -0.125, 0.24, 0.42, 0.04), *mirrored(0.12, 1.45, -0.01, 0.025, 0.27, 0.2)]
+        else if (p.style == "bun") [block(0.0, 1.74, -0.09, 0.11, 0.09, 0.1)] else [];
+    [dye(p.hair, [*crown, *extra])^,
+     *(if (p.hat != null) [dye(p.hat, [block(0.0, 1.69, -0.005, 0.245, 0.085, 0.25), block(0.0, 1.69, 0.17, 0.2, 0.02, 0.13)])^] else [])]
+}
+// rims round each eye with a bridge and temples, or dark lenses for sunglasses
+fn glasses(p) any^ {
+    let rims = if (p.glasses == "sun") mirrored(0.05, 1.588, 0.124, 0.075, 0.05, 0.01)
+        else [*mirrored(0.05, 1.633, 0.124, 0.075, 0.009, 0.01), *mirrored(0.05, 1.588, 0.124, 0.075, 0.009, 0.01),
+              *mirrored(0.088, 1.588, 0.124, 0.009, 0.054, 0.01), *mirrored(0.012, 1.588, 0.124, 0.009, 0.054, 0.01)];
+    if (p.glasses == null) [] else [dye([0.06, 0.06, 0.07], [*rims, block(0.0, 1.612, 0.124, 0.03, 0.008, 0.01),
+        *mirrored(0.118, 1.622, 0.06, 0.008, 0.008, 0.13)])^]
+}
+// a person as five buffers: the body, and each limb about its pivot
+pub fn person(p) any^ => {body: merge([*torso(p)^, *face(p)^, *hair(p)^, *glasses(p)^,
+        *(if (p.bag != null) [dye(p.bag, [block(0.0, 0.98, -0.17, 0.3, 0.38, 0.1), *mirrored(0.13, 1.0, 0.0, 0.035, 0.42, 0.245)])^] else [])]),
+    'leg-l': leg(p, "leg-l")^, 'leg-r': leg(p, "leg-r")^, 'arm-l': arm(p, "arm-l")^, 'arm-r': arm(p, "arm-r")^}
 
 // ---- props
 pub fn cone() => merge([cuboid(-0.21, 0.0, -0.21, 0.21, 0.04, 0.21), post(0.0, 0.0, 0.04, 0.74, 0.17, 0.035, 10)])

@@ -1,4 +1,4 @@
-// Native Lambda port of utils/check_state_machine.py (D7.2.5, D7.5.3).
+// Native Lambda port of utils/check_state_machine.py (D10.2.1, D9.5.6).
 import .check_state_machine_core
 import .state_machine_policy
 

@@ -362,7 +362,7 @@ public:
     // ========================================================================
     
 private:
-    // Attribute helpers — one path for maps and elements alike. D2.6.6v2 puts
+    // Attribute helpers — one path for maps and elements alike. D3.1.1 puts
     // every container's attribute face at the same offsets, so these take the
     // shared `Map` base and elements upcast at the call site.
     ShapeBuilder container_shape_builder(const Map* container);

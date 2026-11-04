@@ -421,7 +421,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
     }
 
     // the CLI result owns its schema/import graph through reporting; callers
-    // release it before shutting down the shared input cache (D4.2.6).
+    // release it before shutting down the shared input cache (D5.2.5).
     validation_result->owned_pool = pool;
 
     // Print comprehensive results using sophisticated error reporting
@@ -562,7 +562,7 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
             } else if (str_ieq_const(ext, ext_len, ".textile") || str_ieq_const(ext, ext_len, ".txtl")) {
                 input_format = "textile";
             } else if (str_ieq_const(ext, ext_len, ".mark")) {
-                // D2.9.1: validator detection uses the same sole Mark extension as input().
+                // D10.1.1: validator detection uses the same sole Mark extension as input().
                 input_format = "mark";
             }
             // If no recognized extension, keep as nullptr for Lambda format

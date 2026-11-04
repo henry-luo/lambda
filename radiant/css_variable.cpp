@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// substitution is shared by layout, CSSOM and animation; allocations follow the caller's pool (D4.5.1v4).
+// substitution is shared by layout, CSSOM and animation; allocations follow the caller's pool (D5.5.1).
 // inherited custom properties resolve in the environment where they were specified.
 struct CssVarStack {
     const char* name;
@@ -89,13 +89,13 @@ struct CssVarContext {
         if (engine && engine->limits.max_substitution_depth) max_depth = engine->limits.max_substitution_depth;
     }
     ~CssVarContext() {
-        // cache borrows end at return; output stays in the caller's pool (D4.5.1v4).
+        // cache borrows end at return; output stays in the caller's pool (D5.5.1).
         if (cache) hashmap_free(cache);
         if (measure_pool) pool_destroy(measure_pool);
     }
     Pool* temporary_pool() {
         // tokenization and serialization work must not accumulate in retained
-        // view pools across computed-style reads (D4.5.1v4).
+        // view pools across computed-style reads (D5.5.1).
         if (!measure_pool) measure_pool = pool_create();
         if (!measure_pool) allocation_failed = true;
         return measure_pool;
@@ -672,7 +672,7 @@ static StrView css_substitute_custom_text(Pool* pool, DomElement* element,
     CssCustomTextOutput output = {buffer, {}, false, 0};
     bool valid = css_append_custom_text(pool, element, source, stack, &output, trim_boundary_comments);
     // typed values and public text results copy this temporary spelling before
-    // the substitution context ends (D4.5.1v4).
+    // the substitution context ends (D5.5.1).
     Pool* temporary_pool = css_active_var_context->temporary_pool();
     StrView result = valid && temporary_pool ?
         StrView{pool_dup_n(temporary_pool, buffer->str, buffer->length), buffer->length}

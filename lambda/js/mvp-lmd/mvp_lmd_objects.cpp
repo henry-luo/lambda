@@ -148,7 +148,7 @@ Map* mvp_lmd_property_map(Item owner, bool writing, bool numeric_attributes) {
     }
     if (writing && (kind == LMD_TYPE_ARRAY || kind == LMD_TYPE_ARRAY_NUM)) {
         TypeMap* shape = (TypeMap*)owner.map->type;
-        // D3.2.4v4: guest descriptor operations cannot rewrite a foreign declared prefix.
+        // D4.2.5: guest descriptor operations cannot rewrite a foreign declared prefix.
         if (shape && (shape->is_trusted_contract || shape->nominal) && (!shape->nominal ||
                 (shape->nominal->extension != &mvp_lmd_class_extension &&
                  shape->nominal->extension != &mvp_lmd_plain_extension))) return NULL;
@@ -492,7 +492,7 @@ extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     TypeId tid = get_type_id(owner);
     if ((tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_ARRAY_NUM) && !map->type) {
-        // D2.6.6v3: the existing array attribute face owns and traces these packed fields.
+        // D3.1.1: the existing array attribute face owns and traces these packed fields.
         Input* tree = runtime_shape_tree();
         map->type = tree ? type_tree_map_root(tree) : NULL;
         if (!map->type) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);

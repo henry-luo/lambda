@@ -130,8 +130,8 @@ stores preserve undefined/NaN behavior without round trips through double.
 Closed nonnumeric factories use Lambda's existing plain-Item return ABI;
 nonnumeric locals skip scalar adoption. Fixed-key literal values are evaluated
 in order and precisely rooted before allocating their unobservable parent.
-Existing shape guards and transition fallback remain (**D2.2.5**, **D3.4.3v5**,
-**D5.2.1v3**, **D5.3.4**).
+Existing shape guards and transition fallback remain (**D2.2.5**, **D3.4.3**,
+**D6.2.1**, **D6.3.4**).
 
 No new compiler/runtime helper or import was added. Only the MVP compiler
 changed; shared runtime and benchmark sources are unchanged. Release build

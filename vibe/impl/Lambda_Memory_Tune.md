@@ -16,10 +16,10 @@
   tenured-data residue), `vibe/impl/JS_Tune13_Impl.md` T13-8 (external dense
   array ownership), `vibe/Lambda_Garbage_Collector2.md` §5.6 (the already
   designed future tenured compaction), and `doc/Doc_Convention.md`.
-- **Formal authority:** D4.2.2–D4.2.5v3 (one `MemContext`/VM substrate and
-  release-safe tracking), D4.3.1–D4.3.3 (stable object zone and one-fixup data
-  compaction), D4.4.1–D4.4.6 (COW cost and correctness), D5.3.2–D5.3.3
-  (collection only at a rooted `MAY_GC` boundary), D8.5.1v3 (static recipe
+- **Formal authority:** D5.2.2–D5.2.4 (one `MemContext`/VM substrate and
+  release-safe tracking), D5.3.1–D5.3.2 (stable object zone and one-fixup data
+  compaction), D5.4.1–D5.4.5 (COW cost and correctness), D6.3.2–D6.3.3
+  (collection only at a rooted `MAY_GC` boundary), D8.5.1 (static recipe
   code image and fresh materialization), and S9.1.2–S9.1.3 (value/COW semantics
   and `var` borrows).
 
@@ -54,8 +54,8 @@ does not execute the LambdaJS JetStream rows. Its initial 8,000 nodes each
 construct a depth-5 payload tree (63 maps), so roughly 504,000 payload maps
 are live before the 4,000 insert/delete cycles begin. Its COW rewrites are
 governed by S9.1.2 and S9.1.3, not an accidental JavaScript-style pointer-tree
-implementation. The existing source comment citing D3.3.1 should eventually
-be corrected: D3.3.1 covers inference; S9.1.2 is the applicable value/COW
+implementation. The existing source comment citing D4.3.1 should eventually
+be corrected: D4.3.1 covers inference; S9.1.2 is the applicable value/COW
 ruling. That documentation correction is independent of this tune.
 
 ### 1.2 Established mechanisms
@@ -72,14 +72,14 @@ ruling. That documentation correction is independent of this tune.
 2. **High-water data and object extents.** A nursery block is fully committed;
    `gc_data_zone_reset()` rewinds it but retains every block. Object-zone sweep
    returns slots to size-class free lists, but releases no slab until heap
-   destruction. This reuse is valid and fast under D4.3.2v2, but process RSS
+   destruction. This reuse is valid and fast under D5.3.1, but process RSS
    records the high-water mark.
 
 3. **Append-only tenured residue (resolved by Phase C).** The former path
    copied nursery survivors into `tenured_data`, then could only return old
    tenured extents at heap destruction. Phase C now evacuates both source zones
    into a preallocated fresh tenured zone once mature tenured storage reaches
-   its generic threshold. Each marked buffer keeps D4.3.1's one owner-pointer
+   its generic threshold. Each marked buffer keeps D5.3.1's one owner-pointer
    fixup; the evacuated old tenured VM extents are released in the collection.
 
 4. **Recursive static source data was being compiled as executable work.**
@@ -88,14 +88,14 @@ ruling. That documentation correction is independent of this tune.
    maps, so recursive arrays/maps expanded into 284,563 MIR instructions.
    `MIR_link` then dominated the process peak while copying and optimizing that
    image. The new recipe represents the immutable literal shape in the input
-   pool and materializes a fresh JS graph on each evaluation, as D8.5.1v3
+   pool and materializes a fresh JS graph on each evaluation, as D8.5.1
    requires. It emits 29,814 instructions for Hyphen without sharing mutable
    arrays or objects between evaluations.
 
 5. **Workload allocation is real.** Havlak creates a large temporary graph and
    Splay retains a large graph by construction. A memory tune must not claim
    that all reported RSS is reclaimable, nor weaken COW's unobservable sharing
-   requirement (S9.1.2, D4.4.1–D4.4.6).
+   requirement (S9.1.2, D5.4.1–D5.4.5).
 
 ---
 
@@ -108,17 +108,17 @@ ruling. That documentation correction is independent of this tune.
 - Do not special-case any benchmark source, workload name, allocation size, or
   iteration count.
 - Do not turn `memtrack` into a release-build per-allocation registry or a
-  lifetime/reclamation authority. D4.2.5v3 requires every non-`lib/` raw
+  lifetime/reclamation authority. D5.2.4 requires every non-`lib/` raw
   allocation to use its corresponding `memtrack` API, while release telemetry
   remains counters-only and has no per-allocation global lock on hot paths.
 - Do not move GC object structs, use a conservative stack scan, or introduce a
-  write barrier. D4.3.1 fixes stable `Item` pointers and one owning-pointer
+  write barrier. D5.3.1 fixes stable `Item` pointers and one owning-pointer
   fixup per surviving variable-size buffer.
 - Do not change JS ArrayBuffer/TypedArray ownership, resizable-buffer,
   detachment, or view semantics. A buffer is charged once to its owning
   ArrayBuffer; views do not acquire a second charge.
 - Do not change COW eligibility merely to reduce memory. A false unique result
-  is a semantic error under S9.1.2 and D4.4.1.
+  is a semantic error under S9.1.2 and D5.4.1.
 
 ---
 
@@ -137,7 +137,7 @@ by `memtrack` category at process completion. STATS stores a small size/category
 header adjacent to each allocation and updates atomics directly; it has no
 allocation pointer registry or global registry lock. DEBUG retains the guarded
 registry for diagnostics. This is the release-safe distinction required by
-D4.2.5v3, but it is not yet the lifecycle snapshots and per-owner attribution
+D5.2.4, but it is not yet the lifecycle snapshots and per-owner attribution
 specified below.
 
 Report current, peak, and capacity/reserved bytes where meaningful:
@@ -195,7 +195,7 @@ reachability. The mark/sweep graph remains the only liveness authority.
 `gc_external_preflight(heap, bytes, kind)` is called before allocating a
 GC-owned native payload. It may collect only at its caller's existing
 `MAY_GC` boundary; otherwise the caller must preflight earlier, before it owns
-an unrooted GC value. This is required by D5.3.2 and D5.3.3. The successful
+an unrooted GC value. This is required by D6.3.2 and D6.3.3. The successful
 allocation calls `gc_external_record_alloc()`; failed allocation and wrapper
 publication therefore create no phantom charge. `gc_external_record_release()`
 never starts a collection and runs from the physical `ByteStorage` release
@@ -240,7 +240,7 @@ write preparation, and final destruction route through this account. The
 charge belongs to the `ByteStorage` release callback so an alias retained by
 `Binary` remains charged until its final reference disappears. The implementation
 has no allocation registry, lock, or raw libc allocation; it uses the
-corresponding `memtrack` APIs required by D4.2.5v3. The focused GC regression
+corresponding `memtrack` APIs required by D5.2.4. The focused GC regression
 `GCHeapTest.ExternalPayloadPressureTracksPhysicalLifetime` covers accounting,
 the exact threshold edge, collection reset, and release balance.
 
@@ -279,7 +279,7 @@ tenured allocation. It then:
 3. Restores the nursery source, releases the old tenured VM extents, then
    sweeps dead object owners and resets the nursery as usual.
 
-This retains D4.3.1: object structs and `Item` pointers never move, and each
+This retains D5.3.1: object structs and `Item` pointers never move, and each
 surviving data owner receives at most one pointer fixup. It does not require a
 remembered set or a write barrier. It implements the full compaction described
 in `Lambda_Garbage_Collector2.md` §5.6 by reusing the existing compacting owner
@@ -319,7 +319,7 @@ unacceptable pause.
 - Extend the existing forced-GC + poison corpus so a collection can occur
   between every owner copy/fixup step. Run all three Lambda execution tiers.
 - Verify VMap and hosted-language native callbacks remain allocation-free while
-  tracing/finalizing, per D4.3.3.
+  tracing/finalizing, per D5.3.2.
 - Run `make test-lambda-baseline`, `make test262-baseline`, and the targeted
   JS buffer suites before a release memory comparison.
 
@@ -351,7 +351,7 @@ child. At execution, `js_static_literal_from_recipe()` roots its receiver and
 children across allocation, materializes the shape in source order, preserves
 array holes and duplicate-key last-writer behavior, and returns a new mutable
 array/object graph for every evaluation. The original flat literal fast paths
-remain for their smaller representations. This maintains D8.5.1v3's rule that
+remain for their smaller representations. This maintains D8.5.1's rule that
 the recipe is code-image metadata, not a shared mutable runtime literal.
 
 ### 6.2 Correctness and result
@@ -378,12 +378,12 @@ for recovering dead tenured data.
 1. **Nursery tails.** After all live nursery data has moved, release or
    decommit only unused tail regions beyond a hysteresis floor. No live owner
    can point into the reset nursery, so this is a VM-region policy change under
-   D4.2.2 and D4.3.2v2. Preserve enough blocks for the measured steady state.
+   D5.2.2 and D5.3.1. Preserve enough blocks for the measured steady state.
 
 2. **Object-zone regions.** Consider returning only a whole region for which
    every slab is empty, all free-list/range metadata is updated atomically, and
    no stable live object is affected. Do not release individual slabs merely
-   because some slots are free. This remains a later slice because D4.3.1
+   because some slots are free. This remains a later slice because D5.3.1
    requires stable live object addresses and the current ownership index has to
    be audited first.
 
@@ -444,7 +444,7 @@ win.
   stale high-water data but does not promise to erase the graph's inherent
   footprint. A targeted typed release sample is 259.8 MiB, compared with
   Result45's 227.9 MiB, so this change makes no memory-improvement claim for
-  Splay. COW copy-count reduction remains the separate D4.4/Tune28 track.
+  Splay. COW copy-count reduction remains the separate D5.4/Tune28 track.
 
 No row receives a numerical RSS target until Phase A establishes an exact,
 archived-release baseline and the counters explain which bytes are avoidable.
@@ -461,7 +461,7 @@ This proposal is complete only when:
 3. at least ArrayBuffer storage and Lambda Binary (after its audit) use that
    lifecycle without double counting or finalization hazards;
 4. a full tenured-data collection returns dead promoted capacity while retaining
-   D4.3.1's stable-object guarantee;
+   D5.3.1's stable-object guarantee;
 5. every change passes the required Lambda, JavaScript, and forced-GC gates;
 6. an updated memory report records both RSS and internal counter evidence,
    including any time/RSS trade-off; and

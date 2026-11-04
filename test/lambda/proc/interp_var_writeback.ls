@@ -1,4 +1,4 @@
-// T21-3b (D8.1.1v6): `var` parameters and indexed/member stores across the
+// T21-3b (D8.3.3): `var` parameters and indexed/member stores across the
 // tier boundary. Under the AUTO default every function here promotes to a
 // satellite after its fifth entry (each loop runs six), so the tail of each
 // loop exercises: T0 -> satellite with a var scalar rebind and a var array

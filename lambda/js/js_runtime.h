@@ -129,7 +129,7 @@ LAMBDA_RT_API Item js_status_ok(void);
     Item js_status_value = (__VA_ARGS__); \
     if (item_is_error(js_status_value)) return js_status_value; \
 } while (0)
-// D8.4.3: use only as a standalone statement in an Item-returning function.
+// D7.4.3: use only as a standalone statement in an Item-returning function.
 // The assigned value is the one merged JS success/error lane; no ambient
 // exception state is consulted between the call and propagation.
 #define JS_ASSIGN_OR_RETURN(name, ...) \
@@ -1069,7 +1069,7 @@ void js_fetch_set_base_path(const char* dir_path);
 // Exception Handling (try/catch/throw)
 // =============================================================================
 
-// D8.4.3: throw returns the merged ERROR Item; routing carries that Item.
+// D7.4.3: throw returns the merged ERROR Item; routing carries that Item.
 LAMBDA_RT_API Item js_throw_value(Item value);
 // Convert a routed ERROR Item to the JavaScript value observable at a catch,
 // rejection, or host boundary.  It never reads or clears ambient state.

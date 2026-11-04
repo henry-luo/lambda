@@ -1,4 +1,4 @@
-// Tune29 §19.1 (D4.4.4v4, S9.1.2): two spellings of one runtime place, and a
+// Tune29 §19.1 (D5.4.4, S9.1.2): two spellings of one runtime place, and a
 // nested handle chain rebound in one branch arm. A write through one must be
 // seen through the other exactly as per-access navigation sees it, and never
 // reach a value another binding holds. Run on both tiers and under forced GC.

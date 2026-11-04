@@ -1,4 +1,4 @@
-// D3.3.3/D8.3.3: a complete loop witness preserves numeric lanes inductively.
+// D4.3.3/D7.3.3: a complete loop witness preserves numeric lanes inductively.
 pn least(a, b, c) {
     if (a < b) { if (a < c) { return a }; return c }
     if (b < c) { return b }

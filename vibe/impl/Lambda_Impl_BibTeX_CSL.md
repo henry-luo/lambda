@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-10. **Status:** Initial opt-in implementation delivered; full CSL conformance and the later gates below remain open.
 
-**Design:** [BibTeX and CSL citation processing in `lambda.doc.latex`](../latex/Lambda_Design_BibTeX_CSL.md). The user selected Lambda script as the implementation language and `lambda.doc.latex` as the package, then authorized implementation. No formal ruling changes are required: source modules follow **D7.2.1–D7.2.4v3**, resource capture follows **D7.1.2v2 / D7.5.2**, inert style/reference data follows **S1.8**, pure batch processing follows **S12.1.1v2 / S12.4.1v2**, and errors/diagnostics follow **S7.4.1–S7.4.4**.
+**Design:** [BibTeX and CSL citation processing in `lambda.doc.latex`](../latex/Lambda_Design_BibTeX_CSL.md). The user selected Lambda script as the implementation language and `lambda.doc.latex` as the package, then authorized implementation. No formal ruling changes are required: source modules follow **D9.3.1–D9.3.4**, resource capture follows **D9.1.2 / D11.1.2**, inert style/reference data follows **S1.8**, pure batch processing follows **S12.1.1v2 / S12.4.1v2**, and errors/diagnostics follow **S7.4.1–S7.4.4**.
 
 ## Delivered behavior
 
@@ -97,7 +97,7 @@ variables still suppress their groups. This matches the separate generated
 suffix path in [citeproc-js](https://github.com/Juris-M/citeproc-js/blob/master/src/node_text.js)
 and preserves the unmodified bundled style resources. The core fixture
 `empty-generated-suffix-keeps-no-date` and Word's undated corporate-source case
-cover it. The change stays in the pure processing layer (**D7.2.3**, **S1.8**).
+cover it. The change stays in the pure processing layer (**D9.3.3**, **S1.8**).
 Word also passes `{plain_text: true}` to `data.json`: a source form's literal
 `<making>` or `&amp;` is text, while the existing default continues to normalize
 rich CSL JSON markup. Both use the same structural validation, and the data

@@ -16,14 +16,14 @@ application viewport/scissor state; Three.js updates its viewport normally.
 A failed graphics request leaves the mode unselected, allowing Canvas 2D.
 
 The adapter uses a declared static Jube interface, native-backed branded
-objects, explicit prototypes, and opaque resource IDs (D7.4.1v2/D7.4.4).
+objects, explicit prototypes, and opaque resource IDs (D9.5.1/D9.5.4).
 `webgl_methods.def` declares 144 selected methods and their conversion/arity
 contracts. Constants and query result shapes have separate catalogs. The
 shared `radiant/gl_core.cpp` provider serves both JS and native scene clients;
 Three.js retains its own scene graph in LambdaJS.
 
 WebGL wrappers retain their canvas/context through precise realm-owned roots
-and the host object's ownership edge (D4.5.2/D5.3.3). Native records retain IDs,
+and the host object's ownership edge (D5.5.2/D6.3.3). Native records retain IDs,
 never raw GC pointers. The document owns graphics contexts and snapshot
 leases; teardown removes the canvas registry before releasing its pool.
 Each resource is checked against its context/kind; uniform locations also
@@ -45,7 +45,7 @@ selection, scissor, pack state/PBO bindings and application errors. Readback
 clips the default buffer and leaves out-of-bounds destination bytes untouched,
 as required by [Khronos's read-operation rule](https://registry.khronos.org/webgl/specs/latest/1.0/#READING_PIXELS_OUTSIDE_THE_FRAMEBUFFER).
 A normal clear/draw requests repaint without requiring `flush`. Presentation
-publishes an immutable ImageSurface lease (D4.5.1v4); unchanged page repaints
+publishes an immutable ImageSurface lease (D5.5.1); unchanged page repaints
 reuse it. With `preserveDrawingBuffer:false`, later drawing/readback lazily
 resets the underlying buffer while the published image remains retained.
 Writes to user FBOs do not dirty the default image.
@@ -59,7 +59,7 @@ provides actual logs/reflection. There is no ANGLE/GLSL translator dependency
 or claim of complete browser shader validation.
 
 `WEBGL_lose_context` is the sole advertised extension. Loss/restoration events
-use the existing host task loop (D7.4.2v2), with actual WebGLContextEvent/Event
+use the existing host task loop (D9.5.2), with actual WebGLContextEvent/Event
 prototypes, trusted/cancelable event flags and one consumed loss error.
 Resources created while lost receive invalid wrappers without native GPU
 allocation, matching the current [Khronos context-loss contract](https://registry.khronos.org/webgl/specs/latest/1.0/#CONTEXT_LOST).
@@ -106,7 +106,7 @@ Chromium. All gallery assets/references live under `test/demo/scene3d/`.
 
 Commands and fixture scope are in [test/webgl/README.md](../../test/webgl/README.md).
 `make test-scene3d` and the existing Radiant baseline include the native gate
-(D7.3.5). Named Khronos assertion ports are separately pinned/licensed in
+(D9.4.5). Named Khronos assertion ports are separately pinned/licensed in
 `test/webgl/conformance-manifest.json`; they are not presented as complete
 upstream test files or full Khronos/WPT conformance.
 
@@ -123,7 +123,7 @@ upstream test files or full Khronos/WPT conformance.
 | `make test-js-exception-catalog test-js-callable-catalog` | Pass |
 | `make test-radiant-baseline` | **4,089 pass / 350 partial / 1 pre-existing failure** |
 | `make build-headless` | Pass; no GLFW/OpenGL imports/linkage |
-| Windowless full host and headless-C | WebGL returns null, Canvas 2D remains available, green pixel capture; native scene construction golden passes in headless-C (D7.1.4v2) |
+| Windowless full host and headless-C | WebGL returns null, Canvas 2D remains available, green pixel capture; native scene construction golden passes in headless-C (D9.2.1) |
 | Radiant no-int-cast lint and first-party whitespace check | Pass |
 
 The complete staged whitespace check additionally reports one original

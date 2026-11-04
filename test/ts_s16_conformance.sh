@@ -507,7 +507,7 @@ run A "line-start ? continues a type alias"   'type T = int\n?\n1\n'
 run A "line-start ? continues an annotation"  'let x: int\n? = null\nx\n'
 run A "line-start ? in a parameter type"      'fn f(a: int\n?) { a }\nf(null)\n'
 # S2.5.1v2, S2.5.5v2: no item limit (a 65-argument call parses; the 16-argument
-# source limit is a later semantic check, D6.2.2v2)
+# source limit is a later semantic check, D7.2.2)
 items65="$(seq -s ', ' 0 64 | sed 's/, *$//')"
 attrs70="$(for i in $(seq 0 69); do printf 'a%d: %d, ' "$i" "$i"; done | sed 's/, $//')"
 names70="$(for i in $(seq 0 69); do printf 'n%d, ' "$i"; done | sed 's/, $//')"

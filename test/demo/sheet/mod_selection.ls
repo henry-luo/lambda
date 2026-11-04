@@ -1,4 +1,4 @@
-// S12.1.3 / D7.2.5: range gestures own model selection; the host supplies pointer transport.
+// S12.1.3 / D10.2.1: range gestures own model selection; the host supplies pointer transport.
 import dom
 import m: .mod_model
 import capture: lambda.ui.core.splitter

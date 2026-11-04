@@ -9,7 +9,7 @@ the style-neutral, workspace, dtna, bold, and wired controls share synchronizati
 
 Template state remains the application-owned source of truth. Projection is
 pure, and handlers assign the next state (**S12.1.3**, **S1.4**). Editing policy
-uses the existing Lambda editor model and DOM mechanisms (**D7.2.5**).
+uses the existing Lambda editor model and DOM mechanisms (**D10.2.1**).
 
 ## Editor controller
 
@@ -32,7 +32,7 @@ import controller: lambda.editor.controller
 | `accept_selection(editor, snapshot)` | `fn` | Apply the snapshot to the editor value and report whether it changed. |
 
 `surface` and `is_control` only query the DOM and are `fn`, following native
-getters and queries under **D7.4.6**. Mounting, selection publication and focus
+getters and queries under **D7.1.1**. Mounting, selection publication and focus
 remain `pn`; callers obey each wrapper's published colour (**S12.1.1v3**).
 See [DOM reads and procedural calls](../Lambda_Func.md#dom-reads-and-procedural-calls).
 
@@ -45,13 +45,13 @@ a document-selection snapshot, but the controller verifies both live selection
 boundaries belong to the configured surface before accepting it. Private
 form-control selections remain separate. The pure `selection_snapshot` and
 `accept_selection` helpers preserve the editor adapter's stale-revision and
-model-completion-echo checks (**D7.2.5**, **D7.5.3**).
+model-completion-echo checks (**D10.2.1**, **D9.5.6**).
 
 An editor may supply `transaction_filter(editor, transaction)`, a pure callback
 returning a transaction or an error. The adapter invokes it before recording
 history for both native input and `edit_apply`. Derived annotations therefore
 undo with the original edit, and a rejected transaction leaves the editor intact
-(**S1.4**, **D7.2.5**). The Word demo uses this hook for text revisions. Its
+(**S1.4**, **D10.2.1**). The Word demo uses this hook for text revisions. Its
 filter skips history restores, transient IME updates, and its own review actions;
 the committed composition is annotated once. Hosts must handle a returned error
 and claim the rejected native action to prevent a second editing path.

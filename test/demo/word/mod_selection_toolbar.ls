@@ -1,4 +1,4 @@
-// selection chrome reads native range geometry; formatting stays in model commands (D7.2.5).
+// selection chrome reads native range geometry; formatting stays in model commands (D10.2.1).
 import dom
 import lambda.editor.core.source_pos
 

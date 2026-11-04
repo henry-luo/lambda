@@ -1,4 +1,4 @@
-// D7.2.5: stateless ribbon layout shared with Word and Slides.
+// D10.2.1: stateless ribbon layout shared with Word and Slides.
 import icons: .ribbon_icons
 import outline: .icons
 // choose one word boundary; intrinsic button width keeps both lines fully visible.

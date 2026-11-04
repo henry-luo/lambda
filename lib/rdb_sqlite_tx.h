@@ -11,6 +11,10 @@ extern "C" {
 typedef struct RdbSqliteTxn RdbSqliteTxn;
 typedef struct RdbSqliteWork RdbSqliteWork;
 typedef struct RdbSqliteClone RdbSqliteClone;
+typedef struct RdbSqliteFileSession RdbSqliteFileSession;
+
+/* A file-backed commit or publication may have happened despite an error. */
+enum { RDB_SQLITE_UNCERTAIN = 1 };
 
 /* Names and byte values are borrowed until the callback returns. */
 typedef bool (*RdbSqliteRowFn)(void* user, int count, const char* const* names,
@@ -20,9 +24,20 @@ typedef bool (*RdbSqliteRowFn)(void* user, int count, const char* const* names,
 RdbSqliteTxn* rdb_sqlite_tx_begin(Pool* pool, const char* path);
 RdbSqliteTxn* rdb_sqlite_tx_begin_existing(Pool* pool, const char* path);
 
+/* Session acquisition, borrowing and close belong to the owner thread. The
+ * owner must close before resetting/destroying its pool, which must outlive
+ * every transaction/clone. Close refuses active borrowers, including a cloned
+ * transaction through publication. Opening fails if the VFS cannot check file
+ * movement. Clone work still runs on its worker. */
+RdbSqliteFileSession* rdb_sqlite_file_session_open(Pool* pool, const char* path);
+bool rdb_sqlite_file_session_current(RdbSqliteFileSession* session);
+int rdb_sqlite_file_session_close(RdbSqliteFileSession* session);
+RdbSqliteTxn* rdb_sqlite_file_session_begin(Pool* pool, RdbSqliteFileSession* session);
+
 /* The owner registers and pins both connections, a worker copies a bounded
  * read snapshot, then the owner finishes or discards only after joining it. */
 RdbSqliteClone* rdb_sqlite_clone_prepare(Pool* pool, const char* source, size_t limit);
+RdbSqliteClone* rdb_sqlite_file_session_clone(Pool* pool, RdbSqliteFileSession* session, size_t limit);
 void rdb_sqlite_clone_run(RdbSqliteClone* clone, const int* cancelled);
 RdbSqliteTxn* rdb_sqlite_clone_finish(RdbSqliteClone* clone);
 void rdb_sqlite_clone_discard(RdbSqliteClone* clone);
@@ -46,7 +61,9 @@ void rdb_sqlite_tx_mark_failed(RdbSqliteTxn* tx);
 /* Owner-thread liveness check for a publication authorization callback. */
 bool rdb_sqlite_tx_live(RdbSqliteTxn* tx);
 
-/* An error or cancellation rolls back; a failed statement also poisons the scope. */
+/* An error or cancellation rolls back; a failed statement also poisons the scope.
+ * A failed file-backed COMMIT returns RDB_SQLITE_UNCERTAIN unless a deferred
+ * constraint failure is conclusively rolled back; reopen before retry. */
 int rdb_sqlite_tx_finish(RdbSqliteTxn* tx, bool unwinding);
 
 /* Publish a bounded committed memory database while its connection is live.
@@ -55,10 +72,13 @@ int rdb_sqlite_tx_finish(RdbSqliteTxn* tx, bool unwinding);
 typedef int (*RdbSqliteSnapshotFn)(void* user, const void* data, size_t size);
 /* Publish a clone's unchanged image once, before its first modifying statement. */
 int rdb_sqlite_tx_preimage(RdbSqliteTxn* tx, size_t limit, RdbSqliteSnapshotFn publish, void* user);
+/* Hash a bounded checked backup image before any modifying statement in this scope. */
+int rdb_sqlite_tx_snapshot_digest(RdbSqliteTxn* tx, size_t limit, uint8_t output[32]);
 int rdb_sqlite_tx_finish_snapshot(RdbSqliteTxn* tx, bool unwinding, size_t limit,
                                    RdbSqliteSnapshotFn publish, void* user);
 
-/* Outside an open scope, one statement owns its commit or rollback. */
+/* Outside an open scope, one statement owns its commit or rollback and may
+ * return RDB_SQLITE_UNCERTAIN after a failed file-backed COMMIT. */
 int rdb_sqlite_execute_once(const char* path, const char* sql, size_t sql_len,
                             const RdbValue* params, int param_count,
                             RdbSqliteRowFn row_fn, void* user);

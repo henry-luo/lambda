@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3.1-D5.3.2: mutual recursion and the string length leaf are NO_GC, so their caller uses a rootless native stack guard. S7.7.3 (2026-10-31): contract-safe inlining may leave either mutual-component member as the call target; both must retain the same rootless guard and NO_GC closure.",
+  "description": "D6.3.1-D6.3.2: mutual recursion and the string length leaf are NO_GC, so their caller uses a rootless native stack guard. S7.7.3 (2026-10-31): contract-safe inlining may leave either mutual-component member as the call target; both must retain the same rootless guard and NO_GC closure.",
   "checks": [
     {
       "in_func": "_gc_mut_even_#",

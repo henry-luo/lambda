@@ -51,7 +51,7 @@ guarantee everything (within the soundness envelope). In Lambda, annotations are
 *operational*: they are enforced by runtime checks at declaration boundaries (TE-18:
 enforcement at declaration boundaries only, guard dominates scope; DF8: the check lives
 in the callee), and they select *representation lanes* — an `int` annotation puts values
-in the unboxed i64 lane, `float[]` selects a typed SIMD-capable array (D2.8 native
+in the unboxed i64 lane, `float[]` selects a typed SIMD-capable array (D2.5 native
 lanes). Fully typed Lambda gets *dynamically enforced* soundness: a violation is caught
 and raised at the boundary, not proven absent at compile time. It is closer to
 "TypeScript with teeth" than to Hindley-Milner. The flip side: ML types can't make code

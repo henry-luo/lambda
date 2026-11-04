@@ -289,7 +289,7 @@ static void js_global_environment_reset_metadata(
 
 // RootVector clears itself when its owner replaces the heap. Binding metadata
 // cannot outlive those cleared Items, so rebuilding fixed slots also clears
-// the dynamic rows (D5.3.5; JSCU29).
+// the dynamic rows (D6.3.5; JSCU29).
 bool js_global_environment_ensure(JsGlobalEnvironment* environment) {
     if (!environment) return false;
     if (root_vector_count(&environment->roots) >= JS_GLOBAL_ENV_SLOT_COUNT) {
@@ -312,7 +312,7 @@ bool js_global_environment_init(JsGlobalEnvironment* environment,
     root_vector_init(&environment->roots, owner, "JS global environment");
     // Runtime records are allocated before a JS heap exists. Publishing the
     // fixed slots waits for the first global operation, when RootVector can
-    // register them with that heap (D5.4.2).
+    // register them with that heap (D6.4.2).
     return true;
 }
 
@@ -991,7 +991,7 @@ typedef void (*JsRuntimeRootVectorVisitor)(RootVector* roots, Item* slots,
 // Every fixed realm span is declared here once. The same catalog binds the
 // spans to RootVector and clears them at lifecycle boundaries, so no parallel
 // root-range descriptor or mutable reset registry can drift from its owner
-// (D5.3.5; JSCU29).
+// (D6.3.5; JSCU29).
 static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         JsRuntimeRootVectorVisitor visit, void* data) {
     if (!state || !visit) return;
@@ -1060,7 +1060,7 @@ bool js_realm_intrinsic_slots_ensure_roots(void) {
     if (js_runtime_state.realm_slots.suffix_reserved) return true;
     // Fixed semantic spans must be bound before this lazy catalog reservation;
     // registration can otherwise let a bootstrap collection observe an
-    // unconfigured owner range while the realm store grows (D5.3.5).
+    // unconfigured owner range while the realm store grows (D6.3.5).
     js_runtime_state_prepare_root_vectors(js_active_runtime_state);
     // Typed-array and catalog identity all belong to the dynamic realm-slot
     // carrier. Reserve the complete suffix once intrinsic construction first
@@ -1385,7 +1385,7 @@ static void js_reset_module_vars() {
 }
 
 // =============================================================================
-// Error-lane construction (D8.4.3)
+// Error-lane construction (D7.4.3)
 // =============================================================================
 JS_FORWARD_EXPRESSION(Item, js_status_ok, (void), ((Item){.item = b2it(true)}))
 
@@ -1496,7 +1496,7 @@ extern "C" void js_error_lane_format(Item lane, char* out, int out_size) {
 
 // TDZ check: throw ReferenceError if variable is still in Temporal Dead Zone.
 // Names arrive as module NameIds so delayed MIR never dereferences a compiler
-// pool spelling after that pool has been released (D5.4.3).
+// pool spelling after that pool has been released (D6.4.3).
 
 // Const assignment check: throw TypeError when assigning to a const variable.
 extern "C" Item js_throw_const_assign(NameId name_id, int name_len) {
@@ -1526,7 +1526,7 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     // Hot batches retain one heap/input arena across tests. Preserve its Input
     // owner while clearing transient heap-bound state so the intrinsic
     // prototype snapshot can restore mutations in that same realm; full heap
-    // teardown must leave the pointer cleared (D6.2.2v2).
+    // teardown must leave the pointer cleared (D7.2.2).
     Input* retained_input = js_input;
     // batch realms cannot retain the preceding job's weak targets or cleanup records.
     js_weak_state_destroy(&js_runtime_state);
@@ -1535,7 +1535,7 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     js_reset_cached_realm_objects();
     // A partial hot reset restores the same constructor/prototype snapshot;
     // clearing catalog callables here would lazily create a second
-    // %ThrowTypeError%/parseFloat object and break realm identity (D6.2.2v2).
+    // %ThrowTypeError%/parseFloat object and break realm identity (D7.2.2).
     if (full_reset) js_builtin_cache_reset();
     if (full_reset) js_proto_snapshot_invalidate();
     jube_modules_runtime_reset();
@@ -1556,7 +1556,7 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
         js_array_immortal_props_cleanup_all();
     }
     // Preamble reuse retains catalog callable/constructor identity; a full reset, or a partial reset without a valid snapshot, drops
-    // the complete realm-slot store (D6.2.2v2).
+    // the complete realm-slot store (D7.2.2).
     if (full_reset || !js_proto_snapshot_is_valid()) {
         js_realm_slots_clear(&js_runtime_state.realm_slots);
     } else {
@@ -1575,7 +1575,7 @@ extern "C" void js_batch_reset() {
     // A host can finish a document after its context-owned JS state was
     // released.  Do not manufacture a replacement capsule just to reset it.
     // DOM policy can bind JS support before its evaluator owns a heap. There
-    // are no heap caches to reset then, and precise root slots need a heap (D5.3.3).
+    // are no heap caches to reset then, and precise root slots need a heap (D6.3.3).
     if (!js_active_runtime_state || !context || !context->heap || !context->heap->gc) return;
     // increment epoch to invalidate cached heap objects
     js_heap_epoch++;
@@ -1652,7 +1652,7 @@ extern "C" Item js_new_named_error(const char* type_name, const char* message) {
     Rooted<Item> name_root(roots, js_name_item(type_name ? type_name : "Error"));
     Rooted<Item> text_root(roots, js_name_item(message ? message : ""));
     if (!roots.valid()) return ItemError;
-    // D5.3.3: constructing the message and Error object can collect; an
+    // D6.3.3: constructing the message and Error object can collect; an
     // unrooted name/text pair produced anonymous [object Object] exceptions.
     return js_new_error_with_name(name_root.get(), text_root.get());
 }
@@ -1678,11 +1678,11 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
     err_root.set(js_new_error_with_name(err_name, message_root.get()));
     // ToString(message) is evaluated while allocating the error carrier; an
     // abrupt completion must escape before IterableToList attempts to mutate
-    // that completion as if it were the new AggregateError (D8.3.2).
+    // that completion as if it were the new AggregateError (D7.3.2).
     if (item_is_error(err_root.get())) return err_root.get();
     // AggregateError requires IterableToList. Array.from's no-argument
     // compatibility path returned [] for undefined and hid GetIterator's
-    // required TypeError; use the iterator primitive directly (D6.2.2v2).
+    // required TypeError; use the iterator primitive directly (D7.2.2).
     errors_array_root.set(js_iterable_to_array(errors_root.get()));
     // IterableToList is part of construction, so an abrupt iterator result must
     // escape instead of being installed as the new error's `.errors` value.
@@ -2043,7 +2043,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
 
 extern "C" Item js_new_error_with_name_cstr(const char* name, const char* message) {
     RootFrame roots(2);
-    // D5.3.3: constructing the message may collect the newly allocated name.
+    // D6.3.3: constructing the message may collect the newly allocated name.
     Rooted<Item> name_root(roots, make_string_item(name));
     Rooted<Item> message_root(roots, make_string_item(message));
     return js_new_error_with_name(name_root.get(), message_root.get());

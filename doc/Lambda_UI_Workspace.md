@@ -21,7 +21,7 @@ content-bearing constructors also accept a child or array of children.
 Logical elements such as `<workspace.button>` can also be used with `apply`.
 Controls use the same `on_change` request and controlled-value policy as
 `lambda.ui.controls`; applications own the accepted state and handle requests
-in their templates (S12.1.3v2, D7.2.5).
+in their templates (S12.1.3v2, D10.2.1).
 
 `page(root, options)` supplies a full document and accepts `title`, `locale`,
 `direction` and `tokens`. The `tokens` map overrides the defaults returned by

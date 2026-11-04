@@ -119,7 +119,7 @@ static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic
             (int)result.decision, result.system_error, result.committed, result.outcome_unknown,
             (unsigned long long)result.approval.serial);
         // The returned error owns this call's failure; ambient diagnostics are
-        // not an error carrier (S7.4.5, D5.4.2).
+        // not an error carrier (S7.4.5, D6.4.2).
         if (result.outcome_unknown) *failure = io_fs_error(ERR_FILE_WRITE_ERROR,
             "output: broker connection lost; write outcome is unknown");
         return false;
@@ -300,7 +300,7 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
             else if (strcmp(ext, "txt") == 0) effective_format = "text";
             else if (strcmp(ext, "toml") == 0) effective_format = "toml";
             else if (strcmp(ext, "ini") == 0) effective_format = "ini";
-            // D2.9.1: Mark filenames have one canonical extension.
+            // D10.1.1: Mark filenames have one canonical extension.
             else if (strcmp(ext, "mark") == 0) effective_format = "mark";
             // unknown extension: leave as NULL for fallback handling below
         }
@@ -479,7 +479,7 @@ extern "C" StrBuf* lambda_get_local_path_from_item(Item item);
 #define FETCH_LOCAL_CHUNK ((size_t)256 * 1024)
 
 struct FetchJob {
-    // the request, all mem-owned: the worker thread holds no managed values (D5.3.3)
+    // the request, all mem-owned: the worker thread holds no managed values (D6.3.3)
     char* url;
     char* method;
     char* body;
@@ -1359,7 +1359,8 @@ Item pn_io_create_file(Item target_item, Item content) {
     }
     const char* leaf = file_path_basename(path->str);
     char* parent = file_path_dirname(path->str);
-    FileAnchorOptions options = {0, create_file_guard, lambda_task_running(), NULL, NULL};
+    // Confirmed create-only exports require the same durable publication barrier.
+    FileAnchorOptions options = {FILE_ANCHOR_FULL_SYNC, create_file_guard, lambda_task_running(), NULL, NULL};
     FileAnchor* anchor = parent && leaf && *leaf && strcmp(leaf, ".") && strcmp(leaf, "..")
         ? file_anchor_open(parent, &options) : NULL;
     mem_free(parent);

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.4.1\u2013D2.4.3/S7.7.2: guarded float conversion retains its boxed cold error path and a native successful tree.",
+  "description": "D2.3.4\u2013D2.4.3/S7.7.2: guarded float conversion retains its boxed cold error path and a native successful tree.",
   "checks": [
     {
       "in_func": "_typed_#",

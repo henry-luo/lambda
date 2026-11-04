@@ -1437,13 +1437,13 @@ a silently successful-looking result (B).
 #### Promoted to the formal design (2026-08-07)
 
 TE-17's lane purity is now a normative design invariant: **DI20 — Native lanes are
-error-free**, anchored in **§D2.8** of [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md)
-(v1.5.0). D2.8.1 carries the representation argument and the two rejected escape hatches
-(in-band sentinel, sidecar); D2.8.2 carries I2 plus the fault-regime exclusion; D2.8.3 carries
-this decision and TE-18's dominance, and states that the `may_defect` split (D6.1.3) is a
+error-free**, anchored in **§D2.5** of [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md)
+(v1.5.0). D2.5.1 carries the representation argument and the two rejected escape hatches
+(in-band sentinel, sidecar); D2.5.2 carries I2 plus the fault-regime exclusion; D2.5.3 carries
+this decision and TE-18's dominance, and states that the `may_defect` split (D7.1.3) is a
 *prerequisite* for lane routing. The semantics side was already written — S7.8.1 (acceptance)
-and S7.7.2/S7.7.3 (dominance) — and is unchanged; D2.8 is the representational counterpart, the
-error analogue of DI5 (null sentinels) and DI8 (ArrayNum null-freedom). Cite `DI20`/`D2.8.x`
+and S7.7.2/S7.7.3 (dominance) — and is unchanged; D2.5 is the representational counterpart, the
+error analogue of DI5 (null sentinels) and DI8 (ArrayNum null-freedom). Cite `DI20`/`D2.5.x`
 rather than TE-17 for the lane rule from here on; TE-17 remains the record of the deliberation.
 
 #### Open
@@ -1465,7 +1465,7 @@ rather than TE-17 for the lane rule from here on; TE-17 remains the record of th
 failure an ordinary bound error. The binding's effective type includes that
 outcome; no invalid value is admitted as the declared type and no block is
 implicitly exited. A declaration remains a no-result statement (S2.5.4v3).
-**D2.8.3v3** replaces the old whole-scope clean-binding guarantee with proof
+**D2.5.3** replaces the old whole-scope clean-binding guarantee with proof
 of error freedom before native use. The full rule and examples are now in
 [TE-18.1](Lambda_Design_Type_Error_Handling.md#te-181--validation-produces-an-outcome-declarations-do-not-skip).
 
@@ -1483,7 +1483,7 @@ analysis are retained in
 
 ### TE-19 — Verified once, valid while unchanged; a required field is a required field (decided 2026-09-17, user)
 
-**The ruling (S11.4.10, D3.2.6).** A declared type — on `let`/`var`, a parameter, a return,
+**The ruling (S11.4.10, D4.2.6).** A declared type — on `let`/`var`, a parameter, a return,
 or a nominal binding of an element — is verified at the crossing, and the verification
 remains valid as long as the data is not changed. Under a nominal contract every required
 field is present in an admitted value; the container stays open beyond the declared prefix
@@ -1501,17 +1501,17 @@ values (language interop) are outside TE-19 until they cross a boundary that adm
 admitted record may hold an empty packed slot ("partially built records, host-built maps",
 `vibe/impl/Lambda_Impl_Tune28.md` §9.17), which put a zero-word test and a null arm on every
 field read; and the per-access shape-identity compare and certificate re-check on elements
-of a certified `T[]` (D3.2.4v4's corollary: the proof is transitive through a verified
+of a certified `T[]` (D4.2.5's corollary: the proof is transitive through a verified
 carrier). Both are measured at ~38–42 MIR instructions per record access in the typed lane
 against one in the c2m port (`temp/r46/`, deltablue2 `c_choose_method`).
 
-**Spec linkage.** TE-19 → S11.4.10, D3.2.6, D3.2.4v4; handle-carried facts → D4.4.4v4 /
+**Spec linkage.** TE-19 → S11.4.10, D4.2.6, D4.2.5; handle-carried facts → D5.4.4 /
 CW37 (`Lambda_Design_Runtime_COW.md` §11.14). Implementation records are Tune29 and
 [Verified Contracts](impl/Lambda_Impl_Verified_Contracts.md).
 
 #### TE-19.1 — Persistent contract proofs in runtime descriptors
 
-**Design accepted 2026-10-28; authority: S11.4.10, D3.2.4v4, D3.2.6.** Admission
+**Design accepted 2026-10-28; authority: S11.4.10, D4.2.5, D4.2.6.** Admission
 publishes a descriptor that preserves the value's complete physical layout and
 records the contract already established. An exact named descriptor proves its
 own contract. An extended descriptor may retain a pointer to that descriptor as
@@ -1548,7 +1548,7 @@ arbitrary sets of refinements and element-content certificates are outside that
 representation. Arrays continue to use their existing `ArrayRepCert` mechanism.
 
 Compiler consumers distinguish a possible layout from a live admission proof
-(D3.2.6). Returned-record layout candidates use exact/prefix guards; eliminating
+(D4.2.6). Returned-record layout candidates use exact/prefix guards; eliminating
 admission additionally requires an enforced declaration or definitions whose
 mutations preserve the contract. Nested writes and mutable argument paths can
 invalidate an unannotated local's proof. Nullable record stores reuse the
@@ -1556,7 +1556,7 @@ non-null arm's offsets only after receiver, incoming field contract and COW
 ownership checks; the null arm retains RHS evaluation and the checked failure.
 
 Array crossings compare the existing certificate and physical carrier together
-(D3.3.3v3). Value-preserving transforms may retain a certificate after restoring
+(D4.3.3). Value-preserving transforms may retain a certificate after restoring
 its native lane, and must recheck any changed length before publication. Broad
 container and nullable scalar crossings can use kind guards; misses, conversions,
 counted/multidimensional arrays and binder-dependent contracts retain admission.
@@ -1596,7 +1596,7 @@ the language. (b) Evaluate it on both. (b) won:
 - S10.1.7v2 already decides how a bare name in a type constraint resolves, scope names first,
   which presumes predicates read scope names.
 - The allow-list was stricter than what it protected. AI17 asked for a *pure* predicate, and
-  Lambda's purity is the `fn`/`pn` bit (D6.1.2 names it the soundness gate): a `let` read and an
+  Lambda's purity is the `fn`/`pn` bit (D7.1.2 names it the soundness gate): a `let` read and an
   `fn` call are pure. The static check delivers the purity; an evaluator restriction only made
   one tier wrong.
 - (a) would have rejected predicates that work on the JIT today, `~ > lim` first among them.
@@ -1986,7 +1986,7 @@ semantics.
    admission rules at both sites. Deferred failure stores a rich error and
    continues; the old variable value is replaced. Declared and effective types
    stay distinct, and native use requires proof of error freedom (SI14v3,
-   D2.8.3v3). The prior clean-binding/retained-old-value wording is preserved in
+   D2.5.3). The prior clean-binding/retained-old-value wording is preserved in
    [TE-18.2 history](Lambda_Design_Type_Error_Handling.md#earlier-reassignment-retention-and-exit-rules-retired-2026-11-02).
 9. **Sys-func registry metadata for the clean/open split (extends B13) — DEFERRED 2026-07-29
    (user) to the perf-tuning stage**, where the clean/open sys-func versions are built anyway.
@@ -2034,7 +2034,7 @@ semantics.
 
 ~~A failed initializer leaves its binding unestablished and skips to the end
 of its declaring block; its successful entry guard dominates every use.~~
-Replaced by **S7.7.2v2/S11.4.1v4/D2.8.3v2**, recorded in
+Replaced by **S7.7.2v2/S11.4.1v4/D2.5.3**, recorded in
 [TE-18.1](Lambda_Design_Type_Error_Handling.md#te-181--validation-produces-an-outcome-declarations-do-not-skip).
 
 The original TE-15/TE-18 deliberations below preserve the design history,
@@ -2465,3 +2465,69 @@ future follow-ups; these quotations do not override those rulings.
 > three shapes the rule does not reach directly. TE-18 has no open items.
 >
 > ---
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D3.2.4v5 → D4.2.5
+
+**D4.2.5*** **A crossing into a named map contract is a reification, not
+merely a check.** A named contract fixes a *physical* packed layout —
+per-field `byte_offset` and storage class — and the emitter's direct
+field access indexes by that layout. So a boundary may be elided only
+when the source **provably already carries the contract's layout**;
+semantic compatibility alone is never sufficient, because the same value
+admits under two different physical shapes. A value acquires that proof
+in exactly two ways: adopting the contract at construction, or crossing a
+boundary that reified it. Every consumer of this rule — static elision,
+runtime admission, and the direct read/write pair — must reach the
+contract **through the non-null arm** of its spelling: `N?` and `N | null`
+are wrappers whose own `type_id` is `LMD_TYPE_TYPE`, and a
+self-referential record is necessarily optional, so testing the wrapper
+silently exempts precisely the recursive contracts this rule exists to
+protect. Error alternatives likewise preserve the normal contract's full
+reification: `N^` and `N | E` establish N's layout on their normal arm
+(S11.4.6v4). Errors retain Item storage and never establish that layout.
+The open `map` fixes no layout and so needs no reification. For an
+open **nominal** instance the contract fixes the **declared prefix**: extra
+fields extend the shape after it and never disturb that prefix (S2.1.4).
+Violating this is a memory-safety defect, not a missed optimization: an
+unreified literal shape read through a contract's offsets returns a
+malformed Item. The same rule holds at every rank of `N[]`: the native
+carrier is a `MapN*` lane only while an exact full-array certificate proves
+the named layout, rank, and leaf contract; `Map*` and the map TypeId alone
+are insufficient. **Corollary (v4): the proof is transitive through a
+verified carrier.** An element read from a certified `T[]`, or a field read
+from an admitted record, *carries* `T`'s declared-prefix layout proof,
+because every write into a certified carrier admits its value before
+publishing (S11.4.1v5). A reader that holds the carrier's proof therefore
+accesses the element or field by offset with no per-access shape-identity
+compare and no certificate re-check; the proof lasts as long as the
+carrier's verification does (D4.2.6). [S11.1.1v3, Tune19 §11.5, Tune20
+§T20-6a, OB16; v4 2026-09-17, v5 TE-13.4 2026-11-03, user]
+
+### ex-D3.2.6 → D4.2.6
+
+**D4.2.6*** **Verified once, valid while unchanged; a required field is
+a required field.** A declared type — on `let`/`var`, a parameter, a
+return, or a nominal binding of an element — is verified at the crossing,
+and the verification remains valid as long as the data is not changed
+(S11.4.10). Under a nominal contract every required field is present in
+an admitted value; the container stays **open** beyond the declared prefix
+(S11.4.6, S2.1.4). **Native lanes store exactly the declared layout — that
+is the ABI**, for every lane implementation. Consequently a reader holding
+a verified contract reads a required field by offset with no presence
+test and no empty-slot arm, and a reader of a `T[]` lane reads `T`'s
+carrier with no slot test. Structural composition is unconstrained — an
+element may carry any attributes and content, including errors — and only
+the nominal binding verifies. Host-built values (language interop) are
+outside this rule until they cross a boundary that admits them. [TE-19,
+S11.4.10; 2026-09-17, user]

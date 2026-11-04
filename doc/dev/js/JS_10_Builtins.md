@@ -13,7 +13,7 @@
 
 ## 1. Purpose & scope
 
-LambdaJS ships the ES2020+ standard library as native C++ that operates on Lambda `Item` values. There is no self-hosted JS prelude. Under **D6.2.1 and D6.2.2v2**, every builtin is a realm-local function value whose typed `[[Call]]` and optional `[[Construct]]` targets are fixed when the value is created. Catalog IDs, display names, formal lengths, and owner groups are linking/reflection metadata; none selects the runtime algorithm. Namespace, constructor, prototype, and global bindings are installed as ordinary properties during realm construction ([§13](#13-globalthis-a-snapshot)).
+LambdaJS ships the ES2020+ standard library as native C++ that operates on Lambda `Item` values. There is no self-hosted JS prelude. Under **D7.2.1 and D7.2.2**, every builtin is a realm-local function value whose typed `[[Call]]` and optional `[[Construct]]` targets are fixed when the value is created. Catalog IDs, display names, formal lengths, and owner groups are linking/reflection metadata; none selects the runtime algorithm. Namespace, constructor, prototype, and global bindings are installed as ordinary properties during realm construction ([§13](#13-globalthis-a-snapshot)).
 
 The coverage notes below are grounded in the spec tables and the namespace getters actually present in the code; where a method count is large the doc gives a representative sample and cites the table rather than enumerating every entry.
 
@@ -49,7 +49,7 @@ A JS Symbol *value* is a pointer-backed core `Symbol` carried by
 `LMD_TYPE_SYMBOL`; its `SYMBOL_JS_*` kind determines unique, registered, or
 well-known behavior. The pointer is its value identity, and the temporary
 `NameId` reaches the existing property route only at a property boundary
-(**D4.6.1v3**). This section covers the `Symbol` builtin object.
+(**D5.6.1**). This section covers the `Symbol` builtin object.
 
 - **Well-known symbols** use a fixed catalog selector to cache one direct `Symbol*` per realm: `iterator`, `toPrimitive`, `hasInstance`, `toStringTag`, `asyncIterator`, `species`, `match`, `replace`, `search`, `split`, `unscopables`, `isConcatSpreadable`, `matchAll`, `asyncDispose`, and `dispose`. `js_populate_symbol_ctor` installs their direct Symbol Items as non-writable/non-enumerable/non-configurable own properties of the `Symbol` constructor per ES §19.4.2.
 - **Symbol prototype** and static bindings use the corresponding `JS_BUILTIN_OWNER_SYMBOL_*` catalog owners.
@@ -67,7 +67,7 @@ Catalog owner `JS_BUILTIN_OWNER_JSON_METHOD` supplies `parse`, `stringify`, plus
 - **stringify** — `js_json_stringify_full(value, replacer, space)` (`:12672`); the plain arity-1 form is `js_json_stringify` → `_full(value, ItemNull, ItemNull)` (`:12797`). The recursive serializer `js_stringify_value` (`:12438`) applies a **replacer function** (called with `(key, value)`, `:12456`) or a **replacer array** PropertyList (`:12617`), and honors a **space/gap** indent string built once at the top. BigInt values throw a TypeError (`:12506`); `Symbol`-typed values are dropped.
 
 Each serialization frame roots its current value, callback inputs, key list,
-and active property key across recursion and user callbacks (**D5.3.3**).
+and active property key across recursion and user callbacks (**D6.3.3**).
 The outer frame also owns the replacement PropertyList and wrapper holder.
 Without those roots, collecting while serializing a nested array drops the
 remaining object properties. `json_stringify_gc_ownership.js` covers nested
@@ -122,7 +122,7 @@ All **13 traps** are implemented as `js_proxy_trap_*` (`js_runtime.cpp`): `get` 
 
 ## 11. BigInt (Decimal-backed)
 
-A BigInt is a Lambda `LMD_TYPE_DECIMAL` value; `js_is_bigint` checks that representation while `js_global_is_bigint` additionally distinguishes `DECIMAL_BIGINT` from arbitrary-precision decimal values. Mixed BigInt/Number arithmetic throws and `typeof` reports `"bigint"`. Per **D6.2.2v2**, the `BigInt` global has typed `[[Call]]` and `[[Construct]]` entries: the latter exists for `IsConstructor`/`extends` but rejects before argument coercion. Prototype/static bindings use the `JS_BUILTIN_OWNER_BIGINT_*` catalog owners.
+A BigInt is a Lambda `LMD_TYPE_DECIMAL` value; `js_is_bigint` checks that representation while `js_global_is_bigint` additionally distinguishes `DECIMAL_BIGINT` from arbitrary-precision decimal values. Mixed BigInt/Number arithmetic throws and `typeof` reports `"bigint"`. Per **D7.2.2**, the `BigInt` global has typed `[[Call]]` and `[[Construct]]` entries: the latter exists for `IsConstructor`/`extends` but rejects before argument coercion. Prototype/static bindings use the `JS_BUILTIN_OWNER_BIGINT_*` catalog owners.
 
 ---
 
@@ -130,7 +130,7 @@ A BigInt is a Lambda `LMD_TYPE_DECIMAL` value; `js_is_bigint` checks that repres
 
 Installed as own properties of `globalThis` from the `global_fns` table (`js_globals.cpp:14380`): `parseInt`/`parseFloat`/`isNaN`/`isFinite`, `eval`, the URI quartet `decodeURI`/`encodeURI`/`decodeURIComponent`/`encodeURIComponent`, the legacy `escape`/`unescape`, the timer/scheduling family (`setTimeout`/`setInterval`/`setImmediate`/`queueMicrotask`/`requestAnimationFrame` + clears), and the Web globals `structuredClone`/`fetch`. Core implementations: `js_parseInt` (`:3460`, accumulates as a double for large values), `js_parseFloat` (`:3582`, ES `StrDecimalLiteral` only — no hex/octal/binary), `js_isNaN` (`:3683`), `js_isFinite` (`:3699`); the URI codecs and `atob`/`btoa` are at `:13242`+. `Number.parseInt`/`Number.parseFloat` share these.
 
-`TextDecoder` shares the UTF-8 decoder with Response text consumption. The valid-input path copies decoded bytes directly; invalid input uses `utf8_decode_replacement` (`lib/utf.c`) to replace each maximal invalid subsequence and reconsume the offending byte. `fatal` rejects invalid UTF-8, while BOM handling preserves `ignoreBOM`. Decoder and input owners stay rooted across property reads and allocation (**D5.3.3**). Streaming and other-encoding coverage remain separate gaps.
+`TextDecoder` shares the UTF-8 decoder with Response text consumption. The valid-input path copies decoded bytes directly; invalid input uses `utf8_decode_replacement` (`lib/utf.c`) to replace each maximal invalid subsequence and reconsume the offending byte. `fatal` rejects invalid UTF-8, while BOM handling preserves `ignoreBOM`. Decoder and input owners stay rooted across property reads and allocation (**D6.3.3**). Streaming and other-encoding coverage remain separate gaps.
 
 ---
 

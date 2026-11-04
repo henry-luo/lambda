@@ -1,6 +1,6 @@
 // latex/macros.ls — the table of document macro definitions
 // The TeX engine expands every macro invocation before the direct parser runs
-// (D7.2.7) and echoes the \newcommand-family definitions into its output, so
+// (D10.2.2) and echoes the \newcommand-family definitions into its output, so
 // the AST still holds <newcommand "\\name" ...> elements whose argument_groups
 // keep each group's raw source. This module collects those definitions as data
 // for the readers that need them: TikZ islands (tikz_bridge.ls), bussproofs

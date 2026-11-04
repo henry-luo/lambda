@@ -1,4 +1,4 @@
-// D7.2.5: Insert dialogs retain typed settings and use existing Word catalogs.
+// D10.2.1: Insert dialogs retain typed settings and use existing Word catalogs.
 import charts: lambda.editor.graphics.chart
 import smartart: lambda.editor.graphics.diagram
 import wordart: lambda.editor.graphics.wordart

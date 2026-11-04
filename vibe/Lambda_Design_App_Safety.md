@@ -1,8 +1,8 @@
 # Lambda App Safety
 
 **Status:** script/app defaults, protected grant storage, and package-update
-policy ratified by the user on 2026-11-02 (**D7.5.5–D7.5.8**), with private-data
-retention on uninstall ratified on 2026-11-03 (**D7.5.9**). Remaining
+policy ratified by the user on 2026-11-02 (**D11.2.1–D11.2.4**), with private-data
+retention on uninstall ratified on 2026-11-03 (**D11.2.5**). Remaining
 architecture and delivery details are proposals. Policy, anchored I/O,
 grant-store/file-broker and scoped Lambda source/input/parser-resource/path/task
 components, host ad-hoc admission/source manifests and grant restoration,
@@ -21,11 +21,11 @@ web content, email, Jube extensions, and their access to host resources.
 
 **Authority:** the [formal design](../doc/Lambda_Formal_Design.md) and
 [formal semantics](../doc/Lambda_Formal_Semantics.md) remain authoritative.
-This design develops **D7.5.1–D7.5.2 / DO19**, continuing
+This design develops **D11.1.1–D11.1.2 / DO19**, continuing
 [JA10 and JA16](Lambda_Design_Jube_Architecture.md). The approved defaults map
-to **D7.5.5** (execution root and loading), **D7.5.6** (create versus overwrite),
-**D7.5.7** (protected settings), and **D7.5.8** (network denial and package
-updates), and **D7.5.9** (retention on uninstall). Other recommendations remain proposed requirements unless identified
+to **D11.2.1** (execution root and loading), **D11.2.2** (create versus overwrite),
+**D11.2.3** (protected settings), and **D11.2.4** (network denial and package
+updates), and **D11.2.5** (retention on uninstall). Other recommendations remain proposed requirements unless identified
 as existing rulings. This document does not allocate a competing security ledger.
 
 **Current platform investigation (2026-11-03):** the shared App Sandbox helper
@@ -51,7 +51,7 @@ backend-independent private-data service uses a channel-bound virtual
 `/.lambda/app-data` mount, stored beneath protected `~/.lambda/app-data`,
 with no source authority and bounded writes. Details and remaining gates are in
 the [implementation progress](impl/Lambda_Impl_App_Safety.md#6-implementation-progress)
-(**D7.5.1–D7.5.2, D7.5.5–D7.5.7**).
+(**D11.1.1–D11.1.2, D11.2.1–D11.2.3**).
 
 ## 1. Recommended direction
 
@@ -89,17 +89,17 @@ permissions also need explicit designs.
 
 | Existing authority | Constraint on this proposal |
 |---|---|
-| **D7.5.1** | Preserve T1 trusted native, T2 process + OS sandbox + broker, and T3 sandboxed Wasm. Third-party native modules never enter the runtime process. A T1 DSO is not a security boundary. |
-| **D7.5.2** | Use one central I/O door across Lambda, Radiant, and modules; policy includes capabilities, isolation, audit, and quotas. |
-| **D7.5.5–D7.5.8** | Approved app/script loading scope, default new-file creation with overwrite approval, protected per-principal settings, and pull-only host package updates. Detailed rules are in §4.1, §6.4, §7.3, and §8.3. |
-| **D7.3.2–D7.3.4, D7.3.6** | Preserve module integrity/ABI admission, transactional registration, the host API, and export allowlist. These are necessary admission controls, not proof of native-code safety. |
-| **D7.4.1v2–D7.4.2v2** | Keep raw pointers out of script interfaces, resources in host-owned rid tables, and async completion under host control. Across processes, marshal values instead of transmitting pointer-bearing `Item` bits. |
+| **D11.1.1** | Preserve T1 trusted native, T2 process + OS sandbox + broker, and T3 sandboxed Wasm. Third-party native modules never enter the runtime process. A T1 DSO is not a security boundary. |
+| **D11.1.2** | Use one central I/O door across Lambda, Radiant, and modules; policy includes capabilities, isolation, audit, and quotas. |
+| **D11.2.1–D11.2.4** | Approved app/script loading scope, default new-file creation with overwrite approval, protected per-principal settings, and pull-only host package updates. Detailed rules are in §4.1, §6.4, §7.3, and §8.3. |
+| **D9.4.2–D9.4.4, D9.4.6** | Preserve module integrity/ABI admission, transactional registration, the host API, and export allowlist. These are necessary admission controls, not proof of native-code safety. |
+| **D9.5.1–D9.5.2** | Keep raw pointers out of script interfaces, resources in host-owned rid tables, and async completion under host control. Across processes, marshal values instead of transmitting pointer-bearing `Item` bits. |
 | **S2.4.4** | Logical target resolution obeys sandboxing and capabilities; resolving an address does not itself perform I/O or confer access. |
 | **S12.1.1v3, S12.4.1v3–S12.4.3** | Effect classification and scoped resources remain intact. A permitted `pn` effect still needs authorization; eager `input()` reads and resource discovery also need checks. |
 | **S13.3.1v2–S13.3.2** | Revocation integrates with task ownership, cancellation, and cleanup. Cancellation at park points is not a hard CPU limit. |
-| **D5.3.3** | Native adapters use precise `RootFrame` / `Rooted` ownership; sandbox work must not restore conservative stack scanning. |
-| **D7.5.4** | Preserve origin-based audible-output activation. It does not grant file, network, microphone, or credential access. |
-| **D7.2.7v2; S1.8** | TeX stays within its existing read-only resource boundary; document data must not acquire executable-source authority. |
+| **D6.3.3** | Native adapters use precise `RootFrame` / `Rooted` ownership; sandbox work must not restore conservative stack scanning. |
+| **D11.3.1** | Preserve origin-based audible-output activation. It does not grant file, network, microphone, or credential access. |
+| **D10.2.2; S1.8** | TeX stays within its existing read-only resource boundary; document data must not acquire executable-source authority. |
 | **Mail ML5v2, ML6** in [Lambda_Demo_Mail](Lambda_Demo_Mail.md) | Message scripts remain disabled; secrets belong in the OS secret store. Interactive mail would require a later explicit design decision. |
 
 ## 2. Prior art and lessons
@@ -191,7 +191,7 @@ requesting principal even when work is offloaded to another thread.
 Opening a file grants access to that file, not its parent directory or execution
 of neighboring files. Documents needing relative assets request a document
 resource directory through trusted UI. Existing format rules still apply;
-for example, the TeX read scope in **D7.2.7v2** must also fit within the selected
+for example, the TeX read scope in **D10.2.2** must also fit within the selected
 document-resource grant. A downloaded `.ls`, HTML attachment, or saved page
 does not become a trusted app merely by residing on disk.
 
@@ -202,7 +202,7 @@ effect distinction in **S12.1.1v3** without confusing purity with authority.
 
 ### 4.1 Default script loading and dependency scope
 
-**Approved 2026-11-02; D7.5.5–D7.5.6.** Each run is a small sandboxed app
+**Approved 2026-11-02; D11.2.1–D11.2.2.** Each run is a small sandboxed app
 with an explicit source/resource root. An installed app has its admitted app
 root; running a project uses the project directory selected by the user.
 Opening a loose script initially grants its entry file and approved shipped
@@ -234,7 +234,7 @@ Imported code shares the calling app/script's grants; imports cannot add
 permissions. Importing `io` exposes names, not filesystem/network authority.
 Check every transitive dependency, top-level initializer read, and cache hit
 before use. There is no unrestricted loading/compilation phase. A denied
-required initializer fails the import under **D7.2.2**, without publishing
+required initializer fails the import under **D9.3.2**, without publishing
 partially initialized state.
 
 Before execution, collect declared requirements and discoverable imports into
@@ -276,7 +276,7 @@ engine and host imports; it never runs in the policy broker.
 
 **One policy contract:** Lambda builtins, Node compatibility, DOM fetch,
 Radiant resources, native service adapters, and module APIs submit requests to
-the same authority model (**D7.5.2**). Surface adapters preserve language/web
+the same authority model (**D11.1.2**). Surface adapters preserve language/web
 semantics; they do not maintain competing authorization databases. Raw I/O
 mechanisms remain under `lib`/reviewed platform services. Source and binary
 checks prevent accidental bypasses, while the OS prevents adversarial bypasses.
@@ -329,7 +329,7 @@ Capabilities identify an operation set, a resource or constrained namespace,
 the grantee, expiry/owner lifetime, delegation rights, and a policy generation.
 Represent them as opaque host-owned resources. An integer rid is only an index
 into a principal-scoped, generation-checked table, never an OS descriptor or
-authority a different principal can claim by guessing (**D7.4.1v2**).
+authority a different principal can claim by guessing (**D9.5.1**).
 
 Delegation can only narrow resource, operations, duration, and onward delegation.
 Ordinary serialization, `postMessage`, file storage, or copying a rid never
@@ -406,7 +406,7 @@ explicit limits, not reasons to leave future access enabled.
 
 ### 6.4 Protected settings and grant persistence
 
-**Approved 2026-11-02; D7.5.7.** The host stores what is granted to each
+**Approved 2026-11-02; D11.2.3.** The host stores what is granted to each
 installed app and each ad-hoc script under **`~/.lambda/setting`**. This is
 host security state, not app configuration. Persistent records include the
 host-assigned principal, admitted identity/root, resource and operation scope,
@@ -478,13 +478,13 @@ admission; setting a directory `noexec` does not constrain an interpreter.
 
 The experimental broker implements data/cache/temp through channel-bound
 virtual mounts (`/.lambda/app-data`, `/.lambda/app-cache`, `/.lambda/app-temp`)
-under **D7.5.2, D7.5.5–D7.5.7**. Temp files are isolated between concurrent
+under **D11.1.2, D11.2.1–D11.2.3**. Temp files are isolated between concurrent
 admissions; the quota counts all of that principal's sessions. A held lease,
 not a PID or age threshold, distinguishes live temp trees from abandoned ones.
 Joined teardown and trusted cache eviction use bounded, identity-checked
 removal; cleanup failure is visible to the host.
 
-Uninstall retains persistent app data by default (**D7.5.9**, USER,
+Uninstall retains persistent app data by default (**D11.2.5**, USER,
 2026-11-03). Deletion is a separate explicit action in trusted Lambda management;
 neither uninstall nor permission revocation silently erases it. Retained data
 grants no permission to reinstall or execute code. Cache/temp remain discardable.
@@ -500,7 +500,7 @@ remain pending. See the
 [storage component](../lambda/host/safety/README.md#broker-owned-private-data-cache-and-temporary-files).
 
 Persistent security/private state uses ordered namespace publication under
-**D7.5.2, D7.5.7**. Creating a directory syncs its inode and its parent's name
+**D11.1.2, D11.2.3**. Creating a directory syncs its inode and its parent's name
 before returning; create-mode retries also sync retained directories. A new
 lock/lease stream is returned only after the empty file and parent have synced.
 Protected settings and private mounts additionally require `F_FULLFSYNC` on
@@ -514,7 +514,7 @@ filesystem corruption or physical power-loss scenario.
 [Linux directory syncing](https://man7.org/linux/man-pages/man2/fsync.2.html).
 
 Trusted quota management stores per-principal overrides under the protected
-`~/.lambda/setting` namespace (**D7.5.2, D7.5.7**). Missing overrides use the
+`~/.lambda/setting` namespace (**D11.1.2, D11.2.3**). Missing overrides use the
 trusted host's defaults. Saved records bind the principal kind/digest and account
 profile, retain a monotonically increasing generation and survive app-code
 revalidation and data reset. Corrupt or copied records refuse admission;
@@ -570,7 +570,7 @@ must resolve through this policy rather than opening a second I/O door.
 
 ### 7.3 Default creation and approval before overwrite
 
-**Approved 2026-11-02; D7.5.6.** Creating a new ordinary file under the
+**Approved 2026-11-02; D11.2.2.** Creating a new ordinary file under the
 approved app/project root is granted by default, subject to quotas, protected
 locations, and OS restrictions. Creating necessary ordinary subdirectories is
 part of that operation. It does not grant arbitrary deletion, renaming,
@@ -618,7 +618,7 @@ overwrite exemption.
 
 ### 8.1 Network policy
 
-Apps and ad-hoc scripts have no network access until granted (**D7.5.8**).
+Apps and ad-hoc scripts have no network access until granted (**D11.2.4**).
 The host updater's narrow exception (§8.3) does not grant them network access.
 Scope a grant to parsed
 scheme/hostname/port; use exact hosts by default, not textual suffix matches.
@@ -665,7 +665,7 @@ Clipboard reads, selected contacts/photos, location, printing, notifications,
 accessibility automation, and global keyboard hooks are sensitive services.
 Expose focused operations and user-selected subsets; global input injection,
 debugging other processes, and unrestricted accessibility control are outside
-the normal app profile. Audible output continues to follow **D7.5.4**.
+the normal app profile. Audible output continues to follow **D11.3.1**.
 
 Cover process spawn, environment access, standard streams, filesystem watchers,
 GPU/media services, local IPC, clipboard, diagnostics, and crash reporting in
@@ -677,7 +677,7 @@ stdout destinations; app output is also a potential data sink.
 
 ### 8.3 Host-controlled package auto-update
 
-**Approved 2026-11-02; D7.5.8.** Lambda provides a host mechanism to poll and
+**Approved 2026-11-02; D11.2.4.** Lambda provides a host mechanism to poll and
 download package updates from the package's **designated update endpoint**.
 This is a pull-only service exception to default network denial. The installed
 package declares update metadata at admission; package code does not implement
@@ -728,7 +728,7 @@ secrets; package install hooks do not execute with updater authority. If a
 package is vendored into a mutable user project, replacing those existing
 files still requires §7.3 approval. Stage updates while a version is in use
 and activate at a safe boundary; do not hot-unload native modules contrary
-to **D7.3.2**. New capability requests do not inherit consent: retain existing
+to **D9.4.2**. New capability requests do not inherit consent: retain existing
 restrictions and seek user approval before enabling the additional operations.
 
 **User controls:** expose per-package and global controls in trusted settings,
@@ -754,7 +754,7 @@ Default polling cadence, installation-time presentation, and update schema
 remain implementation choices. Use bounded downloads and retry backoff; an
 update server cannot cause unbounded polling, storage growth, or grant changes.
 
-**Current transport component (D7.5.2, D7.5.7–D7.5.8; 2026-11-03):**
+**Current transport component (D11.1.2, D11.2.3–D11.2.4; 2026-11-03):**
 `host/safety/update_download` constructs a GET for a public repository-relative
 name from the admitted package record. It permits at most three redirects,
 checking the exact admitted origin and canonical public HTTPS syntax on every
@@ -782,7 +782,7 @@ metadata/freshness, trust-root rotation, safe staging/extraction, activation and
 installed-package catalog integration remain required before update delivery
 is available. Transport tests do not qualify M2 or enable default rollout.
 
-**Selected verifier implementation (USER, 2026-11-03; D7.5.8):** implement
+**Selected verifier implementation (USER, 2026-11-03; D11.2.4):** implement
 TUF metadata parsing, canonical signing bytes, threshold verification, root
 rotation, rollback/freshness checks, delegated lookup and refresh sequencing
 in Lambda Script. Use native primitives for public-key signature math and
@@ -796,10 +796,10 @@ must bind state to the live package job, immutable verifier code and protected
 cache. Accepted roots and metadata are persisted before later fetches. Root
 rotation that changes timestamp/snapshot keys atomically drops both cached
 roles. The host cache stores opaque signed bytes with profile/authority binding,
-generation comparison and a persisted observed-clock watermark under D7.5.7.
+generation comparison and a persisted observed-clock watermark under D11.2.3.
 This is not a hardware-backed counter or an app-callable state store.
 
-Under **D7.5.2, D7.5.7–D7.5.8**, role labels remain opaque UTF-8 values inside
+Under **D11.1.2, D11.2.3–D11.2.4**, role labels remain opaque UTF-8 values inside
 that record, with exact identity and a 128-byte ceiling. They never select
 settings filenames. The verifier percent-encodes whole role components;
 target references preserve canonical existing escapes exactly once. Native
@@ -816,7 +816,7 @@ requires revalidation on each handoff. Equal timestamp metadata resumes target
 verification from the old trusted envelope, allowing interrupted downloads to
 retry without accepting new same-version expiry/references.
 
-The initial **D7.5.2, D7.5.8** offline decoder implements its ZIP namespace and
+The initial **D11.1.2, D11.2.4** offline decoder implements its ZIP namespace and
 streaming policy in Lambda Script, using the existing native bounded reader.
 It validates all paths before emission and sends one exact member at a time,
 requiring host acknowledgement between members. It writes no files and runs no
@@ -844,7 +844,7 @@ open; delivery and default sandbox rollout stay disabled.
 
 ## 9. Jube and executable-code admission
 
-Apply the existing **D7.5.1** tiers without conflating package signing and trust:
+Apply the existing **D11.1.1** tiers without conflating package signing and trust:
 
 | Tier | Admission and execution | Safety consequence |
 |---|---|---|
@@ -869,12 +869,12 @@ must be unavailable in app/content profiles.
 T2 needs a versioned wire protocol: bounded value serialization, opaque remote
 resource handles, cancellation, backpressure, and crash/error reporting. Raw
 `Item` values, pointers, function addresses, and native host-object layouts do
-not cross the process boundary (**D7.4.1v2**). Modules whose synchronous
+not cross the process boundary (**D9.5.1**). Modules whose synchronous
 callbacks or shared-memory assumptions cannot be expressed safely remain
 unsupported in T2 until redesigned; do not fall back to T1.
 
 For T1 vendor libraries that internally perform I/O, register and constrain
-their service operations under **D7.5.2**; a checker exemption does not make
+their service operations under **D11.1.2**; a checker exemption does not make
 their native code confined. Existing connection-lifecycle proposals
 **JA16.1–JA16.4** in [Lambda_IO_RDB](Lambda_IO_RDB.md) remain part of that work.
 For T2, even vendor I/O must be limited by the worker's OS profile or mediated
@@ -1006,11 +1006,11 @@ policy; logs are not a covert exception to network restrictions.
 |---|---|
 | Resource budgets | Limit memory, CPU time, wall time, processes/tasks, open handles, network bytes, storage, output size, parse depth, archive expansion, and pending IPC. Include compiler/JIT and GPU work. Prevent denial of service before a user can revoke access. |
 | External termination | A supervisor can stop an app even in an infinite native/JIT loop. Cooperative cancellation remains useful but does not cover non-yielding code (**S13.3.2**). Limit cleanup time before forced termination. |
-| Hostile-input isolation | Parse/render complex documents, archives, images, fonts, and media in restricted workers with bounded results. Preserve archive rejection/quota rules in **S12.4.1v3** and TeX restrictions in **D7.2.7v2**. |
+| Hostile-input isolation | Parse/render complex documents, archives, images, fonts, and media in restricted workers with bounded results. Preserve archive rejection/quota rules in **S12.4.1v3** and TeX restrictions in **D10.2.2**. |
 | Supply-chain integrity | Pin dependencies; authenticate releases and policy manifests; verify artifacts and transitive native dependencies; separate package download from activation. No automatic install scripts with host authority. |
-| Safe updates | Host-owned pull-only updater under **D7.5.8**, atomic activation, protected trust roots, and recovery to an approved known-good version. New permissions require fresh grants; preserve user pause/disable choices and block rollback to revoked vulnerable releases. |
+| Safe updates | Host-owned pull-only updater under **D11.2.4**, atomic activation, protected trust roots, and recovery to an approved known-good version. New permissions require fresh grants; preserve user pause/disable choices and block rollback to revoked vulnerable releases. |
 | Code/data separation | Protected managed runtime/dependency images and executable caches; explicit code loading and revalidation after approved project edits. Creating a source file never authorizes execution in a stronger principal or search-path injection into trusted host code. |
-| Runtime hardening | Bounds/overflow checks, precise GC roots (**D5.3.3**), fuzzing, sanitizers, platform exploit mitigations, and writable/executable memory discipline. These reduce exploit risk but do not replace containment. |
+| Runtime hardening | Bounds/overflow checks, precise GC roots (**D6.3.3**), fuzzing, sanitizers, platform exploit mitigations, and writable/executable memory discipline. These reduce exploit risk but do not replace containment. |
 | UI integrity | Host-owned prompts, verified app/destination identity, clear active-device indicators, anti-spam limits, and restrictions on fullscreen/popups around sensitive consent. |
 | IPC and automation scope | Only named authenticated services; no ambient desktop bus, credential agent, shell, global automation, or debug endpoint. AI/automation features receive task-scoped grants; instructions in files/pages cannot mint permissions. |
 | Security maintenance | Inventory dependencies and their advisories, supported-version policy, prompt updates, vulnerability reporting, reproducible attack regressions, and an emergency capability/module revocation mechanism. |
@@ -1026,7 +1026,7 @@ or inherited environment accidentally.
 |---|---|
 | Runtime/API permission checks only | Useful first milestone and developer feedback; cannot contain native code or a runtime exploit. Must not be marketed as the full sandbox. |
 | One OS sandbox around the whole Lambda desktop application | Protects some host resources but leaves all Lambda apps/content sharing its union of grants. Insufficient inter-app separation. |
-| Separate processes without OS policy | Separates memory and crashes, but preserves ordinary user filesystem/network authority. Insufficient for T2 (**D7.5.1**). |
+| Separate processes without OS policy | Separates memory and crashes, but preserves ordinary user filesystem/network authority. Insufficient for T2 (**D11.1.1**). |
 | All access through a general-purpose privileged RPC service | Simple to expose, difficult to secure; risks replacing direct access with a confused deputy. Prefer typed, bounded service operations. |
 | Signed native modules in-process | Signing helps provenance; it does not constrain malicious behavior. Reserve T1 for explicitly trusted platform code. |
 | Wasm for every app | Attractive containment and portability, but not required to deliver Lambda's native runtime. Start with T3 extensions and retain OS confinement for native app workers. |
@@ -1043,22 +1043,22 @@ security checks in performance comparisons.
 
 The user approved the following on **2026-11-02**:
 
-1. **D7.5.5:** an app/ad-hoc script has an admitted source/resource root;
+1. **D11.2.1:** an app/ad-hoc script has an admitted source/resource root;
    local dependencies and shipped libraries load under the same policy, and
    transitive imports/initializers never gain additional authority.
-2. **D7.5.6:** creation of new files under the root is allowed by default;
+2. **D11.2.2:** creation of new files under the root is allowed by default;
    overwriting existing files prompts for approval. Protected resources remain
    excluded, and race/rename/delete-recreate paths cannot bypass the rule.
-3. **D7.5.7:** per-app and per-ad-hoc-script grants are stored under
+3. **D11.2.3:** per-app and per-ad-hoc-script grants are stored under
    `~/.lambda/setting`, protected from app/user-script manipulation.
-4. **D7.5.8:** network access is denied by default. A separate host updater
+4. **D11.2.4:** network access is denied by default. A separate host updater
    may poll/download from designated package endpoints without general user
    data uploads; users can pause, disable, and restore it.
 
 The standalone-file read scope remains narrow until the user selects its
 folder/project. Managed runtime/shared dependency images remain under the
 protected installer/update path. This does not change the existing email
-script prohibition (**ML5v2**) or native-module trust tiers (**D7.5.1**).
+script prohibition (**ML5v2**) or native-module trust tiers (**D11.1.1**).
 
 Remaining choices are the supported OS/version matrix, migration of existing
 trusted CLI use, app identity/signing and local-code-change UX, manifest and
@@ -1080,7 +1080,7 @@ not a complete security audit or a claim that every existing gate is absent.
 
 | Evidence in the current tree | Implication |
 |---|---|
-| Formal design Appendix A marks **D7.5.1** T2/T3 as directional/unbuilt and **D7.5.2** as an adopted central-I/O direction with unfinished extraction. | The present architecture must not be described as a completed adversarial app sandbox. |
+| Formal design Appendix A marks **D11.1.1** T2/T3 as directional/unbuilt and **D11.1.2** as an adopted central-I/O direction with unfinished extraction. | The present architecture must not be described as a completed adversarial app sandbox. |
 | [`jube_node_permission.cpp`](../lambda/jube/jube_node_permission.cpp): `js_permission_init_from_argv`, per-session policy, read/write/net checks. | Reuse behavior and migration knowledge, but Node-specific optional permissions are not a complete cross-runtime security policy. |
 | [`node_fs_module.cpp`](../lambda/module/node_fs/node_fs_module.cpp): host permission calls and session-owned filesystem module state. | Route the existing host seam into the central authority model instead of inventing a second filesystem gate. |
 | [`jube_registry.cpp`](../lambda/jube/jube_registry.cpp): `jube_load_manifest_path_internal`, conditional digest verification, `jube_load_dynamic_module_checked`, environment loader. | Audit all admission paths, pre-load metadata, constructors and dependency resolution. Existing DSO loading is not T2 confinement. |
@@ -1118,7 +1118,7 @@ References for these mechanisms and limits:
 The strict refusal to downgrade a required profile is Lambda's recommendation,
 not a claim about every upstream API's default behavior.
 
-Lambda's T0/MIR execution policy remains governed by **D8.1.1v18**. A platform
+Lambda's T0/MIR execution policy remains governed by **D8.3.2**. A platform
 that cannot safely support its requested JIT profile must use a supported
 interpreter profile or reject the workload, with capability limits explicit.
 No alternative C-text backend or weakened executable-memory policy is proposed.
@@ -1189,7 +1189,7 @@ Minimum adversarial regression matrix:
 Run focused security tests during each milestone, then the affected aggregate
 gates: `make test-lambda-baseline` for runtime changes,
 `make test262-baseline` for JS changes, and `make test-radiant-baseline` for
-Radiant changes. Add relevant module conformance gates under **D7.3.5**;
+Radiant changes. Add relevant module conformance gates under **D9.4.5**;
 schedule broader Node qualification explicitly where needed. Fuzz protocol,
 path, and resource-policy boundaries; include real OS denial tests in CI.
 Language/DOM correctness suites and mocked permission tests alone do not prove
@@ -1205,12 +1205,80 @@ make tests pass.
 
 - ~~A normal app's executable package/root is entirely read-only; only the
   installer/updater replaces its files.~~ Replaced on 2026-11-02 by
-  **D7.5.6** for ordinary app/project roots: create new files by default and
+  **D11.2.2** for ordinary app/project roots: create new files by default and
   obtain approval before overwriting existing files. Managed runtime/shared
   dependencies retain their protected installation boundary (§7.1).
 - ~~All writes to user files require an extra output-file or writable-directory
-  grant.~~ Replaced by **D7.5.6** for new files inside the admitted app/project
+  grant.~~ Replaced by **D11.2.2** for new files inside the admitted app/project
   root; outside-root writes still require additional grants.
-- ~~Network denial has no package-update exception.~~ Refined by **D7.5.8**:
+- ~~Network denial has no package-update exception.~~ Refined by **D11.2.4**:
   the trusted host may pull admitted package updates, independently of app
   network grants, with protected user pause/disable/restore controls.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D7.5.5 → D11.2.1
+
+**D11.2.1*** **Apps and ad-hoc scripts execute within an admitted
+source/resource root.** They may read/import inside that root and load
+approved shipped packages; outside dependencies need additional grants.
+A loose file initially grants only itself and approved shipped libraries;
+selecting a project/folder establishes the wider root. Transitive imports,
+initializer IO, and cache hits obey the same policy; importing an API or
+resolving a path grants no authority (S2.4.4, S16.9.8). Imported code shares,
+never expands, the caller's grants. Loading has no unrestricted bootstrap
+phase. (USER, 2026-11-02)
+[App_Safety §4.1](Lambda_Design_App_Safety.md#41-default-script-loading-and-dependency-scope)
+
+### ex-D7.5.6 → D11.2.2
+
+**D11.2.2*** **New files under the app/project root are allowed by
+default; overwriting existing files requires user approval.** Creation is
+atomic create-if-absent, never a check followed by truncation. Modification,
+append, and replacement cannot bypass approval through alternate APIs or
+delete/recreate. A remembered overwrite grant requires explicit user consent;
+protected host/OS resources remain excluded. Root mutations are brokered so
+native code cannot bypass the distinction. (USER, 2026-11-02)
+[App_Safety §7.3](Lambda_Design_App_Safety.md#73-default-creation-and-approval-before-overwrite)
+
+### ex-D7.5.7 → D11.2.3
+
+**D11.2.3*** **Per-app and per-ad-hoc-script grants live under
+`~/.lambda/setting`, controlled by the trusted host.** Apps and user scripts
+cannot create, modify, delete, replace, or redirect this security state,
+including through ancestor grants or path aliases. The host binds records
+to admitted principals and preserves expiry/revocation; no script can grant
+itself authority. OS confinement plus broker checks enforce protection;
+same-user filesystem ownership alone is insufficient. (USER, 2026-11-02)
+[App_Safety §6.4](Lambda_Design_App_Safety.md#64-protected-settings-and-grant-persistence)
+
+### ex-D7.5.8 → D11.2.4
+
+**D11.2.4*** **App/script network access is denied by default; package
+auto-update is a separate host-owned pull service.** It may poll and download
+verified updates only from admitted designated package endpoints, without
+granting network authority to package code. Requests carry no user data,
+credentials, or telemetry by default; unavoidable connection/request metadata
+is not anonymity. Users can pause, disable, and restore updating, with state
+protected under D11.2.3; a global offline setting overrides this exception.
+Update admission cannot expand app grants or authorize replacement of user
+project files without D11.2.2 approval. (USER, 2026-11-02)
+[App_Safety §8.3](Lambda_Design_App_Safety.md#83-host-controlled-package-auto-update)
+
+### ex-D7.5.9 → D11.2.5
+
+**D11.2.5*** **Uninstall retains private app data by default.** Deleting
+retained persistent data requires a separate explicit trusted-user action.
+Cache and temporary files remain discardable; removing installation or
+grant state alone does not authorize persistent-data erasure.
+(USER, 2026-11-03)
+[App_Safety §7.1](Lambda_Design_App_Safety.md#71-storage-model)

@@ -1,0 +1,42 @@
+{
+  "name": "Auto column flex items fit their available inline size before laying out nested articles",
+  "html": "test/ui/css_flex_auto_cross_fit.html",
+  "viewport": {
+    "width": 1200,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#section"
+      },
+      "width": 400,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".article"
+      },
+      "width": 400,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".picture"
+      },
+      "width": 174,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".text"
+      },
+      "width": 150,
+      "tolerance": 1
+    }
+  ]
+}

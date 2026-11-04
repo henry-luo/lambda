@@ -94,7 +94,8 @@ bool prepare_destination(SqliteScope* scope, const char* path) {
     const char* leaf = file_path_basename(path);
     scope->leaf = leaf ? mem_strdup(leaf, MEM_CAT_EVAL) : NULL;
     char* parent = file_path_dirname(path);
-    FileAnchorOptions options = {0, authorize_destination, scope, NULL, NULL};
+    // A successful company-image publication must flush volatile drive caches too.
+    FileAnchorOptions options = {FILE_ANCHOR_FULL_SYNC, authorize_destination, scope, NULL, NULL};
     if (scope->destination && scope->leaf && parent &&
             strcmp(scope->leaf, ".") && strcmp(scope->leaf, "..") &&
             rdb_target_authorized(scope->destination, "sqlite"))
@@ -241,8 +242,11 @@ Item close_scope(Bool unwinding) {
     LambdaTask* owner = lambda_task_running();
     SqliteScope* scope = owner ? (SqliteScope*)lambda_task_attachment_take(owner, &attachment_key) : NULL;
     if (!scope) return io_fs_error(ERR_INVALID_OPERATION, "io.sqlite: no active transaction");
+    bool publication = scope->destination_anchor != NULL;
     int result = finish_scope(scope, unwinding == BOOL_TRUE);
-    if (result == 1) return io_fs_error(ERR_IO_ERROR, "io.sqlite.create: file published but durability is uncertain");
+    if (result == RDB_SQLITE_UNCERTAIN) return publication
+        ? io_fs_error(ERR_IO_ERROR, "io.sqlite.create: file published but durability is uncertain")
+        : io_fs_error(ERR_IO_ERROR, "io.sqlite: commit outcome is uncertain; reopen before retrying");
     return result == RDB_OK ? ItemNull : io_fs_error(ERR_IO_ERROR, "io.sqlite: transaction rolled back or commit failed");
 }
 
@@ -384,7 +388,7 @@ bool collect_row(void* user, int count, const char* const* names, const RdbValue
     return ok;
 }
 
-// Only the owner task allocates and roots Lambda values (D5.3.1–D5.3.3).
+// Only the owner task allocates and roots Lambda values (D6.3.1–D6.3.3).
 bool materialize_rows(SqliteJob* job, Rooted<Array*>* result) {
     RootFrame roots(2);
     Rooted<Array*> row(roots, (Array*)NULL);
@@ -470,6 +474,38 @@ Item sqlite_preimage(Item handle, Item path) {
     return result == RDB_OK ? ItemNull : io_fs_error(ERR_IO_ERROR, "io.sqlite.preimage: backup failed; transaction will roll back");
 }
 
+Item sqlite_snapshot_digest(Item handle) {
+    SqliteScope* scope = current_scope();
+    Item denied = ItemNull;
+    if (!io_fs_allow_unbrokered("io.sqlite.snapshot_digest", &denied) || !require_threadsafe_sqlite(&denied)) {
+        if (scope) rdb_sqlite_tx_mark_failed(scope->tx);
+        return denied;
+    }
+    bool active_handle = get_type_id(handle) == LMD_TYPE_VMAP && handle.vmap &&
+        handle.vmap->host_type == &scope_brand && scope && handle.vmap->host_data == scope;
+    if (!active_handle) {
+        if (scope) rdb_sqlite_tx_mark_failed(scope->tx);
+        return io_fs_error(ERR_INVALID_OPERATION, "io.sqlite.snapshot_digest: expected the active transaction");
+    }
+    if (lambda_task_cancel_requested(scope->owner)) {
+        rdb_sqlite_tx_mark_failed(scope->tx);
+        return io_fs_error(ERR_CANCELLED, "io.sqlite.snapshot_digest: task cancelled");
+    }
+    uint8_t digest[32];
+    int status = rdb_sqlite_tx_snapshot_digest(scope->tx, SQLITE_NEW_IMAGE_LIMIT, digest);
+    if (lambda_task_cancel_requested(scope->owner)) {
+        rdb_sqlite_tx_mark_failed(scope->tx);
+        return io_fs_error(ERR_CANCELLED, "io.sqlite.snapshot_digest: task cancelled");
+    }
+    if (status != RDB_OK) {
+        rdb_sqlite_tx_mark_failed(scope->tx);
+        return io_fs_error(ERR_IO_ERROR, "io.sqlite.snapshot_digest: snapshot unavailable or transaction modified");
+    }
+    Binary* result = heap_binary_from_bytes((const char*)digest, sizeof(digest));
+    if (!result) { rdb_sqlite_tx_mark_failed(scope->tx); return ItemError; }
+    return (Item){.item = x2it(result)};
+}
+
 Item sqlite_statement(Item path, Item sql, Item params, bool query) {
     SqliteScope* scope = current_scope();
     Item denied = ItemNull;
@@ -542,6 +578,7 @@ Item sqlite_statement(Item path, Item sql, Item params, bool query) {
     }
     free_job(job);
     if (item_is_error(outcome.get())) return outcome.get();
+    if (finish == RDB_SQLITE_UNCERTAIN) return io_fs_error(ERR_IO_ERROR, "io.sqlite: commit outcome is uncertain; reopen before retrying");
     if (!ok || finish != RDB_OK) return io_fs_error(ERR_IO_ERROR, "io.sqlite: statement failed or result exceeded its limits");
     return query ? (Item){.array = result.get()} : ItemNull;
 }
@@ -558,6 +595,7 @@ extern "C" Item pn_io_sqlite_database(Item path) { return target_value(path, SQL
 extern "C" Item pn_io_sqlite_existing(Item path) { return target_value(path, SQLITE_TARGET_EXISTING); }
 extern "C" Item pn_io_sqlite_create(Item path) { return target_value(path, SQLITE_TARGET_NEW); }
 extern "C" Item pn_io_sqlite_preimage(Item handle, Item path) { return sqlite_preimage(handle, path); }
+extern "C" Item pn_io_sqlite_snapshot_digest(Item handle) { return sqlite_snapshot_digest(handle); }
 extern "C" Item pn_io_sqlite_clone(Item source, Item path) {
     if (!valid_database_path(source) ||
             (source.get_len() == 8 && memcmp(source.get_chars(), ":memory:", 8) == 0))

@@ -1,10 +1,10 @@
 # Radiant Font Cache and Handle Ownership
 
 **Status:** implemented  
-**Authority:** `doc/Lambda_Formal_Design.md` D4.5.1v3
+**Authority:** `doc/Lambda_Formal_Design.md` D5.5.1
 
 This note defines how Radiant keeps loaded native font faces alive while
-preserving a bounded, replaceable face cache. It applies D4.5.1v3's Radiant
+preserving a bounded, replaceable face cache. It applies D5.5.1's Radiant
 seam contracts—**pin, gen-check, copy-as-value**—to `FontHandle` ownership.
 It does not replace the formal design ruling.
 
@@ -107,7 +107,7 @@ face.
 
 `font_prop_copy(destination, source)` first unpins `destination`'s old handle,
 copies the property value, then pins the copied handle. This implements
-D4.5.1v3's copy-as-value requirement for the handle alias.
+D5.5.1's copy-as-value requirement for the handle alias.
 
 When a persistent property dies or is rebound,
 `font_prop_release_handle()` unpins it and nulls the handle. A `FontBox` needs

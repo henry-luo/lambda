@@ -3608,9 +3608,11 @@ function _wpt_actions_set_selection(anchor_node, focus_node, mode) {
         } catch (_) {}
     } catch (_) {}
 }
-_WptActions.prototype.send = function() {
+// Keep independent input sources in separate functions so a keyboard-only
+// sequence does not compile the pointer and wheel processing path.
+function _wpt_actions_perform_pointer(actions) {
     var pairs = 0;
-    var current_origin = this._origin;
+    var current_origin = actions._origin;
     var current_x = 0;
     var current_y = 0;
     var down_spin_target = null;
@@ -3628,8 +3630,8 @@ _WptActions.prototype.send = function() {
     var alt_ptr = false;
     var meta_ptr = false;
     var mods_ptr = { shift: false, ctrl: false, alt: false, meta: false };
-    for (var i = 0; i < this._steps.length; i++) {
-        var st = this._steps[i];
+    for (var i = 0; i < actions._steps.length; i++) {
+        var st = actions._steps[i];
         if (st.type === "scroll") {
             var scroll_x = st.x || 0;
             var scroll_y = st.y || 0;
@@ -3661,7 +3663,7 @@ _WptActions.prototype.send = function() {
             current_x = st.x || 0;
             current_y = st.y || 0;
             if (st.node) current_origin = st.node;
-            if (this._pointer_type === "touch") {
+            if (actions._pointer_type === "touch") {
                 if (st.node && typeof st.node.getBoundingClientRect === "function") {
                     var touch_center = _wpt_actions_origin_center(st.node);
                     current_x += touch_center.x;
@@ -3674,7 +3676,7 @@ _WptActions.prototype.send = function() {
                 continue;
             }
             if (down_open && down_text_control && st.node === down_text_control &&
-                down_default_allowed && down_button === this.ButtonType.LEFT) {
+                down_default_allowed && down_button === actions.ButtonType.LEFT) {
                 saw_drag_move = true;
                 var text_end = _wpt_actions_text_control_offset_for_x(
                     down_text_control, current_x);
@@ -3689,23 +3691,23 @@ _WptActions.prototype.send = function() {
                 }
             } else if (down_open && st.node && st.node !== down_anchor) {
                 saw_drag_move = true;
-                if (down_button === this.ButtonType.LEFT && down_default_allowed) {
+                if (down_button === actions.ButtonType.LEFT && down_default_allowed) {
                     _wpt_actions_set_selection(down_anchor, st.node, "extend");
                 }
             }
         } else if (st.type === "down") {
-            if (this._pointer_type === "touch") {
+            if (actions._pointer_type === "touch") {
                 down_open = true;
-                down_anchor = current_origin || this._origin;
+                down_anchor = current_origin || actions._origin;
                 _wpt_actions_dispatch_touch(down_anchor, "touchstart",
                     current_x, current_y);
                 continue;
             }
             down_open = true;
             down_button = st.button;
-            down_anchor = current_origin || this._origin;
-            var spin = (!down_anchor && down_button === this.ButtonType.LEFT)
-                ? _wpt_actions_number_spin_target(this._context, current_x, current_y)
+            down_anchor = current_origin || actions._origin;
+            var spin = (!down_anchor && down_button === actions.ButtonType.LEFT)
+                ? _wpt_actions_number_spin_target(actions._context, current_x, current_y)
                 : null;
             down_spin_target = spin ? spin.el : null;
             down_spin_delta = spin ? spin.delta : 0;
@@ -3717,7 +3719,7 @@ _WptActions.prototype.send = function() {
             if (allowed && down_anchor) {
                 var event_target = _wpt_actions_event_target(down_anchor);
                 var text_control = _wpt_actions_text_control(event_target);
-                if (text_control && down_button === this.ButtonType.LEFT) {
+                if (text_control && down_button === actions.ButtonType.LEFT) {
                     down_text_control = text_control;
                     down_text_start = _wpt_actions_text_control_offset_for_x(
                         text_control, current_x);
@@ -3731,7 +3733,7 @@ _WptActions.prototype.send = function() {
                 var host = _wpt_actions_editing_host(down_anchor);
                 try { if (host && typeof host.focus === "function") host.focus(); } catch (_) {}
                 var tag = event_target && event_target.tagName ? String(event_target.tagName).toUpperCase() : "";
-                if (shift_ptr && tag !== "A" && down_button !== this.ButtonType.RIGHT) {
+                if (shift_ptr && tag !== "A" && down_button !== actions.ButtonType.RIGHT) {
                     _wpt_actions_set_selection(down_anchor, down_anchor, "extend");
                 } else if (host && down_anchor === host) {
                     // Element-origin WebDriver clicks are relative to the
@@ -3743,16 +3745,16 @@ _WptActions.prototype.send = function() {
                 }
             }
         } else if (st.type === "up") {
-            if (this._pointer_type === "touch") {
+            if (actions._pointer_type === "touch") {
                 _wpt_actions_dispatch_touch(down_anchor || current_origin,
                     "touchend", current_x, current_y);
                 down_open = false;
                 down_anchor = null;
                 continue;
             }
-            var up_anchor = current_origin || down_anchor || this._origin;
+            var up_anchor = current_origin || down_anchor || actions._origin;
             var up_target = down_spin_target || _wpt_actions_event_target(up_anchor);
-            if (down_open && down_default_allowed && down_button === this.ButtonType.LEFT &&
+            if (down_open && down_default_allowed && down_button === actions.ButtonType.LEFT &&
                 saw_drag_move && up_anchor && up_anchor !== down_anchor) {
                 _wpt_actions_set_selection(down_anchor, up_anchor, "extend");
             }
@@ -3777,6 +3779,8 @@ _WptActions.prototype.send = function() {
             down_anchor = null;
         }
     }
+}
+function _wpt_actions_perform_keyboard(actions) {
     // ----- Keyboard step handling -----
     // Process keyDown(ArrowLeft|ArrowRight) events while Shift is held to
     // extend the document selection. Also handle Cmd/Ctrl + V/C/X to
@@ -3789,8 +3793,8 @@ _WptActions.prototype.send = function() {
         var ctrl_held = false;
         var alt_held = false;
         var meta_held = false;
-        for (var ki = 0; ki < this._steps.length; ki++) {
-            var ks = this._steps[ki];
+        for (var ki = 0; ki < actions._steps.length; ki++) {
+            var ks = actions._steps[ki];
             if (ks.type === "keyDown") {
                 if (ks.key === "\uE008") shift_held = true;       // Shift
                 else if (ks.key === "\uE009") ctrl_held = true;   // Control
@@ -3861,6 +3865,18 @@ _WptActions.prototype.send = function() {
             }
         }
     } catch (_) {}
+}
+_WptActions.prototype.send = function() {
+    var needs_pointer = false;
+    for (var i = 0; i < this._steps.length; i++) {
+        var type = this._steps[i].type;
+        if (type === "move" || type === "down" || type === "up" || type === "scroll") {
+            needs_pointer = true;
+            break;
+        }
+    }
+    if (needs_pointer) _wpt_actions_perform_pointer(this);
+    _wpt_actions_perform_keyboard(this);
     return Promise.resolve();
 };
 

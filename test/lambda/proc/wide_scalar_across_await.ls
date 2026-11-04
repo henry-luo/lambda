@@ -1,5 +1,5 @@
 // RVO4: wide scalars must survive a suspension boundary.
-// A suspension is a re-homing barrier (D5.1.3), and under the companion-lane
+// A suspension is a re-homing barrier (D6.1.3), and under the companion-lane
 // return convention (RV5) the async spill tracker must only ever observe
 // resolved Items — never a pending lane-1 Item whose payload rides a register
 // that dies at the next call. i64 and out-of-band (subnormal) doubles are the

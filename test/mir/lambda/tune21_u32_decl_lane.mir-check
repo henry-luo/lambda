@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.4.3, S4.5.3, S11.4.1v5: the shared int-lane to u32 boundary uses a full-width unsigned upper-bound branch, which also rejects negative and nullable/poison lanes. Its successful arm packs the exact u32 payload; the cold arm retains one rich E201 check per boundary. The fallible bitwise-to-int return join forwards its error without another type check (S4.4.4).",
+  "description": "D2.3.5, S4.5.3, S11.4.1v5: the shared int-lane to u32 boundary uses a full-width unsigned upper-bound branch, which also rejects negative and nullable/poison lanes. Its successful arm packs the exact u32 payload; the cold arm retains one rich E201 check per boundary. The fallible bitwise-to-int return join forwards its error without another type check (S4.4.4).",
   "checks": [
     {
       "in_func": "_rol_#",

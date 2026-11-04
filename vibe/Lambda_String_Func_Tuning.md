@@ -4,7 +4,7 @@
 
 **Status:** PROPOSED. One slice has landed: T28-5.1, `replace()` and `find()` on the shared literal scan kernel (commit `8491fe595`, recorded in [Tune28 §9.10](impl/Lambda_Impl_Tune28.md)). Everything in §5 is a candidate, and nothing there is scheduled.
 
-**Spec linkage:** no ruling change is proposed. The work must preserve S17.1.1 (split), S2.6.4 (adjacent strings merge), S4.7.1 and S4.8.1 (a float spells as its shortest round-trip decimal), D4.3.1 and D4.3.2v2 (objects never move; string bytes stay inline), and D5.3.3 (a helper's arguments are caller-rooted borrows). Points that touch a ruling are collected in §8 for the user to decide.
+**Spec linkage:** no ruling change is proposed. The work must preserve S17.1.1 (split), S2.6.4 (adjacent strings merge), S4.7.1 and S4.8.1 (a float spells as its shortest round-trip decimal), D5.3.1 and D5.3.1 (objects never move; string bytes stay inline), and D6.3.3 (a helper's arguments are caller-rooted borrows). Points that touch a ruling are collected in §8 for the user to decide.
 
 **IDs:** extends the T28-5 series, whose home is [Tune28 §9.10](impl/Lambda_Impl_Tune28.md). T28-5.1 is the landed slice. Candidates are referred to by section number here (for example §5.2-3) and get Tune IDs when a round schedules them.
 
@@ -139,8 +139,8 @@ Worked example: `replace(s, "A", "1")` on 10 KB of DNA with about 2,500 matches.
   - the same float spellings (S4.7.1, S4.8.1).
 - **UTF-8:** ASCII stop bytes and one-byte needles never occur inside a multi-byte sequence, so byte-level scanning is safe. A result may carry `is_ascii` only when every one of its bytes is proven ASCII.
 - **GC:**
-  - A `String`'s `chars` pointer stays valid across the allocation of a result. Objects never move and string bytes stay inline (D4.3.1, D4.3.2v2), and a helper's arguments are caller-rooted (D5.3.3).
-  - Data-zone pointers (list buffers, packed arrays) do not stay valid. Reload them after any allocation, because D4.3.1 compacts the data zone.
+  - A `String`'s `chars` pointer stays valid across the allocation of a result. Objects never move and string bytes stay inline (D5.3.1, D5.3.1), and a helper's arguments are caller-rooted (D6.3.3).
+  - Data-zone pointers (list buffers, packed arrays) do not stay valid. Reload them after any allocation, because D5.3.1 compacts the data zone.
 - **Verification:** every change goes through the protocol in §7.
 
 ---

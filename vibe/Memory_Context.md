@@ -25,7 +25,7 @@ sections remain historical rationale and are not current interface contracts.
   backing `Pool*`. Its factory constructors are `mem_arena_create(ctx, role,
   label)` and `mem_arena_create_sized(ctx, initial, max, role, label)`.
 - A pool may own a non-block resource through a cleanup (`pool_add_cleanup`),
-  and every `Input` is owned by the pool it lives in (D4.2.6, 2026-09-25):
+  and every `Input` is owned by the pool it lives in (D5.2.5, 2026-09-25):
   detaching the arena from its backing pool had left a URL-less `Input`'s
   arena with no owner at all. See [§16](#16-input-ownership-d426).
 - GC object slabs, data blocks, bump extents, and large objects are owned by
@@ -1055,9 +1055,9 @@ Most subsystems only need to **register a reclaimer**; the page-routing is conce
 
 ---
 
-## 16. Input ownership (D4.2.6)
+## 16. Input ownership (D5.2.5)
 
-**Status:** implemented 2026-09-25. Ruling: D4.2.6 (Formal Design 13.1.0).
+**Status:** implemented 2026-09-25. Ruling: D5.2.5 (Formal Design 13.1.0).
 
 ### 16.1 The leak
 
@@ -1092,3 +1092,56 @@ Arenas now die with their pool, as they did before 2026-08-08. Code written sinc
 ---
 
 *End of proposal.*
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D4.2.1v3 → D5.2.1
+
+**D5.2.1** `MemContext` is a **factory that owns every allocator** — no
+allocator exists off-graph; parent/backing edges wire at creation;
+cascade teardown is in reverse-dependency order. System allocations use
+the hardened `memtrack` substrate: direct allocations use its checked
+`mem_alloc`/`mem_calloc`/`mem_realloc`/`mem_free` contract. Pool is a
+context-owned allocator whose user bytes come from Pool-owned VM extents;
+`memtrack` may account extent metadata and diagnostics but is not the
+ownership mechanism for individual Pool blocks. The platform VM layer is an
+opaque region provider below those owners. Hot allocation paths do not take
+the `MemContext` registry lock; ownership registration and teardown remain
+centralized. [Memory_Context §2–§7; Mem_Heap §5]
+
+### ex-D4.2.2v2 → D5.2.2
+
+**D5.2.2** Per-document sub-contexts key allocators to a document URL,
+with the **attribution/reclamation split**: Radiant documents are
+reclaimable per-document; Lambda `input()` data is GC-coupled and gets
+attribution only. `MemContext` is the single page-allocation failure and
+memory-pressure coordinator. Its VM region layer reserves, commits,
+decommits, and releases page-aligned extents; allocation failure enters
+the context's configured retry/reclamation path before returning `NULL`.
+Legacy `memtrack` pressure callbacks are compatibility adapters and must
+not form a second escalation ladder. [Memory_Context §15]
+
+### ex-D4.2.6 → D5.2.5
+
+**D5.2.5** A pool may **own a resource that is not one of its blocks**
+through a **cleanup**: `pool_add_cleanup` registers a callback that runs
+once, newest first, when the pool releases its blocks (destroy, drain,
+reset), while those blocks are still valid. It is lifecycle only — the
+pool keeps none of the resource's bytes — so it is not a fifth mechanism
+(D5.1.4). **Every `Input` is owned by the pool it lives in**: it has
+its own context (D5.2.1), created under the pool's context, for its arena
+and name pool, and it registers its release as a cleanup, so it is
+released explicitly or, at the latest, with its pool — the lifetime its
+creator already chose, since the `Input` struct is one of that pool's
+blocks. A cleanup reached from a registry cascade must not re-enter the
+registry; the cascade has already destroyed every context created under
+the pool's. [Memory_Context §16]

@@ -1,12 +1,12 @@
 # Radiant Full-UA Editable — UA-6 Release and Verification Record
 
 **Date:** 2026-09-07  
-**Status:** applicable D7.2.5 UA editing acceptance complete
+**Status:** applicable D10.2.1 UA editing acceptance complete
 
 This is the execution record for
 [Radiant_Impl_Editable2.md](Radiant_Impl_Editable2.md). It records the
 implemented package-owned `contenteditable`/`designMode` behavior required by
-D7.2.5 and the verification boundary used for its completion.
+D10.2.1 and the verification boundary used for its completion.
 
 ## Implemented boundary
 
@@ -19,7 +19,7 @@ crossings. The source ownership and no-emulation audits are clean.
 The separately proposed unified form-control/history migration in
 `Radiant_Design_Edit_History.md` remains out of scope. Existing form editing
 and history retain their owner and passed their regression suite. This follows
-D7.2.5; native crossing ownership follows D5.3.3.
+D10.2.1; native crossing ownership follows D6.3.3.
 
 The Chromium reference is a linked worktree whose parent may advance for
 unrelated reference pages. Manifest verification therefore compares the
@@ -64,6 +64,6 @@ for 180 seconds and was killed by the runner; the parent was interrupted and
 ended with exit 130.
 
 This report deliberately does not call that aggregate run green. Its failures
-are outside the D7.2.5 selected editable corpus and did not reproduce in the
+are outside the D10.2.1 selected editable corpus and did not reproduce in the
 Lambda or Radiant baselines above. They remain repository-wide test debt to be
 resolved independently rather than hidden by an editing exclusion.

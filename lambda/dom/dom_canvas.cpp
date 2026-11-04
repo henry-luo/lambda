@@ -3,7 +3,7 @@
  *
  * Provides font-aware measurement and a bounded Canvas 2D command surface.
  * HTML canvas drawing is delegated through the Radiant DOM waist; this file
- * never receives a renderer-owned pointer (D7.4.1v2, D7.5.3).
+ * never receives a renderer-owned pointer (D9.5.1, D9.5.6).
  * The standalone OffscreenCanvas compatibility object remains measurement-only:
  *   new OffscreenCanvas(w, h)
  *   canvas.getContext("2d")

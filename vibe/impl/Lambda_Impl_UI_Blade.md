@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Blade is an ordinary shipped source package (**D7.2.4**), with 64 qualified
+Blade is an ordinary shipped source package (**D9.3.4**), with 64 qualified
 component tags (**S2.4.3v3**). It shares 58 Ant-inspired component constructors
 and a scoped configuration provider with Clay; five additional widgets supply
 RPG panels, meters, item slots, ability buttons and vector icons.
@@ -50,13 +50,13 @@ by the application; no game timer or global key dispatcher is installed.
 Any positive cooldown shades the full circular clipped face, while the hotkey
 is its sibling outside that clip. A lighter shade keeps the disabled spell icon
 readable alongside the disabled skull; activation remains guarded by the
-existing native disabled state (**D7.2.4**, **S12.1.3**).
+existing native disabled state (**D9.3.4**, **S12.1.3**).
 
 ## Validation
 
 Source goldens: `test/lambda/ui_blade/`. Native fixtures: `test/ui/blade/`,
 `test/ui/blade_gallery.json` and `test/ui/blade_components.json`.
-`make test-ui-blade` runs all three execution tiers (**D8.1.1v18**).
+`make test-ui-blade` runs all three execution tiers (**D8.3.2**).
 
 The source checks cover all 58 shared constructors, five RPG widgets,
 qualified descriptors, the document shell, native roles/attributes, errors,
@@ -102,7 +102,7 @@ Option `:hover` is derived from the existing select hover index and dropdown
 owner. Transitions request the ordinary pseudo-state recascade, preserving
 one owner per state (**S12.1.5v2**). A disabled-row test also exposed an
 unguarded user commit; the source procedure now reuses `option_enabled`
-before calling the native setter (**S12.1.3**, **D7.2.4**).
+before calling the native setter (**S12.1.3**, **D9.3.4**).
 
 `test/ui/blade/dropdown.ls` and its JSON replay check dark/parchment computed
 styles, painted normal/hover/disabled colors, selection, dismissal, and
@@ -125,7 +125,7 @@ Blade's empty presets inherited the shared Ant-style inbox illustration.
 The Blade lowering hook now validates the existing shared contract, then
 substitutes original SVG chest artwork for `default` and `simple` only.
 Image height, custom images, explicit absence and decorative semantics remain
-unchanged. This is source presentation under **D7.2.4** and **S12.1.3**.
+unchanged. This is source presentation under **D9.3.4** and **S12.1.3**.
 
 A release-build wheel replay of the component forge reproduced about half a
 second per frame. `render.stats` records and macOS CPU sampling identified

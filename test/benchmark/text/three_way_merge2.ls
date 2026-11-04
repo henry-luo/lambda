@@ -32,7 +32,7 @@ pn make_variant(base: string[], side: string) string[]^ {
     lines
 }
 
-// S11.4.8v2/D8.3.1v2: direct split-result calls select the string-array raw variant.
+// S11.4.8v2/D7.3.1: direct split-result calls select the string-array raw variant.
 fn word_at(words: string[] as W, index: int) string =>
     if (index < len(words)) words[index] else ""
 
@@ -67,7 +67,7 @@ pn merge_words(base_line: string, left_line: string, right_line: string) string^
     join(words, " ")
 }
 
-// S11.4.8v2/D8.3.4v2: direct typed document arrays select a task-free pn raw body.
+// S11.4.8v2/D7.3.4: direct typed document arrays select a task-free pn raw body.
 pn merge_lines(base_lines: string[] as B, left_lines: string[], right_lines: string[]) string^ {
     var merged: array = []
     for index of base_lines {

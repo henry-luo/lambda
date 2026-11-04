@@ -1,5 +1,5 @@
 // Pure frame-to-cell layout. The runtime supplies utf8proc scalar metadata;
-// wrapping, tabs and caret coordinates stay in Lambda (S12.1.3, D7.1.6).
+// wrapping, tabs and caret coordinates stay in Lambda (S12.1.3, D9.2.2).
 
 fn codepoint_width(ch) {
   let width = lambda.io.cell_width(ord(ch))

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S7.6.3v3/S7.7.2v2/D5.2.1v5: validated scalar success uses a native lane and error companion; unions, nullable values and captures retain their Item contract.",
+  "description": "S7.6.3v3/S7.7.2v2/D6.2.1: validated scalar success uses a native lane and error companion; unions, nullable values and captures retain their Item contract.",
   "checks": [
     {
       "in_func": "_checked_float_#",

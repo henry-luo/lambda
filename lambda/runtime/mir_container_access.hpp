@@ -20,7 +20,7 @@ static inline void em_guard_broad_container(MirEmitter* em, MIR_reg_t item,
 static inline void em_array_num_elem_guard(MirEmitter* em, MIR_reg_t arr_ptr,
         uint8_t expected_elem, MIR_label_t l_bail, uint8_t expected_layout = 0) {
     // fold adjacent immutable header bytes without dropping kind, view/rank
-    // or lane checks; build the constant in host byte order (D3.3.3v3).
+    // or lane checks; build the constant in host byte order (D4.3.3).
     uint8_t expected_bytes[] = {LMD_TYPE_ARRAY_NUM, 0, expected_layout, expected_elem};
     uint8_t mask_bytes[] = {UINT8_MAX, 0, 0x03, UINT8_MAX};
     uint32_t expected, mask;
@@ -169,7 +169,7 @@ static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
 #endif
 
 // callers prove the lane/certificate and exclusive ownership before entering.
-// No interior buffer pointer survives the growth fallback (D5.3, D3.3.3v3).
+// No interior buffer pointer survives the growth fallback (D5.3, D4.3.3).
 static inline void em_array_num_append(MirEmitter* em, MIR_reg_t array,
         MIR_reg_t value, ArrayNumElemType lane, MIR_label_t cold) {
     MIR_reg_t length = em_load_at(em, array, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "append_length");
@@ -205,7 +205,7 @@ static inline MIR_reg_t em_physical_array_index(MirEmitter* em, MIR_reg_t owner,
             MIR_new_reg_op(em->ctx, native)));
     }
     // native lanes own the state byte; ordinary Array can instead be a thin
-    // virtual list with no physical items buffer (D2.4.1).
+    // virtual list with no physical items buffer (D2.3.4).
     MIR_reg_t state = em_load_at(em, pointer, offsetof(Container, reserved_state), MIR_T_U8, "pointer_array_state");
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, state),
         MIR_new_reg_op(em->ctx, state), MIR_new_int_op(em->ctx, CONTAINER_STATE_VIRTUAL_LIST)));
@@ -330,7 +330,7 @@ static inline MIR_reg_t em_item_null_compare(MirEmitter* em, MIR_reg_t item,
 }
 
 // canonical type predicates need only the semantic TypeId. Named/extended
-// descriptors retain the runtime identity test (S2.1.1v3, D8.3.1v2).
+// descriptors retain the runtime identity test (S2.1.1v3, D7.3.1).
 static inline MIR_reg_t em_semantic_value_type_test(MirEmitter* em, MIR_reg_t item, Type* expected) {
     bool scalar = expected == &TYPE_NULL || expected == &TYPE_BOOL || expected == &TYPE_INT ||
         expected == &TYPE_FLOAT || expected == &TYPE_STRING || expected == &TYPE_ERROR;

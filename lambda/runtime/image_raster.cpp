@@ -176,7 +176,7 @@ static bool raster_track_bytes(ByteStorage* storage, void*) {
     if (storage->release_data == raster_release_bytes) return true;
     RasterByteAccounting* accounting = (RasterByteAccounting*)mem_alloc(sizeof(RasterByteAccounting), MEM_CAT_CONTAINER);
     if (!accounting) return false;
-    // account shared backing once, until its last tile/span owner releases it (D4.1.4v5).
+    // account shared backing once, until its last tile/span owner releases it (D5.1.4).
     accounting->token = heap_gc_external_preflight(storage->capacity, GC_EXTERNAL_KIND_OTHER);
     accounting->release = storage->release_data; accounting->context = storage->release_context;
     heap_gc_external_record_alloc(accounting->token, storage->capacity, GC_EXTERNAL_KIND_OTHER);

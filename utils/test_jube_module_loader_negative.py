@@ -4,7 +4,7 @@
 Every case copies the subject module (node-fs, with its node-core dependency)
 into an isolated bundle, breaks one loader contract (manifest, digest, ABI,
 descriptor, requirements, initialization, dependency rollback), and expects
-`require('fs')` to fail with MODULE_NOT_FOUND instead of loading it (D7.3.2).
+`require('fs')` to fail with MODULE_NOT_FOUND instead of loading it (D9.4.2).
 """
 
 from __future__ import annotations
@@ -160,7 +160,7 @@ def expect_rejection(case_name: str, bundle_root: Path, isolated_host: Path,
 
 
 def test_search_priority(module_dir: Path, specifier: str) -> None:
-    # D7.3.4: catalog metadata selects the image before descriptor validation.
+    # D9.4.4: catalog metadata selects the image before descriptor validation.
     # An incompatible lower-priority copy must never displace that selection.
     for case_name, locations, accepted in (
             ("configured-first", ("configured", "second"), True),

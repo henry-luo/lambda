@@ -78,7 +78,7 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 - **Parser**: Direct C lexer/parser (`lambda/runtime/parser/lambda_lexer.c`, `lambda_parser.c`); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
 - **AST Builder**: `lambda/runtime/build_ast.cpp` - constructs typed AST from parser reductions
 - **Transpiler**: `lambda/runtime/transpile-mir.cpp` - MIR Direct JIT, the only back end (the C-text transpiler is removed, see rule 14)
-- **Execution**: tiered per D8.1.1 — `lambda/runtime/interp.cpp` is the T0 AST-walking interpreter; hot definitions promote to MIR JIT (`lambda/runtime/mir.c`)
+- **Execution**: tiered per D8.3.1 — `lambda/runtime/interp.cpp` is the T0 AST-walking interpreter; hot definitions promote to MIR JIT (`lambda/runtime/mir.c`)
 - **Runtime builtins**: `lambda/runtime/lambda-eval.cpp` - the C-ABI `fn_*` library that interpreted and JIT'd code call into (not an evaluator)
 - **Type System**: `lambda/lambda-data.hpp` - 20+ built-in types with inference
 
@@ -189,8 +189,8 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 
 ## Lambda Language Documentation
 - `doc/Lambda_Formal_Semantics.md` — **Normative semantics specification (ADR)** — core principles, value domain, truthiness, numerics, equality, total order, absence/errors, mutability, operators, metaprogramming; the semantic authority when docs or implementation disagree (decision records in `vibe/Lambda_Semantics_Formal*.md`)
-- `doc/Lambda_Formal_Design.md` — **Normative design/implementation specification** — D-numbered rulings D1–D8 (architecture, data representation, type & shape, memory, stacks/rooting, functions, modules/Jube, compilation) with impl footnotes and open issues `DO#`; the design authority when design docs or implementation disagree
-- `doc/Lambda_Formal_Index.md` — **Generated ruling index** for both formal specs (ID → spec line → title); `python3 utils/formal_index.py D7.3.6` prints one ruling in full. Regenerate with `make formal-index` whenever a spec changes
+- `doc/Lambda_Formal_Design.md` — **Normative design specification** — principle-first D-numbered rulings D1–D11 (architecture, value representation, containers & shapes, types, memory, execution state, functions & calls, compilation & tiers, build/modules/packages, documents, security) in ASD-STE100 style, with status (Appendix A) and open issues `DO#`; the design authority when design docs or implementation disagree. Renumbered at 61.0.0 (2026-11-04): `python3 utils/formal_index.py --old D8.1.1v14` maps an old ID; implementation history is in `vibe/impl/Lambda_Impl_Formal_Design_History.md`
+- `doc/Lambda_Formal_Index.md` — **Generated ruling index** for both formal specs (ID → spec line → title); `python3 utils/formal_index.py D9.4.6` prints one ruling in full. Regenerate with `make formal-index` whenever a spec changes
 - `doc/Doc_Convention.md` — **Documentation convention** — the document tiers, authority order (Formal specs → vibe → grammar.js; ask the user on missing rulings or conflicts), formal-spec structure and distillation discipline, vibe/impl/ledger conventions, doc/dev verified-against headers
 - `doc/Lambda_Reference.md` — Language overview and quick reference
 - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)

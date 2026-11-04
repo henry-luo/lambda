@@ -1,4 +1,4 @@
-// D5.4.2, D7.1.2v2: native query reuse owns bytes and respects snapshot identity.
+// D6.4.2, D9.1.2: native query reuse owns bytes and respects snapshot identity.
 import radiant
 
 let regular = input("lmd/package/doc/latex/fonts/Serif/cmunrm.woff2", 'binary')^

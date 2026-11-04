@@ -1,4 +1,4 @@
-// S12.1.1v3 / D7.2.4v4: levels, bounds and culling remain pure scene descriptions.
+// S12.1.1v3 / D9.3.4: levels, bounds and culling remain pure scene descriptions.
 import s: lambda.scene3d
 let mesh=s.mesh(s.box(),s.material())
 let levels=[s.group([mesh]),s.group([s.points(s.geometry([0,0,0]),s.material())]),s.group([s.sprite(s.material())])]

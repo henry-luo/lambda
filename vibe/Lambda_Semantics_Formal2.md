@@ -924,6 +924,38 @@ unstated equality and ordering language and left decimal scales/ranks exposed
 to hash-table accidents. Two canonical domains keep document names and numeric
 coordinates usable without expanding the language's observable equality model.
 
+#### C8.6b Duplicate literal keys (2026-11-04, user)
+
+**Ratified as S2.3.1v2 and S16.8.9v2; representation D3.4.1v2.**
+Choose option 1: repeated explicitly written names in a map literal or
+an element/object attribute list are compile errors (E242). A bare name and
+its quoted spelling name the same field. Normalize names and resolve namespace
+aliases under S8.2.2v6 before comparing their identities. A repeat remains an
+error when a spread or a computed entry appears between the written names.
+
+Computed entries and spread overlaps remain legal, including known constant
+computed keys and spreads of known literals. Entries evaluate left to right;
+last write wins, first insertion determines position. A collision replaces
+one physical field, including its type, so all observable map operations see
+one entry per key. Equality continues to compare effective fields unordered
+(S5.4.1). The input-format parsers' separate duplicate-admission policies are
+unchanged; spreading their fields constructs a normalized literal.
+
+**Why option 1:** repeated written keys usually signal a mistake, while dynamic
+collisions support generated fields and the defaults/override idiom
+`{*:defaults, key: value}`. Option 2 (accept every duplicate) offers a uniform
+rule but loses an inexpensive diagnostic. The check follows syntax, so
+constant folding cannot change program validity. Explicit names are checked
+only against other explicit names; a spread overlap is intentional even when
+its fields can be inferred statically.
+
+**Earlier implementation:** static literals retained all entries in their
+shape chain. `{a:1,b:2,a:3}` printed three fields, had length 3, read `a` as 3,
+and compared unequal to `{a:3,b:2}`. That behavior is superseded. The dynamic
+literal builder already replaced fields correctly; no new map representation
+or per-read deduplication is needed. Implementation and evidence:
+[Impl_Duplicate_Keys](impl/Lambda_Impl_Duplicate_Keys.md).
+
 #### C8.7 Implementation notes (code-level, 2026-07-04)
 
 From reading the equality implementation (`lambda/lambda-eval.cpp`, dispatcher
@@ -2615,13 +2647,13 @@ opened), v26.0.0.
 **Spec linkage:** S8.2.2v4 (supersedes S8.2.2v3), S2.4.3v3 (names are statically
 namespace-qualified), S2.4.4 (the resolver maps namespaces to roots), S5.4.3 (element
 equality is tag + namespace), S2.2.2v2 (`symbol.empty`), S16.8.7 (`'a` is a symbol).
-Design: D3.4.4v3, NI17.
+Design: D3.4.4, NI17.
 
 **The problem.** Lambda spells a key three ways — a bare name (`a`, `ns.a`), a symbol
 literal (`'a'`) and a string (`"a"`, as a subscript or a key carried by data; a map
 literal admits only a name or a symbol as a key). S8.2.2v3 said string and symbol subscripts with the
 same contents normalize to one name, but said nothing about bare names or namespaces, and
-the design layer (D3.4.4v2) had meanwhile taken the interned `NameId` as the identity of
+the design layer (D3.4.4) had meanwhile taken the interned `NameId` as the identity of
 a string-kind name: "a non-zero `name_id` is compared exactly". NameIds are per name pool
 (`pool_number << 16 | ordinal`), so `name` had one id in the compiler's pool, another in
 each parse `Input`'s pool, a third in the runtime pool, and none for a CSV header or a
@@ -2642,7 +2674,7 @@ proves them different.
 - `{a: 1}` and `{'a': 1}` declare one key; `m.a`, `m['a']` and `m["a"]` read it.
   This was already the runtime's behaviour and is now the rule.
 - The design layer's `name_id` becomes a fast path: equal ids prove one spelling, differing
-  or absent ids fall back to kind, namespace, length and bytes (D3.4.4v3). JavaScript
+  or absent ids fall back to kind, namespace, length and bytes (D3.4.4). JavaScript
   `Symbol()` and private names are outside this space and keep identity by record (NI15).
 - Transition-tree edges must be keyed by spelling (Impl_Map_Transition_Coverage P0).
 - A namespaced symbol written to or read from a *map* is still matched by its local
@@ -2663,7 +2695,7 @@ proves them different.
   states it.
 - **JavaScript symbols join the one name space through a namespace convention** under the
   host root `js` — proposed in Impl_Map_Transition_Coverage §2.9 and accepted the same day
-  as NI18 and D3.4.4v4.
+  as NI18 and D3.4.4.
 
 ### C22. The `of` axis: `IntKey` membership and iteration (2026-10-12) — RESOLVED
 
@@ -2732,8 +2764,8 @@ position natively and records the bounds facts a `while` counter earns, so on th
 `for i of a { a[i] }` matches `while (i < len(a))`. Two caveats came out of rewriting the
 benchmark loops. In a `pn` body the parenthesized `for (i of a) { … }` is the expression form
 and builds a result list on every entry; the statement spelling is `for i of a { … }`. And
-D8.1.1v14's loop-head handoff covers `while` only, so on the `auto` tier a long `for` loop in
+D8.3.2's loop-head handoff covers `while` only, so on the `auto` tier a long `for` loop in
 a function entered fewer times than the promotion threshold stays in T0 (a one-call 490k
 string walk: 98 ms as `for`, 58 ms as `while`). The `text_search` benchmarks kept their
 `while` loops for that reason; extending the handoff to `for` statements is a design
-question for D8.1.1, not decided here.
+question for D8.3.1, not decided here.

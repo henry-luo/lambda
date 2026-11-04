@@ -79,6 +79,7 @@ fn materials(look, lights) => [
     std("m-hub", "#c9ccd1", {roughness: 0.25, metalness: 0.9}),
     s.material('basic', {id: "m-headlamp", color: "#f4f1e6", emissive: "#fff2d0", 'emissive-intensity': if (lights) 6.0 else 0.5}),
     s.material('basic', {id: "m-taillamp", color: "#6e0c0c", emissive: "#ff2a1a", 'emissive-intensity': if (look.windows > 0.0) 3.0 else 1.0}),
+    s.material('basic', {id: "m-indicator", color: "#6e3a05", emissive: "#ff7a10", 'emissive-intensity': 1.2}),
     std("m-person", "#ffffff", {roughness: 0.85}),
     // props
     std("m-cone", "#f05a1a", {roughness: 0.6}),
@@ -102,16 +103,63 @@ fn textures() => [
 // ---- shared geometry: one buffer per vehicle kind and part, people, props and furniture
 pub let PARTS = ["paint", "glass", "trim", "head", "tail"]
 pub let PART_MATERIAL = {glass: "m-glass", trim: "m-trim", head: "m-headlamp", tail: "m-taillamp"}
-let SHIRTS = [[0.75, 0.2, 0.2], [0.2, 0.42, 0.7], [0.92, 0.75, 0.3], [0.3, 0.6, 0.38], [0.92, 0.92, 0.9], [0.45, 0.3, 0.6], [0.95, 0.5, 0.25], [0.2, 0.2, 0.22]]
-let PANTS = [[0.15, 0.18, 0.3], [0.25, 0.25, 0.27], [0.5, 0.42, 0.32], [0.1, 0.1, 0.12]]
-let SKINS = [[0.95, 0.8, 0.66], [0.78, 0.57, 0.42], [0.55, 0.38, 0.27], [0.9, 0.72, 0.58]]
-pub let PERSON_VARIANTS = 8
+// the people on the sidewalks: skin and hair tones, then twelve outfits (looks for mod_mesh.person)
+let SKIN = [[0.95, 0.8, 0.66], [0.78, 0.57, 0.42], [0.55, 0.38, 0.27], [0.9, 0.72, 0.58], [0.4, 0.27, 0.19]]
+let HAIR = {black: [0.07, 0.06, 0.06], brown: [0.35, 0.22, 0.12], blond: [0.85, 0.7, 0.42], grey: [0.68, 0.68, 0.66], auburn: [0.55, 0.25, 0.12]}
+let DENIM = [0.2, 0.3, 0.5], WHITE = [0.92, 0.92, 0.9], BLACK = [0.1, 0.1, 0.12], KHAKI = [0.6, 0.52, 0.38], BROWN = [0.35, 0.22, 0.14]
+let LOOK = {glasses: null, hat: null, bag: null, under: WHITE, bottom_color: DENIM, shoes: WHITE}
+let PEOPLE = [
+    {*: LOOK, skin: SKIN[0], hair: HAIR.black, style: "short", top: "tee", top_color: [0.78, 0.18, 0.18], bottom: "pants"},
+    {*: LOOK, skin: SKIN[1], hair: HAIR.brown, style: "short", top: "jacket", top_color: [0.16, 0.2, 0.34], bottom: "pants",
+     bottom_color: [0.3, 0.3, 0.32], shoes: BLACK, glasses: "clear"},
+    {*: LOOK, skin: SKIN[0], hair: HAIR.blond, style: "long", top: "dress", top_color: [0.95, 0.78, 0.3], bottom: "skirt",
+     bottom_color: [0.95, 0.78, 0.3], shoes: BROWN},
+    {*: LOOK, skin: SKIN[2], hair: HAIR.brown, style: "cap", top: "long", top_color: [0.3, 0.55, 0.36], bottom: "pants",
+     bottom_color: KHAKI, shoes: BROWN, hat: [0.92, 0.45, 0.15], bag: [0.16, 0.24, 0.42]},
+    {*: LOOK, skin: SKIN[2], hair: HAIR.black, style: "buzz", top: "tee", top_color: WHITE, bottom: "shorts", bottom_color: BLACK, glasses: "sun"},
+    {*: LOOK, skin: SKIN[3], hair: HAIR.black, style: "bun", top: "jacket", top_color: [0.5, 0.12, 0.2], under: [0.62, 0.62, 0.64],
+     bottom: "pants", bottom_color: BLACK, shoes: BLACK},
+    {*: LOOK, skin: SKIN[0], hair: HAIR.auburn, style: "long", top: "long", top_color: [0.45, 0.3, 0.62], bottom: "skirt",
+     bottom_color: [0.25, 0.25, 0.28], shoes: BLACK, glasses: "clear"},
+    {*: LOOK, skin: SKIN[4], hair: HAIR.black, style: "short", top: "tee", top_color: [0.95, 0.52, 0.22], bottom: "pants", bag: [0.4, 0.42, 0.45]},
+    {*: LOOK, skin: SKIN[0], hair: HAIR.grey, style: "short", top: "jacket", top_color: [0.72, 0.6, 0.42], under: BLACK, bottom: "pants",
+     bottom_color: [0.22, 0.22, 0.26], shoes: BROWN, glasses: "clear"},
+    {*: LOOK, skin: SKIN[1], hair: HAIR.black, style: "cap", top: "tee", top_color: [0.18, 0.6, 0.62], bottom: "shorts",
+     bottom_color: KHAKI, hat: [0.75, 0.15, 0.15], glasses: "sun"},
+    {*: LOOK, skin: SKIN[2], hair: HAIR.black, style: "long", top: "dress", top_color: [0.22, 0.42, 0.78], bottom: "skirt",
+     bottom_color: [0.22, 0.42, 0.78], shoes: BLACK},
+    {*: LOOK, skin: SKIN[3], hair: HAIR.brown, style: "short", top: "long", top_color: WHITE, bottom: "pants", bottom_color: [0.14, 0.17, 0.3], shoes: BLACK}]
+pub let PERSON_VARIANTS = len(PEOPLE)
+pub fn person_mesh(k) any^ => m.person(PEOPLE[k])
+// every look's body and limb buffers, named g-person-<look>-<part>
+pub fn person_geometry() any^ => [for (k in 0 to (PERSON_VARIANTS - 1)) *(let parts = person_mesh(k),
+    [for (part in ["body", *m.LIMBS]) m.geometry("g-person-" ++ string(k) ++ "-" ++ part, parts[part])])]
+// one walk cycle (two steps) in seconds: legs swing ±0.42 rad, so at the people's mean pace of 1.35 m/s
+// the feet keep pace with the ground
+pub let STRIDE = 1.15
+// limb swing at a gait phase: legs alternate, each arm swings against its own side's leg
+fn limb_angle(part, phase) => (let s = sin(phase),
+    if (part == "leg-l") 0.42 * s else if (part == "leg-r") -0.42 * s else if (part == "arm-l") -0.35 * s else 0.35 * s)
+fn swing_q(a) => [sin(a / 2.0), 0.0, 0.0, cos(a / 2.0)]
+// a person's figure: the body and each limb on its pivot, posed at a gait phase (the walk clip then owns
+// the limbs and the figure's bob)
+pub fn person_figure(id, k, phase = 0.0) element => s.group([s.mesh("g-person-" ++ string(k) ++ "-body", "m-person", {id: id ++ "-body"}),
+    *[for (part in m.LIMBS) s.group([s.mesh("g-person-" ++ string(k) ++ "-" ++ part, "m-person", {id: id ++ "-" ++ part ++ "-mesh"})],
+        {id: id ++ "-" ++ part, position: m.PIVOTS[part], quaternion: swing_q(limb_angle(part, phase))})]], {id: id ++ "-fig"})
+// every pedestrian walks one shared looping clip from its own gait phase; the figure bobs twice a cycle
+pub fn walk_clip(peds) any^ {
+    let keys = [for (i in 0 to 12) i * u.TAU / 12.0];
+    s.clip("walk", [*[for (p in peds, part in m.LIMBS) s.track(p.id ++ "-" ++ part ++ ".quaternion", [for (a in keys) a / u.TAU * STRIDE],
+            [for (a in keys, q in swing_q(limb_angle(part, p.gait + a))^) q], 'quaternion')],
+        *[for (p in peds) s.track(p.id ++ "-fig.position", [for (a in keys) a / u.TAU * STRIDE],
+            [for (a in keys, c in [0.0, 0.03 * abs(cos(p.gait + a)), 0.0]) c], 'vector')]], {duration: STRIDE, autoplay: true})
+}
 fn shared_geometry() => [
     *[for (kind in ["sedan", "hatch", "van", "taxi", "pickup"], let parts = m.vehicle(kind)) for (p in PARTS) m.geometry("g-" ++ kind ++ "-" ++ p, parts[p])],
     *[for (p in PARTS, let parts = m.vehicle("sedan", false)) m.geometry("g-player-" ++ p, parts[p])],
     m.geometry("g-tyre", m.tyre()), m.geometry("g-hub", m.hub()),
-    *[for (k in 0 to (PERSON_VARIANTS - 1)) m.geometry("g-person-" ++ string(k),
-        m.person(SHIRTS[k], PANTS[k % 4], SKINS[(k * 3) % 4], if (k % 3 == 0) [0.35, 0.22, 0.12] else [0.08, 0.07, 0.07]))],
+    m.geometry("g-indicator-l", m.indicator(1.0)), m.geometry("g-indicator-r", m.indicator(-1.0)),
+    *person_geometry(),
     m.geometry("g-cone", m.cone()), m.geometry("g-crate", m.crate(1.0)), m.geometry("g-barrel", m.barrel()), m.geometry("g-bin", m.bin()),
     m.geometry("g-beacon", m.post(0.0, 0.0, 0.0, 40.0, 2.4, 2.4, 20)),
     m.geometry("g-parcel", m.block(0.0, -0.35, 0.0, 0.7, 0.7, 0.7))]
@@ -249,13 +297,18 @@ fn player_body(car, look, lights) element => physics.body("player", [
 fn wheel_body(id) element => physics.body(id, [physics.collider(id ++ "-shape", 'sphere', {radius: 0.05, groups: NOBODY}),
     s.mesh("g-tyre", "m-tyre", {id: id ++ "-tyre"}), s.mesh("g-hub", "m-hub", {id: id ++ "-hub"})],
     {type: 'kinematic-position', position: [0.0, PARKED_Y, 0.0]})
+// the rear indicators ride with the car while lit and wait below the city otherwise, so blinking is a
+// pose command rather than a material edit
+pub let INDICATOR_IDS = ["indicator-l", "indicator-r"]
+fn indicator_body(id) element => physics.body(id, [physics.collider(id ++ "-shape", 'sphere', {radius: 0.05, groups: NOBODY}),
+    s.mesh("g-" ++ id, "m-indicator", {id: id ++ "-lamp", 'cast-shadow': false, 'receive-shadow': false})],
+    {type: 'kinematic-position', position: [0.0, PARKED_Y, 0.0]})
 // traffic and people take their IDs from their records, so they are built as literal bodies
 fn traffic_body(a) element => <'rigid-body' id: a.id, type: 'kinematic-position', position: [a.x, 0.0, a.z], quaternion: u.quat(a.heading),
     *[physics.collider(a.id ++ "-shape", 'box', {size: [a.hw * 2.0, 1.3, a.hl * 2.0], position: [0.0, 0.95, 0.0], groups: {membership: TRAFFIC, filter: PROPS}}),
       *[for (p in PARTS) s.mesh("g-" ++ a.kind ++ "-" ++ p, if (p == "paint") paint_id(a.paint) else PART_MATERIAL[p], {id: a.id ++ "-" ++ p})]]>
 fn ped_body(p) element => <'rigid-body' id: p.id, type: 'kinematic-position', position: [p.x, p.y, p.z], quaternion: u.quat(p.heading),
-    *[physics.collider(p.id ++ "-shape", 'sphere', {radius: 0.2, groups: NOBODY}),
-      s.mesh("g-person-" ++ string(p.n % PERSON_VARIANTS), "m-person", {id: p.id ++ "-mesh"})]>
+    *[physics.collider(p.id ++ "-shape", 'sphere', {radius: 0.2, groups: NOBODY}), person_figure(p.id, p.n % PERSON_VARIANTS, p.gait)]>
 fn prop_body(k, p) element {
     let id = "prop-" ++ string(k)
     let groups = {membership: PROPS, filter: STATIC + PLAYER + TRAFFIC + PROPS}
@@ -304,7 +357,9 @@ let SKY = s.environment('sky', {id: "sky", 'sun-direction': LOOKS.day.sun, 'sun-
 pub fn scene(st) element {
     let look = LOOKS[st.look];
     s.scene([
-        physics.world({state: 'playing', gravity: [0.0, -9.81, 0.0], timestep: 1.0 / 120.0, 'solver-iterations': 10}),
+        // 24 substeps of 1/120 s let a frame as slow as 200 ms (a debug build or a busy machine) catch up;
+        // the default 8 covers only 67 ms, and the debt past that pauses the scene
+        physics.world({state: 'playing', gravity: [0.0, -9.81, 0.0], timestep: 1.0 / 120.0, 'solver-iterations': 10, 'max-substeps': 24}),
         s.light('directional', {id: "sun", position: [for (x in look.sun) x * 300.0], target: [0.0, 0.0, 0.0], color: look.sun_color,
             intensity: look.sun_i, 'cast-shadow': true, 'shadow-cascades': 3, 'shadow-distance': 220.0, 'shadow-map-size': 2048,
             'shadow-normal-bias': 0.05, 'shadow-softness': 1.5}),
@@ -313,9 +368,10 @@ pub fn scene(st) element {
         s.resources([*(if (SKY == null) [] else [SKY]), *textures(), *materials(look, st.lights), *shared_geometry()]),
         *ground_cover(), *buildings(), *parked_cars(), *street_furniture(look), *landmarks(), *surroundings(look),
         city_body(), player_body(st.car, look, st.lights), *[for (id in WHEEL_IDS) wheel_body(id)],
+        *[for (id in INDICATOR_IDS) indicator_body(id)],
         *[for (a in st.traffic) traffic_body(a)], *[for (p in st.peds) ped_body(p)], *[for (k, p in city.PROPS) prop_body(k, p)],
         beacon_body("pickup"), beacon_body("drop"), camera_body(st.camera),
-        *clips(),
+        *clips(), walk_clip(st.peds),
         post.chain([post.effect('bloom', {id: "glow", strength: look.bloom, threshold: 1.0, radius: 3.0}), post.effect('fxaa')])
     ], {id: "city", camera: "cam", width: 1280, height: 720, viewBox: "0 0 1280 720", preserveAspectRatio: "xMidYMid slice",
         background: look.background, environment: "sky", 'environment-intensity': look.env_i, 'tone-mapping': 'aces',

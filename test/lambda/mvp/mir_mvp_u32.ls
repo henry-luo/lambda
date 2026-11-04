@@ -1,4 +1,4 @@
-// S4.4, D2.4.3: packed arithmetic, full-width shift counts and failed producers.
+// S4.4, D2.3.5: packed arithmetic, full-width shift counts and failed producers.
 fn add_words(a: u32, b: u32) u32 => a + b
 fn sub_words(a: u32, b: u32) u32 => a - b
 fn mul_words(a: u32, b: u32) u32 => a * b

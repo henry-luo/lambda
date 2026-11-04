@@ -27,8 +27,7 @@ void process_svg_resource(NetworkResource* res, struct DomElement* use_element);
 void process_html_resource(NetworkResource* res, struct DomDocument* doc);
 void process_script_resource(NetworkResource* res, struct DomDocument* doc);
 
-// Normalize CSS url() values and expose them to loader-stage prefetch policy.
-void radiant_resolve_stylesheet_resource_urls(struct CssStylesheet* sheet);
+// Visit authored CSS url() values without changing their consumer-relative spelling.
 void radiant_for_each_stylesheet_resource_url(struct CssStylesheet* sheet,
                                               RadiantCssUrlVisitor visitor,
                                               void* context);

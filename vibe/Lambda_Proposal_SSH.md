@@ -3,7 +3,7 @@
 - **Date:** 2026-10-06
 - **Status:** PROPOSAL — not ruled, not implemented. Findings come from Lambda's build scripts and `build_lambda_config.json`, the libssh2 1.11.1 and libssh 0.11.3 sources and changelogs, curl master's `lib/vssh/`, and size measurements of the installed Homebrew archives. No SSH-enabled build was made.
 - **Scope:** adding `sftp://` and `scp://` to the libcurl that Lambda links on macOS, Linux and Windows: which SSH library, which crypto backend, the licence and size of each choice, and the Lambda-side work. Interactive SSH (remote shell, command execution, port forwarding) is out of scope for the curl route; §3.6 names the one option that could cover it.
-- **Formal authority:** no `S#`/`D#` ruling covers SSH or the set of URL schemes Lambda acquires. Related rulings: S14.3.1 (`input()` and `stream()` are symmetric over the same source specifiers, so an `sftp://` URL would become a specifier for both); D7.1.6 (`lambda-cli` carries the third-party libraries its io needs, so it would carry the SSH library too); D7.1.7v6 (`lambda-wasm` excludes all network access including curl, so it is unaffected).
+- **Formal authority:** no `S#`/`D#` ruling covers SSH or the set of URL schemes Lambda acquires. Related rulings: S14.3.1 (`input()` and `stream()` are symmetric over the same source specifiers, so an `sftp://` URL would become a specifier for both); D9.2.2 (`lambda-cli` carries the third-party libraries its io needs, so it would carry the SSH library too); D9.2.3 (`lambda-wasm` excludes all network access including curl, so it is unaffected).
 - **ID series:** networking has no ledger series yet, so this proposal mints `SSH#` (`doc/Doc_Convention.md` §4). The open decisions are `SSH1`–`SSH6` (§7).
 
 ## 0. Question and answer
@@ -98,7 +98,7 @@ Lambda can already run `scp`, `sftp` or `ssh` through `cmd()` (`doc/Lambda_Sys_F
 
 ### 3.6 Option F — an SSH Jube module on libssh, without curl
 
-A separately loaded module, shaped like `rdb-drivers`, that uses libssh directly. It keeps the LGPL code out of `lambda.exe` exactly as RDB8 does, and it is the only option that could also offer remote command execution, which curl cannot. The cost is writing the SFTP/SCP client code that curl would otherwise provide, plus a module API. For `input("sftp://…")` to work, the host's `input()` would have to reach a module-provided scheme; whether the D7.4 module contracts allow such a hook was not checked.
+A separately loaded module, shaped like `rdb-drivers`, that uses libssh directly. It keeps the LGPL code out of `lambda.exe` exactly as RDB8 does, and it is the only option that could also offer remote command execution, which curl cannot. The cost is writing the SFTP/SCP client code that curl would otherwise provide, plus a module API. For `input("sftp://…")` to work, the host's `input()` would have to reach a module-provided scheme; whether the D9.5 module contracts allow such a hook was not checked.
 
 ## 4. Size
 

@@ -1,4 +1,4 @@
-// Create-only SQLite publication follows S12.4.4v4 and D7.5.2.
+// Create-only SQLite publication follows S12.4.4v4 and D11.1.2.
 import sqlite: lambda.io.sqlite
 
 pn returned(path) int^ {

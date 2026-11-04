@@ -1,4 +1,4 @@
-// S12.3.3v2 / D2.6.7: a pn method needs its mutable receiver write-back lane.
+// S12.3.3v2 / D3.1.4: a pn method needs its mutable receiver write-back lane.
 // A bound closure would retain only a snapshot, so it cannot be a value.
 type Counter {
     value: int = 0,

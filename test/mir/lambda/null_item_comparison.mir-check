@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S5.1.1v2 / D2.4: erased null predicates preserve Error and Type-value fallback, combine the null tag and zero pointer, and invert equality for inequality.",
+  "description": "S5.1.1v2 / D2.3.4–D2.3.5: erased null predicates preserve Error and Type-value fallback, combine the null tag and zero pointer, and invert equality for inequality.",
   "checks": [
     {
       "in_func": "_equals_null_#",

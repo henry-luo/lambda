@@ -7,8 +7,8 @@
 > **Design:** [PG12.1–PG12.11](../Lambda_Design_Procart.md#9-p7--composable-drawing-grammar),
 > summarized in [the package ledger](../Lambda_Pkg_Proc_Art.md#pg12--composable-drawing-grammar-p7).
 > **Spec linkage:** S2.6.1v2 (element data), S12.1.1v3 (pure expansion),
-> S12.1.5v2 / D7.5.3v2 (presentation ownership), S1.6 (execution transparency),
-> D7.2.4v4 (package paths). No formal-spec ruling changes.
+> S12.1.5v2 / D9.5.6 (presentation ownership), S1.6 (execution transparency),
+> D9.3.4 (package paths). No formal-spec ruling changes.
 
 **Outcome:** a stored artwork composes all nine drawing primitives and semantic
 objects using the same adjustment state, named rules, seeded variant selection
@@ -79,7 +79,7 @@ Shared code was promoted rather than copied: `lambda.color` owns existing
 slide parsing and UI HSV arithmetic, the Scene3D geometry validator is public,
 and the specimen viewer calls the package mesh batcher. These remain pure
 value operations under **S12.1.1v3 / PG9**; native ownership is unchanged
-(**S12.1.5v2 / D7.5.3v2**).
+(**S12.1.5v2 / D9.5.6**).
 
 | Qualification | Result |
 |---|---|

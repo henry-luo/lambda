@@ -1,4 +1,4 @@
-// colored chrome reuses the album's contours; document icons keep their own color (D7.2.5).
+// colored chrome reuses the album's contours; document icons keep their own color (D10.2.1).
 import outline: .icons
 
 // saturated contours keep small ribbon glyphs crisp against the white panels.

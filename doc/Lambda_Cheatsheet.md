@@ -773,7 +773,7 @@ fn factorial(n: int) int {
 }
 ```
 
-**XHTML input (D2.10.1):**
+**XHTML input (D10.1.4):**
 ```lambda
 let page = input("page.xhtml", 'xhtml')^
 let doc = parse("<html xmlns=\"http://www.w3.org/1999/xhtml\"><head/><body/></html>", 'xhtml')^

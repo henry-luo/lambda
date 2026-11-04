@@ -1,4 +1,4 @@
-// Per-document package state for UA editing (D7.2.5, S9.1.7). Native code
+// Per-document package state for UA editing (D10.2.1, S9.1.7). Native code
 // stores only this opaque immutable value's GC root; policy stays in Lambda.
 import dom
 
@@ -97,7 +97,7 @@ pub pn toggle_typing_format(host, tag) {
 
 // Formatting descriptors become a single immutable future-typing mark.  The
 // package—not native editor state—keeps the wrapper and attribute/style choice
-// that the next ordinary insert plan must apply (D7.2.5).
+// that the next ordinary insert plan must apply (D10.2.1).
 pub pn set_typing_format(host, descriptor, use_css) {
     let current = ensure(host);
     if (current == null) null

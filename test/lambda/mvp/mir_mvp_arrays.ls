@@ -1,4 +1,4 @@
-// S7.1.1v3, S9.1.2–S9.1.3, D4.4.4v4: indexed absence, snapshots and borrowed replacement.
+// S7.1.1v3, S9.1.2–S9.1.3, D5.4.4: indexed absence, snapshots and borrowed replacement.
 pn replace(var a: int[]) {
     a = fill(3, 9)^
     a[1] = 7

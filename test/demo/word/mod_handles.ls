@@ -1,4 +1,4 @@
-// Object gestures retain a source path; previews never change history (D7.2.5).
+// Object gestures retain a source path; previews never change history (D10.2.1).
 import dom
 import lambda.editor.core.doc
 import image: lambda.editor.image

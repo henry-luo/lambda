@@ -1,5 +1,5 @@
 // Minimal-write DOM publishing shared by the demos: each helper writes only when the
-// requested value differs, so republishing an unchanged state causes no restyle (D4.5.1v4).
+// requested value differs, so republishing an unchanged state causes no restyle (D5.5.1).
 import dom
 
 pub pn attr(target,key,value) {

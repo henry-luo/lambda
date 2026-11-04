@@ -3,8 +3,8 @@
 - **Date:** 2026-08-20
 - **Status:** DESIGN — rulings TB1/TB2 given by the user; gap analysis verified in code; implementation not started
 - **Scope:** how a declared record contract's fields are STORED in packed map data, which shapes compiled fast-lane code may address by fixed offset, and when a literal may adopt a declared contract's `TypeMap`
-- **Related:** `vibe/impl/Lambda_Impl_Tune19.md` §9–§11 (the O(n²) recursive-type investigation, the reverted adoption slice, and the malformed-contract-shape finding this doc resolves); future normative home per Tune19 §10.3: ruling in `doc/Lambda_Formal_Design.md` (D3.2.2v2 family), engine detail in `doc/dev/lambda/LR_03` and `LR_13`
-- **Formal authority touched:** D3.2.2* (validator as runtime enforcer), D2.2.2 (same facts same code), D3.2.1 (one subtype model)
+- **Related:** `vibe/impl/Lambda_Impl_Tune19.md` §9–§11 (the O(n²) recursive-type investigation, the reverted adoption slice, and the malformed-contract-shape finding this doc resolves); future normative home per Tune19 §10.3: ruling in `doc/Lambda_Formal_Design.md` (D4.2.3 family), engine detail in `doc/dev/lambda/LR_03` and `LR_13`
+- **Formal authority touched:** D4.2.3* (validator as runtime enforcer), D2.2.2 (same facts same code), D4.2.1 (one subtype model)
 
 ## 1. The rulings — normative home: `Lambda_Design_Compiling_Lane.md` §10
 
@@ -101,7 +101,7 @@ already fit every concrete storage class.
    the regression pair.
 4. **G2 cleanup** — nothing to build: assert that declared union fields never
    reach a fixed-offset emitter (already true via `is_direct_access_type`) and
-   record TB2 in the D3.2.2v2 revision alongside §9.5's items.
+   record TB2 in the D4.2.3 revision alongside §9.5's items.
 
 ## 5. Open questions
 

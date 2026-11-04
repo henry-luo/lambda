@@ -7,7 +7,7 @@
 // ==============================================================================
 
 // P2 lowering copies the function node, but direct identifiers retain their
-// original declaration entry. D8.1.1v12 requires this private image to retain
+// original declaration entry. D8.3.4 requires this private image to retain
 // source-definition semantics, including self-tail-call recognition.
 static bool same_function_definition(const AstFuncNode* left,
         const AstFuncNode* right) {

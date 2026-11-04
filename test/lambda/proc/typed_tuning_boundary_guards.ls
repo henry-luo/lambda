@@ -1,4 +1,4 @@
-// S7.7.2-S7.7.4/D3.3.3v3: exact arms preserve all dynamic boundary failures.
+// S7.7.2-S7.7.4/D4.3.3: exact arms preserve all dynamic boundary failures.
 fn dynamic(value) any => value
 pn integers(count, value) int[]^ {
     var values: int[] = fill(count, value)

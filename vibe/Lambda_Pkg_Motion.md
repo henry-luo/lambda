@@ -10,19 +10,19 @@
 
 | Ruling | Applied here |
 |---|---|
-| **D7.2.4v3**, **S16.9.6**, **S16.9.8** | `lambda.scene3d.motion` is a shipped source package under the reserved root, mapped to `<lambda-home>/package/scene3d/motion.ls`; ordinary dotted import. |
+| **D9.3.4**, **S16.9.6**, **S16.9.8** | `lambda.scene3d.motion` is a shipped source package under the reserved root, mapped to `<lambda-home>/package/scene3d/motion.ls`; ordinary dotted import. |
 | **S12.1.1v3** | Loading, validation, editing, retargeting and scene compilation are pure `fn` data transforms; playback is a host effect. |
 | **S12.4.1v3** | `input()` returns an acquired value; dependency acquisition (FBX external textures) uses the existing input/URL path. |
-| **D7.1.2v2** | All resource IO stays in `lambda-io`; Radiant never fetches. |
-| **D4.1.3** | Raw and converted values, including decoded FBX arrays, belong to the destination Input pool/arena. |
+| **D9.1.2** | All resource IO stays in `lambda-io`; Radiant never fetches. |
+| **D5.1.3** | Raw and converted values, including decoded FBX arrays, belong to the destination Input pool/arena. |
 | **S2.5.1v2**, **S2.6.4** | Arrays stay single content items; adjacent strings would merge, so ordered FBX properties travel in one array (§4). |
-| **S9.3.2**, **D2.6.1v3** | Typed FBX arrays map to `ArrayNum` with the exact element kind; an `ArrayNum` is observably an ordinary array. |
+| **S9.3.2**, **D3.2.1** | Typed FBX arrays map to `ArrayNum` with the exact element kind; an `ArrayNum` is observably an ordinary array. |
 | **S2.2.2v2** | Empty FBX binary properties map to `null`, as the A3D `Extra` mapping already does. |
 | **S8.2.4v3** | BVH frames and character streams are read with positional subscripts (`data[f, c]`). |
 | **S12.1.5v2** | The template owns the requested motion state; the host owns playback time, fades and automatic transitions (§9.2). |
-| **D7.5.3v2**, **D7.4.2v2** | Lambda reaches the live scene only through `radiant-dom`; motion events use existing host scheduling. |
-| **D4.5.1v4**, **D4.5.2**, **D5.3.3** | Controller and palette state are document-owned, generation-checked, and retain no GC pointers. |
-| **D7.3.5** | Each stage names its conformance gate (§12). |
+| **D9.5.6**, **D9.5.2** | Lambda reaches the live scene only through `radiant-dom`; motion events use existing host scheduling. |
+| **D5.5.1**, **D5.5.2**, **D6.3.3** | Controller and palette state are document-owned, generation-checked, and retain no GC pointers. |
+| **D9.4.5** | Each stage names its conformance gate (§12). |
 
 ## 0. Summary
 
@@ -267,7 +267,7 @@ The types fix the shape; `motion.validate(character)` checks the rest and is run
 
 **Body.** Mesh geometry is stored in character space at bind time, so one inverse bind per joint serves every mesh. `skin-indices` address joints in skeleton preorder; each vertex has at most four influences, with weights summing to 1. Meshes without skin are static in character space. Resource IDs inside `<body>` are local; `motion.scene` prefixes them.
 
-**Numeric streams** (`times`, channel arrays, geometry arrays, `inverse_bind`) are `float` `ArrayNum` values. By D2.6.1v3 this is a representation choice with no observable difference from boxed arrays.
+**Numeric streams** (`times`, channel arrays, geometry arrays, `inverse_bind`) are `float` `ArrayNum` values. By D3.2.1 this is a representation choice with no observable difference from boxed arrays.
 
 ### 6.4 Example
 
@@ -298,9 +298,9 @@ The Hips quaternion channel is omitted because it equals the rest value at both 
 
 ### 7.1 Entry point
 
-`input(source, {type: 'character', flavor: 'auto' | 'fbx' | 'bvh'})` returns a `<character>`. Each format has exactly one native converter, built with the `SceneAsset` helpers (format-neutral Input-owned construction) and following the existing dependency and ownership rules (D4.1.3, S12.4.1v3). The package's `motion.load` wraps this call and applies caller options (§8.2).
+`input(source, {type: 'character', flavor: 'auto' | 'fbx' | 'bvh'})` returns a `<character>`. Each format has exactly one native converter, built with the `SceneAsset` helpers (format-neutral Input-owned construction) and following the existing dependency and ownership rules (D5.1.3, S12.4.1v3). The package's `motion.load` wraps this call and applies caller options (§8.2).
 
-Numeric streams are built as `float` `ArrayNum`. The cheapest way is to change `SceneAsset::array` once, so every existing scene-asset format benefits as well; by D2.6.1v3 this changes no observable value or golden.
+Numeric streams are built as `float` `ArrayNum`. The cheapest way is to change `SceneAsset::array` once, so every existing scene-asset format benefits as well; by D3.2.1 this changes no observable value or golden.
 
 ### 7.2 FBX profile
 
@@ -479,7 +479,7 @@ The validators (`model.ls` skeleton and skin-index checks), the A3D quota and §
 - **Reconciliation:** `state` and `cue` are excluded from `scene3d_animation_source_hash`; everything else about the controller, its states and its clips stays in the hash. When a regenerated scene keeps the hash but changes `(state, cue)`, the host resets and plays the new state's action and calls the existing `animation_action_crossfade(from, to, fade, false)`. Other mutations that keep the hash leave playback untouched, which is the rule the current code already applies to sibling UI mutations.
 - **Automatic transitions:** when a `once` state with `next` finishes, the host crossfades to `next` using the mixer's existing `finished` event. The template's `state` attribute is not rewritten. Requesting the same state again needs a new `cue`.
 - **Deterministic seek:** exact-time sampling (render captures, tests) replays the requested state from time 0, including its `next` chain, so `lambda render … -o frame.png` at time `t` is reproducible.
-- **Events:** state changes and finishes reach the document as events on the `<scene3d>` element through the existing host path (D7.5.3v2, D7.4.2v2), so a template can react (for example, re-enable a "Jump" button). The event names and payload follow the mixer's existing `finished`/`loop` events plus one `statechange {controller, from, to, time}`. Lambda template handlers receive them (`on statechange(evt)`; §13 decision 10, confirmed by `test/scene3d/motion-control.ls`).
+- **Events:** state changes and finishes reach the document as events on the `<scene3d>` element through the existing host path (D9.5.6, D9.5.2), so a template can react (for example, re-enable a "Jump" button). The event names and payload follow the mixer's existing `finished`/`loop` events plus one `statechange {controller, from, to, time}`. Lambda template handlers receive them (`on statechange(evt)`; §13 decision 10, confirmed by `test/scene3d/motion-control.ls`).
 
 ### 9.3 What stays the same
 
@@ -508,7 +508,7 @@ Oracles, used only in tests and capture tooling:
 
 ## 12. Staged delivery and acceptance
 
-Each milestone ends at its named gate (D7.3.5). Required aggregate gates (`make test-lambda-baseline`, `make test-radiant-baseline`) run at milestone boundaries, per the Radiant workflow.
+Each milestone ends at its named gate (D9.4.5). Required aggregate gates (`make test-lambda-baseline`, `make test-radiant-baseline`) run at milestone boundaries, per the Radiant workflow.
 
 | Milestone | Delivers | Acceptance |
 |---|---|---|

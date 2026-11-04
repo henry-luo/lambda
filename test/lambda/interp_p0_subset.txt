@@ -4,7 +4,7 @@
 # followed by `python3 test/interp/refresh_lists.py`, then reviewed and
 # committed. Every script here runs entirely under the AST interpreter
 # (fallback=0) and produces output byte-identical to the JIT tier, which is the
-# shared golden oracle (SI3 / D3.3.1's third leg).
+# shared golden oracle (SI3 / D4.3.1's third leg).
 #
 # format: <script>	<direct|run>
 # `run` scripts are procedural and must be invoked as `lambda.exe run <script>`

@@ -1,4 +1,4 @@
-// D2.6.4/S9.1.3: a guarded descriptor must follow in-place retags and COW.
+// D2.6.2/S9.1.3: a guarded descriptor must follow in-place retags and COW.
 pn new_record() { return {link: null, flag: false, value: 1} }
 pn read_record(record) { return [record.link, record.flag, record.value] }
 pn nested_record(record) { return (record.link).value }

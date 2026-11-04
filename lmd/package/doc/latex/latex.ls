@@ -42,7 +42,7 @@ import profiles: .docclass.profiles
 // Public API — HTML string output
 // ============================================================
 
-// D7.2.7: every LaTeX parse expands with the TeX engine before the direct parser
+// D10.2.2: every LaTeX parse expands with the TeX engine before the direct parser
 // builds the AST; the package supplies its adapter registry so local files never
 // shadow an adapter and adapter commands keep raw arguments
 pub fn parse_source(latex_source, base) =>
@@ -314,7 +314,7 @@ pub fn render_document(ast, options) any^ {
 }
 
 // Path-source entry for the native document transform (CLI convert, Radiant):
-// parsing here, not natively, gives the engine the adapter registry (D7.2.7).
+// parsing here, not natively, gives the engine the adapter registry (D10.2.2).
 pub fn render_document_file(file_path, options) any^ {
     let source = input(file_path, "text") ^ { raise error("could not read " ++ file_path, ^) }
     let ast = parse_source(source, file_path)

@@ -1,4 +1,4 @@
-// S12.1.1v3/D7.2.4v4: scene constructors and bounded batch simulation are pure values.
+// S12.1.1v3/D9.3.4: scene constructors and bounded batch simulation are pure values.
 import analysis: lambda.physics.analysis
 
 pub fn world(options = {}) element => <physics *: options>

@@ -1,7 +1,7 @@
 #pragma once
 #include "audio_bus.hpp"
 
-// D7.5.10: capture timestamps travel with samples; overrun drops input rather than inventing silence.
+// D11.3.2: capture timestamps travel with samples; overrun drops input rather than inventing silence.
 static constexpr unsigned AUDIO_CAPTURE_CAPACITY = 2 * AUDIO_BUS_RATE, AUDIO_CAPTURE_PACKET = 4096;
 struct AudioCapturePcm;
 struct AudioCapturePcmInfo {
@@ -12,7 +12,7 @@ struct AudioCapturePcmInfo {
 };
 size_t audio_capture_pcm_bytes(unsigned capacity = AUDIO_CAPTURE_CAPACITY);
 AudioCapturePcm* audio_capture_pcm_create(unsigned capacity = AUDIO_CAPTURE_CAPACITY);
-// the producer and monitor voice must be retired before destruction (D4.5.2).
+// the producer and monitor voice must be retired before destruction (D5.5.2).
 void audio_capture_pcm_destroy(AudioCapturePcm* pcm);
 // one producer only; no allocation, waiting, DOM, GC or scripts. Frame stamps never regress.
 unsigned audio_capture_pcm_write(AudioCapturePcm* pcm, uint64_t frame, const float* stereo, unsigned frames);

@@ -358,12 +358,15 @@ void pdf_walk_image(RenderContext* base, ViewBlock* view, float x, float y,
     PdfWalkContext* ctx = (PdfWalkContext*)base;
     ctx->frame.x = x; ctx->frame.y = y; ctx->frame.image_view = view; ctx->frame.ui = ctx->ui_context;
     ImageSurface* image = render_media_image_surface(view);
-    bool direct = !ctx->effect.active && image && image->format != IMAGE_FORMAT_SVG;
+    BlockBlot origin = {}; origin.x = x - view->x; origin.y = y - view->y;
+    Rect content = render_geometry_block_content_rect(&origin, view, 1.0f);
+    Corner radius = render_media_content_corners(view, content, 1.0f);
+    // the direct image schema only carries rectangular clips; curves use shared paint commands.
+    bool direct = !ctx->effect.active && image && image->format != IMAGE_FORMAT_SVG &&
+        !radiant_corner_has_radius(&radius);
     if (direct) pdf_walk_dispatch(ctx, "image", ctx->element, view);
     ctx->frame.image_view = nullptr;
     radiant_pdf_link(*ctx->links, view, {x, y, view->width, view->height});
-    BlockBlot origin = {}; origin.x = x - view->x; origin.y = y - view->y;
-    Rect content = render_geometry_block_content_rect(&origin, view, 1.0f);
     PdfPaintBatch batch(ctx, content);
     render_media_paint_image_content(batch.paint, ctx->ui_context, view, &content, font, color);
     batch.finish(!direct);
@@ -683,7 +686,8 @@ bool pdf_secondary_glyph(void* data, const LayoutViewNode* node, const PaintGlyp
 bool pdf_secondary_image(void* data, const LayoutViewNode* node, const PaintImageBox* image) {
     PdfWalkContext* ctx = (PdfWalkContext*)data;
     ctx->frame.fragment = node; ctx->frame.image_box = image; ctx->frame.ui = ctx->ui_context.get();
-    if (image->image && (image->image->format == IMAGE_FORMAT_SVG || image->opacity != 255)) {
+    if (image->image && (image->image->format == IMAGE_FORMAT_SVG || image->opacity != 255 ||
+        radiant_corner_has_radius(&image->content_radius))) {
         PdfPaintBatch batch(ctx, image->content_rect);
         if (!render_paint_image_box(batch.paint, image)) pdf_walk_fail(ctx, "cannot record selected page image");
         batch.finish();

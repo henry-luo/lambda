@@ -7,7 +7,7 @@
   Lambda arrays and map shapes. Wide nullable native Arrays use destination-owned `TypedItem`
   slots rather than raw `Item` words; that LR08-4 array correction landed 2026-09-13. The same
   destination-owned slot is used for packed `i64?`/`u64?` Map/Shape fields by
-  D2.5.2v3/D2.6.1v3/D2.6.4v3; that map projection landed 2026-09-14.
+  D2.4.2/D3.2.1/D2.6.2; that map projection landed 2026-09-14.
   `int?`, `float?`, `bool?`,
   `string?`, `symbol?`, `binary?`, `decimal?`,
   `datetime?`, `complex?`, and the supported nullable container pointers (`array?`, `map?`,
@@ -42,7 +42,7 @@ boundary it converts to/from the ordinary `ItemNull` value. The explicit `i64?`/
 selects `Item` itself as the expression carrier `N(T?)`, because no raw 64-bit null code exists.
 That does not permit persistent native storage to retain a scalar-home pointer: an
 `i64?[]`/`u64?[]` element and a packed Map/Shape field declared `i64?`/`u64?` each store a
-destination-owned `TypedItem`. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
+destination-owned `TypedItem`. [D2.4.2, D3.2.1, D2.6.2]
 
 This applies everywhere a compiler or runtime chooses a physical representation:
 
@@ -129,8 +129,8 @@ Array or Map/Shape slot is instead a `TypedItem` with an inline, destination-own
 9. **Persistent wide storage owns its payload.** An `i64?`/`u64?` native Array element or packed
    Map/Shape field validates the value then copies `null`, `int64_t`, or `uint64_t` into its
    `TypedItem` slot. It must never copy a raw wide-scalar `Item` whose payload points into a
-   number-frame extent; reads reconstruct the consumer's carrier under D5.2.2v3/D5.2.3 rather
-   than exposing that storage as an `Item`. [D2.5.2v3, D2.6.4v3]
+   number-frame extent; reads reconstruct the consumer's carrier under D6.2.2/D6.2.3 rather
+   than exposing that storage as an `Item`. [D2.4.2, D2.6.2]
 
 ---
 
@@ -223,7 +223,7 @@ Persistent native storage deliberately does **not** retain that Item word. An `i
 `uint64_val` for `u64`. The store validates the declared contract and copies the payload into its
 destination allocation; the read converts from that slot to the consumer carrier. A `TypedItem*`
 and a number-frame Item pointer never escape the destination boundary. This is the required
-destination-owned storage under D2.5.2v3/D2.6.4v3 and prevents a later number-frame reuse from
+destination-owned storage under D2.4.2/D2.6.2 and prevents a later number-frame reuse from
 changing an earlier value.
 
 The extra tag is confined to persistent wide-optional Array and Map/Shape storage. It does not
@@ -304,7 +304,7 @@ but the Item boundary still maps their null marker to `ItemNull`.
 ### 4.1 Why `float?` keeps the NaN marker
 
 The current `float?` design is retained (confirmed 2026-09-14, user). Expression/native ABI
-carriers and persistent storage have distinct requirements. [D2.5.2v3, D2.6.1v3]
+carriers and persistent storage have distinct requirements. [D2.4.2, D3.2.1]
 
 | Type | Expression / native ABI carrier | Native array / packed field |
 |---|---|---|
@@ -316,14 +316,14 @@ The key reason is preserving the **single-double expression and native ABI lane*
 Using it for float expressions would require a different carrier and ABI, such as a separate
 tag/payload pair or a boxed carrier. It is possible with a redesign, but is not a replacement
 within the current lane. Even `i64?`/`u64?` use `TypedItem` only in persistent storage; their
-expression carrier remains `Item`. [D2.5.2v3]
+expression carrier remains `Item`. [D2.4.2]
 
 Changing only float storage to `TypedItem` would retain the expression lane's NaN rules, add
 load/store conversions, and grow packed slots from eight to nine bytes. The existing float slot
 already owns its payload inline. Full-width integers need the extra tag because every raw
 64-bit integer pattern is valid, and their persistent storage must not borrow a number-frame
 payload. Float's reserved NaN marker lets expressions and storage share one eight-byte carrier.
-[D2.5.2v3, D2.6.1v3, D2.6.4v3]
+[D2.4.2, D3.2.1, D2.6.2]
 
 ---
 
@@ -484,7 +484,7 @@ descriptor transition, not merely a `TypeId` overwrite. In particular, `i8 -> i8
 one byte to eight bytes, so every following packed offset must be rebuilt; the fixed-slot prefix
 must be preserved only when its descriptor and byte offset are unchanged. `i64 -> i64?` and
 `u64 -> u64?` likewise select the 9-byte `TypedItem` descriptor; a null/non-null write within an
-already nullable field does not change the shape. [D2.5.2v3, D2.6.1v3]
+already nullable field does not change the shape. [D2.4.2, D3.2.1]
 
 ### 6.3 Arrays have three physical forms
 
@@ -493,7 +493,7 @@ physical granularity. A map puts each field at its descriptor's minimum width; a
 normally uses one fixed 64-bit word per element, irrespective of whether the lane itself is a
 byte or a pointer. The exact `i64?`/`u64?` Map/Shape field and `i64?[]`/`u64?[]` Array element
 are the destination-owned exception: their descriptor selects one `TypedItem` slot. The
-descriptor tells the reader how to interpret each slot. [D2.5.2v3, D2.6.1v3]
+descriptor tells the reader how to interpret each slot. [D2.4.2, D3.2.1]
 
 | Physical form | Element representation | Use |
 |---|---|---|
@@ -670,7 +670,7 @@ after it proves the value cannot include `undefined`.
 6. **Implement storage.** Move typed map fields and native Arrays to descriptors, including
    shape transitions/repacking, COW cloning, `ArrayNum`-to-native demotion on an admitted null
    store, destination-owned `TypedItem` storage for `i64?[]`/`u64?[]` and `i64?`/`u64?`
-   Map/Shape fields, and JS shaped properties. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
+   Map/Shape fields, and JS shaped properties. [D2.4.2, D3.2.1, D2.6.2]
 7. **Enable LJS only after bridge tests pass.** Keep its general dynamic value path boxed.
 
 ### 9.1 Implemented first slice (2026-08-05)
@@ -688,7 +688,7 @@ after it proves the value cannot include `undefined`.
   `float?`, `i8?`…`u32?`, and pointer-backed optionals use their native lane storage. Exact
   `i64?`/`u64?` instead select a 9-byte, destination-owned `TypedItem` field through the
   shared persistent descriptor projection. Null/non-null mutation changes its inline tag and
-  payload without a shape transition. [D2.5.2v3, D2.6.1v3, D2.6.4v3]
+  payload without a shape transition. [D2.4.2, D3.2.1, D2.6.2]
 - Array admission compares the whole lane descriptor (kind, nullability, and sized/pointer
   detail), not merely whether a source is already native. Thus `int[] -> int?[]` and
   `string[] -> string?[]` give the target its own COW carrier before a nullable store; the
@@ -794,3 +794,34 @@ continues to expose ordinary `ItemNull`. With that encoding fixed, a shared full
 descriptor lets inference, MIR, shapes, arrays, runtime conversion, and LambdaJS use one
 representation policy instead of repeatedly falling back to `any`/boxed Items at the first
 nullable join.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.5.2v3 → D2.4.2
+
+**D2.4.2** Sentinels: `INT_LANE_NULL` (numerically the `ItemNull` word
+— what makes box/unbox exact) joins the three poison sentinels; `bool?` is
+one byte 0/1/2 with C-truthiness banned; sized `i8?`…`u32?` widen to the
+i64 lane; `float?` reserves a distinct NaN payload (`ItemNull`'s bits are
+a valid finite double) — the null test is a bit compare, never IEEE `==`,
+and other NaNs canonicalize on store. `i64?`/`u64?` have no spare raw
+one-word null code, so their expression and dynamic-boundary carrier is an
+ordinary Item. Every persistent native destination for an `i64?`/`u64?`
+payload — a native-Array element or packed Map/Shape field — is nevertheless
+a destination-owned `TypedItem`: a null tag, or an inline `int64_t`/
+`uint64_t` payload with its exact tag. The store validates then copies that
+payload into its destination; the read reconstructs the consumer carrier.
+A raw wide-scalar Item pointing into a number frame must never be retained.
+Thus wide optionals preserve their native typed representation without
+borrowing a scalar home; the extra tag is confined to persistent storage,
+not the register ABI. Wide optionals remain outside the unboxed wide `+ - *`
+path, which admits only non-optional operands. [Nullable §3–4; D6.2.2–D6.2.3]

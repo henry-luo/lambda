@@ -7,7 +7,7 @@
 > **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/editing.cpp` (surface classification), `radiant/event.cpp` (the snapshotted contenteditable action gate, source projection, and model completion), `radiant/editing_dom_waist.cpp` (checked DOM edit capabilities), `radiant/state_store.cpp` (selection revision/origin), `radiant/editing_host.cpp` (canonical host recognition), and `radiant/editing_target_range.cpp` (immutable `InputEvent` target ranges).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name. The historical design docs `vibe/radiant/Radiant_Design_Editing*.md` and `Radiant_Design_Selection.md` are rationale only and are explicitly marked phased-out.
 
-Selected Range mutations preserve `DomSelection::direction`, including collapse. Native Selection getters report the stored direction rather than deriving it from endpoint equality; state validation checks valid direction values and equal collapsed endpoints without requiring directionless state. This follows the [Selection API §2](https://www.w3.org/TR/selection-api/#dfn-direction) through the shared DOM owner (**D1.3v3**, **D7.4.4**).
+Selected Range mutations preserve `DomSelection::direction`, including collapse. Native Selection getters report the stored direction rather than deriving it from endpoint equality; state validation checks valid direction values and equal collapsed endpoints without requiring directionless state. This follows the [Selection API §2](https://www.w3.org/TR/selection-api/#dfn-direction) through the shared DOM owner (**D1.3**, **D9.5.4**).
 
 ---
 
@@ -24,7 +24,7 @@ owner, and sends non-cancelable `input` after a claim or change. A model
 handler never falls through to UA DOM mutation. Form controls retain their
 separate value-store action between the same kind of notifications, as
 documented by [RAD_19](RAD_19_Form_Controls.md). This ordering and ownership
-follow **D7.2.5**, **D7.5.3**, **S12.1.3**, and **S12.2.2**.
+follow **D10.2.1**, **D9.5.6**, **S12.1.3**, and **S12.2.2**.
 
 ---
 
@@ -46,7 +46,7 @@ The atom is `struct DomBoundary { DomNode* node; uint32_t offset; }` (`event.hpp
 
 ### 2.4 `EditingSelection` — the façade over both worlds
 
-`struct EditingSelection` (`event.hpp`) is the union facade owned by the StateStore (`DocState`). Its `kind` is `EDIT_SEL_DOM_RANGE` (rich, carrying a `DomRange* range`) or `EDIT_SEL_TEXT_CONTROL` (form, carrying `DomElement* control` plus UTF-16 `start_u16`/`end_u16`). This is the single seam through which the two browser-required selection domains are unified. The 64-bit selection revision orders `selectionchange` delivery and presentation refreshes; `DocState::selection_origin` records `api`, `pointer`, `keyboard`, `dom-mutation`, or `model-commit`, and a model commit also carries its source-model revision. Those fields let a model adapter reject stale selection events and absorb its own projection echo without clearing stored marks (D7.5.3).
+`struct EditingSelection` (`event.hpp`) is the union facade owned by the StateStore (`DocState`). Its `kind` is `EDIT_SEL_DOM_RANGE` (rich, carrying a `DomRange* range`) or `EDIT_SEL_TEXT_CONTROL` (form, carrying `DomElement* control` plus UTF-16 `start_u16`/`end_u16`). This is the single seam through which the two browser-required selection domains are unified. The 64-bit selection revision orders `selectionchange` delivery and presentation refreshes; `DocState::selection_origin` records `api`, `pointer`, `keyboard`, `dom-mutation`, or `model-commit`, and a model commit also carries its source-model revision. Those fields let a model adapter reject stale selection events and absorb its own projection echo without clearing stored marks (D9.5.6).
 
 ---
 
@@ -91,7 +91,7 @@ replacement, cross-surface retargeting, or invalidated target ranges fail
 closed: the gate invokes no action and does not select another owner. A
 Selection-only revision does not reroute the owner or rewrite the immutable
 target ranges. A selected model handler owns the route even when it declines,
-so `PASS` never falls through to UA DOM mutation (D7.2.5, D7.5.3).
+so `PASS` never falls through to UA DOM mutation (D10.2.1, D9.5.6).
 
 The model result is a structured `EditResult`. Its source selection and model
 revision remain precisely rooted while S12.1.3 reactive regeneration rebuilds
@@ -110,7 +110,7 @@ batch, so MutationObserver delivery stays after post-action `input`.
 
 **Live-range mutation envelopes** implement WHATWG DOM §5.3 boundary adjustments so that every open range and the selection stay valid across a tree mutation: `dom_mutation_pre_remove` (`:1053`, called before removing a child), `dom_mutation_post_insert` (`:1078`, shifting offsets past an insertion), `dom_mutation_text_split` (`:1130`), plus `dom_mutation_text_replace_data` and `dom_mutation_text_merge` (declared `event.hpp`, `337`). Each walks `state->live_ranges`, adjusts endpoints per spec, and re-syncs the selection; all are safe to call with no state, no ranges, or no selection. The binding layer (JS DOM mutation) is responsible for calling them around every tree/text mutation.
 
-`dom_selection_modify` with `dom_boundary_move` implements the browser-convention `Selection.modify` surface: `move` collapses at the moved focus and `extend` retains the anchor; `forward`/`backward` are logical directions, while `left`/`right` use visual, bidi-aware character and word paths. It accepts `character`, `word`, `line`, `lineboundary`, `sentence`, `sentenceboundary`, `paragraph`, `paragraphboundary`, and `documentboundary`; an empty selection is a no-op and invalid arguments report `SyntaxError`. Character movement follows visible text and collapsed whitespace; line and line-boundary movement use the editing-host layout stops when available; paragraph movement recognizes block and `<br>` boundaries; and document-boundary movement reaches the DOM-tree edges. It is a checked native DOM/Selection mechanism rather than a separate contenteditable default action, consistent with **D7.2.5**.
+`dom_selection_modify` with `dom_boundary_move` implements the browser-convention `Selection.modify` surface: `move` collapses at the moved focus and `extend` retains the anchor; `forward`/`backward` are logical directions, while `left`/`right` use visual, bidi-aware character and word paths. It accepts `character`, `word`, `line`, `lineboundary`, `sentence`, `sentenceboundary`, `paragraph`, `paragraphboundary`, and `documentboundary`; an empty selection is a no-op and invalid arguments report `SyntaxError`. Character movement follows visible text and collapsed whitespace; line and line-boundary movement use the editing-host layout stops when available; paragraph movement recognizes block and `<br>` boundaries; and document-boundary movement reaches the DOM-tree edges. It is a checked native DOM/Selection mechanism rather than a separate contenteditable default action, consistent with **D10.2.1**.
 
 Movement remains within an editing host and `text_is_selectable_for_modify` skips non-selectable subtrees. The fidelity limit is narrow: word breaks use a simple alphanumeric classifier, and sentence plus some line fallbacks are structural approximations rather than locale-aware Unicode segmentation. These are `Selection.modify` conformance limits, not a general contenteditable-support gap. `SelectionModify*` cases in `test/test_dom_range_gtest.cpp` cover the base move/extend, collapsed-whitespace, empty-selection, and invalid-argument contracts; `test/ui/dom_pkg_edge_text.json` covers paragraph-boundary traversal through an empty inline.
 
@@ -129,7 +129,7 @@ Rich surfaces query glyphs in their painted coordinate plane. For blank space,
 that same point resolver, scoped to the active surface. Explicit empty/atomic
 element boundaries retain precedence. An editor-scoped `dom.boundary_from_point`
 returns null when it cannot produce an owned boundary, rather than falling back
-to another surface's text (D7.2.5/D7.5.3).
+to another surface's text (D10.2.1/D9.5.6).
 
 ---
 
@@ -143,7 +143,7 @@ It decodes the referenced file's pixels and never falls back to that icon for an
 unreadable, non-image or multiple-file copy. With no file URLs, direct PNG and
 TIFF/JPEG bitmap clipboard content remains available. `clipboard_mac_read_items`
 returns an owned snapshot; package paste policy stays outside the adapter
-(**D7.2.5**). `test_clipboard_mac_cases.mm` checks source dimensions and pixels
+(**D10.2.1**). `test_clipboard_mac_cases.mm` checks source dimensions and pixels
 against conflicting icon previews without using the general pasteboard.
 
 ---

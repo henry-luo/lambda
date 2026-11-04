@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Lambda/native binding contracts from one manifest (D3.5.1)."""
+"""Generate Lambda/native binding contracts from one manifest (D4.4.1)."""
 import argparse
 import hashlib
 import json

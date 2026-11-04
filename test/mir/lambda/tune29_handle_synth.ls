@@ -1,4 +1,4 @@
-// T29-1 (D4.4.4v4): a record place spelled in several statements is navigated
+// T29-1 (D5.4.4): a record place spelled in several statements is navigated
 // once. The first read binds the handle -- un-sharing the spine and the leaf,
 // because a later statement writes through it -- and every later read and
 // write is an offset through the handle. A place whose container is replaced

@@ -15,7 +15,7 @@ AudioCapturePermission audio_capture_mac_permission(bool request) {
         if (request) {
             int idle = 0;
             if (__atomic_compare_exchange_n(&pending, &idle, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-                // the OS completion owns no document, PCM queue or GC value (D4.5.2).
+                // the OS completion owns no document, PCM queue or GC value (D5.5.2).
                 [AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio completionHandler:^(BOOL) {
                     __atomic_store_n(&pending, 0, __ATOMIC_RELEASE);
                 }];

@@ -66,7 +66,7 @@ static inline MIR_reg_t em_guarded_int_bitwise(MirEmitter* em, SysFunc fn,
     return result;
 }
 
-// shared packed u32 operations preserve guards before payload masking (S4.4, D2.4.3).
+// shared packed u32 operations preserve guards before payload masking (S4.4, D2.3.5).
 static inline void em_guard_u32_item(MirEmitter* em, MIR_reg_t item,
         MIR_label_t fallback) {
     MIR_reg_t upper = em_new_reg(em, "u32_operand_upper", MIR_T_I64);
@@ -93,7 +93,7 @@ static inline MIR_reg_t em_u32_binary(MirEmitter* em, Operator operation,
 
     // A nested fallible producer can publish ItemError even when inference
     // selects u32 arithmetic. Keep the boxed operator for that cold join
-    // before masking either tag away (S4.4.1, D2.4.1–D2.4.3).
+    // before masking either tag away (S4.4.1, D2.3.4–D2.3.5).
     if (guard_left) em_guard_u32_item(em, left_item, fallback);
     if (guard_right) em_guard_u32_item(em, right_item, fallback);
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
@@ -164,7 +164,7 @@ static inline MIR_reg_t em_u32_bitwise(MirEmitter* em, SysFunc function,
     // A nested shift can return ItemError despite its inferred u32 result.
     // Validate uncertain operands before their payload masks erase that tag;
     // the existing boxed helper retains the slow/error semantics (S4.4.4,
-    // D2.4.1–D2.4.3).
+    // D2.3.4–D2.3.5).
     if (guard_left) em_guard_u32_item(em, left_item, l_fallback);
     if (guard_right) em_guard_u32_item(em, right_item, l_fallback);
     bool is_shift = function == SYSFUNC_SHL ||

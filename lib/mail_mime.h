@@ -1,6 +1,6 @@
 // mail_mime.h — MIME header decoding for mail (vibe/Lambda_Demo_Mail.md MG5):
 // charsets to UTF-8, RFC 2047 encoded words, RFC 2045/2231 parameters and
-// RFC 5322 address lists. Context-free (D7.1.2v2); the eml reader builds
+// RFC 5322 address lists. Context-free (D9.1.2); the eml reader builds
 // Lambda values from the results.
 
 #pragma once

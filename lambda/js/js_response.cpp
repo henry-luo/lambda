@@ -36,7 +36,7 @@ static Item response_create(Item body, Item headers, int status, Item status_tex
     Rooted<Item> state(roots, js_array_new(0)), constructor(roots, ItemNull);
     constructor.set(js_host_intrinsic_constructor(JS_REALM_SLOT_RESPONSE_CONSTRUCTOR, "Response"));
     JS_RETURN_IF_ERROR(constructor.get());
-    // each source remains rooted while publishing its private state edge (D5.3.3).
+    // each source remains rooted while publishing its private state edge (D6.3.3).
     JS_RETURN_IF_ERROR(js_array_push(state.get(), bytes.get()));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), header_root.get()));
     JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = i2it(status)}));

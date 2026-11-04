@@ -5,7 +5,7 @@
 //
 // A parse first builds scratch nodes in an arena that dies with the parse, so
 // a failed branch costs only arena bytes; the successful tree is then
-// converted to Input-owned or GC-owned elements (GM4/GM14, D4.2.6/D5.3.3).
+// converted to Input-owned or GC-owned elements (GM4/GM14, D5.2.5/D6.3.3).
 
 #include "grammar.hpp"
 #include "../parser/lambda_rd_parser.h"

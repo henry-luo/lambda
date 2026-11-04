@@ -59,8 +59,8 @@ The command surface is small and maps directly onto the diagram:
 
 The Mark tree is the runtime form of **Mark Notation**, a notation designed to hold *both* object data and markup in one data model. JSON gives it maps and arrays; HTML and XML give it elements. A stable subset of the literal syntax is formalized and released separately as [Mark Notation](https://github.com/henry-luo/mark); Lambda Script uses the same literals as its native data syntax, so a document and a program are written in one language.
 
-Mark files use **`.mark` as their sole canonical extension** (D2.9.1).
-Explicit `mark` input accepts any filename (D2.9.2), for example
+Mark files use **`.mark` as their sole canonical extension** (D10.1.1).
+Explicit `mark` input accepts any filename (D10.1.2), for example
 `input("data.payload", 'mark')^`; `.m` and `.mk` are not automatic aliases.
 
 ```lambda
@@ -158,7 +158,7 @@ Confluence wiki markup. The root is `<doc>` with optional `<meta>` followed by
 `<code type:"block">` or `<code type:"inline">`. Custom elements cover math,
 citations, footnotes, and inert raw source. All wiki readers use the common
 normalization and MarkBuilder construction path (S2.6.1v2, S2.6.2–S2.6.5;
-D7.1.5). Vimwiki page tags and Zim tags/creation metadata can populate `<meta>`;
+D9.1.4). Vimwiki page tags and Zim tags/creation metadata can populate `<meta>`;
 native task markers retain states and progress bounds. HTML5, LaTeX, and MDX
 have their own parser tree shapes; see [format-specific trees](Markup_Formats_Support.md).
 
@@ -209,7 +209,7 @@ And a Lambda script can be seen as a functional mapping from its input sources, 
 Formatters run the pipeline backwards. Mark itself is the lossless serialization of the tree; JSON, YAML, TOML, INI, XML, HTML, Markdown, reStructuredText, Org-mode, wiki, Textile, JSX/MDX, LaTeX and plain text each write the parts of the tree they can express, and math trees can be emitted as LaTeX, Typst, AsciiMath or MathML. Where a target lacks a concept the conversion is deliberately predictable rather than silently lossy: a `binary` value, for instance, becomes a standard base64 string in JSON and YAML. Because every parser and every formatter meets in the middle, adding one parser adds a route to every existing output, and adding one formatter adds a route from every existing input.
 
 All wiki writers, including MediaWiki, live in the shipped `lambda.doc.wiki`
-Lambda Script package (D7.2.4); the native MediaWiki formatter is retired.
+Lambda Script package (D9.3.4); the native MediaWiki formatter is retired.
 Select a target with `wiki:<flavor>`. Unsupported constructs produce loss
 diagnostics, and plain formatting fails on them by default. Use
 `wiki.format_report` to inspect the text and diagnostics, then `loss:"allow"`

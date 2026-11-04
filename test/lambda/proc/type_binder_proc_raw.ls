@@ -1,4 +1,4 @@
-// S11.4.8v2/D8.3.4v2: synchronous pn binders admit direct raw variants.
+// S11.4.8v2/D7.3.4: synchronous pn binders admit direct raw variants.
 pn binder_pick(value: number as T, count: int) T {
     var index = 0
     while (index < count) {

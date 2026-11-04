@@ -121,6 +121,7 @@ static const ErrorCodeInfo error_code_table[] = {
     {ERR_FILTER_BODY_NO_CURRENT, "FILTER_BODY_NO_CURRENT", "Filter body does not mention ~"},
     {ERR_FOR_CLAUSE, "FOR_CLAUSE", "Invalid for-header clause"},
     {ERR_TYPE_CYCLE, "TYPE_CYCLE", "Type refers to itself through no structural position"},
+    {ERR_DUPLICATE_KEY, "DUPLICATE_KEY", "Duplicate explicit literal key"},
     {ERR_DEFERRED_ADMISSION, "DEFERRED_ADMISSION", "Local type admission requires runtime validation"},
 
     // 3xx - Runtime Errors

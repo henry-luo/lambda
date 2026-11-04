@@ -1,4 +1,4 @@
-// D5.3/D8.4.3v2: only total scalar leaves may move across loop control flow.
+// D6.3/D7.4.3: only total scalar leaves may move across loop control flow.
 function pureLoop(n) {
     let total = 0;
     for (let i = 0; i < n; i++) total += Math.round(1.5) + Math.ceil(-0.5) + Math.pow(2, 3);

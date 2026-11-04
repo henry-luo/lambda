@@ -86,7 +86,7 @@ def main():
         if "timeout" in (jit_status, int_status):
             verdict = "timeout"
         elif fallback:
-            # D8.1.1v15: a forced interpreter run must never compile MIR.
+            # D8.3.1: a forced interpreter run must never compile MIR.
             verdict = "mismatch"
         elif excluded or not executed:
             verdict = "excluded"

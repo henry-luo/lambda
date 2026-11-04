@@ -2220,7 +2220,7 @@ passes `/` through. Both separators are retired.)*
 path picks its root, and there are three:
 
 1. **A name is a package root.** Names belong to packages: `lambda` is the
-   reserved root for what Lambda ships (D7.2.4), the built-in and registered
+   reserved root for what Lambda ships (D9.3.4), the built-in and registered
    modules keep their bare names (`import math` ≡ `import lambda.math`), and
    every other name is held for packages from the future Lambda package
    registry. A bare root never falls back to a file, so `import
@@ -2236,7 +2236,7 @@ path picks its root, and there are three:
 *What this replaces.* Before this ruling a bare `import a.b` loaded
 `./a/b.ls` from the working directory, as `Lambda_Modules.md` documented, but
 the resolver actually swapped the first segment for the Lambda home (a
-leftover of the pre-D7.2.4 `lambda.package.x` scheme), so `import
+leftover of the pre-D9.3.4 `lambda.package.x` scheme), so `import
 test.benchmark.x` had been loading `lambda/benchmark/x.ls`. Working-directory
 resolution also made a module's meaning depend on where the script was run
 from. Package names and relative files now cannot collide: a bare name is a
@@ -2941,7 +2941,7 @@ import, not new syntax — recorded as SO37.
 
 1. **Spelling is `[expr]`.** The decisive ground is **access symmetry**: the dynamic read is already `m[expr]` (S12.3.3v2 — `obj["m"]` is the one member operation in dynamic form), so `{[k]: v}` constructs exactly what `m[k]` reads back. The bracket is the key-expression bracket on both sides of the assignment. That JS/TS readers already know the form is a secondary benefit, not the reason.
 2. **The key domain is the name domain, unchanged.** `expr` evaluates to a `NameKey` under S8.2.2v2 — a string or a symbol, normalized by contents — and the entry defines that name. A computed key therefore never turns a `{…}` into a `VMap`: `{[1]: "one"}` is an error, exactly as the literal `{1: "one"}` is, and the literal's key domain stays the domain `m[expr]` ranges over. (This keeps the map-literal/`VMap` line where the `map(…)` paragraph above draws it; a wider key domain would be a `VMap`-literal question, not a change here.)
-3. **Entries evaluate left to right; a later entry wins.** This is the rule spread already has (`{*: base, x: 99}` shadows `base.x`), applied uniformly: a static key, a computed key, and a spread that all land on the same name resolve by position, no special case.
+3. **Entries evaluate left to right; computed and spread collisions replace the earlier field.** S2.3.1v2 / S16.8.9v2 (USER, 2026-11-04) additionally reject repeated explicitly written names, including across intervening computed entries or spreads. Spread overlaps remain allowed even if statically knowable, as do bracketed constant keys. The last write determines value/type, the first insertion determines position, and the constructed literal has one field per effective name. The check follows syntax, independently of optimization. Full decision record: [C8.6b](Lambda_Semantics_Formal2.md#c86b-duplicate-literal-keys-2026-11-04-user).
 4. **Shape follows the spread precedent, not a new mechanism.** A literal containing any computed key builds its shape at run time, as a literal containing `*: m` already does; its static entries keep their inferred types, and the literal's static type is the open map. No new representation, no new tier work beyond the construction path — D3.4.1's packed layout is reached the same way a spread-built map reaches it.
 5. **Element attributes take the same entry.** `<input type: "range", [name]: value>` is legal; `attr_name` is `_key` plus the dotted form, so the grammar change is one alternative in `_key` and covers both literals. The attribute/content boundary rule (§5.10, the required boundary comma before content) is untouched: `[…]` after that comma is array content as today.
 6. **Not ruled here: the keyed for-splice.** `{for (k at src) [k]: f(src[k])}` is the natural payoff — S8.3.3 already says for-expressions splice at the construction site — but the `for` clause inside a map literal is a separate grammar question and is recorded as a follow-on, not folded into this ruling.
@@ -2953,7 +2953,7 @@ import, not new syntax — recorded as SO37.
 - **Parens must stay inert.** §5.9 rule 1 and S16.4.1v2 promise that grouping parens never flip a reading — `if c {a: 1}` and `if (c) {a: 1}` are the same program. A paren key breaks that promise at exactly one position: `{a: 1}` and `{(a): 1}` would mean different things (the symbol `a` versus the value of `a`). Brackets carry no inertness expectation; parens do.
 - **No symmetry to buy.** `(expr)` mirrors nothing on the read side; `[expr]` mirrors `m[expr]`. Since the two spellings tie on every other axis, the one that pairs construction with access wins.
 
-**Implementation (not started).** `grammar.js`: add `seq('[', $._expr, ']')` to `_key` (covers `map_item` and `attr_name`). C parser: `parse_map` and `parse_element` accept the bracketed key; `braced_expression_is_map` and `element_attribute_starts` skip one balanced bracket group before testing for `:`. `build_ast`: a computed variant of the key-expression node carrying an expression instead of a name, lowered on both tiers through the same runtime path the keyed spread uses. Fixtures: a map case, an element-attribute case, the block-vs-map probe `{[1, 2]}` / `{[k]: 1}`, and the non-name-key error.
+**Original implementation plan (2026-09-05; implemented by 2026-11-04).** `grammar.js`: add `seq('[', $._expr, ']')` to `_key` (covers `map_item` and `attr_name`). C parser: `parse_map` and `parse_element` accept the bracketed key; `braced_expression_is_map` and `element_attribute_starts` skip one balanced bracket group before testing for `:`. `build_ast`: a computed variant of the key-expression node carrying an expression instead of a name, lowered on both tiers through the same runtime path the keyed spread uses. Fixtures: a map case, an element-attribute case, the block-vs-map probe `{[1, 2]}` / `{[k]: 1}`, and the non-name-key error.
 
 **Ratified 2026-09-05, spec v22.0.0:** S16.8.9 carries points 1–4 and the rejected `(expr)` spelling; S16.4.1v3 carries the relaxed predicate. Point 4 needs no D ruling — it rides the shape path spread already uses (D3.4.3: runtime-built maps rebuild per transition). Cite S16.8.9 / S16.4.1v3, not this section.
 
@@ -2961,7 +2961,7 @@ import, not new syntax — recorded as SO37.
 
 ### 7.27 Lists, blocks, and the content model (decided 2026-09-21 — ratified as S2.5 + S2.6)
 
-> **Implemented 2026-09-23**, both tiers, by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) P1–P4. The kind of a query result was ruled 2026-09-23 as S8.2.4 (a run; [Expr_Query §4.1](Lambda_Expr_Query.md)). The remaining LaTeX deviation closed on 2026-10-02: S2.6.1v2/D2.6.5v4 require command string runs to be array children and all element appends to merge adjacent strings.
+> **Implemented 2026-09-23**, both tiers, by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) P1–P4. The kind of a query result was ruled 2026-09-23 as S8.2.4 (a run; [Expr_Query §4.1](Lambda_Expr_Query.md)). The remaining LaTeX deviation closed on 2026-10-02: S2.6.1v2/D3.3.1 require command string runs to be array children and all element appends to merge adjacent strings.
 
 **Revision (USER, 2026-09-23): `count(x)` is the size of the run `x` is.**
 S8.3.3v2 had defined `count` as the number of items a value contributes
@@ -3026,7 +3026,7 @@ were raised:
    construction-time courtesy: a normalized element must stay normalized, so
    `e[i] = v`, insertion, and removal renormalize at the write site, and
    positions after the write may shift.
-8. **Parsed documents are bound by the same model** (S2.6.1v2, D2.6.5v4;
+8. **Parsed documents are bound by the same model** (S2.6.1v2, D3.3.1;
    USER, 2026-10-02). Every element append merges adjacent strings. LaTeX
    commands carry consecutive string arguments in an array child,
    `<cmd ["str", "str"]>`, and the package and formatter read its entries as
@@ -3035,7 +3035,7 @@ were raised:
    break a run. Arrays keep the argument boundaries without ambient state.
 
    **Superseded implementation exception:** ~~LaTeX keeps consecutive strings
-   unmerged through MarkBuilder's verbatim element append~~ (D2.6.5v3).
+   unmerged through MarkBuilder's verbatim element append~~ (D3.3.1).
    This exception hid argument boundaries in adjacent element strings; the
    array child now makes those boundaries explicit.
 
@@ -3091,7 +3091,7 @@ parse error, against 14.
 
 **Why S2, not S16.** Normalization decides which value is built, not which
 program a text denotes; and it applies where there is no source text at all
-(input parsers appending through `list_push`, D2.6.5v2). The ruling therefore
+(input parsers appending through `list_push`, D3.3.1). The ruling therefore
 sits in the value domain, and S16.7 keeps only what is top-level-specific: an
 emptied script's value is a single `null`. S2.5 and S2.6 were appended after S2.4
 Paths rather than inserted earlier, so no existing ruling ID is renumbered.
@@ -3172,7 +3172,7 @@ kind rule at all. The rulings:
 25. **S3.3v2**: for a list, `results or default` works (empty is `null`),
     but a single falsy result (`false`, `""`, `null`, error) reads as no
     result; `if (r)` ≡ `if r` always, since `(r)` ≡ `r` even for a list.
-26. **D2.6.5v3**: three append disciplines — content (normalize + splice),
+26. **D3.3.1**: three append disciplines — content (normalize + splice),
     sequence (splice lists, else verbatim), verbatim (arguments, rest, pairs,
     single-value slots with the list → array image); one list flag; spreading
     decided by the value's kind, never by syntax.
@@ -3690,3 +3690,46 @@ and exact previous wording are retained below.
 >   is the *sole* discriminator between propagation and handling. A brace
 >   that carries that grammar burden is structural by construction, like
 >   `fn`'s body brace and `case T { ... }`'s arm brace — not like `if`'s.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.6.5v4 → D3.3.1
+
+**D3.3.1** **The append discipline follows the destination: content,
+sequence, or slot.** Three runtime appends exist and they are not
+interchangeable. The **content** append (`list_push()`) applies S2.6's
+normalization — a `null` or `""` is dropped, a list is spliced in, a string
+or binary is concatenated onto a preceding item of the same kind — and is
+correct only for element content and script top-level content; content
+writes after construction preserve it (S2.6.5). The **sequence** append
+builds lists and array literals: it splices a list (S2.5.1v2) and stores
+every other value verbatim, `null` included, adjacent strings apart. The
+**verbatim** append stores the item as one value whatever it is — argument
+and rest lists, `zip` pairs, and every single-value slot (a map field, an
+attribute, an object field), where a list is first turned into its array
+image (S2.5.6). Which append a site uses is decided by what it builds,
+never by a per-format switch, and a list's spreading is decided by the
+value's kind at run time, never by the syntax around it (S1.6): the one
+list flag is the kind bit.
+The split is **content versus collection**, never per format: every input
+parser yields normalized element content (S2.6.1v2). MarkBuilder's element
+child append uses the owner-aware content append; collection append APIs
+also dispatch element destinations to content normalization, so none can
+preserve adjacent element strings. MarkEditor child writes rebuild through
+the same content append in both edit modes (S2.6.5); web DOM node operations
+have explicit positional-node APIs. LaTeX commands carry consecutive string
+arguments in one array child, `<cmd ["a", "b"]>`, and their consumers read
+the array entries as positional arguments. Arrays remain non-spreading
+values (S2.6.3). The choice belongs at the destination and append site,
+never ambient state: a process-wide "suppress merging" flag leaks across
+allocations and early returns. The former flag on
+`EvalContext`/`InputAllocationContext` is retired. [LR09-R3; Design_Syntax §7.27]

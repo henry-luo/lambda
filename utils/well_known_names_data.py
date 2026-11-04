@@ -36,7 +36,7 @@ MARKUP_EXTRA_ENTRIES = [
     ("COLOR", "color"), ("BACKGROUND", "background"), ("OPEN", "open"),
     ("CONTROLS", "controls"),
 ]
-# append new identities after the existing catalog tail (D4.6.1v4).
+# append new identities after the existing catalog tail (D5.6.1).
 MARKUP_TRAILING_ENTRIES = [
     ("SCENE3D", "scene3d"), ("GEOMAP", "geomap"),
     ("CSS_WEBKIT_BOX_ORIENT", "-webkit-box-orient"),

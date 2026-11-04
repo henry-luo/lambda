@@ -1,4 +1,4 @@
-// S4.1.2, D8.4.1v2: guarded loops and bitwise operations retain their checked miss paths.
+// S4.1.2, D7.4.1: guarded loops and bitwise operations retain their checked miss paths.
 pn countdown(n: int, seed: int) int {
     var total: int = seed
     while (n >= 0) {

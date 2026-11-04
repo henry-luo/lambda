@@ -1,4 +1,4 @@
-// D8.3.2 / S7.1.1v3: inferred fusion agrees with materialized reads.
+// D7.3.2 / S7.1.1v3: inferred fusion agrees with materialized reads.
 pn tune32_same_at(left, li: int, right, ri: int) bool {
     return left[li] == right[ri]
 }

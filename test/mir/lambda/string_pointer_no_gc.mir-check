@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3.1–D5.3.2: audited fn_str_eq_ptr keeps a typed string-equality leaf rootless, so its entry uses BSTART and does not call the native stack probe.",
+  "description": "D6.3.1–D6.3.2: audited fn_str_eq_ptr keeps a typed string-equality leaf rootless, so its entry uses BSTART and does not call the native stack probe.",
   "checks": [
     {
       "in_func": "_equal_#",

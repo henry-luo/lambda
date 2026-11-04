@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3/D8.4.1v2: lazy activation-local certificates reuse equivalent full primitive contracts; initialization dominates conditional and loop first use. The existing guarded loop emits proven and generic siblings, with two fill sites per sibling sharing the activation register.",
+  "description": "D4.3.3/D7.4.1: lazy activation-local certificates reuse equivalent full primitive contracts; initialization dominates conditional and loop first use. The existing guarded loop emits proven and generic siblings, with two fill sites per sibling sharing the activation register.",
   "checks": [
     {
       "in_func": "_repeated_#",

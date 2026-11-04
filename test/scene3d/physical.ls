@@ -1,4 +1,4 @@
-// S12.1.1v3 / D4.5.3v2: material values survive view edits; the host owns playback/resources.
+// S12.1.1v3 / D5.5.3: material values survive view edits; the host owns playback/resources.
 import dom
 import s: lambda.scene3d
 fn stage(coat) element => s.scene([

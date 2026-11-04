@@ -4,7 +4,7 @@
 profiles implemented; embedded font programs and full LanguageLevel remain open.
 
 Design: [Lambda_Pkg_EPS.md](../Lambda_Pkg_EPS.md). This implementation follows
-**D7.2.4** (shipped document packages), **D4.1.3** (Input-owned parsing),
+**D9.3.4** (shipped document packages), **D5.1.3** (Input-owned parsing),
 **S1.4** (explicit guest identity), **S12.1.2** (procedural execution loop),
 **S7.4.2** (raised conversion failures), and **S7.6.7v4** (procedure statement
 handlers). No formal language ruling changes.
@@ -231,7 +231,7 @@ The broader local corpus exposed four missing paths: Palatino text in
 `circle.eps`, palette/RGB callbacks in the two ImageMagick logos, and planar
 ASCII85/RunLength callbacks in the GIMP logo. All execution stays in Lambda
 Script; the native additions only expose existing bounded codecs, byte reads
-and the shared PDF PNG encoder (**D4.1.3**, **D7.4.6**).
+and the shared PDF PNG encoder (**D5.1.3**, **D7.1.1**).
 
 Three defects required general fixes. A bare token must consume its single
 whitespace terminator (CRLF counts once) before a callback reads inline data.

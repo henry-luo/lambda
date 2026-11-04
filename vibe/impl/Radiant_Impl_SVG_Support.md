@@ -81,13 +81,13 @@ current aggregate.
 
 | Authority | Constraint |
 |---|---|
-| **D2.11.1–D2.11.2** | Inline HTML SVG follows browser-standard foreign-content parsing; external SVG reuses the same HTML5 parser and Mark result model. XML/XHTML hosts keep their syntax under **D2.10.1**. |
-| **D2.11.3–D2.11.4** | SVG source export serializes the current edited DOM. Animation snapshots capture the selected virtual frame, keep that clock fixed and remain at that frame when reopened. |
-| **D4.1.3 / D4.2.2v2–D4.2.6** | Parsed SVG, compiled filters, resources and sampled payloads retain their actual document/pool owners. Copy or retain every value that survives the current walk. |
-| **D4.5.1v4 / D4.1.4v5** | Preserve document and selected-view ownership and independent scratch arenas: “pin, gen-check, copy-as-value.” Cache retirement cannot invalidate retained paint. |
-| **D4.6.1v4** | Extend canonical property identity and generated accessors; preserve existing IDs. |
-| **D5.3.3 / D5.4.1** | Callback and DOM bridges use precise roots and the owning evaluator lifetime. |
-| **D7.3.3–D7.3.4** | Reuse declared engine/DOM providers; do not introduce new upward host imports. |
+| **D10.1.5–D10.1.5** | Inline HTML SVG follows browser-standard foreign-content parsing; external SVG reuses the same HTML5 parser and Mark result model. XML/XHTML hosts keep their syntax under **D10.1.4**. |
+| **D10.1.6–D10.1.7** | SVG source export serializes the current edited DOM. Animation snapshots capture the selected virtual frame, keep that clock fixed and remain at that frame when reopened. |
+| **D5.1.3 / D5.2.2–D5.2.5** | Parsed SVG, compiled filters, resources and sampled payloads retain their actual document/pool owners. Copy or retain every value that survives the current walk. |
+| **D5.5.1 / D5.1.4** | Preserve document and selected-view ownership and independent scratch arenas: “pin, gen-check, copy-as-value.” Cache retirement cannot invalidate retained paint. |
+| **D5.6.1** | Extend canonical property identity and generated accessors; preserve existing IDs. |
+| **D6.3.3 / D6.4.1** | Callback and DOM bridges use precise roots and the owning evaluator lifetime. |
+| **D9.4.3–D9.4.4** | Reuse declared engine/DOM providers; do not introduce new upward host imports. |
 
 These rulings are in the [formal design](../../doc/Lambda_Formal_Design.md).
 For coordinate policy, where no formal ruling supplies the SVG-specific rule,
@@ -106,8 +106,8 @@ copying them. Extract shared cases before adding another per-property variant.
 
 Keep inline SVG in host CSS and external SVG images in their isolated style and
 resource mode. SVG source export uses the current DOM, including edits, under
-**D2.11.3**. A selected virtual frame supplies the settled state for a stable
-snapshot under **D2.11.4**; capture preserves its time. Reuse the existing virtual
+**D10.1.6**. A selected virtual frame supplies the settled state for a stable
+snapshot under **D10.1.7**; capture preserves its time. Reuse the existing virtual
 timer controls and DOM serialization through the declared provider boundary.
 Rendered PNG/PDF and general HTML-page SVG output retain their resolved-paint
 contract: vectors where supported, transparent fallbacks at the requested
@@ -156,7 +156,7 @@ Keep attribute-versus-CSS `transform` precedence intact.
 
 **Excluded:** 3D/perspective, new stroke-box accuracy, animated individual
 properties, resource-transform expansion and exhaustive use-instance contexts.
-Required changes to the DOM provider follow **D7.3.3–D7.3.4**.
+Required changes to the DOM provider follow **D9.4.3–D9.4.4**.
 
 **Verification budget:** one focused transform fixture during edits, neighboring
 SVG transform/use hits once stable, then the required area gates. Keep one
@@ -248,7 +248,7 @@ Include `x`, `y`, `width`, `height`, `rx`, `ry` on `rect`; `cx`, `cy`, `r` on
 properties, with applicability checked per element. Support numeric/px values,
 percentages, `em`/`rem`, existing linear length-percentage math, CSS-wide values
 and variables through shared validation/computation. Reuse registered width and
-height identities rather than adding SVG duplicates (**D4.6.1v4**).
+height identities rather than adding SVG duplicates (**D5.6.1**).
 
 | Acceptance | Observable result |
 |---|---|
@@ -272,7 +272,7 @@ that the visible fixture cannot adequately distinguish.
 
 ### 8.1 Shared SVG DOM export and virtual-frame acceptance
 
-**Outcome, USER 2026-10-18; D2.11.3–D2.11.4:** export the current SVG DOM,
+**Outcome, USER 2026-10-18; D10.1.6–D10.1.7:** export the current SVG DOM,
 including edits, and use the frame selected by the virtual timer for stable
 animation snapshots. E0 is shared core acceptance across Milestones 1–3.
 
@@ -294,7 +294,7 @@ snapshot, project those effective values onto an export copy of the current SVG
 DOM and make animation drivers inert in that copy. Preserve the live DOM's base
 values and animation declarations. Reopening the snapshot must display the
 selected frame. The export-copy step reuses the current animation/presentation
-adapters and namespace-aware serializer under **D7.3.3–D7.3.4**.
+adapters and namespace-aware serializer under **D9.4.3–D9.4.4**.
 
 | Acceptance | Observable result |
 |---|---|
@@ -363,7 +363,7 @@ verification budget. Existing common-page blockers can change this order.
 | 2 | `feConvolveMatrix` | Useful for imported illustration effects; lower reuse than component transfer. Start with a bounded kernel profile, specified edge/alpha behavior and explicit rejection outside its budget. |
 | 3 | `animateMotion` / `mpath` | Adds animated diagram paths; existing transform animation already covers common motion. Define path-distance, rotation and clock scope before implementation. |
 | 4 | Further SVG CSS | Geometry on images/viewports/foreignObject, CSS animation in image/use documents, stroke-box accuracy, sampled CSSOM and remaining paint interpolation. Each needs its own named context. |
-| 5 | Text shaping and rendered-page output | Complex shaping belongs to the shared font plan; searchable/selectable text in rendered-page export and wider native PDF paint need separate output requirements. SVG DOM save preserves its existing text nodes under **D2.11.3**. |
+| 5 | Text shaping and rendered-page output | Complex shaping belongs to the shared font plan; searchable/selectable text in rendered-page export and wider native PDF paint need separate output requirements. SVG DOM save preserves its existing text nodes under **D10.1.6**. |
 | 6 | Architecture and conformance tail | Full resource/cache API redesign, persistent ID indexes, cache eviction/rotated-layer acceleration, broad SVG DOM reflection, discard and at-risk vector effects require demonstrated need. |
 
 Minor SVG/PDF edge differences retain their existing qualification owner.
@@ -382,15 +382,15 @@ progress rings and interactive charts/diagrams, including coherent live paint,
 geometry and pointer targeting. CSS shape geometry remains the subsequent P2
 extension.
 
-**Confirmed parser rulings (USER, 2026-10-18):** **D2.11.1** requires browser-
-standard parsing for SVG embedded in HTML. **D2.11.2** requires external SVG to
+**Confirmed parser rulings (USER, 2026-10-18):** **D10.1.5** requires browser-
+standard parsing for SVG embedded in HTML. **D10.1.5** requires external SVG to
 reuse that same HTML5 SVG parsing path and Mark result model, reducing parser
 duplication. This supersedes the earlier recommendation to retain separate XML
 intake for SVG pictures. Explicit XML/XHTML hosts retain their syntax under
-**D2.10.1**. The working SVG2 design is reconciled to these rulings.
+**D10.1.4**. The working SVG2 design is reconciled to these rulings.
 
-**Confirmed export contract (USER, 2026-10-18):** **D2.11.3** saves the current
-SVG DOM, including edits. **D2.11.4** uses the frame selected by the virtual
+**Confirmed export contract (USER, 2026-10-18):** **D10.1.6** saves the current
+SVG DOM, including edits. **D10.1.7** uses the frame selected by the virtual
 timer for stable snapshots; capture preserves that frame and virtual time.
 Wall-clock animation capture is outside the requirement. Shared E0 acceptance
 defines the finite implementation and verification scope. Rendered-page
@@ -401,7 +401,7 @@ blocks the proposed milestones.
 
 ## 12 Shared SVG parser implementation record
 
-**2026-10-18, D2.11.1–D2.11.2:** standalone loading already embeds its SVG source
+**2026-10-18, D10.1.5–D10.1.5:** standalone loading already embeds its SVG source
 in an HTML document. SVG pictures instead called `parse_svg_document` in the XML
 parser, producing different results for the same markup. The external intake
 now calls the existing HTML5 document parser and selects its SVG subtree using
@@ -434,7 +434,7 @@ their original pixel controls without a second SVG parser.
 Chromium 152.0.7977.42 independently captures both inline-HTML and original XML
 interpretations of the two existing foreignObject fixtures and the SMIL QName
 fixture. Their twelve pixel expectations now follow the HTML interpretation in
-**D2.11.2**, with every sample and original channel tolerance retained. Six
+**D10.1.5**, with every sample and original channel tolerance retained. Six
 focused native UI fixtures pass all 81 assertions, including ordinary SVG images,
 resource isolation and the combined export snapshot. That snapshot's reference
 to the same SMIL asset uses the independently verified HTML color.
@@ -479,7 +479,7 @@ or full HTML/SVG standards-conformance claim is made by this repair.
 ## 13 Current implementation checkpoint
 
 **2026-10-18, base `06f4d14f9`:** implements the confirmed interactive-first
-proposal and the P2 shape extension. E0 follows **D2.11.3–D2.11.4**. Network
+proposal and the P2 shape extension. E0 follows **D10.1.6–D10.1.7**. Network
 sprites remain deferred. Evidence lives in `temp/svg_enhancement/`; the intake
 binary is retained there for causal comparisons. The final aggregate gate completed with failures outside the focused SVG
 inventory; this checkpoint does not claim a green required gate.
@@ -585,7 +585,7 @@ existing event/virtual-timer control route exposes the same behavior:
 Standard `XMLSerializer.serializeToString(svg)` keeps its ordinary current-DOM
 serialization behavior; it does not freeze animation. Capturing a frame never
 adds a timer, resets the clock or requires a wall-clock sleep. Wider animated
-external-resource/use-instance snapshots remain unqualified under **D2.11.4**;
+external-resource/use-instance snapshots remain unqualified under **D10.1.7**;
 network-sprite delivery and wall-clock animation export remain deferred.
 
 ## 14 Outstanding work follow-up
@@ -596,11 +596,11 @@ remain separately reportable. Evidence: `temp/svg_outstanding/`.
 
 | Item | Delivered behavior and verification |
 |---|---|
-| Lifetime blocker, **D4.2.1v3** | `MemContext` follows explicit backing-child edges across contexts and reparenting, rather than assuming reverse registration/context order. Subtree unregistration uses the same allocation-free traversal. Seventeen context and seven factory tests pass with ASan; the full frame-export/reopen and independent HTML navigation reproducers exit without the former use-after-free. |
+| Lifetime blocker, **D5.2.1** | `MemContext` follows explicit backing-child edges across contexts and reparenting, rather than assuming reverse registration/context order. Subtree unregistration uses the same allocation-free traversal. Seventeen context and seven factory tests pass with ASan; the full frame-export/reopen and independent HTML navigation reproducers exit without the former use-after-free. |
 | **F3.3** | A named color-matrix → blur → composite → component-transfer chain filters a group containing SVG text and an image. Both source types paint correctly and change after a channel edit; native and Chromium controls pass. PNG/SVG/PDF pass at 1×/2×. |
 | **G4.5** | Initial and live edited rect/circle/ellipse geometry matches independently authored literal-attribute references byte-for-byte in PNG/SVG/PDF at 1×/2× with caches off/eager: 24 actual/reference format pairs. The existing export runner now supports live event sequences and reference documents. Comparing exports at the same origin avoids unrelated translated-curve rasterization differences. |
-| Live capture | PDF render events now borrow the settled current edition through the existing Lambda PDF exporter (**S2.6.6v3**). HTML-page SVG capture carries raster density into its outer dimensions, retaining CSS-unit viewBox coordinates. Source saves retain **D2.11.3**. |
-| Broader **D2.11.4** inventory | Rendered local/file-backed `use` instances serialize separate sampled definitions with rewritten local IDs/references and sibling paint definitions. Generated prefixes avoid authored-ID collisions. Local SVG image imports embed a frozen SVG sampled at the existing picture time. Export/reopen preserves independent click-triggered instance states, the image frame and filter resources; later timer advancement still works. Repeated fixed-frame files are byte-identical. Chromium passes 20 reopened pixel checks plus unique-ID/reference/driver checks at both densities. |
+| Live capture | PDF render events now borrow the settled current edition through the existing Lambda PDF exporter (**S2.6.6v3**). HTML-page SVG capture carries raster density into its outer dimensions, retaining CSS-unit viewBox coordinates. Source saves retain **D10.1.6**. |
+| Broader **D10.1.7** inventory | Rendered local/file-backed `use` instances serialize separate sampled definitions with rewritten local IDs/references and sibling paint definitions. Generated prefixes avoid authored-ID collisions. Local SVG image imports embed a frozen SVG sampled at the existing picture time. Export/reopen preserves independent click-triggered instance states, the image frame and filter resources; later timer advancement still works. Repeated fixed-frame files are byte-identical. Chromium passes 20 reopened pixel checks plus unique-ID/reference/driver checks at both densities. |
 | CSS inventory | Reconciled four references to the removed native PDF writer with the current **S2.6.6v3** PDF implementation. Removed stale native-Form/ink-tracking/ASan qualification claims, retaining the old visual cases for requalification. The current isolated-alpha PDF case and opacity UI controls pass. Added bounded SVG geometry qualification; generation/check now pass. TSV trailing empty fields retain their delimiters. |
 
 **Focused receipt:** six fixtures pass 24 density/cache runs and 224 assertions
@@ -651,6 +651,6 @@ the failed gate.
 **Remaining scope:** Linux/Windows runtime/export smoke is pending; macOS cannot
 establish it. Nested resource closure, SVG images inside use templates, complete
 use-host inheritance and other resource combinations remain unqualified under
-**D2.11.4**. These require named, finite workloads before further expansion.
+**D10.1.7**. These require named, finite workloads before further expansion.
 Network sprites retain the user’s deferral; wall-clock capture remains outside
 the requirement. No new design ruling is needed for the delivered follow-up.

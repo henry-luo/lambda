@@ -590,7 +590,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
         // callback scopes and resource cleanup leave before restoring another agent's state.
         timer_progress_generation++;
         bool close_after_fire = th && !th->is_interval;
-        // D5.3/D5.4.3: the timer callback may collect before the saved async
+        // D6.3/D6.4.3: the timer callback may collect before the saved async
         // context is restored, so callback results and prior context snapshots
         // must remain exact roots across the callback boundary.
         JS_ROOTS(roots,
@@ -1794,7 +1794,7 @@ extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {
 }
 
 static bool event_loop_has_pending_requests(void) {
-    // D5.4.4: the bound context's resource table owns finite native requests;
+    // D6.4.4: the bound context's resource table owns finite native requests;
     // persistent sockets and timers do not extend a snapshot's capture window.
     RuntimeResourceTable* table = js_runtime_resource_table();
     for (int i = 0; i < runtime_resource_table_slot_count(table); i++) {
@@ -1837,7 +1837,7 @@ extern "C" int js_event_loop_wait_until(int (*predicate)(void*), void* user, int
 }
 
 static int js_event_loop_drain_impl(bool keep_intervals) {
-    // D5.4.1: the drain may resume parent timers after a rendering checkpoint,
+    // D6.4.1: the drain may resume parent timers after a rendering checkpoint,
     // so it is not a quiescent handoff boundary for nested document realms.
     RuntimeExecutionScope execution_scope(context);
     // Commit script mutations before its first queued task. This is the

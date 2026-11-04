@@ -1,4 +1,4 @@
-// S4.1/D5.2/D5.3: a non-null typed read keeps its diagnostic on the OOB arm.
+// S4.1/D6.2/D6.3: a non-null typed read keeps its diagnostic on the OOB arm.
 pn read_sum(xs: float[], ys: float[], index: int) float^ {
     let _admitted_left_3: float = xs[index]
     let left: float = _admitted_left_3^

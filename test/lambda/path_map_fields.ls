@@ -1,4 +1,4 @@
-// IL2-I20: inferred any fields must decode stored paths (D2.6.1v3).
+// IL2-I20: inferred any fields must decode stored paths (D3.2.1).
 fn record(value: any) => {label: string(value), target: value}
 fn attribute(value: any) => <entry target: value>
 fn lookup(value, key) => value[key]

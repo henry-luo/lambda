@@ -82,6 +82,9 @@
 #ifndef WPT_RUNNER_KEEP_TEMP
 #define WPT_RUNNER_KEEP_TEMP 0
 #endif
+#ifndef WPT_RUNNER_LAYOUT
+#define WPT_RUNNER_LAYOUT 0
+#endif
 
 static const char* WPT_DIR = WPT_RUNNER_DIR;
 static const char* SHIM_PATH = WPT_RUNNER_SHIM_PATH;
@@ -342,9 +345,12 @@ static std::string extract_attr(const std::string& tag, const char* attr) {
  * testharnessreport.js, etc.) are skipped -- they are covered by the
  * shim.
  */
-static std::string extract_inline_scripts(const std::string& html, const std::string& html_dir) {
+template <typename Document>
+static std::string extract_inline_scripts(const std::string& html, const std::string& html_dir,
+                                          Document* document) {
     std::string result;
     size_t pos = 0;
+    size_t document_pos = 0;
 
     while (pos < html.size()) {
         size_t tag_start = html.find('<', pos);
@@ -397,7 +403,11 @@ static std::string extract_inline_scripts(const std::string& html, const std::st
                 result += "\n";
             }
             // External / unresolved srcs are skipped silently.
-            pos = tag_end + 1;
+            size_t close = html.find("</script>", tag_end);
+            if (close == std::string::npos) break;
+            if (document) document->append(html, document_pos, tag_start - document_pos);
+            pos = close + strlen("</script>");
+            document_pos = pos;
             continue;
         }
 
@@ -408,8 +418,12 @@ static std::string extract_inline_scripts(const std::string& html, const std::st
         result += content;
         result += "\n";
 
+        if (document) document->append(html, document_pos, tag_start - document_pos);
         pos = close + strlen("</script>");
+        document_pos = pos;
     }
+
+    if (document) document->append(html, document_pos, html.size() - document_pos);
 
     return result;
 }
@@ -428,12 +442,22 @@ static std::string wrap_any_js(const std::string& js) {
  */
 static std::string execute_js_with_doc(const char* js_path, const char* html_path, int* exit_code) {
     char command[1024];
+#if WPT_RUNNER_LAYOUT
+#ifdef _WIN32
+    snprintf(command, sizeof(command),
+             "lambda.exe layout \"%s\" --auto-close --no-log --view-output \"%s.json\" 2>&1", js_path, js_path);
+#else
+    snprintf(command, sizeof(command),
+             "./lambda.exe layout \"%s\" --auto-close --no-log --view-output \"%s.json\" 2>&1", js_path, js_path);
+#endif
+#else
 #ifdef _WIN32
     snprintf(command, sizeof(command),
              "lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1", js_path, html_path);
 #else
     snprintf(command, sizeof(command),
              "./lambda.exe js \"%s\" --document \"%s\" --no-log 2>&1", js_path, html_path);
+#endif
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -449,7 +473,13 @@ static std::string execute_js_with_doc(const char* js_path, const char* html_pat
     }
 
     int raw = pclose(pipe);
+#if WPT_RUNNER_LAYOUT && !defined(_WIN32)
+    // A signal does not have an exit status; do not turn it into a zero exit.
+    *exit_code = raw == -1 ? -1 : WIFEXITED(raw) ? WEXITSTATUS(raw) :
+        WIFSIGNALED(raw) ? 128 + WTERMSIG(raw) : -1;
+#else
     *exit_code = WEXITSTATUS(raw);
+#endif
     return output;
 }
 
@@ -650,16 +680,20 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
     if (p.is_any_js) {
         // Bare JS: wrap and treat as a single inline script. Use a blank
         // HTML stub for --document so the document-related globals exist.
-        scripts = extract_inline_scripts(wrap_any_js(scripts), WPT_DIR);
+        scripts = extract_inline_scripts(wrap_any_js(scripts), WPT_DIR, &result.output);
         // Use a tiny inline blank document for the --document flag.
         // Reuse any existing simple HTML if present; otherwise the test
         // file itself works as a placeholder document.
         doc_arg = "test/wpt/wpt_blank_document.html";
+#if WPT_RUNNER_LAYOUT
+        result.output = read_file_contents(doc_arg.c_str());
+#endif
     } else {
         size_t slash = p.source_path.rfind('/');
         std::string source_dir = slash == std::string::npos
             ? std::string(WPT_DIR) : p.source_path.substr(0, slash);
-        scripts = extract_inline_scripts(scripts, source_dir);
+        scripts = extract_inline_scripts(scripts, source_dir,
+            WPT_RUNNER_LAYOUT ? &result.output : nullptr);
     }
 
     if (scripts.empty()) {
@@ -693,8 +727,39 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
     std::string combined = shim + "\n" + scripts +
                            "\n_wpt_fire_onload();\n_wpt_print_summary();\n";
 
-    std::string temp_js = std::string(TEMP_DIR) + "/" + WPT_RUNNER_TEMP_PREFIX + p.test_name + ".js";
+    std::string temp_js = std::string(TEMP_DIR) + "/" + WPT_RUNNER_TEMP_PREFIX + p.test_name;
+#if WPT_RUNNER_LAYOUT
+    // Separate simultaneous layout-suite invocations that run the same case.
+    char process_id[32];
+#ifdef _WIN32
+    snprintf(process_id, sizeof(process_id), "%d", _getpid());
+#else
+    snprintf(process_id, sizeof(process_id), "%ld", (long)getpid());
+#endif
+    temp_js += "_";
+    temp_js += process_id;
+#endif
+    temp_js += WPT_RUNNER_LAYOUT ? ".html" : ".js";
+#if WPT_RUNNER_LAYOUT
+    // Execute the same harness after the parsed document exists, without
+    // letting the layout loader execute the original scripts a second time.
+    for (size_t i = 0; i + 8 <= combined.size(); i++) {
+        if (combined[i] == '<' && combined[i + 1] == '/' &&
+                tolower((unsigned char)combined[i + 2]) == 's' &&
+                tolower((unsigned char)combined[i + 3]) == 'c' &&
+                tolower((unsigned char)combined[i + 4]) == 'r' &&
+                tolower((unsigned char)combined[i + 5]) == 'i' &&
+                tolower((unsigned char)combined[i + 6]) == 'p' &&
+                tolower((unsigned char)combined[i + 7]) == 't') {
+            result.setup_error = "Cannot safely embed script source containing an HTML script end tag";
+            return result;
+        }
+    }
+    result.output += "\n<script>\n" + combined + "\n</script>\n";
+    write_file_contents(temp_js.c_str(), result.output);
+#else
     write_file_contents(temp_js.c_str(), combined);
+#endif
 
     std::string output = execute_js_with_doc(
         temp_js.c_str(), doc_arg.c_str(), &result.exit_code);
@@ -718,6 +783,9 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
     }
 
     if (!WPT_RUNNER_KEEP_TEMP) unlink(temp_js.c_str());
+#if WPT_RUNNER_LAYOUT
+    if (!WPT_RUNNER_KEEP_TEMP) unlink((temp_js + ".json").c_str());
+#endif
     result.crash_test_passed =
         p.test_name.find("crash") != std::string::npos &&
         result.total_count == 0 && result.exit_code == 0;
@@ -736,6 +804,15 @@ static void report_wpt_dom_events_result(const WptDomEventsResult& result) {
         FAIL() << result.setup_error;
         return;
     }
+
+#if WPT_RUNNER_LAYOUT
+    // A summary printed before a later crash is not a completed layout test.
+    if (result.exit_code != 0) {
+        FAIL() << "Layout child failed for " << p.source_path
+               << " (exit " << result.exit_code << ")\n" << result.output.substr(0, 4096);
+        return;
+    }
+#endif
 
     // Crash tests pass purely by completing.
     if (result.crash_test_passed) {

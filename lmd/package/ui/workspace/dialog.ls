@@ -1,4 +1,4 @@
-// The caller owns visibility, commands and focus restoration (S12.1.3v2, D7.2.5).
+// The caller owns visibility, commands and focus restoration (S12.1.3v2, D10.2.1).
 import c: lambda.ui.core.component
 import scope: lambda.ui.workspace.scope
 

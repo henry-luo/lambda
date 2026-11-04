@@ -29,7 +29,7 @@ bool mvp_reject(LambdaMvpModule* m, AstNode* node, const char* reason) {
 ValueRep mvp_rep(Type* type) {
     if (!type) return VALUE_REP_ITEM;
     // an ordinary error alternative needs Item transport until discharge;
-    // its type-expression pointer is not a runtime value (S7.8.1, D2.4.3).
+    // its type-expression pointer is not a runtime value (S7.8.1, D2.3.5).
     if (lambda_type_accepts_error(type)) return VALUE_REP_ITEM;
     Type* plain = type_field_unwrap_simple_decl(type);
     if (plain && plain->type_id == LMD_TYPE_TYPE && plain->kind == TYPE_KIND_UNARY &&
@@ -103,7 +103,7 @@ bool mvp_needs_number_home(Type* contract) {
     bool optional = false;
     Type* scalar = lambda_type_nullable_lane_base(contract, &optional);
     // an array contract is a Type expression, but its values are containers,
-    // not possible cold scalar homes (D2.4.3, D5.2.3).
+    // not possible cold scalar homes (D2.3.5, D6.2.3).
     if (scalar == &TYPE_TYPE || mvp_array_contract(scalar) ||
             lambda_type_nonnull_map_contract(scalar)) return false;
     return !scalar || scalar->type_id == LMD_TYPE_TYPE ||
@@ -184,7 +184,7 @@ bool mvp_boundary_proven(Type* source, Type* destination) {
     Type* expected = lambda_array_contract_element(destination);
     // an identical admitted element descriptor preserves record reification
     // transitively. Structural similarity alone cannot prove its physical
-    // layout; outer constraints retain their validator (D3.2.4v5, D3.3.3v3).
+    // layout; outer constraints retain their validator (D4.2.5, D4.3.3).
     return (mvp_array_element(source) && mvp_array_element(destination)) ||
         (element == &TYPE_STRING && expected == &TYPE_STRING) ||
         (element && element == expected && lambda_array_contract_is_plain(source) &&
@@ -408,7 +408,7 @@ static bool binding_var_borrow(LambdaMvpModule* m, MvpBinding* binding, Type* pr
             Type* normal = preserved ? lambda_type_remove_error(m->tp->pool, mvp_contract(param)) : NULL;
             // this optional query preserves only a normal value domain across
             // invariant primitive-array borrows. Storage/escape callers omit
-            // it and retain the stricter no-borrow proof (D3.3.3v3, S9.1.3).
+            // it and retain the stricter no-borrow proof (D4.3.3, S9.1.3).
             if (preserved && !lambda_type_accepts_error(mvp_contract(param)) && mvp_array_element(preserved) &&
                     mvp_array_element(normal) == mvp_array_element(preserved) &&
                     lambda_array_contract_is_plain(normal) && mvp_boundary_proven(normal, preserved)) continue;
@@ -541,7 +541,7 @@ Type* mvp_contextual_contract(LambdaMvpModule* m, AstNode* literal) {
     AstNodeId id = ast_index_find(index, literal);
     AstFunctionId owner = id < index->count ? index->owner_functions[id] : AST_FUNCTION_ID_INVALID;
     // an expression-bodied function enforces the same result boundary as an
-    // explicit return; construct its record in that layout (D3.2.4v5).
+    // explicit return; construct its record in that layout (D4.2.5).
     if (!target && owner < m->function_count &&
             mvp_function_result_expression(&m->functions[owner]) == literal)
         target = m->functions[owner].result_contract;
@@ -589,7 +589,7 @@ bool mvp_prefers_packed_tensor(LambdaMvpModule* m, AstNode* literal) {
     return false;
 }
 
-// query transient scalar producer proofs; the shared AST remains the sole type graph (D8.2.5v3).
+// query transient scalar producer proofs; the shared AST remains the sole type graph (D8.2.5).
 Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool dense_arrays) {
     AstNode* n = ast_unwrap_primary_to_leaf(source);
     if (!n) return &TYPE_NULL;
@@ -801,7 +801,7 @@ LambdaMvpModule* lambda_mvp_create(Transpiler* tp, MIR_context_t ctx) {
 }
 
 // Demand-only interval query over the shared AST and immutable binding plans;
-// it never publishes a second node-type/fact table (D8.2.5v3).
+// it never publishes a second node-type/fact table (D8.2.5).
 static MvpIntRange array_element_range(LambdaMvpModule*, MvpBinding*, int depth = 0);
 static MvpIntRange counter_bound(LambdaMvpModule*, NameEntry*, AstNode*, int depth = 0);
 static MvpIntRange condition_range(LambdaMvpModule* m, NameEntry* entry, AstNode* source,
@@ -1848,7 +1848,7 @@ static MvpIntRange array_element_range(LambdaMvpModule* m, MvpBinding* binding, 
     if (!range.finite) return {};
     AstIndex* index = &m->tp->ast_index;
     // value copies detach before writing; only direct writes/borrows of this
-    // root can change its element domain (S9.1.2, D4.4.6).
+    // root can change its element domain (S9.1.2, D5.4.5).
     for (AstNodeId i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         if (node->node_type == AST_NODE_ASSIGN_STAM &&
@@ -2061,7 +2061,7 @@ static bool admitted_call(LambdaMvpModule* m, AstCallNode* call) {
                     if (success != &TYPE_ANY_NO_ERROR && admitted_contract(success, m->tp->pool)) {
                         // the imported boxed entry enforces its declared result
                         // just like a local call. Preserve its normal domain
-                        // without changing the external Item ABI (D8.4.2v2).
+                        // without changing the external Item ABI (D7.4.2).
                         f->declared_result = declared;
                         normal = success;
                     }
@@ -2228,7 +2228,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             ? lambda_type_remove_error(m->tp->pool, f->declared_result) : signature->returned;
         if (!success) success = f->declared_result;
         // the ordinary error alternative travels in the companion, never in a
-        // successful scalar lane (S11.4.2v3, D2.4.3).
+        // successful scalar lane (S11.4.2v3, D2.3.5).
         plan_return(f, success == &TYPE_ANY_NO_ERROR || success == &TYPE_NONE ||
             mvp_boundary_proven(f->declared_result, &TYPE_ERROR) ? f->declared_result : success, false);
         // open scalar contracts can reach checked admission and contained errors.
@@ -2274,7 +2274,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                     lambda_type_remove_error(m->tp->pool, b->contract)->type_id == LMD_TYPE_MAP) {
                 // reset the successful record arm too: Record | Error must not
                 // retain a physical layout proof across open field writes.
-                // Typed calls re-establish their prefix (D3.3.4, S12.2.1v3).
+                // Typed calls re-establish their prefix (D2.4.3, S12.2.1v3).
                 b->contract = lambda_type_has_proven_error(b->contract) ? &TYPE_ANY : &TYPE_MAP;
                 b->rep = mvp_rep(b->contract);
             }
@@ -2688,7 +2688,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         m->entry.abi.effects.may_reenter |= m->main->abi.effects.may_reenter;
         m->entry.abi.effects.may_return_error |= m->main->abi.effects.may_return_error;
     }
-    // publish one final return ABI after recursive error effects have converged (D8.4.2v2).
+    // publish one final return ABI after recursive error effects have converged (D7.4.2).
     for (uint32_t i = 0; i < m->function_count; i++)
         plan_return(&m->functions[i], m->functions[i].result_contract, false);
     plan_integer_ranges(m);

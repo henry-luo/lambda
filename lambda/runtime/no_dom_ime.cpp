@@ -1,4 +1,4 @@
-// IME15/D7.2.5: this host never creates a DOM document or a UI-mode Input.
+// IME15/D10.2.1: this host never creates a DOM document or a UI-mode Input.
 // The shared Lambda value/Mark paths retain DOM seams; fail closed if reached.
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_lifecycle.hpp"

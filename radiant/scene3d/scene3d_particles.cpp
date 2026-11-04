@@ -1749,7 +1749,7 @@ Item scene3d_particles_trail_read(Scene3dParticles *state, Item request) {
     if (!source || !source->is_element() ||
         !scene3d_particles_trail_samples(state, source->as_element(), (unsigned)index, points, &count)) return ItemError;
     const auto &record = emitter->particles[(emitter->playback.head + (unsigned)index) % emitter->description.capacity];
-    // copy bounded native history before allocating any caller-owned values (D4.5.2/D5.3.3).
+    // copy bounded native history before allocating any caller-owned values (D5.5.2/D6.3.3).
     RootedValueBuilder result, samples(true);
     particle_snapshot_header(state, clock, &result);
     result.put("emitter", Item{.item = s2it(heap_create_name(emitter->id))});

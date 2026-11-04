@@ -594,7 +594,7 @@ This baseline already contains significant JS semantic machinery:
 - object creation and property definition are runtime calls;
 - calls use the separately registered `js_args` stack;
 - exception propagation is explicit `js_check_exception` plus branches;
-- truthiness and property access use runtime helpers (the named `NameId` heads; there are no inline caches — D8.4.1v2/LC1v2);
+- truthiness and property access use runtime helpers (the named `NameId` heads; there are no inline caches — D7.4.1/LC1v2);
 - normal, implicit, and exception returns are separate.
 
 Those are existing JS-lowering costs, not stack-frame additions.

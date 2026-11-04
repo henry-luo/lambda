@@ -400,6 +400,7 @@ struct DocumentCleanupTiming {
     double document_ms = 0.0;
 };
 bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing);
+bool document_runtime_cleanup_ready(DomDocument* doc);
 void free_document(DomDocument* doc);
 void image_cache_cleanup(UiContext* uicon);
 ImageSurface* load_image(UiContext* uicon, const char* img_url);

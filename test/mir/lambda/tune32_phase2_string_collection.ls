@@ -1,4 +1,4 @@
-// D3.3.3v3: element candidates never certify a collection's physical slots.
+// D4.3.3: element candidates never certify a collection's physical slots.
 pn tune32_phase2_words() {
     var words = []
     words.push("al" ++ "pha")^

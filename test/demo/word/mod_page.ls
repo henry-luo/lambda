@@ -1,4 +1,4 @@
-// Page settings belong to the document, so undo, snapshots, and PDF share them (D7.2.5).
+// Page settings belong to the document, so undo, snapshots, and PDF share them (D10.2.1).
 import lambda.editor.core.doc
 import lambda.editor.core.step
 import lambda.editor.core.transaction

@@ -1,4 +1,4 @@
-// S12.1.1v3 / D5.1.1v3: task notifications write state; the host projects the pure view.
+// S12.1.1v3 / D6.1.1: task notifications write state; the host projects the pure view.
 import dom
 import t: lambda.scene3d.transform
 

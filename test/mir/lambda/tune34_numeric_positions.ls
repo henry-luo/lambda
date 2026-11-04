@@ -1,4 +1,4 @@
-// S8.2.4/D3.3.3: numeric keys must be exact positions; erased element lanes remain Items.
+// S8.2.4/D4.3.3: numeric keys must be exact positions; erased element lanes remain Items.
 pn read_numeric(a, key: float) { return a[key] }
 pn mixed(n: int) {
     var key = 0

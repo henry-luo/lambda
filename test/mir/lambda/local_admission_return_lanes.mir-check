@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S7.7.2v2/S7.7.4v2/D2.8.3: a retained local check does not force boxed scalar returns; returned and propagated outcomes keep their error behavior.",
+  "description": "S7.7.2v2/S7.7.4v2/D2.5.3: a retained local check does not force boxed scalar returns; returned and propagated outcomes keep their error behavior.",
   "checks": [
     {
       "in_func": "_keeps_initializer_#",

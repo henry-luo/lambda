@@ -1,4 +1,4 @@
-// D3.2.4v3 / D3.3.3v3: runtime indices retain named-record layout proofs.
+// D4.2.5 / D4.3.3: runtime indices retain named-record layout proofs.
 type Row = {value: int, values: int[]}
 type World = {rows: Row?[], counter: int}
 

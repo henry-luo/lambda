@@ -1606,7 +1606,7 @@ TEST_F(SvgAnimationLifetimeTest, ClockSurvivesLayoutReleaseAndStopsOnPauseDetach
     ASSERT_TRUE(root->append_child(svg));
     svg_animation_prepare(svg);
     ASSERT_EQ(scheduler->count, 1);
-    // D4.2.6: scheduler teardown releases its clock before document resources disappear.
+    // D5.2.5: scheduler teardown releases its clock before document resources disappear.
     state_store_destroy(&doc);
     doc.destroy();
     EXPECT_EQ(doc.services.svg_animation_registry, nullptr);
@@ -3883,7 +3883,7 @@ TEST(CssVariableSubstitutionTest, DocumentLimitsBoundBytesTokensAndAuthoredText)
         entry.value = lam::up(declaration->value);
         entry.value_text = lam::up(declaration->value_text);
         entry.value_text_len = declaration->value_text_len;
-        // the entry borrows stack storage only for this resolver call (D4.5.1v4).
+        // the entry borrows stack storage only for this resolver call (D5.5.1).
         node->css_variables = lam::own(&entry);
         StrView text = {};
         const CssValue* value = css_compute_element_custom_property_text(doc.document_pool,
@@ -5345,7 +5345,7 @@ TEST_F(FontLocalSourceTest, CompletedDownloadStaysAfterLocalNamesInTheOriginalRu
     EXPECT_FALSE(registered->has_pending_sources);
     EXPECT_STREQ(registered->sources[0].local_name, "Missing Online Regression Face");
     EXPECT_STREQ(registered->sources[1].path, cached_path.get());
-    // the registry owns its source paths after the layout descriptor is released (D4.5.1v4).
+    // the registry owns its source paths after the layout descriptor is released (D5.5.1).
     fontface_cleanup(&ui);
     expect_name(font_face_load(ctx, registered, 20.0f), "SVGTestRectangle-Regular");
 
@@ -7168,7 +7168,7 @@ TEST_F(SvgLayerScrollTest, IsolatedSvgImageReusesPixelsAcrossHostHoverScrollAndL
     EXPECT_EQ(layer_images, 1u);
     test_radiant_expect_surface_pixel(ui->surface, 50, 40, 255, 0, 0);
     test_radiant_expect_surface_pixel(ui->surface, 90, 40, 255, 255, 255);
-    // an unrelated layout epoch cannot change the image document's isolated paint (D2.11.2)
+    // an unrelated layout epoch cannot change the image document's isolated paint (D10.1.5)
     ui->document->style_content_epoch++;
     ASSERT_NO_FATAL_FAILURE(paint(40, 30));
     EXPECT_EQ(counters.layer_recordings, 0u);

@@ -61,7 +61,7 @@ must use wall time rather than headless replay's virtual clock.
 
 Package goldens live in `test/lambda/music/` and are registered with
 `test_lambda_gtest`. The focused `music_gc_roots` score/font/SVG ownership
-probe, performance and MIDI tests are also in the forced-GC corpus (D5.3.3).
+probe, performance and MIDI tests are also in the forced-GC corpus (D6.3.3).
 The full layout/reflow/A4 matrix stays in the golden suite; its twenty-measure
 score needlessly multiplies heap scans when every allocation forces collection.
 Bravura's independent license/provenance is under `lmd/package/music/fonts/`.

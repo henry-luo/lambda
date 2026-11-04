@@ -21,14 +21,14 @@ preparation script bundles that file. Shared page layout lives in
 `mod_gallery.ls` and `chart.css`; chart conversion and classification live in
 `mod_catalog.ls`. The normal gallery shows all dashboard examples together,
 without pagination. Galleries use three columns on wider screens and one column
-on narrow screens. Packages use the shipped `lambda.*` hierarchy (D7.2.4v3).
+on narrow screens. Packages use the shipped `lambda.*` hierarchy (D9.3.4).
 Live state belongs to each applied view (S12.1.3). Animations play once on load
 and can be replayed. Mermaid, Graphviz, and TikZ examples are rendered diagrams;
 the chart marks provide the interactive examples.
 
 The normal page generates all 44 dashboard charts before its first frame,
 including charts below the viewport. Each tile owns its applied chart, so
-selections remain independent (S12.1.3, D4.5.3v2). The eager replay checks the
+selections remain independent (S12.1.3, D5.5.3). The eager replay checks the
 complete first frame, scrolling, selection, and navigation back to a fresh page.
 The original `test/lambda/chart/chart_dashboard.ls` remains the static export
 entry point.

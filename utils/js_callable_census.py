@@ -67,7 +67,7 @@ PATTERNS = {
         r"\b(?:js_string_method|js_number_method|js_map_method|"
         r"js_array_method|js_array_method_direct)\s*\("
     ),
-    # D6.2.2v2: host/catalog methods are direct callable properties too; moving
+    # D7.2.2: host/catalog methods are direct callable properties too; moving
     # an old receiver/name dispatcher out of lambda/js must not evade the gate.
     "host_name_dispatch_references": re.compile(
         r"\b(?:js_dom_element_method|js_document_method|"

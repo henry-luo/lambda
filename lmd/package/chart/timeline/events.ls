@@ -1,4 +1,4 @@
-// DOM reads stay fn; focus, control writes and event delivery stay pn (D7.4.6).
+// DOM reads stay fn; focus, control writes and event delivery stay pn (D7.1.1).
 import dom
 import c: .common
 import reducer: .state
@@ -91,7 +91,7 @@ pn focus_pending(current, host) {
     {*:current,focus_pending:false}
 }
 
-// the host owns frame tokens; removed instances invalidate queued delivery (D7.5.3).
+// the host owns frame tokens; removed instances invalidate queued delivery (D9.5.6).
 pub pn handle(model, clock, evt) {
     let tick=evt.type=="timeline_frame";
     if (evt.type=="timeline_action" and evt.detail.type=="source_update") {

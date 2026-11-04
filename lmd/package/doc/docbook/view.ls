@@ -1,4 +1,4 @@
-// Source viewing uses the same pure converter; acquisition stays procedural (D7.2.4, S12.1.1v3).
+// Source viewing uses the same pure converter; acquisition stays procedural (D9.3.4, S12.1.1v3).
 import docbook: lambda.doc.docbook
 import h: .html
 import config: .options

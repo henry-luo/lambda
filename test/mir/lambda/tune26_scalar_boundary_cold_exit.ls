@@ -1,4 +1,4 @@
-// S4.1/D2.4.1/D5.2-D5.3: nullable native failures stay outside the hot path.
+// S4.1/D2.3.4/D6.2-D6.3: nullable native failures stay outside the hot path.
 pn add_at(var values: float[], index: int) any {
     // S7.7.2v2/S7.6.3v3: admission retains its error; explicitly exit before arithmetic.
     let initial: float = values[index]

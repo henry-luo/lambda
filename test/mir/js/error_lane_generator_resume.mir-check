@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.4, D7.4.2, D8.4.3v2: the formal generator uses Lambda Activation parking and observes its suspension-failure lane once.",
+  "description": "D6.4, D9.5.2, D7.4.3: the formal generator uses Lambda Activation parking and observes its suspension-failure lane once.",
   "checks": [
     {
       "in_func": "mvp_lmd_f17",

@@ -22,18 +22,18 @@ axes (`dom_source_parent`, `dom_source_child`, `dom_source_sibling`). Anonymous
 table layout fixups must not change a row's parent or sibling index after
 layout; script-visible child/sibling navigation shares those helpers. The axes
 live in core so selectors and language adapters reuse one implementation without
-module-to-module links (**D7.3.4**).
+module-to-module links (**D9.4.4**).
 
 The single most important thing to understand about this area is what it *does not* do. Radiant never parses a stylesheet and never runs the cascade. Both live entirely in the CSS engine under `lambda/input/css/` (documented in the input/output doc set, not here). By the time a node reaches layout, its element already carries a fully-cascaded `StyleTree*` in `DomElement::specified_style` (`dom_element.hpp:322`), and Radiant's only job is to compute *used values* from it.
 
 The parser produces `CssDeclaration` (`css_style.hpp:765`), each carrying a `CssSpecificity` (`css_style.hpp:747`), a `CssOrigin` (`css_style.hpp:756`), a `source_order`, an `!important` flag, and the parsed `CssValue*`. Selector matching and cascade winner-selection are the style-node system's job: every element owns a `StyleTree` (`css_style_node.hpp:65`) — an `AvlTree` keyed by `CssPropertyId` whose nodes are `StyleNode` (`css_style_node.hpp:48`), each holding a `winning_decl` (`css_style_node.hpp:50`) plus a `weak_list` of losing declarations (`css_style_node.hpp:51`) kept in specificity order for fallback. Radiant reads only `style_node->winning_decl` and never touches the losers.
 
-Radiant must compare declarations when different CSS names write the same used-value slot, such as logical and physical border sides. Direct candidates use `css_declaration_cascade_compare()`, which includes origin, importance, layer order, specificity and source order. `resolve_css_styles()` assigns a style-pass-local rank to the winning declarations when layers are present; the per-side spacing, border and radius `*_specificity` fields retain that rank. Without layers, `get_cascade_priority()` keeps its compact origin/specificity/source-order encoding. This comparison does not select a winner for a single CSS property; the style tree already did that. The rank array lives in the layout scratch scope and cannot outlive the pass, consistent with **D4.5.1v4**.
+Radiant must compare declarations when different CSS names write the same used-value slot, such as logical and physical border sides. Direct candidates use `css_declaration_cascade_compare()`, which includes origin, importance, layer order, specificity and source order. `resolve_css_styles()` assigns a style-pass-local rank to the winning declarations when layers are present; the per-side spacing, border and radius `*_specificity` fields retain that rank. Without layers, `get_cascade_priority()` keeps its compact origin/specificity/source-order encoding. This comparison does not select a winner for a single CSS property; the style tree already did that. The rank array lives in the layout scratch scope and cannot outlive the pass, consistent with **D5.5.1**.
 
 Single-property queries retain immutable shorthand dependencies rather than
 scanning the property registry on every read. The process-owned indexes contain
 property identifiers; winning declarations still belong to their native style
-trees (**D4.5.1v4**).
+trees (**D5.5.1**).
 `CssStyleApplicationTest.PropertyProjectionRetainsShorthandAndResetDependencies`
 covers font projections and the `all` exclusions.
 
@@ -44,8 +44,8 @@ the same validator checks their resolved values at computed-value time, where
 an invalid result inherits/defaults rather than reviving an earlier declaration.
 Direct enum serialization treats an untouched `_undef` slot as absent and uses
 the registered initial keyword, without writing defaults into inherited storage.
-This preserves declaration ownership (**D4.5.1v4 / D4.1.4v5**) and the existing
-parser/resolver boundary (**D7.3.3–D7.3.4**). CSS Text 4 collapse/trim shorthand
+This preserves declaration ownership (**D5.5.1 / D5.1.4**) and the existing
+parser/resolver boundary (**D9.4.3–D9.4.4**). CSS Text 4 collapse/trim shorthand
 forms remain outside this supported grammar. See
 [writing-mode M77](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m77--white-space-declaration-admission)
 for the causal parser and text-consumer regressions and qualification status.
@@ -58,7 +58,7 @@ The node this writes onto is the same unified DOM/view node described in [RAD_01
 
 ### 1.1 Retained computed and used values
 
-**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**:
+**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2**:
 `css_resolved_style.cpp` retains clean typed geometry separately from a lazily
 applied used box. Context changes reevaluate dependency-matched percentage
 bindings, including HTML dimension hints, without rerunning the cascade.
@@ -78,7 +78,7 @@ variables, still suppress the hint. `CssResolvedSize::percentage_value`
 (`radiant/css_resolved_style.hpp:19`) retains
 the percentage until its consumer selects the containing measure. No consumer
 reconstructs a preferred size from final track geometry
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 The percentage/length branch of `parse_html_dimension_attr`
 (`radiant/resolve_htm_style.cpp:108`) follows HTML's leading-whitespace,
@@ -155,7 +155,7 @@ on each resolution. A positive value in the previous `FontProp` is not an own
 declaration. Own CSS sizes, valid legacy HTML size hints and UA font scales
 retain their local role; preservation uses the shared HTML size parser and
 `HtmlUaElementDefault` metadata, including ruby annotations. The existing
-`ensure_font` ownership path remains **D4.5.1v4 /D4.1.4v5**. The causal mutation
+`ensure_font` ownership path remains **D5.5.1 /D5.1.4**. The causal mutation
 in `layout_system_color_font_tracking.html` checks inherited ASCII and emoji,
 fixed author sizes, valid/invalid hints and ruby at both device scales.
 
@@ -178,7 +178,7 @@ The switch cases delegate the actual unit/color/`var()` work to a small set of p
 keeps temporary tokens, computed names, formatter buffers and expanded spelling
 in the substitution context's pool. Typed results stay in the caller's pool;
 public computed-text reads copy temporary spelling before the context ends.
-This follows **D4.5.1v4** and prevents repeated computed-style reads from
+This follows **D5.5.1** and prevents repeated computed-style reads from
 retaining parser work in the view-property pool. `CssVariableSubstitutionTest`
 checks invalid-result storage and the returned text's lifetime.
 

@@ -63,7 +63,7 @@ template<class G> inline RadiantGradientCenter radiant_gradient_center(const G* 
 struct RadiantRadialGeometry { float cx, cy, rx, ry; };
 RadiantRadialGeometry radiant_radial_gradient_geometry(const RadialGradient* gradient, Rect rect);
 
-// frame-local native style facts; retained lists reject this borrowed payload (D4.5.1v4).
+// frame-local native style facts; retained lists reject this borrowed payload (D5.5.1).
 struct RadialMaskPaint {
     lam::Up<RadialGradient> gradient;
     Rect rect;
@@ -1802,7 +1802,7 @@ RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run);
 RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font_context);
 RdtPath* render_path_create_paint_glyph_run(const PaintGlyphRun* run, FontContext* font_context);
 
-// selected faces are borrowed only during each synchronous visitor call (D4.5.1v4).
+// selected faces are borrowed only during each synchronous visitor call (D5.5.1).
 typedef bool (*RenderTextRunGlyphFn)(void* context, uint32_t codepoint,
     FontHandle* face, float x, float baseline_y, float advance);
 bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* fonts,
@@ -3050,7 +3050,7 @@ inline void radiant_retain_font_family(FontProp* font, lam::PoolPtr<char> family
 }
 
 // A built-in family name (a string literal). No GcPtr overload: retained props never
-// point into the GC heap (D4.5.2). family is never written through, so dropping the
+// point into the GC heap (D5.5.2). family is never written through, so dropping the
 // literal's const here is safe.
 inline void radiant_retain_font_family(FontProp* font, lam::StaticPtr<const char> family) {
     font->family = lam::up(const_cast<char*>(family.get()));
@@ -3799,7 +3799,7 @@ bool render_paint_text_decorations(PaintList* paint, const FontBox* font,
     Color color, bool before_text, const Color* override_color = nullptr);
 
 struct RenderTextDecorationSource {
-    unsigned char* text; // borrowed only during synchronous shadow recording (D4.5.1v4)
+    unsigned char* text; // borrowed only during synchronous shadow recording (D5.5.1)
     TextRect* rect;
     float origin_x, origin_y;
 };
@@ -4406,7 +4406,7 @@ struct RenderBorderStroke {
     RdtStrokeCap cap;
     int dash_count;
 };
-// the callback takes ownership of path, including on failure (D4.5.1v4).
+// the callback takes ownership of path, including on failure (D5.5.1).
 bool render_paint_boundary_path(void*, RdtPath*, Color, const RenderBorderStroke*);
 bool render_border_raster_path(void*, RdtPath*, Color, const RenderBorderStroke*);
 using RenderBorderPathCallback = bool (*)(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke);
@@ -4595,8 +4595,10 @@ struct PaintImageBox {
     float raster_scale;
     uint8_t opacity;
     bool overflow_visible;
+    Corner content_radius = {}; // resolved values outlive the source style in paged editions (D5.5.1).
 };
-bool render_paint_image_box(PaintList* paint, const PaintImageBox* box);
+bool render_paint_image_box(PaintList* paint, const PaintImageBox* box, UiContext* ui = nullptr);
+Corner render_media_content_corners(ViewBlock* view, Rect content_rect, float raster_scale);
 
 // Synchronous document-owned borrows; retained paint commands snapshot pixels.
 ImageSurface* render_canvas_surface(ViewBlock* view);
@@ -4615,8 +4617,6 @@ Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* image, Rect 
 Rect render_media_positioned_rect(const EmbedProp* embed, Rect viewport, float width, float height, float raster_scale);
 bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect image_rect,
     const Rect* content_rect, float raster_scale, FontContext* fonts, UiContext* ui = nullptr, uint8_t opacity = 255);
-bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
-                                    const Rect* content_rect);
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
                                         int target_height);
 void render_image_view(struct RasterRenderContext* rdcon, ViewBlock* view);

@@ -55,10 +55,10 @@ pub fn step_ped(p, car, dt) {
     let k = if (away != null or scare > 1.2) u.ease(10.0, dt) else u.ease(2.0, dt)
     let moving = scare == 0.0
     let s = if (moving) p.s + p.dir * p.pace * dt else p.s
-    let gait = p.gait + (if (moving) p.pace * 5.5 * dt else 0.0)
     let hop = if (scare > 1.2) 0.45 * sin(u.PI * (1.6 - scare) / 0.4) else 0.0
-    let next = {*: p, s: s, ox: u.lerp(p.ox, tx, k), oz: u.lerp(p.oz, tz, k), gx: tx, gz: tz, scare: scare, gait: gait, hop: max(0.0, hop)};
-    {*: next, *: place(next), y: city.ground(next.x, next.z) + next.hop + (if (moving) 0.035 * abs(sin(gait)) else 0.0),
+    let next = {*: p, s: s, ox: u.lerp(p.ox, tx, k), oz: u.lerp(p.oz, tz, k), gx: tx, gz: tz, scare: scare, hop: max(0.0, hop)};
+    // the scene's walk clip swings the limbs and bobs the figure from this pedestrian's gait phase
+    {*: next, *: place(next), y: city.ground(next.x, next.z) + next.hop,
      startled: away != null}
 }
 pub fn step(peds, car, dt) => [for (p in peds) step_ped(p, car, dt)]

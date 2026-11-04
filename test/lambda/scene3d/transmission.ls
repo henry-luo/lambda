@@ -1,4 +1,4 @@
-// S12.1.1v3 / D7.2.4v4: glass properties and tracks are pure descriptions.
+// S12.1.1v3 / D9.3.4: glass properties and tracks are pure descriptions.
 import s: lambda.scene3d
 fn scene(options = {}, kind = 'physical') any^ => s.scene([s.camera(), s.mesh(s.box(), s.material(kind, {id: "glass", *: options}))])
 fn message(description) any^ => s.normalize(description) ^ { ^.message }

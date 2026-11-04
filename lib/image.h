@@ -227,7 +227,7 @@ int image_gif_frame_count_from_memory(const unsigned char *data, size_t length);
 ImageStatus image_encode_gif_frames(ImageContext* context, const RasterBuffer* const* frames,
     const uint16_t* delays, uint32_t count, uint32_t plays, ImageEncoded* encoded, ImageError* error);
 
-// file/resource entry points are declared by lambda/io/image_io.h (D7.1.3).
+// file/resource entry points are declared by lambda/io/image_io.h (D9.1.3).
 #ifdef __cplusplus
 }
 #endif

@@ -10,8 +10,8 @@ root-planner storage reduction, and bounded call/string adapter reductions are
 landed locally; full Tune13 correctness and performance acceptance remain open.
 
 **Design authority:** [JS Tune13](../jube/JS_Tune13.md), governed by **S1.11**,
-**D2.4**, **D3.3.2v2**, **D3.4.4v2**, **D4.6**, **D5.3**, **D8.1.3v11**,
-**D8.4.1v2–D8.4.3v2**, and **D8.6.1–D8.6.3**. The native-only MIR decision is
+**D2.3**, **D4.3.2**, **D3.4.4**, **D5.6**, **D6.3**, **D8.4.2**,
+**D7.4.1–D7.4.3**, and **D8.6.1–D8.6.3**. The native-only MIR decision is
 ratified; the implementation and tuning gates below remain open. See the
 proposal for the corrected Tune12 evidence, helper design, source inventory,
 and superseded execution policy.
@@ -54,15 +54,15 @@ remain unambiguous.
 
 The root-planner change keeps the block fixed-point solution, reverse transfer,
 root-slot coloring, and call reload facts unchanged; only the storage of facts
-consumed by collecting calls changed. This is governed by **D5.3** and remains
+consumed by collecting calls changed. This is governed by **D6.3** and remains
 subject to the final zero-slack and release gates.
 
 The lazy metadata path is an ordinary-shape deferral, not synthetic reflection.
 The function retains its final `name` and formal length; the first operation that
 can observe an own descriptor publishes real `length` then `name` slots. Any
 prototype or user-field creation publishes that same prefix first, and deletion
-creates a real tombstone. This retains **D6.2.2v2** property authority and
-**D5.3** rooting while avoiding the callback-time maps shown by the profile.
+creates a real tombstone. This retains **D7.2.2** property authority and
+**D6.3** rooting while avoiding the callback-time maps shown by the profile.
 
 Focused release evidence is intentionally not closeout evidence. The fresh
 three-sample Hyphen comparison in `temp/js_tune13_hyphen_lazy_metadata_final.json`
@@ -352,7 +352,7 @@ Use the current full test population, not a frozen historical passing count:
 - Finalized-MIR structural contracts and zero-slack ratchets; do not regenerate
   expected counts merely to absorb unexplained growth (**D8.6.1–D8.6.3**).
 - Precise-root/scalar-home tests across fast/miss joins, nested calls, exception
-  paths, loop invalidation, and partially built literals (**D5.3**).
+  paths, loop invalidation, and partially built literals (**D6.3**).
 - Expected-output fixtures for semantic regressions, including a matching `.txt`
   whenever a new Lambda `.ls` test is introduced.
 

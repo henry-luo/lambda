@@ -4,7 +4,7 @@
 #include "mir_emitter_shared.hpp"
 
 // static path syntax has no evaluated operands; both emitters use the same
-// constructors and the activation's owning pool (D2.4.3, D4.1.2).
+// constructors and the activation's owning pool (D2.3.5, D5.1.2).
 static inline MIR_reg_t em_literal_path(MirEmitter* em, AstPathNode* node) {
     MIR_reg_t pool = em_load_at(em, em->frame.runtime, offsetof(Context, pool), MIR_T_P, "path_pool");
     MIR_reg_t path = node->authority

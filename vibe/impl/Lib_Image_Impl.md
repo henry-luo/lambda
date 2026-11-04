@@ -6,8 +6,8 @@ Design: [Common Image I/O Library](../lib/Lib_Image.md). Scope and direct source
 modification were authorized by the user; all imported code is under
 `lib/image/<library>/`, with no patch replay step.
 
-Spec linkage: **D7.1.1–D7.1.3** (codec mechanisms versus resource acquisition),
-**D4.1.4v5** (tracked native allocation), **D5.3.3** (precise runtime roots),
+Spec linkage: **D9.1.1–D9.1.3** (codec mechanisms versus resource acquisition),
+**D5.1.4** (tracked native allocation), **D6.3.3** (precise runtime roots),
 **S7.4.3–S7.4.4** (faults and rich errors), **S17.8.1** (option validation).
 No formal ruling changes are introduced.
 
@@ -102,7 +102,7 @@ required internal fallback. All eight formats and the thumbnail APIs remain.
 
 ### Decoder-only AVIF profile (2026-10-16)
 
-The byte codec remains context-free in `lib`, as required by **D7.1.2v2**.
+The byte codec remains context-free in `lib`, as required by **D9.1.2**.
 The reduced profile is declared in `build_lambda_config.json`; no additional
 dependency or upstream source edit is required. The pinned libaom 3.12.1 decoder source lists were independently
 checked against upstream configuration: 125 files on ARM64, including 56 ARM
@@ -142,7 +142,7 @@ The earlier source cleanup removed 805 files / roughly 17 MB from `lib/image/`.
 Build recipes have since been deleted entirely rather than relocated. Licenses,
 patent notices, copyright attributions, and provenance records remain, including
 JPEG's required `README.ijg`. No formal ruling changes are introduced
-(**D7.1.1–D7.1.3**, **D7.1.6–D7.1.7v6**).
+(**D9.1.1–D9.1.3**, **D9.2.2–D9.2.3**).
 
 ### Size-optimized image and reduced TIFF profile (2026-10-16)
 
@@ -162,7 +162,7 @@ JPEG12-in-TIFF serves specialist GeoTIFF workflows, but Lambda's existing
 RGBA strip/tile path rejects 12-bit samples. The public TIFF writer emits
 8-bit Deflate. The wrapper now reports `unsupported_feature` before pixel
 allocation for JPEG12; metadata probing remains available. This keeps the
-codec mechanism in `lib` (**D7.1.2v2**) and makes the unsupported subset
+codec mechanism in `lib` (**D9.1.2**) and makes the unsupported subset
 explicit through rich checked-channel diagnostics (**S7.4.4**).
 
 The stored 32 by 24 JPEG12 grayscale fixture was generated using the original
@@ -192,7 +192,7 @@ Local implementation and performance evidence is under
 Finder consumes the shared decoder through the document-owned `radiant.image_job`
 thumbnail channel. The existing worker/cancellation lifecycle now admits copied
 file paths and CSS bounds, converting bounds through the document's device scale.
-Workers call `image_io_decode_path`; codecs remain in `lib` (**D7.1.2v2**).
+Workers call `image_io_decode_path`; codecs remain in `lib` (**D9.1.2**).
 The channel owns a 128-entry LRU cache, including decoder failures. Its 32 MiB
 retained-pixel budget reserves the consumer's reported canvas bytes and pending
 upload before admitting cached pixels; transient results and codec scratch
@@ -202,10 +202,10 @@ the existing `FileStat` ABI. Revisions are checked around decoding; explicit ref
 invalidates the cache even when publication metadata was preserved.
 
 The app measures viewport geometry before mutations, prioritizes selected previews,
-and uploads transient arrays into retained canvases (**S12.1.3**, **D4.5.2**).
+and uploads transient arrays into retained canvases (**S12.1.3**, **D5.5.2**).
 Offscreen and retiring canvases release their pixels. Folder generations and job
 tokens reject stale completions; document teardown cancels and joins native work
-(**D4.5.1v4**). SVG remains on Radiant's vector path. No formal ruling changes.
+(**D5.5.1**). SVG remains on Radiant's vector path. No formal ruling changes.
 
 Validation: 84 assertions across five Finder UI replays and 14 assertions in the
 real-folder scrolling replay pass. Two Finder goldens pass on interp/auto/JIT;

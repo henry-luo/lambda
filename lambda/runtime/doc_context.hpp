@@ -11,7 +11,7 @@
 //
 //   * a NODE TABLE keyed by container pointer giving `(document, parent, key,
 //     generation)`. That is the identity carrier DO25 asked for: document
-//     nodes are Input-arena owned, immutable and non-moving (D4.3.1), so the
+//     nodes are Input-arena owned, immutable and non-moving (D5.3.1), so the
 //     container pointer identifies the node and nothing has to be stored in
 //     the node itself. `&` walks this table to the root and spells the path;
 //     `===` is pointer equality on top of it.
@@ -91,6 +91,6 @@ void doc_context_register_tree(Document* doc, Item root, const void* parent,
 // still answer true.
 void doc_context_commit_head(Document* doc, Item head);
 
-// S2.4.4 / D5.4.2–D5.4.4: clear only the active evaluator's document capsule.
+// S2.4.4 / D6.4.2–D6.4.4: clear only the active evaluator's document capsule.
 // Heap teardown also releases its heads and precise roots before heap storage.
 void doc_context_reset(void);

@@ -1,7 +1,7 @@
 // mail_imap.h — IMAP response framing, response parsing and command encoding
 // (RFC 9051, RFC 3501) for lambda.io.mail (vibe/Lambda_Demo_Mail.md ML1, ML2).
 //
-// Context-free (D7.1.2v2): bytes in, framed responses and token trees out. The
+// Context-free (D9.1.2): bytes in, framed responses and token trees out. The
 // runtime sends the encoded commands and turns the trees into Lambda values.
 // Framing reads literals by their byte count, so message content can never end
 // or forge a response (the curl custom-request hazard of §2.4).

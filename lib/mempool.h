@@ -54,7 +54,7 @@ void pool_drain(Pool* pool);
 void pool_reset(Pool* pool);
 
 /**
- * Register a cleanup (D4.2.6): `fn(arg)` runs once when the pool releases its
+ * Register a cleanup (D5.2.5): `fn(arg)` runs once when the pool releases its
  * blocks — pool_destroy, pool_drain or pool_reset — newest first, while the
  * pool is still valid. It lets the pool own a resource that is not one of its
  * blocks, which then dies with the pool at the latest. Lifecycle only: the

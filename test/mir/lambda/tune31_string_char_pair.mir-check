@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune31 Phase III B2 / D3.3.3v3, S7.1.1v3: two indexed typed strings use the no-allocation pair comparator. Its runtime leaf preserves UTF-8 character, absent-read and equality semantics.",
+  "description": "Tune31 Phase III B2 / D4.3.3, S7.1.1v3: two indexed typed strings use the no-allocation pair comparator. Its runtime leaf preserves UTF-8 character, absent-read and equality semantics.",
   "checks": [
     {
       "in_func": "_tune31_char_pair_equal_#",

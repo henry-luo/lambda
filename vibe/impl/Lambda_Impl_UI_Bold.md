@@ -3,7 +3,7 @@
 > **Date:** 2026-10-10.
 > **Status:** initial native subset implemented; native dependency failures remain open.
 > **User-selected package/theme name:** `lambda.ui.bold` / `bold`.
-> **Authority:** **D7.2.4**, **D7.2.5**, **D8.1.1v17**,
+> **Authority:** **D9.3.4**, **D10.2.1**, **D8.3.6**,
 > **S2.4.3v3**, **S8.2.2v5**, **S12.1.1v2–S12.1.3**. No language or engine ruling changes.
 
 ## Scope and reference
@@ -27,7 +27,7 @@ are diagnosed, rather than represented by placeholder exports.
 
 | Source | Responsibility |
 |---|---|
-| `lmd/package/ui/bold.ls` | Public facade, page shell and imported view registration (**D7.2.4**) |
+| `lmd/package/ui/bold.ls` | Public facade, page shell and imported view registration (**D9.3.4**) |
 | `ui/bold/contract.ls` | Shared validation for constructors and direct logical attributes |
 | `ui/bold/tokens.ls` | Immutable defaults, validated overrides, full/scoped `--bold-` variables |
 | `ui/bold/style.ls` | Independent family selectors, native states, responsive spacing and hard shadows |
@@ -51,7 +51,7 @@ The native controls share one implementation rather than copying dtna's
 procedures. Frame event names are family-specific; native radio groups use
 the shared `data-ui-controlled-checked` marker so controlled peers in either
 family can settle. DOM remains the sole owner of default actions
-(**D7.2.5**). Present empty/false controlled values are preserved by key
+(**D10.2.1**). Present empty/false controlled values are preserved by key
 membership (**S8.2.2v5**).
 
 ## Verification and remaining work
@@ -61,7 +61,7 @@ native HTML semantics and content slots; invalid props and diagnostics; direct
 elements, source preservation and nested/family coexistence. They are registered
 in the existing auto-discovery harness. An isolated source snapshot of the
 staged package and existing dtna API passed all **30** combined bold/dtna
-golden fixtures on each of `interp`, `auto` and `jit` (**D8.1.1v17**).
+golden fixtures on each of `interp`, `auto` and `jit` (**D8.3.6**).
 
 `test/ui/bold_gallery.ls` is a direct-element component explorer. Its native
 fixture checks 11 style/content/control assertions, including inherited pink

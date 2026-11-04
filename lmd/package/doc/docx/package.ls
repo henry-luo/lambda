@@ -1,4 +1,4 @@
-// Word-specific validation builds on the shared OPC capture (D7.2.4v4/D7.5.2).
+// Word-specific validation builds on the shared OPC capture (D9.3.4/D11.1.2).
 import c: .common
 import opc: lambda.doc.opc
 pub fn xml(parts,path,required=false) any^ => opc.xml(parts,path,required,c.fail,c.uri)^

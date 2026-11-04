@@ -1,4 +1,4 @@
-// S9.1.2 / D7.2.4v3: the shared image tree is authoritative; rows only resolve identities.
+// S9.1.2 / D9.3.4: the shared image tree is authoritative; rows only resolve identities.
 import img: lambda.image
 import sequence: lambda.editor.core.doc
 import paths: lambda.editor.core.source_pos

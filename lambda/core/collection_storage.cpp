@@ -30,7 +30,7 @@ void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
     // so a sparse spec length cannot observe stale payloads or zeroed nulls.
     int64_t new_tail_start = new_capacity - list->extra;
     int64_t old_tail_start = old_capacity - list->extra;
-    // D2.6.6v2: the companion moved to the attribute face, so the same
+    // D3.1.1: the companion moved to the attribute face, so the same
     // "is this a JS array with properties" question is asked of that face now.
     bool js_props = list->type == &ArrayPropsShape && list->data;
     Item vacant = js_props ?

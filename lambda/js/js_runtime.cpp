@@ -71,7 +71,7 @@ extern "C" bool js_execution_interrupt_pending(void) {
 }
 
 extern "C" Item js_execution_interrupt_status(void) {
-    // D8.4.3v2: unwind guest frames normally, including suspended-stack owners.
+    // D7.4.3: unwind guest frames normally, including suspended-stack owners.
     if (js_execution_interrupt_pending()) {
         return js_throw_error_with_code("ERR_SCRIPT_EXECUTION_TIMEOUT",
             "Script execution timed out");
@@ -646,7 +646,7 @@ static bool js_array_numeric_grow(Item array_item, int64_t required_length) {
     if (!js_is_ordinary_numeric_array(array_item) || required_length < 0) return false;
     RootFrame roots(1);
     Rooted<Item> array_root(roots, array_item);
-    // D2.6.6v2: the companion lives in the array's attribute face, not in the
+    // D3.1.1: the companion lives in the array's attribute face, not in the
     // elements buffer, so it survives this reallocation untouched.
     ArrayNum* arr = array_root.get().array_num;
     if (required_length <= container_dense_capacity((Array*)arr)) return true;
@@ -735,7 +735,7 @@ static bool js_array_promote_numeric_to_tagged(Item array_item) {
     Array* tagged = (Array*)numeric;
     tagged->items = new_items;
     tagged->capacity = new_capacity;
-    tagged->extra = 0;  // D2.6.6v2: no reserved companion slot
+    tagged->extra = 0;  // D3.1.1: no reserved companion slot
     for (int64_t i = 0; i < length; i++) {
         // array_num_read_item materializes the numeric lane; array_set then
         // adopts any out-of-band scalar into the new container-owned tail.
@@ -765,7 +765,7 @@ static void js_array_note_stored_value(Array* arr, Item value) {
         } else if (kind == JS_ELEMENTS_PACKED_NUMERIC) {
             if (!js_array_value_is_numeric(value)) {
                 // Undefined is a present value, so it cannot remain in the
-                // no-hole numeric representation (D8.4.3).
+                // no-hole numeric representation (D7.4.3).
                 container_set_js_elements_kind((Container*)arr,
                                                JS_ELEMENTS_PACKED_TAGGED);
             }
@@ -1221,7 +1221,7 @@ Item js_proxy_private_slots(Item proxy, bool create, Item (*allocate)(), bool al
     if (get_type_id(slots) == LMD_TYPE_MAP) return slots;
     if (!create) return ItemNull;
     // Private slots are created lazily; the allocation may compact the Proxy,
-    // so reacquire its carrier before publishing the new slot pointer (D5.3.2).
+    // so reacquire its carrier before publishing the new slot pointer (D6.3.2).
     Rooted<Item> slots_root(roots, allocate ? allocate() : js_new_object());
     if (get_type_id(slots_root.get()) != LMD_TYPE_MAP) return ItemNull;
     pd = js_get_proxy_data(proxy_root.get());
@@ -1239,7 +1239,7 @@ extern "C" bool js_has_call_capability(Item target) {
     TypeId type = get_type_id(target);
     if (type == LMD_TYPE_FUNC) {
         Function* lambda_fn = target.function;
-        // D6.2.2v2: MVP has no JsFunction tail; use its published entry ABI.
+        // D7.2.2: MVP has no JsFunction tail; use its published entry ABI.
         if (function_has_abi(lambda_fn, FN_ENTRY_ABI_MVP_LMD))
             // default class constructors dispatch through class metadata, without a body pointer.
             return mvp_lmd_is_callable(target);
@@ -1278,7 +1278,7 @@ static Item js_proxy_get_trap(JsProxyData* pd, const char* trap_name, int trap_l
     if (tt == LMD_TYPE_UNDEFINED || tt == LMD_TYPE_NULL) return ItemNull;
     if (!js_is_callable(trap)) {
         // GetMethod observes an exotic [[Call]] capability; the handler may
-        // provide a callable Proxy trap (D6.2.2v2).
+        // provide a callable Proxy trap (D7.2.2).
         return js_throw_type_errorf(
             "'%.*s' returned for property '%.*s' of object '#<Object>' is not a function", trap_len, trap_name, trap_len, trap_name);
     }
@@ -1287,7 +1287,7 @@ static Item js_proxy_get_trap(JsProxyData* pd, const char* trap_name, int trap_l
 
 extern "C" Item js_proxy_new(Item target, Item handler) {
     // ES2020 §26.2.1.1: both target and handler must be objects
-    // native nodes and collections are object values through their virtual carriers (D7.4.5v2).
+    // native nodes and collections are object values through their virtual carriers (D9.5.5).
     if (!js_is_object_value(target)) {
         return js_throw_type_error("Cannot create proxy with a non-object as target");
     }
@@ -1406,13 +1406,13 @@ extern "C" Item js_proxy_revocable(Item target, Item handler) {
     fn->env[0] = (Item){.item = (uint64_t)(uintptr_t)pd};
     fn->env_size = 1;
     // The per-object closure owns its revoke target directly; an observable
-    // name or sentinel ID must not select its behavior (D6.2.2v2).
+    // name or sentinel ID must not select its behavior (D7.2.2).
     js_function_finalize_capabilities(fn);
 
     // build result object { proxy, revoke }
     result_root.set(js_new_object());
     // The result does not own either exotic until both data properties are
-    // published, so retain every edge across shape allocation (D5.2, D5.3.3).
+    // published, so retain every edge across shape allocation (D6.2, D6.3.3).
     js_set_key_cstr(result_root.get(), "proxy", proxy_root.get());
     js_set_key_cstr(result_root.get(), "revoke", revoke_root.get());
     return result_root.get();
@@ -2081,7 +2081,7 @@ extern "C" Item js_proxy_trap_get_prototype_of(Item proxy) {
         &get_prototype_trap_home));
     // Packed numeric arrays are ordinary object values too; rejecting them
     // here made the proxy boundary disagree with the shared object test
-    // (D4.6.1v2), so only primitive trap results are invalid.
+    // (D5.6.1), so only primitive trap results are invalid.
     // ES2020 §9.5.1 invariant: result must be Object or null
     TypeId rt = get_type_id(result);
     if (rt != LMD_TYPE_MAP && !js_is_js_array(result) && rt != LMD_TYPE_FUNC &&
@@ -2241,7 +2241,7 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
     TypeId callee_type = get_type_id(callee_root.get());
     if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee_root.get())) {
         // Bound construction substitutes the ultimate target only when the
-        // explicit newTarget names the bound wrapper itself (D6.2.2v2).
+        // explicit newTarget names the bound wrapper itself (D7.2.2).
         proto_source_root.set(js_bound_function_effective_new_target(
             callee_root.get(), target_root.get()));
         instance_proto_root.set(js_get_name_key(proto_source_root.get(), "prototype", 9));
@@ -2454,7 +2454,7 @@ static Item js_private_brand_key_for_class_existing(Item class_item) {
 
 
 // The derived constructor owns this exact post-super point; the shared helper
-// initializes only the derived class and preserves D6.2.2v2 ordering.
+// initializes only the derived class and preserves D7.2.2 ordering.
 
 
 
@@ -2590,7 +2590,7 @@ extern "C" Item js_get_prototype_from_constructor_default(Item new_target,
         // old path re-interned its name and entered generic Get for every
         // allocation; reading the exact NameId slot preserves replacement
         // semantics without charging that unrelated lookup machinery to each
-        // explicit [[Construct]] (D6.2.2v2).
+        // explicit [[Construct]] (D7.2.2).
         prototype_root.set((descriptor.flags & JS_PD_HAS_VALUE)
             ? descriptor.value : make_js_undefined());
     } else {
@@ -2623,7 +2623,7 @@ static Item js_apply_resolved_constructed_prototype(Item result,
     Item current_prototype = js_get_prototype_of(result_root.get());
     if (item_is_error(current_prototype)) return current_prototype;
     if (current_prototype.item != prototype_root.get().item) {
-        // D6.2.2v2: GetPrototypeFromConstructor remains observable, but a
+        // D7.2.2: GetPrototypeFromConstructor remains observable, but a
         // redundant canonical Array prototype slot creates a companion map
         // that incorrectly disables dense element kernels such as fill/set.
         js_set_prototype(result_root.get(), prototype_root.get());
@@ -2657,12 +2657,12 @@ static Item js_apply_constructed_intrinsic_prototype(Item result,
     if (item_is_error(prototype_root.get())) return prototype_root.get();
     // GetPrototypeFromConstructor is observable even for the canonical
     // intrinsic: skipping it made a replaced `.prototype` affect classes but
-    // not direct `new` calls (D6.2.2v2).
+    // not direct `new` calls (D7.2.2).
     result_root.set(js_apply_resolved_constructed_prototype(result_root.get(),
         prototype_root.get()));
     if (item_is_error(result_root.get())) return result_root.get();
     if (policy == JS_INTRINSIC_CONSTRUCT_PROMISE) {
-        // D6.2.2v2: Promise's wrapper factory publishes an own constructor
+        // D7.2.2: Promise's wrapper factory publishes an own constructor
         // cache, so forwarded newTarget must replace the base-realm value.
         metadata_key_root.set(js_name_item(
             "constructor", 11));
@@ -2838,7 +2838,7 @@ static Item js_intrinsic_construct_with_policy(
     }
     if (policy == JS_INTRINSIC_CONSTRUCT_OBJECT &&
             target_root.get().item == callee_root.get().item) {
-        // D6.2.2v2: canonical Object construction has the call behavior and
+        // D7.2.2: canonical Object construction has the call behavior and
         // returns an existing object or its type-specific wrapper unchanged;
         // applying Object.prototype afterwards destroyed both identity and
         // the wrapper's Number/String/Boolean prototype.
@@ -2858,7 +2858,7 @@ static Item js_intrinsic_construct_with_policy(
     if (policy != JS_INTRINSIC_CONSTRUCT_PROXY) {
         // GetPrototypeFromConstructor precedes allocation for the intrinsic
         // constructors. Delaying it made invalid ArrayBuffer/DataView lengths
-        // throw before an observable newTarget.prototype getter (D6.2.2v2).
+        // throw before an observable newTarget.prototype getter (D7.2.2).
         prototype_root.set(js_get_prototype_from_constructor(
             target_root.get(), policy));
         if (item_is_error(prototype_root.get())) return prototype_root.get();
@@ -2985,7 +2985,7 @@ Item js_intrinsic_ctor_string_call_body(Item callee, Item this_value,
 }
 
 // A missing actual is JavaScript undefined; ItemNull is an internal sentinel
-// and would change ToString/ToNumber (D6.2.2v2).
+// and would change ToString/ToNumber (D7.2.2).
 JS_FORWARD_STATIC_EXPRESSION(Item, js_intrinsic_arg, (Item* args, int argc, int index), (args && index >= 0 && index < argc ? args[index] : make_js_undefined()))
 
 // Every intrinsic body has the same five-parameter native shape. These three
@@ -3026,7 +3026,7 @@ JS_FORWARD_STATIC_EXPRESSION(Item, js_intrinsic_arg, (Item* args, int argc, int 
         return (expression); \
     }
 
-// D6.2.2v2: Number keeps its explicit BigInt conversion; generic ToNumber
+// D7.2.2: Number keeps its explicit BigInt conversion; generic ToNumber
 // rejects BigInt by design.
 JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_number_call_body,
     has_arg ? js_number_function(arg0) : js_make_number(0.0))
@@ -3238,7 +3238,7 @@ static bool js_typed_array_use_default_species(Item constructor, Item* species) 
 }
 
 // both frontends share TypedArraySpeciesCreate and result validation; only
-// property lookup and callable representation belong to the frontend (D1.3v3).
+// property lookup and callable representation belong to the frontend (D1.3).
 extern "C" Item js_typed_array_species_create_with_ops(Item exemplar, Item* args,
         int argc, const JsTypedArrayOps* ops) {
     auto fail = [ops](const char* message) {
@@ -3411,7 +3411,7 @@ Item js_map_shape_lookup(Map* m, const char* key_str, int key_len, bool* out_fou
         return _map_read_field(entry, m->data);
     }
     // The shape records whether it contains spread links; a plain hash miss
-    // must not rescan every field looking for a link that cannot exist (D3.4.3v5).
+    // must not rescan every field looking for a link that cannot exist (D3.4.3).
     if (!map_type->has_spread) {
         if (out_found) *out_found = false;
         return ItemNull;
@@ -3489,7 +3489,7 @@ static Item js_buffer_prototype_for_lookup(void) {
 }
 
 extern "C" Item js_call_accessor_getter(Item getter, Item receiver) {
-    // D6.2.2v2: the prototype-walk Receiver belongs only to the current Get;
+    // D7.2.2: the prototype-walk Receiver belongs only to the current Get;
     // pass it directly so nested property operations cannot inherit ambient
     // state and recursively invoke the outer accessor.
     Item result = js_call_function(getter, receiver, NULL, 0);
@@ -3646,7 +3646,7 @@ static bool js_property_ops_property_get(Item object, Item key, Item receiver,
         }
         Item dv_proto = js_get_prototype(object);
         if (dv_proto.item != ITEM_NULL) {
-            // D6.2.2v2: buffer/byteLength/byteOffset are real prototype
+            // D7.2.2: buffer/byteLength/byteOffset are real prototype
             // accessors, and the original DataView remains their Receiver.
             Item result = js_get_key_core(dv_proto, key, receiver);
             if (item_is_error(result) ||
@@ -3659,7 +3659,7 @@ static bool js_property_ops_property_get(Item object, Item key, Item receiver,
         return true;
     }
     if (js_is_fixed_layout_iterator(object)) {
-        // D6.2.2v2: the native state stays exotic, but every observable
+        // D7.2.2: the native state stays exotic, but every observable
         // iterator binding lives on a real realm-owned prototype object.
         *out_result = js_get_key_core(
             js_iterator_prototype_for_object(object), key, receiver);
@@ -4412,7 +4412,7 @@ static bool js_try_get_primitive_string_length_name_no_gc(Item object,
 
 static bool js_try_get_primitive_string_length_name_id_no_gc(Item object,
         NameId name_id, Item* out) {
-    // Generated catalog NameIds are context-independent (D4.6.1v2); test it
+    // Generated catalog NameIds are context-independent (D5.6.1); test it
     // before NamePool resolution so a static primitive length read stays a leaf.
     return name_id == LAMBDA_NAME_LENGTH &&
         js_try_get_primitive_string_length_no_gc(object, out);
@@ -4454,7 +4454,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
     MvpLmdRealmScope mvp_owner_scope(mvp_lmd_property_program(object));
     if ((type == LMD_TYPE_FUNC && function_has_abi(object.function, FN_ENTRY_ABI_MVP_LMD)) ||
             (mvp_lmd_program_library() && mvp_lmd_owns_properties(object))) {
-        // D6.2.2v2: host callers must not read the legacy callable tail.
+        // D7.2.2: host callers must not read the legacy callable tail.
         key_root.set(mvp_lmd_property_key(key));
         return item_is_error(key_root.get()) ? key_root.get() :
             mvp_lmd_property_with_receiver(object, key_root.get(), ItemNull, LMD_PROP_GET, receiver);
@@ -4575,7 +4575,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 if (st == JS_OWN_DELETED) return make_js_undefined();
             }
         }
-        // D6.2.2v2: typed-array metadata is installed as real constructor and
+        // D7.2.2: typed-array metadata is installed as real constructor and
         // prototype properties; spelling-specific lookup here bypassed delete,
         // redefine, and Proxy-observable prototype semantics.
         // Metadata selects the exotic table; ordinary objects have no callback.
@@ -4635,7 +4635,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
             if (js_canonicalize_property_string(key, &canonical_key)) {
                 // Preserve one canonical NameId through the full prototype
                 // walk so each ordinary-own probe does not reintern a dynamic
-                // spelling (D4.6.1v2, D5.3).
+                // spelling (D5.6.1, D6.3).
                 key = canonical_key;
                 key_root.set(key);
             }
@@ -4660,7 +4660,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     Item lazy_value = ItemNull;
                     // The marker is an ordinary int on every non-global object;
                     // resolving it there would corrupt descriptor values and
-                    // user data that happens to equal the marker (D4.6.1v2).
+                    // user data that happens to equal the marker (D5.6.1).
                     if (js_resolve_lazy_global(object, key, &lazy_value)) {
                         return lazy_value;
                     }
@@ -4673,7 +4673,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         return js_private_member_access_error(private_key, false);
                     }
                 }
-                // D5.3/D5.4.3: shaped map fields can expose a pointer into
+                // D6.3/D6.4.3: shaped map fields can expose a pointer into
                 // movable scalar storage; publish a current number-home Item
                 // before later property/call allocations can compact it.
                 return borrowed_shape_value
@@ -4762,7 +4762,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
         result = js_prototype_lookup_ex_with_receiver(
             object, key, receiver_root.get(), &proto_found);
         if (proto_found) return result;
-        // D6.2.2v2: intrinsic bindings are ordinary prototype properties.
+        // D7.2.2: intrinsic bindings are ordinary prototype properties.
         // A miss after the complete prototype walk stays a miss; consulting the
         // catalog here would resurrect deleted bindings and bypass Proxy/Get.
         return make_js_undefined();
@@ -4984,7 +4984,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
             if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
                 return js_get_prototype_of(object);
             }
-            // D6.2.2v2: primitive methods, including @@iterator, are read from
+            // D7.2.2: primitive methods, including @@iterator, are read from
             // the materialized String.prototype before indexed-character logic.
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
@@ -5041,7 +5041,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
             if ((fn->flags & JS_FUNC_FLAG_STRICT) && js_is_restricted_function_property_name(str_key)) {
                 return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
             }
-            // D6.2.2v2: all public function properties live in properties_map.
+            // D7.2.2: all public function properties live in properties_map.
             //
             // Stage A1 leaf-probe routing: dispatch the slot+sentinel+
             // IS_ACCESSOR sequence through js_ordinary_get_own. Receiver is
@@ -5055,7 +5055,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
             if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
                 Item pm_obj = fn->properties_map;
                 Item ord_val = ItemNull;
-                // D6.2.2v2: a callable used as a prototype owns the descriptor,
+                // D7.2.2: a callable used as a prototype owns the descriptor,
                 // but the original base remains the Receiver. Using the prototype
                 // function here made inherited getters observe the wrong `this`.
                 Item receiver = receiver_root.get();
@@ -5098,7 +5098,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     // Function.prototype has [[Call]] but no [[Construct]]. A
                     // plain Map only worked while the removed name dispatcher
                     // pretended it was callable; publish the real capability
-                    // object required by D6.2.2v2.
+                    // object required by D7.2.2.
                     fn->prototype = js_fn_intrinsic_class(fn) == JS_CLASS_FUNCTION
                         ? js_new_native_function(js_function_prototype_call_target)
                         : js_fn_intrinsic_class(fn) == JS_CLASS_REGEXP
@@ -5348,7 +5348,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         // Boolean methods must be published on the real
                         // prototype. Property-miss synthesis formerly hid the
                         // missing catalog installation and resolved valueOf to
-                        // Object.prototype.valueOf instead (D6.2.2v2).
+                        // Object.prototype.valueOf instead (D7.2.2).
                         if (nl == 7 && strncmp(nm, "Boolean", 7) == 0) {
                             js_populate_builtin_prototype_methods(
                                 fn->prototype, nm, nl);
@@ -5397,11 +5397,11 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 js_intrinsic_initialization_end_for_constructor(
                     intrinsic_initialization);
                 // The lazy transaction publishes a complete own property, not
-                // a catalog answer synthesized from a missing shape (D6.2.2v2).
+                // a catalog answer synthesized from a missing shape (D7.2.2).
                 return js_materialize_function_prototype_property(
                     object, key, fn->prototype);
             }
-            // D6.2.2v2: statics are constructor own properties and inherited
+            // D7.2.2: statics are constructor own properties and inherited
             // callable behavior is installed on the real prototype chain.
             // Preserve the original function as Receiver for inherited accessors.
             Item inherited = js_function_inherited_property_get(object, key);
@@ -5417,7 +5417,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
         js_is_symbol(object)) {
         Item proto = js_get_prototype_of(object);
         if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
-            // D6.2.2v2: primitive prototype access is ordinary Get with the
+            // D7.2.2: primitive prototype access is ordinary Get with the
             // primitive retained as Receiver; no type/name catalog fallback.
             Item result = js_get_key_core(
                 proto, key, receiver_root.get());
@@ -5582,7 +5582,7 @@ bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value) {
 }
 
 bool js_sparse_array_map_set(SparseArrayMap* sm, int64_t index, Item value) {
-    // D2.6.4: a movable hash entry owns its scalar payload, never a borrowed Item home.
+    // D2.6.2: a movable hash entry owns its scalar payload, never a borrowed Item home.
     if (!sm || index < 0 || !js_array_sparse_ensure_table(sm)) return false;
     JsArraySparseHashEntry entry = {};
     entry.index = index;
@@ -5965,7 +5965,7 @@ static bool js_array_companion_has_numeric_slot(Array* arr, int64_t index) {
     if (!tm || !tm->has_array_index_shape) return false;
     // This lookup is called from audited NO_GC reads. Converting the index
     // through ToPropertyKey can enter JS; write its canonical decimal key
-    // into caller-owned storage instead (D5.3.2).
+    // into caller-owned storage instead (D6.3.2).
     char idx_buf[32];
     int idx_len = (int)str_uint64_decimal_write(idx_buf, (uint64_t)index);
     Item pm_item = (Item){.map = pm};
@@ -6168,7 +6168,7 @@ static Item js_set_array_core(Item object, Item key, Item value,
                                   (long long)(new_len - arr->length));
                         // Expanding length creates holes even when no dense
                         // buffer is allocated. A packed reader must not treat
-                        // those absent indices as own data (S1.11, D8.4.3v2).
+                        // those absent indices as own data (S1.11, D7.4.3).
                         container_set_js_elements_kind((Container*)arr,
                                                        JS_ELEMENTS_SPARSE_TAGGED);
                         js_array_stamp_dense_tail_holes(arr);
@@ -6499,7 +6499,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         }
         // Private field definitions and existing private data slots bypass
         // Proxy [[Set]]. A private accessor with no own slot must continue to
-        // the ordinary private-brand setter path below (D6.2.2v2).
+        // the ordinary private-brand setter path below (D7.2.2).
         bool direct_private_storage = js_private_define_active ||
             js_private_storage_has_own(object, key);
         if (direct_private_storage) {
@@ -6877,7 +6877,7 @@ static Item js_set_function_core(Item object, Item key, Item value,
         fn = (JsFunction*)function_root.get().function;
         if (js_function_has_own_prototype(function_root.get())) {
             // Materialization makes descriptor flags authoritative before Set;
-            // a native payload must not stand in for a public shape (D6.2.2v2).
+            // a native payload must not stand in for a public shape (D7.2.2).
             Item materialized = js_get_key_default(function_root.get(), key_root.get());
             if (item_is_error(materialized)) return materialized;
             fn = (JsFunction*)function_root.get().function;
@@ -6893,7 +6893,7 @@ static Item js_set_function_core(Item object, Item key, Item value,
                 return value_root.get(); // non-writable, silently reject
             }
         }
-        // D5.4.3/D6.2.2v2: lazy prototype materialization may collect. The
+        // D6.4.3/D7.2.2: lazy prototype materialization may collect. The
         // replacement is an exact root so both the hidden construct payload
         // and its public data property receive the relocated realm value.
         fn->prototype = value_root.get();
@@ -7002,7 +7002,7 @@ static Item js_set_function_core(Item object, Item key, Item value,
 extern "C" Item js_set_function_prototype_completion(Item object, Item value) {
     // Keep the constructor payload and public `prototype` property coupled;
     // otherwise `new F()` retains the stale default object after `F.prototype`
-    // is assigned through the unified Set kernel (D6.2.2v2).
+    // is assigned through the unified Set kernel (D7.2.2).
     RootFrame roots(3);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> value_root(roots, value);
@@ -7223,7 +7223,7 @@ JS_FORWARD_ITEM(js_define_own_key_storage, (Item object, Item key, Item value), 
 extern "C" Item js_set_key_default(Item object, Item key, Item value) {
     // The completion kernel owns ordinary Set semantics; this default adapter
     // roots transient MIR keys and values through its allocating ABI boundary
-    // until OrdinarySet has completed (D5.4.3).
+    // until OrdinarySet has completed (D6.4.3).
     JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
     Item result = js_set_completion_with_key(object_root.get(), key_root.get(),
         value_root.get(), object_root.get());
@@ -7278,7 +7278,7 @@ extern "C" Item js_assignment_set_result(Item value, Item key,
 
 extern "C" Item js_set_key_strict_policy(Item object, Item key, Item value) {
     // Strict assignment inspects the original key after Set returns; keep it
-    // rooted across both the completion and policy phases (D5.4.3).
+    // rooted across both the completion and policy phases (D6.4.3).
     JS_ROOTS(roots, object_root, object, key_root, key, value_root, value);
     Item result = js_set_completion_with_key(object_root.get(), key_root.get(),
         value_root.get(), object_root.get());
@@ -7917,7 +7917,7 @@ static JsUtf16StringPosition* js_utf16_string_position(String* string) {
         caches->utf16_sources[i] = caches->utf16_sources[i - 1];
         caches->utf16_positions[i] = caches->utf16_positions[i - 1];
     }
-    // D5.3.5: the epoch-guarded root range owns the source, never a raw GC pointer.
+    // D6.3.5: the epoch-guarded root range owns the source, never a raw GC pointer.
     caches->utf16_sources[0] = source;
     caches->utf16_positions[0] = position;
     return &caches->utf16_positions[0];
@@ -8009,7 +8009,7 @@ Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
                 (int)rlen, cache_hash, cache_ready);
             if (cached.item != ItemNull.item) return cached;
         }
-        // D5.3.3: a cache miss allocates; retain the source before copying
+        // D6.3.3: a cache miss allocates; retain the source before copying
         // from it so a collection cannot invalidate this borrowed payload.
         RootFrame roots(1);
         Rooted<Item> source_root(roots, str_item);
@@ -8172,7 +8172,7 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
                    JS_ELEMENTS_PACKED_TAGGED &&
                value.item == JS_DELETED_SENTINEL_VAL) {
         // A hole is an absence, not the present undefined value; the first
-        // hole-producing write permanently leaves packed storage (D8.4.3).
+        // hole-producing write permanently leaves packed storage (D7.4.3).
         container_set_js_elements_kind((Container*)arr,
                                        JS_ELEMENTS_HOLEY_TAGGED);
     } else if (container_js_elements_kind((Container*)arr) ==
@@ -8246,7 +8246,7 @@ static Item js_array_new_sparse_length(int64_t length) {
     if (length <= JS_ARRAY_DENSE_GAP_ALWAYS_OK) {
         Item result = (Item){.array = arr};
         // Data-zone allocation may collect and compact `arr`, so publish the
-        // owner root before the buffer is created (D5.3).
+        // owner root before the buffer is created (D6.3).
         JS_ROOTS(roots, result_root, result);
         int64_t capacity = length + 4;
         Item* items = js_array_gc_items_alloc(capacity);
@@ -8363,7 +8363,7 @@ static Item js_array_get_index(Item array, int64_t idx, Item fallback_key,
     if (idx >= 0 && idx < arr->length && idx < js_array_dense_capacity(arr)) {
         if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
             // a consumer can allocate after this read, moving the array's
-            // scalar tail. Its result needs a transient number home (D5.3.4).
+            // scalar tail. Its result needs a transient number home (D6.3.4).
             return js_scalar_storage_read(arr->items[idx], false);
         }
         if (!lookup_prototype) return make_js_undefined();
@@ -8771,7 +8771,7 @@ extern "C" bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t in
                 js_array_companion_has_numeric_slot(arr, index))) {
         return false;
     }
-    // D5.3.2: use the proven existing slot directly so this NO_GC entry
+    // D6.3.2: use the proven existing slot directly so this NO_GC entry
     // cannot reach the allocating growth arm of js_array_store_owned.
     AutoAssertNoGC no_gc;
     js_array_note_stored_value(arr, value);
@@ -8846,7 +8846,7 @@ extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
     // has passed the descriptor/prototype guards, the shared indexed store is
     // the complete ordinary-array policy, including length-only sparse arrays;
     // routing these keys through descriptor synthesis made every rehash write
-    // walk the full property kernel (D8.4.3).
+    // walk the full property kernel (D7.4.3).
     if (!js_is_extensible(array)) {
         js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
             JS_OPT_REASON_NOT_EXTENSIBLE, JS_OPT_OUTCOME_FALLBACK);
@@ -9193,7 +9193,7 @@ extern "C" void js_console_warn_multi(Item* args, int argc);
 extern "C" void js_console_error_multi(Item* args, int argc);
 extern "C" void js_console_debug_multi(Item* args, int argc);
 
-// D6.2.2v2: after receiver/name call shortcuts were removed, the observable
+// D7.2.2: after receiver/name call shortcuts were removed, the observable
 // console functions themselves must retain the complete variadic argument span.
 #define JS_CONSOLE_SPAN_ADAPTER(adapter_name, multi_name) \
     static Item adapter_name(Item* args, int argc) { \
@@ -10282,7 +10282,7 @@ static Item js_intrinsic_string_method(Item this_value, JsStringIntrinsicOp op,
 }
 
 // The published call target fixes the operation; display metadata is not an
-// executable selector under D6.2.2v2.
+// executable selector under D7.2.2.
 #define JS_STRING_INTRINSIC_BODY(body_name, operation, strict_receiver) \
     JS_INTRINSIC_BODY(body_name, \
         js_intrinsic_string_method(this_value, operation, strict_receiver, args, argc))
@@ -10849,7 +10849,7 @@ Item js_intrinsic_boolean_to_string_body(Item callee, Item this_value,
     JS_ASSIGN_OR_RETURN(primitive, js_intrinsic_boolean_value(this_value,
         "Boolean.prototype.toString requires that 'this' be a Boolean"));
     // ToString on the wrapper would call this method recursively; the Boolean
-    // intrinsic operates directly on [[BooleanData]] (D6.2.2v2).
+    // intrinsic operates directly on [[BooleanData]] (D7.2.2).
     bool value = it2b(primitive);
     return js_name_item(
         value ? "true" : "false", value ? 4 : 5);
@@ -11008,7 +11008,7 @@ static Item js_intrinsic_object_static(JsObjectStaticOp op, Item* args,
         if (needs_to_object && !nullish) {
             // Object reflection methods use the String exotic wrapper. The
             // primitive shortcut omitted descriptors and pre-sized arrays
-            // before push, doubling visible entries (D6.2.2v2).
+            // before push, doubling visible entries (D7.2.2).
             JS_ASSIGN_OR_RETURN(boxed, js_to_object(object));
             object_root.set(boxed);
             object = object_root.get();
@@ -11352,7 +11352,7 @@ Item js_intrinsic_array_from_body(Item callee, Item this_value, Item* args,
     if (js_is_constructor_internal(this_value)) {
         Item array_constructor = js_get_constructor(js_name_item("Array", 5));
         // Constructor identity, not mutable display metadata, selects the
-        // default Array path required by D6.2.2v2.
+        // default Array path required by D7.2.2.
         if (this_value.item != array_constructor.item) {
             TypeId mapper_type = get_type_id(mapper);
             bool mapping = argc >= 2 && mapper.item != ITEM_JS_UNDEFINED &&
@@ -12003,7 +12003,7 @@ JS_RUNTIME_UNARY_BODY(js_intrinsic_json_raw_json_body, js_json_raw_json(arg0))
 JS_RUNTIME_UNARY_BODY(js_intrinsic_json_is_raw_json_body,
     js_json_is_raw_json_builtin(arg0))
 
-// D6.2.2v2: each Date property stores a distinct direct target; the selected
+// D7.2.2: each Date property stores a distinct direct target; the selected
 // operation is immutable target policy and never comes from function metadata.
 #define JS_DATE_METHOD_BODY(body_name, operation) \
     JS_INTRINSIC_BODY(body_name, js_date_method(this_value, operation))
@@ -12690,7 +12690,7 @@ Item js_construct_entry_ordinary(Item func_item, Item* args, int arg_count,
     if (item_is_error(receiver_root.get())) return receiver_root.get();
     // The receiver is unpublished while the body runs, so a native local was
     // not sufficient under precise GC. Keep it rooted and forward the caller's
-    // result home through the construct protocol (D5.2.1, D5.3.2).
+    // result home through the construct protocol (D6.2.1, D6.3.2).
     Item result = js_call_constructor_body(callee_root.get(), receiver_root.get(),
         args, arg_count, target_root.get(), result_home, true);
     if (item_is_error(result)) return result;
@@ -12759,7 +12759,7 @@ Item js_construct_entry_bound(Item func_item, Item* args, int arg_count,
     }
     // Bound [[Construct]] ignores [[BoundThis]], prepends the owned arguments,
     // and delegates through the target capability instead of redispatching by
-    // observable wrapper name or metadata (D6.2.2v2).
+    // observable wrapper name or metadata (D7.2.2).
     return js_construct_value(target_root.get(), merged, total_argc,
         new_target_root.get(), result_home, true);
 }
@@ -12789,8 +12789,8 @@ Item js_call_entry_bound(Item func_item, Item this_val, Item* args,
     }
     if (bound_argc == 0) {
         // A receiver-only bind preserves the incoming argument list exactly;
-        // avoid a second rooted span before the target's call entry (D5.3,
-        // D6.2.2v2).
+        // avoid a second rooted span before the target's call entry (D6.3,
+        // D7.2.2).
         js_opt_trace_record(JS_OPT_BOUND_CALL_FORWARD_ARGS, JS_OPT_REASON_NONE,
             JS_OPT_OUTCOME_TAKEN);
         return js_call(target_root.get(), this_root.get(), args, arg_count,
@@ -12807,7 +12807,7 @@ Item js_call_entry_bound(Item func_item, Item this_val, Item* args,
         merged[bound_argc + i] = args ? args[i] : ItemNull;
     }
     // Bound [[Call]] owns only argument/this adaptation; target selection and
-    // every semantic body remain in the target's stored capability (D6.2.2v2).
+    // every semantic body remain in the target's stored capability (D7.2.2).
     return js_call(target_root.get(), this_root.get(), merged, total_argc,
         result_home, true);
 }
@@ -12909,7 +12909,7 @@ static void js_prepare_new_target_for_call(bool install_new_target,
 }
 
 static RootFrameLifetime js_call_result_frame_lifetime(uint64_t* result_home) {
-    // D5.3.3: an explicit caller home receives the result before the callee's
+    // D6.3.3: an explicit caller home receives the result before the callee's
     // number temporaries retire; calls without one must keep those homes alive.
     return result_home ? RootFrameLifetime::ACTIVATION : RootFrameLifetime::NESTED;
 }
@@ -12933,7 +12933,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     }
     // keep the exact argument span rooted through nested callbacks and their
     // collections; event listeners can re-enter the call kernel before return
-    // (D6.2.2v2).
+    // (D7.2.2).
     RootSpan call_arg_roots((!args_prerooted && arg_count > 0)
         ? (size_t)arg_count : 0);
     if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
@@ -13012,7 +13012,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
         return ItemError;
     }
 
-    // JSI18/D8.1.3: only an ordinary entry may replace the boxed AST body.
+    // JSI18/D8.4.1: only an ordinary entry may replace the boxed AST body.
     // The kernel already roots the callee and actual span, so compilation may
     // allocate without exposing unrooted call operands to the collector.
     if (construct_new_target.item == 0 &&
@@ -13035,7 +13035,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     // to the base and skip the subclass constructor entirely.
     // A construct protocol entry always scopes the explicit operand, even
     // when static body analysis found no source-level `new.target` read. A
-    // nested ERROR/super call must restore the caller's active slot (D6.2.2v2).
+    // nested ERROR/super call must restore the caller's active slot (D7.2.2).
     bool install_new_target = construct_new_target.item != 0 ||
         !analysis_known ||
         (fn->flags & JS_FUNC_FLAG_READS_NEW_TARGET) ||
@@ -13055,7 +13055,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
         // Native bodies implement their own [[Call]] semantics and must see the
         // exact receiver. Applying OrdinaryCallBindThis here turned null and
         // undefined into globalThis before built-in RequireObjectCoercible
-        // checks could run (D6.2.2v2).
+        // checks could run (D7.2.2).
         if (!js_fn_native(fn)->call) {
             this_val = js_compute_callback_this(fn, this_val);
         }
@@ -13103,7 +13103,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     // Body entry (JC14). The prologue above already owns a rooted span for
     // `args`, so the body, native callbacks and `arguments` all borrow it.
     // `arguments` observes the original actual list even when every actual is
-    // extra to the formal list (D6.2.2v2).
+    // extra to the formal list (D7.2.2).
     js_pending_call_args = args;
     js_pending_call_argc = arg_count;
     Item result = ItemError;
@@ -13133,7 +13133,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
         // thread-local compares are the whole check on the common path; the
         // out-of-line form only runs to confirm and log a mismatch.
     } else {
-        // D5.2.1v3: a span entry forwards a pending wide scalar with its
+        // D6.2.1: a span entry forwards a pending wide scalar with its
         // payload in Context::mir_companion_slot; resolve it before native
         // code sees the Item.
         // O2: an async body owns its result promise, including rejection of a
@@ -13147,7 +13147,7 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
     if (result_home && lambda_item_uses_scalar_home(result)) {
-        // D5.3: context-ABI MIR calls ignore the result-home argument; adopt
+        // D6.3: context-ABI MIR calls ignore the result-home argument; adopt
         // their transient scalar before the callee activation expires.
         result = lambda_item_adopt_scalar_home(result, result_home);
     }
@@ -13175,8 +13175,8 @@ Item js_call_entry_generic(Item func_item, Item this_val, Item* args,
 
 // The finalizer admits this entry only for code bodies that cannot observe an
 // activation-local fact. Keep the callee and borrowed argument span rooted,
-// but leave the caller activation installed: D6.2.2v2 requires exact roots,
-// while D8.4.1v2 permits removing a protocol step after its guard proves it
+// but leave the caller activation installed: D7.2.2 requires exact roots,
+// while D7.4.1 permits removing a protocol step after its guard proves it
 // unobservable. `this_val` stays an ABI operand for the compiled body even
 // though the admission contract has proven the body cannot read it.
 
@@ -13272,7 +13272,7 @@ static Item js_call_compiled_this_direct(Item func_item, Item this_val, Item* ar
             call_arg_roots, "js-call-mir-this")) return ItemError;
     JsFunction* fn = (JsFunction*)callee_root.get().function;
     // The active call-activation slot is already an exact GC root. Install
-    // the receiver there before invoking the compiled body (D5.3.2).
+    // the receiver there before invoking the compiled body (D6.3.2).
     js_current_this = this_val;
     Item method_home = js_fn_home_class(fn);
     if (method_home.item != ItemNull.item && method_home.item != 0 &&
@@ -13306,7 +13306,7 @@ Item js_call_entry_compiled_this(Item func_item, Item this_val, Item* args,
 
 // JC21 guard: the facts that let an AST call site enter the kernel's direct
 // instance. Every excluded shape keeps its full kernel step on the generic
-// path, so a miss is observably identical to a hit (D8.4.1v2).
+// path, so a miss is observably identical to a hit (D7.4.1).
 static inline bool js_call_ast_direct_eligible(Item callee) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) return false;
     JsFunction* fn = (JsFunction*)callee.function;
@@ -13346,7 +13346,7 @@ extern "C" Item js_call_from_ast(Item callee, Item this_val, Item* args,
 // function that capability is the kernel itself. Published Lambda functions
 // retain their Core boxed ABI and cross through its own dynamic dispatcher.
 // `result_home` and `args_prerooted` are the two ownership operands
-// (D6.2.2v2); they qualify the call, they do not select a different kernel.
+// (D7.2.2); they qualify the call, they do not select a different kernel.
 extern "C" Item js_call(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
     JS_RETURN_IF_ERROR(js_execution_interrupt_status());
@@ -13357,7 +13357,7 @@ extern "C" Item js_call(Item func_item, Item this_val, Item* args,
         // boxed ABI performs the required signature and result-home handling.
         Function* lambda_fn = func_item.function;
         if (function_has_abi(lambda_fn, FN_ENTRY_ABI_MVP_LMD)) {
-            // D6.2.2v2: host callbacks retain the MVP layout and caller-owned
+            // D7.2.2: host callbacks retain the MVP layout and caller-owned
             // arguments/result; never read the larger JsFunction invoke slot.
             RootFrame roots(2, js_call_result_frame_lifetime(result_home));
             if (!roots.valid()) return ItemError;
@@ -13475,7 +13475,7 @@ static Item js_array_like_arg_count(Item args_array, int* argc) {
     TypeId args_type = get_type_id(args_array);
     // Compact numeric arrays are ordinary JavaScript arrays too; excluding
     // them here made Function.prototype.apply reject valid numeric argument
-    // lists after the elements transition (D4.6.1v2).
+    // lists after the elements transition (D5.6.1).
     int64_t length = 0;
     if ((args_type == LMD_TYPE_ARRAY && !args_array.array->is_js_arguments) ||
             js_is_ordinary_numeric_array(args_array)) {
@@ -13503,7 +13503,7 @@ static Item js_array_like_copy_args(Item args_array, Item* args, int argc) {
     if (!roots.valid()) return ItemError;
     for (int i = 0; i < argc; i++) {
         // The destination is a RootSpan: earlier getter results must survive
-        // collections during later index reads (D5.3.5, D5.4.1).
+        // collections during later index reads (D6.3.5, D6.4.1).
         Item source = array_root.get();
         args[i] = js_is_js_array(source)
             ? js_elements_get(source, (Item){.item = i2it(i)})
@@ -13595,7 +13595,7 @@ extern "C" Item js_construct_array_like(
         if (!args) return ItemError;
         JS_RETURN_IF_ERROR(js_array_like_copy_args(array_root.get(), args, argc));
     }
-    // D6.2.2v2: spread expansion produces operands only; the explicit
+    // D7.2.2: spread expansion produces operands only; the explicit
     // newTarget is forwarded to the single construct kernel.
     return js_construct_value(constructor_root.get(), args, argc,
         target_root.get(), NULL, true);
@@ -15536,7 +15536,7 @@ static void js_regex_initialize_own_property(Item obj, Item key, Item value,
         bool uses_cached_shape) {
     // Construction publishes no observable receiver until all standard own
     // fields exist. Direct storage avoids treating those fields as user
-    // overrides of RegExp.prototype's virtual accessors (D6.2.2v2).
+    // overrides of RegExp.prototype's virtual accessors (D7.2.2).
     if (uses_cached_shape) {
         fn_map_set(obj, key, value);
         return;
@@ -15583,7 +15583,7 @@ static Item js_regex_build_object(JsRegexData* rd, bool dynamic_instance,
     carrier->original_flags = original_flags;
     carrier->original_flags_len = original_flags_len;
     // Property construction can collect; retain the receiver and both values
-    // instead of reusing a stale pre-collection map address (D5.3).
+    // instead of reusing a stale pre-collection map address (D6.3).
     Rooted<Item> source_root(roots, (Item){.item = s2it(js_regex_escape_source(
         source, source_len))});
     Rooted<Item> flags_root(roots, js_name_item(canonical_flags, flags_len));
@@ -17526,7 +17526,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     js_regexp_update_last_match(utf16_subject ? match_s : input_s, matches, num_groups);
 
     // build result as an Array with .index, .input, .groups properties (per ES spec)
-    // D5.3.3: named-property creation below can grow the companion Map and
+    // D6.3.3: named-property creation below can grow the companion Map and
     // collect. The match array must remain rooted until it is handed back.
     result_root.set(js_array_new(num_groups));
     // J39-7: spec uses CreateDataProperty for capture-group writes — bypass
@@ -18324,7 +18324,7 @@ Item js_apply_replacement_from_items(StrBuf* buf, const char* repl, int repl_len
 // The bulk path admits only facts whose ordinary Get/RegExpExec operations
 // cannot call user code.  A raw own lookup proves the actual inherited exec
 // capability without invoking a getter; every mutation/alternate receiver
-// keeps the protocol loop below (S1.11, D6.2.2v2).
+// keeps the protocol loop below (S1.11, D7.2.2).
 static bool js_regexp_builtin_bulk_eligible(Item regex, JsRegexData** out_rd) {
     if (out_rd) *out_rd = NULL;
     if (get_type_id(regex) != LMD_TYPE_MAP || !regex.map) return false;
@@ -18743,7 +18743,7 @@ static bool js_split_index_is_trailing_surrogate(String* s, int64_t index) {
 static Item js_regexp_split_with_ops(Item this_val, Item str, Item limit, const JsRegExpOps* ops) {
     // @@split creates its splitter and result before its first RegExpExec.
     // Keep every cross-safepoint value rooted so a collection cannot finalize
-    // the split matcher while this native frame still borrows it (D5.3.3).
+    // the split matcher while this native frame still borrows it (D6.3.3).
     RootFrame roots(11);
     uint64_t source_home = 0, limit_home = 0;
     Rooted<Item> receiver_root(roots, this_val);
@@ -18872,7 +18872,7 @@ static Item js_regexp_split_with_ops(Item this_val, Item str, Item limit, const 
     bool subject_is_utf8 = !unicode_matching && ops->split_utf8_native &&
         ops->split_utf8_native(splitter_root.get());
     JsRegexData* scan_data = NULL;
-    // D8.4.1v2: a builtin splitter has no observable failed exec probes.
+    // D7.4.1: a builtin splitter has no observable failed exec probes.
     // find its next seat once, then keep the ordinary match/capture protocol.
     bool skip_failed_probes = ops == &js_regexp_default_ops && s_str &&
         !unicode_matching && js_regexp_builtin_bulk_eligible(splitter_root.get(), &scan_data) &&
@@ -19154,7 +19154,7 @@ Item js_collection_create_with_storage(TypeMap* shape, Pool* pool, int kind, boo
     collection->base.type_id = LMD_TYPE_MAP;
     collection->base.map_kind = MAP_KIND_COLLECTION;
     collection->base.type = shape;
-    // D6.2.2v2: capability storage is not an observable property or cloneable field.
+    // D7.2.2: capability storage is not an observable property or cloneable field.
     collection->collection_data = data;
     Map* initialized = map_fill_reserve_data(&collection->base);
     return initialized ? Item{.map = initialized} : ItemError;
@@ -19778,7 +19778,7 @@ extern "C" Item js_typed_array_callback_algorithm(Item obj, Item* args, int argc
 }
 
 // typed methods share their element algorithms across frontends; property,
-// coercion and invocation operations remain frontend-owned (D1.3v3, D5.3).
+// coercion and invocation operations remain frontend-owned (D1.3, D6.3).
 extern "C" Item js_typed_array_method_with_ops(Item obj, Item* args, int argc,
         bool array_semantics, JsTypedArrayMethodKind kind, const JsTypedArrayOps* ops) {
     const JsBufferViewOps* buffer = ops ? ops->buffer : &js_buffer_view_default_ops;
@@ -19948,7 +19948,7 @@ extern "C" Item js_typed_array_method_with_ops(Item obj, Item* args, int argc,
 }
 
 // join and locale conversion retain their owners, temporary text and primitive
-// receiver homes across user conversion callbacks (D5.2-D5.3).
+// receiver homes across user conversion callbacks (D6.2-D6.3).
 extern "C" Item js_array_like_join_kernel(Item obj, bool typed_array, int64_t length,
         const char* separator, int separator_len, bool locale,
         const JsTypedArrayOps* ops) {
@@ -20051,7 +20051,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 // so falling through produced ItemError before the callback.
                 return js_array_generic_flat_map(obj, args, argc);
             }
-            // D6.2.2v2: operation comes from the stored target, not a property
+            // D7.2.2: operation comes from the stored target, not a property
             // spelling or an own method on the receiver.
             // ValidateTypedArray: check for detached buffer before any method.
             // Js54 P5: only throw when invoked via TypedArray.prototype — when the
@@ -21294,7 +21294,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         JsStringIntrinsicOp operation, Item* args, int argc) {
     if (operation == JS_STRING_INTRINSIC_MATCH_ALL)
         return js_regexp_string_match_all_with_ops(str, argc ? args[0] : make_js_undefined(), NULL);
-    // D6.2.2v2: the target body supplies immutable operation policy; receiver
+    // D7.2.2: the target body supplies immutable operation policy; receiver
     // properties and observable names cannot redirect an extracted intrinsic.
     if (get_type_id(str) != LMD_TYPE_STRING) {
         // For replaceAll, defer ALL coercion of `this` until after searchValue checks per
@@ -21480,7 +21480,7 @@ static Item js_string_intrinsic_algorithm(Item str,
             // Lambda's fn_split splits by code point (S17.1.1) — right for
             // Lambda, wrong here. ASCII keeps the shared path: there the two
             // readings coincide and fn_split is cheaper.
-            // substring allocation can collect before the first append (D5.3.3).
+            // substring allocation can collect before the first append (D6.3.3).
             units_root.set(js_array_new(0));
             int64_t units = js_string_utf16_length(sstr);
             for (int64_t i = 0; i < units; i++) {
@@ -21499,7 +21499,7 @@ static Item js_string_intrinsic_algorithm(Item str,
         if (get_type_id(result) == LMD_TYPE_ARRAY && result.array) {
             if (!tagged_literal_split) {
                 // fn_split's inferred pointer slots hold raw String*, not JS
-                // Items. Widen before the JS read boundary (D3.3.1v2).
+                // Items. Widen before the JS read boundary (D4.3.1).
                 array_widen_inferred_pointer_lane(result.array);
             }
             // apply limit (compare as unsigned to avoid (int)0xFFFFFFFF = -1 bug)
@@ -22742,7 +22742,7 @@ static Item js_array_index_key(int64_t index) {
 static Item js_array_method_property_key(int64_t index) {
     // Generic Array.prototype methods operate on array-like objects whose
     // property names may exceed the 32-bit ArrayIndex range; preserve the
-    // full decimal ToPropertyKey spelling for those names (D6.2.2v2).
+    // full decimal ToPropertyKey spelling for those names (D7.2.2).
     if (index <= (int64_t)JS_PROPERTY_INDEX_MAX) {
         return js_property_index_key(index);
     }
@@ -22863,7 +22863,7 @@ static Item js_array_generic_push(Item object, Item* args, int argc) {
     // A clean ordinary Array has no observable index Set path. Preserve the
     // dense representation for append-heavy code, while descriptor, prototype,
     // and non-extensible receivers continue through the generic ES path
-    // (D8.4.3v2).
+    // (D7.4.3).
     if (get_type_id(object) == LMD_TYPE_ARRAY && object.array &&
             !object.array->is_js_arguments) {
         RootFrame roots(1);
@@ -22978,7 +22978,7 @@ static Item js_array_flatten_is_array_status(Item item) {
     TypeId type = get_type_id(item);
     // Numeric arrays are ordinary JavaScript arrays after Tune5 admission;
     // excluding them here leaves an empty compact array as a nested value
-    // instead of flattening it (D4.6.1v2).
+    // instead of flattening it (D5.6.1).
     if (type == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(item)) {
         return (Item){.item = ITEM_TRUE};
     }
@@ -23002,7 +23002,7 @@ static Item js_array_flatten_into_status(Item target, Item source, int64_t sourc
             LAMBDA_SCALAR_HOME(mapper_result_home);
             // Proxy and bound callbacks carry executable capability in their
             // entries; bypassing the kernel here rejected valid callables and
-            // skipped their apply/bound semantics (D6.2.2v2).
+            // skipped their apply/bound semantics (D7.2.2).
             element = js_call_function_into(mapper, this_arg, cb_args, 3,
                 &mapper_result_home);
             if (item_is_error(element)) return element;
@@ -23067,7 +23067,7 @@ static Item js_array_generic_flat_map(Item object, Item* args, int argc) {
 static Item js_array_generic_slice(Item object, Item* args, int argc) {
     // Slice allocates its species result before reading source entries. Keep the
     // receiver, result, and current entry in exact homes across those safepoints
-    // so JIT-only callers cannot lose them to GC (D5.4.3).
+    // so JIT-only callers cannot lose them to GC (D6.4.3).
     RootFrame roots(3);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> result_root(roots, ItemNull);
@@ -23252,7 +23252,7 @@ static bool js_array_try_fast_splice(Item object, Item deleted, int64_t length,
 static Item js_array_generic_splice(Item object, Item* args, int argc) {
     // Splice shifts object-valued entries across allocating property calls;
     // root the receiver, arguments, result array, and current value so a GC
-    // cannot leave one shifted slot pointing at a stale native address (D5.4.3).
+    // cannot leave one shifted slot pointing at a stale native address (D6.4.3).
     int rooted_argc = args && argc > 0 ? argc : 0;
     RootFrame roots((size_t)(3 + rooted_argc));
     Rooted<Item> object_root(roots, object);
@@ -24126,7 +24126,7 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
 
 Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
         int argc, bool from_right, uint64_t* result_home, const JsArrayOps* ops) {
-    // D5.3/D5.4.3: the reducer callback may collect before returning, so the
+    // D6.3/D6.4.3: the reducer callback may collect before returning, so the
     // receiver, callback, accumulator, and current element cannot live only in
     // native locals between iterations.
     RootFrame roots(6);
@@ -24141,7 +24141,7 @@ Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item
     // The callback can collect, so use one exact span for its four borrowed
     // operands instead of copying a native stack array at every iteration.
     // Clear it after each call: it must not retain a previous element across
-    // the next semantic Get (D5.3/D6.2.2v2).
+    // the next semantic Get (D6.3/D7.2.2).
     RootSpan callback_arg_roots(4);
     if (!roots.valid() || !callback_arg_roots.valid()) return ItemError;
     Item* callback_args = callback_arg_roots.items();
@@ -24265,11 +24265,11 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
         uint64_t* result_home) {
     // Array methods share the property-kernel implementations. The remaining
     // cases below are the operations whose receiver or result policy is not
-    // expressible by that generic dispatcher (D8.4.1v2).
+    // expressible by that generic dispatcher (D7.4.1).
     TypeId arr_type = get_type_id(arr);
     // ES Array methods that unconditionally Set length must reject a frozen
     // or length-locked receiver even when their element loop is empty. Keep
-    // this invariant at the array boundary before generic dispatch (D8.4.3v2).
+    // this invariant at the array boundary before generic dispatch (D7.4.3).
     if (arr_type == LMD_TYPE_ARRAY &&
             JS_OP_HAS(operation, JS_OP_FLAG_UNCONDITIONAL_LENGTH_WRITE)) {
         if (it2b(js_object_is_frozen(arr))) {
@@ -25528,7 +25528,7 @@ extern "C" Item js_get_intl_object_value() {
     js_set_function_name(segmenter_ctor_root.get(), js_name_item("Segmenter"));
     js_set_key_cstr(segmenter_proto_root.get(), "constructor", segmenter_ctor_root.get());
     js_set_key_cstr(segmenter_proto_root.get(), "segment", segmenter_method_root.get());
-    // D6.2.2v2: Intl.Segmenter owns [[Construct]] and a shared prototype;
+    // D7.2.2: Intl.Segmenter owns [[Construct]] and a shared prototype;
     // publishing it as a native function erased that capability after Tune4.
     js_initialize_native_constructor_prototype(segmenter_ctor_root.get(),
         segmenter_proto_root.get());
@@ -26470,7 +26470,7 @@ static void js_set_prototype_impl(Item object, Item prototype,
                 ? (Item){.item = ITEM_JS_UNDEFINED} : prototype_root.get());
         // Error carriers keep ordinary properties in a side map; without an
         // internal prototype slot, a custom NewTarget silently falls back to
-        // the intrinsic Error prototype (D6.2.2v2).
+        // the intrinsic Error prototype (D7.2.2).
         return;
     }
     if (ot == LMD_TYPE_VMAP && js_promise_vmap_is(object)) {
@@ -26478,7 +26478,7 @@ static void js_set_prototype_impl(Item object, Item prototype,
         if (!promise) return;
         // Promise carriers have no Map header slot for [[Prototype]]. Preserve
         // the OrdinaryCreateFromConstructor result here so Promise subclasses
-        // retain their prototype for `instanceof` and species lookup (D6.2.2v2).
+        // retain their prototype for `instanceof` and species lookup (D7.2.2).
         promise->prototype_override = prototype_root.get().item == ItemNull.item
             ? (Item){.item = ITEM_JS_UNDEFINED} : prototype_root.get();
         promise->has_prototype_override = true;
@@ -27093,7 +27093,7 @@ static Item js_get_async_iterator_proto() {
         return js_async_iterator_proto_cache;
     }
     JS_ROOTS(roots, proto_root, js_new_object(), obj_proto_root, ItemNull, si_fn_root, ItemNull);
-    // D5.4.3: the realm cache cannot own this prototype until initialization
+    // D6.4.3: the realm cache cannot own this prototype until initialization
     // completes, and each constructor/property lookup below may collect.
     {
         Item obj_ctor = js_get_constructor(js_name_item("Object", 6));
@@ -27127,7 +27127,7 @@ extern "C" Item js_get_generator_shared_proto(bool is_async) {
         parent_root, ItemNull,
         fn_root, ItemNull,
         tag_val_root, ItemNull);
-    // D5.4.3: forced collection can run while intrinsic callables are created;
+    // D6.4.3: forced collection can run while intrinsic callables are created;
     // keep the unpublished shared prototype owned until its realm cache store.
     parent_root.set(is_async ? js_get_async_iterator_proto() : js_get_iterator_proto());
     js_set_prototype(proto_root.get(), parent_root.get());
@@ -27262,7 +27262,7 @@ extern "C" JsGeneratorStateRecord* js_generator_get_ast_state(Item generator) {
 static bool js_iterator_state_ensure_roots(void) {
     // Iterator prototypes and generator markers are realm singletons. Their
     // exact roots are now owned by JsRealmSlots, so no secondary lazy record
-    // or fixed root span is needed (D5.3.5; JSCU29).
+    // or fixed root span is needed (D6.3.5; JSCU29).
     return js_active_runtime_state != NULL;
 }
 
@@ -28171,7 +28171,7 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
     }
 
     // WebIDL collection VArrays are iterable array-like objects without
-    // acquiring JavaScript Array identity (D1.3/D7.4.5v2).
+    // acquiring JavaScript Array identity (D1.3/D9.5.5).
     if (tid == LMD_TYPE_VARRAY) {
         return js_create_fixed_iterator(iterable, JS_CLASS_MAP_ITERATOR, -1);
     }
@@ -29084,7 +29084,7 @@ static bool js_domain_is_domain_item(Item domain) {
 }
 
 static void js_domain_sync_visible_state(void) {
-    // D5.3/D5.4.3: domain publication allocates process properties and the
+    // D6.3/D6.4.3: domain publication allocates process properties and the
     // visible stack array, so transient values must stay exact roots across
     // each allocation instead of relying only on the persistent state slots.
     RootFrame roots(2);
@@ -29874,7 +29874,7 @@ static bool js_promise_is_builtin_promise_constructor(Item constructor) {
         : js_get_constructor(js_name_item("Promise", 7));
     // Fast native capability paths are valid only for this realm's exact
     // Promise binding. Bound/user functions may share names or bodies without
-    // sharing identity or construction semantics (D6.2.2v2).
+    // sharing identity or construction semantics (D7.2.2).
     return constructor.item == intrinsic.item;
 }
 
@@ -30304,7 +30304,7 @@ static Item js_promise_combinator_iterable_with_constructor(
         reject_fn_root.set((kind == 0 && custom_constructor) ? reject_root.get() :
             js_promise_make_bound_element_handler(reject_handler,
                 counter_root.get(), index, result_item));
-        // D7.2.2: Promise.all exposes the capability reject directly; wrapping
+        // D9.3.2: Promise.all exposes the capability reject directly; wrapping
         // it changes observable callback identity for custom constructors.
 
         Item error = ItemNull;
@@ -30379,7 +30379,7 @@ static Item js_promise_combinator_with_constructor(Item constructor, Item iterab
     if (item_is_error(promise_root.get())) return promise_root.get();
     resolve_root.set(resolve);
     reject_root.set(reject);
-    // D7.2.2/D7.3: every combinator uses one iterator transaction, including
+    // D9.3.2/D9.4: every combinator uses one iterator transaction, including
     // arrays, so custom @@iterator and close behavior cannot diverge by input
     // representation.
     return js_promise_combinator_iterable_with_constructor(
@@ -30437,7 +30437,7 @@ static Item js_await_sync_mark(Item marker, Item fulfilled, Item value) {
 // An await outside any body's activation (a script's or the entry module's
 // top level), in both tiers, and a host waiting on a promise. Jobs run only
 // until this promise's own reaction has, so it resumes at the same FIFO point
-// as a parked await (D6.3.1). Work outside the job queues (timers, another
+// as a parked await (D7.5.1). Work outside the job queues (timers, another
 // runtime) then gets a bounded loop drain; a promise still pending after it
 // reads as undefined.
 extern "C" Item js_await_sync(Item value) {
@@ -30508,7 +30508,7 @@ extern "C" Item js_await_sync(Item value) {
 // Async context: a running async function's suspended state machine.
 using JsAsyncContext = JsAsyncContextStateRecord;
 
-// JSCU10 (D5.1.1v2/D5.1.3): a suspended async activation is a GC-owned frame,
+// JSCU10 (D6.1.1/D6.1.3): a suspended async activation is a GC-owned frame,
 // not a slot in a context-wide table. The carrier owns its re-homed env and
 // result promise and traces its own edges; the resume/reject reactions retain
 // the frame Item, so it lives exactly as long as the awaited promise or the
@@ -30607,7 +30607,7 @@ static void js_async_drive(Item frame_item, Item input) {
     // js_bind_function allocates, so the freshly made native function has
     // to be rooted before it is passed in, not only after it is bound;
     // otherwise the bound callback can wrap a collected target and the
-    // suspended body is never resumed (**D1.5**, **D5.3.2**).
+    // suspended body is never resumed (**D1.5**, **D6.3.2**).
     resume_root.set(js_new_native_function(js_async_resume_handler));
     resume_root.set(js_bind_function(resume_root.get(), ItemNull, &frame_item, 1));
     reject_root.set(js_new_native_function(js_async_reject_handler));
@@ -31252,7 +31252,7 @@ extern "C" void js_tla_flush_for_runtime(Runtime* runtime) {
     }
     // Dynamic import is currently a synchronous loader; finish the imported
     // module's deferred TLA body before resolving its namespace, otherwise an
-    // already-settled `await` still exposes an empty export object (D7.2.2).
+    // already-settled `await` still exposes an empty export object (D9.3.2).
     g_tla_draining_depth++;
     js_tla_drain_ready_modules(runtime);
     g_tla_draining_depth--;
@@ -32237,7 +32237,7 @@ extern "C" Item js_text_encoder_new(void) {
     js_set_key_default(obj_root.get(), k_root.get(), v_root.get());
     // Native construct bodies that return their own object must attach the
     // constructor's real prototype; the common kernel cannot replace an
-    // explicit object result merely from the global spelling (D6.2.2v2).
+    // explicit object result merely from the global spelling (D7.2.2).
     js_collection_link_prototype(obj_root.get(), "TextEncoder", 11);
     return obj_root.get();
 }
@@ -32618,7 +32618,7 @@ extern "C" void js_weak_map_gc_trace(Map* map, gc_heap_t* gc) {
             !gc_register_ephemeron(gc, &data->target.item, &data->empty.item, NULL, NULL))
         gc_mark_item(gc, data->target.item);
     for (JsWeakCell* cell = data->cells; cell; cell = cell->next) {
-        // holdings are strong even when they indirectly retain the weak target (D5.3).
+        // holdings are strong even when they indirectly retain the weak target (D6.3).
         gc_mark_item(gc, cell->holdings.item);
         if (cell->target.item && !gc_register_ephemeron(gc, &cell->target.item, &data->empty.item,
                 js_weak_target_cleared, data)) gc_mark_item(gc, cell->target.item);

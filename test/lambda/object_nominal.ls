@@ -1,4 +1,4 @@
-// D2.6.6v2 phase 2 / S2.1.1v3: an object is a NOMINAL CONTAINER, not a
+// D3.1.1 phase 2 / S2.1.1v3: an object is a NOMINAL CONTAINER, not a
 // container kind. A nominal value is an ordinary map or element whose type
 // descriptor carries a nominal record, so `is object` and the structural test
 // are independent axes. This fixture pins that independence, and pins nominal

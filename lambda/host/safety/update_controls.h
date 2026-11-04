@@ -53,7 +53,7 @@ typedef struct SecurityUpdateControl SecurityUpdateControl;
 typedef struct SecurityUpdateJob SecurityUpdateJob;
 typedef struct SecurityUpdateLease SecurityUpdateLease;
 
-// D7.5.7-D7.5.8: trusted host only. No management or request-now operation is
+// D11.2.3-D11.2.4: trusted host only. No management or request-now operation is
 // part of the worker channel. These controls do not fetch or authenticate data.
 // Missing state requires explicit create-only initialization, never recovery
 // from a backup or an environment-provided catalog. Initial catalog is empty.

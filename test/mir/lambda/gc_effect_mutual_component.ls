@@ -1,4 +1,4 @@
-// D5.3.2: a closed recursive component has no collecting edge even when
+// D6.3.2: a closed recursive component has no collecting edge even when
 // neither member can be emitted before its callee.
 pn gc_mut_even(x: bool) bool {
     if (x) { return gc_mut_odd(false) }

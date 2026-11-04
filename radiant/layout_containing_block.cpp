@@ -316,7 +316,7 @@ ViewElement* layout_create_anonymous_text_item(LayoutContext* lycon,
 LayoutAnonymousTextRun* layout_append_anonymous_text_run(LayoutContext* lycon,
         ScratchMark* scope, LayoutAnonymousTextRun* head, DomText* text,
         bool leading, bool trailing, bool whitespace) {
-    // runs share the enclosing item's scratch owner (D4.5.1v4).
+    // runs share the enclosing item's scratch owner (D5.5.1).
     LayoutAnonymousTextRun* run = (LayoutAnonymousTextRun*)(scope
         ? scratch_scope_calloc(&lycon->scratch, scope, sizeof(LayoutAnonymousTextRun))
         : scratch_calloc(&lycon->scratch, sizeof(LayoutAnonymousTextRun)));
@@ -346,7 +346,7 @@ void layout_shift_anonymous_text_runs(LayoutAnonymousTextRun* runs, float dx, fl
 radiant::SizeF layout_measure_anonymous_text(LayoutContext* lycon,
         ViewElement* item, LayoutAnonymousTextRun* runs, float width, bool intrinsic) {
     // detach retained rectangles before trial formatting: layout_text recycles
-    // its input chain, and a size query must leave that chain intact (D4.1.4v5).
+    // its input chain, and a size query must leave that chain intact (D5.1.4).
     struct TextSnapshot {
         DomText* node;
         DomText value;

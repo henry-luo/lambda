@@ -16,11 +16,11 @@ property kernel; B6, the implementation record)
 
 Decisions introduced here use **JOP#** ledger IDs. Formal rulings are cited
 first whenever they cover the point. The design applies **D1.2–D1.3**,
-**D1.5–D1.6**, **D2.1.4**, **D2.6.1–D2.6.2**, **D3.4.1**,
-**D3.4.4v2–D3.4.6**, **D4.3.1–D4.3.3**,
-**D4.6.1v2–D4.6.2v2**, **D5.2.1–D5.2.2**,
-**D5.3.1–D5.3.5**, **D5.4.1–D5.4.4**, **D6.2.2v2**,
-**D7.4.1–D7.4.3**, and **D8.4.3**. The immutable JavaScript class metadata
+**D1.5–D1.6**, **D2.1.3**, **D3.2.1–D3.2.2**, **D3.4.1**,
+**D3.4.4–D3.4.6**, **D5.3.1–D5.3.2**,
+**D5.6.1–D5.6.2**, **D6.2.1–D6.2.2**,
+**D6.3.1–D6.3.5**, **D6.4.1–D6.4.4**, **D7.2.2**,
+**D9.5.1–D9.5.3**, and **D7.4.3**. The immutable JavaScript class metadata
 extension is adopted as **D3.4.7** in the formal design specification
 (version 1.15.0).
 
@@ -62,7 +62,7 @@ source/MIR/native caller
 The target is not a new JavaScript-private object model. JS objects remain
 Lambda `Item` values; ordinary objects remain `Map` + `TypeMap`; arrays remain
 Lambda arrays governed by Tune5's per-container elements kind; native host
-objects remain VMaps under **D7.4.1**. This design removes the parallel
+objects remain VMaps under **D9.5.1**. This design removes the parallel
 classification and dispatch mechanisms that accumulated around those shared
 representations.
 
@@ -76,10 +76,10 @@ The redesign is complete only when:
 | Property API | Tune5's eight public semantic operations remain unchanged. The ops table is internal and does not become a ninth public property family. |
 | Prototype | One resolver owns explicit `[[Prototype]]`, intrinsic defaults, TypedArray per-kind defaults, host prototypes, and null. `js_get_implicit_proto` and `__instance_proto__` are deleted. |
 | Native payloads | `Map.data` always matches `Map.type` under **D3.4.1/D3.4.5**. Proxy, TypedArray, ArrayBuffer, DataView, iterator, and collection state uses typed trailing/native storage, never a fake TypeMap or a marker property. |
-| Callability | Metadata never grants `[[Call]]` or `[[Construct]]`. Callable capability remains per value under **D6.2.2v2**; legacy callable class Maps become functions. |
-| Host boundary | VMap/Jube host operations remain the authority under **D7.4.1–D7.4.3**; one core bridge exposes them to the property kernel without copying their tables into JS Maps. |
+| Callability | Metadata never grants `[[Call]]` or `[[Construct]]`. Callable capability remains per value under **D7.2.2**; legacy callable class Maps become functions. |
+| Host boundary | VMap/Jube host operations remain the authority under **D9.5.1–D9.5.3**; one core bridge exposes them to the property kernel without copying their tables into JS Maps. |
 | Sentinels | Class/prototype/native-backing sentinels are deleted. `__promise_idx` is the only named temporary exception and is confined to JR7's legacy Promise adapter. |
-| Ownership | Metadata contains no realm `Item`, GC pointer, mutable cache, or context-owned address. All callback operands that survive allocation/re-entry are precisely rooted under **D5.3**. |
+| Ownership | Metadata contains no realm `Item`, GC pointer, mutable cache, or context-owned address. All callback operands that survive allocation/re-entry are precisely rooted under **D6.3**. |
 
 ---
 
@@ -167,17 +167,17 @@ outcome contracts.
 | **JOP2** | **Metadata is selected before publication.** Every JS-created Map starts with the correct metadata-qualified TypeMap. There is no post-construction class stamp. |
 | **JOP3** | **Metadata is immutable and pointer-carried.** A `TypeMap` carries one `const JsClassMeta*`. Shape transitions and descriptor clones preserve it exactly. |
 | **JOP4** | **Layout identity stays structural.** Per **D3.4.2**, class metadata does not alter the ordered field/type layout identity. It does qualify the runtime TypeMap/transition family and cache guard; TypeMaps with different metadata are never the same runtime blueprint even when their field layouts match. |
-| **JOP5** | **Metadata has no realm values.** It may contain stable IDs, flags, policies, diagnostic literals, and static function-table pointers, but no `Item`, GC pointer, mutable realm cache, or context-owned address under **D5.4.3**. |
+| **JOP5** | **Metadata has no realm values.** It may contain stable IDs, flags, policies, diagnostic literals, and static function-table pointers, but no `Item`, GC pointer, mutable realm cache, or context-owned address under **D6.4.3**. |
 | **JOP6** | **One exotic table.** `JsPropertyOps` is the only JS-core table for exotic property, prototype, and extensibility operations. Plain objects have no table lookup beyond a null pointer test. |
 | **JOP7** | **Tune5 remains the semantic owner.** The eight public property operations, `JsPropertyLane`, receiver propagation, key materialization, descriptor rules, and caller-owned throwing policy do not move into metadata. |
 | **JOP8** | **Fallthrough is non-observable.** An exotic callback may decline only before allocating, coercing, invoking user code, mutating state, or otherwise becoming observable. After any such action it must return a complete success/failure/error outcome. |
 | **JOP9** | **HasOwn is derived.** The public Tune5 `HasOwn` operation uses the exotic `GetOwnPropertyDescriptor` result; the table does not grow a second near-identical own-presence algorithm. |
 | **JOP10** | **One prototype resolver.** Explicit override, explicit null, intrinsic default, TypedArray-kind default, and host callback are policies behind one `GetPrototypeOf`/`SetPrototypeOf` core. Public `__proto__` is an ordinary accessor. |
-| **JOP11** | **Native payload is not shape data.** Engine exotics use typed trailing storage (or another D2.1.4-approved container extension); VMaps use their vtable payload. `Map.data` never holds a native payload. |
+| **JOP11** | **Native payload is not shape data.** Engine exotics use typed trailing storage (or another D2.1.3-approved container extension); VMaps use their vtable payload. `Map.data` never holds a native payload. |
 | **JOP12** | **`map_kind` is physical only.** Allocation, tracing, finalization, and checked payload accessors may inspect it. Property, prototype, branding, `instanceof`, coercion, and builtin semantics may not. |
 | **JOP13** | **Callability remains per value.** A class ID, metadata pointer, or ops table cannot make an object callable or constructable. Callable Proxies keep explicit per-value capabilities; class constructor Maps are retired in favor of `JsFunction`. |
 | **JOP14** | **Brand and `instanceof` are distinct.** Internal-slot brand checks use class/family metadata. JavaScript `instanceof` follows `Symbol.hasInstance` and the prototype chain; class ID is not a substitute, except where an existing formal error-carrier ruling explicitly maps error code to prototype. |
-| **JOP15** | **Host authority is not copied.** A single VMap/Jube bridge delegates to declared member records and record-owned hooks; module vtables remain the brand and lifecycle authority under **D7.4.1–D7.4.4**. |
+| **JOP15** | **Host authority is not copied.** A single VMap/Jube bridge delegates to declared member records and record-owned hooks; module vtables remain the brand and lifecycle authority under **D9.5.1–D9.5.4**. |
 | **JOP16** | **No hidden string protocol.** Internal slots use typed payload fields, capability fields, or NamePool private identities. Prefix/spelling tests do not identify engine state. |
 | **JOP17** | **Promise exception is narrowly owned.** Until JR7, a legacy Promise wrapper may retain `__promise_idx` only inside the Promise adapter. Metadata, prototype lookup, generic private-property code, and all other object kinds must not inspect it. |
 | **JOP18** | **Deletion is part of the feature.** Tune6 is incomplete while `js_property_exotic_adapter`, class stamping, `js_get_implicit_proto`, `__instance_proto__`, fake TypeMap sentinels, or semantic `map_kind` switches remain. |
@@ -196,7 +196,7 @@ The final semantic classification has two levels:
 | `JsClassMeta` | Which JavaScript brand, default prototype policy, and exotic internal operations apply? | ordinary Object, Proxy, TypedArray, Arguments, iterator, Error family, host bridge |
 
 `TypeId` is not replaced. It remains the shared data-model discriminator under
-**D1.2/D2.1.4**. `JsClassMeta` removes the three additional semantic
+**D1.2/D2.1.3**. `JsClassMeta` removes the three additional semantic
 discriminators layered above it.
 
 ### 3.2 Metadata resolution by representation
@@ -210,7 +210,7 @@ discriminators layered above it.
 | ordinary `ARRAY` / admitted `ARRAY_NUM` | static Array metadata selected by TypeId plus Tune5 ordinary-array admission |
 | `FUNC` | static Function metadata; produced-instance metadata remains construct-target data, not the function's own class |
 | `VMAP` | static host-bridge metadata; exact brand and callbacks come from the existing VMap/Jube type descriptor |
-| ERROR-tagged/resting error | metadata selected from the D8.4.3 error code-to-class mapping |
+| ERROR-tagged/resting error | metadata selected from the D7.4.3 error code-to-class mapping |
 | primitive wrapper access | static Boolean/Number/String/Symbol/BigInt metadata used only by the wrapper/property-reference boundary |
 
 The resolver does not allocate, mutate, intern, invoke script, or consult an
@@ -226,7 +226,7 @@ observes it.
 At the foreign-map seam, ordinary JS behavior is projected without writing
 into the Input-owned TypeMap. If the value is mutated into runtime ownership,
 the existing transition/copy path creates a runtime TypeMap with ordinary JS
-metadata. This applies **D4.6.2v2**'s explicit Input boundary rather than
+metadata. This applies **D5.6.2**'s explicit Input boundary rather than
 inventing a metadata side table.
 
 ### 3.4 Arrays and functions
@@ -235,7 +235,7 @@ Array class metadata is not stored in the companion Map. Tune5's companion is
 an orthogonal named/index-descriptor overlay and may be absent. The array's
 `TypeId` plus ordinary-array admission selects the Array metadata; its
 `JsElementsKind` remains per container as ruled by JR6 and
-**D2.6.1–D2.6.2**.
+**D3.2.1–D3.2.2**.
 
 Every function's own object class is Function. An intrinsic constructor's
 produced-instance metadata is carried by its construct capability or factory
@@ -244,7 +244,7 @@ descriptor. It must not overload the function's class metadata or mutable
 
 ### 3.5 Error carriers
 
-**D8.4.3** already makes the error code ↔ error-class prototype table
+**D7.4.3** already makes the error code ↔ error-class prototype table
 authoritative for error identity at rest. Tune6 exposes that existing mapping
 through `js_object_meta()`; it does not add a second class byte to the shared
 `LambdaError` carrier. Ordinary error overflow properties continue through
@@ -374,7 +374,7 @@ may be round-tripped through a string-keyed property.
 
 ### 5.3 VMap host layout
 
-Host/module-native objects remain VMaps under **D7.4.1**. Their vtable owns
+Host/module-native objects remain VMaps under **D9.5.1**. Their vtable owns
 tracing, finalization, and exact native brand. The JS property kernel sees one
 host-bridge metadata record whose operations delegate to the resolved declared
 member records and record-owned hooks.
@@ -425,7 +425,7 @@ PreventExtensions
 
 There is no separate `HasOwn` callback: **JOP9** derives it from
 `GetOwnPropertyDescriptor`. Call and construct entries are excluded by
-**D6.2.2v2/JOP13**. GC trace/finalize callbacks are storage-lifecycle
+**D7.2.2/JOP13**. GC trace/finalize callbacks are storage-lifecycle
 operations and stay with the GC allocation class or VMap vtable.
 
 Tune5's first seven names above plus derived `HasOwn` remain its exact eight
@@ -459,7 +459,7 @@ Callbacks receive Tune5's canonical inputs:
 - the original receiver for `Get` and `Set`; and
 - operation-specific value/descriptor operands.
 
-The lane is the only lookup identity under **D4.6.1v2**. A callback may
+The lane is the only lookup identity under **D5.6.1**. A callback may
 materialize the key once when ECMAScript requires it for a Proxy trap,
 reflection, TypedArray `CanonicalNumericIndexString`, or a host callback.
 Materialization does not create a second identity.
@@ -523,7 +523,7 @@ The fixed policies are:
 | `EXOTIC` | use the class table's `GetPrototypeOf` callback, e.g. Proxy |
 
 Metadata stores only the policy and stable ID. Realm-owned prototype Items
-stay in the existing rooted runtime state under **D5.4.3**.
+stay in the existing rooted runtime state under **D6.4.3**.
 
 ### 7.3 Explicit override storage
 
@@ -559,7 +559,7 @@ mutable cache.
 retires that representation:
 
 - a class constructor is a `JsFunction` with explicit call/construct entries
-  under **D6.2.2v2**;
+  under **D7.2.2**;
 - its public `.prototype` is an ordinary function property;
 - construction obtains the instance prototype through the existing
   `GetPrototypeFromConstructor` path; and
@@ -590,7 +590,7 @@ Examples:
 
 Builtin receiver checks call one helper such as
 `js_require_class_family(value, JS_FAMILY_TYPED_ARRAY)`. The helper resolves
-metadata and reports an in-band TypeError on mismatch under **D8.4.3**.
+metadata and reports an in-band TypeError on mismatch under **D7.4.3**.
 Individual builtins do not combine TypeId, `map_kind`, sentinel properties,
 and class-name bytes.
 
@@ -684,7 +684,7 @@ Jube VMaps route through one host bridge. DOM wrappers that are already VMaps
 use that bridge directly. Any remaining DOM `MapKind` special case is
 classified during Tune6 P0:
 
-- module/native ownership -> migrate to VMap per **D7.4.1**; or
+- module/native ownership -> migrate to VMap per **D9.5.1**; or
 - ECMAScript engine-owned exotic -> give it an engine `JsClassMeta` and typed
   trailing storage.
 
@@ -788,7 +788,7 @@ persists even with a custom prototype.
 MIR continues to call Tune5's eight property operations with a
 `JsPropertyLane` and optional observable key. It never bakes a
 `JsClassMeta*`, `JsPropertyOps*`, TypeMap pointer, host descriptor pointer, or
-realm prototype Item into shared code under **D5.4.3**.
+realm prototype Item into shared code under **D6.4.3**.
 
 ### 12.2 Existing ICs
 
@@ -805,7 +805,7 @@ and `JsPropertyOps` signatures contain no IC/feedback parameter.
 
 ### 12.3 JR8 handoff — **VOID (JR8 retired 2026-09-09)**
 
-> **D8.4.1v2**/LC1v2 ban feedback vectors and per-site caches in LambdaJS; the
+> **D7.4.1**/LC1v2 ban feedback vectors and per-site caches in LambdaJS; the
 > ICs this seam was to hand over were deleted on 2026-08-15
 > (`../Lambda_Design_JS_IC_Retire.md`). The consumer of these seams is now
 > compile-predicted shape specialization (IC_Retire Tier A, IR10–IR15;
@@ -823,7 +823,7 @@ ABIs.
 ### 13.1 Errors
 
 Every fallible operation returns an ordinary result/status or an ERROR-tagged
-`LambdaError*` under **D8.4.3**. There is no pending exception flag, throw
+`LambdaError*` under **D7.4.3**. There is no pending exception flag, throw
 side channel, or ops-table-local error slot.
 
 ### 13.2 GC
@@ -834,7 +834,7 @@ side channel, or ops-table-local error slot.
   allocation/storage tracer.
 - VMap payload tracing remains its vtable's responsibility.
 - Ordinary shape data is traced from the TypeMap exactly as required by
-  **D3.4.1/D4.3.3**.
+  **D3.4.1/D5.3.2**.
 - No native pointer is stored as an Item or ordinary property.
 
 Forced-GC tests cover every exotic constructor, expando transition, callback
@@ -844,7 +844,7 @@ re-entry, prototype override, Proxy trap, and payload finalizer.
 
 Metadata/ops tables are immutable and may be shared. TypeMaps, prototypes,
 shape transitions, and host objects keep their existing context/thread owner
-under **D5.4.1–D5.4.4**. Tune6 adds no lock, atomic reference protocol,
+under **D6.4.1–D6.4.4**. Tune6 adds no lock, atomic reference protocol,
 process-global mutable registry, or cross-context pointer cache.
 
 ### 13.4 Module lifetime
@@ -878,17 +878,17 @@ not alter the existing structural D3.4 rulings.
 
 ### 14.2 Existing rulings applied without change
 
-- **D2.1.4** permits typed extensions of shared container representations;
+- **D2.1.3** permits typed extensions of shared container representations;
   Tune6 uses that layer instead of new TypeIds.
 - **D3.4.1/D3.4.5** require `Map.type` and `Map.data` to agree; native payload
   separation enforces the existing invariant.
-- **D4.6.1v2–D4.6.2v2** remain the sole property-name identity authority.
-- **D5.3** governs roots across every operation/callback boundary.
-- **D5.4.3** forbids realm prototype Items and metadata pointers in baked MIR.
-- **D6.2.2v2** keeps call/construct capability per callable value.
-- **D7.4.1** keeps native host objects on VMap and ECMAScript exotics in the
+- **D5.6.1–D5.6.2** remain the sole property-name identity authority.
+- **D6.3** governs roots across every operation/callback boundary.
+- **D6.4.3** forbids realm prototype Items and metadata pointers in baked MIR.
+- **D7.2.2** keeps call/construct capability per callable value.
+- **D9.5.1** keeps native host objects on VMap and ECMAScript exotics in the
   engine-owned object layer.
-- **D8.4.3** remains the one completion/error channel.
+- **D7.4.3** remains the one completion/error channel.
 
 ---
 
@@ -942,14 +942,14 @@ broad file decomposition after JR4/JR6/JR7/JR8 deletions so code moves once.
 | Keep `js_class` byte and add an ops table beside it | Preserves post-publication stamping and two metadata mechanisms. |
 | Put `JsClassMeta` directly on every Map | Adds per-object size/cost and duplicates immutable data that belongs to shared shapes. |
 | Put array elements kind in metadata | Elements representation is mutable per array; JR6 correctly stores it per container. |
-| Put call/construct entries in class metadata | Violates **D6.2.2v2** and makes all values of a class share callability. |
+| Put call/construct entries in class metadata | Violates **D7.2.2** and makes all values of a class share callability. |
 | Let `map_kind` index the ops table | Keeps physical storage and semantic behavior coupled; non-Map/VMap/array cases immediately require parallel dispatch again. |
 | Keep native payload in `Map.data` and redirect all property access to a side Map | Violates **D3.4.1/D3.4.5**, retains dual property storage, and forces every ordinary access through exotic code. |
 | Store native pointers in hidden string properties after “upgrade” | Makes internal slots forgeable/reflectable, burdens shapes and GC, and retains sentinel protocols. |
-| Store realm prototype Items in static metadata | Violates **D5.4.3**, leaks/reset-crosses realms, and creates hidden roots. |
+| Store realm prototype Items in static metadata | Violates **D6.4.3**, leaks/reset-crosses realms, and creates hidden roots. |
 | Give every exotic operation a mandatory full implementation | Duplicates ordinary descriptor/prototype algorithms across types. Explicit non-observable fallthrough is the smaller correct seam. |
 | Allow arbitrary callback fallthrough after work | Can double-run traps/side effects and continue with stale receiver/shape state. |
-| Convert all engine exotics to new TypeIds | Spends shared tag budget and violates the extend-in-place direction of **D1.2/D2.1.4**. |
+| Convert all engine exotics to new TypeIds | Spends shared tag budget and violates the extend-in-place direction of **D1.2/D2.1.3**. |
 | Patch C2MIR for the new layout | Forbidden by **D1.6** and repository rule 14. |
 
 ---

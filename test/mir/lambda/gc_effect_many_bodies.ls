@@ -1,4 +1,4 @@
-// D5.3.2: a 65th GC-free function must remain a proven direct-call target.
+// D6.3.2: a 65th GC-free function must remain a proven direct-call target.
 // Keep each body distinct so emission records more than the old fixed cap.
 
 pn gc_leaf_00(x: int) int { var y = x; while (y > 0) { y = y - 1 }; return x + 1 }

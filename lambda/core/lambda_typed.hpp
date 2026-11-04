@@ -221,7 +221,7 @@ inline Map* as_map(ItemOf<LMD_TYPE_MAP> v) {
     return v.ptr();
 }
 
-// D2.6.6: an object shares Element's layout, so it CANNOT be viewed as a Map*
+// D3.1.1: an object shares Element's layout, so it CANNOT be viewed as a Map*
 // — `type`/`data` sit at different offsets. Read an object's attribute face
 // through MapReader (which holds the shape and buffer directly) or through the
 // object's own members; the old `(Map*)` pun is gone deliberately.
@@ -284,7 +284,7 @@ inline ConstShapeRef shape_borrow(const ShapeEntry* p) {
     return ConstShapeRef(p);
 }
 
-// D3.4.3v3: the owner type bounds the walk; a tree node's chain may run on
+// D3.4.3: the owner type bounds the walk; a tree node's chain may run on
 // past its last field into a descendant's.
 inline ShapeRef shape_next(const TypeMap* owner, ShapeRef shape) {
     return shape ? shape_borrow(typemap_next_field(owner, shape.get())) : ShapeRef();

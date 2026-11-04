@@ -45,7 +45,7 @@ let NO_VAR = -1   // handle-store spelling of a null variable
 
 // Handles are homogeneous integer lanes. The world owns concrete record
 // lanes; cons[0] is deliberately null, hence only that store is nullable.
-// This exercises T[]'s MapVariable*/MapConstraint* mapping (D3.2.4v3).
+// This exercises T[]'s MapVariable*/MapConstraint* mapping (D4.2.5).
 type Vec = int[]
 type Variable = {val: int, constraints: Vec, determinedBy: int,
     walkStrength: int, stay: int, mark: int}
@@ -64,7 +64,7 @@ pn vec_add(var v: Vec, item: int) any {
 }
 
 // read-only: a `var` here made every caller's place copy (`cs = w.vars[i].constraints`)
-// count as mutated, so each call copied the constraint list (S9.1.2, D4.4.6)
+// count as mutated, so each call copied the constraint list (S9.1.2, D5.4.5)
 fn vec_at(v: Vec, idx: int) int {
     return v[idx]
 }
