@@ -278,6 +278,33 @@ try {
             assert.equal(check.workerSlots, name === 'test_radiant_page_snapshot' ? 2 : 3);
         }
     });
+    check('Reduced Radiant inventory preserves the full gate and selects explicit cases', () => {
+        const reduced = JSON.parse(invoke(['--target=radiant', '--category=baseline', '--radiant-baseline', '--list']).stdout);
+        const byName = new Map(reduced.map(t => [t.baseName, t]));
+        const full = new Map(inventory.map(t => [t.baseName, t]));
+        for (const name of ['test_map_gtest', 'test_epub_reader_state']) {
+            assert.ok(full.has(name));
+            assert.ok(!byName.has(name));
+        }
+        const cases = require('./radiant_baseline_cases.json');
+        for (const [name, selected] of Object.entries(cases)) {
+            assert.ok(full.has(name) && byName.has(name), name);
+            assert.equal(new Set(selected).size, selected.length);
+            assert.equal(byName.get(name).expectedCases, selected.length);
+            assert.deepEqual(byName.get(name).runnerArgs,
+                [...full.get(name).runnerArgs, '--gtest_filter=' + selected.join(':')]);
+        }
+        for (const [name, item] of full) {
+            if (!byName.has(name) || cases[name]) continue;
+            assert.deepEqual(byName.get(name), item, name);
+        }
+    });
+    check('Reduced Radiant case lists reject missing cases', () => {
+        const { child, summary } = runSelected(['test_paged_media_gtest'], 'pass', ['--radiant-baseline']);
+        assert.notEqual(child.status, 0);
+        const count = require('./radiant_baseline_cases.json').test_paged_media_gtest.length;
+        assert.ok(summary.failed_test_names.some(name => name.includes(`expected ${count} selected cases, got 4`)));
+    });
     check('View workers keep the discovered executables across a concurrent relink', () => {
         const viewer = path.join(fixture, 'relink-viewer.exe');
         const native = path.join(fixture, 'test_radiant_view_gtest.exe');
