@@ -1557,14 +1557,14 @@ TypeId census_any_type_id(Transpiler* tp, AnyReason reason) {
     return LMD_TYPE_ANY;
 }
 
-// unbound names and non-structural type cycles have no evaluable meaning even
-// in relaxed mode (S16.10.4, S11.4.12v2).
+// unbound names, non-structural cycles and repeated written keys stay invalid
+// in relaxed mode (S16.10.4, S11.4.12v2, S2.3.1v2).
 // Parse/syntax failures never reach here, so they are never downgraded.
 static bool record_as_static_warning(Transpiler* tp, LambdaErrorCode code,
         LambdaError* error) {
     if (!tp->static_warning || !ERR_IS_SEMANTIC(code) ||
             code == ERR_UNDEFINED_VARIABLE || code == ERR_UNDEFINED_FUNCTION ||
-            code == ERR_TYPE_CYCLE) return false;
+            code == ERR_TYPE_CYCLE || code == ERR_DUPLICATE_KEY) return false;
     tp->warning_count++;
     if (!tp->warnings) tp->warnings = arraylist_new(8);
     arraylist_append(tp->warnings, error);
@@ -6400,10 +6400,43 @@ static bool ast_map_items_require_runtime_shape(Transpiler* tp, AstNode* items) 
     return false;
 }
 
+// S2.3.1v2: check written names before namespace lowering or item relinking;
+// computed keys and spread contents keep their runtime replacement semantics.
+static void validate_literal_keys(Transpiler* tp, AstNode* items) {
+    struct WrittenKey { String* name; Target* ns; };
+    int count = ast_linked_node_count(items);
+    WrittenKey* seen = (WrittenKey*)pool_calloc(tp->pool, sizeof(WrittenKey) * count);
+    int used = 0;
+    for (AstNode* item = items; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR ||
+                ast_node_is_syntactic_spread_key(tp, item)) continue;
+        AstNamedNode* named = (AstNamedNode*)item;
+        if (named->key || !named->name) continue;
+        String* name = named->name;
+        Target* ns = NULL;
+        StrView source = ast_node_source(tp, item);
+        if (!source.length || source.str[0] != '\'') {
+            StrView local = {};
+            ns = lambda_namespace_qualify(tp, {name->chars, name->len}, &local);
+            if (ns) name = name_pool_create_strview(tp->name_pool, local);
+        }
+        for (int i = 0; i < used; i++) {
+            if (same_name_string(seen[i].name, name) && target_equal(seen[i].ns, ns)) {
+                record_semantic_error_span(tp, item->source_span, ERR_DUPLICATE_KEY,
+                    "duplicate explicit key '%.*s' in literal",
+                    (int)named->name->len, named->name->chars);
+                break;
+            }
+        }
+        seen[used++] = {name, ns};
+    }
+}
+
 // A map node holds the raw item list its items were reduced into; resolution
 // relinks it as the retained item chain.
 static void resolve_map(Transpiler* tp, AstMapNode* ast_node) {
     AstNode* items = ast_node->item;
+    validate_literal_keys(tp, items);
     resolve_qualified_literal_keys(tp, items);
     ast_node->item = NULL;
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
@@ -11661,6 +11694,7 @@ static AstNode* build_element_syntax(Transpiler* tp, SourceSpan span,
 static void resolve_element(Transpiler* tp, AstElementNode* node) {
     String* name = (String*)syntax_tail((AstNode*)node, ELEMENT_SYNTAX_SIZE)[0];
     AstNode* children = node->item;
+    validate_literal_keys(tp, children);
     node->item = NULL;
     StrView tag = {name->chars, (size_t)name->len};
     TypeObject* object_type = lookup_object_type_for_tag(tp, tag);
