@@ -240,7 +240,7 @@ try {
     check('Radiant inventory includes every baseline phase', () => {
         const selected = new Set(inventory.map(t => t.baseName));
         for (const name of ['test_scene3d_unit_gtest', 'test_map_gtest', 'test_paged_media_gtest',
-            'test_ui_automation_gtest', 'test_radiant_view_ui_gtest', 'test_dom_ui_gtest',
+            'test_ui_automation_gtest',
             'test_page_load_gtest', 'test_radiant_view_gtest', 'test_layout_fuzzy_gtest',
             'test_wpt_css_syntax_gtest', 'test_wpt_input_events_gtest',
             'test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_radiant_render_baseline']) {
@@ -590,15 +590,14 @@ try {
         assert.equal(child.status, 1);
         assert.ok(summary.failed_test_names.some(t => t.includes('at least 25 passing tests')));
     });
-    check('UI runner aliases retain separate arguments and artifacts', () => {
-        const names = ['test_ui_automation_gtest', 'test_radiant_view_ui_gtest', 'test_dom_ui_gtest'];
+    check('UI automation runs the combined suites once', () => {
+        const names = ['test_ui_automation_gtest'];
         const { child, output, summary } = runSelected(names);
         assert.equal(child.status, 0, child.stderr);
-        assert.equal(summary.level2_c_tests.length, 3);
-        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade', 'view', 'dom'].entries()) {
-            const data = JSON.parse(fs.readFileSync(path.join(output, names[index] + '_results.json'), 'utf8'));
-            assert.equal(data.args[data.args.indexOf('--suite') + 1], suite);
-        }
+        assert.equal(summary.level2_c_tests.length, 1);
+        const data = JSON.parse(fs.readFileSync(path.join(output, names[0] + '_results.json'), 'utf8'));
+        assert.equal(data.args[data.args.indexOf('--suite') + 1], 'baseline,dtna,timeline,wired,clay,blade,view,dom');
+        assert.ok(!inventory.some(t => ['test_radiant_view_ui_gtest', 'test_dom_ui_gtest'].includes(t.baseName)));
     });
     for (const budget of [5, 12]) check(`Nested pools share ${budget} slots, backfill light suites, and leave exclusive checks alone`, () => {
         const trace = path.join(fixture, `trace-suites-${budget}`);
