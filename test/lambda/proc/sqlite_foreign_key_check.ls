@@ -13,6 +13,9 @@ pn main() {
         sqlite.execute(tx, "CREATE TABLE parent (id INTEGER PRIMARY KEY)")^
         sqlite.execute(tx, "CREATE TABLE child (parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)")^
         sqlite.execute(tx, "CREATE TABLE pragma_foreign_key_check (value INTEGER)")^
+        sqlite.execute(tx, "CREATE TABLE pragma_integrity_check (value INTEGER)")^
+        let integrity=sqlite.query(tx, "PRAGMA main.integrity_check")^
+        print(len(integrity)==1 and integrity[0][0]=="ok"); print("\n")
         print(len(sqlite.query(tx, "PRAGMA main.foreign_key_check")^) == 0); print("\n")
         sqlite.execute(tx, "INSERT INTO child VALUES (7)")^
         let broken=sqlite.query(tx, "PRAGMA main.foreign_key_check")^

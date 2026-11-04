@@ -9,14 +9,17 @@
 #include <cmath>
 #include <cstring>
 #include <limits.h>
+#include <stdlib.h>
 #include "../lib/strbuf.h"
 #include "../lib/tagged.hpp"
 #include "../lib/uv_loop.h"
+#include "../lib/memtrack.h"
 
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/event.hpp"
 #include "../radiant/render.hpp"
+#include "../radiant/radiant.hpp"
 #include "../radiant/render_css3d.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/io/mark_builder.hpp"
@@ -32,6 +35,7 @@ extern "C" {
 }
 
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/concurrency.h"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
@@ -110,6 +114,227 @@ TEST(DomDocumentOwnership, HeaplessSupportContextCanResetBeforeTeardown) {
         EXPECT_EQ(root_vector_count(&js_runtime_state.realm_slots.values), 0);
     }
     runtime_cleanup(&runtime);
+}
+
+TEST(DomDocumentOwnership, LoaderRuntimeSurvivesActiveCleanupAndRetries) {
+    UiContext ui = {};
+    struct Cleanup {
+        UiContext* ui;
+        ~Cleanup() { ui_context_release_loader_runtime(ui); }
+    } cleanup = {&ui};
+    Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+    ASSERT_NE(runtime, nullptr);
+    runtime_init(runtime);
+    ui.loader_runtime = lam::own(runtime);
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_TRUE(eval_context_transfer_thread(owner));
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(runtime, "null;", 5,
+        "loader-runtime-owner.js", nullptr)));
+    LambdaScheduler* scheduler = lambda_scheduler_create(3);
+    ASSERT_NE(scheduler, nullptr);
+    runtime_set_scheduler(runtime, scheduler);
+    {
+        RuntimeExecutionScope active(owner);
+        ui.destroy();
+        EXPECT_EQ(ui.loader_runtime.get(), runtime);
+        EXPECT_FALSE(ui_context_release_loader_runtime(&ui));
+        EXPECT_EQ(ui.loader_runtime.get(), runtime);
+        EXPECT_EQ(runtime_scheduler(runtime), scheduler);
+        EXPECT_FALSE(runtime->cleanup_incomplete);
+    }
+    EXPECT_TRUE(ui_context_release_loader_runtime(&ui));
+    EXPECT_EQ(ui.loader_runtime.get(), nullptr);
+}
+
+TEST(DomDocumentOwnership, RuntimeCleanupOwnsRecursiveDocumentRelease) {
+    for (int owned = 0; owned < 3; ++owned) {
+        Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+        ASSERT_NE(runtime, nullptr);
+        runtime_init(runtime);
+        struct Cleanup {
+            Runtime* runtime;
+            ~Cleanup() { if (runtime) { runtime_cleanup(runtime); mem_free(runtime); } }
+        } cleanup = {runtime};
+        ASSERT_TRUE(eval_context_transfer_thread(runtime_get_eval_context(runtime)));
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(runtime, "null;", 5,
+            "recursive-document-owner.js", nullptr)));
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        ASSERT_NE(document, nullptr);
+        document->js.runtime = runtime;
+        if (owned) {
+            document->lambda_runtime = runtime;
+            document->owns_script_runtime = owned == 1;
+        }
+        runtime->dom_doc = document;
+        EXPECT_EQ(runtime_try_cleanup(runtime), RUNTIME_CLEANUP_COMPLETE) << owned;
+        EXPECT_EQ(destroyed, 1u) << owned;
+        EXPECT_EQ(runtime->eval_context, nullptr) << owned;
+        mem_free(runtime);
+        cleanup.runtime = nullptr;
+    }
+}
+
+static const RuntimeResourceDescriptor runtime_cleanup_probe_descriptor = {
+    RUNTIME_RESOURCE_TIMER, RUNTIME_RESOURCE_GROUP_NONE, "document-runtime-preflight"
+};
+
+static void runtime_cleanup_probe_closed(void* data) {
+    ++*(unsigned*)data;
+}
+
+TEST(DomDocumentOwnership, IncompatibleDocumentOwnersRefuseRuntimeCleanupBeforeTeardown) {
+    ASSERT_EXIT({
+        Runtime runtime = {};
+        Runtime other = {};
+        runtime_init(&runtime);
+        runtime_init(&other);
+        EvalContext* owner = runtime_get_eval_context(&runtime);
+        EvalContext* other_owner = runtime_get_eval_context(&other);
+        if (!owner || !other_owner || !eval_context_transfer_thread(owner) ||
+            item_is_error(js_interp_execute_source(&runtime, "null;", 5,
+                "refused-document-owner.js", nullptr))) _Exit(2);
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document) _Exit(3);
+        unsigned closed = 0;
+        RuntimeResourceTable* table = runtime_resource_table_context_ensure(owner);
+        if (!table || !runtime_resource_table_add_native_owned(table, nullptr,
+            &runtime_cleanup_probe_descriptor, runtime_cleanup_probe_closed, &closed)) _Exit(6);
+        document->js.runtime = &runtime;
+        document->lambda_runtime = &other;
+        runtime.dom_doc = document;
+        runtime_reset_heap(&runtime);
+        if (destroyed || closed || !runtime_heap(&runtime)) _Exit(7);
+        if (runtime_try_cleanup(&runtime) != RUNTIME_CLEANUP_RETRY ||
+            runtime.cleanup_incomplete || runtime.dom_doc != document || destroyed || closed ||
+            !runtime_heap(&runtime)) _Exit(4);
+        document->lambda_runtime = nullptr;
+        if (runtime_try_cleanup(&runtime) != RUNTIME_CLEANUP_COMPLETE || destroyed != 1 || closed != 1) _Exit(5);
+        runtime_cleanup(&other);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, MissingDocumentEvaluatorDoesNotBeginRuntimeTeardown) {
+    ASSERT_EXIT({
+        Runtime runtime = {};
+        Runtime foreign = {};
+        runtime_init(&runtime);
+        runtime_init(&foreign);
+        EvalContext* owner = runtime_get_eval_context(&runtime);
+        if (!owner || !eval_context_transfer_thread(owner) ||
+            item_is_error(js_interp_execute_source(&runtime, "null;", 5,
+                "document-evaluator-oom.js", nullptr))) _Exit(2);
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document || foreign.eval_context) _Exit(3);
+        document->js.runtime = &foreign;
+        runtime.dom_doc = document;
+        memtrack_fault_inject(0);
+        RuntimeCleanupResult result = runtime_try_cleanup(&runtime);
+        memtrack_fault_clear();
+        if (result != RUNTIME_CLEANUP_RETRY || runtime.cleanup_incomplete ||
+            runtime.dom_doc != document || destroyed || !runtime_heap(&runtime)) _Exit(4);
+        document->js.runtime = nullptr;
+        if (runtime_try_cleanup(&runtime) != RUNTIME_CLEANUP_COMPLETE || destroyed != 1) _Exit(5);
+        runtime_cleanup(&foreign);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+struct RuntimeCleanupOwnerChange {
+    DomDocument* document;
+    Runtime* other;
+    unsigned calls;
+};
+
+static void runtime_cleanup_change_document_owner(void* data) {
+    RuntimeCleanupOwnerChange* change = (RuntimeCleanupOwnerChange*)data;
+    change->calls++;
+    change->document->lambda_runtime = change->other;
+}
+
+TEST(DomDocumentOwnership, OwnerChangeAfterTeardownReportsIncompleteRuntime) {
+    // An incomplete runtime cannot be retried; isolate its live resources.
+    ASSERT_EXIT({
+        Runtime runtime = {};
+        Runtime other = {};
+        runtime_init(&runtime);
+        runtime_init(&other);
+        EvalContext* owner = runtime_get_eval_context(&runtime);
+        EvalContext* other_owner = runtime_get_eval_context(&other);
+        if (!owner || !other_owner || !eval_context_transfer_thread(owner) ||
+            item_is_error(js_interp_execute_source(&runtime, "null;", 5,
+                "document-owner-change.js", nullptr))) _Exit(2);
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document) _Exit(3);
+        document->js.runtime = &runtime;
+        runtime.dom_doc = document;
+        RuntimeCleanupOwnerChange change = {};
+        change.document = document;
+        change.other = &other;
+        RuntimeResourceTable* table = runtime_resource_table_context_ensure(owner);
+        if (!table || !runtime_resource_table_add_native_owned(table, nullptr,
+            &runtime_cleanup_probe_descriptor, runtime_cleanup_change_document_owner, &change)) _Exit(4);
+        if (runtime_try_cleanup(&runtime) != RUNTIME_CLEANUP_INCOMPLETE ||
+            !runtime.cleanup_incomplete || runtime.dom_doc != document || destroyed || change.calls != 1 ||
+            runtime_try_cleanup(&runtime) != RUNTIME_CLEANUP_INCOMPLETE || change.calls != 1) _Exit(5);
+        document->lambda_runtime = nullptr;
+        if (free_document_profiled(document, nullptr) || destroyed) _Exit(6);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+struct RecursiveRuntimeCleanupProbe {
+    Runtime* runtime;
+    RuntimeCleanupResult result;
+    unsigned calls;
+    bool heap_survived_reset;
+};
+
+struct RecursiveRuntimeCleanupResource : DomDocumentResourceData {
+    RecursiveRuntimeCleanupProbe* probe;
+};
+
+static void recursive_runtime_cleanup_resource(DomDocumentResourceData* data) {
+    RecursiveRuntimeCleanupResource* resource = (RecursiveRuntimeCleanupResource*)data;
+    resource->probe->calls++;
+    runtime_reset_heap(resource->probe->runtime);
+    resource->probe->heap_survived_reset = runtime_heap(resource->probe->runtime) != nullptr;
+    resource->probe->result = runtime_try_cleanup(resource->probe->runtime);
+    mem_free(resource);
+}
+
+TEST(DomDocumentOwnership, RuntimeCleanupWaitsForRecursiveDocumentDestruction) {
+    ASSERT_EXIT({
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        EvalContext* owner = runtime_get_eval_context(&runtime);
+        if (!owner || !eval_context_transfer_thread(owner) ||
+            item_is_error(js_interp_execute_source(&runtime, "null;", 5,
+                "recursive-document-close.js", nullptr))) _Exit(2);
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document) _Exit(3);
+        RecursiveRuntimeCleanupProbe probe = {};
+        probe.runtime = &runtime;
+        probe.result = RUNTIME_CLEANUP_COMPLETE;
+        RecursiveRuntimeCleanupResource* resource = (RecursiveRuntimeCleanupResource*)mem_calloc(
+            1, sizeof(RecursiveRuntimeCleanupResource), MEM_CAT_LAYOUT);
+        if (!resource) _Exit(4);
+        resource->probe = &probe;
+        if (!dom_document_add_resource(document, resource, recursive_runtime_cleanup_resource)) _Exit(5);
+        runtime.dom_doc = document;
+        free_document(document);
+        if (probe.calls != 1 || !probe.heap_survived_reset || probe.result != RUNTIME_CLEANUP_RETRY ||
+            destroyed != 1 || !runtime_heap(&runtime)) _Exit(6);
+        runtime.dom_doc = nullptr;
+        if (runtime_try_cleanup(&runtime) != RUNTIME_CLEANUP_COMPLETE) _Exit(7);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
 }
 
 TEST(DomDocumentOwnership, CrossRuntimeTimerKeepsItsOwningDocument) {
@@ -223,6 +448,120 @@ TEST(DomDocumentOwnership, LambdaOnlyEvaluatorClosesDocumentsAtResetAndTeardown)
     runtime_cleanup(&runtime);
     cleanup.runtime = nullptr;
     EXPECT_EQ(destroyed, 3u);
+}
+
+// A failed registration must not make a retry appear owned without a close row (D5.3.3).
+TEST(DomDocumentOwnership, FailedRegistrationCanBeRetried) {
+    unsigned destroyed = 0;
+    unsigned failures = 0;
+    for (size_t limit = 0; limit < 10; ++limit) {
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        Pool* pool = pool_create();
+        ASSERT_NE(pool, nullptr);
+        EvalContext* owner = runtime_get_eval_context(&runtime);
+        ASSERT_NE(owner, nullptr);
+        ASSERT_TRUE(eval_context_init(owner));
+        heap_init();
+        ASSERT_NE(owner->heap, nullptr);
+        owner->pool = owner->heap->pool;
+        owner->name_pool = name_pool_create_runtime(pool);
+        ASSERT_NE(owner->name_pool, nullptr);
+        RuntimeResourceTable* table = runtime_resource_table_context_ensure(owner);
+        ASSERT_NE(table, nullptr);
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        ASSERT_NE(document, nullptr);
+        memtrack_fault_inject(limit);
+        bool registered = dom_retain_owned_document(document);
+        memtrack_fault_clear();
+        if (!registered) {
+            failures++;
+            EXPECT_EQ(runtime_resource_table_active_count(table), 0) << limit;
+            ASSERT_TRUE(dom_retain_owned_document(document)) << limit;
+        }
+        EXPECT_EQ(runtime_resource_table_active_count(table), 1) << limit;
+        EXPECT_TRUE(dom_retain_owned_document(document)) << limit;
+        EXPECT_EQ(runtime_resource_table_active_count(table), 1) << limit;
+        if (limit % 2) {
+            free_document(document);
+            EXPECT_EQ(runtime_resource_table_active_count(table), 0) << limit;
+        } else {
+            runtime_reset_heap(&runtime);
+            EXPECT_EQ(runtime_resource_table_active_count(table), 0) << limit;
+        }
+        EXPECT_EQ(destroyed, limit + 1) << limit;
+        runtime_cleanup(&runtime);
+        pool_destroy(pool);
+    }
+    EXPECT_GE(failures, 3u);
+}
+
+struct CssomReentrantOwnerProbe : DomDocumentResourceData {
+    DomDocument* document;
+    bool* retained;
+    bool* attached;
+    bool* released;
+};
+
+struct CssomReentrantResourceProbe : DomDocumentResourceData { bool* released; };
+static void cssom_reentrant_resource_destroyed(DomDocumentResourceData* data) {
+    CssomReentrantResourceProbe* probe = (CssomReentrantResourceProbe*)data;
+    *probe->released = true;
+    mem_free(probe);
+}
+
+static void cssom_reentrant_owner_destroyed(DomDocumentResourceData* data) {
+    CssomReentrantOwnerProbe* probe = (CssomReentrantOwnerProbe*)data;
+    *probe->retained = dom_retain_owned_document(probe->document);
+    CssomReentrantResourceProbe* resource = (CssomReentrantResourceProbe*)mem_calloc(
+        1, sizeof(*resource), MEM_CAT_LAYOUT);
+    if (resource) {
+        resource->released = probe->released;
+        *probe->attached = dom_document_add_resource(probe->document, resource,
+            cssom_reentrant_resource_destroyed);
+        if (!*probe->attached) mem_free(resource);
+    }
+    // A nested close shares the outer teardown and must not destroy twice.
+    free_document(probe->document);
+    mem_free(probe);
+}
+
+// Closing callbacks cannot establish ownership of a document being destroyed (D5.3.3).
+TEST(DomDocumentOwnership, DestructionRejectsReentrantOwnership) {
+    for (int runtime_close = 0; runtime_close < 2; ++runtime_close) {
+        unsigned destroyed = 0;
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        Pool* pool = pool_create();
+        ASSERT_NE(pool, nullptr);
+        EvalContext* owner = runtime_get_eval_context(&runtime);
+        ASSERT_TRUE(owner && eval_context_init(owner));
+        heap_init();
+        ASSERT_NE(owner->heap, nullptr);
+        owner->pool = owner->heap->pool;
+        owner->name_pool = name_pool_create_runtime(pool);
+        ASSERT_NE(owner->name_pool, nullptr);
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        ASSERT_NE(document, nullptr);
+        ASSERT_TRUE(dom_retain_owned_document(document));
+        bool retained = true, attached = false, released = false;
+        CssomReentrantOwnerProbe* probe = (CssomReentrantOwnerProbe*)mem_calloc(
+            1, sizeof(*probe), MEM_CAT_LAYOUT);
+        ASSERT_NE(probe, nullptr);
+        probe->document = document;
+        probe->retained = &retained;
+        probe->attached = &attached;
+        probe->released = &released;
+        ASSERT_TRUE(dom_document_add_resource(document, probe, cssom_reentrant_owner_destroyed));
+        if (runtime_close) runtime_reset_heap(&runtime);
+        else free_document(document);
+        EXPECT_FALSE(retained) << runtime_close;
+        EXPECT_TRUE(attached) << runtime_close;
+        EXPECT_TRUE(released) << runtime_close;
+        EXPECT_EQ(destroyed, 1u) << runtime_close;
+        runtime_cleanup(&runtime);
+        pool_destroy(pool);
+    }
 }
 
 TEST(CssomIdentity, NativeResizeWritesReplaceInlinePriorityWithoutAScriptRealm) {

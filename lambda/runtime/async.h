@@ -161,6 +161,9 @@ void runtime_resource_table_init(RuntimeResourceTable* table, Context* owner,
 RuntimeResourceTable* runtime_resource_table_context(EvalContext* owner);
 RuntimeResourceTable* runtime_resource_table_context_ensure(EvalContext* owner);
 void runtime_resource_table_clear(RuntimeResourceTable* table);
+// Close every group except the one whose task-owned borrowers are still joining.
+void runtime_resource_table_close_except_group(RuntimeResourceTable* table,
+    RuntimeResourceGroup retained_group);
 void runtime_resource_table_destroy(RuntimeResourceTable* table);
 uint32_t runtime_resource_table_add(RuntimeResourceTable* table, Item value,
     const RuntimeResourceDescriptor* descriptor,

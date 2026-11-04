@@ -764,6 +764,7 @@ typedef enum SysFunc {
     SYSPROC_IO_SQLITE_CLONE,    // lambda.io.sqlite clone(source, path) - snapshot target
     SYSPROC_IO_SQLITE_PREIMAGE, // lambda.io.sqlite preimage(tx, path) - pre-write backup
     SYSPROC_IO_CREATE_FILE,      // io.create_file(path, bytes) - publish a new file
+    SYSPROC_IO_SQLITE_SNAPSHOT_DIGEST, // lambda.io.sqlite snapshot_digest(tx) - bounded read snapshot
 } SysFunc;
 
 typedef struct Type {
@@ -3653,6 +3654,7 @@ extern "C" {
     Item pn_io_sqlite_create(Item path);
     Item pn_io_sqlite_clone(Item source, Item path);
     Item pn_io_sqlite_preimage(Item handle, Item path);
+    Item pn_io_sqlite_snapshot_digest(Item handle);
     Item pn_io_sqlite_execute2(Item path, Item sql);
     Item pn_io_sqlite_execute3(Item path, Item sql, Item params);
     Item pn_io_sqlite_query2(Item path, Item sql);

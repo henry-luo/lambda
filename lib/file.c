@@ -1152,6 +1152,31 @@ static int file_anchor_parent(FileAnchor* anchor, const char* relative, char** c
     *leaf = slash ? slash + 1 : *copy;
     return fd;
 }
+
+static bool file_anchor_parent_matches(FileAnchor* anchor, const char* relative, int parent) {
+    char* copy = NULL; const char* leaf = NULL;
+    int fresh = file_anchor_parent(anchor, relative, &copy, &leaf);
+    struct stat held, named;
+    bool valid = fresh >= 0 && fstat(parent, &held) == 0 && fstat(fresh, &named) == 0 &&
+        held.st_dev == named.st_dev && held.st_ino == named.st_ino;
+    if (fresh >= 0) close(fresh);
+    mem_free(copy);
+    if (valid) {
+        // Rebind without callbacks: the authorized walk itself can rename a directory.
+        FileAnchor view = *anchor;
+        view.options.guard = NULL;
+        view.options.ancestor_guard = NULL;
+        view.options.namespace_guard = NULL;
+        copy = NULL; leaf = NULL;
+        fresh = file_anchor_parent(&view, relative, &copy, &leaf);
+        valid = fresh >= 0 && fstat(fresh, &named) == 0 &&
+            held.st_dev == named.st_dev && held.st_ino == named.st_ino;
+        if (fresh >= 0) close(fresh);
+        mem_free(copy);
+    }
+    if (!valid) errno = ESTALE;
+    return valid;
+}
 #endif
 
 FileAnchor* file_anchor_open(const char* path, const FileAnchorOptions* options) {
@@ -1299,14 +1324,8 @@ bool file_anchor_remove(FileAnchor* anchor, const char* relative, const FileRevi
         if (pass) {
             // A guard may run host code. Rebind the parent and leaf after it
             // before deleting, so callback-time substitution stays untouched.
-            char* fresh_copy = NULL; const char* fresh_leaf = NULL;
-            int fresh = file_anchor_parent(anchor, relative, &fresh_copy, &fresh_leaf);
-            struct stat held_parent, named_parent;
-            valid = fresh >= 0 && fstat(parent, &held_parent) == 0 && fstat(fresh, &named_parent) == 0 &&
-                held_parent.st_dev == named_parent.st_dev && held_parent.st_ino == named_parent.st_ino;
-            if (fresh >= 0) close(fresh);
-            mem_free(fresh_copy);
-            if (!valid) { errno = ESTALE; break; }
+            valid = file_anchor_parent_matches(anchor, relative, parent);
+            if (!valid) break;
         }
         valid = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0 && file_anchor_object_stat(anchor, &st);
         if (!valid) break;
@@ -1507,6 +1526,53 @@ bool file_anchor_read_all_named(FileAnchor* anchor, const char* relative, uint64
     return true;
 }
 
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+static bool file_anchor_stage_matches(int parent, const char* stage, const struct stat* expected) {
+    struct stat st;
+    if (fstatat(parent, stage, &st, AT_SYMLINK_NOFOLLOW) != 0) return false;
+    FileRevision actual = file_revision_from_stat(&st);
+    FileRevision original = file_revision_from_stat(expected);
+#ifdef __APPLE__
+    bool same_change_time = st.st_ctimespec.tv_nsec == expected->st_ctimespec.tv_nsec;
+#else
+    bool same_change_time = st.st_ctim.tv_nsec == expected->st_ctim.tv_nsec;
+#endif
+    if (!S_ISREG(st.st_mode) || st.st_nlink != 1 || !same_change_time || !file_revision_equal(&original, &actual)) {
+        errno = ESTALE;
+        return false;
+    }
+    return true;
+}
+
+static bool file_anchor_stage_has_content(int fd, const void* content, size_t size) {
+    unsigned char buffer[16384];
+    size_t offset = 0;
+    while (offset < size) {
+        off_t position = (off_t)offset;
+        if (position < 0 || (uint64_t)position != (uint64_t)offset) { errno = EFBIG; return false; }
+        size_t remaining = size - offset;
+        size_t chunk = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        ssize_t count = pread(fd, buffer, chunk, position);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { if (!count) errno = ESTALE; return false; }
+        if (memcmp(buffer, (const unsigned char*)content + offset, (size_t)count)) { errno = ESTALE; return false; }
+        offset += (size_t)count;
+    }
+    return true;
+}
+
+static void file_anchor_discard_stage(int parent, const char* stage, const struct stat* expected,
+        int fd, const void* content, size_t size) {
+    int error = errno;
+    // Only an unchanged prefix of our input is safe to remove after an error.
+    if (expected->st_size >= 0 && (uint64_t)expected->st_size <= size &&
+            file_anchor_stage_matches(parent, stage, expected) &&
+            file_anchor_stage_has_content(fd, content, (size_t)expected->st_size) &&
+            file_anchor_stage_matches(parent, stage, expected)) (void)unlinkat(parent, stage, 0);
+    errno = error;
+}
+#endif
+
 int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
         const void* content, size_t size, const FileRevision* expected) {
 #if defined(_WIN32) || defined(__EMSCRIPTEN__)
@@ -1522,6 +1588,7 @@ int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
     bool exists = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
     FileRevision actual = file_revision_from_stat(exists ? &st : NULL);
     int result = -1;
+    int stage_hold = -1;
     if (!exists && errno != ENOENT) goto done;
     if (!expected && exists) { errno = EEXIST; goto done; }
     if (expected && (!exists || !file_anchor_object_stat(anchor, &st) ||
@@ -1535,35 +1602,66 @@ int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
         if (!crypto_random_bytes(random, sizeof(random))) { errno = EIO; goto done; }
         memcpy(stage, FILE_ATOMIC_STAGE_PREFIX, sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1);
         hex_encode(random, sizeof(random), stage + sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1);
-        fd = openat(parent, stage, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+        fd = openat(parent, stage, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (fd >= 0 || errno != EEXIST) break;
     }
     if (fd < 0) goto done;
+    struct stat stage_stat;
+    if (fstat(fd, &stage_stat) != 0) { close(fd); goto done; }
+    // Keep the inode alive through authorization and publication to prevent reuse.
+    stage_hold = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (stage_hold < 0) {
+        int error = errno; file_anchor_discard_stage(parent, stage, &stage_stat, fd, content, size); close(fd); errno = error; goto done;
+    }
     FILE* stream = fdopen(fd, "wb");
-    if (!stream) { close(fd); unlinkat(parent, stage, 0); goto done; }
+    if (!stream) { int error = errno; close(fd); errno = error; file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done; }
     bool written = fwrite(content, 1, size, stream) == size && fflush(stream) == 0 &&
         file_anchor_sync(fd, anchor->options.flags) == 0;
-    if (fclose(stream) != 0) written = false;
-    if (!written || !file_anchor_validate(anchor)) { unlinkat(parent, stage, 0); goto done; }
+    int write_error = errno;
+    struct stat completed_stat;
+    if (fstat(fd, &completed_stat) == 0) stage_stat = completed_stat;
+    else { written = false; write_error = errno; }
+    if (fclose(stream) != 0) { written = false; write_error = errno; }
+    if (!written) { errno = write_error; file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done; }
+    if (!file_anchor_validate(anchor)) { file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done; }
     if (expected) {
         exists = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
         actual = file_revision_from_stat(exists ? &st : NULL);
         if (!exists || !file_anchor_object_stat(anchor, &st) || !file_revision_equal(expected, &actual)) {
-            unlinkat(parent, stage, 0); errno = ESTALE; goto done;
+            errno = ESTALE; file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
         }
         if (!file_anchor_guard(anchor, relative, FILE_ANCHOR_REPLACE, &actual)) {
-            int error = errno; unlinkat(parent, stage, 0); errno = error; goto done;
+            file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
         }
-        result = renameat(parent, stage, parent, leaf);
     } else {
         if (!file_anchor_guard(anchor, relative, FILE_ANCHOR_CREATE, NULL)) {
-            int error = errno; unlinkat(parent, stage, 0); errno = error; goto done;
+            file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
         }
-        result = file_publish_new_at(parent, stage, parent, leaf);
     }
+    // Host guards can change bindings; validate after the final callback.
+    if (!file_anchor_parent_matches(anchor, relative, parent)) {
+        file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
+    }
+    if (expected) {
+        exists = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
+        actual = file_revision_from_stat(exists ? &st : NULL);
+        if (!exists || !file_anchor_object_stat(anchor, &st) || !file_revision_equal(expected, &actual)) {
+            errno = ESTALE; file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
+        }
+    }
+    if (!file_anchor_stage_matches(parent, stage, &stage_stat)) {
+        errno = ESTALE; goto done;
+    }
+    // Do not rely on timestamp granularity to detect changes made by a guard.
+    if (!file_anchor_stage_has_content(stage_hold, content, size) ||
+            !file_anchor_stage_matches(parent, stage, &stage_stat)) {
+        goto done;
+    }
+    result = expected ? renameat(parent, stage, parent, leaf) :
+        file_publish_new_at(parent, stage, parent, leaf);
     {
         int publish_error = errno;
-        if (result != 0) unlinkat(parent, stage, 0);
+        if (result != 0) file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size);
         // publication has committed even if directory durability cannot be confirmed
         if (result == 0 && file_anchor_sync(parent, anchor->options.flags) != 0) {
             publish_error = errno;
@@ -1575,6 +1673,7 @@ int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
 done:
     {
         int error = errno;
+        if (stage_hold >= 0) close(stage_hold);
         close(parent);
         mem_free(copy);
         errno = error;

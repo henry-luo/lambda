@@ -118,9 +118,10 @@ static void dom_close_owned_document(void* data) {
 
 extern "C" bool dom_retain_owned_document(void* native_document) {
     DomDocument* document = (DomDocument*)native_document;
-    if (!document || !context) return false;
+    if (!document || document->destroying || !context) return false;
     for (DomDocumentResource* entry = document->resources; entry; entry = entry->next) {
-        if (entry->destroy == dom_owned_document_destroyed) return true;
+        if (entry->destroy == dom_owned_document_destroyed)
+            return ((DomOwnedDocumentResource*)entry->data.get())->id != 0;
     }
     RuntimeResourceTable* table = runtime_resource_table_context_ensure(context);
     if (!table) return false;
@@ -129,16 +130,19 @@ extern "C" bool dom_retain_owned_document(void* native_document) {
     if (!resource) return false;
     resource->table = table;
     resource->document = document;
-    if (!dom_document_add_resource(document, resource, dom_owned_document_destroyed)) {
-        mem_free(resource);
-        return false;
-    }
     static const RuntimeResourceDescriptor descriptor = {
         RUNTIME_RESOURCE_DOM_DOCUMENT, RUNTIME_RESOURCE_GROUP_NONE, "DOMDocument"
     };
     resource->id = runtime_resource_table_add_native_owned(table, document,
         &descriptor, dom_close_owned_document, resource);
-    return resource->id != 0;
+    // Publish the document marker only after the runtime owns a close row;
+    // otherwise an allocation failure makes a later retry falsely succeed.
+    if (!resource->id || !dom_document_add_resource(document, resource, dom_owned_document_destroyed)) {
+        if (resource->id) runtime_resource_table_forget_owned(table, document, resource->id);
+        mem_free(resource);
+        return false;
+    }
+    return true;
 }
 
 #include <cstring>

@@ -10,10 +10,13 @@
 #endif
 
 #include "../lambda/runtime/concurrency.h"
+#include "../lambda/runtime/async.h"
 #include "../lambda/runtime/activation.h"
 #include "../lambda/lambda.hpp"
 #include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/runtime/lambda-error.h"
+#include "../lambda/runtime/render_map.h"
+#include "../lambda/runtime/template_state.h"
 #include "../lambda/runtime/recovery_frame.h"
 #include "../lambda/runtime/lambda-stack.h"
 #include "../lambda/runtime/runtime-state.h"
@@ -22,6 +25,7 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/runtime/gc/gc_object_zone.h"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/jube/jube_interface.h"
 #include "../lambda/jube/jube_registry.h"
@@ -33,8 +37,10 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/validator/validator.hpp"
 #include "../lib/mem_factory.h"
+#include "../lib/memtrack.h"
 #include "../lib/mempool.h"
 #include "../lib/file.h"
+#include "../lib/rdb_sqlite_tx.h"
 #include "../lib/uv_loop.h"
 #include "../lib/url.h"
 #include "../lib/str.h"
@@ -1143,6 +1149,1036 @@ TEST_F(LambdaConcurrencyRuntime, ShutdownJoinsOffloadBeforeReleasingTaskAttachme
     EXPECT_EQ(probe.offload_released, 1);
     EXPECT_EQ(probe.attachment_released, 1);
     EXPECT_TRUE(probe.release_order_valid);
+}
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+struct RuntimeDatabaseTeardownProbe {
+    Pool* pool;
+    RdbSqliteFileSession* session;
+    RdbSqliteClone* clone;
+    int worker_started;
+    int worker_finished;
+    int other_closed;
+    int attachment_released;
+    int clone_released;
+    int close_status;
+    bool current_at_release;
+    bool worker_joined_at_release;
+    bool other_closed_at_release;
+    bool close_refused_while_cloned;
+};
+static const char runtime_database_attachment_key = 0;
+
+static void runtime_database_worker(LambdaOffload* job, void* data) {
+    RuntimeDatabaseTeardownProbe* probe = (RuntimeDatabaseTeardownProbe*)data;
+    __atomic_store_n(&probe->worker_started, 1, __ATOMIC_RELEASE);
+    while (!__atomic_load_n(lambda_offload_cancel_flag(job), __ATOMIC_ACQUIRE)) uv_sleep(1);
+    rdb_sqlite_clone_run(probe->clone, lambda_offload_cancel_flag(job));
+    __atomic_store_n(&probe->worker_finished, 1, __ATOMIC_RELEASE);
+}
+static void runtime_database_clone_release(void* data) {
+    RuntimeDatabaseTeardownProbe* probe = (RuntimeDatabaseTeardownProbe*)data;
+    probe->close_refused_while_cloned = rdb_sqlite_file_session_close(probe->session) == RDB_ERROR;
+    rdb_sqlite_clone_discard(probe->clone);
+    probe->clone = NULL;
+    probe->clone_released++;
+}
+static void runtime_database_release(void* data) {
+    RuntimeDatabaseTeardownProbe* probe = (RuntimeDatabaseTeardownProbe*)data;
+    probe->worker_joined_at_release = __atomic_load_n(&probe->worker_finished, __ATOMIC_ACQUIRE) != 0;
+    probe->other_closed_at_release = probe->other_closed == 1;
+    probe->current_at_release = rdb_sqlite_file_session_current(probe->session);
+    probe->close_status = rdb_sqlite_file_session_close(probe->session);
+    pool_destroy(probe->pool);
+    probe->pool = NULL;
+    probe->attachment_released++;
+}
+static void runtime_database_other_close(void* data) {
+    ((RuntimeDatabaseTeardownProbe*)data)->other_closed++;
+}
+static Item runtime_database_task(Activation* self, Item arg) {
+    RuntimeDatabaseTeardownProbe* probe = (RuntimeDatabaseTeardownProbe*)(uintptr_t)arg.item;
+    static const LambdaOffloadOps ops = {runtime_database_worker, NULL, runtime_database_clone_release};
+    if (!lambda_task_attachment_install(entry_task(self), &runtime_database_attachment_key,
+            probe, runtime_database_release)) return ItemError;
+    return lambda_task_offload(&ops, probe, 0);
+}
+
+// S12.4.2–S12.4.3: the SQLite owner closes after its worker is joined.
+TEST(LambdaDocumentTasks, RuntimeTeardownKeepsDatabaseUntilTaskCleanup) {
+    for (int reset = 0; reset < 2; reset++) {
+        const char* path = reset ? "temp/runtime_db_heap_reset.db" : "temp/runtime_db_cleanup.db";
+        remove(path);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        ASSERT_TRUE(eval_context_transfer_thread(runtime_get_eval_context(&runtime)));
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "null;", 5,
+            "runtime-db-owner.js", NULL)));
+        EvalContext* owner = runtime_get_eval_context(&runtime);
+        RuntimeDatabaseTeardownProbe probe = {};
+        probe.pool = pool_create();
+        ASSERT_NE(probe.pool, nullptr);
+        RdbSqliteTxn* seed = rdb_sqlite_tx_begin(probe.pool, path);
+        ASSERT_NE(seed, nullptr);
+        const char* sql = "CREATE TABLE sample(value INTEGER)";
+        ASSERT_EQ(rdb_sqlite_tx_execute(seed, sql, strlen(sql), NULL, 0, NULL, NULL), RDB_OK);
+        ASSERT_EQ(rdb_sqlite_tx_finish(seed, false), RDB_OK);
+        probe.session = rdb_sqlite_file_session_open(probe.pool, path);
+        ASSERT_NE(probe.session, nullptr);
+        probe.clone = rdb_sqlite_file_session_clone(probe.pool, probe.session, 1024 * 1024);
+        ASSERT_NE(probe.clone, nullptr);
+        Pool* orphan_pool = pool_create();
+        ASSERT_NE(orphan_pool, nullptr);
+        RdbSqliteFileSession* orphan = rdb_sqlite_file_session_open(orphan_pool, path);
+        ASSERT_NE(orphan, nullptr);
+        RuntimeResourceTable* table = runtime_resource_table_context(owner);
+        ASSERT_NE(table, nullptr);
+        static const RuntimeResourceDescriptor other = {
+            RUNTIME_RESOURCE_TIMER, RUNTIME_RESOURCE_GROUP_NONE, "teardown-probe"
+        };
+        ASSERT_NE(runtime_resource_table_add_native_owned(table, NULL, &other,
+            runtime_database_other_close, &probe), 0u);
+        LambdaScheduler* scheduler = lambda_scheduler_create(3);
+        ASSERT_NE(scheduler, nullptr);
+        runtime_set_scheduler(&runtime, scheduler);
+        ASSERT_NE(lambda_task_create(scheduler, runtime_database_task, frame_arg(&probe)), nullptr);
+        ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+        for (int i = 0; i < 1000 && !__atomic_load_n(&probe.worker_started, __ATOMIC_ACQUIRE); i++) uv_sleep(1);
+        ASSERT_EQ(__atomic_load_n(&probe.worker_started, __ATOMIC_ACQUIRE), 1);
+        if (reset) runtime_reset_heap(&runtime);
+        else runtime_cleanup(&runtime);
+        EXPECT_EQ(probe.attachment_released, 1);
+        EXPECT_EQ(probe.clone_released, 1);
+        EXPECT_TRUE(probe.close_refused_while_cloned);
+        EXPECT_TRUE(probe.worker_joined_at_release);
+        EXPECT_TRUE(probe.other_closed_at_release);
+        EXPECT_TRUE(probe.current_at_release);
+        EXPECT_EQ(probe.close_status, RDB_OK);
+        // Connections whose owners failed to close still reach the registry backstop.
+        EXPECT_FALSE(rdb_sqlite_file_session_current(orphan));
+        EXPECT_EQ(rdb_sqlite_file_session_close(orphan), RDB_OK);
+        pool_destroy(orphan_pool);
+        if (reset) runtime_cleanup(&runtime);
+        remove(path);
+    }
+}
+#endif
+
+struct DocumentJoinProbe { int worker_started; int worker_finished; int task_finished; };
+static DocumentJoinProbe* document_join_probe;
+static void* document_join_owner;
+
+static void* document_join_current() { return document_join_owner; }
+static Function* document_test_procedure(EvalContext* owner, fn_ptr entry) {
+    Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
+    if (!fn) return NULL;
+    function_init_abi(fn, LMD_TYPE_FUNC, FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE);
+    fn->ptr = entry;
+    fn->runtime_context = (Context*)owner;
+    fn->requires_runtime_context = true;
+    fn->mir_public_return_shape = LAMBDA_MIR_PUBLIC_RETURN_ITEM;
+    return fn;
+}
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+struct RuntimeDocumentJoinProbe {
+    LambdaTask* parent;
+    LambdaTask* child;
+    RdbSqliteFileSession* session;
+    int* resource_closed;
+    Runtime* runtime;
+    LambdaScheduler* scheduler;
+    bool reenter;
+    bool reset;
+    bool reentrant_preserved;
+    bool cancelled;
+    bool session_live;
+    bool resource_live;
+    bool state_live;
+    bool child_finished;
+    bool parent_finished;
+};
+struct RuntimeDocumentJoinResource {
+    RdbSqliteFileSession* session;
+    int closed;
+    int close_status;
+};
+struct RuntimeDocumentJoinReentry {
+    Runtime* runtime;
+    LambdaScheduler* scheduler;
+    RuntimeDocumentJoinResource* resource;
+    void* retiring_document;
+    bool reset;
+    bool attempted;
+    bool preserved;
+    bool external_rejected;
+    bool guard_rejected;
+};
+static RuntimeDocumentJoinProbe* runtime_document_join_probes;
+static const char runtime_document_join_template[] = "document-join-template";
+static const char runtime_document_join_state[] = "document-join-state";
+
+static RuntimeDocumentJoinProbe* runtime_document_join_current(bool child) {
+    LambdaTask* task = lambda_task_running();
+    for (int i = 0; i < 2; i++) {
+        RuntimeDocumentJoinProbe* probe = &runtime_document_join_probes[i];
+        if ((child ? probe->child : probe->parent) == task) return probe;
+    }
+    return NULL;
+}
+static Item runtime_document_join_child(Context*) {
+    RuntimeDocumentJoinProbe* probe = runtime_document_join_current(true);
+    if (!probe) return ItemError;
+    Item result = pn_sleep((Item){.item = i2it(5)});
+    probe->child_finished = !item_is_error(result) &&
+        rdb_sqlite_file_session_current(probe->session) && !*probe->resource_closed;
+    return result;
+}
+static Item runtime_document_join_parent(Context* owner) {
+    RuntimeDocumentJoinProbe* probe = runtime_document_join_current(false);
+    if (!probe) return ItemError;
+    if (probe->reenter) {
+        if (probe->reset) runtime_reset_heap(probe->runtime);
+        else runtime_cleanup(probe->runtime);
+        probe->reentrant_preserved = !*probe->resource_closed &&
+            rdb_sqlite_file_session_current(probe->session) &&
+            runtime_scheduler(probe->runtime) == probe->scheduler;
+    }
+    Item result = pn_receive();
+    probe->cancelled = item_is_error(result);
+    probe->session_live = rdb_sqlite_file_session_current(probe->session);
+    probe->resource_live = !*probe->resource_closed;
+    probe->state_live = render_map_get_doc_root().item == i2it(61) &&
+        tmpl_state_get((Item){.item = i2it(31)}, runtime_document_join_template,
+            runtime_document_join_state).item == i2it(77);
+    LambdaTask* task = lambda_task_running();
+    lambda_task_set_cleanup_masked(task, true);
+    RootFrame roots(3);
+    Rooted<Item> held_result(roots, result);
+    Function* fn = document_test_procedure((EvalContext*)owner, (fn_ptr)runtime_document_join_child);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    document_join_owner = probe;
+    Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+    probe->child = lambda_task_from_handle(handle.get());
+    Item joined = pn_wait1(handle.get());
+    probe->parent_finished = !item_is_error(joined);
+    lambda_task_set_cleanup_masked(task, false);
+    return held_result.get();
+}
+static void runtime_document_resource_closed(void* data) {
+    RuntimeDocumentJoinResource* resource = (RuntimeDocumentJoinResource*)data;
+    resource->closed++;
+    resource->close_status = rdb_sqlite_file_session_close(resource->session);
+}
+static void runtime_document_join_reenter(uv_timer_t* timer) {
+    RuntimeDocumentJoinReentry* probe = (RuntimeDocumentJoinReentry*)timer->data;
+    probe->attempted = true;
+    if (probe->reset) runtime_reset_heap(probe->runtime);
+    else runtime_cleanup(probe->runtime);
+    probe->preserved = !probe->resource->closed &&
+        rdb_sqlite_file_session_current(probe->resource->session) &&
+        runtime_scheduler(probe->runtime) == probe->scheduler;
+    RootFrame roots(1);
+    Function* fn = document_test_procedure(runtime_get_eval_context(probe->runtime),
+        (fn_ptr)runtime_document_join_child);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    document_join_owner = probe->retiring_document ? probe->retiring_document : probe;
+    if (!probe->retiring_document) {
+        bool guard_started = lambda_document_retirement_guard_begin(probe->scheduler, probe);
+        probe->guard_rejected = !guard_started;
+        if (guard_started) lambda_document_retirement_guard_end(probe->scheduler, probe);
+    } else {
+        probe->guard_rejected = true;
+    }
+    Item started = lambda_task_start_document(procedure.get(), NULL);
+    probe->external_rejected = item_is_error(started);
+    if (lambda_task_handle_is(started)) lambda_task_cancel(lambda_task_from_handle(started));
+    uv_close((uv_handle_t*)timer, NULL);
+}
+
+// S13.3.1v2: document and runtime joins keep the SQLite owner live through cleanup.
+TEST(LambdaDocumentTasks, RuntimeShutdownJoinsDocumentCleanupBeforeResourceClose) {
+    for (int mode = 0; mode < 3; mode++) {
+        bool reset = mode == 1;
+        bool guarded = mode == 2;
+        const char* path = guarded ? "temp/document_join_guarded.db" :
+            (reset ? "temp/document_join_reset.db" : "temp/document_join_cleanup.db");
+        remove(path);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        EvalContext* owner = runtime_get_eval_context(&runtime);
+        ASSERT_TRUE(eval_context_transfer_thread(owner));
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "null;", 5,
+            "document-runtime-join.js", NULL)));
+        render_map_init();
+        render_map_set_doc_root((Item){.item = i2it(61)});
+        tmpl_state_set((Item){.item = i2it(31)}, runtime_document_join_template,
+            runtime_document_join_state, (Item){.item = i2it(77)});
+        Pool* pool = pool_create();
+        ASSERT_NE(pool, nullptr);
+        RdbSqliteTxn* seed = rdb_sqlite_tx_begin(pool, path);
+        ASSERT_NE(seed, nullptr);
+        const char* sql = "CREATE TABLE sample(value INTEGER)";
+        ASSERT_EQ(rdb_sqlite_tx_execute(seed, sql, strlen(sql), NULL, 0, NULL, NULL), RDB_OK);
+        ASSERT_EQ(rdb_sqlite_tx_finish(seed, false), RDB_OK);
+        RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, path);
+        ASSERT_NE(session, nullptr);
+        RuntimeDocumentJoinResource resource = {session, 0, RDB_ERROR};
+        RuntimeResourceTable* table = runtime_resource_table_context(owner);
+        ASSERT_NE(table, nullptr);
+        static const RuntimeResourceDescriptor marker = {
+            RUNTIME_RESOURCE_TIMER, RUNTIME_RESOURCE_GROUP_NONE, "document-join-probe"
+        };
+        ASSERT_NE(runtime_resource_table_add_native_owned(table, NULL, &marker,
+            runtime_document_resource_closed, &resource), 0u);
+        LambdaScheduler* scheduler = lambda_scheduler_create(4);
+        ASSERT_NE(scheduler, nullptr);
+        runtime_set_scheduler(&runtime, scheduler);
+        RuntimeDocumentJoinProbe probes[2] = {};
+        runtime_document_join_probes = probes;
+        lambda_set_document_probe(document_join_current);
+        {
+            RootFrame roots(3);
+            Function* fn = document_test_procedure(owner, (fn_ptr)runtime_document_join_parent);
+            ASSERT_NE(fn, nullptr);
+            Rooted<Item> procedure(roots, (Item){.function = fn});
+            Rooted<Item> first(roots, ItemNull), second(roots, ItemNull);
+            for (int i = 0; i < 2; i++) {
+                probes[i].session = session;
+                probes[i].resource_closed = &resource.closed;
+                probes[i].runtime = &runtime;
+                probes[i].scheduler = scheduler;
+                probes[i].reenter = i == 0;
+                probes[i].reset = reset != 0;
+                document_join_owner = &probes[i];
+                Item handle = lambda_task_start_document(procedure.get(), NULL);
+                if (i == 0) first.set(handle); else second.set(handle);
+                probes[i].parent = lambda_task_from_handle(handle);
+                ASSERT_NE(probes[i].parent, nullptr);
+            }
+            ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 2);
+            EXPECT_TRUE(probes[0].reentrant_preserved) << reset;
+        }
+        if (guarded) {
+            ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &probes[0]));
+            ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &probes[1]));
+            EXPECT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_RETRY);
+            EXPECT_FALSE(runtime.cleanup_incomplete);
+            EXPECT_EQ(runtime_scheduler(&runtime), scheduler);
+            EXPECT_EQ(resource.closed, 0);
+            EXPECT_TRUE(rdb_sqlite_file_session_current(session));
+            runtime_reset_heap(&runtime);
+            EXPECT_EQ(runtime_scheduler(&runtime), scheduler);
+            EXPECT_EQ(resource.closed, 0);
+        }
+        {
+            RuntimeExecutionScope active(owner);
+            if (guarded) EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &probes[0]));
+            else if (reset) runtime_reset_heap(&runtime);
+            else EXPECT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_RETRY);
+            EXPECT_EQ(runtime_scheduler(&runtime), scheduler) << reset;
+            EXPECT_EQ(resource.closed, 0) << reset;
+            EXPECT_TRUE(rdb_sqlite_file_session_current(session)) << reset;
+        }
+        RuntimeDocumentJoinReentry reentry = {&runtime, scheduler, &resource,
+            guarded ? &probes[0] : nullptr, reset, false, false, false, false};
+        uv_timer_t timer = {};
+        ASSERT_EQ(uv_timer_init(lambda_uv_loop(), &timer), 0);
+        timer.data = &reentry;
+        ASSERT_EQ(uv_timer_start(&timer, runtime_document_join_reenter, 0, 0), 0);
+        if (guarded) {
+            EXPECT_TRUE(lambda_document_tasks_join_guarded(scheduler, &probes[0]));
+            EXPECT_EQ(resource.closed, 0);
+            EXPECT_TRUE(rdb_sqlite_file_session_current(session));
+            EXPECT_TRUE(lambda_document_tasks_join_guarded(scheduler, &probes[1]));
+            EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &probes[0]));
+            EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &probes[1]));
+            EXPECT_EQ(resource.closed, 0);
+            EXPECT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_COMPLETE);
+        } else if (reset) runtime_reset_heap(&runtime);
+        else EXPECT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_COMPLETE);
+        EXPECT_TRUE(reentry.attempted) << reset;
+        EXPECT_TRUE(reentry.preserved) << reset;
+        EXPECT_TRUE(reentry.external_rejected) << reset;
+        EXPECT_TRUE(reentry.guard_rejected) << reset;
+        for (int i = 0; i < 2; i++) {
+            EXPECT_TRUE(probes[i].cancelled) << reset << ":" << i;
+            EXPECT_TRUE(probes[i].session_live) << reset << ":" << i;
+            EXPECT_TRUE(probes[i].resource_live) << reset << ":" << i;
+            EXPECT_TRUE(probes[i].state_live) << reset << ":" << i;
+            EXPECT_TRUE(probes[i].child_finished) << reset << ":" << i;
+            EXPECT_TRUE(probes[i].parent_finished) << reset << ":" << i;
+        }
+        EXPECT_EQ(resource.closed, 1);
+        EXPECT_EQ(resource.close_status, RDB_OK);
+        pool_destroy(pool);
+        if (reset) runtime_cleanup(&runtime);
+        lambda_set_document_probe(NULL);
+        document_join_owner = NULL;
+        runtime_document_join_probes = NULL;
+        remove(path);
+    }
+}
+#endif
+static int document_test_tick_start(uv_timer_t* timer) {
+    int status = uv_timer_init(lambda_uv_loop(), timer);
+    return status ? status : uv_timer_start(timer, [](uv_timer_t*) {}, 1, 10);
+}
+static void document_test_tick_stop(uv_timer_t* timer) {
+    uv_timer_stop(timer);
+    uv_close((uv_handle_t*)timer, NULL);
+    uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+}
+static void document_join_worker(LambdaOffload* job, void* data) {
+    DocumentJoinProbe* probe = (DocumentJoinProbe*)data;
+    __atomic_store_n(&probe->worker_started, 1, __ATOMIC_RELEASE);
+    while (!__atomic_load_n(lambda_offload_cancel_flag(job), __ATOMIC_ACQUIRE)) uv_sleep(1);
+    // A non-cooperative native operation may finish after the former five-second cutoff.
+    uv_sleep(5300);
+    __atomic_store_n(&probe->worker_finished, 1, __ATOMIC_RELEASE);
+}
+static Item document_join_procedure(Context*) {
+    static const LambdaOffloadOps ops = {document_join_worker, NULL, NULL};
+    Item result = lambda_task_offload(&ops, document_join_probe, 0);
+    document_join_probe->task_finished = 1;
+    return result;
+}
+
+// S13.3.1v2: cancellation must join a document's native work before retirement.
+TEST_F(LambdaConcurrencyRuntime, DocumentReleaseJoinsSlowCancelledWorker) {
+    DocumentJoinProbe probe = {};
+    document_join_probe = &probe;
+    document_join_owner = &probe;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure(&eval, (fn_ptr)document_join_procedure);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+    ASSERT_TRUE(lambda_task_handle_is(handle.get()));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    for (int i = 0; i < 1000 && !__atomic_load_n(&probe.worker_started, __ATOMIC_ACQUIRE); i++) uv_sleep(1);
+    ASSERT_EQ(__atomic_load_n(&probe.worker_started, __ATOMIC_ACQUIRE), 1);
+    uv_timer_t timer = {};
+    ASSERT_EQ(document_test_tick_start(&timer), 0);
+    EXPECT_EQ(lambda_document_tasks_release(&probe), 1);
+    EXPECT_EQ(__atomic_load_n(&probe.worker_finished, __ATOMIC_ACQUIRE), 1);
+    EXPECT_EQ(probe.task_finished, 1);
+    EXPECT_EQ(lambda_task_state(lambda_task_from_handle(handle.get())), LAMBDA_TASK_DONE);
+    // Keep the probe live even when the regression leaves the worker behind.
+    while (lambda_task_state(lambda_task_from_handle(handle.get())) != LAMBDA_TASK_DONE) {
+        uv_run(lambda_uv_loop(), UV_RUN_ONCE);
+        lambda_scheduler_run_ready(scheduler);
+    }
+    document_test_tick_stop(&timer);
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    document_join_probe = NULL;
+}
+
+struct DocumentCleanupProbe { LambdaTask* child; int child_started; int child_finished; int parent_finished; };
+static DocumentCleanupProbe* document_cleanup_probe;
+
+static Item document_cleanup_child(Context*) {
+    document_cleanup_probe->child_started = 1;
+    Item result = pn_sleep((Item){.item = i2it(5300)});
+    if (!item_is_error(result)) document_cleanup_probe->child_finished = 1;
+    return result;
+}
+static Item document_cleanup_parent(Context* owner) {
+    LambdaTask* task = lambda_task_running();
+    (void)lambda_task_suspend(task);
+    // A child created by cancellation-masked cleanup must be joined, not cancelled.
+    lambda_task_set_cleanup_masked(task, true);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure((EvalContext*)owner, (fn_ptr)document_cleanup_child);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> handle(roots, lambda_task_start_function_scoped(procedure.get(), NULL, true));
+    document_cleanup_probe->child = lambda_task_from_handle(handle.get());
+    Item result = pn_wait1(handle.get());
+    if (!item_is_error(result)) document_cleanup_probe->parent_finished = 1;
+    lambda_task_set_cleanup_masked(task, false);
+    return result;
+}
+
+// S13.3.1v2 and S13.3.2: cancellation-masked cleanup can join new descendants.
+TEST_F(LambdaConcurrencyRuntime, DocumentReleaseJoinsChildStartedDuringCleanup) {
+    DocumentCleanupProbe probe = {};
+    document_cleanup_probe = &probe;
+    document_join_owner = &probe;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure(&eval, (fn_ptr)document_cleanup_parent);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+    ASSERT_TRUE(lambda_task_handle_is(handle.get()));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    uv_timer_t timer = {};
+    ASSERT_EQ(document_test_tick_start(&timer), 0);
+    EXPECT_EQ(lambda_document_tasks_release(&probe), 1);
+    EXPECT_EQ(probe.child_started, 1);
+    EXPECT_EQ(probe.child_finished, 1);
+    EXPECT_EQ(probe.parent_finished, 1);
+    EXPECT_EQ(lambda_task_state(lambda_task_from_handle(handle.get())), LAMBDA_TASK_DONE);
+    // Keep the probe live until a regressing scheduler finally drains its tasks.
+    while (lambda_task_state(lambda_task_from_handle(handle.get())) != LAMBDA_TASK_DONE) {
+        uv_run(lambda_uv_loop(), UV_RUN_ONCE);
+        lambda_scheduler_run_ready(scheduler);
+    }
+    document_test_tick_stop(&timer);
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    document_cleanup_probe = NULL;
+}
+
+struct DocumentRetireProbe {
+    LambdaScheduler* scheduler;
+    void* document;
+    LambdaTask* child;
+    LambdaTask* grandchild;
+    LambdaTask* explicit_grandchild;
+    int first_cancel;
+    int second_cancel;
+    int child_finished;
+    int foreign_finished;
+    bool guard_started;
+    bool guard_ended_early;
+    bool detached_during_parent;
+    bool ordinary_child_cancelled;
+    bool grandchild_cancelled;
+    bool explicit_grandchild_cancelled;
+    bool join_refused_reentrant;
+};
+static DocumentRetireProbe* document_retire_probe;
+
+static Item document_retire_child(Context*) {
+    document_retire_probe->child_finished++;
+    return ItemNull;
+}
+static Item document_retire_parent(Context* owner) {
+    DocumentRetireProbe* probe = document_retire_probe;
+    probe->join_refused_reentrant = !lambda_scheduler_join_document_tasks(probe->scheduler);
+    probe->guard_started = lambda_document_retirement_guard_begin(probe->scheduler, probe->document);
+    probe->guard_ended_early = lambda_document_retirement_guard_end(probe->scheduler, probe->document);
+    probe->first_cancel = lambda_document_tasks_cancel(probe->scheduler, probe->document);
+    probe->second_cancel = lambda_document_tasks_cancel(probe->scheduler, probe->document);
+    probe->detached_during_parent = lambda_document_tasks_detach_joined(probe->scheduler, probe->document);
+    LambdaTask* current = lambda_task_running();
+    RootFrame roots(3);
+    Function* fn = document_test_procedure((EvalContext*)owner, (fn_ptr)document_retire_child);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> ordinary(roots, lambda_task_start_function_scoped(procedure.get(), NULL, true));
+    probe->ordinary_child_cancelled = lambda_task_cancel_requested(lambda_task_from_handle(ordinary.get()));
+    lambda_task_set_cleanup_masked(current, true);
+    document_join_owner = probe->document;
+    Rooted<Item> child(roots, lambda_task_start_document(procedure.get(), NULL));
+    probe->child = lambda_task_from_handle(child.get());
+    lambda_task_set_cleanup_masked(current, false);
+    return ItemNull;
+}
+static Item document_retire_foreign(Context*) {
+    Item result = lambda_task_suspend(lambda_task_running());
+    document_retire_probe->foreign_finished++;
+    return result;
+}
+
+struct GuardedDocumentJoinReentry {
+    LambdaScheduler* scheduler;
+    void* document;
+    bool called;
+    bool refused;
+    bool still_owned;
+};
+
+// S13.3.1v2/S13.3.2: refusal keeps the document owner until cleanup finishes.
+TEST_F(LambdaConcurrencyRuntime, GuardedDocumentJoinRetriesAfterActiveAndReentrantCalls) {
+    DocumentCleanupProbe cleanup_probe = {};
+    DocumentRetireProbe foreign_probe = {};
+    int foreign_document = 0;
+    document_cleanup_probe = &cleanup_probe;
+    document_retire_probe = &foreign_probe;
+    document_join_owner = &cleanup_probe;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(4);
+    Function* parent_fn = document_test_procedure(&eval, (fn_ptr)document_cleanup_parent);
+    ASSERT_NE(parent_fn, nullptr);
+    Rooted<Item> parent_proc(roots, (Item){.function = parent_fn});
+    Function* foreign_fn = document_test_procedure(&eval, (fn_ptr)document_retire_foreign);
+    ASSERT_NE(foreign_fn, nullptr);
+    Rooted<Item> foreign_proc(roots, (Item){.function = foreign_fn});
+    Rooted<Item> parent(roots, lambda_task_start_document(parent_proc.get(), NULL));
+    document_join_owner = &foreign_document;
+    Rooted<Item> foreign(roots, lambda_task_start_document(foreign_proc.get(), NULL));
+    ASSERT_TRUE(lambda_task_handle_is(parent.get()));
+    ASSERT_TRUE(lambda_task_handle_is(foreign.get()));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 2);
+    EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &cleanup_probe));
+    EXPECT_FALSE(lambda_task_cancel_requested(lambda_task_from_handle(parent.get())));
+    ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &cleanup_probe));
+    {
+        RuntimeExecutionScope active(&eval);
+        EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &cleanup_probe));
+        EXPECT_TRUE(lambda_task_cancel_requested(lambda_task_from_handle(parent.get())));
+        EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, &cleanup_probe));
+        document_join_owner = &cleanup_probe;
+        EXPECT_TRUE(item_is_error(lambda_task_start_document(parent_proc.get(), NULL)));
+    }
+    GuardedDocumentJoinReentry reentry = {scheduler, &cleanup_probe, false, false, false};
+    uv_timer_t timer = {};
+    ASSERT_EQ(uv_timer_init(lambda_uv_loop(), &timer), 0);
+    timer.data = &reentry;
+    ASSERT_EQ(uv_timer_start(&timer, [](uv_timer_t* handle) {
+        GuardedDocumentJoinReentry* probe = (GuardedDocumentJoinReentry*)handle->data;
+        probe->called = true;
+        probe->refused = !lambda_document_tasks_join_guarded(probe->scheduler, probe->document);
+        probe->still_owned = !lambda_document_tasks_detach_joined(probe->scheduler, probe->document);
+        uv_close((uv_handle_t*)handle, NULL);
+    }, 0, 0), 0);
+    EXPECT_TRUE(lambda_document_tasks_join_guarded(scheduler, &cleanup_probe));
+    EXPECT_TRUE(reentry.called);
+    EXPECT_TRUE(reentry.refused);
+    EXPECT_TRUE(reentry.still_owned);
+    EXPECT_EQ(cleanup_probe.child_finished, 1);
+    EXPECT_EQ(cleanup_probe.parent_finished, 1);
+    EXPECT_FALSE(lambda_task_cancel_requested(lambda_task_from_handle(foreign.get())));
+    EXPECT_TRUE(item_is_error(lambda_task_start_document(parent_proc.get(), NULL)));
+    EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &cleanup_probe));
+    EXPECT_EQ(lambda_document_tasks_cancel(scheduler, &foreign_document), 1);
+    EXPECT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    EXPECT_EQ(foreign_probe.foreign_finished, 1);
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, &foreign_document));
+    uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    document_cleanup_probe = NULL;
+    document_retire_probe = NULL;
+}
+
+struct GuardedDocumentStallProbe { bool parked; bool finished; };
+static GuardedDocumentStallProbe* guarded_document_stall_probe;
+
+static Item guarded_document_stall_task(Context*) {
+    LambdaTask* task = lambda_task_running();
+    (void)lambda_task_suspend(task);
+    lambda_task_set_cleanup_masked(task, true);
+    guarded_document_stall_probe->parked = true;
+    Item result = lambda_task_suspend(task);
+    guarded_document_stall_probe->finished = true;
+    lambda_task_set_cleanup_masked(task, false);
+    return result;
+}
+
+TEST_F(LambdaConcurrencyRuntime, GuardedDocumentJoinRetainsStalledCleanup) {
+    GuardedDocumentStallProbe probe = {};
+    guarded_document_stall_probe = &probe;
+    document_join_owner = &probe;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure(&eval, (fn_ptr)guarded_document_stall_task);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+    LambdaTask* task = lambda_task_from_handle(handle.get());
+    ASSERT_NE(task, nullptr);
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &probe));
+    // With no referenced loop handles, masked cleanup has no source of progress.
+    ASSERT_EQ(uv_loop_alive(lambda_uv_loop()), 0);
+    EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &probe));
+    EXPECT_TRUE(probe.parked);
+    EXPECT_FALSE(probe.finished);
+    EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, &probe));
+    EXPECT_TRUE(item_is_error(lambda_task_start_document(procedure.get(), NULL)));
+    lambda_task_resume(task);
+    EXPECT_TRUE(lambda_document_tasks_join_guarded(scheduler, &probe));
+    EXPECT_TRUE(probe.finished);
+    EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &probe));
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    guarded_document_stall_probe = NULL;
+}
+
+TEST(LambdaDocumentTasks, GuardedJoinRejectsSchedulerWithoutEvaluator) {
+    ASSERT_EQ(context, nullptr);
+    LambdaScheduler* scheduler = lambda_scheduler_create(3);
+    ASSERT_NE(scheduler, nullptr);
+    int document = 0;
+    ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &document));
+    EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &document));
+    EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &document));
+    lambda_scheduler_destroy(scheduler);
+    lambda_uv_cleanup();
+}
+
+TEST(LambdaDocumentTasks, RetirementGuardRetainsHeaplessRuntime) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    EvalContext* owner = runtime_get_eval_context(&runtime);
+    ASSERT_NE(owner, nullptr);
+    ASSERT_TRUE(eval_context_transfer_thread(owner));
+    ASSERT_EQ(runtime_heap(&runtime), nullptr);
+    LambdaScheduler* scheduler = lambda_scheduler_create(3);
+    ASSERT_NE(scheduler, nullptr);
+    runtime_set_scheduler(&runtime, scheduler);
+    struct HeaplessCloseProbe {
+        LambdaScheduler* scheduler;
+        int closed;
+        bool guard_rejected;
+    } close_probe = {scheduler, 0, false};
+    RuntimeResourceTable* table = runtime_resource_table_context_ensure(owner);
+    ASSERT_NE(table, nullptr);
+    static const RuntimeResourceDescriptor marker = {
+        RUNTIME_RESOURCE_TIMER, RUNTIME_RESOURCE_GROUP_NONE, "heapless-guard-probe"
+    };
+    ASSERT_NE(runtime_resource_table_add_native_owned(table, nullptr, &marker,
+        [](void* data) {
+            HeaplessCloseProbe* probe = (HeaplessCloseProbe*)data;
+            probe->closed++;
+            bool started = lambda_document_retirement_guard_begin(probe->scheduler, probe);
+            probe->guard_rejected = !started;
+            if (started) lambda_document_retirement_guard_end(probe->scheduler, probe);
+        }, &close_probe), 0u);
+    int document = 0;
+    ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &document));
+    EXPECT_TRUE(lambda_scheduler_has_document_retirement_guards(scheduler));
+    ASSERT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_RETRY);
+    EXPECT_EQ(runtime_get_eval_context(&runtime), owner);
+    EXPECT_EQ(runtime_scheduler(&runtime), scheduler);
+    EXPECT_EQ(close_probe.closed, 0);
+    runtime_reset_heap(&runtime);
+    EXPECT_EQ(runtime_scheduler(&runtime), scheduler);
+    EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &document));
+    EXPECT_FALSE(lambda_scheduler_has_document_retirement_guards(scheduler));
+    runtime_reset_heap(&runtime);
+    EXPECT_TRUE(lambda_document_retirement_guard_begin(scheduler, &document));
+    EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &document));
+    EXPECT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_COMPLETE);
+    EXPECT_EQ(runtime_scheduler(&runtime), nullptr);
+    EXPECT_EQ(close_probe.closed, 1);
+    EXPECT_TRUE(close_probe.guard_rejected);
+}
+
+static Item document_retire_transfer(Context* owner) {
+    DocumentRetireProbe* probe = document_retire_probe;
+    (void)lambda_document_tasks_cancel(probe->scheduler, probe->document);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure((EvalContext*)owner, (fn_ptr)document_retire_child);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    // The probe is switched by the host to the second document before this turn.
+    Rooted<Item> child(roots, lambda_task_start_document(procedure.get(), NULL));
+    probe->child = lambda_task_from_handle(child.get());
+    return ItemNull;
+}
+
+static Item document_retire_cleanup_branch(Context* owner) {
+    DocumentRetireProbe* probe = document_retire_probe;
+    RootFrame roots(3);
+    Function* fn = document_test_procedure((EvalContext*)owner, (fn_ptr)document_retire_child);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> handle(roots, lambda_task_start_function_scoped(procedure.get(), NULL, true));
+    probe->grandchild = lambda_task_from_handle(handle.get());
+    probe->grandchild_cancelled = lambda_task_cancel_requested(probe->grandchild);
+    Rooted<Item> explicit_handle(roots, lambda_task_start_document(procedure.get(), NULL));
+    probe->explicit_grandchild = lambda_task_from_handle(explicit_handle.get());
+    probe->explicit_grandchild_cancelled = lambda_task_cancel_requested(probe->explicit_grandchild);
+    return ItemNull;
+}
+
+static Item document_retire_deep_parent(Context* owner) {
+    DocumentRetireProbe* probe = document_retire_probe;
+    (void)lambda_document_tasks_cancel(probe->scheduler, probe->document);
+    LambdaTask* current = lambda_task_running();
+    lambda_task_set_cleanup_masked(current, true);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure((EvalContext*)owner, (fn_ptr)document_retire_cleanup_branch);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> handle(roots, lambda_task_start_function_scoped(procedure.get(), NULL, true));
+    probe->child = lambda_task_from_handle(handle.get());
+    lambda_task_set_cleanup_masked(current, false);
+    return ItemNull;
+}
+
+// S13.3.2: a cleanup child can delegate work without cancelling its descendants.
+TEST_F(LambdaConcurrencyRuntime, DocumentRetirementAllowsCleanupDescendants) {
+    DocumentRetireProbe probe = {};
+    probe.scheduler = scheduler;
+    probe.document = &probe;
+    document_retire_probe = &probe;
+    document_join_owner = probe.document;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure(&eval, (fn_ptr)document_retire_deep_parent);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> parent(roots, lambda_task_start_document(procedure.get(), NULL));
+    ASSERT_TRUE(lambda_task_handle_is(parent.get()));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    ASSERT_NE(probe.child, nullptr);
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    ASSERT_NE(probe.grandchild, nullptr);
+    ASSERT_NE(probe.explicit_grandchild, nullptr);
+    EXPECT_FALSE(probe.grandchild_cancelled);
+    EXPECT_FALSE(probe.explicit_grandchild_cancelled);
+    EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, probe.document));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 2);
+    EXPECT_EQ(probe.child_finished, 2);
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, probe.document));
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    document_retire_probe = NULL;
+}
+
+// S13.3.1v2: an explicit different document owns its task, even if its starter is retiring.
+TEST_F(LambdaConcurrencyRuntime, DocumentRetirementRespectsExplicitDifferentOwner) {
+    DocumentRetireProbe probe = {};
+    int other_document = 0;
+    probe.scheduler = scheduler;
+    probe.document = &probe;
+    document_retire_probe = &probe;
+    document_join_owner = probe.document;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure(&eval, (fn_ptr)document_retire_transfer);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> parent(roots, lambda_task_start_document(procedure.get(), NULL));
+    ASSERT_TRUE(lambda_task_handle_is(parent.get()));
+    document_join_owner = &other_document;
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    ASSERT_NE(probe.child, nullptr);
+    EXPECT_FALSE(lambda_task_cancel_requested(probe.child));
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, probe.document));
+    EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, &other_document));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    EXPECT_EQ(probe.child_finished, 1);
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, &other_document));
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    document_retire_probe = NULL;
+}
+
+// S13.3.1v2: a host may request cancellation from the task and detach only after its descendants join.
+TEST_F(LambdaConcurrencyRuntime, DocumentRetirementKeepsOwnershipUntilDescendantsFinish) {
+    DocumentRetireProbe probe = {};
+    int foreign_document = 0;
+    probe.scheduler = scheduler;
+    probe.document = &probe;
+    document_retire_probe = &probe;
+    document_join_owner = probe.document;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(5);
+    Function* parent_fn = document_test_procedure(&eval, (fn_ptr)document_retire_parent);
+    ASSERT_NE(parent_fn, nullptr);
+    Rooted<Item> parent_proc(roots, (Item){.function = parent_fn});
+    Rooted<Item> parent(roots, lambda_task_start_document(parent_proc.get(), NULL));
+    ASSERT_TRUE(lambda_task_handle_is(parent.get()));
+    document_join_owner = &foreign_document;
+    Function* foreign_fn = document_test_procedure(&eval, (fn_ptr)document_retire_foreign);
+    ASSERT_NE(foreign_fn, nullptr);
+    Rooted<Item> foreign_proc(roots, (Item){.function = foreign_fn});
+    Rooted<Item> foreign(roots, lambda_task_start_document(foreign_proc.get(), NULL));
+    ASSERT_TRUE(lambda_task_handle_is(foreign.get()));
+    EXPECT_EQ(lambda_document_tasks_cancel(NULL, probe.document), -1);
+    EXPECT_FALSE(lambda_document_tasks_detach_joined(NULL, probe.document));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 2);
+    EXPECT_EQ(probe.first_cancel, 1);
+    EXPECT_EQ(probe.second_cancel, 1);
+    EXPECT_TRUE(probe.guard_started);
+    EXPECT_FALSE(probe.guard_ended_early);
+    EXPECT_FALSE(probe.detached_during_parent);
+    EXPECT_TRUE(probe.join_refused_reentrant);
+    EXPECT_TRUE(probe.ordinary_child_cancelled);
+    ASSERT_NE(probe.child, nullptr);
+    EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, probe.document));
+    EXPECT_EQ(lambda_document_tasks_cancel(scheduler, probe.document), 2);
+    EXPECT_FALSE(lambda_task_cancel_requested(probe.child));
+    EXPECT_FALSE(lambda_task_cancel_requested(lambda_task_from_handle(foreign.get())));
+    document_join_owner = probe.document;
+    Item rejected = lambda_task_start_document(parent_proc.get(), NULL);
+    EXPECT_TRUE(item_is_error(rejected));
+    if (lambda_task_handle_is(rejected)) lambda_task_cancel(lambda_task_from_handle(rejected));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 2);
+    EXPECT_EQ(probe.child_finished, 1);
+    EXPECT_FALSE(lambda_document_retirement_guard_end(scheduler, probe.document));
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, probe.document));
+    rejected = lambda_task_start_document(parent_proc.get(), NULL);
+    EXPECT_TRUE(item_is_error(rejected));
+    if (lambda_task_handle_is(rejected)) lambda_task_cancel(lambda_task_from_handle(rejected));
+    EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, probe.document));
+    Function* child_fn = document_test_procedure(&eval, (fn_ptr)document_retire_child);
+    ASSERT_NE(child_fn, nullptr);
+    Rooted<Item> child_proc(roots, (Item){.function = child_fn});
+    Item reopened = lambda_task_start_document(child_proc.get(), NULL);
+    ASSERT_TRUE(lambda_task_handle_is(reopened));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    EXPECT_EQ(probe.child_finished, 2);
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, probe.document));
+    EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, &foreign_document));
+    EXPECT_EQ(lambda_document_tasks_cancel(scheduler, &foreign_document), 1);
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    EXPECT_EQ(probe.foreign_finished, 1);
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, &foreign_document));
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    document_retire_probe = NULL;
+}
+
+// S13.3.1v2: shutdown blocks new document owners even when no tasks existed.
+TEST_F(LambdaConcurrencyRuntime, RuntimeShutdownClosesDocumentTaskAdmission) {
+    int document = 0;
+    document_join_owner = &document;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(1);
+    Function* fn = document_test_procedure(&eval, (fn_ptr)document_retire_child);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    ASSERT_TRUE(lambda_scheduler_join_document_tasks(scheduler));
+    EXPECT_TRUE(item_is_error(lambda_task_start_document(procedure.get(), NULL)));
+    EXPECT_FALSE(lambda_document_retirement_guard_begin(scheduler, &document));
+    EXPECT_TRUE(lambda_scheduler_join_document_tasks(scheduler));
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+}
+
+// S13.3.1v2: teardown must reject new starts even when no task supplied a marker.
+TEST_F(LambdaConcurrencyRuntime, DocumentRetirementGuardCoversEmptyOwner) {
+    DocumentRetireProbe probe = {};
+    probe.scheduler = scheduler;
+    probe.document = &probe;
+    document_retire_probe = &probe;
+    document_join_owner = probe.document;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(1);
+    Function* fn = document_test_procedure(&eval, (fn_ptr)document_retire_child);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    EXPECT_FALSE(lambda_document_retirement_guard_begin(NULL, probe.document));
+    memtrack_fault_inject(0);
+    bool guarded_after_failure = lambda_document_retirement_guard_begin(scheduler, probe.document);
+    memtrack_fault_clear();
+    EXPECT_FALSE(guarded_after_failure);
+    EXPECT_FALSE(lambda_document_retirement_guard_end(scheduler, probe.document));
+    ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, probe.document));
+    EXPECT_TRUE(lambda_document_retirement_guard_begin(scheduler, probe.document));
+    EXPECT_FALSE(lambda_scheduler_join_document_tasks(scheduler));
+    EXPECT_TRUE(item_is_error(lambda_task_start_document(procedure.get(), NULL)));
+    EXPECT_EQ(lambda_document_tasks_cancel(scheduler, probe.document), 0);
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, probe.document));
+    EXPECT_TRUE(item_is_error(lambda_task_start_document(procedure.get(), NULL)));
+    EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, probe.document));
+    Item started = lambda_task_start_document(procedure.get(), NULL);
+    ASSERT_TRUE(lambda_task_handle_is(started));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    EXPECT_EQ(probe.child_finished, 1);
+    EXPECT_TRUE(lambda_document_tasks_detach_joined(scheduler, probe.document));
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    document_retire_probe = NULL;
+}
+
+struct DocumentSwitchProbe {
+    Runtime* other;
+    uv_sem_t resume_worker;
+    int worker_started;
+    int worker_finished;
+    int task_finished;
+    bool switched;
+};
+static DocumentSwitchProbe* document_switch_probe;
+
+static void document_switch_worker(LambdaOffload* job, void* data) {
+    DocumentSwitchProbe* probe = (DocumentSwitchProbe*)data;
+    __atomic_store_n(&probe->worker_started, 1, __ATOMIC_RELEASE);
+    while (!__atomic_load_n(lambda_offload_cancel_flag(job), __ATOMIC_ACQUIRE)) uv_sleep(1);
+    uv_sem_wait(&probe->resume_worker);
+    __atomic_store_n(&probe->worker_finished, 1, __ATOMIC_RELEASE);
+}
+static Item document_switch_procedure(Context*) {
+    static const LambdaOffloadOps ops = {document_switch_worker, NULL, NULL};
+    Item result = lambda_task_offload(&ops, document_switch_probe, 0);
+    document_switch_probe->task_finished = 1;
+    return result;
+}
+
+// A shared-loop callback must not strand the retiring document's task in another evaluator.
+static void document_join_restores_owner(bool guarded) {
+    Runtime runtimes[2] = {};
+    struct Cleanup {
+        Runtime* runtimes;
+        ~Cleanup() {
+            lambda_set_document_probe(NULL);
+            document_join_owner = NULL;
+            document_switch_probe = NULL;
+            for (int i = 1; i >= 0; i--) {
+                if (!runtimes[i].eval_context) continue;
+                js_runtime_context_enter_turn(&runtimes[i], runtimes[i].eval_context);
+                runtime_cleanup(&runtimes[i]);
+            }
+        }
+    } cleanup = {runtimes};
+    for (int i = 0; i < 2; i++) {
+        runtime_init(&runtimes[i]);
+        ASSERT_TRUE(eval_context_transfer_thread(runtime_get_eval_context(&runtimes[i])));
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtimes[i], "null;", 5,
+            "document-join-context.js", NULL)));
+    }
+    EvalContext* owner = runtime_get_eval_context(&runtimes[0]);
+    ASSERT_TRUE(js_runtime_context_enter_turn(&runtimes[0], owner));
+    LambdaScheduler* scheduler = lambda_scheduler_create(3);
+    ASSERT_NE(scheduler, nullptr);
+    runtime_set_scheduler(&runtimes[0], scheduler);
+    DocumentSwitchProbe probe = {};
+    probe.other = &runtimes[1];
+    ASSERT_EQ(uv_sem_init(&probe.resume_worker, 0), 0);
+    document_switch_probe = &probe;
+    document_join_owner = &probe;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure(owner, (fn_ptr)document_switch_procedure);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+    ASSERT_TRUE(lambda_task_handle_is(handle.get()));
+    ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    for (int i = 0; i < 1000 && !__atomic_load_n(&probe.worker_started, __ATOMIC_ACQUIRE); i++) uv_sleep(1);
+    ASSERT_EQ(__atomic_load_n(&probe.worker_started, __ATOMIC_ACQUIRE), 1);
+    uv_timer_t timer = {};
+    ASSERT_EQ(uv_timer_init(lambda_uv_loop(), &timer), 0);
+    timer.data = &probe;
+    ASSERT_EQ(uv_timer_start(&timer, [](uv_timer_t* timer) {
+        DocumentSwitchProbe* probe = (DocumentSwitchProbe*)timer->data;
+        probe->switched = js_runtime_context_enter_turn(probe->other, probe->other->eval_context);
+        uv_sem_post(&probe->resume_worker);
+    }, 10, 0), 0);
+    if (guarded) {
+        ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &probe));
+        EXPECT_TRUE(lambda_document_tasks_join_guarded(scheduler, &probe));
+    } else {
+        EXPECT_EQ(lambda_document_tasks_release(&probe), 1);
+    }
+    bool restored = context == owner;
+    if (!restored) ASSERT_TRUE(js_runtime_context_enter_turn(&runtimes[0], owner));
+    EXPECT_TRUE(probe.switched);
+    EXPECT_TRUE(restored);
+    EXPECT_EQ(__atomic_load_n(&probe.worker_finished, __ATOMIC_ACQUIRE), 1);
+    EXPECT_EQ(probe.task_finished, 1);
+    while (lambda_task_state(lambda_task_from_handle(handle.get())) != LAMBDA_TASK_DONE) {
+        uv_run(lambda_uv_loop(), UV_RUN_ONCE);
+        lambda_scheduler_run_ready(scheduler);
+    }
+    if (guarded) EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &probe));
+    uv_close((uv_handle_t*)&timer, NULL);
+    uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+    uv_sem_destroy(&probe.resume_worker);
+}
+
+TEST(LambdaDocumentTasks, ReleaseRestoresOwnerAfterAnotherDocumentRuns) {
+    document_join_restores_owner(false);
+}
+
+TEST(LambdaDocumentTasks, GuardedJoinRestoresOwnerAfterAnotherDocumentRuns) {
+    document_join_restores_owner(true);
 }
 
 // S7.4.4: a payload-less compatibility value never borrows another error's state.

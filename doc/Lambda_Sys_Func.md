@@ -2078,6 +2078,7 @@ park while SQLite executes (D7.2.4v4).
 | `create(path)` | target or error | Create an `open` target that publishes a new file only after a successful transaction, and never replaces an existing path. |
 | `clone(source, path)` | target or error | Open a consistent, validated SQLite snapshot for a scoped transaction and publish it to a new path only on success. |
 | `preimage(tx, path)` | `null` or error | Publish the unchanged image from an active clone scope to a new path before its first modifying statement. |
+| `snapshot_digest(tx)` | binary or error | Hash a bounded SQLite image from an active scope before any modifying statement. |
 | `execute(path_or_tx, sql, params?)` | `null` or error | Execute one statement that returns no rows. |
 | `query(path_or_tx, sql, params?)` | array of rows or error | Execute one statement and return each row as an array in column order. |
 
@@ -2090,11 +2091,12 @@ UTF-8. Positional rows preserve duplicate column names and nulls. Decimal and
 datetime values need an explicit application conversion.
 
 SQL is limited to one statement per call. Transaction-control statements,
-`ATTACH`, `DETACH`, pragmas other than argument-free `foreign_key_check`,
-virtual-table creation and extension loading are rejected. The read-only
-`PRAGMA main.foreign_key_check` checks the transaction's database snapshot,
-including its own pending writes (S12.4.4v4). Its result is subject to the
-same row and byte limits as other queries.
+`ATTACH`, `DETACH`, pragmas other than argument-free `foreign_key_check` and
+`integrity_check`, virtual-table creation and extension loading are rejected.
+The read-only `PRAGMA main.foreign_key_check` and `PRAGMA main.integrity_check`
+check the transaction's database snapshot, including its own pending writes
+(S12.4.4v4). Their results are subject to the same row and byte limits as other
+queries.
 `execute` accepts statements that expose result metadata but return
 no rows, as SQLite can do for a strict-table alteration; a returned row fails
 the statement and rolls it back. Input SQL is limited to 1 MiB, paths to 1,023 UTF-8 bytes, and parameters to
@@ -2120,22 +2122,42 @@ a literal filename beginning with `file:` with `./`. `existing` also rejects
 `:memory:` and opens read/write without SQLite's create flag. It is suitable
 when a missing file must remain missing;
 `database` and standalone calls may create a database file.
-File-backed transactions use SQLite's own synchronization behavior; the
-create-only publication barrier described below does not apply to subsequent
-edits of the company file. Their power-loss durability remains unqualified.
+File-backed scoped transactions and standalone statements configure SQLite
+with `synchronous=EXTRA`, `fullfsync=ON` and `checkpoint_fullfsync=ON` before
+beginning. On macOS this asks SQLite to use `F_FULLFSYNC` for commit and
+checkpoint syncs; rollback-journal mode also requests a directory sync after
+journal removal. SQLite's current macOS VFS falls back to ordinary `fsync` if
+`F_FULLFSYNC` fails and ignores some journal-creation directory-sync failures.
+The create-only publication barrier below therefore does not apply to
+subsequent edits, and power-loss durability remains unqualified. If a
+file-backed commit fails and rollback cannot be confirmed, the outcome is
+uncertain: reopen and inspect the database before retrying. In particular, a
+journal-removal directory sync can fail after the change has committed.
+
+When the SQLite VFS supports `SQLITE_FCNTL_HAS_MOVED`, file-backed scopes
+check the open database and its original path around SQL statements, snapshots
+and commit; a detected move or symlink retarget makes the scope rollback-only
+and reports an error (S12.4.4v4). If rollback cannot be confirmed, inspect
+both paths before retrying. Clone checks its source during capture and before
+releasing the source connection. These checks are not atomic with external renames and do
+not bind separate transactions to the same file. VFS implementations without
+the file control retain their previous behavior. Do not move or replace a
+database while it is in use.
 
 `create` runs the transaction on a private in-memory database, then publishes
 its committed image atomically through an authorized parent directory. An
 error or cancellation in the block body publishes nothing. An existing destination, even
-an empty file or symlink, is never replaced. The serialized image is limited
-to 64 MiB, and the final serialization and file publication run on the
-caller. On macOS, publication requires `F_FULLFSYNC` as well as `fsync` for
+an empty file or symlink, is never replaced. A checked SQLite backup is copied
+into a contiguous image before publication; the image is limited to 64 MiB.
+The final backup, image copy and file publication run on the caller. On macOS,
+publication requires `F_FULLFSYNC` as well as `fsync` for
 the staged file and its parent; a failed barrier is not treated as success.
 If publication succeeds but directory synchronization fails, the
 error reports an uncertain durability outcome; inspect the destination before
 retrying. Creation uses the anchored-file implementation and currently fails
-closed on Windows. macOS is tested; Linux remains to be qualified. A crash
-can leave a private staging file, so recovery and cleanup remain open work.
+closed on Windows. macOS is tested; Linux remains to be qualified. A crash or
+an error that prevents verifying a stage can leave a private staging file, so
+recovery and cleanup remain open work.
 
 `clone` reads an existing SQLite database into a bounded, consistent snapshot,
 including committed WAL data, then opens that snapshot as a transaction. The
@@ -2147,14 +2169,26 @@ applies to the database image, and attachments are not included. It is the
 application's responsibility to validate its own data and check uncertain
 publication outcomes. The same platform and staging limitations apply.
 
-`preimage` publishes the original image from an active `clone` scope to a
-second new path. It may be called once, after read-only validation and before
-any modifying statement. A failed or uncertain publication makes the scope
+`preimage` publishes a checked backup of the original snapshot from an active
+`clone` scope to a second new path. SQLite may change physical header bytes
+while making the backup. It may be called once, after read-only validation and
+before any modifying statement. A failed or uncertain publication makes the scope
 rollback-only. The preimage is an independent file effect: after it has been
 published, it remains even if the enclosing transaction later rolls back
 (S12.4.4v4, D7.5.6). A later upgrade-destination publication can also fail or
 be uncertain, so inspect both paths before retrying. The snapshot size,
 authorization, platform and staging limits of `create` apply.
+
+`snapshot_digest` returns the SHA-256 digest of a bounded SQLite backup image
+of `main` in the active transaction before any modifying statement. The 64 MiB
+limit applies to the image. It does not consume a clone's `preimage` opportunity.
+A failed call poisons the scope. Backup and hashing run on the caller thread,
+with cancellation checked before and after. The checked backup propagates page
+read failures and includes unrecognized tables and their data. It is a physical
+image, not a canonical logical database hash: SQLite's backup API can change
+header bytes, so compare a captured clone with its published, reopened image.
+A match says nothing about changes after the second snapshot or about power-loss
+durability (S12.4.4v4).
 
 The initial confined-app profile has no database broker and denies acquisition
 before opening a file (D7.5.2). macOS has been exercised; Windows and Linux

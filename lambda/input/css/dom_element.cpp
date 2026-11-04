@@ -817,6 +817,7 @@ static void dom_document_destroy_resource(lam::Own<DomDocumentResource>* link) {
 }
 
 void DomDocument::destroy() {
+    destroying = true;
     dom_retire_begin_destroy(this);
     mem_free(services.preferred_languages); services.preferred_languages = nullptr;
     lam::free_owned(services.pragma_language);

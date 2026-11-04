@@ -4864,7 +4864,7 @@ struct LayoutLoaderHostScope {
 // its math.
 bool layout_path_uses_loader_runtime(const char* path);
 // Releases the window's loader runtime; its documents must already be gone.
-void ui_context_release_loader_runtime(struct UiContext* uicon);
+bool ui_context_release_loader_runtime(struct UiContext* uicon);
 Runtime* ui_context_loader_runtime(struct UiContext* uicon);
 // Ends the loader runtime's work on one document: the document takes the UI
 // attribute roots that work published (with no document they are dropped),

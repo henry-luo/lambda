@@ -1400,6 +1400,8 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_sqlite_clone", PROFILE_SQLITE_FPTR(pn_io_sqlite_clone), NULL, NULL, false, 0, false},
     {SYSPROC_IO_SQLITE_PREIMAGE, "io_sqlite_preimage", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_sqlite_preimage", PROFILE_SQLITE_FPTR(pn_io_sqlite_preimage), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_SQLITE_SNAPSHOT_DIGEST, "io_sqlite_snapshot_digest", 1, &TYPE_BINARY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_snapshot_digest", PROFILE_SQLITE_FPTR(pn_io_sqlite_snapshot_digest), NULL, NULL, false, 0, false},
     {SYSPROC_IO_SQLITE_EXECUTE, "io_sqlite_execute", 2, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_sqlite_execute2", PROFILE_SQLITE_FPTR(pn_io_sqlite_execute2), NULL, NULL, false, 0, true},
     {SYSPROC_IO_SQLITE_EXECUTE, "io_sqlite_execute", 3, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,

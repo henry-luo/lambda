@@ -3099,6 +3099,8 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         return;
     }
     dom_lifecycle_release_backing_roots(dom_doc);
+    // The outer cleanup owns this runtime until document teardown returns.
+    if (runtime->cleanup_in_progress) return;
     runtime_cleanup(runtime);
     mem_free(runtime);
 

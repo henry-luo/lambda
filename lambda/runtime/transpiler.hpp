@@ -178,6 +178,8 @@ struct Runtime {
     EvalContext* eval_context;
     bool js_runtime_used;
     bool no_task_drain;
+    bool cleanup_in_progress;
+    bool cleanup_incomplete;
 };
 
 // Complete a guest MIR activation that either reused its caller's heap or
@@ -423,6 +425,14 @@ void ui_attribute_roots_release(void* roots);
 // Non-blocking close notification: satellite workers observe this before the
 // document/runtime owner starts its full teardown.
 void runtime_request_satellite_cancel(Runtime* runtime);
+typedef enum RuntimeCleanupResult {
+    RUNTIME_CLEANUP_COMPLETE,
+    RUNTIME_CLEANUP_RETRY,
+    RUNTIME_CLEANUP_INCOMPLETE,
+} RuntimeCleanupResult;
+// RETRY preserves the owner for a quiescent retry; INCOMPLETE means native
+// teardown already began and must not be retried or treated as completed.
+RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
 EvalContext* runtime_get_eval_context(Runtime* runtime);

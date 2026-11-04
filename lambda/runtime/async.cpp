@@ -432,6 +432,17 @@ extern "C" void runtime_resource_table_clear_owned(RuntimeResourceTable* table,
     }
 }
 
+extern "C" void runtime_resource_table_close_except_group(RuntimeResourceTable* table,
+        RuntimeResourceGroup retained_group) {
+    if (!table) return;
+    for (int i = 0; table->slots && i < table->slots->length; i++) {
+        RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
+        RuntimeResourceEntry* entry = slot ? slot->entry : NULL;
+        if (entry && (!entry->descriptor || entry->descriptor->group != retained_group))
+            runtime_resource_table_release_entry(table, slot, true);
+    }
+}
+
 extern "C" void runtime_resource_table_clear(RuntimeResourceTable* table) {
     if (!table) return;
     if (table->slots) {

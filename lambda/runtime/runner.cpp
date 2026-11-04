@@ -62,7 +62,9 @@
 
 extern "C" Item js_get_key_default(Item object, Item key);
 struct DomDocument;
-extern void free_document(DomDocument* doc);
+struct DocumentCleanupTiming;
+extern bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing);
+extern bool document_runtime_cleanup_ready(DomDocument* doc);
 
 #ifndef LAMBDA_MIR_CACHE_DEFAULT
 #define LAMBDA_MIR_CACHE_DEFAULT 1
@@ -3782,8 +3784,65 @@ static void runtime_quiesce_satellite_workers(Runtime* runtime);
 
 static void runtime_quiesce_satellite_workers(Runtime* runtime);
 
+static bool runtime_document_preflight(Runtime* runtime) {
+    if (!runtime->dom_doc || document_runtime_cleanup_ready((DomDocument*)runtime->dom_doc)) return true;
+    log_error("runtime-document-preflight: document is not ready for retirement");
+    return false;
+}
+
+static bool runtime_join_document_tasks(Runtime* runtime) {
+#ifndef LAMBDA_NO_TASKS
+    LambdaScheduler* scheduler = runtime_scheduler(runtime);
+    // A guard also pins a heapless runtime's scheduler and evaluator.
+    if (lambda_scheduler_has_document_retirement_guards(scheduler)) return false;
+    if (scheduler) {
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        // Neither task stacks nor active base-stack execution are quiescent.
+        if (activation_current() || (context && context->execution_depth) ||
+                (owner && owner->execution_depth)) return false;
+        if (!runtime_heap(runtime)) return true;
+        if (!owner || !eval_context_init(owner) || !runtime_context_bind_retained(runtime, owner) ||
+                (js_runtime_state_for(owner) && !js_runtime_state_init(owner))) return false;
+        owner->scheduler = scheduler;
+        return lambda_scheduler_join_document_tasks(scheduler);
+    }
+#else
+    (void)runtime;
+#endif
+    return true;
+}
+
+static void runtime_release_tasks_and_resources(Runtime* runtime, EvalContext* owner) {
+#ifndef LAMBDA_NO_TASKS
+    RuntimeResourceTable* table = runtime_resource_table_context(owner);
+    if (runtime_scheduler(runtime)) {
+        // A task's SQLite attachment owns the connection until its worker joins.
+        runtime_resource_table_close_except_group(table, RUNTIME_RESOURCE_GROUP_DATABASE);
+        if (runtime_scheduler(runtime)) {
+            owner->scheduler = runtime_scheduler(runtime);
+            lambda_scheduler_destroy(runtime_scheduler(runtime));
+            runtime_set_scheduler(runtime, NULL);
+        }
+    }
+#else
+    (void)runtime;
+#endif
+    // A teardown callback may have installed the table after the first lookup.
+    runtime_resource_table_clear(runtime_resource_table_context(owner));
+}
+
 void runtime_reset_heap(Runtime* runtime) {
     if (!runtime) return;
+    if (runtime->cleanup_in_progress || runtime->cleanup_incomplete) {
+        log_error("runtime-document-join: heap reset refused during runtime cleanup");
+        return;
+    }
+    if (!runtime_document_preflight(runtime)) return;
+    // S13.3.1v2: cleanup must run while the document and its resources live.
+    if (!runtime_join_document_tasks(runtime)) {
+        log_error("runtime-document-join: heap reset refused; document tasks were not joined");
+        return;
+    }
     // A satellite still lowering the finished script reads types and names
     // this reset frees; retire and await it first, as runtime_cleanup does.
     // test-batch resets the heap before it frees the scripts, and a worker
@@ -3829,15 +3888,8 @@ void runtime_reset_heap(Runtime* runtime) {
             dom_batch_reset();
         }
 
-        // native owners belong to the evaluator even when no JS realm exists.
-        runtime_resource_table_clear(runtime_resource_table_context(cleanup_context));
-
-#ifndef LAMBDA_NO_TASKS
-        if (runtime_scheduler(runtime)) {
-            lambda_scheduler_destroy(runtime_scheduler(runtime));
-            runtime_set_scheduler(runtime, NULL);
-        }
-#endif
+        // Native owners belong to the evaluator even when no JS realm exists.
+        runtime_release_tasks_and_resources(runtime, cleanup_context);
         if (runtime->js_runtime_used) {
             js_event_loop_shutdown();
     #ifndef LAMBDA_NO_TASKS
@@ -3901,22 +3953,56 @@ static void runtime_quiesce_satellite_workers(Runtime* runtime) {
     }
 }
 
-void runtime_cleanup(Runtime* runtime) {
-    if (!runtime) return;
+struct RuntimeCleanupAttempt {
+    Runtime* runtime;
+    bool destructive;
+    bool complete;
+    ~RuntimeCleanupAttempt() {
+        runtime->cleanup_in_progress = false;
+        if (destructive && !complete) runtime->cleanup_incomplete = true;
+    }
+};
+
+RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime) {
+    if (!runtime) return RUNTIME_CLEANUP_COMPLETE;
+    if (runtime->cleanup_incomplete) return RUNTIME_CLEANUP_INCOMPLETE;
+    if (runtime->cleanup_in_progress) return RUNTIME_CLEANUP_RETRY;
+    runtime->cleanup_in_progress = true;
+    RuntimeCleanupAttempt attempt = {runtime, false, false};
+    // Refuse before retiring native owners if their document is not ready to close.
+    if (!runtime_document_preflight(runtime)) return RUNTIME_CLEANUP_RETRY;
+    // S13.3.1v2: document cleanup precedes editor, template and resource teardown.
+    if (!runtime_join_document_tasks(runtime)) {
+        log_error("runtime-document-join: cleanup refused; document tasks were not joined");
+        return RUNTIME_CLEANUP_RETRY;
+    }
     runtime_quiesce_satellite_workers(runtime);
     // Document/transaction capsules retire with their owning heap after tasks
     // join; do not reset the currently active peer (D5.4.2-D5.4.4).
     EvalContext* cleanup_owner = runtime->eval_context;
     if (cleanup_owner) {
-        if (!eval_context_init(cleanup_owner)) return;
+        if (!eval_context_init(cleanup_owner)) return RUNTIME_CLEANUP_RETRY;
         if (js_runtime_state_for(cleanup_owner) &&
-                !js_runtime_state_init(cleanup_owner)) return;
-        if (cleanup_owner->cwd) {
-            // A session can end before its first execution; unlike the JIT
-            // output path, that leaves its per-execution cwd URL to cleanup.
-            url_destroy(cleanup_owner->cwd);
-            cleanup_owner->cwd = NULL;
-        }
+                !js_runtime_state_init(cleanup_owner)) return RUNTIME_CLEANUP_RETRY;
+    }
+    EvalContext* cleanup_context = NULL;
+    if (runtime_heap(runtime)) {
+        cleanup_context = cleanup_owner ? cleanup_owner : runtime_get_eval_context(runtime);
+        if (!cleanup_context || !runtime_context_bind_retained(runtime, cleanup_context) ||
+                (js_runtime_state_for(cleanup_context) && !js_runtime_state_init(cleanup_context)))
+            return RUNTIME_CLEANUP_RETRY;
+    }
+#ifndef LAMBDA_NO_TASKS
+    // Heapless schedulers still need the shutdown gate before close callbacks run.
+    if (!runtime_heap(runtime) && runtime_scheduler(runtime) &&
+            !lambda_scheduler_join_document_tasks(runtime_scheduler(runtime)))
+        return RUNTIME_CLEANUP_RETRY;
+#endif
+    // Refusals above leave native owners attached; later failures must not be retried.
+    attempt.destructive = true;
+    if (cleanup_owner && cleanup_owner->cwd) {
+        url_destroy(cleanup_owner->cwd);
+        cleanup_owner->cwd = NULL;
     }
     // The Radiant host owns the shared libuv loop across document and script
     // runtimes; retiring either one must leave other realms' handles live.
@@ -3938,28 +4024,15 @@ void runtime_cleanup(Runtime* runtime) {
 
     // Destroy retained execution state (heap and name_pool)
     if (runtime_heap(runtime)) {
-        EvalContext* cleanup_context = cleanup_owner
-            ? cleanup_owner : runtime_get_eval_context(runtime);
-        if (!cleanup_context) return;
-        if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
         cleanup_context->result = ItemNull;
-        if (js_runtime_state_for(cleanup_context) &&
-                !js_runtime_state_init(cleanup_context)) return;
 
         // Destruction follows the same owner-bound path as heap replacement.
         edit_bridge_destroy();
         render_map_destroy();
         tmpl_state_destroy();
 
-        // cancel native owners while their heap is valid, including Lambda DOM loads.
-        runtime_resource_table_clear(runtime_resource_table_context(cleanup_context));
-#ifndef LAMBDA_NO_TASKS
-        if (runtime_scheduler(runtime)) {
-            cleanup_context->scheduler = runtime_scheduler(runtime);
-            lambda_scheduler_destroy(runtime_scheduler(runtime));
-            runtime_set_scheduler(runtime, NULL);
-        }
-#endif
+        // Cancel native owners while their heap is valid, including Lambda DOM loads.
+        runtime_release_tasks_and_resources(runtime, cleanup_context);
 
         if (js_runtime_state_for(cleanup_context)) js_event_loop_shutdown();
 #ifndef LAMBDA_NO_TASKS
@@ -3969,13 +4042,15 @@ void runtime_cleanup(Runtime* runtime) {
 
         dom_shutdown();
         if (runtime->dom_doc) {
-            free_document((DomDocument*)runtime->dom_doc);
+            // A refused document close leaves native owners live; stop before freeing their heap.
+            if (!free_document_profiled((DomDocument*)runtime->dom_doc, NULL))
+                return RUNTIME_CLEANUP_INCOMPLETE;
             runtime->dom_doc = NULL;
             // Child teardown can leave its evaluator and JS capsule bound here.
             if (!eval_context_matches(cleanup_context) &&
-                    !eval_context_transfer_thread(cleanup_context)) return;
+                    !eval_context_transfer_thread(cleanup_context)) return RUNTIME_CLEANUP_INCOMPLETE;
             if (js_runtime_state_for(cleanup_context) &&
-                    !js_runtime_state_init(cleanup_context)) return;
+                    !js_runtime_state_init(cleanup_context)) return RUNTIME_CLEANUP_INCOMPLETE;
         }
         runtime->dom_ui_context = NULL;
 
@@ -4009,7 +4084,7 @@ void runtime_cleanup(Runtime* runtime) {
             // Full JS capsule destruction can release function-owned module
             // bindings, so keep both the JS realm and its slabs alive until it
             // has completed while the owning heap is still valid.
-            if (!js_runtime_state_thread_matches(cleanup_context)) return;
+            if (!js_runtime_state_thread_matches(cleanup_context)) return RUNTIME_CLEANUP_INCOMPLETE;
             // One-shot teardown has no later heap calls; finish eval-generated
             // MIR while its deferred-context list still belongs to this realm.
             js_runtime_state_destroy_context();
@@ -4034,16 +4109,19 @@ void runtime_cleanup(Runtime* runtime) {
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
     } else {
+        // A scheduler or native owner can exist before the first heap is created.
+        if (cleanup_owner) runtime_release_tasks_and_resources(runtime, cleanup_owner);
         dom_shutdown();
         if (runtime->dom_doc) {
-            free_document((DomDocument*)runtime->dom_doc);
+            if (!free_document_profiled((DomDocument*)runtime->dom_doc, NULL))
+                return RUNTIME_CLEANUP_INCOMPLETE;
             runtime->dom_doc = NULL;
         }
         runtime->dom_ui_context = NULL;
     }
     if (!event_loop_cleaned) {
         if (runtime->eval_context && js_runtime_state_for(runtime->eval_context)) {
-            if (!js_runtime_state_init(runtime->eval_context)) return;
+            if (!js_runtime_state_init(runtime->eval_context)) return RUNTIME_CLEANUP_INCOMPLETE;
             js_event_loop_shutdown();
         }
 #ifndef LAMBDA_NO_TASKS
@@ -4062,7 +4140,7 @@ void runtime_cleanup(Runtime* runtime) {
         lambda_module_state_destroy();
         // core capsules are evaluator-owned, independently of the optional JS capsule.
         context_capsule_destroy_all(retiring_context);
-        if (!eval_context_shutdown(retiring_context)) return;
+        if (!eval_context_shutdown(retiring_context)) return RUNTIME_CLEANUP_INCOMPLETE;
         mem_free(runtime->eval_context);
         runtime->eval_context = NULL;
     }
@@ -4071,6 +4149,12 @@ void runtime_cleanup(Runtime* runtime) {
     runtime_close_js_module_mir_scopes(runtime);
 #endif
     runtime_free_all_scripts(runtime);
+    attempt.complete = true;
+    return RUNTIME_CLEANUP_COMPLETE;
+}
+
+void runtime_cleanup(Runtime* runtime) {
+    (void)runtime_try_cleanup(runtime);
 }
 
 // ============================================================================

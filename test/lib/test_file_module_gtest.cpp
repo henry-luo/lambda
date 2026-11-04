@@ -32,6 +32,9 @@
 #include <climits>
 #include <errno.h>
 #include <pthread.h>
+#ifndef _WIN32
+#include <dirent.h>
+#endif
 #if defined(__APPLE__) || defined(__linux__)
 #include <sys/syscall.h>
 #endif
@@ -57,6 +60,8 @@ extern "C" {
 #if defined(__APPLE__) || defined(__linux__)
 struct AnchorSyncTrace;
 static thread_local AnchorSyncTrace* anchor_sync_trace = nullptr;
+static thread_local bool anchor_fail_pread = false;
+static thread_local unsigned anchor_pread_failures = 0;
 struct AnchorSyncTrace {
     struct Event { uint64_t device, inode; bool directory; } events[32] = {};
     uint32_t calls = 0;
@@ -82,6 +87,15 @@ extern "C" int fsync(int fd) {
     int result = (int)syscall(SYS_fsync, fd);
     if (!result && trace && trace->calls == trace->close_at) close(fd);
     return result;
+}
+
+extern "C" ssize_t pread(int fd, void* data, size_t size, off_t offset) {
+    if (anchor_fail_pread) { anchor_pread_failures++; errno = EIO; return -1; }
+#ifdef __APPLE__
+    return (ssize_t)syscall(SYS_pread, fd, data, size, offset);
+#else
+    return (ssize_t)syscall(SYS_pread64, fd, data, size, offset);
+#endif
 }
 #endif
 
@@ -196,6 +210,27 @@ TEST_F(FileAnchorTest, SyncControlObservesAtomicPublicationAndRealKernelErrors) 
     FileRevision revision; EXPECT_FALSE(file_anchor_stat(anchor, "failed", &revision)); EXPECT_EQ(errno, ENOENT);
     AnchorSyncTrace invalid;
     EXPECT_EQ(fsync(-1), -1); EXPECT_EQ(errno, EBADF);
+}
+
+TEST_F(FileAnchorTest, StageReadFailurePreservesStageAndRejectsPublication) {
+    FileAnchor* anchor = open();
+    ASSERT_NE(anchor, nullptr);
+    anchor_pread_failures = 0;
+    anchor_fail_pread = true;
+    int result = file_anchor_write_atomic(anchor, "failed-read", "data", 4, nullptr);
+    int error = errno;
+    anchor_fail_pread = false;
+    EXPECT_EQ(result, -1);
+    EXPECT_EQ(error, EIO);
+    EXPECT_EQ(anchor_pread_failures, 1U);
+    FileRevision revision;
+    EXPECT_FALSE(file_anchor_stat(anchor, "failed-read", &revision));
+    EXPECT_EQ(errno, ENOENT);
+    unsigned entries = 0;
+    auto count = [](void* user, const char*, const FileRevision*) -> bool { (*(unsigned*)user)++; return true; };
+    EXPECT_TRUE(file_anchor_visit(anchor, 8, count, &entries));
+    // A read error cannot prove the stage still contains the bytes we wrote.
+    EXPECT_EQ(entries, 1U);
 }
 
 TEST_F(FileAnchorTest, DirectoryCreationSyncsChildBeforeItsParent) {
@@ -544,6 +579,144 @@ TEST_F(FileAnchorTest, AtomicPublicationRequiresUnchangedAdmittedRevision) {
     guard.external_change = nullptr;
     expect_text(anchor, "file", "external changed bytes");
     mem_free(target);
+}
+
+struct AnchorStageSwap {
+    const char* directory;
+    FileAnchorAction action;
+    unsigned checks;
+    bool deny;
+    bool rewrite;
+    bool remove;
+    bool restore_mtime;
+    bool swapped;
+    char stage[PATH_MAX];
+    char saved[PATH_MAX];
+};
+
+static bool swap_anchor_stage(void* context, const char*, FileAnchorAction action, const FileRevision*) {
+    AnchorStageSwap* state = (AnchorStageSwap*)context;
+    if (action != state->action || ++state->checks != 2) return true;
+    DIR* directory = opendir(state->directory);
+    if (!directory) return false;
+    struct dirent* entry;
+    while ((entry = readdir(directory))) {
+        if (strncmp(entry->d_name, FILE_ATOMIC_STAGE_PREFIX, sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1)) continue;
+        if (path_str_join_posix_into(state->stage, sizeof(state->stage), state->directory, entry->d_name) < 0 ||
+                path_str_join_posix_into(state->saved, sizeof(state->saved), state->directory, "saved-stage") < 0) break;
+        struct stat before;
+        bool ready = !state->restore_mtime || stat(state->stage, &before) == 0;
+        state->swapped = ready && (state->rewrite || (state->remove ? unlink(state->stage) :
+            rename(state->stage, state->saved)) == 0) && write_binary_file(state->stage,
+                state->restore_mtime ? "modified" : "substitute", state->restore_mtime ? 8 : 10) == 0;
+        if (state->swapped && state->restore_mtime) {
+#ifdef __APPLE__
+            struct timespec times[2] = {before.st_atimespec, before.st_mtimespec};
+#else
+            struct timespec times[2] = {before.st_atim, before.st_mtim};
+#endif
+            state->swapped = utimensat(AT_FDCWD, state->stage, times, 0) == 0;
+        }
+        break;
+    }
+    closedir(directory);
+    return state->swapped && !state->deny;
+}
+
+TEST_F(FileAnchorTest, PublicationRejectsSubstitutedStageWithoutRemovingIt) {
+    FileAnchor* plain = open();
+    ASSERT_NE(plain, nullptr);
+    for (unsigned mode = 0; mode < 20; mode++) {
+        SCOPED_TRACE(mode);
+        bool replace = (mode & 1) != 0;
+        const char* target = replace ? "target" : "new";
+        char* target_path = file_path_join(project, target);
+        ASSERT_NE(target_path, nullptr);
+        unlink(target_path);
+        FileRevision original = {};
+        if (replace) {
+            ASSERT_EQ(file_anchor_write_atomic(plain, target, "original", 8, nullptr), 0);
+            ASSERT_TRUE(file_anchor_stat(plain, target, &original));
+        }
+        AnchorStageSwap swap = {project, replace ? FILE_ANCHOR_REPLACE : FILE_ANCHOR_CREATE};
+        swap.deny = (mode & 2) != 0;
+        swap.rewrite = (mode & (4 | 16)) != 0;
+        swap.remove = (mode & 8) != 0;
+        swap.restore_mtime = (mode & 16) != 0;
+        FileAnchor* guarded = open(FILE_ANCHOR_SAME_DEVICE, swap_anchor_stage, &swap);
+        ASSERT_NE(guarded, nullptr);
+        EXPECT_EQ(file_anchor_write_atomic(guarded, target, "intended", 8, replace ? &original : nullptr), -1);
+        EXPECT_TRUE(swap.swapped);
+        if (replace) expect_text(plain, target, "original");
+        else EXPECT_FALSE(file_exists(target_path));
+        char* bytes = nullptr;
+        size_t size = 0;
+        ASSERT_TRUE(file_read_all(swap.stage, MEM_CAT_TEMP, &bytes, &size));
+        EXPECT_EQ(size, swap.restore_mtime ? 8U : 10U);
+        EXPECT_EQ(memcmp(bytes, swap.restore_mtime ? "modified" : "substitute", size), 0);
+        mem_free(bytes);
+        unlink(swap.stage);
+        unlink(swap.saved);
+        unlink(target_path);
+        mem_free(target_path);
+    }
+}
+
+struct AnchorFinalMutation {
+    FileAnchorAction action;
+    const char* path;
+    const char* moved;
+    unsigned checks;
+    bool changed;
+};
+
+static bool mutate_final_anchor(void* context, const char* relative, FileAnchorAction action, const FileRevision*) {
+    AnchorFinalMutation* state = (AnchorFinalMutation*)context;
+    if (action == FILE_ANCHOR_TRAVERSE && strcmp(relative, "parent")) return true;
+    if (action != state->action || ++state->checks != 2) return true;
+    state->changed = state->moved ? rename(state->path, state->moved) == 0 && mkdir(state->path, 0700) == 0 :
+        write_binary_file(state->path, "host update", 11) == 0;
+    return state->changed;
+}
+
+TEST_F(FileAnchorTest, PublicationRechecksDestinationAndParentAfterFinalGuard) {
+    FileAnchor* plain = open();
+    ASSERT_NE(plain, nullptr);
+    ASSERT_EQ(file_anchor_write_atomic(plain, "target", "original", 8, nullptr), 0);
+    FileRevision original;
+    ASSERT_TRUE(file_anchor_stat(plain, "target", &original));
+    char* target = file_path_join(project, "target");
+    AnchorFinalMutation mutation = {FILE_ANCHOR_REPLACE, target};
+    FileAnchor* guarded = open(FILE_ANCHOR_SAME_DEVICE, mutate_final_anchor, &mutation);
+    ASSERT_NE(guarded, nullptr);
+    EXPECT_EQ(file_anchor_write_atomic(guarded, "target", "intended", 8, &original), -1);
+    EXPECT_EQ(errno, ESTALE);
+    EXPECT_TRUE(mutation.changed);
+    expect_text(plain, "target", "host update");
+    char* parent = file_path_join(project, "parent");
+    char* moved = file_path_join(project, "moved");
+    ASSERT_EQ(mkdir(parent, 0700), 0);
+    AnchorFinalMutation move = {FILE_ANCHOR_CREATE, parent, moved};
+    FileAnchor* parent_guarded = open(FILE_ANCHOR_SAME_DEVICE, mutate_final_anchor, &move);
+    ASSERT_NE(parent_guarded, nullptr);
+    EXPECT_EQ(file_anchor_write_atomic(parent_guarded, "parent/new", "intended", 8, nullptr), -1);
+    EXPECT_EQ(errno, ESTALE);
+    EXPECT_TRUE(move.changed);
+    char* old_destination = file_path_join(moved, "new");
+    char* new_destination = file_path_join(parent, "new");
+    EXPECT_FALSE(file_exists(old_destination));
+    EXPECT_FALSE(file_exists(new_destination));
+    ASSERT_EQ(rmdir(moved), 0);
+    AnchorFinalMutation walk_move = {FILE_ANCHOR_TRAVERSE, parent, moved};
+    FileAnchor* walk_guarded = open(FILE_ANCHOR_SAME_DEVICE, mutate_final_anchor, &walk_move);
+    ASSERT_NE(walk_guarded, nullptr);
+    EXPECT_EQ(file_anchor_write_atomic(walk_guarded, "parent/new", "intended", 8, nullptr), -1);
+    EXPECT_EQ(errno, ESTALE);
+    EXPECT_TRUE(walk_move.changed);
+    EXPECT_FALSE(file_exists(old_destination));
+    EXPECT_FALSE(file_exists(new_destination));
+    mem_free(old_destination); mem_free(new_destination);
+    mem_free(parent); mem_free(moved); mem_free(target);
 }
 
 TEST_F(FileAnchorTest, SpecialFilesAreNeverOpenedAsContent) {

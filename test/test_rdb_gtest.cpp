@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 #include <string.h>
+#include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <uv.h>
@@ -2570,6 +2571,16 @@ static bool tx_foreign_key_row(void* user, int count, const char* const* names,
     return true;
 }
 
+static bool tx_integrity_row(void* user, int count, const char* const* names,
+                             const RdbValue* values) {
+    (void)names;
+    TxRowCheck* check = (TxRowCheck*)user;
+    check->rows++;
+    check->matches = count == 1 && values[0].type == RDB_TYPE_STRING &&
+        values[0].str_val && strcmp(values[0].str_val, "ok") == 0;
+    return true;
+}
+
 TEST_F(RdbTest, SqliteSingleStatementAutocommitsAndRollsBackFailure) {
     const char* create = "CREATE TABLE autocommit_entries (n INTEGER NOT NULL)";
     ASSERT_EQ(rdb_sqlite_execute_once(TEST_DB_PATH, create, strlen(create), NULL, 0, NULL, NULL), RDB_OK);
@@ -2675,7 +2686,8 @@ TEST_F(RdbTest, SqliteTransactionPreservesTextAndBlobBytes) {
 TEST_F(RdbTest, SqliteTransactionRejectsUncontrolledStatements) {
     const char* statements[] = {
         "SELECT 1; SELECT 2", "ATTACH DATABASE ':memory:' AS other", "PRAGMA foreign_keys = OFF",
-        "PRAGMA foreign_key_check = 'authors'", "BEGIN", "SAVEPOINT nested", "SELECT load_extension('missing')"
+        "PRAGMA foreign_key_check = 'authors'", "PRAGMA integrity_check = 'authors'", "PRAGMA integrity_check = 1",
+        "BEGIN", "SAVEPOINT nested", "SELECT load_extension('missing')"
     };
     for (const char* sql : statements) {
         RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
@@ -2701,6 +2713,18 @@ TEST_F(RdbTest, SqliteForeignKeyCheckReadsTheTransactionSnapshot) {
     check = {};
     ASSERT_EQ(tx_sql(tx, "PRAGMA main.foreign_key_check", NULL, 0, tx_foreign_key_row, &check), RDB_OK);
     EXPECT_EQ(check.rows, 0);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+}
+
+TEST_F(RdbTest, SqliteIntegrityCheckReadsTheTransactionSnapshot) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE pragma_integrity_check (n INTEGER CHECK(n > 0))"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO pragma_integrity_check VALUES (1)"), RDB_OK);
+    TxRowCheck check = {};
+    ASSERT_EQ(tx_sql(tx, "PRAGMA main.integrity_check", NULL, 0, tx_integrity_row, &check), RDB_OK);
+    EXPECT_EQ(check.rows, 1);
+    EXPECT_TRUE(check.matches);
     EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
 }
 
@@ -2740,6 +2764,297 @@ TEST_F(RdbTest, SqliteTransactionCommitFailureRollsBackSchemaAndData) {
     EXPECT_EQ(rdb_get_table(conn, "deferred_child"), nullptr);
     rdb_close(conn);
 }
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+static sqlite3_vfs* session_original_vfs;
+static sqlite3_vfs session_no_move_vfs;
+static sqlite3_io_methods session_no_move_methods;
+static int (*session_original_control)(sqlite3_file*, int, void*);
+
+static int session_no_move_control(sqlite3_file* file, int operation, void* argument) {
+    if (operation == SQLITE_FCNTL_HAS_MOVED) return SQLITE_NOTFOUND;
+    return session_original_control(file, operation, argument);
+}
+
+static int session_no_move_open(sqlite3_vfs*, const char* name, sqlite3_file* file,
+        int flags, int* output_flags) {
+    int rc = session_original_vfs->xOpen(session_original_vfs, name, file, flags, output_flags);
+    if (rc == SQLITE_OK && (flags & SQLITE_OPEN_MAIN_DB) && file->pMethods) {
+        session_no_move_methods = *file->pMethods;
+        session_original_control = file->pMethods->xFileControl;
+        session_no_move_methods.xFileControl = session_no_move_control;
+        file->pMethods = &session_no_move_methods;
+    }
+    return rc;
+}
+
+TEST_F(RdbTest, SqliteFileSessionFailsClosedWhenVfsCannotDetectMoves) {
+    session_original_vfs = sqlite3_vfs_find(NULL);
+    ASSERT_NE(session_original_vfs, nullptr);
+    session_no_move_vfs = *session_original_vfs;
+    session_no_move_vfs.zName = "lambda-test-no-file-movement";
+    session_no_move_vfs.xOpen = session_no_move_open;
+    ASSERT_EQ(sqlite3_vfs_register(&session_no_move_vfs, 1), SQLITE_OK);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, TEST_DB_PATH);
+    EXPECT_EQ(session, nullptr);
+    if (session) (void)rdb_sqlite_file_session_close(session);
+    // The pre-existing unbound API retains its compatibility behavior.
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin_existing(pool, TEST_DB_PATH);
+    EXPECT_NE(tx, nullptr);
+    if (tx) EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    EXPECT_EQ(sqlite3_vfs_unregister(&session_no_move_vfs), SQLITE_OK);
+    EXPECT_EQ(sqlite3_vfs_register(session_original_vfs, 1), SQLITE_OK);
+}
+
+TEST_F(RdbTest, SqliteMovedFileRollsBackAndRejectsFurtherWork) {
+    const char* moved = "temp/test_rdb_moved.db";
+    const char* spare = "temp/test_rdb_replacement.db";
+    unlink(moved);
+    for (int phase = 0; phase < 3; phase++) {
+        unlink(spare);
+        create_test_database(spare);
+        RdbSqliteTxn* tx = rdb_sqlite_tx_begin_existing(pool, TEST_DB_PATH);
+        ASSERT_NE(tx, nullptr);
+        TxRowCheck row = {};
+        ASSERT_EQ(tx_sql(tx, "SELECT 42 AS n", NULL, 0, tx_integer_row, &row), RDB_OK);
+        if (phase == 1) ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id,name) VALUES (10,'pending')"), RDB_OK);
+        ASSERT_EQ(rename(TEST_DB_PATH, moved), 0);
+        ASSERT_EQ(rename(spare, TEST_DB_PATH), 0);
+        if (phase == 0) EXPECT_EQ(tx_sql(tx, "INSERT INTO authors (id,name) VALUES (10,'wrong')"), RDB_ERROR);
+        if (phase == 2) {
+            uint8_t digest[32];
+            EXPECT_EQ(rdb_sqlite_tx_snapshot_digest(tx, 1024 * 1024, digest), RDB_ERROR);
+        }
+        EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+        // Both the replacement and the detached original must retain their rows.
+        RdbConn* replacement = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+        RdbConn* original = rdb_open(pool, moved, "sqlite", true);
+        ASSERT_NE(replacement, nullptr);
+        ASSERT_NE(original, nullptr);
+        ASSERT_EQ(rdb_load_schema(replacement), RDB_OK);
+        ASSERT_EQ(rdb_load_schema(original), RDB_OK);
+        EXPECT_EQ(rdb_row_count(replacement, "authors"), 3);
+        EXPECT_EQ(rdb_row_count(original, "authors"), 3);
+        rdb_close(replacement);
+        rdb_close(original);
+        ASSERT_EQ(unlink(TEST_DB_PATH), 0);
+        ASSERT_EQ(rename(moved, TEST_DB_PATH), 0);
+    }
+}
+
+TEST_F(RdbTest, SqliteCloneRejectsMovedSourceBeforeAndAfterCopy) {
+    const char* moved = "temp/test_rdb_clone_moved.db";
+    const char* spare = "temp/test_rdb_clone_replacement.db";
+    unlink(moved);
+    for (int phase = 0; phase < 2; phase++) {
+        unlink(spare);
+        create_test_database(spare);
+        RdbSqliteClone* clone = rdb_sqlite_clone_prepare(pool, TEST_DB_PATH, 1024 * 1024);
+        ASSERT_NE(clone, nullptr);
+        if (phase == 1) rdb_sqlite_clone_run(clone, NULL);
+        ASSERT_EQ(rename(TEST_DB_PATH, moved), 0);
+        ASSERT_EQ(rename(spare, TEST_DB_PATH), 0);
+        if (phase == 0) rdb_sqlite_clone_run(clone, NULL);
+        EXPECT_EQ(rdb_sqlite_clone_finish(clone), nullptr);
+        ASSERT_EQ(unlink(TEST_DB_PATH), 0);
+        ASSERT_EQ(rename(moved, TEST_DB_PATH), 0);
+    }
+}
+
+TEST_F(RdbTest, SqliteRetargetedSymlinkRejectsCommit) {
+    const char* link = "temp/test_rdb_link.db";
+    unlink(link);
+    ASSERT_EQ(symlink("test_rdb.db", link), 0);
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin_existing(pool, link);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id,name) VALUES (10,'pending')"), RDB_OK);
+    ASSERT_EQ(unlink(link), 0);
+    ASSERT_EQ(symlink("test_rdb_empty.db", link), 0);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    RdbConn* original = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(original, nullptr);
+    ASSERT_EQ(rdb_load_schema(original), RDB_OK);
+    EXPECT_EQ(rdb_row_count(original, "authors"), 3);
+    rdb_close(original);
+    unlink(link);
+}
+
+TEST_F(RdbTest, SqliteFileSessionOwnsItsAnchorAcrossTransactionsAndCopies) {
+    EXPECT_EQ(rdb_sqlite_file_session_open(pool, ":memory:"), nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_open(pool, "file:unexpected"), nullptr);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, TEST_DB_PATH);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(rdb_sqlite_file_session_current(session));
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_file_session_begin(pool, session), nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_clone(pool, session, 1024 * 1024), nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id,name) VALUES (10,'session')"), RDB_OK);
+    ASSERT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    TxRowCheck row = {};
+    ASSERT_EQ(tx_sql(tx, "SELECT count(*)+38 AS n FROM authors", NULL, 0, tx_integer_row, &row), RDB_OK);
+    EXPECT_TRUE(row.matches);
+    ASSERT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    RdbSqliteClone* clone = rdb_sqlite_file_session_clone(pool, session, 1024 * 1024);
+    ASSERT_NE(clone, nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_ERROR);
+    rdb_sqlite_clone_run(clone, NULL);
+    tx = rdb_sqlite_clone_finish(clone);
+    ASSERT_NE(tx, nullptr);
+    row = {};
+    ASSERT_EQ(tx_sql(tx, "SELECT count(*)+38 AS n FROM authors", NULL, 0, tx_integer_row, &row), RDB_OK);
+    EXPECT_TRUE(row.matches);
+    // A captured clone retains its source until its transaction ends.
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_file_session_begin(pool, session), nullptr);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    EXPECT_FALSE(rdb_sqlite_file_session_current(session));
+    EXPECT_EQ(rdb_sqlite_file_session_begin(pool, session), nullptr);
+}
+
+struct SessionPublicationMove { const char* moved; const char* spare; int calls; bool move; };
+static int session_publication_move(void* user, const void* data, size_t size) {
+    SessionPublicationMove* state = (SessionPublicationMove*)user;
+    if (!data || !size) return RDB_ERROR;
+    state->calls++;
+    if (state->move && (rename(TEST_DB_PATH, state->moved) || rename(state->spare, TEST_DB_PATH)))
+        return RDB_ERROR;
+    return RDB_OK;
+}
+
+TEST_F(RdbTest, SqliteFileSessionCloneChecksSourceThroughPublication) {
+    const char* moved = "temp/test_rdb_session_publish_moved.db";
+    const char* spare = "temp/test_rdb_session_publish_replacement.db";
+    unlink(moved);
+    for (int phase = 0; phase < 3; phase++) {
+        unlink(spare);
+        create_test_database(spare);
+        RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, TEST_DB_PATH);
+        ASSERT_NE(session, nullptr);
+        RdbSqliteClone* clone = rdb_sqlite_file_session_clone(pool, session, 1024 * 1024);
+        ASSERT_NE(clone, nullptr);
+        rdb_sqlite_clone_run(clone, NULL);
+        RdbSqliteTxn* tx = rdb_sqlite_clone_finish(clone);
+        ASSERT_NE(tx, nullptr);
+        SessionPublicationMove state = {moved, spare, 0, phase != 0};
+        if (phase == 0) {
+            ASSERT_EQ(rename(TEST_DB_PATH, moved), 0);
+            ASSERT_EQ(rename(spare, TEST_DB_PATH), 0);
+        }
+        if (phase == 2) {
+            EXPECT_EQ(rdb_sqlite_tx_preimage(tx, 1024 * 1024, session_publication_move, &state), RDB_SQLITE_UNCERTAIN);
+            EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+        } else {
+            EXPECT_EQ(rdb_sqlite_tx_finish_snapshot(tx, false, 1024 * 1024, session_publication_move, &state),
+                      phase == 0 ? RDB_ERROR : RDB_SQLITE_UNCERTAIN);
+        }
+        EXPECT_EQ(state.calls, phase == 0 ? 0 : 1);
+        EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+        ASSERT_EQ(unlink(TEST_DB_PATH), 0);
+        ASSERT_EQ(rename(moved, TEST_DB_PATH), 0);
+    }
+}
+
+TEST_F(RdbTest, SqliteFileSessionRejectsReplacementBetweenTransactions) {
+    const char* moved = "temp/test_rdb_session_moved.db";
+    const char* spare = "temp/test_rdb_session_replacement.db";
+    unlink(moved); unlink(spare);
+    create_test_database(spare);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, TEST_DB_PATH);
+    ASSERT_NE(session, nullptr);
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    ASSERT_EQ(rename(TEST_DB_PATH, moved), 0);
+    ASSERT_EQ(rename(spare, TEST_DB_PATH), 0);
+    EXPECT_FALSE(rdb_sqlite_file_session_current(session));
+    EXPECT_EQ(rdb_sqlite_file_session_begin(pool, session), nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_clone(pool, session, 1024 * 1024), nullptr);
+    ASSERT_EQ(unlink(TEST_DB_PATH), 0);
+    ASSERT_EQ(rename(moved, TEST_DB_PATH), 0);
+    // Restoring the same still-open file is distinct from opening a copy.
+    EXPECT_TRUE(rdb_sqlite_file_session_current(session));
+    tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+}
+
+TEST_F(RdbTest, SqliteFileSessionRejectsMoveDuringWriteOrClone) {
+    const char* moved = "temp/test_rdb_session_active_moved.db";
+    const char* spare = "temp/test_rdb_session_active_replacement.db";
+    unlink(moved); unlink(spare);
+    create_test_database(spare);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, TEST_DB_PATH);
+    ASSERT_NE(session, nullptr);
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id,name) VALUES (10,'pending')"), RDB_OK);
+    ASSERT_EQ(rename(TEST_DB_PATH, moved), 0);
+    ASSERT_EQ(rename(spare, TEST_DB_PATH), 0);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    ASSERT_EQ(unlink(TEST_DB_PATH), 0);
+    ASSERT_EQ(rename(moved, TEST_DB_PATH), 0);
+    RdbConn* original = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(original, nullptr);
+    ASSERT_EQ(rdb_load_schema(original), RDB_OK);
+    EXPECT_EQ(rdb_row_count(original, "authors"), 3);
+    rdb_close(original);
+    create_test_database(spare);
+    RdbSqliteClone* clone = rdb_sqlite_file_session_clone(pool, session, 1024 * 1024);
+    ASSERT_NE(clone, nullptr);
+    rdb_sqlite_clone_run(clone, NULL);
+    ASSERT_EQ(rename(TEST_DB_PATH, moved), 0);
+    ASSERT_EQ(rename(spare, TEST_DB_PATH), 0);
+    EXPECT_EQ(rdb_sqlite_clone_finish(clone), nullptr);
+    ASSERT_EQ(unlink(TEST_DB_PATH), 0);
+    ASSERT_EQ(rename(moved, TEST_DB_PATH), 0);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+}
+
+TEST_F(RdbTest, SqliteFileSessionDetectsRetargetedSymlink) {
+    const char* link = "temp/test_rdb_session_link.db";
+    unlink(link);
+    ASSERT_EQ(symlink("test_rdb.db", link), 0);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, link);
+    ASSERT_NE(session, nullptr);
+    ASSERT_EQ(unlink(link), 0);
+    ASSERT_EQ(symlink("test_rdb_empty.db", link), 0);
+    EXPECT_FALSE(rdb_sqlite_file_session_current(session));
+    EXPECT_EQ(rdb_sqlite_file_session_begin(pool, session), nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_clone(pool, session, 1024 * 1024), nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    unlink(link);
+}
+
+TEST_F(RdbTest, SqliteFileSessionCloneIncludesCommittedWalWrites) {
+    sqlite3* db = NULL;
+    ASSERT_EQ(sqlite3_open(TEST_DB_PATH, &db), SQLITE_OK);
+    ASSERT_EQ(sqlite3_exec(db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL), SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(db), SQLITE_OK);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, TEST_DB_PATH);
+    ASSERT_NE(session, nullptr);
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors (id,name) VALUES (10,'wal')"), RDB_OK);
+    ASSERT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    RdbSqliteClone* clone = rdb_sqlite_file_session_clone(pool, session, 1024 * 1024);
+    ASSERT_NE(clone, nullptr);
+    rdb_sqlite_clone_run(clone, NULL);
+    tx = rdb_sqlite_clone_finish(clone);
+    ASSERT_NE(tx, nullptr);
+    TxRowCheck row = {};
+    ASSERT_EQ(tx_sql(tx, "SELECT count(*)+38 AS n FROM authors", NULL, 0, tx_integer_row, &row), RDB_OK);
+    EXPECT_TRUE(row.matches);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+}
+#endif
 
 TEST_F(RdbTest, SqliteTransactionTreatsParametersAsData) {
     RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, TEST_DB_PATH);
@@ -3007,6 +3322,8 @@ struct SnapshotCheck {
     int outcome;
     bool contents_match;
     RdbConnLife* close_during_publish;
+    RdbSqliteTxn* reenter_during_publish;
+    int reenter_result;
 };
 
 static int check_snapshot(void* user, const void* data, size_t size) {
@@ -3028,6 +3345,7 @@ static int check_snapshot(void* user, const void* data, size_t size) {
     if (stmt) sqlite3_finalize(stmt);
     sqlite3_close(db);
     if (check->close_during_publish) rdb_conn_life_close(check->close_during_publish);
+    if (check->reenter_during_publish) check->reenter_result = tx_sql(check->reenter_during_publish, "SELECT 1");
     return check->outcome;
 }
 
@@ -3067,6 +3385,38 @@ TEST_F(RdbTest, SqliteMemorySnapshotRollsBackAndLimitsBeforePublication) {
     rdb_close(conn);
 }
 
+TEST_F(RdbTest, SqliteClonePreimageDoesNotPublishOnSqliteOutOfMemory) {
+    RdbSqliteClone* clone = rdb_sqlite_clone_prepare(pool, TEST_DB_PATH, 1024 * 1024);
+    ASSERT_NE(clone, nullptr);
+    rdb_sqlite_clone_run(clone, NULL);
+    RdbSqliteTxn* tx = rdb_sqlite_clone_finish(clone);
+    ASSERT_NE(tx, nullptr);
+    SnapshotCheck check = {};
+    sqlite3_int64 previous_soft = sqlite3_soft_heap_limit64(-1);
+    sqlite3_int64 previous_hard = sqlite3_hard_heap_limit64(1);
+    int result = rdb_sqlite_tx_preimage(tx, 1024 * 1024, check_snapshot, &check);
+    sqlite3_hard_heap_limit64(previous_hard);
+    sqlite3_soft_heap_limit64(previous_soft);
+    EXPECT_EQ(result, RDB_ERROR);
+    EXPECT_EQ(check.calls, 0);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+}
+
+TEST_F(RdbTest, SqliteMemorySnapshotDoesNotPublishOnSqliteOutOfMemory) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, ":memory:");
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE sample (value INTEGER)"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO sample VALUES (42)"), RDB_OK);
+    SnapshotCheck check = {};
+    sqlite3_int64 previous_soft = sqlite3_soft_heap_limit64(-1);
+    sqlite3_int64 previous_hard = sqlite3_hard_heap_limit64(1);
+    int result = rdb_sqlite_tx_finish_snapshot(tx, false, 1024 * 1024, check_snapshot, &check);
+    sqlite3_hard_heap_limit64(previous_hard);
+    sqlite3_soft_heap_limit64(previous_soft);
+    EXPECT_EQ(result, RDB_ERROR);
+    EXPECT_EQ(check.calls, 0);
+}
+
 TEST_F(RdbTest, SqliteMemorySnapshotReportsUncertainPublication) {
     RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, ":memory:");
     ASSERT_NE(tx, nullptr);
@@ -3075,6 +3425,19 @@ TEST_F(RdbTest, SqliteMemorySnapshotReportsUncertainPublication) {
     SnapshotCheck check = {};
     check.outcome = 1;
     EXPECT_EQ(rdb_sqlite_tx_finish_snapshot(tx, false, 1024 * 1024, check_snapshot, &check), 1);
+    EXPECT_EQ(check.calls, 1);
+    EXPECT_TRUE(check.contents_match);
+}
+
+TEST_F(RdbTest, SqliteMemorySnapshotRejectsPublicationReentry) {
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin(pool, ":memory:");
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE sample (value INTEGER)"), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO sample VALUES (42)"), RDB_OK);
+    SnapshotCheck check = {};
+    check.reenter_during_publish = tx;
+    EXPECT_EQ(rdb_sqlite_tx_finish_snapshot(tx, false, 1024 * 1024, check_snapshot, &check), RDB_SQLITE_UNCERTAIN);
+    EXPECT_EQ(check.reenter_result, RDB_ERROR);
     EXPECT_EQ(check.calls, 1);
     EXPECT_TRUE(check.contents_match);
 }
@@ -3103,6 +3466,10 @@ static bool clone_count_row(void* user, int count, const char* const* names, con
     return true;
 }
 
+static int write_snapshot_callback(void* user, const void* data, size_t size) {
+    return write_binary_file((const char*)user, (const char*)data, size) == 0 ? RDB_OK : RDB_ERROR;
+}
+
 TEST_F(RdbTest, SqliteCloneCopiesAConsistentReadSnapshot) {
     RdbSqliteClone* clone = rdb_sqlite_clone_prepare(pool, TEST_DB_PATH, 1024 * 1024);
     ASSERT_NE(clone, nullptr);
@@ -3119,6 +3486,80 @@ TEST_F(RdbTest, SqliteCloneCopiesAConsistentReadSnapshot) {
     EXPECT_EQ(check.value, 3);
     EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
 }
+
+TEST_F(RdbTest, SqliteSnapshotDigestChecksTheCompleteReadSnapshot) {
+    uint8_t original[32] = {}, repeated[32] = {}, cloned[32] = {}, published[32] = {};
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin_existing(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    CloneCount count = {};
+    ASSERT_EQ(tx_sql(tx, "SELECT COUNT(*) FROM authors", NULL, 0, clone_count_row, &count), RDB_OK);
+    ASSERT_EQ(rdb_sqlite_tx_snapshot_digest(tx, 1024 * 1024, original), RDB_OK);
+    ASSERT_EQ(rdb_sqlite_tx_snapshot_digest(tx, 1024 * 1024, repeated), RDB_OK);
+    EXPECT_EQ(memcmp(original, repeated, sizeof(original)), 0);
+    ASSERT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    RdbSqliteClone* clone = rdb_sqlite_clone_prepare(pool, TEST_DB_PATH, 1024 * 1024);
+    ASSERT_NE(clone, nullptr);
+    rdb_sqlite_clone_run(clone, NULL);
+    tx = rdb_sqlite_clone_finish(clone);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(rdb_sqlite_tx_snapshot_digest(tx, 1024 * 1024, cloned), RDB_OK);
+    const char* path = "temp/test_rdb_digest_preimage.db";
+    ASSERT_EQ(rdb_sqlite_tx_preimage(tx, 1024 * 1024, write_snapshot_callback, (void*)path), RDB_OK);
+    RdbSqliteTxn* reopened = rdb_sqlite_tx_begin_existing(pool, path);
+    ASSERT_NE(reopened, nullptr);
+    ASSERT_EQ(rdb_sqlite_tx_snapshot_digest(reopened, 1024 * 1024, published), RDB_OK);
+    EXPECT_EQ(memcmp(cloned, published, sizeof(cloned)), 0);
+    EXPECT_EQ(rdb_sqlite_tx_finish(reopened, false), RDB_OK);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO authors(id,name) VALUES (99,'pending')"), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_tx_snapshot_digest(tx, 1024 * 1024, repeated), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    tx = rdb_sqlite_tx_begin_existing(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(rdb_sqlite_tx_snapshot_digest(tx, 16, repeated), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+}
+
+#ifdef __APPLE__
+typedef ssize_t (*DigestPreadFn)(int, void*, size_t, off_t);
+static DigestPreadFn digest_original_pread;
+static int digest_read_fault;
+static int digest_read_faults;
+
+static ssize_t digest_fault_pread(int fd, void* data, size_t size, off_t offset) {
+    if (__atomic_exchange_n(&digest_read_fault, 0, __ATOMIC_ACQ_REL)) {
+        __atomic_add_fetch(&digest_read_faults, 1, __ATOMIC_RELAXED);
+        errno = EIO;
+        return -1;
+    }
+    return digest_original_pread(fd, data, size, offset);
+}
+
+TEST_F(RdbTest, SqliteSnapshotDigestRejectsPageReadFailure) {
+    sqlite3* db = NULL;
+    ASSERT_EQ(sqlite3_open(TEST_DB_PATH, &db), SQLITE_OK);
+    ASSERT_EQ(sqlite3_exec(db, "CREATE TABLE digest_payload(data BLOB); INSERT INTO digest_payload VALUES (zeroblob(8388608))", NULL, NULL, NULL), SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(db), SQLITE_OK);
+    RdbSqliteTxn* tx = rdb_sqlite_tx_begin_existing(pool, TEST_DB_PATH);
+    ASSERT_NE(tx, nullptr);
+    CloneCount count = {};
+    ASSERT_EQ(tx_sql(tx, "SELECT COUNT(*) FROM authors", NULL, 0, clone_count_row, &count), RDB_OK);
+    sqlite3_vfs* vfs = sqlite3_vfs_find(NULL);
+    ASSERT_NE(vfs, nullptr);
+    ASSERT_GE(vfs->iVersion, 3);
+    digest_original_pread = (DigestPreadFn)vfs->xGetSystemCall(vfs, "pread");
+    ASSERT_NE(digest_original_pread, nullptr);
+    ASSERT_EQ(vfs->xSetSystemCall(vfs, "pread", (sqlite3_syscall_ptr)digest_fault_pread), SQLITE_OK);
+    digest_read_faults = 0;
+    __atomic_store_n(&digest_read_fault, 1, __ATOMIC_RELEASE);
+    uint8_t digest[32] = {};
+    int result = rdb_sqlite_tx_snapshot_digest(tx, 16 * 1024 * 1024, digest);
+    __atomic_store_n(&digest_read_fault, 0, __ATOMIC_RELEASE);
+    EXPECT_EQ(vfs->xSetSystemCall(vfs, "pread", (sqlite3_syscall_ptr)digest_original_pread), SQLITE_OK);
+    EXPECT_EQ(digest_read_faults, 1);
+    EXPECT_EQ(result, RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+}
+#endif
 
 TEST_F(RdbTest, SqliteCloneRejectsMissingOversizedCancelledAndBrokenSources) {
     const char* absent = "temp/test_rdb_clone_absent.db";
@@ -3153,20 +3594,58 @@ TEST_F(RdbTest, SqliteCloneRejectsMissingOversizedCancelledAndBrokenSources) {
     unlink(corrupt);
 }
 
-struct CloneRegistry { RdbConnLife* lives[2]; int count; };
+// Clone publication can register a third, short-lived checked-image connection.
+struct CloneRegistry { RdbConnLife* lives[3]; int count; RdbConnLife* revoke_on_add; };
 static CloneRegistry clone_registry;
 static int clone_registry_add(RdbConnLife* life, const char*, uint32_t* rid, void** owner) {
-    if (clone_registry.count == 2) return RDB_ERROR;
+    if ((size_t)clone_registry.count >= sizeof(clone_registry.lives) / sizeof(clone_registry.lives[0])) return RDB_ERROR;
     clone_registry.lives[clone_registry.count++] = life;
     *rid = clone_registry.count;
     *owner = &clone_registry;
+    if (clone_registry.revoke_on_add) {
+        RdbConnLife* victim = clone_registry.revoke_on_add;
+        clone_registry.revoke_on_add = NULL;
+        rdb_conn_life_close(victim);
+    }
     return RDB_OK;
 }
 static void clone_registry_remove(void* owner, uint32_t rid) {
     CloneRegistry* registry = (CloneRegistry*)owner;
-    if (rid >= 1 && rid <= 2) rdb_conn_life_close(registry->lives[rid - 1]);
+    if (rid >= 1 && rid <= (uint32_t)registry->count) rdb_conn_life_close(registry->lives[rid - 1]);
 }
 static const RdbRegistryHooks clone_registry_hooks = { reg_authorize, clone_registry_add, clone_registry_remove };
+
+static RdbConnLife* session_authorize_victim;
+static RdbSqliteFileSession* session_authorize_target;
+static int session_authorize_close_result;
+static int session_authorize_skip;
+static bool session_authorize_reject_after_close;
+static RdbSqliteWork* session_authorize_work;
+static int session_authorize_work_result;
+static int session_authorize_revoke(const char* driver, const RdbTarget* targets, int count) {
+    if (session_authorize_victim) {
+        RdbConnLife* victim = session_authorize_victim;
+        session_authorize_victim = NULL;
+        rdb_conn_life_close(victim);
+    }
+    if (session_authorize_target && session_authorize_skip > 0) {
+        session_authorize_skip--;
+    } else if (session_authorize_target) {
+        RdbSqliteFileSession* target = session_authorize_target;
+        session_authorize_target = NULL;
+        session_authorize_close_result = rdb_sqlite_file_session_close(target);
+        if (session_authorize_reject_after_close) return RDB_ERROR;
+    }
+    if (session_authorize_work) {
+        RdbSqliteWork* work = session_authorize_work;
+        session_authorize_work = NULL;
+        session_authorize_work_result = rdb_sqlite_tx_work_end(work);
+    }
+    return reg_authorize(driver, targets, count);
+}
+static const RdbRegistryHooks session_authorize_hooks = {
+    session_authorize_revoke, clone_registry_add, clone_registry_remove
+};
 
 struct CloneTeardownRace { RdbSqliteClone* clone; uv_sem_t entered; uv_sem_t resume; };
 static void clone_teardown_worker(void* user) {
@@ -3175,6 +3654,235 @@ static void clone_teardown_worker(void* user) {
     uv_sem_wait(&race->resume);
     rdb_sqlite_clone_run(race->clone, NULL);
 }
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+static void session_registry_database(const char* path, bool seed) {
+    unlink(path);
+    sqlite3* db = NULL;
+    ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    const char* sql = seed ? "CREATE TABLE sample(value INTEGER); INSERT INTO sample VALUES(42)" :
+        "CREATE TABLE sample(value INTEGER)";
+    ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(db), SQLITE_OK);
+}
+
+static void session_registry_expect_count(const char* path, int expected) {
+    sqlite3* db = NULL;
+    ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    sqlite3_stmt* stmt = NULL;
+    ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT count(*) FROM sample", -1, &stmt, NULL), SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    EXPECT_EQ(sqlite3_column_int(stmt, 0), expected);
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+TEST_F(RdbRegistryTest, SqliteFileSessionRechecksHostAuthorization) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_session_policy.db";
+    session_registry_database(path, false);
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    rdb_set_registry_hooks(&clone_registry_hooks);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, path);
+    ASSERT_NE(session, nullptr);
+    registry.refuse_authorize = true;
+    EXPECT_FALSE(rdb_sqlite_file_session_current(session));
+    EXPECT_EQ(rdb_sqlite_file_session_begin(pool, session), nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_clone(pool, session, 1024 * 1024), nullptr);
+    registry.refuse_authorize = false;
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO sample VALUES(1)"), RDB_OK);
+    registry.refuse_authorize = true;
+    EXPECT_EQ(tx_sql(tx, "INSERT INTO sample VALUES(2)"), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    registry.refuse_authorize = false;
+    RdbSqliteClone* clone = rdb_sqlite_file_session_clone(pool, session, 1024 * 1024);
+    ASSERT_NE(clone, nullptr);
+    rdb_sqlite_clone_run(clone, NULL);
+    registry.refuse_authorize = true;
+    EXPECT_EQ(rdb_sqlite_clone_finish(clone), nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    registry.refuse_authorize = false;
+    session_registry_expect_count(path, 0);
+    unlink(path);
+}
+
+TEST_F(RdbRegistryTest, SqliteFileSessionAuthorizationCanRevokeFinishingTransaction) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_session_policy_revoke.db";
+    session_registry_database(path, false);
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    session_authorize_victim = NULL;
+    session_authorize_target = NULL;
+    session_authorize_work = NULL;
+    rdb_set_registry_hooks(&session_authorize_hooks);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, path);
+    ASSERT_NE(session, nullptr);
+    session_authorize_target = session;
+    session_authorize_close_result = RDB_OK;
+    EXPECT_TRUE(rdb_sqlite_file_session_current(session));
+    EXPECT_EQ(session_authorize_close_result, RDB_ERROR);
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "INSERT INTO sample VALUES(1)"), RDB_OK);
+    ASSERT_EQ(clone_registry.count, 2);
+    session_authorize_victim = clone_registry.lives[1];
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    EXPECT_EQ(session_authorize_victim, nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    session_registry_expect_count(path, 0);
+    unlink(path);
+}
+
+TEST_F(RdbRegistryTest, SqliteFileSessionRejectsCloseDuringTransactionAcquisition) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_session_begin_reentrant.db";
+    session_registry_database(path, false);
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    session_authorize_victim = NULL;
+    session_authorize_target = NULL;
+    session_authorize_work = NULL;
+    rdb_set_registry_hooks(&session_authorize_hooks);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, path);
+    ASSERT_NE(session, nullptr);
+    // Skip the session check and reenter from the transaction's open authorization.
+    session_authorize_target = session;
+    session_authorize_skip = 1;
+    session_authorize_close_result = RDB_OK;
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    EXPECT_EQ(session_authorize_target, nullptr);
+    EXPECT_EQ(session_authorize_close_result, RDB_ERROR);
+    ASSERT_NE(tx, nullptr);
+    EXPECT_EQ(tx_sql(tx, "INSERT INTO sample VALUES(1)"), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    session = rdb_sqlite_file_session_open(pool, path);
+    ASSERT_NE(session, nullptr);
+    session_authorize_target = session;
+    session_authorize_skip = 1;
+    session_authorize_reject_after_close = true;
+    EXPECT_EQ(rdb_sqlite_file_session_begin(pool, session), nullptr);
+    session_authorize_reject_after_close = false;
+    EXPECT_EQ(session_authorize_close_result, RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    session_registry_expect_count(path, 1);
+    unlink(path);
+}
+
+static int session_publication_revoke_policy(void* user, const void* data, size_t size) {
+    int* calls = (int*)user;
+    if (!data || !size) return RDB_ERROR;
+    (*calls)++;
+    registry.refuse_authorize = true;
+    return RDB_OK;
+}
+
+TEST_F(RdbRegistryTest, SqliteFileSessionCloneReportsPolicyRevocationDuringPublication) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_session_publish_policy.db";
+    session_registry_database(path, true);
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    rdb_set_registry_hooks(&clone_registry_hooks);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, path);
+    ASSERT_NE(session, nullptr);
+    RdbSqliteClone* clone = rdb_sqlite_file_session_clone(pool, session, 1024 * 1024);
+    ASSERT_NE(clone, nullptr);
+    rdb_sqlite_clone_run(clone, NULL);
+    RdbSqliteTxn* tx = rdb_sqlite_clone_finish(clone);
+    ASSERT_NE(tx, nullptr);
+    int calls = 0;
+    EXPECT_EQ(rdb_sqlite_tx_finish_snapshot(tx, false, 1024 * 1024,
+        session_publication_revoke_policy, &calls), RDB_SQLITE_UNCERTAIN);
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    registry.refuse_authorize = false;
+    session_registry_expect_count(path, 1);
+    unlink(path);
+}
+
+TEST_F(RdbRegistryTest, SqliteFileSessionRevocationPoisonsActiveTransaction) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_session_revoked.db";
+    session_registry_database(path, false);
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    rdb_set_registry_hooks(&clone_registry_hooks);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, path);
+    ASSERT_NE(session, nullptr);
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    RdbSqliteWork* work = rdb_sqlite_tx_work_begin(tx);
+    ASSERT_NE(work, nullptr);
+    ASSERT_EQ(clone_registry.count, 2);
+    rdb_conn_life_close(clone_registry.lives[0]);
+    EXPECT_FALSE(rdb_sqlite_file_session_current(session));
+    int cancelled = 0;
+    const char sql[] = "INSERT INTO sample VALUES(1)";
+    (void)rdb_sqlite_tx_work_execute(work, sql, sizeof(sql) - 1, NULL, 0, NULL, NULL, &cancelled);
+    EXPECT_EQ(rdb_sqlite_tx_work_end(work), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    session_registry_expect_count(path, 0);
+    unlink(path);
+}
+
+TEST_F(RdbRegistryTest, SqliteFileSessionRejectsReentrantWorkCompletion) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_session_reentrant_work.db";
+    session_registry_database(path, false);
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    session_authorize_victim = NULL;
+    session_authorize_target = NULL;
+    session_authorize_work = NULL;
+    rdb_set_registry_hooks(&session_authorize_hooks);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, path);
+    ASSERT_NE(session, nullptr);
+    RdbSqliteTxn* tx = rdb_sqlite_file_session_begin(pool, session);
+    ASSERT_NE(tx, nullptr);
+    RdbSqliteWork* work = rdb_sqlite_tx_work_begin(tx);
+    ASSERT_NE(work, nullptr);
+    const char sql[] = "INSERT INTO sample VALUES(1)";
+    int cancelled = 0;
+    ASSERT_EQ(rdb_sqlite_tx_work_execute(work, sql, sizeof(sql) - 1, NULL, 0, NULL, NULL, &cancelled), RDB_OK);
+    session_authorize_work = work;
+    session_authorize_work_result = RDB_OK;
+    EXPECT_EQ(rdb_sqlite_tx_work_end(work), RDB_OK);
+    EXPECT_EQ(session_authorize_work, nullptr);
+    EXPECT_EQ(session_authorize_work_result, RDB_ERROR);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_OK);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    session_registry_expect_count(path, 1);
+    unlink(path);
+}
+
+TEST_F(RdbRegistryTest, SqliteFileSessionClonePinsAnchorAcrossTeardown) {
+    ensure_temp_dir();
+    const char* path = "temp/test_rdb_session_clone_revoked.db";
+    session_registry_database(path, true);
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    rdb_set_registry_hooks(&clone_registry_hooks);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(pool, path);
+    ASSERT_NE(session, nullptr);
+    CloneTeardownRace race = {};
+    race.clone = rdb_sqlite_file_session_clone(pool, session, 1024 * 1024);
+    ASSERT_NE(race.clone, nullptr);
+    ASSERT_EQ(clone_registry.count, 2);
+    ASSERT_EQ(uv_sem_init(&race.entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&race.resume, 0), 0);
+    uv_thread_t worker;
+    ASSERT_EQ(uv_thread_create(&worker, clone_teardown_worker, &race), 0);
+    uv_sem_wait(&race.entered);
+    rdb_conn_life_close(clone_registry.lives[0]);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_ERROR);
+    uv_sem_post(&race.resume);
+    ASSERT_EQ(uv_thread_join(&worker), 0);
+    EXPECT_EQ(rdb_sqlite_clone_finish(race.clone), nullptr);
+    EXPECT_EQ(rdb_sqlite_file_session_close(session), RDB_OK);
+    uv_sem_destroy(&race.entered);
+    uv_sem_destroy(&race.resume);
+    unlink(path);
+}
+#endif
 
 TEST_F(RdbRegistryTest, SqliteClonePinsBothConnectionsAcrossRegistryTeardown) {
     ensure_temp_dir();
@@ -3463,5 +4171,25 @@ TEST_F(RdbRegistryTest, SqliteClonePreimageReportsTeardownAfterPublication) {
     EXPECT_EQ(rdb_sqlite_tx_preimage(tx, 1024 * 1024, check_snapshot, &check), 1);
     EXPECT_TRUE(check.contents_match);
     EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    // Registry authorization for the checked image can revoke the source before publication.
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    clone = rdb_sqlite_clone_prepare(pool, path, 1024 * 1024);
+    ASSERT_NE(clone, nullptr);
+    rdb_sqlite_clone_run(clone, NULL);
+    tx = rdb_sqlite_clone_finish(clone);
+    ASSERT_NE(tx, nullptr);
+    clone_registry.revoke_on_add = clone_registry.lives[1];
+    SnapshotCheck revoked = {};
+    EXPECT_EQ(rdb_sqlite_tx_preimage(tx, 1024 * 1024, check_snapshot, &revoked), RDB_ERROR);
+    EXPECT_EQ(revoked.calls, 0);
+    EXPECT_EQ(rdb_sqlite_tx_finish(tx, false), RDB_ERROR);
+    memset(&clone_registry, 0, sizeof(clone_registry));
+    tx = rdb_sqlite_tx_begin(pool, ":memory:");
+    ASSERT_NE(tx, nullptr);
+    ASSERT_EQ(tx_sql(tx, "CREATE TABLE sample (value INTEGER)"), RDB_OK);
+    clone_registry.revoke_on_add = clone_registry.lives[0];
+    SnapshotCheck final_revoked = {};
+    EXPECT_EQ(rdb_sqlite_tx_finish_snapshot(tx, false, 1024 * 1024, check_snapshot, &final_revoked), RDB_ERROR);
+    EXPECT_EQ(final_revoked.calls, 0);
     unlink(path);
 }

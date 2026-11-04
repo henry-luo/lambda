@@ -420,6 +420,7 @@ struct DomDocument : DomDocumentResourceData {
 
     // Native extensions retain runtime-backed values through document resources.
     lam::Own<struct DomDocumentResource> resources;
+    bool destroying; // native teardown has started; no new resource owner may attach
 
     // Reactive UI: cached CSS for rebuild_lambda_doc optimization
     lam::OwnArr<struct CssStylesheet*> cached_inline_sheets;  // Parsed inline <style> stylesheets (cached)
