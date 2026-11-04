@@ -44,6 +44,8 @@ void dom_notify_mutation_detail(DomJsMutationKind kind,
                                    void* target, void* parent,
                                    const char* attribute_name,
                                    const char* old_value);
+// apply proven non-style data/aria writes with ordinary observer/attribute side effects.
+bool dom_set_non_style_metadata(void* target, const char* name, const char* value);
 void dom_notify_scroll_position_change(void* element, float old_x, float old_y);
 
 #ifdef __cplusplus

@@ -8285,17 +8285,15 @@ static void focus_set_within_chain(DocState* state, View* view, bool set) {
     }
 }
 
-static void focus_clear_pseudo_subtree(DocState* state, View* node) {
-    if (!state || !node) return;
-    focus_set_pseudo(state, node, STATE_FOCUS, PSEUDO_STATE_FOCUS, false);
-    focus_set_pseudo(state, node, STATE_FOCUS_VISIBLE,
-                     PSEUDO_STATE_FOCUS_VISIBLE, false);
-    focus_set_pseudo(state, node, STATE_FOCUS_WITHIN,
-                     PSEUDO_STATE_FOCUS_WITHIN, false);
-    if (!node->is_element()) return;
-    DomElement* elem = lam::dom_require_element(node);
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        focus_clear_pseudo_subtree(state, static_cast<View*>(child));
+static void focus_clear_pseudo_state(DocState* state) {
+    // clear recorded flags: walking the DOM manufactured two false entries per unrelated node.
+    uint32_t changed = view_state_clear_interaction_flag(state, "focus");
+    changed += state_map_delete_entries_for_name(state, STATE_FOCUS_VISIBLE);
+    changed += state_map_delete_entries_for_name(state, STATE_FOCUS_WITHIN);
+    if (changed) {
+        state->full_repaint_requests++; state->is_dirty = true;
+        state->needs_repaint = true;
+        state->version++;
     }
 }
 
@@ -8444,14 +8442,7 @@ static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
     focus->focus_visible = from_keyboard || (editing_surface_from_target(view, &surface) &&
         !surface.disabled && !surface.target_in_false_island);
 
-    View* old_root = view_geometry_tree_root(old_focus);
-    View* new_root = view_geometry_tree_root(view);
-    if (old_root) {
-        focus_clear_pseudo_subtree(state, old_root);
-    }
-    if (new_root && new_root != old_root) {
-        focus_clear_pseudo_subtree(state, new_root);
-    }
+    focus_clear_pseudo_state(state);
 
     // Update :focus pseudo-state on new element
     if (view) {

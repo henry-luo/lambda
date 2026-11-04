@@ -103,6 +103,7 @@ DomElement* dom_parent_element(DomElement* element) {
 }
 
 static const char* dom_element_stored_attribute(DomElement* element, const char* key);
+static Item extract_element_attribute_item(Element* element, const char* name);
 
 static const char* dom_element_namespace_binding(DomElement* element, const char* prefix, size_t length) {
     if (!element) return nullptr;
@@ -196,6 +197,9 @@ NameId dom_element_html_tag(DomElement* element) {
 
 bool dom_element_is_html_tag(DomElement* element, NameId tag) {
     if (!element || !tag) return false;
+    // known markup already carries its local-name identity; reject unrelated
+    // tags without repeatedly probing private namespace attributes.
+    if (element->tag_id && element->tag_id != tag) return false;
     // the local name rejects nearly every element before the namespace walks
     // its ancestors; flat-tree and style predicates ask this per ancestor.
     const char* local = element->local_name();
@@ -1733,10 +1737,12 @@ static const char* dom_element_stored_attribute(DomElement* element, const char*
         return nullptr;
     }
     if (!element->is_synthetic()) {
-        ElementReader reader(dom_element_to_element(element));
-        const char* value = extract_element_attribute(dom_element_to_element(element), key, nullptr);
-        if (value) return value;
-        ItemReader scalar = reader.get_attr(key);
+        // strings and numeric attributes share one lexical-QName lookup;
+        // absent private namespace probes previously searched the shape twice.
+        Item item = extract_element_attribute_item(dom_element_to_element(element), key);
+        String* value = item.get_safe_string();
+        if (value) return value->chars;
+        ItemReader scalar(item.to_const());
         DomDocument* owner = element->storage_owner();
         if (scalar.isNumber() && scalar.getType() != LMD_TYPE_COMPLEX &&
                 owner) {
@@ -4591,12 +4597,16 @@ const char* dom_comment_get_content(DomComment* comment_node) {
  * Extract string attribute from Lambda Element
  * Returns attribute value or nullptr if not found
  */
-const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena) {
-    (void)arena;
-    if (!elem || !attr_name) return nullptr;
+static Item extract_element_attribute_item(Element* elem, const char* attr_name) {
+    if (!elem || !attr_name) return ItemNull;
     // XML stores (namespace, local); DOM and SVG ask with the lexical QName.
     const ShapeEntry* field = markup_attribute_field((TypeMap*)elem->type, attr_name);
-    Item value = field ? map_shape_field_to_item(elem->data, field) : ItemNull;
+    return field ? map_shape_field_to_item(elem->data, field) : ItemNull;
+}
+
+const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena) {
+    (void)arena;
+    Item value = extract_element_attribute_item(elem, attr_name);
     String* string_value = value.get_safe_string();
     return string_value ? string_value->chars : nullptr;
 }

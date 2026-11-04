@@ -748,6 +748,20 @@ extern "C" void dom_svg_invalidate_presentation(void* opaque) {
     dom_layer_note_mutation(node);
 }
 
+static void dom_mutation_notify_observers(DomJsMutationKind kind, DomNode* target,
+        DomNode* parent, const char* attribute_name, const char* old_value) {
+    dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
+    // native-only renderers have no realm in which to allocate a callback receiver.
+    if (dom_realm_active() && kind == DOM_JS_MUTATION_ATTRIBUTE && target &&
+            target->is_element() && attribute_name) {
+        DomElement* element = target->as_element();
+        const char* value = element->has_attribute(attribute_name)
+            ? element->get_attribute(attribute_name) : nullptr;
+        dom_realm_custom_element_attribute(dom_wrap_element(element), attribute_name,
+            old_value, value ? value : element->has_attribute(attribute_name) ? "" : nullptr);
+    }
+}
+
 static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
                                           DomNode* parent = nullptr,
@@ -791,16 +805,7 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence,
                                    attribute_name, presentation_property);
     }
-    dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
-    // native-only renderers have no realm in which to allocate a callback receiver.
-    if (dom_realm_active() && kind == DOM_JS_MUTATION_ATTRIBUTE && target &&
-            target->is_element() && attribute_name) {
-        DomElement* element = target->as_element();
-        const char* value = element->has_attribute(attribute_name)
-            ? element->get_attribute(attribute_name) : nullptr;
-        dom_realm_custom_element_attribute(dom_wrap_element(element), attribute_name,
-            old_value, value ? value : element->has_attribute(attribute_name) ? "" : nullptr);
-    }
+    dom_mutation_notify_observers(kind, target, parent, attribute_name, old_value);
 
     DocState* st = doc->state;
     if (st) {
@@ -8433,6 +8438,30 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
         }
         dom_canvas_reset_context(dom_wrap_element(elem));
     }
+}
+
+extern "C" bool dom_set_non_style_metadata(void* target, const char* name, const char* value) {
+    DomElement* element = (DomElement*)target;
+    if (!element || !element->doc || !name || !value || strchr(name, ':') ||
+        (strncmp(name, "data-", 5) && strncmp(name, "aria-", 5))) return false;
+    // namespace/case-sensitive writes keep the general attribute path.
+    for (const char* character = name; *character; character++)
+        if (*character >= 'A' && *character <= 'Z') return false;
+    const char* local_name = nullptr;
+    const char* uri = dom_element_attribute_namespace_uri(element, name, &local_name);
+    if ((uri && *uri) || dom_engine_attribute_has_css_dependency(element->doc, element, name))
+        return false;
+    const char* old_value = element->get_attribute(name);
+    if (!dom_element_set_non_style_metadata(element, name, value)) return false;
+    dom_after_set_attribute(element, name, value);
+    if (dom_edit_transaction_defer_mutation(element->doc, DOM_JS_MUTATION_ATTRIBUTE,
+            element, element->parent, name, old_value)) return true;
+    // observers/custom elements still see the write, but unrelated geometry
+    // reads must not recascade and reflow the document for application metadata.
+    element->doc->mutation_epoch++;
+    dom_mutation_notify_observers(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent, name, old_value);
+    dom_engine_publish_metadata_change(element->doc);
+    return true;
 }
 
 extern "C" void dom_after_remove_attribute(void* elem_ptr,
@@ -16459,6 +16488,7 @@ extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
     const char* attr_name = fn_to_cstr(name);
     const char* attr_val = dom_to_attr_cstr(value);
     if (!attr_name || !attr_val || dom_is_internal_attr(attr_name)) return ItemNull;
+    if (dom_set_non_style_metadata(elem, attr_name, attr_val)) return ItemNull;
     const char* old_value = elem->get_attribute(attr_name);
     const char* local = nullptr;
     const char* uri = old_value ? dom_element_attribute_namespace_uri(elem, attr_name, &local) : "";

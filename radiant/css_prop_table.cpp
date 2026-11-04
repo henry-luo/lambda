@@ -1793,6 +1793,10 @@ static bool serialize_transform(const CssPropAccessor* accessor, DomElement* ele
 static bool serialize_used_size(const CssPropAccessor* accessor, DomElement* element,
                                 int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
+    // CSSOM resolved dimensions use computed values without an associated box;
+    // a clean display:none snapshot must not expose its zero layout dimensions.
+    if (resolve_display_value(element).outer == CSS_VALUE_NONE)
+        return serialize_decl(accessor, element, pseudo_type, out);
     float value = accessor->id == CSS_PROPERTY_WIDTH ? element->width : element->height;
     if (!element->doc || !element->doc->view_tree || !element->doc->view_tree->root) {
         const BlockProp* block = element->block();

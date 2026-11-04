@@ -7285,9 +7285,24 @@ static bool dom_js_style_has_attribute_value(StyleNode* node, void* data) {
 
 bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name) {
     if (!doc || !element || !name) return true;
+    // stylesheet owners retain their lifecycle invalidation even for metadata.
+    if (dom_js_node_is_stylesheet_related(element) ||
+        dom_js_node_is_stylesheet_related(element->parent)) return true;
     bool found = false;
     if (element->specified_style) style_tree_foreach(element->specified_style, dom_js_style_has_attribute_value, &found);
     return found || dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_attribute_value_dependency, (void*)name);
+}
+
+extern "C" bool dom_engine_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name) {
+    return radiant_attribute_has_css_dependency(doc, element, name);
+}
+
+extern "C" void dom_engine_publish_metadata_change(DomDocument* doc) {
+    DocState* state = doc ? doc->state.get() : nullptr;
+    if (!doc || doc->js.mutation_count || (doc->root && doc->root->layout_dirty) ||
+        (state && (state->needs_reflow || state->reflow_scheduler.pending))) return;
+    // only consume this metadata epoch; preserve pending resize/font/style work.
+    layout_publish_document_geometry(static_cast<UiContext*>(doc->js.host_ui_context), doc);
 }
 
 static bool dom_js_selector_has_attribute_dependency(CssSelector* selector, void* context) {
@@ -7815,10 +7830,9 @@ static bool dom_js_node_has_table_fixup_context(DomNode* node) {
     for (DomNode* current = node; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* element = lam::dom_require_element(current);
+        if (element->tag() == MARKUP_NAME_TABLE || layout_element_is_anonymous_table_fixup(element)) return true;
         CssEnum display = resolve_display_value((void*)element).inner;
-        if (element->tag() == MARKUP_NAME_TABLE ||
-            layout_element_is_anonymous_table_fixup(element) ||
-            is_table_internal_display(display)) {
+        if (is_table_internal_display(display)) {
             return true;
         }
     }
@@ -7831,10 +7845,10 @@ static DomElement* dom_js_table_layout_root(DomNode* node) {
     for (DomNode* current = node; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* element = lam::dom_require_element(current);
+        if (!element->is_table_fixup() && element->tag() == MARKUP_NAME_TABLE) return element;
         DisplayValue display = resolve_display_value((void*)element);
         if (!element->is_table_fixup() &&
-            (element->tag() == MARKUP_NAME_TABLE ||
-             display.inner == CSS_VALUE_TABLE)) {
+            display.inner == CSS_VALUE_TABLE) {
             return element;
         }
         if (!fixup_parent && element->is_table_fixup() && element->parent &&
@@ -7856,9 +7870,11 @@ static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
     if (!doc || !doc->view_tree) return false;
 
     DomElement** roots = static_cast<DomElement**>(mem_alloc(
-        sizeof(DomElement*) * doc->js.mutation_record_count, MEM_CAT_LAYOUT));
+        2 * sizeof(DomElement*) * doc->js.mutation_record_count, MEM_CAT_LAYOUT));
     if (!roots) return false;
+    DomElement** table_roots = roots + doc->js.mutation_record_count;
     int root_count = 0;
+    int table_count = 0;
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (record->kind != DOM_JS_MUTATION_STYLE &&
@@ -7871,32 +7887,11 @@ static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
         if (!candidate) continue;
         if (dom_js_node_has_table_fixup_context(
                 static_cast<DomNode*>(candidate))) {
-            DomElement* table_root = nullptr;
-            if (record->kind == DOM_JS_MUTATION_STYLE ||
-                record->kind == DOM_JS_MUTATION_INLINE_STYLE ||
-                record->kind == DOM_JS_MUTATION_STYLE_REPAINT ||
-                record->kind == DOM_JS_MUTATION_ATTRIBUTE) {
-                table_root = dom_js_table_layout_root(static_cast<DomNode*>(candidate));
-            }
+            DomElement* table_root = dom_js_table_layout_root(static_cast<DomNode*>(candidate));
             if (!table_root) continue;
-            bool already_reset = false;
-            for (int j = 0; j < root_count; j++) {
-                if (roots[j] == table_root) {
-                    already_reset = true;
-                    break;
-                }
-            }
-            if (already_reset) continue;
-            // Table-internal style changes can change anonymous-box fixup; a
-            // retained row/cell subtree otherwise preserves the old structure.
-            layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(table_root);
-            view_pool_reset_retained_subtree(
-                doc->view_tree, static_cast<DomNode*>(table_root));
-            // Reset releases inherited view properties; recascading only the
-            // target would measure descendants against the reset parent font.
-            dom_js_recascade_subtree(doc, table_root,
-                                     DOM_JS_MUTATION_ATTRIBUTE, matcher);
-            roots[root_count++] = table_root;
+            // collect before teardown so nested roots reset once against the same DOM.
+            table_roots[table_count++] = table_root;
+            dom_js_add_subtree_root(table_root, roots, &root_count);
             continue;
         }
 
@@ -7904,10 +7899,17 @@ static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
     }
 
     for (int i = 0; i < root_count; i++) {
+        bool table_context = false;
+        for (int j = 0; j < table_count; j++) {
+            if (dom_js_node_contains(roots[i], table_roots[j])) { table_context = true; break; }
+        }
+        if (table_context) layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(roots[i]);
         // Computed style is stored in retained view properties; merely clearing
         // styles_resolved leaves removed borders/sizes live across the reflow.
         view_pool_reset_retained_subtree(
             doc->view_tree, static_cast<DomNode*>(roots[i]));
+        // table descendants need their inherited styles after the single reset.
+        if (table_context) dom_js_recascade_subtree(doc, roots[i], DOM_JS_MUTATION_ATTRIBUTE, matcher);
     }
     mem_free(roots);
     return true;
@@ -10456,18 +10458,15 @@ static bool css_selector_uses_pseudo_state(CssSelector* selector,
     return false;
 }
 
-static bool css_simple_selector_uses_hover(CssSimpleSelector* simple) {
-    return css_simple_selector_uses_pseudo_state(simple, PSEUDO_STATE_HOVER);
-}
-
 static bool css_selector_uses_hover(CssSelector* selector) {
     return css_selector_uses_pseudo_state(selector, PSEUDO_STATE_HOVER);
 }
 
-// This fast path is deliberately narrow. A :hover condition in an ancestor
+// This fast path is deliberately narrow. A state condition in an ancestor
 // compound can restyle descendants, which requires the normal full reflow.
-static bool css_selector_is_self_color_background_hover(CssSelector* selector) {
-    if (!selector || !css_selector_uses_hover(selector) ||
+static bool css_selector_is_self_color_background_state(CssSelector* selector,
+        uint32_t state, CssSelectorType selector_type) {
+    if (!selector || !css_selector_uses_pseudo_state(selector, state) ||
         selector->compound_selector_count == 0) return false;
 
     size_t final_index = selector->compound_selector_count - 1;
@@ -10484,14 +10483,19 @@ static bool css_selector_is_self_color_background_hover(CssSelector* selector) {
                 simple->type <= CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) {
                 return false;
             }
-            if (!css_simple_selector_uses_hover(simple)) continue;
-            if (c != final_index || simple->type != CSS_SELECTOR_PSEUDO_HOVER) {
+            if (!css_simple_selector_uses_pseudo_state(simple, state)) continue;
+            if (c != final_index || simple->type != selector_type) {
                 return false;
             }
             found_hover = true;
         }
     }
     return found_hover;
+}
+
+static bool css_value_is_paint_color(const CssValue* value) {
+    CssComputedColor color = {};
+    return value && (value->type == CSS_VALUE_TYPE_COLOR || css_color_compute(value, &color));
 }
 
 static bool css_declaration_is_color_background_only(CssDeclaration* declaration) {
@@ -10501,8 +10505,10 @@ static bool css_declaration_is_color_background_only(CssDeclaration* declaration
         case CSS_PROPERTY_BACKGROUND_COLOR:
             return true;
         case CSS_PROPERTY_BACKGROUND:
-            // Complex backgrounds can need used box dimensions for their paint.
-            return declaration->value->type == CSS_VALUE_TYPE_COLOR;
+            // substitutions are admitted only after the element resolves them
+            // to a color; complex backgrounds retain their layout context.
+            return css_value_is_paint_color(declaration->value) ||
+                css_value_contains_var_reference(declaration->value);
         // border colors repaint in place; border widths and styles stay with layout.
         case CSS_PROPERTY_BORDER_COLOR:
         case CSS_PROPERTY_BORDER_TOP_COLOR:
@@ -10559,8 +10565,8 @@ static bool css_rule_uses_hover(CssRule* rule) {
     return css_rule_uses_pseudo_state(rule, PSEUDO_STATE_HOVER);
 }
 
-static bool css_rule_is_self_color_background_hover(CssRule* rule,
-                                                     bool* found_hover) {
+static bool css_rule_is_self_color_background_state(CssRule* rule,
+        uint32_t state, CssSelectorType selector_type, bool* found_hover) {
     if (!rule || !found_hover) return true;
     if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) {
         bool rule_uses_hover = false;
@@ -10568,14 +10574,14 @@ static bool css_rule_is_self_color_background_hover(CssRule* rule,
         if (group) {
             for (size_t i = 0; i < group->selector_count; i++) {
                 CssSelector* selector = group->selectors ? group->selectors[i] : NULL;
-                if (!selector || !css_selector_uses_hover(selector)) continue;
+                if (!selector || !css_selector_uses_pseudo_state(selector, state)) continue;
                 rule_uses_hover = true;
-                if (!css_selector_is_self_color_background_hover(selector)) return false;
+                if (!css_selector_is_self_color_background_state(selector, state, selector_type)) return false;
             }
-        } else if (css_selector_uses_hover(rule->data.style_rule.selector)) {
+        } else if (css_selector_uses_pseudo_state(rule->data.style_rule.selector, state)) {
             rule_uses_hover = true;
-            if (!css_selector_is_self_color_background_hover(
-                    rule->data.style_rule.selector)) return false;
+            if (!css_selector_is_self_color_background_state(
+                    rule->data.style_rule.selector, state, selector_type)) return false;
         }
         if (rule_uses_hover) {
             *found_hover = true;
@@ -10586,18 +10592,18 @@ static bool css_rule_is_self_color_background_hover(CssRule* rule,
             }
         }
         for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
-            if (!css_rule_is_self_color_background_hover(
+            if (!css_rule_is_self_color_background_state(
                     rule->data.style_rule.nested_rules
                         ? rule->data.style_rule.nested_rules[i] : NULL,
-                    found_hover)) return false;
+                    state, selector_type, found_hover)) return false;
         }
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
                rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
         for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-            if (!css_rule_is_self_color_background_hover(
+            if (!css_rule_is_self_color_background_state(
                     rule->data.conditional_rule.rules
                         ? rule->data.conditional_rule.rules[i] : NULL,
-                    found_hover)) return false;
+                    state, selector_type, found_hover)) return false;
         }
     }
     return true;
@@ -10620,6 +10626,23 @@ static bool document_has_pseudo_state_rules(DomDocument* doc,
         }
     }
     return false;
+}
+
+static bool active_rule_requires_layout(CssRule* rule, void* context) {
+    // scope and nesting can project an ancestor's state outside its own box.
+    if (rule->type == CSS_RULE_SCOPE ||
+        ((rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) &&
+         rule->data.style_rule.nested_rule_count &&
+         css_rule_uses_pseudo_state(rule, PSEUDO_STATE_ACTIVE))) return true;
+    return !css_rule_is_self_color_background_state(rule, PSEUDO_STATE_ACTIVE,
+        CSS_SELECTOR_PSEUDO_ACTIVE, (bool*)context);
+}
+
+static bool document_active_is_paint_only(DomDocument* doc) {
+    bool found = false;
+    if (dom_js_stylesheet_tree_has_match(doc->services.ua_focus_stylesheet,
+            active_rule_requires_layout, &found)) return false;
+    return !dom_js_document_rule_tree_has_match(doc, active_rule_requires_layout, &found) && found;
 }
 
 static bool document_has_hover_rules(DomDocument* doc) {
@@ -10675,17 +10698,19 @@ static bool css_rule_matches_hover_in_tree(CssRule* rule, SelectorMatcher* match
     return false;
 }
 
+static SelectorMatcher* document_pseudo_matcher(DomDocument* doc, DocState* state) {
+    if (!state->hover_matcher)
+        state->hover_matcher = selector_matcher_create(doc->document_pool);
+    if (state->hover_matcher) state_configure_selector_matcher(state, state->hover_matcher);
+    return state->hover_matcher;
+}
+
 static bool document_has_matched_hover_rules(DomDocument* doc, DocState* state) {
     if (!doc || !state || !doc->root || !doc->document_pool || !document_has_hover_rules(doc)) {
         return false;
     }
-    SelectorMatcher* matcher = state->hover_matcher;
-    if (!matcher) {
-        matcher = selector_matcher_create(doc->document_pool);
-        state->hover_matcher = matcher;
-    }
+    SelectorMatcher* matcher = document_pseudo_matcher(doc, state);
     if (!matcher) return true; // preserve the existing conservative restyle path.
-    state_configure_selector_matcher(state, matcher);
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
         if (!stylesheet || stylesheet->disabled) continue;
@@ -10707,13 +10732,8 @@ static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* 
     if (!doc || !state || !doc->root || !doc->document_pool || !document_has_hover_rules(doc)) {
         return false;
     }
-    SelectorMatcher* matcher = state->hover_matcher;
-    if (!matcher) {
-        matcher = selector_matcher_create(doc->document_pool);
-        state->hover_matcher = matcher;
-    }
+    SelectorMatcher* matcher = document_pseudo_matcher(doc, state);
     if (!matcher) return true; // preserve the existing conservative restyle path.
-    state_configure_selector_matcher(state, matcher);
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
         if (!stylesheet || stylesheet->disabled) continue;
@@ -10721,7 +10741,8 @@ static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* 
             CssRule* rule = stylesheet->rules ? stylesheet->rules[r] : NULL;
             if (!css_rule_uses_hover(rule)) continue;
             bool found_hover = false;
-            if (css_rule_is_self_color_background_hover(rule, &found_hover)) continue;
+            if (css_rule_is_self_color_background_state(rule, PSEUDO_STATE_HOVER,
+                    CSS_SELECTOR_PSEUDO_HOVER, &found_hover)) continue;
             if (css_rule_matches_hover_in_tree(rule, matcher,
                                                static_cast<DomNode*>(doc->root))) {
                 return true;
@@ -10734,13 +10755,8 @@ static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* 
 static bool document_has_matched_hover_rule_on_path(DomDocument* doc, DocState* state,
                                                      View* target) {
     if (!doc || !state || !target || !doc->document_pool) return false;
-    SelectorMatcher* matcher = state->hover_matcher;
-    if (!matcher) {
-        matcher = selector_matcher_create(doc->document_pool);
-        state->hover_matcher = matcher;
-    }
+    SelectorMatcher* matcher = document_pseudo_matcher(doc, state);
     if (!matcher) return true; // preserve the existing conservative restyle path.
-    state_configure_selector_matcher(state, matcher);
     for (View* view = target; view; view = static_cast<View*>(view->parent)) {
         if (!view->is_element()) continue;
         DomElement* element = lam::dom_require_element(view);
@@ -10896,6 +10912,16 @@ static bool refresh_hover_paint_style(DocState* state, LayoutContext* lycon,
     for (size_t i = 0; i < sizeof(properties) / sizeof(properties[0]); i++) {
         CssDeclaration* declaration = style_tree_get_declaration(
             element->specified_style, properties[i]);
+        if (declaration && properties[i] == CSS_PROPERTY_BACKGROUND &&
+            css_value_contains_var_reference(declaration->value)) {
+            Pool* scratch = pool_create_sized(0);
+            if (!scratch) return false;
+            const CssValue* resolved = css_resolve_element_var_value(scratch, element,
+                declaration->value, CSS_PROPERTY_BACKGROUND);
+            bool color_only = css_value_is_paint_color(resolved);
+            pool_destroy(scratch);
+            if (!color_only) return false;
+        }
         if (declaration) resolve_css_property(properties[i], declaration, lycon);
     }
     refresh_hover_inherited_color(lycon, element);
@@ -10943,17 +10969,30 @@ static bool refresh_hover_color_background_element(DocState* state,
                                                    View* view) {
     if (!state || !state->hover_matcher || !doc || !lycon || !view || !view->is_element()) return true;
     DomElement* element = lam::dom_require_element(view);
-    if (!element->specified_style) return true;
+    // the lazy document-as-Node wrapper is above the laid-out root; it has
+    // DomElement storage but never participates in the element paint cascade.
+    if (view == doc->js.doc_node) return true;
+    if (element->view_type == RDT_VIEW_NONE) return false;
 
     bool had_border_color[4];
     hover_border_color_winners(element, had_border_color);
     CssDeclaration* color = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR);
+    // recascade can reclaim/reuse the old winner's address; retain its value
+    // to detect inherited color changes, including a transition's target color.
+    Pool* snapshot_pool = color ? pool_create() : nullptr;
+    CssDeclaration* before = color && snapshot_pool ? css_declaration_clone_owned(
+        color, color->specificity, color->origin, snapshot_pool) : nullptr;
+    if (color && !before) {
+        if (snapshot_pool) pool_destroy(snapshot_pool);
+        return false;
+    }
     // Direct self-hover rules can only change this element's cascade.
     radiant_cascade_styles_for_element_with_matcher(element, state->hover_matcher);
-    if (!refresh_hover_paint_style(state, lycon, element, had_border_color)) return false;
-    // compare declarations: a color transition still paints the old used value here.
-    return style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR) == color ||
-        refresh_hover_inheriting_descendants(state, lycon, element);
+    bool unchanged = css_declaration_winner_equal(before,
+        style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR));
+    if (snapshot_pool) pool_destroy(snapshot_pool);
+    return refresh_hover_paint_style(state, lycon, element, had_border_color) &&
+        (unchanged || refresh_hover_inheriting_descendants(state, lycon, element));
 }
 
 static bool refresh_hover_color_background_path(DocState* state,
@@ -11116,6 +11155,11 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
                 reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
                 dirty_mark_element(state, doc->root);
             }
+        } else if (!state->needs_reflow && !state->reflow_scheduler.pending &&
+                   !doc->js.mutation_count) {
+            // a paint-only cascade leaves the committed box snapshot valid.
+            layout_publish_document_geometry(
+                static_cast<UiContext*>(doc->js.host_ui_context), doc);
         }
     }
     state->hover_styles_active = hover_styles_active;
@@ -11233,29 +11277,32 @@ void update_hover_state(EventContext* evcon, View* new_target) {
 void update_active_state(EventContext* evcon, View* target, bool is_active) {
     DocState* state = event_context_target_state(evcon);
     if (!state) return;
+    View* previous = static_cast<View*>(state->active_target);
+    ActiveTransitionArgs active_args = { .target = is_active ? target : nullptr };
+    active_transition(state, ACTIVE_TRANSITION_SET_TARGET, &active_args);
+    View* changed = is_active ? target : previous;
+    if (!changed) return;
 
-    if (is_active) {
-        ActiveTransitionArgs active_args = { .target = target };
-        active_transition(state, ACTIVE_TRANSITION_SET_TARGET, &active_args);
-        View* node = target;
-        while (node) {
-            sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, true);
-            node = static_cast<View*>(node->parent);
-        }
-        log_debug("update_active_state: set active on %p", target);
-    } else {
-        View* prev_active = static_cast<View*>(state->active_target);
-        ActiveTransitionArgs active_args = { .target = NULL };
-        active_transition(state, ACTIVE_TRANSITION_SET_TARGET, &active_args);
-        if (prev_active) {
-            View* node = prev_active;
-            while (node) {
-                sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, false);
-                node = static_cast<View*>(node->parent);
-            }
-        }
-        log_debug("update_active_state: cleared active");
+    DomDocument* doc = event_context_target_document(evcon);
+    // self-only paint declarations share hover's retained color/ink update;
+    // pending geometry, relational selectors and allocation failures keep layout.
+    if (doc && !state->pseudo_state_batch_depth && !state->needs_reflow &&
+        !state->reflow_scheduler.pending && !doc->js.mutation_count &&
+        document_active_is_paint_only(doc) && document_pseudo_matcher(doc, state) &&
+        refresh_hover_color_background_paths(state, doc, previous, is_active ? target : nullptr)) {
+        doc_state_mark_dirty(state);
+        doc_state_request_repaint(state);
+        evcon->need_repaint = true;
+        // paint-only cascade epochs preserve the committed box snapshot.
+        layout_publish_document_geometry(evcon->ui_context, doc);
+        return;
     }
+    // the transition commits the entire active ancestry; recascade it once.
+    pseudo_state_batch_begin(state);
+    for (View* node = changed; node; node = static_cast<View*>(node->parent))
+        sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, is_active);
+    pseudo_state_batch_end(doc, state);
+    log_debug("update_active_state: target=%p active=%d", changed, is_active);
 }
 
 // ============================================================================

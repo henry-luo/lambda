@@ -1603,16 +1603,20 @@ ConstItem Element::get_attr(const char* attr_name) const {
 
 const ShapeEntry* markup_attribute_field(const TypeMap* type, const char* name) {
     if (!type || !name) return nullptr;
+    // every field compares against the same lexical QName; measure it once.
+    StrView query = strview_from_cstr(name);
     FOR_EACH_MAP_FIELD(type, field) {
         if (!field->name) continue;
         if (!field->ns) {
-            if (strview_equal(field->name, name)) return field;
+            if (strview_eq(field->name, &query)) return field;
             continue;
         }
         const char* prefix = field->ns->name_prefix;
         size_t length = prefix ? strlen(prefix) : 0;
-        if (length && strlen(name) > length && !memcmp(prefix, name, length) &&
-                name[length] == ':' && strview_equal(field->name, name + length + 1)) return field;
+        if (length && query.length > length && !memcmp(prefix, name, length) && name[length] == ':') {
+            StrView local = {name + length + 1, query.length - length - 1};
+            if (strview_eq(field->name, &local)) return field;
+        }
     }
     return nullptr;
 }
