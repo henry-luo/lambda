@@ -720,7 +720,7 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
     // A generic DOM transaction still updates live Range endpoints, but it
     // publishes Selection only after the inverse journal has committed. This
     // prevents an allocation/stale failure from queuing selectionchange for a
-    // state the transaction later restores (D7.2.5).
+    // state the transaction later restores (D10.2.1).
     if (dom_mutation_transaction_active(s->state)) return;
     bool changed = !selection_notification_snapshot_matches(s, direction);
     if (changed) {

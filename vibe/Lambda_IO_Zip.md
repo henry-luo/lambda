@@ -16,15 +16,15 @@
 > from all phases.
 > Other archive formats and non-ZIP output remain future work.
 >
-> **Spec linkage:** §3–§4 → **D7.4.5v2** (virtual element/array carriers),
+> **Spec linkage:** §3–§4 → **D9.5.5** (virtual element/array carriers),
 > **S8.1.2v2** (element iteration), **S2.5.7v4** (`content` returns an array),
 > **S2.2.4** and **S2.6.2–S2.6.4** (empty files and element content);
 > §5 → **S12.4.1v3**, **S14.3.1v3** (eager archive capture, lazy member
 > decompression, and resource closure);
-> §6 and Appendix A → **D7.1.2v2**, **D7.5.2** (I/O ownership and policy),
-> **D4.1.3**, **D4.2.4**, **D5.3.3** (memory ownership and precise roots);
+> §6 and Appendix A → **D9.1.2**, **D11.1.2** (I/O ownership and policy),
+> **D5.1.3**, **D5.2.3**, **D6.3.3** (memory ownership and precise roots);
 > §7 → **S10.1.4**, **S12.1.1v2** (explicit procedural output);
-> §10 → **D7.4.5v2**, **D7.5.2**, **D4.1.3/D4.2.4/D5.3.3** (reuse of
+> §10 → **D9.5.5**, **D11.1.2**, **D5.1.3/D5.2.3/D6.3.3** (reuse of
 > archive carriers, I/O policy, and lifetime); the format-specific evaluation
 > boundaries are recorded in **S12.4.1v3/S14.3.1v3**.
 >
@@ -176,7 +176,7 @@ also follows **S2.5.7v4**, so zero or one child does not collapse its kind.
 
 ## 4. Shared file/directory data model
 
-Under **D7.4.5v2**, a `Velmt` presents the semantic kind `element`, with a tag,
+Under **D9.5.5**, a `Velmt` presents the semantic kind `element`, with a tag,
 named attributes, and ordered children. Its child view presents the semantic
 kind `array`. ZIP support adds a backend, not a new language type.
 
@@ -324,7 +324,7 @@ per-member expanded bytes, and total expanded bytes. Enforce actual expansion
 as well as declared sizes; cache eviction must not reset an archive's expansion
 budget. Explicit nested archive input inherits a bounded nesting/expansion
 policy. Concrete defaults and option names belong to the shared I/O quota
-design under **D7.5.2**, not an unlimited ZIP-only bypass.
+design under **D11.1.2**, not an unlimited ZIP-only bypass.
 
 Use the normal `T^E` error mechanism for unreadable input, malformed ZIP,
 unsupported features, integrity failure, decoding failure, and exceeded limits.
@@ -445,7 +445,7 @@ and Phase 2 remain the implemented ZIP profile.
 
 ### 9.1 Limits and output options
 
-**Z1 — bounded archive policy (D7.5.2, S17.8.1).** The options below are
+**Z1 — bounded archive policy (D11.1.2, S17.8.1).** The options below are
 accepted in input and output option maps. Limits are nonnegative integers;
 zero is a real limit. Existing transport limits may be stricter (the synchronous
 HTTP adapter also retains its 50 MiB response cap). Index limits include implicit directories and wrapper
@@ -498,7 +498,7 @@ pn save_constructed_zip() {
 
 **Status:** IMPLEMENTED (2026-10-15); native reader integration and regression coverage.
 Add read-only `input()` backends for 7z, tar, legacy RAR and RAR 5.0 using the
-same filesystem `Velmt`/`VArray` contract (**D7.4.5v2**). Existing ZIP input/output retains its
+same filesystem `Velmt`/`VArray` contract (**D9.5.5**). Existing ZIP input/output retains its
 backend. Archive conversion to ZIP can reuse Phase 2's tree writer; 7z/tar/RAR
 writers, extraction, archive mutation, encryption, and password handling are
 outside this phase.
@@ -543,14 +543,14 @@ child order from §4. ZIP-only metadata is absent when the new format cannot
 supply it; tar's header checksum must not become a fabricated payload CRC.
 Nested ZIP/7z/tar/RAR members stay binary by default and open only through
 explicit member input, inheriting the same nesting and expansion ledger (§9.1,
-**D7.5.2**).
+**D11.1.2**).
 
 ### 10.2 Snapshot, decoding, and validation boundaries
 
 Keep the pure-value ownership boundary of **S12.4.1v3**: acquire immutable
 outer bytes and validate/index the complete container inside `input()`, closing
 the source before returning. Retained members keep their snapshot alive under
-**D4.1.3/D4.2.4/D5.3.3**. The format-specific boundaries are:
+**D5.1.3/D5.2.3/D6.3.3**. The format-specific boundaries are:
 
 - **7z:** decode compressed archive headers during indexing, charging decoded
   metadata to the index budget. Listing accepted regular-file/directory entries
@@ -597,7 +597,7 @@ traversal forms after that normalization and reject resulting collisions.
 ZIP/tar keep their existing backslash rejection. Validate 7z/RAR
 coder/dictionary and decoded-header sizes before
 unbounded allocation; all decoder working memory and retained tar/block buffers
-must have an enforceable bound under **D7.5.2**.
+must have an enforceable bound under **D11.1.2**.
 
 ### 10.3 Upstream readers and acceptance
 
@@ -610,7 +610,7 @@ checksum manifests, and provenance/re-sync instructions in
 the vendor sources. Build integration must supply native liblzma, zlib, bzip2
 and zstd; register only the admitted readers/filters and reject missing codecs.
 Never invoke external decompressor programs or filesystem extraction helpers
-(**D7.5.2**). The native subset is linked into Lambda; browser WASM keeps ZIP
+(**D11.1.2**). The native subset is linked into Lambda; browser WASM keeps ZIP
 only. Filename conversion uses a per-reader UTF-8 charset without Unicode
 normalization. C allocation failures unwind to the Lambda boundary instead of
 exiting the host. Reader/parser allocations share the index limit; codec
@@ -649,7 +649,7 @@ archive reader.
 Integration with images and networking is at the Lambda-owned adapter boundary:
 capture an archive through the ordinary file/HTTP I/O door, read a member through
 the archive backend, then pass its bytes to the existing image/document decoder
-(**D7.5.2**, **D7.4.5v2**). No vendor image-library or curl source edits are needed.
+(**D11.1.2**, **D9.5.5**). No vendor image-library or curl source edits are needed.
 HTTP `Content-Encoding` remains curl's responsibility; an archive in the
 response body is a separate decoding step. Curl's
 [`CURLOPT_ACCEPT_ENCODING`](https://curl.se/libcurl/c/CURLOPT_ACCEPT_ENCODING.html)
@@ -693,14 +693,14 @@ containers; they do not silently expand Phase 3's required profile:
   metadata contract and `Velmt`/`VArray` operations. Flat child-index spans
   provide O(1) indexed navigation; wrappers and attributes initialize on
   access. Payloads and per-format parse results are cached independently.
-- **Lifetime:** **D4.1.3/D4.2.4** Input-owned pool/arena nodes and parse caches
+- **Lifetime:** **D5.1.3/D5.2.3** Input-owned pool/arena nodes and parse caches
   live until their InputManager is torn down. Pool cleanup releases the archive
   once. A retained child remains valid after dropping the root. Runtime-owned
-  generic content views retain/trace their owner with **D5.3.3** precise roots.
+  generic content views retain/trace their owner with **D6.3.3** precise roots.
 - **Virtual errors:** virtual ABI 2 adds an optional fallible `prepare` hook
   before cached `count`. Content, indexing, iteration, query and formatting
   preserve failures. `len()` keeps its ordinary `int` contract; deferred host
-  failures travel through the **S7.4.3/D6.1.3** defect channel, remaining
+  failures travel through the **S7.4.3/D7.1.3** defect channel, remaining
   catchable with `or` without changing ordinary count annotations. Jube ABI 9
   rejects modules compiled against the earlier callback layout.
 - **Output:** `lambda/runtime/lambda-proc.cpp` selects ZIP through the ordinary
@@ -710,7 +710,7 @@ containers; they do not silently expand Phase 3's required profile:
   completes fallible formatting before opening its target.
 - **Interactive browsing:** `lambda view archive.zip` (including ZIP-backed
   DOCX/JAR and renamed ZIP sources) and `lambda view directory/` share the
-  bundled `lambda.doc.doc_viewer` tree (**D7.2.4**). Its path-source entry
+  bundled `lambda.doc.doc_viewer` tree (**D9.3.4**). Its path-source entry
   captures the root once; rows retain member nodes for expansion and preview
   (**S12.4.1v3/S14.3.1v3**). Structured/text/binary previews read those nodes;
   images use data URLs and HTML uses `srcdoc`, without extracting members or

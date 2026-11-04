@@ -33,9 +33,9 @@ part of `test_js_gtest.exe` in batch mode and complete in <1s collectively.
 | `metadata_regexp_lastindex_attrs.js` | `RegExp.prototype.compile` enforces `lastIndex` writability from `ShapeEntry::flags`, not `__nw_lastIndex` | §22.2.3.1 RegExpAlloc |
 | `metadata_class_identity.js` | public `__class_name__` is an ordinary key; built-in brands use `TypeMap::js_class`, and user classes use constructor/prototype identity | §10.1.1 OrdinaryObjectCreate |
 | `metadata_delete_shape_status.js` | deleted ordinary, virtual function, custom function, Object.prototype virtual builtin, and array companion-map slots are hidden by centralized shape-slot status; old INT sentinel payloads remain ordinary values | §10.1.10 OrdinaryDelete |
-| `tune5_property_exotics.js` | Proxy, TypedArray, and Arguments operations use the exotic adapter for Get/Set/HasOwn/descriptor-visible indexed presence | D4.6.1v2, D4.6.2v2 |
-| `tune5_elements_transitions.js` | numeric arrays promote in place for undefined, holes, gaps, while preserving identity and companion overlays | D5.3.1–D5.3.5 |
-| `tune5_array_descriptors.js` | indexed and length descriptors remain authoritative through the array companion overlay | D3.4.4v2, D5.3.3 |
-| `tune5_array_proto_epoch.js` | array-hole fast paths observe prototype indexed-property mutation immediately | D5.4.1–D5.4.4 |
-| `symbol_function_key_identity.js` | a unique Symbol key cannot collide with a same-spelling built-in function property | D3.4.4, D4.6.2v2 |
+| `tune5_property_exotics.js` | Proxy, TypedArray, and Arguments operations use the exotic adapter for Get/Set/HasOwn/descriptor-visible indexed presence | D5.6.1, D5.6.2 |
+| `tune5_elements_transitions.js` | numeric arrays promote in place for undefined, holes, gaps, while preserving identity and companion overlays | D6.3.1–D6.3.5 |
+| `tune5_array_descriptors.js` | indexed and length descriptors remain authoritative through the array companion overlay | D3.4.4, D6.3.3 |
+| `tune5_array_proto_epoch.js` | array-hole fast paths observe prototype indexed-property mutation immediately | D6.4.1–D6.4.4 |
+| `symbol_function_key_identity.js` | a unique Symbol key cannot collide with a same-spelling built-in function property | D3.4.4, D5.6.2 |
 | `intl_number_format_supported_locales.js` | the built-in English NumberFormat reports exactly its available locale | ECMA-402 §9.2.2 |

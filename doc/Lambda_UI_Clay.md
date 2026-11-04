@@ -6,10 +6,10 @@ and layered soft shadows. The visual reference is Muhammad Farhan Juna’s
 [Clay Dashboard](https://dribbble.com/shots/27508244-Clay-Dashboard-Claymorphism-Dashboard-UI).
 The implementation uses CSS and SVG; it does not bundle the reference artwork.
 
-The package is ordinary shipped Lambda source (**D7.2.4**). Authored
+The package is ordinary shipped Lambda source (**D9.3.4**). Authored
 `<clay.*>` elements retain qualified identity (**S2.4.3v3**); presentation and
 event procedures follow **S12.1.1v2–S12.1.3**. Native fields retain the control
-ownership policy in **D7.2.5**, including explicit null and false ownership
+ownership policy in **D10.2.1**, including explicit null and false ownership
 through key membership (**S8.2.2v5**).
 
 ## Start here
@@ -112,7 +112,7 @@ implementation; see the [feature inventory](../test/ui/dtna_reference/catalog.ma
 Interactive browser distribution remains deferred.
 
 `make test-ui-clay ARGS='--jobs 2'` checks source/API contracts and native fixtures
-on interpreter, automatic and JIT tiers (**D8.1.1v17**). The fixtures exercise
+on interpreter, automatic and JIT tiers (**D8.3.6**). The fixtures exercise
 editing, controlled requests, typed selection, forms, retained tabs, table
 sorting/selection/paging, tree checks, disclosure, ratings, tags, alerts, theme
 inheritance, and the two galleries.

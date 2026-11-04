@@ -280,7 +280,7 @@ CssValue* css_value_create_computed_color(Pool* pool, const CssComputedColor* co
     bool perceptual = color->type == CSS_COLOR_OKLAB || color->type == CSS_COLOR_OKLCH;
     bool predefined = color->type == CSS_COLOR_COLOR;
     if (!rgb && !polar && !perceptual && !predefined) return nullptr;
-    // Canonical function trees retain floating channels and `none` under D4.5.1v4.
+    // Canonical function trees retain floating channels and `none` under D5.5.1.
     CssValue** channels = (CssValue**)pool_alloc(pool, sizeof(CssValue*) * 6);
     CssValue** args = (CssValue**)pool_alloc(pool, sizeof(CssValue*) * 4);
     if (!channels || !args) return nullptr;

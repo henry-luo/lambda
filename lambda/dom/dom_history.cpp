@@ -247,7 +247,7 @@ extern "C" void js_history_install_globals(void) {
         history_root, js_new_object());
     if (!js_history_state->history_rooted) {
         // the native receiver identity survives prototype method capture and
-        // collections, and leaves before heap replacement (D5.3.5, D5.4.2).
+        // collections, and leaves before heap replacement (D6.3.5, D6.4.2).
         if (!heap_try_register_gc_root(&js_history_state->history_object.item)) return;
         js_history_state->history_rooted = true;
     }

@@ -1,4 +1,4 @@
-// Each apply owns its selection stores and camera (S9.1.4, D6.2.3v2).
+// Each apply owns its selection stores and camera (S9.1.4, D7.2.3).
 import chart: lambda.chart.chart
 import vega: lambda.chart.vega
 let rows=[{group:"A",x:2,y:2},{group:"B",x:8,y:8}]

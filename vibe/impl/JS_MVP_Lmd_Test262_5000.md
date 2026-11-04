@@ -16,7 +16,7 @@ First capture the current whole-target inventory. The previous 8,888 count is
 diagnostic; the last 1,913/1,949 result only covers selected patterns. Record the
 entry selected-mode count separately; the milestone requires the candidate
 audit below even if entry already has more than 5,000 selected-mode passes.
-No baseline/harness change may hide failures (**S1.11**, **D1.3v3**).
+No baseline/harness change may hide failures (**S1.11**, **D1.3**).
 
 ## 2. Work and order
 
@@ -32,13 +32,13 @@ Prioritize reproduced shared root causes from the fresh inventory, not isolated
 test-name accommodations. Global/class environment prerequisites precede their
 consumers. Existing methods are extended rather than reimplemented wholesale.
 Private classes, interpreter interoperability, async/modules and advanced buffers
-remain later work; eval/Function bodies retain **D8.1.3v24**'s interpreter policy.
+remain later work; eval/Function bodies retain **D8.4.5**'s interpreter policy.
 
 ## 3. Reuse and performance contracts
 
 - Reuse Lambda nominal Maps/shapes, canonical keys, Array storage, destination
-  scalar homes and precise RootFrame/Rooted ownership (**D2.6.9v3**, **D2.7.1**,
-  **D3.4.3v5**, **D5.2–D5.3**). Ordinary objects do not become VMaps.
+  scalar homes and precise RootFrame/Rooted ownership (**D3.1.5**, **D2.6.1**,
+  **D3.4.3**, **D6.2–D6.3**). Ordinary objects do not become VMaps.
 - Start descriptor work in `mvp_lmd_objects.cpp`, `mvp_lmd_reflect.cpp` and the
   existing `js_descriptor_from_object_with_reader`/descriptor validation kernel.
 - Reuse sequence length/index, iterator, property and callable operations from
@@ -46,13 +46,13 @@ remain later work; eval/Function bodies retain **D8.1.3v24**'s interpreter polic
   `mvp_lmd_strings.cpp`; use Lambda/lib numeric and UTF kernels underneath.
 - Public classes extend existing class plans, nominal runtime classes, home
   objects and closure environments. Preserve Lambda ancestry and JS reference
-  captures (**S2.1.3v2**, **D2.6.6v3**, **D2.6.10**, **D6.2.3v2**).
+  captures (**S2.1.3v2**, **D3.1.1**, **D3.1.2**, **D7.2.3**).
 - Template arrays reuse ordinary arrays and existing descriptor/integrity
   operations. Retain site-owned values through the execution owner's existing
   precise metadata roots, not an untraced static cache.
 - No is_normal flag, unconditional environment allocation on ordinary calls,
   second interpreter, graph-copy bridge or whole-unit fallback. Retain proven
-  native paths and guard generic semantic operations (**D8.4.1v2**).
+  native paths and guard generic semantic operations (**D7.4.1**).
 
 Search for existing helpers before adding one. Record and announce each concrete
 new production helper before coding; small options preserve existing callers.
@@ -119,7 +119,7 @@ Additional root-cause repairs found during validation:
   Private prototype-link slots reuse the same cache representation. Only immutable
   shapes are cached; links and values stay live, accessors and mapped arguments
   retain semantic dispatch, and no managed value is added to an untraced cache
-  (**D2.6.10**, **D5.2–D5.3**, **D8.4.1v2**).
+  (**D3.1.2**, **D6.2–D6.3**, **D7.4.1**).
 - Reflected global reads reuse the existing property-cache emitter with a
   caller-owned miss branch. Cache misses retain ordered semantic HasProperty/Get,
   inherited proxy traps and missing-name ReferenceError. The new proxy check also
@@ -238,7 +238,7 @@ The compiler now separately proves whether receiver uses can expose bindings:
 `globalThis`, unresolved names, escaped/computed receivers, native keys and
 same-spelled global properties retain conservative admission. Distinct static
 user fields reuse the existing local parameter/store inventory. This is a
-compile-time proof under **D8.4.1v2**, with the original runtime property kernels
+compile-time proof under **D7.4.1**, with the original runtime property kernels
 and global bindings retained. Focused cases cover each rejected exposure route.
 The patched release SHA-256 is
 `f2b5e7c51c057836000bb6860b1bbd3c70be1b042ca72b039eab8896176a8a5e`.
@@ -310,7 +310,7 @@ This phase extends existing operations; it does not claim full conformance for
 all Object/Array/String families. Full RegExp symbol protocols, remaining Array
 operations such as flatMap, private class elements, builtin subclass instance
 slots, interpreter interoperability, async/modules and advanced buffers remain
-outside completion claims. Eval/Function retain **D8.1.3v24**'s interpreter
+outside completion claims. Eval/Function retain **D8.4.5**'s interpreter
 policy. Dynamic class captures and metadata share the existing 255-slot closure
 environment limit. All unsupported/failed canonical IDs stay visible in the inventory.
 

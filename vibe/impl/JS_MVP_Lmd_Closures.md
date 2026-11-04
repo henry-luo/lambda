@@ -2,11 +2,11 @@
 
 **Status:** the first step of [JS_MVP_Lmd §22](../jube/JS_MVP_Lmd.md#22-closures-callbacks-and-array-growth) is implemented, 2026-10-08. Validation and paired measurements are recorded below. Public static fields and `String.substring` remain the separately proposed follow-up.
 
-Authority: **S1.11**, **D1.3v3**, **D5.2–D5.3**, **D6.2.2v2–D6.2.4**. These changes implement the existing guest-language boundary without changing Lambda capture semantics or the shared Function layout.
+Authority: **S1.11**, **D1.3**, **D6.2–D6.3**, **D7.2.2–D7.2.4**. These changes implement the existing guest-language boundary without changing Lambda capture semantics or the shared Function layout.
 
 ## Representation and admitted behavior
 
-MVP closures reuse `Function::closure_env`, `closure_field_count`, `heap_calloc_closure_env`, and `owned_item_slot_store`. Each captured binding has a shared one-element Lambda Array cell. Enclosing code, nested closures and sibling closures read and write that same cell. The common environment tracer retains the cells; existing array storage owns their wide scalar homes. Lambda closures continue to store immutable snapshots (**D6.2.3v2–D6.2.4**).
+MVP closures reuse `Function::closure_env`, `closure_field_count`, `heap_calloc_closure_env`, and `owned_item_slot_store`. Each captured binding has a shared one-element Lambda Array cell. Enclosing code, nested closures and sibling closures read and write that same cell. The common environment tracer retains the cells; existing array storage owns their wide scalar homes. Lambda closures continue to store immutable snapshots (**D7.2.3–D7.2.4**).
 
 Cells exist before hoisted functions are created, including captures of function-body lexical declarations. Reads and writes retain TDZ and const checks. Captured parameters, named function expressions, escaping captures, nested forwarding and distinct `let`/`const` iteration bindings are supported. Capturing functions use the existing boxed entry ABI; functions without captures retain their direct/native paths.
 
@@ -33,7 +33,7 @@ The runtime and compiler helpers were disclosed before implementation.
 
 The dense-loop proof rejects aliases, captures, method calls, skipped writes and nonunit steps. The initial regression screen exposed a 10% `integer_dense` slowdown from a newly required generic hole branch; this proof restores the prior read path for dense construction while retaining hole checks elsewhere.
 
-`Object.keys`/`values`/`entries` produce fresh dense arrays, so their direct iteration also retains its previous hole-free read path. Literal initialization drops subsequent shape guards only while every prior store is known to preserve the shape; a possible numeric or optional-value retype restores the guards. The iterator keeps its original owner even if the source binding is reassigned. Only the fixed array/ordered-map discriminator is hoisted: lengths, entries and tombstones remain live. String concatenation has only audited MIR callers, whose argument roots already cover the shared join's allocation. No native-stack scanning is involved (**D5.2–D5.3**).
+`Object.keys`/`values`/`entries` produce fresh dense arrays, so their direct iteration also retains its previous hole-free read path. Literal initialization drops subsequent shape guards only while every prior store is known to preserve the shape; a possible numeric or optional-value retype restores the guards. The iterator keeps its original owner even if the source binding is reassigned. Only the fixed array/ordered-map discriminator is hoisted: lengths, entries and tombstones remain live. String concatenation has only audited MIR callers, whose argument roots already cover the shared join's allocation. No native-stack scanning is involved (**D6.2–D6.3**).
 
 ## Coverage and reproducible harness
 

@@ -4,7 +4,7 @@
 
 Extend the existing file I/O modules (`lib/file.c` and `lib/file_utils.c`) into a comprehensive, cross-platform C file operations library serving all Lambda runtime backends: **Lambda Script**, **JavaScript**, **Python**, and **Bash** transpilation.
 
-Security-sensitive opens, temporary-object reservation, and copy/delete operations stay in this shared boundary, including no-follow checks and allocation quotas, as required by **D7.5.2**.
+Security-sensitive opens, temporary-object reservation, and copy/delete operations stay in this shared boundary, including no-follow checks and allocation quotas, as required by **D11.1.2**.
 
 ### Current State
 

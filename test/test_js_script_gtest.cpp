@@ -185,7 +185,7 @@ TEST(JsArguments, ArrayLikeGettersRetainEarlierArgumentsAcrossCollection) {
         js_set_global_property(js_name_item("collectApplyArgs"),
             js_new_native_function(js_apply_getter_collect), 0);
         // index zero returns an unpublished object; only the argument-list
-        // builder can retain it when index one's getter collects (D5.4.1).
+        // builder can retain it when index one's getter collects (D6.4.1).
         const char source[] =
             "function receive(a, b) { return a.value + b.value; } "
             "function Box(a, b) { this.value = receive(a, b); } "
@@ -1661,7 +1661,7 @@ TEST(JsInterpreter, ModulePromotionRetainsImportAndActivationBoundaries) {
         auto* function = (JsFunction*)function_item.function;
         bool admitted = !strcmp(name, "moduleRead") || !strcmp(name, "globalRead") ||
             !strcmp(name, "call") || !strcmp(name, "expressionCall") ||
-            !strcmp(name, "nested"); // D8.1.3v41: one checked module wrapper, no captures.
+            !strcmp(name, "nested"); // D8.4.5: one checked module wrapper, no captures.
         EXPECT_EQ(js_fn_body_kind(function), admitted
             ? JS_FUNCTION_BODY_CODE : JS_FUNCTION_BODY_AST) << name;
         EXPECT_EQ(function->code->p2_promotion.state, admitted
@@ -3593,7 +3593,7 @@ TEST(JsInterpreter, ReusesSynchronousStaticImportModuleMirAcrossFreshRuntimes) {
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
     // The child and parent compile once, then both enter fresh second-runtime
-    // namespaces through their retained immutable images (D8.5.1v2).
+    // namespaces through their retained immutable images (D8.5.1).
     EXPECT_GE(after.mir_builds, before.mir_builds + 2);
     EXPECT_GE(after.mir_hits, before.mir_hits + 2);
     EXPECT_GE(after.module_hits, before.module_hits + 2);
@@ -3633,7 +3633,7 @@ TEST(JsInterpreter, RetiresStaticImportModuleMirConeWhenDependencyChanges) {
     runtime_cleanup(&first);
 
     // A different source generation must retire the cached importer before
-    // the next realm can observe the child namespace (D8.5.1v2).
+    // the next realm can observe the child namespace (D8.5.1).
     ASSERT_EQ(write_binary_file(dependency_path, second_dependency,
         sizeof(second_dependency) - 1), 0);
 
@@ -3843,7 +3843,7 @@ TEST(JsInterpreter, ReusesFunctionAstTemplateAcrossHeapReplacement) {
     JsScript* second = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
         "cached-harness.js");
     // The parsed function is shared, while the replacement realm receives an
-    // execution overlay with its own lazy callable metadata (D8.5.1v2).
+    // execution overlay with its own lazy callable metadata (D8.5.1).
     EXPECT_NE(second, first);
     EXPECT_EQ(second->cache_template, (Script*)first);
     EXPECT_EQ(js_test_source_script_count(runtime), 2);
@@ -5099,7 +5099,7 @@ TEST(JsInterpreter, KeepsAccessorCellsVirtualAndAliveAcrossCollection) {
     runtime_cleanup(&runtime);
 }
 
-// Parked scopes are carrier edges, never process-wide roots (D5.1.1v3).
+// Parked scopes are carrier edges, never process-wide roots (D6.1.1).
 TEST(JsInterpreter, AbandonedParkedScopesDoNotRegisterGlobalRoots) {
     const char* bodies[] = {
         "(function(){ function* g(){ {let big = new Array(128).fill(7); yield big[0];} } "

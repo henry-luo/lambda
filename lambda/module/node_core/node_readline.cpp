@@ -286,7 +286,7 @@ static Item node_readline_emit_js(Item interface_item, const char* event,
 }
 
 // The emit phase is Lambda-only. JS listeners run after dispatch has restored
-// the owning JS activation (D7.4.2v2), including when one chunk has many lines.
+// the owning JS activation (D9.5.2), including when one chunk has many lines.
 static Item node_readline_template_emit(void* user, void* mounted,
                                         Item event_name, Item event_data) {
     NodeReadlineHandle* handle = (NodeReadlineHandle*)user;

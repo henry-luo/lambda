@@ -14,9 +14,9 @@
 > **Formal-spec linkage:** D1.1 defines hosted-language support as a selected
 > grammar and AST builder, not a 100% compatibility promise; D1.2 requires
 > `Item` as the sole script-visible value currency; D1.9 requires malformed
-> input to fail as an error rather than reach undefined behaviour; D4.1.1v2
-> and D4.1.3 require parsed documents to remain Input-arena owned and outside
-> GC rooting; and D7.1.1 separates the static Lambda runtime from dynamic Jube
+> input to fail as an error rather than reach undefined behaviour; D5.1.1
+> and D5.1.3 require parsed documents to remain Input-arena owned and outside
+> GC rooting; and D9.1.1 separates the static Lambda runtime from dynamic Jube
 > modules.  This proposal changes none of those rulings.
 
 ## Summary
@@ -86,7 +86,7 @@ expensive:
 - `InputContext` already owns an input copy of the source, UTF-8-aware source
   tracking, bounded diagnostics, and a `MarkBuilder`.
 - `MarkBuilder` creates arena-owned strings, elements, maps, and arrays.  The
-  final root belongs to the Input arena, exactly as D4.1.1v2 and D4.1.3
+  final root belongs to the Input arena, exactly as D5.1.1 and D5.1.3
   require.
 - `input-latex-tables.{h,cpp}` already centralizes common command and
   environment classification.
@@ -329,7 +329,7 @@ not a reason to copy a grammar quirk.
 ## Runtime retirement boundary
 
 The requested end state is no Tree-sitter parser library in the Lambda runtime.
-Under D7.1.1, the Lambda runtime is its static-library/executable layering;
+Under D9.1.1, the Lambda runtime is its static-library/executable layering;
 Jube language modules are dynamic modules and are outside that boundary.
 
 | Consumer | Required result |

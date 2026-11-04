@@ -1,5 +1,5 @@
 // VT byte strings are produced from a cell plan in Lambda. The host only
-// writes these bytes and reports whether the full write completed (D7.1.6).
+// writes these bytes and reports whether the full write completed (D9.2.2).
 
 fn csi(amount, command) =>
   if (amount <= 0) "" else chr(27) ++ "[" ++ string(amount) ++ command

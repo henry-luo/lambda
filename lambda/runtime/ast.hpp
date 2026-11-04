@@ -145,7 +145,7 @@ static inline AstFuncNode* ast_direct_call_function(AstCallNode* call) {
     return (AstFuncNode*)node;
 }
 
-// D6.1.3 (LR12-24): may a value expression carry an error its static type does
+// D7.1.3 (LR12-24): may a value expression carry an error its static type does
 // not declare? The error enters only through a call (`call_may_defect` decides
 // which) and flows through value positions: operands, conditions, branches,
 // a member or index base, and an unannotated binding's
@@ -257,7 +257,7 @@ static inline bool ast_sys_operands_error_may_reach(const SysFuncInfo* info,
     return false;
 }
 
-// D6.1.3: the statement and literal kinds that may originate a defect
+// D7.1.3: the statement and literal kinds that may originate a defect
 // whatever the compiler knows -- a store's bounds, key domain or element type
 // (TE-18 S1), a launch's admission, a statement handler's fresh raise, a
 // deferred object field (S11.4.10), a runtime-shaped map. Both may_defect
@@ -297,7 +297,7 @@ static inline bool ast_call_may_force_virtual_content(AstCallNode* call) {
     bool nullable = false;
     Type* base = source && source->type
         ? lambda_type_nullable_lane_base(source->type, &nullable) : NULL;
-    // S7.4.3/D6.1.3: a deferred host read is a defect beside len's int
+    // S7.4.3/D7.1.3: a deferred host read is a defect beside len's int
     // contract. Prepared child arrays and concrete scalars need no read.
     return !base || base->type_id == LMD_TYPE_ANY ||
         is_element_family_type_id(base->type_id) || base->type_id == LMD_TYPE_PATH;
@@ -450,7 +450,7 @@ static inline bool ast_declared_type_is_open_any_array(Type* declared) {
 
 static inline bool ast_declared_type_is_map(Type* declared) {
     Type* semantic = type_field_unwrap_simple_decl(declared);
-    // optional records retain their field boundary on every write (D3.2.4v4).
+    // optional records retain their field boundary on every write (D4.2.5).
     return semantic && (semantic->type_id == LMD_TYPE_MAP ||
         lambda_type_nonnull_map_contract(semantic));
 }
@@ -512,7 +512,7 @@ static inline bool ast_call_has_plain_container_parameter(const TypeFunc* signat
 // parameter, so a caller can tell a PLACE borrow (`f(var m.rows[i])`, CW25)
 // from a bare-binding borrow. A place has no NameEntry of its own, so its
 // `entries` slot stays NULL: its caller transports a rooted home and publishes
-// replacements through the evaluated path (D4.4.7).
+// replacements through the evaluated path (D5.4.6).
 static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
         const TypeFunc* signature, NameEntry** entries,
         AstNode** arg_nodes = NULL) {
@@ -636,15 +636,15 @@ typedef struct AstForNode : AstNode {
     AstNode *then;       // body expression
     NameScope *vars;     // scope for the variables in the loop
     bool discard_result; // statement form executes its stream for effects only
-    // D8.1.1v18: 1-based handoff ordinal of a `for` statement that is a direct
+    // D8.3.2: 1-based handoff ordinal of a `for` statement that is a direct
     // statement of a `pn` body (frame-plan pass); 0 = never a handoff loop
     uint8_t interp_handoff_ordinal;
-    // D8.1.1v18: set only on a loop continuation's copy of its `for` -- the
+    // D8.3.2: set only on a loop continuation's copy of its `for` -- the
     // walk position to resume at; the copy's source is the walk's snapshot
     AstNode *resume_from;
 } AstForNode;
 
-// D8.1.1v18: the handoff ordinal of either loop kind a `pn` body may hand off
+// D8.3.2: the handoff ordinal of either loop kind a `pn` body may hand off
 // at -- a `while`, or a `for` statement; 0 for any other node.
 static inline uint8_t ast_handoff_ordinal(const AstNode* node) {
     if (!node) return 0;
@@ -802,7 +802,7 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
         }
         // Declarations, returns and the remaining composites can hide a write
         // in an initializer or operand (`var z = mutate(r)`). Missing them let
-        // a D4.4.6 place copy and a JIT read-only alias skip their snapshot.
+        // a D5.4.5 place copy and a JIT read-only alias skip their snapshot.
         case AST_NODE_VAR_STAM:
         case AST_NODE_LET_STAM:
         case AST_NODE_PUB_STAM:
@@ -1096,7 +1096,7 @@ static inline TypeType* lambda_type_node_singleton(Type* node_type, TypeId* out_
             // 'list' never matches at runtime (LMD_TYPE_LIST no longer exists),
             // so fn_is must see the singleton rather than a base_type lookup.
             if (tt->type == &TYPE_LIST)    { if (out_tid) *out_tid = tid; return &LIT_TYPE_LIST; }
-            // D2.6.6v2 phase 2 (OB14): `object` has no TypeId of its own — it
+            // D3.1.1 phase 2 (OB14): `object` has no TypeId of its own — it
             // wears the map tag only to route through the container switches.
             // Without this arm the tag fallback below would hand back the
             // `map` singleton and `{x: 1} is object` would answer true.
@@ -1330,7 +1330,7 @@ struct Script : Input {
     uint32_t cache_compilation_unit_id; // process-cache logical unit, never reused after admission
     // A cache template owns immutable parser/compiler storage. Runtime
     // instances borrow it and keep only their execution scope and module slab
-    // local to the receiving EvalContext (D7.1.2v2/D8.5.1v2).
+    // local to the receiving EvalContext (D9.1.2/D8.5.1).
     const Script* cache_template;
     struct InputCacheScope* cache_scope;
     bool cache_owned_template;
@@ -1372,13 +1372,13 @@ struct Script : Input {
     ArrayList* direct_imports;  // execution-local direct Lambda import dependencies
     // Cache templates retain immutable dependency owners separately: replacing
     // `direct_imports` would redirect a live interpreter to another Runtime's
-    // module-state IDs (D8.5.1v7).
+    // module-state IDs (D8.3.5).
     ArrayList* cache_direct_imports;
 
-    // ---- T0 AST interpreter (D8.1.1v2) ----
+    // ---- T0 AST interpreter (D8.3.1) ----
     // Module top level owns a frame plan just like a function does; its
     // module-level bindings live in a persistent-rooted slab rather than in
-    // per-activation slots (AI6/D7.2.1).
+    // per-activation slots (AI6/D9.3.1).
     FnFramePlan interp_plan;
     Item* interp_slab;              // persistent-rooted module binding storage
     uint32_t interp_slab_count;     // Item lanes in interp_slab (tails follow)
@@ -1402,12 +1402,12 @@ struct Script : Input {
     bool interp_views_registered;   // T0 view entries published in this context
     // Per-execution strings produced while registering an immutable AST
     // template. The parser-owned name pool stays frozen in the cache image
-    // (D8.5.1v2); anonymous view refs live only with this Script shell.
+    // (D8.5.1); anonymous view refs live only with this Script shell.
     ArrayList* ast_overlay_strings;
     // P2 counters and boxed entries belong to one execution image, not to
     // the parser-owned function definition. Cached AST instances allocate
     // entries here so a satellite from a retired EvalContext cannot be
-    // published into a later runtime (D8.1.1v2/D8.5.1v2).
+    // published into a later runtime (D8.3.1/D8.5.1).
     ArrayList* ast_promotion_overlay;
 
     // The REPL keeps its append-only source buffer alive because AST source
@@ -1442,14 +1442,14 @@ typedef struct Transpiler : Script {
     bool preserve_ast_index;
     // Whole-script AUTO POC lowering addresses the already-planned T0 module
     // slab, so MIR globals must use the same module-slot contract instead of
-    // creating an eager BSS layout (D8.1.1v4/D7.2.1).
+    // creating an eager BSS layout (D8.3.1/D9.3.1).
     bool compile_against_interp_slab;
     // Mark the full-image POC lowering so non-admitted local callees stay on
     // the normal dynamic tier boundary while admitted recursion remains direct.
     bool whole_script_poc;
     // A native importer resolves public entries through generated addresses.
     // Automatic MIR interpretation has no such ABI, so imported modules retain
-    // native code generation (D8.5.1v7).
+    // native code generation (D8.3.5).
     bool requires_native_mir_exports;
 
     // Compiler unit resumes indexing into MIR; retained ASTs restart it.

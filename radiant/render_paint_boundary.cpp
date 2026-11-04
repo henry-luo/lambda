@@ -139,7 +139,7 @@ bool render_paint_boundary_path(void* context, RdtPath* path, Color color, const
     if (stroke) paint_stroke_path(paint, path, color, stroke->width, stroke->cap, RDT_JOIN_MITER,
                                  stroke->dashes, stroke->dash_count, stroke->phase, nullptr);
     else paint_fill_path(paint, path, color, RDT_FILL_WINDING, nullptr);
-    // paths and copied dash arrays must survive the caller's stack (D4.5.1v4).
+    // paths and copied dash arrays must survive the caller's stack (D5.5.1).
     if (paint_list_take_path_payload(paint, index, stroke ? PAINT_STROKE_PATH : PAINT_FILL_PATH)) return true;
     rdt_path_free(path); return false;
 }
@@ -178,7 +178,7 @@ bool render_paint_boundary_emit_collapsed_borders(PaintList* paint, ViewBlock* v
             band.width = width;
         }
         // a collapsed edge is centered on its cell boundary, with the winning
-        // style/color shared by raster and vector consumers (D4.5.1v4).
+        // style/color shared by raster and vector consumers (D5.5.1).
         if (edge->style == CSS_VALUE_SOLID) {
             paint_fill_rect(paint, band.x, band.y, band.width, band.height, edge->color);
         } else {

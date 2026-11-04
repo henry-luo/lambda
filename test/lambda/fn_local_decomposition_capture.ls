@@ -1,4 +1,4 @@
-// S9.1.4v2/D6.2.3v3: decomposed targets use the same shared-home protocol.
+// S9.1.4v2/D7.2.3: decomposed targets use the same shared-home protocol.
 fn discard(value) => 0
 fn local_writer(seed) {
     var a, b = [seed, seed + 1]

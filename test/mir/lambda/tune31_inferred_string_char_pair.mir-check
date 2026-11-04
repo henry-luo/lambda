@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune32 T32-2 / D3.3.3v3: the inferred exact string entry now shares the pair fusion certified by the expanded differential, fallback and GC fixtures.",
+  "description": "Tune32 T32-2 / D4.3.3: the inferred exact string entry now shares the pair fusion certified by the expanded differential, fallback and GC fixtures.",
   "checks": [
     {
       "in_func": "_tune31_inferred_char_pair_#",

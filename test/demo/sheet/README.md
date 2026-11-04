@@ -71,7 +71,7 @@ Pointer capture and separator keyboard sizing reuse `../mod_splitter.ls`.
 Slides also loads the extracted ribbon stylesheet. The app uses the shared entry
 resource resolver and demo catalog/preview infrastructure. Spreadsheet state and
 commands stay in Lambda, with pure rendering and handler-owned effects
-(**S12.1.3**, **D7.2.5**); procedure dispatch captures the successful result in its
+(**S12.1.3**, **D10.2.1**); procedure dispatch captures the successful result in its
 value arm (**S7.6.7v4**).
 
 Verification:

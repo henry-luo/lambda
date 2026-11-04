@@ -388,7 +388,7 @@ bool collect_row(void* user, int count, const char* const* names, const RdbValue
     return ok;
 }
 
-// Only the owner task allocates and roots Lambda values (D5.3.1–D5.3.3).
+// Only the owner task allocates and roots Lambda values (D6.3.1–D6.3.3).
 bool materialize_rows(SqliteJob* job, Rooted<Array*>* result) {
     RootFrame roots(2);
     Rooted<Array*> row(roots, (Array*)NULL);

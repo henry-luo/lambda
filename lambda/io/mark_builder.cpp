@@ -3,7 +3,7 @@
 // String Management Strategy (unified name/symbol system):
 //   - createName(): Always pooled via NamePool (string interning)
 //       Use for: map keys, element tags, attribute names - structural identifiers
-//       pooling shares storage; cross-owner equality follows NameKey (D4.6.1v4)
+//       pooling shares storage; cross-owner equality follows NameKey (D5.6.1)
 //
 //   - createString(): Never pooled (arena allocated)
 //       Use for: user content, text data, string values - non-structural content
@@ -425,7 +425,7 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
         element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
     }
 
-    // D3.4.3v3: start on the tag's root in the Input's transition tree, so
+    // D3.4.3: start on the tag's root in the Input's transition tree, so
     // elements with one tag and attribute sequence share one TypeElmt
     TypeElmt* root = element ? elmt_tree_root(input, tag_name_, NULL) : NULL;
     if (root) {
@@ -575,7 +575,7 @@ ElementBuilder& ElementBuilder::children(std::initializer_list<Item> items) {
 //------------------------------------------------------------------------------
 Item ElementBuilder::final() {
     // nothing to finalize: an element's type came from the transition tree, or
-    // is its own private type (D3.4.3v3)
+    // is its own private type (D3.4.3)
     return (Item){.element = elmt_};
 }
 
@@ -689,7 +689,7 @@ MapBuilder& MapBuilder::put(String* key, bool value) {
 }
 
 Item MapBuilder::final() {
-    // map_put already shared the type through the transition tree (D3.4.3v3)
+    // map_put already shared the type through the transition tree (D3.4.3)
     return (Item){.map = map_};
 }
 
@@ -1041,7 +1041,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         TypeElmt* view_type = nullptr;
         ShapeEntry* view_attr = nullptr;
         if (copying_view_) {
-            // D4.5.3 copies values without erasing nominal, qualified, or declared field contracts.
+            // D5.5.3 copies values without erasing nominal, qualified, or declared field contracts.
             Element* occurrence = elem_builder.final().element;
             if (!occurrence) return ItemNull;
             TypeElmt* allocated_type = (TypeElmt*)occurrence->type;

@@ -1,4 +1,4 @@
-// D2.6.2-D2.6.3: int[] stores admit poison and reject the full-width null lane.
+// D3.2.2-D3.2.1: int[] stores admit poison and reject the full-width null lane.
 // A 32-bit test aliases INT_LANE_NULL with finite zero; the guard must be BEQ.
 
 pn tune17b_swap(var v: int[], i: int, j: int) any {

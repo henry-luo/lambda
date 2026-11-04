@@ -147,7 +147,7 @@ void state_store_retire_runtime(DomDocument* document, EvalContext* owner) {
         state->template_state_map = nullptr;
         state->render_map = nullptr;
     }
-    // later native teardown must not rebind the context after its owner frees it (D5.3.3).
+    // later native teardown must not rebind the context after its owner frees it (D6.3.3).
     if (store) store->semantic_context = nullptr;
 }
 
@@ -864,7 +864,7 @@ StrBuf* radiant_state_dump_mark(DocState* state) {
     StrBuf* out = strbuf_new_cap(1024);
     if (out) print_root_item(out, doc_item);
 
-    // the pool releases the Input it holds (D4.2.6)
+    // the pool releases the Input it holds (D5.2.5)
     mem_pool_destroy(scratch_pool);
     return out;
 }
@@ -1913,7 +1913,7 @@ void DocState::destroy() {
     editing_composition_clear_preedit(this);
     // The package can retain opaque generic DOM delta ids. Release their
     // document-owned snapshots before this state's DOM/storage dependencies
-    // begin teardown (D5.3.3).
+    // begin teardown (D6.3.3).
     state_store_release_script_values(this, (Context*)context);
 
     // Detach template state map from global store before destroying
@@ -2525,7 +2525,7 @@ View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry
     }
     DomDocument* doc = state->owner_store->document;
     if (entry->owner_id == entry->view_id && entry->owner_address) {
-        // D4.5.1v3: a registry-valid owner can still be detached before retirement.
+        // D5.5.1: a registry-valid owner can still be detached before retirement.
         DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
         DomNode* owner = dom_node_ref_validate(doc, owner_ref);
         if (owner && owner->id == entry->view_id) {
@@ -2737,7 +2737,7 @@ bool view_state_ref_follow_rebuild(DomDocument* doc, DomNodeRef* owner,
     DomNode* replacement = view_state_corresponding_node(node, old_root, new_root);
     if (!replacement || replacement == node) return false;
     DomNodeRef next = dom_node_ref(replacement);
-    // D4.5.2: acquire the new lease before releasing the old presentation node.
+    // D5.5.2: acquire the new lease before releasing the old presentation node.
     if (reason < DOM_NODE_PIN_REASON_COUNT) {
         if (!dom_node_pin(doc, next, reason)) return false;
         dom_node_unpin(doc, *owner, reason);
@@ -3320,7 +3320,7 @@ uint32_t view_state_prune_orphans(DocState* state) {
             bool invalid_live_kind = false;
             if (entry->state && key_live && entry->kind == VIEW_STATE_FORM_CONTROL) {
                 DomElement* elem = key_live->is_element() ? lam::dom_require_element(key_live) : NULL;
-                // D4.5.1v3: clearing pass-local form properties does not retire the DOM value owner.
+                // D5.5.1: clearing pass-local form properties does not retire the DOM value owner.
                 invalid_live_kind = !elem || (!elem->form && !is_form_control(elem));
             }
             if (!entry->state || !key_live || !state_live || invalid_live_kind) {
@@ -9029,7 +9029,7 @@ void clipboard_copy_rich(const char* html, const char* plain_text) {
 }
 
 static const char* form_direction_live_value(DomElement* element, void*) {
-    // text values stay StateStore-owned; recascade reads must not initialize another owner (D4.5.1v4).
+    // text values stay StateStore-owned; recascade reads must not initialize another owner (D5.5.1).
     DocState* state = element && element->doc ? (DocState*)element->doc->state : nullptr;
     const char* value = form_control_get_value(state, static_cast<View*>(element), nullptr);
     return value ? value : radiant_input_peek_live_value(element);

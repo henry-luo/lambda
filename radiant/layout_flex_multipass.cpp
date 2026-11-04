@@ -524,7 +524,7 @@ static void flex_for_each_original_height_item(
 static void flex_adjust_column_content_item(ViewElement* item, float original_height,
                                              float* y_shift) {
     if (!item || !y_shift) return;
-    if (*y_shift > 0.5f) {
+    if (fabsf(*y_shift) > FLEX_CONTENT_EPSILON) {
         item->y += *y_shift;
     }
 
@@ -533,7 +533,8 @@ static void flex_adjust_column_content_item(ViewElement* item, float original_he
     if (has_flex_item_prop(item) && item->fi->aspect_ratio > 0.0f &&
         new_height > original_height + 0.5f) {
         item->height = original_height;
-    } else if (new_height > original_height + 0.5f) {
+    } else if (fabsf(new_height - original_height) > FLEX_CONTENT_EPSILON) {
+        // final wrapping and ratio constraints can shrink a provisional content height too.
         float height_diff = new_height - original_height;
         *y_shift += height_diff;
     }
@@ -795,6 +796,9 @@ bool flex_height_is_parent_constrained(LayoutContext* context, ViewBlock* contai
     if (container->fi->main_size_from_flex || container->fi->flex_grow > 0.0f) {
         return true;
     }
+    // ratio-derived auto heights remain assigned sizes while their nested flex content is laid out.
+    if (container->height > 0.0f && flex_item_explicit_ratio_basis(container, false) >= 0.0f)
+        return true;
     if (parent_is_row) {
         if (!include_row_cross_stretch) return false;
         int parent_align_items = parent && parent->embed && parent->embedp()->flex
@@ -1417,6 +1421,8 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
 
     // final item flow owns its paragraph direction as well as its font/strut.
     layout_setup_inline_direction(lycon, flex_item);
+    // flex finalization bypasses setup_inline, including the item's first-line indent.
+    layout_setup_text_indent(lycon, flex_item, content_width);
     line_init(lycon, content_x_offset, content_x_offset + content_width);
     // CRITICAL: Check if this flex item is ITSELF a flex container (nested flex)
     if (flex_item->display.inner == CSS_VALUE_FLEX) {
@@ -1919,7 +1925,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 }
             });
 
-        if (y_shift > 0.5f) {
+        if (fabsf(y_shift) > FLEX_CONTENT_EPSILON) {
             bool has_explicit_height = layout_axis_has_given_size(flex_container, false);
             // CRITICAL FIX: Also check if this container is a flex item whose height was
             bool is_flex_item = has_flex_item_prop(flex_container) ||

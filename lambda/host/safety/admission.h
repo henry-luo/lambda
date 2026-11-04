@@ -41,7 +41,7 @@ typedef struct SecurityFileSelection {
     bool persistent;
 } SecurityFileSelection;
 
-// D7.5.5-D7.5.7: host-only ad-hoc admission. The host supplies its verified
+// D11.2.1-D11.2.3: host-only ad-hoc admission. The host supplies its verified
 // installation/catalog, not a manifest from the app. No parsing runs here.
 // Source manifests are bounded to .ls imports plus the exact selected entry.
 SecurityAdmission* security_admission_open(const SecurityAdmissionConfig* config,

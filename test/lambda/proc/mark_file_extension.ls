@@ -1,4 +1,4 @@
-// D2.9.1–D2.9.2: only .mark selects Mark automatically; explicit Mark ignores the filename.
+// D10.1.1–D10.1.2: only .mark selects Mark automatically; explicit Mark ignores the filename.
 pn main() {
     let source = "'extension-check'";
     for (filename in ["data.mark", "data.MARK", "data.m", "data.mk", "data.mr",

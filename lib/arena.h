@@ -190,7 +190,7 @@ void arena_get_stats(Arena* arena, ArenaStats* out);
 // An arena releases memory only in batch: whole-arena reset/clear/destroy, or
 // rewinding its tail to a mark. A block is never individually freed or
 // discarded; it may only be retained for reuse within the same arena
-// (arena_retire), as DOM node retirement does (D4.1.4v5).
+// (arena_retire), as DOM node retirement does (D5.1.4).
 
 // A scratch arena registers as the sole owner of its backing arena's tail, so
 // reset/clear cannot invalidate its pointers and no other allocation can land

@@ -1,4 +1,4 @@
-// Wiki formatting is a shipped Lambda package; native IO remains runtime-free (D7.1.1, D7.2.4).
+// Wiki formatting is a shipped Lambda package; native IO remains runtime-free (D9.1.1, D9.3.4).
 import profiles: .wiki.profiles
 import writer: .wiki.writer
 import c: .misc.common

@@ -505,7 +505,7 @@ static Item jube_lambda_method_invoke(Item env_item, Item* args, int argc) {
         ? &trec->members[ordinal] : NULL;
     if (rec && rec->bind) {
         // both doors resolve a row the same way, or the Lambda face would keep
-        // the adapter the JS face just lost (D6.2.2v2)
+        // the adapter the JS face just lost (D7.2.2)
         if (rec->bind->row_index) {
             out = jube_invoke_row(rec->bind, env[0], args, argc);
         } else if (rec->bind->call) {
@@ -835,7 +835,7 @@ static void jube_install_member_accessor(Item prototype, JubeMemberRecord* rec) 
 
 static void jube_install_prototype_member(Item prototype, JubeMemberRecord* rec) {
     // adapter publications already live on their declaring interface; a host-type
-    // seed must not overwrite them with a broader native-storage brand (D7.4.4).
+    // seed must not overwrite them with a broader native-storage brand (D9.5.4).
     const JubeMemberRecord* canonical = rec->canonical_record ? rec->canonical_record : rec;
     if (canonical->publications) return;
     if (rec->kind == JUBE_MEMBER_FIELD) {
@@ -880,7 +880,7 @@ extern "C" bool jube_publish_prototype_member(const JubeTypeDef* type,
         publication->next = rec->publications;
         rec->publications = publication;
     }
-    // metadata is stable; each declaring interface caches its own realm-owned callable (D6.2.2v2 / D5.4.1).
+    // metadata is stable; each declaring interface caches its own realm-owned callable (D7.2.2 / D6.4.1).
     jube_install_prototype_member(prototype, &publication->member);
     return true;
 }
@@ -1089,7 +1089,7 @@ static int jube_member_projected_get_impl(Item receiver, Item key, Item* out,
     JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
     if (!rec || (own_only && jube_prototype_member_for(rec, receiver))) return 0;
     // projection excludes named hooks and expandos; JS own reflection also
-    // excludes published prototype members (D1.3v3).
+    // excludes published prototype members (D1.3).
     return jube_dispatch_get_record(receiver, rec, out);
 }
 
@@ -1180,7 +1180,7 @@ int jube_member_define_own(Item receiver, Item key, Item descriptor, Item* out) 
             jube_js_indexed(trec) &&
             !trec->binding->indexed_set && jube_index_from_key(key_root.get(), &index)) {
         // getter-only WebIDL indices reject definitions even outside current bounds.
-        // descriptor conversion still precedes that rejection (D6.2.2v2, D5.3.3).
+        // descriptor conversion still precedes that rejection (D7.2.2, D6.3.3).
         JsPropertyDescriptor converted = {};
         Item status = js_descriptor_from_object(descriptor_root.get(), &converted);
         *out = item_is_error(status) ? status : (Item){.item = ITEM_FALSE};
@@ -1290,7 +1290,7 @@ static Item jube_make_data_descriptor(Item value, bool writable,
     RootFrame roots(2);
     Rooted<Item> value_root(roots, value);
     Rooted<Item> descriptor_root(roots, host->value->new_object());
-    // D5.1.1: descriptor shape transitions may collect, so both the object
+    // D6.1.1: descriptor shape transitions may collect, so both the object
     // under construction and its potentially managed value need exact roots.
     host->value->property_set(descriptor_root.get(), jube_name_item("value"),
                               value_root.get());
@@ -1575,7 +1575,7 @@ static void jube_member_record_init(JubeMemberRecord* record,
         !(bind && (bind->flags & (JUBE_MEMBER_NON_ENUMERABLE | JUBE_MEMBER_PROTOTYPE)));
 }
 
-// count parameters and detect '^' independently of fn/pn colour (D7.4.6).
+// count parameters and detect '^' independently of fn/pn colour (D7.1.1).
 // With the external type-pattern scanner the attr's type is ONE opaque token
 // (`type_pattern_token`), so fn-typed members are recognized and parsed from
 // the token TEXT: `fn(a: T, b: U) R^E` or `pn(a: T, b: U) R^E`.

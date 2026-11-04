@@ -110,13 +110,13 @@ until saved; closing the window does not autosave.
 HTML shell and SVG; `mod_present.ls` updates retained controls and the page.
 Page sizing publishes first; a requested frame applies the camera against the
 committed layout. Reading bounds immediately after sizing still exposes the
-previous layout, so startup scrolling must wait for that commit (**D7.4.6,
+previous layout, so startup scrolling must wait for that commit (**D7.1.1,
 S12.1.3**).
 Connector previews retain the page, shapes, other edges and inspector. They update
 only the active edge, selection overlay and endpoint fields. Target contours and
 the page transform come from the press snapshot; committing refreshes the full
 inspector and records one edit. The shell and pointer-capture owner stay stable while SVG content changes,
-following **S12.1.3** (pure views, mutations in handlers) and **D4.5.1v4**
+following **S12.1.3** (pure views, mutations in handlers) and **D5.5.1**
 (document-owned native resources). Reusable model, shape, paint, SVG scene, geometry, routing, commands, and gesture
 code now lives under `lmd/package/editor/draw/`, exposed through
 [`lambda.editor.draw`](../../../lmd/package/editor/draw/README.md). The demo
@@ -145,7 +145,7 @@ make -C build/premake config=debug_native test_lambda_gtest
 ```
 
 Repeat with `LAMBDA_EXEC_BACKEND=interp` and `LAMBDA_EXEC_BACKEND=jit` to
-exercise all execution tiers (**D8.1.1v18**). The golden tests live in
+exercise all execution tiers (**D8.3.2**). The golden tests live in
 `tests/draw_model.ls`, `tests/draw_styles.ls` and `tests/draw_selection.ls`,
 each with its expected `.txt`; native replays are
 in `test/ui/draw/` and are registered in the Radiant baseline manifest.

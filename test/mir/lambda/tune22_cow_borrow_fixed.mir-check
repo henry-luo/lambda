@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S9.2.2/D8.4.1v2: a member-plus-literal-index var PLACE borrow passes its keys through the stack key span (cow_path_borrow_keys), avoiding the temporary Lambda path array while preserving COW isolation.",
+  "description": "S9.2.2/D7.4.1: a member-plus-literal-index var PLACE borrow passes its keys through the stack key span (cow_path_borrow_keys), avoiding the temporary Lambda path array while preserving COW isolation.",
   "checks": [
     {
       "in_func": "_main_#",

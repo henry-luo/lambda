@@ -78,7 +78,7 @@ bool audio_render_open(DomDocument* document, uint64_t session, const AudioRende
         (!plan.provider_count && (!plan.source_count || !plan.event_count)) ||
         !isfinite(plan.scene_time) || plan.scene_time < 0 || !isfinite(plan.time_scale) || plan.time_scale <= 0)
         return fail("audio render: invalid plan or finite output limit");
-    // register the native quota owner before the pool that will retire its snapshot readers (D4.5.2).
+    // register the native quota owner before the pool that will retire its snapshot readers (D5.5.2).
     if (plan.provider_count && rdt_audio_pcm_storage_bytes(plan.frames) > radiant_audio_available_pcm(document))
         return fail("audio render: provider snapshot exceeds document PCM/reader quota");
     auto* pool = render_pool(document, true); if (!pool) return fail("audio render: document owner admission failed");

@@ -56,9 +56,37 @@
 "scene"
 {
   valid: true,
-  bodies: 108,
-  clips: ["signals", "crane", "harbour-ripples", "beacons"],
-  commands: 48,
+  bodies: 110,
+  clips: ["signals", "crane", "harbour-ripples", "beacons", "walk"],
+  commands: 50,
   looks: [23, 23, 23],
   next_look: ["dusk", "night", "day"]
+}
+"governor"
+{
+  free: null,
+  held: 30,
+  ratchet: 20,
+  floor: 8,
+  kept: 20,
+  eased: 24,
+  lifting: 22,
+  lifted: null,
+  over: {
+    throttle: 0,
+    brake: 0.6,
+    steer: 0,
+    handbrake: false
+  },
+  under: true,
+  open: true
+}
+"indicators"
+{
+  left: "l",
+  right: "r",
+  off_phase: null,
+  straight: null,
+  at_speed: "l",
+  drift: null
 }

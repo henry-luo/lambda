@@ -1,8 +1,8 @@
 # AST Interpreter — Tier-0 Execution for Lambda and LambdaJS
 
 **Date:** 2026-08-15 (rev 2 — DECIDED by user ruling; spec revision landed same day)
-**Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; static-module AST prebuild landed 2026-09-19 (D8.1.1v10, D8.1.3v12, D8.5.1v4).** Ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. Loop-head handoff was ruled on 2026-10-02 (**AI23**, **D8.1.1v14**) and extended to plain `for` statements on 2026-10-12 (**AI25**, **D8.1.1v18**); it is implemented for `while` loops and plain `for` statements that are direct statements of a `pn` body; JS P2 promotion and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI25** remains the design record; the formal rulings named above win on disagreement.
-**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v15**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v3), S15.3.
+**Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; static-module AST prebuild landed 2026-09-19 (D8.3.3, D8.4.2, D8.5.1).** Ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. Loop-head handoff was ruled on 2026-10-02 (**AI23**, **D8.3.2**) and extended to plain `for` statements on 2026-10-12 (**AI25**, **D8.3.2**); it is implemented for `while` loops and plain `for` statements that are direct statements of a `pn` body; JS P2 promotion and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI25** remains the design record; the formal rulings named above win on disagreement.
+**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.3.1**, **D8.4.2**, **D8.5.1**, D1.3/D1.6/D1.7, D6.1–D6.4, D7.1–D7.2, D9.3, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v3), S15.3.
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` (§12/U26 — amended by this doc), `vibe/Lambda_Repl.md`, `vibe/Lambda_Design_MIR_Cache.md` + `_L3`, `vibe/Lambda_Design_Stack_Rooting.md`, `vibe/Lambda_Design_Compiling_Return_Value.md`, `vibe/Lambda_Design_Stack_Frame.md`.
 **Scope:** Stage 1 = Lambda core (§3–§8, §10–§11). Stage 2 = LambdaJS (§9). C2MIR is untouched per D1.6 and CLAUDE rule 14.
 
@@ -12,15 +12,15 @@
 
 This design makes a **tree-walking interpreter over the existing typed AST the default execution mode (Tier 0)** for Lambda, and turns MIR Direct native compilation into a **selective, per-function, demand-triggered optimizer (Tier 1)** — a function is compiled when it proves hot (default: 5th ordinary call or 5th direct self-tail edge). The AST becomes the single runtime source of truth; native code becomes a derived cache, exactly in the spirit of D1.7 (*"every compiled artifact is a local derived cache… memoization, not a format"*).
 
-The interpreter is **boxed-only, forever**. It executes by calling the same C-ABI runtime helper library (`lambda-eval.cpp` et al.) that generated MIR code calls, and it lives on the same side-root/number stacks with the same rooting discipline as generated frames. Semantic micro-decisions therefore stay where they already live — in the helpers — and the standing invariant SI3/D3.3.1 (*"erasing every inferred type and running boxed must produce identical results"*) is the correctness contract: the interpreter *is* the boxed lane, executed directly, gated by the existing differential harness.
+The interpreter is **boxed-only, forever**. It executes by calling the same C-ABI runtime helper library (`lambda-eval.cpp` et al.) that generated MIR code calls, and it lives on the same side-root/number stacks with the same rooting discipline as generated frames. Semantic micro-decisions therefore stay where they already live — in the helpers — and the standing invariant SI3/D4.3.1 (*"erasing every inferred type and running boxed must produce identical results"*) is the correctness contract: the interpreter *is* the boxed lane, executed directly, gated by the existing differential harness.
 
-This reverses U26 (`vibe/Lambda_Design_Unified_AST.md` §12) and D8.1.1 — **ruled by the user and landed as D8.1.1v2 on 2026-08-15**, with the v1 rejection kept as a brief historical footnote in the ruling and the full record retained in Unified_AST §12. §1 records the re-argument against U26's counter-arguments, with evidence that accumulated after U26: the REPL's O(n²) whole-history recompile (LR_01 Known Issue #8), the fact that LambdaJS already needed a size-triggered interpreter escape hatch because *"link-time codegen dominates"* large/cold/document scripts (JS_00 §"JIT with an interpreter escape hatch"), and the growing set of features (const-folding, `that` predicates, debugging, hot reload, REPL, comptime) that all independently want an evaluator that does not require a JIT pipeline warm-up.
+This reverses U26 (`vibe/Lambda_Design_Unified_AST.md` §12) and D8.3.1 — **ruled by the user and landed as D8.3.1 on 2026-08-15**, with the v1 rejection kept as a brief historical footnote in the ruling and the full record retained in Unified_AST §12. §1 records the re-argument against U26's counter-arguments, with evidence that accumulated after U26: the REPL's O(n²) whole-history recompile (LR_01 Known Issue #8), the fact that LambdaJS already needed a size-triggered interpreter escape hatch because *"link-time codegen dominates"* large/cold/document scripts (JS_00 §"JIT with an interpreter escape hatch"), and the growing set of features (const-folding, `that` predicates, debugging, hot reload, REPL, comptime) that all independently want an evaluator that does not require a JIT pipeline warm-up.
 
 ## 0.1 Static module AST prebuild — implemented 2026-09-19
 
-The generic `module_ast_prebuild` scheduler owns graph order and worker lifetime only. Lambda and LambdaJS each supply first-party-parser import discovery, resolver, and isolated AST-builder callbacks. Discovery remains serial and parse-accurate; independent same-language leaves run in dependency-depth waves on the thread pool. Workers create a temporary `Runtime`, publish an AST-only `InputScriptCache` template, then exit: they never instantiate imports, execute top-level code, mutate the receiving runtime, or lower MIR. This is the cache boundary in **D8.5.1v4**.
+The generic `module_ast_prebuild` scheduler owns graph order and worker lifetime only. Lambda and LambdaJS each supply first-party-parser import discovery, resolver, and isolated AST-builder callbacks. Discovery remains serial and parse-accurate; independent same-language leaves run in dependency-depth waves on the thread pool. Workers create a temporary `Runtime`, publish an AST-only `InputScriptCache` template, then exit: they never instantiate imports, execute top-level code, mutate the receiving runtime, or lower MIR. This is the cache boundary in **D8.5.1**.
 
-On Lambda, the receiving runtime clones and plans the retained AST before T0 execution; the existing AUTO counters subsequently promote a hot supported definition to its P2 satellite under **D8.1.1v10**. A T0-ineligible module reaches the existing whole-MIR fallback only after returning to that runtime. On LambdaJS, `JS_EXEC_BACKEND=auto` is explicit: supported static ES modules execute their cached AST closure, unsupported units retain whole-module MIR; unset remains MIR and forced `ast` remains fail-closed (**D8.1.3v12**). JS has no per-function P2 satellite yet, so this implementation does not call its whole-module fallback "hot compilation." The focused JS gate is `JsInterpreter.AutoPrebuildsStaticImportClosureAsAst`.
+On Lambda, the receiving runtime clones and plans the retained AST before T0 execution; the existing AUTO counters subsequently promote a hot supported definition to its P2 satellite under **D8.3.3**. A T0-ineligible module reaches the existing whole-MIR fallback only after returning to that runtime. On LambdaJS, `JS_EXEC_BACKEND=auto` is explicit: supported static ES modules execute their cached AST closure, unsupported units retain whole-module MIR; unset remains MIR and forced `ast` remains fail-closed (**D8.4.2**). JS has no per-function P2 satellite yet, so this implementation does not call its whole-module fallback "hot compilation." The focused JS gate is `JsInterpreter.AutoPrebuildsStaticImportClosureAsAst`.
 
 ## 1. Why revisit U26 — the motivations, re-argued
 
@@ -31,12 +31,12 @@ U26 rejected an AST interpreter on five grounds (`Lambda_Design_Unified_AST.md:8
 | 1 | **Turnaround time.** Even MIR-interp mode pays full lowering: parse → AST → whole-module MIR construction → `MIR_link`. For unit/regression suites and pages loading many large scripts, compile time dominates run-once execution. | `MIR_set_gen_interface` generates *every* function of a module during `MIR_link` (`transpile-mir.cpp:25341`, `mir/mir-gen.c:9755`). LambdaJS already auto-selects MIR-interp above 15 KB source at O0, 100k MIR insns, or 20k insns in document context (`runtime/mir_policy.hpp`) — a tiering policy that exists because eager codegen was measurably too slow for exactly the workloads named here. **Measured (JS side, JS_15):** `MIR_link` — eager whole-module codegen, not symbol resolution — is **50–82% of total compile time** on large vendor libraries (lodash: 4.8 s of 6.7 s in link); routing large/cold modules to MIR-interp made them **4–6× faster end-to-end** (lodash 6.7 s → 1.3 s), the Radiant web-template suite ≈3× faster, and the full 39k-test Test262 corpus ≈17% faster summed — short scripts never amortize codegen. Radiant today *skips oversized page scripts entirely* under byte budgets and recompiles byte-identical vendor scripts every load (bootstrap ×116, jQuery ×58/45/30 across the web-template suite). `LAMBDA_PROFILE=1` phase data attributes per-script Lambda-side cost; Lambda-side numbers are a P0 deliverable. | Run-once and cold code executes straight off the AST: no MIR module, no link, no codegen. Only proven-hot functions pay lowering — and each pays it once, individually. |
 | 2 | **Memory.** MIR IR is large and generated native code is larger; both are resident per module for the whole session. | The interp thresholds above are *volume*-triggered; `count_lambda_mir_volume` (`transpile-mir.cpp:25188`) exists precisely because MIR insn count is the pressure metric. Test262 crash recovery leaks ~55 MB of MIR code pages per recovery (`main.cpp:3700`) — code-page volume is real. There is no per-module byte metric in-tree — adding one is part of P0 (§11). | The AST is already retained for the `Script` lifetime (`transpile-mir.cpp:25512` handoff; freed only in `runtime_free_script`). T0 therefore adds near-zero marginal memory; T1 allocates MIR + native code only for the hot subset. |
 | 3 | **Flexible tooling.** Debugging, profiling, watch/step, hot reload are hard at MIR level — generated code is deliberately immutable (DI14: *"generated code is immutable — never patched"*), which is an asset for correctness and exactly what makes breakpoint patching impossible there. | Source positions already ride on every AST node (`AstNode::node`, a `TSNode`; start row/col readable without the tree). `Script::debug_info` maps native address ranges only — no statement-level map. `vibe/LambdaJS_Hot_Reload.md` wants reload semantics MIR cannot give. | Per-node evaluation is a natural hook point: breakpoints by byte offset, statement stepping, per-node profiling, and hot reload by AST swap (§7). |
-| 4 | **Static / comptime / analysis evaluation.** The sanctioned const-folder (D8.1.1, U26 §12.3) is an interpreter fragment by another name. `that` constraint predicates today JIT-compile a `constraint_fn` per constrained type (`TypeObject::constraint_fn`, installed `lambda-data-runtime.cpp:2501`) — so `lambda.exe validate` drags in the whole JIT to run a predicate. | Const-folding exists only on the JS side (`jm_try_fold_const`); Lambda has none. U26 itself KIV'd a "reference interpreter as executable spec". | One engine serves all of it: `EvalMode::CONST` is the const-folder (purity-gated per D6.1.2), `EvalMode::PREDICATE` runs `that` clauses without JIT, and T0 in production *is* the executable-spec oracle, differentially tested continuously instead of KIV (§6). |
+| 4 | **Static / comptime / analysis evaluation.** The sanctioned const-folder (D8.3.1, U26 §12.3) is an interpreter fragment by another name. `that` constraint predicates today JIT-compile a `constraint_fn` per constrained type (`TypeObject::constraint_fn`, installed `lambda-data-runtime.cpp:2501`) — so `lambda.exe validate` drags in the whole JIT to run a predicate. | Const-folding exists only on the JS side (`jm_try_fold_const`); Lambda has none. U26 itself KIV'd a "reference interpreter as executable spec". | One engine serves all of it: `EvalMode::CONST` is the const-folder (purity-gated per D7.1.2), `EvalMode::PREDICATE` runs `that` clauses without JIT, and T0 in production *is* the executable-spec oracle, differentially tested continuously instead of KIV (§6). |
 | 5 | **REPL / shell.** Every REPL line re-parses, re-builds, re-lowers, re-links, and re-JITs the entire accumulated history (`main.cpp:819` → `run_script_mir(repl_history)`); LR_01 documents it as O(n²) (Known Issue #8). | The history is overwhelmingly run-once top-level statements — the exact workload where compilation is pure overhead. | T0 executes the history directly; functions defined in the session that get hot promote to T1. Incremental top-level *state* (`vibe/Lambda_Repl.md`) remains the orthogonal follow-on that removes re-execution (§8). |
 
 ### 1.1 Answering U26's counter-arguments directly
 
-**"An interpreter needs a second, parallel vtable of direct-execution hooks… the two-implementations-of-semantics trap."** The trap is real if the interpreter re-implements semantic micro-decisions. It doesn't. The division of labor in this design: *semantics live in the runtime helpers* (~446 Lambda-relevant C-ABI entries — `fn_*`, `array_*`, `pn_*`, `cow_*`, … — the same ones generated code imports), and both MIR lowering and interpretation are *structural* walks that select helpers. What T0 duplicates is only the walk: node kind → child order → helper choice. Crucially, T0 is boxed-only, so the genuinely hard 80% of the MIR backend — representation inference, the dual-function plan (D8.3.1), lanes, nullable machinery, native specialization, return-value v3 lanes — has **no interpreter counterpart at all**. SI3 guarantees the boxed walk is result-identical by standing invariant, and the differential gate (§10) makes any residual divergence a caught bug, not a silent fork. The in-tree profiling data makes the point quantitatively: on the 261-fixture JS batch corpus, JIT-*generated* code is **0.6% of working CPU** while runtime helpers are **43.5%** — *"generated code is almost pure glue between helper calls; essentially all semantic work happens in C"* (`vibe/jube/JS_Profiling_Helpers.md` §2). A walker that reproduces the glue and calls the same helpers starts from ≈99.4% semantic parity — and ≈99.4% of the runtime cost profile — by construction.
+**"An interpreter needs a second, parallel vtable of direct-execution hooks… the two-implementations-of-semantics trap."** The trap is real if the interpreter re-implements semantic micro-decisions. It doesn't. The division of labor in this design: *semantics live in the runtime helpers* (~446 Lambda-relevant C-ABI entries — `fn_*`, `array_*`, `pn_*`, `cow_*`, … — the same ones generated code imports), and both MIR lowering and interpretation are *structural* walks that select helpers. What T0 duplicates is only the walk: node kind → child order → helper choice. Crucially, T0 is boxed-only, so the genuinely hard 80% of the MIR backend — representation inference, the dual-function plan (D7.3.1), lanes, nullable machinery, native specialization, return-value v3 lanes — has **no interpreter counterpart at all**. SI3 guarantees the boxed walk is result-identical by standing invariant, and the differential gate (§10) makes any residual divergence a caught bug, not a silent fork. The in-tree profiling data makes the point quantitatively: on the 261-fixture JS batch corpus, JIT-*generated* code is **0.6% of working CPU** while runtime helpers are **43.5%** — *"generated code is almost pure glue between helper calls; essentially all semantic work happens in C"* (`vibe/jube/JS_Profiling_Helpers.md` §2). A walker that reproduces the glue and calls the same helpers starts from ≈99.4% semantic parity — and ≈99.4% of the runtime cost profile — by construction.
 
 **"Lowering is a single-pass tree walk — the same order of work as one interpretive pass."** Per node visited, roughly yes. But lowering visits *every* node of the module and materializes MIR data structures for all of it, then links and (by default) generates native code for all of it — while interpretation visits only the nodes that actually execute. For run-once code the executed-node count is the same as the lowered-node count and T0 wins by skipping MIR construction + link + codegen entirely; for cold code (functions never called — common in libraries and test scaffolding) T0 visits zero nodes where lowering paid full price. The claim was correct about *lowering* and incorrect about the *pipeline*: measured on real vendor libraries, `MIR_link` alone is 50–82% of total compile time, and on the JS batch corpus compile in total is 33.2% of working CPU (JS_15; `JS_Profiling_Helpers.md`).
 
@@ -50,9 +50,9 @@ U26 rejected an AST interpreter on five grounds (`Lambda_Design_Unified_AST.md:8
 
 ## 2. Goals and non-goals
 
-**Goals.** (g1) T0 default execution for scripts, REPL, `validate`, `convert`, layout-embedded scripts. (g2) Per-function demand-triggered T1 with function-entry replacement. (g3) Result identity across tiers, enforced by running the baseline suites under both tiers (SI3/D3.3.1 extended). (g4) One evaluation engine reused for const-folding, `that` predicates, and future comptime (S15.3 `compile()` path). (g5) First-class hooks for stepping, breakpoints, per-node profiling, hot reload. (g6) Strictly lower cold-start time and resident memory on compile-dominated workloads, measured (§10).
+**Goals.** (g1) T0 default execution for scripts, REPL, `validate`, `convert`, layout-embedded scripts. (g2) Per-function demand-triggered T1 with function-entry replacement. (g3) Result identity across tiers, enforced by running the baseline suites under both tiers (SI3/D4.3.1 extended). (g4) One evaluation engine reused for const-folding, `that` predicates, and future comptime (S15.3 `compile()` path). (g5) First-class hooks for stepping, breakpoints, per-node profiling, hot reload. (g6) Strictly lower cold-start time and resident memory on compile-dominated workloads, measured (§10).
 
-**Non-goals.** (n1) No bytecode IR — *"no shared bytecode, no shared object model, no interpreter framework"* stays true across languages (Features J2); within Lambda, the typed AST is the only executable form below MIR (AI22). (n2) No deoptimization — compiled code never returns control to the interpreter mid-activation, and T0 never inspects a T1 frame. A running T0 activation leaves the interpreter at exactly two kinds of boundary: a direct validated self-tail call (§5.1; D8.1.1v5) and a loop-head test (§5.1.1; AI23, D8.1.1v14). (n3) No unboxed or specialized interpreter lane, ever (AI3). (n4) No inline caches in either Lambda or LambdaJS (**D8.4.1v2**); tier-up swaps data cells and ordinary shape metadata never patches dispatch. (n5) No change to C2MIR (D1.6). (n6) MIR-interp mode is not removed in v1 — it is demoted from size-pressure valve to codegen diagnostic once T0 reaches parity (AI19).
+**Non-goals.** (n1) No bytecode IR — *"no shared bytecode, no shared object model, no interpreter framework"* stays true across languages (Features J2); within Lambda, the typed AST is the only executable form below MIR (AI22). (n2) No deoptimization — compiled code never returns control to the interpreter mid-activation, and T0 never inspects a T1 frame. A running T0 activation leaves the interpreter at exactly two kinds of boundary: a direct validated self-tail call (§5.1; D8.3.2) and a loop-head test (§5.1.1; AI23, D8.3.2). (n3) No unboxed or specialized interpreter lane, ever (AI3). (n4) No inline caches in either Lambda or LambdaJS (**D7.4.1**); tier-up swaps data cells and ordinary shape metadata never patches dispatch. (n5) No change to C2MIR (D1.6). (n6) MIR-interp mode is not removed in v1 — it is demoted from size-pressure valve to codegen diagnostic once T0 reaches parity (AI19).
 
 ## 3. The tier model
 
@@ -78,7 +78,7 @@ U26 rejected an AST interpreter on five grounds (`Lambda_Design_Unified_AST.md:8
 - **T1** — MIR Direct native code, compiled one function at a time into "satellite" MIR modules (§5.2) when the definition proves hot. Whole-module eager compilation (today's pipeline) remains available as `--jit-all` / `LAMBDA_EXEC_BACKEND=jit` — for benchmarks, for release-mode servers, and as the differential baseline.
 - **MIR-interp** — no longer a tier. It survives as a diagnostic for debugging codegen (`--mir-interp`), because it executes the same emitted frames (Stack_Rooting §5.5); the `mir_policy.hpp` size thresholds retire once T0 is default (AI19).
 
-The unit of tiering is the **definition site** (`AstFuncNode`), not the closure instance: many closures share one definition and one counter (AI8, AIO3). Promotion never patches anything: it writes the compiled `_b` entry into the definition-site cell and (lazily) into `Function` values, both plain data (D8.4.1/DI14 respected).
+The unit of tiering is the **definition site** (`AstFuncNode`), not the closure instance: many closures share one definition and one counter (AI8, AIO3). Promotion never patches anything: it writes the compiled `_b` entry into the definition-site cell and (lazily) into `Function` values, both plain data (D7.4.1/DI14 respected).
 
 ## 4. Interpreter core (Stage 1)
 
@@ -91,10 +91,10 @@ T0 manipulates tagged `Item`s exclusively — the same 64-bit tagged representat
 
 ### 4.2 The stack: frames as side-stack windows
 
-D5.1.1 fixes the stack inventory: native C stack (invisible to GC), the two watermarked side stacks (root stack scanned `[base, top)`, number stack never scanned), heap async frames. **The interpreter adds no fourth mechanism.** An interpreter activation is:
+D6.1.1 fixes the stack inventory: native C stack (invisible to GC), the two watermarked side stacks (root stack scanned `[base, top)`, number stack never scanned), heap async frames. **The interpreter adds no fourth mechanism.** An interpreter activation is:
 
 - a C++ `InterpFrame` on the native stack (control state only — no Items), and
-- a statically sized **window on the side-root stack** holding every GC-visible value of the activation: `[ param/local slots | operand scratch slots ]`, plus the paired number-stack watermark — exactly the two-watermark frame shape generated code uses (D5.1.2), entered and exited through the existing `lambda_root_frame_begin/end` (or the `RootFrame`/`RootSpan` RAII layer), zero-before-publish, strictly LIFO.
+- a statically sized **window on the side-root stack** holding every GC-visible value of the activation: `[ param/local slots | operand scratch slots ]`, plus the paired number-stack watermark — exactly the two-watermark frame shape generated code uses (D6.1.2), entered and exited through the existing `lambda_root_frame_begin/end` (or the `RootFrame`/`RootSpan` RAII layer), zero-before-publish, strictly LIFO.
 
 ```cpp
 struct InterpFrame {                    // C stack; holds no Items directly
@@ -110,7 +110,7 @@ struct InterpFrame {                    // C stack; holds no Items directly
 };
 ```
 
-**Static frame sizing** comes from a new build-time **frame-plan pass** (§4.3): `total_slots = params + locals + max_scratch_depth`, where `max_scratch_depth` is a Sethi–Ullman-style count over each expression tree — the maximum number of Items that must be held live across a child evaluation or allocating helper call. Scratch depth is a property of expression *shape*, not data size (an N-item element literal accumulates through a rooted list builder, holding O(1) scratch), so the static bound is small and exact. The rules the walker follows are the same ones the JIT prologue and native helpers already obey (Stack_Rooting; D5.3.3):
+**Static frame sizing** comes from a new build-time **frame-plan pass** (§4.3): `total_slots = params + locals + max_scratch_depth`, where `max_scratch_depth` is a Sethi–Ullman-style count over each expression tree — the maximum number of Items that must be held live across a child evaluation or allocating helper call. Scratch depth is a property of expression *shape*, not data size (an N-item element literal accumulates through a rooted list builder, holding O(1) scratch), so the static bound is small and exact. The rules the walker follows are the same ones the JIT prologue and native helpers already obey (Stack_Rooting; D6.3.3):
 
 1. Any Item that must survive a child eval or a MAY_GC helper call is stored to a scratch slot first and **re-read from the slot after** — never cached in a C++ local across an allocation (data buffers move under `gc_compact_data` even though objects don't).
 2. Slots are zeroed before the watermark is published; frames exit LIFO; the frame-entry limit check against `side_root_commit_limit` is the same check generated prologues emit, with `lambda_root_frame_overflow_error` as the fail-closed path.
@@ -131,16 +131,16 @@ Identifier evaluation is then `slots[entry->slot]` / `env[entry->slot]` / `slab[
 
 ### 4.4 Module state: slabs for both tiers
 
-Module-level vars currently live in per-module `_gvar_*` BSS inside the compiled MIR module — storage that does not exist when a module is never compiled. Per D7.2.1 (*"Package state lives in per-context slabs, never at code-baked addresses"*), T0 moves module bindings wholly into the per-context module slab (`EvalContext::module_states` / `LambdaModuleLayout` — the machinery `prepare_context_module_state` already establishes): the interpreter reads/writes slab slots; satellite-compiled functions receive the slab base pointer the same way compiled modules today receive `_mod_consts_ptr` (BSS pointer written after link). Item-holding slab ranges are registered GC roots (the `register_bss_gc_roots` pattern, relocated to slab ownership). Whole-module `--jit-all` mode keeps its current BSS layout during the transition; slab unification for that mode is the end state (AI6, AIO12). Module initialization order and the transaction barrier are unchanged: T0 interprets each module's top level in import post-order inside a `TRANSACTION_BARRIER` recovery frame, exactly as `run_script_mir` arms one per module init today (D7.2.2/S7.7.6).
+Module-level vars currently live in per-module `_gvar_*` BSS inside the compiled MIR module — storage that does not exist when a module is never compiled. Per D9.3.1 (*"Package state lives in per-context slabs, never at code-baked addresses"*), T0 moves module bindings wholly into the per-context module slab (`EvalContext::module_states` / `LambdaModuleLayout` — the machinery `prepare_context_module_state` already establishes): the interpreter reads/writes slab slots; satellite-compiled functions receive the slab base pointer the same way compiled modules today receive `_mod_consts_ptr` (BSS pointer written after link). Item-holding slab ranges are registered GC roots (the `register_bss_gc_roots` pattern, relocated to slab ownership). Whole-module `--jit-all` mode keeps its current BSS layout during the transition; slab unification for that mode is the end state (AI6, AIO12). Module initialization order and the transaction barrier are unchanged: T0 interprets each module's top level in import post-order inside a `TRANSACTION_BARRIER` recovery frame, exactly as `run_script_mir` arms one per module init today (D9.3.2/S7.7.6).
 
 ### 4.5 Functions, closures, and the tier boundary
 
 `Function` (`lambda.h:1107`) is the value both tiers share. Two additions:
 
-- **`def` — the AST definition-site pointer** (`const AstFuncNode*`). Today `Function` has no route back to the AST; D6.2.1 already rules that function *identity* is the static AST definition site, and S5.5.1 equality needs `(module, node)` — so this field is doctrine catching up with the struct, not a tiering hack. It carries: the body to interpret, the frame plan, the promotion state.
-- **`FunctionEntryAbi::LAMBDA_INTERPRETED`** — a new entry-ABI tag. Cold functions are created with `entry_abi = LAMBDA_INTERPRETED`, `ptr = NULL`. `lambda_dynamic_call` — already the single dynamic dispatch point, already switching on `entry_abi` — gains one arm: interpreted callees enter `interp_call(ctx, fn, argc, argv)`, which opens a frame per §4.2 and evaluates `fn->def->body`. Every call edge across the tier boundary flows through this helper, so **T1→T0 works today unchanged** (generated code already calls `fn_call*` → `lambda_dynamic_call` for first-class callees), and **T0→T1 is the existing native-invoke arm**. Promotion (§5) stores the compiled `_b` address into `ptr` and flips `entry_abi` to `LAMBDA_BOXED_FUNCTION/PROCEDURE` — a data write on a GC object, unobservable per S1.6, single-threaded per eval context per D5.4.1.
+- **`def` — the AST definition-site pointer** (`const AstFuncNode*`). Today `Function` has no route back to the AST; D7.2.1 already rules that function *identity* is the static AST definition site, and S5.5.1 equality needs `(module, node)` — so this field is doctrine catching up with the struct, not a tiering hack. It carries: the body to interpret, the frame plan, the promotion state.
+- **`FunctionEntryAbi::LAMBDA_INTERPRETED`** — a new entry-ABI tag. Cold functions are created with `entry_abi = LAMBDA_INTERPRETED`, `ptr = NULL`. `lambda_dynamic_call` — already the single dynamic dispatch point, already switching on `entry_abi` — gains one arm: interpreted callees enter `interp_call(ctx, fn, argc, argv)`, which opens a frame per §4.2 and evaluates `fn->def->body`. Every call edge across the tier boundary flows through this helper, so **T1→T0 works today unchanged** (generated code already calls `fn_call*` → `lambda_dynamic_call` for first-class callees), and **T0→T1 is the existing native-invoke arm**. Promotion (§5) stores the compiled `_b` address into `ptr` and flips `entry_abi` to `LAMBDA_BOXED_FUNCTION/PROCEDURE` — a data write on a GC object, unobservable per S1.6, single-threaded per eval context per D6.4.1.
 
-Closures need nothing new: captures snapshot by value at creation into the boxed-Item env with owned-scalar tails (D6.2.3/D6.2.4) via the same `to_closure_named` + `owned_item_slot_store` helpers the JIT emits. The interpreter reads captures as `env[slot]`. Because `let` bindings are final and assignment through a capture is a compile error (S9.1.4 per D6.2.3), **stage 1 has no mutable upvalues, no cells, no write-backs** — a major simplification JS will not share (§9).
+Closures need nothing new: captures snapshot by value at creation into the boxed-Item env with owned-scalar tails (D7.2.3/D7.2.4) via the same `to_closure_named` + `owned_item_slot_store` helpers the JIT emits. The interpreter reads captures as `env[slot]`. Because `let` bindings are final and assignment through a capture is a compile error (S9.1.4 per D7.2.3), **stage 1 has no mutable upvalues, no cells, no write-backs** — a major simplification JS will not share (§9).
 
 Statically-known calls inside T0 (callee resolved to an `AstFuncNode` through `AstIdentNode::entry`) may bypass `Function`-value dispatch: consult the definition-site promotion cell directly — compiled ⇒ boxed native invoke; else push an interpreter frame recursively (still routing argument rooting through a `RootSpan`, as `lambda_dynamic_call` does). This is an internal fast path with identical semantics, not a third ABI.
 
@@ -155,7 +155,7 @@ enum class EvalSignal : uint8_t { NORMAL, RETURNED, BROKE, CONTINUED, ERROR_SKIP
 
 `return`/`break`/`continue` are ordinary signal returns up the walker (`pn`-only constructs per S12.1.2); `longjmp` remains reserved for faults (§4.8). Two structural hazards from the AST survey are handled by construction: the AST is a **DAG** (declaration nodes are reachable through both statement lists and `NameEntry->node`) — the walker evaluates only through structural child edges and treats `entry->node` links as *reads*; and generic `(AstNamedNode*)` casts are forbidden in dispatch (the `AstLoopNode` layout divergence — a live-bug pattern `push_name` already documents). Dispatch-table static asserts pin the known enum collisions (`AST_NODE_START` vs `AST_NODE_EVENT_HANDLER`).
 
-Later optimizations — per-node function-pointer threading, node-kind-specialized helper selection cached on the node's `Type*` — are explicitly deferred until profiles ask (AIO10); they change dispatch cost, not semantics, and must never become inline caches in the **D8.4.1v2** sense (no patching, no per-site mutable dispatch state).
+Later optimizations — per-node function-pointer threading, node-kind-specialized helper selection cached on the node's `Type*` — are explicitly deferred until profiles ask (AIO10); they change dispatch cost, not semantics, and must never become inline caches in the **D7.4.1** sense (no patching, no per-site mutable dispatch state).
 
 ### 4.7 Implicit contexts
 
@@ -185,11 +185,11 @@ The full walker, by node family (the complete per-kind inventory is the P1 check
 | String patterns, path/query exprs, sys funcs | pattern constants from const pool (prepass-compiled patterns become plan-pass outputs, AIO12); `sys_func_defs[]` gives the C function pointer — direct call, same registry both tiers |
 | `pn` statements: `var`, assignment (incl. index/member), `while`/`do-while`, `break`/`continue`/`return` | `EvalSignal` channel; mutation through `cow_prepare_write`-family helpers so COW sharing stays unobservable (S9.1.2); out-of-bounds writes raise per SI11 |
 | Imports / module top-level | post-order module init under transaction barriers (§4.4); built-in `math`/`io` and Jube imports resolve at call sites as today (they produce no AST nodes) |
-| `start`, async, generators | **interpreted (2026-10-05, AI11v2)** — T0 evaluates `start`, `wait`, `select` and scoped tasks directly; a task's body runs on its own activation and parks in place (`vibe/Lambda_Design_Runtime_Async.md` RA1, RA12). Definitions are no longer promoted for their colour (D8.1.1v16). *[v1: suspension-capable definitions promoted at first call, because suspension was a MIR state-machine transform.]* |
+| `start`, async, generators | **interpreted (2026-10-05, AI11v2)** — T0 evaluates `start`, `wait`, `select` and scoped tasks directly; a task's body runs on its own activation and parks in place (`vibe/Lambda_Design_Runtime_Async.md` RA1, RA12). Definitions are no longer promoted for their colour (D8.3.2). *[v1: suspension-capable definitions promoted at first call, because suspension was a MIR state-machine transform.]* |
 | Views / templates | modules containing `AST_NODE_VIEW` keep whole-module eager compilation in v1 — registration reaches into the compiled context (`_view_<N>` lookup) (AI12) |
 | Error-recovery nodes | T0 refuses to execute a script with `error_count > 0`, same gate as lowering |
 
-Explicit `LAMBDA_EXEC_BACKEND=interp` is a strict T0 pin (**D8.1.1v16**, AI24v2,
+Explicit `LAMBDA_EXEC_BACKEND=interp` is a strict T0 pin (**D8.3.2**, AI24v2,
 user rulings 2026-10-03 and 2026-10-05). The support scan rejects any script or
 import that needs MIR; a suspension-capable procedure no longer does, because T0
 executes it. The scan reports an unsupported-feature error before execution;
@@ -208,11 +208,11 @@ admission remain separate. Evidence: [typed performance audit §9](impl/Lambda_I
 
 ### 5.1 Trigger
 
-Each `AstFuncNode` (definition site) carries a promotion cell in its `FnAnalysis`: `{ state: INTERP | COMPILING | COMPILED | PINNED_INTERP, call_count, backedge_count, tail_edge_count, void* boxed_entry }`. An ordinary interpreted entry increments `call_count`; at `call_count >= LAMBDA_FUNC_JIT_THRESHOLD` (default **5**) it compiles synchronously and runs that entry natively. TCO self-tail iterations reuse the active frame, so each validated logical call increments both `call_count` and the separate `tail_edge_count`. On the fifth direct self-tail edge, the runtime compiles the existing eligible satellite, preserves the rooted source argument vector, detaches the no-longer-active T0 frame, and enters the satellite through the ordinary boxed wrapper. This is not arbitrary on-stack replacement: the tail expression has no continuation and its next state is exactly a new function entry. A compile/admission failure keeps the same coerced T0 slots and continues TCO. Loop back-edges are counted per loop site; a loop reaching `LAMBDA_LOOP_JIT_THRESHOLD` (default 10000) queues its definition with a loop entry and the running activation hands off at that loop's head (§5.1.1, AI23). D5.1.2's *"no hotness detection — primitives are unconditionally cheap"* is untouched: that ruling scopes stack primitives; these are per-function counters (D8.1.1v5). Counters are per-eval-context state (D5.4.1), so there is no cross-thread counter traffic.
+Each `AstFuncNode` (definition site) carries a promotion cell in its `FnAnalysis`: `{ state: INTERP | COMPILING | COMPILED | PINNED_INTERP, call_count, backedge_count, tail_edge_count, void* boxed_entry }`. An ordinary interpreted entry increments `call_count`; at `call_count >= LAMBDA_FUNC_JIT_THRESHOLD` (default **5**) it compiles synchronously and runs that entry natively. TCO self-tail iterations reuse the active frame, so each validated logical call increments both `call_count` and the separate `tail_edge_count`. On the fifth direct self-tail edge, the runtime compiles the existing eligible satellite, preserves the rooted source argument vector, detaches the no-longer-active T0 frame, and enters the satellite through the ordinary boxed wrapper. This is not arbitrary on-stack replacement: the tail expression has no continuation and its next state is exactly a new function entry. A compile/admission failure keeps the same coerced T0 slots and continues TCO. Loop back-edges are counted per loop site; a loop reaching `LAMBDA_LOOP_JIT_THRESHOLD` (default 10000) queues its definition with a loop entry and the running activation hands off at that loop's head (§5.1.1, AI23). D6.1.2's *"no hotness detection — primitives are unconditionally cheap"* is untouched: that ruling scopes stack primitives; these are per-function counters (D8.3.2). Counters are per-eval-context state (D6.4.1), so there is no cross-thread counter traffic.
 
 ### 5.1.1 Loop-head handoff (AI23, ruled 2026-10-02)
 
-**The problem.** A once-called procedure whose loop is the whole workload never re-enters, so no entry-based trigger helps it. The 2026-09-07 answer was to treat a loop-owning procedure as hot at its first entry. When promotion became asynchronous on 2026-09-22 (D8.1.1 *v12*: the triggering call stays T0), that trigger kept compiling the definition but the activation that needed the code could no longer reach it. Measured 2026-10-02 on the v50 release binary: `mandelbrot2` and `matmul2` run at interpreter speed under AUTO, about 250× their JIT time, while the image for `main` is ready after 16 ms; publishing it at the trigger (`LAMBDA_SATELLITE_SYNC=1`) closes the gap.
+**The problem.** A once-called procedure whose loop is the whole workload never re-enters, so no entry-based trigger helps it. The 2026-09-07 answer was to treat a loop-owning procedure as hot at its first entry. When promotion became asynchronous on 2026-09-22 (D8.3.1 *v12*: the triggering call stays T0), that trigger kept compiling the definition but the activation that needed the code could no longer reach it. Measured 2026-10-02 on the v50 release binary: `mandelbrot2` and `matmul2` run at interpreter speed under AUTO, about 250× their JIT time, while the image for `main` is ready after 16 ms; publishing it at the trigger (`LAMBDA_SATELLITE_SYNC=1`) closes the gap.
 
 **Options considered.** (a) Make the loop-owner first-entry trigger wait for its image: no new transfer point, but it compiles every loop-owning definition whether or not the loop turns out hot. (b) Hand the running activation off at a loop head once its image is published. (c) Leave the gap and document `LAMBDA_EXEC_BACKEND=jit`. **The user ruled (b).**
 
@@ -239,7 +239,7 @@ Plan, phases and evidence: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl
 
 **As implemented (2026-10-02).** The loop entry is not a second entry into the definition's own lowering. That lowering proves facts that hold only on its own path into the loop (counter signs, an accumulator interval with no runtime guard), emits each loop in several copies, and requires every GC register to be defined on every entry path. Instead the continuation is synthesized as its own procedure: the body's statements from the loop onward, with the live-in locals as parameters. The parameters reuse the locals' binding entries, so the shared statements need no rewriting, and entering through the `_b` wrapper gives each live-in the admission an unknown caller's argument gets. Two consequences follow. A continuation parameter is treated as an owner that may be shared, so every store tests the container's shared bit, because a live-in container may be shared with other T0 bindings (S9.1.2); only a written declared parameter also takes the ordinary entry snapshot (revised 2026-10-03). And only a `while` that is a direct statement of a `pn` body is eligible, since only there is the rest of the activation a statement suffix; back-edges of its nested loops count toward it. The record and the defects the stress run found are in the implementation plan §12.2.
 
-**Function-local while suffixes (2026-11-02, D8.1.1v18, S12.1.2v3).**
+**Function-local while suffixes (2026-11-02, D8.3.2, S12.1.2v3).**
 The parent-fn extension also admits eligible direct `while` statements in `fn`
 bodies. A synthesized continuation retains the original callable colour and
 functional result collection. If normal completion needs values already
@@ -254,7 +254,7 @@ records the release comparisons and final runtime gates.
 
 **`for` statements (AI25, ruled 2026-10-12).** Rewriting benchmark `while` loops as `for i of a` exposed the cost of point 5: on the `auto` tier a long `for` in a definition entered fewer than `LAMBDA_FUNC_JIT_THRESHOLD` times stayed in T0 for its whole walk (one call over a 490k-character string: 98 ms as `for`, 58 ms as `while`, equal on the `jit` tier). **The user ruled the `for` statement in.** A plain `for` statement — one source, and no join, `group`, `order`, `limit` or `offset` — that is a direct statement of a `pn` body is numbered as a handoff loop. Its hidden state is exactly two values: the snapshot its walk iterates (S9.2.3: taken at loop entry, so later rebinding of the source does not reach the walk) and the next walk position. The continuation takes them as two trailing parameters after the live-ins, and its first statement is a copy of the `for` whose source is the snapshot parameter and which starts its counter at the position parameter (`AstForNode::resume_from`); the body and every other clause are shared, as for `while`. A `for` walk holds its own scratch slots, so the statement-boundary test applies to the scratch level at the statement's entry. A comprehension stream (`order`, `group`, `limit`, `offset`) or a join keeps state no position can describe, so those loops stay T0. Verified by `test/lambda/proc/for_loop_handoff.ls` under forced thresholds 2 and 5 (`LambdaTierParityTests.ForStatementLoopHandoffResumesWalk`).
 
-**Threshold evidence (2026-10-03).** The 10,000 default (D8.1.1v14) was re-checked on the post-Tune2 release. T0 is now 2–4× faster per iteration, and a continuation compiles in 1–4 ms. Those two changes roughly cancel, and the measured break-even of the §4.3 probes lies at 6,300–9,500 back-edges, just below the default. A sweep of the whole AUTO benchmark suite shows a flat optimum. *Lower* (2,500 or 5,000) is within ±1.3% on time but queues 21–39% more loop images, 42–51 of them never used. *Higher* is slower: 20,000 by about 1%, losing loops of 10,000–20,000 back-edges such as `navier_stokes` (+25%) and `matmul2` (+30%), though it leaves only 8 images unused. 50,000 is 6–8% slower, with 13–14 rows worse by over 10%. The sweep also exposed a rule gap rather than a tuning issue: a definition gets one loop image, bound to its first loop to reach the threshold. If that loop exits before the image arrives, a later, longer loop of the same definition stays in T0 (`larceny/array1`, 131 ms instead of 9.6 ms). Fixing it changes the once-per-definition rule and awaits a ruling. Data: implementation plan §12.6.
+**Threshold evidence (2026-10-03).** The 10,000 default (D8.3.2) was re-checked on the post-Tune2 release. T0 is now 2–4× faster per iteration, and a continuation compiles in 1–4 ms. Those two changes roughly cancel, and the measured break-even of the §4.3 probes lies at 6,300–9,500 back-edges, just below the default. A sweep of the whole AUTO benchmark suite shows a flat optimum. *Lower* (2,500 or 5,000) is within ±1.3% on time but queues 21–39% more loop images, 42–51 of them never used. *Higher* is slower: 20,000 by about 1%, losing loops of 10,000–20,000 back-edges such as `navier_stokes` (+25%) and `matmul2` (+30%), though it leaves only 8 images unused. 50,000 is 6–8% slower, with 13–14 rows worse by over 10%. The sweep also exposed a rule gap rather than a tuning issue: a definition gets one loop image, bound to its first loop to reach the threshold. If that loop exits before the image arrives, a later, longer loop of the same definition stays in T0 (`larceny/array1`, 131 ms instead of 9.6 ms). Fixing it changes the once-per-definition rule and awaits a ruling. Data: implementation plan §12.6.
 
 ### 5.2 The satellite module
 
@@ -273,7 +273,7 @@ The promotion unit is a **satellite MIR module**: one Lambda function + its `_b`
 
 The transient `MirTranspiler` session state (var scopes, loop stack, TCO context, …) is already save/restored around each `transpile_func_def`; a satellite session is that machinery pointed at one function. The tables freed at end-of-lowering today (`local_funcs`, `import_cache`, `callsite_info`, `global_vars`) are exactly the ones AI10 promotes to Script lifetime. `ast_index_destroy` moves from pre-handoff to Script teardown so ID-keyed side tables remain valid for late lowering (AIO4 tracks the memory cost).
 
-#### 5.2.1 Admission widening — D8.1.1v6 (2026-09-06, T21-3)
+#### 5.2.1 Admission widening — D8.3.3 (2026-09-06, T21-3)
 
 The v5 gate pinned every definition with a plain `any` parameter and every
 body containing a local `var` declaration or a rebinding assignment, on the
@@ -344,10 +344,10 @@ direct calls, extended to both tier edges:
   `pn bump(var n) { n = n + 1 }` on an int-lane local left `n` unchanged
   because the lane binding had no root slot to transport.
 
-Typed `var` parameters followed on 2026-09-07 (D8.1.1v8, below).
+Typed `var` parameters followed on 2026-09-07 (D8.3.3, below).
 Committed differential: `test/lambda/proc/interp_var_writeback.ls`.
 
-**D8.1.1v7 (2026-09-07) -- the residue after write-back.** Result37's part 2
+**D8.3.3 (2026-09-07) -- the residue after write-back.** Result37's part 2
 showed two pins left: (1) the once-called `main` whose loop is the whole
 workload (mandelbrot 100x, matmul 146x, navier_stokes 61x Node e2e) --
 `interp_promote_function` now promotes a procedure whose body owns a loop
@@ -367,7 +367,7 @@ cross-function call-site inference (diviter 20.7 s → 0.29 s, levenshtein,
 quicksort, richards) and is neutral elsewhere -- satellite call-site
 specialization is the design item that would retire it.
 
-**D8.1.1v8 (2026-09-07) -- typed `var` parameters.** The last scan pin on
+**D8.3.3 (2026-09-07) -- typed `var` parameters.** The last scan pin on
 the Result37 residue (navier_stokes: every kernel takes `var x: float[]`;
 nbody2: `advance(var bx: float[], ...)`; json2: `p_read(var p: Parser)`)
 was the typed `var` parameter, refused because the raw-lane ABI has no
@@ -397,7 +397,7 @@ so the adapter is all it needs:
   rebuilt the carrier is visible to the caller too. The raw entry is
   unchanged: it writes its typed `var` parameter in place, as on the eager
   direct edge.
-- *Pin (retired 2026-09-14, D8.1.1v10).* Until then the raw entry could not
+- *Pin (retired 2026-09-14, D8.3.3).* Until then the raw entry could not
   publish a rebind of a typed `var` parameter, so
   `interp_fn_rebinds_typed_var_param` kept such a body -- and every body
   calling it directly -- in T0. Every publishable `var` position now
@@ -410,9 +410,9 @@ Fixtures: `test/lambda/proc/interp_typed_var_param.ls` (in-place stores,
 records, nested and recursive `var` chains, aliasing inside the callee,
 three tiers byte-identical), `interp_typed_var_rebind.ls` and
 `cow_var_typed_rebind.ls` (rebinds of every scalar lane, string, record and
-their optional forms; three tiers byte-identical since D8.1.1v10).
+their optional forms; three tiers byte-identical since D8.3.3).
 
-**D8.1.1v9 (2026-09-07) -- the satellite cluster.** With every scan pin
+**D8.3.3 (2026-09-07) -- the satellite cluster.** With every scan pin
 gone, the remaining auto residue was the satellite's own shape: one
 definition per image. richards/deltablue (1.2-1.4x) paid for it in boxed
 dynamic dispatch through every callee's `_b` wrapper (40 / 111
@@ -469,7 +469,7 @@ v1 compiles synchronously at the triggering call — bounded by single-function 
 
 ### 5.5 What T1 keeps
 
-Everything. Satellite-compiled functions are ordinary MIR Direct output: dual-entry planning where the persisted analysis allows (D8.3.1), unboxed params for closed caller sets, the RV12 return lanes, the JIT root-frame prologue — unchanged. The only lowering deltas are the call-site policy (dynamic across satellites) and module-var slab access. In `--jit-all` mode the pipeline is byte-for-byte today's, keeping the MT7 emission ratchet meaningful (AIO2 covers whether satellites get their own budget fixtures).
+Everything. Satellite-compiled functions are ordinary MIR Direct output: dual-entry planning where the persisted analysis allows (D7.3.1), unboxed params for closed caller sets, the RV12 return lanes, the JIT root-frame prologue — unchanged. The only lowering deltas are the call-site policy (dynamic across satellites) and module-var slab access. In `--jit-all` mode the pipeline is byte-for-byte today's, keeping the MT7 emission ratchet meaningful (AIO2 covers whether satellites get their own budget fixtures).
 
 ### 5.6 Policy knobs
 
@@ -477,7 +477,7 @@ Everything. Satellite-compiled functions are ordinary MIR Direct output: dual-en
 
 ### 5.7 Whole-script AUTO POC — [measured 2026-08-24]
 
-An opt-in POC tests the alternative promotion policy requested for D8.1.1v4:
+An opt-in POC tests the alternative promotion policy requested for D8.3.1:
 
 ```text
 LAMBDA_EXEC_BACKEND=auto LAMBDA_FUNC_JIT_THRESHOLD=10 LAMBDA_AUTO_WHOLE_SCRIPT=1
@@ -488,7 +488,7 @@ module once, then publishes the generated `_b` entries for every definition
 that passes the existing satellite admission gate. The active T0 frame is not
 OSR'd: that trigger call finishes in T0 and later calls use the published
 entries. The MIR image is lowered against the already-rooted T0 module slab
-(D7.2.1), and the AST index is retained while T0 remains live. This avoids
+(D9.3.1), and the AST index is retained while T0 remains live. This avoids
 replacing the live slab with an eager BSS layout. Importing modules remain on
 the normal satellite path until dependency images can be promoted atomically;
 closures, aggregate/mutable parameters, async/task definitions, and other
@@ -549,7 +549,7 @@ enum class EvalMode : uint8_t {
 
 A `that` predicate has no mode of its own (AI17v3, §6.2): it runs under `RUNTIME`.
 
-`EvalMode::CONST` **is** the const-folder D8.1.1 sanctioned: same walker, restricted to the pure core subset with the `fn`/`pn` purity bit as the soundness gate — D6.1.2 names that bit *"the const-folder's soundness gate"* verbatim, and U26 §12.3's estimate (*"~95% of argument 4 at ~5% of an interpreter's cost"*) inverts once the interpreter exists anyway: the folder becomes a mode flag, not a second engine. Folding runs in the pass manager over literal-typed subtrees, with a fuel budget and a strict no-effect, no-fault discipline (a folding attempt that raises or exhausts fuel simply doesn't fold). The MIR-cache folding hazard (`Lambda_Design_MIR_Cache_L3.md` — folded data-item REFs kill value-based patching) is a constraint on what folded *pointers* may flow into lowering, inherited as-is.
+`EvalMode::CONST` **is** the const-folder D8.3.1 sanctioned: same walker, restricted to the pure core subset with the `fn`/`pn` purity bit as the soundness gate — D7.1.2 names that bit *"the const-folder's soundness gate"* verbatim, and U26 §12.3's estimate (*"~95% of argument 4 at ~5% of an interpreter's cost"*) inverts once the interpreter exists anyway: the folder becomes a mode flag, not a second engine. Folding runs in the pass manager over literal-typed subtrees, with a fuel budget and a strict no-effect, no-fault discipline (a folding attempt that raises or exhausts fuel simply doesn't fold). The MIR-cache folding hazard (`Lambda_Design_MIR_Cache_L3.md` — folded data-item REFs kill value-based patching) is a constraint on what folded *pointers* may flow into lowering, inherited as-is.
 
 ### 6.2 `that` predicates without the JIT (AI17v3, revised 2026-09-26)
 
@@ -578,15 +578,15 @@ U26 §12.3 KIV'd *"a deliberately slow, obviously-correct reference interpreter 
 
 T0 removes the per-line **compile** share (today: full re-lower + re-link + re-codegen of the entire history per line). The **re-execution** share remains until incremental top-level state lands, which is `vibe/Lambda_Repl.md`'s territory and composes cleanly: with T0, "incremental compilation" (parse-tree caches, function-hash caches, snapshots) stops being the needed mechanism — a persistent interpreter environment (Script kept alive across lines, statements appended, module slab persistent, def-site counters surviving the session so REPL-defined hot functions stay promoted) is both simpler and strictly more useful. That end state is P4 (§11); v1 REPL simply routes the existing whole-history model through T0 and is already strictly faster per line. The shell (`vibe/Lambda_IO_Shell.md`) is the same workload — line-at-a-time, run-once — and inherits the same path.
 
-## 9. Stage 2: LambdaJS (historical design, landed status in D8.1.3v10)
+## 9. Stage 2: LambdaJS (historical design, landed status in D8.4.1)
 
-*This section retains the rationale that preceded the LambdaJS walker. Current status is **D8.1.3v10** and `vibe/Lambda_Design_JS_Interpreter.md`: Lambda and JavaScript share the runtime substrate but retain separate semantic walkers, activation records, and completion kinds. On disagreement, those current authorities win.*
+*This section retains the rationale that preceded the LambdaJS walker. Current status is **D8.4.1** and `vibe/Lambda_Design_JS_Interpreter.md`: Lambda and JavaScript share the runtime substrate but retain separate semantic walkers, activation records, and completion kinds. On disagreement, those current authorities win.*
 
 **The AST is already shared.** There is no separate JS tree: `JsAstNodeType` is a typedef of `AstNodeType` and `JsAstNode` of `AstNode` (`js_ast.hpp:70–223`) — JS builds the JS-shaped kinds of the unified AST plus ~10 JS-only kinds in the 1000-band (template literals, labeled statements, regex, `with`, tagged templates). Stage 2 is a second walker over the *same* node representation, `NameEntry` symbol table, `Type*` graph, and `AstIndex` — not a new tree. The per-language execution split lives where the lowering split already lives; the dormant `LangProfile` hook table (`ast-core.hpp:884`) is the designated seam if the walkers later want a shared driver.
 
 **Why JS is where the model pays most — measured.** The size policy at the single decision point `js_mir_entrypoints_require.cpp:1043` (plus `g_js_force_document_interp`, which already routes *all* Radiant page JS to MIR-interp, cutting JS compile work ~2–2.6×) is "interpret the cold stuff" in embryo, adopted because `MIR_link` is 50–82% of compile on vendor libraries and the interpreter beat the JIT by ≈17% summed over the full Test262 corpus (JS_15). Radiant additionally *skips oversized scripts outright* under byte budgets and recompiles identical vendor files every page load (`JsMirCache` caches only the preamble). Stage 2 replaces the one-shot static decision with stage 1's promotion cells: the decision point exists; the counters and the interp→satellite promotion path are the genuinely new parts.
 
-**What transfers structurally from stage 1:** precise side-stack/root-frame discipline, the shared runtime and module substrate, debug/profiling hooks, and helper reuse. **D8.1.3v10** does not transfer Lambda's `EvalSignal`, `InterpFrame`, or semantic walker into JavaScript: JS retains `JsInterpFrame`, lexical environments/references, and its own completion kinds. JavaScript throws still use explicit returned completion under **D1.4v3**/**D8.4.3v2**, never C++ exceptions or `longjmp` for ordinary language failure.
+**What transfers structurally from stage 1:** precise side-stack/root-frame discipline, the shared runtime and module substrate, debug/profiling hooks, and helper reuse. **D8.4.1** does not transfer Lambda's `EvalSignal`, `InterpFrame`, or semantic walker into JavaScript: JS retains `JsInterpFrame`, lexical environments/references, and its own completion kinds. JavaScript throws still use explicit returned completion under **D1.4**/**D7.4.3**, never C++ exceptions or `longjmp` for ordinary language failure.
 
 **JS-specific work stage 2 must own** (deltas Lambda stage 1 does not have):
 
@@ -594,7 +594,7 @@ T0 removes the per-line **compile** share (today: full re-lower + re-link + re-c
 2. **Completion semantics.** Labeled break/continue must run IteratorClose for every for-of crossed, `finally` re-raises a saved in-flight error unless its own throw wins, and `with` pushes dynamic scope objects. The walker carries these as JavaScript completion records; the MIR lane uses a dynamic `try_ctx_stack` plus explicit returned error routing.
 3. **Suspension.** Generators/async are a compile-time two-function state-machine transform (locals hoisted to env slots, `switch(state)` dispatch, 63-state cap) that does not transfer to a walker. v1 mirrors AI11 — suspension-capable functions promote at first call — with interpreter-native suspension (heapified frames, `LambdaAsyncFrame` precedent) as the eventual replacement, which also lifts the 63-state cap and must interoperate with the existing `js_generator_next`/`js_async_drive`/`js_promise_then` drivers.
 4. **`this` / `new.target` / `arguments`.** Today dynamic GC-rooted globals plus synthetic captures for arrows; a walker with real frames should own them per-frame, which needs frame-aware variants of the `js_get_this`-family helpers.
-5. **Per-AST-node inline caches are forbidden.** **D8.4.1v2** supersedes the earlier JS-IC direction: the walker calls ordinary JavaScript reference/property kernels, and `AstIndex` side tables hold immutable analysis facts rather than mutable cache cells.
+5. **Per-AST-node inline caches are forbidden.** **D7.4.1** supersedes the earlier JS-IC direction: the walker calls ordinary JavaScript reference/property kernels, and `AstIndex` side tables hold immutable analysis facts rather than mutable cache cells.
 6. **Compile-time facts as a shared pre-pass.** TDZ ranges, Annex-B hoisting, strict-mode resolution, `module_consts` indices are computed inside MIR phases 1.0–1.7c today; stage 2 moves them into shared analysis passes — the same motion AI10 makes for Lambda's call-site/param analyses.
 7. **Mixed-tier `eval` and scope visibility.** Direct eval must resolve against interpreter environment records *and* compiled module-var indices when the caller is JIT'd — U26's materialization concern, real for JS and scoped here.
 8. **Helper seams that bake compiled artifacts.** `js_new_closure_mir(void* func_ptr, …)` and `js_generator_create(func_ptr, …)` take compiled code pointers; they need interpreter-target variants, and `JsFunction` (like Lambda's `Function`, AI7) gains a `def` AST pointer beside `func_ptr`.
@@ -607,7 +607,7 @@ T0 removes the per-line **compile** share (today: full re-lower + re-link + re-c
 
 **Validation gates (D1.10: every invariant names its gate).**
 
-1. **Differential identity:** `make test-lambda-baseline` passes 100% under `LAMBDA_EXEC_BACKEND=interp` and `LAMBDA_EXEC_BACKEND=jit`, with identical outputs — the SI3/D3.3.1 harness grown a third leg. Divergence in anything but fault timing (S7.11.4) is a release blocker.
+1. **Differential identity:** `make test-lambda-baseline` passes 100% under `LAMBDA_EXEC_BACKEND=interp` and `LAMBDA_EXEC_BACKEND=jit`, with identical outputs — the SI3/D4.3.1 harness grown a third leg. Divergence in anything but fault timing (S7.11.4) is a release blocker.
 2. **GC soundness:** baseline + stress under forced-GC modes (`force_collect_interval`, ASan) with the interpreter driving — every helper call is a potential safepoint (object-zone allocation collects under stress).
 3. **Emission ratchet:** `--jit-all` output byte-identical to pre-change (MT7 untouched in v1); satellite budgets decided in AIO2.
 4. **Turnaround:** measured corpus — `test/lambda` suite wall-clock, REPL per-line latency at history sizes {10, 100, 1000}, a Radiant page with N scripts, `validate` on a constrained schema — each with before/after and a stated target in the P0 report, not in this doc.
@@ -621,7 +621,7 @@ mode. Each run used `./test/test_lambda_gtest.exe --gtest_brief=1`; the
 external `/usr/bin/time -p` `real` field is the process wall time. Every sample
 passed all **758/758** tests.
 The unset environment was the then-shipped AUTO policy specified by
-**D8.1.1v4**.
+**D8.3.1**.
 
 | Mode | Selector | Wall samples | Median |
 |---|---|---:|---:|
@@ -633,7 +633,7 @@ On this corpus, full T0 interpretation is about **11.4% faster** than AUTO
 by median wall time. AUTO and eager JIT are effectively tied (0.11s median
 difference); the wider sample ranges reflect ordinary host-load variance.
 This is a corpus measurement, not a general claim that AUTO dominates either
-fixed tier. The correctness result is the release gate for **D8.1.1v4/P5**;
+fixed tier. The correctness result is the release gate for **D8.3.1/P5**;
 the remaining P2 work is promotion breadth and performance tuning.
 
 ### Post-fix AUTO remeasurement — [measured 2026-08-25]
@@ -651,7 +651,7 @@ date.
 
 With the shipped threshold raised to **5** and the fifth direct self-tail edge
 able to enter an eligible satellite during its first activation
-(**D8.1.1v5**), a freshly rebuilt release `lambda.exe` and release
+(**D8.3.2**), a freshly rebuilt release `lambda.exe` and release
 `test_lambda_gtest.exe` again passed **758/758** on every AUTO sample:
 **61.26s, 52.41s, 47.96s real** (median **52.41s**). A direct release probe
 of `loop(20, 0)` logged `satellite compiled function='loop'` during that one
@@ -675,7 +675,7 @@ All threshold/backedge and whole-script-POC overrides were unset.
 
 | Mode | Wall samples | Median | Relative to full interpreter |
 |---|---:|---:|---:|
-| AUTO (**D8.1.1v5**) | 32.55s, 32.41s, 32.39s | **32.41s** | **2.1% faster** |
+| AUTO (**D8.3.2**) | 32.55s, 32.41s, 32.39s | **32.41s** | **2.1% faster** |
 | Full interpreter | 33.06s, 33.10s, 33.38s | **33.10s** | baseline |
 
 The within-mode spreads are narrow (0.16s AUTO; 0.32s interpreter), making
@@ -718,7 +718,7 @@ overrides, passed **759/759** each:
 This confirms the source-level S8.1.3 paired-`at` fix is present in the
 release artifact; the remaining spread is host-load variance, not a fixture
 mismatch. The timing is the current passing full-JIT record for the 741-script
-/ 759-test tree (**D8.1.1v5**).
+/ 759-test tree (**D8.3.2**).
 
 ### AUTO promotion-threshold sweep — [measured 2026-08-24]
 
@@ -746,7 +746,7 @@ aggressive for cold/short functions: raising it to 5 removes 34% of the
 then-default promoting scripts and 26% of promotion events. Raising it again
 to 10 only removes a further 18% of threshold-5 promoting scripts, while
 retaining the high-fanout graph/PDF cases. Threshold 5 is now the shipped
-default (D8.1.1v5), but a work-based profitability gate (estimated body cost
+default (D8.3.2), but a work-based profitability gate (estimated body cost
 and backedge work, plus a per-script satellite/MIR budget) is preferable to a
 single global threshold. The existing fail-closed satellite eligibility
 policy remains unchanged; once-called hot loops need a separate `main`/OSR
@@ -761,7 +761,7 @@ policy because backedge promotion is deferred until the next entry.
 - **P2 — tiering.** Promotion cells, `LAMBDA_INTERPRETED` entry ABI, satellite lowering contract (§5.2), Script-scoped analysis persistence, entry swap. *Gate: promoted-function outputs identical to interp; perf floor gate 5.*
 - **P3 — one-engine unification.** `EvalMode::CONST` folder in the pass manager; `EvalMode::PREDICATE` for `that` (retired by AI17v2: predicates now run under `RUNTIME`); validator de-JIT. *Gate: fold-on/fold-off differential; `validate` runs with JIT never initialized.*
 - **P4 — REPL/shell persistent environment.** Script-alive-across-lines, appended statements, persistent slab + counters. *Gate: REPL latency flat in history length.*
-- **P5 — default flip + spec. ✅ LANDED 2026-08-24.** `auto` is the unset default; MIR-interp remains diagnostic and `jit` remains the explicit eager path. The release `test_lambda_gtest` corpus is green under the default AUTO policy (**758/758**), including the P2 scalar-module, dynamic-argument, object/procedure, and var-call regressions. **D8.1.1v5 + the implementation-doc status update record the current selector, threshold, tail-handoff rule, and gate** (§15, per CLAUDE rule 17). Stage 2 (JS) design revision opens after this gate.
+- **P5 — default flip + spec. ✅ LANDED 2026-08-24.** `auto` is the unset default; MIR-interp remains diagnostic and `jit` remains the explicit eager path. The release `test_lambda_gtest` corpus is green under the default AUTO policy (**758/758**), including the P2 scalar-module, dynamic-argument, object/procedure, and var-call regressions. **D8.3.2 + the implementation-doc status update record the current selector, threshold, tail-handoff rule, and gate** (§15, per CLAUDE rule 17). Stage 2 (JS) design revision opens after this gate.
 
 Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes AUTO the shipped default while preserving explicit `interp` and `jit` controls.
 
@@ -770,10 +770,10 @@ Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes
 - **Bytecode VM.** A third executable form (AST → bytecode → MIR) re-introduces a compile step and a resident IR on the cold path — the two costs this design removes — and contradicts the *no shared bytecode* stance (Features J2). Tree-walking over a typed, banded, already-resident AST is the minimal mechanism; revisit only with T0 profiles in hand (AI22).
 - **`LAMBDA_LAZY_MIR` as the answer.** Lazy *codegen* still constructs and links the full MIR module eagerly — it defers only native generation, addresses neither turnaround for build+lower nor MIR-IR memory, and serves none of the tooling/comptime/REPL motivations. It was also measured and rejected on the JS side: `MIR_set_lazy_gen_interface` collapses link but makes on-demand generation ≈80× costlier per function, scaling ≈O(n²) at opt≥2 (JS_15), on top of the documented thunk-lifetime hazard. Satellites bound generation scope structurally instead (§5.2).
 - **MIR-interp as the default tier.** Same analysis: full lowering cost, no per-node hooks, no comptime reuse, and no TCO (a known deliberate divergence, JO10). It stays as a codegen diagnostic.
-- **Unboxed/specialized interpreter.** Re-implements the representation lane outside `MirEmitter` — precisely the duplication trap U26 warned about, and a violation of the D5.3.4 boundary (*"rooting policy and final store insertion live only in MirEmitter"* for generated code; the interpreter stays on the native-helper side of that line, D5.3.3). Boxed-only, forever (AI3).
+- **Unboxed/specialized interpreter.** Re-implements the representation lane outside `MirEmitter` — precisely the duplication trap U26 warned about, and a violation of the D6.3.4 boundary (*"rooting policy and final store insertion live only in MirEmitter"* for generated code; the interpreter stays on the native-helper side of that line, D6.3.3). Boxed-only, forever (AI3).
 - **Deoptimization (compiled code back into the interpreter).** Frame materialization out of natively-typed registers is the exact problem U26 flagged. Handoff is one-way (§5.1.1): a guard miss is detected in the loop entry's prologue, before any effect, and the activation simply stays in T0.
-- **Patching call sites / entry thunks on promotion.** Violates D8.4.1/DI14 (immutable generated code) and buys little over data-cell dispatch through `lambda_dynamic_call`.
-- **Conservative stack scanning for interpreter temporaries.** Retired and forbidden (CLAUDE rule 15; D5.3.3's precise-rooting contract). The frame-window design (§4.2) exists so this is never needed.
+- **Patching call sites / entry thunks on promotion.** Violates D7.4.1/DI14 (immutable generated code) and buys little over data-cell dispatch through `lambda_dynamic_call`.
+- **Conservative stack scanning for interpreter temporaries.** Retired and forbidden (CLAUDE rule 15; D6.3.3's precise-rooting contract). The frame-window design (§4.2) exists so this is never needed.
 
 ## 13. Open issues
 
@@ -782,10 +782,10 @@ Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes
 - **AIO3 — Counter placement for closure-heavy code.** Definition-site counters undercount per-instance hotness for factory-produced closures; assess whether value-level escalation is ever needed.
 - **AIO4 — `ast_index` retention.** Moving `ast_index_destroy` to Script teardown keeps dense IDs/parents for side tables; measure the memory and decide per-module opt-out.
 - **AIO5 — CST retention vs materialized spans.** End positions and re-discrimination reads need the live `TSTree`; decide when/whether to materialize `{start,end}` and drop the tree.
-- **AIO6 — Background compilation.** Move promotion compiles off the hot call path onto the scheduler; interacts with D5.4.1 (one context identity) — satellites compile against Script-scoped state, so this looks feasible but is unproven.
+- **AIO6 — Background compilation.** Move promotion compiles off the hot call path onto the scheduler; interacts with D6.4.1 (one context identity) — satellites compile against Script-scoped state, so this looks feasible but is unproven.
 - **AIO7 — Hot-reload generations.** Old-generation Scripts pinned by live closures (`Function::def`); module-state identity across reloads; interaction with L1 cache invalidation.
-- **AIO8 — Cross-context visibility.** Promotion cells are per-definition (Script-scoped) but consulted per-context; define the story for multiple eval contexts sharing a Script (today: one canonical context per isolate, D5.4.1 — keep it that simple if possible).
-- **AIO9 — Satellite→satellite fast calls.** Resolved-address imports when the callee compiled first; multi-version guard chains later (D8.4.1's sanctioned shape). v1 pays the dynamic-call cost across satellites.
+- **AIO8 — Cross-context visibility.** Promotion cells are per-definition (Script-scoped) but consulted per-context; define the story for multiple eval contexts sharing a Script (today: one canonical context per isolate, D6.4.1 — keep it that simple if possible).
+- **AIO9 — Satellite→satellite fast calls.** Resolved-address imports when the callee compiled first; multi-version guard chains later (D7.4.1's sanctioned shape). v1 pays the dynamic-call cost across satellites.
 - **AIO10 — Dispatch optimization budget.** Threaded dispatch / per-node fn pointers / type-keyed helper preselection — only with profiles, only if T0 time matters after promotion does its job.
 - **AIO11 — closed 2026-10-02 by AI23** (loop-head handoff, §5.1.1); the original question is in Appendix S.
 - **AIO12 — Satellite module-var/pattern lowering.** The slab-access lowering for module vars in satellites, pattern/property constants as Script-scoped artifacts, and the transition story while `--jit-all` keeps BSS layout (AI6).
@@ -795,57 +795,226 @@ Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes
 
 | # | Decision | Status |
 |---|---|---|
-| **AI1** | An AST-walking interpreter (T0) is the default execution mode; MIR Direct native (T1) is selective, per-function, demand-triggered. Reverses U26/D8.1.1 (→ D8.1.1v2, §15) | **confirmed** |
+| **AI1** | An AST-walking interpreter (T0) is the default execution mode; MIR Direct native (T1) is selective, per-function, demand-triggered. Reverses U26/D8.3.1 (→ D8.3.1, §15) | **confirmed** |
 | **AI2** | The AST (+ scopes, const_list, type_list) is the single runtime source of truth; all compiled artifacts are derived caches (D1.7 alignment) | **confirmed** |
-| **AI3** | T0 is boxed-only, forever; it calls the same runtime helper library as generated code; no unboxed interpreter lane will ever exist (SI3/D3.3.1 as correctness contract) | **confirmed** |
-| **AI4** | Interpreter frames are windows on the existing side stacks (root window + number watermark per frame); no fourth stack mechanism (D5.1.1 upheld) | **confirmed** |
+| **AI3** | T0 is boxed-only, forever; it calls the same runtime helper library as generated code; no unboxed interpreter lane will ever exist (SI3/D4.3.1 as correctness contract) | **confirmed** |
+| **AI4** | Interpreter frames are windows on the existing side stacks (root window + number watermark per frame); no fourth stack mechanism (D6.1.1 upheld) | **confirmed** |
 | **AI5** | A build-time frame-plan pass assigns `NameEntry` slots/storage classes and static scratch depth onto `FnAnalysis`; joins the D8.2.5 pass manager | **confirmed** |
-| **AI6** | Module-level bindings live in per-context module slabs for T0 and satellites (D7.2.1); `_gvar_*` BSS remains only in whole-module `--jit-all` mode during transition | **confirmed** |
-| **AI7** | `Function` gains `def` (AST definition site — also discharging D6.2.1/S5.5.1 identity) and entry ABI `LAMBDA_INTERPRETED`; `lambda_dynamic_call` is the single tier-dispatch point; `ptr` NULL until promotion | **confirmed** |
+| **AI6** | Module-level bindings live in per-context module slabs for T0 and satellites (D9.3.1); `_gvar_*` BSS remains only in whole-module `--jit-all` mode during transition | **confirmed** |
+| **AI7** | `Function` gains `def` (AST definition site — also discharging D7.2.1/S5.5.1 identity) and entry ABI `LAMBDA_INTERPRETED`; `lambda_dynamic_call` is the single tier-dispatch point; `ptr` NULL until promotion | **confirmed** |
 | **AI8v2** | Promotion trigger: per-definition-site ordinary-call and direct-self-tail-edge counters, threshold 5 (`LAMBDA_FUNC_JIT_THRESHOLD`); the fifth direct tail edge hands off at an entry-equivalent boundary; loop back-edges are counted per loop site against `LAMBDA_LOOP_JIT_THRESHOLD` (10000) and trigger AI23. Revised 2026-10-02; v1 in Appendix S | **confirmed** |
 | **AI9** | Promotion unit: satellite MIR module (function + `_b` wrapper) in the Script's `jit_context`, linked on demand via the existing import resolver, BSS pointers written post-link | **confirmed** |
 | **AI10** | Whole-module AST analyses (call sites, param narrowing, `FnVariantAnalysis`) run once per Script at first promotion and persist Script-scoped; lowering-session tables promoted to Script lifetime | **confirmed** |
 | **AI11** | Suspension-capable definitions (`may_await`/`is_generator`/`needs_task_context`/`START`) bypass T0 — compiled at first call; interpreter continuations are future work | **retired 2026-10-05 by AI11v2** |
-| **AI11v2** | T0 executes suspension-capable definitions: each task body runs on its own activation and parks in place, so there is no interpreter continuation to build (`vibe/Lambda_Design_Runtime_Async.md` RA1, RA12; D8.1.1v16) | **ratified (user, 2026-10-05); implemented** |
+| **AI11v2** | T0 executes suspension-capable definitions: each task body runs on its own activation and parks in place, so there is no interpreter continuation to build (`vibe/Lambda_Design_Runtime_Async.md` RA1, RA12; D8.3.2) | **ratified (user, 2026-10-05); implemented** |
 | **AI12** | View/template-containing modules keep whole-module eager compilation in v1 | **confirmed** |
 | **AI13** | T0 error handling: error-as-value checks at lowering's check points; declaration-boundary skip per S7.7.1/S7.7.2; faults on recovery frames; only fault timing may differ across tiers (S7.11.4) | **confirmed** |
 | **AI14** | `return`/`break`/`continue` travel as `EvalSignal` through the walker; `longjmp` is fault-only | **confirmed** |
 | **AI15** | Implicit contexts (`~`, `~#`, `last`, `^`, pipe injection, handlers) are explicit slot-backed stacks in `InterpState` | **confirmed** |
-| **AI16** | The sanctioned const-folder is this engine under `EvalMode::CONST`, purity-gated (D6.1.2), fuel-budgeted — one engine, two modes | **confirmed** |
+| **AI16** | The sanctioned const-folder is this engine under `EvalMode::CONST`, purity-gated (D7.1.2), fuel-budgeted — one engine, two modes | **confirmed** |
 | **AI17v3** | `that` predicates evaluate in T0 as calls of their own `fn`, in full and in their declaring scope (declaring module, captures read where the type is named, the names they bind as that function's locals); purity is the static `fn`/`pn` check, not an evaluator mode (S11.4.11, TE-20). Revised 2026-09-26 (twice); v1 and v2 in Appendix S | **confirmed** |
 | **AI18** | The U26-KIV reference interpreter is subsumed: T0 is the executable-spec oracle, differentially gated on every baseline run | **confirmed** |
 | **AI19** | MIR-interp demotes to codegen diagnostic at P5; `mir_policy.hpp` size thresholds retire | **confirmed** |
 | **AI20** | REPL/shell route through T0 now; persistent top-level environment (P4) supersedes incremental-compilation caching as the REPL end state | **confirmed** |
 | **AI21** | Stage 2 extends the tier model to LambdaJS over `JsAstNode`, sharing frames/tiering/hooks; JS semantics stay in the JS helper layer; the size-based interp policy is replaced | **confirmed** |
 | **AI22** | No bytecode IR; tree-walk over the typed AST is the only sub-MIR executable form; revisit only with T0 profiles | **confirmed** |
-| **AI23** | Loop-head handoff: a running T0 activation may enter its published image at a head test of the loop that triggered it, as a one-way whole-function continuation; eligibility is limited to loops whose live state is entirely named frame slots; the loop-owner first-entry trigger is retired (§5.1.1; D8.1.1v14) | **confirmed (user, 2026-10-02); partially implemented 2026-10-02** |
-| **AI24** | Explicit `interp` executes only T0. Unsupported modules/imports and task-backed bodies fail before execution; whole-module fallback and MIR satellites are AUTO-only (D8.1.1v15). | **confirmed (user, 2026-10-03); revised by AI24v2** |
-| **AI24v2** | As AI24, minus the task-backed rejection: T0 runs task-backed bodies (D8.1.1v16) | **ratified (user, 2026-10-05); implemented** |
-| **AI25** | Loop-head handoff extends to a plain `for` statement of a `pn` body; the continuation resumes the walk from its snapshot and next position, passed as two trailing parameters (§5.1.1; D8.1.1v18) | **ruled (user, 2026-10-12); implemented** |
+| **AI23** | Loop-head handoff: a running T0 activation may enter its published image at a head test of the loop that triggered it, as a one-way whole-function continuation; eligibility is limited to loops whose live state is entirely named frame slots; the loop-owner first-entry trigger is retired (§5.1.1; D8.3.2) | **confirmed (user, 2026-10-02); partially implemented 2026-10-02** |
+| **AI24** | Explicit `interp` executes only T0. Unsupported modules/imports and task-backed bodies fail before execution; whole-module fallback and MIR satellites are AUTO-only (D8.3.1). | **confirmed (user, 2026-10-03); revised by AI24v2** |
+| **AI24v2** | As AI24, minus the task-backed rejection: T0 runs task-backed bodies (D8.3.2) | **ratified (user, 2026-10-05); implemented** |
+| **AI25** | Loop-head handoff extends to a plain `for` statement of a `pn` body; the continuation resumes the walk from its snapshot and next position, passed as two trailing parameters (§5.1.1; D8.3.2) | **ruled (user, 2026-10-12); implemented** |
 
 ## 15. Spec impact
 
 **Landed 2026-08-15 with the ruling (this rev):**
 
-- **`doc/Lambda_Formal_Design.md` v1.23.0** — **D8.1.1v2*** revised in place: tiered execution, T0 default, per-definition promotion (default 3rd call), const-folder = CONST mode, MIR-interp demoted to codegen diagnostic, no-patching restated (D8.4.1/DI14), the D5.1.2 "no hotness detection" scope clarification folded into the ruling text, and a brief historical footnote on the v1 rejection (per user instruction). Appendix A carries the implementation footnote (shipped pipeline unchanged until P0–P5); Appendix B adopts the interpreter opens as **DO25** (AIO1/AIO2/AIO8/AIO11 named; AIO1–AIO12 referenced); Appendix C indexes this doc under D8.1–D8.2.
+- **`doc/Lambda_Formal_Design.md` v1.23.0** — **D8.3.1*** revised in place: tiered execution, T0 default, per-definition promotion (default 3rd call), const-folder = CONST mode, MIR-interp demoted to codegen diagnostic, no-patching restated (D7.4.1/DI14), the D6.1.2 "no hotness detection" scope clarification folded into the ruling text, and a brief historical footnote on the v1 rejection (per user instruction). Appendix A carries the implementation footnote (shipped pipeline unchanged until P0–P5); Appendix B adopts the interpreter opens as **DO25** (AIO1/AIO2/AIO8/AIO11 named; AIO1–AIO12 referenced); Appendix C indexes this doc under D8.3–D8.2.
 - **`vibe/Lambda_Design_Unified_AST.md` rev 10** — **U26 struck and superseded** in the §9 ledger and banner-noted in §12; the historical analysis retained unchanged in place (retired IDs never reused); §12.3's const-folder and KIV oracle recorded as absorbed (AI16, AI18).
-- **`vibe/impl/Lambda_Impl_Tune_Ast (retired).md`** — the "do not implement a new AST interpreter" restriction struck (lifted by D8.1.1v2/AI1); interpreter work proceeds under this doc's phases, not that retired plan's contingencies.
+- **`vibe/impl/Lambda_Impl_Tune_Ast (retired).md`** — the "do not implement a new AST interpreter" restriction struck (lifted by D8.3.1/AI1); interpreter work proceeds under this doc's phases, not that retired plan's contingencies.
 
-**Landed 2026-10-02 with the AI23 ruling:** `doc/Lambda_Formal_Design.md` 16.0.0 — **D8.1.1v14*** (loop-head handoff, per-loop-site trigger at 10000, first-entry trigger retired), Appendix A row "not implemented", **DO25** now names AIO13 in place of AIO11.
+**Landed 2026-10-02 with the AI23 ruling:** `doc/Lambda_Formal_Design.md` 16.0.0 — **D8.3.2*** (loop-head handoff, per-loop-site trigger at 10000, first-entry trigger retired), Appendix A row "not implemented", **DO25** now names AIO13 in place of AIO11.
 
 **Lands with implementation (per phase / P5):**
 
 - **`doc/dev/lambda/`** — LR_00 §goals ("JIT-only execution, no interpreter" → tiered model), LR_01 (REPL flow, Known Issue #8 resolution path), LR_07 (interp-selection §, satellite lowering), LR_08 (interpreter frames as a side-stack client), and a new LR doc for the interpreter itself. The LR set describes the implemented system and updates as phases land.
 - **`doc/dev/js/`** — JS_00 §3 + JS_01 §6 when stage 2 lands.
-- **`doc/Lambda_Formal_Design.md`** — D6.2.1 implementation footnote when `Function::def` materializes definition-site identity (AI7); the Appendix A D8.1.1v2 row updates per phase.
+- **`doc/Lambda_Formal_Design.md`** — D7.2.1 implementation footnote when `Function::def` materializes definition-site identity (AI7); the Appendix A D8.3.1 row updates per phase.
 - **`doc/Lambda_Formal_Semantics.md`** — no ruling changes required: S1.6/SI3 already state tier invisibility, S7.11.4 already carves out fault timing. (This is the design's quiet strength: the semantics spec never assumed a compiler.)
 
 ## Appendix S — Superseded rulings
 
-- ~~**n2** — (n2) No general OSR in v1 — arbitrary interpreter program counters and locals never materialize into MIR frames. A direct validated self-tail call is the narrow exception: it is already a function-entry boundary, so AUTO may hand it to the compiled boxed entry (§5.1; D8.1.1v5). AIO11 still tracks hot inline loops in a once-called `main`.~~ Superseded 2026-10-02 by **AI23** (§5.1.1): loop-head handoff is a second sanctioned boundary. What remains a non-goal is deoptimization.
+- ~~**n2** — (n2) No general OSR in v1 — arbitrary interpreter program counters and locals never materialize into MIR frames. A direct validated self-tail call is the narrow exception: it is already a function-entry boundary, so AUTO may hand it to the compiled boxed entry (§5.1; D8.3.2). AIO11 still tracks hot inline loops in a once-called `main`.~~ Superseded 2026-10-02 by **AI23** (§5.1.1): loop-head handoff is a second sanctioned boundary. What remains a non-goal is deoptimization.
 - ~~**AI8** — Promotion trigger: per-definition-site ordinary-call and direct-self-tail-edge counters, threshold 5 (`LAMBDA_FUNC_JIT_THRESHOLD`); the fifth direct tail edge hands off at an entry-equivalent boundary, while general loop backedges still mark for next-call promotion.~~ Superseded 2026-10-02 by **AI8v2**. The per-definition back-edge count (default 1024) only marked a definition for a later entry, which a once-called loop owner never has.
-- ~~**Loop-owner first-entry trigger (D8.1.1 *v7*, 2026-09-07)** — a procedure whose body owns a loop statement promotes at its first entry, as hot by construction.~~ Retired 2026-10-02 by **AI23**. It compiled synchronously when introduced; after asynchronous promotion (D8.1.1 *v12*, 2026-09-22) the triggering activation could no longer reach the image, and the trigger queued every loop-owning definition regardless of how long its loop ran.
+- ~~**Loop-owner first-entry trigger (D8.3.1 *v7*, 2026-09-07)** — a procedure whose body owns a loop statement promotes at its first entry, as hot by construction.~~ Retired 2026-10-02 by **AI23**. It compiled synchronously when introduced; after asynchronous promotion (D8.3.1 *v12*, 2026-09-22) the triggering activation could no longer reach the image, and the trigger queued every loop-owning definition regardless of how long its loop ran.
 - ~~**§12 rejection** — **OSR / on-stack replacement.** High machinery cost (frame materialization into natively-typed registers — the exact problem U26 flagged), low expected value for Lambda's workloads; function-entry replacement plus backedge-triggered next-call promotion covers all but once-called long-running bodies (AIO11).~~ Superseded 2026-10-02 by **AI23**. The machinery-cost argument holds for leaving compiled code, not for entering it from T0's boxed slots.
 - ~~**AIO11 — Once-called hot bodies.** `pn main()` with heavy inline loops never re-enters, so backedge marking never pays. Options: honest documentation + `--jit-all`; per-script pragma; eager-compile heuristic on `run`-mode `main`; OSR (last resort). Decide from real `run`-mode corpora before P5.~~ Closed 2026-10-02 by **AI23**: the user ruled loop-head handoff over waiting at first entry and over documentation alone.
 - ~~**AI17v2** — `that` predicates evaluate in T0 as ordinary `fn` expressions, in full and in their declaring scope (declaring module, captured locals, a per-evaluation window for the names they bind).~~ Superseded 2026-09-26 by **AI17v3** (§6.2). Both tiers expanded the body where `is` named the type, T0 reserving a `BINDING_STORAGE_PREDICATE` window in the evaluating frame for the names it binds. A body naming its own type recursed without bound at compile time ([LR03-28](<Lambda_Issue_Ledger (fixed).md#lr03-28>)), and the JIT's copy of an imported body read the importer's names ([LR03-27](<Lambda_Issue_Ledger (fixed).md#lr03-27>)); each body is now a function, called per layer.
 - ~~**AI17** — `that` predicates evaluate under `EvalMode::PREDICATE` instead of JIT-compiled `constraint_fn`; S11.4.6 base-only shipped behavior unchanged.~~ Superseded 2026-09-26 by **AI17v2** (§6.2, §14). The mode admitted a predicate only when every node passed an allow-list (literals, `~`/`~key`, a set of operators, 22 pure system functions) within a 1,024-step `LAMBDA_PREDICATE_FUEL` budget, and answered `false` otherwise. The JIT evaluated the same body in full, so the tiers disagreed and `auto` flipped a hot function's answer on promotion ([LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>)). Purity is now the static `fn`/`pn` check (S11.4.11, TE-20).
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D8.1.1v18 → D8.3.1–D8.3.6
+
+**D8.3.2*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+parser → the shared typed AST → **tiered execution**. The parser reduces
+directly into the retained `AstNode` graph; no Lambda CST or replacement
+syntax tree is retained. The default file/module path is the C parser, while
+Tree-sitter remains an explicit reference/rollback parser and the editor/
+binding grammar. A boxed AST-walking interpreter (**T0**) remains the
+baseline execution mode and the retained AST is the runtime source of truth;
+the shipped Lambda script policy is **AUTO**: each definition starts in T0,
+and an eligible hot definition may promote to its P2 boxed MIR satellite.
+*(v15, 2026-10-03, USER)* Explicit `LAMBDA_EXEC_BACKEND=interp` is strictly T0:
+unsupported scripts or imports fail with an unsupported-feature diagnostic
+before execution; whole-module MIR fallback is not permitted. These fallback
+paths belong to AUTO only; explicit `jit` selects the eager MIR path.
+[Ast_Interpreter AI24] *(v16, 2026-10-05, USER)* T0 executes suspending
+definitions (`start`, `wait`, scoped tasks) on their tasks' activations, so
+no definition is excluded from a tier by its colour: promotion and loop
+handoff read hit counters only, in both languages. [Runtime_Async RA11,
+RA12]
+Ordinary interpreted entries promote at `LAMBDA_FUNC_JIT_THRESHOLD` (**5** by
+default). A direct, validated self-tail edge also increments the
+definition-site call and tail-edge counters; at the same threshold it may
+synchronously publish the eligible satellite and transfer to its ordinary
+boxed entry with the rooted next-call arguments. This is a tail-entry
+handoff: a tail expression has no continuation, so its state is exactly the
+next entry's arguments. *(v14, 2026-10-02, USER)* A running T0 activation
+may also hand off at a **loop-head test**. Back-edges are counted per loop
+site; a loop that reaches `LAMBDA_LOOP_JIT_THRESHOLD` (**10000** by default)
+queues its definition once, and that image carries, beside the boxed entry,
+a loop entry for that loop. After publication the activation enters it at
+the next head test of the same loop with its frame's named slots; compiled
+code completes the activation and returns its result, and T0 unwinds as for
+`return`. Handoff is one-way: compiled code never returns control to the
+interpreter mid-activation. A loop is eligible only where every T0 value
+live at its head is a named frame slot; every other loop, and every guard
+miss, stays T0. *(v18, 2026-10-12, USER)* A plain `for` statement -- one
+source, no join, `group`, `order`, `limit` or `offset` -- is eligible too:
+beside the named slots its only live state is the walk's entry snapshot and
+next position, which its loop entry takes as two trailing parameters and
+resumes the walk from (S8.1.3v2, S9.2.3). [Ast_Interpreter AI25] Owning a loop does not promote a definition at entry: the
+call threshold, the self-tail threshold and the loop threshold are the only
+triggers. [Ast_Interpreter AI23] *(v6, 2026-09-06)*
+A satellite is always entered through its boxed `_b` wrapper, so a definition
+whose signature carries plain `any` parameters is promotable: an `any`
+parameter has no raw carrier to mis-decode, and a lane the body alone infers
+for it is guarded by the wrapper's exact shape test with the boxed slow body
+behind it. A promoted body owns its whole activation, so local `var`
+declarations, plain rebinding assignments, and indexed/member stores are
+promotable too (a store through a local or a value parameter replaces a
+register the satellite roots itself; through a module binding it reaches the
+shared slab). An untyped `var` parameter crosses the tier boundary through
+the CW33 home transport (`Context::mir_var_homes`): T0 publishes the
+address of its frame slot and prepares chain-root borrows before entering a
+satellite, the satellite publishes its rooted slot address before a dynamic
+call (pre-detaching a shared root, as the direct edge does), and each callee
+-- the generated prologue/epilogue or `interp_call` -- consumes the cells and
+stores the final parameter value back through them; the dispatcher accepts
+such signatures only in the borrowed-call mode (`fn_call_borrowed_into`). A
+`var` local passed to an untyped `var` parameter is bound boxed at its
+declaration so it owns the root slot the transport needs. *(v7: aggregate
+and structured VALUE parameter contracts -- `float[]`, records, maps -- are
+admitted: the boxed `_b` wrapper admits each argument under the declared
+contract exactly as the eager module compiler's wrapper does before the raw
+entry sees it.)* *(v8, 2026-09-07)* A typed `var` parameter (`var x:
+float[]`, `var p: Rec`) is admitted too. On every boxed edge -- T0 →
+satellite, and a satellite's dynamic call -- its position travels through
+the same CW33 home cells; the boxed `_b` wrapper consumes the cell and,
+when a home WAS transported, prepares the container once (un-share-at-
+borrow, S9.2.2: the CW33 callee-prologue prepare placed in the adapter, a
+byte-test no-op when the container is unique; without a home there is
+nothing to store a replacement back through, so the container passes
+through as before), admits it under the declared contract, hands the raw
+entry the container to write in place, and stores the admitted container
+back through the home on return; a satellite caller reloads its register
+from the slot and keeps the raw descriptor, since a typed `var` position is
+invariant (S9.2.1). What the raw entry cannot publish is a REBIND of the
+parameter, so a body that assigns to a typed `var` parameter stays in T0,
+and so does every satellite that would call it directly: T0 publishes the
+rebind through the home, a raw argument would not be reloaded. P2 still
+fails closed for such rebinding bodies, nested definitions, indirect Lambda
+calls, object-field identifiers, and match expressions. *(v9, 2026-09-07)*
+A synchronous satellite image is a **cluster**, not a single definition: the promoted
+target together with every module-level definition reachable from it
+through direct calls that is itself promotable and not yet compiled or
+pinned (bounded, 64 definitions), defined in module order. Calls among
+cluster members are direct native edges, and the image's call-site
+inference collects from the module's complete retained AST, so a member's
+parameters take the lanes the eager tier would give them (a T0 caller that
+passes something else meets the wrapper's exact-shape guard). Each member's
+boxed entry is published to its T0 function when the image links; a callee
+that is already compiled keeps its own entry and stays a dynamic target,
+as do pinned and unsupported bodies. A satellite reads module bindings and
+interned constants with the eager tier's inline loads from the owner's
+slab state (re-read from the state at every use), no longer through a
+per-read accessor call. Two invariants this
+admission exposed: a satellite that interns literals into its module's const
+list must rebind the module state's static image afterwards, and a
+dynamic-call argument list is built by verbatim positional append, never by
+content-splicing push. *(v12, 2026-09-22)* A hot AUTO definition queues a
+single snapshot-safe target definition instead of synchronously compiling on
+the execution thread. The triggering call and every call before publication
+stay T0. The process-wide bounded compiler pool deduplicates that target for
+one Script execution generation. A worker compiles from frozen AST/source
+facts in a private MIR context and returns a sealed image; it may not mutate
+the Script MIR context, module slab, constant/type/property-key images,
+shared import resolver, AST analysis facts, or Function entries. Only a
+later ordinary execution safe point -- an interpreted function entry or a
+loop-head test -- verifies the generation and publishes the image's
+entries. A failed, stale, or unsupported image is discarded and
+pins that execution-local definition to T0. Publication itself replaces no
+active frame; the loop-head handoff above is the only transfer of a running
+activation. The first
+parallel implementation excludes async closures, cross-language imports,
+pattern prepasses, and constant-list growth; those cases do not revert to
+synchronous compilation. Private direct-callee cluster images remain future
+work. [D1.8, D6.4.3, D7.4.1, D8.3.4]
+`LAMBDA_EXEC_BACKEND=interp` pins the run to T0, while `LAMBDA_EXEC_BACKEND=jit` explicitly
+selects eager whole-module **MIR Direct** (`transpile-mir.cpp`) → MIR JIT
+(**T1**). *(v13, 2026-09-22)* Static import prebuild is a process-global,
+language-neutral keyed-future service. It owns one bounded work pool and
+retains one task per canonical module path plus language/profile; the
+`InputScriptCache` separately remains authoritative for exact source bytes,
+source generation, parser ABI, and artifact admission. Root discovery
+submits work and returns without a closure-wide wait. Parse-accurate
+discovery immediately canonicalizes and requests every static child. A
+duplicate request receives the same future, while a completed child releases
+only its direct parents. Thus for `A -> B -> C` and `A -> D -> C`, discovering
+`B` and `D` requests one shared `C`; `C` completion releases both parents.
+A task never waits for a child task while occupying a pool worker; only a
+node whose direct dependencies completed may queue its AST build. The
+ordinary Lambda/JS importer waits only for the future of its direct module
+before consuming it, and never from the prebuild-worker path. Cycle failure
+is a prebuild miss; ordinary loading keeps its established diagnostics and
+cycle handling. A worker owns a temporary `Runtime` and may publish only a
+retained AST template through `InputScriptCache`; it neither instantiates a
+module nor lowers MIR. The receiving runtime clones that template, plans T0,
+and the ordinary AUTO P2 counters decide whether a hot Lambda definition
+later receives its MIR satellite. An AST shape outside T0's supported surface
+falls back only on that receiving runtime's established whole-MIR path. The
+scheduler is common infrastructure, not a shared language parser or
+evaluator. [D8.3.5] *(v17, 2026-10-06, USER)* **The REPL is one
+persistent T0 session.** Each completed entry is parsed by the C parser,
+built, planned and executed as a fragment against the retained Script,
+global scope and module slab; a rejected or failed entry is rolled back
+whole. No REPL or inspection path depends on Tree-sitter. Whole-history
+replay is retired: in a session the tier selector governs satellites only
+(`auto` promotes at the ordinary thresholds, `interp` never, `jit` at the
+first call) and nothing compiles a whole module. An entry outside T0's
+supported surface is rejected with a diagnostic naming the construct and is
+never compiled as a per-entry MIR module. An interrupt (SIGINT) during an
+entry raises a fault through the execution recovery frame; the session
+reports the entry as failed and restores its snapshot. [Repl_Interp
+RI4–RI6] *(Historical: v1 ruled the opposite — "no
+AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
+by user ruling 2026-08-15; the full record is
+`Lambda_Design_Unified_AST.md` §12.)* [CGP1, CGP2, AI1–AI22]

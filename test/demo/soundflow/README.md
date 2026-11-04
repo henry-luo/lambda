@@ -37,4 +37,4 @@ The model test checks pitch from length, live and looped crossings, pausing, tap
 
 The PCM encoder and native voice lifetime now share `lambda.audio.pcm` and
 `lambda.audio.voices` with Eden. The instrument synthesis, cache, limits and
-16-bit quantization remain Soundflow's existing behavior (D7.5.3–D7.5.4).
+16-bit quantization remain Soundflow's existing behavior (D9.5.6–D11.3.1).

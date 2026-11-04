@@ -1,4 +1,4 @@
-// Pictures and picture-filled shapes share relationship validation and byte capture (D7.5.2).
+// Pictures and picture-filled shapes share relationship validation and byte capture (D11.1.2).
 import c: .common
 import opc: lambda.doc.opc
 import media: lambda.doc.media

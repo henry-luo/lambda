@@ -3,8 +3,8 @@
 - Status: implemented and validated; the measured Navier-Stokes regression
   below remains a performance follow-up.
 - Scope: loop/call optimization and broader native typed-array mutation.
-- Authority: D8.2.6 (producer-owned demand), D8.4.3v2 (call effects), D5.3.4
-  (precise roots), D3.3.3v3 (array certificates), S7.1.1v3/S7.1.3v2
+- Authority: D8.2.6 (producer-owned demand), D7.4.3 (call effects), D6.3.4
+  (precise roots), D4.3.3 (array certificates), S7.1.1v3/S7.1.3v2
   (total reads and checked writes), S9.1.2 (snapshots).
 
 ## Implementation
@@ -38,7 +38,7 @@ their existing publication paths.
 The RHS is evaluated and rooted before the key, then the current owner is
 read. A key call can allocate or replace a borrowed owner; the store must use
 the post-call owner with the original RHS. No interior pointer survives a
-call (D5.3.4).
+call (D6.3.4).
 
 ## Correctness defects found during implementation
 
@@ -62,7 +62,7 @@ pointer into that temporary frame. A separate scalar home and the existing
 Forced-GC coverage additionally found that dense JavaScript array reads
 returned a borrowed scalar-tail pointer that could be poisoned by later
 growth/collection. Those reads now use the same transient ownership boundary
-(D5.3.4). The four failing JS fixtures and four Test262 cases reproduced on
+(D6.3.4). The four failing JS fixtures and four Test262 cases reproduced on
 the cached control; these are baseline repairs, independent of the Lambda
 loop optimization. A stale external `node-net` module caused the DNS crash;
 rebuilding it fixed the crash without a source change.
@@ -145,5 +145,5 @@ does not introduce scalar reference parameters.
 Against C/C2MIR, these changes remove repeated imported calls, dead collection
 construction and checked setters on proven numeric stores. Remaining costs
 include semantic admission, precise roots, cold-path joins, array certificates,
-COW checks and boxed sized-scalar call arguments. D8.3.1's one native body per
+COW checks and boxed sized-scalar call arguments. D7.3.1's one native body per
 function still applies; no C-text backend or new ABI has been introduced.

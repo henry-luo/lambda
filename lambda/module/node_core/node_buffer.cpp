@@ -2319,7 +2319,7 @@ extern "C" Item js_get_buffer_prototype(void) {
     RootFrame values_roots(1);
     Rooted<Item> values_root(values_roots,
         js_new_native_function(js_buf_inst_values));
-    // D5.4.3: both aliases are published after allocating keys, so the shared
+    // D6.4.3: both aliases are published after allocating keys, so the shared
     // callable must remain precisely rooted until the second store owns it.
     js_set_key_cstr(buffer_prototype, "values", values_root.get());
     js_set_key_default(buffer_prototype, js_well_known_symbol_key(1), values_root.get());
@@ -2400,7 +2400,7 @@ Item node_buffer_namespace(void) {
 
     // set up prototype (lazy, cached)
     prototype_root.set(js_get_buffer_prototype());
-    // D5.4.3: prototype construction allocates before the outer property call
+    // D6.4.3: prototype construction allocates before the outer property call
     // establishes ownership, so retain the returned object in this root frame.
     js_set_key_cstr(namespace_root.get(), "prototype", prototype_root.get());
     {
@@ -2420,7 +2420,7 @@ Item node_buffer_namespace(void) {
     buf_set_method(buffer_namespace, "btoa", js_btoa, 1);
     {
         blob_ctor_root.set(js_new_native_constructor(js_blob_new));
-        // D5.4.3: naming allocates before namespace publication owns the
+        // D6.4.3: naming allocates before namespace publication owns the
         // constructor; keep the intermediate callable in the enclosing frame.
         js_set_function_name(blob_ctor_root.get(), make_string_item("Blob"));
         js_set_key_cstr(namespace_root.get(), "Blob", blob_ctor_root.get());
@@ -2432,7 +2432,7 @@ Item node_buffer_namespace(void) {
     // Buffer.constants — MAX_LENGTH and MAX_STRING_LENGTH
     {
         constants_root.set(js_new_object());
-        // D5.4.3: the constants object is not owned by the namespace until all
+        // D6.4.3: the constants object is not owned by the namespace until all
         // of its fields are installed, so each allocating store needs this root.
         js_set_key_cstr(constants_root.get(), "MAX_LENGTH", (Item){.item = i2it(JS_BUFFER_MAX_LENGTH)});
         js_set_key_cstr(constants_root.get(), "MAX_STRING_LENGTH", (Item){.item = i2it(JS_BUFFER_MAX_STRING_LENGTH)});
@@ -2444,7 +2444,7 @@ Item node_buffer_namespace(void) {
     js_set_key_cstr(buffer_namespace, "kStringMaxLength", (Item){.item = i2it(JS_BUFFER_MAX_STRING_LENGTH)});
 
     // buffer.SlowBuffer — legacy, alias for allocUnsafeSlow
-    // D5.4.3: inline function creation could be collected while a later call
+    // D6.4.3: inline function creation could be collected while a later call
     // argument was evaluated; the common installer roots the publication triple.
     buf_set_method(buffer_namespace, "SlowBuffer", js_buffer_allocUnsafeSlow, 1);
 

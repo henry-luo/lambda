@@ -1,4 +1,4 @@
-// S12.1.1v2/D7.4.4: clips are pure data; playback belongs to the declared document host.
+// S12.1.1v2/D9.5.4: clips are pure data; playback belongs to the declared document host.
 import transforms: .transform
 
 pub fn clip(label, tracks, options = {}) element => <'animation-clip' id: label, duration: -1.0, *: options, *tracks>

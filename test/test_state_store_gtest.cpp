@@ -367,7 +367,7 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
     control->form = lam::view_prop(&original);  // test-owned prop
     ASSERT_TRUE(form_control_store_text_value(doc.state, static_cast<View*>(control), "svg", 3, 3));
     ASSERT_TRUE(root->remove_child(control));
-    // D4.5.1v3: layout properties are temporary; the registered DOM control owns its value.
+    // D5.5.1: layout properties are temporary; the registered DOM control owns its value.
     control->form = nullptr; control->view_type = RDT_VIEW_NONE;
     state_store_prune_after_reflow(doc.state);
     uint32_t length = 0;

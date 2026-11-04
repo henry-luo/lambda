@@ -88,7 +88,7 @@ TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
     EXPECT_EQ(before, after);
 }
 
-// S9.1.4v2/D4.3.3: closure environments, rather than native locals, own
+// S9.1.4v2/D5.3.2: closure environments, rather than native locals, own
 // the shared binding after its parent's explicit root is released.
 TEST_F(EvalContextTest, ConfinedCaptureHomesShareWritesAndTraceTheirValues) {
     RootFrame roots(5);
@@ -439,7 +439,7 @@ TEST(TypeContractMetadataTest, RemovesAndNormalizesErrorAndNullConstituents) {
 }
 
 TEST(TypeContractMetadataTest, ComparisonChecksCompactContainerDescriptorsSafely) {
-    // Generic container descriptors have no nested/shape payload (D3.3.3).
+    // Generic container descriptors have no nested/shape payload (D4.3.3).
     Type* types[] = {&TYPE_ARRAY, &TYPE_LIST, &TYPE_MAP, &TYPE_OBJECT, &TYPE_ELMT};
     for (Type* type : types) {
         EXPECT_FALSE(lambda_type_comparison_may_error(type, true, false));
@@ -565,7 +565,7 @@ TEST(TypeContractMetadataTest, SysFuncRelationsInstantiateSelectedArguments) {
 
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
-    // S11.4.9/D3.3.5: fill binds from argument 1, and its collection/text
+    // S11.4.9/D4.3.4: fill binds from argument 1, and its collection/text
     // consumers retain that relation rather than falling back to `any`.
     EXPECT_NE(strstr(result.stdout_buf,
         "<value_type_element_type \"int\">"), nullptr);
@@ -602,7 +602,7 @@ TEST(TypeBinderTest, AstDumpPreservesBinderSitesAndDependentReferences) {
 
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
-    // S11.4.8/D3.1.1v4: slots make binder sites and dependent uses distinct.
+    // S11.4.8/D4.1.1: slots make binder sites and dependent uses distinct.
     EXPECT_NE(strstr(result.stdout_buf,
         "<TypeBinder <name \"U\"> <slot 0> <bound \"number\">>"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
@@ -990,7 +990,7 @@ TEST(AstBuildAllocationTest, SizedLiteralCopyFailureDoesNotCrash) {
     EXPECT_GT(tp.error_count, 0);
 
     arraylist_free(tp.const_list);
-    pool_destroy(pool);  // releases the Input too (D4.2.6)
+    pool_destroy(pool);  // releases the Input too (D5.2.5)
 }
 
 TEST(AstBuildReductionTest, SyntaxPhaseDefersBindingUntilResolve) {
@@ -1031,7 +1031,7 @@ TEST(AstBuildReductionTest, SyntaxPhaseDefersBindingUntilResolve) {
 
     lambda_rd_destroy_syntax(syntax);
     arraylist_free(tp.const_list);
-    pool_destroy(pool);  // releases the Input too (D4.2.6)
+    pool_destroy(pool);  // releases the Input too (D5.2.5)
 }
 
 TEST_F(ErrorCreationTest, CreateFormattedError) {
@@ -1532,6 +1532,34 @@ protected:
 };
 
 // Syntax error tests
+TEST_F(NegativeScriptTest, DuplicateLiteralKeys) {
+    const struct { const char* path; int duplicates; } scripts[] = {
+        {"test/lambda/negative/semantic/duplicate_map_keys.ls", 6},
+        {"test/lambda/negative/semantic/duplicate_attribute_keys.ls", 5},
+        {"test/lambda/negative/semantic/duplicate_namespace_keys.ls", 3}
+    };
+    const char* tiers[] = {"interp", "jit", "auto"};
+    const bool modes[] = {false, true};
+    for (const auto& script : scripts) {
+        for (const char* tier : tiers) {
+            for (bool relaxed : modes) {
+                // every invalid literal is diagnosed, also under --static-warning.
+                ScriptResult result = run_lambda_script(script.path, false, tier, relaxed);
+                EXPECT_NE(result.exit_code, 0) << script.path << " tier=" << tier;
+                int duplicates = 0;
+                const char* cursor = result.output.c_str();
+                while ((cursor = strstr(cursor, "error[E242]"))) {
+                    duplicates++;
+                    cursor++;
+                }
+                EXPECT_EQ(duplicates, script.duplicates) << result.output;
+                EXPECT_EQ(strstr(result.output.c_str(), "\n\"bound:"), nullptr)
+                    << result.output;
+            }
+        }
+    }
+}
+
 TEST_F(NegativeScriptTest, SyntaxErrorMalformedRange) {
     ExpectErrorWithoutCrash("test/lambda/negative/test_syntax_errors.ls");
 }
@@ -1842,7 +1870,7 @@ TEST_F(NegativeScriptTest, IoTextSearchUnknownLiteralOptionIsCompileError) {
         "unknown option 'whole_line' for io.text_search (S17.8.1)");
 }
 
-// S12.3.2 / D6.2.2v2 (LR07-16): a dynamic call has no declaration to bind
+// S12.3.2 / D7.2.2 (LR07-16): a dynamic call has no declaration to bind
 // names against; both tiers had silently passed named arguments by position.
 TEST_F(NegativeScriptTest, NamedArgumentsNeedStaticallyKnownCallee) {
     ExpectErrorMessage("test/lambda/negative/semantic/named_arg_dynamic_call.ls",
@@ -2159,7 +2187,7 @@ TEST_F(NegativeScriptTest, TypeEnforcementRuntimeNegativeGoldensPinDiagnostics) 
 }
 
 TEST_F(NegativeScriptTest, RequiredLiteralFieldRejectsNullOnEveryTier) {
-    // T29-2 (D3.2.6, S11.4.10): the JIT's shaped-literal path accepted null in
+    // T29-2 (D4.2.6, S11.4.10): the JIT's shaped-literal path accepted null in
     // a required field while the interpreter rejected it, so every tier is
     // pinned here. The site label differs by tier (field vs declaration); the
     // outcome may not: E201 is retained instead of admitting an invalid record.
@@ -2279,7 +2307,7 @@ TEST_F(NegativeScriptTest, BoolLiteralDeclarationChecksItsValueOnEveryTier) {
 }
 
 // S11.1.3 (LR03-14, LR03-18): a range type admits its members only. It wore
-// the range VALUE tag (D3.1.1v4), so a range-typed parameter rejected every
+// the range VALUE tag (D4.1.1), so a range-typed parameter rejected every
 // int statically while the JIT admitted a range value, and a range-typed map
 // field read its int as a pointer.
 TEST_F(NegativeScriptTest, RangeParameterRejectsNonMemberOnEveryTier) {
@@ -2350,7 +2378,7 @@ TEST_F(NegativeScriptTest, CountedArrayContractRejectsWrongNdShapeOnEveryTier) {
         false, "error[E201]: type check at declaration 'm' failed: expected int[2][3]");
 }
 
-// D3.3.3v3: a push changes a counted array's length without a boundary, so the
+// D4.3.3: a push changes a counted array's length without a boundary, so the
 // next `int[3]` boundary re-checks it. The JIT elided the check for a binding
 // declared with that contract, and the interned certificate stayed valid.
 TEST_F(NegativeScriptTest, CountedArrayContractRechecksResizedBindingOnEveryTier) {
@@ -2652,7 +2680,7 @@ TEST_F(NegativeScriptTest, ImportParseErrorBlocksExecution) {
         << "Importer executed after imported module parse failure.\nOutput: " << result.output;
 }
 
-// D7.2.2 (LR07-17): a module whose init ends in an ordinary error never
+// D9.3.2 (LR07-17): a module whose init ends in an ordinary error never
 // becomes importable. The JIT had dropped the init result and run the importer
 // against the module's half-set slots.
 TEST_F(NegativeScriptTest, ImportInitErrorBlocksExecution) {

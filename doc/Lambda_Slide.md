@@ -1,8 +1,8 @@
 # Lambda Slide Presentations
 
 `lambda.slide` authors decks as Lambda elements, compiles their cues, and displays
-them in Radiant. The package is source Lambda under D7.2.4; rendering uses the
-shared host boundary under D7.5.3. Compilation and sampling are pure functions;
+them in Radiant. The package is source Lambda under D9.3.4; rendering uses the
+shared host boundary under D9.5.6. Compilation and sampling are pure functions;
 live templates perform DOM writes and request frames under S12.1.1v3/S12.1.3.
 
 ## Quick start
@@ -12,9 +12,9 @@ slide and object editing, undo/redo, `.slides` open/save, HTML handout export,
 speaker notes and presentation of the current deck. Choose Northstar and the
 other examples from **Samples**. See the [editor guide](../test/demo/slides/README.md)
 for controls and the current feature scope. It uses the existing package and
-DOM boundary under D7.2.4/D7.5.3 and procedural handlers under S12.1.3.
+DOM boundary under D9.3.4/D9.5.6 and procedural handlers under S12.1.3.
 
-A deck is a `.slides` file: Mark data (D2.9.3) whose root is `<presentation>`.
+A deck is a `.slides` file: Mark data (D10.1.3) whose root is `<presentation>`.
 
 ```mark
 // hello.slides
@@ -46,7 +46,7 @@ reveals and staggered bar fills; axes stay steady and labels appear afterward.
 See the [demo guide](../test/demo/slides/README.md) for its contents and controls.
 
 Scripts load a deck with `input("hello.slides", 'slides')^` (an explicit format,
-D2.9.2) and can embed it with `player`/`page` below; a deck built by Lambda code
+D10.1.2) and can embed it with `player`/`page` below; a deck built by Lambda code
 is saved for presenting with `output(deck, "hello.slides", 'mark')^`.
 
 The standalone page fits the logical canvas into the viewer, with letterboxing,
@@ -179,7 +179,7 @@ dom.dispatch(player_node, {type: "slide_command", bubbles: false,
 Common object attributes are `id`, `x`, `y`, `width`, `height`, `rotation`, `scale`,
 `opacity`, `role`, `class`, `style`, `morph_id`, and `metadata`. Optional
 `metadata` is a map of application annotations, retained in `source` and ignored
-by placement and paint (S1.4, D7.5.3). Width/height/scale are positive;
+by placement and paint (S1.4, D9.5.6). Width/height/scale are positive;
 opacity is in [0,1]. Built-in layouts are `'blank'`, `'title'`, `'title-body'`,
 `'two-column'`, `'three-column'`, `'section'`, `'quote'`, `'image-left'`, and
 `'image-right'`; roles are `'title'`, `'body'`, `'left'`, `'center'`, `'right'`,
@@ -231,7 +231,7 @@ can target inherited objects. Master cycles, duplicate definitions, invalid
 objects and unknown references fail compilation, including unused definitions.
 Unspecified built-in roles retain their title/body/footer bounds. Named layouts
 cannot shadow built-in names. Composition runs before scene/cue
-compilation within the source package (D7.2.4).
+compilation within the source package (D9.3.4).
 
 Effect targets are author IDs, distinct from generated DOM IDs. Generated keys
 include player instance, slide index and object position, so independent players
@@ -317,7 +317,7 @@ for example `'left'` brings incoming content from the right. Default duration is
 Push moves both layers, Cover moves the incoming layer and Uncover the outgoing
 layer. Wipe clips the incoming layer; Reveal clips and moves the outgoing layer.
 Random Bars uses a deterministic staggered strip clip. These are package samples
-of supported CSS geometry under S12.1.1v3/D7.5.3, rather than a separate animation
+of supported CSS geometry under S12.1.1v3/D9.5.6, rather than a separate animation
 engine. Pointer/focus input on both layers is excluded during a transition.
 
 `transition_variant` selects `'normal'`/`'through-black'` for Fade and Cut,
@@ -340,7 +340,7 @@ on load, even when `autostart` is omitted. Embedded hosts send `activate`.
 `transition_sound: {name: "Chime", src: "cue.wav"}` plays a single cue on entry.
 Sources may be local/remote URLs or base64 data URIs; relative sources use
 `base_uri`. Acquisition stays procedural, and the existing native audio interface
-owns playback under S12.1.3/D7.5.3/D7.5.4. Pause pauses the cue; leaving, stopping or
+owns playback under S12.1.3/D9.5.6/D11.3.1. Pause pauses the cue; leaving, stopping or
 closing the player releases it. Audio errors appear in the status and
 `data-slide-sound-error` without stopping the visual timeline. `data-slide-sound`
 reports `playing`, `paused`, `silent` or `error`. Static output does not play sounds.
@@ -363,7 +363,7 @@ opening entry cues; the `activate` command exposes that same manual activation.
 
 The player toolbar is a single row of icon controls with tooltips and accessible
 names, including Previous/Next, Play/Pause/Resume, Restart and presenter tools.
-It reuses the packaged icon catalog (D7.2.5). Narrow windows scroll the items
+It reuses the packaged icon catalog (D10.2.1). Narrow windows scroll the items
 horizontally; the hide arrow remains visible at the right edge. Full-screen
 changes update the icon and accessible action name without replacing the button.
 
@@ -422,7 +422,7 @@ Overview uses titles without rendering every slide. Next-slide previews are
 rendered lazily into a separate cache with instance-specific IDs; revisiting a
 preview reuses its markup, and audience layers retain their existing cache
 (SLD3/SLD4). Preview content is inert. Presenter state and event handling stay
-in Lambda under D7.5.3 and S12.1.3.
+in Lambda under D9.5.6 and S12.1.3.
 
 Reducer events use `{command: 'next', time_ms: ...}`, `{command: 'jump', slide: ...}`,
 or `{command: 'seek', address: ...}`. Frame times are monotonic milliseconds.
@@ -458,8 +458,8 @@ used: its paged flow does not yet paint transformed subtrees or inline SVG.
 Each live player parks when waiting for manual input, paused, or finished.
 Autoplay dwell requests frames but keeps the completed cue's visual time fixed.
 DOM handles and frame requests
-use generation-checked document ownership (D4.5.1v4), and host values use precise
-roots (D5.3.3). A failed command, rejected live style value or refused frame request pauses the
+use generation-checked document ownership (D5.5.1), and host values use precise
+roots (D6.3.3). A failed command, rejected live style value or refused frame request pauses the
 affected player and reports a message in its status. Restart retries playback;
 an invalid authored value must be corrected before that retry can succeed.
 `data-slide-index/cue/phase/paused/autoplay/timed/rate` describe discrete live state; `data-slide-time`

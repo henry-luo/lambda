@@ -3,7 +3,7 @@
 **Status:** core delivered and focused/native acceptance passed, 2026-10-28.
 The broad baseline retains two pre-existing failures listed below.
 **Authority:** PG15 in [Procart design](../Lambda_Design_Procart.md); pure
-sampling follows S12.1.1v3, native presentation follows D7.5.3v2.
+sampling follows S12.1.1v3, native presentation follows D9.5.6.
 
 ## Finite milestone
 
@@ -60,7 +60,7 @@ usually remain east-facing). Existing surface work is preserved.
   literal environment, retains conditions through seed changes, resets the
   original day and can stop motion. Rain and mist use existing native meshes.
 - Camera pose is presentation state, handed from the live controller to author
-  state before the author replaces the scene (**S12.1.5v2 / D7.5.3v2**). The
+  state before the author replaces the scene (**S12.1.5v2 / D9.5.6**). The
   controller receives distinct initial and home/reset poses. Camera attributes
   use full-precision numeric text so DOM readback does not round typed array
   components. The shared DOM serializer handles nested instance rows and both

@@ -2294,7 +2294,7 @@ static MIR_reg_t relocated_constant(LmdCompiler* c, uint64_t value) {
     ArrayList* sites = c->program->relocations;
     int index = sites->length;
     // one slot per emitted operand keeps the layout independent of pointer
-    // identity, interning, and allocator reuse in another realm (D8.5.1v2).
+    // identity, interning, and allocator reuse in another realm (D8.5.1).
     if (!arraylist_append(sites, (void*)value)) {
         mvp_lmd_program_diagnostic(c->program, NULL, "relocation allocation failed"); return constant(c, 0);
     }
@@ -2617,7 +2617,7 @@ struct LmdLoopInterrupt {
         move(c, remaining, reg(c, op(c, MIR_SUB, reg(c, remaining), integer(c, 1))));
         branch(c, MIR_BNE, ready, reg(c, remaining), integer(c, 0));
         move(c, remaining, integer(c, 1024));
-        // D8.4.3v2: pure compiled loops need a completion boundary after SIGPROF too.
+        // D7.4.3: pure compiled loops need a completion boundary after SIGPROF too.
         check_error(c, em_call_0(&c->em, "mvp_lmd_execution_interrupt_status", MIR_T_I64, true));
         put_label(c, ready);
     }
@@ -3938,7 +3938,7 @@ static bool field_write(LmdCompiler* c, LmdReference ref, LmdValue value, MIR_la
         type == LMD_TYPE_FLOAT ? MIR_T_D : type == LMD_TYPE_BOOL || type == LMD_TYPE_UNDEFINED ? MIR_T_U8 : MIR_T_I64, stored);
     return true;
 }
-// D8.4.1v2: shared shape lookup produces invocation-local metadata, never site feedback.
+// D7.4.1: shared shape lookup produces invocation-local metadata, never site feedback.
 static MIR_reg_t own_data_field(LmdCompiler* c, MIR_reg_t owner, MIR_reg_t name,
         MIR_label_t miss, MIR_reg_t shape = 0, const LmdShapeSet* predicted = NULL, String* spelling = NULL) {
     if (!shape) {
@@ -4473,7 +4473,7 @@ static LmdValue string_read(LmdCompiler* c, LmdReference ref) {
     put_label(c, done);
     return boxed(c, result, length ? K_ANY : K_STRING | K_UNDEFINED);
 }
-// JS admission/coercion precedes these shared physical lane operations (D2.4.3).
+// JS admission/coercion precedes these shared physical lane operations (D2.3.5).
 static LmdValue typed_array_lanes(LmdCompiler* c, LmdValue owner, MIR_reg_t index,
         LmdValue* value = NULL, MIR_reg_t end = 0, unsigned lanes = 0, bool native = false) {
     if (!lanes || (lanes & ~7u)) lanes = 7;
@@ -6976,7 +6976,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         em_after_resolved_call(&c->em, "mvp_lmd_entry", &entry->call, insn, 0, result_type);
     }
     if (invoked) put_label(c, invoked);
-    // consume the context companion before any safepoint or rooted store (D5.2.1v3).
+    // consume the context companion before any safepoint or rooted store (D6.2.1).
     bool pending = !direct || fn_return_shape_may_be_pending(direct->return_abi.shape);
     if (!pair && (native || pending)) companion = em_load_at(&c->em, c->em.frame.runtime,
         offsetof(Context, mir_companion_slot), MIR_T_I64, "companion");
@@ -7835,7 +7835,7 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             LmdFunction* initializer = cls && cls->reusable_layout
                 ? (LmdFunction*)c->program->functions->data[cls->constructor_id] : NULL;
             LmdInlineBody body = {};
-            // expanded constructor proofs reuse class metadata without creating new per-site caches (D8.4.1v2).
+            // expanded constructor proofs reuse class metadata without creating new per-site caches (D7.4.1).
             if (initializer && constructor_layout_reusable(c->program, initializer->ast->body) &&
                     inline_body(c, initializer, &body, true, true)) {
                 LmdValue* values = call_arguments(c, call, false);
@@ -12996,7 +12996,7 @@ Item mvp_lmd_compile_function_satellite(Runtime* runtime, JsScript* script, uint
         definition->node_type == AST_NODE_ARROW_FUNC || !definition->name;
     if (as_expression) strbuf_append_char(source, '(');
     if (method) {
-        // D8.1.3v38 preserves checked defaults verbatim and the original method metadata.
+        // D8.4.5 preserves checked defaults verbatim and the original method metadata.
         strbuf_append_str(source, "function(");
         for (AstNode* parameter = definition->params; parameter; parameter = parameter->next) {
             SourceSpan span = parameter->source_span;
@@ -13124,7 +13124,7 @@ Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t len
     // publish the same heap/name-pool tuple used by Runtime cleanup and reentry.
     if (!js_prepare_eval_context(runtime, true, &owner, &reusing_context, true) ||
             !js_runtime_state_ensure_input(owner)) return ItemError;
-    // D8.1.3v25: the formal entry owns the same document binding formerly
+    // D8.4.2: the formal entry owns the same document binding formerly
     // performed after legacy MIR compilation, including stack-worker rebinding.
     if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
     if (runtime->dom_doc) dom_set_document(runtime->dom_doc);
@@ -13135,7 +13135,7 @@ Item mvp_lmd_execute_in_runtime(Runtime* runtime, const char* source, size_t len
         // nested module imports retain the parent's queues and scheduler.
         js_event_loop_init();
     }
-    // D5.3: Script retirement follows heap finalization; escaping closures and
+    // D6.3: Script retirement follows heap finalization; escaping closures and
     // nominal shapes keep their compiler-owned records throughout that lifetime.
     MvpLmdRetainedScript* retained = NULL;
     if (!js_runtime_state.formal_mir_owner) {

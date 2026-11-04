@@ -4,9 +4,9 @@
 **Scope:** HTTP(S) document navigation, linked CSS, fonts, images, and page
 scripts from discovery through first paint.  This does not change LambdaJS or
 DOM semantics.  
-**Spec linkage:** D1.3v3 keeps shared host services distinct from private
-guest cores; D6.3.2 keeps workers share-nothing; and D4.2.2v2, D4.2.3,
-D4.2.4, and D4.5.1v3 require explicit document ownership and teardown. This
+**Spec linkage:** D1.3 keeps shared host services distinct from private
+guest cores; D7.5.2 keeps workers share-nothing; and D5.2.2, D5.2.1,
+D5.2.3, and D5.5.1 require explicit document ownership and teardown. This
 design applies those rules to a shared resource service: workers move immutable
 response bytes, while the page's DOM and script realm remain private. It
 operationalizes Radiant concurrency decisions RC1 and RC8 in
@@ -39,7 +39,7 @@ therefore starts only after trusted realm preparation; its bounded fixed and
 source-size-scaled budget covers page-owned work. If recovery nevertheless
 interrupts JS or allocator ownership, the failure is sticky through outer
 document teardown; teardown must abandon that batch rather than reset state
-that may have been interrupted (D4.2.2v2, D4.2.3, D4.5.1v3).
+that may have been interrupted (D5.2.2, D5.2.1, D5.5.1).
 
 ### 1.1 September 2026 online-suite audit
 
@@ -113,7 +113,7 @@ specified dependency and source order.
 Classic, defer, and module evaluation mutate one document realm and remain
 ordered on the page thread under RC1. Downloading immutable response bytes is
 parallel today. A future bounded prebuild pool may parse immutable source or
-prepare module descriptors only through share-nothing workers (D6.3.2); it
+prepare module descriptors only through share-nothing workers (D7.5.2); it
 must publish no DOM, JS heap, closure, or MIR ownership across the boundary.
 Evaluation, instantiation, microtask checkpoints, and browser-global sync stay
 serial.
@@ -214,7 +214,7 @@ results, as RC6 requires.
   context live/reserved bytes and script source/AST/MIR retained bytes.
 - Detach timers, resource callbacks, JS roots, and shared-cache references
   before context disposal. Context teardown proceeds in dependency order under
-  D4.2.2v2–D4.2.4 and D4.5.1v3; it never bulk-frees a cache shared by a live
+  D5.2.2–D5.2.3 and D5.5.1; it never bulk-frees a cache shared by a live
   document.
 - Bound page-local script-source and preparation retention by bytes. Release a
   transient representation as soon as no module, callback, debugging, or API
@@ -242,7 +242,7 @@ The manager is registered in the document-resource lifetime list when it is
 created.  Thus every `DomDocument` destruction path, including redirect or
 script navigation before a window owns the document, cancels worker activity
 and destroys the manager before DOM storage disappears.  This preserves the
-page-thread/private-document boundary required by D1.3v3 and RC1.
+page-thread/private-document boundary required by D1.3 and RC1.
 
 P3 is implemented as follows:
 

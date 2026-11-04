@@ -1,4 +1,4 @@
-// Text revisions are source marks; accepting/rejecting edits never restores an old document (S1.4, D7.2.5).
+// Text revisions are source marks; accepting/rejecting edits never restores an old document (S1.4, D10.2.1).
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import lambda.editor.mod_source_pos

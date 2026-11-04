@@ -2,7 +2,7 @@
 
 > **Status:** implemented and qualified, 2026-10-28.
 > **Contract:** [PG14.1–PG14.5](../Lambda_Design_Procart.md#11-p9--reusable-surface-patterns-pg14).
-> **Spec linkage:** S12.1.1v3 (pure generation), S11.4.6 (runtime admission), S8.1.1v2/S8.1.2v3 (name membership and explicit null), S1.6 (tier transparency), S12.1.5v2/D7.5.3v2 (presentation ownership), D7.2.4v4 (source package reuse). No formal ruling changes.
+> **Spec linkage:** S12.1.1v3 (pure generation), S11.4.6 (runtime admission), S8.1.1v2/S8.1.2v3 (name membership and explicit null), S1.6 (tier transparency), S12.1.5v2/D9.5.6 (presentation ownership), D9.3.4 (source package reuse). No formal ruling changes.
 
 ## Delivered behavior
 

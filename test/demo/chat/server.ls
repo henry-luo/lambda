@@ -1,4 +1,4 @@
-// a standalone owner keeps the listener and peer tasks alive (D7.2.4v4).
+// a standalone owner keeps the listener and peer tasks alive (D9.3.4).
 import chat: lambda.chat
 import config: .mod_config
 

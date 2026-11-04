@@ -46,7 +46,7 @@ flow; inline wrappers move their shared-coordinate descendants through
 from normal and atomic children, maps their static position, then adds the
 physical translation once. Orthogonal children use that same rule before
 returning from their publication branch. This preserves sibling placement and
-subtree origins without new retained state (**D4.5.1v4 / D4.1.4v5**).
+subtree origins without new retained state (**D5.5.1 / D5.1.4**).
 
 `layout_sticky_positioned` (`:341`) is a constraint solver, not an offset: it finds the nearest scroll-container ancestor (`overflow != visible`), converts the element's position into that scroller's content coordinates by accumulating ancestor border-box offsets plus padding/border (`:385`), and then clamps the element so its edges honor the inset constraints (`top` means "top edge ≥ scrollport_top + T", etc.). A second clamp keeps the element inside its containing block (`:457`–`:491`). At scroll offset 0 this typically yields no shift.
 
@@ -75,7 +75,7 @@ viewport origin; established geometry uses its padding edge, including a
 positioned root's border inset. `layout_abs_block_internal` scopes dependent
 computed-style application and content layout to that CB, and binds the active
 DOM node/view around style application. Deferred flex layout therefore cannot
-apply an absolute child's style to a sibling (**D4.5.1v4 / D4.1.4v5**).
+apply an absolute child's style to a sibling (**D5.5.1 / D5.1.4**).
 Direct and mathematical percentages share the actual containing size, including
 definite zero. The solver then handles authored sizes, opposing insets,
 intrinsic/replaced sizes, min/max constraints and auto margins before publishing
@@ -107,7 +107,7 @@ declaration uses `layout_block_has_automatic_size` to preserve definite HTML
 dimension hints. On the logical block axis, `min-content`/`max-content` enter
 image ratio sizing as automatic sizes rather than provisional object defaults
 ([CSS Sizing 3 §3.2](https://www.w3.org/TR/css-sizing-3/#sizing-values)).
-The shared producer adds no retained owner (**D4.5.1v4 / D4.1.4v5**).
+The shared producer adds no retained owner (**D5.5.1 / D5.1.4**).
 
 Two deferred-correction passes handle ordering hazards. `re_resolve_abs_children_vertical` (`:1174`) re-resolves percentage heights, `top`, and `bottom`-anchored `y` for abs children after an auto-height CB is finalized — abs children are laid out eagerly in DOM order and initially resolve percentages against 0. `layout_finalize_static_positioned_abs_descendants` (`:2031`) and `layout_shift_static_positioned_abs_descendants` (`:2051`) fix up static-position abs/fixed descendants after a normal-flow ancestor's final position (or later move) is known — used mainly by flex/grid static positioning, where the static origin is captured in parent-local coordinates and needs the parent-to-CB delta applied.
 
@@ -140,7 +140,7 @@ later initial candidate, then applies clearance, preceding-float constraints and
 the existing space search. It does not infer this logical minimum from a retained
 physical `block->y`. The default unspecified minimum leaves other callers
 unchanged. The transient scalar adds no persistent node state
-(**D4.5.1v4 / D4.1.4v5**). M74's analytic controls and retained float/character
+(**D5.5.1 / D5.1.4**). M74's analytic controls and retained float/character
 regression cover horizontal, vertical and sideways flow, both directions,
 line-space changes, positive decoration, preceding blocks and clearance;
 focused, export and required aggregate checks are qualified in M74.
@@ -172,7 +172,7 @@ pass finalizes horizontal ordering before returning; block groups defer that
 axis to their later mirror step. Vertical fragments stay in the horizontal
 surrogate until shared publication, including sideways-lr RTL. Leading break
 anchors use the same source frame. Published geometry and scratch records keep
-their existing **D4.5.1v4 / D4.1.4v5** owners. Qualification and the retained
+their existing **D5.5.1 / D5.1.4** owners. Qualification and the retained
 fragment controls are recorded in writing-mode M53.
 
 `layout_multicol_content` (`:2297`) runs three phases. **Phase 1** lays out all children once with `content_width`/line bounds constrained to the column width, capturing total flow height (`:2371`–`:2399`); a single-column fast path at `:2321` just runs normal flow. **Phase 2** collects block children and splits them at spanners (`column-span: all`) into column groups per §7.1 (`:2412`+). **Phase 3** distributes each group across columns: `multicol_balanced_target_search` (`:2059`) binary-searches (12 steps) the smallest per-column target height for which `multicol_simulate_column_count` (`:2027`) yields no more than `column_count` fragments — respecting explicit break-before/after and skipped for `column-fill: auto`. Blocks are then placed through the cursor helpers `multicol_cursor_place_block`/`_advance_block`/`_advance_fragmented_block` (`:2216`/`:2227`/`:2232`). Spanners are laid out at full container width between groups (`:2645`+), with collapsed top margins handled as `max(prev_margin_bottom, spanner_margin_top)` — flagged in-code as simplified (`:2716`). Nested/descendant spanners are split out by `multicol_split_child_around_spanners` (`:1550`). Nested descendants are projected in their own flow coordinates, measured from the column top (2026-10-26). The space a split leaves at a column bottom (`out_flow_shift`), pushed single-line blocks and margins truncated at unforced breaks carry forward to later siblings and into the fragment extents; previously paragraphs inside a wrapper overflowed one column and left a blank band in the next. Inline lines that straddle a column boundary are re-projected by `multicol_project_fragmented_inline_descendants` (`:957`), and out-of-flow (abs) descendants are re-anchored into their fragment by `multicol_apply_positioned_fragment_anchors` (`:730`), including the spanner-as-containing-block case (`:662`).

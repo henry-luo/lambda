@@ -1,4 +1,4 @@
-// D7.5.3v2: mount typed Scene3D descriptions at the explicit DOM boundary.
+// D9.5.6: mount typed Scene3D descriptions at the explicit DOM boundary.
 import dom
 import camera: .camera
 

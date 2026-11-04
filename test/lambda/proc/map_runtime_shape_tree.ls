@@ -1,4 +1,4 @@
-// D3.4.3v4: plain maps grown at runtime share their types through the
+// D3.4.3: plain maps grown at runtime share their types through the
 // context's transition tree. Each new key used to copy the whole shape into a
 // never-reclaimed pool (LR03-38), so building an n-key map cost O(n²) entries.
 // Maps that share a tree type must still mutate independently.

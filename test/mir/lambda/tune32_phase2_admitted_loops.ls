@@ -1,4 +1,4 @@
-// D3.3.4 / S9.1.3: layout admission and live borrow ownership are independent.
+// D2.4.3 / S9.1.3: layout admission and live borrow ownership are independent.
 pn tune32_phase2_admitted_store(var values: float[], count: int) {
     var index: int = 0
     while (index < count) {

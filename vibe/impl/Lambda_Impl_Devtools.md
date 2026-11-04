@@ -6,8 +6,8 @@ paging and selection reveal. Qualification results are recorded by delivery belo
 
 Design: [Lambda_Design_Devtools.md](../Lambda_Design_Devtools.md). The user selected
 Lambda values and a minimal request/reply/event protocol over local pipes.
-Existing semantics and precise ownership remain authoritative: S1.8, D5.3.3,
-D5.4.1–D5.4.4, D8.1.1v18 and D8.1.3v42.
+Existing semantics and precise ownership remain authoritative: S1.8, D6.3.3,
+D6.4.1–D6.4.4, D8.3.2 and D8.4.5.
 
 ## First delivery
 
@@ -147,7 +147,7 @@ is added by this phase.
 The Live workspace now includes **Lambda scratch**. It starts another native
 process with `lambda devtools --scratch --pipe 3`. This is the existing
 persistent **functional** REPL: declarations, immutable top-level bindings and
-entry rollback follow S16.7.4–S16.7.6 and D8.1.1v18. The console does not borrow
+entry rollback follow S16.7.4–S16.7.6 and D8.3.2. The console does not borrow
 the Radiant page's lexical environment or introduce a Lambda string-evaluation
 builtin (S1.8). Cmd/Ctrl+Enter submits an entry; Alt+Up/Down recalls history.
 
@@ -161,7 +161,7 @@ type metadata until their wire spellings are fully qualified. Functions and
 unsupported entities stay opaque. Expansion invokes no user function.
 
 `RootVector` keeps precise retained Item slots, and each handle owns stable
-numeric payload storage (D5.2, D5.3.3). The REPL's existing runtime retains its
+numeric payload storage (D6.2, D6.3.3). The REPL's existing runtime retains its
 Script, imported Inputs and binding slab for the session. **Clear results**
 releases inspector handles, including handles from a partial expansion; it
 keeps REPL bindings. **Stop scratch** ends only that target. **Collect** forces

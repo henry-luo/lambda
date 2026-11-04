@@ -33,7 +33,7 @@ static void capture_monitor_retire(DocumentCapture* capture, AudioVoiceLoss loss
     if (loss != AUDIO_VOICE_OK) { capture->loss = loss; capture->monitor_lost = true; }
 }
 static void capture_finish(DocumentCapture* capture, CaptureState state) {
-    // exclude both native readers/producers before releasing either queue (D4.5.2 / D7.5.10).
+    // exclude both native readers/producers before releasing either queue (D5.5.2 / D11.3.2).
     capture_monitor_retire(capture);
     audio_submix_release_route(capture->submix, capture->routing); capture->route = capture->routing = 0;
     if (capture->device) capture->backend.close(capture->backend.context, capture->device);

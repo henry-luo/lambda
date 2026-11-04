@@ -1,4 +1,4 @@
-// presentation is pure; handlers own native transport effects (S12.1.1v2/D7.4.6).
+// presentation is pure; handlers own native transport effects (S12.1.1v2/D7.1.1).
 import dom
 import c: .common
 import perf: .performance

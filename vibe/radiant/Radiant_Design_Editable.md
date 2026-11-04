@@ -9,7 +9,7 @@ editing transaction gate, registered action handlers, full UA editing
 behavior, `execCommand`/`queryCommand*`, `designMode`, and conformance against
 the applicable WPT and Chromium editing suites.
 
-> **Current ruling — D7.2.5.** Phase 9 (§20) supersedes Phase 1's “minimal DOM
+> **Current ruling — D10.2.1.** Phase 9 (§20) supersedes Phase 1's “minimal DOM
 > compatibility, no default UA rich editing, no `execCommand`” boundary.
 > Radiant's common gate remains, but all UA editing policy is implemented in
 > the shipped Lambda DOM package. Native C/C++ supplies platform events and
@@ -41,7 +41,7 @@ rich-edit engine was restored. The implementation and release evidence are in
 detailed proposed history architecture: Lambda-element storage, independent
 surface timelines, the `EditStep` contract, atomic native-waist application,
 grouping/coalescing, retention, pruning, and unified form-control history. It
-remains a proposal until its D7.2.5v2 ratification steps are completed; §20.7
+remains a proposal until its D10.2.1 ratification steps are completed; §20.7
 below is the current Phase-9 baseline in the meantime.
 
 **Model-editor unification design:**
@@ -51,7 +51,7 @@ and source-model backends, and the explicit source-selection/native-waist
 handoff. It is subordinate to this document's route snapshot and registered
 action contract: public `beforeinput` remains notification-only, the selected
 Radiant-template action runs afterwards, and the common gate alone emits the
-post-action `input` (D7.2.5, D7.5.3). The ambient runtime
+post-action `input` (D10.2.1, D9.5.6). The ambient runtime
 `set_selection` callback is retired; model selection completes through a
 revisioned `EditResult` or `dom.finish_model_edit` on the declared
 `radiant-dom` waist.
@@ -105,7 +105,7 @@ selects at most one action owner for a transaction. Other matching observers
 may inspect the transaction through the gate, but they are not action
 handlers. Under Phase 9, the Lambda DOM package is the built-in UA action
 owner whenever author or model-owned code has not canceled or claimed the
-edit (D7.2.5).
+edit (D10.2.1).
 
 Two built-in action handlers are introduced:
 
@@ -157,7 +157,7 @@ path.
 Radiant will provide `document.execCommand`, `queryCommandSupported`,
 `queryCommandEnabled`, `queryCommandState`, `queryCommandIndeterm`,
 `queryCommandValue`, and `designMode` through thin host bindings whose policy
-and implementation live in the Lambda DOM behavior package (D7.2.5).
+and implementation live in the Lambda DOM behavior package (D10.2.1).
 Formatting, links, block
 transformation, history, clipboard commands, and the equivalent keyboard or
 `beforeinput` intents share one package command registry and operation model.
@@ -199,7 +199,7 @@ requirements.
     code after the new gate reaches its end-to-end cutover; do not leave two
     competing transaction paths.
 13. Make the applicable automated WPT contenteditable/editing suites and the
-    pinned Chromium editing corpus green conformance gates (D1.10, D7.3.5).
+    pinned Chromium editing corpus green conformance gates (D1.10, D9.4.5).
 
 ## 3. Non-goals
 
@@ -212,7 +212,7 @@ requirements.
 - Do not require bare npm package resolution for the first compatibility
   milestone. Checked-in test bundles are sufficient.
 - Do not restore a monolithic native rich-text editor. The full UA engine is a
-  Lambda package over generic native DOM mechanisms (D7.2.5, D7.5.3).
+  Lambda package over generic native DOM mechanisms (D10.2.1, D9.5.6).
 - Do not make event recording depend on the chosen editing handler.
 - Do not encode command names, list/table policy, normalization, or editing
   history in C/C++.
@@ -653,7 +653,7 @@ synchronous listener mutation through the mutation epoch. It then validates
 the retained host, canonical surface, and immutable target ranges: unrelated
 observational mutation may proceed, while replacement, detachment,
 cross-surface retargeting, or invalid ranges fail closed without running an
-action or selecting a new owner (D7.2.5, D7.5.3).
+action or selecting a new owner (D10.2.1, D9.5.6).
 
 Both notification functions target the retained editing host and use the
 standard DOM propagation path. The post-notification carries the same
@@ -816,7 +816,7 @@ Callers break out of later event handling only when:
 
 > This section records the limited first-gate handler. Its transaction
 > ordering and DOM invariants remain; its intentionally narrow operation set
-> is superseded by the full Lambda-package UA engine in §20 (D7.2.5).
+> is superseded by the full Lambda-package UA engine in §20 (D10.2.1).
 
 The web-platform baseline is
 [Input Events Level 2](https://www.w3.org/TR/input-events-2/): a user agent
@@ -1103,7 +1103,7 @@ Lambda editor, CodeMirror, ProseMirror, or a simple contenteditable element.
 
 > This section records the first-gate compatibility boundary. Phase 9 removes
 > its command, structural-default, history, paste, and ShadowRoot exclusions;
-> the current target and gates are §20.5–§20.10 (D7.2.5).
+> the current target and gates are §20.5–§20.10 (D10.2.1).
 
 ### 13.1 Boundary: a DOM capability set, not an editor API
 
@@ -1520,7 +1520,7 @@ fixture, or replay schema depends on the transitional dispatch path.
 
 Phase 9 supersedes the first gate's intentionally limited default action and
 legacy-command exclusions. The detailed design, work breakdown, and exit gate
-are in §20 (D7.2.5).
+are in §20 (D10.2.1).
 
 ---
 
@@ -1593,7 +1593,7 @@ allowed. Mutation that detaches/replaces the owner or invalidates/crosses its
 target ranges stops before action dispatch and emits no `input`; routing is
 never repeated. A Selection-only change is observable through its revision but
 does not retarget the snapshotted action. This preserves normal UA observation
-while preventing stale capability use (D7.2.5, D7.5.3).
+while preventing stale capability use (D10.2.1, D9.5.6).
 
 ### Q3. What is the JavaScript action-registration API?
 
@@ -1698,7 +1698,7 @@ but none remains an implementation authority.
 | Record | Historical decision | What the current design retains / rejects |
 |---|---|---|
 | **CE1** — *Radiant `contenteditable`* (2026-05-19) | Defined the DOM editable-host layer shared by Lambda `edit <…>` templates and JavaScript: standard `contenteditable` modes, focus, `beforeinput` / `input`, composition, clipboard, drag/drop, `inputmode`, `enterkeyhint`, and a curated WPT baseline. It deliberately left source or DOM mutation to the editor consumer and rejected `execCommand`, `queryCommand*`, and `designMode`. | Retain the standard-host, Selection/Range, event-payload, and platform-input requirements. Refine the original consumer dispatch into this document's one editing gate and registered action-owner model. The earlier `data-editable` routing discussion is retired. |
-| **CE2** — *execCommand, Chrome corpus, WPT baseline* (2026-06-15) | Reversed CE1's legacy-API decision. It proposed a built-in native default-action engine for `execCommand` / `queryCommand*` / `designMode`, plus history and a Chromium `editing/` corpus as the primary compatibility program. Its intended event envelope remained `beforeinput` → mutation → `input`. | Phase 1 rejected both the native engine and the legacy API. Phase 9 now restores the full UA and command/query goals while retaining the crucial ownership correction: algorithms live in the Lambda DOM behavior package; native Radiant supplies only the common gate and generic DOM mechanisms (D7.2.5). |
+| **CE2** — *execCommand, Chrome corpus, WPT baseline* (2026-06-15) | Reversed CE1's legacy-API decision. It proposed a built-in native default-action engine for `execCommand` / `queryCommand*` / `designMode`, plus history and a Chromium `editing/` corpus as the primary compatibility program. Its intended event envelope remained `beforeinput` → mutation → `input`. | Phase 1 rejected both the native engine and the legacy API. Phase 9 now restores the full UA and command/query goals while retaining the crucial ownership correction: algorithms live in the Lambda DOM behavior package; native Radiant supplies only the common gate and generic DOM mechanisms (D10.2.1). |
 | **CE3** — *structural Chrome editing corpus plan* (2026-06-18) | Turned CE2's imported Chromium corpus into a broad structural conformance roadmap: a faithful legacy harness, sample-tree selection serialization, a general edit-operation planner, DOM normalization, and capability-by-capability promotion. | The old native conformance lane remains retired. Phase 9 reuses the pinned Chromium corpus as a package-UA conformance gate, never as justification for restoring C++ editing policy. Already-derived `test/editor-js/test/tier_f_chromium` fixtures remain a distinct editor-model suite. |
 
 **Resulting direction.** CE1 identified the durable shared substrate. CE2 and
@@ -1707,7 +1707,7 @@ to native Radiant. Phase 1 corrected that ownership and proved the common gate;
 Phase 9 completes the UA surface in Lambda. The design therefore keeps one
 gate, sends `beforeinput` and `input` as notifications around one chosen action
 owner, and uses standard `contenteditable` plus existing template ownership to
-select the model-first template or package-owned UA route (D7.2.5).
+select the model-first template or package-owned UA route (D10.2.1).
 
 ### 17.3 Delete after the corresponding cutover
 
@@ -1722,7 +1722,7 @@ select the model-first template or package-owned UA route (D7.2.5).
 | `dispatch_rich_consumer_transaction_operation()`, `dispatch_rich_consumer_transaction()`, and `dispatch_rich_transaction_defaultable()` | delete after call-site conversion | keyboard, text, composition, clipboard, drag/drop, automation, and replay use one contenteditable consumer-gate entry that snapshots the registered action |
 | `RichDefaultTransactionArgs` and its unused fallback view/offset plumbing | delete | the selected target range and canonical DOM Selection are the mutation inputs |
 | `JsDomTestdriverMutationArgs`, inert `js_dom_testdriver_rich_mutate()`, and the testdriver's hand-built `EditingTransaction` in `lambda/js/js_dom.cpp` | delete | synthetic keys enter the same platform/automation event path as end-to-end editor input; the testdriver no longer pretends to provide a native edit callback |
-| native `document.execCommand`/`queryCommand*` command tables or mutation bodies | replace with thin package dispatch | public bindings remain, but all command lookup, enabled/state/value decisions, mutation, normalization, and history belong to the Lambda DOM behavior package (D7.2.5) |
+| native `document.execCommand`/`queryCommand*` command tables or mutation bodies | replace with thin package dispatch | public bindings remain, but all command lookup, enabled/state/value decisions, mutation, normalization, and history belong to the Lambda DOM behavior package (D10.2.1) |
 | `test/ui/editor4b/phase3-no-native-edit.json` as a marker-era regression | replace, then delete | a new gate fixture proves route selection, one action owner, no implicit default, and structured outcome without referring to `data-script-edit` or the deleted native engine |
 | `test/ui/_retired_native_editing/` | already deleted with the native-engine retirement; do not recreate it | active tests cover retained event payloads, Selection/Range, clipboard, composition, and observer behavior; no test expects the retired browser-rich algorithms |
 | old `test/editing` CE3 runner wiring | keep retired | Phase 9 may expose the same pinned, read-only Chromium corpus through new package-UA runner wiring, but it must not restore the native structural-editing test path; derived `test/editor-js/test/tier_f_chromium` fixtures remain a distinct editor-model suite |
@@ -1826,7 +1826,7 @@ Before creating a native primitive, search for existing static helpers and
 promote reusable functions to the appropriate module header. Default editing
 operations must not be duplicated between `event.cpp`, the DOM waist, and the
 Lambda package. Command behavior is added only in the Lambda DOM behavior
-package (D7.2.5).
+package (D10.2.1).
 
 ---
 
@@ -1879,8 +1879,8 @@ compatibility” box without changing the single-owner gate around it.
 Phase 9 implements a browser-compatible user-agent editing action for plain
 `contenteditable` and `designMode`. The action is a shipped behavior of the
 Lambda DOM package, not native Radiant policy and not an application editor.
-This is the binding design for D7.2.5 and follows the package/runtime boundary
-in D7.2.1–D7.2.3 and the explicit Lambda-to-Radiant contract in D7.5.3.
+This is the binding design for D10.2.1 and follows the package/runtime boundary
+in D9.3.1–D9.3.3 and the explicit Lambda-to-Radiant contract in D9.5.6.
 
 “Full UA support” has a conformance meaning rather than a promise to copy one
 browser's internals:
@@ -1934,7 +1934,7 @@ the equivalent generic operations. The policy must not be copied while it is
 moved.
 
 Package state is per document and is reached through the document's package
-context, as required by D7.2.1. Mutable command state, typing marks, or history
+context, as required by D9.3.1. Mutable command state, typing marks, or history
 must not be stored in process-global or module-global state.
 
 ### 20.3 One gate, two public entry points
@@ -2112,7 +2112,7 @@ contract, independent per-surface timelines, atomic Radiant DOM-waist API,
 coalescing rules, and the 256-entry-per-timeline/16-MiB-per-document pruning
 policy. It also proposes bringing `<input>` and `<textarea>` into the same
 package-owned architecture. That expansion is not required by, and does not
-replace, the implemented `contenteditable`/`designMode` history in D7.2.5;
+replace, the implemented `contenteditable`/`designMode` history in D10.2.1;
 the existing form-control boundary in §20.5 remains the current ruling.
 
 UA history is a per-document package service. Every applied `EditPlan` records
@@ -2147,7 +2147,7 @@ that have gone stale.
 
 ### 20.8 Native waist and package loading requirements
 
-The Lambda-to-Radiant waist is explicit and reviewable under D7.5.3. Its API
+The Lambda-to-Radiant waist is explicit and reviewable under D9.5.6. Its API
 is grouped by mechanism—range validation, tree mutation, selection mapping,
 mutation epoch, invalidation—not by command. Every exported primitive must:
 
@@ -2158,7 +2158,7 @@ mutation epoch, invalidation—not by command. Every exported primitive must:
 4. queue ordinary observer records and rendering invalidation;
 5. return structured failure without applying command fallback policy.
 
-The package is loaded as a normal shipped script package under D7.2.1–D7.2.3.
+The package is loaded as a normal shipped script package under D9.3.1–D9.3.3.
 Initialization failure is a document/runtime error and cannot silently fall
 back to native editing policy. Package dispatch is synchronous for Phase 9;
 no plan or borrowed DOM handle survives an `await`.
@@ -2168,7 +2168,7 @@ Its sources currently live under `lambda/dom`, while `import dom`
 already names the built-in mechanism module. When the old `lambda.*`
 paths are migrated, the behavior package must receive a distinct,
 non-colliding package path; it must not shadow or dual-resolve the built-in
-module (D7.2.4).
+module (D9.3.4).
 
 The native gate remains responsible for logging and replay. Logs identify the
 package command/intent, descriptor version, selected action owner, plan/result
@@ -2292,7 +2292,7 @@ later behind an exclusion because another group is difficult.
 The final automated gate permits zero unexpected failures, crashes, hangs, or
 timeouts. A platform-unavailable case is counted separately and must have a
 focused Lambda-side test for every product behavior that can be exercised
-without that external service. D7.3.5 requires these gates for the shipped
+without that external service. D9.4.5 requires these gates for the shipped
 package; package unit tests alone are insufficient.
 
 ### 20.11 Phase-9 exit criteria
@@ -2315,7 +2315,7 @@ Phase 9 is complete only when all of the following hold:
    stale-handle, and GC-rooting tests;
 8. CodeMirror, ProseMirror, Editor.js, Radiant template editing, form controls,
    logging/replay, and mutation/selection/layout regressions remain green;
-9. the active implementation and developer docs agree with D7.2.5 and this
+9. the active implementation and developer docs agree with D10.2.1 and this
    section, and superseded Phase-1 exclusions are no longer presented as
    current limitations.
 
@@ -2330,3 +2330,32 @@ Phase 9 is complete only when all of the following hold:
 | Re-entrancy or allocation invalidates DOM handles | synchronous plans, mutation-epoch validation, per-document state, and precise rooting across every waist call |
 | Harness support is mistaken for product support | harness mutation/emulation audit in UA-0 and no-emulation CI assertions |
 | Corpus size hides regressions | capability-family promotion, focused package tests before corpus promotion, deterministic seeds, and zero unexpected crash/hang policy |
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](../impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D7.2.5 → D10.2.1
+
+**D10.2.1*** **Full user-agent editing policy belongs to the shipped Lambda
+DOM behavior package, never to Radiant's native implementation.** Radiant
+owns the platform-input gate and standard DOM mechanisms—editing-host
+recognition,
+events, Selection/Range, clipboard/composition transport, observation,
+geometry, and checked generic DOM mutation primitives. The behavior package
+(currently sourced under `lmd/package/dom`) owns uncanceled
+`contenteditable` default actions, structural normalization, editing
+history, `designMode`, and the complete
+`execCommand`/`queryCommand*` compatibility surface. User input and legacy
+commands lower through one package operation model, so cancellation,
+command state, mutation, history, and selection cannot drift between entry
+points. Its conformance gates are the applicable automated WPT
+contenteditable/editing suites and the pinned Chromium editing corpus.
+[D9.3.1–D9.3.3, D9.4.5, D9.5.6; Radiant_Design_Editable §20]

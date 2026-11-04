@@ -280,7 +280,7 @@ fn selected_preview(file) any^ {
       else { pdf.pdf_to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PDF"> } }
     }
     else if (is_latex_document(file["extension"])) {
-      // Parse through the package so the TeX engine sees its adapter registry (D7.2.7);
+      // Parse through the package so the TeX engine sees its adapter registry (D10.2.2);
       // the selected file's path also resolves local packages, bibliographies and images.
       let parsed = latex.parse_file(selected_path)
       if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }

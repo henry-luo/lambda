@@ -377,12 +377,12 @@ Marking unconditionally broke two corpus scripts: scalar place copies
 read-and-return helpers (`rbt_get`'s `var v = n[NV]`) share-marked every
 value they handed out, detaching the callers' borrows (cd2_orig).
 
-**CW24v3 (RULED 2026-09-16, user; IMPLEMENTED same day; D4.4.6).** Refinement
+**CW24v3 (RULED 2026-09-16, user; IMPLEMENTED same day; D5.4.5).** Refinement
 (b) asked the wrong question. An unmutated place copy is observationally a
 copy only while nothing writes the *place*; gate (b) never looked at the place.
 So `let old = r.kid; r.kid.n = 7; print(old.n)` printed `7` on both tiers in
-every archived release back to Result42 (S9.1.2 violated; D4.4.1's "false
-unique is a semantic bug"). The borrow-work of D4.4.4/CW34/CW36 relies on the
+every archived release back to Result42 (S9.1.2 violated; D5.4.1's "false
+unique is a semantic bug"). The borrow-work of D5.4.4/CW34/CW36 relies on the
 leaf's share bit for exactly these aliases, so no borrow analysis was sound on
 top of it. The corrected gate marks at bind iff **the place may be written
 while the copy is alive**, decided statically per binding at FUNCTION_END:
@@ -397,7 +397,7 @@ Neither condition fires for the shapes (b) protected: a scalar copy has no
 container to mark, and a read-and-return helper (`rbt_get`) has no root write
 in the copy's range and its copy dies in the frame. Returning the *node itself*
 now marks, which is the required semantics, not a lost optimization. The
-monotonic bit (D4.4.1) is untouched; a scoped/counted mark stays the recorded
+monotonic bit (D5.4.1) is untouched; a scoped/counted mark stays the recorded
 follow-up if the static rule proves too conservative on a measured row.
 
 *Conformance follow-up (T28-8, same day).* Condition 1's oracle did not look

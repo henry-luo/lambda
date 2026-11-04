@@ -20,13 +20,13 @@ remain linked to that input; this proposal specifies scripts first and reserves
 the same identity and ownership model for future input-document artifacts.
 
 **Formal linkage:** D1.7 (source remains the distributed form), D1.8 and
-D5.4.3 (no context-dependent value at a code-baked address), D4.2.3 (every
-allocator has a named context owner), D7.1.2 (I/O versus derived-artifact
-layering), D7.2.2–D7.2.3 (transactional module initialization and in-process
-import caching), D8.1.3v10 (retained LambdaJS AST and explicit AST tier),
-D8.4.1v2 (immutable generated code), D7.1.2v2 (I/O and opaque-artifact
-layering), D8.5.1v7 (the persistent executable-script cache and global
-static-module future registry), and D8.1.1v12/D8.5.1v6 (parallel satellite
+D6.4.3 (no context-dependent value at a code-baked address), D5.2.1 (every
+allocator has a named context owner), D9.1.2 (I/O versus derived-artifact
+layering), D9.3.2–D9.3.3 (transactional module initialization and in-process
+import caching), D8.4.1 (retained LambdaJS AST and explicit AST tier),
+D7.4.1 (immutable generated code), D9.1.2 (I/O and opaque-artifact
+layering), D8.3.5 (the persistent executable-script cache and global
+static-module future registry), and D8.3.4/D8.3.4 (parallel satellite
 publication).
 This proposal records the 2026-09-13 policy decisions in §15; formal rulings
 are kept synchronized as implementation lands.
@@ -177,7 +177,7 @@ This distinction is mandatory:
   objects, module registries, DOM wrappers, timers, and prototype state remain
   execution-owned.
 
-D1.8, D5.4.3, and D8.4.1v2 require this split. Generated code is immutable;
+D1.8, D6.4.3, and D7.4.1 require this split. Generated code is immutable;
 all context-dependent mutable state must have a named per-instance owner.
 
 ---
@@ -232,13 +232,13 @@ another language.
 
 ### 5.1 Layering reconciliation
 
-D7.1.2 places derived script/MIR artifacts above the I/O layer. The adopted
+D9.1.2 places derived script/MIR artifacts above the I/O layer. The adopted
 interpretation is that `InputManager` owns persistent `ScriptInput` records
 and opaque artifact handles, while the LambdaJS/Lambda/guest adapter remains
 the source of the artifact type and finalizer. `lambda/input/` therefore need
 not name `MIR_context_t` or a language AST class. This centralizes lifetime and
 lookup without moving language semantics into the I/O layer. The formal design
-records this interpretation in **D7.1.2v2**.
+records this interpretation in **D9.1.2**.
 
 ---
 
@@ -359,7 +359,7 @@ On a MIR hit the adapter:
 
 This is the fresh-document-realm rule of `JsMirLeaseSession`, generalized to
 every script runner. It is also the requirement that makes a retained Lambda
-MIR module compatible with a fresh heap under D5.4.3.
+MIR module compatible with a fresh heap under D6.4.3.
 
 ### 8.3 No implicit tier change
 
@@ -382,7 +382,7 @@ Module **source and compilation artifacts** are cacheable. Module
 must ask the cache for a lease before parsing or compiling a module and must
 instantiate it in the current runtime's registry.
 
-The loader preserves D7.2.2: initialization is transactional. A module enters
+The loader preserves D9.3.2: initialization is transactional. A module enters
 the current runtime's import registry only after its current instantiation
 succeeds; a failed initialization never publishes a partially established
 module. Circular-import detection is likewise an execution-graph state, not a
@@ -537,7 +537,7 @@ and `A -> D -> C` use one `C` build without either a depth batch barrier or a
 whole-closure wait. Cycle detection completes the affected prebuild future as
 failed; the established ordinary loader retains its own cycle handling and
 diagnostics. Module initialization, execution state, and MIR remain with the
-receiving runtime. [D8.1.1v13, D8.5.1v7]
+receiving runtime. [D8.3.5, D8.3.5]
 
 #### Parallel P2 satellite compilation (initial implementation landed)
 
@@ -602,11 +602,11 @@ worker image is discarded and pins that execution-local definition to T0, with
 no program-visible error. A Script teardown retires the queue generation and
 waits for in-flight jobs before releasing its snapshot; a cache-template clone
 never transfers an image or entry pointer to a different execution. This
-preserves D1.8, D5.4.3, D8.4.1v2, and the fresh-execution guarantee of D8.5.1.
+preserves D1.8, D6.4.3, D7.4.1, and the fresh-execution guarantee of D8.5.1.
 
 This is not general OSR. A currently active interpreted frame is never
 replaced. A later ordinary call observes a published boxed entry. Loop-header
-OSR remains a separate design problem under D8.1.1's active-frame rule.
+OSR remains a separate design problem under D8.3.1's active-frame rule.
 
 **Initial delivery boundary.** The first implementation provides the
 process-wide queue, target-definition deduplication, state machine, generation
@@ -632,7 +632,7 @@ Priority classes, dependency-cone reclamation, and an automatic high-water
 policy remain later cache-memory work.
 
 Every allocation used by a cache artifact receives a named cache context under
-D4.2.3. A cache context is neither a document context nor an execution heap.
+D5.2.1. A cache context is neither a document context nor an execution heap.
 
 ### 12.3 Failure handling
 
@@ -678,7 +678,7 @@ point and the publication order instead of depending on worker timing
 
 1. Record the resolved §15 policies in the formal design when implementation
    is authorized: persistent manager-owned `ScriptInput` artifacts and default
-   cache admission for every script. **Done:** D7.1.2v2 and D8.5.1v3 are
+   cache admission for every script. **Done:** D9.1.2 and D8.5.1 are
    ratified; v3 records managed abandoned-build recovery and bounded retention.
 2. Inventory every direct executable-source read and direct compiler `Input`
    creation; add source-class counters without changing execution. **Done:**
@@ -749,7 +749,7 @@ remain transactional.
    `JsMirLeaseSession`). The duplicate `RADIANT_JS_SOURCE_CACHE` URL-source
    LRU and its private counters are retired: remote snapshots are admitted by
    `InputManager` after the generic HTTP disk-fetch cache, as required by
-   D8.5.1v3.
+   D8.5.1.
 3. Route JS CLI and `js-test-batch` compatible preambles through the same
    adapter while retaining their explicit hot-heap policy.
 4. Retire the legacy `JsMirCache` ownership/index while retaining only the
@@ -814,7 +814,7 @@ destroyed. Runtime/context/heap/DOM/module state is never retained there.
 
 The persistent input owns opaque artifact handles and their lifetime. The
 language adapter supplies artifact operations and retains the actual type
-knowledge, preserving the D7.1.2 layer boundary described in §5.1.
+knowledge, preserving the D9.1.2 layer boundary described in §5.1.
 
 ### R2 — Default admission for all scripts (resolved 2026-09-13)
 
@@ -826,7 +826,7 @@ uses the same `ScriptInput` path. Retention is unlimited by default; an
 explicit `LAMBDA_SCRIPT_CACHE_MAX_BYTES` cap reclaims inactive entries only.
 
 This generalizes D8.5.1 beyond its former imported-module wording and is
-ratified in **D8.5.1v3**.
+ratified in **D8.5.1**.
 
 ### Implementation status — 2026-09-14
 
@@ -862,7 +862,7 @@ The companion direct-read sweep classified `radiant/cmd_layout.cpp` and
 `lambda/input/` documents, `js_require` JSON/package metadata, Node/JS
 filesystem APIs, npm manifests/tarballs, and generic HTTP transfer cache as
 data or transport, not executable-language loader paths. They intentionally do
-not participate in D8.5.1v3 script admission. This is a source-level inventory
+not participate in D8.5.1 script admission. This is a source-level inventory
 proof for this tree; new executable loaders must terminate at one of the
 common-service methods above and extend this table.
 
@@ -870,7 +870,7 @@ The Lambda REPL is included in the first row: its empty bootstrap source is
 cache-admitted, but its mutable append-only AST/history remains source-only
 until the full history identity is part of an artifact key. This prevents a
 `clear` or a fresh session from mutating a template that another session can
-observe (D8.5.1v3).
+observe (D8.5.1).
 
 The reusable-artifact slice now includes Lambda interpreter import/view
 overlays and JIT module cones. A cached T0 parent creates fresh Script shells
@@ -882,7 +882,7 @@ owner/slot rather than writing resolution state into a cached `NameEntry`.
 P2 promotion counters and boxed satellite entries likewise live in a
 per-`Script` overlay for cached AST instances; an execution can neither read
 an entry from a retired EvalContext nor publish one into the parser-owned
-definition (D8.1.1v2/D8.5.1v3). A P2-touched AST image is conservatively
+definition (D8.3.1/D8.5.1). A P2-touched AST image is conservatively
 excluded from later AST hits until lowering's remaining mutable facts receive
 the same overlay; this is a correctness gate, not poisoning or eviction.
 Eager JIT AST-miss reuse remains excluded because MIR lowering still mutates
@@ -923,7 +923,7 @@ retired: its replacement
 owns only batch accounting and active leases while `InputScriptCache` owns
 artifact identity and lifetime.
 
-### R3 — Stable logical compilation-unit IDs (implemented 2026-09-14; D8.5.1v3)
+### R3 — Stable logical compilation-unit IDs (implemented 2026-09-14; D8.5.1)
 
 A stable ID is required only for **reusable Lambda MIR**, not as an additional
 user-visible script identity. Today `write_fn_name_ex()` and `write_var_name()`
@@ -983,3 +983,54 @@ compilation products; recreate every execution context and mutable language
 state.** That rule satisfies the existing fresh-realm behavior, makes AST and
 MIR caching composable, and gives future hosted languages and document inputs
 one extensible entry point without sharing their semantics or lifetimes.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D8.5.1v7 → D8.5.1, D8.3.4, D8.3.5
+
+**D8.3.5*** **L1** is a persistent in-process `InputScriptCache` for
+executable script sources, including main scripts, imports, harnesses, and
+document/hosted-language scripts. Source identity uses exact bytes plus
+canonical identity, source kind, language/parser profile, and resolution
+policy; AST and optional MIR artifacts are subordinate entries. A hit
+recreates execution, heap, DOM, module, and exception state, and the default
+policy admits every successful script (`LAMBDA_SCRIPT_CACHE=off|ast|mir|all`).
+`LAMBDA_SCRIPT_CACHE_MAX_BYTES` is an optional retained-byte limit: unset or
+`0` retains without a limit, while a positive limit evicts only inactive,
+dependency-free entries in least-recently-used order. A live lease or
+dependency cone may exceed the limit and records retention pressure rather
+than losing an artifact it still references.
+If recovery closes a scope that owns an unfinished AST/MIR build claim, the
+common service wakes waiters and poisons that key until source invalidation.
+Static module closure prebuild is an AST-only cache producer backed by a
+process-global keyed-future registry and one bounded pool. Root discovery
+submits its static-import requests without waiting for the closure. A request
+for an existing canonical path plus language/profile receives the existing
+task future; child completion continues only direct parents, and a parent
+queues its AST build only after its direct child futures succeed. No
+dependency-depth batch barrier, whole-closure wait, or worker-side wait on a
+nested import is permitted. The ordinary Lambda and JS loaders wait only on
+the future for the direct module they are about to consume. Task identity is
+a scheduling key only: cache admission still checks exact source identity
+and parser/resolution profile before reuse. Cycle failure leaves ordinary
+loader diagnostics authoritative. Module initialization, execution state,
+and MIR compilation remain with the receiving runtime. Canonical file paths are used
+at both prebuild and runtime import boundaries, so a relative spelling
+cannot bypass the retained AST image. AUTO satellite compilation is a second
+process-wide, bounded compiler-work class. Its initial task key is Script
+execution generation plus target definition, and its output is a private,
+immutable MIR image that waits for execution-safe publication; no cache
+template or receiving-runtime state crosses that boundary. A later private
+cluster-image extension must preserve this boundary. [D8.3.4, D8.4.5]
+The cache remains source-distributed and in-process; disk/code-image caching
+stays D8.5.2–D8.5.3. L2 lazy codegen remains an approved experiment. [MC1,
+MC2]

@@ -341,7 +341,7 @@ static void stacks_release(ActivationStacks* stacks) {
     bool pooled = stack_pool_count < ACTIVATION_POOL_MAX;
     if (pooled) {
         // no live roots remain; batch trimming at GC instead of discarding a
-        // stack that a nested generator is about to acquire again (D5.1.1v3).
+        // stack that a nested generator is about to acquire again (D6.1.1).
         // preserve retained-first reuse across nested completion waves.
         if (!stack_pool_retained) {
             stacks->next_free = NULL;
@@ -556,7 +556,7 @@ static void activation_thunk(void* arg) {
     activation_sanitizer_finish(activation);
     uint64_t* slots = activation_slots(activation);
     // Every activation owns an execution boundary at its root: a fault on this
-    // stack must land on this stack, never jump to the resumer's (D5.3.6).
+    // stack must land on this stack, never jump to the resumer's (D6.3.6).
     LambdaRecoveryFrame* frame = lambda_recovery_frame_begin_for(
         (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
     if (!frame) {
@@ -584,7 +584,7 @@ static void activation_thunk(void* arg) {
             LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
         slots[ACTIVATION_SLOT_TRANSFER] = err2it(&activation->fault.error).item;
     } else {
-        // D5.4.1: fresh activation stacks start at depth zero, but their guest
+        // D6.4.1: fresh activation stacks start at depth zero, but their guest
         // frames must block evaluator handoff until they park or return.
         RuntimeExecutionScope execution_scope;
         Item result = activation->entry(activation,
@@ -681,7 +681,7 @@ extern "C" ActivationStatus activation_resume(Activation* activation, Item input
 
     // Back on the resumer: the activation saved itself and reinstalled us.
     // The segment may be discarded below. Own a wide scalar before either
-    // compaction or completion releases its source storage (D5.1.1v3).
+    // compaction or completion releases its source storage (D6.1.1).
     Item transferred = {.item = activation_slots(activation)[ACTIVATION_SLOT_TRANSFER]};
     activation->result = lambda_item_adopt_scalar_home(transferred, &activation->result_home);
     if (activation->status == ACTIVATION_SUSPENDED) activation_note_parked(activation);
@@ -723,7 +723,7 @@ typedef struct ActivationBaseCall {
 
 // Runs on the base stack. Its own execution boundary keeps a fault there:
 // the recovery chain's other frames live on the activation's stack, and no
-// jump may cross a stack (D5.3.6v2).
+// jump may cross a stack (D6.3.6).
 static void* activation_base_call_thunk(void* data) {
 #ifndef _WIN32
     activation_sanitizer_finish(NULL);

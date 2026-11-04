@@ -1,0 +1,10 @@
+<!doctype html>
+<style>
+body { margin: 0; font: 20px/24px Arial; }
+.controls { display: flex; gap: 16px; padding: 20px; }
+button { display: flex; align-items: center; font: inherit; padding: 12px 32px;
+    border: 0; border-radius: 12px; background: blue; color: white; }
+#label:before { content: "Search"; }
+#icon::before { content: ""; display: block; width: 24px; height: 24px; background: white; }
+</style>
+<div class="controls"><button id="label"></button><button id="icon"></button></div>

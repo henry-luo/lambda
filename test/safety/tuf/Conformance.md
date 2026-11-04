@@ -1,6 +1,6 @@
 # Lambda TUF conformance qualification
 
-Authority: **D7.5.8**, with local pure-function state under **S12.1.2v3**.
+Authority: **D11.2.4**, with local pure-function state under **S12.1.2v3**.
 `../run_tuf_conformance.py` runs the official upstream client suite against the
 production Lambda Script package. `conformance.json` pins the upstream suite
 and libfaketime commits and the expected 119-case inventory. No expected-failure

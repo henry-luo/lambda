@@ -20,7 +20,8 @@ pn main() {
         Unsigned: 18446744073709551615u64, Real: 0.1, Tiny: 1e-7,
         Huge: 1e21, Sized: 0.5f32, Plain: -42})^;
     let source = {A: 1, B: 2};
-    let spread = encode({*:source, A: 3, C: 4, *:{B: 5, D: 6}, A: 7})^;
+    // S2.3.1v2: the final generated override replaces A without a second field.
+    let spread = encode({*:source, A: 3, C: 4, *:{B: 5, D: 6}, ['A']: 7})^;
     var row: Row = dynamic({count: null, wide: 9223372036854775807i64, enabled: false});
     let typed = encode(row)^;
     let separators = <file format:'pdf', "start" {} {N: 1} "end">;

@@ -2,7 +2,7 @@
 
 These `.sty` files are Lambda's own, not vendored copies: each binds a LaTeX
 package's user commands for Lambda's TeX expansion engine, written from the
-package's manual (D7.2.7v2; `vibe/latex/Lambda_Design_TeX_Engine.md` §4). The
+package's manual (D10.2.2; `vibe/latex/Lambda_Design_TeX_Engine.md` §4). The
 engine finds them after the unmodified upstream files in the parent directory.
 They may be edited like any Lambda source; CLAUDE.md rule 16 does not apply.
 

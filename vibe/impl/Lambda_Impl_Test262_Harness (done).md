@@ -3,9 +3,9 @@
 Date: 2026-09-10. Source base: `cbd220d923b14a3bc5a4e98453565f3fcea3ea04`.
 Scope: the first four optimization items from the batch throughput analysis:
 realm lifecycle, retained canonical helper ASTs, selective C+ helpers, and
-phase/lifecycle telemetry. Implementation follows **D8.1.3v10** (retained
-Scripts in the common runtime), **D5.3.3** (precise native roots), and
-**D6.2.2v2** (real callable dispatch). No formal ruling changes.
+phase/lifecycle telemetry. Implementation follows **D8.4.1** (retained
+Scripts in the common runtime), **D6.3.3** (precise native roots), and
+**D7.2.2** (real callable dispatch). No formal ruling changes.
 
 ## Implementation
 
@@ -137,6 +137,6 @@ The template was approximately 2.38x slower and used approximately 7x more memor
 
 This experiment was reverted. The current harness uses the ordinary AST realm recycle path. The raw records are preserved in `temp/js262_realm_template_enabled.log` and `temp/js262_realm_template_disabled.log`.
 
-The result is consistent with the ownership constraints in D4.3.1 (the non-moving mark-and-sweep heap) and D5.3.3 (precise `RootFrame`/`Rooted` ownership): a snapshot can preserve realm identity, but it does not by itself define a reclaimable per-test allocation boundary.
+The result is consistent with the ownership constraints in D5.3.1 (the non-moving mark-and-sweep heap) and D6.3.3 (precise `RootFrame`/`Rooted` ownership): a snapshot can preserve realm identity, but it does not by itself define a reclaimable per-test allocation boundary.
 
 *Relocated on 2026-09-28 from the retired root `JS262_Test_Guide.md`; the maintained harness guide is `test/js262/JS262_Test_Guide.md` in the lambda-test repository. The raw logs were untracked scratch files.*

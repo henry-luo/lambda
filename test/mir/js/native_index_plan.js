@@ -1,4 +1,4 @@
-// D1.3/D8.4.1v2: a proven Number key crosses the JS semantic boundary in a
+// D1.3/D7.4.1: a proven Number key crosses the JS semantic boundary in a
 // native carrier, while partial keys and prototype-visible holes retain the kernel.
 function nativeRead(value) {
   return value[0];

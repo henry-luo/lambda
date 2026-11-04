@@ -1,5 +1,5 @@
 // Reuse distributed CMU/KaTeX faces; this is resource selection, not geometry.
-// Binary acquisition stays in Lambda IO (D7.1.2v2).
+// Binary acquisition stays in Lambda IO (D9.1.2).
 import font_files: lambda.doc.font
 
 pub let FAMILY = "Computer Modern Serif"

@@ -6,7 +6,7 @@ struct gc_heap;
 struct DomGcEventOwner;
 DomGcEventOwner* dom_broadcast_channel_event_owner(Item receiver);
 
-// declared Jube host state; listener edges are traced from the wrapper (D5.3.3).
+// declared Jube host state; listener edges are traced from the wrapper (D6.3.3).
 Item dom_broadcast_channel_create(Item name);
 void* dom_broadcast_channel_native(Item receiver);
 void dom_broadcast_channel_listeners_changed(void* channel);

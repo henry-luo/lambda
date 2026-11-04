@@ -1,4 +1,4 @@
-// Weighted text layout and SVG rendering; shipped namespace follows D7.2.4.
+// Weighted text layout and SVG rendering; shipped namespace follows D9.3.4.
 
 import radiant
 import color: .color

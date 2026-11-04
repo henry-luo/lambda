@@ -1,4 +1,4 @@
-// D2.4/D8.3.3: string admission refines len, without certifying open arrays.
+// D2.3/D7.3.3: string admission refines len, without certifying open arrays.
 pn forward_text(value) { return value }
 pn quote_text(value) { return "[" ++ forward_text(value) ++ "]" }
 pn wrap_text(value) { return "{" ++ quote_text(value) ++ "}" }

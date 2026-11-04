@@ -1,4 +1,4 @@
-// Package-owned text, deletion, composition, and plain-drop policy (D7.2.5).
+// Package-owned text, deletion, composition, and plain-drop policy (D10.2.1).
 // All mutations below use the invocation's generic range primitives; command
 // aliases and platform input both reach this one family through commands.ls.
 import dom

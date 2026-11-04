@@ -1,8 +1,8 @@
 # Word demo: object layout and arrangement
 
 **Date:** 2026-10-23  
-**Authority:** **S1.4**, **S12.1.3**, **D7.2.5** for immutable commands, source
-ownership and projection; **D4.5.1v4** for shared native paint/export ownership.
+**Authority:** **S1.4**, **S12.1.3**, **D10.2.1** for immutable commands, source
+ownership and projection; **D5.5.1** for shared native paint/export ownership.
 
 ## Core milestone
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.4, D6.2.2v2: a field arrow retains lexical this in the shared Lambda closure environment instead of consulting its caller receiver.",
+  "description": "D6.4, D7.2.2: a field arrow retains lexical this in the shared Lambda closure environment instead of consulting its caller receiver.",
   "checks": [
     {
       "in_func": "mvp_lmd_f3",

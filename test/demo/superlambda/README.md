@@ -103,7 +103,7 @@ concurrent debug builds could not replace the benchmark host.
 The physics clock runs at 25 Hz. Radiant resolves SVG font metrics only for
 `ex` lengths and uses geometric clip intersections for sprite batches, avoiding
 repeated font-directory scans and full-surface alpha-mask composites.
-The SVG resource lifetime follows **D4.2.2v2–D4.2.6/D4.5.1v4**.
+The SVG resource lifetime follows **D5.2.2–D5.2.5/D5.5.1**.
 
 A release replay of 240 separately painted frames at 1024 × 800 took 58.52 s
 before these changes and a median 5.88 s after them (three runs, about 10.0×

@@ -1,4 +1,4 @@
-// D8.1.1v14/S12.1.2v3: hot fn loops retain functional completion and colour.
+// D8.3.2/S12.1.2v3: hot fn loops retain functional completion and colour.
 fn total(n: int) float {
     var i: int = 0
     var sum: float = 0.0

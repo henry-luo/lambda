@@ -1,4 +1,4 @@
-// Side-effect-free facts for one DOM editing invocation (D7.2.5).  Command
+// Side-effect-free facts for one DOM editing invocation (D10.2.1).  Command
 // planners read this record; native mechanism must not infer policy from it.
 import dom
 

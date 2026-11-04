@@ -7,14 +7,14 @@ Finite scope: deterministic procedural replay, the native Meadow reset replay,
 and demonstrated blockers from the Eden simulation/model work. Runtime and
 palette-binding repairs are qualified below. Direct diagnosis resolved the two
 Meadow image comparisons with the explicitly approved coverage compatibility fix.
-Authority: **S1.6**, **S12.1.1v3**, **D2.4.1–D2.4.3**, **D4.3.1**,
-**D5.2.3**, **D5.3.3**, **D2.11.4**, **D4.5.1v4–D4.5.3v2**.
+Authority: **S1.6**, **S12.1.1v3**, **D2.3.4–D2.3.5**, **D5.3.1**,
+**D6.2.3**, **D6.3.3**, **D10.1.7**, **D5.5.1–D5.5.3**.
 
 ## Dynamic scalar argument ownership — LR07-50
 
 `lambda_dynamic_call` copied argument Items into precise roots, but a wide
 numeric Item could still point into the argument List's owned scalar tail.
-The List's data allocation can compact during a callback (**D4.3.1**);
+The List's data allocation can compact during a callback (**D5.3.1**);
 rooting a copied numeric Item does not give that interior payload a stable
 home. A four-argument erased call reproduced a live u64 changing from
 `4316279033673738697` to reused storage while the callee allocated records.
@@ -22,7 +22,7 @@ A direct generator call retained its key and replayed exactly.
 
 The dynamic ABI now snapshots wide scalar payloads into the caller's number
 extent before optional/rest adaptation or invocation. This uses the existing
-explicit C/host ownership helper (**D5.2.3**), preserves precise roots for GC
+explicit C/host ownership helper (**D6.2.3**), preserves precise roots for GC
 objects, and checks number-stack exhaustion. Scalar results may safely alias
 those caller-owned homes; nothing points into a temporary native array.
 No Procart random algorithm, expected result, or execution-tier override changed.
@@ -47,7 +47,7 @@ the descriptor and unconditionally tested the Item tag.
 Assignment statements now publish the post-store binding's actual carrier via
 the existing binding descriptor helper. Procedural error guards inspect boxed
 Item results; native scalar/pointer carriers cannot contain ItemError
-(**D2.4.1–D2.4.3**). Explicit assignment admission and handled-error suppression
+(**D2.3.4–D2.3.5**). Explicit assignment admission and handled-error suppression
 remain in their existing owners. No vendor code or C-text back end changed.
 
 `proc/float_assignment_descriptor.ls` calls a numerical filter through a dynamic
@@ -100,7 +100,7 @@ The user explicitly approved this graphics-provider compatibility exception to
 AGENTS.md rule 1 on 2026-10-28: “Implement and test the coverage fix.” No pixel
 tolerance, capture delay, warm-up render, context reset, expected image or
 animation/shadow disablement was introduced. Native graphics ownership remains
-**D4.5.1v4–D4.5.3v2**; no semantic ruling changed.
+**D5.5.1–D5.5.3**; no semantic ruling changed.
 
 The independent bone-palette feedback hazard found earlier remains separately
 repaired: an unskinned shadow draw must bind the white fallback instead of the
@@ -231,7 +231,7 @@ The map hash now visits sorted keys and recursively hashes field values using
 canonical numeric hashes. Map key comparison delegates to the existing recursive
 value equality. Boxed and numeric-array storage share a canonical sequence hash
 and comparison. Precise roots retain the map/array, current read and rooted key
-list across allocating reads and recursive hashes (**D5.3.3**). No stack scanning
+list across allocating reads and recursive hashes (**D6.3.3**). No stack scanning
 or graphics quota change is involved.
 
 Permanent fixtures: `test/lambda/group_map_keys.ls` covers independent map
@@ -262,8 +262,8 @@ expected image, resource quota or sample-count change was used.
 
 ## Reentrant numeric carrier proof — LR07-53
 
-2026-10-29. Authority: **D2.4.1–D2.4.3** (representation authorities and
-conversion), **D8.2.4v2** (the common AST child/index contract). No ruling changed.
+2026-10-29. Authority: **D2.3.4–D2.3.5** (representation authorities and
+conversion), **D8.2.4** (the common AST child/index contract). No ruling changed.
 
 Eden's bounded-batch ecosystem worker crashed forced JIT before `main`, while
 interpreter and AUTO passed. Reduction removes imports, tasks, handlers and
@@ -311,8 +311,8 @@ No Eden source or unrelated physics/Scene3D changes were modified.
 
 ## UI attribute buffer ownership — LR08-14
 
-2026-10-29. Authority: **D3.4.3v5/D3.4.5** (shape rebuilds),
-**D4.5.1v4/D4.5.2** (document-region ownership). No ruling changed.
+2026-10-29. Authority: **D3.4.3/D3.4.5** (shape rebuilds),
+**D5.5.1/D5.5.2** (document-region ownership). No ruling changed.
 
 Eden's landscape inset exposed a runtime `pool_free` of an arena pointer.
 The reduction needs only an element with four attribute spreads: add an int,
@@ -341,7 +341,7 @@ likewise omitted numeric attributes, including `tabindex:0`.
 The existing DOM stored-attribute seam now formats numeric Items through the
 shared `format_number` formatter and interns the resulting text with the
 existing document attribute-value store. The source Item stays numeric; callers
-receive stable document-owned text (**D4.5.1v4/D4.5.2**). SVG presentation fallback
+receive stable document-owned text (**D5.5.1/D5.5.2**). SVG presentation fallback
 uses that seam while preserving CSS declaration and animation precedence.
 No template spelling or numeric value was changed to hide the defect.
 
@@ -408,7 +408,7 @@ document-pool and Input-owned caches. Converted reads use the existing
 `dom_document_create_string` helper on the node's storage owner; publication
 back into Mark still makes/reuses an Input-owned String. A same-text read→write
 test checks that these owners cannot alias. Native documents never need a
-fabricated input merely to read an attribute (**D4.5.1v4/D4.5.2**).
+fabricated input merely to read an attribute (**D5.5.1/D5.5.2**).
 
 Both previously aborting imported-model units pass **2/2**. The expanded
 DOM attribute suite passes **4/4**, including a native document with an empty
@@ -444,7 +444,7 @@ The generic DOM text seam must not widen the Scene3D schema. Previously
 later material-color parser instead. The existing `scene3d_text` owner now
 checks the raw String/Symbol lane before using reflected text. The unchanged
 negative case, mixed typed scene and outdoor garden pass **3/3** after this
-repair; no expected diagnostic changed (**D2.4.3**, **D7.3.5**).
+repair; no expected diagnostic changed (**D2.3.5**, **D9.4.5**).
 
 Blade's three-row textarea was formerly read as absent and used the two-row
 default: 66px control height and 445px panel height. Correct numeric reflection
@@ -502,7 +502,7 @@ started but never returned. The same scene built from ordinary input on the
 host stack succeeded.
 
 Under **S12.1.1v3 / S12.1.3**, state writes remain in procedural handlers and
-projection remains pure. **D5.1.1v3 / D5.4.1** require the task's activation and
+projection remains pure. **D6.1.1 / D6.4.1** require the task's activation and
 the quiescent document host to keep their own execution ownership. A task-side
 settle now preserves the dirty render-map entry and marks the existing
 document-owned frame resource pending. The native host pump drains that flag
@@ -511,7 +511,7 @@ Embedding ancestors expose a pending child without idle document-tree scans;
 each actual drain enters its document's canonical evaluator. Direct DOM writes
 and reads retain their existing synchronous path. Ordinary input reconciliation,
 RAF requests, transaction boundaries, stack budgets and image expectations are
-unchanged. The retained resource contains no GC pointer (**D4.5.2 / D4.5.3v2**).
+unchanged. The retained resource contains no GC pointer (**D5.5.2 / D5.5.3**).
 
 The new `test/ui/template_task_reconcile` fixture generates a bounded 600-step
 pure recipe, a 40-level scene hierarchy and 400 blade instances. The preserved

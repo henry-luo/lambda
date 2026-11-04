@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3/D5.4: key snapshot and each live-property query retain rooted Items across collection.",
+  "description": "D6.3/D6.4: key snapshot and each live-property query retain rooted Items across collection.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",

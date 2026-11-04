@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.4, D8.2.6v2: the closed write inventory admits an unresolved numeric global as an array key. Keep native index stores without general indexed-property dispatch or a string-to-number key round trip.",
+  "description": "D2.4.3, D8.2.6: the closed write inventory admits an unresolved numeric global as an array key. Keep native index stores without general indexed-property dispatch or a string-to-number key round trip.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

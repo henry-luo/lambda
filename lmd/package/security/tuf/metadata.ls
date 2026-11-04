@@ -1,4 +1,4 @@
-// D7.5.8: wire/schema checks and public-key primitives; no IO or authority.
+// D11.2.4: wire/schema checks and public-key primitives; no IO or authority.
 import json: lambda.security.tuf.json
 
 pub fn invalid(message) error => error("tuf: " ++ message)

@@ -1,4 +1,4 @@
-// D3.3.3v3/S11.4.10: transformation proofs include the actual slot representation.
+// D4.3.3/S11.4.10: transformation proofs include the actual slot representation.
 type Cell = {value: int}
 type One = 1
 

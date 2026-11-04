@@ -812,7 +812,7 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
     LambdaTask* task = scheduler->all_tasks;
     while (task) {
         LambdaTask* next = task->next_all;
-        // D6.3.1: a JS microtask can only request a later Lambda macrotask.
+        // D7.5.1: a JS microtask can only request a later Lambda macrotask.
         // Once teardown starts, retained Promise reactions must become no-ops
         // rather than dereferencing the task after this record is released.
         task_handle_invalidate(task);
@@ -944,7 +944,7 @@ extern "C" LambdaTask* lambda_task_create(LambdaScheduler* scheduler,
 }
 
 extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
-    // shared-loop wakeups during another document's teardown must leave this owner's task queued (D5.4.1).
+    // shared-loop wakeups during another document's teardown must leave this owner's task queued (D6.4.1).
     if (!scheduler || scheduler->owner != context) return 0;
     LambdaTask* task = scheduler_dequeue(scheduler);
     if (!task) return 0;
@@ -1290,7 +1290,7 @@ extern "C" void lambda_task_complete(LambdaTask* task, Item result) {
     log_debug("concurrency task: completed id=%llu sequence=%llu",
         (unsigned long long)task->id,
         (unsigned long long)task->completion_sequence);
-    // D5.3.3: once complete, reachability through the handle retains the result, not the scheduler.
+    // D6.3.3: once complete, reachability through the handle retains the result, not the scheduler.
     if (task->values_rooted) {
         heap_unregister_gc_root(&task->result.item);
         heap_unregister_gc_root(&task->resume_value.item);

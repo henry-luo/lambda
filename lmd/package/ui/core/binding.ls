@@ -1,5 +1,5 @@
 // declarative actions carry data to an ancestor handler; projection never
-// writes application state or calls a procedure (S12.1.3, D7.2.5).
+// writes application state or calls a procedure (S12.1.3, D10.2.1).
 pub fn validate(binding) bool^ {
     if (binding == null or (binding is string and len(binding) > 0)) true
     else if (not (binding is map)) raise error("control: on_change must be an action name or descriptor")

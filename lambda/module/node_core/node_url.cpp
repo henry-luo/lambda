@@ -1176,7 +1176,7 @@ extern "C" Item js_usp_delete(Item name_item, Item value_item) {
     if (item_is_error(value_str)) return value_str;
 
     Item new_entries = js_array_new(0);
-    // replacement lists are not reachable from the receiver until publication (D5.3.3).
+    // replacement lists are not reachable from the receiver until publication (D6.3.3).
     roots.slot(new_entries);
     int64_t len = js_array_length(entries);
     for (int64_t i = 0; i < len; i++) {

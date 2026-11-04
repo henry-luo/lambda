@@ -3,9 +3,9 @@
 > **Status:** presenter milestones 13.1–13.5 met on the measured decks, 2026-10-07; core slide editor delivered 2026-10-25 (see below).
 > **Authorized scope:** implement [the package design](../Lambda_Pkg_Slides.md);
 > no PPTX import/export.
-> **Contracts:** D7.2.4/D7.5.3 package and host boundaries; S12.1.1v3/S12.1.3
+> **Contracts:** D9.3.4/D9.5.6 package and host boundaries; S12.1.1v3/S12.1.3
 > pure transformations and procedural event handlers; S2.6.3 element splicing;
-> D4.5.1v4/D5.3.3 ownership and precise roots; D7.2.2 boxed import entries; D2.1.3 tagged string leaves.
+> D5.5.1/D6.3.3 ownership and precise roots; D9.3.2 boxed import entries; D2.1.1 tagged string leaves.
 
 ## Editing cards and preserving unchanged content
 
@@ -26,7 +26,7 @@ surface, with the same inverse client transform as direct glyph hits. Explicit
 empty/atomic boundaries retain precedence; an editor-scoped DOM query cannot
 fall through to another surface's text. Native caret painting uses the painted
 client matrix and the shared transformed-rectangle painter, keeping its scale,
-rotation and overflow clips aligned with its text (D7.2.5/D4.5.1v4).
+rotation and overflow clips aligned with its text (D10.2.1/D5.5.1).
 
 Acceptance covers both Northstar market cards, clicks beside their short number
 lines, caret pixels, no-op/canceled edits with pixel parity and retained DOM
@@ -50,7 +50,7 @@ kept a fixed 380-by-430 viewport. The shared slide renderer now identifies a
 `content` object with one SVG root and makes that viewport fill its existing
 definite content wrapper. This reuses the percentage-sized SVG layout used by
 the drawing demo and inserted graphics. The original `viewBox`, aspect-ratio
-policy and source subtree stay intact (S1.4/D7.5.3). SVGs embedded in ordinary
+policy and source subtree stay intact (S1.4/D9.5.6). SVGs embedded in ordinary
 HTML flow keep their own dimensions.
 
 Acceptance covers shrinking during pointer capture, retained SVG identity and
@@ -58,7 +58,7 @@ paint inside the resized outline, cancellation, commit/undo/redo, inspector
 dimensions, a different editor zoom, thumbnails, save/open and presentation.
 The original live-resize replay fails before the change: the outline shrinks,
 but the SVG viewport and pixels remain at the original size. The repair belongs
-to the package projection and requires no native engine change (D7.2.5).
+to the package projection and requires no native engine change (D10.2.1).
 Verification uses `slide_graphic_resize.json` in default and JIT modes, nearby
 editor/ribbon/inline/preview replays, and the required Lambda package baseline.
 Artifacts are under `temp/slides/resize/`.
@@ -83,7 +83,7 @@ than subtracting an unscaled layout origin. Carets and composition underlines
 use the existing transformed rectangle painter, matching glyphs and selection.
 Rich editing scopes the shared text-rectangle search to its active surface and
 resolves glyph positions through that surface's CSS plane. This prevents an
-untransformed thumbnail from supplying the editor's boundary (D7.2.5/D7.5.3).
+untransformed thumbnail from supplying the editor's boundary (D10.2.1/D9.5.6).
 
 The existing text-control boundary reader is published through `dom` with a
 realm-neutral result and UTF-16 offsets. The demo resolves its entry point after
@@ -96,7 +96,7 @@ Committing an edit also exposed a retained-node reparenting failure: the Mark
 importer recursively inspected applied template children before its live UI
 identity check. That check now precedes plain Mark ownership inspection, so the
 registered editor subtree retains its identity and existing lifetime owner
-(D4.5.2). No conservative GC scanning or new ownership exception is introduced.
+(D5.5.2). No conservative GC scanning or new ownership exception is introduced.
 
 `slide_caret_placement.json` checks click offsets and pixels separately, including
 typing on each row and committing a rich-card edit. The native regression fails
@@ -118,10 +118,10 @@ A freshly rebuilt module boundary audit still rejects the existing `doc_state_re
 Right-clicking a thumbnail selects that slide and opens the existing menu host.
 Shift+F10/ContextMenu opens it for the keyboard-focused thumbnail. New, duplicate,
 delete, move up/down and present-from-here reuse the existing slide commands;
-menu construction shares ribbon items and the core slide-action rows (D7.2.5).
+menu construction shares ribbon items and the core slide-action rows (D10.2.1).
 Optional item ID prefixes keep popup controls distinct from matching ribbon and
 navigation controls. The shared menu helper measures, clamps, focuses and
-keyboard-navigates the popup (D7.5.3).
+keyboard-navigates the popup (D9.5.6).
 
 Secondary pointer/click events leave the newly opened menu intact because native
 contextmenu precedes the secondary press. Commands close it and return focus to
@@ -154,7 +154,7 @@ command, using the focused thumbnail's index when keyboard focus differs from
 the active slide. Publication restores focus to the next surviving thumbnail;
 the existing model provides undo and the last-slide safeguard. Native text
 controls and canvas object deletion retain their own keyboard contexts
-(S12.1.3/D7.2.5). `slide_sidebar_delete.json` covers these boundaries.
+(S12.1.3/D10.2.1). `slide_sidebar_delete.json` covers these boundaries.
 
 Verification: the original Delete reproducer fails before the fix. All 50
 deletion assertions pass in default and JIT modes, including repeated deletion,
@@ -168,10 +168,10 @@ The navigation panel captures thumbnail pointers on its retained scrollport.
 A movement threshold separates clicks from drags; previews preserve thumbnail
 nodes and authored data (S1.4/S12.1.3). A line shows the insertion slot. Frame
 callbacks scroll near the panel edges through the existing DOM scroll-state API
-and recompute the slot from committed thumbnail geometry (D7.5.3). Escape,
+and recompute the slot from committed thumbnail geometry (D9.5.6). Escape,
 pointer cancellation/capture loss, resizing and outside drops cancel the gesture
 and its pending frame. Capture release reuses the panel splitter's helper
-(D7.2.5).
+(D10.2.1).
 
 `reorder_slide` removes and inserts the source slide rather than swapping distant
 positions. Move up/down uses the same transformation. Committing a drop selects
@@ -199,7 +199,7 @@ shadow, while reopening remains usable. The demo already publishes `display:none
 and removes menu items. Layout suppresses the box as `RDT_VIEW_NONE`, but shared
 stacking collection classified its retained style storage as a positioned layer.
 Raster dispatch could then paint that storage as an inline element. The selected
-view retains its storage by D4.1.4v5; that lifetime does not grant paint membership.
+view retains its storage by D5.1.4; that lifetime does not grant paint membership.
 
 Signed stacking collection now skips hidden records before classification or
 descent. The positioned-child chain likewise omits suppressed records. The shared
@@ -224,7 +224,7 @@ nodes so native double-click targets survive. Actual drags still move/resize
 objects. Plain text retains its native textarea path; styled text, HTML cards
 and table cells use a retained `lambda.editor` surface. Word's styled projection
 is promoted for reuse, including model source paths and authored classes
-(D7.2.5/D7.5.3). Opaque graphic islands remain outside the editable text range.
+(D10.2.1/D9.5.6). Opaque graphic islands remain outside the editable text range.
 
 The rich editing host stays alive and is parked outside the procedural canvas
 before that canvas is replaced. Reopening uses `controller.replace` and restores
@@ -253,13 +253,13 @@ goldens pass. Visual captures retain the cards' typography and layout.
 ## Home quick actions — 2026-10-25
 
 Home starts with Undo/Redo above Save/Print. Word and Slides reuse the same
-`mod_ribbon.history_tools` builder and existing colored SVG contours (D7.2.5).
+`mod_ribbon.history_tools` builder and existing colored SVG contours (D10.2.1).
 The title bar keeps Present; Undo, Redo and Save live in Home. Slides publishes
 history availability to the ribbon controls after edits and tab changes.
 Save uses the existing deck dialog;
 Print and Ctrl/Cmd+P save slide-sized PDF pages with completed builds.
 The shared `mod_export.pdf` extracts Word's atomic PDF publication helper;
-both demos use its pending-file/rename path through Radiant (S12.1.3/D7.5.3).
+both demos use its pending-file/rename path through Radiant (S12.1.3/D9.5.6).
 Printing preserves authored data, saved state and undo history (S1.4).
 
 Acceptance covers the two-row layout, history enablement across edits/tabs,
@@ -286,7 +286,7 @@ minification. Image and glyph sampling reuse one pixel-cell intersection visitor
 glyphs include transparent space outside their bitmap in the footprint's area.
 Magnification, rotation and projective sampling retain their existing paths.
 Authored data and layout geometry remain unchanged (S1.4); retained replay keeps
-source ownership and tile coordinates (D4.1.4v5).
+source ownership and tile coordinates (D5.1.4).
 
 Acceptance: synthetic thin strokes at 1/8, 1/4 and 1/2 scale retain their coverage
 at every source phase; fractional edges have proportional coverage and identical
@@ -309,7 +309,7 @@ The left Slides panel has a draggable, keyboard-focusable vertical separator.
 Its width is a session view preference, separate from authored data and history
 (S1.4/S12.1.3). Pointer capture, width/ARIA publishing and directional key sizing
 are extracted from Finder into `test/demo/mod_splitter.ls` and reused by both
-demos (D7.2.5). Escape restores the gesture's starting width; pointer release
+demos (D10.2.1). Escape restores the gesture's starting width; pointer release
 and capture loss end it. Bounds reserve the studio's minimum width and the
 visible inspector/Animation Pane. New/Open/Undo preserve the chosen panel width.
 
@@ -333,11 +333,11 @@ All 25 relevant goldens pass, with three focused goldens also passing in JIT mod
 
 The shared player uses one 52px row of transport and presenter icons, including
 Previous. `slide/toolbar.ls` reuses `ui.dtna.icons` and emits the existing command
-attributes, accessible names, shortcut tooltips and toggle state (D7.2.5).
+attributes, accessible names, shortcut tooltips and toggle state (D10.2.1).
 Speed, slide count and jump input remain readable controls. Overflow stays in
 one horizontal scroller while Hide stays visible outside it. Full-screen changes
 retain both SVG glyphs and select them through pressed state; live handlers
-update the action label rather than replacing children (S12.1.3/D7.5.3).
+update the action label rather than replacing children (S12.1.3/D9.5.6).
 Acceptance covers icon navigation, slider input, fixed-height resize and
 hide/reveal behavior at desktop and narrow widths. Verification uses existing
 slide goldens and UI replays, focused JIT checks and the required Lambda baseline.
@@ -362,7 +362,7 @@ existing editor and player. Verification budget: focused package goldens in
 default and JIT modes, editor and pixel replays, neighboring slide replays, then
 the required Lambda baseline. No native engine change or performance claim.
 Pure transformations follow S1.4/S12.1.1v3; live DOM and frame ownership follow
-S12.1.3/D7.5.3; shared Word ribbon controls follow D7.2.5.
+S12.1.3/D9.5.6; shared Word ribbon controls follow D10.2.1.
 
 `slide/animation.ls` supplies the shared catalog, defaults and motion presets.
 The effects compiler adds deterministic blinds/checkerboard/dissolve masks,
@@ -407,8 +407,8 @@ and save/reopen/presentation of all settings. Verification budget: focused
 package/editor goldens on both tiers; editor and transition live/pixel replays;
 the required Lambda baseline at the package milestone boundary. No native paint
 engine change or performance claim is planned. Package transforms remain pure
-under S12.1.1v3; media, DOM and preview scheduling use S12.1.3/D7.5.3; shared
-ribbon widgets and the package transition catalog follow D7.2.5.
+under S12.1.1v3; media, DOM and preview scheduling use S12.1.3/D9.5.6; shared
+ribbon widgets and the package transition catalog follow D10.2.1.
 
 The shared package catalog now supplies the gallery, defaults and effect options.
 `mod_transitions.ls` owns pure authoring changes and one-transaction Apply to All;
@@ -475,12 +475,12 @@ by the required Lambda/input gates for the shared serializer and package changes
 
 `mod_insert_data.ls` owns dialog descriptors, `mod_insert_ui.ls` builds the ribbon
 and forms, and `mod_insert.ls` lowers validated settings into ordinary objects.
-Under D7.2.5, the existing Word chart, shape, SmartArt, WordArt and equation
+Under D10.2.1, the existing Word chart, shape, SmartArt, WordArt and equation
 renderers supply the graphics; Word's validation helpers are public, and its
 symbol catalog and stateless ribbon widgets are shared. Tables use the existing
 editor table command, HTML adapter and Word table style painter. No renderer or
 catalog is copied. Pure document/history changes follow S1.4/S12.1.1v3;
-procedural form, resource and screenshot work stays at S12.1.3/D7.5.3's boundary.
+procedural form, resource and screenshot work stays at S12.1.3/D9.5.6's boundary.
 
 Objects accept a map-valued `metadata` annotation, retained in compiled `source`
 and ignored by layout/paint. Insert stores its typed parameters there so ordinary
@@ -497,7 +497,7 @@ in the shared Mark printer. The printer now quotes names outside the Mark name
 token grammar, sharing that grammar's character helpers with the reader. The
 regression covers unusual map keys, namespace tags/attributes and imported SVG.
 This preserves authored data through serialization; no namespace semantics ruling
-is changed (S1.4, S16.9.3; D7.5.3 for the input/output boundary).
+is changed (S1.4, S16.9.3; D9.5.6 for the input/output boundary).
 
 Screenshot inserts accept image files or capture the current slide through
 `slide.snapshot` and the CLI renderer. Zoom uses the same rendered image path.
@@ -537,7 +537,7 @@ disabled/pressed states and accessible labels. Home changes apply to the whole
 selected text object or shape, preserving the existing object-selection model.
 Menus share the demos' focus/navigation and measured viewport-clamping policy.
 
-Under D7.2.5, `mod_text_format.ls`, `mod_shape_presets.ls` and `mod_ribbon.ls`
+Under D10.2.1, `mod_text_format.ls`, `mod_shape_presets.ls` and `mod_ribbon.ls`
 in `test/demo/` now own Word's typography rules, case conversion, palettes, shape
 presets, font options and stateless ribbon layout. Word retains its existing
 module exports through delegation. Slides calls those helpers plus the existing
@@ -547,7 +547,7 @@ public so retained slide markup uses the same placement policy as Word.
 
 `slides/mod_home.ls` adapts those pure helpers to authored elements under
 S1.4/S12.1.1v3; publication and native field/menu events remain procedural under
-S12.1.3/D7.5.3. The compiler and file format are unchanged. Structured list,
+S12.1.3/D9.5.6. The compiler and file format are unchanged. Structured list,
 highlight and vertical-alignment content is ordinary Mark/HTML, so the same
 data displays in standalone presentations. Rich runs retain their wrappers when
 case changes or newlines split into list items. Copy freezes layout-derived
@@ -576,7 +576,7 @@ The demo entry is now `test/demo/slides/slides.ls`; `lambda demo slides` opens a
 authoring application. Northstar and the three smaller decks remain independent
 `.slides` samples and retain their direct presenter entry points. The editor
 reuses the slide compiler, baseline visual sampler, HTML renderer and live player
-under D7.2.4/D7.5.3; immutable document edits follow S1.4/S12.1.1v3 and procedural
+under D9.3.4/D9.5.6; immutable document edits follow S1.4/S12.1.1v3 and procedural
 DOM handlers follow S12.1.3. No semantics or host API ruling changes are needed.
 
 The finite authoring milestone covers:
@@ -643,14 +643,14 @@ Local IDs replace inherited top-level objects; cues can target those objects.
 Theme-resolved font size/family participate in Morph compatibility. Audience
 layers and inert preview layers have separate lazy caches with instance-specific
 IDs, preserving SLD3/SLD4. All orchestration remains in the source package under
-D7.2.4/D7.5.3 and S12.1.3; no native host or formal-spec changes were needed.
+D9.3.4/D9.5.6 and S12.1.3; no native host or formal-spec changes were needed.
 
 Toolbar restore follow-up: reading the toolbar bounds immediately after changing
 `display: none` to `flex` returned the previous committed, zero-height box. The
 player therefore filled the viewport with the stage and put its restored controls
 below the window. Visibility changes now request a `slide_fit` frame; resize
 also measures after the new toolbar wrapping commits. This respects the
-post-layout geometry contract (ES30) through the existing D7.5.3 host boundary.
+post-layout geometry contract (ES30) through the existing D9.5.6 host boundary.
 `slide_toolbar_restore.json` checks button/H toggles, rapid toggles, resize while
 hidden, wrapping changes, painted toolbar pixels and a working Next button.
 
@@ -679,10 +679,10 @@ merged); the older progress notes below are history.
 
 | Gate | Change | Evidence |
 |---|---|---|
-| Computed font-family ownership | Joined family lists are canonical per view tree (`view_tree_canonical_font_family`); equal lists share one tree-lifetime string, so inherited/copied borrowers stay valid (D4.5.1v4) | 100-target opacity reproducer holds view-pool live bytes flat over 60 callbacks (was +3.4 KB/frame, +5.2 KB/frame with a family list) |
+| Computed font-family ownership | Joined family lists are canonical per view tree (`view_tree_canonical_font_family`); equal lists share one tree-lifetime string, so inherited/copied borrowers stay valid (D5.5.1) | 100-target opacity reproducer holds view-pool live bytes flat over 60 callbacks (was +3.4 KB/frame, +5.2 KB/frame with a family list) |
 | Other view-pool growth | Motion lists resolve in a per-call scratch pool; `line-height: normal` is one static value; selector queries/matchers use call scratch and `selector_matcher_destroy` frees; retired registry records are freed on slot recycle | Same reproducer flat; 20-round navigation holds document and view pools flat with collection |
 | Wrapper-stranded detached DOM | SLD6 idle-time collection: the lifecycle registry charges wrapper-only rejected candidates once, and an idle point collects when 64 KB is newly stranded | 20-round navigation: zero collections and +3.7 MB before; a bounded 120–560 KB document-pool band with six idle collections after |
-| Published-fragment / navigation retention | SLD1–SLD5: decks are `.slides` files presented by the `slides` transform; a slide renders once, on first view, and later navigation changes only state (D2.9.3) | 20-round two-slide navigation holds Input 92,480 B, document pool ~130 KB and view pool ~53 KB flat after warm-up (was +17.5 KB Input per round, never reclaimable) |
+| Published-fragment / navigation retention | SLD1–SLD5: decks are `.slides` files presented by the `slides` transform; a slide renders once, on first view, and later navigation changes only state (D10.1.3) | 20-round two-slide navigation holds Input 92,480 B, document pool ~130 KB and view pool ~53 KB flat after warm-up (was +17.5 KB Input per round, never reclaimable) |
 | Per-frame cost | One host style context per inline-SVG paint pass; a paint-only commit for presentation `opacity`/`transform` turns; inline-SVG layers keyed on content (`style_content_epoch`, `doc_state_content_version`) and folding a uniform stage scale (RAD_14 §4.4, RAD_16 §8) | Release timing below: turn + paint p50 and p95 under 16.67 ms at both viewports on a quiet machine |
 
 Release timing: Apple M4, `temp/slide/perf_mixed.ls` (100 simultaneously
@@ -748,23 +748,23 @@ The toolbar now includes a 0.5×–4× speed slider with a multiplier readout.
 Lambda owns rate changes and clock reanchoring for cues, transitions and dwell,
 including paused playback. Restart and navigation retain the rate. The native
 input behavior supplies pointer/keyboard stepping through the existing DOM
-package; no slide-specific host operation is added (S12.1.1v3/S12.1.3, D7.5.3).
+package; no slide-specific host operation is added (S12.1.1v3/S12.1.3, D9.5.6).
 Forced collection exposed a borrowed synthetic event-name string in
 `dom_engine_dispatch_event`: creating the nested input event could reclaim its
 name before dispatch copied it, suppressing author input delivery. The bridge
-now roots both target and name throughout dispatch under D5.3.3. The same
+now roots both target and name throughout dispatch under D6.3.3. The same
 forced-GC reproduction passes after that ownership fix.
 
 The range-thumb correction fixes layout restoring the authored `value="1"`
 after input changed the live value. Range initialization now reads an existing
 live value without creating state for untouched HTML defaults. Input commit also
 gives the view document-owned value storage instead of a pointer into its stack
-buffer (D4.5.1v4). The generic input fix preserves the package boundary (D7.5.3).
+buffer (D5.5.1). The generic input fix preserves the package boundary (D9.5.6).
 The toolbar range is 0.5×–4× in quarter steps. Pixel assertions now verify actual
 thumb movement on clicks and drags, both endpoints, and persistence through
 Restart and later layout updates; value/readout assertions alone missed the bug.
 The native range thumb now uses the existing circle fill/outline helpers in
-`render_form.cpp`, preserving its size and interaction geometry (D7.5.3).
+`render_form.cpp`, preserving its size and interaction geometry (D9.5.6).
 The toolbar preview was visually checked and all 32 speed assertions still pass.
 The full Radiant baseline retains 4,031 passes / 350 partial / 4 failures; both
 HTTP setup failures pass with loopback access, leaving the existing Tetris and
@@ -803,11 +803,11 @@ the frame budget. Detailed comparisons and artifact paths are recorded below.
 | Final acceptance | Retention and timing gates open; two previously observed baseline failures remain | Repeat relevant regressions after each fix, then sequential full baselines; report remaining failures and map final evidence to proposal milestones |
 
 The next implementation task is the computed-family ownership fix. It follows
-D4.5.1v4's **“pin, gen-check, copy-as-value”** seam contract and D4.1.4v5's
+D5.5.1's **“pin, gen-check, copy-as-value”** seam contract and D5.1.4's
 **“Pool = individual allocation + individual free”** rule. Published Input
-storage requires a separate boundary audit under D4.1.3; D4.1.1v2 says tracing
+storage requires a separate boundary audit under D5.1.3; D5.1.1 says tracing
 stops at non-managed pointers. An ownership change must preserve that boundary
-and D5.3.3 precise roots. No formal ruling changes are proposed.
+and D6.3.3 precise roots. No formal ruling changes are proposed.
 
 ## Delivered package
 
@@ -827,7 +827,7 @@ embeds a chart and uses the paragraph helper.
 fictional leadership briefing. Its reusable source module supplies consistent
 layouts, cards, SVG charts/diagrams, roadmap and scorecard tables, five click
 reveals and speaker notes, using ordinary element composition (S2.6.3) and the
-existing package/host boundary (D7.2.4, D7.5.3). It needs no external assets.
+existing package/host boundary (D9.3.4, D9.5.6). It needs no external assets.
 Visual inspection exposed a missing containing box in the group's inner HTML
 wrapper: absolute children were present but Radiant omitted their zero-height
 ancestor. The package renderer now supplies relative positioning and full group
@@ -850,7 +850,7 @@ static axes/legends from animated marks: a clockwise donut composed of 24 arc
 sectors, a left-to-right line/area reveal, staggered vertical bars revealed from
 the baseline, and sequential horizontal bar fills. Labels fade in after the
 data. Geometry, sequencing and easing remain Lambda authoring over existing
-clip/opacity tracks (S12.1.1v3/S12.1.3, D7.5.3); no native animation extension is
+clip/opacity tracks (S12.1.1v3/S12.1.3, D9.5.6); no native animation extension is
 needed. Percentage-sized SVGs and images also receive definite inner-wrapper
 dimensions, preserving the authored object bounds during clipping.
 
@@ -876,7 +876,7 @@ Manual navigation cancels autoplay. Readiness activation still runs only entry
 cues through `activate`. Dwell uses a separate elapsed value so completed chart
 visuals do not rewind while waiting. The reducer carries missed-frame time
 through automatic advances and parks at the final build. These changes stay
-in Lambda under S12.1.1v3/S12.1.3 and D7.5.3; no host extension is required.
+in Lambda under S12.1.1v3/S12.1.3 and D9.5.6; no host extension is required.
 
 `test_slide_playback_controls` initially checked 23 boundaries, including repeated Play,
 paused cues/transitions/dwells, manual cancellation, late frames, reduced motion,
@@ -915,7 +915,7 @@ Lambda handler path and remains unresolved.
 The subsequent thumb correction adds painted-thumb assertions: before the fix,
 the value/readout checks passed but the endpoint pixel failed because reflow
 restored the authored value. After the generic live-value and storage fixes
-(D4.5.1v4, D7.5.3), the release speed replay passes 32 assertions, including
+(D5.5.1, D9.5.6), the release speed replay passes 32 assertions, including
 dragging to both endpoints and retaining the thumb through later layout. The
 0.5×–4× toolbar range is covered by a 38-check playback reducer fixture, including
 4× completion timing. All 13 package scripts pass in both tiers (26 runs), and
@@ -980,10 +980,10 @@ Keyboard routing preserves embedded controls and modified shortcuts.
 - Imported MIR calls now pass `ITEM_MISSING_ARGUMENT` for omitted Lambda boxed
   arguments. Explicit null remains null, and cross-language calls retain their
   host ABI. This repairs the skipped-default bug exposed by `slide.compile(deck)`
-  in eager JIT mode (D7.2.2); the package does not supply a workaround.
+  in eager JIT mode (D9.3.2); the package does not supply a workaround.
 
 Behavior-handler model values now receive a precise root before the event record
-is allocated (D5.3.3). A forced-GC double-click regression reproduced a collected
+is allocated (D6.3.3). A forced-GC double-click regression reproduced a collected
 DOM wrapper with the previous binary; rooting the model fixes word selection and
 subsequent caret collapse without a JavaScript runtime. Both canonical DOM and
 projected selection assertions pass. The handler retains the rooted value through
@@ -1049,12 +1049,12 @@ edits. Building the retained-view target separately succeeds; the latest 149 tes
 `dom.presentation_style_set_property(node, property, value)` writes an owned CSS
 value at animation origin, without replacing an authored Mark attribute.
 `dom.presentation_style_clear(node)` removes the whole transient layer. Both are
-shared, realm-neutral host operations (D7.5.3). Unknown properties, invalid
+shared, realm-neutral host operations (D9.5.6). Unknown properties, invalid
 values, `!important` writes and values unsupported by the existing ownership
 copier are rejected before changing the previous sample. Same-value writes are
 no-ops. Author `!important` rules retain precedence. Recascade preserves this
 layer and authored inline declarations; node removal/document teardown use the
-existing owned declaration release path (D4.5.1v4).
+existing owned declaration release path (D5.5.1).
 
 Live sampled effects, layer transitions, Morph placement/background and SVG
 fill/stroke now use this channel. Viewport sizing remains an authored style
@@ -1080,12 +1080,12 @@ and reduced-motion Morph fixtures pass.
 A separate release retention probe found that first buffers of temporary runtime
 arrays used the document arena whenever UI mode was active. Allocation now
 selects that arena only when it owns the collection header; explicit Input
-construction retains its existing allocation path (D4.1.1v2, D4.3.1). Native
+construction retains its existing allocation path (D5.1.1, D5.3.1). Native
 regressions verify a GC array survives collection with its heap-owned buffer and
 an arena Element retains an arena buffer. All 83 GC tests pass.
 
 Event source-position/selection snapshots now use ordinary GC maps and arrays,
-with exact roots during construction (D4.1.1v2, D5.3.3). Existing source-schema
+with exact roots during construction (D5.1.1, D6.3.3). Existing source-schema
 builders initialize private immutable seeds once per document. The delivery
 fixture retains a selection snapshot across later frames and checks its schema
 and values. All nine assertions pass normally and with `LAMBDA_GC_FORCE_EVERY=1`.
@@ -1106,7 +1106,7 @@ retains the whole batch, rather than to suppress a regression.
 Repeated inline attribute add/remove operations exposed unpublished shape
 drafts retained in Input's arena and transition steps retained in its pool.
 MarkEditor now owns a lazy draft arena and releases it at destruction. Persistent
-types and pooled keys retain their established owners (D3.4.3v3, D4.1.4v5).
+types and pooled keys retain their established owners (D3.4.3, D5.1.4).
 A 256-cycle regression checks exact warm-state arena/pool bounds and surviving
 attributes; all 55 MarkEditor tests pass. Reconcile selector matchers now use
 caller-owned storage through the shared initializer; release profiling had
@@ -1142,7 +1142,7 @@ precede the growing journal, which removes the 64-record overflow fallback.
 Retention is still open. Before array ownership was fixed, Input grew by
 roughly 57 KB per frame; transient event metadata then accounted for 640 bytes
 per frame. Both ordinary-frame growth sources are fixed without omitting fields
-or rewinding published data (D4.1.4v5, D5.3.3). The event-snapshot release probe
+or rewinding published data (D5.1.4, D6.3.3). The event-snapshot release probe
 at 1280 × 720 records Input 431232 → 431264 bytes (the final parked diagnostic
 write), node arena 496 → 496, and two reused frame slots. Turn p50/p95 is
 18.711/20.330 ms, with paint excluded.
@@ -1162,7 +1162,7 @@ resolver. Ordinary-frame commit growth is zero. The per-node audit logging was
 removed after attribution.
 
 DOM attribute writes now reuse equal immutable values in a document-owned index
-whose strings stay in the same Input arena (D4.1.1v2, D4.1.4v5). This does not
+whose strings stay in the same Input arena (D5.1.1, D5.1.4). This does not
 free published strings or put arbitrary values into NamePool. The index is
 released at document teardown and is keyed by the owning Input. A regression
 checks 256 alternating visibility/inert writes, exact warm Input bounds and an
@@ -1200,7 +1200,7 @@ counts/live/cold bytes and evictions. None of these navigation numbers satisfy
 the retention criterion.
 
 Fragment parsing bypassed the private token arena already used by full-document
-HTML parsing. It now uses the same begin/recycle/end helpers (D4.1.4v5), while
+HTML parsing. It now uses the same begin/recycle/end helpers (D5.1.4), while
 published Mark values keep their original owner. The new 1000-element fragment
 regression checks a bounded token footprint, published attributes and continuation
 after token scratch release. The 20-round navigation probe still passes 40
@@ -1254,14 +1254,14 @@ not released when its extension retired. The new lifetime regression fails with
 the old library and passes after the missing release. Pinned detached nodes keep
 their snapshot; retirement releases it. A 1,024-retirement warm run preserves the
 same live-pool footprint. All 152 retained-view cases pass. This changes ownership
-at retirement only (D4.5.1v4); snapshots still survive relayout. A new release
+at retirement only (D5.5.1); snapshots still survive relayout. A new release
 20-round navigation run passes 40 assertions and records Input
 1514032 → 36235088, DOM 2995118 → 25465587 and view 728664 → 385294 bytes.
 Whole-session retention remains unbounded.
 
 Transition tracks now grow in a separate document-pool array. The DOM owner
 header defines the snapshot storage so retirement releases both that array and
-the outer state without depending on Radiant's track implementation (D4.5.1v4).
+the outer state without depending on Radiant's track implementation (D5.5.1).
 The pinning and retirement plateau regressions allocate actual dynamic tracks
 and check their lifetime as well as the outer snapshot.
 
@@ -1269,7 +1269,7 @@ Handler execution previously enabled UI allocation for its entire duration, so
 temporary elements constructed only to format HTML became fat nodes in the retained
 Input arena. Allocation is now scoped: handlers use runtime GC ownership, and
 template retransform enables the retained output arena only while producing its
-render result (D4.1.1v2, D4.5.1v4). Nested scopes restore the prior context and
+render result (D5.1.1, D5.5.1). Nested scopes restore the prior context and
 thread-local input owner. A four-callback probe constructs and formats 1,000 nested
 elements per callback without inserting them. Previously Input grew by 1,056,000
 bytes per callback; the changed release keeps it at 6,816 bytes across all four.
@@ -1287,9 +1287,9 @@ The retained-wrapper failure comes from a plain GC element created by a handler
 and then borrowed by a native DOM wrapper. After the model replaces the element,
 the registry’s untraced backing pointer allowed GC to reclaim and reuse its
 address. The registry now owns a stable precise Item root for managed backing
-sources only (D4.1.1v2, D5.3.3). Attached and wrapper-pinned detached nodes retain
+sources only (D5.1.1, D6.3.3). Attached and wrapper-pinned detached nodes retain
 that root; retirement releases it. Runtime teardown releases all remaining roots
-before destroying the heap. Parser/Input values remain outside GC (D4.1.3).
+before destroying the heap. Parser/Input values remain outside GC (D5.1.3).
 The root-only candidate passes all nine retained-wrapper assertions under explicit
 forced GC and poisoning, plus a tenth assertion in an extra HTML serialization
 probe. Three native tests pass: pinned survival/unpinned collection, 1,024
@@ -1299,7 +1299,7 @@ teardown. The full native ownership executable passes 155/155 with that candidat
 A separate native test then exposes a second ownership issue: the rooted source’s
 content buffer moves during GC, while the copied DOM Element header still holds
 its old pointer. The before-fix test fails with distinct source/borrower addresses.
-The refresh fix follows D4.3.1’s single-owner compaction contract:
+The refresh fix follows D5.3.1’s single-owner compaction contract:
 `dom_element_to_element()` reloads borrowed data/content pointers from the rooted
 source on access. Per-buffer pointer identity detects when a DOM edit has installed
 independent storage and ends that borrow. A node flag keeps ordinary Input-backed
@@ -1322,13 +1322,13 @@ were withdrawn. Transfer now refreshes the native header before adopting it and
 inherits the physical GC owner when registering the destination record. Returning
 to an earlier owner also preserves that heap. Destruction withdraws roots before
 resource callbacks, which can destroy adopted source documents and their heaps
-(D4.5.1v4, D5.3.3). All three new cases pass; the ownership suite reached 161/161.
+(D5.5.1, D6.3.3). All three new cases pass; the ownership suite reached 161/161.
 
 Three character-data cases then reproduced absent roots for detached GC-backed
 text and comments. The shared registry now accepts a backing Item: a Text node
 retains its String, and a Comment retains its source Element. Buffer refresh
 applies only to copied Element headers; String object addresses and inline bytes
-remain stable under D4.3.1/D4.3.2v2. Text mutation updates the retained value so
+remain stable under D5.3.1/D5.3.1. Text mutation updates the retained value so
 the old GC String becomes collectible. A fourth case verifies String adoption
 between separate heaps and release at retirement. All 165 ownership cases pass.
 The release candidate `temp/slide/lambda_release_character_backing` passes all
@@ -1342,15 +1342,15 @@ recurred. All layout/render gates passed. No test expectation was weakened.
 Artifacts are `temp/slide/*baseline_character_backing*` and
 `temp/slide/character_backing_*`.
 
-Published fragment storage remains an open ownership boundary (D4.1.3).
+Published fragment storage remains an open ownership boundary (D5.1.3).
 A private parser Input cannot be released merely when its DOM nodes retire:
 MarkEditor inserts its values into other Mark trees, and scripts may retain raw
 Mark values independently of DOM wrappers. Such a cohort would violate static
-Input lifetime (D4.1.2). `fn_mutable_value` is also insufficient for an owned
+Input lifetime (D5.1.2). `fn_mutable_value` is also insufficient for an owned
 transfer: it clones containers while borrowing types and scalar Strings. An
 owned-GC transfer would need stable owned type/name metadata, owned text and
 attributes, precise destination roots, and an audit of GC edges inserted into
-non-managed parent trees (D4.1.1v2). Neither that transfer nor private-cohort
+non-managed parent trees (D5.1.1). Neither that transfer nor private-cohort
 release is implemented. Parser work cleanup and native backing roots alone do
 not establish a bound on repeated navigation.
 
@@ -1366,11 +1366,11 @@ A new 20-round navigation probe passes 40 assertions and records Input
 node storage stays at 496 bytes. Remaining fragment backing and document storage
 still grow, so long-session acceptance is open.
 
-HTML parser lifetime now separates work from published Mark data (D4.1.4v5).
+HTML parser lifetime now separates work from published Mark data (D5.1.4).
 Stacks, tokenizer buffers and error records use a parser-owned arena; stack
 growth and adoption-agency insertion use that same arena. Parser destruction
 releases the arena, builder headers and untransferred buffer storage, leaving
-published strings and elements with their Input owner (D4.1.1v2, D4.1.3).
+published strings and elements with their Input owner (D5.1.1, D5.1.3).
 Full parses, DOM fragments and runtime fragment parsing use a shared scope guard.
 The markup parser retains its fragment parser for continuation and destroys it on
 reset/teardown. A foster-text merge also releases its temporary builder after
@@ -1422,7 +1422,7 @@ parsed every node's inline CSS during style initialization. `SvgStyleEntry` now
 parses its inline declarations once, when the shared entry lookup first queries
 that node. The complete node index remains available for ancestors, custom
 properties and references outside the current SVG; isolated image documents use
-the same lookup. No retained cross-frame CSS cache is added (D4.5.1v4).
+the same lookup. No retained cross-frame CSS cache is added (D5.5.1).
 
 Sequential release comparisons with the handler-allocation build record:
 
@@ -1464,14 +1464,14 @@ native FocusEvent construction allocated its init record. The trusted-event
 factory also left init/type/event values unrooted across allocating calls, and
 the FocusEvent constructor did not retain its inputs and result while adding
 `relatedTarget`. Each scope now uses precise `RootFrame`/`Rooted` ownership
-(D5.3.3). A native test forces collection at every allocation, drops the caller's
+(D6.3.3). A native test forces collection at every allocation, drops the caller's
 related-target root, then verifies identity and a marker before and after another
 collection. It fails before the fix and passes after; all 192 JS script cases pass.
 
 Focus pruning uses the owned document root, while validation formerly walked
 above it to the physical synthetic `#document` ancestor. Focus validation now
 shares the existing owned-root selection with hover and active validation
-(D4.5.1v4). Its native test fails before the fix and passes after, and also checks
+(D5.5.1). Its native test fails before the fix and passes after, and also checks
 that corrupt ancestry inside the owned root is still rejected. All 166 retained
 view/ownership cases pass. The release candidate
 `temp/slide/lambda_release_focus_boundary` replays the two-round navigation audit
@@ -1566,7 +1566,7 @@ Using `font-family:Arial` grows view-pool live bytes by 48,648; using
 `css_join_font_family_parts` allocating in the view pool while
 `radiant_retain_font_family` stores a borrowed pointer and font teardown releases
 no family storage. This identifies one contributor, not all growth. A fix must
-preserve inherited borrowers and secondary-view ownership (D4.5.1v4); freeing
+preserve inherited borrowers and secondary-view ownership (D5.5.1); freeing
 the pointer indiscriminately would be invalid. The temporary reproducer is
 `temp/slide/family_growth_{single,list}.{ls,json,log}`.
 
@@ -1574,7 +1574,7 @@ The merged release also passes 40 assertions over 20 navigation rounds and 120
 callbacks, while Input grows 936,864 → 10,889,024 bytes and DOM grows
 3,165,518 → 28,935,841 bytes. Node arena usage stays at 496 bytes and two request
 slots are reused. This does not satisfy the navigation retention bound; the
-published-fragment ownership audit remains necessary (D4.1.3, D4.1.4v5).
+published-fragment ownership audit remains necessary (D5.1.3, D5.1.4).
 Artifacts are `temp/slide/merged_navigation.{log,result.json}`.
 The 20-round repeat under forced collection and freed-memory poisoning also
 passes 40 assertions and 120 callbacks, with no raw-pointer or inconsistent
@@ -1596,14 +1596,14 @@ result JSON and `merged_navigation_gc_summary.json` under `temp/slide/`.
    teardown have different responsibilities. Add a native regression covering
    repeated resolution and borrowers surviving parent restyle/view retirement.
    Rerun both reduced opacity probes and account for the remaining single-family
-   growth before claiming view retention is bounded (D4.5.1v4, D4.1.4v5).
+   growth before claiming view retention is bounded (D5.5.1, D5.1.4).
 2. **Bound published-fragment retention.** Trace Input, Mark and DOM ownership
    across repeated scene replacement. DOM retirement alone cannot authorize
    releasing a fragment that escaped into another Mark parent or script value.
    A move to GC-owned values needs owned strings/type metadata and an audit of
    non-managed parents that hide managed children from tracing. Ordinary arena
-   blocks cannot be individually discarded (D4.1.1v2, D4.1.2, D4.1.3,
-   D4.1.4v5, D5.3.3). Repeat normal and forced-GC/poison navigation; require a
+   blocks cannot be individually discarded (D5.1.1, D5.1.2, D5.1.3,
+   D5.1.4, D6.3.3). Repeat normal and forced-GC/poison navigation; require a
    sustained plateau in live owners after warm-up, not just passing assertions.
 3. **Reduce measured frame cost.** Investigate
    `post_html_handler_incremental_rebuild`, which still invokes layout after
@@ -1612,7 +1612,7 @@ result JSON and `merged_navigation_gc_summary.json` under `temp/slide/`.
    Visibility collapse, transforms, containing blocks and scroll overflow need
    correct handling. Reuse existing cascade/paint helpers and verify transformed
    bounds, clipping, retained paint and hit testing. Timing and effect policy
-   remain in Lambda (D7.5.3). Repeat aligned release callback/paint measurements
+   remain in Lambda (D9.5.6). Repeat aligned release callback/paint measurements
    at 1280 × 720 and 1920 × 1080; the 16.67 ms gate remains open until measured.
 4. **Revalidate changed ownership and invalidation paths.** Run meaningful
    native regressions, all package scripts in both execution tiers, and focused

@@ -2,10 +2,10 @@
 
 > **Status:** scalability and keyed animation tranche implemented and verified, 2026-10-13. Retained upstream parity remains incomplete.
 > **Design:** [Timeline package](../Lambda_Pkg_Chart_Timeline.md).
-> **Formal linkage:** D7.2.1–D7.2.4/D7.2.6 (source packages),
+> **Formal linkage:** D9.3.1–D9.3.4/D9.3.5 (source packages),
 > S12.1.1v2/S12.1.3 (pure presentation and procedural handlers),
 > S9.1.4/S9.3.1 (instance state and captures), S7.4.1/S7.4.2 (errors),
-> D7.5.3 (native host boundary), D8.1.1v17 (execution tiers).
+> D9.5.6 (native host boundary), D8.3.6 (execution tiers).
 
 ## Scope and acceptance
 
@@ -61,7 +61,7 @@ they are not runtime dependencies or vendored implementation code.
 - Shared cached ASTs exposed a T0 view-state identity bug: activation looked up
   the first AST match, although imports can have distinct execution modules.
   `interp_view_template_ref` now matches both AST and module, consistent with
-  D8.5.1v3 (immutable cached AST, execution-owned state), S9.1.4, and S12.1.3.
+  D8.5.1 (immutable cached AST, execution-owned state), S9.1.4, and S12.1.3.
   `lambda_template_shared_import` reproduces the defect before the fix (2/5) and
   passes afterward (5/5). Timeline card expansion/search with dtna imported in
   the same document also passes after the fix.
@@ -90,7 +90,7 @@ they are not runtime dependencies or vendored implementation code.
   [Open XML workbook specification](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/structure-of-a-spreadsheetml-document).
 - Frozen document export and procedural `timeline.save` produce HTML/SVG and
   native PNG/JPEG/PDF, including paginated table PDF. `radiant.export_document`
-  is a general procedural host boundary (D7.5.3/S12.1.1v2); it consumes in-memory
+  is a general procedural host boundary (D9.5.6/S12.1.1v2); it consumes in-memory
   HTML and reuses the CLI's export sessions/encoders without intermediate files.
   Encoder/write failures propagate. Local posters, recorded image/frame bytes,
   authored fallbacks, explicit external resources, and text/omit diagnostics
@@ -118,7 +118,7 @@ they are not runtime dependencies or vendored implementation code.
   digits (S6.2.2v3/S6.2.3).
 - Native capture now follows retained presentation nodes on incremental and full
   document rebuilds through the same correspondence helper as frame requests
-  (D7.5.3). A fresh pointer press clears compatibility-click suppression so an
+  (D9.5.6). A fresh pointer press clears compatibility-click suppression so an
   intentional Apply/Cancel click works immediately after dragging. The fourteen
   native timeline fixtures pass in MIR Direct; state-store tests pass 16/16.
 
@@ -172,7 +172,7 @@ they are not runtime dependencies or vendored implementation code.
   removed peers, and the page body handler are covered by a separate native
   fixture. Generic navigation queues now follow rebuilt nodes with precise
   leases and execute at the common quiescent pump, including requests from
-  buttons and slideshow ticks (D4.5.1v4/D5.3.3, D5.4.1, D7.5.3).
+  buttons and slideshow ticks (D5.5.1/D6.3.3, D6.4.1, D9.5.6).
 - Package gates before retained media ownership: all 29 timeline/procedural export scripts pass in T0/MIR;
   all 114 chart/procedural export scripts pass in AUTO; all 19 native timeline
   fixtures pass in T0/MIR. Nine existing DOM history/navigation fixtures pass.
@@ -191,7 +191,7 @@ they are not runtime dependencies or vendored implementation code.
   Actual audio-end notification and removal pause now have native fixtures;
   broader provider/platform parity remains open. The full 22-fixture timeline
   suite passes independently in T0 and explicit JIT before the outgoing-card work.
-  (**D4.5.1v4/D5.3.3, D7.5.3, S12.1.3**).
+  (**D5.5.1/D6.3.3, D9.5.6, S12.1.3**).
 - Verification correction: `LAMBDA_EXEC_BACKEND=mir` selects AUTO through the
   unknown-value fallback. Eager MIR verification uses `jit`. The latest explicit
   `jit` run passes all 29 timeline/procedural export scripts. Current native
@@ -255,7 +255,7 @@ Later engine changes still require the affected baseline gates to be rerun.
 - Native explicit `inert` attributes now use shared flat-tree ancestry for pointer
   targeting and sequential/programmatic focus, following the
   [HTML inert subtree rules](https://html.spec.whatwg.org/multipage/interaction.html#inert-subtrees)
-  at the D7.2.5/D7.5.3 host boundary. Five native assertions pass; slot/host ancestry
+  at the D10.2.1/D9.5.6 host boundary. Five native assertions pass; slot/host ancestry
   has a passing unit regression.
 - UI runners now put machine results and phase traces in a process-specific
   directory under `temp/ui-test-results/`. Concurrent runners previously deleted
@@ -265,10 +265,10 @@ Later engine changes still require the affected baseline gates to be rerun.
 - Rich introduction redisplay exposed a native ownership defect: a retained pure
   element was used as its DOM node and poisoned by subtree retirement. All
   Lambda UI source values now receive separate mutable occurrences, including child buffers,
-  attribute storage, and descendant text nodes (S9.3.1, S12.1.3, D4.5.1v4).
+  attribute storage, and descendant text nodes (S9.3.1, S12.1.3, D5.5.1).
   The original source remains the reverse-map/template key. The element shape
   mutation helper is shared with Input writers and preserves qualified and
-  nominal identity (S2.4.3v3, D3.4.3v5, D3.4.5). A new regression verifies source
+  nominal identity (S2.4.3v3, D3.4.3, D3.4.5). A new regression verifies source
   attributes, nested elements, inline strings, retirement, and redisplay.
   Both affected story fixtures also pass with AddressSanitizer. Input-owned
   value allocation and long-lived rebuild budgets still need the release
@@ -286,7 +286,7 @@ Later engine changes still require the affected baseline gates to be rerun.
   only the copied DOM content slots point to mutable descendant occurrences,
   including arbitrarily nested arrays within the DOM depth budget. A clear COW
   bit cannot transfer ownership: the render map observes the original value too
-  (S12.1.3, D4.5.1v4/D4.5.2). Native source regressions cover qualified/nominal
+  (S12.1.3, D5.5.1/D5.5.2). Native source regressions cover qualified/nominal
   identity, descendant edits, unmarked arrays, retirement, and redisplay. Retiring
   an older occurrence removes its source lookup only if it still owns that key.
 - Render-map retransformation publishes new result identities even when their
@@ -303,7 +303,7 @@ Later engine changes still require the affected baseline gates to be rerun.
   and displayed-map handoff regressions. The first two have focused passing
   evidence above. Map frames now follow the same rebuilt-node correspondence
   as other retained owners, so queries retain the last displayed frame until
-  the next paint (D4.5.2/D7.5.3). Its checks and both full engine baseline gates
+  the next paint (D5.5.2/D9.5.6). Its checks and both full engine baseline gates
   remain pending; the earlier baseline run is not a clean gate.
 - Equal results with a new identity require a DOM ownership update; an exact
   same-value return preserves the existing DOM and its imperative edits. Parsed
@@ -317,8 +317,8 @@ Later engine changes still require the affected baseline gates to be rerun.
   retaining authored text, qualified names, attributes, and immutable source
   values. The shared pure `radiant.with_content` boundary uses ordinary element
   allocation, attribute storage, content normalization, and declared-content
-  validation (S2.6.2–S2.6.4, S17.4.1/S17.7.1, D3.4.5/D4.5.2). It crosses the
-  additive Jube value table with an explicit minimum table size (D7.3.6), rather
+  validation (S2.6.2–S2.6.4, S17.4.1/S17.7.1, D3.4.5/D5.5.2). It crosses the
+  additive Jube value table with an explicit minimum table size (D9.4.6), rather
   than exporting another runtime symbol. All 36 search contracts and nine native
   rich-search assertions pass in T0/JIT. Parsed-HTML ownership tests pass 7/7.
   All 60 scene3d checks and all affected viewer cases pass outside sandbox
@@ -348,9 +348,9 @@ Later engine changes still require the affected baseline gates to be rerun.
   Eighteen pure contracts and 21 native assertions cover these controls. The
   broader chart/native suites are being rerun.
 - Those date commits exposed two host defects. The focus-session baseline now
-  belongs to retained form state (D4.5.2), surviving same-identity regeneration.
+  belongs to retained form state (D5.5.2), surviving same-identity regeneration.
   Sequential-focus policy returns its chosen node and native applies the shared
-  edit-commit/change/blur/focus transition (D7.2.5). The transition adapter also
+  edit-commit/change/blur/focus transition (D10.2.1). The transition adapter also
   retains the keyboard-origin flag. The native Tab snapshot now records the
   document wrapper's actual HTML child index after a commit-driven rebuild;
   focus, caret, selection, and pending-paint assertions are unchanged. The form
@@ -359,7 +359,7 @@ Later engine changes still require the affected baseline gates to be rerun.
 - The first subsequent full Radiant run found two more focus-sequence defects:
   `dom_pkg_commit` lost blur after a change-triggered rebuild, and dtna pagination
   consequently missed its blur commit. Pending focus events now retain original
-  node leases and follow retained identities between callbacks (D4.5.2/D7.2.5).
+  node leases and follow retained identities between callbacks (D5.5.2/D10.2.1).
   Frames, pointer capture, navigation, and focus reuse one reference-rebasing
   helper. Both regressions and affected focus/filter/source fixtures pass in
   T0/JIT and ASan; seven focused ASan scenarios pass in T0 and five in JIT.
@@ -378,8 +378,8 @@ Later engine changes still require the affected baseline gates to be rerun.
 - The expanded source/resource/story/state JIT gate passes 5/5. The subsequent
   full Radiant run passes all 511 UI and 154 DOM cases but exposes a parent-link
   focus owner mismatch after entering an iframe. Pointer hit testing now binds
-  the document of its tree, and capture binds its actual node owner (D4.5.2,
-  D5.4.1/D7.5.3). Both iframe viewer regressions pass after the fix. The full
+  the document of its tree, and capture binds its actual node owner (D5.5.2,
+  D6.4.1/D9.5.6). Both iframe viewer regressions pass after the fix. The full
   Lambda baseline passes 6671/6673, with the same recorded LaTeX corpus timeout
   and disabled-attribute serialization failure; it predates the new presentation
   helper below. Full engine gates after that helper remain pending.
@@ -389,7 +389,7 @@ Later engine changes still require the affected baseline gates to be rerun.
   predicates require boolean results. `radiant.present_content` constructs a
   structural presentation through the existing element reconstruction and private
   shape clone, leaving nominal sources and strict `with_content` validation intact
-  (S2.1.4, S2.6.2–S2.6.4, D4.5.2/D7.3.6). All 25 new contracts pass in T0/JIT,
+  (S2.1.4, S2.6.2–S2.6.4, D5.5.2/D9.4.6). All 25 new contracts pass in T0/JIT,
   including collection forced at every allocation. The existing search and
   element-content goldens pass in both tiers. Twelve native assertions pass in
   T0/JIT. Eight affected native scenarios pass under ASan in T0 and four in JIT,
@@ -403,7 +403,7 @@ Later engine changes still require the affected baseline gates to be rerun.
   end-of-media fixture. Headless assertion retries treated only loading/buffering
   as pending native work and could exhaust virtual time before AVPlayer delivered
   completion. The shared pending-work predicate now includes playing media;
-  the real native completion event still drives advancement (D7.5.3). Playback,
+  the real native completion event still drives advancement (D9.5.6). Playback,
   completion, and lifetime regressions pass in T0/JIT and ASan T0/JIT
   (23 assertions in each run).
 - A pure immutable interval index now preserves canonical order, open bounds,
@@ -485,7 +485,7 @@ The immutable motion sampler retains displayed geometry and SVG, interpolates
 card/marker bounds and exact windows, and retires passive outgoing records at
 completion. Explicit `render_frame({time_ms, previous})` uses the same sampler;
 native frame scheduling stops when motion and playback settle
-(S12.1.1v2/S12.1.3, S9.1.4/S9.3.1, D7.5.3).
+(S12.1.1v2/S12.1.3, S9.1.4/S9.3.1, D9.5.6).
 
 Sequence cards use measured native flow boxes and translation from displayed to
 target bounds. Native canvas picking and gesture initialization use the displayed

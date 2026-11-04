@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-02.
 **Status:** complete and qualified in `temp/fn-local-worktree`, branch `codex/fn-local-state`.
-**Authority:** S9.1.2, S9.1.4v2, S12.2.1v3, S16.8.7; D4.3.3, D6.2.3v3.
+**Authority:** S9.1.2, S9.1.4v2, S12.2.1v3, S16.8.7; D5.3.2, D7.2.3.
 
 The earlier parent-fn completion check missed comma-decomposition paths.
 `var a, b = [1, 2]` receives immutable binding flags and rejects reassignment

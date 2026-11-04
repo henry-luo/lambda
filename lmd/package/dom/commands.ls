@@ -1,4 +1,4 @@
-// The legacy command surface (D7.2.5, ES20).
+// The legacy command surface (D10.2.1, ES20).
 //
 // Keyboard input and execCommand both resolve through this immutable package
 // registry. Rows carry policy facts only; the native waist sees just the
@@ -24,7 +24,7 @@ pub fn canonical(spelling) any^ => registry.canonical(spelling)
 
 // The document behavior template is attached at an ancestor, while an edit
 // invocation names its concrete host. Keep that handoff explicit rather than
-// treating the template receiver as the editing surface (D7.2.5).
+// treating the template receiver as the editing surface (D10.2.1).
 fn invocation_host(receiver, evt, descriptor) {
     // Document-scoped settings have no Range or editable host. They share the
     // same package session through the body receiver without minting a handle.
@@ -286,7 +286,7 @@ pub pn exec(host, evt) {
     else {
         let descriptor = descriptor(evt.command);
         let target = invocation_host(host, evt, descriptor);
-        // D7.2.5: the package chooses the command; the engine dispatches its event.
+        // D10.2.1: the package chooses the command; the engine dispatches its event.
         if (target == null and descriptor.family == "copy") {
             if (dom.clipboard_copy_event())
                 result.applied(true, true, false, false, false, 0,

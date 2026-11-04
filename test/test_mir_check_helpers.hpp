@@ -1210,7 +1210,7 @@ inline int count_matches(const std::vector<MirLine>& lines, const std::string& p
 }
 
 inline void expect_js_no_site_caches(const char* mir) {
-    // D8.4.1v2: property kernels have four semantic arguments and no site-state operand.
+    // D7.4.1: property kernels have four semantic arguments and no site-state operand.
     const char* prefix = ", mvp_lmd_class_property";
     for (const char* line = mir; *line;) {
         const char* end = strchr(line, '\n');
@@ -1223,7 +1223,7 @@ inline void expect_js_no_site_caches(const char* mir) {
             if (*name_end == ',' || !strncmp(name_end, "_fixed,", 7)) {
                 int commas = 0;
                 for (const char* p = start; p < end; p++) if (*p == ',') commas++;
-                EXPECT_EQ(commas, 6) << "D8.4.1v2: obsolete JS property cache operand at " << target;
+                EXPECT_EQ(commas, 6) << "D7.4.1: obsolete JS property cache operand at " << target;
             }
         }
         line = *end ? end + 1 : end;

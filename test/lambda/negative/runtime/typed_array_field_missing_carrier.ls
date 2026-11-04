@@ -1,4 +1,4 @@
-// Tune29 §19.1 item 2 (D3.2.4v4): a declared T[] read from an admitted
+// Tune29 §19.1 item 2 (D4.2.5): a declared T[] read from an admitted
 // record's field admits a container without the full check, but an absent
 // carrier (an out-of-range element) reads as null and must still be rejected.
 type Node = {id: int, edges: int[]}

@@ -13,14 +13,14 @@
   `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`, `vibe/Lambda_Design_Type_Enforcement.md`,
   `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-3)
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1, S4.5.3;
-  `doc/Lambda_Formal_Design.md` D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1–D3.3.3,
-  D8.3.2–D8.3.3, D8.4.1, D8.6.1–D8.6.3
+  `doc/Lambda_Formal_Design.md` D2.2.2, D2.3, D4.2.1–D4.2.3, D4.3.1–D4.3.3,
+  D7.3.2–D7.3.3, D7.4.1, D8.6.1–D8.6.3
 
 ## 0. Implementation checkpoint (2026-08-08)
 
 Tune17 is implemented through the evidence-backed compiler and runtime slices below.
 The implementation preserves the formal value, ownership, and representation rulings
-in S4.1, S4.5.3, D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1, and D5.2.
+in S4.1, S4.5.3, D2.2.2, D2.3, D4.2.1–D4.2.3, D4.3.1, and D6.2.
 
 - **T1 — lane unification:** inferred raw edges now require a proven scalar lane;
   proven native arguments skip redundant admission checks, while calls with borrowed
@@ -50,7 +50,7 @@ in S4.1, S4.5.3, D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1, and D5.2.
 - **Dynamic JS dispatch safety:** arbitrary `js_map_method` closures remain on the boxed
   dispatcher ABI. The `_into` bridge adopts only a surviving scalar home after generic
   dispatch, preventing a dynamically selected closure from being treated as a known
-  scalar-home callee (D2.2.2, D3.2.1, D3.3.1).
+  scalar-home callee (D2.2.2, D4.2.1, D4.3.1).
 
 ### Verification record
 
@@ -64,7 +64,7 @@ in S4.1, S4.5.3, D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1, and D5.2.
 - Tune17 MIR fixtures pass with the new recursive lane and typed-store checks. The
   original Result26 aggregate targets are not re-labeled as cleared where their
   remaining cost is the measured dynamic ShapeEntry or binary-representation family;
-  those are separate design work under S1.4–S1.6 and D8.4.1.
+  those are separate design work under S1.4–S1.6 and D7.4.1.
 
 ## 1. What Result26 says
 
@@ -115,7 +115,7 @@ call-argument boundaries of the newly inferred int specialization. C7 infers the
 contract, then admits every argument at every inferred call edge — the inferred contract
 does not receive the T-A1 redundancy elision a *declared* contract gets, even when the
 arguments are provably int (products of int arithmetic on the same inferred params)
-[S4.1, D2.4, D3.2.1]. The typed columns of the same rows are fine (tak typed −4%,
+[S4.1, D2.3, D4.2.1]. The typed columns of the same rows are fine (tak typed −4%,
 levenshtein typed −63%), which isolates the defect to the inferred-edge admission.
 
 **R2 — Re-annotated typed rows: the C0.C annotations are still not free.**
@@ -196,7 +196,7 @@ bugs — it is one missing invariant:
 
 > **Same facts ⇒ same code.** However a type fact is established — declaration or
 > inference — the specialization it enables and the checks it requires must be identical
-> [D3.2.1, D2.4]. An annotation is a *contract plus a proof obligation at the boundary*;
+> [D4.2.1, D2.3]. An annotation is a *contract plus a proof obligation at the boundary*;
 > once admitted, it must confer everything inference confers. An inferred fact is a
 > *proof*; it must never install a check that the equivalent declaration would elide.
 
@@ -209,7 +209,7 @@ Every entry in R1–R3 is a violation of this invariant in one direction or the 
 1. **Inferred edges get T-A1 elision** (R1): an inferred call-edge admission whose
    argument lane is already proven (native int/float product of the same specialization)
    is redundant by the same rule that elides declared boundaries — emit no
-   `lambda_type_check`. tak's 8 checks must return to 0 [S4.1, D2.4].
+   `lambda_type_check`. tak's 8 checks must return to 0 [S4.1, D2.3].
 2. **Declared contracts route through the inference specializer** (R3): where C7 would
    specialize an *unannotated* local/param/loop into a packed lane, the *annotated*
    version of the same code must reach the identical emission — the declaration adds a
@@ -217,7 +217,7 @@ Every entry in R1–R3 is a violation of this invariant in one direction or the 
    pnpoly untyped's 20.3 ms, fannkuch typed must return to ≤0.37 ms.
 3. **One representation decision point**: fold the declared-contract and inferred-witness
    paths into a single "establish lane + prove or check once" step in the transpiler, so
-   future mechanisms cannot re-diverge [D3.2.1, D8.3.3].
+   future mechanisms cannot re-diverge [D4.2.1, D7.3.3].
 
 Acceptance: tak/cpstak/ack/levenshtein/hashmap/matmul untyped back to v25 times or
 better; pnpoly/nbody/fannkuch/fasta typed ≤ their untyped times; MIR fixtures assert
@@ -230,7 +230,7 @@ MIR-diff `primes2`/`fannkuch2` emission v25 vs v26 to name the exact store path,
 extend C1's proved-store elision to: (a) packed `bool[]` byte-lane stores of literal
 true/false and proved bool lanes; (b) `int[]` element swaps and stores through annotated
 locals whose uniqueness the `var` binding already gives (fannkuch's
-`perm[i]`/`perm1[j]` shuffle) [D3.2.2, D8.3.2–D8.3.3]. sieve's `bool[]` param read path
+`perm[i]`/`perm1[j]` shuffle) [D4.2.3, D7.3.2–D7.3.3]. sieve's `bool[]` param read path
 (`flags[i-1]` in a branch condition) rides along.
 Acceptance: fannkuch/primes/sieve typed ≤ untyped; the store family leaves the samples.
 
@@ -269,7 +269,7 @@ Targets: splay typed ≤ untyped; deltablue ≤6x Node; richards ≤4.5x Node.
   verify against the R18 line, not just v25.
 - **LambdaJS**: unchanged this round (16.0x geo; havlak 338x, cd 270x, hashmap 220x,
   sha1 205x); remains its own round with the dynamic-key/NameId fast path as the top
-  item (2026-09-09: LJS may NOT use ICs either — D8.4.1v2/LC1v2 now cover both lanes).
+  item (2026-09-09: LJS may NOT use ICs either — D7.4.1/LC1v2 now cover both lanes).
 
 ## 4. Gates and acceptance (house rules, unchanged)
 
@@ -291,7 +291,7 @@ Targets: splay typed ≤ untyped; deltablue ≤6x Node; richards ≤4.5x Node.
   ShapeEntry/map validation, so no unsafe universal bypass ships. No new mechanism ships
   while its family's ledger entry regresses.
 - Non-goals carried forward: no flex-int revival, no Lambda-script inline caches
-  [D8.4.1], no vendored-dep edits, no C2MIR-path changes (frozen, rule 14).
+  [D7.4.1], no vendored-dep edits, no C2MIR-path changes (frozen, rule 14).
 
 Round target: untyped/Node geo 2.25x → **≤1.7x** (T1.1 alone recovers the recursion
 family); typed/Node 1.26x → **≤1.0x**; typed/C2MIR 6.70x → **≤5x**; the R1–R3 ledgers

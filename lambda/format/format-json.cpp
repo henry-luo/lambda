@@ -42,7 +42,7 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
 }
 
 static void format_vmap_with_indent(JsonContext& ctx, const ItemReader& item, int indent) {
-    // dynamic maps share JSON object semantics with shaped maps (D7.4.5v2).
+    // dynamic maps share JSON object semantics with shaped maps (D9.5.5).
     // formatter traversal allocates only in its pool, never in the runtime GC.
     VMap* map = item.item().vmap;
     StringBuf* numeric_key = stringbuf_new(ctx.pool());
@@ -212,7 +212,7 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
                 stringbuf_append_str_n(ctx_.output(), obj_type->type_name.str, obj_type->type_name.length);
             }
             ctx_.write_char('"');
-            // D2.6.6v2 phase 2: a nominal value may be map- OR element-shaped,
+            // D3.1.1 phase 2: a nominal value may be map- OR element-shaped,
             // and MapReader only admits the map form, so the attribute face is
             // walked through the kind-aware shape accessor instead.
             TypeId nom_tid = get_type_id(item.item());

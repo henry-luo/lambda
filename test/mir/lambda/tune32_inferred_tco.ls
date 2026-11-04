@@ -1,4 +1,4 @@
-// D8.3.2: proved scalar tail edges loop; open keys keep source recursion.
+// D7.3.2: proved scalar tail edges loop; open keys keep source recursion.
 pn tune32_count(n, acc) {
     if (n <= 0) { return acc }
     return tune32_count(n - 1, acc + 1)

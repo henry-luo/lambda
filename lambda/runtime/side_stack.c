@@ -1,6 +1,7 @@
 #include "side_stack.h"
 
 #include "../lambda.h"
+#include "../../lib/fiber.h"
 #include "../../lib/log.h"
 #include <stdlib.h>
 
@@ -57,11 +58,11 @@ static bool side_stack_region_reserve(SideStackRegion* region, size_t byte_size)
     if (!memory) return false;
     region->base = (uint64_t*)memory;
     region->limit = region->base + byte_size / sizeof(uint64_t);
-#if defined(_WIN32)
-    region->committed = region->base;
-#else
-    // mmap reserves address space with demand-paged read/write access.
+#if defined(__EMSCRIPTEN__)
     region->committed = region->limit;
+#else
+    // track admitted pages on POSIX too, so GC never re-advises the unused reservation.
+    region->committed = region->base;
 #endif
     region->byte_size = byte_size;
     return true;
@@ -70,12 +71,11 @@ static bool side_stack_region_reserve(SideStackRegion* region, size_t byte_size)
 static bool side_stack_region_ensure(SideStackRegion* region, uint64_t* end) {
     if (!region || !region->base || !end || end > region->limit) return false;
     if (end <= region->committed) return true;
-#if defined(_WIN32)
-    SYSTEM_INFO info;
-    GetSystemInfo(&info);
-    size_t page_size = info.dwPageSize ? (size_t)info.dwPageSize : 4096u;
+#if !defined(__EMSCRIPTEN__)
+    size_t page_size = fiber_page_size();
     uintptr_t target = ((uintptr_t)end + page_size - 1u) & ~(page_size - 1u);
     if (target > (uintptr_t)region->limit) target = (uintptr_t)region->limit;
+#if defined(_WIN32)
     size_t bytes = target - (uintptr_t)region->committed;
     // Windows reservations are inaccessible until the advancing watermark
     // commits their pages; committing the full budget would consume commit
@@ -83,11 +83,10 @@ static bool side_stack_region_ensure(SideStackRegion* region, uint64_t* end) {
     void* committed = VirtualAlloc(region->committed, bytes, MEM_COMMIT,
                                    PAGE_READWRITE);
     if (!committed) return false;
-    region->committed = (uint64_t*)target;
-    return true;
-#else
-    return true;
 #endif
+    region->committed = (uint64_t*)target;
+#endif
+    return true;
 }
 
 bool lambda_side_stack_bind_for(Context* runtime_context) {
@@ -316,23 +315,18 @@ uint64_t* lambda_side_number_alloc(void) {
 
 static void side_stack_region_decommit(SideStackRegion* region, uint64_t* top) {
     if (!region || !top || !region->limit || top >= region->limit) return;
-#if defined(_WIN32)
-    SYSTEM_INFO info;
-    GetSystemInfo(&info);
-    size_t page_size = info.dwPageSize ? (size_t)info.dwPageSize : 4096u;
+#if !defined(__EMSCRIPTEN__) && (defined(_WIN32) || defined(MADV_DONTNEED))
+    size_t page_size = fiber_page_size();
     uintptr_t page_mask = (uintptr_t)page_size - 1u;
     uintptr_t start = ((uintptr_t)top + page_mask) & ~page_mask;
     uintptr_t end = (uintptr_t)region->committed & ~page_mask;
-    if (start < end && VirtualFree((void*)start, end - start, MEM_DECOMMIT)) {
-        region->committed = (uint64_t*)start;
-    }
-#elif defined(MADV_DONTNEED)
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size <= 0) return;
-    uintptr_t page_mask = (uintptr_t)page_size - 1u;
-    uintptr_t start = ((uintptr_t)top + page_mask) & ~page_mask;
-    uintptr_t end = (uintptr_t)region->limit & ~page_mask;
-    if (start < end) madvise((void*)start, end - start, MADV_DONTNEED);
+    if (start >= end) return;
+#if defined(_WIN32)
+    bool released = VirtualFree((void*)start, end - start, MEM_DECOMMIT) != 0;
+#else
+    bool released = madvise((void*)start, end - start, MADV_DONTNEED) == 0;
+#endif
+    if (released) region->committed = (uint64_t*)start;
 #endif
 }
 

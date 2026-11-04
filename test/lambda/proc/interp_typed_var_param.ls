@@ -1,4 +1,4 @@
-// D8.1.1v8: typed `var` parameters cross the tier boundary. Every callee here
+// D8.3.3: typed `var` parameters cross the tier boundary. Every callee here
 // is entered more than the promotion threshold, so on the auto tier the
 // T0 -> satellite, satellite -> satellite and satellite -> T0 edges all occur;
 // the golden is tier-agreed with jit and interp. `keep` is a snapshot

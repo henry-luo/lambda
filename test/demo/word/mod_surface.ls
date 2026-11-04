@@ -1,5 +1,5 @@
 // One source path per applied model node; never parse the painted DOM back into state.
-// The shared factory table keeps tag choice separate from projection (D7.2.5).
+// The shared factory table keeps tag choice separate from projection (D10.2.1).
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import page: .mod_page

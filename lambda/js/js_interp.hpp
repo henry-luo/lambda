@@ -38,7 +38,7 @@ static inline bool js_execution_auto_requested(void) {
     return false;  // AUTO needs the MVP fallback, which this build excludes
 #else
     const char* backend = getenv("JS_EXEC_BACKEND");
-    // D8.1.3v29: tier selection defaults to AUTO; activated MIR uses MVP.
+    // D8.4.2: tier selection defaults to AUTO; activated MIR uses MVP.
     return !backend || !backend[0] || strcmp(backend, "auto") == 0;
 #endif
 }
@@ -112,7 +112,7 @@ extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
 bool js_interp_script_is_supported(JsScript* script);
 
 // ordinary Scripts/modules and dynamic source share MVP value operations;
-// admission and promotion remain execution policy (D8.1.3v43, D5.2-D5.3).
+// admission and promotion remain execution policy (D8.4.4, D6.2-D6.3).
 // This profile never creates a second realm or promotes a dynamic body to MIR.
 enum JsInterpHostOperation {
     JS_INTERP_HOST_GET, JS_INTERP_HOST_HAS, JS_INTERP_HOST_SET,

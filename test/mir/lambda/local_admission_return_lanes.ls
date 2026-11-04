@@ -1,4 +1,4 @@
-// S7.7.2v2/S7.7.4v2/D2.8.3: retained local failures do not complete a callable.
+// S7.7.2v2/S7.7.4v2/D2.5.3: retained local failures do not complete a callable.
 pn keeps_initializer(value) int {
     let checked: int = value
     return 7

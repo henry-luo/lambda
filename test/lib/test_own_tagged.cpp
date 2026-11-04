@@ -70,7 +70,7 @@ TEST(OwnershipPersistentField, RejectsSessionSourcesAtCompileTime) {
 
     static_assert(CanSet<Field, lam::PoolPtr<char>>::value,
                   "persistent pool field should accept pool borrows");
-    // D4.5.2: pool storage is invisible to the collector, so a GC value is kept only by copy.
+    // D5.5.2: pool storage is invisible to the collector, so a GC value is kept only by copy.
     static_assert(!CanSet<Field, lam::GcPtr<char>>::value,
                   "persistent pool field must reject GC borrows");
     static_assert(!CanSet<FieldRef, lam::GcPtr<char>>::value,

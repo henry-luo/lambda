@@ -2,7 +2,7 @@
 
 // Runtime-owned async storage primitives. This header deliberately depends
 // only on Lambda's Item/Array representation; JS and Lambda task policy stay
-// in their respective frontends (D6.3.1, JR7.1).
+// in their respective frontends (D7.5.1, JR7.1).
 #include "../lambda.hpp"
 #include "root_vector.h"
 #include "../../lib/arraylist.h"
@@ -22,7 +22,7 @@ typedef enum RuntimeJobKind {
 
 // One async-context capture travels with every queued JavaScript callback.
 // Queue policy remains external: nextTick, Promise jobs and RAF drain at
-// different checkpoints even though they share this carrier (D6.3.1).
+// different checkpoints even though they share this carrier (D7.5.1).
 typedef struct RuntimeAsyncContextSnapshot {
     Item resource;
     Item als_context;
@@ -48,7 +48,7 @@ typedef struct RuntimeJobQueue {
 
 // One owner can retain callbacks for native operations that complete out of
 // order. Requests carry only a stable slot index; releasing a callback never
-// moves a live slot (D5.1.1v2; JSCU31).
+// moves a live slot (D6.1.1; JSCU31).
 typedef struct RuntimeCallbackSlots {
     RootVector values;
 } RuntimeCallbackSlots;
@@ -57,14 +57,14 @@ typedef struct RuntimeCallbackSlots {
 // whole lifecycle. Slots begin as the all-zero absent Item so migrated native
 // fields preserve their existing presence tests. Callback queues use
 // RuntimeCallbackSlots when completion order is part of their protocol
-// (D5.1.1v2; JSCU31).
+// (D6.1.1; JSCU31).
 typedef struct RuntimeValueSlots {
     RootVector values;
 } RuntimeValueSlots;
 
 // A context-owned native resource has one generation-checked identity and one
 // rooted script owner. Individual protocols retain only their native payload
-// behind this common lifecycle record (D7.4.1v2; JSCU31).
+// behind this common lifecycle record (D9.5.1; JSCU31).
 typedef enum RuntimeResourceKind {
     RUNTIME_RESOURCE_NONE = 0,
     RUNTIME_RESOURCE_TIMER,

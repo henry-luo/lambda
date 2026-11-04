@@ -7,6 +7,7 @@
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/hashmap.h"
+#include "../lib/arraylist.hpp"
 #include <stdlib.h>
 #include <string.h>
 
@@ -864,8 +865,32 @@ void radiant_cascade_styles_for_element(DomElement* element) {
 void radiant_recascade_document_styles(DomDocument* document, DomElement* root,
                                       SelectorMatcher* matcher) {
     if (!document || !root) return;
-    view_geometry_walk_dom_tree(root, radiant_clear_cascaded_styles_visitor, nullptr);
+    struct PreviousStyle {
+        DomElement* element;
+        uint64_t identity;
+        uint32_t version;
+        uint32_t flags;
+    };
+    lam::ArrayList<PreviousStyle> previous(MEM_CAT_TEMP);
+    view_geometry_walk_dom_tree(root, [](DomNode* node, void* data) {
+        DomElement* element = node->as_element();
+        if (element && !element->is_synthetic()) {
+            uint64_t identity = style_epoch_tree_id(element->specified_style);
+            if (identity) ((lam::ArrayList<PreviousStyle>*)data)->push_back(
+                {element, identity, element->style_version, element->elmt_flags});
+        }
+        return radiant_clear_cascaded_styles_visitor(node, nullptr);
+    }, &previous);
     radiant_apply_css_stylesheets_to_tree(document, root, document->stylesheets,
         document->stylesheet_count, document->document_pool,
         (CssEngine*)document->services.cached_css_engine, matcher);
+    for (const auto& saved : previous) {
+        DomElement* element = saved.element;
+        if (style_epoch_tree_id(element->specified_style) != saved.identity) continue;
+        // rematching the same immutable cascade does not change computed inputs;
+        // mutations before this cascade already advanced the saved version.
+        element->style_version = saved.version;
+        uint32_t flags = ELMT_FLAG_STYLES_RESOLVED | ELMT_FLAG_NEEDS_STYLE_RECOMPUTE;
+        element->elmt_flags = (element->elmt_flags & ~flags) | (saved.flags & flags);
+    }
 }

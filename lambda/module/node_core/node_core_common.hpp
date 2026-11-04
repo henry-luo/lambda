@@ -35,10 +35,10 @@ static inline Item jube_node_global_property(const JubeHostAPI* host, const char
 // Native factories MUST root the object they are building. A freshly created
 // object is reachable from nowhere else while its properties are installed, and
 // every install allocates (at least the key string), so a collection triggered
-// mid-construction reclaims it — D5.4.2: a value under construction is live and
+// mid-construction reclaims it — D6.4.2: a value under construction is live and
 // needs an exact root. The symptom is never an allocator error. The finished
 // object simply comes back missing properties, or a later store writes into
-// reclaimed memory and crashes. D2.1.7 pins the heap as non-moving, so a root
+// reclaimed memory and crashes. D2.1.6 pins the heap as non-moving, so a root
 // keeps a plain local valid; the root is about liveness, not address stability.
 struct JubeScopedRoots {
     const JubeHostAPI* host;

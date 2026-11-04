@@ -4,7 +4,7 @@
 #include <stdint.h>
 typedef struct SecurityStateWire SecurityStateWire;
 
-// D7.5.8: bounded opaque role bytes, shared by disk and dedicated verifier IPC.
+// D11.2.4: bounded opaque role bytes, shared by disk and dedicated verifier IPC.
 // This header has no grant, settings or update-management entry point.
 enum {
     SECURITY_UPDATE_METADATA_ROLES = 64,

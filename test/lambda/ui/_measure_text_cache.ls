@@ -1,5 +1,5 @@
 // Face-less text queries (system fonts only) must share one cached query font
-// context; test_radiant_text_query_gtest counts the context builds behind them.
+// context; test_radiant_document_gtest counts the context builds behind them.
 import radiant
 
 let font = {font_family: "sans-serif", font_size: 16}

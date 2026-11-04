@@ -1,5 +1,5 @@
 // WordCraft Session / CommandSpec port over Lambda's source-model editor.
-// S1.4, S12.1.3, D7.2.5: immutable model state owns edits; Radiant owns geometry.
+// S1.4, S12.1.3, D10.2.1: immutable model state owns edits; Radiant owns geometry.
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import lambda.editor.mod_source_pos

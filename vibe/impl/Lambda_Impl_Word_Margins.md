@@ -1,7 +1,7 @@
 # Word demo: page margin presets and facing pages
 
 **Date:** 2026-10-23
-**Authority:** **S1.4**, **S12.1.3**, **D7.2.5** for immutable document settings,
+**Authority:** **S1.4**, **S12.1.3**, **D10.2.1** for immutable document settings,
 editing and projection. Existing CSS page composition supplies print geometry.
 
 ## Delivered behavior

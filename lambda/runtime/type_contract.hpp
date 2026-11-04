@@ -109,11 +109,11 @@ Item lambda_array_restore_rep_cert(Item result, ArrayRepCert* cert);
 
 // resolve the canonical Lambda carrier from the complete semantic contract.
 // this is a representation decision, not a physical MIR register query;
-// abstract and heterogeneous contracts stay boxed (D2.4.1–D2.4.2).
+// abstract and heterogeneous contracts stay boxed (D2.3.4–D2.3.4).
 ValueRep lambda_canonical_rep(Type* contract);
 // apply the same canonical resolver to a compact dispatch key used by legacy
 // compiler entry points; callers with a full contract must use the overload
-// above (D2.4.1–D2.4.2).
+// above (D2.3.4–D2.3.4).
 ValueRep lambda_canonical_rep_for_type_id(TypeId type_id);
 // canonical kind only; returns NULL when the dispatch key has no such type.
 Type* lambda_canonical_type_for_id(TypeId type_id);
@@ -153,7 +153,7 @@ uint64_t lambda_type_repr_hash(Type* type, uint64_t seed0, uint64_t seed1);
 Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op);
 
 // Resolve a concrete record layout through aliases and nullable spellings.
-// A nullable receiver still needs its own value/null guard (D3.2.4v3).
+// A nullable receiver still needs its own value/null guard (D4.2.5).
 Type* lambda_type_nonnull_map_contract(Type* contract);
 
 // True when an annotated boundary from `source` to `target` needs no runtime
@@ -199,7 +199,7 @@ bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out);
 // Array storage is the one physical projection that differs from packed map
 // slots: nullable full-width integers use destination-owned TypedItems.
 bool lambda_type_array_lane_storage_desc(Type* type, LaneStorageDesc* out);
-// SCU8 companion (D3.3.3v3): true when a layout proof -- a native lane or an
+// SCU8 companion (D4.3.3): true when a layout proof -- a native lane or an
 // ArrayNum element tag -- discharges the whole contract. A literal singleton
 // is a value, not a carrier, so its elements still need individual admission.
 bool lambda_type_layout_proves_contract(Type* type);

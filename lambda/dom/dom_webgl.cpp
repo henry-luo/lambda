@@ -23,7 +23,7 @@
 #include <math.h>
 #include <string.h>
 
-// native records hold rids only; every retained script edge is precisely rooted (D4.5.2, D5.3.3).
+// native records hold rids only; every retained script edge is precisely rooted (D5.5.2, D6.3.3).
 struct WebGlObject {
     uint64_t canvas, resource, generation, program;
     int location, kind;
@@ -143,7 +143,7 @@ static Item webgl_attributes(WebGlObject* object) {
     dom_realm_set_name(result.get(),"powerPreference",js_name_item("default"));return result.get();
 }
 
-// loss/restoration events use the existing host task loop; no private event-loop pumping (D7.4.2v2).
+// loss/restoration events use the existing host task loop; no private event-loop pumping (D9.5.2).
 static Item webgl_loss_task(Item callee,Item,Item*,int,uint64_t*) {
     uint64_t payload=js_fn_native((JsFunction*)callee.function)->target.bits;
     WebGlRealm* state=webgl_realm();Item* cached=state?root_vector_at(&state->objects,payload>>1):nullptr;

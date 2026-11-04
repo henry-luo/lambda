@@ -63,7 +63,7 @@ static bool parse_report_equal(const LambdaParseReport* left,
 
 // The fuzz runner calls this path for arbitrary source. It makes parser
 // determinism and bounded recovery a real test target instead of treating a
-// C/Tree-sitter agreement as sufficient evidence (D1.9, D1.10, D8.1.2v3).
+// C/Tree-sitter agreement as sufficient evidence (D1.9, D1.10, D8.1.1).
 static bool lambda_parser_stable(const char* source, size_t length,
                                  LambdaParseStatus* status_out,
                                  LambdaParseError* error_out,

@@ -163,7 +163,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     if (uicon && uicon->input_dispatch_depth == 0) input_method_drain(uicon, doc);
     bool navigated = false;
     if (doc->pending_navigation_url) {
-        // D5.4.1: location.assign() can load a new isolate only after the
+        // D6.4.1: location.assign() can load a new isolate only after the
         // callback returns and this host turn has closed its state batch.
         char* target = doc->pending_navigation_url;
         doc->pending_navigation_url = nullptr;

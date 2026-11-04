@@ -1,4 +1,4 @@
-// A clone preimage is a separate create-only effect before migration (S12.4.4v4, D7.5.6).
+// A clone preimage is a separate create-only effect before migration (S12.4.4v4, D11.2.2).
 import sqlite: lambda.io.sqlite
 
 pn create_source(path) any^ {

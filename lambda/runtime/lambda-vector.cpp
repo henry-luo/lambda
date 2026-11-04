@@ -164,7 +164,7 @@ static Array* vector_to_plain_array(Item item, int64_t len) {
     for (int64_t i = 0; i < len; i++) {
         Item value = vector_get(rooted_source.get(), i);
         result = rooted_result.get();
-        // rehome wide scalars into the result-owned tail (D2.5.2v2).
+        // rehome wide scalars into the result-owned tail (D2.4.2).
         array_set(result, i, value);
     }
     // sorting still consumes boxed Items; restore the certificate after permutation.
@@ -259,7 +259,7 @@ static inline Item item_from_array_num(ArrayNum* array_num) {
 #endif
 
 // Selection and ordering transforms do not admit new elements, so an exact
-// source certificate remains valid on their fresh result (D3.3.3).
+// source certificate remains valid on their fresh result (D4.3.3).
 static ArrayRepCert* array_transform_source_cert(Item source) {
     TypeId source_type = get_type_id(source);
     if (source_type != LMD_TYPE_ARRAY &&
@@ -273,7 +273,7 @@ static Item array_transform_finish(Item source, Item result) {
     ArrayRepCert* cert = array_transform_source_cert(source);
     if (!cert || !lambda_array_rep_proves_cert(source, cert, true)) return result;
     // selection changes no element contract. A boxed staging result must
-    // regain the certified lane before consumers reuse that proof (D3.3.3v3).
+    // regain the certified lane before consumers reuse that proof (D4.3.3).
     return lambda_array_restore_rep_cert(result, cert);
 }
 
@@ -2628,7 +2628,7 @@ Item fn_math_random(Item seed_item) {
 // reverse(vec) - reverse order of elements
 // string/symbol passthrough: strings are singular, not iterable
 // A selection's fresh result: the source's items [start, end), in order or
-// reversed, each stored as one item (D2.6.5v3). Source and result stay rooted
+// reversed, each stored as one item (D3.3.1). Source and result stay rooted
 // across the growth safepoints; the caller finishes it as an array (S2.5.7v2).
 static Item vector_select_items(Item source, int64_t start, int64_t end, bool reversed) {
     RootFrame roots(2);

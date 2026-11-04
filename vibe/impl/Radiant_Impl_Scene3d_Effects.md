@@ -5,7 +5,7 @@ SVG texture acquisition, and the Scene3D “Make waves” gallery.
 
 ## Authority and boundary
 
-**S12.1.1v3**, **D7.2.4v4**, **D7.5.3v2**, **D4.5.1v4** and **D4.5.2**
+**S12.1.1v3**, **D9.3.4**, **D9.5.6**, **D5.5.1** and **D5.5.2**
 apply. Lambda describes values; Radiant owns rendering and playback. This
 extends the implemented **SH1 / SH2 / SH6** shader-material and uniform-track
 facilities in [the shader record](Radiant_Impl_Scene3d_Shaders.md). No formal

@@ -143,13 +143,13 @@ to the editor.
 * **MIR `raise` in a handler arm.** A `raise` in a `^ { … }` error arm marked
   the enclosing if branch as returned, and the if-join then discarded the
   handled value on the normal path (the HTML adapter's `import_text`). Each
-  handler arm now owns its return flag (D8.3.4). Regression:
+  handler arm now owns its return flag (D7.3.4). Regression:
   `test/lambda/handler_raise_in_branch.ls`.
 * **Block split cloned `id`.** Splitting a block copied all its attributes to
   the new half, so an HTML paragraph's `id` appeared twice; the new half now
   drops `id` (`lambda.editor` `split_right_attrs`). Hosts can also mark schema
   attributes `keep_on_split:false` for boundaries such as Word's page starts;
-  ordinary Enter retains the boundary only on the original block (D7.2.5).
+  ordinary Enter retains the boundary only on the original block (D10.2.1).
   Regression: `test/lambda/editor/split_boundary_attrs.ls`.
 * **Flex relayout.** A nested flex item's intrinsic contribution read its
   children's content-box FlexItemProp cache, which a relayout retains from the
@@ -194,10 +194,10 @@ to the editor.
   strings left the old parent's child link attached to their reused storage.
   Retiring that parent could retire a child already in the new tree. Rebuild
   now unlinks a retained child before reparenting it, preserving the ownership
-  required by D4.5.1v4. The same math regression checks both formulas survive.
+  required by D5.5.1. The same math regression checks both formulas survive.
 * **View-only caret boundaries.** Collapsed whitespace can be a DOM text node
   without a text view. Caret geometry now checks the view discriminator before
-  accessing text rectangles. Editing policy remains in Lambda (D7.2.5);
+  accessing text rectangles. Editing policy remains in Lambda (D10.2.1);
   `edit_md_view_only_keys.json` covers deletion and undo of a retained block.
 * **In-flow positioned boxes painted and hit-tested in tree order.** A relative
   or sticky box (`z-index` auto/0) was painted among its siblings in tree
@@ -212,7 +212,7 @@ to the editor.
 ## 3. Package decisions
 
 * One edit session per window, owned by the `edit <edit_app>` instance state
-  (S1.4, D7.2.1): the session record is seeded from the model `~` at first
+  (S1.4, D9.3.1): the session record is seeded from the model `~` at first
   render and replaced only in `on` handlers (S12.1.3).
 * The rich-text surface reuses the `lambda.editor` model: nodes are rendered
   by `apply()` so the render map records source paths for the native
@@ -350,7 +350,7 @@ The shared toolbar separates the filename and document actions from grouped
 formatting controls. Stroke icons, consistent button sizes, restrained active
 states and a fixed-width dirty indicator keep it stable while editing. Buttons
 retain document focus on mouse-down and emit the existing command descriptors;
-editing policy stays in Lambda (D7.2.5). Source mode uses one compact row, and
+editing policy stays in Lambda (D10.2.1). Source mode uses one compact row, and
 formatting groups wrap together in narrower windows.
 
 ## 4. Progress

@@ -1,4 +1,4 @@
-// Scientific data becomes ordinary scene geometry; Radiant owns visibility and depth (D7.5.3).
+// Scientific data becomes ordinary scene geometry; Radiant owns visibility and depth (D9.5.6).
 import scene: lambda.scene3d
 import camera: lambda.scene3d.camera
 import rgba: lambda.slide.color

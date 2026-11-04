@@ -1,5 +1,5 @@
 // LR01-16: satellites that read different property keys. A satellite image is
-// lowered without the receiving runtime (D8.5.1v7) and is published whenever
+// lowered without the receiving runtime (D8.3.5) and is published whenever
 // its worker finishes, so its key suffix gets a place in the module's key table
 // only at publication. When that place was fixed at compile time, an image
 // published after another one resolved its keys through the other's suffix:

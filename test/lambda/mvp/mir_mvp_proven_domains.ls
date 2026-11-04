@@ -26,7 +26,7 @@ pn ready(board: bool[], start: int) int {
 fn require_flag(flags: bool[], key: int) bool { return flags[key] and true }
 pn put_erased(var values: int[], key: int, member: any) any { values[key] = member; return null }
 
-// recursive forwarding keeps caller-owned precise homes alive across GC (D5.3).
+// recursive forwarding keeps caller-owned precise homes alive across GC (D6.3).
 pn rewrite(var a: int[], var box: Cell, depth: int) any {
     if (depth == 0) {
         a = fill(3, 40)

@@ -8,7 +8,7 @@
     {"type": "assert_count", "target": {"selector": ".painterly-canvas"}, "count": 1},
     {"type": "assert_script", "js": "document.querySelector('.painterly-canvas').getAttribute('src').startsWith('data:image/png;base64,')"},
     {"type": "assert_text", "target": {"selector": ".specimen-caption h2"}, "equals": "Oriented painterly"},
-    {"type": "assert_script", "js": "document.querySelectorAll('.generator-nav a').length===9 && document.querySelector('.generator-nav [aria-current=page]').getAttribute('href')==='painterly.ls'"},
+    {"type": "assert_script", "js": "document.querySelectorAll('.generator-nav a').length===10 && document.querySelector('.generator-nav [aria-current=page]').getAttribute('href')==='painterly.ls'"},
     {"type": "assert_count", "target": {"selector": ".stats-card .stat"}, "count": 5},
     {"type": "capture_surface", "source": "page", "file": "temp/procart-painterly/oriented.png"},
     {"type": "script", "js": "globalThis.firstPainting=document.querySelector('.painterly-canvas').getAttribute('src')"},

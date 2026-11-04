@@ -1,6 +1,6 @@
 // A `bool` system function returns an ordinary error for an error operand or
 // an operand outside its domain (S7.9.3, S7.10.4); `bool` is only its success
-// shape (D6.4.1). The JIT narrowed any/all/is_view results into the bool lane
+// shape (D7.6.1). The JIT narrowed any/all/is_view results into the bool lane
 // through truthiness, reading the error as `false`, and let the BOOL_ERROR of
 // contains/starts_with/ends_with reach `if` and `not` as truth. The
 // interpreter kept the error Item; the tiers must agree (S1.6).

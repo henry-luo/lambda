@@ -393,7 +393,7 @@ propagates `null` (S7.10.2, S7.10.5v3).
 
 These pure batches retain float64 geometry and the keyed reference algorithms
 (**S1.6**, **S4.1.5**, **S12.1.1v3**). They use the boxed `Item` ABI and owned
-numeric results (**D6.4.1–D6.4.2**); input arrays are preserved. Whole nulls
+numeric results (**D7.6.1–D7.6.2**); input arrays are preserved. Whole nulls
 propagate null, and error operands propagate before validation.
 
 | Function | Inputs and result |
@@ -417,7 +417,7 @@ available for comparison and unsupported batch domains (**PG7**).
 exact counting kernel used by `lambda.procart.wfc`. Prefer the package for
 model construction and named options; this primitive accepts numeric buffers.
 It is pure (S12.1.1v3) and returns an owned flat `int[]` in row-major order
-through the boxed system-function ABI (D6.4.1–D6.4.2).
+through the boxed system-function ABI (D7.6.1–D7.6.2).
 
 `key` is `u64`. There must be 1–1,000 positive finite `int`/`float` weights,
 with a sum at most 2^53. `masks` has shape `[4, patterns, patterns]`, with
@@ -467,8 +467,8 @@ allocation failure or nonfinite arithmetic return `error`.
 Every droplet in a batch reads one snapshot. Changes accumulate in reference
 order, then each cell is clamped to the previous snapshot's local range.
 Zero droplets or steps preserve the field. Both new batch functions preserve
-inputs, are pure (S12.1.1v3), use the boxed ABI (D6.4.1–D6.4.2) and retain
-sources through precise roots (D5.3.3). Whole-null operands propagate null;
+inputs, are pure (S12.1.1v3), use the boxed ABI (D7.6.1–D7.6.2) and retain
+sources through precise roots (D6.3.3). Whole-null operands propagate null;
 error operands take precedence (S7.1.1v3).
 
 #### Statistical
@@ -533,7 +533,7 @@ let dice = floor(x * 6) + 1     // random 1-6
 ## Physics Functions
 
 These pure functions evaluate `scene3d` physics descriptions under
-**S12.1.1v2**, returning boxed data or an error (**D6.4.1**).
+**S12.1.1v2**, returning boxed data or an error (**D7.6.1**).
 
 | Function | Result |
 |----------|--------|
@@ -544,7 +544,7 @@ These pure functions evaluate `scene3d` physics descriptions under
 The initial native engine supports 3D sphere/box bodies. See [Physics](Lambda_Physics.md)
 for scene tags, bounded simulation options, command records, queries and the
 `lambda.physics` wrappers. Live scene controls are procedures supplied by
-`lambda.physics.scene` through the Radiant host boundary (**D7.5.3**).
+`lambda.physics.scene` through the Radiant host boundary (**D9.5.6**).
 
 ---
 
@@ -968,7 +968,7 @@ Supported schemes are `'ed25519'` (raw 32-byte public key),
 use PEM or DER SubjectPublicKeyInfo. The native primitive uses OpenSSL 3's
 built-in provider in a private context, without reading key files or ambient
 OpenSSL configuration. It grants no network, filesystem, installation or
-publisher authority (**D7.5.7–D7.5.8**).
+publisher authority (**D11.2.3–D11.2.4**).
 
 ### uuid()
 
@@ -1330,15 +1330,15 @@ pn inspect_archive(source) {
 }
 ```
 
-Mark auto-detection uses only `.mark` (D2.9.1); `input(target, 'mark')`
-accepts any filename regardless of its extension (D2.9.2).
+Mark auto-detection uses only `.mark` (D10.1.1); `input(target, 'mark')`
+accepts any filename regardless of its extension (D10.1.2).
 
 | Format | Description | Example |
 |--------|-------------|---------|
 | JSON | JavaScript Object Notation | `input(/.'data.json', 'json')` |
 | XML | Extensible Markup Language | `input(/.'config.xml', 'xml')` |
 | HTML | HyperText Markup Language | `input(/.'page.html', 'html')` |
-| XHTML | XML syntax producing an HTML tree (D2.10.1) | `input("page.xhtml", 'xhtml')^` |
+| XHTML | XML syntax producing an HTML tree (D10.1.4) | `input("page.xhtml", 'xhtml')^` |
 | YAML | YAML Ain't Markup Language | `input(/.'config.yaml', 'yaml')` |
 | TOML | Tom's Obvious Minimal Language | `input(/.'config.toml', 'toml')` |
 | Markdown | Markdown markup | `input(/.'doc.md', 'markdown')` |
@@ -1356,11 +1356,11 @@ accepts any filename regardless of its extension (D2.9.2).
 | STL | ASCII or binary facets as typed `normals`/`positions` arrays | `input("part.stl", 'stl')` |
 | PLY | ASCII or binary elements, one typed column or list per property | `input("scan.ply", 'ply')` |
 
-These model formats map to existing Lambda values (D4.1.3). External
+These model formats map to existing Lambda values (D5.1.3). External
 buffers, textures, and procedural scripts remain references; parsing does not
 load dependencies or start playback. To resolve supported model assets into
 renderable scene elements and shared animation clips, use `lambda.scene3d.load()`
-([asset-loading API and profiles](../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes), D7.2.4/S12.1.1v2).
+([asset-loading API and profiles](../vibe/radiant/Radiant_Design_WebGL.md#15-asset-loading-into-native-scenes), D9.3.4/S12.1.1v2).
 See the [3D input mappings and limits](../vibe/radiant/Radiant_Design_WebGL.md#14-textual-3d-asset-input).
 
 **Input Function Usage:**
@@ -1409,7 +1409,7 @@ authored spelling. Malformed strings/URLs and the 4 MiB / 262,144-token limits
 raise parse errors. This projection supports publication resource rewriting.
 
 `parse(text, 'xhtml')^` selects strict XML syntax and returns an HTML-compatible
-`<#document>` tree (**D2.10.1**). The root must be XHTML `html`; namespace
+`<#document>` tree (**D10.1.4**). The root must be XHTML `html`; namespace
 identity, XML case sensitivity, whitespace and CDATA are preserved. For file
 input, `.xhtml`/`.xht` select this format automatically. See
 [XHTML input and limits](Markup_Formats_Support.md#xhtml-input--html-document-tree)
@@ -1470,7 +1470,7 @@ match over the byte alphabet; ordinary token values are binary, while symbol
 tokens retain their symbol domain. Spans remain byte offsets. An empty binary
 token is `null` (S2.2.2v2). Text input retains Unicode/string behavior. Grammar
 results are GC-owned and temporary parse storage is released after each call
-(GM14, D5.3.3); captured bytes need no text decoding before parsing.
+(GM14, D6.3.3); captured bytes need no text decoding before parsing.
 
 **Source positions** (`parse()` only): with `sourcepos: true` in the options
 map, each top-level block of a markup document (Markdown and the other
@@ -1535,7 +1535,7 @@ unknown-option policy is S17.8.1 in [formal semantics](Lambda_Formal_Semantics.m
 
 Wiki targets accept `"wiki:<flavor>"` or
 `{type:"wiki", flavor:"jira", loss:"error"}` and invoke the shipped
-`lambda.doc.wiki` Lambda Script writers (D7.2.4). The default flavor is
+`lambda.doc.wiki` Lambda Script writers (D9.3.4). The default flavor is
 `mediawiki`; the default loss policy is `error`. `loss:"allow"` permits
 diagnosed losses. Use `wiki.format_report` to inspect `{text, diagnostics}`
 before allowing them. See [wiki output](Markup_Formats_Support.md#51-wiki-output).
@@ -1548,7 +1548,7 @@ format(document, {type:"wiki", flavor:"jira"})^
 `format(scene, 'gltf')` serializes a `lambda.scene3d` element tree, such as a `scene()` or a `load()` result, as a self-contained glTF 2.0 JSON string; `format(scene, 'glb')` returns GLB bytes as a binary value. Groups, meshes (buffer, box and plane geometry), Lambert/basic materials, textures, cameras and directional/point/spot lights are exported; skeletons, morphs and animation clips raise an error naming the construct. See the [export mapping](../vibe/radiant/Radiant_Design_WebGL.md#gltf-and-glb-export).
 
 `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, and
-`ics`/`ical`/`icalendar` use the shipped `lambda.doc.misc` package (D7.2.4).
+`ics`/`ical`/`icalendar` use the shipped `lambda.doc.misc` package (D9.3.4).
 They accept `{type, loss}` options with strict `loss:"error"` defaults.
 `format_report` in that package exposes losses before serialization is
 accepted. See [source formatters](Script_Formats_Support.md) for record
@@ -1587,7 +1587,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 utf8proc width table for printable scalars. These are metadata queries; callers
 decide wrapping and word boundaries in Lambda. String offsets remain Unicode
 code-point offsets (S2.5.8), while `lambda.io.terminal` is a shipped package
-under the module path rules of D7.2.4.
+under the module path rules of D9.3.4.
 
 #### print(args...)
 
@@ -1650,7 +1650,7 @@ for defaults and constructed-tree examples.
 | `wiki` / `wiki:<flavor>` | `.wiki`, `.mediawiki` default to MediaWiki | Lambda Script wiki writers; explicit selector for other dialects |
 | `asciidoc`, `man`, `typst` | `.adoc`, `.asciidoc`, `.asc`; `.man`, `.1`–`.9`; `.typ`, `.typst` | Mark Doc source writers in `lambda.doc.misc` |
 | `eml`, `vcf`, `ics` | `.eml`; `.vcf`, `.vcard`; `.ics`, `.ical` | Email, vCard, and iCalendar source writers |
-| `mark` | `.mark` | Mark Notation (D2.9.1) |
+| `mark` | `.mark` | Mark Notation (D10.1.1) |
 | `text` | `.txt` | Plain text |
 | `toml` | `.toml` | TOML format |
 | `zip` | `.zip` | ZIP32/ZIP64 filesystem tree; Stored or DEFLATE |
@@ -1765,7 +1765,7 @@ publication, the error says the file was published but its durability is
 uncertain: inspect the destination before retrying. This immediate I/O effect
 is not undone by a later SQLite rollback (S12.4.4v4). It is unavailable when a
 security I/O client is bound until the broker supports exclusive creation
-(D7.5.2, D7.5.6), and on platforms without the anchored writer, including the
+(D11.1.2, D11.2.2), and on platforms without the anchored writer, including the
 current Windows implementation. An older Lambda runtime rejects this distinct
 operation; `output` with an unknown mode does not provide the same guarantee.
 
@@ -1802,7 +1802,7 @@ pn rename_file() {
 
 ##### io.fetch(url, options?)
 
-Performs an HTTP request, or reads a local file through the same path, and returns one response map, like a JavaScript `Response` that has already been read. The transfer runs off the loop thread while the calling task parks, so other tasks and a window keep running (S13.1.1v3, D5.3.3). The result is `{status, ok, url, headers, body, bytes}`: `status` is the HTTP status (200 for a local file; 206 or 416 when a local read carries a single `Range: bytes=a-b` header, which it honours as a server would), `ok` is true for a 2xx status, `url` is the final URL after redirects (a `file:` URL for a local source), `headers` maps lowercased header names to values (a repeated name keeps its last value), `body` is a string for text content types (`text/*`, JSON, XML, YAML, CSV, JavaScript, HLS playlists and the like) and `binary` otherwise (`null` when the body is empty bytes or was written to disk), and `bytes` is the body's size. A 4xx or 5xx response is a result, not an error; a connection, TLS or timeout failure raises one (405 *network error*, 406 *network timeout*), and a missing local file raises 401.
+Performs an HTTP request, or reads a local file through the same path, and returns one response map, like a JavaScript `Response` that has already been read. The transfer runs off the loop thread while the calling task parks, so other tasks and a window keep running (S13.1.1v3, D6.3.3). The result is `{status, ok, url, headers, body, bytes}`: `status` is the HTTP status (200 for a local file; 206 or 416 when a local read carries a single `Range: bytes=a-b` header, which it honours as a server would), `ok` is true for a 2xx status, `url` is the final URL after redirects (a `file:` URL for a local source), `headers` maps lowercased header names to values (a repeated name keeps its last value), `body` is a string for text content types (`text/*`, JSON, XML, YAML, CSV, JavaScript, HLS playlists and the like) and `binary` otherwise (`null` when the body is empty bytes or was written to disk), and `bytes` is the body's size. A 4xx or 5xx response is a result, not an error; a connection, TLS or timeout failure raises one (405 *network error*, 406 *network timeout*), and a missing local file raises 401.
 
 Options: `method` (default "GET"), `body` (text or binary), `headers` (a map of text values), `timeout` (seconds, default 30), `user_agent`, `follow_redirects` (default true), `verify_tls` (default true), `max_bytes` (the body may not exceed it), `to` (a local path: the body streams into `<path>.part` and is renamed to `path` on success, and `body` is `null`), `resume` (with `to`: continue an existing `.part` with a Range request), `progress` (a function, `fn` or `pn`) and `progress_ms` (default 250).
 
@@ -1912,7 +1912,7 @@ child receives closed/empty standard input. Output exceeding the capture bound
 is drained and marked `truncated`; it does not become a partial success silently.
 Timeout terminates the process group and returns `timed_out: true`. Task
 cancellation terminates it, waits for capture cleanup, then raises error 319,
-`task cancelled`. No worker thread receives managed Lambda values (D5.3.3).
+`task cancelled`. No worker thread receives managed Lambda values (D6.3.3).
 
 ##### io.text_search(source, query, options?)
 
@@ -1965,7 +1965,7 @@ In a directory, files are selected as `io.grep` selects them. A source that does
 #### lambda.io.websocket
 
 Task-owned WebSocket IO, imported as `import ws: lambda.io.websocket`
-(**D7.2.4v4**). These are procedures (**S12.1.1v3**); network waits park the
+(**D9.3.4**). These are procedures (**S12.1.1v3**); network waits park the
 calling task (**S13.1.2v2**) while other tasks and windows continue running.
 
 | Procedure | Returns | Description |
@@ -2028,13 +2028,13 @@ queues after earlier sends and uses an empty close body when no arguments
 are given. `CloseEvent` exposes readonly `wasClean`, `code`, and `reason`.
 The browser adapter uses the same transport and browser-profile cookies;
 native tasks perform IO, so a JavaScript entry never parks a host frame
-(**D7.4.2v2**). This is a document API, outside the core-global allowlist
-(**D7.3.1**). See the implementation plan for qualification and remaining
+(**D9.5.2**). This is a document API, outside the core-global allowlist
+(**D9.4.1**). See the implementation plan for qualification and remaining
 Fetch-policy/standards coverage; this is not a claim of full WPT conformance.
 
 #### lambda.io.mail
 
-IMAP and POP3 sessions and SMTP sending, as a built-in module at `lambda.io.mail` (D7.2.4v4). Import it with an alias: `import mail: lambda.io.mail`. An unaliased import is refused, because its `open` and `send` would shadow the built-in ones; the fully qualified spelling `lambda.io.mail.open(…)` needs no import. All four functions are procedures and park the calling task. curl connects, secures and logs in; after login the runtime speaks IMAP itself, waiting on the event loop rather than a worker thread (`vibe/Lambda_Demo_Mail.md` §2.5, §5.3).
+IMAP and POP3 sessions and SMTP sending, as a built-in module at `lambda.io.mail` (D9.3.4). Import it with an alias: `import mail: lambda.io.mail`. An unaliased import is refused, because its `open` and `send` would shadow the built-in ones; the fully qualified spelling `lambda.io.mail.open(…)` needs no import. All four functions are procedures and park the calling task. curl connects, secures and logs in; after login the runtime speaks IMAP itself, waiting on the event loop rather than a worker thread (`vibe/Lambda_Demo_Mail.md` §2.5, §5.3).
 
 | Function | Returns | Description |
 |----------|---------|-------------|
@@ -2069,7 +2069,7 @@ pn unread_count(password) {
 Import `lambda.io.sqlite` with an alias to execute one parameterized SQLite
 statement against a local database file. Outside an `open` transaction each
 statement commits on success or rolls back on failure (S12.4.4v4); these calls
-park while SQLite executes (D7.2.4v4).
+park while SQLite executes (D9.3.4).
 
 | Function | Result | Behavior |
 |----------|--------|----------|
@@ -2175,7 +2175,7 @@ while making the backup. It may be called once, after read-only validation and
 before any modifying statement. A failed or uncertain publication makes the scope
 rollback-only. The preimage is an independent file effect: after it has been
 published, it remains even if the enclosing transaction later rolls back
-(S12.4.4v4, D7.5.6). A later upgrade-destination publication can also fail or
+(S12.4.4v4, D11.2.2). A later upgrade-destination publication can also fail or
 be uncertain, so inspect both paths before retrying. The snapshot size,
 authorization, platform and staging limits of `create` apply.
 
@@ -2191,7 +2191,7 @@ A match says nothing about changes after the second snapshot or about power-loss
 durability (S12.4.4v4).
 
 The initial confined-app profile has no database broker and denies acquisition
-before opening a file (D7.5.2). macOS has been exercised; Windows and Linux
+before opening a file (D11.1.2). macOS has been exercised; Windows and Linux
 remain to be qualified. These primitives do not by themselves provide the
 accounting app's migrations, recovery or business controls.
 
@@ -2220,7 +2220,7 @@ pn main() {
 
 #### lambda.io.secret
 
-Passwords and tokens in the OS secret store, as a built-in module at `lambda.io.secret` (D7.2.4v4). Import it with an alias: `import secret: lambda.io.secret`. A value is a generic password named by a `service` and an `account`, both non-empty text. On macOS the store is the user's login Keychain. Other platforms raise `no secret store on this platform` until they gain a backend. All three functions are procedures: the OS may wait on an unlock or access prompt, so each call runs on a worker thread while the calling task parks. Values are never logged (`vibe/Lambda_Demo_Mail.md` ML6).
+Passwords and tokens in the OS secret store, as a built-in module at `lambda.io.secret` (D9.3.4). Import it with an alias: `import secret: lambda.io.secret`. A value is a generic password named by a `service` and an `account`, both non-empty text. On macOS the store is the user's login Keychain. Other platforms raise `no secret store on this platform` until they gain a backend. All three functions are procedures: the OS may wait on an unlock or access prompt, so each call runs on a worker thread while the calling task parks. Values are never logged (`vibe/Lambda_Demo_Mail.md` ML6).
 
 | Function | Returns | Description |
 |----------|---------|-------------|
@@ -2242,7 +2242,7 @@ pn password_for(user) {
 
 #### lambda.io.loopback
 
-One HTTP request on 127.0.0.1, as a native app receives the redirect that ends a sign-in in the system browser (RFC 8252 §7.3), as a built-in module at `lambda.io.loopback` (D7.2.4v4). Import it with an alias: `import loopback: lambda.io.loopback`. [`lambda.oauth`](Lambda_Packages.md) is built on it.
+One HTTP request on 127.0.0.1, as a native app receives the redirect that ends a sign-in in the system browser (RFC 8252 §7.3), as a built-in module at `lambda.io.loopback` (D9.3.4). Import it with an alias: `import loopback: lambda.io.loopback`. [`lambda.oauth`](Lambda_Packages.md) is built on it.
 
 | Function | Returns | Description |
 |----------|---------|-------------|
@@ -2430,7 +2430,7 @@ bundled build. JPEG12 is used by specialist GeoTIFF workflows; the current
 RGBA8 image pipeline does not decode it.
 
 File acquisition and atomic output publication remain in `lambda-io`
-(**D7.1.2v2**, **D7.1.3**); the byte codec core has no Radiant dependency.
+(**D9.1.2**, **D9.1.3**); the byte codec core has no Radiant dependency.
 
 In a Radiant event handler, `dom.set_canvas_pixels(canvas,image)^` synchronously
 copies a rank-three ubyte RGBA array into a document-owned retained canvas.
@@ -2438,7 +2438,7 @@ Strided arrays are accepted. The bitmap dimensions become the array width and
 height; CSS controls its displayed size. Upload replaces the pixels, preserves
 straight-alpha array data, and premultiplies the native surface. Uploads are
 limited to 4096 pixels per dimension and 4,194,304 pixels, and reject an existing
-WebGL context. No borrowed array pointer survives the call (**D4.5.2**).
+WebGL context. No borrowed array pointer survives the call (**D5.5.2**).
 The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 
 `radiant.image_job(owner, request)^` also accepts `channel:"thumbnail"` for
@@ -2449,7 +2449,7 @@ physical thumbnail bounds. Poll with `{action:"poll", channel:"thumbnail", token
 `null` means pending; a completion reports `success`, `cache_hit`, an
 `error:{status,message}` record, and, on success, RGBA `pixels`, `width`, `height`
 and cache metrics. Upload pixels with the canvas bridge above. Native jobs retain
-copied paths and native buffers, never borrowed GC pointers (**D4.5.2**).
+copied paths and native buffers, never borrowed GC pointers (**D5.5.2**).
 
 An optional nonnegative integer `canvas_bytes` reports the consumer's retained
 canvas pixels. The cache's 32 MiB pixel budget reserves those bytes and the
@@ -2461,7 +2461,7 @@ request; `action:"invalidate"` on the thumbnail channel also clears its
 document-owned 32 MiB / 128-entry LRU cache. Cache revisions include subsecond
 modification time and file identity. Thumbnail loading normalizes orientation,
 uses GIF frame/TIFF page zero and permits budgeted full-decode fallback. Paths
-use the shared IO adapter (**D7.1.2v2**). The existing `preview` and `export`
+use the shared IO adapter (**D9.1.2**). The existing `preview` and `export`
 channels continue to process pixel-array input. See the
 [Finder demo](../test/demo/finder/README.md) for a viewport-driven consumer.
 

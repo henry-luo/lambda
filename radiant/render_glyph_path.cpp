@@ -54,7 +54,7 @@ bool render_text_visit_cluster(const FontBox* font, const unsigned char* start,
         size_t* bytes, float* advance, bool include_scalar) {
     RenderClusterVisit visit = {visitor, context};
     float width = 0.0f;
-    // zero advance does not mean no ink; retain selected-face substitutions/mark positions (D4.5.1v4).
+    // zero advance does not mean no ink; retain selected-face substitutions/mark positions (D5.5.1).
     bool shaped = text_visit_glyph_unit(font, start, end, TEXT_SHAPE_HORIZONTAL_CLUSTER, include_scalar,
         render_cluster_glyph, &visit, bytes, &width);
     if (shaped) {

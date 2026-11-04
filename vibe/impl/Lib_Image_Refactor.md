@@ -9,10 +9,10 @@ core, all eight raster format adapters, their imported codecs, and the native
 release source selection in `build_lambda_config.json`. Direct adaptation of
 the imported image sources follows the source policy approved for this work.
 
-Spec linkage: **D7.1.1**, **D7.1.2v2**, and **D7.1.3** keep context-free codec
-mechanisms in `lib` and resource acquisition in `lambda-io`; **D4.1.4v5** retains
+Spec linkage: **D9.1.1**, **D9.1.2**, and **D9.1.3** keep context-free codec
+mechanisms in `lib` and resource acquisition in `lambda-io`; **D5.1.4** retains
 tracked native allocation; **S7.4.3–S7.4.4** retain fault/error classification.
-The runtime-only CLI remains the profile specified by **D7.1.6**. No formal
+The runtime-only CLI remains the profile specified by **D9.2.2**. No formal
 ruling, public API, format capability, or build-source selection changes.
 
 ## Findings

@@ -304,7 +304,6 @@ bool ui_context_enable_native_graphics(UiContext* uicon) {
     uicon->window = radiant_platform_create_window(1, 1, "Lambda Headless", false);
     if (!uicon->window) {
         log_error("[NATIVE_GRAPHICS_HOST] hidden window creation failed");
-        radiant_platform_terminate();
         return false;
     }
     log_info("[NATIVE_GRAPHICS_HOST] hidden graphics host ready");
@@ -601,7 +600,7 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);
     // the realm can outlive this arena; retire its listener pins while the
-    // document registry and precise-root owner are still valid (D4.5.2).
+    // document registry and precise-root owner are still valid (D5.5.2).
     dom_events_release_document(doc);
 
     if (timer_owner && js_runtime_state_for(timer_owner)) {
@@ -681,7 +680,7 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
     if (owned_runtime) {
-        // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D5.4.1).
+        // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D6.4.1).
         if (!radiant_eval_context_switch(runtime_get_eval_context(owned_runtime.get()))) {
             log_error("free_document: could not rebind owned runtime for cleanup; runtime retained");
             owned_runtime.release();
@@ -788,8 +787,7 @@ void UiContext::destroy() {
     window_surface = nullptr;
     surface = nullptr;
 
-    // Only tear down the platform if a window was created (i.e., non-headless
-    // mode); terminating an uninitialized windowing library is undefined.
+    // the host owns its window; the backend's application runtime outlives every host.
     if (window) {
         if (mouse_state.sys_cursor) {
             radiant_platform_destroy_cursor(mouse_state.sys_cursor);
@@ -797,6 +795,5 @@ void UiContext::destroy() {
         }
         radiant_platform_destroy_window(window);
         window = nullptr;
-        radiant_platform_terminate();
     }
 }

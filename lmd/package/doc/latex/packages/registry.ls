@@ -1,4 +1,4 @@
-// Static package catalogue. Package names are data, never dynamic import paths (S1.8, D7.2.4).
+// Static package catalogue. Package names are data, never dynamic import paths (S1.8, D9.3.4).
 import util: ~~.util
 import graphicx: .graphicx
 import enumitem: .enumitem
@@ -399,7 +399,7 @@ pub fn adapter_names() => [for (k, v in CATALOG) string(k)] ++ [for (k, v in CLA
 // the classes whose kernel defines \chapter (the engine declares it for them)
 pub fn chaptered_classes() => [for (k, v in CLASSES where v.base != "article") string(k)]
 
-// a class's profile; an unknown class renders with the article profile (D7.2.7)
+// a class's profile; an unknown class renders with the article profile (D10.2.2)
 pub fn class_profile(cls) => CLASSES[cls] or CLASSES.article
 
 // the family whose handler-table entry serves a class: its family or its own name;
@@ -614,7 +614,7 @@ fn add_names(st, names, opts, node, i) any^ {
 fn walk(node, st, before_body) any^ {
     if (not (node is element)) st
     else if (string(name(node)) == "documentclass") {
-        // D7.2.7: a class without a profile or a beside-document .cls is unknown;
+        // D10.2.2: a class without a profile or a beside-document .cls is unknown;
         // the document still renders with the article profile
         let cls = trim(util.text_of_skip_brack(node))
         if (cls == "") st

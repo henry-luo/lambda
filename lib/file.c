@@ -520,7 +520,7 @@ static int write_binary_file_atomic_mode(const char* filename, const void* conte
     if (overwrite) {
         published = file_rename(tmp, filename);
     } else {
-        // D7.5.6: no existence-check/rename gap, and no replacement fallback.
+        // D11.2.2: no existence-check/rename gap, and no replacement fallback.
 #ifdef _WIN32
         published = MoveFileExA(tmp, filename, MOVEFILE_WRITE_THROUGH) ? 0 : -1;
         if (published != 0) {

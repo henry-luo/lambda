@@ -14,7 +14,7 @@ typedef struct InputAllocationContext {
     Pool* pool;
     Arena* arena;
     bool ui_mode;
-    Input* input;   // the owner; ui_mode content appends deep-copy into it (D4.5.2)
+    Input* input;   // the owner; ui_mode content appends deep-copy into it (D5.5.2)
 } InputAllocationContext;
 
 extern __thread InputAllocationContext* input_allocation_context;

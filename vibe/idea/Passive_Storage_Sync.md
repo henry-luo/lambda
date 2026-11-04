@@ -258,8 +258,8 @@ Lambda has no S3 client today: no `s3` path scheme and no SigV4 signing in
 - **Conditional writes** are ordinary HTTP headers (`If-None-Match`,
   `If-Match`) and an ordinary status code (`412`).
 - **Placement.** The client would sit behind the one central IO door
-  (D7.5.2), with resource IO in `lambda-io` and the raw mechanism in `lib`
-  (D7.1.2v2).
+  (D11.1.2), with resource IO in `lambda-io` and the raw mechanism in `lib`
+  (D9.1.2).
 
 ### 8.2 Data
 

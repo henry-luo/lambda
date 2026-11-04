@@ -1,7 +1,7 @@
 # PDF output virtual list MVP
 
 > **Status:** MVP implemented and verified, 2026-10-02; follow-up issues remain open.
-> **Authority:** S2.6.6v2, D2.6.12v2; remaining contracts SO48/DO32.
+> **Authority:** S2.6.6v2, D3.5.1; remaining contracts SO48/DO32.
 > **Design:** [PDF Output](../Lambda_Design_PDF_Output.md).
 
 The MVP constructs a PDF file's bytes through an extended Element/List and
@@ -61,7 +61,7 @@ unsupported. Dictionary and object nesting is bounded at 64 levels; cycles and
 excessive depth reject the whole file. Reader-specific numeric range policy is
 still open even though the writer preserves the selected numeric spelling.
 
-The dictionary follow-up exposed a pre-existing D5.3.3 ownership defect in
+The dictionary follow-up exposed a pre-existing D6.3.3 ownership defect in
 map contract admission: shape rebuild rooted a wide scalar borrowed from the
 old map data buffer, but GC moved that buffer before the store. The rebuild
 now uses the existing scalar-home adoption helper before allocating, preserving
@@ -93,7 +93,7 @@ general Unicode byte-position API or a shipped PDF package.
 - The initial dictionary baseline passed **6,176/6,177**; a MIR fixture's
   bare `1535` count also matched that substring in an ASLR pointer constant.
   Both affected sidecars now match the actual `and` guard instruction under
-  D4.4.4v4, preserving their exact guard counts. The final baseline passed
+  D5.4.4, preserving their exact guard counts. The final baseline passed
   **6,177/6,177** (2,104 input and 4,073 runtime), including all four native
   builder tests. The existing C PDF writer suite passed **42/42** after sharing
   its literal-string escaping helper with PDFBuilder.

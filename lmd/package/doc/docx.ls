@@ -1,4 +1,4 @@
-// Public DOCX module, resolved as lambda.doc.docx (D7.2.4).
+// Public DOCX module, resolved as lambda.doc.docx (D9.3.4).
 import c: .docx.common
 import package: .docx.package
 import model: .docx.model

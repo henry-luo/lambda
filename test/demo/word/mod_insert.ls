@@ -1,4 +1,4 @@
-// Insert commands keep document structure and history in Lambda (S1.4, D7.2.5).
+// Insert commands keep document structure and history in Lambda (S1.4, D10.2.1).
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import lambda.editor.mod_source_pos

@@ -40,8 +40,9 @@ none of them. Its city, rules, models and textures are original and generated in
 Traffic keeps to the right-hand lane, picks a turn at every junction, stops for red
 and amber lights, queues behind whatever is ahead (the player included), and waits
 for oncoming cars before turning left. A bumped car stops for a moment. Pedestrians
-walk the sidewalk loop around their block and hop clear of a car bearing down on
-them. The stunt lot has two ramps that launch the car across the neighbouring
+walk the sidewalk loop around their block, swinging their arms and legs, and hop
+clear of a car bearing down on them. The car's rear lamp on the side its wheels are
+turned toward blinks amber while it turns. The stunt lot has two ramps that launch the car across the neighbouring
 streets, crate pyramids, a cone slalom and barrels; the yard and some sidewalks have
 more props. Buildings, parked cars, lamp posts, trees and signal poles are solid.
 
@@ -62,7 +63,11 @@ people, courier and camera. Everything that moves on screen is a physics body,
 including the camera, so `sync()` hands the whole frame to Radiant as one batch of
 kinematic pose targets; no scene element is edited per frame (a camera attribute
 edit would relayout the page). Bodies apply their targets on the next physics tick
-at 120 Hz, so the camera and the car move together. The car pushes the crates,
+at 120 Hz, so the camera and the car move together. The turn indicators are bodies
+too: a lit one rides with the car and an unlit one waits below the city. Walking
+needs no per-frame work: each pedestrian's limbs hang from hip and shoulder pivots
+inside its body, and one looping `walk` clip swings them from each person's own gait
+phase. The car pushes the crates,
 cones, barrels and bins, which are dynamic bodies; their contact events count the
 props scattered. Signal lamps, the crane, harbour ripples and beacon pulses are
 native clips on the scene clock, which the traffic also reads, so cars and lamps
@@ -83,8 +88,16 @@ by default instead of reading it back (`RADIANT_GPU_COMPOSITOR=off` restores the
 ([GPU compositor](../../../vibe/radiant/Radiant_Design_GPU_Compositor.md)) and repaints
 only the HUD readouts that changed; the page then holds about 56 fps, with a median
 frame of one 60 Hz vsync. `MIDTOWN_PROFILE=1` prints each frame's interval, step
-and sync times; `MIDTOWN_SPAWN=x,z,heading` starts the car elsewhere, for example
-`MIDTOWN_SPAWN=-178,168,1.5708` in front of the stunt ramp.
+and sync times, the scene's lag and the speed cap; `MIDTOWN_SPAWN=x,z,heading` starts
+the car elsewhere, for example `MIDTOWN_SPAWN=-178,168,1.5708` in front of the stunt ramp.
+
+The native scene pauses itself once its physics falls two seconds behind real time
+("simulation pacing debt exceeded"). Two things keep a slow machine short of that.
+The physics world allows 24 substeps of 1/120 s per frame, so frames as slow as 200 ms
+still catch up. A speed governor watches the lag: past a quarter second the car cannot
+speed up, past 0.6 s it eases down toward 8 m/s, and the cap lifts once the scene
+catches up, with a "Speed held" toast when it engages. Heavy load from other processes,
+such as test suites running in another checkout, is the usual cause.
 
 ## Verification
 

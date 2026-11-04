@@ -1,4 +1,4 @@
-// D2.1.5 and S2.2.3: parsing strings must box the value without advancing twice.
+// D2.1.4 and S2.2.3: parsing strings must box the value without advancing twice.
 let scalar = parse("\"one\"", 'mark')^;
 let values = parse("[\"one\", \"two\", \"\"]", 'mark')^;
 let attributes = parse("<node label: \"text\">", 'mark')^;

@@ -1,4 +1,4 @@
-// S11.4.6v3/D3.2.4v3: nullable record bindings reify their normal map layout.
+// S11.4.6v3/D4.2.5: nullable record bindings reify their normal map layout.
 type Link = {value: int, next: Link?}
 
 pn main() {

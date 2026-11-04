@@ -2,7 +2,7 @@
 #include "../lambda-data.hpp"
 #include "zip_archive.hpp"
 
-// Shared filesystem element contract (S12.4.1v2, S14.3.1v2, D7.4.5v2).
+// Shared filesystem element contract (S12.4.1v2, S14.3.1v2, D9.5.5).
 extern thread_local const ZipLimits* input_zip_limits;
 void input_archive(Input* input, const void* bytes, size_t length, ArchiveFormat format,
     ArchiveBudget* parent_budget = nullptr, uint32_t depth = 0);

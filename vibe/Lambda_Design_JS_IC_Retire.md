@@ -2,7 +2,7 @@
 
 **Status: IMPLEMENTED** (2026-08-15). Scope: LambdaJS named-property
 load/store specialization and compiler-side indexed specialization retirement.
-Lambda-lane dispatch is governed by D8.4.1v2. The implementation removed the
+Lambda-lane dispatch is governed by D7.4.1. The implementation removed the
 per-callsite state and duplicated MIR array/typed-array lanes, then landed the
 original Tier B design: stateless named fast heads use the existing TypeMap
 open-addressed table with NameId identity and fall back to the shared runtime
@@ -11,7 +11,7 @@ property kernels.
 **Update 2026-09-09.** The owner extended the no-inline-cache ruling to
 LambdaJS: LC1's "LJS keeps its ICs" carve-out is closed
 ([`Lambda_Design_Compiling.md`](Lambda_Design_Compiling.md) LC1v2,
-**D8.4.1v2**). Tier A (§5, IR10–IR15) is therefore **no longer an optional
+**D7.4.1**). Tier A (§5, IR10–IR15) is therefore **no longer an optional
 follow-up — it is the only sanctioned way to make LambdaJS property access
 faster**, together with the integer-index lane. Result38 measures the
 consequence of shipping Tier B alone: LambdaJS is 4.35× QuickJS and 29× untyped
@@ -59,11 +59,11 @@ Total: roughly **800 lines of mechanism plus a 5-arg store ABI**, entangled with
 
 **The measured wins came from shape work, not from the cells.** The Tune11/12 record (`vibe/jube/JS_Tune_History.md:145–189`) attributes every headline number to work that made *shapes* canonical and lookups cheaper — constructor shape sharing + derived pre-shaping (richards/deltablue megamorphic → 0), cached intrinsic prototypes (richards −23.3% wall, a *proto-chain* fix outside the IC entirely), array companion admission, sparse→dense promotion. All of that survives this proposal untouched; the state machine layered on top is what retires. The incremental value of the cells *over a fast shape lookup* has never been measured — §7 measures exactly that before anything is deleted.
 
-**The cells are hostile to where the engine is going.** D8.1.1v2 tiering wants execution state that both an interpreter tier and JIT'd code share. Per-callsite cells are owned by MIR module images (allocated per module state, indexed by lowering, hashed into the MIR cache key); a shape-resident fast path is tier-neutral by construction — T0 and T1 hit the same tables with zero extra wiring. The AST-interpreter design already commits the Lambda lane to "no per-site mutable dispatch state" (`vibe/Lambda_Design_Ast_Interpreter.md` n4, §"must never become inline caches").
+**The cells are hostile to where the engine is going.** D8.3.1 tiering wants execution state that both an interpreter tier and JIT'd code share. Per-callsite cells are owned by MIR module images (allocated per module state, indexed by lowering, hashed into the MIR cache key); a shape-resident fast path is tier-neutral by construction — T0 and T1 hit the same tables with zero extra wiring. The AST-interpreter design already commits the Lambda lane to "no per-site mutable dispatch state" (`vibe/Lambda_Design_Ast_Interpreter.md` n4, §"must never become inline caches").
 
 ## 3. The QuickJS reference
 
-Bellard's QuickJS has **no inline caches at all** and is competitive on property-heavy code. Its recipe: property names are **atoms** (interned integers — LambdaJS equivalent: `NameId`, already the definitive property identity per D4.6.1v2); every object points to a **shared shape** (hidden class — LambdaJS equivalent: shared `TypeMap` via constructor pre-shaping and per-callsite literal shapes, `js_property_attrs.h:133`); each shape carries an **atom-keyed hash table**: lookup is `atom & mask` → bucket → short `hash_next` chain of *integer* compares → property index into the object's flat slot array. A property hit is ~3 dependent loads with no per-site state, no invalidation, no staleness — the shape's table *is* the cache, and it is authoritative rather than a copy.
+Bellard's QuickJS has **no inline caches at all** and is competitive on property-heavy code. Its recipe: property names are **atoms** (interned integers — LambdaJS equivalent: `NameId`, already the definitive property identity per D5.6.1); every object points to a **shared shape** (hidden class — LambdaJS equivalent: shared `TypeMap` via constructor pre-shaping and per-callsite literal shapes, `js_property_attrs.h:133`); each shape carries an **atom-keyed hash table**: lookup is `atom & mask` → bucket → short `hash_next` chain of *integer* compares → property index into the object's flat slot array. A property hit is ~3 dependent loads with no per-site state, no invalidation, no staleness — the shape's table *is* the cache, and it is authoritative rather than a copy.
 
 The natural experiment already ran: **quickjs-ng added callsite ICs and then removed them**. [PR #884 "Remove inline caches"](https://github.com/quickjs-ng/quickjs/pull/884) (merged 2025-02-06, **−486/+18 lines**) was prompted by [issue #876 "NG is slower compared to Bellard version"](https://github.com/quickjs-ng/quickjs/issues/876) — with ICs, the engine executed ~3% *more* instructions than the IC-free original on the same workload. When the underlying per-shape lookup is an integer-keyed O(1) probe, IC bookkeeping (probe + install + megamorphic transitions + guard revalidation) is overhead, not acceleration.
 
@@ -75,7 +75,7 @@ Retire `JsLoadIC`/`JsStoreIC` and every layer in the §1 table. The named fast p
 
 ### IR2 — The enabler: O(1) NameId probe of the existing per-TypeMap table (zero new memory)
 
-Add `typemap_hash_lookup_by_name_id(TypeMap* tm, NameId id, uint32_t key_hash)`: probe the **existing** `field_index` open-addressed table at the name's byte-hash, accepting on `entry->name_id == id` (identity compare per D4.6.1v2; the idless-Input byte-fallback rule from `js_load_ic_name_matches` is preserved as a second predicate). The byte-hash is **O(1)** — `property_key_hash(NameRef)` reads the hash cached in `NameMeta` (`lambda/core/name_identity.h:33, 114`); no FNV recompute, no memcmp on the id predicate. Table-full/absent falls back to the linear chain walk exactly as byte probes do today (`lambda-data.hpp:695–696`). Inserts are untouched — the table is already maintained at every shape append (`typemap_hash_insert`), and its last-writer-wins replacement already keys on `name_id` when both entries carry one (`typemap_shape_entries_equal`). This is QuickJS's atom-keyed shape hash, obtained by adding **one probe function (~20 lines)** rather than a second table.
+Add `typemap_hash_lookup_by_name_id(TypeMap* tm, NameId id, uint32_t key_hash)`: probe the **existing** `field_index` open-addressed table at the name's byte-hash, accepting on `entry->name_id == id` (identity compare per D5.6.1; the idless-Input byte-fallback rule from `js_load_ic_name_matches` is preserved as a second predicate). The byte-hash is **O(1)** — `property_key_hash(NameRef)` reads the hash cached in `NameMeta` (`lambda/core/name_identity.h:33, 114`); no FNV recompute, no memcmp on the id predicate. Table-full/absent falls back to the linear chain walk exactly as byte probes do today (`lambda-data.hpp:695–696`). Inserts are untouched — the table is already maintained at every shape append (`typemap_hash_insert`), and its last-writer-wins replacement already keys on `name_id` when both entries carry one (`typemap_shape_entries_equal`). This is QuickJS's atom-keyed shape hash, obtained by adding **one probe function (~20 lines)** rather than a second table.
 
 ### IR3 — Fast heads live in the existing plain entries; the admission kernel survives
 
@@ -103,7 +103,7 @@ With O(1) per-shape probes, a QuickJS-style chain walk (repeat the probe up the 
 
 ### IR9 — Doctrine update (landed, per rule 17)
 
-D8.4.1v2 now extends *specialization over caching* to the JS lane: named
+D7.4.1 now extends *specialization over caching* to the JS lane: named
 property accesses use stateless shared runtime heads over the authoritative
 TypeMap table, with no per-site mutable dispatch state in either lane; generated
 code stays immutable (DI14 unchanged). IR1–IR7 are landed: the shape table is
@@ -114,11 +114,11 @@ this ledger records the proposal and its completed Tier B implementation.
 
 ## 5. Tier A — compile-predicted member specialization (`load_member` / `store_member`)
 
-Tier B makes every named access an honest O(1) lookup; Tier A removes even that lookup at sites where the **compiler** can predict the receiver's shape. The helpers are `js_load_member(obj, site_desc)` and `js_store_member(obj, site_desc, value, strict)`, where `site_desc` is one packed immutable constant `[type_index:16 | prop_index:16 | name_id:32]` (NameId is already `[pool16][ordinal16]`, D4.6.1v2): `type_index` names the predicted canonical pre-shape, `prop_index` indexes that TypeMap's existing `slot_entries[]`, and `name_id` feeds the Tier B head on guard failure — inside the same helper, so a miss costs one branch, never a cliff. Mono by design: one predicted type per site, no install, no state transitions; polymorphic sites simply run Tier B for the minority shapes (and IR13 recovers the dominant polymorphism family, subtypes).
+Tier B makes every named access an honest O(1) lookup; Tier A removes even that lookup at sites where the **compiler** can predict the receiver's shape. The helpers are `js_load_member(obj, site_desc)` and `js_store_member(obj, site_desc, value, strict)`, where `site_desc` is one packed immutable constant `[type_index:16 | prop_index:16 | name_id:32]` (NameId is already `[pool16][ordinal16]`, D5.6.1): `type_index` names the predicted canonical pre-shape, `prop_index` indexes that TypeMap's existing `slot_entries[]`, and `name_id` feeds the Tier B head on guard failure — inside the same helper, so a miss costs one branch, never a cliff. Mono by design: one predicted type per site, no install, no state transitions; polymorphic sites simply run Tier B for the minority shapes (and IR13 recovers the dominant polymorphism family, subtypes).
 
 ### IR10 — Type identity, guard, and the invariant that pays for it
 
-Canonical pre-shapes receive a runtime `fast_type_id` (`uint32` on TypeMap) at registration; the site's `type_index` is **module-image-relative** and resolves through the active module state exactly like NameIds (`js_active_module_name_id` pattern + per-function register memo) — baking a raw id or pointer would bake a realm into shared MIR (same D5.4.3/D5.4.4 discipline the IC comment cites). Guard = `receiver.map->type->fast_type_id == resolved_id`: two dependent loads + one compare. The load-bearing invariant: **only canonical, unmutated pre-shapes carry an id, and the Map-local clone primitive (`js_property_attrs.h:133`) never copies it** — so delete, redefine, accessor install, freeze, and post-construction extension all detach the instance to an id-less TypeMap and the guard fails. One enforcement point, and it makes the per-hit `flags`/deleted checks *free* — they are subsumed by shape identity. The one thing identity does **not** subsume is the ctor reservation mask (same shared TypeMap, per-instance mask — the exact hazard `js_store_ic_try_hit_entry` documents), so the reserved-bit test for `prop_index`'s offset stays on the hit path.
+Canonical pre-shapes receive a runtime `fast_type_id` (`uint32` on TypeMap) at registration; the site's `type_index` is **module-image-relative** and resolves through the active module state exactly like NameIds (`js_active_module_name_id` pattern + per-function register memo) — baking a raw id or pointer would bake a realm into shared MIR (same D6.4.3/D6.4.4 discipline the IC comment cites). Guard = `receiver.map->type->fast_type_id == resolved_id`: two dependent loads + one compare. The load-bearing invariant: **only canonical, unmutated pre-shapes carry an id, and the Map-local clone primitive (`js_property_attrs.h:133`) never copies it** — so delete, redefine, accessor install, freeze, and post-construction extension all detach the instance to an id-less TypeMap and the guard fails. One enforcement point, and it makes the per-hit `flags`/deleted checks *free* — they are subsumed by shape identity. The one thing identity does **not** subsume is the ctor reservation mask (same shared TypeMap, per-instance mask — the exact hazard `js_store_ic_try_hit_entry` documents), so the reserved-bit test for `prop_index`'s offset stays on the hit path.
 
 ### IR11 — `slot_entries[]` is the sole property-ordinal index
 
@@ -142,8 +142,8 @@ Untyped JS means prediction is a static-analysis budget question. Ranked by cove
 
 1. **`this` inside class bodies and recognized prototype-idiom methods** → the enclosing class's combined pre-shape. The lowering already recognizes these constructors to build pre-shapes (Tune12 P2's idiom list, cross-checked inheritance patterns); the method's definition site is lexically bound to the class, so the prediction is free and *hot OO code is overwhelmingly `this.field`* (richards, deltablue, box2d). This is the anchor case — it alone should carry most of Tier A's value.
 2. **`const`/provably-single-assignment locals initialized by a visible `new Ctor(...)` or object literal** → that ctor/literal pre-shape. This is precisely the `jm_infer_jube_type` proof pattern ("deliberately small: only declared-signature results and the immutable global seed participate; unknown assignments and joins return NULL", `js_mir_expression_lowering.cpp:1332–1377`) extended from Jube host types to user shapes.
-3. **(later) Parameters of module-local, non-escaping functions** whose closed caller set agrees on one predicted type — the Lambda lane's dual-function-by-caller precedent (D8.3.1). JS's open world makes this rarer; it is an extension, not a v1 requirement.
-4. **No runtime feedback in v1.** The ABI deliberately decouples prediction from mechanism: a future tier-up profiler (once JS tiering exists per D8.1.1v2) just supplies better `site_desc` constants at re-lowering — no runtime change, no cells, and JR8's load/store feedback slots stay dead.
+3. **(later) Parameters of module-local, non-escaping functions** whose closed caller set agrees on one predicted type — the Lambda lane's dual-function-by-caller precedent (D7.3.1). JS's open world makes this rarer; it is an extension, not a v1 requirement.
+4. **No runtime feedback in v1.** The ABI deliberately decouples prediction from mechanism: a future tier-up profiler (once JS tiering exists per D8.3.1) just supplies better `site_desc` constants at re-lowering — no runtime change, no cells, and JR8's load/store feedback slots stay dead.
 
 Everything unpredicted emits the plain Tier B call. Expectation-setting: Tier A is a targeted accelerator for method bodies and provenance-visible locals, not a universal layer — Tier B is the universal layer, and the measured profile (helpers ≈43.5% of CPU, generated code ≈0.6%) says the floor matters more than the peak.
 
@@ -153,7 +153,7 @@ Combined derived pre-shaping is already **base-first**, so prefix layout compati
 
 ### IR14 — Helper first, inline later
 
-v1 emits the helper call (simple, measurable, one new entry pair). But the profiling record is blunt — JIT-generated code is ~0.6% of working CPU while runtime helpers are ~43.5% (`vibe/jube/JS_Profiling_Helpers.md` §2) — so the endgame for Tier A is **inlining the guard + typed read into MIR** (load type, load id, compare, branch-to-helper, typed slot read), with the helper kept as the out-of-line miss body. The packed single-constant ABI is what makes that expansion mechanical: inline sequence and helper share the same operands. Immutability holds throughout — emitted constants, never-patched code (DI14). This is D8.4.1's own words realized in the JS lane: *"Multi-version dispatch, when it comes, is a guard chain, never a patchable cache."*
+v1 emits the helper call (simple, measurable, one new entry pair). But the profiling record is blunt — JIT-generated code is ~0.6% of working CPU while runtime helpers are ~43.5% (`vibe/jube/JS_Profiling_Helpers.md` §2) — so the endgame for Tier A is **inlining the guard + typed read into MIR** (load type, load id, compare, branch-to-helper, typed slot read), with the helper kept as the out-of-line miss body. The packed single-constant ABI is what makes that expansion mechanical: inline sequence and helper share the same operands. Immutability holds throughout — emitted constants, never-patched code (DI14). This is D7.4.1's own words realized in the JS lane: *"Multi-version dispatch, when it comes, is a guard chain, never a patchable cache."*
 
 ### IR15 — Precedent: this generalizes the Jube ordinal path
 
@@ -204,3 +204,32 @@ P2 is the honest checkpoint: if the cells measurably beat the kernel somewhere, 
 - **OQ4**: Tier A id/table lifecycle across the MIR cache (L1/L3) — are pre-shape registration and type-index tables always re-derived from the loaded image, or can a cached image pair with differently-laid-out pre-shapes? Must be settled before P4.
 - **OQ5**: prototype **method** ordinals in the Tier A table (IR15): what guards prototype-content mutation — the prototype map's own shape identity, a class-seal bit, or restriction to classes whose prototype is provably untouched after definition? Interacts with IR8; one design should cover both.
 - **OQ6**: IR13 merge policy — how aggressive is representation widening at pre-shape merge (INT→FLOAT always? INT64?), and does widening the base layout for a derived class's benefit ever regress base-only workloads? Needs a measurement gate of its own.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D8.4.1v2 → D7.4.1
+
+**D7.4.1** **No inline caches anywhere in the Lambda lane or LambdaJS** —
+*shared semantic dispatch over per-site caching*: specialized lowerings have
+no dynamic-dispatch sites by construction; open sites use runtime dispatch;
+a hot open site is a DF12 inference bug first. Multi-version dispatch, when
+it comes, is a guard chain, never a patchable cache. LambdaJS named and
+indexed property accesses use the shared runtime reference/property kernels;
+TypeMap shape metadata remains ordinary lookup data, not mutable per-site
+cache state. Generated code stays immutable. This bans mutable per-site
+cache cells, feedback vectors, and callee/method caches in **both** lanes:
+the sanctioned speed-up is **compile-predicted specialization with an
+inline guard and the shared kernel on a miss** — for LambdaJS, per-site
+literal and constructor shapes, integer-index lanes, and static `NameId`s
+(D3.4.4, D5.6.1), the same physical routes the Lambda lane uses. A JS
+fast path is admissible only when a miss is observationally identical to
+the kernel result. [LC1v2]

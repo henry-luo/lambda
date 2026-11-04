@@ -1,4 +1,4 @@
-// Chart data is source metadata; the existing chart library owns SVG plotting (S1.4, D7.2.5).
+// Chart data is source metadata; the existing chart library owns SVG plotting (S1.4, D10.2.1).
 import chart: lambda.chart.chart
 import objects: .mod_objects
 import colors: lambda.ui.core.component

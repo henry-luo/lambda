@@ -4,6 +4,7 @@
 // Integrates with CSS parser, image loader, native font system, and SVG parser
 
 #include "resource_loaders.h"
+#include "network_integration.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/resource_processor_hook.h"
 #include "../lib/log.h"
@@ -99,17 +100,6 @@ static void visit_css_value_urls(CssValue* value, RadiantCssUrlVisitor visitor,
     }
 }
 
-typedef struct CssUrlResolveContext {
-    const Url* base_url;
-    Pool* pool;
-} CssUrlResolveContext;
-
-static void resolve_css_url_value(CssValue* value, void* context) {
-    CssUrlResolveContext* resolve = (CssUrlResolveContext*)context;
-    if (value && resolve)
-        value->data.url = radiant_resolve_css_url(resolve->pool, value->data.url, resolve->base_url);
-}
-
 typedef struct CssUrlVisitContext {
     RadiantCssUrlVisitor visitor;
     void* context;
@@ -127,20 +117,6 @@ void radiant_for_each_stylesheet_resource_url(CssStylesheet* sheet,
     if (!sheet || !visitor) return;
     CssUrlVisitContext visit = {visitor, context};
     radiant_for_each_css_declaration(sheet, visit_css_declaration_urls, &visit);
-}
-
-void radiant_resolve_stylesheet_resource_urls(CssStylesheet* sheet) {
-    if (!sheet || !sheet->origin_url || !sheet->pool) return;
-
-    // skip resolution for local file stylesheets
-    if (!url_is_absolute_url(sheet->origin_url)) return;
-
-    Url* base_url = url_parse(sheet->origin_url);
-    if (!base_url) return;
-
-    CssUrlResolveContext context = {base_url, sheet->pool};
-    radiant_for_each_stylesheet_resource_url(sheet, resolve_css_url_value, &context);
-    url_destroy(base_url);
 }
 
 void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
@@ -191,14 +167,12 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
 
     log_debug("network: parsed CSS stylesheet with %zu rules", sheet->rule_count);
 
-    // resolve relative url() values against the stylesheet's source URL
-    radiant_resolve_stylesheet_resource_urls(sheet);
-
     // add stylesheet to document
     if (!add_stylesheet_to_document(doc, sheet)) {
         log_error("network: failed to add stylesheet to document");
         return;
     }
+    radiant_prefetch_document_stylesheet_resources(doc);
 
     // schedule reflow for entire document (CSS affects all elements)
     if (res->manager && doc->root) {

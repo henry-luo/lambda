@@ -11,7 +11,7 @@
 #include "dom_event_host.h"
 
 // Native providers belong to the lower runtime; native module registration
-// publishes immutable process-lifetime tables without an upward link (D7.1.3).
+// publishes immutable process-lifetime tables without an upward link (D9.1.3).
 static const DomCanvasEngineOps* canvas_engine_operations = nullptr;
 static const DomWebGlEngineOps* webgl_engine_operations = nullptr;
 static const DomStyleEngineOps* style_engine_operations = nullptr;

@@ -8,7 +8,7 @@
 
 extern "C" Item fn_format2(Item item, Item type);
 
-// D7.1.1: source round trips invoke the runtime, never evaluate scripts in IO.
+// D9.1.1: source round trips invoke the runtime, never evaluate scripts in IO.
 struct MathFormatTestRuntime {
     Runtime runtime{};
     bool ready;

@@ -1,5 +1,5 @@
 flowchart TB
-  subgraph lane["merged Item error lane (D8.4.3)"]
+  subgraph lane["merged Item error lane (D7.4.3)"]
     SV["js_throw_value(v):<br/>returns ERROR-tagged<br/>LambdaError Item"]
     CK["jm_emit_error_lane_test:<br/>test returned Item tag"]
     CL["js_error_lane_payload:<br/>unwrap at catch/rejection/host boundary"]

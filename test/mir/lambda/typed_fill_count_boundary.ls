@@ -1,4 +1,4 @@
-// S7.7.2-S7.7.3/D3.3.3v3: destination construction retains fill's count gate.
+// S7.7.2-S7.7.3/D4.3.3: destination construction retains fill's count gate.
 pn build(count) int[]^ {
     var values: int[] = fill(count, 0)^
     return values

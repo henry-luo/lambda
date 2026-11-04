@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-06 (rewritten for the persistent interpreter session)
 **Authority:** `doc/Lambda_Formal_Semantics.md` S16.7.4–S16.7.6 (echo, no
-rebinding, session kinds); `doc/Lambda_Formal_Design.md` D8.1.1v17 (one T0
+rebinding, session kinds); `doc/Lambda_Formal_Design.md` D8.3.6 (one T0
 session, no replay, no Tree-sitter, interrupt, unsupported entries). Decision
 record: [`Lambda_Design_Repl_Interp.md`](Lambda_Design_Repl_Interp.md) (RI1–RI6).
 Detailed design: `doc/dev/lambda/LR_01_Compilation_Pipeline.md` §6.

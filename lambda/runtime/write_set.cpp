@@ -21,7 +21,7 @@
 #include "io_sqlite.hpp"
 #endif
 
-// D5.4.2-D5.4.4: transactions and retained edits belong to one evaluator.
+// D6.4.2-D6.4.4: transactions and retained edits belong to one evaluator.
 // A peer's entry/teardown must never observe or clear this owner's pending work.
 struct WriteSetState {
     EvalContext* owner;
@@ -339,7 +339,7 @@ static Item sequence_splice(Item seq, int64_t index, Item value, SpliceKind kind
     // `list_push` allocates on growth, so the three values that outlive the
     // copy loop are rooted: the sequence being read (its `items` pointer is
     // only valid while it is live), the container being filled, and the
-    // inserted value (rule 15, D5.3.3).
+    // inserted value (rule 15, D6.3.3).
     RootFrame roots(3);
     Rooted<Item> rooted_seq(roots, seq);
     Rooted<Item> rooted_value(roots, value);
@@ -355,7 +355,7 @@ static Item sequence_splice(Item seq, int64_t index, Item value, SpliceKind kind
         if (!array) return ItemError;
         rooted_result.set((Item){.item = (uint64_t)(uintptr_t)array});
     }
-    // The append follows the destination (D2.6.5v3): element content is
+    // The append follows the destination (D3.3.1): element content is
     // re-normalized through the content append (S2.6.5); an array keeps its
     // items verbatim, and an inserted list splices by the sequence append.
     auto append = [&](Item item, bool inserted) {

@@ -1818,9 +1818,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         // size; otherwise it re-enters shrink-to-fit sizing and loses max-height's
         // aspect-ratio constraint before the absolute box is finalized.
         layout_store_given_axis(lycon, block, content_width, true);
-    } else if (is_replaced && block->form_control() &&
+    } else if (is_replaced && layout_form_control_has_native_intrinsic_size(block) &&
                block->form->intrinsic_width > 0) {
-        // CSS 2.1 §10.3.8: replaced form control with auto width → use intrinsic width
+        // HTML buttons need shrink-to-fit flow, not a cached form-label width (CSS 2.1 §10.3.7).
         IntrinsicSize form_size = layout_measure_form_control(lycon, block, lycon->available_space);
         content_width = form_size.max_width;
     } else {

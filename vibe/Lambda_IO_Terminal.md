@@ -31,10 +31,10 @@ evaluator or the entire Node stream library.
 procedural handlers); S9.1.4/S9.1.7 (instance state ownership); S12.1.1v2 (effects);
 S2.5.8, S8.3.1v3, S17.4.1 (text coordinates); S12.4 (resources);
 S13.1.2v2/S13.3.2 (suspension/cancellation);
-[D7.1.4v2/D7.1.6](../doc/Lambda_Formal_Design.md) (runtime-only CLI profile);
-D7.2.1–D7.2.4/D7.2.6 (packages and imports); D7.2.5 (analogous DOM
-policy/mechanism split, not a terminal-specific ruling); D5.3.3 (precise roots);
-D7.3/D7.4 (Jube boundaries). For the specific temporary-document contract,
+[D9.2.1/D9.2.2](../doc/Lambda_Formal_Design.md) (runtime-only CLI profile);
+D9.3.1–D9.3.4/D9.3.5 (packages and imports); D10.2.1 (analogous DOM
+policy/mechanism split, not a terminal-specific ruling); D6.3.3 (precise roots);
+D9.4/D9.5 (Jube boundaries). For the specific temporary-document contract,
 [PTH44v2, PTH76 and PTH50v3](Lambda_Design_Reference.md#44-temp-documents-pth44v2-pth76)
 provide the working design details. API spellings below are proposals, not new
 formal rulings.
@@ -206,7 +206,7 @@ retains its existing whole-file input meaning; `repl` would imply a complete
 read–evaluate–print loop, including evaluation. Node's public `readline` name
 is a compatibility surface over this package.
 
-D7.2.4 says **“`lambda.*` is the one root for everything Lambda ships”** and
+D9.3.4 says **“`lambda.*` is the one root for everything Lambda ships”** and
 **“no path may be both a built-in module and a shipped package.”** Keep the
 existing built-in `lambda.io`/`io`; put the script at the distinct leaf
 `lambda.io.terminal`.
@@ -236,7 +236,7 @@ in `lambda/runtime/build_ast.cpp:12978` explicitly excludes all
 and registered modules from distinct shipped leaf modules. Preserve built-in
 precedence and reject exact-path collisions; do not add a readline-only special
 case or a working-directory fallback. Test aliases and fully qualified calls.
-This extends source resolution under D7.2.4/D7.2.6 without turning `lambda.io`
+This extends source resolution under D9.3.4/D9.3.5 without turning `lambda.io`
 itself into two modules.
 
 Do not register a native editor module at the exact package path. Generic
@@ -278,7 +278,7 @@ constructing a `<terminal>` element must not acquire a TTY, start a loop or prin
 those are effects under S12.1.1v2. A convenience procedural reader is a wrapper
 around this mounted lifecycle, not the primary editor implementation.
 
-D7.2.1 requires module bindings to be immutable. There are no replacements for
+D9.3.1 requires module bindings to be immutable. There are no replacements for
 `g_editor`, `g_history` or the global kill ring in script module globals. Each
 mounted editor has its own state and model. Shared history is explicit policy.
 
@@ -295,8 +295,8 @@ a window, DOM or CSS layout engine to edit a terminal line. The session/frame
 structure describes output and lifetime; it is not a list of `print()` calls
 or imperative cursor commands.
 
-D7.1.6 defines `lambda-cli` as the runtime-only host and excludes Radiant;
-D7.1.4v2 also distinguishes runtime-only CLI from full-engine headless modes.
+D9.2.2 defines `lambda-cli` as the runtime-only host and excludes Radiant;
+D9.2.1 also distinguishes runtime-only CLI from full-engine headless modes.
 Therefore keep the common template host and script renderer independent of
 Radiant, with a Radiant adapter sharing them where appropriate.
 Do not link `radiant.a` into the minimal CLI just to recognize `<terminal>`.
@@ -305,7 +305,7 @@ is a separate presentation target for the same template language.
 
 ### 3.4 Ownership contract: Lambda first, native by necessity
 
-D7.2.5 already puts DOM editing policy in the shipped Lambda behavior package.
+D10.2.1 already puts DOM editing policy in the shipped Lambda behavior package.
 Apply the same separation here as a design choice; that ruling does not itself
 require a native terminal renderer. Every new C+ routine must identify an OS,
 VM/GC or host-language operation that cannot already be expressed through the
@@ -620,7 +620,7 @@ where its ownership, errors and scheduling already meet the contract.
 | JS objects and subscriptions | Existing coercion/error/identity/Promise/callback and stream/EventEmitter/AbortSignal mechanics | Readline-specific state machine and compatibility decisions |
 
 Transport handles are host-owned leases or opaque IDs, not script pointers
-(D7.4.1v2/D7.4.3). A `data` event has nonempty bytes; distinct events carry EOF,
+(D9.5.1/D9.5.3). A `data` event has nonempty bytes; distinct events carry EOF,
 error, resize or timeout. S2.2.2v2's solid binary type is not an empty-buffer EOF
 protocol. The protocol component chooses the active frame and uses generic
 instance dispatch for its normalized events. `emit` retains parent routing;
@@ -662,7 +662,7 @@ The shell/host owns the terminal lease for a mounted editor and guarantees
 cleanup on initialization failure, normal unmount, handler/output failure,
 cancellation and runtime shutdown. Supported signal and suspend/resume paths
 must restore/reacquire modes correctly. SIGKILL cannot have an in-process
-restoration guarantee. Rooted session values obey D5.3.3; no conservative native
+restoration guarantee. Rooted session values obey D6.3.3; no conservative native
 stack scanning is permitted.
 
 This ownership changes the earlier proposal's prerequisite: a complete public
@@ -704,7 +704,7 @@ the template does not become a REPL evaluator. Failed user code must not corrupt
 the editor context, and model resets must preserve the intended history/state.
 
 Bundle `package/io` in every interactive CLI installation and resolve it relative
-to Lambda home under D7.2.3/D7.2.6. Test the installed runtime-only CLI without
+to Lambda home under D9.3.3/D9.3.5. Test the installed runtime-only CLI without
 the source checkout, Radiant or Node modules. Missing package diagnostics should
 be clear; a plain-input recovery path must not become another rich editor.
 
@@ -725,7 +725,7 @@ just as a UI host enters an event handler. This is an internal host entry, not a
 change to the public Lambda-to-JS procedure membrane. Async completion and I/O
 continuations become later events after the caller has unwound.
 
-D7.4.2v2 forbids parking with a JubeHostAPI frame on the stack. Prove that the
+D9.5.2 forbids parking with a JubeHostAPI frame on the stack. Prove that the
 chosen handler entry respects that contract on interpreter and MIR; do not
 assume every arbitrary `on` handler is safe for synchronous Jube entry. The
 handler phase is deliberately non-suspending: attempted suspension raises
@@ -761,7 +761,7 @@ detached history copy is not enough where caller mutation is observable.
 Maintain S9.1's Lambda value semantics at the JS aliasing boundary.
 
 Expose generic versioned template-session/load/dispatch services through Jube
-only where missing, following D7.3/D7.4; no `Runtime*`, AST/MIR pointers or direct
+only where missing, following D9.4/D9.5; no `Runtime*`, AST/MIR pointers or direct
 private runtime imports in `node_core`. The existing graph loader alone does
 not establish a usable session-to-template interface. Do not restore deleted
 `js_readline.cpp` or `js_stream_*` internals. Current streams/EventEmitter and

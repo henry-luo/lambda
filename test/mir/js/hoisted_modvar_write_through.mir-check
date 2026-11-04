@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.4, D6.2.2v2: the hoisted local function is retained in a shared Lambda closure cell; the arrow reads its own captured environment.",
+  "description": "D6.4, D7.2.2: the hoisted local function is retained in a shared Lambda closure cell; the arrow reads its own captured environment.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

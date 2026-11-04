@@ -1,6 +1,6 @@
 // LR07-18 (S7.9.3, S7.10.2, S11.4.9, S1.6): a system function's error result
 // stays an error on every tier; its registry row declares the error effect. `string`/`symbol`/`float`/`int` is only the
-// success shape (D6.4.1). The JIT unboxed such results into a native lane:
+// success shape (D7.6.1). The JIT unboxed such results into a native lane:
 // a string became "<error>", a symbol null (or a LambdaError read as a
 // Symbol), a float nan and an int 0; interp kept the error Item.
 

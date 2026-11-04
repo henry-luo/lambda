@@ -10,14 +10,14 @@
 
 | Topic | Rulings | Section |
 |---|---|---|
-| Three physical array forms; `ArrayNum` null-free and observably an `Array` | D2.6.1v3, D2.6.2, DI8, S5.3.1 | §1, §2 |
-| `int` lane is the i64 lane with poison | D2.6.3, S4.4.1 | §2 |
-| Lanes never hold errors | DI20, D2.8.1, S7.8.2 | §3.4 |
+| Three physical array forms; `ArrayNum` null-free and observably an `Array` | D3.2.1, D3.2.2, DI8, S5.3.1 | §1, §2 |
+| `int` lane is the i64 lane with poison | D3.2.1, S4.4.1 | §2 |
+| Lanes never hold errors | DI20, D2.5.1, S7.8.2 | §3.4 |
 | `T[]`, `T[n]`, rank | S11.1.1v3 | §3.1 |
 | Covariance, `var` invariance | S9.2.1 | §3.2 |
 | Contract admission, value-aware numeric admission | S11.4.1v3, S11.4.5 | §3.3 |
-| Representation certificate | D3.3.3v3, D3.1.1v5 | §3.3 |
-| Unproven indexed read is `T?` | D2.5.3 | §3.5 |
+| Representation certificate | D4.3.3, D4.1.1 | §3.3 |
+| Unproven indexed read is `T?` | D2.4.3 | §3.5 |
 | Invalid reads are `null`; no negative indices; `last` | S7.1.1v3, S7.2.1, S7.2.2 | §5 |
 | Positional selection is NumPy's: range, mask, index array | S8.2.4v3 | §5 |
 | Promotion lattice, division and modulo | S4.4.1–S4.4.4, S4.5.1–S4.5.3 | §7.2 |
@@ -34,9 +34,9 @@
 
 ## 0. Summary
 
-- **A typed array is an array.** `ArrayNum` is one of three physical array forms. Equality, `type()`, iteration and formatting cannot tell it apart from a boxed `Array` holding the same values (D2.6.2, S5.3.1).
+- **A typed array is an array.** `ArrayNum` is one of three physical array forms. Equality, `type()`, iteration and formatting cannot tell it apart from a boxed `Array` holding the same values (D3.2.2, S5.3.1).
 - **One container, many element kinds.** A single `ArrayNum` type carries a one-byte element kind: `int`, `float`, the sized integers and floats `i8`…`u64`, `f16`, `f32`, and `bool`, plus a JS-only clamped byte. Elements are packed at their natural width (1, 2, 4 or 8 bytes).
-- **Contract first, representation second.** `T[]` is a homogeneous-array contract enforced at every boundary (S11.1.1v3, S11.4.1v3). The representation follows the admitted contract, and an enforced contract leaves a certificate that makes later boundaries O(1) (D3.3.3v3).
+- **Contract first, representation second.** `T[]` is a homogeneous-array contract enforced at every boundary (S11.1.1v3, S11.4.1v3). The representation follows the admitted contract, and an enforced contract leaves a certificate that makes later boundaries O(1) (D4.3.3).
 - **Lanes hold only values.** No lane holds a null (DI8) or an error (DI20). Admitting a null into a nullable contract demotes the array to a native `Array<T?>`.
 - **The positional world is NumPy's.** N-D shape with strides, broadcasting, axis reductions, multi-axis subscripts `m[i, j]`, boolean masks, index arrays and zero-copy views (S8.2.4v3).
 - **Arithmetic is the scalar lattice, applied lane by lane.** Same-lane `+ - *` wraps in the lane, mixed sized lanes meet in the smallest containing lane, and true division leaves the sized lanes (S4.4, S4.5).
@@ -48,10 +48,10 @@
 
 ## 1. Principles
 
-1. **Representation invariance.** `ArrayNum` is storage, not a language type. A program cannot observe whether `[1, 2, 3]` is a boxed `Array`, a native-lane `Array` or an `ArrayNum` — not through `==`, `type()`, `is`, iteration, printing or serialization (D2.6.2). Unboxed numeric arrays are representation only, and equality is never layout-based (S5.3.1).
+1. **Representation invariance.** `ArrayNum` is storage, not a language type. A program cannot observe whether `[1, 2, 3]` is a boxed `Array`, a native-lane `Array` or an `ArrayNum` — not through `==`, `type()`, `is`, iteration, printing or serialization (D3.2.2). Unboxed numeric arrays are representation only, and equality is never layout-based (S5.3.1).
 2. **One numeric array type.** The original three types (`ARRAY_INT`, `ARRAY_INT64`, `ARRAY_FLOAT`) shared one layout and appeared in the same `switch` statements: about 420 triplicated dispatch points across 16 files. Adding a fourth element width would have added a fourth branch everywhere. One type ID with an element-kind byte collapses that to one branch, and the JIT still emits a single native load because it tracks the element kind statically.
-3. **The contract is authoritative.** The element kind is a storage fact; it never proves a language contract. The full `Type*` graph does (D3.1.1v5). An annotation may drive representation only if its boundary is enforced (S11.4.1v3).
-4. **Lanes are total.** Native lanes cannot encode null or error, so neither is ever stored. The ruled alternatives — an in-band error sentinel, a side table of errors — are rejected (D2.8.1).
+3. **The contract is authoritative.** The element kind is a storage fact; it never proves a language contract. The full `Type*` graph does (D4.1.1). An annotation may drive representation only if its boundary is enforced (S11.4.1v3).
+4. **Lanes are total.** Native lanes cannot encode null or error, so neither is ever stored. The ruled alternatives — an in-band error sentinel, a side table of errors — are rejected (D2.5.1).
 5. **NumPy for positions, XPath for types.** A positional key (integer, range, mask, index array) selects a window whose shape follows the key; a type key walks content (S8.2.4v3). Typed arrays live in the positional world.
 6. **Value semantics by construction.** Pure `fn` code has no assignment statement, so it cannot mutate. Procedural code mutates owners it holds as `var`; aliasing is admitted only as a scoped, checked borrow (S9.2.2).
 7. **No hidden widening.** Construction never converts an element: it keeps each element's type and precision, and packs only elements that already share one exact type (S9.3.2). A declared contract admits a value only when it embeds exactly (S11.4.5). Arithmetic promotes as scalar arithmetic does, and a result that overflows a sized lane wraps in that lane, as Go does (S10.2.4, S4.4.4).
@@ -64,7 +64,7 @@
 
 | Lambda element type | Lane tag | Bytes | Read back as | Notes |
 |---|---|---|---|---|
-| `int` | `ELEM_INT` | 8 | `int` | The i64 lane: finite values plus the int poison encodings (D2.6.3). Distinct from `i64` because `int ∥ i64` (S4.4.1): a finite `int` embeds in `i64`, poison does not. |
+| `int` | `ELEM_INT` | 8 | `int` | The i64 lane: finite values plus the int poison encodings (D3.2.1). Distinct from `i64` because `int ∥ i64` (S4.4.1): a finite `int` embeds in `i64`, poison does not. |
 | `float` (= `f64`) | `ELEM_FLOAT64` | 8 | `float` | One tag per representation: `float[]` and `f64[]` are one array type (Number Model §3.5). |
 | `i8` `i16` `i32` `i64` | `ELEM_INT8` … `ELEM_INT64` | 1 / 2 / 4 / 8 | the sized scalar | Two's-complement storage. |
 | `u8` `u16` `u32` `u64` | `ELEM_UINT8` … `ELEM_UINT64` | 1 / 2 / 4 / 8 | the sized scalar | |
@@ -115,25 +115,25 @@ The representation follows the admitted leaf contract:
 |---|---|
 | non-null `int`, `float`, `i8`…`u64`, `f16`, `f32`, `bool` | `ArrayNum` of the exact kind |
 | nullable numeric or `bool` | native-lane `Array` with the ruled sentinel lane |
-| nullable `i64?`, `u64?` | destination-owned `TypedItem` slots (D2.6.4v3) |
+| nullable `i64?`, `u64?` | destination-owned `TypedItem` slots (D2.6.2) |
 | rectangular nested numeric rank | N-D `ArrayNum`; nested arrays when ragged |
 | union, `any`, error-admitting, heterogeneous | boxed `Array` |
 
-A successful boundary attaches an immutable, interned **representation certificate** proving rank, leaf contract and physical carrier. It is reused only while both the target contract and the current carrier still match; a transform that does not materialize the matching carrier clears it, and the next checked boundary re-admits (D3.3.3v3). The first dynamic crossing costs O(n); repeated same-contract crossings cost O(1); nothing is checked per read. A certificate is never inferred from an element kind or byte width.
+A successful boundary attaches an immutable, interned **representation certificate** proving rank, leaf contract and physical carrier. It is reused only while both the target contract and the current carrier still match; a transform that does not materialize the matching carrier clears it, and the next checked boundary re-admits (D4.3.3). The first dynamic crossing costs O(n); repeated same-contract crossings cost O(1); nothing is checked per read. A certificate is never inferred from an element kind or byte width.
 
 A typed empty array still has a typed carrier: `[]` under `u8[]` is an empty `u8` `ArrayNum`, and an unannotated `[]` stays an open boxed array.
 
 ### 3.4 Null and error
 
-`ArrayNum` is strictly non-null (D2.6.2, DI8). Storing null into `int[]` is rejected. Storing null into `int?[]` atomically demotes the carrier to a native `Array<int?>` before the write. `nan` is a float value, not an error, so a float lane may hold it.
+`ArrayNum` is strictly non-null (D3.2.2, DI8). Storing null into `int[]` is rejected. Storing null into `int?[]` atomically demotes the carrier to a native `Array<int?>` before the write. `nan` is a float value, not an error, so a float lane may hold it.
 
 No lane holds an error (DI20). The type decides the representation: `[f(x) ^ { 0 } for x in xs]` is `int[]` with its lane preserved, while `[f(x) for x in xs]` is `(int | error)[]`, boxed, keeping each element's error (S7.8.2).
 
 ### 3.5 Indexed read types and reflection
 
-An unproven scalar read `a[i]` from `T[]` has public type `T?` (D2.5.3); a bounds proof may use `T` privately in the emitter but never changes the public type. Reads are rank-aware: for `m: int[][]`, `m[i]` is `int[]?` and `m[i, j]` is `int?`. `flatten` and `ravel` return `int[]`, `transpose` keeps rank, a static `reshape(xs, [r, c])` gives `T[][]`, and a dynamic reshape gives the open `array` type plus a certificate.
+An unproven scalar read `a[i]` from `T[]` has public type `T?` (D2.4.3); a bounds proof may use `T` privately in the emitter but never changes the public type. Reads are rank-aware: for `m: int[][]`, `m[i]` is `int[]?` and `m[i, j]` is `int?`. `flatten` and `ravel` return `int[]`, `transpose` keeps rank, a static `reshape(xs, [r, c])` gives `T[][]`, and a dynamic reshape gives the open `array` type plus a certificate.
 
-`type(x)` is `array` for every physical form (D2.6.2). `x is u8[]` and `case u8[]:` test the structural contract, not the lane tag — and because of covariance a `u8[]` also matches `case int[]:`, so match arms go narrowest first.
+`type(x)` is `array` for every physical form (D3.2.2). `x is u8[]` and `case u8[]:` test the structural contract, not the lane tag — and because of covariance a `u8[]` also matches `case int[]:`, so match arms go narrowest first.
 
 ---
 
@@ -141,7 +141,7 @@ An unproven scalar read `a[i]` from `T[]` has public type `T?` (D2.5.3); a bound
 
 ### 4.1 Literals
 
-Construction preserves each element's literal type and precision (S9.3.2, ruled by the user 2026-10-21). A literal is packed into an `ArrayNum` only when every element already has the same exact type; any mix stays a boxed `Array` holding the elements as written. Elements are never promoted to a common numeric type, even when the promotion would be exact, because the element's type is part of its value: `type([1, 2.5][0])` must be `int`, as it is in a boxed array (D2.6.2).
+Construction preserves each element's literal type and precision (S9.3.2, ruled by the user 2026-10-21). A literal is packed into an `ArrayNum` only when every element already has the same exact type; any mix stays a boxed `Array` holding the elements as written. Elements are never promoted to a common numeric type, even when the promotion would be exact, because the element's type is part of its value: `type([1, 2.5][0])` must be `int`, as it is in a boxed array (D3.2.2).
 
 | Literal | Result |
 |---|---|
@@ -253,7 +253,7 @@ Consequences worth stating: `i16[] * i16[]` stays `i16[]` and wraps rather than 
 
 ### 7.3 Equality
 
-`==` on arrays is deep, element-wise numeric equality, exact across lanes (`[1u8] == [1]`), with N-D shape compared structurally. It is never layout-based (S5.3.1, D2.6.2).
+`==` on arrays is deep, element-wise numeric equality, exact across lanes (`[1u8] == [1]`), with N-D shape compared structurally. It is never layout-based (S5.3.1, D3.2.2).
 
 ### 7.4 Element-wise comparison and masks
 
@@ -432,7 +432,7 @@ Not a computer-vision suite (no SIFT, ORB, optical flow or neural networks — t
 
 ## 11. Performance model
 
-- **Static element kind, single load.** When the compiler knows an array's carrier from a certificate, an element read is one native load at the right width plus packing, with no call and no boxing. The certificate guard is the only per-boundary check (D3.3.3v3).
+- **Static element kind, single load.** When the compiler knows an array's carrier from a certificate, an element read is one native load at the right width plus packing, with no call and no boxing. The certificate guard is the only per-boundary check (D4.3.3).
 - **Kernels the compiler can vectorize.** Contiguous same-kind kernels are written so auto-vectorization succeeds: the operator switch is hoisted out of the loop (one straight-line loop per operator and element type, generated from one template), pointers are `__restrict`, loops carry vectorize pragmas, and non-vectorizable operators (`%`, `pow`, `fmod`) run in separate loops so they cannot poison the hot ones. `u8` and `float` are the priority types: they are the common image kinds and the widest SIMD lanes.
 - **One general fallback.** Mixed kinds, broadcasting and non-contiguous views go through a strided walker that is correct for every case. Fast kernels are gated on "contiguous, same kind, vectorizable operator".
 - **Built from source.** Release builds use `-O3` and the host architecture, so auto-vectorization targets the running machine's best instruction set with no runtime dispatch. Verification uses the compiler's vectorization reports; a loop that quietly falls back to scalar is a regression. Performance is measured on release builds only.
@@ -457,7 +457,7 @@ Deferred, designed but not built: region assignment (§8.3); `transpose` with a 
 4. **`f32` input to float-valued functions.** They return `float[]` for predictability; staying in `f32` would halve memory for image pipelines. Unruled.
 5. **`abs` and unary `-` at the lane minimum** (`abs(-128i8)`), and unary `-` on unsigned lanes. Unruled for arrays; the scalar rule should decide.
 6. **Stencil API surface.** Whether border modes and named kernels (`sobel`, `gaussian`) are exposed to scripts, and in what form.
-7. **Tensor functions on nested arrays.** A rectangular nested array whose rows have different types (`[[1, 2, 3], [4.5, 5.5, 6.5]]`) stays nested under S9.3.2, so today `ndim` returns `0`, `shape` errors and `sum` errors, where the widened tensor used to answer `2`, `[2, 3]` and `22.5`. Under D2.6.2 these functions arguably should answer by value — treating any rectangular nested numeric array as N-D, with arithmetic per S10.2.4 — rather than by storage. Unruled.
+7. **Tensor functions on nested arrays.** A rectangular nested array whose rows have different types (`[[1, 2, 3], [4.5, 5.5, 6.5]]`) stays nested under S9.3.2, so today `ndim` returns `0`, `shape` errors and `sum` errors, where the widened tensor used to answer `2`, `[2, 3]` and `22.5`. Under D3.2.2 these functions arguably should answer by value — treating any rectangular nested numeric array as N-D, with arithmetic per S10.2.4 — rather than by storage. Unruled.
 
 ---
 
@@ -467,7 +467,7 @@ Detailed design lives in [LR_05](../doc/dev/lambda/LR_05_Strings_and_Vectors.md)
 
 ### A.1 Layout
 
-`ArrayNum` shares the 64-byte `List` layout (D2.6.6v2): the 8-byte container header, the map face, then `items`/`float_items`/`data` (one union over the element buffer), `length`, `extra`, `capacity` and `rep_cert`. In the header, byte 1 holds lifecycle flags (including `is_heap`), byte 2 (`array_flags`) holds bit 0 `is_ndim`, bit 1 `is_view`, bit 2 the retired `is_pinned`, bit 3 `is_mutable_view` and bit 4 `is_native_lane_array` — bits 5–7 belong to LambdaJS's elements kind and are not free — and byte 3, the map-kind byte, holds the element kind. Element kinds are high-nibble tags; `ELEM_TYPE_SIZE[kind >> 4]` gives the width. `0xC0` is the retired duplicate double tag and stays unavailable.
+`ArrayNum` shares the 64-byte `List` layout (D3.1.1): the 8-byte container header, the map face, then `items`/`float_items`/`data` (one union over the element buffer), `length`, `extra`, `capacity` and `rep_cert`. In the header, byte 1 holds lifecycle flags (including `is_heap`), byte 2 (`array_flags`) holds bit 0 `is_ndim`, bit 1 `is_view`, bit 2 the retired `is_pinned`, bit 3 `is_mutable_view` and bit 4 `is_native_lane_array` — bits 5–7 belong to LambdaJS's elements kind and are not free — and byte 3, the map-kind byte, holds the element kind. Element kinds are high-nibble tags; `ELEM_TYPE_SIZE[kind >> 4]` gives the width. `0xC0` is the retired duplicate double tag and stays unavailable.
 
 ### A.2 Shape side-table
 
@@ -579,14 +579,14 @@ Wording from the four earlier records that the body above no longer holds, with 
 
 - ~~`ELEM_FLOAT` (`0x10`) and `ELEM_FLOAT64` (`0xC0`) are distinct types with the same storage.~~ → One double tag, `ELEM_FLOAT64` at `0x10`; `ELEM_FLOAT` is a source alias; `0xC0` is retired (Number Model §3.5, W8).
 - ~~`elem_type` lives in the upper nibble of `Container.flags`.~~ then ~~the view, N-D and pin bits live in the upper nibble of `flags`.~~ → The element kind is the map-kind byte (byte 3); the layout bits are the separate `array_flags` byte (byte 2) (Appendix A.1).
-- ~~`ELEM_INT` stores int56-as-int64.~~ → The i64 lane with poison encodings (D2.6.3).
+- ~~`ELEM_INT` stores int56-as-int64.~~ → The i64 lane with poison encodings (D3.2.1).
 - ~~Lambda typed arrays are one-dimensional only; multi-dimensional data uses nested arrays.~~ → N-D `ArrayNum` (§6).
 
 **Types and admission**
 
-- ~~`type(arr)` returns `u8[]`.~~ → `type()` is `array` for every physical form (D2.6.2).
+- ~~`type(arr)` returns `u8[]`.~~ → `type()` is `array` for every physical form (D3.2.2).
 - ~~An annotation coerces elements to the annotated type (`let x: i16[] = [1, 2]`); mixed sizes fall back to a generic array.~~ → Admission is a contract with value-aware numeric embedding; inexact values are rejected, never coerced (S11.4.1v3, S11.4.5).
-- ~~`ensure_typed_array` casts an `ArrayNum` of another kind to the annotated kind.~~ → Certificate-backed admission; lossy casts are not admission (D3.3.3v3).
+- ~~`ensure_typed_array` casts an `ArrayNum` of another kind to the annotated kind.~~ → Certificate-backed admission; lossy casts are not admission (D4.3.3).
 
 **Indexing**
 

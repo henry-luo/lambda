@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "P4 / D2.6.1 / S7.1.1v3: a byte-packed bool only restricts its own slot; aligned fields of the same named record read directly, and null receivers yield ItemNull. Nullable bool fields and misaligned float slots retain their checked access path.",
+  "description": "P4 / D3.2.1 / S7.1.1v3: a byte-packed bool only restricts its own slot; aligned fields of the same named record read directly, and null receivers yield ItemNull. Nullable bool fields and misaligned float slots retain their checked access path.",
   "checks": [
     {
       "in_func": "_read_flag_#",

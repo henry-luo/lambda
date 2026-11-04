@@ -7,8 +7,8 @@ P3 breadth below are implemented; mixed-tier, suspension, and default-policy
 phases remain open.
 
 **Design authority:** `doc/Lambda_Formal_Design.md` **D1.3**, **D1.5**,
-**D1.7**, **D5.3.2–D5.3.3**, **D6.2.2v2**, **D6.2.3v2**,
-**D8.1.3v10**, **D8.2.4**, **D8.4.1v2**, and **D8.4.3v2**. The working
+**D1.7**, **D6.3.2–D6.3.3**, **D7.2.2**, **D7.2.3**,
+**D8.4.1**, **D8.2.4**, **D7.4.1**, and **D7.4.3**. The working
 design is `vibe/Lambda_Design_JS_Interpreter.md` P2.
 
 ## Delivered boundary
@@ -19,14 +19,14 @@ same `Runtime` that owns Lambda scripts. The interpreter obtains the
 runtime's canonical `EvalContext`, allocates in its heap, and prepares the
 script's own module-state slab. It therefore shares runtime, context, module
 registry, event-loop owner, and GC heap with Lambda without importing Lambda
-language semantics (**D1.3**, **D1.7**, **D8.1.3v10**).
+language semantics (**D1.3**, **D1.7**, **D8.4.1**).
 
 AST functions are `JsFunction` objects with an explicit AST body kind. Their
 normal calls and construction enter the established `fn->invoke` and
 `fn->construct` kernels; AST evaluation is not a parallel call dispatcher
-(**D6.2.2v2**). Function closures retain a traced `JsInterpEnv` chain with
+(**D7.2.2**). Function closures retain a traced `JsInterpEnv` chain with
 mutable cells. This is JavaScript lexical capture by reference, while Lambda
-snapshot capture remains confined to its own rule (**D6.2.3v2**).
+snapshot capture remains confined to its own rule (**D7.2.3**).
 
 The P2 walker implements literals, identifiers, unary/binary/logical/
 conditional/sequence expressions, simple `var`/`let`/`const` declarations,
@@ -59,7 +59,7 @@ construction reuse the established class construct capability. `super()` uses
 its derived-`this` and live-superclass helpers, then initializes the derived
 fields; `super` property references use the same lexical-home-class property
 helpers for class/object methods, accessors, statics, and arrows. This is all
-within **D8.1.3v10**; it does not create a second JS object, class, iterator,
+within **D8.4.1**; it does not create a second JS object, class, iterator,
 or call model.
 
 Synchronous ES modules retain a `JsScript` import/export plan in the same
@@ -80,13 +80,13 @@ is involved.
 `JsInterpEnv` is a GC-traced raw record: its outer edge and every `Item` cell
 are marked. Active native frames hold exact object roots, and all operands
 that cross a MAY_GC boundary occupy `RootFrame` or `RootSpan` slots
-(**D1.5**, **D5.3.2–D5.3.3**). The focused suite forces collection after a
+(**D1.5**, **D6.3.2–D6.3.3**). The focused suite forces collection after a
 closure escapes and then calls it again.
 
 Admission occurs after realm setup but before declarations or user code. The
 forced AST backend rejects unsupported forms with a normal JavaScript error;
 it never silently executes a second MIR copy after observable work
-(**D8.1.3v10**, **D8.4.3v2**). The unset backend deliberately remains the
+(**D8.4.1**, **D7.4.3**). The unset backend deliberately remains the
 existing whole-script MIR policy.
 
 Synchronous Test262 batches retain their parsed harness `JsScript`, not MIR
@@ -94,8 +94,8 @@ preamble state or heap objects. Each test receives a fresh realm, executes
 that harness as a separate classic Script, then releases its Script/module
 generation before the next test reuses those IDs. This preserves classic
 global-lexical visibility while preventing mutable harness objects, callbacks,
-or stale AST references from crossing the batch boundary (**D5.3.3**,
-**D5.4.3**, **D8.1.3v10**).
+or stale AST references from crossing the batch boundary (**D6.3.3**,
+**D6.4.3**, **D8.4.1**).
 
 ## Validation
 
@@ -148,7 +148,7 @@ count is dynamic. `for (let i=0;i<3;i++) o.push(await p(i))` produced
 Generators already solved this with `JsInterpGeneratorListContinuation`: one
 statement cursor per list on the suspension path, each carrying the ledger
 position at its resume point. That machinery is now shared rather than
-duplicated (**D8.1.3v10**; the two walkers keep their own resume *signal*):
+duplicated (**D8.4.1**; the two walkers keep their own resume *signal*):
 
 - `js_interp_list_head`/`js_interp_suspend_seen` select the generator record
   or the async context from the frame, so `js_interp_exec_list` owns the
@@ -182,7 +182,7 @@ duplicated (**D8.1.3v10**; the two walkers keep their own resume *signal*):
   on first use. A collection in that window freed the array before
   `items[1]` was written (SIGSEGV under `LAMBDA_GC_FORCE_EVERY`). It now roots
   value and array exactly as its `js_gen_throw_signal` twin already did
-  (**D1.5**, **D5.3.2–D5.3.3**). Latent since the signal pair was introduced;
+  (**D1.5**, **D6.3.2–D6.3.3**). Latent since the signal pair was introduced;
   the ledger change only shifted allocation counts enough to hit it.
 - A concise-body async function (`async () => await p`) evaluated its body as
   an expression but discarded the normal completion value and returned
@@ -230,7 +230,7 @@ with no value on both lanes, for different reasons:
 **Rooting across a suspension.** With `LAMBDA_GC_FORCE_EVERY=1` every AST async
 body silently stopped at its first `await` (exit 0, no output). Three bare
 native locals held the only reference to a live object across an allocating
-call (**D1.5**, **D5.3.2–D5.3.3**):
+call (**D1.5**, **D6.3.2–D6.3.3**):
 
 - `js_interp_async_state_result` allocated the `[value, next_state]` array
   before rooting `value` — the awaited promise — so the caller then registered
@@ -496,7 +496,7 @@ iterator value, and labeled jumps that leave nested async iterators. A close
 failure overrides `break` or `return`; a source throw remains the completion
 after the required cleanup. The MIR suspension budget includes these synthetic
 close states, and the original throw is rooted across the close await. This
-keeps the emitted completion/error-lane flow within **D8.4.3v2**, rather than
+keeps the emitted completion/error-lane flow within **D7.4.3**, rather than
 settling the enclosing async function before IteratorClose completes.
 
 Focused AST/MIR coverage exercises deferred close timing, rejection and object
@@ -540,7 +540,7 @@ attributed to a later call. Three emission sites publish and two take:
 The take is the only fallibility signal on those edges and the catalog cannot
 infer that, so the lane state is declared `UNKNOWN` before the tag test —
 otherwise `jm_emit_error_lane_test` folds to a constant "clean". `publish` is a
-void helper and so must be cataloged `JIT_EXCEPTION_PRESERVES` (D8.4.3 tier B,
+void helper and so must be cataloged `JIT_EXCEPTION_PRESERVES` (D7.4.3 tier B,
 enforced by `make test-js-exception-catalog`): it parks a lane out of band and
 never delivers a replacement carrier.
 
@@ -691,7 +691,7 @@ test262 is 40261/40261.
 
 ## JSI35: dynamic source runs only in the AST interpreter (2026-09-24)
 
-**Ruling:** **D8.1.3v20 / JSI35** (USER, 2026-09-24). Design:
+**Ruling:** **D8.4.3 / JSI35** (USER, 2026-09-24). Design:
 `vibe/Lambda_Design_JS_Interpreter.md` §5.6, §15.18, Appendix S2.
 
 Before this change, the AST tier handed every direct eval to the MIR
@@ -834,7 +834,7 @@ interpreted callers; see the next section.
 
 ## Direct eval links an interpreted caller's environments (2026-09-24)
 
-**Ruling:** **D8.1.3v21 / JSI36** (USER, 2026-09-24). Design: `vibe/Lambda_Design_JS_Interpreter.md` §5.6, §16 item 13, Appendix S3. This is the first step of the §5.6 residual. Ledger: JS05-L5, JS05-L6, JS05-L7 (resolved for interpreted callers).
+**Ruling:** **D8.4.3 / JSI36** (USER, 2026-09-24). Design: `vibe/Lambda_Design_JS_Interpreter.md` §5.6, §16 item 13, Appendix S3. This is the first step of the §5.6 residual. Ledger: JS05-L5, JS05-L6, JS05-L7 (resolved for interpreted callers).
 
 Before this change an AST caller used the same `EvalContext` bridge as a MIR caller. It copied its interpreter cells into temporary global properties, ran the eval, and wrote them back. Eval-created vars went through a per-activation journal. A copy is not a binding, so three defects followed: closures made by eval code lost caller locals once the eval returned (L5); `arguments` and `new.target` were missing (L6); and `var x` could not tell the caller's own `x` from an outer one, so it read `undefined` (L7).
 

@@ -91,7 +91,7 @@ bool runtime_module_state_bind_unit(Runtime* runtime, uint32_t unit_id,
     ModuleUnitIndexEntry* found = runtime_module_unit_index_find(runtime, unit_id);
     if (found) {
         // A reused logical id must stop matching an old active slab before
-        // its new binding can be observed (D5.4.3, D8.5.1v2).
+        // its new binding can be observed (D6.4.3, D8.5.1).
         runtime_module_state_set_layout_key(runtime, found->module_state_id,
             found->module_state_id);
         found->module_state_id = module_state_id;
@@ -269,7 +269,7 @@ RuntimeModuleStateScope::RuntimeModuleStateScope(EvalContext* owner)
           restore_previous_(true) {}
 
 RuntimeModuleStateScope::~RuntimeModuleStateScope() {
-    // Top-level entries retain their slab; nested entries restore the caller (D7.2.1).
+    // Top-level entries retain their slab; nested entries restore the caller (D9.3.1).
     if (restore_previous_ && owner_ && context == owner_ && previous_) {
         owner_->active_module_state = previous_;
     }
@@ -309,7 +309,7 @@ RuntimeJitModuleStateScope::RuntimeJitModuleStateScope(EvalContext* owner)
 
 RuntimeJitModuleStateScope::~RuntimeJitModuleStateScope() {
     // A recovery landing may have released the former slab. Resolve its id
-    // again rather than restoring a possibly freed pointer (D5.3.1).
+    // again rather than restoring a possibly freed pointer (D6.3.1).
     if (owner_ && context == owner_) {
         owner_->jit_current_module_state = lambda_module_state_at(owner_,
             previous_id_);
@@ -578,7 +578,7 @@ extern "C" bool lambda_module_state_grow_vars(uint32_t module_id,
 
     // Publish the replacement root before retiring the old range: a REPL
     // append can allocate while extending its binding slab, so no existing
-    // closure or module value may become temporarily unrooted (D5.3.3).
+    // closure or module value may become temporarily unrooted (D6.3.3).
     if (state->vars_registered) heap_unregister_gc_root_range((uint64_t*)state->vars);
     mem_free(state->vars);
     mem_free(state->var_payloads);
@@ -711,10 +711,10 @@ static bool lambda_module_state_append_key_ids(LambdaModuleState* state,
 }
 
 // LR01-16: a satellite is lowered without the receiving runtime's state
-// (D8.5.1v7) and satellites publish in completion order, so its key suffix is
+// (D8.3.5) and satellites publish in completion order, so its key suffix is
 // placed only here. Link by content: a re-prepare into a slab that already
 // holds these keys at the recorded base keeps them (key IDs are local to each
-// slab, D4.6.2v2); otherwise the suffix is appended where it lands and the
+// slab, D5.6.2); otherwise the suffix is appended where it lands and the
 // layout records that base for the generated code. Comparing counts could not
 // tell an image's own suffix from another image's, and one satellite then read
 // another's keys.
@@ -928,7 +928,7 @@ extern "C" void* lambda_module_const_at_state(void* module_state,
     if (!state || !state->consts) return NULL;
     // Satellites carry the owner's slab state directly; resolving constants
     // through it avoids stale per-image layout metadata during batch linking
-    // (D5.2, D8.2).
+    // (D6.2, D8.2).
     return ((void**)state->consts)[index];
 }
 
@@ -937,7 +937,7 @@ extern "C" Item lambda_module_var_at(void* module_state, uint32_t slot) {
     if (!state || !state->vars || slot >= state->var_count) return ItemNull;
     // Keep satellite reads on the same checked slab accessor as T0. A direct
     // MIR load can be overwritten by root write-back when its value is already
-    // owned by the module root range (D5.2).
+    // owned by the module root range (D6.2).
     return state->vars[slot];
 }
 

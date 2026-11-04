@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3/D5.4, D6.2.2v2, D8.1.3v25: formal MIR uses one fixed rooted argument span for guarded MVP entry and semantic fallback; no per-call argument stack protocol.",
+  "description": "D6.3/D6.4, D7.2.2, D8.4.2: formal MIR uses one fixed rooted argument span for guarded MVP entry and semantic fallback; no per-call argument stack protocol.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

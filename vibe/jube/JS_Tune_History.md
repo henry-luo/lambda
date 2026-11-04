@@ -35,7 +35,7 @@ This doc records *what was tried, what it bought, and why*, not how it was coded
 | B10 | 09-09 | Fast paths aligned with untyped Lambda (T10-0…5) | primes 27×, cd2 5.6×; test262 peak RSS 5,662 → 891 MB |
 | B11 | 09-15 | Shared physical plans (T11-0…6) | spectralnorm 0.50×, matmul 0.55×; LJS/QJS 2.588× |
 | B12 | 09-16 | Full-JS paths from the MVP designs | 63-row paired geomean 0.563× |
-| B13 | 09-17 | Native-only MIR (D8.1.3v11) | MIR interpreter retired for JS; hyphen 130 → 90 ms |
+| B13 | 09-17 | Native-only MIR (D8.4.2) | MIR interpreter retired for JS; hyphen 130 → 90 ms |
 | B14 | 09-21 | Native hot-loop regions, cheaper ordinary ops | C14 control 1.120× QuickJS; quicksort 0.18×, Navier 0.36× |
 | B15 | 09-22 | Constructor-recipe regression diagnosis | R48 regression traced to B14 recipes; plan only |
 | B16 | 09-22 | Helper / call-protocol overhead | one ASCII leaf kept (log_pipeline 0.929×) |
@@ -96,7 +96,7 @@ It is wired into `if` conditions, where a whitelist keeps Annex-B function hoist
 
 ### 2.4 Compile latency: run cold code in the MIR interpreter (A4 / A6 / A7)
 
-> **Superseded 2026-09-16** by **D8.1.3v11** (B13, §4.6): LambdaJS MIR selection always produces native code, and MIR-interpreter thresholds were removed. The LambdaJS interpreter is now its AST backend. The diagnosis below still holds; the policy does not.
+> **Superseded 2026-09-16** by **D8.4.2** (B13, §4.6): LambdaJS MIR selection always produces native code, and MIR-interpreter thresholds were removed. The LambdaJS interpreter is now its AST backend. The diagnosis below still holds; the policy does not.
 
 **Root cause (A6).** `link_us` was 50–82% of compile time. It was not symbol resolution: `MIR_set_gen_interface` ran `MIR_gen` **eagerly for every function**, including functions that were never called. For a large module, opt0 JIT took about as long as opt2 (3,691 vs 3,703 ms). That made the existing ">100k insns → opt=0" downgrade a no-op; the real lever was skipping code generation entirely.
 
@@ -147,7 +147,7 @@ Later updates:
 
 ### 2.9 Property access: shapes and inline caches (A10 / A11 / A12)
 
-> **Outcome.** The inline caches did not survive. `JsLoadIC`/`JsStoreIC` were deleted on 2026-08-15 (`../Lambda_Design_JS_IC_Retire.md`), and per-site caches are now banned in both lanes (**D8.4.1v2**, LC1v2). On the same day, named and indexed access moved onto the shared runtime property kernels, and the compiler-side array/typed-array specializations were removed. Separately, B3 N8 (2026-08-11) deleted the compile-time constructor shape inference/composition phases. B10 and B11 later rebuilt predicted shapes as immutable recipes, guarded per access. **The intrinsic-prototype cache (P6a) is still runtime behaviour.**
+> **Outcome.** The inline caches did not survive. `JsLoadIC`/`JsStoreIC` were deleted on 2026-08-15 (`../Lambda_Design_JS_IC_Retire.md`), and per-site caches are now banned in both lanes (**D7.4.1**, LC1v2). On the same day, named and indexed access moved onto the shared runtime property kernels, and the compiler-side array/typed-array specializations were removed. Separately, B3 N8 (2026-08-11) deleted the compile-time constructor shape inference/composition phases. B10 and B11 later rebuilt predicted shapes as immutable recipes, guarded per access. **The intrinsic-prototype cache (P6a) is still runtime behaviour.**
 
 The honest summary of this arc: **the ICs themselves were neutral; the shape work and the prototype cache were the wins.**
 
@@ -216,13 +216,13 @@ Series B began as the `JS_Runtime_Redesign.md` (JR-numbered) implementation line
 | Round | IDs | What landed | Measured |
 | --- | --- | --- | --- |
 | B1 Helpers | P1a | Profile of the 261-script batch: runtime helpers were **43.5%** of working CPU, GC root registration 7.1% (all `js_alloc_promise`), ABI trio 0.22%. Only P1a landed: promise slots register their roots lazily, at first allocation in the epoch. P2–P4 were superseded by the redesign. | Projection only |
-| B1 Runtime | E0–E8 | In-band merged-lane error ABI (**D8.4.3**): `js_throw_value` is the single carrier, the pending flag and exception slots are gone, the lowering tests the result tag, and `LambdaError` gets a Map-compatible prologue (R2b). | error-channel census 1; poll sites 0 |
+| B1 Runtime | E0–E8 | In-band merged-lane error ABI (**D7.4.3**): `js_throw_value` is the single carrier, the pending flag and exception slots are gone, the lowering tests the result tag, and `LambdaError` gets a Map-compatible prologue (R2b). | error-channel census 1; poll sites 0 |
 | B2 Exception | X0–X7; JR3.3–JR3.9 | Catalog conformance and lane-check elision. `jm_publish_call_result` admits a result to the error lane only when the callee's catalog `ret_class` is `JIT_VALUE_BOXED_ITEM`. Unknown calls keep the I64 fallback (fail-closed). Raw-scalar imports are declared `PRESERVES`, and void imports may not claim `MAY_SET`. The 372 remaining `MAY_SET` rows stay until each body is proven infallible. There is no generic "transparent" effect class. `make test-js-exception-catalog` gates test262. Consolidated helpers (`JS_ASSIGN_OR_RETURN_INTO`). | raw-scalar violations 37 → 0, void `MAY_SET` 85 → 0; **−1,180 net LOC** |
-| B3 Name | N0–N8 | `NameId` (from `NamePool`) is the only property identity (**D3.4.4v2, D4.6.1v2–D4.6.2v2**). `ShapeEntry` keeps `name_id` only, and modules carry dense `NameId[]` tables. Pointer-key code and the old constructor shape optimizer were deleted. | **−2,067 LOC** |
-| B4 Callable | C0–C8 | One `js_call_value` kernel and one `js_construct_value` kernel, with per-callee entries chosen at creation (**D6.2.2v2**). `js_dispatch_builtin` (337 cases) was deleted. Explicit `new.target`. Method calls lower to an observable `Get → Call`. | intrinsic call **−31.95%**, bound call −11.95%, GC slot 400 → 272 B; **−4,334 LOC**. Static method **+220%** and Date construction +31% are the cost of the restored semantics |
+| B3 Name | N0–N8 | `NameId` (from `NamePool`) is the only property identity (**D3.4.4, D5.6.1–D5.6.2**). `ShapeEntry` keeps `name_id` only, and modules carry dense `NameId[]` tables. Pointer-key code and the old constructor shape optimizer were deleted. | **−2,067 LOC** |
+| B4 Callable | C0–C8 | One `js_call_value` kernel and one `js_construct_value` kernel, with per-callee entries chosen at creation (**D7.2.2**). `js_dispatch_builtin` (337 cases) was deleted. Explicit `new.target`. Method calls lower to an observable `Get → Call`. | intrinsic call **−31.95%**, bound call −11.95%, GC slot 400 → 272 B; **−4,334 LOC**. Static method **+220%** and Date construction +31% are the cost of the restored semantics |
 | B5 Property | JR6 | Exactly eight receiver-aware operations (`js_get`, `js_set`, `js_define_own`, …) on a `JsPropertyLane`. `JsElementsKind` lives in `array_flags` with monotone promotion. A realm prototype clean-guard replaced repeated numeric scans. | none (release A/B not run) |
 | B6 Object | JOP1–18 | Immutable `TypeMap::js_meta` and one `JsPropertyOps` table (**D3.4.7**). Native payloads moved off `Map.data`. One prototype resolver/mutator pair. The exotic adapter and the sentinels were deleted. | none (release A/B not run) |
-| B7 Promise | JR7 | A Promise is one GC-owned VMap (**D7.4.1v2**) with growable reactions. One `RuntimeAsyncDeque` serves nextTick, microtasks and unhandled rejections. This removed the caps: 8 reactions, 8,192 promises, 1,024 queue entries, and the silent drops past them. | none; R6b scheduler handoff open |
+| B7 Promise | JR7 | A Promise is one GC-owned VMap (**D9.5.1**) with growable reactions. One `RuntimeAsyncDeque` serves nextTick, microtasks and unhandled rejections. This removed the caps: 8 reactions, 8,192 promises, 1,024 queue entries, and the silent drops past them. | none; R6b scheduler handoff open |
 | B8 Module | JR9 | Runtime-owned `ModuleRegistry`, with paths canonicalised before lookup. Only this foundation slice landed. | none; loader migration open |
 
 **What this line taught.**
@@ -257,7 +257,7 @@ Series B began as the `JS_Runtime_Redesign.md` (JR-numbered) implementation line
 
 ### 4.3 B10 — fast paths aligned with untyped Lambda (2026-09-09 → 09-10)
 
-The baseline was Result38: LJS/QJS **4.35×**, against 29.2× for MIR-untyped. Following **D8.4.1v2**, there are no inline caches. B10 uses a compile-time prediction, an inline guard, and the shared kernel on a miss.
+The baseline was Result38: LJS/QJS **4.35×**, against 29.2× for MIR-untyped. Following **D7.4.1**, there are no inline caches. B10 uses a compile-time prediction, an inline guard, and the shared kernel on a miss.
 
 | Package | Mechanism | Effect |
 | --- | --- | --- |
@@ -311,7 +311,7 @@ B12 made common operations do the small physical work that made the MVP runtime 
 
 ### 4.6 B13 — native-only MIR (2026-09-17 → 09-21)
 
-**D8.1.3v11:** MIR selection always produces native code. There is no size threshold, no interpreter fallback, and `--mir-interp` is rejected for JS. The large-module interpreter of §2.4 had been routing hyphen's whole module (289,375 MIR instructions) to the interpreter even under `tier=jit`.
+**D8.4.2:** MIR selection always produces native code. There is no size threshold, no interpreter fallback, and `--mir-interp` is rejected for JS. The large-module interpreter of §2.4 had been routing hyphen's whole module (289,375 MIR instructions) to the interpreter even under `tier=jit`.
 
 B13 then attacked hyphen's allocation, name and property residual. These are unpaired three-sample medians from different binaries, so they are not additive:
 
@@ -345,7 +345,7 @@ The implementation record is `../impl/JS_Tune13_Impl.md`.
 - **Gains preserved.** The B14 gains survived into R48: diviter 12,689 → 614 ms, quicksort 133 → 18 ms, Navier 565 → 184 ms, levenshtein 218 → 82 ms.
 - **Reuse rules (Tune14 §3.3–§3.4).**
   - A shared primitive needs two live clients, and the old copies retire in the same change.
-  - No parallel fact owners, mutable caches or feedback vectors (**D8.4.1v2**).
+  - No parallel fact owners, mutable caches or feedback vectors (**D7.4.1**).
   - Do not resurrect the withdrawn P7 U-A structural driver.
 - **The miss: constructor and alias recipes.** These T14-5 extensions shipped with semantic/GC tests only: `LMD_TYPE_NULL` placeholder slots for dynamic constructor fields, plain-function constructor prefixes, and `Ctor.prototype.method` aliases. No paired result was taken (§4.8).
 
@@ -470,8 +470,8 @@ Grouped by *why*, because the failure modes repeat.
 ## 5. Open items (as of 2026-10-20)
 
 **Resolved since the first edition of this doc:**
-- **The IC keep-retire-inline decision:** retired 2026-08-15, **D8.4.1v2**.
-- **The MIR-interpreter TCO gap:** moot, because the interpreter was retired for JS (**D8.1.3v11**).
+- **The IC keep-retire-inline decision:** retired 2026-08-15, **D7.4.1**.
+- **The MIR-interpreter TCO gap:** moot, because the interpreter was retired for JS (**D8.4.2**).
 - **The A8 transpiler-side fast-path gate:** landed.
 - **The URI gate:** retired.
 - **Float boxing in hot loops:** largely addressed by B11 T11-1, B12 T12-2 and B14 T14-2.

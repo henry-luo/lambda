@@ -1,4 +1,4 @@
-// D7.4.1v2: Lambda projections keep declared names and bound method currency.
+// D9.5.1: Lambda projections keep declared names and bound method currency.
 import dom
 
 pn main() {

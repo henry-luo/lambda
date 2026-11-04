@@ -1,4 +1,4 @@
-// recursive plain parameters retain activation snapshots and precise roots (S9.1.2, D5.3).
+// recursive plain parameters retain activation snapshots and precise roots (S9.1.2, D6.3).
 pn local_sum(values: int[], depth: int) int^ {
     values[0] = values[0] + 1
     if (depth == 0) { return values[0] }

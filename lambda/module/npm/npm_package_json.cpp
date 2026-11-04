@@ -176,7 +176,7 @@ void npm_package_json_free(NpmPackageJson* pkg) {
     free_deps(pkg->scripts, pkg->script_count);
     free_deps(pkg->bin, pkg->bin_count);
 
-    // releases the parsed JSON and its Input (D4.2.6)
+    // releases the parsed JSON and its Input (D5.2.5)
     if (pkg->parse_pool) mem_pool_destroy(pkg->parse_pool);
 
     mem_free(pkg);

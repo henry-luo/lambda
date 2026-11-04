@@ -5,7 +5,7 @@
 **Design:** [WebGL design §14](../radiant/Radiant_Design_WebGL.md#14-textual-3d-asset-input).
 **Base:** `96f9490f11`, worktree branch `codex/webgl-phase3`.
 
-The parsers construct Input-owned Mark values under **D4.1.3**. Positional
+The parsers construct Input-owned Mark values under **D5.1.3**. Positional
 operands are arrays and repeated records are elements, preserving boundaries
 under **S2.5.1v2**, **S2.6.3**, and **S2.6.4**. glTF reuses the JSON map/array
 mapping. The shared JSON parser now rejects incomplete containers, non-JSON

@@ -1,4 +1,4 @@
-// D2.4.1-D2.4.3, S7.8.1: inferred joins preserve carriers and boxed fallbacks.
+// D2.3.4-D2.3.5, S7.8.1: inferred joins preserve carriers and boxed fallbacks.
 import numbers: lambda.chart.numbers
 
 pn flow_magnitude(n) {

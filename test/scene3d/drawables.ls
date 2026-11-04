@@ -1,4 +1,4 @@
-// S12.1.1v3 / D4.5.3v2: style tracks change retained drawable uniforms.
+// S12.1.1v3 / D5.5.3: style tracks change retained drawable uniforms.
 import dom
 import s: lambda.scene3d
 fn stage(size) element => s.scene([

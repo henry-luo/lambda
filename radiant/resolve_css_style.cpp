@@ -475,7 +475,7 @@ void layout_compute_math_lengths(LayoutContext* context, CssValue* value,
 CssValue* layout_clone_computed_math(LayoutContext* context, const CssValue* value,
                                     CssPropertyCode property, Pool* pool) {
     CssValue* computed = css_value_clone_owned(value, pool);
-    // substituted syntax may be scratch-owned; normalize lengths before the owner's context retires (D4.5.1v4).
+    // substituted syntax may be scratch-owned; normalize lengths before the owner's context retires (D5.5.1).
     if (computed) layout_compute_math_lengths(context, computed, property);
     return computed;
 }
@@ -1608,7 +1608,7 @@ const char* css_select_font_family(LayoutContext* lycon, const CssValue* value) 
     if (!value) return NULL;
     if (value->type != CSS_VALUE_TYPE_LIST) {
         const char* family = css_font_family_name_from_value(value);
-        // computed substitutions and style epochs can retire before retained fonts (D4.5.1v4).
+        // computed substitutions and style epochs can retire before retained fonts (D5.5.1).
         return family ? view_tree_canonical_font_family(layout_context_view_tree(lycon),
             family, strlen(family)) : nullptr;
     }
@@ -3815,7 +3815,7 @@ void radiant_compute_stored_line_height(LayoutContext* lycon, DomElement* span) 
         lycon->font = saved_font;
         if (!resolved) return;
     }
-    // D4.5.1v4: inline CSSOM writes can release declarations without relayout;
+    // D5.5.1: inline CSSOM writes can release declarations without relayout;
     // each retained block owns its computed scalar instead of borrowing that graph.
     span->blk->computed_line_height = computed;
     span->blk->line_height = lam::shared(&span->blk->computed_line_height);
@@ -3969,7 +3969,7 @@ static GridTrackSize* parse_grid_length_percentage(LayoutContext* lycon,
     track->is_percentage = percentage;
     track->fit_content_limit = track->value;
     if (percentage) {
-        // D4.5.1v4: substituted trees can be scratch-owned; retain computed lengths before inheritance.
+        // D5.5.1: substituted trees can be scratch-owned; retain computed lengths before inheritance.
         track->expression_owner = lam::own(layout_clone_computed_math(lycon, value,
             CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, pool));
         if (!track->expression_owner) {
@@ -5471,7 +5471,7 @@ static bool collect_inherited_declaration_mask(StyleNode* node, void* context) {
     return true;
 }
 
-// ancestry, cascade edits and DOM moves invalidate this selected-view cache (D4.5.1v4).
+// ancestry, cascade edits and DOM moves invalidate this selected-view cache (D5.5.1).
 static bool inherited_declaration_mask_is_current(radiant::LayoutCache* cache,
         DomDocument* doc, uint32_t generation) {
     return cache && generation && cache->inherited_generation == generation &&
@@ -5493,7 +5493,7 @@ static uint64_t inherited_declaration_mask(LayoutContext* context, DomElement* e
     if (!generation || context->css_query_probe || !element || element->doc != doc ||
         (context->selected_view_tree && context->selected_view_tree != doc->view_tree) ||
         !dom_element_is_connected(element)) return UINT64_MAX;
-    // wrappers above the root survive view-prop retirement and cannot retain a cache (D4.5.1v4).
+    // wrappers above the root survive view-prop retirement and cannot retain a cache (D5.5.1).
     radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(context, element);
     uint64_t mask = 0;
     bool within_root = true;
@@ -8203,7 +8203,7 @@ static bool compute_background_winners(LayoutContext* context,
 
 static void publish_computed_background(ViewTree* tree, BackgroundProp* current,
                                         const BackgroundProp* replacement) {
-    // publish the complete ordered owner before retiring its predecessor (D4.5.1v4).
+    // publish the complete ordered owner before retiring its predecessor (D5.5.1).
     BackgroundProp retired = *current;
     *current = *replacement;
     view_release_background_images(tree, &retired);
@@ -8813,10 +8813,12 @@ CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
 CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,
         const LayoutLogicalSides& sides) {
     if (!style || property <= CSS_PROPERTY_UNKNOWN || property >= CSS_PROPERTY_COUNT) return nullptr;
-    // aliases depend only on the property and logical axes. Reuse their source
-    // set instead of scanning every declaration for every component query.
-    static thread_local LayoutComponentSources cached[CSS_PROPERTY_COUNT] = {};
-    LayoutComponentSources& entry = cached[property];
+    // orthogonal ancestors alternate axes within one pass; retain each mapping
+    // so crossing a writing-mode boundary never rebuilds the property registry.
+    static thread_local LayoutComponentSources cached[8][CSS_PROPERTY_COUNT] = {};
+    unsigned axes = (unsigned)sides.inline_start * 2 +
+        (sides.block_start == CSS_BOX_SIDE_RIGHT || sides.block_start == CSS_BOX_SIDE_BOTTOM);
+    LayoutComponentSources& entry = cached[axes][property];
     if (!entry.valid || entry.sides.inline_start != sides.inline_start ||
         entry.sides.inline_end != sides.inline_end || entry.sides.block_start != sides.block_start ||
         entry.sides.block_end != sides.block_end) {

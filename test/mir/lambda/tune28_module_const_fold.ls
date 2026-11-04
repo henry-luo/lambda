@@ -1,4 +1,4 @@
-// Tune28 T28-1 / RC3.3 / D2.4.1: a module-scope `let` bound to a literal is a
+// Tune28 T28-1 / RC3.3 / D2.3.4: a module-scope `let` bound to a literal is a
 // compile-time constant. Its reads must be immediates, never a boxed module
 // slab load followed by a tag dispatch and an unbox call. The signed form
 // (`-1`) settles in the same binding-copy arm, so it needs no heap either and

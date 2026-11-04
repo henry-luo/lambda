@@ -1,4 +1,4 @@
-// D8.2.6/D8.4.3v2: invariant helper calls and discarded loop output.
+// D8.2.6/D7.4.3: invariant helper calls and discarded loop output.
 pn accumulate(n: int, value: float) float {
     let scale = value * 2.0
     var total = 0.0

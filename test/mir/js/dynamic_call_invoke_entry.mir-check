@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D6.2.2v2, D8.1.3v25: formal callable dispatch reads Function.entry_abi and Function.ptr, guards the owning context/unit and preserves its semantic fallback.",
+  "description": "D7.2.2, D8.4.2: formal callable dispatch reads Function.entry_abi and Function.ptr, guards the owning context/unit and preserves its semantic fallback.",
   "checks": [
     {
       "in_func": "mvp_lmd_f2",

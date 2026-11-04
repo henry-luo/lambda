@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ensure diagnostic MIR calls do not introduce production safepoints (D5.3.3)."""
+"""Ensure diagnostic MIR calls do not introduce production safepoints (D6.3.3)."""
 
 import json
 import os

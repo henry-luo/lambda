@@ -14,9 +14,9 @@ epochs, custom properties, pseudo styles, and the seam to computed view props.
 retained style, sizing and layout architecture, §3.47 (common continuous-document paths qualified 2026-10-21; conservative adapters documented there).
 **Related record:** [Slow Online-Page Loading](Radiant_Issue_Slow_Page_Loading.md).  
 **Spec linkage:** [Formal Design](../../doc/Lambda_Formal_Design.md)
-**D4.1.4v4** (arena versus pool reclamation), **D4.2.1v3–D4.2.5v3**
+**D5.1.4** (arena versus pool reclamation), **D5.2.1–D5.2.4**
 (allocator ownership, attribution, shared lifetime, and diagnostics), and
-**D4.5.1v3** (Radiant's region/pool policy). CSS-specific existing decisions are
+**D5.5.1** (Radiant's region/pool policy). CSS-specific existing decisions are
 [View Reuse](Radiant_Design_View_Reuse.md) **VR1–VR6** (computed-prop sharing),
 **VR12** (accounting), **VR13** (canonical specified styles), and **VR14**
 (singular lifecycle paths).
@@ -67,8 +67,8 @@ that guarantee.
 
 ### 1.1 Implemented result
 
-The implementation follows the ownership boundaries in **D4.1.4v4**,
-**D4.2.1v3–D4.2.5v3**, and **D4.5.1v3** without adding a new allocator or a
+The implementation follows the ownership boundaries in **D5.1.4**,
+**D5.2.1–D5.2.4**, and **D5.5.1** without adding a new allocator or a
 GC path:
 
 - A 128-entry condition cache owns at most 1 KiB of text per key and covers
@@ -317,8 +317,8 @@ document MemContext
 ```
 
 These are logical roles, not a proposal for a new allocator mechanism.
-**D4.1.4v4** requires individual reclamation to use pools; arenas remain
-batch-lifetime storage. **D4.2.1v3** and **D4.2.3** require every allocator to be
+**D5.1.4** requires individual reclamation to use pools; arenas remain
+batch-lifetime storage. **D5.2.1** and **D5.2.1** require every allocator to be
 owned and attributed through `MemContext`.
 
 | Object | Sharing and lifetime contract |
@@ -387,7 +387,7 @@ and include base-URL ownership when sharing unresolved URL values.
 Do not hash padding or mutable resolution caches. A COW mutation must not
 reveal an updated source payload through an older snapshot. An owned style
 borrowing a shared payload must retain its owner; otherwise it must still copy.
-Cross-owner references follow **D4.2.4**, not an assumption that an epoch lives
+Cross-owner references follow **D5.2.3**, not an assumption that an epoch lives
 as long as the document.
 
 ### 3.4 Build compact canonical property blocks
@@ -483,7 +483,7 @@ prop payloads, active recipe builders, and CSSOM/native references before
 changing the current clear behavior.
 
 Reuse existing ownership gates and retirement machinery where their contracts
-fit (**VR14**, **D4.5.1v3**). This proposal does not introduce GC for CSS or rely
+fit (**VR14**, **D5.5.1**). This proposal does not introduce GC for CSS or rely
 on native-stack scanning.
 
 ### 3.8 Bound canonical cache history
@@ -519,7 +519,7 @@ mechanism or compact raw pointers opportunistically.
 Keep the **input generation** used to validate recipes separate from the
 **storage lifetime** needed by their consumers. Ordinary reflow must not create
 a new style epoch (**VR13**). Coordinated pressure reclamation belongs to
-`MemContext` (**D4.2.2v2**).
+`MemContext` (**D5.2.2**).
 
 ### 3.9 Make replacement and extension explicit
 
@@ -602,15 +602,15 @@ Computed accessor callbacks write growable text. Both the full String API and
 bounded native API use that computation; a bounded read reports failure and
 leaves empty output if the complete value does not fit. Intermediate formatting
 and substitutions stay in scratch storage; only the result crosses into the
-caller's pool, under **D4.5.1v4 / D4.1.4v5**. No formal ownership ruling changes.
+caller's pool, under **D5.5.1 / D5.1.4**. No formal ownership ruling changes.
 
 ### 3.13 Size-container delivery contract
 
 The P1.1 size-query implementation extends §3.2's existing container-dependent
 key contract. Keep parsed conditions in the CSS/input owner; supply layout
 measurements through an explicit environment callback, preserving module
-boundaries under **D7.3.3–D7.3.4**. The selected view owns query measurements,
-dependency state and stabilization work under **D4.5.1v4 / D4.1.4v5**. An
+boundaries under **D9.4.3–D9.4.4**. The selected view owns query measurements,
+dependency state and stabilization work under **D5.5.1 / D5.1.4**. An
 independent print/secondary view never reads browsing geometry to answer a query.
 
 For a size query, select a strict flat-tree ancestor with the requested name
@@ -649,7 +649,7 @@ prerequisites in P3.4 of the implementation plan.
 Secondary editions retain a previous-pass content-size table outside their
 replaceable CSS/layout scratch. Entries carry validated `DomNodeRef` identity;
 the edition owns both tables, and external reset/release destroys them with that
-generation (**D4.5.1v4 / D4.1.4v5**). Internal rejected passes preserve only this
+generation (**D5.5.1 / D5.1.4**). Internal rejected passes preserve only this
 measurement input while rebuilding styles and fragments. Query values use the
 selected ancestor's edition-local font and custom-property state.
 
@@ -672,7 +672,7 @@ layout's shared component cascade, including `all` and layer rollback. Explicit
 inheritance follows the parent's corresponding logical property; a pseudo
 inherits from its originating element. Equal computed axes compress to one
 shorthand component. Computed reads never substitute remembered used dimensions
-for the authored fallback (**CI-18 / D4.5.1v4 / D4.1.4v5**).
+for the authored fallback (**CI-18 / D5.5.1 / D5.1.4**).
 
 For intrinsic measurement, `auto <length>` uses its explicit length when no
 usable remembered size exists; `auto none` retains empty size-containment
@@ -691,8 +691,8 @@ testing rather than creating a second containment clip. A paint-contained box
 does not need a scroll pane to clip, and removing containment must restore its
 ordinary used geometry after recascade.
 
-Containment flags are generation-local computed state under **D4.5.1v4 /
-D4.1.4v5**. Reset them before applying current winners; retain remembered
+Containment flags are generation-local computed state under **D5.5.1 /
+D5.1.4**. Reset them before applying current winners; retain remembered
 intrinsic sizes separately when the visibility implementation needs them.
 Store the computed `contain` modes separately from size containment implied by
 `container-type`; explicit inheritance copies only the former. Keyword sets
@@ -720,7 +720,7 @@ Reverse hit traversal cannot let an editor's margin-caret fallback claim
 painted siblings or content outside its parent. SVG text targeting follows
 authored style ancestry across anonymous layout wrappers, including wrappers
 inserted after the style snapshot was indexed. Source-less layout placeholders
-have no Lambda attribute-map identity under **D4.5.1v4**. Shared ancestry
+have no Lambda attribute-map identity under **D5.5.1**. Shared ancestry
 collection uses checked growable storage rather than silently dropping ancestors.
 
 Complete stacking/depth ordering, non-principal boxes,
@@ -742,7 +742,7 @@ Quote depth starts at the enclosing depth, advances in flattened generated
 content order, and is restored on leaving a style-contained subtree. Both
 browsing and independent compositions use the shared content evaluator and
 counter-scope implementation. Scope ownership and generated text follow
-**D4.5.1v4 / D4.1.4v5**; pass-local snapshots never become document-owned pointers.
+**D5.5.1 / D5.1.4**; pass-local snapshots never become document-owned pointers.
 Repeated materialization retains unchanged text rather than allocating a
 replacement document string. Counter/quote checkpoints must also bound
 measurement trials and early returns.
@@ -782,7 +782,7 @@ preserves committed history in the same edition. Disconnection immediately reset
 proximity/event history, including a synchronous remove-and-reinsert. Remembered
 sizes survive that brief disconnection, but a rendering update while disconnected
 retires the entry. Adoption and teardown retire stale references under
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 Before first geometry exists, auto contents are measured. Subsequent layout
 settles relevance and placeholder geometry with a checked pass budget. An
 explicit activation margin is a user-agent policy, rather than an authored
@@ -843,7 +843,7 @@ context. Hidden block contents, including pseudos, produce no children while
 their own placeholder and decorations remain. Printable auto content remains
 relevant independently of browsing position. Counter boundaries use the same
 visibility applicability; no temporary default-view geometry is published
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 Independent remembered sizes use the same weak-identity history owner as
 browsing, with each edition retaining its own dimensions. Final model commit
@@ -863,7 +863,7 @@ accessor uses a branded native payload; constructor/dictionary conversion,
 subclassing and getter exceptions have a JS golden. Initial observation,
 scroll changes, inline handlers, removal and reinsertion have a live fixture.
 The queued target is validated again and detached targets are discarded;
-callbacks run after layout unwinds (**D5.3.3 / D4.3.3**). A connected element
+callbacks run after layout unwinds (**D6.3.3 / D5.3.2**). A connected element
 retains proximity history while auto is disabled or its box is absent.
 Chromium differs on initial notifications and native event flags; these remain explicit
 qualification limits against [CSS Containment 2 §4.4](https://drafts.csswg.org/css-contain-2/#contentvisibilityautostatechange).
@@ -899,7 +899,7 @@ the authority for that distinction, independently of an author's MIME hint.
 
 A selection result borrows parsed values only during computation. Retain its
 resolved URL or resolved gradient in the consuming view's owner, under
-**D4.5.1v4 / D4.1.4v5**. Explicit background inheritance clones owned gradient
+**D5.5.1 / D5.1.4**. Explicit background inheritance clones owned gradient
 objects, stop arrays and layer arrays. Retiring either parent's or child's
 payload cannot invalidate the other. Image-only inheritance preserves the
 child's independent color and background geometry. Replacement releases the
@@ -947,9 +947,9 @@ the marker string, including `list-style-type:none`, per
 Explicit image `none` terminates inheritance. Retained markers refresh their
 borrowed computed image/cache surface and generated-content suppression after
 style changes. An absent marker leaves the rendered tree while retaining its
-owner until ordinary generated-node retirement (**D4.5.1v4**).
+owner until ordinary generated-node retirement (**D5.5.1**).
 Retained marker fonts keep their element owner; the optional temporary font
-owner starts empty when reuse needs no allocation (**D4.1.4v5**).
+owner starts empty when reuse needs no allocation (**D5.1.4**).
 
 Explicit border-image inheritance owns independent URL/gradient/stop copies;
 replacement releases the previous owner after constructing the new payload.
@@ -967,7 +967,7 @@ consumers; broader transformed sampling and projective export remain open.
 Gradient list images share the used marker rectangle and image producer across
 raster, SVG and PDF. Linear/radial commands own their path and copied stops;
 conic/repeating-radial commands own generated pixels until all deferred consumers
-release them (**D4.5.1v4**). Coincident stops select the following color at their
+release them (**D5.5.1**). Coincident stops select the following color at their
 boundary. Software sampling stores premultiplied pixels; SVG encoding and PDF
 soft-mask images receive straight channels. Linear repetitions reuse the checked,
 heap-owned CSS stop expansion. A zero period uses equally spaced stops for the
@@ -1000,7 +1000,7 @@ channels before source-over composition while respecting destination alpha.
 Affine and projective vector image replay uses the shared pixel-center sampler.
 The replaced content and its decorations occupy one block effect scope, so CSS
 group opacity is applied once. Document surfaces remain synchronous borrows;
-deferred paint owns snapshots under **D4.5.1v4 / D4.1.4v5**.
+deferred paint owns snapshots under **D5.5.1 / D5.1.4**.
 Content clipping uses the same containment test as raster painting; coincident
 image/content edges do not add a second PDF clip that compounds antialiasing.
 
@@ -1049,7 +1049,7 @@ independent/paged CSS-image producers retain separate acceptance controls.
 
 ### 3.18 Ordered background layers (delivery contract; implementation pending)
 
-Resolved image objects and stop arrays follow **D4.5.1v4 / D4.1.4v5**;
+Resolved image objects and stop arrays follow **D5.5.1 / D5.1.4**;
 deferred PaintIR owns its paths, stops and generated pixels. **CI-18** follows
 [CSS Backgrounds 3 §2.1–2.3](https://www.w3.org/TR/css-backgrounds-3/#layering):
 retain an authored-order image list, including `none` and unavailable images.
@@ -1119,7 +1119,7 @@ The full-position follow-up uses a shared physical-position descriptor for
 keyword order, three-/four-value edge offsets and axis longhands. Parsing and
 computation share this descriptor. Linear math retains separate percentage/px
 terms; nonlinear percentage math owns a computed tree and evaluates the remaining
-percentage against each tile's free space (**D4.5.1v4 / D4.1.4v5**, **CI-18**).
+percentage against each tile's free space (**D5.5.1 / D5.1.4**, **CI-18**).
 The 21/24 failing predecessor probe improves to 36/36 passing comparisons in an
 extended 12-case probe. Its native view suite passes 609 cases, including inherited
 font-relative lengths and parent retirement. Durable 1x/2x position exports pass
@@ -1148,7 +1148,7 @@ the runner or qualify the complete family.
 
 
 The size-math follow-up shares the computed-expression owner with positions
-(**D4.5.1v4 / D4.1.4v5**, **CI-18**). Size percentages use the full positioning
+(**D5.5.1 / D5.1.4**, **CI-18**). Size percentages use the full positioning
 area, while positions use image free space. It validates the per-layer size
 shape, retains linear/nonlinear math, clamps used calculations to the nonnegative
 size range, suppresses explicit zero sizes and resolves a gradient's `auto` axis
@@ -1171,7 +1171,7 @@ Broader shorthand/gradient grammar and motion/serialization remain open.
 The subsequent 23-input paint candidate restores canonical rectangles, preserves
 standalone gradient-image sampling and lowers integral rectangular clip
 intersections through the existing exact source-over compositor (**CI-18**;
-**D4.5.1v4 / D4.1.4v5**). It passes 128 vector / 613 view cases, 22 live pixels and
+**D5.5.1 / D5.1.4**). It passes 128 vector / 613 view cases, 22 live pixels and
 both required aggregates (6,647 Lambda/input; 4,292 full / 349 partial Radiant).
 Full exports improve to 230/231: the five earlier paint regression groups pass,
 while exactly two ordered PDF edge assertions remain. Matching 131-input ASan
@@ -1201,7 +1201,7 @@ controls, accepts six valid lists and passes 30 live assertions, against 19
 failures on the predecessor (**CI-18**). Repeat parsing/computation uses one
 lower descriptor; supported-image recognition is shared with registered values
 and border images. Independent inherited periods/storage and 256 recascades
-retain stable pool bytes (**D4.5.1v4 / D4.1.4v5**). A mixed URL/local, gradient/
+retain stable pool bytes (**D5.5.1 / D5.1.4**). A mixed URL/local, gradient/
 scroll and gradient/fixed page passes 26 live assertions over 1×/2× changes.
 The frozen 30-input candidate passes required aggregates (6,647 Lambda/input;
 4,295 full / 349 partial Radiant), 231/233 full export groups and 1,081 ASan
@@ -1227,7 +1227,7 @@ computed background component accessors also share layout's winner/substitution
 and shorthand decoding. Owner-font math uses the common SVG/grid length
 normalizer; independent inherited periods project only at the receiving image
 count, and before/after queries compute in their originating font context
-(**CI-18**, **D4.5.1v4 / D4.1.4v5**). The new live fixture passes 20/20 Chromium
+(**CI-18**, **D5.5.1 / D5.1.4**). The new live fixture passes 20/20 Chromium
 references, all 620 view cases pass, and computed reads reach 24 independent
 export comparisons. The final 37-input combined candidate (`ordered_17d.exe`, `reads17dq_*`) passes both required aggregates (6,647 Lambda/input; 4,299 full / 349 partial Radiant), 235/236 full export groups, 1,086 matching 131-input ASan native cases, 372 background/overflow/read and 600 marker comparisons, six live fixtures (153 assertions per runtime) and the Canvas JS golden. The two original ordered bitmap PDF assertions and unchanged 226 deferred / 89 unapproved imports remain open. Original contour storage also preserves the fractional-alpha and affine controls. Image/shorthand getters, effect sampling and broader image-family acceptance remain open.
 
@@ -1238,7 +1238,7 @@ Shape inference and radius arity follow [CSS Images 3 §3.2.1](https://www.w3.or
 Computed descriptors own owner-normalized radius math; geometry supplies each
 tile's independent width/height percentage basis. Image inheritance deep-clones
 that syntax, and the common release path covers mask replacement (**CI-18**,
-**D4.5.1v4 / D4.1.4v5**). Initial controls pass 624 native view cases, 84 durable
+**D5.5.1 / D5.1.4**). Initial controls pass 624 native view cases, 84 durable
 export comparisons and 26 live Chromium-matched assertions. The frozen 40-input lowercase-radius checkpoint passes both required gates (6,647 Lambda/input; 4,300 full / 349 partial Radiant), 236/237 full exports, 1,090 matching 131-input ASan native cases, 456 background/radius/overflow/read and 600 marker comparisons, 179 live assertions per runtime and the Canvas JS golden (`radial18q_*`). The two ordered bitmap PDF assertions and unchanged 226 deferred / 89 unapproved imports remain open. A follow-up uppercase prelude probe exposes a validator case regression assigned to the next candidate; full radial/conic centers also fail all 30 off-center output comparisons despite 20 exact Chromium reference pairs. Case grammar, full centers, stop hints/interpolation, computed image/shorthand reads and effect sampling remain open.
 
 
@@ -1249,12 +1249,12 @@ receive each tile's percentage basis at paint. Keyword matching reuses the
 caseless identifier matcher, and all three gradient kinds share one lower
 function/repetition metadata table. The uppercase radius regression is corrected.
 Controls pass 627 native views, 96 durable 1×/2× output comparisons and 27 live
-Chromium assertions. The frozen 42-input normal / 131-input ASan checkpoint passes fresh 6,647 Lambda/input and 4,301 full / 349 partial Radiant cases, 238/239 exports, 1,093 sanitizer cases, 206 live assertions per runtime, the Canvas JS golden and 552 background/geometry/read plus 600 marker comparisons (`centers19q_*`). Two ordered PDF edge assertions and unchanged 226 deferred / 89 unapproved imports remain open. Wider body/stop/hint grammar and computed image/effect consumers remain open (**CI-18**, **D4.5.1v4 / D4.1.4v5**).
+Chromium assertions. The frozen 42-input normal / 131-input ASan checkpoint passes fresh 6,647 Lambda/input and 4,301 full / 349 partial Radiant cases, 238/239 exports, 1,093 sanitizer cases, 206 live assertions per runtime, the Canvas JS golden and 552 background/geometry/read plus 600 marker comparisons (`centers19q_*`). Two ordered PDF edge assertions and unchanged 226 deferred / 89 unapproved imports remain open. Wider body/stop/hint grammar and computed image/effect consumers remain open (**CI-18**, **D5.5.1 / D5.1.4**).
 
 The next applied stop-math increment retains per-stop owned computed syntax,
 shares used-line fixup across existing image consumers and validates typed
 stop bodies before choosing literal/selected images. Deep clone/retirement
-controls follow **D4.5.1v4 / D4.1.4v5**. Focused checks pass 631 view/style cases,
+controls follow **D5.5.1 / D5.1.4**. Focused checks pass 631 view/style cases,
 130 vector cases, 126 real-paint all-output comparisons, four raster-only
 mask/text comparisons and 34 Chromium-matched live assertions. The frozen 47-input normal /131-input ASan checkpoint passes both required gates (6,647 Lambda/input; 4,302 full /349 partial Radiant), 240/241 exports, 1,097 sanitizer cases, 240 live assertions per runtime, the Canvas JS golden and all 18 focused groups (678 background/geometry/read, four raster-only mask/text and 600 marker comparisons) in `stops20q_*`. The two ordered PDF edge assertions and unchanged 226 deferred /89 unapproved imports remain open. Existing SVG/PDF mask and clipped-text omissions are
 explicit P2.2 work, excluded from all-output credit; wider prelude grammar,
@@ -1264,7 +1264,7 @@ The existing radial mask now scopes flattened export subtrees through the shared
 `PaintEffectGroup` descriptor and raster capture. Sampling retains whole-box
 geometry and the inverse of effective density/transforms; opacity and masking
 composite once before blend. Borrowed mask display items remain unretainable
-while captured pixels own their storage (**D4.5.1v4 /D4.1.4v5**, **CI-18**).
+while captured pixels own their storage (**D5.5.1 /D5.1.4**, **CI-18**).
 Sixteen native nested-opacity/clip/blend/density controls, 30 real-paint output
 comparisons and 30 Chromium-matched live assertions pass. Frozen 51/131-input
 `mask21q_*` passes both required gates (6,647 Lambda/input; 4,304 full /349
@@ -1276,7 +1276,7 @@ visibility and clipped-gradient-text export paths remain separate work.
 ## 4. Instrumentation and decision criteria
 
 Extend existing `StyleEpochStats`, pool counters, and memory snapshots rather
-than introduce an independent allocation tracker (**D4.2.5v3**, **VR12**).
+than introduce an independent allocation tracker (**D5.2.4**, **VR12**).
 Production builds need low-overhead counters, with detailed attribution opt-in.
 
 At parse completion, before/after each cascade, after retirement, and after
@@ -1334,8 +1334,8 @@ document owner; the work-pool metric covers CSS-engine and selector-matcher
 allocations that currently use the loader's layout-role pool. The CSS-role and
 canonical metrics separately prove whether a full recascade duplicated shared
 recipes. This uses the existing pool and `MemContext` accounting path required
-by **D4.2.5v3**, and keeps allocator ownership explicit as required by
-**D4.1.4v4** and **D4.5.1v3**.
+by **D5.2.4**, and keeps allocator ownership explicit as required by
+**D5.1.4** and **D5.5.1**.
 
 `test/test_css_cascade_memory_gtest.cpp` runs six frozen local pages using the
 `lambda.exe` selected by the standard Radiant baseline build, reads the two
@@ -1477,7 +1477,7 @@ stylesheet parser had stopped using it.
 the complete token array there, parses semantic rules into `engine->pool`, and
 destroys the tokenizer pool before returning the stylesheet. This makes the
 token records, copied lexemes, numeric conversion strings, and their VM
-extents parse-call scratch. It follows **D1.3v3**'s explicit ownership and
+extents parse-call scratch. It follows **D1.3**'s explicit ownership and
 cleanup discipline: parser temporary storage must not become a hidden
 document-lifetime owner.
 
@@ -1521,7 +1521,7 @@ imported asset could therefore retain MIR compiler/generator state despite an
 AST document realm. The module path now consults
 `js_ast_interpreter_requested()` before lowering and dispatches to its existing
 AST module executor. This completes the one-realm ownership rule and follows
-**D1.3v3**: a hosted guest shares the host's accounting and lifecycle rather
+**D1.3**: a hosted guest shares the host's accounting and lifecycle rather
 than creating a parallel compiler-owner lifetime.
 
 | Same URL, viewport, and no-op event file | Before tier propagation | After tier propagation | Reduction |
@@ -1798,7 +1798,7 @@ and132-input ASan
 pass6647 core/input,4305 full/349 partial Radiant,1098 sanitizer native and342
 live assertions per runtime. All20 focused groups and the Canvas golden pass;
 full exports242/243 retain only two old ordered 2x PDF edges. Boundary226/89 is
-unchanged. Owners retain **D4.5.1v4 /D4.1.4v5**. Table collapse layout, focus,
+unchanged. Owners retain **D5.5.1 /D5.1.4**. Table collapse layout, focus,
 link annotations and broader paged/effect consumers remain open. Evidence:
 `temp/css_support_p1/background_layers/visibility22q_*`,73 protected artifacts.
 
@@ -1812,21 +1812,21 @@ ancestry, with native-default fallback for empty pre-render projections.
 Committed hiding clears focus through the existing event/identity transition;
 104 further Chromium/native focus assertions and 4,096 stable-pool reads pass.
 The existing owned-root invariant test is unchanged and passes. Owners follow
-**D4.5.1v4 /D4.1.4v5**; pending identity remains **D4.5.2**. Protected
+**D5.5.1 /D5.1.4**; pending identity remains **D5.5.2**. Protected
 `consumer30q_*` passes6,765 core/input, 5,368 full /353 partial /one skipped
 Radiant, 1,106 matching sanitizer cases and 506 live assertions per runtime;
 full exports 243/245 preserve19 range comparisons and two ordered PDF edges.
 The 133-input sanitizer source snapshot matches the 81 primary plus one
 supplemental normal inputs. Seventeen host/collection imports are removed
-through lower-owned immutable providers (**D7.1.3 /D7.5.3**); boundary 213/76
+through lower-owned immutable providers (**D9.1.3 /D9.5.6**); boundary 213/76
 remains a failed strict gate with no allowance increase. Hidden PDF links,
 clipped gradient text, complete axis/clip-margin/paged/effect consumers and the
 broader family limits remain open.
 
 
-**Follow-up qualification (2026-10-12, CI-18 /D7.1.3 /D7.5.3):** Protected
+**Follow-up qualification (2026-10-12, CI-18 /D9.1.3 /D9.5.6):** Protected
 `consumer31q_*` qualifies flat hidden/collapsed own PDF link suppression and
-preserves existing visible-descendant links under **D4.5.1v4 /D4.1.4v5**.
+preserves existing visible-descendant links under **D5.5.1 /D5.1.4**.
 Ten normal/sanitizer annotation controls pass at 1x/2x; Chromium's print behavior
 for a visible descendant differs from its browsing activation. Two more Item
 host wrappers move behind the established lower-owned provider, preserving
@@ -1836,13 +1836,13 @@ comparisons and two ordered PDF boundaries. The first boundary link finds stale
 objects containing the moved wrappers. Their provenance and raw failure remain;
 rebuilding just those objects measures 211 deferred /74 unapproved with no new
 imports or allowance changes. Strict boundary closure remains open under
-**D7.3.3–D7.3.4**; no formal ruling changes.
+**D9.4.3–D9.4.4**; no formal ruling changes.
 
 
-**Event provider qualification (2026-10-12, D7.1.3 /D7.5.3):** Protected
+**Event provider qualification (2026-10-12, D9.1.3 /D9.5.6):** Protected
 `events32q_*` moves eighteen event host calls behind a lower-owned immutable
 provider while preserving native implementation, public module names, traced
-payloads and dispatch identity (**D4.5.1v4 /D4.5.2**). Five provider tests cover
+payloads and dispatch identity (**D5.5.1 /D5.5.2**). Five provider tests cover
 all mandatory fields, operation/argument routing, eight creation-flag combinations
 and 200,000 concurrent event calls. Fresh required gates pass 6,765 Lambda/input
 and 5,368 full /353 partial /one skipped Radiant; 1,107 matching sanitizer cases,
@@ -1852,24 +1852,24 @@ boundaries. Ninety normal and 136 sanitizer source inputs match their protected
 binaries. The four strict DSOs build; the raw boundary removes 18 imports from
 211/74 to 193 deferred /56 unapproved with no additions and an unchanged 165
 allowance. Thirty-seven imports are removed since 230/93; remaining strict
-closure follows **D7.3.3–D7.3.4**. The clipped-text draft stays unapplied and
+closure follows **D9.4.3–D9.4.4**. The clipped-text draft stays unapplied and
 unqualified at the vector edges. No formal ruling changes.
 
 
-**Event workflow qualification (2026-10-12, D7.1.3 /D7.5.3):** Protected
+**Event workflow qualification (2026-10-12, D9.1.3 /D9.5.6):** Protected
 `workflow33q_*` removes four remaining synthetic/author-template imports through
 the existing event provider, preserving implementations and dispatch identity
-(**D4.5.1v4 /D4.5.2**). Required gates, 1,107 matching sanitizer cases, 525 live
+(**D5.5.1 /D5.5.2**). Required gates, 1,107 matching sanitizer cases, 525 live
 assertions per runtime and Canvas golden pass; exports 244/246 retain the same
 nineteen range comparisons and two ordered PDF edges. Ninety-one normal and 136
 sanitizer inputs match protected binaries. The raw boundary improves 193/56 to
 189 deferred /52 unapproved with no additions or allowance change; 41 imports
-are removed since 230/93. Strict closure remains open (**D7.3.3–D7.3.4**).
+are removed since 230/93. Strict closure remains open (**D9.4.3–D9.4.4**).
 
 
 **Editing/factory/context ownership qualification (2026-10-12):** Protected
 `ownership34q_*` qualifies two editing host callbacks, the lower shared fragment
-factory and runtime-owned evaluator transfer (**D7.1.3 / D7.5.3 / D7.2.5 / D5.4.1**).
+factory and runtime-owned evaluator transfer (**D9.1.3 / D9.5.6 / D10.2.1 / D6.4.1**).
 Required gates pass 6,766 Lambda/input and 5,368 full /353 partial /one skipped
 Radiant cases; seven matching sanitizer runners pass 1,144 cases and eighteen
 live fixtures pass 534 assertions per runtime. Canvas golden passes; exports
@@ -1877,7 +1877,7 @@ live fixtures pass 534 assertions per runtime. Canvas golden passes; exports
 normal and 140 sanitizer inputs match protected binaries. The raw boundary is
 185 deferred /48 unapproved, four fewer with no additions or allowance change;
 45 imports are removed since 230/93. Strict closure remains open
-(**D7.3.3–D7.3.4**). No formal ruling or CSS-family promotion changes.
+(**D9.4.3–D9.4.4**). No formal ruling or CSS-family promotion changes.
 
 
 **CI-18 gradient precision and highlight scope increment (2026-10-12):**
@@ -1888,7 +1888,7 @@ bounded to the visible path. Ordered stop lookup preserves the following color
 at a coincident stop; repeated scanline colors may be shared without sharing
 coverage. Stroke/projective/degenerate backend paths retain separate support.
 
-Highlight declarations remain per element under **D4.5.1v4 / D4.1.4v5**.
+Highlight declarations remain per element under **D5.5.1 / D5.1.4**.
 Replacing a subtree's cascade clears highlight entries for that subtree, leaving
 unrelated siblings live. Controls with authored or inherited highlight colors
 acquire inline storage through the existing ownership helper before computation.
@@ -1903,7 +1903,7 @@ dashed, dotted, double and wavy patterns. The complete pattern is clipped to
 those intervals so ink skipping does not restart dash/wave phase; line-through
 remains continuous. Source bytes bound one scoped gap per decoded codepoint,
 removing the former 64-gap loss without retaining font/cache storage
-(**D4.5.1v4 / D4.1.4v5**). CSS/font thickness converts once to destination pixels
+(**D5.5.1 / D5.1.4**). CSS/font thickness converts once to destination pixels
 before snapping; gap clip bounds align vertically to the destination pixel grid
 without trimming the pattern's antialias coverage (**RSC7**).
 
@@ -1926,7 +1926,7 @@ producer. This is P2.2 consumer work, not missing CSS registration. The shape
 and continuity contract follows [CSS Text Decoration 4 §2](https://drafts.csswg.org/css-text-decor-4/#line-decoration)
 and its [painting order](https://drafts.csswg.org/css-text-decor-4/#painting-order).
 No formal ruling defines decoration geometry; payload lifetime remains governed
-by **D4.5.1v4 / D4.1.4v5**, and coordinate ownership by **RSC1 / RSC7**.
+by **D5.5.1 / D5.1.4**, and coordinate ownership by **RSC1 / RSC7**.
 
 - Extract the existing native metric, pattern and ink-interval calculations into
   one recorder with explicit font, fragment origin/extent, source slice and
@@ -1961,7 +1961,7 @@ bounded horizontal profile. Selected-font decoration pixels, offsets, placement,
 paint order, long-run gaps and retirement replay pass focused normal/ASan checks.
 SVG uses glyph outlines and semantic labels; PDF records the same lines. Empty
 interval sets emit no geometry, and failed compound recording rewinds owned
-payloads (**D4.5.1v4 / D4.1.4v5**). Twenty-three exact SVG/PDF pattern-edge
+payloads (**D5.5.1 / D5.1.4**). Twenty-three exact SVG/PDF pattern-edge
 comparisons remain failed: identical path attributes and a clip-removal control
 identify independent-reader clip antialiasing. Those raw failures remain visible;
 transformed/effect, transparent-color, complete owner/fragment and shaping/vertical
@@ -1983,7 +1983,7 @@ and rendering/copying treats alpha zero as the default `currentColor` marker.
 accepts a color and defaults to `currentColor`; [CSS Color §6.3](https://drafts.csswg.org/css-color-4/#transparent-color)
 defines transparent as a color with zero alpha. Alpha must remain paint data.
 This CSS ruling has no Lambda formal counterpart (**CI-18**); style ownership
-continues under **D4.5.1v4 / D4.1.4v5**.
+continues under **D5.5.1 / D5.1.4**.
 
 Represent current-color selection separately from RGBA and copy it through the
 existing font-value helpers. Reuse the emphasis current-color predicate rather
@@ -2000,7 +2000,7 @@ The applied color-state implementation passes thirty exact reference pairs in
 three outputs at both densities, sixteen live assertions and four ownership
 groups in normal/scoped ASan. Partial UI/legacy font initialization now shares one
 initializer with explicit current-color state. Source lifetime remains governed
-by **D4.5.1v4 / D4.1.4v5**. Broad repository qualification is protected under
+by **D5.5.1 / D5.1.4**. Broad repository qualification is protected under
 `decoration_color41q_*`: core 6,797, Radiant 5,411 full /353 partial /one skipped,
 1,111 scoped ASan cases, 694 live assertions per runtime, exporter 255/260 and
 SVG matrix 126 formats /2,466 assertions. Forty comparisons in the five known
@@ -2018,7 +2018,7 @@ sets all four components and resets omitted components to their initial values.
 Use the existing cascade comparison helper for line/style/color/thickness
 application, preserving stronger important/specific/layered longhands. This is
 CSS winner computation under **CI-18**; retained declaration ownership remains
-under **D4.5.1v4 / D4.1.4v5**.
+under **D5.5.1 / D5.1.4**.
 
 The isolated gate skips a component declaration when the selected shorthand
 outranks it. Fourteen controls at both densities pass eighty-four exact PNG/SVG/PDF
@@ -2050,7 +2050,7 @@ control has no green line pixels between glyphs in any output. [CSS Text
 Decoration §4–§5.1](https://drafts.csswg.org/css-text-decor-4/#painting-order)
 places outer shadows below lines/text and includes decorations in the shadowed
 text. This is **CI-18**; synchronous source/font borrows and retained geometry/
-images follow **D4.5.1v4 / D4.1.4v5**, and density follows **RSC1 / RSC7**.
+images follow **D5.5.1 / D5.1.4**, and density follows **RSC1 / RSC7**.
 
 Reuse the shared decoration recorder for the native display-list capture and
 vector shadow layers. Translate complete geometry, including ink gaps, and
@@ -2077,7 +2077,7 @@ to composite each complete group once, preserving vector geometry and nested
 groups. PDF group semantics follow ISO 32000 §11.6.6 and §11.4
 ([PDF Association](https://pdf-issues.pdfa.org/32000-2-2020/clause11.html));
 this CSS consumer repair is **CI-18**, with document-owned streams and teardown
-under **D4.5.1v4 / D4.1.4v5**.
+under **D5.5.1 / D5.1.4**.
 
 Qualify exact overlapping interiors against a single union, nested opacity,
 primitive alpha, coloured backdrops, transforms, clipping and subsequent
@@ -2101,7 +2101,7 @@ remain separate from the interior contract. Protected `pdf_opacity43q_*` records
 /one skipped Radiant case, 1,162 scoped ASan cases, 744 live assertions per
 runtime, Canvas golden and 126 SVG formats /2,466 assertions. Export passes
 258/263 groups with the same forty comparisons. Boundary debt remains 185
-/48 unapproved with no delta (**D7.1.3 / D7.3.3–D7.3.4**). Normal/ASan snapshots
+/48 unapproved with no delta (**D9.1.3 / D9.4.3–D9.4.4**). Normal/ASan snapshots
 contain 145/143 inputs with no drift/reports; 147 protected records and 46,600
 copied exports seal the delivery. Broader opacity/shadow contexts remain open.
 
@@ -2112,7 +2112,7 @@ capture, while the shadow capture retains the recorded stroke's complete bounds.
 Filters consume rendered source ink, including glyph bearings and decoration
 overhang, before applying their spatial support (**CI-18 / RSC1 / RSC7**).
 Bounds may expand during recording; the final display-list publication remains
-immutable under **D4.5.1v4 / D4.1.4v5**.
+immutable under **D5.5.1 / D5.1.4**.
 
 Derive source bounds from the recorded command range. Reuse that range union
 for native and semantic effect groups; update saved-backdrop regions before
@@ -2130,7 +2130,7 @@ include reset after clipping paths, nested propagation and pen-state restoration
 
 **Qualified §3.22/§3.24 (2026-10-13):**
 Protected `decoration_shadow44t2q_*` qualifies the applied checkpoint 44t under
-**CI-18 / RSC1 / RSC7 / D4.5.1v4 / D4.1.4v5**. Complete horizontal glyph/line
+**CI-18 / RSC1 / RSC7 / D5.5.1 / D5.1.4**. Complete horizontal glyph/line
 silhouettes preserve shadow layer alpha and background/shadow/foreground order.
 Translated solid/wavy decorations and sharp/blurred/translucent shadows pass
 independent native/SVG/PDF references at both densities. Completed display-list
@@ -2154,7 +2154,7 @@ preserved under `decoration_shadow44/raw44s/`.
 
 Boundary debt stays 185 deferred /48 unapproved
 with no additions or removals and allowance 165; all four strict
-DSOs build (**D7.1.3 / D7.5.3 / D7.3.3–D7.3.4**).
+DSOs build (**D9.1.3 / D9.5.6 / D9.4.3–D9.4.4**).
 `decoration_shadow44t2q_protected_artifacts.json` seals 151 records
 and 49,112 copied exports. Support inventory remains 410 names and
 twenty bounded partial families. Broader decorating-box/fragment, emphasis,
@@ -2170,7 +2170,7 @@ substitution, defaulting and physical-axis inheritance. Overflow alone applies
 opposite-axis `visible`/`clip` coupling. Computed shorthand/longhand/logical reads
 use the same decoder and current ancestor declarations during dirty callbacks,
 with iterative owner traversal and scratch-owned formatting (**CI-18 /
-D4.5.1v4 / D4.1.4v5**).
+D5.5.1 / D5.1.4**).
 
 An absent authored axis keeps the UA/control fallback supplied by HTML style
 setup. Store that fallback separately from author-computed scroll values and
@@ -2187,7 +2187,7 @@ clip/visible pair has straight edges even with `border-radius`, per
 [CSS Overflow 3 §3.1.2](https://www.w3.org/TR/css-overflow-3/#corner-clipping).
 Paint containment still constrains both axes. Clip state precedes the owner's
 scroll offset; accumulated transforms preserve owner-space edges (**RSC1 /
-RSC7 / D4.5.1v4**).
+RSC7 / D5.5.1**).
 
 Axis-aligned exact pixels and transformed open-end/interior/clipped-edge points
 are separate acceptance controls. Bit-identical transformed antialias fringes,
@@ -2201,8 +2201,8 @@ timing, property/shape queries, geometry/hit testing, touch input, animation
 creation and range/selection lifecycle operations. Radiant publishes native
 adapters from its module; pure child-boundary traversal belongs to the DOM node
 owner. Shared POD geometry and a typed path-containment callback cross the
-boundary without importing native constructor or method symbols (**D7.1.3 /
-D7.5.3 / D7.3.3–D7.3.4**).
+boundary without importing native constructor or method symbols (**D9.1.3 /
+D9.5.6 / D9.4.3–D9.4.4**).
 
 SVG source scopes borrow document/instance/registry state synchronously. A
 scope captures the provider once and restores through that same provider;
@@ -2211,14 +2211,14 @@ entry/restoration producer, retaining nested same-document source inheritance
 and cross-document isolation. Scalar geometry outputs copy native values;
 private text-hit records remain native. Provider publication has process
 lifetime, while borrowed objects retain existing document pins and precise
-Item roots (**D4.5.1v4 / D4.1.4v5 / D5.3.3 / D5.4.1**).
+Item roots (**D5.5.1 / D5.1.4 / D6.3.3 / D6.4.1**).
 
 Native hosts call `radiant_register_dom_engine_providers()` before using DOM
 engine services. `UiContext::init` and Jube static registration share that
 idempotent entry point; standalone embedders can install services without
 initializing the Jube registry. Initializing only the vector backend does not
 install DOM host services. Lower-provider absence remains observable, including
-unchanged output records (**D7.1.3 / D7.5.3**).
+unchanged output records (**D9.1.3 / D9.5.6**).
 
 ### 3.27 Pseudo grid computed-value font owners
 
@@ -2227,8 +2227,8 @@ formatting into the shared font/math resolver. A pseudo's relative lengths use
 its own computed font, including pending font/custom-property edits; walking an
 explicit inherited value changes to the originating declaration owner before
 length computation. Formatting clones and normalizes values in temporary
-storage without retaining source-pool allocations (**CI-18 / D4.5.1v4 /
-D4.1.4v5**).
+storage without retaining source-pool allocations (**CI-18 / D5.5.1 /
+D5.1.4**).
 
 This qualifies computed track functions and lengths on generated pseudos. Used
 track snapshots and pseudo shorthand serialization retain separate limits;
@@ -2242,7 +2242,7 @@ projecting a member; a direct property lookup loses declarations supplied by
 `grid-template` or `grid`. That component competition is axis-independent, while
 the existing font resolver retains the pseudo or explicit inherited declaration
 owner. Used pseudo track snapshots and broader shorthand forms remain separate
-qualification limits (**CI-18 / D4.5.1v4 / D4.1.4v5**).
+qualification limits (**CI-18 / D5.5.1 / D5.1.4**).
 
 ### 3.28 Receiving currentColor and pseudo dispatch
 
@@ -2250,7 +2250,7 @@ Color-typed properties preserve `currentColor` through declaration inheritance
 and resolve it against the receiving element or pseudo's color, including the
 property's initial value. A literal inherited color still uses the declaration's
 value. Retaining the receiver does not change the declaration owner used for
-relative-length or variable computation (**D4.5.1v4 / D4.1.4v5; CI-18**).
+relative-length or variable computation (**D5.5.1 / D5.1.4; CI-18**).
 
 Computed dispatch selects an accessor's declared pseudo capability before
 choosing dirty versus committed execution. Element-only accessors use the
@@ -2273,7 +2273,7 @@ An empty display list receiving a known copied range reserves that range's
 checked item count before appending. It must not inherit the recording list's
 full-frame initial reserve for each tiny retained element. Subsequent growth
 remains amortized, and cloning retains its existing independent payload owners
-and rollback behavior (**D4.5.1v4 / D4.1.4v5**). Encoding still respects the shared
+and rollback behavior (**D5.5.1 / D5.1.4**). Encoding still respects the shared
 critical memory budget; reducing retained allocation does not bypass it.
 
 ### 3.31 Overflow clip margin computation
@@ -2284,7 +2284,7 @@ default padding box and zero offset when a nondefault box alone suffices; length
 use the declaring element or pseudo's font context, including explicit
 inheritance and reads before layout has caught up with a mutation. Temporary
 numeric evaluation does not retain source-pool allocations
-(**CI-18 / D4.5.1v4 / D4.1.4v5**).
+(**CI-18 / D5.5.1 / D5.1.4**).
 
 The existing negative-offset geometry follows the working
 [CSS Overflow 4 §3.2](https://drafts.csswg.org/css-overflow-4/#overflow-clip-margin)
@@ -2300,7 +2300,7 @@ expansion of small radii according to the original two-dimensional edge
 coverage; negative outsets keep the existing inset-and-floor behavior. The
 small-radius polynomial is evaluated without subtracting nearly equal floats.
 Clipping constrains the resulting used radii and shares that geometry with hit
-testing (**CI-18 / RSC1 / RSC7 / D4.5.1v4**).
+testing (**CI-18 / RSC1 / RSC7 / D5.5.1**).
 
 The rule follows the working
 [CSS Backgrounds 3 §4.2](https://drafts.csswg.org/css-backgrounds-3/#corner-shaping)
@@ -2316,7 +2316,7 @@ owner-font numeric evaluation. Dimensional cancellation can turn relative
 lengths into integers, so these domains still depend on the correct font.
 Explicit inheritance changes to the declaring element before evaluation;
 integer rounding and canonical component compression retain their existing
-shared helpers (**CI-18 / D4.5.1v4 / D4.1.4v5**). Computed counts reaching a
+shared helpers (**CI-18 / D5.5.1 / D5.1.4**). Computed counts reaching a
 companion's geometry/paint do not qualify complete pseudo clamping, shaping or
 language-dependent hyphenation.
 
@@ -2328,7 +2328,7 @@ lengths inside dimensionally cancelling math therefore use the same declaring
 font as other numeric domains. Percentages remain coefficients until the
 opacity range is applied. Layout, CSSOM and SVG scalar serialization share the
 same number/percentage, nonfinite and range policy; this does not require a
-layout trial or retain temporary font recipes (**D4.5.1v4 / D4.1.4v5; CI-18**).
+layout trial or retain temporary font recipes (**D5.5.1 / D5.1.4; CI-18**).
 
 Explicit inheritance changes the declaration owner before evaluation, while
 invalid substituted dimensions default through the existing cascade path.
@@ -2345,7 +2345,7 @@ stack levels share the CSSOM owner-font adapter, with each consumer's range
 kept explicit. Layout evaluates the same numeric recipe, applies integer
 rounding/bounds before storage, and copies a parent's computed level for
 explicit inheritance. It never reinterprets an inherited recipe against the
-child's font (**D4.5.1v4 / D4.1.4v5; CI-18**).
+child's font (**D5.5.1 / D5.1.4; CI-18**).
 
 Computed reads retain `auto` separately from integer zero even when the element
 is static, and retain pseudo declaration fonts. Dirty font, variable and class
@@ -2362,7 +2362,7 @@ integer math before assigning either flex or grid item storage. Explicit
 inheritance copies the parent's computed order. The former flex-only accessor
 now lives in the layout header and reads the tagged flex/grid item kind;
 sorting and inheritance share it instead of duplicating field selection
-(**D4.5.1v4 / D4.1.4v5; CI-18**).
+(**D5.5.1 / D5.1.4; CI-18**).
 
 Font, variable and class changes update computed values, exact item offsets
 and painted positions in both layout systems. Invalid literal fractions or
@@ -2380,8 +2380,8 @@ a valid negative calculated number computes to zero. The existing color clamp
 is promoted to the CSS module header with explicit minimum/maximum arguments,
 so color, integer, opacity and flex consumers share NaN/range/zero handling.
 Owner-font scalar evaluation is shared by formatting and native policy helpers;
-committed field access keeps its published numeric snapshot (**D4.5.1v4 /
-D4.1.4v5; CI-18**).
+committed field access keeps its published numeric snapshot (**D5.5.1 /
+D5.1.4; CI-18**).
 
 The numeric grammar follows [CSS Flexbox §7.2](https://drafts.csswg.org/css-flexbox/#flex-components)
 and [CSS Values range checking](https://drafts.csswg.org/css-values-4/#calc-range).
@@ -2398,7 +2398,7 @@ item keeps its grid record while computed reads and explicit inheritance use
 the shared owner-aware declaration query. The query returns a copied scalar
 within its scratch lifetime. The existing accessor derivation slot supplies a
 value when its direct property group is absent; a populated group retains its
-published sample (**D4.5.1v4 / D4.1.4v5; CI-18**).
+published sample (**D5.5.1 / D5.1.4; CI-18**).
 
 The implementation extends the existing inherited-declaration traversal with a
 typed scalar consumer. CSSOM formatting and native inheritance use the same
@@ -2424,7 +2424,7 @@ for grid/container/flex projections instead of adding a third independent
 consumer branch. Layout applies each winning member after the owner's font is
 computed; CSSOM/native inheritance use the same projection and owner traversal.
 Borrowed immutable grammar defaults avoid per-view declaration allocations.
-Complex projected values remain owned by the caller's pool (**D4.5.1v4 / D4.1.4v5**).
+Complex projected values remain owned by the caller's pool (**D5.5.1 / D5.1.4**).
 
 This increment targets explicit zero/length/percentage bases, numeric math,
 member priority/order, substitution, inheritance and live edits. Omitted basis
@@ -2457,7 +2457,7 @@ instead of adding a second ancestry/substitution traversal or formatting then
 reparsing computed text. Native inheritance keeps published parent snapshots
 when present and requests the computed declaration when that optional storage
 is absent. No view tag changes or borrowed value pointers enter the result
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 Qualify relative lengths and preserved percentages, shorthand and longhand
 sources, explicit inheritance, causal font/variable changes, initial/invalid
@@ -2483,7 +2483,7 @@ accessor using the existing declaration consumer; retain pending substitution
 until the shared validator can check the resulting keyword. Raster URL markers
 use their originating item's applied image-rendering value and the existing
 resource-owning transformed/scaled painter. No separate sampling algorithm or
-borrowed declaration storage is needed (**D4.5.1v4 / D4.1.4v5; RSC1 / RSC7**).
+borrowed declaration storage is needed (**D5.5.1 / D5.1.4; RSC1 / RSC7**).
 
 Qualify keyword/default/inheritance/invalid substitution reads, causal edits,
 source-pixel preservation and retained transformed markers at both densities.
@@ -2509,7 +2509,7 @@ length, including homogeneous normalization; keep inverse coordinate mapping,
 clipping, alpha conversion and resource ownership unchanged. Virtual sample
 coordinates use double intermediates so a large composed magnification does
 not require an allocated intermediate image or overflow a float pixel index
-(**CI-18; RSC1 / RSC7; D4.5.1v4**).
+(**CI-18; RSC1 / RSC7; D5.5.1**).
 
 Qualify transformed replaced images, backgrounds and markers at both densities,
 including flips, quarter turns, anisotropic scaling and retained effects.
@@ -2529,7 +2529,7 @@ canonical pseudo-style mapping, including marker and control parts (**CI-18**).
 Route every nonzero pseudo identity through that existing DOM lookup, including
 the grid-component winner path. Reuse the existing substitution, font-state,
 inheritance/default and serialization consumers. No additional pseudo mapping
-or borrowed-style lifetime is introduced (**D4.5.1v4 / D4.1.4v5**). Qualify marker
+or borrowed-style lifetime is introduced (**D5.5.1 / D5.1.4**). Qualify marker
 font variables, inherited/default values, repeated reads and the live used-font
 consumer; broader allowed-property and paint support remains separately bounded.
 
@@ -2540,7 +2540,7 @@ from the parser's mapping and the matcher's type switch before adding a third
 mapping. Parser, matcher and DOM wrapper reuse its name, selector-type and
 legacy-colon policy. Keep every existing numeric identity and alias behavior;
 header-owned immutable metadata avoids a new core-to-input module import
-(**D4.6.1v4; D7.3.3 / D7.3.4; CI-18**).
+(**D5.6.1; D9.4.3 / D9.4.4; CI-18**).
 
 ### 3.44 Adjoining block-start margins across empty children (P1.2)
 
@@ -2561,7 +2561,7 @@ margin cannot replace the authored contribution. Reuse the existing chain,
 self-collapse, clearance and float-shift helpers. Preserve BFC, border/padding,
 clearance, quirky-margin, writing-mode and stretch exclusions. Retained reflow
 must reconstruct the chain from resolved/owned state, without retaining new
-declaration or view borrows (**D4.5.1v4 / D4.1.4v5**).
+declaration or view borrows (**D5.5.1 / D5.1.4**).
 
 Qualify positive/negative/transitive chains, blockers, adjacent floats and causal
 margin/font/content edits against browser geometry and native pixels. Keep the
@@ -2583,7 +2583,7 @@ boundary as fallback before a snapshot exists. Keep layout-dependent percentage
 resolution and the existing horizontal/auto policy bounded separately; do not
 serialize unresolved declaration percentages as used pixels. This follows the
 [CSSOM resolved-value contract](https://www.w3.org/TR/cssom-1/#resolved-values)
-and adds no new retained owner (**CI-18; D4.5.1v4 / D4.1.4v5**).
+and adds no new retained owner (**CI-18; D5.5.1 / D5.1.4**).
 
 The 81-check extension adds owner-relative lengths, percentages and explicit
 inheritance. Chromium passes all 81; the snapshot getter passes 80 natively.
@@ -2625,7 +2625,7 @@ style/version, document and parent revisions, view generation/kind/item role,
 font resources, raster scale, and root-font/viewport inputs when read. Geometry
 bindings track containing dimensions, definiteness and intrinsic policy.
 Snapshots and cloned expressions belong to the selected default-view pool:
-**D4.5.1v4 / D4.1.4v5**, with no retained GC pointers (**D4.5.2**).
+**D5.5.1 / D5.1.4**, with no retained GC pointers (**D5.5.2**).
 
 Probe/secondary views, table/replaced/form/SVG roles, explicit geometry
 inheritance, unsupported percentage reads, container effects and elements with
@@ -2686,8 +2686,8 @@ Implemented repairs:
   width was assigned. Width-only queries now leave height invalid until needed;
   vertical writing retains the existing paired measurement.
 
-Caches remain owned by the selected view pool (**D4.5.1v4 / D4.1.4v5**), with no
-retained GC pointers (**D4.5.2**).
+Caches remain owned by the selected view pool (**D5.5.1 / D5.1.4**), with no
+retained GC pointers (**D5.5.2**).
 
 **Remaining structural work:** the loader discards geometry produced by
 load-time CSSOM reads and initial presentation lays out the document again.
@@ -2736,7 +2736,7 @@ qualification and release measurements are recorded in the
 [implementation record](../impl/Radiant_Impl_Retained_Layout.md).
 
 This extends **VR1–VR6 / VR10 / VR13**; ownership remains governed by
-**D4.5.1v4 / D4.1.4v5 / D4.5.2**. It does not change a formal ruling.
+**D5.5.1 / D5.1.4 / D5.5.2**. It does not change a formal ruling.
 The execution contract is **one computation per unchanged set of inputs**:
 computed CSS per element/style input version, intrinsic sizes per distinct
 sizing query, and flow per distinct box constraint. A fixed viewport alone
@@ -2861,7 +2861,7 @@ effects retain their existing adapters. In particular, vertical flow still
 stores assigned inline constraints in mutable props. This boundary does not
 implement immutable font sharing or retain line fragments; stable query inputs
 and `LayoutResult` consumption belong to milestone 3b, followed by shared update
-publication in milestone 4 (**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+publication in milestone 4 (**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2**).
 
 Milestone 3a is qualified: 168 core cases and the full Radiant baseline pass
 (6,036 passed, 143 partial, 2 skipped, zero unexpected failures). LLVM full CSS
@@ -2932,7 +2932,7 @@ block constraint, since a later stretched height can redistribute descendants.
 Ordinary block/inline results retain their proven height independence. Ordered
 generated effects, resources and dependent lengths remain on existing paths;
 this does not yet provide independent fragments for multiple constraints
-(**VR15**, selected-view ownership **D4.5.1v4 / D4.5.2**).
+(**VR15**, selected-view ownership **D5.5.1 / D5.5.2**).
 
 The conservative flex path also distinguishes provisional auto-line heights from
 authored constraints. Final stretch keeps its percentage-sizing policy, while
@@ -2954,7 +2954,7 @@ trials. Milestones and qualification are tracked in
 
 ### Container-query convergence follow-up (2026-10-21)
 
-**VR15**, selected-view ownership **D4.5.1v4 / D4.5.2**: convergence and
+**VR15**, selected-view ownership **D5.5.1 / D5.5.2**: convergence and
 condition-result caches now use one `css_container_geometry_key`. It projects
 logical query axes through writing mode and includes only eligible physical
 dimensions. An inline-size container's changing uncontained block extent cannot
@@ -2983,14 +2983,14 @@ Incremental reflow starts from the previous published container geometry and
 committed effects; bootstrap probes are for layouts without that retained
 context. If real container dimensions change, the existing key comparison
 recascades and settles the committed flow. This avoids repeating a full probe
-for every script geometry read after a local style mutation (**D4.5.1v4**).
+for every script geometry read after a local style mutation (**D5.5.1**).
 
 Resolved-style validity uses the element's specified-style identity/version,
 inherited computed-value revision, font/resources and geometry context. It does
 not use the document-wide `style_query_epoch`: that epoch also advances on a
 single local edit and is retained for query/publication invalidation. Global
 recascades still revise every affected element; local CSSOM edits leave clean
-sibling styles reusable (**D4.5.1v4**).
+sibling styles reusable (**D5.5.1**).
 
 **VR15 intrinsic grid follow-up:** min/max track sizing consumes one paired
 child contribution for the same containing-block inputs. Keep the two track
@@ -3002,7 +3002,7 @@ this sharing ends with the paired query, rather than bypassing mutation keys.
 
 ### Custom-property candidate lookup (2026-10-22)
 
-**D4.5.1v4 / D4.1.4v5 / D4.5.2**, **VR15**. A lazy sorted name index in
+**D5.5.1 / D5.1.4 / D5.5.2**, **VR15**. A lazy sorted name index in
 `DomElementExt` borrows document-owned custom-property records. Binary lookup
 visits only same-name declarations, retaining their original list order for
 cascade ties, rollback and animation filtering. Membership edits invalidate
@@ -3017,7 +3017,7 @@ direction-sensitive. The journal captures attribute identity and first-strong
 ancestry before child edits: class/style/data writes remain local, while
 `dir=auto`/bdi dependencies, control/text changes and unknown identities retain
 conservative escalation. Explicit HTML ltr/rtl boundaries isolate child edits;
-shadow distribution keeps the broad path (**D4.5.1v4**). Selector dependencies
+shadow distribution keeps the broad path (**D5.5.1**). Selector dependencies
 such as `:has()` still run their ordinary checks.
 
 **VR15 parsing prerequisite:** scripting-enabled `noscript` fallback markup is
@@ -3025,4 +3025,4 @@ raw text in documents and HTML fragments, including a `noscript` fragment
 context. Suppressing its layout subtree alone leaves resource discovery and DOM
 queries incorrect. Preserve disabled-scripting fallback parsing and literal
 end tags/entities in raw text; EOF recovery must neither drop the final byte
-nor reconsume EOF. Published nodes retain document ownership (**D4.5.1v4**).
+nor reconsume EOF. Published nodes retain document ownership (**D5.5.1**).

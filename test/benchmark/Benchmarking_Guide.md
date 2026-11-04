@@ -16,7 +16,7 @@ This document describes how to prepare, run, and report Lambda benchmarks across
 Under S12.1.2v3, algorithmic kernels may use `fn` with local `var`, `while`,
 `break`, `continue` and `return`. Keep `pn main()` for `clock()` and `print()`.
 A rebound value parameter needs a local working variable; explicit inout
-parameters and their callers remain procedures (S9.1.3v2, D6.1.2v2).
+parameters and their callers remain procedures (S9.1.3v2, D7.1.2).
 
 The [function-local migration manifest](function_local_migration.json) records
 converted helpers and retained-procedure reasons. To compare an original

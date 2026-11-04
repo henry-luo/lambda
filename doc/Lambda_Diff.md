@@ -1,8 +1,8 @@
 # Git and patch review
 
 `lambda.doc.diff` parses saved patches and reviews local Git changes. The package
-owns parsing, comparison policy and presentation (D7.2.4/D7.2.6); Radiant supplies
-DOM, layout, selection and clipboard transport (D7.5.3). Repository operations
+owns parsing, comparison policy and presentation (D9.3.4/D9.3.5); Radiant supplies
+DOM, layout, selection and clipboard transport (D9.5.6). Repository operations
 are procedures; viewer construction and patch parsing are pure (S12.1.1v3/S12.1.3).
 
 Create `review.ls` and open it with `./lambda.exe view review.ls`:
@@ -126,7 +126,7 @@ their explicit binary-literal representation.
 
 Only the current loaded body is retained in view state. Completed task handles
 retain their results while referenced; releasing a handle permits its graph and
-mailbox to be collected (D5.3.3). Small native task records, including scalar and
+mailbox to be collected (D6.3.3). Small native task records, including scalar and
 fault homes, remain until the document scheduler closes.
 
 Side-by-side layout, intraline highlights, context expansion, automatic refresh

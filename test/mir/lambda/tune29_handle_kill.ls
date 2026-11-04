@@ -1,4 +1,4 @@
-// Tune29 §19.1 (D4.4.4v4, COW Appendix D): the named-handle kill rows. A
+// Tune29 §19.1 (D5.4.4, COW Appendix D): the named-handle kill rows. A
 // place copy `var h = root.path` borrows its place only while nothing may
 // observe an in-place write. Every probe prints what per-access snapshots
 // would; the sidecar pins which binds lower to a handle.

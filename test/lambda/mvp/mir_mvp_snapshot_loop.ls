@@ -1,4 +1,4 @@
-// an inlined activation's private scratch is reused across loop iterations (D5.3).
+// an inlined activation's private scratch is reused across loop iterations (D6.3).
 pn increment(values: int[], depth: int) int^ {
     values[0] = values[0] + 1
     if (depth == 0) { return values[0] }

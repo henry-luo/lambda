@@ -1,4 +1,4 @@
-// D4.5.2 / SH1: file SVG, pure SVG data and raster textures share shader sampling.
+// D5.5.2 / SH1: file SVG, pure SVG data and raster textures share shader sampling.
 import s: lambda.scene3d
 import fx: lambda.scene3d.effects
 let svg = <svg xmlns: "http://www.w3.org/2000/svg", width: 64, height: 32,

@@ -1,4 +1,4 @@
-// S12.1.3 / D7.2.5: event handlers select model commands and shared UA policy.
+// S12.1.3 / D10.2.1: event handlers select model commands and shared UA policy.
 import dom
 import lambda.editor.mod_doc
 import lambda.editor.mod_editor

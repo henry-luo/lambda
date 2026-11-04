@@ -1,4 +1,4 @@
-// Markdown emoji policy: vibe/input/Input_Markdown.md; Input-owned nodes follow D7.1.5.
+// Markdown emoji policy: vibe/input/Input_Markdown.md; Input-owned nodes follow D9.1.4.
 import markdown: lambda.edit.markdown
 
 let catalog = input("lib/emoji_shortcodes_data.json", 'json')^

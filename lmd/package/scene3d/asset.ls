@@ -1,4 +1,4 @@
-// D7.2.4: the loader returns ordinary scene values; playback is owned by Radiant.
+// D9.3.4: the loader returns ordinary scene values; playback is owned by Radiant.
 fn prefixed(value, prefix) => prefix ++ "-" ++ string(value)
 // the attributes that name another scene resource by id, and so take the prefix too
 let REFERENCES = ["id", "geometry", "material", "texture", "skeleton",

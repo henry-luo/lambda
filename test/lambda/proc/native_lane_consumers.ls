@@ -1,4 +1,4 @@
-// Native-lane arrays (D3.2.6): admission into a nullable scalar or pointer
+// Native-lane arrays (D4.2.6): admission into a nullable scalar or pointer
 // element contract -- `int?[]`, `float?[]`, `bool?[]`, `string?[]` -- publishes
 // a native lane whose slots are lane words, not Items. These consumers read the
 // slots as Items, so an admitted array crashed (printing `let e: int?[] =

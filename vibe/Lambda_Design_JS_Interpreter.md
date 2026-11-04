@@ -4,7 +4,7 @@
 
 **Status:** PROPOSED — architecture and staged implementation plan; no implementation is claimed by this document.
 
-**Execution-policy revision (USER, 2026-09-16; revised 2026-09-22):** **D8.1.3v18 / JSI16v2**
+**Execution-policy revision (USER, 2026-09-16; revised 2026-09-22):** **D8.4.5 / JSI16v2**
 requires native execution whenever LambdaJS selects MIR. MIR interpretation is
 retired for JS, including diagnostic and size-based selection. This decision is
 ratified; removal of the existing runtime paths is planned in
@@ -13,7 +13,7 @@ subject to its implementation gates; the formal spec and
 [implementation record](impl/Lambda_Impl_JS_Interpreter.md) describe the already
 landed AST slice.
 
-**Dynamic-code revision (USER, 2026-09-24):** **D8.1.3v20 / JSI35** makes the
+**Dynamic-code revision (USER, 2026-09-24):** **D8.4.3 / JSI35** makes the
 AST interpreter the only executor of dynamic source. Direct and indirect
 `eval`, the `Function`-family constructors, string timer handlers, and
 `$262.evalScript` parse into a retained `JsScript` and run in T0. The caller's
@@ -21,9 +21,9 @@ tier and `JS_EXEC_BACKEND` do not change this. MIR never lowers dynamic
 source, and the MIR dynamic-code compilation service is deleted. See §5.6,
 §11.6, §15.18, and Appendix S2.
 
-**Direct-eval linking revision (USER, 2026-09-24):** **D8.1.3v21 / JSI36** links a direct eval from interpreted code to its caller frame's live environment chain. Eval code and the closures it creates resolve free names by name through that chain, and a sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment. The remaining MIR bridge described by that historical revision is retired by **D8.1.3v26** below. See §5.6, §16 item 13, and Appendix S3.
+**Direct-eval linking revision (USER, 2026-09-24):** **D8.4.3 / JSI36** links a direct eval from interpreted code to its caller frame's live environment chain. Eval code and the closures it creates resolve free names by name through that chain, and a sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment. The remaining MIR bridge described by that historical revision is retired by **D8.4.3** below. See §5.6, §16 item 13, and Appendix S3.
 
-**MVP alignment (2026-10-18):** **D8.1.3v26** supersedes the remaining
+**MVP alignment (2026-10-18):** **D8.4.3** supersedes the remaining
 MIR projection clauses below. Formal MVP callers already supply live lexical
 cells; the obsolete LJS journals and bridged-eval executor are removed. Both
 tiers validate eval context with the shared AST facts and keep escaping
@@ -31,17 +31,17 @@ numeric receivers in GC-owned scalar homes. The v43 convergence below replaces
 the former distinction between ordinary AST and MVP semantic operations.
 Audit and qualification: [implementation record](impl/JS_Interpreter_MVP_Alignment.md).
 
-**Runtime convergence (2026-10-29): D8.1.3v43** makes ordinary AST/AUTO and
+**Runtime convergence (2026-10-29): D8.4.4** makes ordinary AST/AUTO and
 dynamic source consumers of MVP's realm and operation contract. MIR selection
 and promotion remain execution policy. Native ABI/storage adapters remain for
 host functions, DOM and module consumers; all use shared semantic kernels.
 Runtime-only initialization and interpreter-only module loading require no MIR
 unit. Immutable plans admit unobservable synchronous locals and temporaries to
 exact rooted activation slots with owned numeric homes; observable bindings
-retain live environment cells (**D5.3.3**, **D8.2.4v2**, **D8.4.1v2**).
+retain live environment cells (**D6.3.3**, **D8.2.4**, **D7.4.1**).
 The [alignment record](impl/JS_Interpreter_MVP_Alignment.md) records qualification.
 
-**Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.1.3v22 / JSI18v2** make JS promotion depend only on hot hits. `JS_FUNC_JIT_THRESHOLD` defaults to 5 calls, the same as Lambda (D8.1.3v24; 100 in v23, 1000 in v22, five before), and a loop that reaches `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.1.1v14** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
+**Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.4.5 / JSI18v2** make JS promotion depend only on hot hits. `JS_FUNC_JIT_THRESHOLD` defaults to 5 calls, the same as Lambda (D8.4.5; 100 in v23, 1000 in v22, five before), and a loop that reaches `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.3.2** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
 
 **Static-module prebuild revision (2026-09-19):** `JS_EXEC_BACKEND=auto`
 is now an explicit AST-first module policy. The shared prebuild scheduler
@@ -51,12 +51,12 @@ runtime import lookup before reuse. Interpreter-supported modules execute from
 those templates; unsupported units retain whole-module MIR. Unset remains MIR
 and forced `ast` remains fail-closed. AUTO now promotes an admitted closed,
 synchronous classic top-level function at `JS_FUNC_JIT_THRESHOLD` calls (default
-five; 5 again since D8.1.3v24) to a boxed MIR satellite; its local-data slice admits non-spread arrays,
+five; 5 again since D8.4.5) to a boxed MIR satellite; its local-data slice admits non-spread arrays,
 data objects with static or local computed keys, and static or local-key
 computed member chains. Whole-module MIR fallback is not a promotion. This is
-governed by **D8.1.3v18** and **D8.5.1v4**.
+governed by **D8.4.5** and **D8.5.1**.
 
-**Module numeric predicate revision (USER, 2026-10-23): D8.1.3v30** extends
+**Module numeric predicate revision (USER, 2026-10-23): D8.4.5** extends
 hot-entry promotion to synchronous ES-module top-level declarations and
 function expressions only when the existing parameter-only numeric/boolean
 proof admits their single returned expression. Imports, globals, captures,
@@ -68,7 +68,7 @@ module slab, namespace and callable identity, and handles ordinary coercions
 when later arguments have other types. Forced AST stays interpreted; module
 loop handoff and whole-module admission are unchanged.
 
-**Module predicate call revision (USER, 2026-10-23): D8.1.3v31** extends that
+**Module predicate call revision (USER, 2026-10-23): D8.4.5** extends that
 proof only with direct calls to resolved, non-import top-level function
 declarations. Call arguments obey the same expression proof. The declaration
 proves admission, not a constant callee value: every call reads the source
@@ -82,7 +82,7 @@ call proof certify a strict activation without observations for the compiled
 light-call entry; general read-only expressions do not. Callees retain their
 own ordinary invoke boundaries.
 
-**Module hot-entry and loop revision (USER, 2026-10-23/24): D8.1.3v41** extends admission
+**Module hot-entry and loop revision (USER, 2026-10-23/24): D8.4.5** extends admission
 to synchronous top-level ES-module declarations, function expressions and public
 instance methods that pass the existing classic-function checks. A method
 requires simple parameters and a class site at module top level or inside one
@@ -101,12 +101,12 @@ strict receiver, home and non-constructibility; only checked parameter/body span
 form the isolated function expression used to compile its body. Thresholds, forced AST and whole-unit admission do not change. Checked
 top-level synchronous module functions may also hand off at the existing hot-loop
 threshold, preserving live module cells and distinct for-let head bindings. On publication, admitted strict definitions retain the scan's
-activation observations as callable analysis flags (**D8.4.1v2**). The ordinary
+activation observations as callable analysis flags (**D7.4.1**). The ordinary
 compiled light or receiver entry can consume those facts without repeating a
 full activation; the guards still fall back across realms, modules or `with`.
 The numeric/predicate-call proof remains useful before promotion.
 
-**D8.1.3v36** additionally admits contained synchronous ordinary function
+**D8.4.5** additionally admits contained synchronous ordinary function
 declarations and switch statements for hot entry of checked top-level module
 functions. Each contained body passes the dependency and activation checks.
 Bindings inside the selected function subtree use ordinary compiled closure
@@ -116,7 +116,7 @@ suspended definitions and eval/dynamic source remain excluded. Classic
 admission, loop handoff, thresholds, forced AST and whole-unit admission do not
 expand. No outer AST environment is bridged.
 
-**D8.1.3v38** additionally admits checked identifier parameter defaults and
+**D8.4.5** additionally admits checked identifier parameter defaults and
 contained synchronous arrows for these module methods. Their subtree proof also
 accepts contained ordinary declarations, switch and constant templates. Every
 initializer and contained body is checked. Captures stay inside the newly
@@ -129,7 +129,7 @@ source/name/length, strict receiver, home and non-constructibility remain
 authoritative. Other method/class exclusions, classic/ordinary-function
 admission, whole-unit admission, thresholds and all loop handoff stay unchanged.
 
-**D8.1.3v40** adds hot entry for synchronous ES-module arrows at module
+**D8.4.5** adds hot entry for synchronous ES-module arrows at module
 level or inside one top-level synchronous function declaration, function
 expression or arrow. Parameters must be simple identifiers, with no activation
 observations (this/arguments/new.target/super). The checked body/dependency
@@ -147,7 +147,7 @@ zero activation observations. Its module-level binding initially obscured its
 enclosing initialization arrow; source ownership tracing corrected that
 classification before the user approved this extension.
 
-**D8.1.3v41** adds the user-approved live capture read bridge for checked
+**D8.4.5** adds the user-approved live capture read bridge for checked
 synchronous ordinary function expressions inside one top-level synchronous
 ES-module function declaration, function expression or arrow. Both parameter
 lists must be simple identifiers; the target has no activation observations
@@ -175,7 +175,7 @@ control, 15732/15708 ms experiment; checksum `1891615 302068 1876230`). The hot
 `next` and `allocateCursor` definitions are inside an arrow at UTF-8 byte 85262,
 so that experiment was removed under its acceptance rule. Subsequent binding
 inspection found `R`, `L` and `F` are module-slab variables, not wrapper captures.
-The user approved **D8.1.3v34** to admit this one-wrapper shape under the existing
+The user approved **D8.4.5** to admit this one-wrapper shape under the existing
 resolved dependency proof, without a captured-environment bridge. The wrapper-method experiment reached both `next` and `allocateCursor`, but
 its two CSS pairs were neutral (15541/15559 ms control, 15598/15705 ms candidate),
 with the original checksum unchanged. It was removed under the approved
@@ -189,7 +189,7 @@ excluded. Evidence and the earlier experiment are under
 
 **Scope:** LambdaJS execution inside the shared Lambda runtime, including page-level coexistence with Lambda behavior/app code. This document specializes the interpreter direction established by **AI21**, the shared-AST rules **D8.2.1–D8.2.5**, and the accepted DOM-state decisions **ES10–ES13**. It does not change either language's observable semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
-**Formal authority:** **D1.1–D1.10**, **D4.1.1v2**, **D4.1.4v4**, **D4.5.1v3**, **D4.6.1v2–D4.6.2v2**, **D5.1.1–D5.1.4**, **D5.3.2–D5.3.4**, **D5.4.1–D5.4.4**, **D6.2.1–D6.2.4**, **D6.3.1**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v22**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
+**Formal authority:** **D1.1–D1.10**, **D5.1.1**, **D5.1.4**, **D5.5.1**, **D5.6.1–D5.6.2**, **D6.1.1–D6.1.4**, **D6.3.2–D6.3.4**, **D6.4.1–D6.4.4**, **D7.2.1–D7.2.4**, **D7.5.1**, **D9.3.1**, **D8.3.2**, **D8.4.5**, **D8.2.1–D8.2.6**, **D7.4.1**, **D7.4.3**, and **D8.6.1–D8.6.4** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
 
 **Related designs:** [`Lambda_Design_DOM_State.md`](Lambda_Design_DOM_State.md) (ES10–ES13, EO1–EO6), [`Lambda_Design_Runtime_Globals.md`](Lambda_Design_Runtime_Globals.md) (RG0–RG14), [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md), [`doc/dev/js/JS_01_Compilation_Pipeline.md`](../doc/dev/js/JS_01_Compilation_Pipeline.md), [`JS_04_MIR_Lowering.md`](../doc/dev/js/JS_04_MIR_Lowering.md), [`JS_05_Functions_Closures.md`](../doc/dev/js/JS_05_Functions_Closures.md), [`JS_08_Iterators_Generators.md`](../doc/dev/js/JS_08_Iterators_Generators.md), and [`JS_09_Async_Modules.md`](../doc/dev/js/JS_09_Async_Modules.md).
 
@@ -225,7 +225,7 @@ source
 The AST walker is the JavaScript interpreter. Selecting MIR means executing
 generated native code, whether eagerly generated or reached through an admitted
 native lazy-generation entry. There is no LambdaJS MIR-interpreter execution
-mode, including for diagnostics or large/cold modules (**D8.1.3v18**).
+mode, including for diagnostics or large/cold modules (**D8.4.5**).
 
 ### 1.1 Why this is a separate walker
 
@@ -246,7 +246,7 @@ Putting both languages in one semantic switch would either branch on language at
 
 ### 1.2 Page-level integration decision
 
-The page is one isolate. Its Lambda packages/templates and JavaScript realm run under the same `Runtime`, canonical `EvalContext`, heap generation, dynamic `NamePool`, module registry, module-state ID space, scheduler/event-loop owner, and root/number side-stack pair. This is required by **D1.2–D1.5**, **D5.3.3**, **D5.4.1–D5.4.4**, **D6.3.1**, and accepted DOM-state decisions **ES10–ES13**.
+The page is one isolate. Its Lambda packages/templates and JavaScript realm run under the same `Runtime`, canonical `EvalContext`, heap generation, dynamic `NamePool`, module registry, module-state ID space, scheduler/event-loop owner, and root/number side-stack pair. This is required by **D1.2–D1.5**, **D6.3.3**, **D6.4.1–D6.4.4**, **D7.5.1**, and accepted DOM-state decisions **ES10–ES13**.
 
 The selected boundary is:
 
@@ -263,7 +263,7 @@ The selected boundary is:
 | mutable runtime state | one `EvalContext` owner, split lazy capsules | common modules, roots, async work, page services, and activation state must not be hidden inside a JS megastruct |
 | JS realm state | one optional `JsRealmState` capsule | `globalThis`, intrinsics, prototypes, JS environments, and observable realm caches remain ECMAScript-specific |
 | lexical/global environments | profile-owned | Lambda immutable snapshot captures and JavaScript mutable binding cells are observably different |
-| DOM/view storage | native Radiant arena/state store | **D4.5.1v3** remains the seam; scripts exchange generation-checked projections and `Item` values, not raw ownership |
+| DOM/view storage | native Radiant arena/state store | **D5.5.1** remains the seam; scripts exchange generation-checked projections and `Item` values, not raw ownership |
 
 ```text
 DomDocument  (native DOM/view arena + canonical interaction state)
@@ -304,7 +304,7 @@ This is tighter than two interpreters sharing only an API. A Lambda behavior han
 1. No bytecode or additional resident IR.
 2. No unboxed interpreter lane.
 3. No general on-stack replacement or arbitrary interpreter-PC transfer to MIR. *(The loop-head handoff of JSI18v2 is the one ruled exception.)*
-4. No inline caches or mutable per-AST-site property caches under **D8.4.1v2**.
+4. No inline caches or mutable per-AST-site property caches under **D7.4.1**.
 5. No C2MIR work under **D1.6**.
 6. No attempt to inherit Lambda language semantics for common-shaped nodes.
 7. No promise of full ECMAScript coverage beyond the features admitted by LambdaJS's profile under **D1.1**.
@@ -349,7 +349,7 @@ The JavaScript walker selects JavaScript runtime helpers and JavaScript control 
 
 ### JSI2 — `JsScript` is the retained owner
 
-`JsScript` publicly extends `Script`. The inherited base is the only carrier for source ownership, `Input` pool/name/type storage, profile, canonical reference, AST/index, module-state ID, imports, cache state, T0 plan/slab, debug metadata, and MIR context. `JsScript` adds only JavaScript-specific parse-goal and persistent semantic facts. Any `JsFunction` whose body references that AST points back to its owning `JsScript`; the runtime retains the owner beyond every callback/function that can execute it (**D1.7**, **D6.2.1**, **D8.2.1**).
+`JsScript` publicly extends `Script`. The inherited base is the only carrier for source ownership, `Input` pool/name/type storage, profile, canonical reference, AST/index, module-state ID, imports, cache state, T0 plan/slab, debug metadata, and MIR context. `JsScript` adds only JavaScript-specific parse-goal and persistent semantic facts. Any `JsFunction` whose body references that AST points back to its owning `JsScript`; the runtime retains the owner beyond every callback/function that can execute it (**D1.7**, **D7.2.1**, **D8.2.1**).
 
 ### JSI3 — One authoritative binding/analysis pipeline
 
@@ -361,7 +361,7 @@ Every interpreter-visible value is an `Item`. Wide scalar lifetime follows the s
 
 ### JSI5 — Precise rooting only
 
-Every live `Item` across child evaluation, helper calls, callbacks, or other `MAY_GC` boundaries occupies a side-root slot or a traced heap object. No conservative C-stack scan is restored (**D1.5**, **D5.3.2–D5.3.3**).
+Every live `Item` across child evaluation, helper calls, callbacks, or other `MAY_GC` boundaries occupies a side-root slot or a traced heap object. No conservative C-stack scan is restored (**D1.5**, **D6.3.2–D6.3.3**).
 
 ### JSI6 — References are explicit
 
@@ -373,15 +373,15 @@ The walker uses JavaScript completion kinds `NORMAL`, `RETURN`, `THROW`, `BREAK`
 
 ### JSI8 — Throws remain explicit returned completions
 
-A fallible helper's ERROR-tagged `Item` is converted immediately into a `THROW` completion in the current activation. Every crossed activation runs its own `finally`, IteratorClose, environment cleanup, and root/number epilogue before returning the same error identity (**D1.4v3**, **D8.4.3v2**).
+A fallible helper's ERROR-tagged `Item` is converted immediately into a `THROW` completion in the current activation. Every crossed activation runs its own `finally`, IteratorClose, environment cleanup, and root/number epilogue before returning the same error identity (**D1.4**, **D7.4.3**).
 
 ### JSI9 — Calls retain the existing capability authority
 
-Every dynamic call goes through `fn->invoke`; construction requires `fn->construct` and an explicit `newTarget` operand. AST execution is a function body kind behind those entries, not a parallel call dispatcher (**D6.2.2v2**).
+Every dynamic call goes through `fn->invoke`; construction requires `fn->construct` and an explicit `newTarget` operand. AST execution is a function body kind behind those entries, not a parallel call dispatcher (**D7.2.2**).
 
 ### JSI10 — No inline caches
 
-Named/indexed/private accesses call the shared JavaScript reference/property kernels. `AstIndex` may hold immutable analysis facts, counters, or source/debug state, but not mutable property-result caches (**D8.4.1v2**).
+Named/indexed/private accesses call the shared JavaScript reference/property kernels. `AstIndex` may hold immutable analysis facts, counters, or source/debug state, but not mutable property-result caches (**D7.4.1**).
 
 ### JSI11 — Fallback is pre-execution and counted
 
@@ -397,7 +397,7 @@ Until heapified interpreter continuations land, generator/async/top-level-await 
 
 ### JSI14 — Function body kind is explicit
 
-`JsFunction` declares `NATIVE`, `MIR`, or `AST`; null pointer inference never selects semantics (**D6.2.2v2**).
+`JsFunction` declares `NATIVE`, `MIR`, or `AST`; null pointer inference never selects semantics (**D7.2.2**).
 
 ### JSI15 — MIR exists only after T1 selection
 
@@ -405,7 +405,7 @@ Until heapified interpreter continuations land, generator/async/top-level-await 
 
 ### JSI16v2 — Selected LambdaJS MIR executes native code
 
-Under **D8.1.3v18** (USER, 2026-09-16; revised 2026-09-22), the AST walker is LambdaJS's interpreter;
+Under **D8.4.5** (USER, 2026-09-16; revised 2026-09-22), the AST walker is LambdaJS's interpreter;
 selected MIR units execute generated native code. Source/module size, document
 context, optimization level, diagnostic switches, and inherited global state
 cannot select MIR interpretation or silently reroute a selected MIR unit to AST.
@@ -421,7 +421,7 @@ T0 support is decided from the complete indexed semantic plan before declaration
 
 ### JSI18v2 — Promotion is hotness-only, at function entry or a loop head
 
-*(v2, USER 2026-10-03; D8.1.3v22.)* A definition is compiled only on a hot hit: its call count or one of its loops' back-edge counts reaching the threshold. A call-count promotion publishes a boxed satellite for a later ordinary entry. A loop promotion may also transfer the running activation at that loop's head test, as a continuation over the bindings live there (**D8.1.1v14** shape); the handoff is one-way. No arbitrary interpreter program counter is transferred. *v1 allowed entry only and no frame transfer.*
+*(v2, USER 2026-10-03; D8.4.5.)* A definition is compiled only on a hot hit: its call count or one of its loops' back-edge counts reaching the threshold. A call-count promotion publishes a boxed satellite for a later ordinary entry. A loop promotion may also transfer the running activation at that loop's head test, as a continuation over the bindings live there (**D8.3.2** shape); the handoff is one-way. No arbitrary interpreter program counter is transferred. *v1 allowed entry only and no frame transfer.*
 
 ### JSI19 — Static property names are planned once
 
@@ -433,23 +433,23 @@ The runtime script catalog/module registry retains every `JsScript` generation t
 
 ### JSI21 — Differential and ownership gates are mandatory
 
-T0/T1 semantic comparison, tier crossings, forced GC, page coexistence, Test262 partitioning, and release measurements are implementation gates, not follow-up polish (**D1.10**, **D8.6.3–D8.6.4v2**).
+T0/T1 semantic comparison, tier crossings, forced GC, page coexistence, Test262 partitioning, and release measurements are implementation gates, not follow-up polish (**D1.10**, **D8.6.3–D8.6.4**).
 
 ### JSI22 — No substitute machine or retired path
 
-This work adds no bytecode, C2MIR behavior, vendor patch, conservative stack scan, or fifth allocation mechanism (**D1.5–D1.6**, **D4.1.4v4**).
+This work adds no bytecode, C2MIR behavior, vendor patch, conservative stack scan, or fifth allocation mechanism (**D1.5–D1.6**, **D5.1.4**).
 
 ### JSI23 — A page has one execution isolate
 
-Lambda and JavaScript on one `DomDocument` use the same `Runtime` and canonical `EvalContext`. A nested event, callback, import, or behavior dispatch validates that identity; it never swaps to a language-owned context (**D5.4.1**, **ES10–ES13**).
+Lambda and JavaScript on one `DomDocument` use the same `Runtime` and canonical `EvalContext`. A nested event, callback, import, or behavior dispatch validates that identity; it never swaps to a language-owned context (**D6.4.1**, **ES10–ES13**).
 
 ### JSI24 — The GC heap is shared
 
-All GC-managed Lambda and JavaScript values for the page allocate in `EvalContext::heap`. A collector cycle traces both languages' active frames and context-owned roots in one graph. There is no cross-heap `Item` state or clone-on-call membrane (**D1.2–D1.5**, **D6.3.1**).
+All GC-managed Lambda and JavaScript values for the page allocate in `EvalContext::heap`. A collector cycle traces both languages' active frames and context-owned roots in one graph. There is no cross-heap `Item` state or clone-on-call membrane (**D1.2–D1.5**, **D7.5.1**).
 
 ### JSI25 — The side stacks are shared
 
-Lambda and JavaScript activations reserve nested windows from the same `Context::side_root_*` and `side_number_*` regions. No JavaScript operand/value/root stack is added. Durable realm/job state remains in traced heap objects or registered context root ranges (**D5.1.1–D5.1.4**, **D5.3.3**).
+Lambda and JavaScript activations reserve nested windows from the same `Context::side_root_*` and `side_number_*` regions. No JavaScript operand/value/root stack is added. Durable realm/job state remains in traced heap objects or registered context root ranges (**D6.1.1–D6.1.4**, **D6.3.3**).
 
 ### JSI26 — One interpreter kernel, profile-owned semantics
 
@@ -457,11 +457,11 @@ A common activation service owns frame entry/exit, root and number watermarks, l
 
 ### JSI27 — Scheduling has one owner and ordered lanes
 
-The `EvalContext` owns one event-loop/scheduler service. JavaScript jobs/microtasks retain JavaScript checkpoint semantics; Lambda task resumes retain their macrotask ordering under **D6.3.1**. “One event loop” does not mean one undifferentiated FIFO.
+The `EvalContext` owns one event-loop/scheduler service. JavaScript jobs/microtasks retain JavaScript checkpoint semantics; Lambda task resumes retain their macrotask ordering under **D7.5.1**. “One event loop” does not mean one undifferentiated FIFO.
 
 ### JSI28 — Names share one context identity domain
 
-Per-script static spelling tables may remain owner-local, but every runtime property/module name links into the page's dynamic `NamePool`/`NameId` domain. A JavaScript script cannot publish a competing property identity table (**D4.6.1v2–D4.6.2v2**).
+Per-script static spelling tables may remain owner-local, but every runtime property/module name links into the page's dynamic `NamePool`/`NameId` domain. A JavaScript script cannot publish a competing property identity table (**D5.6.1–D5.6.2**).
 
 ### JSI29 — Script and module identity are runtime-wide
 
@@ -469,15 +469,15 @@ Per-script static spelling tables may remain owner-local, but every runtime prop
 
 ### JSI30 — Realms and lexical environments remain separate
 
-Sharing a context and heap does not merge Lambda package scope with `globalThis`, Lambda snapshot captures with JS binding cells, or Lambda collection semantics with JS objects. Cross-language access goes through declared callable/namespace/VMap membranes using `Item` (**D1.2–D1.3**, **D6.2.2v2**).
+Sharing a context and heap does not merge Lambda package scope with `globalThis`, Lambda snapshot captures with JS binding cells, or Lambda collection semantics with JS objects. Cross-language access goes through declared callable/namespace/VMap membranes using `Item` (**D1.2–D1.3**, **D7.2.2**).
 
 ### JSI31 — The Radiant memory seam remains explicit
 
-DOM/view nodes and packed interaction state remain native arena/state-store allocations. Lambda and JavaScript heap values refer to them only through the existing pin, generation-check, and copy-as-value contracts (**D4.5.1v3**, **ES2**, **ES10–ES12**). A shared script heap does not make DOM arena pointers GC objects.
+DOM/view nodes and packed interaction state remain native arena/state-store allocations. Lambda and JavaScript heap values refer to them only through the existing pin, generation-check, and copy-as-value contracts (**D5.5.1**, **ES2**, **ES10–ES12**). A shared script heap does not make DOM arena pointers GC objects.
 
 ### JSI32 — `EvalContext` is the state owner, not a state megastruct
 
-Mutable isolate state belongs to the canonical `EvalContext`, partitioned into lazy, non-moving capsules by lifetime and semantic responsibility. Unification does not mean copying every field into `EvalContext` or renaming `JsRuntimeState` to a generic megastruct. It means common facilities have one common capsule, while JavaScript-only realm semantics have one optional JS capsule (**D5.4.1–D5.4.2**, **RG0**, **RG2**, **RG12–RG13**).
+Mutable isolate state belongs to the canonical `EvalContext`, partitioned into lazy, non-moving capsules by lifetime and semantic responsibility. Unification does not mean copying every field into `EvalContext` or renaming `JsRuntimeState` to a generic megastruct. It means common facilities have one common capsule, while JavaScript-only realm semantics have one optional JS capsule (**D6.4.1–D6.4.2**, **RG0**, **RG2**, **RG12–RG13**).
 
 ### JSI33 — Activation state is not realm state
 
@@ -485,7 +485,7 @@ Mutable isolate state belongs to the canonical `EvalContext`, partitioned into l
 
 ### JSI34 — One TLS root remains the execution authority
 
-`context` remains the sole sanctioned runtime TLS root under **D5.4.1**. The current `js_active_runtime_state` may remain only as a checked transitional derived cache; the endpoint hoists `context->js_realm` at JS entry or passes it explicitly through cold/native boundaries. It never becomes a second owner, rebinding mechanism, or independently mutable execution identity.
+`context` remains the sole sanctioned runtime TLS root under **D6.4.1**. The current `js_active_runtime_state` may remain only as a checked transitional derived cache; the endpoint hoists `context->js_realm` at JS entry or passes it explicitly through cold/native boundaries. It never becomes a second owner, rebinding mechanism, or independently mutable execution identity.
 
 ---
 
@@ -678,11 +678,11 @@ An interpreted closure stores a traced pointer to the lexical environment visibl
 
 This replaces the current copied-env/read-back workaround for the shared mixed-tier ABI. It also addresses the documented per-iteration staleness and fixed capture-count hazards in `JS_05_Functions_Closures.md`.
 
-**D6.2.3 clarification required before landing:** its current unqualified snapshot-capture wording describes Lambda semantics through S9.1.4. Under **D1.3**, it cannot govern LambdaJS. The formal design should revise the ruling in place (for example, D6.2.3v2) to state that Lambda captures immutable values while each guest profile owns its closure semantics; LambdaJS captures lexical bindings by reference. The corresponding working design ledger must be updated in the same change.
+**D7.2.3 clarification required before landing:** its current unqualified snapshot-capture wording describes Lambda semantics through S9.1.4. Under **D1.3**, it cannot govern LambdaJS. The formal design should revise the ruling in place (for example, D7.2.3) to state that Lambda captures immutable values while each guest profile owns its closure semantics; LambdaJS captures lexical bindings by reference. The corresponding working design ledger must be updated in the same change.
 
 ### 5.6 Dynamic code and direct eval (JSI35, JSI36)
 
-Dynamic source is interpreted (**D8.1.3v20**). Every source string the realm
+Dynamic source is interpreted (**D8.4.3**). Every source string the realm
 compiles after start-up is parsed into a retained `JsScript` and executed by the
 AST walker. This covers direct eval, indirect eval, the `Function`,
 `GeneratorFunction`, `AsyncFunction`, and `AsyncGeneratorFunction` constructors,
@@ -703,7 +703,7 @@ The dynamic-code entry is one runtime service with one semantic owner:
 | direct eval, strict or strict caller | eval code | an eval-private variable environment |
 | `Function` family | a function expression script | none; the completion is the function |
 
-A direct eval from AST or MVP code links its activation to the caller's live environment chain (**D8.1.3v26 / JSI36v2**). Nothing is projected or written back:
+A direct eval from AST or MVP code links its activation to the caller's live environment chain (**D8.4.3 / JSI36v2**). Nothing is projected or written back:
 
 - the eval gets one boundary record. It holds the eval's lexical declarations, and a strict eval's vars, since that record is a strict eval's variable environment. Its outer record is the caller frame's current environment;
 - eval code, and every closure it creates, resolves a free name by name through that chain. Each record answers from its declarations, its materialized `arguments`, then the vars direct eval added to it. Past the last record, the name resolves as code of the outermost caller script would: that script's top-level bindings, then the realm. The record that answers also bounds the `with` probe, so a binding of the activation precedes the Object Environment Records its function captured at creation;
@@ -716,7 +716,7 @@ receiver, new target and home object. `js_interp_execute_host_eval` enters the
 same linked evaluator. Global/property/call operations use `JsInterpHostOps`
 and MVP's existing Lambda-backed storage. Ordinary AST/AUTO installs the same
 operation contract with ordinary Script/Module binding and promotion policy;
-dynamic source retains its own admission policy (**D8.1.3v43**).
+dynamic source retains its own admission policy (**D8.4.4**).
 
 Both tiers derive eval early errors from `js_ast_collect_function_facts`.
 Non-computed property names and nested ordinary-function bodies are not lexical
@@ -736,7 +736,7 @@ and qualification are recorded in
 
 ### 6.1 State ownership rule
 
-The target is **one state owner with several typed capsules**, not one flat “unified runtime state.” This follows the existing Runtime/EvalContext distinction in **RG0** and the opaque-capsule requirement in **D5.4.2/RG2**:
+The target is **one state owner with several typed capsules**, not one flat “unified runtime state.” This follows the existing Runtime/EvalContext distinction in **RG0** and the opaque-capsule requirement in **D6.4.2/RG2**:
 
 | Owner | Owns | Must not own |
 |---|---|---|
@@ -774,7 +774,7 @@ struct EvalContext : Context {
 };
 ```
 
-These names describe ownership; they do not require one flag-day layout edit. Fields already correctly common—`heap`, `name_pool`, `module_states`, scheduler, template state, Jube session—are promoted behind the indicated capsule API as their callers migrate. The JIT-visible `Context` prefix stays unchanged, capsule objects are stable after construction, and root registration remains explicit as required by **D5.4.2**.
+These names describe ownership; they do not require one flag-day layout edit. Fields already correctly common—`heap`, `name_pool`, `module_states`, scheduler, template state, Jube session—are promoted behind the indicated capsule API as their callers migrate. The JIT-visible `Context` prefix stays unchanged, capsule objects are stable after construction, and root registration remains explicit as required by **D6.4.2**.
 
 The common capsules are lazy. A Lambda-only CLI run need not allocate `JsRealmState` or page state. A JS-only Test262 run does not allocate template/render state. A mixed page allocates both but still has one heap, root registry, module instance space, and scheduling owner.
 
@@ -786,12 +786,12 @@ The current `JsRuntimeState` fields are reassigned by semantic lifetime, not by 
 |---|---|---|
 | `global_bindings`, `constructors`, `intrinsics`, `well_known`, prototypes, `globalThis`, JS namespace/wrapper identity, RegExp last-match state | `JsRealmState` | observable ECMAScript realm identity; meaningless to a Lambda-only context |
 | Promise reaction records, generator/async continuations, eval private-name parse scopes, JS module live-binding/TLA extensions | JS subcapsules reached from `JsRealmState` or the relevant common instance | language semantics remain JS-specific even when their storage/scheduling substrate is common |
-| `event_loop` queues, timers, immediate/rAF task ownership, page liveness and drain state | `AsyncRuntimeState` with JS lanes | **D1.3/D5.4.4** require one event loop per context; JS microtask/`nextTick` ordering remains a lane policy |
+| `event_loop` queues, timers, immediate/rAF task ownership, page liveness and drain state | `AsyncRuntimeState` with JS lanes | **D1.3/D6.4.4** require one event loop per context; JS microtask/`nextTick` ordering remains a lane policy |
 | `module_states`, module slab table/capacity, instantiated namespace/loading/error state | `ContextModuleState` | both languages instantiate modules in the same context and module-state ID space |
 | active JS module selector | current activation, with a temporary compatibility field in `ContextModuleState` for generated ABI | it changes across nested calls and is not realm identity |
 | `root_range_registry`, heap/root epochs | `ContextRootRegistry` / common heap generation | GC ownership is common; individual realm/page capsules still own and register their fixed ranges |
 | `current_this`, `new_target`, private home class/index, `super` stack, pending arguments/source, strict-call flag, call depth/limit, interpreter `with` stack | `JsActivationPayload` on the common activation chain | these are dynamic call facts; nesting requires a stack, not singleton realm registers |
-| native document/UI binding, canonical active document, DOM generation/pins shared with Radiant | `PageRuntimeState` | ES10–ES13 make page state common; native DOM remains outside GC under **D4.5.1v3** |
+| native document/UI binding, canonical active document, DOM generation/pins shared with Radiant | `PageRuntimeState` | ES10–ES13 make page state common; native DOM remains outside GC under **D5.5.1** |
 | JS DOM wrapper/collection identity, listener callback Items, observer/XHR/fetch JS objects | JS DOM subcapsule under `JsRealmState`, registered through common roots and pointing to `PageRuntimeState` | wrapper identity is realm-observable; native page authority is common |
 | Node/Jube native service session | existing `EvalContext::jube_node_session` and service capsules | native services are context facilities, not ECMAScript global-object identity |
 | Node globals and module namespace wrapper Items (`process`, `console`, Buffer/stream/http constructors) | JS host-realm subcapsule | the visible objects belong to the JS realm even when the service behind them is context-owned |
@@ -820,7 +820,7 @@ EvalContext::ContextModuleState[module_state_id]
   optional Lambda instance extension: package initialization transaction facts
 ```
 
-The inherited `Script::module_state_id` is the join key. Cross-language imports consult the one runtime definition registry, then instantiate or retrieve the one context entry. This preserves language-specific namespace/live-binding algorithms without storing heap values in a runtime that may cache code across contexts (**D5.4.3**, **D7.2.1–D7.2.3**, **RG12–RG13**).
+The inherited `Script::module_state_id` is the join key. Cross-language imports consult the one runtime definition registry, then instantiate or retrieve the one context entry. This preserves language-specific namespace/live-binding algorithms without storing heap values in a runtime that may cache code across contexts (**D6.4.3**, **D9.3.1–D9.3.3**, **RG12–RG13**).
 
 ### 6.5 Activation state and T0/T1 convergence
 
@@ -901,7 +901,7 @@ The reusable part of Lambda's current `InterpFrameGuard` becomes the common acti
 5. restores both watermarks exactly once on normal completion;
 6. is safely abandoned only by an eligible native-fault recovery landing.
 
-Profile selection happens once when the activation is entered. The kernel then calls `lambda_eval_*` or `js_eval_*`; it does not place a language branch in every core-node case. Their semantic fields and completion records remain separate. This preserves **D1.3** and **D5.1.1**: one interpreter service and one stack substrate do not mean one semantic switch.
+Profile selection happens once when the activation is entered. The kernel then calls `lambda_eval_*` or `js_eval_*`; it does not place a language branch in every core-node case. Their semantic fields and completion records remain separate. This preserves **D1.3** and **D6.1.1**: one interpreter service and one stack substrate do not mean one semantic switch.
 
 ### 6.8 One side-stack pair and one heap
 
@@ -913,13 +913,13 @@ JavaScript does not add an operand stack, shadow root stack, or private number s
 - queued callbacks/timers and module namespaces are owned by the common async/module capsules, using the same root registry;
 - page listener/observer wrapper Items remain in the JS DOM realm subcapsule while native document pins remain in `PageRuntimeState`;
 - activation-temporary `this`, `new.target`, arguments, `super`, iterator, `with`, and operand state move to `JsInterpFrame` root slots or `JsEnvRecord`s;
-- state surviving a yield moves to a traced heap continuation under **D5.1.3**.
+- state surviving a yield moves to a traced heap continuation under **D6.1.3**.
 
 During migration, ambient fields still required by generated T1 are exposed only through the activation accessors described in §6.5; T0 does not create or reconcile a second copy. A compatibility generated-call activation may project old storage until each T1 boundary is migrated, then the old fields are deleted.
 
 The heap is likewise singular. Lambda containers/functions/errors and JavaScript objects/functions/environments/promises are distinct traced object kinds in the same `Heap::gc`. Same heap does not authorize representation punning: a JS object is not a Lambda map, and access still selects the language's vtable/runtime kernels through `get_type_id(Item)` and declared membranes.
 
-AST pools, source pools, and static name pools remain outside GC under **D4.1.1v2**. Radiant DOM/view arenas remain outside GC under **D4.5.1v3**. The common collector sees only the heap wrappers/handles and rooted `Item`s that intentionally cross those seams.
+AST pools, source pools, and static name pools remain outside GC under **D5.1.1**. Radiant DOM/view arenas remain outside GC under **D5.5.1**. The common collector sees only the heap wrappers/handles and rooted `Item`s that intentionally cross those seams.
 
 ### 6.9 JavaScript frame
 
@@ -953,7 +953,7 @@ This staged bridge avoids duplicating OrdinaryCallBindThis or constructor setup 
 
 ### 6.11 Arguments
 
-The call boundary remains dynamically sized `Item* + argc` under **D6.2.2v2**. The caller roots the span; the callee initializes parameter cells and retains any rest/arguments object it creates.
+The call boundary remains dynamically sized `Item* + argc` under **D7.2.2**. The caller roots the span; the callee initializes parameter cells and retains any rest/arguments object it creates.
 
 The frame stores enough metadata to lazily construct:
 
@@ -1069,7 +1069,7 @@ Array literals create JavaScript arrays, preserving elisions/holes, spread order
 - spread via own-enumerable property copy;
 - the special literal `__proto__` form.
 
-They never call Lambda collection/COW builders. **D4.4.2** keeps JS mutation out of Lambda's COW protocol.
+They never call Lambda collection/COW builders. **D5.4.2** keeps JS mutation out of Lambda's COW protocol.
 
 ### 7.7 Assignment and destructuring
 
@@ -1102,7 +1102,7 @@ The algorithm is explicit:
 4. if `finally` completes abruptly, it replaces the saved completion;
 5. otherwise restore the saved completion unchanged.
 
-Iterator/environment cleanups nested inside these constructs execute in their own crossed frames, satisfying **D1.4v3**.
+Iterator/environment cleanups nested inside these constructs execute in their own crossed frames, satisfying **D1.4**.
 
 ### 7.10 `with`
 
@@ -1209,7 +1209,7 @@ Lambda `Function` and `JsFunction` remain distinct heap object kinds. Unifying t
 3. it enters the target profile under the same `EvalContext`, heap, module registry, and interpreter activation chain;
 4. the callee returns through the explicit completion ABI;
 5. the boundary converts only the completion *classification* required by the declared import/callback contract, preserving the underlying heap error/value identity;
-6. every crossed frame performs its own cleanup before the caller consumes the result (**D1.4v3**, **D8.4.3v2**).
+6. every crossed frame performs its own cleanup before the caller consumes the result (**D1.4**, **D7.4.3**).
 
 No deep copy, heap switch, context rebinding, or raw function-layout cast occurs. Cross-language imports continue to publish language-owned namespaces through `ModuleNamespaceOps`; direct same-language calls retain their existing fast path.
 
@@ -1251,11 +1251,11 @@ instantiation. The shipped AUTO scope includes a restricted P2 bridge: an
 admitted closed classic definition starts in T0 and may publish its own native
 entry, while every unsupported definition remains T0. Forced AST interpretation
 reports a deterministic unsupported-tier error rather than silently compiling;
-differential tests select each backend explicitly (**D8.1.3v18**).
+differential tests select each backend explicitly (**D8.4.5**).
 
 ### 9.3 Promotion point
 
-*(Revised 2026-10-03, D8.1.3v22 / JSI18v2.)* Promotion has two triggers, both hot hits. The call count belongs to the static AST definition (`JsCallableCode`); `JS_FUNC_JIT_THRESHOLD` defaults to 5 (D8.1.3v24). The threshold-crossing call has not started its body, so it may enter the published native satellite.
+*(Revised 2026-10-03, D8.4.5 / JSI18v2.)* Promotion has two triggers, both hot hits. The call count belongs to the static AST definition (`JsCallableCode`); `JS_FUNC_JIT_THRESHOLD` defaults to 5 (D8.4.5). The threshold-crossing call has not started its body, so it may enter the published native satellite.
 
 A loop that is a direct statement of a function body counts its back-edges in the same definition's promotion cell. At `JS_LOOP_JIT_THRESHOLD` (default 10000) the statements from that loop to the end of the body are compiled as a continuation over the live-in bindings, and the running activation enters it at the loop's next head test. The interpreter then returns the continuation's result as the activation's result; nothing is written back. Eligibility conditions and sequencing are in the [tuning plan](impl/Lambda_Impl_JS_Interp_Tune.md) §5 E3. No other interpreter PC is transferable. Both thresholds are provisional until release profiling. Direct validated self-tail handoff may be considered only after the ordinary entry satellite is correct and separately gated.
 
@@ -1280,7 +1280,7 @@ encoded base before publication. Spread, object-literal methods/accessors and
 captures outside the slab remain ineligible. The satellite context is retained in the
 owning `EvalContext` until teardown. Every other definition is pinned to T0.
 
-The **D8.1.3v38** module extension uses the same admission scan as classic
+The **D8.4.5** module extension uses the same admission scan as classic
 functions, adding an explicit import-binding exclusion. Synchronous top-level
 functions and checked public instance methods on classes at top level
 or inside one top-level synchronous module function/arrow may read and write live module slots, call their current values and perform the
@@ -1292,12 +1292,12 @@ use checked parameter/body spans without replacing the original callable metadat
 still classify the narrow light-call contract before promotion. The ordinary
 hot-call threshold and boxed satellite publication remain authoritative; the
 source module is not re-evaluated and its existing binding slab is not
-reinitialized. **D8.1.3v38** extends only the method subtree to checked identifier
+reinitialized. **D8.4.5** extends only the method subtree to checked identifier
 defaults and contained synchronous arrows, declarations, switch and constant
 templates. Every initializer/body is checked; local captures use ordinary MIR
 closure cells, while outer bindings must be original live module slots.
 
-For hot entry only, the approved **D8.1.3v36** extension admits contained synchronous ordinary function
+For hot entry only, the approved **D8.4.5** extension admits contained synchronous ordinary function
 declarations and switch statements. The scan checks every contained body and
 accepts lexical captures only inside the selected function subtree, using the
 existing compiled closure cells. Module references in contained helpers still
@@ -1310,13 +1310,13 @@ checks pass normally and with forced GC/freed-memory poisoning, but five paired
 original CSS runs have median wall 14.998 s versus control 14.777 s, with equal
 checksum. The tokenizer reaches the call threshold but remains excluded for
 three constant template literals. The user approved those constants separately
-as **D8.1.3v37**; interpolation and tagged templates remain excluded.
+as **D8.4.5**; interpolation and tagged templates remain excluded.
 Overview/pricing retain their 120-second watchdogs. Atlas passes with both
 builds on the current server response, so that pass is not attributed to the
 experiment. The nested/switch extension was restored for v37 qualification
 and then removed again after the combined experiments were slower.
 
-**D8.1.3v37** admits an untagged template literal only when it has no
+**D8.4.5** admits an untagged template literal only when it has no
 expressions and exactly one tail quasi with a valid cooked string. This is a
 constant string for the existing MIR lowering; source text and callable
 identity remain original. The scan returns at that checked literal rather than
@@ -1334,11 +1334,11 @@ candidate and control. O0 and a generic inlining-budget experiment were also
 slower and removed. The qualified v35 code and release are restored. Current
 AST sampling identifies checked defaults and local arrow callbacks in module
 methods (`setSource`, `forEach`, `insert`) as the next boundary. The user approved that limited method scope as
-**D8.1.3v38** on 2026-10-24. The method-only implementation and qualification
+**D8.4.5** on 2026-10-24. The method-only implementation and qualification
 are recorded below. Original method metadata/body checks,
 capture/import exclusions and loop-handoff policy remain authoritative.
 
-**D8.1.3v35** also admits the existing one-way loop handoff for synchronous
+**D8.4.5** also admits the existing one-way loop handoff for synchronous
 top-level module functions passing that proof. Local live-ins are read from
 the exact-rooted activation at the head; module operations retain the source
 slab and ordinary call kernel. A for-let head is initialized from its current
@@ -1354,7 +1354,7 @@ Primitive live-ins use checked Number, String or Boolean copies inside the
 cloned body so its ordinary local analysis sees those facts. A cached
 continuation checks those primitive kinds before entry; a mismatch stays in
 T0 without coercion or replay. Objects, BigInts and Symbols receive no such
-copy coercion. These are body-entry guards, not per-site caches (**D8.4.1v2**).
+copy coercion. These are body-entry guards, not per-site caches (**D7.4.1**).
 
 Landed hot-entry clones declare only bindings referenced by the selected
 function's shared `AstIndex` reference slice (**D8.2.4**). The approved v36
@@ -1381,7 +1381,7 @@ dependencies that cannot be referenced through stable runtime helpers or
 existing satellites make the definition ineligible and pin it to T0 or trigger
 a pre-execution whole-unit policy decision.
 
-Compiled artifacts remain immutable under **D8.4.1v2**. Publication writes the definition's promotion cell/body entry, not generated instructions.
+Compiled artifacts remain immutable under **D7.4.1**. Publication writes the definition's promotion cell/body entry, not generated instructions.
 
 ### 9.5 Shared environment prerequisite
 
@@ -1445,7 +1445,7 @@ document setup / post-render evaluator creation
 
 A JS-bearing HTML page that later loads the Lambda dom package reuses its existing runtime/context. A Lambda page that later establishes page JS ensures `JsRealmState` on that same context; during migration `js_runtime_state_init()` remains the compatibility entry that performs this work. Neither path allocates a competing heap, async service, root registry, or module registry. This is the interpreter-side realization of **ES12** and **EO6**.
 
-An iframe/subdocument is a separate document isolate under **EO5v2**: it owns a different `Runtime`, `EvalContext`, heap, and registry. The host thread may hand off between document contexts only at a quiescent document/event boundary with no live activation or side-root frame, as required by **D5.4.1**. It never switches context in a nested callback.
+An iframe/subdocument is a separate document isolate under **EO5v2**: it owns a different `Runtime`, `EvalContext`, heap, and registry. The host thread may hand off between document contexts only at a quiescent document/event boundary with no live activation or side-root frame, as required by **D6.4.1**. It never switches context in a nested callback.
 
 Standalone CLI/Test262 execution uses the same ownership graph without a `DomDocument`; “one page isolate” becomes “one invocation/test isolate.”
 
@@ -1483,7 +1483,7 @@ that entry before the Script's pool is released. It therefore survives a
 excluded from reuse because their one-time link/evaluation state belongs to the
 canonical module registry. This is a local derived cache under **D1.7**, with
 the single shared `Runtime`/`EvalContext` ownership required by
-**D8.1.3v11** and **D5.4.1**.
+**D8.4.2** and **D6.4.1**.
 
 `jit_init()` moves wholly inside the T1 branch. This is the point of the feature: a successful T0 run creates no MIR context and performs no MIR lowering/link. Runtime/context/heap initialization is not T1 work and is shared with Lambda.
 
@@ -1512,7 +1512,7 @@ The context has one scheduling owner and liveness decision. It may contain multi
 
 - JavaScript `nextTick` and Promise microtasks at their defined checkpoints;
 - JavaScript timers, immediates, animation-frame callbacks, and async module work;
-- Lambda task resumes as FIFO macrotasks under **D6.3.1**;
+- Lambda task resumes as FIFO macrotasks under **D7.5.1**;
 - native DOM/event work and deferred layout/paint callbacks.
 
 Unification means one owner decides whether the page has pending work, performs teardown, and roots queued callbacks in one heap. It does not reorder everything into a generic FIFO. A Lambda resume never interrupts a JS job or its microtask checkpoint, and a JS callback never runs concurrently with a Lambda handler on the page thread.
@@ -1598,8 +1598,8 @@ Vendor sources, C2MIR, generated `parser.c`, generated Lua, and `log.conf` remai
 1. Adopt this proposal's ledger.
 2. Revise the stale Stage 2 text in `Lambda_Design_Ast_Interpreter.md`:
    - `EvalSignal` does not transfer unchanged; JS uses `JsCompletion`.
-   - per-AST-node inline caches are removed under **D8.4.1v2**.
-3. Add the formal JavaScript tier ruling (recommended new **D8.1.3**, rather than overloading Lambda-specific D8.1.1), clarify D6.2.3's Lambda-only snapshot rule, and formalize **ES12** as one document isolate = one `Runtime`/`EvalContext`/heap/registry/side-stack set.
+   - per-AST-node inline caches are removed under **D7.4.1**.
+3. Add the formal JavaScript tier ruling (recommended new **D8.4.1**, rather than overloading Lambda-specific D8.3.1), clarify D7.2.3's Lambda-only snapshot rule, and formalize **ES12** as one document isolate = one `Runtime`/`EvalContext`/heap/registry/side-stack set.
 4. Add `JS_TIER` plumbing, stats, and a differential runner that initially reports every script unsupported.
 5. Add assertions/counters proving that a mixed Lambda/JS page has one runtime, context, heap, module registry, module-state allocator, and side-stack base.
 
@@ -1621,8 +1621,8 @@ Vendor sources, C2MIR, generated `parser.c`, generated Lua, and `log.conf` remai
 matches its native reference; a page with page JS plus the Lambda dom package
 proves one owner for runtime/context/heap/registry/module IDs and tears down once;
 `fn->analysis` and every source/name pointer remain valid through event-loop drain
-and batch reuse; **D8.6.4v2** timing/LOC diagnostics are recorded. MIR interpretation
-is not a JS test tier under **D8.1.3v11**.
+and batch reuse; **D8.6.4** timing/LOC diagnostics are recorded. MIR interpretation
+is not a JS test tier under **D8.4.2**.
 
 ### P2 — Restricted synchronous vertical slice
 
@@ -1669,7 +1669,7 @@ Add:
 4. Add AUTO counters and hot-function tests.
 5. Preserve the native-only MIR contract across promotion and retained artifacts;
    size-based and diagnostic MIR interpretation are removed by JS Tune13 rather
-   than deferred to this promotion phase (**D8.1.3v18**).
+   than deferred to this promotion phase (**D8.4.5**).
 
 **Gate:** full JS T0/T1/native and Lambda↔JS call matrix passes under forced GC; closure mutation, per-iteration cells, direct eval, class constructors, bound/proxy calls, and error identity remain exact across tier and language crossings.
 
@@ -1689,7 +1689,7 @@ Add:
 2. Tune promotion thresholds from measured total turnaround, not microbenchmarks alone.
 3. Flip unset JavaScript policy to AUTO only after the formal ruling and complete gates.
 
-**Gate:** correctness gates are green, fallback policy is auditable, compiler-time and LOC ratchets under **D8.6.4v2** are satisfied or explicitly accounted, and no supported workload regresses beyond an approved measured budget.
+**Gate:** correctness gates are green, fallback policy is auditable, compiler-time and LOC ratchets under **D8.6.4** are satisfied or explicitly accounted, and no supported workload regresses beyond an approved measured budget.
 
 ---
 
@@ -1821,7 +1821,7 @@ fallback/reject reason
 MIR functions/instructions produced
 ```
 
-The principal metric is total cold turnaround for run-once work. Hot arithmetic kernels are expected to be slower in T0 and are promotion targets. Test262 and Radiant measurements use identical manifests, one warm-up, and median-of-five release samples where **D8.6.4v2** applies.
+The principal metric is total cold turnaround for run-once work. Hot arithmetic kernels are expected to be slower in T0 and are promotion targets. Test262 and Radiant measurements use identical manifests, one warm-up, and median-of-five release samples where **D8.6.4** applies.
 
 ---
 
@@ -1833,7 +1833,7 @@ Rejected. Common node shapes do not share coercion, containers, references, clos
 
 ### 15.2 Keep MIR interpretation as a LambdaJS tier
 
-Rejected, including as a diagnostic or large-module mode (**D8.1.3v11**). It still
+Rejected, including as a diagnostic or large-module mode (**D8.4.2**). It still
 pays AST-to-MIR lowering and provides no native execution benefit. AST handles
 interpretation; native compiler costs must be improved directly. Existing
 MIR-interpreter support for other language profiles is outside this decision.
@@ -1852,11 +1852,11 @@ Rejected as the mixed-tier ABI. It reproduces the current per-iteration and capt
 
 ### 15.6 Infer AST body from null `func_ptr`
 
-Rejected. `func_ptr` is a MIR target field, not executable capability authority; native function shapes may also leave it null. `body_kind` must be explicit under **D6.2.2v2**.
+Rejected. `func_ptr` is a MIR target field, not executable capability authority; native function shapes may also leave it null. `body_kind` must be explicit under **D7.2.2**.
 
 ### 15.7 Add per-node property inline caches
 
-Rejected by **D8.4.1v2**. The current Stage 2 paragraph proposing them is superseded by this design and must be corrected.
+Rejected by **D7.4.1**. The current Stage 2 paragraph proposing them is superseded by this design and must be corrected.
 
 ### 15.8 Fall back when an unsupported node is reached
 
@@ -1868,11 +1868,11 @@ Rejected. Compiler-session state contains transient MIR/register/error/recovery 
 
 ### 15.10 Restore conservative native-stack scanning
 
-Rejected by **D1.5/D5.3.3** and repository rule 15. Interpreter temporaries use planned side-root slots.
+Rejected by **D1.5/D6.3.3** and repository rule 15. Interpreter temporaries use planned side-root slots.
 
 ### 15.11 Give Lambda and JavaScript separate page runtimes/contexts
 
-Rejected by **D5.4.1** and **ES12**. Event callbacks, template state, module namespaces, and DOM behavior would need context switching or copying inside one synchronous event turn. TLS identity and precise root-stack ownership make that both unsafe and semantically unnecessary.
+Rejected by **D6.4.1** and **ES12**. Event callbacks, template state, module namespaces, and DOM behavior would need context switching or copying inside one synchronous event turn. TLS identity and precise root-stack ownership make that both unsafe and semantically unnecessary.
 
 ### 15.12 Give JavaScript a separate GC heap
 
@@ -1880,7 +1880,7 @@ Rejected by **D1.2–D1.5**. `Item` carries no heap identifier, `gc_is_managed()
 
 ### 15.13 Give the JS interpreter a private root/value stack
 
-Rejected by **D1.3** and **D5.1.1–D5.3.3**. Nested Lambda↔JS calls are one LIFO lifetime chain. Two root stacks would require every collection and recovery boundary to discover, scan, checkpoint, and restore both, while a private value stack would become the forbidden fourth stack mechanism.
+Rejected by **D1.3** and **D6.1.1–D6.3.3**. Nested Lambda↔JS calls are one LIFO lifetime chain. Two root stacks would require every collection and recovery boundary to discover, scan, checkpoint, and restore both, while a private value stack would become the forbidden fourth stack mechanism.
 
 ### 15.14 Build two independent interpreter services
 
@@ -1896,11 +1896,11 @@ Rejected as incomplete integration. Context ownership fixes cross-isolate global
 
 ### 15.17 Inline all mutable state directly into `EvalContext`
 
-Rejected by **D5.4.2**. A flat super-context would force Lambda-only runs to carry JS/DOM/Node state, destabilize the JIT-visible layout, obscure teardown order, and recreate the same lifetime ambiguity at a larger scale. Stable lazy capsule pointers provide one context identity without one megastruct.
+Rejected by **D6.4.2**. A flat super-context would force Lambda-only runs to carry JS/DOM/Node state, destabilize the JIT-visible layout, obscure teardown order, and recreate the same lifetime ambiguity at a larger scale. Stable lazy capsule pointers provide one context identity without one megastruct.
 
 ### 15.18 Keep MIR as the dynamic-code compiler
 
-Rejected by the user on 2026-09-24 (**JSI35**, **D8.1.3v20**). The service
+Rejected by the user on 2026-09-24 (**JSI35**, **D8.4.3**). The service
 compiled each eval string and dynamic `Function` body into its own MIR module.
 It used three tiers chosen by scanning the source text: a regex-literal fast
 path, a `return (…)` function-wrapper form, and a whole-script form. Each form
@@ -1929,14 +1929,14 @@ These questions do not reopen the decisions above:
 3. **Fact layout.** Which `JsFuncCollected` fields become `FnAnalysis`, which require a JS function-plan extension, and which remain MIR-only? The rule is “shared semantic answer once; backend mechanics local.”
 4. **Property-name synthetic inventory.** Which names are semantic products of source forms and which are backend-private? The former belong in `JsScript` planning; the latter must still be sealed before dynamic NamePool activation.
 5. **Restricted-slice admission.** The exact first supported fixture manifest is established by the P2 differential survey, not by weakening semantics for an inconvenient node.
-6. **Promotion threshold.** *Ruled 2026-10-03 (D8.1.3v22; call default 5 per D8.1.3v24):* 5 calls and 10000 loop back-edges, both provisional until release profiling.
+6. **Promotion threshold.** *Ruled 2026-10-03 (D8.4.5; call default 5 per D8.4.5):* 5 calls and 10000 loop back-edges, both provisional until release profiling.
 7. **Direct self-tail handoff.** KIV until ordinary entry promotion and JS call/construct/error semantics are green. *Wrong turn recorded (removed 2026-09-15):* an AST self-tail activation reuse (`JS_INTERP_TAIL_CALL`) had shipped ahead of this gate and violated JSI7. Its completion crossed an enclosing `try`, so `catch` missed the callee's throw and `finally` ran before the callee. Unbounded self-recursion also never raised `RangeError`. Any future handoff must be unobservable, including termination: Node performs no TCO, so unbounded recursion must still reach the stack limit. See `vibe/jube/JS_Runtime_Call_Flatten.md` §3.5 v2 note.
 8. **Continuation representation.** Reuse/extend current generator and async state owners after the synchronous frame/rooting model is stable.
 9. **JS root-range inventory.** Which current fixed ranges are truly realm-persistent, page-wrapper-owned, async-lane-owned, or activation-shaped? The target owners are fixed by §6.3; the audit determines each field's row and destruction callback.
 10. **Scheduling-lane surface.** What is the narrow lane API by which Promise jobs/`nextTick`/timers preserve JS ordering while the common async owner performs liveness, task rooting, cancellation, and teardown?
 11. **Module instance extension.** Which current `ModuleDescriptor` TLA fields form the JS extension of `ContextModuleInstance`, and which dependency facts are immutable runtime-definition data?
 12. **Mixed stack traces.** Define the minimal boundary record needed to stitch generated MIR/native frames to alternating interpreted activations without adding a second semantic call stack.
-13. **Direct-eval environment linking.** *Updated 2026-10-18 (**D8.1.3v26 / JSI36v2**, §5.6).* AST and MVP callers share live environment cells. The retired MIR projection journals are removed; private-name projection remains parser-only.
+13. **Direct-eval environment linking.** *Updated 2026-10-18 (**D8.4.3 / JSI36v2**, §5.6).* AST and MVP callers share live environment cells. The retired MIR projection journals are removed; private-name projection remains parser-only.
 
 ---
 
@@ -1953,33 +1953,33 @@ These questions do not reopen the decisions above:
 | **JSI7** | JavaScript uses structured NORMAL/RETURN/THROW/BREAK/CONTINUE completions | proposed |
 | **JSI8** | ERROR-tagged helper returns become explicit THROW completions in the immediate frame | proposed |
 | **JSI9** | `fn->invoke`/`fn->construct` remain the sole call/construct authorities | proposed |
-| **JSI10** | No JavaScript AST/property inline caches | confirmed by D8.4.1v2 |
+| **JSI10** | No JavaScript AST/property inline caches | confirmed by D7.4.1 |
 | **JSI11** | Unsupported scripts fall back only before execution and are counted | proposed |
 | **JSI12** | T0 and T1 capturable bindings share environment cells | proposed |
 | **JSI13** | Suspension remains compiled until heapified interpreter continuations land | proposed |
 | **JSI14** | `func_ptr == NULL` never selects AST semantics; function body kind is explicit | proposed |
 | **JSI15** | `jit_init()` and MIR lowering occur only inside the selected T1 path | proposed |
-| **JSI16v2** | Selected LambdaJS MIR executes native code; AST is the interpreter | ratified USER 2026-09-16 / D8.1.3v18; implementation pending JS Tune13 |
+| **JSI16v2** | Selected LambdaJS MIR executes native code; AST is the interpreter | ratified USER 2026-09-16 / D8.4.5; implementation pending JS Tune13 |
 | **JSI17** | T0 support is semantic-fact-aware and decided before declaration instantiation | proposed |
-| **JSI18v2** | Promotion is hotness-only (5 calls or 10000 loop back-edges; D8.1.3v24); a loop may hand off the running activation at its head test | ratified USER 2026-10-03 / D8.1.3v22; entry promotion implemented for the closed P2 slice, loop handoff not implemented |
+| **JSI18v2** | Promotion is hotness-only (5 calls or 10000 loop back-edges; D8.4.5); a loop may hand off the running activation at its head test | ratified USER 2026-10-03 / D8.4.5; entry promotion implemented for the closed P2 slice, loop handoff not implemented |
 | **JSI19** | Static property names are discovered and sealed from `JsScript` plans before realm work | proposed |
 | **JSI20** | Runtime-catalog/module ownership retains old `JsScript` generations while callbacks can execute them | proposed |
 | **JSI21** | Differential, tier/language-crossing, page-coexistence, forced-GC, Test262, and release-performance gates are mandatory | proposed |
 | **JSI22** | No bytecode, C2MIR work, vendor edits, or conservative stack scanning | confirmed |
 | **JSI23** | One page document isolate owns one `Runtime` and canonical `EvalContext` | proposed / ES12 alignment |
 | **JSI24** | Lambda and JavaScript values occupy one page GC heap and one traced object graph | confirmed by D1.3; page enforcement proposed |
-| **JSI25** | Lambda and JavaScript activations nest on one root/number side-stack pair | confirmed by D1.3/D5.1; interpreter enforcement proposed |
+| **JSI25** | Lambda and JavaScript activations nest on one root/number side-stack pair | confirmed by D1.3/D6.1; interpreter enforcement proposed |
 | **JSI26** | One interpreter kernel owns activations; semantic evaluators/frame payloads remain profile-specific | proposed |
-| **JSI27** | One context owns scheduling, with ordered JS microtask/nextTick and Lambda macrotask lanes | confirmed by D6.3.1; consolidation proposed |
-| **JSI28** | Static owner pools link runtime-visible names into one context `NameId` domain | proposed / D4.6 alignment |
+| **JSI27** | One context owns scheduling, with ordered JS microtask/nextTick and Lambda macrotask lanes | confirmed by D7.5.1; consolidation proposed |
+| **JSI28** | Static owner pools link runtime-visible names into one context `NameId` domain | proposed / D5.6 alignment |
 | **JSI29** | `JsScript : Script` is catalogued directly as `Script*`; no parallel script record/catalog exists | proposed |
 | **JSI30** | JS realms/environments and Lambda scopes/closures remain semantically distinct | confirmed by D1.3 |
-| **JSI31** | The shared script heap does not absorb Radiant DOM/view arena ownership | confirmed by D4.5.1v3 / ES10 |
-| **JSI32** | `EvalContext` owns split lazy common capsules; no unified state megastruct | proposed / D5.4.2 alignment |
+| **JSI31** | The shared script heap does not absorb Radiant DOM/view arena ownership | confirmed by D5.5.1 / ES10 |
+| **JSI32** | `EvalContext` owns split lazy common capsules; no unified state megastruct | proposed / D6.4.2 alignment |
 | **JSI33** | JS call/module/`this`/`super`/arguments state belongs to the common activation chain, not realm state | proposed |
-| **JSI34** | `context` remains the only TLS execution root; the derived JS-state TLS cache is retired | proposed / D5.4.1 alignment |
-| **JSI35** | Dynamic source (eval, `Function` family, string timers, `$262.evalScript`) executes only in the AST interpreter; MIR never lowers it | ratified USER 2026-09-24 / D8.1.3v20 |
-| **JSI36v2** | Direct eval from AST and MVP callers links to live lexical environments; no value projection/write-back journal remains. Context checks use shared bound-AST facts. | updated 2026-10-18 / D8.1.3v26 |
+| **JSI34** | `context` remains the only TLS execution root; the derived JS-state TLS cache is retired | proposed / D6.4.1 alignment |
+| **JSI35** | Dynamic source (eval, `Function` family, string timers, `$262.evalScript`) executes only in the AST interpreter; MIR never lowers it | ratified USER 2026-09-24 / D8.4.3 |
+| **JSI36v2** | Direct eval from AST and MVP callers links to live lexical environments; no value projection/write-back journal remains. Context checks use shared bound-AST facts. | updated 2026-10-18 / D8.4.3 |
 
 ---
 
@@ -1987,16 +1987,16 @@ These questions do not reopen the decisions above:
 
 This proposal becomes implementation authority only when the following documentation changes land together:
 
-1. add the JavaScript T0/T1 ruling to `doc/Lambda_Formal_Design.md`, recommended as **D8.1.3**;
-2. revise D6.2.3 in place to explicitly distinguish Lambda snapshot captures from guest-profile closure semantics;
-3. add a page/document-isolate ownership ruling to `doc/Lambda_Formal_Design.md` (recommended **D5.4.5**) stating one document `Runtime`/`EvalContext`/heap/module registry/side-stack set, with subdocuments as separate isolates handed off only at quiescent boundaries;
+1. add the JavaScript T0/T1 ruling to `doc/Lambda_Formal_Design.md`, recommended as **D8.4.1**;
+2. revise D7.2.3 in place to explicitly distinguish Lambda snapshot captures from guest-profile closure semantics;
+3. add a page/document-isolate ownership ruling to `doc/Lambda_Formal_Design.md` (recommended **D6.4.5**) stating one document `Runtime`/`EvalContext`/heap/module registry/side-stack set, with subdocuments as separate isolates handed off only at quiescent boundaries;
 4. revise `Lambda_Design_Ast_Interpreter.md` §9 to point here and remove its stale `EvalSignal`/inline-cache claims;
 5. update `Lambda_Design_DOM_State.md` §3.11–§3.12 to cite the integrated interpreter/heap/stack contract here and reconcile the EO6 implementation-status text with the current landed path;
 6. update `JS_01`, `JS_04`, `JS_05`, `JS_08`, `JS_09`, and `JS_16` as each implementation phase actually lands;
 7. create an implementation status record under `vibe/impl/` before code work claims a completed phase.
 
 The original adoption baseline predates the explicit AST backend and retained
-`JsScript` now recorded in **D8.1.3v11**. This document's broader mixed-tier/AUTO
+`JsScript` now recorded in **D8.4.2**. This document's broader mixed-tier/AUTO
 architecture is still not a claim of full implementation. The new native-only
 MIR contract is ratified but its remaining runtime selection paths are removed
 by JS Tune13; consult the formal implementation footnote and the linked
@@ -2004,9 +2004,9 @@ implementation record for landed coverage.
 
 ## Appendix S — Superseded execution-policy rulings
 
-### S1 — JSI16 and the prior D8.1.3v10 backend clause
+### S1 — JSI16 and the prior D8.4.1 backend clause
 
-Superseded by **D8.1.3v11 / JSI16v2**, USER 2026-09-16. Historical text:
+Superseded by **D8.4.2 / JSI16v2**, USER 2026-09-16. Historical text:
 
 > ~~MIR-interp may execute an already-produced artifact for differential/backend
 > work. It is not the AST tier and does not satisfy a zero-lowering T0 gate.~~
@@ -2024,9 +2024,9 @@ native execution for every selected MIR unit. This removes the whole-module
 interpreter cliff rather than retuning its threshold. Cold compilation cost is
 addressed by the compiler/helper work in JS Tune13, not an interpreter fallback.
 
-### S2 — §5.6 direct-eval admission and the D8.1.3v19 dynamic-code clause
+### S2 — §5.6 direct-eval admission and the D8.4.2 dynamic-code clause
 
-Superseded by **D8.1.3v20 / JSI35**, USER 2026-09-24. Historical §5.6 text:
+Superseded by **D8.4.3 / JSI35**, USER 2026-09-24. Historical §5.6 text:
 
 > ~~Until this bridge is complete, a `JsScript` containing direct eval fails the
 > T0 support scan. Indirect eval and `Function` construction may continue
@@ -2044,9 +2044,9 @@ unit, into per-call MIR modules. The bridge protocol it relied on survives
 unchanged as the caller-side contract (§5.6). Only the MIR executor behind the
 bridge is removed.
 
-### S3 — §5.6 interpreted-caller bridge and the D8.1.3v20 bridge clause
+### S3 — §5.6 interpreted-caller bridge and the D8.4.3 bridge clause
 
-Superseded by **D8.1.3v21 / JSI36**, USER 2026-09-24. Historical §5.6 text:
+Superseded by **D8.4.3 / JSI36**, USER 2026-09-24. Historical §5.6 text:
 
 > ~~A direct eval runs over its caller's bindings through the `EvalContext` eval bridge. That one protocol serves both caller tiers: the caller installs the bridge before the call. A T0 caller projects its interpreter cells; a MIR caller projects its registers.~~
 
@@ -2060,9 +2060,9 @@ The former formal clause was:
 
 The first retirement step is what JSI36 ratifies. Interpreted callers link their environments, and the bridge text now describes MIR callers only. The projection lost bindings after the eval returned (JS05-L5), missed `arguments` and `new.target` (JS05-L6), and could not tell the caller's own `var` from an outer one (JS05-L7). It also needed source scans in place of const and restricted-name write errors.
 
-### Module loop boundary superseded by D8.1.3v35 (2026-10-23)
+### Module loop boundary superseded by D8.4.5 (2026-10-23)
 
-~~D8.1.3v34 extends module hot entry only; module loop handoff remains
+~~D8.4.5 extends module hot entry only; module loop handoff remains
 excluded.~~ The user approved checked synchronous top-level module loop
 handoff under the existing proof and backedge threshold, with live slab
 bindings and distinct shadowing for-let heads. All other admission boundaries
@@ -2091,7 +2091,7 @@ module-arrow proposal targets the sampled `Wu` definition and awaits the user
 decision required by `doc/Doc_Convention.md` §2. No arrow expansion is implemented.
 
 
-The user approved the limited top-level module-arrow proposal as **D8.1.3v39**
+The user approved the limited top-level module-arrow proposal as **D8.4.5**
 on 2026-10-24. The admission scan separates constant-template permission from
 the v38 method subtree so it does not restore ordinary nested declarations or
 switch. Every checked arrow rejects activation observations and non-identifier
@@ -2118,10 +2118,10 @@ removes stale candidate objects. Latest original-page replays retain overview's
 received HTTP403; the qualified control receives normal HTML and still hits
 120s, so no repair is inferred. The current overview cache matches the captured
 original module body byte-for-byte. At that point the one-wrapper proposal
-awaited the user decision required by **D8.1.3v39** and `doc/Doc_Convention.md` §2.
+awaited the user decision required by **D8.4.5** and `doc/Doc_Convention.md` §2.
 
 
-The user approved the checked one-wrapper arrow extension as **D8.1.3v40**
+The user approved the checked one-wrapper arrow extension as **D8.4.5**
 on 2026-10-24. The implementation shares the existing method wrapper check;
 standalone arrows keep their own body proof and zero-capture/activation gates.
 No method-subtree permission or AST environment bridge is granted to those
@@ -2146,11 +2146,11 @@ Lambda retains the identical pre-existing PDF golden mismatch, with 8,156
 passing checks overall. Original CSS improves modestly; original overview and
 pricing still hit 120 s, while Atlas passes with both candidate and control.
 The qualified release/modules and source snapshot are verified after the broad
-gates. The remaining captured predicate at byte 44722 is outside **D8.1.3v40**;
-the read-only bridge was proposed at that boundary and subsequently approved as **D8.1.3v41**. Its implementation and new qualification are recorded below.
+gates. The remaining captured predicate at byte 44722 is outside **D8.4.5**;
+the read-only bridge was proposed at that boundary and subsequently approved as **D8.4.5**. Its implementation and new qualification are recorded below.
 
 
-The **D8.1.3v41** live-read slice is qualified (2026-10-24). The source proof
+The **D8.4.5** live-read slice is qualified (2026-10-24). The source proof
 admits only ordinary function expressions in one ordinary synchronous module
 wrapper, simple parameters and no activation observations. It excludes captured
 parameters/writes, catch/self/private bindings and object-method wrappers as
@@ -2174,14 +2174,14 @@ Isolated diagnostic sampling identifies the setSource callback at 91846–91994
 as remaining AST work: 32 sampled million-evaluation intervals across three
 original large-CSS passes. These are work samples, not CPU percentages. It
 reads r/i and reads/writes a/o/s/c from its immediate method body and observes
-lexical this. D8.1.3v41 excludes this method-site/write/receiver bridge. The
+lexical this. D8.4.5 excludes this method-site/write/receiver bridge. The
 concrete next proposal and ownership/acceptance plan are in
 `temp/radiant-online-oct24-capture-reads/method-callback-capture-proposal.txt`;
-the user subsequently approved that extension as D8.1.3v42 below. No watchdog
+the user subsequently approved that extension as D8.4.5 below. No watchdog
 change or single-function explanation of the remaining timeouts is claimed.
 
 
-**D8.1.3v42 (USER, 2026-10-24)** approves checked synchronous arrows directly
+**D8.4.5 (USER, 2026-10-24)** approves checked synchronous arrows directly
 inside public instance methods that pass the existing v38 whole-method proof,
 including checked defaults and existing top-level/one-wrapper class sites.
 The selected arrow has simple parameters and no nested callable bodies or
@@ -2214,7 +2214,7 @@ All three exit normally with zero tracked live bytes/count. These results do
 not establish that callback promotion repairs the watchdogs.
 
 The four engine/test source files and release/modules are restored to the
-qualified D8.1.3v41 hashes; the v42 policy remains approved for future work.
+qualified D8.4.5 hashes; the v42 policy remains approved for future work.
 The candidate patch, source, binary and evidence are preserved under
 `temp/radiant-online-oct24-method-callbacks/`, with `status-final.json` recording
 the rejection. Broader gates were not run for this unhelpful candidate; v41's
@@ -2222,7 +2222,7 @@ unchanged qualification remains authoritative. The online-loading objective
 remains incomplete.
 
 
-### S4 — Distinct ordinary AST/native operation profile (superseded by D8.1.3v43)
+### S4 — Distinct ordinary AST/native operation profile (superseded by D8.4.4)
 
 ~~The MVP operation profile and explicit AST/native operation profile remain
 distinct consumers of the shared walker. Explicit AST execution retains its
@@ -2240,3 +2240,329 @@ also guard actual parameter types. AUTO loop handoff retains its existing live
 environment path. Release profiling justified local binding and call/root work;
 frame splitting remains conditional on evidence and is not claimed as a speedup.
 See the alignment implementation record for controlled results and limits.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D8.1.3v43 → D8.4.1–D8.4.6
+
+**D8.4.4*** LambdaJS uses its first-party C lexer and hybrid
+recursive-descent/Pratt parser for normal JavaScript and TypeScript
+source admission. It reduces directly into the retained `JsAstNode` graph;
+the vendored JavaScript and TypeScript Tree-sitter grammars are linked only
+by the isolated `lambda-cst` differential verifier. LambdaJS has an
+explicit, boxed AST interpreter backend. A
+retained `JsScript : Script` owns its AST/source facts and stable module
+identity; it executes in the same runtime-owned `EvalContext`, GC heap,
+event loop, and module-state registry as Lambda. AST functions are an
+explicit `JsFunction` body kind behind the ordinary `fn->invoke` and
+`fn->construct` capabilities, not a second call dispatcher. The current
+synchronous slice uses JavaScript completion kinds and the existing JS
+property/call kernels; lexical environments are precisely traced records
+whose mutable cells are captured by reference. The admitted synchronous
+surface includes patterns/defaults/rest/spread, sync iteration with
+IteratorClose, switch/labels, optional/logical assignment, regex/template/
+tagged-template expressions, object environments, and class
+methods/accessors/fields/static blocks plus implicit and explicit derived
+construction.
+All semantic operations route through the existing JS property, iterator,
+class, and call kernels. Direct and indirect `eval` calls are admitted, as
+is `new.target`, including lexical capture by an AST arrow function.
+`super()` and `super` property references use the existing lexical home
+class, derived-`this` binding, field-initialization, and construct helpers;
+this includes class and object methods, accessors, statics, and AST arrows.
+Private fields, methods/accessors, static private elements, and private
+brand checks resolve a class-owned identity key through the existing private
+runtime. Class evaluation installs that key's owner in a traced lexical
+environment; member bodies, field initializers, static blocks, and nested
+closures retain it. Instance private methods publish the existing metadata
+brand record before field initializers; every get/set/in operation routes to
+the existing private property and brand kernels.
+Both caller tiers expose private-name identities only while the eval source
+is parsed; execution resolves them through the retained lexical environments.
+*(v20, 2026-09-24)* Dynamic source is interpreted. Direct and indirect
+`eval`, the `Function`, `GeneratorFunction`, `AsyncFunction`, and
+`AsyncGeneratorFunction` constructors, string timer handlers, and
+`$262.evalScript` parse into a retained `JsScript` and execute in the AST
+interpreter. This holds whatever the caller's tier or the unit selector;
+MIR never lowers dynamic source. Script top-level lexicals resolve through
+realm records linked to their module slots. This is a deliberate language
+boundary. It is neither an unsupported-unit fallback nor a replay of the
+enclosing script.
+*(v21, 2026-09-24)* A direct eval from interpreted code links its activation to the caller frame's live environment chain; nothing is projected or written back. The eval's own declarative record holds its lexical declarations, and a strict eval's vars; its outer record is the caller's current one. Eval code, and every closure it creates, resolves a free name through that chain — each record's declarations, its `arguments`, and the vars direct eval added to it — then through the outermost caller script's top-level bindings and the realm. A sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment and reuse a binding it already has (EvalDeclarationInstantiation with Annex B.3.2.3 and B.3.4). `this`, `new.target`, and the home object are the caller frame's own.
+*(v26, 2026-10-18)* MVP callers also supply live `JsInterpEnv` cells through
+the rooted `JsInterpHostCaller` descriptor. Direct eval uses the same linked
+binding resolver and declaration instantiation on both tiers; the retired
+LJS MIR projection/write-back journals and their direct-eval entry are absent.
+Context-sensitive early errors use the shared bound-AST function facts,
+including lexical function boundaries and property-name exclusion, rather
+than source-text scans. Escaping lexical receivers own numeric payloads in
+their GC environment through Lambda's scalar-home API (**D6.2–D6.3**).
+*(v43, 2026-10-29)* Ordinary AST/AUTO, dynamic source and MIR share the
+MVP realm and JavaScript operation contract. Execution policy selects the
+walker, compilation and promotion; it does not select different property,
+coercion, array, class or call semantics. Native callable/storage adapters
+retain explicit ABI capabilities for host and module consumers. Initializing
+an interpreted realm requires no empty MIR unit; interpreter-only builds
+retain dynamic source, classes, realms and AST module loading.
+Synchronous `yield*` uses the shared MVP protocol loop on each delegating
+activation; interpreter completion signals are adapted at that boundary.
+Immutable scope facts may place unobservable synchronous locals in exact
+activation root slots with destination-owned numeric homes and reusable
+temporary windows (**D6.3.3**, **D8.2.4**). Observable bindings retain live
+environment cells; per-site mutable caches remain forbidden (**D7.4.1**).
+JavaScript coercion and mutation remain distinct from Lambda's (**S1.11**).
+`JS_EXEC_BACKEND=ast` forces this backend.
+*(v25, 2026-10-16, USER)* MVP-Lmd is the formal JavaScript MIR engine.
+Activated MIR uses the fast MVP compiler: explicit `JS_EXEC_BACKEND=mir`,
+AUTO's whole-unit fallback and eligible function/loop promotion all use
+this engine. Host and module entry points honor the same tier selection;
+legacy LJS MIR is not an implicit fallback.
+Dynamic source remains in the retained AST interpreter as specified above.
+Generated code and returned values retain their caller-owned Runtime and
+EvalContext lifetimes, with shared Lambda storage and precise roots.
+Conformance failures exposed by activation are implementation gaps; they
+do not justify rerouting tests, weakening expectations or changing the
+supported baseline population.
+*(v29, 2026-10-21, USER; clarifies v28)* JavaScript defaults to AUTO:
+unset, empty and `JS_EXEC_BACKEND=auto` selectors use the AST interpreter
+for supported units, with MVP MIR fallback and hot promotion as specified
+below. The fast MVP engine replaces the old MIR engine whenever MIR is
+activated; it does not replace AUTO as the default tier policy.
+`JS_EXEC_BACKEND=mir` explicitly selects whole-unit MIR, and `ast` forces
+the AST interpreter. The redundant `--runtime=mvp-lmd` CLI option remains
+removed from Script and batch entry points. Runtime ownership alone must not imply
+dynamic-source effects or discard native call, numeric and storage proofs.
+Shared canonical context, realm bindings and retained-code ownership follow
+**D6.3–D6.4**. General handling is selected from demonstrated source or
+environment dependencies before execution, or by an explicit guarded
+operation/body boundary; completed side effects are never replayed.
+Preserving the rewritten MVP's release performance is the first integration
+gate and precedes expansion of dynamic feature coverage.
+*(v12, 2026-09-19)* AUTO is an AST-first
+policy: an interpreter-supported JS unit consumes the same static-import AST
+closure prebuilt under D8.3.5/D8.3.5, while an unsupported unit keeps
+the established whole-module MVP MIR path. The unset JS selector is AUTO *(v29)*, and
+forced `ast` remains fail-closed. *(v13, 2026-09-22)* AUTO also has a
+definition-site P2 MIR-satellite boundary. `JS_FUNC_JIT_THRESHOLD` has a default
+of **5** calls, the same as Lambda's `LAMBDA_FUNC_JIT_THRESHOLD` *(v24; 100 in v23, 1000 in v22, five before)*. At an ordinary call entry that
+reaches the threshold, a supported function can publish a boxed native entry
+before its body begins; no arbitrary interpreter program counter transfers
+to MIR.
+*(v22, 2026-10-03, USER)* A JS definition is compiled to MIR only on a hot
+hit: its call count reaching `JS_FUNC_JIT_THRESHOLD`, or one of its loops
+reaching the back-edge threshold. Nothing compiles a definition at first
+entry or because it owns a loop. A running AST activation may hand off at a
+**loop-head test**, in the shape D8.3.2 rules for Lambda: back-edges are
+counted per loop site; a loop that reaches `JS_LOOP_JIT_THRESHOLD` (**10000** by
+default) queues its definition once; the image carries a loop entry over
+the bindings live at that head; after publication the activation enters it
+at the next head test of the same loop, compiled code completes the
+activation, and the interpreter unwinds as for `return`. Handoff is one-way.
+A loop is eligible only where every value live at its head is a named
+binding the image can receive; every other loop stays interpreted. The
+selector and knobs keep their JS names (`JS_EXEC_BACKEND`,
+`JS_FUNC_JIT_THRESHOLD`, `JS_LOOP_JIT_THRESHOLD`); both thresholds are provisional and
+are to be revised from release profiling.
+The initial admission is intentionally closed: only a synchronous classic
+top-level function declaration or function expression with local-only
+bindings is eligible. Any capture, module/global binding, call boundary,
+nested callable, class,
+compound literal/pattern, `arguments`, `new.target`, `eval`, or `with` pins
+that definition to AST.
+*(v34, 2026-10-23, USER)* ES modules additionally admit synchronous
+top-level function declarations/expressions and public instance methods under
+the existing checked body/dependency proof. Methods require simple parameters;
+their class site is top-level or inside one top-level synchronous module
+function/arrow. Every resolved free lexical binding must be an ordinary source
+module-slab binding; wrapper locals, parameters and class-self/private bindings
+remain captures. Ordinary unresolved globals retain the classic checks.
+Admitted bodies may perform local loops, property operations and live module
+reads, writes and calls through ordinary invocation; no binding constancy is
+inferred. Imports, captures outside the slab, constructors, accessors,
+static/computed/private methods, super/private access, other nested/deeper or
+suspended definitions, eval and dynamic source stay excluded. Classification
+precedes the hot call, including threshold one. Boxed satellites preserve the
+source slab, namespace and original callable's identity, source, strict
+receiver, method home and non-constructibility. Thresholds, forced AST and
+whole-unit admission do not change. The parameter-expression proof remains
+a narrower light-call proof.
+*(v35, 2026-10-23, USER)* Synchronous top-level ES-module functions passing
+that body/dependency proof may also use the existing hot-loop, one-way
+handoff. Module reads, writes and calls retain the original live slab;
+local live-ins come from the precisely rooted activation at the loop head.
+A shadowing for-let head retains its own lexical boundary rather than
+flattening distinct bindings into one name. Unrepresentable live-ins, TDZ,
+const-write refusals, import/capture/nested-callable/method/suspension/dynamic
+exclusions and the existing thresholds remain authoritative.
+*(v36, 2026-10-24, USER)* Hot-entry promotion of checked synchronous
+top-level ES-module functions additionally admits contained synchronous
+ordinary function declarations and switch statements. Every contained body
+passes the same dependency and activation checks. Resolved lexical bindings
+must belong to the selected function subtree or the original module slab;
+contained closures use ordinary compiled closure ownership, while module
+reads and writes retain live source slots. Dependency selection includes
+references from every contained function. Imports, captures outside that
+subtree/slab, contained function expressions/arrows/methods/classes,
+suspended definitions, eval and dynamic source remain excluded. Original
+callable identity, receiver and construction behavior remain authoritative.
+No outer AST environment is bridged or module source re-executed. This
+extension does not change classic-function admission, loop handoff,
+thresholds, forced AST or whole-unit admission.
+*(v37, 2026-10-24, USER)* Module hot-entry admission additionally accepts
+untagged template literals with no substitutions and exactly one valid
+cooked quasi as constant strings, using the existing lowering and original
+source. Interpolation and tagged templates remain excluded. All other
+callable/dependency exclusions, thresholds, classic admission, forced AST,
+whole-unit admission and loop handoff remain unchanged.
+*(v38, 2026-10-24, USER)* Checked public instance module methods at
+the approved class sites additionally admit identifier parameters with
+checked defaults and contained synchronous arrows, ordinary declarations,
+switch statements and constant templates. Check every initializer and
+contained body; resolved bindings must stay within the selected method
+subtree or original live module slab. Compiled closures own their ordinary
+environments; no pre-existing AST environment is bridged. Imports,
+wrapper/external/class-self/private captures, destructuring/rest, contained
+function expressions/classes/methods, suspended/dynamic definitions and
+arguments/new.target/super remain excluded. Original method identity,
+source/name/length, strict receiver, home and non-constructibility remain
+authoritative. Other class/method exclusions, classic/ordinary-function
+admission, whole-unit admission, thresholds and all loop handoff stay
+unchanged.
+*(v39, 2026-10-24, USER)* Hot entry additionally admits synchronous
+top-level ES-module arrows with simple identifier parameters, no activation
+observations (this/arguments/new.target/super) and the existing checked
+body/dependency proof over live module slots. Preserve original arrow
+identity, source/name/length, lexical receiver metadata and
+non-constructibility; no pre-existing AST environment is bridged. The
+approved constant-template proof applies. Imports, external captures,
+nested/suspended/dynamic definitions and other existing exclusions remain
+authoritative. Ordinary nested-declaration/switch promotion stays deferred;
+classic admission, all loop handoff, whole-unit admission and thresholds
+remain unchanged.
+*(v40, 2026-10-24, USER)* These checked module arrows may also be
+defined inside one top-level synchronous module function declaration,
+function expression or arrow. Every free binding must still resolve to
+the original live module slab or an ordinary unresolved global; no
+wrapper-local, import, external, class-self or private capture is admitted.
+Deeper/suspended wrappers and class/field/static-block sites stay excluded.
+Simple parameters, no activation observations, original arrow metadata,
+the existing body proof and all other v39 boundaries remain authoritative.
+No pre-existing AST environment is bridged. Ordinary nested-declaration/
+switch promotion stays deferred; thresholds and all loop handoff are unchanged.
+*(v41, 2026-10-24, USER)* Checked synchronous ordinary function
+expressions inside one top-level synchronous ES-module function/arrow may
+read that wrapper's body let/const/var bindings through their original live
+AST cells. Both functions require simple identifier parameters and no
+direct-eval/with effects; the target has no activation observations or
+nested callable bodies. Each read uses immutable original binding identity
+and the current original callable's traced environment, preserving TDZ,
+scalar ownership, sibling instances and live replacement. Captured
+parameters/writes, imports, self/private bindings, deeper/suspended/class/
+method/field sites and dynamic source remain excluded. Preserve original callable
+identity, source/name/length and receiver/construction behavior; never copy
+captures into module slots or re-execute the wrapper. Other admission,
+thresholds and all loop handoff remain unchanged.
+*(v42, 2026-10-24, USER)* Checked synchronous arrows directly inside the bodies of
+synchronous public instance methods may hot-promote when the entire method
+passes the existing v38 body/dependency and class-site proof. The target has
+simple identifier parameters, no nested callable bodies and no activation
+observations except its original method's lexical this. The method retains
+its checked defaults. Free bindings may additionally be immediate-method-body
+let/const/var cells: read consts, and read/write let/var through each current
+original callable's traced AST environment and shared binding operations.
+Read lexical this from that original AST payload, never a synthetic MIR
+closure environment. Preserve live cell/receiver ownership, TDZ, scalar
+homes, identity, source/name/length and arrow non-constructibility. Captured
+parameters/const writes, other outer/class-self/private bindings, imports,
+deeper or other callable sites, suspended/dynamic definitions, eval/with
+and arguments/new.target/super remain excluded. Constructors, accessors,
+static/computed/private methods stay excluded. Other admission, thresholds
+and all loop handoff remain unchanged.
+*(v14, 2026-09-22)* A promoted definition may read
+or write a direct non-computed named property of its ordinary `this`
+receiver. The existing call kernel installs that receiver; P2 appends its
+sealed property-key image to the definition's active module slab at the
+encoded key-table base, so the temporary clone never leaks name indices into
+the retained body. Other property forms, including computed and nested
+accesses, remain AST-pinned. The satellite context is owned by the current
+`EvalContext` until final realm teardown. *(v15, 2026-09-22)* Classic
+function expressions use the same definition-owned `JsCallableCode` and
+`FunctionId` path as declarations, so a non-capturing expression with no
+enclosing `FunctionId` reaches the same P2 boundary. Thus an unsupported
+definition remains AST-executed; whole-module MIR is never represented as
+promotion. *(v16, 2026-09-22)* P2 also admits arrays without spread and
+plain data object literals with non-computed identifier or literal keys.
+Static non-computed named-member chains rooted in `this`, a parameter, or a
+function-local value use the existing property kernels; every static name
+from the temporary clone is appended to the owner slab before publication.
+Computed or indexed access, spread, accessors, methods, and dynamic keys
+remain AST-pinned. *(v17, 2026-09-22)* A computed member read or write is
+also admitted when both its receiver and key independently satisfy the
+local-only P2 scan. The existing MIR Reference path evaluates the receiver
+before the key, applies `ToPropertyKey` once, and invokes the ordinary
+property kernel. Computed object-literal keys, spread, accessors, methods,
+and any nonlocal receiver or key remain AST-pinned. *(v18, 2026-09-22)* A
+data object literal may use a computed key when that key and its value each
+satisfy the local-only scan. The existing object lowering evaluates and
+canonicalizes the key before its value, then calls the same data-property
+kernel. Spread, accessors, methods, and nonlocal key/value expressions
+remain AST-pinned.
+A synchronous CommonJS `require()` resolves literal targets against the
+owning `JsScript`, then enters the existing CJS resolver, cache, and runtime
+module registry. Its synthetic wrapper executes in a private module slab
+and restores the caller's active slab on return, so `module`/`exports` never
+leak into the page global and nested loads retain ordinary cache identity.
+The admitted synchronous ES-module slice uses the same registry rather than
+a JS-private cache: a module first publishes its registry-owned namespace
+placeholder, instantiates hoisted function declarations, then traverses
+static dependencies and executes its retained `JsScript` in its own shared
+module slab. It admits default/named/namespace imports; default/named,
+namespace (`export * as name`), and non-ambiguous star exports; named and
+star re-exports; `import.meta.url`; and dynamic `import()` as a Promise over
+that same resolver. Import reads resolve through the retained binding plan
+on every read, and export writes propagate through the registry, so the
+admitted named bindings remain live across re-exports and circular function
+imports. ES top-level `this` is undefined and imports are read-only.
+A `.ls` target is compiled by Lambda into the same registry descriptor; its
+public boxed function values retain their `TypeFunc` and cross the ordinary
+call kernel through Lambda's existing boxed dynamic-call ABI, not through a
+wrapper heap or a second evaluator. Thus one page/runtime has one
+`EvalContext`, heap, event-loop owner, module registry, and active module
+state authority, while Lambda and JavaScript retain separate semantic
+walkers and activation records. Top-level await, async module evaluation,
+generators/async functions, ambiguous star-export resolution, shared T0/T1
+environments, and continuations remain excluded from that initial slice. AUTO sends
+an interpreter-supported unit to AST and an unsupported unit to formal MVP MIR;
+the unset or empty selector is AUTO (v29). An explicit `mir` selector remains
+in the MIR lane; its shared link policy may choose eager native, lazy
+native, or the MIR-interpreter interface from unit volume, document
+attachment, and the largest finalized function. A selected MIR unit is not
+silently redirected to AST; compilation failure is reported without replay.
+Its dynamic source still executes in AST under v20.
+An AST ordinary function materializes the existing runtime `arguments`
+object in its precisely traced activation environment before evaluating
+parameter defaults. Sloppy functions with simple identifier parameters use
+the runtime's mapped aliases for parameter reads and writes; strict or
+non-simple functions use its unmapped object. An AST arrow resolves
+`arguments` through its retained outer function environment. This retains
+existing `arguments.callee` policy and never reads mutable ambient call
+state after the activation has escaped.
+The support admission runs after parse/bind/index but before declarations or
+user code; unsupported syntax raises a JS error in the prepared realm and
+never replays through MIR. *(v19, 2026-09-23)* The shared link policy
+chooses native, lazy-native, or MIR-interpreter interface from total and
+largest-function instruction counts plus document attachment; a large
+native function may lower only its generator optimization level. Default or
+explicit `auto` takes the interpreter-supported AST-first path; unsupported
+units retain formal MVP MIR. The unset selector selects AUTO (v29).
+[D1.3, D1.5, D1.7, D6.4.1, D7.2.2, D7.2.3,
+D8.2.4, D7.4.1, D7.4.3, JSI1–JSI13, JSI16v2, JSI35, JSI36]

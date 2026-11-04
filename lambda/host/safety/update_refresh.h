@@ -24,7 +24,7 @@ struct SecurityUpdateRefreshReport {
     ConfinedProcessResult process;
     SecurityVerifiedUpdate* artifact;
 };
-// D7.5.8: trusted host service only. Does not extract, install, finish the ticket
+// D11.2.4: trusted host service only. Does not extract, install, finish the ticket
 // or expose an updater command to apps. Caller owns the live job through consume.
 bool security_update_refresh(const SecurityUpdateRefreshConfig* config, SecurityUpdateJob* job, SecurityUpdateRefreshReport* out);
 // Checks the captured random reservation and live policy on every handoff.

@@ -390,7 +390,7 @@ size_t radiant_speech_voices(RdtSpeechVoice* out, size_t capacity) {
 }
 
 static uint64_t speech_next_token() {
-    // tokens never alias another document or a finished utterance (D4.5.1v4).
+    // tokens never alias another document or a finished utterance (D5.5.1).
     return audio_bus_identity(INT64_MAX);
 }
 
@@ -402,9 +402,9 @@ uint64_t radiant_speech_speak(DomElement* owner, SpeechText* text, const SpeechO
         *error = "speech options are invalid"; if (text) speech_text_release(text); return 0;
     }
     if (!doc || !dom_element_is_connected(owner)) { *error = "speech owner is not connected"; speech_text_release(text); return 0; }
-    // D7.5.4: a network document needs sticky activation before it may sound.
+    // D11.3.1: a network document needs sticky activation before it may sound.
     if (options->volume > 0 && !radiant_document_may_start_audio(doc)) {
-        *error = "speech needs a user gesture in a network document (D7.5.4)";
+        *error = "speech needs a user gesture in a network document (D11.3.1)";
         speech_text_release(text); return 0;
     }
     DocumentSpeech* speech = document_speech(doc, true);
@@ -547,7 +547,7 @@ static bool adopt_render(SpeechUtterance* u) {
 
 // hands an utterance to the document's speech voice, joining the bus first if needed.
 static bool playback_arm(DomDocument* doc, DocumentSpeech* speech, SpeechUtterance* u, const char** error) {
-    if (u->options.volume > 0 && !radiant_document_may_start_audio(doc)) { *error = "speech needs document activation (D7.5.4)"; return false; }
+    if (u->options.volume > 0 && !radiant_document_may_start_audio(doc)) { *error = "speech needs document activation (D11.3.1)"; return false; }
     auto submix = radiant_document_submix(doc); speech->submix = submix;
     if (u->route && !audio_submix_route_ref_valid(submix, u->routing)) { *error = "speech route was removed"; return false; }
     if (!speech->voice) {

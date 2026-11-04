@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S11.4.1v3, S7.1.1v3, D5.2: the fixed-read direct result has one length guard per borrowed array, scalar arithmetic on the valid arm, and an ordinary call on the absent arm; an escaping result retains the call.",
+  "description": "S11.4.1v3, S7.1.1v3, D6.2: the fixed-read direct result has one length guard per borrowed array, scalar arithmetic on the valid arm, and an ordinary call on the absent arm; an escaping result retains the call.",
   "checks": [
     {
       "in_func": "_fixed_result_#",

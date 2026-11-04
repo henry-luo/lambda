@@ -1,0 +1,20 @@
+<!doctype html>
+<style>
+  body { margin: 0; font: 16px/24px Arial; }
+  .outer { display: flex; flex-direction: column; align-items: flex-start; width: 400px; }
+  .section { display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
+  .header { display: flex; justify-content: space-between; width: 100%; }
+  .article { display: flex; width: 100%; padding: 24px; border: 2px solid;
+             box-sizing: border-box; gap: 24px; align-items: center; }
+  .picture { width: 50%; max-width: 382px; flex-shrink: 0; height: 100px; background: red; }
+  .text { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+</style>
+<div class="outer">
+  <div class="section" id="section">
+    <div class="header"><span>Featured Articles</span><span>All articles</span></div>
+    <div class="article">
+      <div class="picture"></div>
+      <div class="text">Three Authors Who Changed the English Language These famous writers were responsible for coining many interesting words in the English language.</div>
+    </div>
+  </div>
+</div>

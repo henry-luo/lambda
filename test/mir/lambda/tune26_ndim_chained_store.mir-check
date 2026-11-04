@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3/S7.1.3v2/S9.2.2: an exact int[][] write computes both shaped ArrayNum strides and stores the native lane before its allocation-bearing checked fallback. Re-pinned 2026-09-13: both strides are still computed, but each now multiplies its index parameter in place (%p2 row, %p3 column) instead of a copied local, so the patterns name the parameter registers -- `{{r}}` matches only %r<hex> by design. The native lane store likewise writes the value parameter (%p4) straight into the computed slot.",
+  "description": "D4.3.3/S7.1.3v2/S9.2.2: an exact int[][] write computes both shaped ArrayNum strides and stores the native lane before its allocation-bearing checked fallback. Re-pinned 2026-09-13: both strides are still computed, but each now multiplies its index parameter in place (%p2 row, %p3 column) instead of a copied local, so the patterns name the parameter registers -- `{{r}}` matches only %r<hex> by design. The native lane store likewise writes the value parameter (%p4) straight into the computed slot.",
   "checks": [
     {
       "in_func": "_store_#",

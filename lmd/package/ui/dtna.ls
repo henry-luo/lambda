@@ -1,4 +1,4 @@
-// Shipped facade (D7.2.4); imported views retain their defining module.
+// Shipped facade (D9.3.4); imported views retain their defining module.
 import c: lambda.ui.core.component
 import native: lambda.ui.core.contract
 import theme: .dtna.tokens

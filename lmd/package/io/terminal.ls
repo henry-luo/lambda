@@ -1,4 +1,4 @@
-// Shipped terminal facade and session template (S12.1.3, D7.2.4).
+// Shipped terminal facade and session template (S12.1.3, D9.3.4).
 import model: .terminal.model
 import .terminal.frame
 import layout: .terminal.layout
@@ -145,7 +145,7 @@ on readline_prompt(value) {
   emit("readline_frame_event", {name: "set_prompt", event: value})
 }
 on readline_history_size(value) { history_limit = max(0, value) }
-// a host restores a saved history (REPL session start, D8.1.1v17)
+// a host restores a saved history (REPL session start, D8.3.6)
 on readline_history_load(entries) { history = entries }
 on readline_history_ignore_dot(value) { history_ignore_dot = value }
 on readline_history_unique(value) { history_unique = value }

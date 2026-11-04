@@ -1,6 +1,6 @@
 # Lambda package-update verifier
 
-Authority: **D7.5.7–D7.5.8**. This is a Lambda Script implementation of the
+Authority: **D11.2.3–D11.2.4**. This is a Lambda Script implementation of the
 authentication workflow in [TUF 1.0.37](https://theupdateframework.github.io/specification/latest/).
 It is a component under qualification, not a qualified update service or a
 claim of TUF conformance. No Rust or Python runtime is required.

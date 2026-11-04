@@ -367,7 +367,7 @@ void render_painter_fill_transformed_rect(RasterRenderContext* rdcon, Rect* rect
             &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
         return;
     }
-    // native controls and decorations share the owner's paint transform (D4.5.1v4).
+    // native controls and decorations share the owner's paint transform (D5.5.1).
     RdtPath* path = rdt_path_new();
     if (!path) { rdcon->paint_failed = true; return; }
     rdt_path_add_rect(path, rect->x, rect->y, rect->width, rect->height, 0, 0);

@@ -26,10 +26,10 @@ metadata or use an ambient fallback if a client is bound. The broker enforces
 the effective grant on the resolved target and the size limit while reading;
 transport failures, invalid clients, revocation and oversized data are errors.
 Path conversion and `file:` parsing must not turn a remote authority or alias
-into a local path that escapes broker checks. D7.5.2 and D7.5.5 require the
+into a local path that escapes broker checks. D11.1.2 and D11.2.1 require the
 central I/O door and admitted resource authority; a path selected by app code
 is not itself a grant. Retain precise managed roots and independent ownership
-of native bytes across offload, cancellation and error cleanup (D5.3.3).
+of native bytes across offload, cancellation and error cleanup (D6.3.3).
 
 Before implementation verify the existing channel's maximum payload, client
 lifetime and thread-safety for parked calls, and whether it can distinguish an

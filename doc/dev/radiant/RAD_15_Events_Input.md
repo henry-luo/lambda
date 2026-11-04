@@ -88,7 +88,7 @@ cursor selection and scrollbar geometry stays native and is not a second event
 propagation path.
 
 Package clipboard commands retain the enclosing event record across their nested
-notifications (D7.2.5, S12.1.3). An exact `RootFrame` keeps that record alive;
+notifications (D10.2.1, S12.1.3). An exact `RootFrame` keeps that record alive;
 its cancellation and UA-delivery flags return with it, while
 model edits and selection completions remain pending. This prevents a clipboard
 command from making its enclosing click appear undelivered and replaying it.
@@ -96,7 +96,7 @@ Keyboard events target the live focused control before a retained document caret
 so a menu can navigate without changing the document's selection.
 
 Secondary-button `contextmenu` records expose the hit `source_pos` separately
-from the retained `source_selection` (D7.2.5, S12.1.3). Rich-editable table cells
+from the retained `source_selection` (D10.2.1, S12.1.3). Rich-editable table cells
 retain their padding as a hit target; nearby caret candidates cannot redirect
 item actions into another paragraph. If text-edge snapping escapes the hit
 element, the context position uses that element's boundary.
@@ -145,7 +145,7 @@ fallback, preserving subscriptions/captures/media when an earlier sibling is
 removed; a differently keyed node cannot inherit that state.
 The ordinary page body/window handler still runs. Subscribers receive fresh,
 non-bubbling records; history notifications retain `state`, `oldURL`, and `newURL`
-through their delivery boundary (S12.1.3, D4.5.1v4/D5.3.3, D7.5.3).
+through their delivery boundary (S12.1.3, D5.5.1/D6.3.3, D9.5.6).
 
 Package navigation requests retain precise node leases and follow corresponding
 nodes across full and incremental rebuilds. The host consumes them after handlers
@@ -153,7 +153,7 @@ and state batches have returned at the common event-loop pump. This also covers
 button, keyboard, and frame callbacks. `dom.history_traverse(owner, delta)` uses
 that same queue; native fragment changes publish hash notifications, and history
 traversal publishes popstate followed by hashchange when the fragment changed.
-JavaScript uses its existing queued history task delivery (D5.4.1, D7.5.3).
+JavaScript uses its existing queued history task delivery (D6.4.1, D9.5.6).
 
 Evidence: `test/ui/window_subscriptions.{ls,json}`,
 `test/ui/dom/native_fragment_events.{html,json}`, and
@@ -176,7 +176,7 @@ retiring its DOM node and searches within the corresponding replacement
 template result before structural fallback. Keyed chart elements therefore
 retain focus when an earlier sibling disappears or the mark family changes.
 The key is copied across retirement and released after restoration; no retired
-DOM pointer becomes the owner of the new focus (D4.5.1v4).
+DOM pointer becomes the owner of the new focus (D5.5.1).
 
 Lambda `dom.dispatch` descriptors with an explicit `detail` field create a
 rooted custom event, preserving that value through nested dispatch. Ordinary
@@ -197,7 +197,7 @@ live focused surface. `lambda.dom.scroll` leaves Space to text entry there;
 its later character event performs the edit. A completed native editable-caret
 operation ends keyboard default dispatch before scrolling, so arrow keys do
 not both move the caret and page the containing scrollport. Native owns focus
-classification and geometry; the package owns the Space policy (**D7.2.5**).
+classification and geometry; the package owns the Space policy (**D10.2.1**).
 `editor_viewport` and the Word `viewport` replay cover physical key sequences;
 the document keyboard-scroll fixtures retain Space/PageDown outside editors.
 
@@ -212,13 +212,13 @@ The three `RDT_EVENT_COMPOSITION_*` events (`event.cpp:9367`) carry native IME p
 
 ## 7. Scrolling and the context menu
 
-Scrolling is handled in `scroller.cpp`. `scrollpane_target` (`scroller.cpp:255`) hit-tests the scrollbar track/thumb; `scrollpane_scroll` (`scroller.cpp:214`) applies wheel deltas; `scrollpane_drag` (`scroller.cpp:340`) converts a thumb drag delta into a scroll position. Crucially, scroll position is **not** stored on the view — every write goes through `scroll_state_set_position_for_view` into the StateStore ([RAD_17](RAD_17_Interaction_State.md)), so scroll survives relayout and participates in incremental reconcile. `RDT_EVENT_SCROLL` in `handle_event` hit-tests to find the scrollable block; the package-selected wheel operation applies `scrollpane_scroll` through the live scroll chain. Thumb motion publishes changed offsets through `radiant_notify_scrolled_view`, as wheel and track paging do, and resamples geometry observers; clamped or stationary motion emits no extra `scroll` event (**D7.2.5**; ES33 in `vibe/Lambda_Design_DOM_Default.md` §2.9). A scroll repaints without relayout; because sticky offsets depend on the scroll position, a moved position marks `sticky_scroll_stale`, and paint and `handle_event` re-solve sticky boxes first ([RAD_11 §2.1](RAD_11_Positioned_Float_Multicol_Lists.md)).
+Scrolling is handled in `scroller.cpp`. `scrollpane_target` (`scroller.cpp:255`) hit-tests the scrollbar track/thumb; `scrollpane_scroll` (`scroller.cpp:214`) applies wheel deltas; `scrollpane_drag` (`scroller.cpp:340`) converts a thumb drag delta into a scroll position. Crucially, scroll position is **not** stored on the view — every write goes through `scroll_state_set_position_for_view` into the StateStore ([RAD_17](RAD_17_Interaction_State.md)), so scroll survives relayout and participates in incremental reconcile. `RDT_EVENT_SCROLL` in `handle_event` hit-tests to find the scrollable block; the package-selected wheel operation applies `scrollpane_scroll` through the live scroll chain. Thumb motion publishes changed offsets through `radiant_notify_scrolled_view`, as wheel and track paging do, and resamples geometry observers; clamped or stationary motion emits no extra `scroll` event (**D10.2.1**; ES33 in `vibe/Lambda_Design_DOM_Default.md` §2.9). A scroll repaints without relayout; because sticky offsets depend on the scroll position, a moved position marks `sticky_scroll_stale`, and paint and `handle_event` re-solve sticky boxes first ([RAD_11 §2.1](RAD_11_Positioned_Float_Multicol_Lists.md)).
 
 Wheel and scrollbar-press defaults in `lambda.dom.form` match `view any`,
 including the viewport's `<html>` target above `<body>` and XML document roots.
 A body-only handler misses viewport scrollbar presses even though hit testing
 finds the thumb. Author cancellation still precedes this package policy
-(**S12.1.3**, **D7.2.5**); native retains drag capture, geometry and scroll state.
+(**S12.1.3**, **D10.2.1**); native retains drag capture, geometry and scroll state.
 `viewport_scrollbar_drag` covers capture outside the track and cancellation;
 `marble_drop/scrolling` covers viewport dragging, track paging and wheel input
 at 1x and 2x device density.
@@ -252,13 +252,13 @@ The root `event_interval_ms` defaults to 50; `0` runs adjacent commands without 
 
 ### 8.1 Render and animation assertions
 
-`event_sim_render.{cpp,hpp}` supplies the Scene3D CLI integration vocabulary. These commands use the same assertion totals and `--event-result` JSON as the existing UI assertions. `script` fails on an exception; `assert_script` requires the boolean `true`. Script turns borrow the document evaluator and keep code/results in precise roots (**D5.3.3**), including script-less pages whose evaluator has not initialized its heap yet.
+`event_sim_render.{cpp,hpp}` supplies the Scene3D CLI integration vocabulary. These commands use the same assertion totals and `--event-result` JSON as the existing UI assertions. `script` fails on an exception; `assert_script` requires the boolean `true`. Script turns borrow the document evaluator and keep code/results in precise roots (**D6.3.3**), including script-less pages whose evaluator has not initialized its heap yet.
 
 | Commands | Arguments and observation |
 |---|---|
 | `scene3d` | `target` selector; `op` is `snapshot`, `lose_context`, `release`, `collect`, `seek`, `automatic`, `update`, `play`, `stop` or `configure`. Snapshots accept logical `width`/`height`, `scale`, expected `success` and a `diagnostic` substring. Playback uses `clip`, `seconds`, `enabled`, `once` and `clamp`. |
 | `animation_tick`, `animation_frame`, `css_animation` | Advance the document scheduler by `seconds`, flush rAF at absolute `ms` (optionally checking `callbacks`), or sample a target's CSS animation at absolute `seconds`. `collect_gc` performs a bounded `count` of precise collections. |
-| `snapshot_surface`, `release_surface`, `prepare_canvas` | Save a named surface lease plus an independent pixel copy, release that lease, or prepare document canvas snapshots. `lease: "display_list"` exercises display-list ownership. Sources are `page`, `canvas` and `scene3d`; `surface` addresses a saved lease. Generation-checked handles and leases follow **D4.5.1v4**, with owned pixel copies for comparisons. |
+| `snapshot_surface`, `release_surface`, `prepare_canvas` | Save a named surface lease plus an independent pixel copy, release that lease, or prepare document canvas snapshots. `lease: "display_list"` exercises display-list ownership. Sources are `page`, `canvas` and `scene3d`; `surface` addresses a saved lease. Generation-checked handles and leases follow **D5.5.1**, with owned pixel copies for comparisons. |
 | `assert_surface` | Physical-pixel probes `[x,y,r,g,b,alpha=255,tolerance=3]`; optional `premultiplied` / `premultiplied_pixels`. Count matching pixels in `[x,y,width,height]` using `rgba` channel bounds, a named `reference` (changed RGB, or RGBA with `alpha: true`), `different_from_pixel: [x,y]`, and/or `red_above_blue`. `count` requires `min`, `max` or `eq` bounds. |
 | `snapshot_render_stats`, `assert_render_stats` | Save named numeric metrics or compare a nonempty `fields` map. Sources: `scene3d`, `webgl`, `animation`, `svg_animation`, `scheduler`, `view`, `document`, `surface`, `measurement`. Field values are exact numbers or `{eq,ne,min,max,tolerance}`; `baseline` subtracts that field from a named checkpoint. Unknown fields/checkpoints fail. Optional `js` evaluates immediately before observation in the same turn, before the host paints again. |
 | `pointer_event` | Dispatch pointer down/up/cancel or raw mouse down/up at CSS `x`/`y`, or read coordinates from `position_from: {target,x: attribute,y: attribute}`. Optional `prevented` checks cancellation; the dispatch API's boolean is not a success flag. |

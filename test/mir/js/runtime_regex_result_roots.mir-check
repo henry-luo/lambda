@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3/D5.4: formal RegExp results and named-capture graphs remain in rooted storage through generic property access. D8.1.3v27: check the terminal CLI specialization and its complete semantic miss.",
+  "description": "D6.3/D6.4: formal RegExp results and named-capture graphs remain in rooted storage through generic property access. D8.4.2: check the terminal CLI specialization and its complete semantic miss.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",

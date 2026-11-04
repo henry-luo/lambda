@@ -68,17 +68,17 @@ All dispatch happens inside `main()` (`main.cpp:1309`) as a sequence of `strcmp(
 - **Procedural run.** `run` (`:4158`, §4).
 - **Fallthrough.** Script-option parsing (`:4247`): `--mir`/`--mir-interp`, `--max-errors N`, `--optimize=N` and `-O0..-O3`, `--dry-run`; a bare file → `run_script_file` (`:4351`); otherwise → `run_repl` (`:4359`).
 
-Document transforms do not synthesize Lambda source. `LambdaDocumentTransformConfig` selects the input type, shipped package, and public export; native code loads the package by its resolved file path, parses the input natively, and invokes that export with typed options. This uses the ordinary package compilation unit and public export boundary required by **D7.2.1–D7.2.2** and preserves the package's own relative-import base.
+Document transforms do not synthesize Lambda source. `LambdaDocumentTransformConfig` selects the input type, shipped package, and public export; native code loads the package by its resolved file path, parses the input natively, and invokes that export with typed options. This uses the ordinary package compilation unit and public export boundary required by **D9.3.1–D9.3.2** and preserves the package's own relative-import base.
 
 ---
 
 ## 6. The REPL loop
 
-> Section re-verified against the tree on 2026-10-06 (D8.1.1v17, S16.7.4–S16.7.6).
+> Section re-verified against the tree on 2026-10-06 (D8.3.6, S16.7.4–S16.7.6).
 
 <img alt="REPL entry lifecycle" src="diagram/d01_repl.svg" width="720">
 
-`run_repl(runtime, procedural)` (`main.cpp`) owns one `InterpReplSession` for the whole interactive run; `lambda` opens a functional session and `lambda run` without a script a procedural one (S16.7.6). The session is the only REPL engine: there is no accumulated history buffer and no `run_script_mir` replay (D8.1.1v17). Under `jit` the driver switches the tier to `auto` with a first-call promotion threshold, so the tier only governs satellite promotion.
+`run_repl(runtime, procedural)` (`main.cpp`) owns one `InterpReplSession` for the whole interactive run; `lambda` opens a functional session and `lambda run` without a script a procedural one (S16.7.6). The session is the only REPL engine: there is no accumulated history buffer and no `run_script_mir` replay (D8.3.6). Under `jit` the driver switches the tier to `auto` with a first-call promotion threshold, so the tier only governs satellite promotion.
 
 `interp_repl_session_init` (`runtime/runner.cpp`) loads an empty `<repl-session>` Script through the T0 branch, gives it a growable `repl_source` buffer, marks the global scope `is_proc` for a procedural session, and prepares its module slab. Each line is appended to the pending entry; `repl_has_unclosed_brackets` (`main-repl.cpp`) keeps the `.. ` prompt while a bracket, string or block comment is open. A balanced entry goes to `interp_repl_session_eval`, which runs one transaction (`ReplEntryTxn`): append the source, reduce it with the C parser against the retained global scope (`lambda_rd_reduce_ast`), finalize, rebase the fragment's spans, scan it for T0 support, check its import cones, plan new slots (`interp_plan_repl_fragment`) and grow the slab, link the fragment into the root chain and AST index, snapshot the slab, and execute only the fragment (`interp_run_repl_fragment`). The fragment executor first initializes any newly imported module cone, then runs the top level, as a procedure body in a procedural session.
 

@@ -24,7 +24,7 @@ reader, paginated and fixed layouts, file-browser preview, and generic iframe
 navigation delegation. They are discovered by the baseline UI manifest.
 `test/epub_reader_check.py` checks persisted preferences/bookmarks, moved-file
 resume and rejection of an altered saved passage, and is registered in the
-Radiant baseline through `test/run_epub_reader.js`.
+Radiant full gate through `test/run_epub_reader.js`.
 
 These small fixtures establish the declared initial profile. They do not
 establish full EPUB conformance, RTL/vertical writing, CFI, obfuscated fonts,

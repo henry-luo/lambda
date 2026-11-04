@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-26. **Status:** initial reader implemented; broader acceptance incomplete.
 
-The public package is `lambda.doc.ebook` (D7.2.4). It loads EPUB 2/3 and
+The public package is `lambda.doc.ebook` (D9.3.4). It loads EPUB 2/3 and
 presents chapters through Radiant. The supported profile is horizontal LTR
 prose with chapter scrolling/column pagination, plus single-page fixed-layout
 XHTML/SVG with fit/zoom. The broader target remains recorded in
@@ -18,7 +18,7 @@ EPUB uses existing ZIP/XML/CSS/Radiant facilities and no new ebook decoder.
 
 - `read` captures local bytes procedurally; `parse` accepts immutable bytes or
   a captured ZIP root. Captured-member parsing never reacquires the source
-  (S12.1.1v3, S12.4.1v2, S14.3.1v2, D7.1.2v2).
+  (S12.1.1v3, S12.4.1v2, S14.3.1v2, D9.1.2).
 - OCF rendition selection, relocated OPF, metadata/cover, manifest IDs, spine
   occurrences/non-linear entries, XHTML/SVG fallbacks, EPUB 3 contents,
   landmarks/page lists, and EPUB 2 NCX are implemented in Lambda Script.
@@ -48,7 +48,7 @@ occurrence, canonical href, original source node and Unicode-scalar position
 with quote validation. Atomic sidecars preserve preferences, bookmarks and
 last-read location when an unchanged file moves. Embedded browser previews do
 not persist. Reader mutation stays in procedural handlers (S12.1.3); retained
-values keep their Input/resource owners (D4.1.3, D4.5.1v4).
+values keep their Input/resource owners (D5.1.3, D5.5.1).
 
 Native integration fixes are shared with ordinary iframes:
 
@@ -57,7 +57,7 @@ Native integration fixes are shared with ordinary iframes:
   a body fragment. Successful replacement retires old interactions and glyph
   caches before releasing the old document.
 - Child load/teardown restores the embedding evaluator at the quiescent layout
-  boundary (D5.4.1). Deferred DOM-package admission no longer marks an unstarted
+  boundary (D6.4.1). Deferred DOM-package admission no longer marks an unstarted
   load complete, so inputs remain focusable after chapter navigation.
 - CSSOM and iframe scroll ranges share descendant-overflow measurement, so
   generated columns can actually scroll. `dom.scroll_metrics` exposes viewport
@@ -68,7 +68,7 @@ Native integration fixes are shared with ordinary iframes:
 - Native policy admission rebinds its document at quiescent event boundaries;
   scrolling in existing HTML/XML previews continues to work. A support-only JS
   capsule can exist before a heap; batch reset now respects that lifecycle
-  instead of attempting to allocate a realm-cache root without a heap (D5.3.3).
+  instead of attempting to allocate a realm-cache root without a heap (D6.3.3).
 - Publication URLs encode decoded member names/fragments when serialized, so
   literal percent escapes survive navigation. Resolving an anchor updates the
   source locator before subsequent readiness/resize restores it.
@@ -81,7 +81,7 @@ panel and **Aa** reading settings, and footer navigation. Controls have labels
 and tooltips, unavailable chapter/history actions are disabled, and chrome
 follows the selected light/sepia/dark theme. Narrow windows collapse the sidebar;
 its contents toggle restores it. Search receives focus and Enter submits it.
-Settings remain ordinary view/handler policy (D7.2.4, D7.2.5, S12.1.3).
+Settings remain ordinary view/handler policy (D9.3.4, D10.2.1, S12.1.3).
 
 Radiant focus is painted through CSS, including a UA `:focus-visible` rule
 that author outline declarations override. Focus transitions now refresh
@@ -89,7 +89,7 @@ matching focus selectors. Native form rings and the unconditional focus overlay
 are removed. Only a collapsed selection in the focused, editable surface
 paints an insertion caret; ordinary reading text, readonly/disabled fields,
 noneditable islands and blurred editors do not. Drag selection/copying retains
-its canonical DOM boundaries (D7.2.5). `assert_caret` can now check visibility
+its canonical DOM boundaries (D10.2.1). `assert_caret` can now check visibility
 independently of those boundaries. Browser behavior references and the shared
 mechanism are documented in [RAD_17](../../doc/dev/radiant/RAD_17_Interaction_State.md#3-the-data-model).
 
@@ -143,7 +143,7 @@ teardown pumps the shared libuv loop, which can fire a timer owned by another
 document. Timer entry captured the retiring document before switching runtime;
 exit then installed that pointer in the timer's realm after its DOM had been
 destroyed. The fix captures the restoration document after the callback's
-retained owner is bound, preserving the quiescent-handoff contract (D5.4.1).
+retained owner is bound, preserving the quiescent-handoff contract (D6.4.1).
 The CoreText font-name message also appears in passing runs.
 
 The new native `CrossRuntimeTimerKeepsItsOwningDocument` regression detects

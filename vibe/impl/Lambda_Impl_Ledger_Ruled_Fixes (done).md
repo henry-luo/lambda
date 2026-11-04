@@ -12,10 +12,10 @@ implemented.
 
 | Records | Authority | Change and regression coverage |
 |---|---|---|
-| LR07-22, LR07-28 | S1.6; D3.3.3v3 | Representation-changing stores invalidate inferred element lanes, including list splices, dynamic values, bool specialization and loop binders. Numeric specializations retain their runtime element-tag guard; a generic bool Array cannot prove its members from a container tag. `proc/ledger_lane_widening.ls`. |
+| LR07-22, LR07-28 | S1.6; D4.3.3 | Representation-changing stores invalidate inferred element lanes, including list splices, dynamic values, bool specialization and loop binders. Numeric specializations retain their runtime element-tag guard; a generic bool Array cannot prove its members from a container tag. `proc/ledger_lane_widening.ls`. |
 | LR07-30 | S1.6; S11.1.3 | A range-annotated mutable binding uses a boxed member carrier, preserving an admitted float's kind. Same fixture. |
-| LR07-43 | S12.2.1; D2.4.1–D2.4.3 | Unknown assignments widen an inferred scalar before loop emission. Proven native expressions and enforced scalar return contracts preserve closed numeric/string lanes. JSON fractional accumulation is 3.75, not 3. Same fixture. |
-| LR03-36 | S12.2.1; D3.3.3v3 | Compact/N-D literal selection follows widened dependencies through immutable aliases and nested expressions. Direct, let-alias, nested and arithmetic cases are covered in both tiers. Same fixture. |
+| LR07-43 | S12.2.1; D2.3.4–D2.3.5 | Unknown assignments widen an inferred scalar before loop emission. Proven native expressions and enforced scalar return contracts preserve closed numeric/string lanes. JSON fractional accumulation is 3.75, not 3. Same fixture. |
+| LR03-36 | S12.2.1; D4.3.3 | Compact/N-D literal selection follows widened dependencies through immutable aliases and nested expressions. Direct, let-alias, nested and arithmetic cases are covered in both tiers. Same fixture. |
 | LR12-33 | S9.1.3 | Plain container-capable parameters snapshot before a sibling var borrow writes. The var root detaches and refreshes its numeric layout. Generic maps, nominal Box, typed arrays and an indexed array loop share one argument with their plain snapshot. `proc/ledger_cow_value_boundaries.ls`. |
 | LR12-35, LR12-40 | S9.1.2 | Member/index reads and operand-returning expressions cross the alias binding boundary. MIR source roots also record possible sharing, so writes through either the copy or the original detach. Includes `or`, `if`, `match`, `that` and member copies. Same fixture. |
 | LR12-42 | S1.6; S8.2.1v4 | T0 admits a constant scalar string/symbol index-assignment key through the existing COW setter. Same fixture. |
@@ -29,7 +29,7 @@ implemented.
 | LR10-19 | S7.4.2 | Function completion diagnoses an unlicensed raise before return-type validation. Plain and value-error-return functions have negative fixtures. Existing closure, DOCX, UI and Scene3D callers were migrated to explicit raising or value-error forms. |
 | LR07-40, partial | Lambda_Func call contract; S12.3.2 for the dynamic restrictions | Duplicate named/named and positional/named slots are rejected before normalization discards an argument. Positional arguments after named ones still fill the next empty slot. Unknown names are untouched. Two negative fixtures plus `interp_variadic.ls`. |
 | LR10-16 | S7.5.1v2 | Error acknowledgement resolves arguments by parameter name, including out-of-order names; the wrong receiving parameter still produces E228. `ledger_named_error_ack.ls` and a negative fixture. |
-| LR11-7 | S8.2.2v6; D4.6.1v4 | Symbol documentation now describes NameKey identity and the actual arena allocator, without promising pooling or pointer comparison. |
+| LR11-7 | S8.2.2v6; D5.6.1 | Symbol documentation now describes NameKey identity and the actual arena allocator, without promising pooling or pointer comparison. |
 | LR11-9 | Existing parser severity contract | Input notes log at debug, warnings at warning and real parse errors at error. CSV reads no longer print a false zero-error report. |
 | LR13-16 | Existing validator diagnostic contract | Literal mismatch diagnostics use the literal contract formatter rather than only its kind. The CLI now reports expected `"debug"`, instead of expected string/got string. |
 

@@ -8,17 +8,17 @@ the larger proposal. It does not change any formal ruling.
 
 ## Contracts
 
-- D7.2.4: the public package is `lambda.map`, with explicit entry
+- D9.3.4: the public package is `lambda.map`, with explicit entry
   `lmd/package/map.ls` and private implementation modules beneath `map/`.
-- D7.4.6 / S12.1.3: camera calculations, normalization, querying, SVG export
+- D7.1.1 / S12.1.3: camera calculations, normalization, querying, SVG export
   and DOM reads are functions; focus and capture remain procedural.
   Interaction state belongs to each reactive view instance.
 - S7.4.1: invalid package input returns an ordinary error value. Unsupported
   layer types, expressions and properties are rejected explicitly.
-- D4.5.2 / D4.5.1v4: a native frame owns its copied Input, compiled styles,
+- D5.5.2 / D5.5.1: a native frame owns its copied Input, compiled styles,
   evaluated paths and spatial index. Document resources retain/release frames;
   detached viewports release their lease. Frames contain no GC pointers.
-- D7.5.3 / D5.3.3: declared `radiant.geomap_plan`, snapshot/query functions
+- D9.5.6 / D6.3.3: declared `radiant.geomap_plan`, snapshot/query functions
   and `radiant.local_point` form the native boundary. Snapshot adapters copy
   metadata into rooted Lambda values. `map.to_svg` and `render_frame` use the
   same frame painter as the viewport, without GeoJSON text attributes.
@@ -144,7 +144,7 @@ and **5/5** in forced JIT mode. Logs: `temp/map-functional-pinned.log`,
 `radiant/geomap_style.{hpp,cpp}` now compiles the supported expression language
 once per layer paint or query batch. The same evaluator serves native raster,
 SVG/PDF, package normalization and rendered-feature queries through declared
-Radiant functions (D7.5.3). It records feature/zoom dependencies, checks arity,
+Radiant functions (D9.5.6). It records feature/zoom dependencies, checks arity,
 static types, zoom placement, increasing stops and distinct match labels, and
 validates unused branches and constant failures. The compiler has depth 32 and
 a shared budget of 1,024 expression visits/match labels per layer.
@@ -158,7 +158,7 @@ errors return ordinary package errors (S7.4.1), and raw native errors retain
 transactional rejection of the whole map, including preceding valid layers.
 
 Compiled nodes borrow the rooted description for one synchronous call
-(D4.5.2, D5.3.3). D4.3.1 and D4.3.2v2 keep object headers and strings stable;
+(D5.5.2, D6.3.3). D5.3.1 and D5.3.1 keep object headers and strings stable;
 array/map readers are acquired afresh during evaluation so compacted backing
 data is not retained across result allocations. Batch evaluation roots the layer and feature array while
 allocating result records. It accepts up to 16,384 features and propagates a
@@ -251,7 +251,7 @@ before inspecting candidates in reverse paint order. `snapshot(node)` and
 they never implicitly paint a newer model. Frame leases survive resize and
 removal. Public snapshots own copied feature metadata, with JSON depth/node
 quotas, and native consumers retain a frame during result allocation. This
-implements D4.5.2/D5.3.3 without a GC-managed native registry.
+implements D5.5.2/D6.3.3 without a GC-managed native registry.
 
 The map and SVG queries share `dom_geometry_path_query`, extending the existing
 path walker with rectangle intersection for fills, stroke segments, caps and
@@ -270,7 +270,7 @@ MapLibre line property or default. Programs are retained within each frame;
 sharing them across different camera plans is still outstanding.
 
 Native event coordinates use the shared `view_client_to_local` inverse plane
-homography through declared function `radiant.local_point` (D7.4.6, D7.5.3).
+homography through declared function `radiant.local_point` (D7.1.1, D9.5.6).
 Rotation, perspective and singular transforms have focused tests. Reactive
 state now includes hover, selection and drag suppression. A 3 CSS pixel
 threshold separates a click from dragging; a completed drag suppresses the

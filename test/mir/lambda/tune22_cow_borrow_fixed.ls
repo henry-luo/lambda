@@ -1,4 +1,4 @@
-// S9.2.2/D8.4.1v2: static member/int PLACE paths use the bounded descriptor
+// S9.2.2/D7.4.1: static member/int PLACE paths use the bounded descriptor
 // ABI and retain the same observable COW isolation as the generic walker.
 pn tag(var row) { row.value = 17 }
 

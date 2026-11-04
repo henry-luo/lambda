@@ -1,4 +1,4 @@
-// D7.5.8: test-only host relay. All trust decisions use the production package;
+// D11.2.4: test-only host relay. All trust decisions use the production package;
 // request/state files are isolated fixture data, never production grant state.
 import updater: lambda.security.tuf.update
 import tuf: lambda.security.tuf

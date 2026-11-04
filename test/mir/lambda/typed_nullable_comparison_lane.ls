@@ -1,4 +1,4 @@
-// S6.1.2/D2.4.1-D2.4.3: a nullable comparison stays a 0/1/2 bool lane.
+// S6.1.2/D2.3.4-D2.3.5: a nullable comparison stays a 0/1/2 bool lane.
 pn classify(values: int[], index: int) int {
     if (values[index] > 0) { return 1 }
     if (values[index] <= 0) { return -1 }

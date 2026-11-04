@@ -6,7 +6,7 @@
 **Authority:** S1.4v2, S2.5.3v3–S2.5.4v3, S7.4.6v3,
 S9.1.2–S9.1.4v2, S9.1.7v2, S12.1.1v3–S12.1.2v3,
 S12.1.4v4, S16.4.3v4, S16.6.5v2–S16.6.9v2;
-D6.1.2v2, D6.2.3v3 and D4.3.3.
+D7.1.2, D7.2.3 and D5.3.2.
 
 ## 1. Delivery boundary
 
@@ -155,7 +155,7 @@ coverage from a program forbidden by S12.1.1v3.
 1. Audit constant evaluation, local CSE, loop transforms, stream fusion and
    parallelization consumers of `is_proc`/pure-colour facts. A local read
    depends on intervening writes even when the enclosing call is pure
-   (D6.1.2v2). Reuse existing dependency analyses or decline the transform
+   (D7.1.2). Reuse existing dependency analyses or decline the transform
    when the proof is absent; never hard-code a function or benchmark name.
 2. Ensure compile-time evaluation terminates under its existing budget or
    declines unsupported loops. Do not compile a literal infinite while by

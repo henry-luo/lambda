@@ -5,12 +5,12 @@
 > C/C++ layouts and pointer interfaces consumed by Lambda MIR Direct. It
 > introduces no new semantic or ABI ruling.
 >
-> **Formal linkage:** `D2.1.1` (one-word `Item`), `D2.1.3` (tagged leaf
-> pointers), `D2.4.1` (semantic representation discipline), `D2.6.1`
-> (array carriers), `D2.6.6v2` (container hierarchy), `D3.4.1` and `D3.4.6`
-> (packed shapes and lane descriptors), `D5.2.1v3` (companion returns),
-> `D5.4.1`–`D5.4.4` (context ownership and capsules), `D6.2.1` (function
-> values), and `D7.4.1v2`–`D7.4.3` (native/guest boundaries).
+> **Formal linkage:** `D2.1.1` (one-word `Item`), `D2.1.1` (tagged leaf
+> pointers), `D2.3.4` (semantic representation discipline), `D3.2.1`
+> (array carriers), `D3.1.1` (container hierarchy), `D3.4.1` and `D3.4.6`
+> (packed shapes and lane descriptors), `D6.2.1` (companion returns),
+> `D6.4.1`–`D6.4.4` (context ownership and capsules), `D7.2.1` (function
+> values), and `D9.5.1`–`D9.5.3` (native/guest boundaries).
 >
 > **Scope:** generated Lambda MIR, its C/C++ runtime helpers, the GC layout
 > bridge, and the context-owned module state reached by generated code.
@@ -26,7 +26,7 @@ physical classes:
 | `MIR_T_I64` | boxed `Item`, Lambda integer lane, machine integer, or raw 64-bit payload; the surrounding `MirValue`/`ValueRep` says which one |
 | `MIR_T_D` | native binary64 floating-point lane |
 
-Under `D2.4.1`, MIR register type alone is not a semantic type. In particular,
+Under `D2.3.4`, MIR register type alone is not a semantic type. In particular,
 boxed `Item`, an `int` lane, Lambda `int64`, and machine quantities can all use
 `MIR_T_I64`.
 
@@ -46,7 +46,7 @@ f(Context* runtime, [closure env or self], native parameters, ...)
 `Item` is represented as an `I64` MIR result/argument, not as a MIR struct
 type. Shape-2 generated returns use the second MIR result for the raw scalar
 payload. C-reachable wrappers put that payload in
-`Context::mir_companion_slot`, as required by `D5.2.1v3`.
+`Context::mir_companion_slot`, as required by `D6.2.1`.
 
 The generated entry implementations are emitted by
 [`transpile-mir.cpp`](../lambda/runtime/transpile-mir.cpp#L31779); common ABI,
@@ -99,12 +99,12 @@ loads `Context::pool` (string/number construction) and `Context::run_main`.
 
 The scratch, companion, and `var`-home cells are transport locations, not GC
 roots. The companion cell holds raw scalar bits only, and is live only between
-a shape-2 return and its resolution (`D5.2.1v3`, `D5.2.2v3`).
+a shape-2 return and its resolution (`D6.2.1`, `D6.2.2`).
 
 ### 2.3 `EvalContext`, `Heap`, and the capsule directory
 
 `EvalContext` extends `Context` and is the canonical long-lived isolate owner
-(`D5.4.1`–`D5.4.2`). It adds the runtime heap, AST/name pools, decimal context,
+(`D6.4.1`–`D6.4.2`). It adds the runtime heap, AST/name pools, decimal context,
 validator, result and error state, debug-info/stack-trace state, scheduler,
 current vargs, the edit-session editor, the `Runtime` back-pointer, the
 template registry, the module-state table (`active_module_state`,
@@ -113,7 +113,7 @@ tail — `capsule_directory`. Its definition is in
 [`lambda-data.hpp`](../lambda/lambda-data.hpp#L107).
 
 `ContextCapsuleDirectory` is the one directory for context-owned subsystem
-state (`D5.4.2`–`D5.4.4`; JSCU15/JSCU27). Reading a capsule is one indexed
+state (`D6.4.2`–`D6.4.4`; JSCU15/JSCU27). Reading a capsule is one indexed
 load into `ContextCapsuleSlot`; each subsystem owns its own frozen
 `ContextCapsuleOps` record, and lifecycle (`release_heap` at heap replacement,
 `destroy` at context teardown) is a table walk rather than a hand-maintained
@@ -140,7 +140,7 @@ The `Heap` definition is in
 asserted in [`transpile-mir.cpp`](../lambda/runtime/transpile-mir.cpp#L70)
 so an `EvalContext` prefix change cannot silently invalidate inline allocation.
 `capsule_directory` and `execution_depth` are kept at the tail precisely so the
-established module-state offsets do not move (`D8.1.3v10`).
+established module-state offsets do not move (`D8.4.1`).
 
 ## 3. Container hierarchy
 
@@ -155,7 +155,7 @@ Container
         └── SparseArrayMap
 ```
 
-This is the `D2.6.6v2` layout. The attribute face is shared by every member of
+This is the `D3.1.1` layout. The attribute face is shared by every member of
 the chain, and the content face is shared by `List`, `ArrayNum`, and `Element`.
 
 ### 3.1 `Container`
@@ -209,7 +209,7 @@ ArrayRepCert*  rep_cert   // full homogeneous-array representation proof
 ```
 
 `Array` is the compatibility alias for `List`. The `extra` region owns
-container-resident wide scalar payloads where required by `D2.6.4`.
+container-resident wide scalar payloads where required by `D2.6.2`.
 `rep_cert` is the non-GC representation certificate described in §3.7; MIR
 loads it at a baked offset.
 
@@ -244,7 +244,7 @@ no new fields beyond `List` — `sizeof(Element) == sizeof(List)` is asserted.
 `Object` is a typedef of `Element` ([`lambda.h`](../lambda/lambda.h#L848));
 there is no separate object container TypeId. Nominal identity is carried by
 the type descriptor (`TypeMap::nominal`) and cached in the container header's
-`nominal_reserved` bit (`D2.6.6v2`).
+`nominal_reserved` bit (`D3.1.1`).
 
 ### 3.6 Other container carriers
 
@@ -261,10 +261,10 @@ The materialized and virtual definitions, vtables, and offset assertions are
 in [`lambda.hpp`](../lambda/lambda.hpp#L773).
 
 `VMap` is the representation used when a native structure must cross into the
-Lambda value domain as a projection (`D7.4.1v2`). Raw native pointers are not
+Lambda value domain as a projection (`D9.5.1`). Raw native pointers are not
 script-visible. Guest modules additionally cross through opaque handles and
 versioned API tables; they do not receive `Runtime*`, `EvalContext*`,
-`Input*`, `MIR_context_t`, or `AstNode*` (`D7.4.3`).
+`Input*`, `MIR_context_t`, or `AstNode*` (`D9.5.3`).
 
 ### 3.7 `ArrayRepCert` and `LaneStorageDesc`
 
@@ -370,9 +370,9 @@ field. It is immutable after publication, survives compatible transitions, and
 is cleared by raw descriptor detachment. It is independent of `nominal` and does
 not enlarge the eight-byte `Container` header. Design:
 [Type Enforcement TE-19.1](Lambda_Design_Type_Enforcement.md#te-191--persistent-contract-proofs-in-runtime-descriptors)
-(D3.2.4v4, D3.2.6).
+(D4.2.5, D4.2.6).
 
-How the sharing flags and the `transitions` chain let maps share one `TypeMap` — the per-`Input` transition tree, and the rule that a shared type is never edited in place — is ruled by D3.4.3v3 and designed in [Lambda_Design_Shape_Transitions.md](Lambda_Design_Shape_Transitions.md).
+How the sharing flags and the `transitions` chain let maps share one `TypeMap` — the per-`Input` transition tree, and the rule that a shared type is never edited in place — is ruled by D3.4.3 and designed in [Lambda_Design_Shape_Transitions.md](Lambda_Design_Shape_Transitions.md).
 
 The C++ definitions are in
 [`lambda-data.hpp`](../lambda/lambda-data.hpp#L309) and
@@ -389,7 +389,7 @@ It is defined in [`lambda-data.hpp`](../lambda/lambda-data.hpp#L150).
 Generated MIR does not bake mutable module-variable *addresses* into code. It
 bakes only the selector path — `EvalContext::module_states` plus
 `LambdaModuleState::vars` / `::consts` — and the module id/slot constants, then
-reaches storage through context-selected module state (`D5.4.3`):
+reaches storage through context-selected module state (`D6.4.3`):
 
 | Struct | Purpose |
 |---|---|
@@ -408,7 +408,7 @@ are in [`lambda.h`](../lambda/lambda.h#L2356).
 
 ## 6. Function and closure interface
 
-`Function` is a GC-managed first-class value (`D6.2.1`). Its ABI-relevant
+`Function` is a GC-managed first-class value (`D7.2.1`). Its ABI-relevant
 fields are:
 
 ```text
@@ -429,7 +429,7 @@ The `flags` word is a **direct** MIR read: `transpile-mir.cpp` loads
 `offsetof(Function, flags)` to test the ABI/return-shape bits, so no field
 before it may shift. The collector uses `closure_field_count` and
 `closure_env` to trace captures. A closure environment stores captured values
-as `Item`s (`D6.2.3`–`D6.2.4`). Dynamic calls enter through runtime dispatch
+as `Item`s (`D7.2.3`–`D7.2.4`). Dynamic calls enter through runtime dispatch
 functions such as `fn_call*` / `fn_call_into`; the function pointer is not
 itself a script-visible raw pointer.
 
@@ -459,7 +459,7 @@ corresponding C++ definitions carry static assertions against them. Note that
 the GC ABI view because the certificate is not traced.
 
 This keeps GC tracing, packed-field access, and generated MIR on one layout
-contract (`D3.4.1`, `D4.3`, `D5.3.4`).
+contract (`D3.4.1`, `D5.3`, `D6.3.4`).
 
 ### 7.1 Baked-offset inventory
 
@@ -476,7 +476,7 @@ readers rather than guessed ones.
 | `Context` | `pool`, `run_main`, `side_root_top`/`_limit`/`_commit_limit`, `side_number_top`/`_limit`/`_commit_limit`, `mir_return_lane`, `mir_bitcast_scratch`, `mir_companion_slot`, `mir_var_homes` |
 | `EvalContext` / `Heap` | `heap`, `gc` (inline bump allocation), `module_states` |
 | `Map` | `type`, `data`, `data_cap` |
-| `List` / `Element` / `ArrayNum` | `items`, `length`, `extra`, `capacity`, `rep_cert` (one constant each — the D2.6.6v2 single-chain guarantee) |
+| `List` / `Element` / `ArrayNum` | `items`, `length`, `extra`, `capacity`, `rep_cert` (one constant each — the D3.1.1 single-chain guarantee) |
 | `ArrayRepCert` | `rank`, `leaf_element` |
 | `LaneStorageDesc` | `kind` |
 | `ShapeEntry` | `type` |
@@ -527,11 +527,11 @@ MIR" has two meanings here:
 
 It does not include every compiler-only `JsMir*` planning record or every Node
 request object. Those records die before generated code runs. The formal
-constraints for this section are `D1.3` (one core runtime), `D2.6.9v3` (a JS
+constraints for this section are `D1.3` (one core runtime), `D3.1.5` (a JS
 object is a nominal Lambda `Map`), `D3.4.7` (JS class metadata on `TypeMap`),
-`D5.1.1v2`/`D5.1.3` (heap-owned suspension state), `D5.3.3` (precise roots),
-`D6.2.2v2`/`D6.2.3v2` (call/construct capabilities and captures),
-`D7.4.1v2` (native projections), and `D8.4.3v2` (explicit completion lanes).
+`D6.1.1`/`D6.1.3` (heap-owned suspension state), `D6.3.3` (precise roots),
+`D7.2.2`/`D7.2.3` (call/construct capabilities and captures),
+`D9.5.1` (native projections), and `D7.4.3` (explicit completion lanes).
 
 ### 9.1 Physical JS MIR ABI
 
@@ -803,7 +803,7 @@ counters. The definitions are in
 
 **New since the previous census.** Generator and async records now share one
 base holding exactly the durable activation edges that outlive the creating
-native frame (`D5.1.1v2`, `D6.2.2v2`; JSCU32):
+native frame (`D6.1.1`, `D7.2.2`; JSCU32):
 
 ```text
 type_id = LMD_TYPE_MAP, runtime_context, state_fn, env, env_size, state,
@@ -879,7 +879,7 @@ Four records named in the previous census are **gone**:
 
 - `JsRootRange` — every rooted capsule state now directly extends `RootVector`,
   which also supports fixed contiguous spans, so there is one root carrier
-  (`D5.3`).
+  (`D6.3`).
 - `JsRootedState` — its one `RootVector` member was a pure wrapper; the twelve
   state owners now use the Lambda root carrier directly.
 - `JsIteratorState` — iterator/generator prototype roots moved into
@@ -891,7 +891,7 @@ Four records named in the previous census are **gone**:
 `this`/`newTarget` state fields: a synchronous call has one ambient owner whose
 Item homes are either the context-owned base `RootVector` or one exact native
 `RootFrame`, so a nested call replaces one activation link instead of mutating
-parallel globals (`D5.1.1v2`, `D6.2.2v2`; JSCU28). The call-depth counter it
+parallel globals (`D6.1.1`, `D7.2.2`; JSCU28). The call-depth counter it
 used to carry was retired by JC23's native stack guard.
 
 The common invariant is that Item-bearing state uses explicit `RootVector` or

@@ -8,10 +8,10 @@
 The existing SVG animation engine supplies shared sampling and playback
 mechanisms. SVG keeps its SMIL policy; native scenes and the declared Three.js
 bridge apply clip/action/mixer policy above the same evaluator. RC1 keeps
-sampling and binding updates on the page thread; D7.4.2v2 keeps events on the
+sampling and binding updates on the page thread; D9.5.2 keeps events on the
 existing task loop. Host interfaces and resource identities follow
-D7.4.1v2/D7.4.4, retained JS edges follow D4.5.2/D5.3.3, and published images
-keep the D4.5.1v4 snapshot ownership contract. Lambda helpers produce pure
+D9.5.1/D9.5.4, retained JS edges follow D5.5.2/D6.3.3, and published images
+keep the D5.5.1 snapshot ownership contract. Lambda helpers produce pure
 clip/track data under S12.1.1v2.
 
 ## Work and evidence
@@ -56,7 +56,7 @@ the same jqueryui CSS total, 380,794 bytes versus the old 373,940-byte budget.
 The path-sensitive baseline is unchanged; no test or budget was relaxed.
 All other aggregate layout, UI, DOM, vector, view and rendering suites pass.
 
-The bridge is first-party `NativeAnimationMixer` around the unmodified pinned objects. The browser uses upstream `AnimationMixer` as its independent oracle. The host interface owns copied track storage and precisely rooted callbacks in document resources (D7.4.1v2/D7.4.4, D4.5.2/D5.3.3); wrappers carry numeric identities. No borrowed JS array survives a call. The Jube interface catalog now grows through the existing `ArrayList`, because registering the added optional interface exposed its former fixed 64-record limit.
+The bridge is first-party `NativeAnimationMixer` around the unmodified pinned objects. The browser uses upstream `AnimationMixer` as its independent oracle. The host interface owns copied track storage and precisely rooted callbacks in document resources (D9.5.1/D9.5.4, D5.5.2/D6.3.3); wrappers carry numeric identities. No borrowed JS array survives a call. The Jube interface catalog now grows through the existing `ArrayList`, because registering the added optional interface exposed its former fixed 64-record limit.
 
 ## Release measurements
 
@@ -95,11 +95,11 @@ Three.js conformance.
 
 ## Declared Phase III profile
 
-The selected binding surface follows the Phase III design and D7.4.1v2/D7.4.4.
+The selected binding surface follows the Phase III design and D9.5.1/D9.5.4.
 `NativeAnimationMixer` takes one Three.js root and one owning canvas; separate
 roots use separate mixers. The adapter uses the pinned `PropertyBinding`, copies
 tracks once and retains callback closures through precise `RootVector` homes
-(D4.5.2/D5.3.3). Binding ownership is exclusive until uncache/dispose, including whole-property/indexed overlap and resolved named/numeric morph aliases. Native and
+(D5.5.2/D6.3.3). Binding ownership is exclusive until uncache/dispose, including whole-property/indexed overlap and resolved named/numeric morph aliases. Native and
 upstream mixers must not drive the same property. `setAutomatic(true)` attaches
 the document scheduler; explicit update then rejects. `setTime(seconds)` stops
 automatic advancement and samples exactly. Native samples precede rAF drawing
@@ -136,7 +136,7 @@ Core loop/finished traces follow the pinned order and payloads. Binding writes
 commit before bridge event delivery; mutation of the same host during a native
 callback rejects, while disposal defers safely until the callback unwinds.
 Native `<scene3d>` emits `loop`/`finished` through the existing timing task queue
-(D7.4.2v2), carrying clip/action, loopDelta/direction and mixer time. Removing a
+(D9.5.2), carrying clip/action, loopDelta/direction and mixer time. Removing a
 JS object from its root disposes affected playback; DOM target generations and
 connectivity validate each native access. Root replacement/teardown retire
 resources. Authored scene data remains untouched; inactive overlays expose

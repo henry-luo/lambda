@@ -2,7 +2,7 @@
 
 - **Status:** historical engineering reference; consolidated 2026-10-14 from `Lambda_Grammar_Reduce1.md`–`Lambda_Grammar_Reduce5.md`.
 - **Scope:** how to reduce a generated Tree-sitter parser, what worked, what failed, and the measurements behind those conclusions. Implementation plans and code-level migration details are omitted.
-- **Formal linkage:** [D8.1.1v18 and D8.1.2v3](../doc/Lambda_Formal_Design.md#d81-structure) govern the current C-parser pipeline and Tree-sitter's reference role. Historical syntax choices below do not override the [formal semantics](../doc/Lambda_Formal_Semantics.md).
+- **Formal linkage:** [D8.3.2 and D8.1.1](../doc/Lambda_Formal_Design.md#d83-lambda-execution-tiers) govern the current C-parser pipeline and Tree-sitter's reference role. Historical syntax choices below do not override the [formal semantics](../doc/Lambda_Formal_Semantics.md).
 - **Related:** [C parser design](Lambda_Grammar_Parser.md), [type-pattern design](Lambda_Type_Pattern.md), [documentation authority](../doc/Doc_Convention.md).
 
 Lambda now uses its first-party C lexer and recursive-descent/Pratt parser in
@@ -328,6 +328,6 @@ parsing and recovery remain capabilities to account for when making that choice.
    reference artifacts from grammar sources and leave the vendored runtime alone.
 
 For current Lambda, any parser disagreement is reviewed against the formal syntax
-rulings and working design records (**D8.1.2v3**). Neither Tree-sitter nor the C
+rulings and working design records (**D8.1.1**). Neither Tree-sitter nor the C
 parser is an unquestioned acceptance oracle. These historical measurements justify
 techniques to investigate; they create no new size target or pending tuning work.

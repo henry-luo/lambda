@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-// resource ownership stays in lambda-io (D7.1.2v2); byte codecs remain in lib.
+// resource ownership stays in lambda-io (D9.1.2); byte codecs remain in lib.
 ImageStatus image_io_probe_path(ImageContext *context, const char *path, ImageInfo *info, ImageError *error);
 ImageStatus image_io_decode_path(ImageContext *context, const char *path, const ImageDecodeOptions *options,
                                  ImageDecoded *result, ImageError *error);

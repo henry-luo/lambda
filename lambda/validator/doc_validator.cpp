@@ -44,7 +44,7 @@ void transpiler_destroy(Transpiler* transpiler) {
     if (!transpiler) return;
 
     // diagnostics can retain imported Type pointers after validator teardown;
-    // their result pool, rather than this registry, owns the loader (D4.2.6).
+    // their result pool, rather than this registry, owns the loader (D5.2.5).
     transpiler->runtime = nullptr;
 
     // free arraylists (heap-allocated via arraylist_new)
@@ -372,7 +372,7 @@ ValidationResult* create_validation_result(Pool* pool) {
 
 void validation_result_destroy(ValidationResult* result) {
     if (!result || !result->owned_pool) return;
-    // loader scopes and report paths die before their backing pool (D4.2.6).
+    // loader scopes and report paths die before their backing pool (D5.2.5).
     Pool* owner = result->owned_pool;
     result->owned_pool = nullptr;
     mem_pool_destroy(owner);

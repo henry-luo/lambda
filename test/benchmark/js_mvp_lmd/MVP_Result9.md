@@ -50,9 +50,9 @@ Candidate: `2c67152b386faf735960f302264fb08602042812be47eebb09a3970a899b29af`.
 ## Changes
 
 - Preserve numeric array indices until a named-property fallback actually needs a string.
-- Reuse completed class shapes for proven conditional and nested initializers with simple parameters, through class metadata and existing property stores (D3.4.3v5, D3.4.5). Expanded admission adds no new per-site cache cells (D8.4.1v2).
+- Reuse completed class shapes for proven conditional and nested initializers with simple parameters, through class metadata and existing property stores (D3.4.3, D3.4.5). Expanded admission adds no new per-site cache cells (D7.4.1).
 - Prepare RegExp input once per operation; reuse shared matcher scratch and direct ASCII offsets. `MvpLmdRegExpInput` is the only new local helper type.
-- Reduce shared activation discard/reclaim system calls and retain one idle stack for immediate reuse (D1.3v3, D5.1.1v3). Precise roots, warm16 and the 32-stack pool limit remain; retained pages can add at most 3 MiB resident memory.
+- Reduce shared activation discard/reclaim system calls and retain one idle stack for immediate reuse (D1.3, D6.1.1). Precise roots, warm16 and the 32-stack pool limit remain; retained pages can add at most 3 MiB resident memory.
 
 ## Requested targets
 

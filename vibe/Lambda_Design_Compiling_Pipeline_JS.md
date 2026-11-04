@@ -7,25 +7,25 @@
 > implementation record is in §4.4. Companion to
 > `Lambda_Design_Compile_Pipeline.md` (LC3.1–LC3.8, the Lambda front-end
 > budget). Everything here is an implementation of the shared pipeline
-> contract (**D8.2.4v2**, **D8.2.5v3**) and the revised default-backend
-> clause of **D8.1.3v29**: AUTO remains the default; activated MIR uses fast MVP.
+> contract (**D8.2.4**, **D8.2.5**) and the revised default-backend
+> clause of **D8.4.2**: AUTO remains the default; activated MIR uses fast MVP.
 > **Role**: the design home for the *cost* of the LambdaJS compile pipeline
 > and for the structural alignment of the two front ends: which stages exist,
 > what each walks, where the time goes, which analyses the two languages
 > duplicate, and which shared substrate replaces the duplicates. Pipeline
 > *structure* stays owned by `Lambda_Design_Unified_AST.md` (U27–U32) and
 > `Lambda_Design_JS_Unified.md`; the JS AST backend by
-> `Lambda_Design_Ast_Interpreter.md` and **D8.1.3v19**.
+> `Lambda_Design_Ast_Interpreter.md` and **D8.4.2**.
 > **Scope**: parse-build → bind → validate → index → analyze/plan → lower →
 > finalize → prelink → link, in the activated MIR lane and the default AST/AUTO lane.
 > Out of scope: execution speed of generated code, the MIR cache tiers
 > (D8.5), the vendored MIR code generator (rule 16: never patched, only
 > steered by policy).
-> **Formal anchors**: D8.1.3v29 (JS front end, explicit boxed AST backend,
-> AUTO default), D8.1.1v13 (Lambda AUTO tier), D8.2.2 (variance tiers),
-> D8.2.4v2 (one indexed compilation unit; no new private core-child walks),
-> D8.2.5v3 (typed pass manager; facts on the AST), D8.4.1v2 (no inline
-> caches), D8.5.1v7 (L1 cache, AST-template prebuild), D8.6.1 (MT7 emission
+> **Formal anchors**: D8.4.2 (JS front end, explicit boxed AST backend,
+> AUTO default), D8.3.5 (Lambda AUTO tier), D8.2.2 (variance tiers),
+> D8.2.4 (one indexed compilation unit; no new private core-child walks),
+> D8.2.5 (typed pass manager; facts on the AST), D7.4.1 (no inline
+> caches), D8.3.5 (L1 cache, AST-template prebuild), D8.6.1 (MT7 emission
 > ratchet).
 > **Ledger**: extends the compiling area's **LC#** series
 > (`Lambda_Design_Compiling.md`): decisions **LC4.1–LC4.12**, open issues
@@ -48,7 +48,7 @@ same fact bits. The JS manager lives in `js_transpiler_parse_c`
 | Stage | LambdaJS | Lambda (for comparison) | Shared today |
 |---|---|---|---|
 | parse-build (AST) | Reduction sink `js_c_reduce` allocates `JsAstNode`s directly; **no binding during construction**. Lexer/parser `lambda/js/parser/`. | The syntax sink allocates nodes as productions complete, with names unbound; the resolve pass (`build`) then **binds names and types in production order**, with per-function analyses at each function's end (LC3.9). | `AstNode` header, core node kinds (D8.2.2), pool/name-pool |
-| bind (BOUND) | `js_rebuild_direct_scope_graph` creates the scope graph, hoists declarations, resolves identifiers, and plans binding slots. | Lambda retains its language-specific scope rebuild. | `NameScope` owns the shared lazy pointer-identity lookup index and slot planner (`D8.2.4v2`). |
+| bind (BOUND) | `js_rebuild_direct_scope_graph` creates the scope graph, hoists declarations, resolves identifiers, and plans binding slots. | Lambda retains its language-specific scope rebuild. | `NameScope` owns the shared lazy pointer-identity lookup index and slot planner (`D8.2.4`). |
 | validate (VALIDATED) | `js_check_early_errors` (`js_early_errors.cpp`): one walk with a strict/generator/async/label context. | `lambda_ast_finalize_script`: ≈9 full walks plus per-procedure fixed points (colour, COW borrows, concurrency). | — |
 | index (INDEXED) | shared `ast_index_compiler_pass` with `js_profile` (`visit_ext_children`, `publish_ext_facts`). | same pass, `lambda_profile`. | `AstIndex` (D8.2.4) |
 | AST lane | `js_interp_script_is_supported`; slots are planned at bind. `ast` is explicit; `auto` and an unset selector are AST-first with MIR fallback. AUTO promotes hot definitions to P2 satellites. | `interp_scan_supported` + `interp_plan_script`; AUTO is the default. | `FnPromotionCell`, satellite compile, `InputScriptCache`, `module_ast_prebuild` |
@@ -156,10 +156,10 @@ not surface in the JS samples; the literal-shape scans hide it.
    the AST executor because MIR was measurably too slow for them
    (JS_01 §6, JS_15); the numbers above say the gate is set far above where
    the pathology starts.
-2. **Lambda already made this decision.** D8.1.1v13 ships AUTO: every
+2. **Lambda already made this decision.** D8.3.5 ships AUTO: every
    Lambda definition starts in T0 and promotes when hot. LambdaJS has the
    same machinery behind an env var (P2 satellites, `js_interp_promote_
-   function_if_hot`, prebuilt AST templates under D8.5.1v7). Two languages
+   function_if_hot`, prebuilt AST templates under D8.3.5). Two languages
    in one runtime with opposite defaults is a policy inconsistency, and the
    Lambda doc's initial-load argument (§2 there) applies to JS verbatim.
 3. **The duplicated analyses are where the cost lives.** Captures, call-site
@@ -203,7 +203,7 @@ timer that today covers four passes is retired in favour of the per-pass
 fields, and `LAMBDA_PROFILE=1` writes JS rows to `temp/phase_profile.txt`
 exactly as it writes Lambda rows.
 
-**Why.** D8.2.5v3 names this schedule. Without per-pass timing the
+**Why.** D8.2.5 names this schedule. Without per-pass timing the
 JS front end cannot be split (§1.3) and the O(F·N) analysis phases cannot be
 told apart from lowering. This is the precondition for §4.
 
@@ -339,25 +339,25 @@ functions runs only when the child has no structural parent edge (the
 malformed or shared-list case it was written for), never on the ordinary
 path. Shared with Lambda.
 
-#### LC4.12 (implemented 2026-09-23; **D8.1.3v19**) — LambdaJS defaults to AUTO like Lambda
+#### LC4.12 (implemented 2026-09-23; **D8.4.2**) — LambdaJS defaults to AUTO like Lambda
 
 **Decision to ratify.** The unset `JS_EXEC_BACKEND` selects AUTO: an
 interpreter-supported unit and its prebuilt static closure execute from the
 retained AST, hot definitions promote to P2 satellites, unsupported units
 fall back to whole-module MIR exactly as today. `mir` remains selectable.
-This aligns the JS default with D8.1.1v13 and makes the numbers in the
+This aligns the JS default with D8.3.5 and makes the numbers in the
 "AST lane front end" column of §1.3 the default first-result cost for page
 scripts.
 
-**Ruling record.** D8.1.3v18's MIR default was revised by **D8.1.3v19** and
+**Ruling record.** D8.4.5's MIR default was revised by **D8.4.2** and
 the formal-design semver bump. The Test262 AUTO/default gate and focused
 module/dynamic-import coverage in §4.4 are the acceptance evidence.
 
 ### 3.1 Non-goals
 
 - No change to JavaScript semantics, early-error rules, or the AST backend's
-  admitted surface (D8.1.3v18 body).
-- No inline caches or per-site mutable dispatch state (D8.4.1v2); reverse
+  admitted surface (D8.4.5 body).
+- No inline caches or per-site mutable dispatch state (D7.4.1); reverse
   tables are compile-time facts of the unit.
 - No patch to vendored MIR (rule 16); LC4.7 is policy only.
 - No second IR; the index is the only shared query substrate (D8.2.4).
@@ -471,8 +471,8 @@ parse-build, bind, validate, and index fields.
 
 ### 4.4 Implementation record (2026-09-23)
 
-The implemented subset is governed by **D8.2.4v2**, **D8.2.5v3**, and
-**D8.1.3v19**. `AstIndex` now publishes preorder ranges, reverse tables,
+The implemented subset is governed by **D8.2.4**, **D8.2.5**, and
+**D8.4.2**. `AstIndex` now publishes preorder ranges, reverse tables,
 function-child adjacency, and a per-function overlay CSR slice for synthetic
 class-field initializers that logically own source nodes outside their
 structural range. JS capture collection consumes both the dense range and the
@@ -529,8 +529,8 @@ regression covers JS outer reads/writes and verifies that a second same-profile
 query reuses the cached bitmap. It also caught and fixed the zero-function
 CSR case. Targeted Lambda closure/shadowing/call-site inference and JS
 MIR/AUTO parity checks pass with this record. These changes implement the
-shared-unit requirements of **D8.2.4v2** and the fact ownership/scheduling
-requirements of **D8.2.5v3**; they do not alter JavaScript or Lambda semantics.
+shared-unit requirements of **D8.2.4** and the fact ownership/scheduling
+requirements of **D8.2.5**; they do not alter JavaScript or Lambda semantics.
 
 ---
 
@@ -571,7 +571,7 @@ Shared: `ast_index_visit` span-owner loop (`ast-core.cpp`).
   unmeasured because one timer spans all four; LC4.1 supplies it. The
   `ast_index_visit` O(N·F) loop may be a visible share on minified bundles.
 - **LCO8** `js_mir_link_main` ignores `mir_policy.hpp`; whether the
-  D8.1.3v11 "always native" comment was meant to retire the thresholds or
+  D8.4.2 "always native" comment was meant to retire the thresholds or
   only the pure-interpreter mode needs confirming against the design record
   before LC4.7.
 - **LCO9** The interp-interface path's own cost on 400k-instruction modules
@@ -592,7 +592,7 @@ Shared: `ast_index_visit` span-owner loop (`ast-core.cpp`).
   is killed by `timeout` prints nothing. `LAMBDA_COMPILER_TIMING=1` adds the
   `COMPILER_TIMING` line on the same path.
 - The AST lane is selected with `JS_EXEC_BACKEND=ast`; `auto` selects
-  the AST lane plus P2 promotion; unset selects AUTO under **D8.1.3v19**.
+  the AST lane plus P2 promotion; unset selects AUTO under **D8.4.2**.
 - macOS `sample <pid>` by PID immediately after launch; the JS compile runs
   on the main thread (unlike Lambda's large-stack thread). Attribution
   scripts and raw samples are under `temp/sample_js_*.txt`.

@@ -12,8 +12,8 @@
   HTML serialization, event cascade) are **out of scope** except where an
   algorithm is trapped inside a dispatcher.
 - **Authority:**
-  [formal design](../../doc/Lambda_Formal_Design.md) **D6.2.2v2**,
-  **D7.4.1v2**, **D7.4.4**, **D7.4.5v2**;
+  [formal design](../../doc/Lambda_Formal_Design.md) **D7.2.2**,
+  **D9.5.1**, **D9.5.4**, **D9.5.5**;
   [formal semantics](../../doc/Lambda_Formal_Semantics.md) **S5.1.4v2**,
   **S9.1.4**, **S9.2.2**.
   Working design records: [DOM host API](../Lambda_Design_DOM_Host_API.md)
@@ -23,7 +23,7 @@
   [DOM package](../Lambda_Design_DOM_Pkg.md).
   This proposal changes **implementation structure only**; it proposes no
   change to any `S#`/`D#` ruling, and it is in service of two of them that the
-  code does not yet satisfy (D7.4.4 "no fallback tier", D7.4.5v2 "materializing
+  code does not yet satisfy (D9.5.4 "no fallback tier", D9.5.5 "materializing
   array-shaped host state into real arrays … is an anti-pattern this ruling
   retires").
 - **New ledger IDs:** `DS1`–`DS17` (rulings proposed here), `DSO1`–`DSO6`
@@ -49,7 +49,7 @@ Four obligations — the three requirements, plus the hop budget:
    other rows becomes `DERIVED` with `DOM_NO_BODY`, or keeps a native body only
    when a measurement justifies it and the ES43 oracle proves it equal.
 3. **Wrap, do not translate.** Radiant DOM state reaches Lambda as `velmt` /
-   `varray` / `vmap` over the live engine structures (D7.4.5v2), not as
+   `varray` / `vmap` over the live engine structures (D9.5.5), not as
    snapshot arrays built by a collect loop and not as a re-entry into a
    string-keyed property dispatcher.
 4. **Three hops, every path.** One dispatch, one body, one engine access —
@@ -215,10 +215,10 @@ DOM node a tag face, an attribute map face and a child list face. Meanwhile
 > Collections are returned as ordinary Lambda arrays, i.e. snapshots (S9.2.2)
 > … Live collections stay a JS-adapter concern.
 
-That sentence predates D7.4.5v2 and is the policy this proposal retires. Note
+That sentence predates D9.5.5 and is the policy this proposal retires. Note
 what S9.2.2 actually rules: *read views* have snapshot semantics. A live DOM
 collection is not a read view of a Lambda value; it is host state, and
-D7.4.5v2 names materializing it "an anti-pattern this ruling retires".
+D9.5.5 names materializing it "an anti-pattern this ruling retires".
 
 ---
 
@@ -231,12 +231,12 @@ string, and the bind tables. Only the first is checked.
 
 **F-2 — two operation catalogs.** 89 ordinals and 313 catalog rows, overlapping
 in 21 names, joined by the 658-line `dom_element_operation_impl` chain and 168
-lines of thunks and externs. The ordinal is a *selector*, which D6.2.2v2 says a
+lines of thunks and externs. The ordinal is a *selector*, which D7.2.2 says a
 published capability should not need: the record already resolved the member.
 
-**F-3 — the property protocol is a fallback tier that D7.4.4 retired.** 1607
+**F-3 — the property protocol is a fallback tier that D9.5.4 retired.** 1607
 code lines of name-keyed chains, 75 of whose names are already bound as compiled
-records. D7.4.4 rules that declared interfaces + record hooks are the *only*
+records. D9.5.4 rules that declared interfaces + record hooks are the *only*
 host-object protocol, "no fallback tier". The chains are that tier.
 
 **F-4 — two reflection tables.** 26 attributes declared once declaratively in
@@ -251,7 +251,7 @@ fast.
 teeth; and `range`/`selection` alone hold ~28 rows that are plain compositions
 of boundary points.
 
-**F-7 — snapshot-by-default for Lambda**, contradicting D7.4.5v2 and duplicating
+**F-7 — snapshot-by-default for Lambda**, contradicting D9.5.5 and duplicating
 live `VArray` backends that already exist.
 
 **F-8 — the eight most primitive operations in the DOM are string re-entries.**
@@ -278,7 +278,7 @@ two-liners that take the resolved member and look it back up by *string*:
 and `radiant_dom_document_host_get_property` then swaps the process-wide active
 document (`dom_swap_active_document` / `dom_restore_active_document`) around
 each read, because `dom_document_proxy_get_property(key)` takes only a key and
-reads an ambient global. D7.4.4's corollary rules the opposite in as many
+reads an ambient global. D9.5.4's corollary rules the opposite in as many
 words: property keys "are resolved internally via one borrowed byte view, and
 are never re-materialized for a fallback consumer."
 
@@ -303,7 +303,7 @@ DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv,
        js_name)    // JS spelling when it differs from camel(name); "" otherwise
 ```
 
-`iface` and `js_name` are metadata (D7.4.4 already says member spellings are),
+`iface` and `js_name` are metadata (D9.5.4 already says member spellings are),
 so adding them changes no ABI. From the one row we then generate:
 
 - the catalog struct slot (exists),
@@ -367,7 +367,7 @@ After DS1/DS2, `dom_get_property_impl` / `dom_set_property_impl` retain only:
 - style shorthand and custom-property names,
 - the document-node passthrough.
 
-Every name that has a bind row is deleted from the chain. Per D7.4.4 the record
+Every name that has a bind row is deleted from the chain. Per D9.5.4 the record
 is the only implementation; a second one that must agree is the defect.
 
 ### DS4 — one reflection table, in the core, generating both sides
@@ -443,7 +443,7 @@ Three concrete changes:
    `VArray` backends** rather than building an array. `form_controls` is a
    one-line change — `dom_live_form_elements_bridge` already exists and is
    already registered as `html_form_controls_collection`.
-3. **`dom_module.cpp`'s snapshot policy note is replaced** by the D7.4.5v2 rule,
+3. **`dom_module.cpp`'s snapshot policy note is replaced** by the D9.5.5 rule,
    and the `dom.*` face stops being documented as snapshot-only.
 
 ### DS8 — `dom_core.cpp` stops re-entering the property dispatcher
@@ -531,8 +531,8 @@ call with any count) happen **once**, in that switch, instead of in 84 generated
 thunks and 80 `argc < n` tests inside the arms.
 
 This is DSO7 promoted to a ruling, because the three-hop budget cannot be met
-without it. It costs a `JUBE_ABI_VERSION` bump — the same kind D7.4.4 and
-D7.4.5v2 each took. It removes one hop from **every** JS member access.
+without it. It costs a `JUBE_ABI_VERSION` bump — the same kind D9.5.4 and
+D9.5.5 each took. It removes one hop from **every** JS member access.
 
 ### DS14 — a `CORE` row never reaches its own mechanism by name
 
@@ -645,7 +645,7 @@ Each phase is independently landable and independently gated.
 `dom_prop_get(n, "camelCaseName")`, into `dom.cpp` beside the script-visible
 traversal helpers and the node-kind rules they need. The property-chain arms
 now delegate *to* the rows instead of the rows re-entering the chain, so the
-two doors keep one implementation (ES38, D7.4.4).
+two doors keep one implementation (ES38, D9.5.4).
 
 **DS14 extended — the seven element-traversal rows** (`parent_element`,
 `first_element_child`, `last_element_child`, `next_element_sibling`,
@@ -1094,7 +1094,7 @@ work, in the same order.
 | Precedence change: a record now wins where the chain used to | P3 | Delete an arm only after confirming the bind row exists for that receiver type *and* that its handler reaches the same body. |
 | A demoted row is measurably slower | P5 | Demote behind the ES43 oracle plus a release-build timing on the WPT/`.ls` corpus; keep `DOM_F_FASTPATH` for any row that fails the budget, with the budget recorded in the row's comment. |
 | Live carrier where a snapshot was semantically required | P4 | Only the four rows the spec calls live are converted. `query_selector_all` stays a snapshot — it is static by specification. |
-| **`JUBE_ABI_VERSION` bump breaks prebuilt modules** | P1 (DS13) | Adding a field to `JubeMemberBind` changes `sizeof`, so any pre-built module carrying its own bind tables mis-strides them — and `modules/lang-python/lang-python.dylib` is checked in as a binary. `make build` does not rebuild it. P1 must bump `JUBE_ABI_VERSION` 6 → 7, rebuild every module in `modules/`, and verify the version guard rejects a stale one loudly rather than reading garbage. This is the same class of break that produced ABI 6 (D7.4.4 and D7.4.5v2 each took one), so the mechanism exists; the hazard is forgetting the rebuild. |
+| **`JUBE_ABI_VERSION` bump breaks prebuilt modules** | P1 (DS13) | Adding a field to `JubeMemberBind` changes `sizeof`, so any pre-built module carrying its own bind tables mis-strides them — and `modules/lang-python/lang-python.dylib` is checked in as a binary. `make build` does not rebuild it. P1 must bump `JUBE_ABI_VERSION` 6 → 7, rebuild every module in `modules/`, and verify the version guard rejects a stale one loudly rather than reading garbage. This is the same class of break that produced ABI 6 (D9.5.4 and D9.5.5 each took one), so the mechanism exists; the hazard is forgetting the rebuild. |
 | Stale `.o` after the P7 split | P7 | Renamed/moved files leave objects in `build/` **and inside the `.a`**; purge both or the gates test stale code. |
 | `JsRuntimeState` layout drift breaking `modules/node-*.dylib` | P1–P3 | `make build` does not rebuild them; rebuild both sides of any A/B. |
 | DS15 changes *when* the active document is swapped | P6 | The swap/restore currently wraps every document property read. Removing it is correct only if every migrated row takes the document explicitly. Migrate a row and its swap in the same commit; the foreign-document WPT cases are the ones that will catch a miss. |

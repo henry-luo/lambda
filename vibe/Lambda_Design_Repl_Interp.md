@@ -1,8 +1,8 @@
 # REPL — Finishing the Interpreter-Backed Session
 
 **Date:** 2026-10-06 (rev 3 — RULED and IMPLEMENTED)
-**Status:** **DECIDED 2026-10-06 (user ruling RI1–RI6, §5); Phases A–C implemented 2026-10-06 on branch `worktree-repl-interp` (§8).** The persistent T0 session (`interp_repl_session_*`) is the only REPL engine. Rulings: **S16.7.4–S16.7.6** (semantics 57.1.0) and **D8.1.1v17** (design 25.0.0).
-**Design authority:** `doc/Lambda_Formal_Design.md` — D8.1.1v17 (tiers, selector, C parser, the REPL session), D7.2.1/D7.2.2 (module unit, import binding), D5.3.3 (module slab root), D4.6.2v2 (REPL shares module table + NamePool); `doc/Lambda_Formal_Semantics.md` — S16.7.1 (top level is content), S16.7.4–S16.7.6 (echo, no rebinding, session kinds), S16.2.3v3 (entry separation), S2.5.4v2 (declarations produce no item).
+**Status:** **DECIDED 2026-10-06 (user ruling RI1–RI6, §5); Phases A–C implemented 2026-10-06 on branch `worktree-repl-interp` (§8).** The persistent T0 session (`interp_repl_session_*`) is the only REPL engine. Rulings: **S16.7.4–S16.7.6** (semantics 57.1.0) and **D8.3.6** (design 25.0.0).
+**Design authority:** `doc/Lambda_Formal_Design.md` — D8.3.6 (tiers, selector, C parser, the REPL session), D9.3.1/D9.3.2 (module unit, import binding), D6.3.3 (module slab root), D5.6.2 (REPL shares module table + NamePool); `doc/Lambda_Formal_Semantics.md` — S16.7.1 (top level is content), S16.7.4–S16.7.6 (echo, no rebinding, session kinds), S16.2.3v3 (entry separation), S2.5.4v2 (declarations produce no item).
 **Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` §8 (AI20), `vibe/impl/Lambda_Impl_Ast_Interp (done).md` P4, `vibe/Lambda_Repl.md` (stale — describes the retired replay model), `vibe/idea/Clojure_REPL.md` Part 2 (ergonomics roadmap).
 **Ledger:** LR01-7 and LR01-18 FIXED 2026-10-06 and moved to the fixed ledger.
 
@@ -44,7 +44,7 @@ Session driven over stdin; `>` is the non-tty prompt.
 | `<div class:"c"; "t">` | E100 | correct (`,` between attributes and content) |
 | runaway recursion | `error` after depth budget | recovery frame works; no Ctrl-C during an entry (**gap G7**) |
 
-Mechanics confirmed: a rejected entry restores scope tail, const/type list lengths, source length, AST index and slab snapshot (`runner.cpp:2404`–`2515`); `clear` releases the module root and Script (`runner.cpp:2322`); the slab grows geometrically with one registered root range (D5.3.3).
+Mechanics confirmed: a rejected entry restores scope tail, const/type list lengths, source length, AST index and slab snapshot (`runner.cpp:2404`–`2515`); `clear` releases the module root and Script (`runner.cpp:2322`); the slab grows geometrically with one registered root range (D6.3.3).
 
 **2026-11-03 update:** S16.10.4 now rejects an undefined value name or bare
 call while compiling the entry (E202/E203). The REPL reports the diagnostic
@@ -78,7 +78,7 @@ and rolls back the entry; G2's other runtime-diagnostic questions remain.
 - `run_repl` always uses `InterpReplSession`. The `repl_history` / `last_output` buffers, `run_script_mir(repl_history)` and the prefix-diff printer are deleted. `check_statement_completeness` keeps only the bracket fast path (§3.6).
 - The tier selector keeps its meaning for *satellites*, not for the REPL driver: `auto` promotes hot session functions (today's behaviour), `interp` never promotes, `jit` promotes at the first call (threshold 1) rather than compiling a whole-history module. If `jit` must keep "eager whole-module" semantics for files, that is unaffected — the REPL simply has no whole module to compile.
 - `interp_repl_session_init` failure is a startup error ("REPL unavailable: …"), not a silent fallback.
-- **No Tree-sitter anywhere on the REPL path** (RI6). Verified 2026-10-06: `main-repl.cpp`, `run_repl` and the session code in `runner.cpp` reference no `ts_*`/`TSParser` symbol and do not consult `LAMBDA_PARSER`; the D8.5.1v7 carve-out that allowed the reference parser for the REPL is struck in D8.1.1v17. Completeness (§3.6) and every diagnostic come from the C parser.
+- **No Tree-sitter anywhere on the REPL path** (RI6). Verified 2026-10-06: `main-repl.cpp`, `run_repl` and the session code in `runner.cpp` reference no `ts_*`/`TSParser` symbol and do not consult `LAMBDA_PARSER`; the D8.3.5 carve-out that allowed the reference parser for the REPL is struck in D8.3.6. Completeness (§3.6) and every diagnostic come from the C parser.
 
 ### 3.2 Entry lifecycle and the diagnostics contract (G2)
 
@@ -126,7 +126,7 @@ The fragment builder gains a scope-kind flag (procedure body vs content) and the
 Today a file import inside an entry passes build, gets a slab slot, and is never loaded. Two acceptable states, the first being the minimum:
 
 1. **Reject with a message** — `error: import of a file module is not supported in a REPL entry yet; use .load` — until (2) lands. Rejection happens in the fragment scan (an `AST_NODE_IMPORT` whose target is not a system module).
-2. **Cone load as a transaction** — resolve and prebuild the import cone through the ordinary module path (`module_ast_prebuild`, D8.5.1v4), run the cone's initialisation *before* the entry's slab snapshot is taken, and on failure release the cone's module states (`lambda_module_state_release`) and restore scope/source as for any rejected entry. The session already releases exact module roots on `clear`, so the release half exists.
+2. **Cone load as a transaction** — resolve and prebuild the import cone through the ordinary module path (`module_ast_prebuild`, D8.5.1), run the cone's initialisation *before* the entry's slab snapshot is taken, and on failure release the cone's module states (`lambda_module_state_release`) and restore scope/source as for any rejected entry. The session already releases exact module roots on `clear`, so the release half exists.
 
 ### 3.6 Completeness via the parser (G6)
 
@@ -136,7 +136,7 @@ Keep `has_unclosed_brackets` as the zero-cost fast path. When brackets balance, 
 
 An entry whose top-level nodes are **all declarations** echoes nothing. Any other entry echoes `print_root_item` of its result, including a literal `null`. Rationale: S2.5.4v2 says declarations produce no item, so there is nothing to echo; printing `null` for `let x = 1` misreads "no item" as "the item `null`". The fragment is at hand (`parsed_root->child` list), so the test is a walk over the entry's top-level node kinds, not an output diff.
 
-### 3.8 Interrupt (G7) — ruled (RI4, D8.1.1v17)
+### 3.8 Interrupt (G7) — ruled (RI4, D8.3.6)
 
 `terminal_device` already records SIGINT in `terminal_interrupted`. Expose a read (`terminal_interrupt_pending()` → clears and returns), and poll it in T0 at the places that are already safe points: loop back-edges, call entry, and the satellite-publication check. On a pending interrupt the walker raises a fault through the existing recovery frame (`LAMBDA_FAULT_INTERRUPTED`, new code in the fault table), which the session turns into `REPL_ENTRY_FAILED` + rollback — the same path a depth overflow takes today. Satellite (MIR) code does not poll in this round: an interrupted entry that is inside a promoted function stops at its next T0 safe point, which is the function's return. Under `interp` tier the interrupt is exact.
 
@@ -170,9 +170,9 @@ Everything below reads the session's `NameScope` + slab, which replay could neve
 | **RI1** | What does a REPL entry echo? (LR01-18) | Declaration-only entries echo nothing; every other entry echoes its value, `null` included (§3.7). | S16.7.4 |
 | **RI2** | Is redefinition at the session top level allowed? | **No — stays E209.** The proposed shadowing was declined; the session top level is one scope (§3.3). | S16.7.5 |
 | **RI3** | May a REPL session be procedural? | `lambda` opens a functional session; `lambda run` with no file opens a procedural session (implicit persistent `pn` body) **and warns the user that entries carry out effectful changes** (§3.4). | S16.7.6 |
-| **RI4** | May an entry be interrupted, and how is it reported? | SIGINT → fault through the recovery frame → entry reported failed and rolled back (§3.8). | D8.1.1v17 |
-| **RI5** | What happens to an entry T0 cannot run? | Rejected with a named-construct message; never compiled as a per-entry MIR module. T0 coverage is the fix. | D8.1.1v17 |
-| **RI6** | Retire whole-history replay and the reference-parser carve-out? | Yes. **Nothing on the REPL path may depend on the Tree-sitter parser.** `jit` in a session means "promote at first call"; no whole-module compile. | D8.1.1v17 (D8.5.1v7 carve-out struck) |
+| **RI4** | May an entry be interrupted, and how is it reported? | SIGINT → fault through the recovery frame → entry reported failed and rolled back (§3.8). | D8.3.6 |
+| **RI5** | What happens to an entry T0 cannot run? | Rejected with a named-construct message; never compiled as a per-entry MIR module. T0 coverage is the fix. | D8.3.6 |
+| **RI6** | Retire whole-history replay and the reference-parser carve-out? | Yes. **Nothing on the REPL path may depend on the Tree-sitter parser.** `jit` in a session means "promote at first call"; no whole-module compile. | D8.3.6 (D8.3.5 carve-out struck) |
 
 ## 6. Phases
 
@@ -188,7 +188,7 @@ Everything below reads the session's `NameScope` + slab, which replay could neve
 - `vibe/Lambda_Repl.md` — rewrite around the session model (today it documents buffer replay and Tree-sitter completeness, both gone).
 - `doc/dev/lambda/LR_01_*.md` §6 — the REPL loop section describes `run_script_mir(repl_history)`.
 - `vibe/Lambda_Issue_Ledger.md` — LR01-7 (replay) and LR01-18 (echo) close; `vibe/impl/Lambda_Impl_Ast_Interp (done).md` P4 text "imports are deliberately rejected" corrected.
-- **Landed 2026-10-06 with the rulings:** `doc/Lambda_Formal_Design.md` D8.1.1v17 (25.0.0) — the REPL session, replay retired, the D8.5.1v7 reference-parser carve-out struck, RI4–RI6; `doc/Lambda_Formal_Semantics.md` S16.7.4–S16.7.6 (57.1.0) — echo, no rebinding, session kinds. Both carry `*` footnotes until Phases A–B land; flip them then.
+- **Landed 2026-10-06 with the rulings:** `doc/Lambda_Formal_Design.md` D8.3.6 (25.0.0) — the REPL session, replay retired, the D8.3.5 reference-parser carve-out struck, RI4–RI6; `doc/Lambda_Formal_Semantics.md` S16.7.4–S16.7.6 (57.1.0) — echo, no rebinding, session kinds. Both carry `*` footnotes until Phases A–B land; flip them then.
 - `doc/Lambda_Reference.md` / tutorial REPL samples — the website quickstart avoids `let` because of LR01-18; it can stop avoiding it.
 
 ## 8. Implementation record (2026-10-06)

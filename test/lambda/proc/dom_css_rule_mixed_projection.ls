@@ -1,4 +1,4 @@
-// D7.4.1v2: an active JS realm must not change Lambda's declared member currency.
+// D9.5.1: an active JS realm must not change Lambda's declared member currency.
 import dom
 import bridge: ~~.js_helper
 

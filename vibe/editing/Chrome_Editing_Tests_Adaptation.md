@@ -14,7 +14,7 @@ current Radiant. `dom_selection_modify` now accepts all of the listed
 granularities, has bidi-aware visual character/word paths, and uses
 editing-host layout stops for line boundaries. Word and sentence segmentation
 remain approximations. This is native DOM/Selection mechanism under
-**D7.2.5**; see [RAD_18 §6](../../doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md#6-dom-range-mutation-selection-modify-stringification).
+**D10.2.1**; see [RAD_18 §6](../../doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md#6-dom-range-mutation-selection-modify-stringification).
 
 ---
 

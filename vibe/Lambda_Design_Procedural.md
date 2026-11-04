@@ -2,7 +2,7 @@
 
 **Revision:** 3 (2026-11-02) — local imperative `fn` bodies and confined shared captures, ratified by the user.
 **Status:** `fn` local control and confined shared captures are **implemented and qualified in `codex/fn-local-state`** (Lambda/input baseline **8520/8520**). The indexed escape analysis covers aliases, containers, known return/retention summaries and transitive captures. Escaping closures preserve creation-time snapshots and reject writes of fn-owned captures. Qualification, conservative proof boundaries and existing `pn`/COW debt are recorded in the implementation plan. Comprehension extensions remain SO51. The resource model remains designed, not built.
-**Formal linkage:** call effects S12.1.1v3, D6.1.1v2; local control S12.1.2v3, S16.6.5v2; results S2.5.3v3–S2.5.4v3; local ownership S1.4v2, S9.1.7v2; inout/captures S9.1.3v2–S9.1.4v2, D6.2.3v3; assignment S12.2.1v3–S12.2.2; COW S9.1.2, D4.4.1–D4.4.6; optimization D6.1.2v2; control forms S16.6.6–S16.6.9v2; error completion S7.4.6v3; resources S12.4.1v3–S12.4.3; script top level S16.7.1, S16.7.6.
+**Formal linkage:** call effects S12.1.1v3, D7.1.1; local control S12.1.2v3, S16.6.5v2; results S2.5.3v3–S2.5.4v3; local ownership S1.4v2, S9.1.7v2; inout/captures S9.1.3v2–S9.1.4v2, D7.2.3; assignment S12.2.1v3–S12.2.2; COW S9.1.2, D5.4.1–D5.4.5; optimization D7.1.2; control forms S16.6.6–S16.6.9v2; error completion S7.4.6v3; resources S12.4.1v3–S12.4.3; script top level S16.7.1, S16.7.6.
 **Implementation plan:** [completed implementation record](<impl/Lambda_Impl_Function_Local_State (done).md>).
 **Spec mapping:** `Lambda_Procedural.md` §1–§5 (the 2026-01-23 proposal) → S12.1.2, S16.6.5, S12.2.1; `Lambda_Proc_Assignment.md` design principles 1–4 → S12.2.1; principle 5 and §4.3–§4.5 → S9.1.6, S9.3.2, S12.2.2; §4.6 and Phase 6 → superseded by S9.1.4 (Appendix S, S-1).
 **Scope:** local imperative computation in both callable colours, the continuing `fn`→`pn` prohibition, mutable-root ownership, confined procedure captures, and the procedural APIs for external effects. COW machinery, document updates and concurrency retain their own records.
@@ -20,12 +20,12 @@ The governing principles are S1.10 and S9.1.2: colour what changes the caller's 
 
 The new permission is lexical, not an inference that a procedure happens to be harmless. A `pn` remains forbidden from `fn`, including a helper that only touches local data and a procedure nested in the same body. Mutating builtins declared `pn` keep that restriction; local assignment does not recolour `push`, IO, tasks or host APIs.
 
-*Why a declared bit rather than inferred purity.* The bit is load-bearing across the runtime (D6.1.2v2): it is the const-folder's soundness gate, the license for stream fusion and parallelization, the guarantee that `fn` regions never suspend, and what makes the JS Promise membrane computable. An inferred bit would let a library change colour silently with its implementation; a declared one changes a caller's contract only when the declaration changes. The accepted price is that effects are not reified: a `pn` call executes; there is no held, unexecuted effect value.
+*Why a declared bit rather than inferred purity.* The bit is load-bearing across the runtime (D7.1.2): it is the const-folder's soundness gate, the license for stream fusion and parallelization, the guarantee that `fn` regions never suspend, and what makes the JS Promise membrane computable. An inferred bit would let a library change colour silently with its implementation; a declared one changes a caller's contract only when the declaration changes. The accepted price is that effects are not reified: a `pn` call executes; there is no held, unexecuted effect value.
 
 Three boundaries follow from the bit and are easy to miss:
 
 - **A script's top level is `fn` effect context, not an `fn` activation.** Top-level mutable statements remain forbidden; procedural code belongs in `main()`, run by `lambda run script.ls` (S12.1.1v3, S16.7.1). `lambda run` without a script opens a procedural REPL session whose entries append to one implicit procedure body (S16.7.6).
-- **Element construction is `fn` context, even inside a procedure.** Attributes and content of `<elmt …>` evaluate as pure expressions; a `pn` call nested directly in an element literal is rejected statically, or refused at run time when the callee's colour is unknown (S12.1.1v3, D6.1.1v2; USER 2026-10-15). Run the procedure in a preceding statement and build the element from its bound result:
+- **Element construction is `fn` context, even inside a procedure.** Attributes and content of `<elmt …>` evaluate as pure expressions; a `pn` call nested directly in an element literal is rejected statically, or refused at run time when the callee's colour is unknown (S12.1.1v3, D7.1.1; USER 2026-10-15). Run the procedure in a preceding statement and build the element from its bound result:
 
   ```lambda no-run
   // no-run: load_parts is a placeholder procedure
@@ -132,9 +132,9 @@ An `fn` may rebind or update members/indexes only through a `var` declared in th
 
 An **unannotated** `var` may change runtime type on reassignment; an **annotated** `var` constrains every assignment to its declared type (S12.2.1, S11.4.1). A mismatch is E201 (*type check at assignment*), raised by the checked boundary at run time when the value's type is not known statically. Implicit widening at an annotated position is by **exact embedding only** (S4.4.1): `int → float`, `int → int64` and every exact path into `integer`/`decimal` are admitted; `int64`/`u64 → float` and every narrowing need an explicit conversion. *Assignment never silently corrupts data* — the single sentence that the whole 2026-02 audit (Appendix A.2) existed to make true.
 
-*Why widen silently but check annotations.* An unannotated `var` states no contract, so the compiler serves the program as written: it keeps the fast native carrier while every assignment agrees, and moves the binding to a boxed `Item` home when one does not (D2.4.1–D2.4.3). An annotation is a contract the author wrote down; honouring it is the point of writing it. The 2026-02 design admitted any numeric coercion (`int ↔ float ↔ int64 ↔ decimal`) at annotated positions; the 2026-07-20 numeric model narrowed that to exact embedding (Appendix S, S-2).
+*Why widen silently but check annotations.* An unannotated `var` states no contract, so the compiler serves the program as written: it keeps the fast native carrier while every assignment agrees, and moves the binding to a boxed `Item` home when one does not (D2.3.4–D2.3.5). An annotation is a contract the author wrote down; honouring it is the point of writing it. The 2026-02 design admitted any numeric coercion (`int ↔ float ↔ int64 ↔ decimal`) at annotated positions; the 2026-07-20 numeric model narrowed that to exact embedding (Appendix S, S-2).
 
-The widening decision is static and tier-shared. Pre-widening AST reads can retain their initial types; compact literal selection now follows widened dependencies through aliases and nested expressions and declines that stale storage proof ([LR03-36](<Lambda_Issue_Ledger (fixed).md#lr03-36>), fixed 2026-10-28; S12.2.1, D3.3.3v3).
+The widening decision is static and tier-shared. Pre-widening AST reads can retain their initial types; compact literal selection now follows widened dependencies through aliases and nested expressions and declines that stale storage proof ([LR03-36](<Lambda_Issue_Ledger (fixed).md#lr03-36>), fixed 2026-10-28; S12.2.1, D4.3.3).
 
 ### 3.3 Assignment targets
 
@@ -143,7 +143,7 @@ The surface has three target shapes: an identifier (`x = v`), an index (`a[i] = 
 - **A write may update or add only a member admitted by the container's existing key domain, and never changes the container kind** (S9.1.6). `var a = []; a["str"] = 1` raises (S7.1.3v2) and `a` stays an array. Changing kinds is whole-binding replacement: `var a = [1]; a = {value: 1}`. Adding a new field to a map or an open object instance is an ordinary member addition and a shape transition.
 - **An invalid write raises.** Out-of-bounds, key-domain and base failures on a member or index write are hard errors through the `T^` channel, never a soft value, `null` or a silent no-op; sequence growth is explicit (`push`, `splice`) (S7.1.3v2). *Reads ask a question; writes issue a command.* The 2026-02 runtime setters logged and returned on every such failure — the silent no-op this ruling forbids.
 - **Elements are mutable on both faces** (S12.2.2): `elem.attr = v` is map-field assignment; `elem[i] = v` is child assignment, which keeps content normalized (S2.6.5).
-- **Storage follows the value, not the other way round.** A write of a value the container's packed representation cannot hold exactly moves the container to a representation that can — never a truncation, never a reinterpretation of bits (S9.3.2), and the change of representation is unobservable (D2.6.2). The 2026-02 audit found the opposite: an `ArrayInt` slot read back a float's tagged bits as an integer (BUG-1). The fix generalized into the construction ruling: storing a scalar and reading it back keeps its type at every magnitude.
+- **Storage follows the value, not the other way round.** A write of a value the container's packed representation cannot hold exactly moves the container to a representation that can — never a truncation, never a reinterpretation of bits (S9.3.2), and the change of representation is unobservable (D3.2.2). The 2026-02 audit found the opposite: an `ArrayInt` slot read back a float's tagged bits as an integer (BUG-1). The fix generalized into the construction ruling: storing a scalar and reading it back keeps its type at every magnitude.
 - **Field type changes rebuild the shape.** A map or element field assigned a value of another type gets a new shape entry; shape metadata always describes the stored data (principle 5 of the 2026-02 audit; BUG-3 was a `null` field holding a container under a `null` shape).
 
 ### 3.4 `=` never writes a document
@@ -165,7 +165,7 @@ The distinction between an `fn` activation and an `fn` *effect context* matters:
 
 ## 5. Mutable value semantics
 
-Binding, assignment and construction **copy, observably, for every container kind**; the implementation is copy-on-write, and sharing must be unobservable — a verifiable property, not a convention (S9.1.2). The machinery is the COW record's (D4.4.1–D4.4.6, CW#); this section states only what a procedure author sees.
+Binding, assignment and construction **copy, observably, for every container kind**; the implementation is copy-on-write, and sharing must be unobservable — a verifiable property, not a convention (S9.1.2). The machinery is the COW record's (D5.4.1–D5.4.5, CW#); this section states only what a procedure author sees.
 
 ### 5.1 Copies, not references
 
@@ -177,7 +177,7 @@ Binding, assignment and construction **copy, observably, for every container kin
 
 ### 5.3 Function and procedure closures
 
-**Ratified 2026-11-02 (USER): confined sharing; escaping snapshots.** S9.1.4v2 and D6.2.3v3 distinguish these cases:
+**Ratified 2026-11-02 (USER): confined sharing; escaping snapshots.** S9.1.4v2 and D7.2.3 distinguish these cases:
 
 | Closure | Capture behavior |
 |---|---|
@@ -187,7 +187,7 @@ Binding, assignment and construction **copy, observably, for every container kin
 
 **Shared access means the actual parent binding.** Whole-variable reassignment, member/index updates and COW replacement all go through that binding's owner. Independently writable environment copies are not equivalent. A local value copy such as `let saved = xs` remains a value snapshot even if `xs` itself has a live procedure capture (S9.1.2).
 
-**Escape classification precedes capture creation.** Returning a closure, retaining it outside the invocation, forwarding it through a callee that may retain it, or capturing it transitively in an escaping closure prevents a live capture. An unknown escape path is not a proof of confinement. A potentially escaping closure takes its snapshots when formed, not at the eventual return/store; a mutable captured write is rejected rather than silently changing its target. Internal representation must preserve existing no-cycle, inout-exclusivity and precise-rooting contracts (S9.1.3v2, S9.1.5v2, D4.3.3).
+**Escape classification precedes capture creation.** Returning a closure, retaining it outside the invocation, forwarding it through a callee that may retain it, or capturing it transitively in an escaping closure prevents a live capture. An unknown escape path is not a proof of confinement. A potentially escaping closure takes its snapshots when formed, not at the eventual return/store; a mutable captured write is rejected rather than silently changing its target. Internal representation must preserve existing no-cycle, inout-exclusivity and precise-rooting contracts (S9.1.3v2, S9.1.5v2, D5.3.2).
 
 ```lambda no-run
 // no-run: design example; executable fixtures cover creation-time snapshots
@@ -207,7 +207,7 @@ Calling the returned `read` from `pn` context observes `seed`, the snapshot at i
 
 ### 5.4 Nested mutation and shared records
 
-A deep update spells the path: `t.nodes[i].value = v` writes in place through the `var` root. `var h = t.nodes[i]` is a *copy* — mutating `h` does not reach `t` unless it is stored back — and the compiler binds such place copies as borrows wherever the difference is unobservable (D4.4.4v4, D4.4.5, D4.4.6). Ergonomics for deep updates are owned by the nested-mutation record (SO14, CW22–CW28).
+A deep update spells the path: `t.nodes[i].value = v` writes in place through the `var` root. `var h = t.nodes[i]` is a *copy* — mutating `h` does not reach `t` unless it is stored back — and the compiler binds such place copies as borrows wherever the difference is unobservable (D5.4.4, D5.4.5, D5.4.5). Ergonomics for deep updates are owned by the nested-mutation record (SO14, CW22–CW28).
 
 When two owners need to see one record, the idiom is the **handle store**: one container owns each record, every other reference is a key into it, and the store travels as one `var` parameter. Identity that aliasing supplied implicitly becomes data (C4.2e; `doc/Lambda_Procedural.md` §Sharing Mutable State). The AWFY `richards` and `deltablue` ports are the worked examples.
 
@@ -217,7 +217,7 @@ S12.1.2v3 separates sequential local computation from external effects. A `while
 
 S16.6.5v2 preserves existing `for` meaning. Adding `var` to an `fn` never silently reclassifies a comprehension as a procedural loop. **SO51 remains open:** mutation of a containing local across comprehension iterations, `break`/`continue`, nonlocal `return`, partial collected results and interactions with `where`/`order by`/`limit` and parallelization. The implementation milestone covers the ratified `while` form and existing comprehensions; it must not invent these extensions while relaxing the old blanket guards.
 
-The effect bit remains declared, checked, and suspension-free for `fn` (D6.1.2v2). However, an optimizer needs local read/write and control dependencies before moving an expression, folding a changing local, reusing a closure environment or parallelizing iterations. Constant evaluation needs a bounded evaluator or a safe refusal for loops it cannot evaluate; compile time must not hang on an admitted runtime loop. Interp, MIR Direct and auto promotion must agree on these facts.
+The effect bit remains declared, checked, and suspension-free for `fn` (D7.1.2). However, an optimizer needs local read/write and control dependencies before moving an expression, folding a changing local, reusing a closure environment or parallelizing iterations. Constant evaluation needs a bounded evaluator or a safe refusal for loops it cannot evaluate; compile time must not hang on an admitted runtime loop. Interp, MIR Direct and auto promotion must agree on these facts.
 
 ## 7. Reaching the outside world
 
@@ -239,7 +239,7 @@ A callable reports ordinary failures as error outcomes. Its return contract must
 
 | Topic | Ruling | Status |
 |---|---|---|
-| `fn`/`pn` effect bit; top level and element construction are `fn` context | S12.1.1v3, D6.1.1v2 | Implemented; residue in the S12.1.4v3 footnote |
+| `fn`/`pn` effect bit; top level and element construction are `fn` context | S12.1.1v3, D7.1.1 | Implemented; residue in the S12.1.4v3 footnote |
 | Local `break`/`continue`/`return`/`while`/`var` and assignment in either callable colour | S12.1.2v3, S16.6.5v2 | Qualified on interp/jit/auto; Lambda/input baseline 8520/8520 |
 | Fn fallthrough collects; pn normal results replace, including null; no-result statements leave the accumulator unchanged | S2.5.3v3, S2.5.4v3, S12.1.2v3, S7.6.1v9, S7.6.7v5 | Fn local-control extension implemented; broader handler changes retain their own status |
 | `while` two spellings; statements need braces; control blocks versus value blocks; branch homogeneity | S16.6.1–S16.6.2, S16.6.6, S16.6.8v3, S16.6.9v2 | Fn/arrow extension qualified; C parser 444/444, CST parser 430/430 |
@@ -247,10 +247,10 @@ A callable reports ordinary failures as error outcomes. Its return contract must
 | `let`/params immutable; unannotated `var` may change type; annotated `var` by exact embedding | S12.2.1, S4.4.1, S11.4.1 | Implemented; LR03-36 partial |
 | Member/index writes stay in the key domain; no kind change | S9.1.6 | Core tiers conformant; editor/host access sites unaudited |
 | Element attribute and child assignment | S12.2.2 | Implemented |
-| Writes never corrupt a packed representation | S9.3.2, D2.6.2 | Implemented |
-| Values copy; COW unobservable | S9.1.2, D4.4.1–D4.4.6 | Stage 1 landed |
+| Writes never corrupt a packed representation | S9.3.2, D3.2.2 | Implemented |
+| Values copy; COW unobservable | S9.1.2, D5.4.1–D5.4.5 | Stage 1 landed |
 | Inout parameters; exclusivity; invariance | S9.1.3v2, S9.2.1 | Snapshot half unconditional; exclusivity partial |
-| Escaping/`fn` closures snapshot; confined nested `pn` may share parent `fn` locals | S9.1.4v2, D6.2.3v3 | Indexed confinement proofs select shared traced homes in T0/MIR; escaping fn-local captures reject writes and retain value snapshots. Unknown retention requires snapshots. Legacy pn-parent capture debt remains separate. |
+| Escaping/`fn` closures snapshot; confined nested `pn` may share parent `fn` locals | S9.1.4v2, D7.2.3 | Indexed confinement proofs select shared traced homes in T0/MIR; escaping fn-local captures reject writes and retain value snapshots. Unknown retention requires snapshots. Legacy pn-parent capture debt remains separate. |
 | Comma decomposition; no bracket destructuring | S16.8.7, S12.2.1v3 | Mutable targets, COW ownership and capture flow implemented; [follow-up record](<impl/Lambda_Impl_Function_Local_Decomposition (done).md>) |
 | No global mutable state; fn activation may own local working state | S9.1.7v2 | Global prohibition preserved; fn-local admission implemented |
 | `=` is Tier 2; documents change only by `put`/`del`/`output` | PTH55, PTH72v2, PTH73 | Implemented (PTH30–PTH80) |
@@ -260,7 +260,7 @@ A callable reports ordinary failures as error outcomes. Its return contract must
 
 - **SO51 — Comprehension extensions:** local cross-iteration mutation and early exits need a separate ruling (§6); they are outside the `while` milestone.
 
-- **Legacy pn-parent capture modes** (S9.1.4v2, D6.2.3v3): the parent-fn extension has indexed confinement proofs and shared traced homes. A closure over a pn-parent `var` still has legacy writable-copy debt (S-1), and only the E231 read-after-call guard protects the outer scope (§5.3). COW Stage 2.
+- **Legacy pn-parent capture modes** (S9.1.4v2, D7.2.3): the parent-fn extension has indexed confinement proofs and shared traced homes. A closure over a pn-parent `var` still has legacy writable-copy debt (S-1), and only the E231 read-after-call guard protects the outer scope (§5.3). COW Stage 2.
 - **Exclusivity** (S9.1.3): faces 1, 3 and 4 landed (overlapping `var` arguments are E211); face 2 is unreachable behind E229; view-borrow confinement (S9.2.2) and the view-state half of S9.2.4v2 are outstanding.
 - **A repeated literal map key** keeps both entries; a write updates the first while a read takes the last — [LR03-17](Lambda_Issue_Ledger.md#lr03-17), needs a ruling.
 - **Nested-mutation ergonomics** — SO14, owned by the nested-mutation record.
@@ -270,7 +270,7 @@ A callable reports ordinary failures as error outcomes. Its return contract must
 
 
 
-- ~~**S-1 · Closures capture by writable copy** (Proc_Assignment §4.6, Phase 6, BUG-7 fix, 2026-02): each closure gets its own mutable `Item` slot per captured `var`; writes inside the closure persist across its calls while the outer `var` stays independent (the closure-counter pattern).~~ Replaced by **S9.1.4** / **D6.2.3v2**: closures are immutable values and capture assignment is a compile error (§5.3).
+- ~~**S-1 · Closures capture by writable copy** (Proc_Assignment §4.6, Phase 6, BUG-7 fix, 2026-02): each closure gets its own mutable `Item` slot per captured `var`; writes inside the closure persist across its calls while the outer `var` stays independent (the closure-counter pattern).~~ Replaced by **S9.1.4** / **D7.2.3**: closures are immutable values and capture assignment is a compile error (§5.3).
 - ~~**S-2 · Annotated `var` admits any numeric coercion** (Proc_Assignment §4.1.1 rule 3: `int ↔ float ↔ int64 ↔ decimal`, and `INT ↔ INT64` interchangeable in `fn_map_set`).~~ Replaced on 2026-07-20 by exact-embedding widening, **S4.4.1** via **S12.2.1** (§3.2).
 - ~~**S-3 · `output(source, url, format?): null | error`** (Procedural §3): a positional format symbol defaulting to `'mark`, extension auto-detection, and failure returned as an error value.~~ Replaced by `output(v, target, options?)`, which raises (**S7.4.5**), takes options as a map (**S17.8.1**), and is the Tier 3 whole-document `put` (**PTH54v2**, **PTH60v3**) (§7.1).
 - ~~**S-4 · `try`/`catch` blocks** (Procedural §6.2, future).~~ Never adopted; error handling is the channel model of **S7.4–S7.6** (§7.2).
@@ -295,10 +295,10 @@ and capture sections updated 2026-11-02; other entries retain the 2026-10-23 sur
 - **AST.** The statement nodes are `AST_NODE_BREAK_STAM`, `CONTINUE_STAM`, `RETURN_STAM`, `VAR_STAM` and `ASSIGN_STAM`. `while` is an `AST_NODE_LOOP` with `LOOP_FORM_WHILE` (`AstWhileNode` is a typedef). `resolve_assignment` retags an index or member target as `AST_NODE_INDEX_ASSIGN_STAM` or `AST_NODE_MEMBER_ASSIGN_STAM`. Every assignment is one record, `AstAssignNode`, with `target_entry` and its COW fields (D8.2.2); `AstAssignStamNode` and `AstCompoundAssignNode` are aliases of it, where "compound" means an index or member target, not `+=`. Decomposition is `AST_NODE_DECOMPOSE` (`AstDecomposeNode`).
 - **Binding facts.** `NameEntry` keeps the three 2026-02 flags `is_mutable`, `has_type_annotation` and `type_widened`, beside the COW facts (`cow_param_mutated`, `cow_owned`, `is_place_copy`, `var_root_may_share`, …). `resolve_assignment` sets `type_widened` on the first type-changing write to an unannotated `var`; later reads are typed `any`. MIR decides a native-lane `var`'s home once at its declaration (`mir_nested_control_writes_binding` with widening cascade). A `var` passed as a `var` argument is also boxed. T0 stores every binding as an `Item`.
 - **Execution.** T0 runs loops in `interp.cpp` and signals `break`, `continue` and `return` through `EvalSignal`. MIR lowers through `transpile_while` and `transpile_assign_stam_core`. Annotated boundaries go through `emit_checked_boundary`, and on T0 through the matching interp check.
-- **Paths and COW.** A nested path write runs through `exec_place_assign` on T0, and through `transpile_compound_assignment_item` and the `cow_place_leaf_*` helpers in MIR. Both reach `cow_path_set_impl` / `cow_path_set_inplace`. The COW primitives are `cow_mark_shared`, `cow_bind_var` and `cow_prepare_write`. The Lambda-side write wrappers (`index_assign_cow`, `array_set_cow`, `member_set_cow`, `map_set_cow`) prepare the write before calling the raw setter (D4.4.2).
+- **Paths and COW.** A nested path write runs through `exec_place_assign` on T0, and through `transpile_compound_assignment_item` and the `cow_place_leaf_*` helpers in MIR. Both reach `cow_path_set_impl` / `cow_path_set_inplace`. The COW primitives are `cow_mark_shared`, `cow_bind_var` and `cow_prepare_write`. The Lambda-side write wrappers (`index_assign_cow`, `array_set_cow`, `member_set_cow`, `map_set_cow`) prepare the write before calling the raw setter (D5.4.2).
 - **Runtime setters.** `fn_index_set` dispatches by owner kind. A sequence write with a non-integer key raises E201. On an element, an integer key writes a child (`fn_array_set`) and a name key writes an attribute (`fn_map_set`). `fn_array_set` still converts a specialized array in place (`convert_specialized_to_generic`). A field type change in `fn_map_set` retags in place when that is safe, and otherwise moves the container onto a runtime shape-tree target (`container_retype_field`, D3.4.5). `map_rebuild_for_type_change` now serves only JS shapes. A new member is added by `map_extend_open_shape`. `Container::is_data_migrated` is still consulted for parser-built containers.
 - **`var` parameters.** At the call site an argument must be a mutable `var` root (E211). Overlapping roots or view bases are E211, and the types must match exactly (E207). A plain `pn` parameter written by the callee is snapshotted (`cow_param_mutated`).
-- **Closures.** `lambda_analyze_capture_permissions` builds one indexed value-flow graph and fixed-point known-call summaries before either tier creates captures (S9.1.4v2, D6.2.3v3). Confined named/anonymous pn values share actual parent homes through aliases and containers; unknown retention, pure-fn capture boundaries, escaping ancestors and reference-cycle backedges require snapshots. A home is an internal one-element GC Array using existing owned Item/scalar storage. Parent writes and COW detaches publish through that home; snapshots mark captured containers shared and copy wide scalar payloads. T0/MIR environments and parent slots precisely root their homes. AUTO declines shared-home satellites; eager MIR supports them. Legacy pn-parent captured-var writes and their E231 guard remain separate debt. A `start` capturing a mutable `var` is E221.
+- **Closures.** `lambda_analyze_capture_permissions` builds one indexed value-flow graph and fixed-point known-call summaries before either tier creates captures (S9.1.4v2, D7.2.3). Confined named/anonymous pn values share actual parent homes through aliases and containers; unknown retention, pure-fn capture boundaries, escaping ancestors and reference-cycle backedges require snapshots. A home is an internal one-element GC Array using existing owned Item/scalar storage. Parent writes and COW detaches publish through that home; snapshots mark captured containers shared and copy wide scalar payloads. T0/MIR environments and parent slots precisely root their homes. AUTO declines shared-home satellites; eager MIR supports them. Legacy pn-parent captured-var writes and their E231 guard remain separate debt. A `start` capturing a mutable `var` is E221.
 - **Element purity.** `colour_walk_visit` switches to functional mode inside element and object literals, so `colour_walk_call` reports E224. Dynamic callees go through the run-time colour guard (`fn_colour_guard`).
 - **Output.** `output` is registered at arity 2 and 3 (`pn_output2`, `pn_output3`; append through `pn_output_append`) in `lambda-proc.cpp`. The `io.*` procedures are in `sys_func_registry.c`. Both tiers still handle `AST_NODE_PIPE_FILE_STAM`, the old pipe-to-file statement, but `build_ast` no longer creates it, so the path looks unreachable. Retiring it is a cleanup, not a design question.
 - **Fixtures.** Local-control and snapshot coverage is in `test/lambda/fn_local_*.ls` and `proc/fn_local_proc_snapshot.ls`; the former `mutation_in_fn` and `function_body_var` negatives are now the valid `fn_local_legacy` and `fn_local_colour_poly` cases. Ownership, capture escape, comprehension control, lexical targets and static/dynamic pn refusal have `negative/{semantic,runtime}/fn_local_*` fixtures. Existing `proc_control`, `proc_var*`, `cow_*`, `var_param*`, `let_finality` and typed-container-write cases retain their roles.
@@ -310,7 +310,7 @@ and capture sections updated 2026-11-02; other entries retain the 2026-10-23 sur
 
   | Bug | Defect | Fix (then) | Where it stands now |
   |---|---|---|---|
-  | BUG-1 | Specialized-array write extracted a mismatched value's tagged bits — silent garbage | Convert the array to generic in place; specialized getters fall back on `type_id` | Generalized as S9.3.2 / D2.6.2 |
+  | BUG-1 | Specialized-array write extracted a mismatched value's tagged bits — silent garbage | Convert the array to generic in place; specialized getters fall back on `type_id` | Generalized as S9.3.2 / D3.2.2 |
   | BUG-2 | `elem[i] = v` silently dropped | List/element cases in the array setter | S12.2.2 |
   | BUG-3 | `null` field holding a container under a `null` shape | Rebuild the shape on every type change | Principle kept (§3.3) |
   | BUG-4 | MarkEditor zeroed a field on type change | Runtime path stopped using MarkEditor | MarkEditor unchanged for input parsers |
@@ -323,5 +323,50 @@ and capture sections updated 2026-11-02; other entries retain the 2026-10-23 sur
 - **2026-07-20** — numeric-model amendment: annotated widening narrowed to exact embedding (S-2).
 - **2026-08** — C4 ratified into S9 (mutable value semantics); COW Stage 1 landed; plain-parameter snapshots made unconditional (2026-08-29, CW29); the C-text transpiler retired (MIR Direct is the only back end); S16.6.5–S16.6.9 control-form rulings implemented in both front ends (2026-08-24).
 - **2026-09** — document updates (PTH30–PTH80) put `output` in Tier 3 beside `put`/`del` (PTH-O11 resolved 2026-09-17); procedure arrow `pn (x) => { … }` (S16.6.7v2, 2026-09-26).
-- **2026-10-15** — element construction made `fn` context inside procedures (S12.1.1v3, D6.1.1v2).
+- **2026-10-15** — element construction made `fn` context inside procedures (S12.1.1v3, D7.1.1).
 - **2026-10-23** — this consolidation.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D6.1.2v2 → D7.1.2
+
+**D7.1.2*** The bit is load-bearing across the runtime: it is the
+const-folder's soundness gate, the stream-fusion and parallelization
+license (*Polars/DuckDB must trust their UDFs; Lambda verifies*), the
+reduction-legality condition, the guarantee that `fn` regions are
+suspension-free (no scheduling polls in pure code), and what makes the
+JS Promise membrane computable. **No reified effects**: a `pn` call
+executes; there is no held, unexecuted effect value. Local mutation and
+control inside `fn` do not change its call colour, but the bit alone does
+not prove a local read invariant, a loop independent, or evaluation
+terminating. Optimizations must preserve sequential local dependencies
+and completion; non-escaping live captures may not be lifted into shared
+or cached environments. Escaping captures keep the immutable-value
+contract of S9.1.4v2. [U26, PD11, K19, K23, Features §3.6;
+S12.1.2v3; Design_Procedural §6]
+
+### ex-D6.2.3v3 → D7.2.3
+
+**D7.2.3*** **Closure representation respects capture permissions.**
+`fn` captures and every potentially escaping closure retain immutable
+`Item` snapshots at creation; captured writes are compile errors. A
+proven non-escaping nested `pn` may access the enclosing `fn`'s live local
+`var` storage under S9.1.4v2. Sibling procedures refer to the same binding
+home, not independent writable copies. One tier-shared analysis decides
+capture mode before layout/lowering; an unknown escape is not proof of
+confinement. Live storage never outlives the parent invocation and uses
+precise roots (D5.3.2, D7.2.4), never a native-stack scan. Escape does not
+trigger a late snapshot: snapshot-at-creation semantics must already
+hold. Captures outside this confined parent-fn case keep their existing
+snapshot representation. Under D1.3 this does not change LambdaJS
+capture semantics.
+[Design_Procedural §5.3; C4, Box_Unbox, JSI5]

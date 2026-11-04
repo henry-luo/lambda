@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "A guarded float array comparison retains the complete boxed fallback for absence, errors and representation changes (S7.1.1v3, D3.3.3v3).",
+  "description": "A guarded float array comparison retains the complete boxed fallback for absence, errors and representation changes (S7.1.1v3, D4.3.3).",
   "checks": [
     {
       "in_func": "_probability_compare_#",

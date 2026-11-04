@@ -1,6 +1,6 @@
 import sequence: .editor.mod_doc
 
-// D7.2.4v3 / S9.1.2: Raster storage is native; document composition stays in Lambda values.
+// D9.3.4 / S9.1.2: Raster storage is native; document composition stays in Lambda values.
 pub fn blank(options) element^ => lambda.sys.image_raster(null, options)^
 pub fn from_array(samples, options = {}) element^ => lambda.sys.image_raster(samples, options)^
 pub fn channel(raster, channel_name) array^ => lambda.sys.image_region(raster, null, channel_name)^

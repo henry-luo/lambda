@@ -232,7 +232,7 @@ typedef enum StepPosition {
 } StepPosition;
 
 // POD snapshot: piecewise points borrow the configuration/keyframe owner pool.
-// scheduler instances instead own a copy in their scheduler pool (D4.5.1v4).
+// scheduler instances instead own a copy in their scheduler pool (D5.5.1).
 typedef struct TimingFunction {
     TimingFunctionType type;
     union {
@@ -269,7 +269,7 @@ typedef void (*AnimTickFn)(AnimationInstance* anim, float t);
 typedef void (*AnimFinishFn)(AnimationInstance* anim);
 typedef void (*AnimCancelFn)(AnimationInstance* anim);
 
-// document-owned scheduler state survives retained relayout (D4.5.1v4).
+// document-owned scheduler state survives retained relayout (D5.5.1).
 struct AnimationInstance {
     AnimationInstance* next;
     AnimationInstance* prev;
@@ -800,7 +800,7 @@ extern ImageSurface* image_surface_alloc(void);
 // valid until the scope ends: destroyed surfaces are released only at a quiet
 // point, when no read scope is open anywhere.
 extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
-// immutable snapshot leases retain storage across replacement/removal (D4.5.1v4).
+// immutable snapshot leases retain storage across replacement/removal (D5.5.1).
 extern void image_surface_snapshot_publish(ImageSurface* surface);
 extern ImageSurface* image_surface_snapshot_retain(ImageSurface* surface);
 extern void image_surface_snapshot_release(ImageSurface* surface);
@@ -954,7 +954,7 @@ inline void font_prop_release_handle(FontProp* font) {
 
 inline void font_prop_copy(FontProp* destination, const FontProp* source, Pool* pool) {
     if (!destination || !source || destination == source) return;
-    // copied font props own their mutable shadows independently (D4.5.1v4).
+    // copied font props own their mutable shadows independently (D5.5.1).
     TextShadow* shadows = pool ? clone_text_shadows(pool, source->text_shadow) : nullptr;
     if (pool) lam::free_owned_list(pool, destination->text_shadow);
     font_prop_release_handle(destination);
@@ -1282,7 +1282,7 @@ typedef struct Corner {
     lam::Up<CornerExpressions> expressions;
 } Corner;
 
-// keep computed values separate from paint's overlap-constrained used radii (D4.5.1v4).
+// keep computed values separate from paint's overlap-constrained used radii (D5.5.1).
 struct CornerExpressions {
     Corner computed;
     lam::Up<const CssValue> horizontal[4], vertical[4];
@@ -2775,7 +2775,7 @@ struct ViewBlock : ViewSpan {
     // ViewBlock* last_child;
 };
 
-// a paint projection borrows its caller's boundary; never retain this stack-only view (D4.5.1v4).
+// a paint projection borrows its caller's boundary; never retain this stack-only view (D5.5.1).
 inline ViewBlock view_with_boundary(ViewBlock* source, BoundaryProp* boundary) {
     ViewBlock view = *source;
     view.bound = lam::view_prop(boundary);
@@ -3195,7 +3195,7 @@ static_assert(sizeof(ViewTableRowGroup) == sizeof(DomElement), "ViewTableRowGrou
 static_assert(sizeof(ViewTableRow) == sizeof(DomElement), "ViewTableRow must not add fields");
 static_assert(sizeof(ViewTableCell) == sizeof(DomElement), "ViewTableCell must not add fields");
 // List now carries Lambda's array representation certificate after its stable
-// content offsets; DOM overlays inherit that one-word tail (D3.3.3).
+// content offsets; DOM overlays inherit that one-word tail (D4.3.3).
 static_assert(sizeof(DomElement) <= 376, "DomElement size ratchet regressed");
 static_assert(sizeof(DomText) <= 120, "DomText size ratchet regressed");
 static_assert(sizeof(DomNode) <= 80, "DomNode size ratchet regressed");
@@ -4770,7 +4770,7 @@ typedef struct DocumentJsHostConfig {
     InputResourcePolicy resource_policy;
     const struct RenderPagedOptions* paged_media;
     bool scripting_disabled;    // DomDocument::scripting_disabled for the loaded document
-    bool microphone_granted;   // D7.5.10: initial document only, never inherited
+    bool microphone_granted;   // D11.3.2: initial document only, never inherited
 } DocumentJsHostConfig;
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const struct DomDocument* source);

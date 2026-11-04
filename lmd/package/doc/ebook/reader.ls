@@ -1,4 +1,4 @@
-// Reader policy and mutation live in Lambda views/handlers (D7.2.4, S12.1.3).
+// Reader policy and mutation live in Lambda views/handlers (D9.3.4, S12.1.3).
 import dom
 import c: .common
 import chapters: .chapter

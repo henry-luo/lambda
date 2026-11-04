@@ -1,4 +1,4 @@
-// filtered signs with a caller-supplied exact fallback; no runtime dependency (D7.1.1).
+// filtered signs with a caller-supplied exact fallback; no runtime dependency (D9.1.1).
 #ifndef LIB_PROCGEN_PREDICATES_H
 #define LIB_PROCGEN_PREDICATES_H
 #include <stdbool.h>

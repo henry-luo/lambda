@@ -3,7 +3,7 @@
 The producer intentionally starts from grammar.js-compatible constructs, while
 scope records prevent accidental unresolved identifiers. It does not claim that
 Tree-sitter decides the language: parser_differential.py adjudicates any
-grammar/C-parser discrepancy under D8.1.2v3 before a candidate is semantic.
+grammar/C-parser discrepancy under D8.1.1 before a candidate is semantic.
 """
 
 from __future__ import annotations

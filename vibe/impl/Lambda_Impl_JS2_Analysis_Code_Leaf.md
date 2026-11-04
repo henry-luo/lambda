@@ -3,8 +3,8 @@
 > **Implemented — 2026-09-10.** Tasks 5, 6 and 7 of the JS
 > tuning follow-up to [the struct-authority record](../Lambda_Design_Structs_JS.md).
 > Source base: `6460b0f51`, which commits tasks 3 and 4.
-> Authority: **D1.3**, **D2.4.3**, **D5.2.3**, **D5.3.1–D5.3.4**,
-> **D5.4.2–D5.4.3**, **D6.2.1–D6.2.3v2**, **D8.2.4**, **D8.4.3v2**,
+> Authority: **D1.3**, **D2.3.5**, **D6.2.3**, **D6.3.1–D6.3.4**,
+> **D6.4.2–D6.4.3**, **D7.2.1–D7.2.3**, **D8.2.4**, **D7.4.3**,
 > **D8.6.1–D8.6.3**. No semantic or design ruling changes.
 
 ## Task 5: shared effect and scalar-ownership analysis
@@ -20,7 +20,7 @@ The previous adopter accepted that class but emitted tests for all three wide
 lanes whenever it was nonempty. It now emits only the admitted I64, U64 or F64
 classification, with a common adoption body and unchanged watermark restoration.
 The dynamic case still handles every wide lane. This is representation analysis,
-not permission to change coercion (**D2.4.3**, **D5.2.3**, **D8.4.3v2**).
+not permission to change coercion (**D2.3.5**, **D6.2.3**, **D7.4.3**).
 
 The six JS binary arithmetic helpers share one audited catalog initializer.
 Their wide Number results are doubles; string results, errors and Decimal-backed
@@ -33,7 +33,7 @@ these helpers can allocate fresh scalar payloads. The emitter consumes this fact
 for either language. Addition retains its existing per-call reclaim and benefits
 from F64-only classification. Module/property/environment reads retain their
 borrowed-result handling. No global helper-adoption skip or new loop-reclamation
-policy is introduced (**D5.2.3**, **D5.3.2–D5.3.4**).
+policy is introduced (**D6.2.3**, **D6.3.2–D6.3.4**).
 
 The first experiment audited all six as generic boxed results, adding 47 MIR
 instructions to Ackermann's body and a repeatable approximately 4.6% slowdown.
@@ -55,7 +55,7 @@ MIR records use the existing library HashMap, keyed by compiler-selected entry,
 context, module state and arity. This preserves the existing definition-entry
 boundary; it does not use source text to merge different definitions. AST records
 use the shared `AstFunctionId` from the retained Script's `AstIndex`. Their records
-and metadata live in that Script's pool (**D6.2.1**, **D8.2.4**).
+and metadata live in that Script's pool (**D7.2.1**, **D8.2.4**).
 
 Validation exposed an interpreter-only constructor for class-field initializer
 ASTs: it created an unindexed function at every class evaluation. Both AST and
@@ -69,13 +69,13 @@ introduced.
 Each function still has its own identity, captured environment, mutable properties,
 prototype, receiver and invocation state. Sharing definition metadata never merges
 JS closure values or imports Lambda's snapshot-capture semantics into JS
-(**D1.3**, **D6.2.2v2–D6.2.3v2**).
+(**D1.3**, **D7.2.2–D7.2.3**).
 
 Each weak MIR record remembers its owning table. Finalization removes it from
 that table even when another realm is active. Table teardown detaches live records
 before freeing the buckets; their remaining function references own eventual
 release. This replaces the old active-realm lookup during finalization and adds
-no GC root or process-global cache (**D5.3.3**, **D5.4.2–D5.4.3**).
+no GC root or process-global cache (**D6.3.3**, **D6.4.2–D6.4.3**).
 
 The per-function object size is unchanged. A shared MIR definition gains one
 owner pointer and a HashMap entry; this trades modest per-definition storage for
@@ -93,7 +93,7 @@ Five JS string methods share one conversion/position adapter: `indexOf`,
 `lastIndexOf`, `includes`, `startsWith` and `endsWith`. JS owns receiver/search
 coercion, RegExp rejection, default arguments, clamping and UTF-16 indices;
 Lambda retains its own language contract. Prefix/suffix predicates restrict the
-leaf to the one candidate span (**D1.3**, **D2.4.3**).
+leaf to the one candidate span (**D1.3**, **D2.3.5**).
 
 The regression comparison exposed existing JS adapter defects: code-point indices
 for astral text, negative empty-needle reverse positions, omitted-argument
@@ -102,7 +102,7 @@ search with float-represented Numbers. The adapter now reuses the existing WTF-8
 UTF-16 expansion for non-ASCII subjects, including matches inside surrogate pairs.
 Buffer array admission uses `js_is_js_array`; numeric reverse search accepts both
 Number representations. Source and destination ownership uses precise roots
-through allocating/coercing operations (**D5.3.3**).
+through allocating/coercing operations (**D6.3.3**).
 
 The `fast-diff` library then exposed an existing JSON leaf defect: the common
 escaper treated adjacent WTF-8 high/low surrogates as two lone surrogates. It now
@@ -158,7 +158,7 @@ findings. Running the same checker against the committed versions of the changed
 source files produces the same findings after accounting for the removed helper
 name and line shifts; this change adds none. Its pre-existing diagnostics include
 `js_literal_shape`, `js_set_function_source` and unresolved/native-member paths.
-This is not a clean transitive NO_GC-audit claim (**D5.3.2**).
+This is not a clean transitive NO_GC-audit claim (**D6.3.2**).
 
 The dynamic checks exercise executed paths under exact roots; they do not prove
 every possible lifetime path (**D8.6.3**). The unmodified Test262 baseline uses its
@@ -246,7 +246,7 @@ The committed-base diff removes 41 net physical C/C++ lines from
 `lambda/runtime` + `lambda/js` (+366/−407), counting comments and whitespace.
 The JSON leaf repair adds 14 lines in `lib`. This bounded change does not
 re-run or claim the historical whole-AST retirement/timing ratchets in
-**D8.6.4v2**.
+**D8.6.4**.
 
 ## Remaining follow-ups
 
@@ -256,9 +256,9 @@ re-run or claim the historical whole-AST retirement/timing ratchets in
   definition populations before choosing further cache specialization.
 - Extend audited result/effect facts to more helpers, with borrowed/owned-result
   and reentry proofs. Effect-based guard hoisting and loop reclamation need their
-  own invalidation/lifetime proof (**D5.2.3**, **D5.3**, **D8.4.3v2**).
+  own invalidation/lifetime proof (**D6.2.3**, **D6.3**, **D7.4.3**).
 - Share additional compatible algorithm families after checking each
-  profile's coercion, ordering, indexing and error rules (**D1.3**, **D2.4.3**).
+  profile's coercion, ordering, indexing and error rules (**D1.3**, **D2.3.5**).
 
 The wider JSCU36–JSCU43 proposal remains broader than these three implemented
 tasks. The outstanding static GC-audit and environment/network failures above

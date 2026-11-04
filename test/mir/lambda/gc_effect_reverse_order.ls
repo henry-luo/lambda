@@ -1,4 +1,4 @@
-// D5.3.2: the same call graph, with its callee declared first.
+// D6.3.2: the same call graph, with its callee declared first.
 pn gc_order_reverse_leaf(x: int) int {
     var y = x
     while (y > 0) { y = y - 1 }

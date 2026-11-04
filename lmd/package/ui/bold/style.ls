@@ -1,4 +1,4 @@
-// selectors and custom properties are family-local; native controls keep UA behavior (D7.2.5).
+// selectors and custom properties are family-local; native controls keep UA behavior (D10.2.1).
 pub let css = "
 .bold-root,.bold-config-provider{font-family:var(--bold-font-family);font-size:var(--bold-font-size);line-height:var(--bold-line-height);color:var(--bold-text);background:var(--bold-background)}
 .bold-root{box-sizing:border-box;min-height:100vh;padding:32px}.bold-root *{box-sizing:border-box}

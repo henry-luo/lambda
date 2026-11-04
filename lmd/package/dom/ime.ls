@@ -48,7 +48,7 @@ pub pn end(body) {
 }
 
 
-// D7.2.5/IME-O1: the body adapter owns all key, settings and learning policy.
+// D10.2.1/IME-O1: the body adapter owns all key, settings and learning policy.
 fn is_enabled(body,status) bool {
     let override = dom.get_attribute(body,"data-ime");
     if (override == "off") false else if (override == "chinese") true else status.enabled

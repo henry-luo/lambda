@@ -379,7 +379,7 @@ static Item js_create_document_fonts_object(void) {
     Rooted<Item> fonts(roots, js_new_object());
     // Font loading is complete before scripts execute, so expose the settled
     // promise rather than a then-only object that breaks chained handlers.
-    // promise creation and property-name interning can collect either unpublished value (D5.3.3).
+    // promise creation and property-name interning can collect either unpublished value (D6.3.3).
     Rooted<Item> ready(roots, dom_realm_promise_resolve(make_js_undefined()));
     dom_realm_set_cstr(fonts.get(), "ready", ready.get());
     return fonts.get();
@@ -1818,7 +1818,7 @@ static void dom_compile_event_attr_to_expando(DomElement* elem,
 }
 
 static void dom_initialize_event_attrs(DomElement* elem) {
-    // D5.3.3: compiling an inline handler allocates a function and expando in
+    // D6.3.3: compiling an inline handler allocates a function and expando in
     // the current JS realm. A realm retained after script recovery may have no
     // live Input, so wrapper construction must defer this JS-only work.
     if (!elem || !dom_realm_active()) return;
@@ -3256,7 +3256,7 @@ static DomDocument* js_document_proxy_doc_from_item(Item item) {
             return (DomDocument*)host_data;
         }
         // non-document virtual projections must not re-enter dom_unwrap_element:
-        // it delegates here after rejecting their host type (D7.4.5v2).
+        // it delegates here after rejecting their host type (D9.5.5).
         return nullptr;
     }
     return nullptr;
@@ -4235,7 +4235,7 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
 static void destroy_pending_load_document(DomDocumentResourceData* data) {
     auto* held = (DomPendingLoadDocument*)data;
     auto* state = held->state;
-    // either owner can retire first; use the stored capsule without rebinding TLS (D5.4.1).
+    // either owner can retire first; use the stored capsule without rebinding TLS (D6.4.1).
     DomPendingLoadDocument** document_link = &state->pending_load_documents;
     while (*document_link && *document_link != held) document_link = &(*document_link)->next;
     if (*document_link) *document_link = held->next;
@@ -4279,7 +4279,7 @@ static bool retain_pending_load_document(DomDocument* document) {
     if (!held) return false;
     held->state = state;
     held->document = document;
-    // queued native pins must detach before either the document registry or evaluator retires (D5.3.3).
+    // queued native pins must detach before either the document registry or evaluator retires (D6.3.3).
     if (!dom_document_add_resource(document, held, destroy_pending_load_document, context)) {
         mem_free(held);
         return false;
@@ -6342,7 +6342,7 @@ extern "C" Item dom_document_exec_command_bridge(Item command_item,
     return (Item){.item = b2it(handled ? 1 : 0)};
 }
 
-// D7.2.5: DOM only coerces the public queryCommand* arguments and forwards
+// D10.2.1: DOM only coerces the public queryCommand* arguments and forwards
 // them to the package behavior boundary.  Command support/state stays out of
 // this IDL bridge, so execution and every query share one package registry.
 extern "C" Item dom_document_query_command_bridge(Item command_item,
@@ -6505,7 +6505,7 @@ static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) 
     JS_ROOTS(roots, walker_root, walker_item, root_root, ItemNull,
         current_root, ItemNull, node_root, ItemNull);
     // node wrappers lease their native owners and may move while another
-    // property getter collects; retain both until traversal finishes (D5.3.5).
+    // property getter collects; retain both until traversal finishes (D6.3.5).
     root_root.set(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_ROOT));
     current_root.set(dom_realm_get_name(walker_root.get(), JS_TREE_WALKER_CURRENT));
     DomNode* root = (DomNode*)dom_unwrap_element(root_root.get());
@@ -6581,7 +6581,7 @@ extern "C" Item dom_create_tree_walker_bridge(Item root_item, Item what_to_show_
     dom_realm_set_name(walker_root.get(), JS_TREE_WALKER_WHAT_TO_SHOW,
                     (Item){.item = i2it((int64_t)what_to_show)});
     // captured prototype methods operate on the actual native walker receiver;
-    // per-instance bound callbacks hid the WebIDL surface (D3.4.7, D6.2.2v2).
+    // per-instance bound callbacks hid the WebIDL surface (D3.4.7, D7.2.2).
     dom_bind_interface_prototype(dom_realm_global(), walker_root.get(), "TreeWalker");
     return walker_root.get();
 }
@@ -6663,7 +6663,7 @@ static Item dom_document_design_mode_value(DomDocument* document) {
 
 // The behavior package determines designMode compatibility semantics. This
 // bridge writes its canonical Boolean to the active document without selecting
-// a host, focus target, or editing action (D7.2.5).
+// a host, focus target, or editing action (D10.2.1).
 extern "C" Item dom_document_set_design_mode_bridge(Item enabled_item) {
     DomDocument* document = _js_current_document
         ? _js_current_document : _js_main_document;
@@ -7655,7 +7655,7 @@ extern "C" Item dom_click_method_bridge(Item elem_item) {
             return make_js_undefined();
         }
     }
-    // D5.3.3: MouseEvent construction and dispatch can collect both JS carriers.
+    // D6.3.3: MouseEvent construction and dispatch can collect both JS carriers.
     RootFrame roots(2);
     Rooted<Item> element_root(roots, elem_item);
     Rooted<Item> event_root(roots, js_create_click_mouse_event());
@@ -10518,7 +10518,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = b2it(dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
     }
 
-    // D7.4.5v2: attributes is a live NamedNodeMap VArray over native attributes.
+    // D9.5.5: attributes is a live NamedNodeMap VArray over native attributes.
     if (prop_id == JS_DOM_PROP_ATTRIBUTES) {
         return dom_attribute_collection_bridge(elem);
     }
@@ -11348,7 +11348,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
     }
 
-    // The prototype chain is realm shape, not DOM mechanism (ES33/D7.4.4). With
+    // The prototype chain is realm shape, not DOM mechanism (ES33/D9.5.4). With
     // no realm bound there is nothing to walk, and reaching for one anyway
     // faulted: the lookup builds an intrinsic constructor, which allocates from
     // the JS realm's pool, so a Lambda-only script died on a null pool -- e.g.
@@ -12173,7 +12173,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         if (handler_name && handler_name[0] == 'o' && handler_name[1] == 'n' &&
             handler_name[2] != '\0') {
             // DOM host setters store on* values in the expando side table;
-            // D5.3.3: expando allocation can collect the handler key before
+            // D6.3.3: expando allocation can collect the handler key before
             // registration; use the rooted key after that allocation.
             dom_event_handler_property_set_for_node(
                 elem, handler_name, (int)strlen(handler_name), value_root.get());
@@ -12387,7 +12387,7 @@ static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
 
 static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
                                                    const char* interface_name) {
-    // keep the matrix rooted while installing methods (D5.3.3).
+    // keep the matrix rooted while installing methods (D6.3.3).
     RootFrame roots(1);
     Rooted<Item> result_root(roots, js_new_object());
     Item result = result_root.get();
@@ -15072,7 +15072,7 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
     // MarkEditor may either clone the String or reuse it. Both paths can
     // relink a fresh wrapper, which must be replaced by the preserved live
     // node before completing this move; otherwise the same text is linked
-    // twice after a retained transaction restore (D5.3.3).
+    // twice after a retained transaction restore (D6.3.3).
     DomText* relinked = dom_find_text_child(parent, inserted_string);
     // Detached clone parents have no live tree for MarkEditor to relink.
     // The verified backing child is linked through the DOM chain below.
@@ -15304,7 +15304,7 @@ static bool dom_replace_document_element(DomElement* old_root,
 
     Element* replacement_backing = dom_element_to_element(replacement);
     Element* old_backing = dom_element_to_element(old_root);
-    // D4.5.3: the parser's document list can still name the source of a copied root.
+    // D5.5.3: the parser's document list can still name the source of a copied root.
     Element* old_source = dom_element_render_source(old_root);
     if (!replacement_backing || !old_backing) return false;
 
@@ -16283,7 +16283,7 @@ static Item dom_replace_children(Item parent_item, Item* args, int argc) {
 
     added_root.set(js_array_new(0));
     removed_root.set(js_array_new(0));
-    // snapshots pin removed wrappers through backing-tree edits and observer delivery (D5.3.3).
+    // snapshots pin removed wrappers through backing-tree edits and observer delivery (D6.3.3).
     for (DomNode* child = is_fragment ? insertion->as_element()->first_child.get() : insertion;
          child; child = is_fragment ? child->next_sibling.get() : nullptr) {
         node_root.set(dom_wrap_element(child));
@@ -17050,7 +17050,7 @@ extern "C" Item dom_core_insert_adjacent_text(Item n, Item where, Item text) {
 // need a stable root object that supports appendChild/activeElement while the
 // light DOM stays addressable.
 extern "C" Item dom_core_attach_shadow(Item n, Item init) {
-    // D5.3.3: wrapper decoration allocates; keep the root and its borrowed mode string alive.
+    // D6.3.3: wrapper decoration allocates; keep the root and its borrowed mode string alive.
     RootFrame roots(5);
     Rooted<Item> receiver_root(roots, n), init_root(roots, init), mode_root(roots, ItemNull),
         shadow_root(roots, ItemNull), expando_root(roots, ItemNull);
@@ -17380,7 +17380,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     }
 
     // Node identity is a published capability, not a name-selected host call;
-    // keep wrapper identity tied to the underlying node (D6.2.2v2).
+    // keep wrapper identity tied to the underlying node (D7.2.2).
     if (operation == JUBE_DOM_IS_SAME_NODE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         return dom_core_same_node_op(elem_item, args[0]);
@@ -17407,7 +17407,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     }
 
     // EventTarget is a Node capability, so text/comment nodes must reach the
-    // same typed call targets before Element-only operations begin (D6.2.2v2).
+    // same typed call targets before Element-only operations begin (D7.2.2).
     if (operation == JUBE_DOM_ADD_EVENT_LISTENER) {
         return argc >= 2
             ? dom_add_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
@@ -17586,7 +17586,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
 
     // SVG member records land here with an explicit operation; keeping their
     // native-object construction in this one target prevents property reads
-    // and calls from diverging (D6.2.2v2).
+    // and calls from diverging (D7.2.2).
     if (dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_MATRIX) {
         return dom_core_svg_create_matrix(elem_item);
     }

@@ -5,7 +5,7 @@ struct AudioProviderInfo;
 enum AudioCapturePermission { AUDIO_CAPTURE_UNKNOWN, AUDIO_CAPTURE_PENDING, AUDIO_CAPTURE_ALLOWED,
     AUDIO_CAPTURE_DENIED, AUDIO_CAPTURE_UNAVAILABLE };
 // trusted embedding seam; callbacks/context remain host-owned until document teardown.
-// permission(request=true) may request OS consent; open never runs without both grants (D7.5.10).
+// permission(request=true) may request OS consent; open never runs without both grants (D11.3.2).
 struct AudioCaptureBackend {
     void* context;
     AudioCapturePermission (*permission)(void* context, bool request);

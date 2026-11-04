@@ -1,4 +1,4 @@
-// D8.1.1v18/S7.6.3v3: loop handoff keeps dynamic call outcomes boxed until ^.
+// D8.3.2/S7.6.3v3: loop handoff keeps dynamic call outcomes boxed until ^.
 fn letter_code(codepoint: int) int =>
     if (codepoint == 65) 0 else if (codepoint == 67) 1 else
         if (codepoint == 71) 2 else 3

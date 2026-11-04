@@ -1,4 +1,4 @@
-// Shared pure formatter helpers; normalized elements stay ordinary values (S2.6, D7.2.4).
+// Shared pure formatter helpers; normalized elements stay ordinary values (S2.6, D9.3.4).
 pub fn fail(message) error => error({code:7802,message:"doc.misc: " ++ message})
 pub fn get(value,key,fallback = null) => if (value[key] == null) fallback else value[key]
 pub fn tag(value) => if (value is element) string(name(value)) else ""

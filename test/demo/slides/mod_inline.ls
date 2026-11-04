@@ -1,4 +1,4 @@
-// S12.1.3 / D7.2.5: a retained Word-model editor keeps rich slide text and its source separate.
+// S12.1.3 / D10.2.1: a retained Word-model editor keeps rich slide text and its source separate.
 import dom
 import lambda.editor.mod_editor
 import lambda.editor.mod_doc

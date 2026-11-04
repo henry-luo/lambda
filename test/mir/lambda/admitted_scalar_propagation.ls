@@ -1,4 +1,4 @@
-// S7.6.3v3/S11.4.6v3/D2.4.1: a plain admitted local fixes its success lane.
+// S7.6.3v3/S11.4.6v3/D2.3.4: a plain admitted local fixes its success lane.
 fn opaque(value) => value
 fn checked_float(value) float^ {
     let checked: float = value

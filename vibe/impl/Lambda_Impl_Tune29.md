@@ -11,12 +11,12 @@
   T29-5 item 2, T29-7c (§19.2). The time profile that decided the disposition
   is §17. Two pre-existing JIT correctness defects were found and fixed on
   the way (§11.2, §11.3); three more were ledgered (LR12-14..16).
-- **Formal authority:** **D4.4.4v4** (a handle carries four facts, valid while
-  the place is unchanged; synthesized handles), **D3.2.4v4** (the layout proof
-  is transitive through a verified carrier), **D3.2.6 / S11.4.10** (verified
+- **Formal authority:** **D5.4.4** (a handle carries four facts, valid while
+  the place is unchanged; synthesized handles), **D4.2.5** (the layout proof
+  is transitive through a verified carrier), **D4.2.6 / S11.4.10** (verified
   once, valid while unchanged; a required field is a required field; native
-  lane layout is the ABI), D2.5.3 (flow-sensitive use of an index read's
-  payload), D4.3.1 (headers never move; the data zone compacts), S4.1.2 /
+  lane layout is the ABI), D2.4.3 (flow-sensitive use of an index read's
+  payload), D5.3.1 (headers never move; the data zone compacts), S4.1.2 /
   S4.2.3 (int saturation; nan is unequal), S9.1.2 / S9.1.3 / S9.2.2 (values
   never alias; plain params snapshot; a mutable borrow un-shares first),
   S11.4.1v3 (proof reuse only while the carrier matches), D5 (precise
@@ -140,18 +140,18 @@ deltablue/havlak/richards/splay/cd family.
   identity, layout, presence and ownership are all re-proven at every
   spelling of the same path. Tune28 §9.6 tried to hoist the certificate
   guard and found the proof is carried in a flag after a join, so nothing
-  can CSE it. D4.4.4v4 makes the proof a property of a handle instead.
+  can CSE it. D5.4.4 makes the proof a property of a handle instead.
 - **N7 — presence re-proof.** Every field read of an admitted record tests
   the packed slot for a zero word and materializes `ItemNull`
   (`transpile-mir.cpp:20838` `skip_null_guard = false` and the empty-slot arm
   in `emit_mir_direct_field_read` at :20861). Tune28 §9.17 left it because no
-  ruling said a required field is present. D3.2.6 now does.
+  ruling said a required field is present. D4.2.6 now does.
 - **N8 — layout re-proof through a verified carrier.** Element reads compare
   the element's shape pointer against a baked `TypeMap*`, and every typed
-  store re-runs `emit_array_rep_cert_guard` (:22104). D3.2.4v4 rules the proof
+  store re-runs `emit_array_rep_cert_guard` (:22104). D4.2.5 rules the proof
   transitive through the carrier.
 - **N9 — nullable and finite lanes.** An unproven index read infers `T?`
-  (D2.5.3) and the null arm follows the value into arithmetic; `==` on an
+  (D2.4.3) and the null arm follows the value into arithmetic; `==` on an
   `int` lane excludes nan on both operands (S4.2.3) even when both are
   provably finite; band tests (S4.1.2) run on every `+`/`-` even when an
   interval is proven (`mir_int_lane_interval` :11244 knows literals and
@@ -171,10 +171,10 @@ deltablue/havlak/richards/splay/cd family.
 
 | Ruling | What it removes | Track |
 |---|---|---|
-| D4.4.4v4: a handle carries identity, layout, presence, uniqueness, valid while the place and its ownership are unchanged; compiler-synthesized handles | re-navigation per access; per-write COW tests on `w`, `cons`, element | T29-1 |
-| D3.2.6 / S11.4.10: verified once, valid while unchanged; required field present; lane layout is the ABI | empty-slot arm and `ItemNull` materialization on required fields; `bool[]` element walks | T29-2, T29-5 |
-| D3.2.4v4 corollary: proof transitive through a verified carrier | per-element shape-identity compare; certificate re-check on typed stores | T29-2 |
-| D2.5.3 (existing): flow-sensitive payload use | null arm carried through arithmetic after an index read | T29-3 |
+| D5.4.4: a handle carries identity, layout, presence, uniqueness, valid while the place and its ownership are unchanged; compiler-synthesized handles | re-navigation per access; per-write COW tests on `w`, `cons`, element | T29-1 |
+| D4.2.6 / S11.4.10: verified once, valid while unchanged; required field present; lane layout is the ABI | empty-slot arm and `ItemNull` materialization on required fields; `bool[]` element walks | T29-2, T29-5 |
+| D4.2.5 corollary: proof transitive through a verified carrier | per-element shape-identity compare; certificate re-check on typed stores | T29-2 |
+| D2.4.3 (existing): flow-sensitive payload use | null arm carried through arithmetic after an index read | T29-3 |
 | design notes (no ruling): finiteness fact; inline tag test before a checked store; in-place append on unique strings | nan tests on proven-finite operands; unconditional checked-store calls; per-append allocation | T29-3, T29-4, T29-6 |
 
 The rulings fix *what may be assumed*; the concrete invalidation table is an
@@ -211,7 +211,7 @@ Do this first: T29-1's handles rely on presence and layout being facts.
    `skip_null_guard = false` (:20838) in favour of the admission fact
    (`mir_receiver_binding_non_null` :20840 already carries it for a named
    binding; extend it to any value reached through an admitted receiver —
-   the chained-read hazard Tune28 §9.7 named is exactly what D3.2.6 closes,
+   the chained-read hazard Tune28 §9.7 named is exactly what D4.2.6 closes,
    because an admitted `a.b` is present).
 2. **Drop the per-element shape-identity compare.** An element read from a
    certified `T[]` (array certificate proven once at admission) carries `T`'s
@@ -229,7 +229,7 @@ Do this first: T29-1's handles rely on presence and layout being facts.
    must never publish a required field as a zero word; audit the partial-
    construction paths (record literals, `fill`, host `MarkBuilder` entry) so
    that a value acquires its layout proof only when every required field is
-   written. Host-built values stay outside D3.2.6 until they admit.
+   written. Host-built values stay outside D4.2.6 until they admit.
 
 - Pilot: deltablue2 `c_choose_method` 1,997 → ≤ 1,300 insns (107 remaining
   `ItemNull` materializations, 76 guard instructions); cube3d2 `run_cube`
@@ -240,9 +240,9 @@ Do this first: T29-1's handles rely on presence and layout being facts.
   read with no `TypeMap*` compare); probe of a *non-admitted* receiver
   keeps both arms.
 - Risk: medium. A wrong presence assumption is a malformed Item read
-  (D3.2.4). Item 4 is the safety net and lands before items 1–3.
+  (D4.2.5). Item 4 is the safety net and lands before items 1–3.
 
-### T29-1 — Handles that carry facts (N6; D4.4.4v4, CW37)
+### T29-1 — Handles that carry facts (N6; D5.4.4, CW37)
 
 1. **Static shape.** Extend `lambda_ast_lower_rmw_borrows`
    (`build_ast.cpp:11286`) and `RmwBorrowCtx` so that, besides the named
@@ -258,7 +258,7 @@ Do this first: T29-1's handles rely on presence and layout being facts.
 2. **Bind.** `cow_bind_rmw_handle` (`lambda-eval.cpp:8691`) runs the spine
    test and, for a *writing* handle, un-shares a shared leaf into its place
    (S9.2.2) so no later write through any aliasing spelling can detach. The
-   handle register holds the leaf's **header** pointer only (D4.3.1); packed
+   handle register holds the leaf's **header** pointer only (D5.3.1); packed
    field and array buffer pointers are reloaded after every allocation
    point.
 3. **Access.** Field reads and writes through the handle are offset loads
@@ -288,7 +288,7 @@ Do this first: T29-1's handles rely on presence and layout being facts.
 
 ### T29-3 — Non-null and finite lane facts (N9)
 
-1. **Split the null arm at the read** (D2.5.3). `a[i]` with an unproven index
+1. **Split the null arm at the read** (D2.4.3). `a[i]` with an unproven index
    branches once: the in-bounds arm feeds a plain `T` lane into the rest of
    the expression, the miss arm materializes null and joins at the
    expression's result. Today the `T?` lane is threaded through every
@@ -368,7 +368,7 @@ exactly the reason a unique array's `push` is. `fn_join` keeps its allocating
 path for shared or `let`-bound sources. The static shape is the assignment
 whose RHS is `lhs ++ e` with `lhs` the assigned name; the runtime test is the
 shared bit on the string header (strings are containers in the object zone,
-D4.3.2v2).
+D5.3.1).
 
 - Pilot: base642 `b64_encode` (11 join sites) 10.6 → ≤ 4 ms; hyphen2,
   microdiff2, prettier_ast2, three_way_merge2, log_pipeline2.
@@ -442,7 +442,7 @@ emitters and can proceed in parallel.
 
 ## 10. Obligations carried into implementation
 
-1. A wrong presence or layout assumption reads a malformed Item (D3.2.4);
+1. A wrong presence or layout assumption reads a malformed Item (D4.2.5);
    T29-2 item 4 (runtime writers honour the ABI) lands before any arm is
    removed, and every removal has a fixture that shows the arm *kept* on a
    non-admitted receiver.
@@ -456,7 +456,7 @@ emitters and can proceed in parallel.
    fixture; S4.1.2/S4.2.3 results are byte-identical on all tiers.
 5. Nothing in this round changes an observable result; the tier-parity
    harness is the gate, and a divergence is a bug in the track, never a
-   semantics change (D3.3.1v2).
+   semantics change (D4.3.1).
 
 ## 11. Implementation evidence
 
@@ -481,7 +481,7 @@ column is the archived release binary's dump of the same script.
 - **awfy/richards2 (shared core `test/benchmark/richards2_core.ls`).**
   `tasks: TaskControlBlock?[]`, `pkts: Packet?[]`. `datas` stays `array`: it
   holds four record kinds (the C port's `void *handle`), and a union element
-  would stay boxed under D2.5.3. Output identical on all tiers for both the
+  would stay boxed under D2.4.3. Output identical on all tiers for both the
   AWFY and JetStream wrappers.
 
 Typing `tasks` exposed §11.2's first defect: the JIT runs of richards2 looped
@@ -491,7 +491,7 @@ forever (the interpreter was correct).
 
 `w.tasks[tid].th` reads a `bool` field through a `TaskControlBlock?` element,
 so the member emitter unboxes into the nullable bool lane (byte 0/1/2,
-D2.5.2v3). It then published that register with
+D2.4.2). It then published that register with
 `mir_expr_semantic_type(node)` -- the `bool?` wrapper, whose TypeId maps to
 the Item representation -- so `mir_value_carrier_type` reported `any` for a raw
 register. Two consumers trusted it:
@@ -529,7 +529,7 @@ stored a zero word in the slot. The interpreter rejected it (E201). Root cause:
 expected`, but a plain field's contract arrives as its declaration wrapper,
 which unwraps to a different pointer, so a null-typed proof passed for every
 required field and `mir_map_literal_matches_contract` sent the literal down
-the unchecked shaped path. This is the D3.2.4 non-null-arm trap. Fix: a null
+the unchecked shaped path. This is the D4.2.5 non-null-arm trap. Fix: a null
 proof is compatible exactly when `lambda_type_accepts_null(expected)`.
 Regressions: `test/lambda/negative/runtime/typed_literal_required_{array,dynamic}_null.ls`
 + gtest `NegativeScriptTest.RequiredLiteralFieldRejectsNullOnEveryTier`
@@ -537,7 +537,7 @@ Regressions: `test/lambda/negative/runtime/typed_literal_required_{array,dynamic
 "at declaration 'c'"), as it already did for wrong-typed values on v46; both
 tiers fail with E201 and never establish the binding.
 
-Host-built values are outside D3.2.6 and were not audited.
+Host-built values are outside D4.2.6 and were not audited.
 
 ### 11.4 T29-2 item 1 — required fields have no empty-slot arm (LANDED)
 
@@ -550,7 +550,7 @@ Host-built values are outside D3.2.6 and were not audited.
 - `mir_receiver_non_null()` replaces `mir_receiver_binding_non_null()`: besides
   a named non-optional record binding, a member read of a required container
   field through a non-null receiver is non-null (Tune28 §9.7's chained-read
-  hazard is exactly what D3.2.6 closes). Index reads stay out (an out-of-bounds
+  hazard is exactly what D4.2.6 closes). Index reads stay out (an out-of-bounds
   read is null, S7.1.1v3). A `T[]` contract is recognised through
   `lambda_array_contract_canonical` (it is an occurrence wrapper).
 - The receiver probe of `emit_checked_index_load`
@@ -629,7 +629,7 @@ Fixtures: new `tune29_required_field_read` (required read has no branch; an
 optional field and a nullable receiver keep their arms) and
 `tune29_carrier_proof` (the path store keeps exactly the certificate's three
 compares and two null tests). `typed_path_store` pinned the root shape-word
-load that D3.2.4v4 removes by design; its sequence drops that step and pins the
+load that D4.2.5 removes by design; its sequence drops that step and pins the
 remaining compare count.
 
 ## 12. T29-1 implementation evidence
@@ -663,7 +663,7 @@ remaining compare count.
   is its caller's, CW33) and calls the existing `cow_place_leaf_fixed`, which
   un-shares every link and returns the installed leaf or null (S9.2.2). No new
   runtime helper was needed. The handle holds the record header only; field
-  and buffer pointers are reloaded per access (D4.3.1).
+  and buffer pointers are reloaded per access (D5.3.1).
 - **Use.** A read use returns the handle register; the member emitter reads
   the field by offset (with the optional-element null test). A write use in
   `mir_emit_typed_path_store` is `beq record, 0 -> checked arm` plus one
@@ -788,7 +788,7 @@ matching the pre-change binary.
 2. **Proven divisors.** `emit_int_lane_divmod` skips the band test of a
    proven in-band operand and the zero test of a proven nonzero divisor, so
    `% 139968` carries no guard of its own.
-3. **Null split at the read (D2.5.3).** `mir_null_split_candidate` applies to
+3. **Null split at the read (D2.4.3).** `mir_null_split_candidate` applies to
    an int tree in which:
    - every operator is `+ - * div %`, is lowered by the checked arith or
      div/mod arm, and is not a u32, wide or compact-loop form;
@@ -1050,7 +1050,7 @@ Top spill sites (spills + reloads per call):
    The static totals overstate hot traffic. The hot cost is on user calls and
    allocation calls that run every iteration.
 2. **Reloads dominate the rows that allocate.** In cube3d2 and havlak2,
-   reloads exceed spills by 1.7x and 1.4x. Under D4.3.1 container headers
+   reloads exceed spills by 1.7x and 1.4x. Under D5.3.1 container headers
    never move; only the data zone compacts. A reloaded register that holds a
    **header** pointer therefore gets back the value it already had.
    - Only data-zone pointers (items and data buffers, which the emitter
@@ -1073,7 +1073,7 @@ Top spill sites (spills + reloads per call):
 1. **T29-7a — reload elision for header pointers.** A register whose value is
    an untagged container pointer, or a scalar Item with no heap payload,
    skips its post-call reload. The spill stays as the root. Proof obligations:
-   - D4.3.1 holds for every container kind, including views and ArrayNum
+   - D5.3.1 holds for every container kind, including views and ArrayNum
      shapes;
    - no runtime helper replaces a spilled slot's value, except CW33 homes and
      the documented republish paths;
@@ -1109,7 +1109,7 @@ post-call reload of any candidate whose frame slot no callee could address.
 - **Safety net.** Any other register use of the base — beyond comparisons and
   the watermark stores the frame emits itself — kept every reload in that
   function.
-- **Why it is sound.** The collector only reads root slots (D4.3.1: objects
+- **Why it is sound.** The collector only reads root slots (D5.3.1: objects
   never move), and MIR preserves pseudo registers across calls.
 
 **Correctness held:**
@@ -1235,7 +1235,7 @@ seven-level runtime ladder.
 | GC of the copies above | `gc_collect_with_root_region` + payload destroy | 28.6 |
 
 Copies plus their collection are about 75% of havlak2. The census confirms it:
-65,675 array copies and 132,341 map copies per run. This is the D4.4.4v4
+65,675 array copies and 132,341 map copies per run. This is the D5.4.4
 "nested handles" case, which the implementation does not cover, plus the
 place-borrow-of-a-shared-child case.
 
@@ -1319,7 +1319,7 @@ disposition below follows the §17 time profile, not §8.
 
 ### 19.1 Three items worth doing, in this order
 
-**1. Nested handles and shared-child borrows** (D4.4.4v4; the unbuilt half
+**1. Nested handles and shared-child borrows** (D5.4.4; the unbuilt half
 of T29-1). havlak2 spends 38% cloning arrays -- `arr_set`'s three-level
 place-copy chain (`var l0 = a.l0; var c1 = l0[i0]; var c2 = c1[i1]`, each
 level cloned on its store) and `push(v.data, x)` borrows that un-share a
@@ -1340,7 +1340,7 @@ callers pass the field place `w.vars[x].constraints`, which clears the
 ArrayNum at every boundary. Together 18% of deltablue2, and most of what §18's
 tag test left in the miss arm. Two mechanisms: a declared record field of
 array contract carries its certificate to the borrow (the layout fact of
-D3.2.4v4 is exactly this), and an empty-literal return against `T[]`
+D4.2.5 is exactly this), and an empty-literal return against `T[]`
 allocates the certified ArrayNum directly instead of reifying through the
 checker. Compiler-only; no semantic change.
 
@@ -1419,9 +1419,9 @@ The profile's first claim was already stale: `vec_at`'s callers pass the
 witness bit (the declaration of `cs` proves the argument). The cost had moved
 to the declaration itself, `var cs: Vec = w.vars[i].constraints`, which ran
 the full `lambda_type_check` because a static relation proves only element
-compatibility, not the live certificate (D3.3.3v3).
+compatibility, not the live certificate (D4.3.3).
 
-- **Carrier-proven declaration admission.** D3.2.4v4's corollary says a field
+- **Carrier-proven declaration admission.** D4.2.5's corollary says a field
   read from an admitted record carries the field's proof: every write into
   the record admitted its value. `mir_member_read_carries_contract` (split out
   of `mir_member_read_proves_contract`, which adds the null condition) marks

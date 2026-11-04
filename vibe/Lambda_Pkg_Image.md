@@ -16,12 +16,12 @@ Extend the existing image subsystem rather than establish another codec or
 pixel-processing pipeline. A complete Photoshop implementation, video editor,
 RAW developer, and GPU processing framework are outside the initial scope.
 
-**Specification linkage:** **D2.1.4** (extensibility), **D7.4.4 / D7.4.5v2**
+**Specification linkage:** **D2.1.3** (extensibility), **D9.5.4 / D9.5.5**
 (declared members and virtual carriers), **S5.4.3** (element equality),
 **S9.1.1–S9.1.3 / S9.2.2** (value semantics and views), **S12.1.1v3 /
-S12.2.2** (effects and element writes), **D4.1.1v2 / D4.1.3 / D4.1.4v5 /
-D4.2.6 / D5.3.3** (ownership and rooting), **D7.1.1–D7.1.3 /
-D7.2.1–D7.2.4v3** (layering and packages), and **S7.4.1–S7.4.5 /
+S12.2.2** (effects and element writes), **D5.1.1 / D5.1.3 / D5.1.4 /
+D5.2.5 / D6.3.3** (ownership and rooting), **D9.1.1–D9.1.3 /
+D9.3.1–D9.3.4** (layering and packages), and **S7.4.1–S7.4.5 /
 S17.8.1** (errors and options). See [Formal Design](../doc/Lambda_Formal_Design.md),
 [Formal Semantics](../doc/Lambda_Formal_Semantics.md), and
 [Doc Convention](../doc/Doc_Convention.md).
@@ -57,7 +57,7 @@ compositor traverses composition children in reverse to build the backdrop.
 Frame order is temporal. Importers translate source ordering explicitly and
 retain source record indices for export. Supporting asset, metadata, preview,
 mask and effect children are not layer-order entries.
-Editor IDs are document data, not addresses (**D2.6.8 / S9.1.5v2**).
+Editor IDs are document data, not addresses (**D3.1.3 / S9.1.5v2**).
 
 ### 1.1 Complete structural schema
 
@@ -207,8 +207,8 @@ format's actual capabilities.
 ## 2. Raster virtual element
 
 `<raster>` uses the existing **Velmt** carrier, with public element semantics
-under **D7.4.5v2**. `RasterBuffer` is its native implementation, not a new
-top-level language TypeId (**D2.1.4**). `image`, `frame`, `stack`, and `layer` are
+under **D9.5.5**. `RasterBuffer` is its native implementation, not a new
+top-level language TypeId (**D2.1.3**). `image`, `frame`, `stack`, and `layer` are
 ordinary composition elements; pixel-heavy behavior belongs in Raster.
 
 Its canonical materialized structure is an element with these attributes:
@@ -241,7 +241,7 @@ The proposed interface exposes:
 | `img.from_array(samples, descriptor)` | Raster value constructed from typed samples |
 | `img.materialize(raster)` | Ordinary element carrying the canonical descriptor and pixels |
 
-Aliases are declared projection members under **D7.4.4 / S12.3.3v2**,
+Aliases are declared projection members under **D9.5.4 / S12.3.3v2**,
 not extra enumerable copies of the pixel data. A missing property follows
 normal missing-member behavior (**S7.1.1v3**); the checked channel function
 returns a descriptive error for an absent channel. A grayscale/CMYK raster
@@ -292,7 +292,7 @@ The target backend uses sparse tiles with reference-counted, immutable
 shared tile payloads.
 Reference counting here owns native bytes through the existing allocation
 substrate; it introduces neither another GC nor another allocator mechanism
-(**D4.1.4v5**).
+(**D5.1.4**).
 
 Decoded samples are authoritative for edited regions. Encoded PSD planes,
 GIF patches and other original payloads are immutable source records used
@@ -328,7 +328,7 @@ and its native payload:
 Writable channel access initially uses checked region/channel operations on
 a `var` Raster. Escaping writable `.r` arrays are not part of the API.
 Direct nested property writes require the existing place/store-back
-machinery to detach the owner chain (**D4.4.3 / D4.4.4v4**); a setter callback
+machinery to detach the owner chain (**D5.4.3 / D5.4.4**); a setter callback
 alone does not establish that guarantee.
 
 Native decode caches may change internally only when the change is
@@ -422,7 +422,7 @@ The implemented RGBA8 tone profile shares `adjust` and retained-effect kernels
 increasing inputs from 0 to 1. Exact linear segments apply after the color matrix,
 master before channel curves, followed by output endpoints. Alpha is preserved.
 Options own their bounded native point arrays across background job copies
-(**D4.5.2**); color/blur caches include tone settings while geometry stays reusable.
+(**D5.5.2**); color/blur caches include tone settings while geometry stays reusable.
 This profile does not claim smooth spline curves, dedicated adjustment layers,
 high-depth storage or color-managed processing.
 
@@ -569,7 +569,7 @@ ownership design. Do not truncate lengths or label PSD-v1 support as PSB.
 
 Ship the public entry module as `lmd/package/image.ls`, imported with
 `import img: lambda.image`. Supporting source modules live under
-`lmd/package/image/`. This explicit entry follows **D7.2.4v3**; no implicit
+`lmd/package/image/`. This explicit entry follows **D9.3.4**; no implicit
 directory-index import or new namespace rule is needed.
 
 | API family | Proposed operations | Effect/result |
@@ -675,17 +675,17 @@ behavior rather than a file-by-file implementation plan.
   parsing/encoding belong below Lambda in the existing image/library layer.
   Resource acquisition/publication stays in `lambda/io`; document translation
   uses MarkBuilder/MarkReader; runtime bridges own Velmt and ArrayNum handling
-  (**D7.1.1–D7.1.3**). Search/promote existing helpers rather than copying them.
+  (**D9.1.1–D9.1.3**). Search/promote existing helpers rather than copying them.
 - The native Raster Velmt traces every retained Item and finalizes its native
   storage once. Immutable native storage/source snapshots have explicit
   owners. C/C++ bridges use `RootFrame`/`Rooted`, refreshing borrowed pointers
-  after safepoints (**D5.3.3**). No conservative native-stack scanning.
+  after safepoints (**D6.3.3**). No conservative native-stack scanning.
 - Static input elements and byte payloads remain Input-owned
-  (**D4.1.1v2 / D4.1.3**). Runtime adoption copies or acquires an explicit
+  (**D5.1.1 / D5.1.3**). Runtime adoption copies or acquires an explicit
   supported owner lease; it never relies on a bare pointer into an Input
-  that may be released. Pool resource cleanup uses **D4.2.6** where appropriate.
+  that may be released. Pool resource cleanup uses **D5.2.5** where appropriate.
 - Radiant receives native pixel snapshots or leases through existing image
-  upload contracts, never a retained GC pointer (**D4.5.2**). A GPU texture is
+  upload contracts, never a retained GC pointer (**D5.5.2**). A GPU texture is
   a derived rendering resource, not the authoritative editing store.
 - Reuse `lib/endian.h`, checked arithmetic, compression and image row kernels.
   All binary sections, dimensions, strides, expanded sizes and frame counts

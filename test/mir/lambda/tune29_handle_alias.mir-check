@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune29 §19.1 (S9.1.2, D4.4.1): the nested handle `c1` is rebound in one `if` arm; the join keeps the path that skips the arm possibly shared, so every store through the chain consults the share bit (member_set_cow, or the owner spine check) instead of the raw fn_array_set that leaked the write into another binding's array.",
+  "description": "Tune29 §19.1 (S9.1.2, D5.4.1): the nested handle `c1` is rebound in one `if` arm; the join keeps the path that skips the arm possibly shared, so every store through the chain consults the share bit (member_set_cow, or the owner spine check) instead of the raw fn_array_set that leaked the write into another binding's array.",
   "checks": [
     {
       "in_func": "_arr_set_#",

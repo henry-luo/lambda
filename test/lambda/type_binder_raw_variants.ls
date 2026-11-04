@@ -1,4 +1,4 @@
-// S11.4.8v2/D8.3.1v2: four exact binder variants, then boxed fallback.
+// S11.4.8v2/D7.3.1: four exact binder variants, then boxed fallback.
 fn identity(T: type, value: T) T => value;
 // This definition deliberately precedes its binder callee: its direct edge
 // must use the raw forward declaration, not wait for body emission order.

@@ -1,7 +1,7 @@
 // Tune27 T27-7: post-call typed-array layout reloads are pruned by liveness.
 // `a` stays live across allocating calls and a loop back edge, `b` is dead
 // after its last read, and every read after an allocation must see the
-// compacted buffer (D5.3.4).
+// compacted buffer (D6.3.4).
 pn tune27_alloc(n: int) float[]^ { return fill(n, 1.0) }
 
 pn tune27_layout_reload_liveness(n: int) float^ {

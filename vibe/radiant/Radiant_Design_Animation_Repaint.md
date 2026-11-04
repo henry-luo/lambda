@@ -12,9 +12,9 @@ or merely moved content. Layout, cascade and the paint-only commit's
 eligibility are unchanged.
 
 **Governing rulings:**
-- **D4.5.3v2:** incremental presentation embraces retention; "restyle, reflow
+- **D5.5.3:** incremental presentation embraces retention; "restyle, reflow
   and repaint reuse every retained structure that is still valid".
-- **D4.5.1v4** and **D4.2.4:** retained storage is arena-owned, released in
+- **D5.5.1** and **D5.2.3:** retained storage is arena-owned, released in
   batches, and reference-counted across threads.
 
 This proposal adds no ruling. It revives the row "Transform/opacity fast path —
@@ -251,8 +251,8 @@ The stamp also includes:
   (Q2).
 - **Ownership.** Captured layers live in a document-resource registry
   (`services.paint_layer_registry`), modelled on `svg_layer_registry`:
-  - arena-owned (D4.5.1v4);
-  - reference-counted while a frame's DisplayList points at them (D4.2.4);
+  - arena-owned (D5.5.1);
+  - reference-counted while a frame's DisplayList points at them (D5.2.3);
   - released at document teardown or on memory pressure;
   - recapture builds a new layer and retires the old one at frame end (no
     in-place reset while referenced).

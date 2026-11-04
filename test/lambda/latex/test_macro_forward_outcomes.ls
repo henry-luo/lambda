@@ -1,4 +1,4 @@
-// S1.6/D8.3.3: a forward call keeps the public Item ABI until native lanes are proven.
+// S1.6/D7.3.3: a forward call keeps the public Item ABI until native lanes are proven.
 import macros: lambda.doc.latex.macros
 let valid = macros.get_defs(<document <newcommand "\\greeting" <brack_group "1"> <curly_group "hello">>>)
 // Attributes contribute to len; the scanner also reaches absent positional children.

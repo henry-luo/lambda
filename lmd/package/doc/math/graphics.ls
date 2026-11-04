@@ -1,4 +1,4 @@
-// Inline raster boxes use KaTeX's height/totalheight baseline contract (D7.2.4).
+// Inline raster boxes use KaTeX's height/totalheight baseline contract (D9.3.4).
 import radiant
 import bx: .svg_box
 import util: .util

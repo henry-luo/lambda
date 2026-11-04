@@ -1,4 +1,4 @@
-// D7.2.4v3: public value API; native mounting lives in lambda.editor.draw.view.
+// D9.3.4: public value API; native mounting lives in lambda.editor.draw.view.
 import core: .draw.core
 import model: .draw.model
 import scene: .draw.scene

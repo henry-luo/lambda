@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3/D5.4, D6.2.2v2: generic string/global calls retain rooted values and use the formal callable entry.",
+  "description": "D6.3/D6.4, D7.2.2: generic string/global calls retain rooted values and use the formal callable entry.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",

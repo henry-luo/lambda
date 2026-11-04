@@ -92,7 +92,7 @@ static const JubeModuleRequirements jube_test_undersized_value_requirements = {
 #endif
 
 // The specifier catalog loads a module only when its descriptor attests every
-// manifest provider (D7.3.4); the fixture provides exactly its own name.
+// manifest provider (D9.4.4); the fixture provides exactly its own name.
 static Item jube_test_namespace_build(void) {
     Item empty = {};
     return empty;

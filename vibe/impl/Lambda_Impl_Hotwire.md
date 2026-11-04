@@ -12,9 +12,9 @@ Exercise real HTTP exchanges through Lambda's native `lambda/serve` server.
 The production `serve` CLI and Lambda `io.http` bindings are currently stubs;
 this milestone uses the native API directly from a test fixture.
 
-Implementation follows **D8.1.3v42** (LambdaJS execution and AST/MIR paths),
-**D7.4.4** (declared host interfaces), **D3.4.7** (native JavaScript records),
-and **D5.3.3** (precise native roots). Fix demonstrated runtime defects at
+Implementation follows **D8.4.5** (LambdaJS execution and AST/MIR paths),
+**D9.5.4** (declared host interfaces), **D3.4.7** (native JavaScript records),
+and **D6.3.3** (precise native roots). Fix demonstrated runtime defects at
 their owning stage. Do not modify upstream packages, inject library shims,
 weaken expectations, or change Test262 exclusions. No language ruling changes
 are proposed.
@@ -89,7 +89,7 @@ that remains broken must be recorded honestly with its root cause.
   - Custom-element upgrade must construct the existing native wrapper, retain
     private fields, and deliver lifecycle reactions. Realm weak state,
     construction frames and queued connection callbacks own their precise roots
-    (**D3.4.7, D5.3.3, D7.4.4**). Attribute callbacks run synchronously at setter
+    (**D3.4.7, D6.3.3, D9.5.4**). Attribute callbacks run synchronously at setter
     boundaries; deferral outlived Turbo's `src` reentrancy guard and repeatedly
     fetched the same frame. Inert templates do not upgrade until import/insert.
   - MIR private-field storage must use native host hooks rather than physical
@@ -97,7 +97,7 @@ that remains broken must be recorded honestly with its root cause.
     still accepting ordinary uninterned strings; the existing key-aware
     own-slot helper handles both.
   - Template-content cache publication needed roots for its key and wrapper.
-    Every-allocation collection exposed the missing ownership (**D5.3.3**).
+    Every-allocation collection exposed the missing ownership (**D6.3.3**).
   - Range deletion must remove Mark-backed children as well as native links;
     otherwise the following append resurrects replaced frame contents.
   - The headless event loop must give I/O continuations a rendering opportunity
@@ -130,7 +130,7 @@ that remains broken must be recorded honestly with its root cause.
 - Radiant qualification exposed two lifecycle-hook defects: attribute mutation
   must check for an active realm before allocating a receiver, and custom-element
   traversal must use the existing source-child/sibling helpers, excluding
-  anonymous layout boxes without DOM identity (**D7.4.4**). The native paint,
+  anonymous layout boxes without DOM identity (**D9.5.4**). The native paint,
   jQuery dynamic-components, and Bootstrap page reproductions now pass. Standalone
   Range targets use the existing weak-default service pattern; production uses
   the strong backing-aware DOM implementation.
@@ -140,7 +140,7 @@ that remains broken must be recorded honestly with its root cause.
   no-op suppression, and requires an asynchronous completion marker. The same
   script passes in Chromium and follows
   [CSSOM View §13.2](https://drafts.csswg.org/cssom-view/#scrolling-events).
-  The runtime uses its pre-existing native scroll-event queue (**D7.4.4**).
+  The runtime uses its pre-existing native scroll-event queue (**D9.5.4**).
 - Final aggregate gates were rerun after those Radiant corrections.
   The HTTP audit restricts each frame-header
   assertion to its own request and checks that redirected HTML contains no

@@ -25,7 +25,7 @@ The CLI dispatches at `main.cpp:1429` into `exec_validation` (`ast_validate.cpp:
 
 Schema loading is `SchemaValidator::load_schema` (`doc_validator.cpp:202`). It does **not** use a bespoke schema parser; it parses the `.ls` schema through the real Lambda transpiler/AST pipeline and harvests each `type Name = …` definition into a `Type*` hashmap keyed by name. Each harvested entry is a `TypeDefinition` (declared in `validator/validator.hpp`) whose vestigial `schema_type` slot is always left `nullptr`, confirming the validator works purely on runtime `Type*` ([§7](#7-the-removed-parallel-schema-model)). Once loaded, the data `Item` is validated by `validate_document` → `validate_against_type`.
 
-**Loader/lifetime reverified 2026-10-29 (S11.4.1v3, S16.9.8, D4.2.6).** The
+**Loader/lifetime reverified 2026-10-29 (S11.4.1v3, S16.9.8, D5.2.5).** The
 schema compiler uses `load_script` with an AST-only Runtime and the schema's
 source path. Relative imports retain their defining type owners without
 executing module code. The validator/result pool owns that Runtime through a

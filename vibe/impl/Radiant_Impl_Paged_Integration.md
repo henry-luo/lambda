@@ -2,7 +2,7 @@
 
 **Status (2026-10-18):** the two remaining paged export failures are closed and the P6 core native-provider adapter is implemented. All 500 paged cases and 124 reuse cases pass. P7 qualification has run against completed PDF commit `9cce7697b` plus these paged changes: full PDF, baseline raster equivalence, performance and size gates remain open. The current receipts and measured limits are at the start of §9. The item engine and its `RADIANT_PAGED_ENGINE=legacy` selector, region trial engine, external page policy, secondary selector/container replay, item budgets and frame/table paint fallbacks remain removed. Earlier dated §9 entries are historical evidence, not the current backlog. This plan supersedes the engine-level direction of the P4 "resumable main flow" milestone recorded in [Radiant_Impl_Paged_Media](Radiant_Impl_Paged_Media.md); the page-box level, page model and output contracts recorded there stay.
 **Design authority:** [Radiant_Layout_Paged_Media §1.3](../radiant/Radiant_Layout_Paged_Media.md#13-design-principle-2026-10-14-paged-layout-is-normal-layout-with-breaks) (the principle this plan implements), §3.2, §5 and §11 for the page model.
-**Formal linkage:** D4.5.1v4 and D4.1.4v5 (ownership of published editions and retained pages), D7.1.4v2 (headless profile). No formal ruling defines Radiant page layout; the vibe design doc is the authority for this plan.
+**Formal linkage:** D5.5.1 and D5.1.4 (ownership of published editions and retained pages), D9.2.1 (headless profile). No formal ruling defines Radiant page layout; the vibe design doc is the authority for this plan.
 
 ---
 
@@ -257,7 +257,7 @@ The user ruled on the three open questions the same day; §4 records each ruling
    implement the replacement break-candidate contract. Acceptance covers
    boxes/paragraphs, replay and failure, nested/source identities, retained
    paint and producer break decisions. Published resources remain edition-owned
-   under **D4.5.1v4 / D4.1.4v5**; the retired page-policy engine stays removed.
+   under **D5.5.1 / D5.1.4**; the retired page-policy engine stays removed.
 3. **P7 qualification:** run the complete paged/reuse, Radiant and PDF gates
    after implementation stabilizes, then measure optimized paged-corpus timing
    against an available provenance-matched frozen release baseline and report
@@ -282,7 +282,7 @@ authored block linefeeds and exact image comparisons remain. New inline-root
 and closed-sibling shrinking regressions pass; the complete paged runner passes
 493/493. Receipts: `temp/paged_completion_exports_before.xml`,
 `paged_completion_exports_final.xml`, `paged_completion_native_exports.xml` and
-`paged_completion_stage1.xml`. Ownership still follows **D4.5.1v4 / D4.1.4v5**.
+`paged_completion_stage1.xml`. Ownership still follows **D5.5.1 / D5.1.4**.
 
 **P6 core adapter complete:** `PagedNativeFlowBinding` binds replayable native
 providers to empty body or static flow controls, with nested-only registrations.
@@ -295,7 +295,7 @@ capacity. Native marks and declared forward targets participate in reference
 replay. Every enumeration exit restores the canonical provider cursor. Static
 providers use independent measurement records and repeat without growing body
 extent. Published glyph/image/exact/solution records retain the producer owner
-through the existing edition material API (**D4.5.1v4 / D4.1.4v5**).
+through the existing edition material API (**D5.5.1 / D5.1.4**).
 
 Seven adapter acceptance cases cover these behaviors, stale streams, nested
 providers, rollback and paint after provider/source teardown. The complete
@@ -532,13 +532,13 @@ Space is opened inside the table by position, not source order (`paged_table_ope
 
 ### 2026-10-15: publication ownership, fixed content and counter compatibility
 
-**Images (P2).** `load_document_image` had checked the selected document's resource policy but decoded through `UiContext::document`. A headless secondary host with no current document therefore returned no image; a host displaying another document used that document's resource base. The loader now scopes decoding and animation registration to the selected document and restores the host's document afterwards. The DOM image adapter uses the same loader without a second context swap. `paged_publish_image` resolves the selected source into the edition's existing `image_resources` cache: the published image survives retirement of the browsing cache and DOM view properties, as required by **D4.5.1v4 / D4.1.4v5**. The three P5 image failures now pass; the repeated-running-image fixture also retires the host cache before raster/PDF painting.
+**Images (P2).** `load_document_image` had checked the selected document's resource policy but decoded through `UiContext::document`. A headless secondary host with no current document therefore returned no image; a host displaying another document used that document's resource base. The loader now scopes decoding and animation registration to the selected document and restores the host's document afterwards. The DOM image adapter uses the same loader without a second context swap. `paged_publish_image` resolves the selected source into the edition's existing `image_resources` cache: the published image survives retirement of the browsing cache and DOM view properties, as required by **D5.5.1 / D5.1.4**. The three P5 image failures now pass; the repeated-running-image fixture also retires the host cache before raster/PDF painting.
 
 **Fixed content (P2).** Publication collects fixed boxes whose containing block is the initial page viewport and emits one occurrence per physical page after composition, including inserted blank pages and trailing sequence sheets. Their source parent's flow-page offset is removed; their local positioned geometry is preserved. They publish as static furniture, independently of body clipping and body mark assignment. Fixed boxes whose containing block is a transformed or containing ancestor keep their ordinary source occurrence. The fixed-content regression checks source occurrences, text, a containing ancestor, raster pixels on every page, and PDF export. Re-layout of percentage-sized fixed furniture for different page widths remains unqualified.
 
-**Counter compatibility (P4/P5, target resolved 2026-10-16).** The user selected the [published CSS Lists 3 Working Draft, 17 November 2020, §4.4.1](https://www.w3.org/TR/2020/WD-css-lists-3-20201117/#inheriting-counters): start with the parent's counter set and take new names from the preceding sibling. The [current editor's draft §4.4.1](https://drafts.csswg.org/css-lists-3/#inheriting-counters) takes the preceding sibling's set instead. The existing engine follows the published rule and Chromium 152; its implementation and the `counters-004`, `foo-counter-reversed-007b` and `li-value-reversed-007b` browser references remain. The legacy sibling-reset fixture preserves its original document and scopes, now checking independently captured published-rule values. Two reset/increment mutations, page-budget rollback/recovery and generated text retained across source-edition release strengthen that fixture. `PagedFlowFootnoteNumbersFollowHeadingCounterSets` still checks calls and markers using `counter-set`, which agrees under both rules. Engine ownership remains **D4.5.1v4 / D4.1.4v5**; no formal ruling defines CSS counter inheritance. Evidence: `temp/view_reuse_goal/counter_scopes_analysis/` and `temp/view_reuse_goal/counter_published_compat/`: 18 focused counter cases and fresh 470/490 paged-media plus 124/124 reuse cases pass. All 614 identities remain and the other 20 failure profiles are unchanged. Four engine archives and all engine/export producers are byte-identical to the closed table-span qualification; its complete Radiant and PDF evidence remains applicable. This is a test/ledger-only compatibility correction.
+**Counter compatibility (P4/P5, target resolved 2026-10-16).** The user selected the [published CSS Lists 3 Working Draft, 17 November 2020, §4.4.1](https://www.w3.org/TR/2020/WD-css-lists-3-20201117/#inheriting-counters): start with the parent's counter set and take new names from the preceding sibling. The [current editor's draft §4.4.1](https://drafts.csswg.org/css-lists-3/#inheriting-counters) takes the preceding sibling's set instead. The existing engine follows the published rule and Chromium 152; its implementation and the `counters-004`, `foo-counter-reversed-007b` and `li-value-reversed-007b` browser references remain. The legacy sibling-reset fixture preserves its original document and scopes, now checking independently captured published-rule values. Two reset/increment mutations, page-budget rollback/recovery and generated text retained across source-edition release strengthen that fixture. `PagedFlowFootnoteNumbersFollowHeadingCounterSets` still checks calls and markers using `counter-set`, which agrees under both rules. Engine ownership remains **D5.5.1 / D5.1.4**; no formal ruling defines CSS counter inheritance. Evidence: `temp/view_reuse_goal/counter_scopes_analysis/` and `temp/view_reuse_goal/counter_published_compat/`: 18 focused counter cases and fresh 470/490 paged-media plus 124/124 reuse cases pass. All 614 identities remain and the other 20 failure profiles are unchanged. Four engine archives and all engine/export producers are byte-identical to the closed table-span qualification; its complete Radiant and PDF evidence remains applicable. This is a test/ledger-only compatibility correction.
 
-**Margin lifetime and font identity (P4).** `LogicalPageLabelsMatchAuthoredTextInPhysicalPdfAndFilteredPreview` crashed on both HEAD and the initial candidate in `setup_font`, while measuring a reused synthetic margin box. Detached margin views kept font-family pointers borrowed from a previous composition's declarations. `PagedMarginBorrows` now resets those view properties before returning the declaration borrow. It also removes their source pointers from the published-font lookup: retaining a source-pointer cache entry across that reset incorrectly reused page 1's 10px font for page 2's 20px font. Published font copies remain pinned and immutable (**D4.5.1v4**). The page-label raster/PDF comparison and `PagedFlowMarginFontsKeepEachPagesComputedSize` pass after these fixes.
+**Margin lifetime and font identity (P4).** `LogicalPageLabelsMatchAuthoredTextInPhysicalPdfAndFilteredPreview` crashed on both HEAD and the initial candidate in `setup_font`, while measuring a reused synthetic margin box. Detached margin views kept font-family pointers borrowed from a previous composition's declarations. `PagedMarginBorrows` now resets those view properties before returning the declaration borrow. It also removes their source pointers from the published-font lookup: retaining a source-pointer cache entry across that reset incorrectly reused page 1's 10px font for page 2's 20px font. Published font copies remain pinned and immutable (**D5.5.1**). The page-label raster/PDF comparison and `PagedFlowMarginFontsKeepEachPagesComputedSize` pass after these fixes.
 
 **Validation.** Current native focus: **37/37 pass** (`TypesetTest.*`, `ResourceAdmissionTest.*`, `SecondaryViewTest.PagedFlow*` and the three image/notes/running-content fixtures). The current paged/native-FO PDF subset passes **27/29**; the caption-wrapper and FO/native pair gates remain failing. Dimension-cast lint and `git diff --check` pass. Paired layout runs with pinned HEAD implementations and the candidate have identical counts and failure inventories: **3,126 pass / 149 accepted partial / 19 fail** of 3,294. Those 19 failures predate this increment; no baseline scores were changed.
 
@@ -551,9 +551,9 @@ The aggregate Radiant run before the final margin-lifetime fix completed with **
 
 **Supporting retirement (P7).** The old element selector matcher, cloned secondary stylesheets/UA sheet, independent container measurement/replay maps, remembered-size commits, anonymous/generated item styles, item-list counter adapter and root marks, independent table/column walkers, image-measure records, frame-edge arguments and square-border/color-only paint fallback are removed. `PagedLayoutOptions::max_items` and `TYPESET_CONTRIBUTION_FLUSH_DEFERRED` no longer exist. The live `max_nodes` bound covers publication as well as sources; `max_container_passes` bounds the browsing engine's actual condition passes. `PagedPageCursor` retains the active page/sequence state required by composition. `TypesetFlowProvider` and producer-owned line alternatives remain intentionally for P6; their adapter is still outstanding.
 
-**One cascade.** `view_tree_css.cpp` reads winning declarations from the document's shared `StyleTree`. `style_tree_get_property_declaration` includes aliases, shorthand components and `all`, with the shared rollback-aware cascade selection. Page/margin/footnote-area computation stays in `ViewCssStyle`; a source metadata bridge remains for native computed-property queries and page-context inheritance, and never lays out the body or rematches selectors. Winning declarations are snapshotted into the edition owner (**D4.5.1v4**). `page`, `string-set` and `footnote-policy` now have distinct registered property codes: the old matcher selected them by spelling, while an unregistered shared code could alias another publishing declaration. Their predefined names are appended without moving existing IDs (**D4.6.1v4**).
+**One cascade.** `view_tree_css.cpp` reads winning declarations from the document's shared `StyleTree`. `style_tree_get_property_declaration` includes aliases, shorthand components and `all`, with the shared rollback-aware cascade selection. Page/margin/footnote-area computation stays in `ViewCssStyle`; a source metadata bridge remains for native computed-property queries and page-context inheritance, and never lays out the body or rematches selectors. Winning declarations are snapshotted into the edition owner (**D5.5.1**). `page`, `string-set` and `footnote-policy` now have distinct registered property codes: the old matcher selected them by spelling, while an unregistered shared code could alias another publishing declaration. Their predefined names are appended without moving existing IDs (**D5.6.1**).
 
-**P2 publication.** Edition-owned immutable `PaintList` records capture shared backgrounds (gradient/image/layers), border images, rounded/styled borders, outlines, supported outer shadows, inline span decorations, text decorations/shadows/emphasis and image markers. Temporary lowering lists borrow payloads without releasing the edition's paths, stops, text or image resources; scoped owner destruction releases them once (**D4.5.1v4 / D4.1.4v5**). PDF keeps an alternate record when the common background producer requires image-layer precomposition. No backend re-reads mutable DOM props. Slice image backgrounds retain their original positioning area and phase; clone decorations use each fragment's box. Background-only clipping keeps border and solid-fill coverage in the fragment rectangle, avoiding doubled antialias coverage on fractional table edges. Hidden own paint is suppressed while explicitly visible descendants remain paintable. Explicit-height boxes grow the fragmentainer table even when no text line commits. Viewport-fixed subtrees re-layout when the physical sheet's containing-block size changes, including percentages and source font selections.
+**P2 publication.** Edition-owned immutable `PaintList` records capture shared backgrounds (gradient/image/layers), border images, rounded/styled borders, outlines, supported outer shadows, inline span decorations, text decorations/shadows/emphasis and image markers. Temporary lowering lists borrow payloads without releasing the edition's paths, stops, text or image resources; scoped owner destruction releases them once (**D5.5.1 / D5.1.4**). PDF keeps an alternate record when the common background producer requires image-layer precomposition. No backend re-reads mutable DOM props. Slice image backgrounds retain their original positioning area and phase; clone decorations use each fragment's box. Background-only clipping keeps border and solid-fill coverage in the fragment rectangle, avoiding doubled antialias coverage on fractional table edges. Hidden own paint is suppressed while explicitly visible descendants remain paintable. Explicit-height boxes grow the fragmentainer table even when no text line commits. Viewport-fixed subtrees re-layout when the physical sheet's containing-block size changes, including percentages and source font selections.
 
 **P3 captions.** Table fragments publish an unpainted wrapper, a separate painted grid and ordinary caption block occurrences. `layout_table_grid_rect` supplies the same grid rectangle to publication and continuous raster/SVG/PDF boundaries, including the simple fast path. Bottom captions begin after the closing grid border. Caption counters/pseudos are materialized in source order before visual reordering, and nested caption views reset before their second layout. Fixed table percentage sizes reuse the containing-block-resolved value; fixed border-box tracks subtract padding once; caption minimum width constrains fixed grids too. Chromium independently confirms the automatic/fixed caption minimum fixture (134px wrapper, 126px caption). Caption continuation controls use equal-width sheets as required by §4.2; changed-width continuation re-layout remains the §7 extension.
 
@@ -598,7 +598,7 @@ still diagnosed as unsupported.
 Tall note bodies use source block/text break edges and reserve independent
 same-width continuation pieces before a following sequence. Changed-width note
 continuations remain unsupported. Published pieces retain their own fragment
-windows and first/last identity under **D4.5.1v4 / D4.1.4v5**; this does not
+windows and first/last identity under **D5.5.1 / D5.1.4**; this does not
 complete the separate legacy paged migration or qualify every multi-note case.
 
 Native computed-property bindings now reach the live CSS workspace, including
@@ -614,7 +614,7 @@ whitespace and original caption controls pass 22/22
 
 The CSS repairs and retained-paint retirement now share `layout_table_grid_rect`.
 Independent native border/padding policies feed both fragment metadata and
-edition-owned paint (**D4.5.1v4 / D4.1.4v5**); sliced image backgrounds keep their
+edition-owned paint (**D5.5.1 / D5.1.4**); sliced image backgrounds keep their
 complete positioning area. Caption counter initialization runs once, and the
 definite-height tail repair retains the bounded fragmentainer lookup.
 
@@ -638,7 +638,7 @@ image traits to publish successfully. Publication now checks visible authored
 sources after the layout workspace has settled its mutation epoch. Anonymous
 table wrappers are skipped when finding an authored style parent: their
 unregistered identities cannot serve as source metadata contexts. This keeps
-edition metadata on registered sources under **D4.5.1v4 / D4.1.4v5** and uses
+edition metadata on registered sources under **D5.5.1 / D5.1.4** and uses
 the existing shared trait validators.
 
 The unchanged native suite improves to **310/490** in the baseline selection
@@ -696,7 +696,7 @@ metadata but never reached the browsing engine's used geometry. The common
 image path now calls `radiant_image_size`, copies the resulting object dimensions
 into the workspace embed, and uses the shared object-position painter. Publication
 retains those dimensions, the selected resource and native overflow policy under
-**D4.5.1v4 / D4.1.4v5**. Removing a native override restores CSS image sizing.
+**D5.5.1 / D5.1.4**. Removing a native override restores CSS image sizing.
 Native graphic URLs resolve inherited XML Base before resource admission; denied
 or missing native graphics fail without publishing an empty edition. An invalid
 scale grammar remains invalid, while incompatible valid scale sets are
@@ -759,7 +759,7 @@ now use the existing tree-owned canonical string store, as family lists already
 did. The timeline fixtures exposed retained `FontProp::family` pointers into
 `CssComputedValueScratch` after substitution; hit testing dereferenced the
 released pool. Longhand and pseudo fonts share the same selector and ownership
-path (**D4.5.1v4 / D4.1.4v5**). Both original timeline fixtures pass with the
+path (**D5.5.1 / D5.1.4**). Both original timeline fixtures pass with the
 supported ASan CLI, with leak detection disabled.
 
 PDF export uses the edition environment's host when its optional explicit host
@@ -789,7 +789,7 @@ sibling `lambda-test` repository.
 **Test migration.** The picture-source control now uses an unsupported media
 type; AVIF is supported by the shared codec registry. Workspace assertions
 follow paged-media §1.3.5, retaining exact geometry, retained pixel and ownership
-checks (**D4.5.1v4 / D4.1.4v5**). Three PDF media-box checks parse numeric
+checks (**D5.5.1 / D5.1.4**). Three PDF media-box checks parse numeric
 coordinates instead of requiring the retired writer's decimal padding
 (**S2.6.6v3**). All nine focused migrated cases pass.
 
@@ -816,8 +816,8 @@ This closes the merged regressions above; it does not complete P6/P7.
 engine, retaining every existing assertion. Acceptance covers native paragraph
 stacking, explicit nominal metrics and negative leading; formatted current and
 target folios in body, running, static and note areas; and CSS/list-attribute
-counter order across retained relayout. Ownership remains **D4.5.1v4 /
-D4.1.4v5**; the behavior follows paged-media design §§1.3 and 11.3, without a
+counter order across retained relayout. Ownership remains **D5.5.1 /
+D5.1.4**; the behavior follows paged-media design §§1.3 and 11.3, without a
 new semantic ruling.
 
 **Implemented.** Namespaced page hints and resolved native geometry also reach
@@ -868,7 +868,7 @@ and independent cell/static reference areas. Acceptance uses the existing native
 percentage-indent and FO ancestry cases without changing assertions. Focused
 checks precede the unchanged View Reuse selection, its complementary reuse/style
 selection and the required Radiant baseline. The contract is paged-media design
-§11.3; edition ownership follows **D4.5.1v4 / D4.1.4v5**.
+§11.3; edition ownership follows **D5.5.1 / D5.1.4**.
 
 **Implemented.** Paged reference geometry consumes the selected CSS snapshot's
 computed native traits after page selection. It no longer reparses inherited
@@ -916,7 +916,7 @@ after their wrapper width settles and resolve horizontal auto margins there.
 Inherited border spacing uses its declaring ancestor's font. Published table
 wrappers contain before captions, the decorated grid and after captions in visual
 order; rows, columns and repeated groups belong to that grid. Published ownership
-continues to follow **D4.5.1v4 / D4.1.4v5**.
+continues to follow **D5.5.1 / D5.1.4**.
 
 Table alignment uses the same platform baseline offset as glyph paint and the
 cell's first formatted line baseline instead of its first glyph. Subpixel shifts
@@ -955,7 +955,7 @@ height-reservation algorithm. Cell continuations retain the initial shift and
 start subsequent slices at their fresh content edge. Preserved line-break source
 bytes remain in fragment ranges but no longer appear as painted glyphs in the
 common text exporter. This implements paged-media design §11.3 with retained
-ownership under **D4.5.1v4 / D4.1.4v5**.
+ownership under **D5.5.1 / D5.1.4**.
 
 **Qualification.** Both existing native cell cases pass; the mutation case also
 checks row-span height distribution. Seven text-export checks pass, including
@@ -979,7 +979,7 @@ bases, first-row cells fill only unweighted unspecified tracks, and remaining
 automatic tracks share the remainder with unit weight. The common distributor
 continues to normalize large weights in double precision. Style admission reuses
 one selected-source helper. This implements paged-media design §11.3 while
-retaining **D4.5.1v4 / D4.1.4v5** ownership.
+retaining **D5.5.1 / D5.1.4** ownership.
 
 **Qualification.** The inherited-base and mutation/diagnostic case now passes;
 the repeated-column case has correct first-page tracks and still exposes its
@@ -999,7 +999,7 @@ intrinsic sizes from the selected paged edition while geometry remains in the
 DOM workspace. Each reference attempt clones history through the existing
 helper; nonfinal or failed attempts restore the last successful state. Only a
 committed edition replaces that state. This preserves independent screen/print
-editions and retained page generations under **D4.5.1v4 / D4.1.4v5**. Zero
+editions and retained page generations under **D5.5.1 / D5.1.4**. Zero
 resource capacities report exhausted budgets before composition starts.
 
 **Contract and checks.** The existing history case retains all its sizing,
@@ -1030,7 +1030,7 @@ retain authored text identities before marker materialization. Following §4.5
 and §4.7, baseline checks compare actual glyph baselines, and the old workspace
 preservation check becomes a stricter retained-edition reflow check. Original
 source ranges, marker count/color/page, empty-item height and export assertions
-remain covered. Retained source/paint ownership follows **D4.5.1v4 / D4.1.4v5**.
+remain covered. Retained source/paint ownership follows **D5.5.1 / D5.1.4**.
 
 **Qualification.** All 18 focused list/marker checks and seven neighboring text
 export checks pass. The original fixture also verifies aligned blue/black glyph
@@ -1058,7 +1058,7 @@ and rejects in-flow block call content. Atomic inline formatting contexts and
 hidden blocks remain valid. Anchor classification is independent of admission so
 detached layout can recognize nested classic footnotes without suppressing its
 own note root. Existing diagnostic reasons and source identities are unchanged;
-transactional publication follows **D4.5.1v4 / D4.1.4v5** and native notes follow
+transactional publication follows **D5.5.1 / D5.1.4** and native notes follow
 paged-media design §11.3.
 
 **Qualification.** The original diagnostic case passes, with added positive
@@ -1078,7 +1078,7 @@ even when the span has no decorated box. Decoration paint and insertion geometry
 use one parameterized callback; decorated zero-width boxes retain their paint.
 This restores empty authored-note calls through ordinary inline publication,
 without synthesizing numbering or specializing the publisher for native tags.
-Source/retained ownership follows **D4.5.1v4 / D4.1.4v5** and native note anchors
+Source/retained ownership follows **D5.5.1 / D5.1.4** and native note anchors
 follow paged-media design §11.3.
 
 **Qualification.** The existing empty-call case passes with all original
@@ -1101,8 +1101,8 @@ text checks. The detached block remains in the published hierarchy (§3.4).
 The atomic-wrap fixture retains `A ` in its TextRect payload (§4.5) and checks
 that its published width equals the selected font's `A` advance, with every
 source byte covered once and the original DOM bytes unchanged. Its image-wrap
-geometry checks remain. Source/edition ownership follows **D4.5.1v4 /
-D4.1.4v5**; these are assertion repairs, with no changed text-layout behavior.
+geometry checks remain. Source/edition ownership follows **D5.5.1 /
+D5.1.4**; these are assertion repairs, with no changed text-layout behavior.
 
 An attempted consumed-space export mark was removed: it erased the separators
 from three passing reference-repagination cases. A separate Unicode atomic-wrap
@@ -1134,7 +1134,7 @@ boundary enters the ordinary fragmentation loop even when the whole table's
 height fits. The row/group break handler, furniture reservation and avoidance
 rules are shared with overflowing tables; no second table producer was added.
 This follows [CSS Fragmentation 3 §4.3](https://www.w3.org/TR/css-break-3/#forced-breaks).
-Retained edition ownership follows **D4.5.1v4 / D4.1.4v5**.
+Retained edition ownership follows **D5.5.1 / D5.1.4**.
 
 **Qualification.** The original forced-row/avoided-group case passes and
 now covers both `break-before` and `break-after` at the boundary, removing the
@@ -1156,7 +1156,7 @@ table group's value precedes its descendant row's value, and the following side
 of the boundary follows the previous side. This replaces enum-number priority
 and follows [CSS Fragmentation 3 §4.3](https://www.w3.org/TR/css-break-3/#forced-breaks).
 The change adds no edition or style borrows; existing ownership remains under
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 **Qualification.** The expanded original table-group case and ordinary
 sibling fixture fail on the old resolver and pass after the repair. They retain
@@ -1181,7 +1181,7 @@ the selected edition's declaration/value APIs, including aliases and variables.
 Computed `BlockProp::break_before/after` values remain unchanged, as required by
 [CSS Fragmentation 3 §3.1.1](https://www.w3.org/TR/css-break-3/#break-propagation).
 Lookup values do not escape the call; selected metadata ownership follows
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 Normal table ordering, paged collection and source-edge lookup share the rule
 that only the first header/footer groups are furniture. Laid-out groups keep
@@ -1209,8 +1209,8 @@ storage growth in the flow's sticky status. Void layout hooks can no longer lose
 the returned error and leave publication believing a truncated page table is
 complete. A failed blank-page insertion prevents material-page creation, resumed
 note errors propagate, and existing producer diagnostics keep their precise
-source/reason. This restores transactional edition failure under **D4.1.4v5 /
-D4.5.1v4**.
+source/reason. This restores transactional edition failure under **D5.1.4 /
+D5.5.1**.
 
 **Qualification.** Expanded sided-boundary budget cases fail on the old
 code and now reject both insufficient blank-page and material-page budgets,
@@ -1236,7 +1236,7 @@ pixels, rule strokes, exports and retained rollback checks. The CSS cases use
 existing ascent-leading snapping; independent Chromium152 captures confirm
 Arial10/20 and Times10/12 rectangles. FO uses nominal font geometry and unsnapped
 half-leading under [XSL1.1 §4.5](https://www.w3.org/TR/2006/REC-xsl11-20061205/#area-line),
-explaining its fractional top. Captured fonts follow **D4.5.1v4**. No engine
+explaining its fractional top. Captured fonts follow **D5.5.1**. No engine
 source changed, and temporary metric logging was removed.
 
 **Qualification.** All five cases pass. Full614 improves **390/490 → 395/490**,
@@ -1259,8 +1259,8 @@ and including closing edges and repeated table footers. The translation uses
 the existing publication mapping for boxes, glyphs, images and paint. It is
 removed before auxiliary publication, so top/bottom floats and footnote areas
 keep their assigned slots. Pagination and mutable DOM geometry stay independent
-of this publication-only translation; edition ownership follows **D4.5.1v4 /
-D4.1.4v5**. This implements the body-column alignment contract in design §11.3.
+of this publication-only translation; edition ownership follows **D5.5.1 /
+D5.1.4**. This implements the body-column alignment contract in design §11.3.
 
 **Qualification.** The expanded original column case fails30assertions on the
 old publisher. It now passes before/center/after for equal and unequal column
@@ -1290,7 +1290,7 @@ The alternating-page fixture now asserts one220px table grid throughout the run
 under §4.2, while independently checking220/180/220px page content widths and
 240/200/240px physical snapshots. Captions still occur only on the original
 first/last pages, and header/footer rows still repeat exactly once per page.
-No engine source changed; edition ownership remains **D4.5.1v4 / D4.1.4v5**.
+No engine source changed; edition ownership remains **D5.5.1 / D5.1.4**.
 
 **Qualification.** All ten caption cases pass. Full614 improves **396/490 →
 398/490**, with **124/124** complementary cases and no new failure. A fresh
@@ -1315,7 +1315,7 @@ publication. Empty unassigned columns preserve their group-local zero origin.
 New source rows/cells merge with retained anonymous row runs before rowspan
 normalization, so appending a row cannot truncate an existing span at a stale
 generated group boundary. Existing retirement helpers preserve ownership under
-**D4.5.1v4 / D4.1.4v5**. Fixtures check exact uncovered-track coverage for absent
+**D5.5.1 / D5.1.4**. Fixtures check exact uncovered-track coverage for absent
 cells (§3.4), unique geometric occurrences and zero property-only occurrences.
 Repeated tracks retain the §4.2 constant run width while physical page widths
 still alternate. Added column-color pixels, extreme-position budgets, recovery
@@ -1347,7 +1347,7 @@ glyph text retains its complete source range. The expanded existing case checks
 both policies at the root and in a two-column native sequence, all four forced
 break values, insufficient-page rollback, successful recovery and retained
 nonempty header pixels after recomposition. Frozen edition ownership remains
-**D4.5.1v4 / D4.1.4v5**; no formal ruling changes.
+**D5.5.1 / D5.1.4**; no formal ruling changes.
 
 **Qualification.** All five focused boundary, furniture and keep controls pass.
 The unchanged 614-case inventory now passes **407/490** baseline and **124/124**
@@ -1377,7 +1377,7 @@ closed ancestor heights, following siblings and the live parent cursor together;
 CSS margin collapse and authored margin values remain independent. Leading
 conditionality uses the boundary captured before CSS margin placement, so a
 preserved margin cannot turn a fresh page into a noninitial native boundary.
-Selected values and frozen paint retain **D4.5.1v4 / D4.1.4v5** ownership.
+Selected values and frozen paint retain **D5.5.1 / D5.1.4** ownership.
 
 The three original cases now also check before/after range symmetry, normalized
 computed values, exact source coverage, CSS margin preservation and addition,
@@ -1404,7 +1404,7 @@ queries through the existing nowrap path (§11.3 of
 `vibe/radiant/Radiant_Layout_Paged_Media.md`). Descendant CSS wrapping or native
 `auto` cannot weaken that owner constraint; forced BR and preserved LF still
 break lines. The lookup stops at the current inline formatting context. Selected
-style ownership remains **D4.5.1v4 / D4.1.4v5**.
+style ownership remains **D5.5.1 / D5.1.4**.
 
 The shared text path had recorded a terminal separator for nowrap movement only
 for document fonts and collapsed spaces. It now records the existing legal
@@ -1442,7 +1442,7 @@ exercise actual repetition. Shared assertions verify direct cell ownership per
 TextRect (§3.4/§4.5), complete source payloads exactly once on each expected page,
 font-line geometry, and original header-first/footer-last roles. Budget failure,
 recovery, changed source-cell geometry and nonempty retained pixels preserve the
-edition ownership required by **D4.5.1v4 / D4.1.4v5**. No engine behavior changed.
+edition ownership required by **D5.5.1 / D5.1.4**. No engine behavior changed.
 
 All five focused table/alignment cases pass. The unchanged 614-case inventory
 now passes 414/490 baseline and 124/124 complementary cases, with no new failure
@@ -1462,7 +1462,7 @@ above every integer (§11.3 of `vibe/radiant/Radiant_Layout_Paged_Media.md`;
 CSS `auto`; CSS avoidance retains its strongest break preference and relaxation
 policy. Page constraints apply at physical page transitions, while column
 constraints apply in their column context. Selected style and retained payload
-ownership remain **D4.5.1v4 / D4.1.4v5**.
+ownership remain **D5.5.1 / D5.1.4**.
 
 Block and table-row chains choose the weakest feasible existing cut, retaining
 the earlier-cut tie behavior and preserving stronger later keeps. Committed
@@ -1508,7 +1508,7 @@ anchor reservations once, and reuses strut undo/shift/refit when a group starts 
 an earlier column. Forced boundaries still stop rewind. The shared column-context
 lookup also handles continuous editions, which intentionally have no physical
 page. Selected styles and immutable retained payloads remain governed by
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 Oversized native `always` groups relax and slice under §1.3.4 of
 `vibe/radiant/Radiant_Layout_Paged_Media.md` and §4.1/§4.4 above. The old rejection
@@ -1558,7 +1558,7 @@ preferred width was treated as its intrinsic minimum, and a wide nowrap grid was
 rejected. Their updated cases apply the common engine and overflow contract of
 §4.1, asserting font-derived grid/cell widths, source-complete glyph payloads,
 nonempty retained pixels, changed geometry/paint and real page-budget failure
-and recovery. Retained ownership remains **D4.5.1v4 / D4.1.4v5**. The tests retain
+and recovery. Retained ownership remains **D5.5.1 / D5.1.4**. The tests retain
 their names and inventory; no reference or score floor changed.
 
 The final unchanged 614-case native inventory passes 423/490 baseline and
@@ -1583,7 +1583,7 @@ apply §1.3.4 of `vibe/radiant/Radiant_Layout_Paged_Media.md` and §4.1 above.
 A 90px image in a 60px body publishes two clipped slices with one retained
 resource and continuous image coordinates. HTML missing/denied images keep
 the common browsing fallback; a native `r:page-document` still reports its
-unavailable graphic at the correct source under **D7.1.2v2**. Hidden descendants
+unavailable graphic at the correct source under **D9.1.2**. Hidden descendants
 stay absent, and an empty SVG viewport participates in ordinary box painting.
 Eight ordinary formatting contexts and a grid root are checked through source
 coverage, font geometry, visible pixels, mutations and real budget rollback.
@@ -1604,7 +1604,7 @@ width, removed grid display returns to flow, and removed height becomes auto.
 The root keeps its viewport box with the second page in its overflow. Authored
 text identity survives inserted list markers. Image assets, source ranges and
 nonempty retained pixels remain stable after resource/cache and DOM changes,
-as required by **D4.5.1v4 / D4.1.4v5**. No formal ruling changes.
+as required by **D5.5.1 / D5.1.4**. No formal ruling changes.
 
 A broad late display refresh initially regressed a mixed-writing-mode baseline
 and a closed dialog. Both reproduced three times; moving the refresh into root
@@ -1641,7 +1641,7 @@ font geometry, visible track colors, causal width/style changes, retained pixels
 and page/node budget rollback with recovery. Authored cell pointers are retained
 across common anonymous row-group fixup. DOM-backed properties are the current
 layout workspace, while published editions retain independent geometry and
-paint under **D4.5.1v4 / D4.1.4v5**. Names and test inventory are unchanged.
+paint under **D5.5.1 / D5.1.4**. Names and test inventory are unchanged.
 
 A blue column with an authored red border exposed an independent publication
 bug: internal table boundaries were passed to the generic box painter as if
@@ -1682,7 +1682,7 @@ paint: cells own the resolved shared edges. A hidden resolved cell edge keeps
 its `hidden` style in retained metadata while its used paint width stays zero.
 This preserves the conflict result and prevents the table's authored border
 from drawing over it. Published state remains edition-owned under
-**D4.5.1v4 / D4.1.4v5**. No test expectation, test name or formal ruling changed.
+**D5.5.1 / D5.1.4**. No test expectation, test name or formal ruling changed.
 
 The full unchanged native inventory now passes 435/490 baseline and 124/124
 complementary cases, with no new failures, increased assertion counts or changed
@@ -1710,8 +1710,8 @@ rather than a filtered alias of the paged-media executable. Test names and
 assertion bodies are preserved byte for byte. Historical evidence above retains
 the executable names used when it was captured.
 
-The targets follow the same edition ownership contract (**D4.5.1v4 /
-D4.1.4v5**). This is a test/build organization change; no formal ruling changes.
+The targets follow the same edition ownership contract (**D5.5.1 /
+D5.1.4**). This is a test/build organization change; no formal ruling changes.
 Case-inventory and runner/build verification is recorded under
 `temp/view_reuse_goal/rename_paged_media/`; the remaining 55 original failures
 and the seven known atomic reference disagreements remain in scope.
@@ -1765,7 +1765,7 @@ all pages, a 4px-to-6px border/color mutation, budget failure/recovery and retai
 pixels. Eight adjacent controls cover separate/collapsed borders, slice/clone,
 padding/spacing and repeated footers. They verify that cloned edges add no
 second gap and that retained pixels survive later source changes under
-**D4.5.1v4 / D4.1.4v5**. The existing source-fragment selector gains an optional
+**D5.5.1 / D5.1.4**. The existing source-fragment selector gains an optional
 page filter; the shared edition-mutation helper accepts colors. No test name or
 formal ruling changes.
 
@@ -1793,7 +1793,7 @@ for the actual text. The anonymous-source fixture now verifies the implemented
 instead of requiring the retired missing-producer diagnostic. It checks the
 anonymous cell ancestry, every source byte, reflow from one line to two at 40px,
 a real node-budget failure/recovery and retained 1×/2× pixels after source-edition
-release, under **D4.5.1v4 / D4.1.4v5**. Its expanded acceptance check fails before
+release, under **D5.5.1 / D5.1.4**. Its expanded acceptance check fails before
 the fix because the authored text has no occurrence state. Chromium 152 confirms
 the same text and width-dependent line split.
 
@@ -1844,7 +1844,7 @@ the table background shows through. A Chromium 152 control independently
 matches all six original pixel assertions for colored rows/columns and missing
 cells. The shared range allocator handles real cells, column ranges and missing
 slots; the shared publication budget check covers each new slot. Captured data
-and published ranges follow **D4.5.1v4 / D4.1.4v5**; no DOM child or persistent
+and published ranges follow **D5.5.1 / D5.1.4**; no DOM child or persistent
 view-property field is added.
 
 Original fixed/auto, rowspan, declared-column, continuation and pixel cases
@@ -1897,7 +1897,7 @@ source bytes and published tracks.
 
 Visible background, image-percentage and table-width mutations check changed
 pixels and retained pixels after original-edition release under
-**D4.5.1v4 / D4.1.4v5**. The shared mutation helper accepts a failure page limit,
+**D5.5.1 / D5.1.4**. The shared mutation helper accepts a failure page limit,
 defaulting to the existing value of one; single-page controls use zero and still
 require a real budget failure and recovery. A page-pixel overload reuses the
 existing RGB comparator. All original scenarios and case names remain.
@@ -1944,7 +1944,7 @@ Chromium evidence under
 [CSS Tables 3 §3.8.3](https://www.w3.org/TR/css-tables-3/#computing-column-measures).
 Published ranges, ignored non-column children, genuine budgets and retained
 blue/lime pixels are checked. No module API or ownership fields change
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 Nine focused checks across the two repairs and fresh full native runs pass
 these cases: 448/490 paged-media plus 124/124 view-reuse, preserving all 614 case
@@ -1972,7 +1972,7 @@ required two glyph-free glue nodes from the retired producer.
 The original case now verifies source-byte coverage, preserved text, captured
 font advances, page/role/position and the third-page anchor. A real page-budget
 failure/recovery, blue-to-red note background and retained source-edition release
-check the observable result under **D4.5.1v4 / D4.1.4v5**. The shared edition
+check the observable result under **D5.5.1 / D5.1.4**. The shared edition
 mutation helper is renamed from `table_edition_mutation` to
 `page_edition_mutation`; its implementation and caller defaults are unchanged.
 Metric assertions use the font captured by the glyph run, without requiring a
@@ -2004,7 +2004,7 @@ Published source ranges retain every original byte while painted ranges omit
 suppressed hard-edge whitespace. Ordinary soft-wrap spaces keep their logical
 text. Native conditional end spaces reuse the shared trimming path. Policy
 pointers are borrowed synchronously; editions retain copied text and captured
-fonts under **D4.5.1v4 / D4.1.4v5**.
+fonts under **D5.5.1 / D5.1.4**.
 
 The four original whitespace cases retain their modes, line positions, source
 coverage and preview independence, and now inspect glyphs inside common merged
@@ -2035,7 +2035,7 @@ edition material instead of requiring the shared DOM workspace to keep its
 pre-layout geometry. Font, line-height, padding and background mutation verifies
 changed output, genuine budget failure/recovery, and original captured fonts,
 source ranges, material identity and pixels after source-edition release
-(**D4.5.1v4 / D4.1.4v5**). This does not add changed-width paragraph regeneration.
+(**D5.5.1 / D5.1.4**). This does not add changed-width paragraph regeneration.
 
 The preview case's visible footer digit has 13.4353 pixels of integrated ink but
 only one nearly black pixel. Its coverage assertion now integrates antialiasing.
@@ -2078,7 +2078,7 @@ arrays or per-fragment computed styles. Space patterns reserve font advances
 without outlines. Additional image and CJK patterns pass. Width/background
 mutation, genuine page-budget failure/recovery, source coverage and retained
 pixels/fonts/PDF after source-edition release verify ownership under
-**D4.5.1v4 / D4.1.4v5**. Multiline, RTL, intrinsic leader behavior and dynamic
+**D5.5.1 / D5.1.4**. Multiline, RTL, intrinsic leader behavior and dynamic
 pseudo-element removal remain partial; full CSS Content conformance is not claimed.
 
 Fresh native runs pass 458/490 paged-media and 124/124 reuse cases, retaining all
@@ -2112,7 +2112,7 @@ explicitly narrower new editions still assert the former narrower widths.
 Nested short blocks use the authored text's common glyph occurrence instead
 of a retired line alias. Page-budget failure/recovery, captured fonts, exact
 source coverage, geometry and retained pixels after source-edition release
-verify ownership under **D4.5.1v4 / D4.1.4v5**. Broader fragmented-table border
+verify ownership under **D5.5.1 / D5.1.4**. Broader fragmented-table border
 conflict resolution and continuation width relayout remain partial.
 
 Fresh native runs pass 463/490 paged-media and 124/124 reuse cases, preserving
@@ -2155,7 +2155,7 @@ unequal papers. Width assertions use the opening run under §4.2; a narrower new
 edition still asserts 180px. Color/width mutations, actual page-budget failure
 and recovery, failure after resetting the original edition, exact source coverage
 and retained geometry/pixels after its release verify ownership under
-**D4.5.1v4 / D4.1.4v5**. This does not establish complete oversized table-furniture
+**D5.5.1 / D5.1.4**. This does not establish complete oversized table-furniture
 or continuation-relayout behavior.
 
 Fresh native runs pass 465/490 paged-media and 124/124 reuse cases, preserving
@@ -2192,7 +2192,7 @@ all eight original translation diagnostics remain checked.
 
 Causal style, geometry and pixel mutations, page/node-budget rollback and
 recovery, exact source coverage, and retained painting after resetting and
-releasing the original edition check **D4.5.1v4 / D4.1.4v5** ownership. The shared
+releasing the original edition check **D5.5.1 / D5.1.4** ownership. The shared
 retention snapshot helper avoids copying the same action/capture check.
 Oversized furniture-only pages and percentage-padding cell geometry remain
 separate open cases.
@@ -2225,7 +2225,7 @@ It checks 5%/10% padding, minimum row/table extents, six shorthand/longhand/math
 controls, and a relative-cell 6px/4px movement with unchanged tracks. Independent
 Chromium 152 geometry confirms these values. Source coverage, causal pixels,
 real page-budget rollback and recovery, and retained painting after resetting
-and releasing the original edition check **D4.5.1v4 / D4.1.4v5**. Relative
+and releasing the original edition check **D5.5.1 / D5.1.4**. Relative
 positioning already worked; its former admission expectation follows §4.1.
 
 Fresh native runs pass 471/490 paged-media and 124/124 reuse cases, with all
@@ -2263,7 +2263,7 @@ pieces to 23px/25px. Missing families now initialize from the active font contex
 or the selected HTML mode's initial font for reused groups as well. Existing
 resolved values are not recopied. The first prototype's layout-policy call from
 the lower IO initializer failed strict linking; it was removed, preserving
-**D7.3.3–D7.3.4** with no new boundary exception.
+**D9.4.3–D9.4.4** with no new boundary exception.
 
 Both original note documents, policies, paper geometry and source texts remain.
 The documented same-width continuation refinement (§9, 2026-10-15 CSS repairs)
@@ -2273,7 +2273,7 @@ Wrapping the same source in an inline atomic box produces the real unplaceable
 source diagnostic and no committed pages; an ordinary block exposes legal
 edges again. Color mutation, real page limits, reset/failure/recovery, release
 of original editions, and retained text, geometry and pixels check
-**D4.5.1v4 / D4.1.4v5**. Shared helpers preserve the checks without duplicating
+**D5.5.1 / D5.1.4**. Shared helpers preserve the checks without duplicating
 snapshot/action code. Changed-width note continuation remains unsupported.
 
 Fresh native runs pass 473/490 paged-media and 124/124 reuse cases, preserving
@@ -2308,7 +2308,7 @@ continuations keep x27 and width53 under the opening run. A 60% mutation binds
 52px and visibly moves the painted edge. A new narrower edition binds its own
 60px cell to 16px, x26 and width44. It retains the old paper geometry and pixels
 through source-edition reset, actual page-budget failure, recovery and release
-(**D4.5.1v4 / D4.1.4v5**). The repeated page-budget/reset/recovery assertion shape
+(**D5.5.1 / D5.1.4**). The repeated page-budget/reset/recovery assertion shape
 is shared across these two cases and the previous cell-policy fixture; its
 original failure and recovery checks remain.
 
@@ -2339,7 +2339,7 @@ font-derived baselines, and blue/red pixels. Following body content and two
 terminal floats share page two; a right-side break inserts one blank and targets
 page three; removing the break returns to one page. Real page-budget failure,
 reset/recovery, source-edition release and retained original geometry/text/pixels
-exercise **D4.5.1v4 / D4.1.4v5**. No new anchor field or alternate paginator is
+exercise **D5.5.1 / D5.1.4**. No new anchor field or alternate paginator is
 introduced. Failed private hypotheses and stage traces remain in the evidence.
 
 Fresh native runs pass 476/490 paged-media and 124/124 reuse cases: all 614
@@ -2374,7 +2374,7 @@ total-height coverage assertions. The original page-budget recovery helper can
 also verify that an uncommitted failed edition cannot export a PDF. Real limits,
 rollback, recovery, valid exports, causal pixels, original-geometry restoration
 and release preserve retained text/geometry/pixels under
-**D4.5.1v4 / D4.1.4v5**. A private pixel oracle initially excluded the exact top
+**D5.5.1 / D5.1.4**. A private pixel oracle initially excluded the exact top
 edge of a filled child; correcting it to top-inclusive/bottom-exclusive required
 no engine change.
 
@@ -2409,7 +2409,7 @@ checked. Changing the distance to 50% shifts the body and a visible blue edge.
 Selecting box areas changes the label folio to 3; selecting descendant areas and
 moving the unchanged Term with padding makes it 2. Reset, actual budget failure,
 recovery, restoration and release retain original folios, geometry and pixels
-under **D4.5.1v4 / D4.1.4v5**. The same strengthened test object fails six
+under **D5.5.1 / D5.1.4**. The same strengthened test object fails six
 assertions against the preceding engine and passes with the repair.
 
 Fresh production checks pass 479/490 paged-media and 124/124 reuse cases, with
@@ -2443,7 +2443,7 @@ stay at their independently reserved coordinates. Invalid alignment still reject
 with the original diagnostic and zero pages. Header-color mutation, real page
 limits, reset/recovery, original-margin restoration, source-edition release and
 two retained centered editions preserve full pixels and source material under
-**D4.5.1v4 / D4.1.4v5**. No engine change was needed.
+**D5.5.1 / D5.1.4**. No engine change was needed.
 
 Three focused checks and fresh production suites pass: 480/490 paged-media and
 124/124 reuse, all 614 identities preserved, the other ten failure profiles
@@ -2473,7 +2473,7 @@ Controls check widow1, a three-line group with multiple moved earlier lines,
 all-short columns that must relax under a real three-page cap, and a taller
 second column. Source bytes, font-derived baselines, physical geometry, blue/red
 pixels, page-budget rollback/recovery, restoration and retained source release
-check **D4.5.1v4 / D4.1.4v5**. The same strengthened test object fails five
+check **D5.5.1 / D5.1.4**. The same strengthened test object fails five
 assertions on the preceding engine; its impossible-minimum control exhausts the
 cap there and terminates with relaxation after the repair.
 
@@ -2519,7 +2519,7 @@ Removing forced padding then selects one correctly measured 180px terminal body.
 Exact masters, blanks, source coverage, captured font baselines, flags, blue/red
 pixels, real padding-budget failure, reset/recovery, original restoration and
 source-edition release retain the original material under
-**D4.5.1v4 / D4.1.4v5**. The retired rejection assertion is replaced by these
+**D5.5.1 / D5.1.4**. The retired rejection assertion is replaced by these
 ordinary-sheet ownership checks, with all original input cases retained.
 
 Fresh production checks pass 482/490 paged-media and 124/124 reuse cases. Three
@@ -2551,7 +2551,7 @@ The shared selector exposes the selected ONLY predicate through an overload; its
 existing five-argument ABI delegates to the same matching body. Rule order,
 parity, blank filtering and run limits are not duplicated. The module header
 declares the overload; no private forward declaration remains. Strict boundaries
-preserve **D7.3.3–D7.3.4** with the existing 137/165 deferment count.
+preserve **D9.4.3–D9.4.4** with the existing 137/165 deferment count.
 
 The original two masters, program order and all 83 source bytes remain. The
 strengthened fixture checks complete source coverage, selected physical bodies,
@@ -2561,7 +2561,7 @@ folio two; blank filtering and an earlier ANY rule select ordinary pages.
 Restoring order restores one page. A 20px-tall only body falls back to three
 ordinary pages with no ghost first sheet. A genuine one-page budget failure on
 that fallback, recovery, restoration and source-edition release preserve the
-original one-page pixels under **D4.5.1v4 / D4.1.4v5**. The same test object fails
+original one-page pixels under **D5.5.1 / D5.1.4**. The same test object fails
 seven assertions on the preceding engine. A predicted tail-pinning issue did not
 occur in the fallback probe, so unrelated tail code remains untouched.
 
@@ -2633,7 +2633,7 @@ excluding the trailing half-leading after the final glyph; an indivisible float
 can require an empty last sheet to take its ordinary alternative first. Earlier
 columns are never restyled by that operation. The existing page budget and
 reference budget bound retries, and publication/retention keep the ownership
-required by **D4.5.1v4 / D4.1.4v5**. These implement existing page-model behavior;
+required by **D5.5.1 / D5.1.4**. These implement existing page-model behavior;
 no formal ruling changes.
 
 The table fixture now verifies successful natural furniture, exactly-once text

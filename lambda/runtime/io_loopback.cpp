@@ -1,5 +1,5 @@
 // io_loopback.cpp — lambda.io.loopback: one HTTP request on 127.0.0.1, the
-// redirect that ends a sign-in in the system browser (RFC 8252 §7.3; D7.2.4v4;
+// redirect that ends a sign-in in the system browser (RFC 8252 §7.3; D9.3.4;
 // vibe/Lambda_Demo_Mail.md MG7, M4).
 //
 // `listen` binds an ephemeral port on the loopback interface only. `accept`

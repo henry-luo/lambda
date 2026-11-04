@@ -108,8 +108,8 @@ These populations are kept separate from the twelve-kernel headline.
 The compiler preserves typed lanes/extents, native element results and stores,
 number-or-undefined snapshots, nested induction ranges, affine bounds, and
 numeric contents of unchanged ordinary literals. It reuses Lambda's physical
-storage and scalar-ownership emitters (**D2.2.5**, **D2.4.3**, **D5.3.4**,
-**D8.2.6**) without runtime feedback (**D8.4.1v2**). Three disclosed compiler
+storage and scalar-ownership emitters (**D2.2.5**, **D2.3.5**, **D6.3.4**,
+**D8.2.6**) without runtime feedback (**D7.4.1**). Three disclosed compiler
 utilities were added; no native runtime helper or full-JS dependency was added.
 See the [implementation record](../../../vibe/impl/JS_MVP_Lmd_Numeric_Tuning.md).
 

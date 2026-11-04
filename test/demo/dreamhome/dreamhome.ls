@@ -226,7 +226,7 @@ fn dragged(st, x, y, free) any^ {
 
 fn transform_of(it) any^ => "translate(" ++ A.n(it.x) ++ " " ++ A.n(it.y) ++ ") rotate(" ++ A.n(it.rot) ++ ")"
 pn set(el, key, value) { if (el != null) dom.set_attribute(el, key, value) }
-// D4.5.1v4: a drag previews on the plan's own elements and commits once, on release
+// D5.5.1: a drag previews on the plan's own elements and commits once, on release
 pn publish_structure(root, st, home) {
     let g = dom.query_selector(root, "#plan-structure")
     if (g == null) { return null }

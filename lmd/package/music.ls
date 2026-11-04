@@ -1,4 +1,4 @@
-// Native MusicXML package; public values and raised errors follow D7.2.4/S7.4.2.
+// Native MusicXML package; public values and raised errors follow D9.3.4/S7.4.2.
 import xml: .music.musicxml
 import engraving: .music.layout
 import paint: .music.engrave

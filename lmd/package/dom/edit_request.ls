@@ -1,4 +1,4 @@
-// Pure constructors for the common editing request protocol (D7.2.5).
+// Pure constructors for the common editing request protocol (D10.2.1).
 
 fn value_or(value, fallback) => if (value == null) fallback else value
 

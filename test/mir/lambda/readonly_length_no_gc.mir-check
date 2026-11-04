@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3.1/S8.3.1v2: flat array length reads its header; an N-D carrier retains the NO_GC helper fallback.",
+  "description": "D6.3.1/S8.3.1v2: flat array length reads its header; an N-D carrier retains the NO_GC helper fallback.",
   "checks": [
     {
       "in_func": "_lens__raw0_#",

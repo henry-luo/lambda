@@ -82,7 +82,7 @@ function checkGeometry(actual) {
     return 'nonfinite SVG geometry';
   if (/<link\b/.test(actual.html) || /class="lm_/.test(actual.html))
     return 'external stylesheet or legacy markup dependency';
-  // D7.2.9: bundled fonts stay file resources; every emitted URL must resolve.
+  // D10.2.4: bundled fonts stay file resources; every emitted URL must resolve.
   const styles = [...actual.html.matchAll(/<style>([\s\S]*?)<\/style>/g)];
   for (const [, css] of styles) {
     for (const [, raw] of css.matchAll(/url\(("(?:\\.|[^"\\])*"|[^)]+)\)/g)) {

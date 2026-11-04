@@ -1,4 +1,4 @@
-// D4.3.3/S9.1.2: allocating loops preserve input copies and escaping captures.
+// D5.3.2/S9.1.2: allocating loops preserve input copies and escaping captures.
 fn build(n) {
     var work = {total: 0, last: [0, 0]}
     var i = 0

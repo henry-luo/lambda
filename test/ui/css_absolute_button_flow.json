@@ -1,0 +1,95 @@
+{
+  "name": "Absolute HTML buttons measure flow labels while native inputs retain intrinsic sizing",
+  "html": "test/ui/css_absolute_button_flow.html",
+  "viewport": {
+    "width": 1200,
+    "height": 400
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "width": 144,
+      "height": 48,
+      "x": 436,
+      "y": 20,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#stretched"
+      },
+      "width": 560,
+      "height": 48,
+      "x": 20,
+      "y": 80,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#native"
+      },
+      "width": 144,
+      "height": 48,
+      "x": 436,
+      "y": 140,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#generated"
+      },
+      "width": 144,
+      "height": 48,
+      "x": 436,
+      "y": 200,
+      "tolerance": 0.1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "width": 224,
+      "x": 356,
+      "height": 48,
+      "tolerance": 0.1
+    },
+    {
+      "type": "resize",
+      "width": 480,
+      "height": 400
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#auto"
+      },
+      "width": 224,
+      "x": 236,
+      "height": 48,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#stretched"
+      },
+      "width": 440,
+      "x": 20,
+      "height": 48,
+      "tolerance": 0.1
+    }
+  ]
+}

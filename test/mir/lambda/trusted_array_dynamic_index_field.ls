@@ -1,4 +1,4 @@
-// D3.3.3v3/S8.2.4v3: a local key may select one admitted record or a collection.
+// D4.3.3/S8.2.4v3: a local key may select one admitted record or a collection.
 // The field fast arm requires the actual record shape; all other keys fall back.
 type Entry = {value: int}
 type Position = {index: int}

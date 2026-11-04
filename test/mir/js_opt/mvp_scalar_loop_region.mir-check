@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.1.3v27, D8.4.1v2: a scalar loop beside unrelated eval guards Number arguments once at its callable entry. Preserve the complete generic conversion loop for misses and avoid duplicating loops at call sites.",
+  "description": "D8.4.2, D7.4.1: a scalar loop beside unrelated eval guards Number arguments once at its callable entry. Preserve the complete generic conversion loop for misses and avoid duplicating loops at call sites.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

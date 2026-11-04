@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S7.1.1v3, D5.3.1, D8.3.1v2: a guarded ASCII scan reads bytes directly and retains the generic Unicode and absent-index loop.",
+  "description": "S7.1.1v3, D6.3.1, D7.3.1: a guarded ASCII scan reads bytes directly and retains the generic Unicode and absent-index loop.",
   "checks": [
     {
       "in_func": "_last_code_#",

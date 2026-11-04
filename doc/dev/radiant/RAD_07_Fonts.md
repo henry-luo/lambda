@@ -44,7 +44,7 @@ The engine is large enough to stand alone (~30 files: `font_context.c`, `font_gl
 The inline helper `font_style_desc_from_prop` (`view.hpp:437`) converts a `FontProp` into the engine's `FontStyleDesc` — mapping `font_weight_numeric` (or, absent that, the `bold`/`bolder`/`lighter` keywords) to a `FontWeight`, and `italic`/`oblique` to a `FontSlant`. This helper supplies the same style descriptor to `setup_font` and glyph fallback;
 `setup_font` adds the UI default-family fallback when the requested family is absent.
 
-`FontBox` (`view.hpp`) is the transient "current font" the layout context swaps in and out as it enters and leaves inline spans: a `FontProp* style` and `current_font_size`. It is an alias of the prop, not a second handle owner; `font_box_handle` derives the handle from `style`. `lycon->font` is a `FontBox`; `setup_font` is what fills it. This follows the Radiant seam's pin/copy-as-value contract, **D4.5.1v3**.
+`FontBox` (`view.hpp`) is the transient "current font" the layout context swaps in and out as it enters and leaves inline spans: a `FontProp* style` and `current_font_size`. It is an alias of the prop, not a second handle owner; `font_box_handle` derives the handle from `style`. `lycon->font` is a `FontBox`; `setup_font` is what fills it. This follows the Radiant seam's pin/copy-as-value contract, **D5.5.1**.
 
 ---
 
@@ -52,7 +52,7 @@ The inline helper `font_style_desc_from_prop` (`view.hpp:437`) converts a `FontP
 font selection and spacing (**VR15**). `view_tree_canonical_font_inputs` hashes
 fields and confirms exact equality; canonical values live with the selected
 view tree. Each element still owns mutable metrics, its pinned handle and text
-shadow chain (**D4.5.1v4 / D4.1.4v5 / D4.5.2**). The mutable `FontProp` remains
+shadow chain (**D5.5.1 / D5.1.4 / D5.5.2**). The mutable `FontProp` remains
 the compatibility adapter; whole font props are not shared.
 
 ## 3. `setup_font` — resolve-and-cache (`font.cpp`)
@@ -93,7 +93,7 @@ fallback metrics when the requested face is available. The query neither
 publishes a handle nor inherits another box's used zoom. Glyph orientation
 still follows computed writing-mode/text-orientation, including table-track
 properties that do not govern used flow. This follows CSS Values 4 §6.1.1 and
-CSS Cascade 5 §4.5.1 under **D4.5.1v4 / D4.1.4v5**.
+CSS Cascade 5 §4.5.1 under **D5.5.1 / D5.1.4**.
 Callers that already own a face retain the handle-based `css_font_metric_unit_px`
 query; the context resolver delegates to it without changing that API.
 
@@ -104,7 +104,7 @@ advances. `font_platform_copy_for_css` creates an owned zero-tracking copy for
 color faces; non-color faces retain their existing state. Catalog construction
 and platform fallback installation share that operation. The selected fallback
 face supplies both measurement and paint, and old aliases are released only
-after the new references are retained (**D4.5.1v4 /D4.1.4v5**). Exact document
+after the new references are retained (**D5.5.1 /D5.1.4**). Exact document
 font data stays on its existing raw-face path. There are no glyph-width offsets
 or family-specific advance tables. The platform attribute is the same one used
 by [Skia's CoreText copy helper](https://skia.googlesource.com/skia/+/refs/heads/main/src/utils/mac/SkCTFontCreateExactCopy.cpp).
@@ -130,7 +130,7 @@ before the first callback. `font_render_glyph_index` sends these IDs through
 the same raster kernel as Unicode glyphs; its cache key explicitly distinguishes
 the two namespaces and retains the handle lifetime identity and render mode.
 Bitmap buffers keep the existing font-context arena/generation lifetime;
-display lists borrow them (**D4.5.1v4 /D4.1.4v5**).
+display lists borrow them (**D5.5.1 /D5.1.4**).
 
 `text_get_emoji_cluster` shares presentation and face-selection inputs between
 layout and painting, including regional pairs and keycaps outside
@@ -163,7 +163,7 @@ Fallback starts from the captured `FontHandle` through
 resolver. Re-resolving a missing or generic style family could choose a different
 primary face and fallback lineage. The returned handle is retained and released
 after the synchronous glyph visit; bitmap lifetime remains the cache's ownership
-(**D4.5.1v4 /D4.1.4v5**).
+(**D5.5.1 /D5.1.4**).
 
 Native CSS transforms reuse the export segment builder with the original word
 context. The transformed bytes belong to a temporary paint segment; DOM text and
@@ -194,7 +194,7 @@ identity and does not replace the native font on a published handle. Metrics
 queries also use the retained face whenever present; family-name lookup can
 substitute an installed font for an unregistered file. Existing authored
 USE_TYPO_METRICS selection remains separate. These synchronous queries borrow
-their selected handle (**D4.5.1v4 / D4.1.4v5**).
+their selected handle (**D5.5.1 / D5.1.4**).
 
 `font_vertical_glyph` applies registered `vert` single substitutions and reads
 authored vertical advances/origins, falling back to the selected content cell
@@ -230,7 +230,7 @@ remain unchanged. Explicit LTR/RTL requests retain override semantics; the parag
 variants choose a base direction while preserving embedded numbers and opposite
 direction runs. At bidi boundaries, range carets use the owning shaped run's
 advance edge instead of an adjacent run's primary line caret. Callback handles
-remain synchronous borrows (**D4.5.1v4 / D4.1.4v5**).
+remain synchronous borrows (**D5.5.1 / D5.1.4**).
 
 The inverse CSS full-width transform uses `utf_to_halfwidth` and generated Unicode
 17 data, including voiced kana and direct width mappings without unrelated
@@ -275,7 +275,7 @@ The WOFF2 output adapter grows a `StrBuf` up to libwoff2's output-size limit;
 it does not allocate or limit writes from the advisory `totalSfntSize` header.
 Font Awesome's transformed glyph tables reconstruct beyond that declared size.
 Only a successful decode is copied into the caller's arena or `MEM_CAT_FONT`
-allocation (**D4.2.5v3**), and the scratch buffer is released on either outcome.
+allocation (**D5.2.4**), and the scratch buffer is released on either outcome.
 `Woff2Test.DecompressWoff2_InaccurateDeclaredSize` checks identical output for
 understated, zero, and oversized declarations with both destination owners.
 
@@ -288,12 +288,12 @@ Radiant owns `@font-face` *parsing*; the engine owns *management* (matching, loa
 Three entry points feed it:
 
 - `parse_font_face_rule` (`font_face.cpp:97`) — parses a single CSS rule. It resolves the source URL against the document/stylesheet base path, delegates the actual descriptor parse to the CSS module (`css_parse_font_face_content`, `css_resolve_font_url`), converts the result to a `FontFaceDescriptor`, and registers it.
-- `process_font_face_rules_from_stylesheet` — bulk-processes a stylesheet via `css_extract_font_faces`. Completed remote sources retain their order as owned downloaded paths (**D4.5.1v4**). Unfinished URLs are left to the asynchronous network resource manager; no transfer starts here. `radiant_is_supported_web_font_source` gates WOFF2/WOFF/TTF/OTF/TTC. Descriptors with no loadable local source are dropped until a download publishes them.
+- `process_font_face_rules_from_stylesheet` — bulk-processes a stylesheet via `css_extract_font_faces`. Completed remote sources retain their order as owned downloaded paths (**D5.5.1**). Unfinished URLs are left to the asynchronous network resource manager; no transfer starts here. `radiant_is_supported_web_font_source` gates WOFF2/WOFF/TTF/OTF/TTC. Descriptors with no loadable local source are dropped until a download publishes them.
 - `process_document_font_faces` (`font_face.cpp:264`) — iterates a document's stylesheets, computing the correct base path per stylesheet (`origin_url` handling for plain paths, `file://`, `http(s)`, and relative paths resolved via `file_realpath`) so relative `src:` URLs resolve against the CSS file, not the HTML document.
 
 `local()` entries and URL entries retain their declared order through the CSS
 parser, Radiant descriptor, and engine registry. Local names are copied into
-the registry's arena under **D4.5.1v4**. The loader checks the installed face's
+the registry's arena under **D5.5.1**. The loader checks the installed face's
 full or PostScript name (OpenType name IDs 4/6), rejects platform family
 substitutions, and continues to the next source when unavailable. The font
 database retains full names in its versioned disk cache, including faces from
@@ -302,7 +302,7 @@ Regression coverage: `FontLocalSourceTest`, CSS parser source-resolution tests,
 and `test/ui/font_face_local_sources.html` (verified 2026-10-09).
 
 During document font registration, completed remote sources are replaced with
-owned copies of their downloaded paths (**D4.5.1v4**), retaining their position
+owned copies of their downloaded paths (**D5.5.1**), retaining their position
 after any `local()` sources in the original rule. The resource manager's ready
 path accessor checks document admission and never initiates a transfer. Dropping
 the downloaded URL while registering a later local-only copy of the same rule
@@ -331,7 +331,7 @@ failed, cancelled, absent, and policy-blocked requests never count as pending.
 
 The engine's `FontContext` — the shared font database, face cache, glyph cache, and native backend state — is created once per `UiContext` in `ui_context.cpp:159-163`: a `FontContextConfig` sets `pixel_ratio`, `max_cached_faces = 64`, and `enable_lcd_rendering = true`, and `font_context_create` builds it (the database is owned internally). `uicon->default_font` and `legacy_default_font` seed the serif default (Times New Roman / Times) matching Chrome (`ui_context.cpp:165-174`). On teardown the context is destroyed and `font_ctx` nulled (`ui_context.cpp:312`).
 
-Handle lifetime is reference-counted and cache-anchored. A `FontProp` holds a cache-managed alias lease, not a direct owner ref; lease acquisition retains the handle and increments its pin count, and lease release decrements both. LRU skips pinned entries, while cache-key replacement and document-font reset may safely release an old mapping because active leases still retain its face. `FontBox` has no separate handle or lease, so copying layout context cannot resurrect a stale handle. The table-driven teardown visitor in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) releases `FontProp` leases through `VIEW_PROP_TEARDOWN` as part of view teardown. This is the cache pin/copy-as-value application of **D4.5.1v3**. Between documents in batch mode the engine offers `font_context_reset_document_fonts` (clears disposable `@font-face` entries and codepoint fallback state) and `font_context_reset_glyph_caches` (`font.h`).
+Handle lifetime is reference-counted and cache-anchored. A `FontProp` holds a cache-managed alias lease, not a direct owner ref; lease acquisition retains the handle and increments its pin count, and lease release decrements both. LRU skips pinned entries, while cache-key replacement and document-font reset may safely release an old mapping because active leases still retain its face. `FontBox` has no separate handle or lease, so copying layout context cannot resurrect a stale handle. The table-driven teardown visitor in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) releases `FontProp` leases through `VIEW_PROP_TEARDOWN` as part of view teardown. This is the cache pin/copy-as-value application of **D5.5.1**. Between documents in batch mode the engine offers `font_context_reset_document_fonts` (clears disposable `@font-face` entries and codepoint fallback state) and `font_context_reset_glyph_caches` (`font.h`).
 
 ---
 
@@ -344,7 +344,7 @@ descriptors without loading faces or starting automatic downloads. Other
 platforms reuse the existing system-directory/Windows-registry database and
 expand lazy collection entries before returning face metadata. The neutral
 `dom.query_local_fonts(options)` operation and JS `window.queryLocalFonts()`
-share this mechanism through the appended catalog slot (**D7.4.4**).
+share this mechanism through the appended catalog slot (**D9.5.4**).
 
 The selected milestone is installed-font listing in Word's ribbon, selection
 toolbar and Word Art dialog, including exact PostScript filtering, Unicode metadata, and retaining

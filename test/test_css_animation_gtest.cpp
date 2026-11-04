@@ -21,6 +21,8 @@
 #include "../radiant/render.hpp"
 #include "../radiant/radiant.hpp"
 #include "../radiant/render_css3d.hpp"
+#include "../radiant/resource_loaders.h"
+#include "../radiant/network_integration.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/css/css_engine.hpp"
@@ -694,7 +696,7 @@ TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
     }
     size_t bytes_after = 0, count_after = 0;
     pool_get_stats(block->pool, &bytes_after, &count_after);
-    // read projections must not accumulate allocations in a retained stylesheet (D4.5.1v4).
+    // read projections must not accumulate allocations in a retained stylesheet (D5.5.1).
     EXPECT_EQ(bytes_after, bytes_before); EXPECT_EQ(count_after, count_before);
     key_root.set(js_name_item("parentRule"));
     style_key_root.set(js_name_item("style"));
@@ -991,6 +993,61 @@ protected:
         EXPECT_STREQ(computed, expected);
     }
 };
+
+TEST_F(MotionCascadeTest, StylesheetResourcePrefetchPreservesAuthoredUrls) {
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        ":root { --hero: url(hero.svg); --layers: url(first.svg), url(second.svg); }"
+        "@media (min-width: 600px) { .logo { background: var(--logo, url(fallback.svg)); } }"
+        ".icon { background-image: url(icon.svg); }",
+        "https://assets.example.test/styles/main.css");
+    ASSERT_NE(sheet, nullptr);
+    EnhancedFileCache* cache = enhanced_cache_create("temp/css_stylesheet_prefetch", 4096, 16);
+    ASSERT_NE(cache, nullptr);
+    struct NetworkScope {
+        DomDocument* doc; EnhancedFileCache* cache;
+        ~NetworkScope() {
+            resource_manager_destroy(doc->resource_manager);
+            doc->resource_manager = nullptr;
+            enhanced_cache_destroy(cache);
+        }
+    } network = {&doc, cache};
+    doc.resource_manager = lam::own(resource_manager_create(&doc, nullptr, cache));
+    ASSERT_NE(doc.resource_manager, nullptr);
+    doc.stylesheets = lam::own_arr((CssStylesheet**)pool_alloc(pool, sizeof(CssStylesheet*)));
+    ASSERT_NE(doc.stylesheets, nullptr);
+    doc.stylesheets[0] = sheet;
+    doc.stylesheet_count = 1;
+    const char* expected[] = {"hero.svg", "first.svg", "second.svg", "fallback.svg", "icon.svg"};
+    HttpCacheHeaders headers = {};
+    headers.content_type = "application/octet-stream";
+    for (const char* relative : expected) {
+        char absolute[160];
+        str_fmt(absolute, sizeof(absolute), "https://assets.example.test/styles/%s", relative);
+        char* stored = enhanced_cache_store(cache, absolute, "image", 5, &headers);
+        ASSERT_NE(stored, nullptr);
+        mem_free(stored);
+    }
+    radiant_prefetch_document_stylesheet_resources(&doc);
+    for (const char* relative : expected) {
+        char absolute[160];
+        str_fmt(absolute, sizeof(absolute), "https://assets.example.test/styles/%s", relative);
+        size_t length = 0;
+        char* content = resource_manager_copy_ready_resource_content(doc.resource_manager, absolute, &length);
+        EXPECT_EQ(length, 5u);
+        EXPECT_STREQ(content, "image");
+        mem_free(content);
+    }
+    ArrayList* urls = arraylist_new(8);
+    ASSERT_NE(urls, nullptr);
+    radiant_for_each_stylesheet_resource_url(sheet, [](CssValue* value, void* context) {
+        arraylist_append((ArrayList*)context, (void*)value->data.url);
+    }, urls);
+    EXPECT_EQ(urls->length, 5);
+    for (int i = 0; i < urls->length && i < 5; i++) {
+        EXPECT_STREQ((const char*)urls->data[i], expected[i]);
+    }
+    arraylist_free(urls);
+}
 
 TEST_F(MotionCascadeTest, SinglePropertyQueriesTrackShorthandsAndStylesheetEdits) {
     CssStylesheet* sheet = css_parse_stylesheet(engine,
@@ -4541,7 +4598,7 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
 
     Runtime runtime = {};
     runtime_init(&runtime);
-    // roots unwind before runtime cleanup, including assertion failures (D5.3.3).
+    // roots unwind before runtime cleanup, including assertion failures (D6.3.3).
     struct EventRuntimeCleanup {
         Runtime* runtime;
         DomDocument** document;
@@ -4664,7 +4721,7 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
     }
     size_t after_bytes = 0, after_count = 0;
     pool_get_stats(context->pool, &after_bytes, &after_count);
-    // D4.5.1v4: unobserved Lambda-document events retain no timer shapes.
+    // D5.5.1: unobserved Lambda-document events retain no timer shapes.
     EXPECT_EQ(after_bytes, before_bytes);
     EXPECT_EQ(after_count, before_count);
 }

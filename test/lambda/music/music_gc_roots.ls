@@ -1,4 +1,4 @@
-// D5.3.3: retain score, glyph/text metrics and SVG owners across allocations.
+// D6.3.3: retain score, glyph/text metrics and SVG owners across allocations.
 // The full reflow/A4/option matrix lives in music_layout.ls; one small score
 // reaches the same allocating package boundaries in the forced-GC sweep.
 import music: lambda.music

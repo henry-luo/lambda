@@ -330,7 +330,7 @@ TEST(JubeDom4, CatalogueMembersPreserveColours) {
     ASSERT_NE(radiant, nullptr);
     ASSERT_TRUE(jube_activate_module(radiant));
 
-    // a member door must preserve its catalogue row's colour (D7.4.6).
+    // a member door must preserve its catalogue row's colour (D7.1.1).
     static const struct { const char* iface; const char* name; bool is_proc; } colours[] = {
 #define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
         {#iface, (member)[0] ? member : #name, (sig)[0] == 'p'},
@@ -491,7 +491,7 @@ static bool capture_callable_realm(Runtime* runtime,
     }
 
     EvalContext* owner = runtime_get_eval_context(runtime);
-    // D5.2/D6.2.2v2: leave both heaps alive while comparing identity, but
+    // D6.2/D7.2.2: leave both heaps alive while comparing identity, but
     // detach every derived TLS cache before another realm becomes current.
     if (!js_runtime_state_shutdown(owner) ||
             !eval_context_shutdown(owner)) {
@@ -2223,7 +2223,7 @@ TEST_F(LambdaConcurrencyRuntime, SmallRuntimeContainersKeepExactBumpHomes) {
     EXPECT_EQ(numbers->data, nullptr);
     EXPECT_TRUE(gc_get_header(numbers)->gc_flags & GC_FLAG_BUMP);
 
-    // D5.3: the allocator changes physical homes, never the exact-root contract.
+    // D6.3: the allocator changes physical homes, never the exact-root contract.
     gc_collect(concurrency_test_gc, eval.side_root_base,
         eval.side_root_top - eval.side_root_base);
     EXPECT_EQ(held_list.get().array, items);
@@ -2265,7 +2265,7 @@ TEST_F(LambdaConcurrencyRuntime, ScalarSnapshotKeepsPreciseHeaderAndPrivatePaylo
     EXPECT_EQ(copy.get().array_num->data, scratch);
     EXPECT_EQ(source.get()->cow_state & COW_STATE_SHARED, 0);
     EXPECT_TRUE(gc_is_managed(concurrency_test_gc, copy.get().array_num));
-    // D5.3: tracing finds the header; the scalar span needs no stack scan.
+    // D6.3: tracing finds the header; the scalar span needs no stack scan.
     gc_collect(concurrency_test_gc, eval.side_root_base,
         eval.side_root_top - eval.side_root_base);
     EXPECT_EQ(copy.get().array_num->data, scratch);
@@ -2731,7 +2731,7 @@ TEST_F(ActivationCore, SuspendAndResumeExchangeValues) {
 }
 
 static Item activation_check_execution_depth(Activation*, Item arg) {
-    // D5.4.1: a fresh stack cannot advertise quiescence while guest frames run.
+    // D6.4.1: a fresh stack cannot advertise quiescence while guest frames run.
     EXPECT_GT(context->execution_depth, 0u);
     Item resumed = activation_suspend(arg);
     EXPECT_GT(context->execution_depth, 0u);
@@ -3237,7 +3237,7 @@ static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
     worker->eval.pool = worker->setup_pool;
     worker->eval.runtime = &shared_module_stress_runtime;
     // Match runner setup: generated property keys require runtime NameIds,
-    // not an idless AST name pool (D4.6.1v2).
+    // not an idless AST name pool (D5.6.1).
     worker->eval.name_pool = name_pool_create_runtime(worker->setup_pool);
     heap_init();
     if (!worker->eval.heap) return false;

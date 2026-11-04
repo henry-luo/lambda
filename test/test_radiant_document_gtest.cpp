@@ -359,6 +359,22 @@ TEST(TextWhitespace, NativeLineBoundariesUseSourceBytesAndKeepTerminalEdgesClose
     size_t syllable = strlen("애");
     EXPECT_FALSE(layout_text_native_break_allowed(korean, syllable, 0x1162,
         jamo_start + syllable, jamo_start + strlen(jamo), true));
+    // reused source storage and later probes must not change an earlier map.
+    char edited[128];
+    size_t length = strlen(thai);
+    str_copy(edited, sizeof(edited), thai, length);
+    LayoutTextBreaks retained(edited, length, true);
+    memset(edited, 'a', length - strlen("中"));
+    memcpy(edited + length - strlen("中"), "中", strlen("中"));
+    LayoutTextBreaks changed(edited, length, true);
+    EXPECT_FALSE(changed.allows_after(strlen("ภาษา")));
+    EXPECT_TRUE(changed.allows_after(length - strlen("中")));
+    str_copy(edited, sizeof(edited), thai, length);
+    LayoutTextBreaks repeated(edited, length, true);
+    for (size_t offset = 0; offset <= length; offset++) {
+        EXPECT_EQ(repeated.allows_after(offset), boundaries.allows_after(offset));
+        EXPECT_EQ(retained.allows_after(offset), boundaries.allows_after(offset));
+    }
 #else
     GTEST_SKIP() << "native Unicode line-break resource is unavailable";
 #endif
@@ -6203,6 +6219,50 @@ TEST_F(RadiantTextQuery, SharedPublicationPreservesScriptGeometryAndInvalidatesI
     EXPECT_EQ(document->state->reflow_scheduler.pending, nullptr);
     ASSERT_TRUE(layout_update_document(&ui, document));
     EXPECT_EQ(tree->document_layout_count, 6u);
+}
+
+TEST_F(RadiantTextQuery, RecascadeRetainsEqualInputsAndExpiresAuthoredAndInheritedChanges) {
+    ASSERT_NE(load("test/html/layout_recascade_reuse.html"), nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
+    DomElement* target = find("target");
+    DomElement* sibling = find("sibling");
+    ASSERT_NE(target, nullptr);
+    ASSERT_NE(sibling, nullptr);
+    ASSERT_NE(style_epoch_tree_id(sibling->specified_style), 0u);
+    auto recascade = [&]() {
+        radiant_recascade_document_styles(document, document->root);
+        document->incremental_layout = document->skip_style_reset = true;
+        layout_html_doc(&ui, document, true);
+        document->incremental_layout = document->skip_style_reset = false;
+    };
+    uint32_t version = sibling->style_version;
+    recascade();
+    EXPECT_EQ(sibling->style_version, version);
+    EXPECT_FLOAT_EQ(target->width, 100.0f);
+    EXPECT_FLOAT_EQ(sibling->width, 40.0f);
+
+    ASSERT_TRUE(document->root->set_attribute("class", "wide"));
+    recascade();
+    EXPECT_FLOAT_EQ(target->width, 180.0f);
+    EXPECT_EQ(sibling->style_version, version);
+    ASSERT_NE(sibling->pseudo, nullptr);
+    ASSERT_NE(sibling->pseudo->before, nullptr);
+    ASSERT_NE(sibling->pseudo->before->first_child, nullptr);
+    EXPECT_STREQ(sibling->pseudo->before->first_child->as_text()->text, "X");
+
+    ASSERT_TRUE(target->set_attribute("dir", "rtl"));
+    recascade();
+    EXPECT_EQ(target->block()->direction, CSS_VALUE_RTL);
+    ASSERT_TRUE(document->root->set_attribute("class", "large"));
+    recascade();
+    EXPECT_FLOAT_EQ(target->width, 100.0f);
+    EXPECT_FLOAT_EQ(target->font->font_size, 24.0f);
+    EXPECT_FLOAT_EQ(sibling->font->font_size, 24.0f);
+    ASSERT_TRUE(dom_cssom_set_inline_property(target, "width", "210px"));
+    recascade();
+    EXPECT_FLOAT_EQ(target->width, 210.0f);
 }
 
 TEST_F(RadiantTextQuery, SharedPublicationRegeneratesTableListAndPseudoStructure) {
@@ -21161,7 +21221,7 @@ TEST_F(RadiantFrameDelivery, FullscreenCatalogRefusesWindowlessTransitions) {
 }
 
 TEST_F(RadiantFrameDelivery, AudibleOutputGateFollowsDocumentOrigin) {
-    // D7.5.4: a local document may start audio; a network one needs trusted
+    // D11.3.1: a local document may start audio; a network one needs trusted
     // activation or the host grant, and activation is sticky.
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
     EXPECT_TRUE(radiant_document_may_start_audio(document));
@@ -21273,7 +21333,7 @@ TEST_F(RadiantAudioCapture, ProceduralReadCopiesWideTimestampsAndPcmIntoOrdinary
     for (unsigned i = 0; i < 2; i++) for (unsigned channel = 0; channel < 2; channel++)
         EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), i, channel), input[i * 2 + channel]);
     ASSERT_TRUE(radiant_capture_stop(document, token));
-    // the copied binary survives closure of the producer and its native queues (D5.3.3).
+    // the copied binary survives closure of the producer and its native queues (D6.3.3).
     EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), 1, 0), .5f);
     request.put("frames", push_d(1.5)); EXPECT_EQ(dom_engine_audio_capture(owner.get(), request.value.get()).item, ItemNull.item);
 }

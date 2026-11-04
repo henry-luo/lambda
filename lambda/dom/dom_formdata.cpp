@@ -106,7 +106,7 @@ static void fd_entries_remove_at(Item entries, int64_t index) {
         index < 0 || index >= entries.array->length) {
         return;
     }
-    // D6.2.2v2: _fd_entries is private FormData list storage. Calling the
+    // D7.2.2: _fd_entries is private FormData list storage. Calling the
     // mutable Array.prototype.splice binding would expose this internal step
     // to prototype replacement instead of applying the FormData list algorithm.
     Array* array = entries.array;
@@ -482,7 +482,7 @@ static Item fd_normalize_newlines(const char* s) {
     return result;
 }
 
-// retain each pair and its values through allocating conversions and array growth (D5.3.3).
+// retain each pair and its values through allocating conversions and array growth (D6.3.3).
 static void fd_append_named_entry(Item entries, const char* name, Item value) {
     RootFrame roots(4);
     Rooted<Item> entries_root(roots, entries);
@@ -871,7 +871,7 @@ extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitte
 
 extern "C" void js_formdata_install_globals(void) {
     Item global = dom_realm_global();
-    // D6.2.2v2: global constructor bindings carry [[Construct]] themselves;
+    // D7.2.2: global constructor bindings carry [[Construct]] themselves;
     // no compiler name interception remains to supply it.
     Item ctor_fn = js_new_native_constructor(js_formdata_construct);
     prop_set(global, "FormData", ctor_fn);

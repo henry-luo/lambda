@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S4.4.4 / D2.4.1–D2.4.3: raw u64 bitwise trees and nonnegative literal ushr counts retain their word carrier; dynamic, erased and nullable operands retain checked runtime fallbacks. A proven raw u64 return crosses its identity boundary without allocating a number home.",
+  "description": "S4.4.4 / D2.3.4–D2.3.5: raw u64 bitwise trees and nonnegative literal ushr counts retain their word carrier; dynamic, erased and nullable operands retain checked runtime fallbacks. A proven raw u64 return crosses its identity boundary without allocating a number home.",
   "checks": [
     {
       "in_func": "_lane_#",

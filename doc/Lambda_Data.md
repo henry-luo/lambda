@@ -220,7 +220,7 @@ and `m[symbol.empty]` reads it (S2.2.2v2, S8.2.2v3).
 
 - Symbols compare by their namespace and decoded spelling (`NameKey`, S8.2.2v6).
 - Interning and allocation are implementation details; pointer equality is
-  not textual-symbol equality (D4.6.1v4, S1.6).
+  not textual-symbol equality (D5.6.1, S1.6).
 - Used for type tags, format identifiers, map keys
 - Single quotes are not alternate string syntax: `'name'` is a `symbol`,
   `"name"` is a `string`, and `'name' == "name"` is `false`
@@ -787,7 +787,7 @@ pn update() {
 
 Typed numeric arrays may use compact native lanes internally. That carrier is
 an implementation detail: assigning a value still validates the full Lambda
-element contract before the lane is written (**D3.1.1v4**, **D3.3.3v3**).
+element contract before the lane is written (**D4.1.1**, **D4.3.3**).
 
 #### Array Operations
 
@@ -832,6 +832,30 @@ Key-value mappings with structural typing:
 // Value-keyed VMap construction
 map([k1, v1, k2, v2, ...])
 ```
+
+#### Duplicate Keys
+
+Repeated explicit keys are a compile error, including a bare name repeated in
+quoted form or across an intervening spread (S2.3.1v2):
+
+```lambda error=E242
+{a: 1, b: 2, a: 3}
+```
+
+Computed keys and overlapping spreads are allowed. The last value wins and the
+key keeps its first insertion position. The result has one field per key:
+
+```lambda
+let key = "a"
+let result = {[key]: 1, b: 2, [key]: 3}
+result              // {a: 3, b: 2}
+len(result);        // 2
+(result == {a: 3, b: 2})  // true
+```
+
+The same rules apply to element/object attribute lists. A bracketed key is
+computed even when its expression is constant; spread overlaps remain allowed
+when the source fields are statically known (S16.8.9v2).
 
 #### Computed Map Keys
 

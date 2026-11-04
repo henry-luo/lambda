@@ -1,4 +1,4 @@
-// Presentation MathML conversion is font-independent (D7.2.8 / D7.1.1).
+// Presentation MathML conversion is font-independent (D10.2.3 / D9.1.1).
 import sym: .symbols
 import alphabet: .alphabet
 import util: .util

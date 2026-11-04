@@ -6,7 +6,7 @@ is still outstanding. **Five open hazards, one of them blocking** — see §5.
 
 **Date:** 2026-07-17, rev 2 2026-08-06 (restructured from inventory-ledger to design record;
 inventory re-verified against the live tree; hazards H1–H9 added); rev 3 2026-08-17
-(restricted non-local recovery explicitly to native system faults under D1.4v3/DI15v2).
+(restricted non-local recovery explicitly to native system faults under D1.4/DI15).
 
 **Companion documents:**
 
@@ -29,7 +29,7 @@ runtime-boundary defects, MIR fatal errors, batch timeout, and batch crash conta
 Structural-equality depth exhaustion is a language-visible ordinary error and is outside this
 native recovery design.
 
-**Strict ordinary-failure exclusion (D1.4v3, DI15v2, D8.4.3v2):** this is not a general error or
+**Strict ordinary-failure exclusion (D1.4, DI15, D7.4.3):** this is not a general error or
 exception mechanism. Lambda `error`/`raise`/propagation, LambdaJS `throw`/rejection, guest-language
 exceptions, I/O errors, cancellation, parse/type errors, and all other language failures return
 through every generated/native frame under
@@ -213,7 +213,7 @@ currently violated in practice.
 
 ### ER-D11 — Re-entry: modules, async, workers, guests
 
-*[Async revised 2026-10-05 (D6.3.3v2, S7.11.2v2, `Lambda_Design_Runtime_Async.md` §4.5): a task's boundaries live on its own activation and stay armed across its parks; a fault in a task is contained there and the task completes with the fault result. Where the text below says a frame never survives a yield, read it for the retired state machines.]*
+*[Async revised 2026-10-05 (D7.5.3, S7.11.2v2, `Lambda_Design_Runtime_Async.md` §4.5): a task's boundaries live on its own activation and stay armed across its parks; a fault in a task is contained there and the task completes with the fault result. Where the text below says a frame never survives a yield, read it for the retired state machines.]*
 
 - **Nested eval / import / module execution.** Every execution entry pushes an execution-boundary
   frame and restores the previous target on normal return. Module and eval initialization is a

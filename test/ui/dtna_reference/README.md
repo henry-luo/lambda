@@ -30,7 +30,7 @@ cases establish reference input, geometry and interaction evidence. Avatar's
 pixel comparison is described below; other cases do not establish native pixel
 correspondence.
 Native comparisons and the full feature matrix remain milestone gates in
-`vibe/Lambda_Pkg_UI.md` (execution tier parity: **D8.1.1v17**).
+`vibe/Lambda_Pkg_UI.md` (execution tier parity: **D8.3.6**).
 
 `.ui-assets` marks a subtree of supporting assets rather than native JSON
 interaction fixtures. Both phases of UI harness discovery honor this marker;
@@ -115,7 +115,7 @@ content clicks, pending-owner removal and fullscreen pointer/keyboard behavior.
 The eighteenth case explicitly pauses CSS Web Animations at 0ms because Spin's
 constant keyframes ignore the global motion token. Automatic percentages remain
 a live observation, so this PNG carries no pixel-parity gate. Native timing uses
-document-owned named frames (**D7.5.3**). The independent
+document-owned named frames (**D9.5.6**). The independent
 `pointer_events_cssom_contracts` fixture checks inheritance, handler-time reads,
 active-state recascade and generated overlays after an ownership swap.
 

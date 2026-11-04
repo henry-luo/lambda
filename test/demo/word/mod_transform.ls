@@ -1,4 +1,4 @@
-// Object gestures and dialogs share model transactions and source metadata (S1.4, D7.2.5).
+// Object gestures and dialogs share model transactions and source metadata (S1.4, D10.2.1).
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import lambda.editor.mod_transaction

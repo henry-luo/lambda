@@ -151,7 +151,7 @@ TEST(LambdaReplTests, test_views_apply_across_submissions_and_rollback) {
 }
 
 TEST(LambdaReplTests, test_runtime_error_does_not_replay_previous_output) {
-    // D8.1.1v17: an entry that completes with an error is reported and rolled
+    // D8.3.6: an entry that completes with an error is reported and rolled
     // back; earlier entries are never re-run, so their output appears once
     test_result result = run_lambda_repl("1 + 1\n[1, 2, 3] + \"hello\"\n2 + 2\nquit");
     ASSERT_NE(result.output, nullptr);
@@ -532,7 +532,7 @@ TEST(LambdaReplTests, test_multiline_startup_message) {
 }
 
 // ============================================================================
-// Persistent interpreter session (D8.1.1v17, S16.7.4-S16.7.6)
+// Persistent interpreter session (D8.3.6, S16.7.4-S16.7.6)
 // ============================================================================
 
 static const char* const k_procedural[] = {"run", NULL};
@@ -559,7 +559,7 @@ TEST(LambdaReplSessionTests, redefinition_is_e209_reported_once) {
 }
 
 TEST(LambdaReplSessionTests, parser_decides_incomplete_entry) {
-    // D8.1.1v17: balanced input the C parser reports INCOMPLETE continues
+    // D8.3.6: balanced input the C parser reports INCOMPLETE continues
     test_result result = run_lambda_repl("let y =\n5\ny\n1 +\n2\nquit");
     ASSERT_NE(result.output, nullptr);
     EXPECT_GE(count_substr(result.output, ".. "), 2) << result.output;
@@ -594,7 +594,7 @@ TEST(LambdaReplSessionTests, procedural_session_runs_statements) {
 }
 
 TEST(LambdaReplSessionTests, failed_entry_restores_procedural_state) {
-    // D8.1.1v17: a failing entry's writes are rolled back with it
+    // D8.3.6: a failing entry's writes are rolled back with it
     test_result result = run_lambda_repl_with(
         "var v = 1\n{ v = 99; error(\"boom\") }\nv\nquit", k_procedural);
     ASSERT_NE(result.output, nullptr);
@@ -605,7 +605,7 @@ TEST(LambdaReplSessionTests, failed_entry_restores_procedural_state) {
 }
 
 TEST(LambdaReplSessionTests, file_import_initializes_module) {
-    // D7.2.2: an entry's import cone initializes before the entry runs
+    // D9.3.2: an entry's import cone initializes before the entry runs
     FILE* module = fopen("temp/repl_session_import_mod.ls", "w");
     ASSERT_NE(module, nullptr);
     fputs("pub fn twice(n) { n * 2 }\npub let base = 40\n", module);
@@ -620,7 +620,7 @@ TEST(LambdaReplSessionTests, file_import_initializes_module) {
 }
 
 TEST(LambdaReplSessionTests, tiers_agree) {
-    // D8.1.1v17: the tier governs satellites only, so output is identical
+    // D8.3.6: the tier governs satellites only, so output is identical
     const char* input = "fn sq(n) { n * n }\nsq(2)\nsq(3)\nsq(4)\nsq(5)\nsq(6)\nsq(7)\nquit";
     static const char* const k_interp[] = {"--tier=interp", NULL};
     static const char* const k_jit[] = {"--tier=jit", NULL};

@@ -1681,7 +1681,7 @@ int main(int argc, char **argv) {
 }
 
 // ============================================================================
-// Input lifetime (D4.2.6): the pool an Input lives in releases it at the
+// Input lifetime (D5.2.5): the pool an Input lives in releases it at the
 // latest. Before, an Input without a URL had no owner for its arena, so each
 // one left an arena registered in the root context for the life of the process.
 // ============================================================================
@@ -1759,7 +1759,7 @@ TEST(InputLifetimeTest, ContextCascadeReleasesInputOnItsPool) {
 }
 
 // ============================================================================
-// Transition-tree storage (D3.4.3v3, D4.1.4v4): nodes and edges are never
+// Transition-tree storage (D3.4.3, D5.1.4): nodes and edges are never
 // freed one by one, so they come from the Input's arena; the element-root
 // table is replaced as it grows, so it is a pool block and the old one is freed.
 // ============================================================================
@@ -1826,7 +1826,7 @@ TEST(TransitionTreeStorageTest, RootTableGrowthFreesTheOldTable) {
 }
 
 // ============================================================================
-// Prefix sharing (D3.4.3v3): a child extends its parent's chain in place while
+// Prefix sharing (D3.4.3): a child extends its parent's chain in place while
 // the parent still owns the tail, so a linear path keeps one chain and one
 // growing hash table; a branch copies its prefix once. Walks stop at `last`,
 // and a type rejects the table entries of the types that extended it.
@@ -2022,7 +2022,7 @@ TEST(TransitionTreePrefixSharingTest, WideObjectKeepsOneChain) {
 }
 
 // ============================================================================
-// Key identity on transition edges (S8.2.2v4, D3.4.4v4): a STRING name is its
+// Key identity on transition edges (S8.2.2v4, D3.4.4): a STRING name is its
 // spelling, so a pooled key with a NameId, an unpooled key and a key given by
 // its characters (a Lambda Symbol) take one edge; a JS Symbol or private name
 // is its record and never matches by its description bytes.
@@ -2170,7 +2170,7 @@ TEST(TransitionTreeKeyIdentityTest, EntriesOfOneSpellingAreEqual) {
 }
 
 // ============================================================================
-// External parents (D3.4.3v5): the runtime tree grows from types it does not
+// External parents (D3.4.3): the runtime tree grows from types it does not
 // own -- here maps and elements built in another Input -- keeping their edges
 // in its own table. The parent is never written, the child owns copies of the
 // parent's names, and a cached child is reused only while it still matches

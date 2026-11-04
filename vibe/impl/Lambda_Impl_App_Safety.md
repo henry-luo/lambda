@@ -18,7 +18,7 @@ approved safety documentation and ongoing implementation in the working tree.
 
 **Design:** [Lambda App Safety](../Lambda_Design_App_Safety.md).
 **Authority:** [formal design](../../doc/Lambda_Formal_Design.md)
-**D7.5.1–D7.5.2, D7.5.5–D7.5.8** and
+**D11.1.1–D11.1.2, D11.2.1–D11.2.4** and
 [formal semantics](../../doc/Lambda_Formal_Semantics.md) **S2.4.4, S16.9.8**.
 This is an informative delivery plan. Proposed API names, file locations,
 test targets, and implementation choices below are not shipped interfaces or
@@ -43,17 +43,17 @@ sandbox without first implementing general app networking.
 | Shared principal, policy evaluation, structured denials, revocation | Implement now; reuse context capsules and existing permission adapters. | M1; policy checks are useful before containment, but are not a complete sandbox. |
 | Admitted root, transitive imports, source-cache authorization | Implement now; integrate existing resolver and source cache. | M1; authorization must precede acquisition and initialization. |
 | Create-only root writes and overwrite challenges | Implement now; extend existing file mechanisms and output adapters. | M1; all project mutations must ultimately run in the broker. |
-| Persisted per-app/per-script grants | Implement the store now; qualify tamper resistance with the OS worker. | M1 + M2; owner-only file modes alone cannot satisfy **D7.5.7**. |
+| Persisted per-app/per-script grants | Implement the store now; qualify tamper resistance with the OS worker. | M1 + M2; owner-only file modes alone cannot satisfy **D11.2.3**. |
 | Offline confined worker, trusted prompts and resource limits | Feasible target, with an early platform/packaging proof required. | M2; first release gate, not an optional hardening task. |
 | Host package polling, verification, staging, pause/disable/restore | Implement after the protected policy service; reuse transport and scheduling mechanisms selectively. | M3u; no app network grant and no package-supplied request execution. |
 | Granted app networking and selected account/device services | Incremental adapters after the broker exists. | M3; unsupported services remain denied. |
 | Web/email isolation and full native extension tiers | Larger integration work; ship only individually qualified profiles. | M4 / M5; do not make these prerequisites for the offline scripting release. |
 
 The first reduced worker can reuse the `lambda-cli` build boundary
-(**D7.1.6**), which excludes Radiant, JS/TS, DOM, and Jube host modules.
+(**D9.2.2**), which excludes Radiant, JS/TS, DOM, and Jube host modules.
 That reduces the initial integration surface; it does not itself isolate the
 runtime, its native dependencies, or its remaining I/O. Use the supported
-T0/MIR policy under **D8.1.1v18**; an interpreter-only platform profile must
+T0/MIR policy under **D8.3.2**; an interpreter-only platform profile must
 advertise its limits and reject unsupported workloads explicitly.
 
 ## 2. Existing code to reuse and gaps to close
@@ -64,7 +64,7 @@ sections are proposals.
 
 | Existing owner / mechanism | Reuse | Required change |
 |---|---|---|
-| [Context capsules](../../lambda/runtime/context_capsule.h) | Context-owned state and lifecycle, **D5.4.2–D5.4.4**. | Attach the broker session/principal reference; propagate it through tasks, callbacks, imports, and document execution. |
+| [Context capsules](../../lambda/runtime/context_capsule.h) | Context-owned state and lifecycle, **D6.4.2–D6.4.4**. | Attach the broker session/principal reference; propagate it through tasks, callbacks, imports, and document execution. |
 | [Node permission adapter](../../lambda/jube/jube_node_permission.cpp) | Existing filesystem/network query and denial entrypoints. | Replace its independent authority calculation with an adapter to the common policy. Current opt-in `--permission` behavior is not the new default sandbox. |
 | [Node filesystem module](../../lambda/module/node_fs/node_fs_module.cpp) | Host permission callbacks and per-session module state. | Route descriptor, sync, and async operations through the same resource ownership and mutation rules. |
 | [Target API](../../lambda/io/target.h), [input dispatcher](../../lambda/input/input.cpp), [module resolver](../../lambda/runtime/build_ast.cpp) | Target parsing, input dispatch, import resolution. | Separate lexical resolution from authorized acquisition; cover metadata probes and transitive loads as well as explicit reads. |
@@ -79,7 +79,7 @@ sections are proposals.
 
 Keep raw, context-free file/process mechanisms in `lib`; resource acquisition
 and policy contracts belong in `lambda-io`; runtime and Radiant supply adapters
-above it (**D7.1.1–D7.1.3, D7.5.2**). Do not place execution-context or DOM types
+above it (**D9.1.1–D9.1.3, D11.1.2**). Do not place execution-context or DOM types
 inside the neutral acquisition/cache layer. Use lower-owned hooks for host
 services. Existing `safety_analyzer.*` concerns compiler optimization safety;
 it should not become the app-security subsystem.
@@ -150,7 +150,7 @@ the macOS decision separate from later Linux/Windows adapter qualification.
 ### M1.1 — Shared policy, identities, and protected grant-store service
 
 **Outcome:** one authority calculation that all language and document adapters
-can call (**D7.5.2, D7.5.5, D7.5.7**).
+can call (**D11.1.2, D11.2.1, D11.2.3**).
 
 Proposed code: neutral `lambda/io/security_policy.{h,cpp}` and host-service
 interfaces, plus a runtime context-capsule adapter. Put the trusted store and
@@ -164,7 +164,7 @@ Implement these contracts first:
 |---|---|
 | Principal admission | Host-assigned identity for each installed app and each ad-hoc script, bound to its admitted entry/root and code identity. Caller-supplied names cannot claim stored grants. Changed code, roots or publishers require revalidation. |
 | Policy evaluation | Intersect platform/profile/manifest ceilings, current grants, content rules, protected-resource exclusions and quotas. Missing security state denies operations; it does not identify a trusted caller. |
-| Capability/resource ownership | Opaque principal-bound identifiers, operation set, lifetime and generation. Keep OS handles and ownership in the broker; copying an integer grants no authority (**D7.4.1v2**). |
+| Capability/resource ownership | Opaque principal-bound identifiers, operation set, lifetime and generation. Keep OS handles and ownership in the broker; copying an integer grants no authority (**D9.5.1**). |
 | Denial and approval challenge | Internal distinction between denied, approval required, revoked, unsupported and resource-limit failures. Adapt to existing Lambda error values, Node errors and web exceptions without adding language syntax. |
 | Revocation | Check at dispatch and before exposing sensitive async completion; cancel pending work and invalidate handles/delegations. Terminate workers if leaked raw access cannot otherwise be revoked. |
 | Audit | Bounded local records of principal, operation, decision and reason. Avoid recording source data, secrets or full sensitive request payloads. |
@@ -193,7 +193,7 @@ UI and OS tamper-resistance gates remain M2.
 
 ### M1.2 — File broker and create-versus-overwrite semantics
 
-**Outcome:** one file service enforces **D7.5.6** for every output route.
+**Outcome:** one file service enforces **D11.2.2** for every output route.
 
 Extend `lib/file.*` rather than introducing parallel file utilities. Existing
 exclusive creation and `FileRevision` are useful primitives. Final-component
@@ -242,7 +242,7 @@ not only mocked policy results.
 ### M1.3 — Close the loading and runtime I/O paths
 
 **Outcome:** the M0-supported worker has no privileged bootstrap or alternate
-I/O route (**D7.5.5, D7.1.2v2, D7.5.2**).
+I/O route (**D11.2.1, D9.1.2, D11.1.2**).
 
 - Establish the principal before reading/parsing the entry file. A loose file
   starts with that file and approved shipped libraries; sibling imports require
@@ -255,11 +255,11 @@ I/O route (**D7.5.5, D7.1.2v2, D7.5.2**).
 - Authorize cache hits as well as misses. Reuse immutable bytes/artifacts only
   with valid acquisition authority and compatible execution ownership; never
   share initialized module state or heap references across principals.
-  Initialization denial must retain **D7.2.2** transaction behavior.
+  Initialization denial must retain **D9.3.2** transaction behavior.
 - Route `input`, output/append, search, metadata, filesystem mutation and
   implicit parser resources through the common service. Include formatters
   that open destinations internally. Preserve the restricted TeX resource
-  contract under **D7.2.7v2**.
+  contract under **D10.2.2**.
 - Deny network, shell/process launch, devices, account/secret operations and
   unsupported native loading in the initial profile. Deny at the adapter and
   OS layer; removing an import name is insufficient.
@@ -267,10 +267,10 @@ I/O route (**D7.5.5, D7.1.2v2, D7.5.2**).
   callbacks to the shared service. Preserve API result/error semantics while
   applying the sandbox's default policy. Do not retain a second grant store.
 
-Use **D5.4.2–D5.4.4** context ownership and **D5.3.3** precise rooting for any
+Use **D6.4.2–D6.4.4** context ownership and **D6.3.3** precise rooting for any
 async values. Task handoff must retain the caller's principal and generation,
 not whichever process/thread context happens to run its callback.
-Observe **D7.4.2v2** when adapting native async calls; do not park a Lambda task
+Observe **D9.5.2** when adapting native async calls; do not park a Lambda task
 through an unsupported native callback stack.
 
 **Done:** selected-root diamond imports and initializer reads work; outside-root
@@ -296,7 +296,7 @@ verified confinement before any untrusted initializer or native constructor.
 Use OS-supported process identity/handle mechanisms rather than a claimed
 principal in a message. Version and bound the IPC schema; reject wrong-owner,
 replayed, oversized, unknown and out-of-order requests. Do not serialize raw
-`Item` pointers across processes (**D7.4.1v2**).
+`Item` pointers across processes (**D9.5.1**).
 
 Add trusted root/file selection, concrete overwrite prompts, grant inspection
 and revocation. Once/session/persistent scopes must be explicit. A worker
@@ -327,7 +327,7 @@ policy-only M1 results cannot substitute for it.
 ### M3u — Host package updater, independently of app networking
 
 **Outcome:** implement the approved updater exception and its controls
-(**D7.5.7–D7.5.8**) without a general fetch capability for apps. Depends on M2
+(**D11.2.3–D11.2.4**) without a general fetch capability for apps. Depends on M2
 for the protected host boundary; protocol/state-machine tests can start in M1.
 
 Deliver in three reviewable steps:
@@ -353,9 +353,9 @@ Deliver in three reviewable steps:
    The installer publishes only an admitted managed package image, with
    crash-safe version selection and recovery. Recheck update state, trust and
    grants immediately before publication/activation. Keep live native versions
-   pinned until process exit; no hot unload (**D7.3.2**). Additional capability
+   pinned until process exit; no hot unload (**D9.4.2**). Additional capability
    requests remain denied pending consent. Project-vendored file replacement
-   still follows **D7.5.6**. No privileged package install hooks.
+   still follows **D11.2.2**. No privileged package install hooks.
 
 TUF supplies the selected metadata/workflow model for signed roles, freshness
 and rollback resistance. The initial Lambda profile and unsupported extensions
@@ -393,7 +393,7 @@ changes from crossing scope. Keep credential and cache partitions per principal.
 
 Adapt `io_secret` and `io_mail` to app/account/operation grants. Add individual
 device services only with lifecycle, visible indicator, revocation and resource
-limits. Include audible output's existing origin/activation rule **D7.5.4**.
+limits. Include audible output's existing origin/activation rule **D11.3.1**.
 Subprocess/shell and arbitrary device access remain separate capabilities;
 they are not necessary to close a brokered HTTP milestone.
 
@@ -432,7 +432,7 @@ do not claim comprehensive browser conformance from one green DOM suite.
 
 ### M5 — Third-party extensions and additional platforms
 
-**Outcome:** qualify one real extension use case at a time under **D7.5.1**.
+**Outcome:** qualify one real extension use case at a time under **D11.1.1**.
 
 - Keep T1 as the explicitly trusted system set. Gate manifests, exact immutable
   images and native dependencies before `dlopen`/`LoadLibrary`; constructors
@@ -507,7 +507,7 @@ automated migration of arbitrary trusted scripts outside the first release.
 These are explicit later milestones or unresolved design work; none is a
 reason to ship the core sandbox with a bypass. Exact schemas, identity-change
 UX, quota presets and platform support choices should be settled in their
-own concrete implementation reviews without widening **D7.5.5–D7.5.8**.
+own concrete implementation reviews without widening **D11.2.1–D11.2.4**.
 
 ## 6. Implementation progress
 
@@ -629,7 +629,7 @@ clients, and qualify the actual offline worker. No whole milestone is complete.
 
 Added the host-only [file broker](../../lambda/host/safety/file_broker.h) and
 [component contracts](../../lambda/host/safety/README.md), implementing the
-file portion of **D7.5.2, D7.5.5–D7.5.7**. Each broker owns its policy and
+file portion of **D11.1.2, D11.2.1–D11.2.3**. Each broker owns its policy and
 admitted root anchors. Namespace authority precedes filesystem discovery and
 parent creation. Bounded read/source byte requests retain dispatch generation
 and refresh the host clock at sensitive checks. Selected files pin one leaf
@@ -663,7 +663,7 @@ it never canonicalizes filesystem authority or rewrites a requested path.
 Invalid UTF-8 fails closed. Existing language normalization forms are unchanged.
 
 Added a neutral byte client and a context-lifetime runtime binding using the
-capsule extension mechanism (**D5.4.2–D5.4.4**), preserving `EvalContext` layout.
+capsule extension mechanism (**D6.4.2–D6.4.4**), preserving `EvalContext` layout.
 `output()` consults it for string, binary, structured, lazy-file and ZIP writes.
 Brokered output no longer creates parent directories through the ambient helper
 before authorization. The store and broker sources remain outside ordinary
@@ -710,7 +710,7 @@ The updater and M3–M5 remain open. No whole milestone is complete.
 ### 2026-11-02 — Lambda source, import, cache and prebuild acquisition
 
 Connected file-backed `load_script` to the bound source client before parsing
-or any Runtime/process-cache hit (**D7.5.5**, **D8.5.1v7**). Pure module path
+or any Runtime/process-cache hit (**D11.2.1**, **D8.3.5**). Pure module path
 construction remains under **S2.4.4 / S16.9.8**. Source identity is acquired
 by the broker under `LOAD_SOURCE`, using a held regular-file descriptor and
 rechecking the named revision, root binding and policy before return. Exact
@@ -724,7 +724,7 @@ Permission denial does not invalidate another principal's immutable cache
 records. Both same-Runtime hits and retained AST/MIR graph cloning re-read and
 compare dependency bytes through the current client. Changed source retires
 its importer cone; denied source rejects the load before initialization.
-Existing execution-state cloning remains context-owned (**D5.4.2–D5.4.4**).
+Existing execution-state cloning remains context-owned (**D6.4.2–D6.4.4**).
 
 Added context-owned prebuild scopes. They copy the client, qualify futures by
 authority scope, use explicit authorized resolution/build callbacks, and join
@@ -778,8 +778,8 @@ and M3–M5 remain open.
 
 ### 2026-11-02 — Ordinary input, directories and implicit parser resources
 
-Implemented another **M1.3 component** under **D7.5.2 / D7.5.5**, preserving
-the parser-specific restrictions of **D7.2.7v2**. The context's client reaches
+Implemented another **M1.3 component** under **D11.1.2 / D11.2.1**, preserving
+the parser-specific restrictions of **D10.2.2**. The context's client reaches
 ordinary `input()` (including module initializers and file forcing) and inline
 `parse()` without adding runtime ownership to the neutral parser layer.
 
@@ -852,7 +852,7 @@ executable hashes and final qualification are retained under
 
 ### Path providers and task delivery component — 2026-11-03
 
-**D7.5.2, D7.5.5** now cover the bound-client metadata, `exists`, directory
+**D11.1.2, D11.2.1** now cover the bound-client metadata, `exists`, directory
 iteration, wildcard and task-read adapters. These are component changes;
 production CLI admission and M2 confinement remain pending.
 
@@ -868,7 +868,7 @@ refusal behavior; explicit force and metadata getters retain structured errors
 One sorted directory facade serves input lists, iteration and wildcard walks.
 Scoped recursive walks share a 4,096-entry budget across sibling subtrees and
 a 64-level bound, avoid symlink recursion and discard partial results on
-refusal/overflow. Result arrays have precise root frames (**D5.3.3**).
+refusal/overflow. Result arrays have precise root frames (**D6.3.3**).
 Snapshots live in an EvalContext capsule with semantic path keys and stable
 registered root slots, rather than writing heap values on shared Path spines.
 Broker session/namespace epochs invalidate them on admission, restriction,
@@ -896,7 +896,7 @@ pool-owned `path_new` constructor. Document heads/node identities were global;
 they now live in a realm capsule with owner-bound precise roots. Another
 context can neither reuse nor clear those heads. Realm capsule heap-release
 callbacks, including dynamically registered ones, run before heap destruction
-(**D5.4.2–D5.4.4, D5.3.3**).
+(**D6.4.2–D6.4.4, D6.3.3**).
 
 The [acquisition inventory](../../test/safety/Loading_IO_Inventory.md) records
 remaining filesystem mutation/search and write-set ownership, named-host
@@ -941,13 +941,13 @@ The goal remains active; no complete M1/M2 milestone is claimed.
 
 ### Private IPC and a real confined T0 worker — 2026-11-03
 
-Implemented the next **D7.5.2 / D7.5.5** component: an experimental dedicated
+Implemented the next **D11.1.2 / D11.2.1** component: an experimental dedicated
 Lambda worker, a bounded private broker channel and actual signed-process
 qualification. This does not complete M1 or M2, and ordinary CLI execution
 still lacks production sandbox admission.
 
 `lib/ipc_stream.*` owns connected local-stream acquisition and raw transfer,
-preserving **D7.1.1–D7.1.3**. `lambda/io/security_channel.*` owns the explicit
+preserving **D9.1.1–D9.1.3**. `lambda/io/security_channel.*` owns the explicit
 little-endian framing and the seven existing acquisition callbacks. Neither
 `Item` nor native pointers/struct layouts/descriptors cross the wire. Payload,
 request, cumulative-byte and absolute monotonic deadline bounds are finite.
@@ -967,12 +967,12 @@ remain in force; IPC does not replace them.
 A complete write request can commit before its reply is lost. The client
 returns `outcome_unknown` separately from confirmed `committed`, closes the
 connection and never retries. `output()` now carries this call's owned error
-through text, binary, structured and ZIP paths (**S7.4.5, D5.4.2**). Logging a
+through text, binary, structured and ZIP paths (**S7.4.5, D6.4.2**). Logging a
 diagnostic alone was not an error carrier; the new failure case exposed and
-fixed that boundary, including forced-GC/poison coverage (**D5.3.3**).
+fixed that boundary, including forced-GC/poison coverage (**D6.3.3**).
 
 `make build-safety-worker` produces the experimental bootstrap. It derives
-from **D7.1.6**, installs its client before entry canonicalization/read/parse/
+from **D9.2.2**, installs its client before entry canonicalization/read/parse/
 initialization and joins task/prebuild users before closing transport. Its
 profile excludes MIR/JIT, networking, DevTools, JS/TS, DOM, Radiant, Jube and
 policy management. The target does not install containment itself. It must
@@ -983,7 +983,7 @@ cumulative bytes, 8,192 requests and a 10-second transaction/idle bound.
 The CLI profile had omitted required image/font, MVP compiler and scratch
 protocol dependencies. The shared profile now retains the font/vector
 mechanisms and their matching header/libraries (CoreGraphics on macOS), the
-MVP source group and the scratch protocol. This follows D7.1.6's required
+MVP source group and the scratch protocol. This follows D9.2.2's required
 third-party-mechanism boundary without adding Radiant/JS/Jube hosts. The
 worker explicitly excludes scratch/DevTools; the IME keeps its previous
 font/DevTools source exclusions. No vendor code was changed.
@@ -1032,7 +1032,7 @@ Source hashes, pinned release/control identities and artifact hashes are in
 
 ### Unsupported adapters and transaction ownership — 2026-11-03
 
-Closed additional initial-profile routes under **D7.5.2, D7.5.5–D7.5.8**.
+Closed additional initial-profile routes under **D11.1.2, D11.2.1–D11.2.4**.
 Copy/move/delete/mkdir/touch/symlink/chmod/rename, `cmd`, fetch, grep/text
 search, mail, secrets and loopback APIs now share a refusal before legacy
 native acquisition, option-driven jobs or offload creation. `io.exec` uses
@@ -1046,8 +1046,8 @@ future offloaded database adapters still require explicit authority handoff.
 A new two-evaluator case reproduced shared transaction state in both tiers:
 the peer observed the owner's open transaction and its reset cleared the
 owner's state. Write-set edits, transaction flags and confinement now live in
-an evaluation-context capsule under **D5.4.2–D5.4.4**, with explicit-owner
-precise roots for retained edit values (**D5.3.3**). Foreign document anchors
+an evaluation-context capsule under **D6.4.2–D6.4.4**, with explicit-owner
+precise roots for retained edit values (**D6.3.3**). Foreign document anchors
 are refused. Reset and heap teardown affect their own owner; runtime cleanup
 does not reset an active peer before selecting its cleanup context. Allocation
 and root-registration failures cannot silently open an autocommit transaction.
@@ -1098,7 +1098,7 @@ or the later updater/network/content/extension milestones.
 
 ### Host ad-hoc admission, catalog and grant restoration — 2026-11-03
 
-Implemented the next **D7.5.5–D7.5.7** host component in
+Implemented the next **D11.2.1–D11.2.3** host component in
 [`admission.*`](../../lambda/host/safety/admission.h). A trusted entry/project
 selection now becomes a profile-bound script principal, a bounded source
 manifest, protected catalog and restored broker grant set before its client is
@@ -1116,7 +1116,7 @@ directories and account credential/configuration namespaces, with installer
 extras for further private directories. A parent-identity/name guard closes
 the absent-directory gap: broad ancestor access cannot create a protected name
 later, including observed Unicode/case aliases. The raw mechanism stays in
-`lib/file`; policy stays in the broker (**D7.5.2, D7.1.1–D7.1.3**). Traversal,
+`lib/file`; policy stays in the broker (**D11.1.2, D9.1.1–D9.1.3**). Traversal,
 root admission and enumeration consult it before child acquisition. Existing
 object guards and anchor revalidation remain independent. Managed shipped code
 is mutation-protected even when a project or remembered parent overlaps it.
@@ -1125,7 +1125,7 @@ Supported selections are existing files or recursive directories. Persistent
 grants are reacquired and fingerprinted; changed, expired, protected or unsupported
 records do not restore rights. Session selections do not become persistent.
 Directory replacement/append grants at the same root are selected before the
-default project challenge (**D7.5.6**). Once-write challenges remain target,
+default project challenge (**D11.2.2**). Once-write challenges remain target,
 version and payload bound. A store-generation lease serializes host saves and
 revocation with preceding bounded operations/commits; no lease crosses a consent
 wait. A stale live admission closes rather than using or restoring old grants.
@@ -1172,7 +1172,7 @@ DO25 warning remains. The goal stays active.
 Implemented an actual dedicated host executable, `lambda-safety-host.exe`, in
 [`supervisor.*`](../../lambda/host/safety/supervisor.h) and
 [`host_main.cpp`](../../lambda/host/safety/host_main.cpp), following
-**D7.5.1–D7.5.2, D7.5.5–D7.5.7**. The host validates its Apple-issued publisher
+**D11.1.1–D11.1.2, D11.2.1–D11.2.3**. The host validates its Apple-issued publisher
 signature and hardened-runtime/no-entitlement profile, locates a fixed companion
 worker bundle, checks its same publisher, identifier, sealed resources and exact
 sandbox-only entitlements, then starts it suspended. The kernel-selected child's
@@ -1183,7 +1183,7 @@ management API is inherited. The existing admission/store/catalog runs before
 source parsing, and source bytes still travel through the bounded broker.
 
 Raw OS work belongs to `lib/confined_process.*`; policy and consent stay in the
-host (**D7.5.2, D7.1.1–D7.1.3**). The channel now supports dispatch on a
+host (**D11.1.2, D9.1.1–D9.1.3**). The channel now supports dispatch on a
 preconstructed endpoint, preserving existing `serve` ownership semantics. The
 supervisor uses an independent watchdog and bounded output capture, sampled
 CPU/physical-footprint gates, hard worker bootstrap CPU/file/descriptor/process/
@@ -1251,7 +1251,7 @@ No engine or platform completion claim is inferred from these component gates.
 
 ### Protected package-update controls and host console — 2026-11-03
 
-Implemented the **D7.5.7–D7.5.8** updater control component in
+Implemented the **D11.2.3–D11.2.4** updater control component in
 [`update_controls.*`](../../lambda/host/safety/update_controls.h), using a
 host-only fixed state slot in the existing anchored grant store. Account-home
 resolution, trusted/private ancestors, cross-process locking, revision checks,
@@ -1328,7 +1328,7 @@ and later network/content/extension milestones remain in the active goal.
 ### 2026-11-03 — Authorization through IPC response publication
 
 The supervisor and admission fixture now select a host-only delivery guard
-(**D7.5.2 / D7.5.5–D7.5.7**). Full request decoding precedes authority capture;
+(**D11.1.2 / D11.2.1–D11.2.3**). Full request decoding precedes authority capture;
 the operation runs after capture, and publication compares that original
 session/epoch under the admission mutex and protected-store generation lease.
 Sampling only the latest generation would miss local revocation of buffered
@@ -1366,7 +1366,7 @@ network/content/native-extension services and other platforms remain open.
 
 ### 2026-11-03 — Private persistent data and experimental native process policy
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, admission now binds a broker-owned
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, admission now binds a broker-owned
 `/.lambda/app-data` virtual mount to the existing private channel. No worker ID
 selects a physical root. Each profile/principal has private anchored storage;
 an owner record checks principal and namespace/owner/data object identities.
@@ -1420,12 +1420,12 @@ qualification, persistent UI/bookmarks and complete catalogs remain open.
 A fresh no-MIR build also exposed an AST escape-analysis dependency on MIR's
 import-audit table. T0-only builds now keep the conservative escape proof when
 that table is absent; the sandbox does not link a compiler merely to obtain an
-optional optimization proof (**D8.1.1, D5.4.2–D5.4.4**).
+optional optimization proof (**D8.3.1, D6.4.2–D6.4.4**).
 
 The fixed process policy also denied native `getcwd`, exposing a relative-path
 runtime gap. The trusted bootstrap now captures the launch directory before
 confinement and supplies an immutable copied directory capsule to the bound
-evaluation context (**D5.4.2–D5.4.4, D7.5.2, D7.5.5**). Runner and T0 execution
+evaluation context (**D6.4.2–D6.4.4, D11.1.2, D11.2.1**). Runner and T0 execution
 boundaries recreate their owned CWD URLs from that metadata; file acquisition
 still goes through the broker. The task-path helper now uses the active lexical
 CWD in both target-conversion steps, matching ordinary input/output. Both-tier
@@ -1495,7 +1495,7 @@ network/content/native-extension services and other platforms remain open.
 
 ### 2026-11-03 — Private cache/temp lifecycle and host-death recovery
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, the private-storage service now shares
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, the private-storage service now shares
 one mount implementation for data, cache and temporary files. The admitted
 channel selects their principal; no worker ID or directory handle was added.
 Source/canonical-source requests at virtual mounts refuse before physical source
@@ -1579,7 +1579,7 @@ reachability when that argument-error join exists. The generated failure edge
 changes from `mov result, 0` to `mov result, parameter_error`; successful TCO
 still jumps to its loop. No optimization was disabled and no error expectation
 was softened. The new regression runs on T0/MIR/auto, also with forced/poisoned
-GC (**D5.3.3**); it and the forced-MIR chart fixture now pass. Before/after MIR
+GC (**D6.3.3**); it and the forced-MIR chart fixture now pass. Before/after MIR
 and paired controls remain in `temp/app-safety-cache-temp-tco-*` and
 `temp/app-safety-cache-temp-chart-*`. Fresh aggregates are required after this
 compiler fix; the earlier library **2,086/2,086** remains a retained control.
@@ -1684,7 +1684,7 @@ does not qualify a default sandbox rollout or complete M2.
 
 ### 2026-11-03 — Mach capability inheritance and ptrace qualification
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, a new actual-launch probe found an
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, a new actual-launch probe found an
 OS boundary gap: fd `CLOEXEC` did not remove registered Mach rights or inherited
 task exception/bootstrap ports. The original signed confined launch retained
 three registered send rights and sent three messages to its parent after
@@ -1744,7 +1744,7 @@ default rollout qualification is claimed. The goal remains active.
 
 ### 2026-11-03 — Qualification checks survive Python optimization
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, a qualification runner must retain
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, a qualification runner must retain
 its controls and refusal checks regardless of Python optimization. Running the
 original inheritance runner with `python3 -O` reproduced a false passing result:
 all three cases were counted despite a live task-access port and no successful
@@ -1780,7 +1780,7 @@ behavior changes in this follow-up.
 
 ### 2026-11-03 — Refuse leaked bootstrap handles before source IO
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, owned native controls demonstrate
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, owned native controls demonstrate
 that installing the process policy does not revoke a pre-held writable file
 descriptor: reads, shared writable mapping and a synchronized fixture-page
 modification all succeed afterward. The native policy runner now records the
@@ -1841,7 +1841,7 @@ unqualified; no normative ruling changes here. The goal remains active.
 
 ### 2026-11-03 — Sandbox before runtime constructors
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, the new full-worker constructor
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, the new full-worker constructor
 gate exposes a remaining boundary gap in the direct-linked worker. Real native
 initializers acquire shared or private file mappings and close their descriptors
 before `main`. Both cases retain readable contents after policy installation,
@@ -1906,7 +1906,7 @@ engine gates here. The goal remains active and default rollout stays disabled.
 
 ### 2026-11-03 — Trusted storage inspection and resumable persistent-data reset
 
-Under **D7.5.2, D7.5.5–D7.5.7**, private-storage management now shares the
+Under **D11.1.2, D11.2.1–D11.2.3**, private-storage management now shares the
 same anchored owner acquisition, namespace/owner locks, marker checks, bounded
 usage traversal and removal helpers as ordinary admissions. Inspection creates
 no admission and performs no abandoned-temp recovery. It reports bytes/entries,
@@ -1933,7 +1933,7 @@ restore script authority. Default quota constants are shared with admission.
 Commands remain behind the existing publisher-signature gate. Signing-identity
 setup is skipped per user instruction; no hardening entitlement was weakened.
 
-The user selected retention on uninstall: **D7.5.9** now requires persistent
+The user selected retention on uninstall: **D11.2.5** now requires persistent
 app data to survive uninstall by default, with deletion as a separate explicit
 action. Formal design advances to 59.1.0 and the working design records the same
 rule. Installed-app uninstall/catalog integration remains pending; this step
@@ -1965,7 +1965,7 @@ backends remain outstanding. The goal stays active.
 
 ### 2026-11-03 — Ordered namespace publication and strict storage barriers
 
-Under **D7.5.2, D7.5.7**, a storage durability audit found that a later synced
+Under **D11.1.2, D11.2.3**, a storage durability audit found that a later synced
 record did not make its newly created ancestor names durable. Anchored directory
 creation previously called `mkdirat`/`openat` without syncing the child and
 parent; new lock/lease files were exposed without syncing their empty inode or
@@ -2027,7 +2027,7 @@ backends remain in the active goal.
 
 ### 2026-11-03 — Protected per-principal storage quotas and host console
 
-Under **D7.5.2, D7.5.7**, the trusted storage service now persists quota policy
+Under **D11.1.2, D11.2.3**, the trusted storage service now persists quota policy
 in `~/.lambda/setting/storage-{a|s}-<principal>.quota`. A new typed principal-
 keyed state slot constructs that fixed name; it cannot select a grant, updater
 record or caller pathname. It reuses the protected store's locking, revision-
@@ -2096,7 +2096,7 @@ remains active.
 
 ### 2026-11-03 — Host-only updater HTTPS pull component
 
-Under **D7.5.2, D7.5.7–D7.5.8**, `lib/https_pull` implements one bounded,
+Under **D11.1.2, D11.2.3–D11.2.4**, `lib/https_pull` implements one bounded,
 anonymous HTTPS GET. `host/safety/update_download` supplies the protected live
 job's endpoint and a public repository-relative role/artifact name, handles at
 most three admitted redirects and performs one bounded final handoff under
@@ -2174,7 +2174,7 @@ remain open. M2/default rollout remain disabled. The goal remains active.
 
 ### 2026-11-03 — Lambda Script update-verification component
 
-Under **D7.5.7–D7.5.8**, and the user's direction to implement verification in
+Under **D11.2.3–D11.2.4**, and the user's direction to implement verification in
 Lambda Script, added `lmd/package/security/tuf.ls` and its `json`, `metadata`,
 `delegation` and `update` modules. Metadata decisions and sequencing run in
 Lambda; native code supplies signature math, admitted transport and opaque
@@ -2261,7 +2261,7 @@ conformance, bridge, deployment and staging gates remain explicit in the report.
 
 ### 2026-11-03 — Bounded offline verifier and trusted refresh coordinator
 
-Under **D7.5.2, D7.5.7–D7.5.8**, `update_refresh` now runs the Lambda Script
+Under **D11.1.2, D11.2.3–D11.2.4**, `update_refresh` now runs the Lambda Script
 verification machine in a dedicated process and executes its bounded actions.
 `make build-update-verifier` embeds the exact seven-file trusted source closure
 into `LambdaUpdateRuntime.dylib`; the existing libSystem-only bootstrap applies
@@ -2297,7 +2297,7 @@ Three reproduced defects were fixed rather than weakening the gates:
 - Early confinement denied uncached Darwin page-size queries. A guessed 4 KiB
   page on this 16 KiB machine caused invalid commits, runaway pool growth and
   an AST startup crash. `mem_vm_page_size` now uses libSystem's initialized
-  process ABI value under **D4.1.4v5**, without broadening the sandbox. The actual
+  process ABI value under **D5.1.4**, without broadening the sandbox. The actual
   offline worker then completed verification with sysconf/getpagesize denied.
 
 A fourth timing regression proved a one-second persisted job could expire on
@@ -2342,7 +2342,7 @@ whole-boundary qualification.
 
 ### 2026-11-03 — Independent TUF conformance and parser adversarial qualification
 
-Under **D7.5.8** and **S12.1.2v3**, added a test-only CLI adapter driving the
+Under **D11.2.4** and **S12.1.2v3**, added a test-only CLI adapter driving the
 production Lambda Script state machine through the official upstream conformance
 suite. The suite and real libfaketime source are unmodified, pinned checkouts
 under `temp/`; test dependencies are isolated in a local virtual environment.
@@ -2404,7 +2404,7 @@ engine gate remains separately pinned in the adapter qualification report.
 
 ### 2026-11-03 — Opaque role identity and canonical repository URI policy
 
-Under **D7.5.2, D7.5.7–D7.5.8**, added the pure Lambda `tuf.path` module and
+Under **D11.1.2, D11.2.3–D11.2.4**, added the pure Lambda `tuf.path` module and
 an independent native URI policy. The four official unusual-role cases now
 pass, bringing the unmodified pinned suite to **112/119**. All seven remaining
 failures are retained: six optional signature schemes and the historical
@@ -2456,7 +2456,7 @@ catalog integration remain open. M2/default rollout and M3u delivery stay off.
 
 ### 2026-11-03 — Offline package decoder in Lambda Script
 
-Under **D7.5.2, D7.5.8**, `lambda.security.package_stage` now implements the
+Under **D11.1.2, D11.2.4**, `lambda.security.package_stage` now implements the
 initial inactive ZIP image policy. It uses the existing bounded captured-byte
 archive reader (**S12.1.1v3, S14.3.1v3**) and validates the complete namespace
 before emitting the first member. Entries stream exact binary bytes, directory
@@ -2485,7 +2485,7 @@ SHA-256 bind stream consistency, not publisher or installation authority.
 The real worker exposed a bridge defect with a promoted `integer` byte total;
 native conversion now accepts bounded u64 and exact integer carriers without
 truncation. Ordinary archive virtual views are enumerated through their
-supported **D7.4.5v2** iterator; no engine or virtual-splice implementation changed.
+supported **D9.5.5** iterator; no engine or virtual-splice implementation changed.
 
 Qualification on macOS arm64 uses an explicitly unhardened ad-hoc composition
 control, with no signing identity installation, user settings or remote fetch:
@@ -2529,7 +2529,7 @@ broader goal stays active. Contract: [package staging](../../lmd/package/securit
 
 ### 2026-11-03 — Verified-artifact handoff to protected inactive staging
 
-Under **D7.5.2, D7.5.8**, `update_stage` now accepts only the opaque verified
+Under **D11.1.2, D11.2.4**, `update_stage` now accepts only the opaque verified
 artifact bound to the live reservation. The host independently checks decoder
 paths, case/duplicate collisions, parent types, member/entry/aggregate ceilings
 and completion digest/counts. It creates private, inactive files through strict

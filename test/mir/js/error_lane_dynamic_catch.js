@@ -1,4 +1,4 @@
-// D8.4.3v2: generic property admission and catch conversion retain independent
+// D7.4.3: generic property admission and catch conversion retain independent
 // fallible boundaries; the formal branch/tag budget is pinned by the sidecar and ratchet.
 function dynamicCaught() {
     try {

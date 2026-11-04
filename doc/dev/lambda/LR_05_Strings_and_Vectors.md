@@ -135,7 +135,7 @@ The internal descriptor and lifetime rules are:
 `is_mutable_view` permits internal writes through to a descriptor's backing.
 For an ordinary Lambda view value that backing is private: a write cannot
 change the source argument. A `var` place borrow uses a caller-rooted home
-and reinstalls replacements through its evaluated path (D4.4.7), including
+and reinstalls replacements through its evaluated path (D5.4.6), including
 on an error result. `reshape` additionally requires the source to be **C-contiguous** (`:2857`): an owned 1-D array qualifies, but an existing non-contiguous view must be materialized with `copy()` first.
 
 ---
@@ -160,17 +160,17 @@ Edge indexing and bilinear mixing are shared with the existing array resamplers.
 
 `fn_image_process` in `lambda/runtime/image_process.cpp` validates RGBA8 and
 option records, allocates one GC-owned destination, refreshes its rooted source
-after allocation (**D5.3.3**), and calls the native evaluator without further GC
+after allocation (**D6.3.3**), and calls the native evaluator without further GC
 safepoints. Point transforms use double-precision registers; geometry/effects
 and final resizing use bounded rows/rings. The source remains immutable
 (**S1.4**), and `as_float` retains its existing float64 contract. No Radiant
-dependency enters the runtime (**D7.5.3**).
+dependency enters the runtime (**D9.5.6**).
 
 `alloc_ndim_arraynum` now shares the ArrayNum factory in
 `lambda/runtime/lambda-data-runtime.cpp`. It snapshots/validates dimensions,
 attaches shape metadata to a rooted owner, and allocates the payload last.
 This avoids promoting a newly allocated, unwritten large buffer at the shape
-allocation safepoint (**D4.3.1 / D5.3.3**). A native regression checks nursery
+allocation safepoint (**D5.3.1 / D6.3.3**). A native regression checks nursery
 ownership at return and the shape/data after explicit collection.
 
 ---

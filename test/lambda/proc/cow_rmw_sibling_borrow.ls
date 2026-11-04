@@ -1,4 +1,4 @@
-// D4.4.4v2: read-modify-write handles on SIBLING fields of one `var` root may
+// D5.4.4: read-modify-write handles on SIBLING fields of one `var` root may
 // each borrow their place, and a return that precedes every use of a handle
 // needs no store-back. Every case below must print what snapshot semantics
 // (S9.1.2, S9.1.3) print, on every tier.

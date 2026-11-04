@@ -1,0 +1,11 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+#outer { font-size: 16px; }
+#target { width: 100px; height: 20px; }
+#sibling { width: 40px; height: 10px; }
+.wide #target { width: 180px; }
+.wide #sibling::before { content: "X"; }
+.large #outer { font-size: 24px; }
+</style>
+<main id="result"><div id="outer"><div id="target">target</div><div id="sibling">sibling</div></div></main>

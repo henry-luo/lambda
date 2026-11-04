@@ -1,4 +1,4 @@
-// D6.1.2v2: every explicit return participates in the result ABI proof.
+// D7.1.2: every explicit return participates in the result ABI proof.
 fn mixed(flag) {
     if (flag) { return 1 }
     return "ok"

@@ -19,7 +19,7 @@ Repair order and finite acceptance:
 
 1. Remove the registered paged crash, retaining caption-side ordering, inherited
    alignment and all three source-order generated-counter assertions. Preserve
-   selected-view ownership (**D4.5.1v4**) and UI copy boundaries (**D4.5.3v2**).
+   selected-view ownership (**D5.5.1**) and UI copy boundaries (**D5.5.3**).
 2. Close all thirteen registered CSS failures: seven framework rule-count
    roundtrips, the two framework input comparisons, two parser expectations,
    two DOM occurrence cases and the HTML/CSS storage case (the two framework
@@ -55,7 +55,7 @@ allocation failure. Fragment edge policy reads the source's computed style,
 rather than optional occurrence metadata. Paged Markdown and both split-cell
 border/alignment groups now pass **3/3** (`wrapup_paged.json`). Parent fetches that
 complete while a child pumps the shared loop retain their existing precise roots
-until the parent's checkpoint (**D5.3.3 / D5.4.1**); the unchanged cold/warm
+until the parent's checkpoint (**D6.3.3 / D6.4.1**); the unchanged cold/warm
 admission control passes (`wrapup_fetch.json`). These latest changes have not had
 another full aggregate or sanitizer run.
 
@@ -106,7 +106,7 @@ caption regression now passes (`caption_final.log`): its old computed-style
 pointer assertion was obsolete, and caption layout also omitted its counter
 scope/generated-content materialization. Width refinement now reuses the
 source-order generated text. Both UI occurrence regressions pass under
-**D4.5.3v2** (`dom_migrated_final.log`).
+**D5.5.3** (`dom_migrated_final.log`).
 
 The selector formatter preserves pseudo-element identity and nth-child `of`
 filters. Native CSS roundtrip passes 55/55, parser 90/90 and formatter 45/45.
@@ -174,7 +174,7 @@ All eight formerly aborting validation runners now pass **124/124**
 validation_options,validator_integration,type_references}_fixed.json`). The
 internal validation library now links statically with its runtime; a dynamic
 library had referenced hundreds of private host symbols and aborted on
-`LIT_BOOL`. This preserves the module boundary (**D7.3.3–D7.3.4**) without
+`LIT_BOOL`. This preserves the module boundary (**D9.4.3–D9.4.4**) without
 exporting runtime internals. The source-position suite passes **5/5**
 (`sourcepos_fixed.json`): its exact source-range matcher now recognizes the
 [GFM §6.9 email autolink grammar](https://github.github.io/gfm/#autolinks-extension-),
@@ -238,7 +238,7 @@ twice. The original case matches all eleven element and two text records
 immediate post-scroll offset, single viewport translation, fixed positioning
 and reset, alongside existing scheduling/cancellation controls
 (`sticky_snapshot_native.json`). Ownership and commit boundaries preserve
-**D4.5.1v4 / D5.4.1**.
+**D5.5.1 / D6.4.1**.
 
 ## Layout failures
 
@@ -253,7 +253,7 @@ Receipts: `http_qualification/receipt.json`, `http_reference_manifest.json` and
 `local_readiness_qualified.json` under `temp/css_debt_repair/`.
 
 Image writes retain pending network requests until native load/error completion.
-Blob URL bytes have a document resource owner (**D4.5.1v4**); revoke removes that
+Blob URL bytes have a document resource owner (**D5.5.1**); revoke removes that
 resource. This bounded implementation does not claim cross-document Blob URL
 sharing. FileReader supports asynchronous `readAsDataURL`, state/result/error,
 load/progress/end events and abort cancellation; other read methods and the
@@ -297,7 +297,7 @@ nor pixel thresholds changed.
 The first aggregate replay exposed an outer-turn mutation loss after the JS
 realm became available during load: nested lifecycle/synthetic dispatch cleared
 records belonging to the loading script. Nested dispatch now preserves that
-ledger and defers its rebuild until the outer turn (**D5.4.1 / D5.3.3**). The
+ledger and defers its rebuild until the outer turn (**D6.4.1 / D6.3.3**). The
 unchanged load-cascade, dynamic auto-fit grid, jQuery tabs and noUiSlider drag
 controls pass (`{cascade,grid,tabs,slider}_nested_fixed.json`). The object-URL compatibility fixture now checks the document origin rather than
 the retired `blob:lambda/` mock prefix; its expected output is unchanged. Aggregate replay
@@ -373,7 +373,7 @@ digests are in `temp/css_plan_delivery/intake_provenance.json`.
 Q0.1–Q0.4 are classified. There are no selected Phase 1 blockers. Qualification
 debt remains failed and owned above; classification does not repair it or imply
 a passing aggregate. Proceed to Phase 1. Preserve style ownership
-(**D4.5.1v4 / D4.1.4v5**) and module boundaries (**D7.3.3–D7.3.4**).
+(**D5.5.1 / D5.1.4**) and module boundaries (**D9.4.3–D9.4.4**).
 
 ## Phase 1 required-gate update
 
@@ -549,7 +549,7 @@ literal durations are rejected and wrong dimensions default after substitution.
 Numeric `linear()` uses normalized percentage inputs, distribution, paired stops
 and repeated-position jumps through the shared sampler. Retained scheduler/effect
 owners copy the points and release replaceable scheduler payloads
-(**D4.5.1v4**); native controls exercise parser-pool retirement and live frees.
+(**D5.5.1**); native controls exercise parser-pool retirement and live frees.
 
 The native motion runner passes 145/145. The animation/transition fixtures pass
 22/9 assertions per AST/MIR, including opacity/translateX pixels/hits, live

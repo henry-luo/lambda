@@ -1,4 +1,4 @@
-// Markdown dialect policy: vibe/input/Input_Markdown.md; Input-owned nodes follow D7.1.5.
+// Markdown dialect policy: vibe/input/Input_Markdown.md; Input-owned nodes follow D9.1.4.
 let source = "First[^a], second[^b], repeated[^a], missing[^missing].\n\n[^b]: A nested note[^inner].\n\n[^a]: **Rich** text with [site][target].\n\n    Another paragraph.\n\n    - one\n    - two\n\n[^inner]: Nested content.\n\n[^unused]: Kept for formatting.\n\n[target]: https://example.com\n\n```text\n[^fake]: Not a definition.\n```\n\n<div>\n[^html]: Not a definition.\n</div>\n"
 let document = parse(source, 'markdown')^
 let references = [for (node in document?element where ((name(node) == 'footnote-ref') ^ { false })) node]

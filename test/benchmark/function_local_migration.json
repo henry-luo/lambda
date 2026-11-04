@@ -2,8 +2,8 @@
   "authority": [
     "S12.1.2v3",
     "S9.1.3v2",
-    "D6.1.2v2",
-    "D8.1.1v18"
+    "D7.1.2",
+    "D8.3.2"
   ],
   "before_commit": "911a0b1ed8",
   "migrated": [

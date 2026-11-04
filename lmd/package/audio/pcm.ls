@@ -1,4 +1,4 @@
-// D7.5.3: native audio consumes owned WAV bytes; synthesis stays outside the player.
+// D9.5.6: native audio consumes owned WAV bytes; synthesis stays outside the player.
 fn le16(v) array => [v%256,(v div 256)%256]
 fn le32(v) array => [v%256,(v div 256)%256,(v div 65536)%256,(v div 16777216)%256]
 // Soundflow's original mono PCM encoder, shared without changing its sample quantization.

@@ -947,7 +947,7 @@ static Item fo_foreign_copy(FoTranslationContext* context, DomElement* source, s
     }
     const char* uri = dom_element_namespace_uri(source);
     if (strcmp(uri, "http://www.w3.org/2000/svg") && strcmp(uri, "http://www.w3.org/1999/xhtml")) return ItemNull;
-    // serialize resolved XML-host graphics into the shared HTML SVG syntax (D2.11.2).
+    // serialize resolved XML-host graphics into the shared HTML SVG syntax (D10.1.5).
     ElementBuilder output = context->builder.element(source->local_name());
     if (root) output.attr("xmlns", "http://www.w3.org/2000/svg")
         .attr("xmlns:xlink", "http://www.w3.org/1999/xlink");

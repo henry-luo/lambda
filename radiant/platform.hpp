@@ -2,7 +2,7 @@
 // platform.hpp — Radiant's platform backend seam (vibe/Lambda_Design_Mobile.md
 // MB7). Radiant sources name only these functions and opaque handles; exactly
 // one backend per build defines them: platform_glfw.cpp on desktop,
-// platform_null.cpp for builds without a GUI (LAMBDA_NO_GUI, D7.1.4v2), and a
+// platform_null.cpp for builds without a GUI (LAMBDA_NO_GUI, D9.2.1), and a
 // UIKit backend on iOS. The backend translates native input into RdtEvent and
 // reports it, and window notifications, through the radiant_host_* functions
 // at the end of this header; host policy (history keys, close guards, click
@@ -42,10 +42,11 @@ typedef struct RadiantIconImage {
 } RadiantIconImage;
 
 // --- library lifetime and event pump ---
+// the backend owns the application runtime until process exit (D4.5.1v4).
+// individual hosts destroy their windows without shutting down that runtime.
 // `hidden_host`: a windowless run that only needs a native graphics/webview
 // parent; it must not claim the application menu bar
 bool radiant_platform_init(bool hidden_host);
-void radiant_platform_terminate(void);
 double radiant_platform_time(void);                  // seconds on the backend's clock
 void radiant_platform_poll_events(void);
 void radiant_platform_wait_events(double timeout_seconds);

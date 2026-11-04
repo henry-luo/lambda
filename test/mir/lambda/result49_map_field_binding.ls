@@ -1,4 +1,4 @@
-// D3.3.3v3, S9.3.1: an admitted array binding can populate a named record
+// D4.3.3, S9.3.1: an admitted array binding can populate a named record
 // directly; an unproven array still crosses the field's checked boundary.
 type Cell = {value: int}
 type Holder = {cells: Cell[], note: string}

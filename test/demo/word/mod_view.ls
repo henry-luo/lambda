@@ -1,4 +1,4 @@
-// View choices are session presentation; they never edit document or history (D7.2.5).
+// View choices are session presentation; they never edit document or history (D10.2.1).
 pub let modes = [{id:"read",command:"view.readMode",label:"Read Mode",icon:"book",ribbon:"view-reading"},
     {id:"print",command:"view.printLayout",label:"Print Layout",icon:"cover",ribbon:"view-print"},
     {id:"web",command:"view.webLayout",label:"Web Layout",icon:"globe",ribbon:"view-web"}]

@@ -362,7 +362,7 @@ static bool js_resolve_lazy_global_impl(Item object, Item key, Item* out_value, 
         // The marker already owns this global slot. Publishing through
         // OrdinarySet would inspect its descriptor, read the marker again,
         // and recursively re-enter this resolver before the slot changes
-        // (D4.6.1v2).
+        // (D5.6.1).
         value_root.set(js_publish_lazy_global(object_root.get(), key_root.get(),
             value_root.get()));
         if (out_value) *out_value = value_root.get();
@@ -3289,7 +3289,7 @@ extern "C" int js_process_current_exit_code(void) {
 
 // build process.env as a map of environment variables
 static Item build_process_env(void) {
-    // D5.3/D5.4.3: process sub-objects are published only after construction,
+    // D6.3/D6.4.3: process sub-objects are published only after construction,
     // so their builder locals must remain exact roots across every property write.
     RootFrame roots(1);
     Rooted<Item> env_root(roots, js_new_object_with_class(JS_CLASS_PROCESS_ENV));
@@ -4084,7 +4084,7 @@ static Item structured_clone_body(Item value, Item transfer_list, int depth,
     // maps/objects: clone properties
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
         // key enumeration, getters and recursive child clones can collect;
-        // unpublished destinations need exact roots until stored (D5.4.1).
+        // unpublished destinations need exact roots until stored (D6.4.1).
         result_root.set(ops ? ops->object() : js_new_object());
         JS_RETURN_IF_ERROR(result_root.get());
         structured_clone_remember(memo, value_root.get(), result_root.get());
@@ -4545,7 +4545,7 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
 
 Item js_numeric_prototype_algorithm(Item num,
         JsNumericPrototypeOp operation, Item* args, int argc) {
-    // D6.2.2v2: a direct intrinsic target supplies immutable operation policy;
+    // D7.2.2: a direct intrinsic target supplies immutable operation policy;
     // observable method spelling cannot choose numeric semantics.
     // BigInt prototype methods
     if (get_type_id(num) == LMD_TYPE_DECIMAL) {
@@ -4939,7 +4939,7 @@ static inline String* js_ascii_char_intern(int code) {
     if (!s) {
         char c = (char)code;
         s = heap_create_name(&c, 1);
-        // D5.3.3: a context cache is an owning GC edge only after its exact
+        // D6.3.3: a context cache is an owning GC edge only after its exact
         // slot range is registered; otherwise collection can leave stale Items.
         if (cache_rooted) g_ascii_char_pool[code] = (Item){.item = s2it(s)};
     }
@@ -5605,7 +5605,7 @@ static Item js_map_constructor_prototype_for_instanceof(Item right, bool* out_is
 
 
 // cross-realm VM errors are classified by the constructor's immutable
-// intrinsic policy; observable `.name` is freely redefinable (D6.2.2v2).
+// intrinsic policy; observable `.name` is freely redefinable (D7.2.2).
 JS_FORWARD_STATIC_EXPRESSION(bool, js_instanceof_is_host_error_constructor,
     (JsFuncName* fn), fn && js_class_is_error_like((JsClass)js_fn_intrinsic_class(fn)))
 
@@ -5656,7 +5656,7 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
         JS_ASSIGN_OR_RETURN(proxy_proto, js_get_name_key(right, "prototype", 9));
         if (!js_instanceof_is_object_like_type(get_type_id(proxy_proto))) {
             // OrdinaryHasInstance observes the Proxy's property trap, but the
-            // carrier MAP is not a legacy class object (D6.2.2v2).
+            // carrier MAP is not a legacy class object (D7.2.2).
             return js_throw_type_error("Function has non-object prototype in instanceof check");
         }
         return js_prototype_chain_contains(left, proxy_proto);
@@ -5719,7 +5719,7 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
             return contains_func_proto;
         }
         // Constructor display names are mutable metadata; prototype identity is
-        // the only ordinary-instance fallback permitted by D6.2.2v2.
+        // the only ordinary-instance fallback permitted by D7.2.2.
         return (Item){.item = b2it(false)};
     }
 
@@ -5987,7 +5987,7 @@ JS_FORWARD_RETURN(bool, js_is_typed_array_ctor_name, (const char* name, int len)
 // v90: GeneratorFunction.prototype singletons are realm slots, alongside the
 // module namespace cache. They are observable identities, not intrinsic
 // catalog entries, so keeping them in the dynamic realm store avoids another
-// fixed singleton span (D5.3.5; JSCU29).
+// fixed singleton span (D6.3.5; JSCU29).
 static Item* js_generator_function_proto_cache_slot(bool is_async) {
     return js_realm_slot(&js_runtime_state.realm_slots, is_async
         ? JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_PROTOTYPE
@@ -6215,7 +6215,7 @@ extern "C" Item js_get_prototype_of(Item object) {
             // intrinsic itself inherits from Function.prototype. Returning
             // %TypedArray% for both created a self-cycle once ordinary
             // callable property lookup began walking the real chain
-            // (D6.2.2v2).
+            // (D7.2.2).
             return js_get_intrinsic_prototype_for_class(JS_CLASS_FUNCTION);
         }
         // v90: Generator functions → return GeneratorFunction.prototype
@@ -6284,7 +6284,7 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     if (!js_func_is_constructor(new_target)) {
         return js_throw_type_error("newTarget is not a constructor");
     }
-    // D6.2.2v2: Reflect.construct is only an operand producer. Proxy, bound,
+    // D7.2.2: Reflect.construct is only an operand producer. Proxy, bound,
     // class-map, intrinsic validation, prototype selection, and new.target
     // substitution all belong to the target's stored construct capability.
     return js_construct_array_like(target, args_array, new_target);
@@ -6735,7 +6735,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     if (js_is_proxy(target)) {
         // Private references are not ordinary Proxy properties: field
         // definition and PrivateSet must reach the Proxy's private-slot
-        // carrier without invoking a public set trap (D6.2.2v2).
+        // carrier without invoking a public set trap (D7.2.2).
         if (get_type_id(key) == LMD_TYPE_STRING &&
                 property_key_requires_identity(it2s(key)) &&
                 property_key_kind(it2s(key)) == NAME_KEY_PRIVATE) {
@@ -6799,7 +6799,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     if (item_is_error(key)) return key;
     // ToPropertyKey and the descriptor probes may compact the heap; the raw
     // local key is only a snapshot, so all later property calls must consume
-    // the relocated root value (D5.4.3).
+    // the relocated root value (D6.4.3).
     target = target_root.get();
     key = key_root.get();
     value = value_root.get();
@@ -7247,7 +7247,7 @@ extern "C" Item js_reflect_apply(Item target, Item this_arg, Item args_array) {
     if (!js_is_object_value(args_array)) {
         return js_throw_type_error("CreateListFromArrayLike requires an object");
     }
-    // D6.2.2v2: Reflect.apply owns only list creation; the common kernel owns
+    // D7.2.2: Reflect.apply owns only list creation; the common kernel owns
     // ordinary and Proxy [[Call]] capability dispatch and precise arg rooting.
     return js_apply_function(target, this_arg, args_array);
 }
@@ -7273,7 +7273,7 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
     if (get_type_id(fn) != LMD_TYPE_FUNC) return false;
     JsFuncProps* efn = (JsFuncProps*)fn.function;
     // Builtin constructor descriptors follow the stored construct target;
-    // mutating `.name` cannot change prototype attributes (D6.2.2v2).
+    // mutating `.name` cannot change prototype attributes (D7.2.2).
     return efn && (js_fn_native(efn)->construct != NULL ||
         js_fn_intrinsic_class(efn) != JS_CLASS_NONE);
 }
@@ -7365,7 +7365,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
 
     // Exotic descriptor hooks may allocate while inspecting the original key;
     // reload both operands before ToPropertyKey so no pre-hook Item points at
-    // a compacted heap string (D5.4.3).
+    // a compacted heap string (D6.4.3).
     obj = object_root.get();
     name = name_root.get();
 
@@ -7381,7 +7381,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     name_root.set(storage_name);
     if (get_type_id(storage_name) != LMD_TYPE_STRING) return ItemNull;
     // ToPropertyKey may collect; reload both operands from their exact roots
-    // before any exotic-object hook observes them (D5.1.1).
+    // before any exotic-object hook observes them (D6.1.1).
     obj = object_root.get();
     name = name_root.get();
     type = get_type_id(obj);
@@ -7424,7 +7424,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
 
     // The second exotic probe is also an allocating boundary (Proxy and host
     // descriptor hooks can construct values); refresh the raw name view before
-    // the ordinary descriptor branches consume its bytes (D5.4.3).
+    // the ordinary descriptor branches consume its bytes (D6.4.3).
     obj = object_root.get();
     name = name_root.get();
     type = get_type_id(obj);
@@ -7444,7 +7444,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     }
     // Function properties: length, name, prototype
     if (type == LMD_TYPE_FUNC) {
-        // D6.2.2v2: FUNC descriptors come only from the real backing shape.
+        // D7.2.2: FUNC descriptors come only from the real backing shape.
         {
             JsPropertyDescriptor pd = {};
             if (js_get_own_property_descriptor(obj, name_str->chars,
@@ -7683,7 +7683,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
 
         value_root.set(js_get_key_default(object_root.get(), name_root.get()));
         if (item_is_error(value_root.get())) return value_root.get();
-        // D5.1.1: property reads may collect; every subsequent shape/name
+        // D6.1.1: property reads may collect; every subsequent shape/name
         // query must reload the object and key from their exact roots.
         obj = object_root.get();
         name = name_root.get();
@@ -7838,7 +7838,7 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
                 if (!key_exists && js_is_truthy(js_object_is_extensible(obj_root.get()))) {
                     // Extensibility is an allocating host query; reload the
                     // map after it because GC may relocate the receiver's
-                    // managed header before the pool-backed store (D5.4.3).
+                    // managed header before the pool-backed store (D6.4.3).
                     m = obj_root.get().map;
                     map_put_heap(m, nm, value_root.get(), js_input);
                     return obj_root.get();
@@ -8545,7 +8545,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             JS_ASSIGN_OR_RETURN(materialized, js_get_name_key(
                 object_root.get(), "prototype", 9));
         }
-        // D6.2.2v2: FUNC OwnPropertyKeys is the ordinary key order of its
+        // D7.2.2: FUNC OwnPropertyKeys is the ordinary key order of its
         // backing shape; length, name, prototype, statics, and user fields do
         // not have a second synthetic enumeration source.
         return get_type_id(fn_props->properties_map) == LMD_TYPE_MAP
@@ -8907,7 +8907,7 @@ extern "C" Item js_object_keys(Item object) {
 
     // For arrays, return indices as string keys: ["0", "1", "2", ...]
     if (type == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object)) {
-        // D5.3/D5.4.3: array-key collection appends while allocation may
+        // D6.3/D6.4.3: array-key collection appends while allocation may
         // collect, so neither the source array nor the result snapshot may
         // live only in native locals during enumeration.
         JS_ROOTS(roots, object_root, object, result_root, js_array_new(0));
@@ -9221,7 +9221,7 @@ extern "C" Item js_for_in_keys(Item object) {
                                 idx_vals[idx_count] = idx;
                                 idx_count++;
                             } else {
-                                // D5.3.3: heap_create_name and array growth are
+                                // D6.3.3: heap_create_name and array growth are
                                 // safepoints; keep the key and result rooted.
                                 key_root.set((Item){.item = s2it(
                                     heap_create_name(s, len))});
@@ -9879,7 +9879,7 @@ static int64_t array_like_length(Item v) {
         if (len_type == LMD_TYPE_FLOAT) {
             // Callable accessors may return a destination-homed numeric scalar;
             // treating only inline ints as lengths made the Test262 native
-            // compareArray fast path disagree with the JS harness (D5.2.1).
+            // compareArray fast path disagree with the JS harness (D6.2.1).
             double number = js_get_number(len_val);
             if (number > (double)INT64_MAX) return INT64_MAX;
             if (number < (double)INT64_MIN) return INT64_MIN;
@@ -10878,7 +10878,7 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};
         bool identity_key = string_is_pooled(ks) && property_key_requires_identity(ks);
-        // D6.2.2v2: inspect the one real function-property shape.
+        // D7.2.2: inspect the one real function-property shape.
         JsFuncProps* fn = (JsFuncProps*)obj.function;
         if (fn->properties_map.item != 0) {
             NameId identity_id = identity_key ? property_key_id(ks) : NAME_ID_NONE;
@@ -11373,7 +11373,7 @@ static Item js_has_sym_iterator(Item iterable, bool* out_has_iterator) {
     }
     if (!js_is_callable(factory_root.get())) {
         // GetMethod tests [[Call]], not the proxy carrier TypeId
-        // (D6.2.2v2).
+        // (D7.2.2).
         return js_throw_type_error("Symbol.iterator is not a function");
     }
     if (out_has_iterator) *out_has_iterator = true;
@@ -11910,7 +11910,7 @@ extern "C" Item js_json_parse(Item str_item) {
     if (!ok) {
         return js_throw_syntax_error(js_name_item("Unexpected token in JSON"));
     }
-    // parsed Input containers cannot trace later GC-owned property replacements (D5.3.3).
+    // parsed Input containers cannot trace later GC-owned property replacements (D6.3.3).
     return fn_mutable_value(result);
 }
 
@@ -12092,7 +12092,7 @@ JS_FORWARD_EXPRESSION(Item, js_json_is_raw_json_builtin, (Item value),
 static Item js_json_array_index_key(int64_t index) {
     // JSON SerializeJSONProperty passes array indices to toJSON/replacer as
     // property-key strings; the packed integer key is only an internal lookup
-    // representation and leaked the wrong callback argument type (D6.2.2v2).
+    // representation and leaked the wrong callback argument type (D7.2.2).
     if (index <= (int64_t)JS_PROPERTY_INDEX_MAX) {
         return js_to_property_key(js_property_index_key(index));
     }
@@ -12981,7 +12981,7 @@ Item js_uri_transform_string(Item text, bool component, bool decode,
     // Cache URIError object per-epoch to avoid expensive error creation
     // in hot loops (e.g., test262 tests that iterate 65000+ code points).
     if (!cache_hit) {
-        // D5.3.3: the canonical constructor roots name and message across
+        // D6.3.3: the canonical constructor roots name and message across
         // both allocations; two local heap_create_name calls did not.
         *error_cache = js_new_named_error("URIError", "URI malformed");
         *error_epoch = js_get_heap_epoch();
@@ -13241,7 +13241,7 @@ static Item js_window_post_message(Item message, Item target_origin,
 }
 
 static void js_reset_existing_root_slot(RootVector* roots, int64_t index, Item value) {
-    // D5.4.2: teardown observes the retired heap generation without publishing roots.
+    // D6.4.2: teardown observes the retired heap generation without publishing roots.
     Item* slot = root_vector_at(roots, index);
     if (slot) *slot = value;
 }
@@ -13483,7 +13483,7 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
     Rooted<Item> constructor(roots, js_domexception_constructor());
     JS_RETURN_IF_ERROR(constructor.get());
     Rooted<Item> object(roots, js_new_object_with_class(JS_CLASS_DOM_EXCEPTION));
-    // D5.3.3: field conversion/getters may collect the unpublished exception.
+    // D6.3.3: field conversion/getters may collect the unpublished exception.
     js_set_prototype(object.get(),
         *js_realm_intrinsic_slot_existing(JS_REALM_SLOT_DOM_EXCEPTION_PROTOTYPE, 0));
     Rooted<Item> actual_name(roots, js_name_item("Error"));
@@ -13839,7 +13839,7 @@ static bool js_message_port_transfer_list_has(Item transfer_list, Item value) {
     }
     return false;
 }
-// both arguments allocate and their evaluation order is unspecified (D5.4.2)
+// both arguments allocate and their evaluation order is unspecified (D6.4.2)
 static Item js_message_port_data_clone_error(const char* message) {
     JS_ROOTS(roots, message_root, make_string_item(message ? message : ""));
     JS_ROOTS(name_roots, name_root, make_string_item("DataCloneError"));
@@ -14360,7 +14360,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
         break;
     }
     case JS_HOST_GROUP_XHR: {
-        // D6.2.2v2: host constructors must publish [[Construct]] because `new`
+        // D7.2.2: host constructors must publish [[Construct]] because `new`
         // no longer infers behavior from the global property's spelling.
         js_install_native_constructor(global.get(), "XMLHttpRequest",
             js_xhr_new);
@@ -14397,7 +14397,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             Rooted<Item> ac_ctor_root(abort_controller_roots,
                 js_new_native_constructor(js_new_AbortController));
             Rooted<Item> ac_proto_root(abort_controller_roots, js_new_object());
-            // D5.4.3: constructor and prototype are unpublished across
+            // D6.4.3: constructor and prototype are unpublished across
             // allocating setup calls and therefore need explicit roots.
             js_set_key_cstr(ac_ctor_root.get(), "prototype", ac_proto_root.get());
             // abort method on instances (set by constructor), but also add as static for access
@@ -14415,7 +14415,7 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
             RootFrame abort_signal_roots(1);
             Rooted<Item> as_ctor_root(abort_signal_roots,
                 js_new_native_function(js_make_abort_signal));
-            // D5.4.3: method installation allocates before global publication.
+            // D6.4.3: method installation allocates before global publication.
             js_install_native_method(as_ctor_root.get(), "abort", js_abort_signal_abort);
             js_install_native_method(as_ctor_root.get(), "timeout",
                 js_abort_signal_timeout);
@@ -14439,11 +14439,11 @@ static Item js_install_host_global_group(Item target, JsHostGlobalGroup group) {
                 js_new_native_this_span_function(js_text_encoder_encode_method));
             Rooted<Item> decode_method(text_codec_roots,
                 js_new_native_this_span_function(js_text_decoder_decode_method));
-            // D6.2.2v2 removed receiver/name dispatch, so codec behavior must be
+            // D7.2.2 removed receiver/name dispatch, so codec behavior must be
             // published as real prototype properties owned by each constructor.
             // Keep both keys rooted: the first property write can collect while
             // the second key is still waiting in the native setup sequence
-            // (D5.4.3).
+            // (D6.4.3).
             Rooted<Item> encode_key(text_codec_roots, make_string_item("encode"));
             Rooted<Item> decode_key(text_codec_roots, make_string_item("decode"));
             // deferred native definitions create own slots even when guest ancestors have setters.
@@ -14721,7 +14721,7 @@ extern "C" Item js_get_global_this() {
         // Node compatibility namespaces are ordinary own data slots, but their
         // large method graphs are built only when read. Tune4 requires this
         // whole-object transaction when eager real properties exceed the realm
-        // startup budget (D6.2.2v2).
+        // startup budget (D7.2.2).
         js_install_host_namespace_slots(js_global_this_obj, js_define_host_namespace_slot, false);
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
@@ -15500,7 +15500,7 @@ extern "C" Item js_eval_private_resolve(Item unscoped_key) {
 
 // The preamble snapshot owns the realm's catalog-backed global functions too;
 // partial reset must keep their identity alongside Number.parseFloat and the
-// Function.prototype restricted accessors (D6.2.2v2).
+// Function.prototype restricted accessors (D7.2.2).
 
 // Intrinsic caches seed their slots with ItemNull but a root-range clear zeroes
 // them, so both patterns mean "nothing cached here".
@@ -15536,7 +15536,7 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
 
     const JsIntrinsicTargetSpec* target = js_intrinsic_target_find(spec->target_id);
     if (!target || !target->call_body) return ItemNull;
-    // D6.2.2v2: publish the catalog-selected direct capability before the
+    // D7.2.2: publish the catalog-selected direct capability before the
     // function becomes observable; global IDs no longer select behavior at call time.
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
     js_function_init_abi(fn);
@@ -16000,7 +16000,7 @@ static void js_proto_snapshot_bootstrap_constructors() {
     // reset can otherwise snapshot an empty global-function cache. Materialize
     // the catalog functions here; later tests may delete configurable metadata
     // such as encodeURI.length, which must be restored at the snapshot boundary
-    // (D6.2.2v2).
+    // (D7.2.2).
     for (int i = 0; i < js_builtin_global_count(); i++) {
         const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
         if (!spec || spec->kind != JS_BUILTIN_GLOBAL_FUNCTION ||
@@ -16047,7 +16047,7 @@ static void js_proto_snapshot_map(MapSnapshot* snap, Map* m) {
             js_proto_snapshot_clear_map(snap);
             return;
         }
-        // D4.3.1: data_cap is the complete allocation contract, including
+        // D5.3.1: data_cap is the complete allocation contract, including
         // constructor-reserved slots beyond the packed TypeMap byte_size.
         memcpy(pristine->data, m->data, (size_t)m->data_cap);
     }
@@ -16074,7 +16074,7 @@ static void js_proto_restore_map(const MapSnapshot* snap) {
     if (snap->data_cap > 0 && m->data && snap->pristine.map->data) {
         // Raw external bytes do not participate in precise GC and allowed
         // accessor pairs to be swept. The rooted shadow Map keeps every edge
-        // traced while its data buffer follows compaction (D4.3.1, D6.2.2v2).
+        // traced while its data buffer follows compaction (D5.3.1, D7.2.2).
         memcpy(m->data, snap->pristine.map->data, (size_t)snap->data_cap);
     }
 }
@@ -16237,7 +16237,7 @@ static void js_proto_snapshot_add_intrinsic_function(
     js_proto_snapshot_capture_prototype_function(snap, function);
     // Built-in method functions remain reachable through a pristine prototype
     // map. Their own descriptor maps must also reset, or a prior test's
-    // `delete method.length` leaks into the next hot-batch realm (D6.2.2v2).
+    // `delete method.length` leaks into the next hot-batch realm (D7.2.2).
     snap->function = (JsFunction*)function_root.get().function;
 }
 
@@ -16373,7 +16373,7 @@ static void js_proto_snapshot_restore_locked() {
         JsFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
         // Global catalog functions survive hot reset for identity. Their own
         // maps must therefore be restored too: a test-local delete of
-        // encodeURI.length otherwise poisons the next test (D6.2.2v2).
+        // encodeURI.length otherwise poisons the next test (D7.2.2).
         js_proto_snapshot_restore_function(s);
     }
     JsPrototypeSnapshotState* state = js_proto_snapshot_state();
@@ -16575,7 +16575,7 @@ extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
 
     // Publishing only the hidden construct payload left the public prototype
     // slot null after a hot snapshot restore. Initialize both views in the
-    // shared native-constructor transaction (D5.4.3, D6.2.2v2).
+    // shared native-constructor transaction (D6.4.3, D7.2.2).
     Item initialized_proto =
         js_initialize_native_constructor_prototype(ctor, per_type);
     if (item_is_error(initialized_proto)) return initialized_proto;
@@ -16688,7 +16688,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         js_intrinsic_target_find(spec->target_id);
     if (!target || !target->call_body) return ItemError;
     // The binding chooses its immutable call/construct capabilities once;
-    // runtime_id remains cache/prototype linkage only (D6.2.2v2).
+    // runtime_id remains cache/prototype linkage only (D7.2.2).
     js_fn_native_ensure(fn)->call = target->call_body;
     js_fn_native_ensure(fn)->construct = target->construct_body;
     js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
@@ -16701,7 +16701,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         : (name ? js_class_from_name(name, (int)strlen(name)) : JS_CLASS_NONE));
     if (typed_array_element_type >= 0) {
         // The target owns its concrete element policy; changing `.name` can
-        // never redirect TypedArray allocation or species behavior (D6.2.2v2).
+        // never redirect TypedArray allocation or species behavior (D7.2.2).
         code->typed_array_element_type_plus_one =
             (uint8_t)(typed_array_element_type + 1);
     }
@@ -16713,7 +16713,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     // because ItemNull.item is non-zero and bound check uses truthy test.
     fn->name = heap_create_name(name, strlen(name));
     // Constructor-cache publication is the point where call and construct
-    // capabilities become immutable executable metadata under D6.2.2v2.
+    // capabilities become immutable executable metadata under D7.2.2.
     js_function_finalize_capabilities(fn);
     Item fn_item = (Item){.function = (Function*)fn};
     js_constructor_cache_at(ctor_id) = fn_item;
@@ -16879,7 +16879,7 @@ extern "C" Item js_get_intrinsic_prototype_for_class(int class_id) {
         Rooted<Item> parent_root(roots,
             js_get_intrinsic_prototype_for_class((int)parent_class));
         // Intrinsic subclass prototypes need their actual parent identity;
-        // class bytes cannot substitute for OrdinaryHasInstance (D6.2.2v2).
+        // class bytes cannot substitute for OrdinaryHasInstance (D7.2.2).
         if (get_type_id(parent_root.get()) == LMD_TYPE_MAP) {
             js_set_prototype(proto_root.get(), parent_root.get());
         }

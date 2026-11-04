@@ -1,23 +1,23 @@
 # Lambda Compile Pipeline — stage map, build-time budget, and implementation
 
 > **Status**: **IMPLEMENTED (2026-09-22).** This is an implementation of the
-> existing pipeline contract (**D8.2.4**, **D8.2.5v2**) under the shipped
-> **AUTO** tier policy (**D8.1.1v13**); it introduces no semantic or design
+> existing pipeline contract (**D8.2.4**, **D8.2.5**) under the shipped
+> **AUTO** tier policy (**D8.3.5**); it introduces no semantic or design
 > ruling.
 > **Role**: the design home for the *cost* of the Lambda compile pipeline from
 > source to a runnable unit — which stages exist, what each walks, where the
 > time goes, and how the front end is brought to a linear budget. The
 > *structure* of the pipeline stays owned by `Lambda_Design_Unified_AST.md`
 > (U27–U32 → D8.2.4–D8.2.6) and the tier model by
-> `Lambda_Design_Ast_Interpreter.md` (AI1–AI22 → D8.1.1).
+> `Lambda_Design_Ast_Interpreter.md` (AI1–AI22 → D8.3.1).
 > **Scope**: parse → build → bind → validate → index → (plan | const-fold →
 > MIR plan/lower/finalize/link). Out of scope: execution speed of T0 or of
 > generated code, the MIR cache tiers (D8.5), and the parser's grammar.
-> **Formal anchors**: D8.1.1v13 (AUTO tier, T0 baseline), D8.1.2v3 (C parser
+> **Formal anchors**: D8.3.5 (AUTO tier, T0 baseline), D8.1.1 (C parser
 > is the shipped front end), D8.2.4 (one indexed compilation unit),
-> D8.2.5v2 (typed pass manager; facts live on the AST), D8.5.1v7 (L1 script
+> D8.2.5 (typed pass manager; facts live on the AST), D8.3.5 (L1 script
 > cache, AST-template prebuild), D8.6.1 (MT7 emission ratchet),
-> D8.6.4v2 (fail-closed consolidation gates).
+> D8.6.4 (fail-closed consolidation gates).
 > **Ledger**: extends the compiling area's **LC#** series
 > (`Lambda_Design_Compiling.md`, LC1–LC2): decisions **LC3.1–LC3.9**, open
 > issues **LCO1–LCO6**. No new series.
@@ -34,7 +34,7 @@
 
 `transpile_script` (`lambda/runtime/runner.cpp`) drives a
 `CompilerPassManager` (`compiler_timing.hpp`) whose passes declare required
-and produced facts (D8.2.5v2). In the AUTO/interp tiers the manager stops
+and produced facts (D8.2.5). In the AUTO/interp tiers the manager stops
 after `index` and hands the unit to the frame planner; in the `jit` tier
 `compile_script_as_mir_direct` (`transpile-mir.cpp`) appends the MIR passes
 to the same manager.
@@ -108,7 +108,7 @@ resolved at their host, so constants, types and diagnostics keep the order
 the old reducer produced. `bind` rejects any node still carrying a syntax
 form. The parser remains a recognizer with no `Transpiler` knowledge, and
 the comparison sink still verifies it against the reference grammar
-(D8.1.2v3).
+(D8.1.1).
 
 ### 1.3 Where the time goes (measured)
 
@@ -188,7 +188,7 @@ quadratic. LCO1.
 
 ## 2. Why tune the front end now
 
-1. **AUTO is the shipped policy (D8.1.1v13): every unit runs in T0 first.**
+1. **AUTO is the shipped policy (D8.3.5): every unit runs in T0 first.**
    Nothing reaches MIR until a definition proves hot, and satellites lower
    one function at a time off the initial path. So the time from source to
    first result is exactly parse + build + bind + validate + index + plan,
@@ -206,7 +206,7 @@ quadratic. LCO1.
    generated or data-heavy modules (`oracle_poc` is a generated oracle,
    `mod_commands` is a command table) are the ones that grow past a thousand.
    A quadratic build turns a linear-looking edit into a visible stall.
-4. **Prebuild only helps if templates are reused.** D8.5.1v7 made module
+4. **Prebuild only helps if templates are reused.** D8.3.5 made module
    ASTs a cache producer; the measured 18 misses in one page-sized closure
    (§1.3) mean the critical path still rebuilds modules a worker already
    built, serially, inside the importer's build pass.
@@ -260,7 +260,7 @@ index never falls back to `memcmp`.
 ### LC3.2 — Import templates are consumed, never rebuilt, on the importer's thread
 
 **Decision.** An IMPORT reduction that finds a prebuilt AST template
-(D8.5.1v7) adopts it; a miss for a module that a prebuild worker owns
+(D8.3.5) adopts it; a miss for a module that a prebuild worker owns
 *waits* for that worker rather than rebuilding inline. Rebuilding is allowed
 only when no worker owns the key (single-import scripts, `jit` tier, or
 prebuild disabled). The cache summary must report zero `ast_misses` for
@@ -370,7 +370,7 @@ must keep rejecting unknown forms.
 - A predicted native lane is only an admission to a typed-array fast path;
   lowering must observe the produced `MirValue` carrier before it writes raw
   storage. A public-ABI Item produced in a satellite falls back to the checked
-  setter (D2.4.1–D2.4.3, D8.2.6).
+  setter (D2.3.4–D2.3.5, D8.2.6).
 - Every Lambda MIR entry uses the shared native-stack probe against
   `Context::stack_limit` and shares its recovery-backed exit with side-stack
   exhaustion. The finalizer inserts the probe only after root coloring, so its
@@ -386,16 +386,16 @@ must keep rejecting unknown forms.
 - Execution-pool map/element rebuilds and search-match shapes stay attached to
   their containers, with no compiler type-list index. Registering those shapes
   in a cached module left dangling entries after batch teardown and raced
-  satellite shape inference (D4.2.3, D8.5.1v7).
+  satellite shape inference (D5.2.1, D8.3.5).
 - Satellite property-key indices are image-local until the receiving evaluator
   assigns their key-table suffix at publication. Generated entries read the
   sealed image relocation; workers never query evaluator TLS for a key base.
   Otherwise every worker sees base zero and later images silently reuse the
-  first image's unrelated property names (D4.6.1v2, D8.5.1v7).
+  first image's unrelated property names (D5.6.1, D8.3.5).
 - Shared name/shape pool reference counts are atomic. Satellite cancellation
   waits for rejected-image cleanup before reporting the queue idle, so parent
   pools cannot disappear while workers still release or consult them
-  (D4.2.4, D8.5.1v7).
+  (D5.2.3, D8.3.5).
 
 **Why.** Not on the T0 critical path, but it is the whole `jit` tier budget
 (§1.3) and it bounds satellite promotion latency in AUTO: a satellite for a
@@ -443,9 +443,9 @@ allocation but no longer copies every reduction onto the tape;
 ### 3.9 Non-goals
 
 - No bytecode, no second IR, no change to the syntax/resolve split
-  (D8.1.1v13, AI22).
+  (D8.3.5, AI22).
 - No change to fact placement: inferred types stay on `AstNode.type`,
-  declared annotations on the declaring node (D8.2.5v2). LC3.3's index
+  declared annotations on the declaring node (D8.2.5). LC3.3's index
   columns are the D8.2.4 identities, not a fact table.
 - No semantic effect: every item is verified by golden identity across
   tiers (§4.3), and the reducer's diagnostics keep their source order.
@@ -477,16 +477,16 @@ allocation but no longer copies every reduction onto the tape;
 - Binding uses an epoch mark, remaps the reducer-built capture list in place,
   and returns one function list to validation. Allocation reserves node IDs;
   bind publishes graph columns, with the JIT-only columns deferred for T0 as
-  permitted by D8.2.4 and D8.2.5v2.
+  permitted by D8.2.4 and D8.2.5.
 - Cache templates keep a cache-only dependency list of immutable template
   owners. Execution keeps its distinct Runtime-local `direct_imports` shell
   graph, so both AST and MIR cache publication avoid retaining stale module
-  state (D8.5.1v7).
+  state (D8.3.5).
 - The call validator resolves source offsets to line numbers only when it
   emits a diagnostic. Successful calls previously scanned the source prefix
   solely to prepare an unused line number, producing a second quadratic
   build cost after scope indexing; this does not alter diagnostics or their
-  source order (D8.2.5v2).
+  source order (D8.2.5).
 - Release scaling, interleaving 12 runs per size, measured median
   `ast_build_us` of 1,135 for `fns_500` and 3,997 for `fns_2000` (3.52×),
   and 2,443 for `lets_2000` and 9,478 for `lets_8000` (3.88×). The focused
@@ -616,7 +616,7 @@ rows separately in `temp/phase_profile.txt`.
 - **LCO2 (resolved)** Cached template dependency validation had normalized
   execution-local imports in place. Template-owner dependencies now live in
   `cache_direct_imports`, so prebuilt AST and MIR graphs do not reuse an
-  earlier Runtime's module shells (D8.5.1v7).
+  earlier Runtime's module shells (D8.3.5).
 - **LCO3** `ui/todo2.ls` rejects T0 (view template without body) and falls
   back to whole-module JIT (79.7 ms). Either T0 support or a satellite-only
   path for the rejected kind.
@@ -627,7 +627,7 @@ rows separately in `temp/phase_profile.txt`.
   build pass on one thread with no prebuild; whether the AUTO-tier prebuild
   should also serve `jit` is a policy question for `Lambda_Design_Compiling.md`.
 - **LCO6** `AstIndex::facts`/`AstNodeFacts` are still allocated per unit
-  although D8.2.5v2 retired the fact table; retiring them belongs to
+  although D8.2.5 retired the fact table; retiring them belongs to
   `Lambda_Proposal_JS_Unify_P7.md` U-D but shortens the index pass here.
 
 ## Appendix C — Measurement notes

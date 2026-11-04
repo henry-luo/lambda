@@ -2024,7 +2024,7 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
 
 // A model-bound surface chooses what a copy or cut puts on the clipboard (its
 // selection may reach past what the DOM shows); Radiant only transports it
-// (D7.2.5). Returns false when the model supplied no clipboard payload.
+// (D10.2.1). Returns false when the model supplied no clipboard payload.
 static bool copy_model_payload_to_clipboard(DocState* state, Item result, const char* prefix) {
     char* image = radiant_edit_result_string_copy(result, "clipboard_image");
     char* html = radiant_edit_result_string_copy(result, "clipboard_html");
@@ -2207,7 +2207,7 @@ static EventSourcePayloadSeeds* event_source_payload_seeds(DomDocument* doc) {
         return nullptr;
     }
     // Reuse the published schema builders once; these private immutable seeds
-    // belong to Input, while every event snapshot below belongs to GC (D4.1.1v2).
+    // belong to Input, while every event snapshot below belongs to GC (D5.1.1).
     MarkBuilder builder(doc->input);
     SourcePosC empty = {};
     seeds->position = source_pos_to_item(builder, &empty).map;
@@ -2274,7 +2274,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     mb.put("type", event_name);
     if (event_name && strcmp(event_name, "scrollkey") == 0) {
         EditingSurface surface;
-        // expose live focus ownership; the package decides which keys belong to text entry (D7.2.5).
+        // expose live focus ownership; the package decides which keys belong to text entry (D10.2.1).
         mb.put("editing", doc->state && editing_surface_from_focus(doc->state, &surface));
     }
     // Every DOM Event has a timeStamp; a native record takes its creation
@@ -2313,13 +2313,13 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     // A behavior-only operation can carry a value without being either an
     // edit intent or a legacy command. Preserve that generic transport shape
-    // for package handlers such as document-mode policy (D7.2.5).
+    // for package handlers such as document-mode policy (D10.2.1).
     if (intent && intent->type == INPUT_INTENT_NONE && !intent->command &&
         intent->data) {
         mb.put("data", intent->data);
     }
 
-    // D7.2.5: the package uses this short-lived capability explicitly for
+    // D10.2.1: the package uses this short-lived capability explicitly for
     // every DOM edit primitive. It is absent from unrelated behavior events.
     if (intent) {
         if (intent->edit_invocation_id != 0) {
@@ -2338,7 +2338,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     // The action snapshot and selectionchange projection share one canonical
     // native revision. Model handlers use this to reject their own completion
-    // echo without clearing stored marks (D7.5.3).
+    // echo without clearing stored marks (D9.5.6).
     DocState* selection_state = doc->state ? (DocState*)doc->state : nullptr;
     if (selection_state &&
         (intent || (event_name && strcmp(event_name, "selectionchange") == 0))) {
@@ -2637,7 +2637,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     // The model action consumes the same immutable target ranges exposed to
     // InputEvent.getTargetRanges(). Project them once while the pre-action DOM
     // is live; schema code never reconstructs a target from post-notification
-    // selection state (D7.2.5, D7.5.3).
+    // selection state (D10.2.1, D9.5.6).
     if (evcon && evcon->editing_target_ranges_active) {
         RootFrame range_roots(1);
         Rooted<Array*> projected_ranges(range_roots, array_plain());
@@ -3631,7 +3631,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     return !declined;
 }
 
-// D5.4.1: a script-less interactive document claims its own evaluator when
+// D6.4.1: a script-less interactive document claims its own evaluator when
 // behavior first needs one; a script-bearing document already owns its realm.
 // A claim may replace the thread binding only outside an active event scope.
 static __thread int s_event_scope_depth = 0;
@@ -3663,7 +3663,7 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     Runtime* rt = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
     if (!rt) return false;
     runtime_init(rt);
-    // D8.1.1v13: behavior handlers can retain nodes in this document's arena;
+    // D8.3.5: behavior handlers can retain nodes in this document's arena;
     // mark even a script-less evaluator as UI-owned before loading dom.ls.
     runtime_set_ui_result_input(rt, doc->input);
     EvalContext* ctx = runtime_get_eval_context(rt);
@@ -3927,7 +3927,7 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         s_enabled = (env && env[0] == '0') ? 0 : 1;
     }
     if (!s_enabled) {
-        // D7.2.5: disabling the behavior package makes rich UA editing
+        // D10.2.1: disabling the behavior package makes rich UA editing
         // unavailable; it must not select a native editing fallback.
         doc->dom_package_loaded = true;
         log_info("dom-package: disabled by RADIANT_DOM_PKG; package behavior unavailable");
@@ -4017,7 +4017,7 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // script-less page nothing has bound an evaluator to this thread yet.
     //
     // Child dispatch can finish with its parent bound. Admit the policy owner
-    // only at a quiescent native boundary; live guest frames still defer (D5.4.1).
+    // only at a quiescent native boundary; live guest frames still defer (D6.4.1).
     EvalContext* ctx = runtime_get_eval_context(rt);
     if (!ctx) {
         log_error("dom-package: runtime has no eval context");
@@ -4032,7 +4032,7 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         log_error("dom-package: cannot bind the document eval thread");
         return false;
     }
-    // D8.5.1v2: package modules share the document evaluator's module registry.
+    // D8.5.1: package modules share the document evaluator's module registry.
     // A Lambda-rendered iframe has no JS DOM realm, but module registration
     // still reads the context-owned JS support epoch while compiling the
     // package after an iframe target switch.
@@ -4628,7 +4628,7 @@ extern "C" bool radiant_dispatch_behavior_dom_edit(View* target,
     return dispatch_behavior_handler(nullptr, target, "domedit", intent, nullptr);
 }
 
-// D7.2.5: queries share the package descriptor registry with execution.  The
+// D10.2.1: queries share the package descriptor registry with execution.  The
 // returned scalar is rooted through handler settlement before this seam hands
 // it back to the DOM IDL bridge.
 extern "C" bool radiant_dispatch_behavior_edit_query(View* target,
@@ -4661,7 +4661,7 @@ extern "C" bool radiant_dispatch_behavior_exec_command(View* target,
 
 // designMode is a document IDL operation, not a command alias. It uses the
 // same behavior bridge so native code transports the raw value without
-// deciding its compatibility semantics or editing-host lifecycle (D7.2.5).
+// deciding its compatibility semantics or editing-host lifecycle (D10.2.1).
 extern "C" bool radiant_dispatch_behavior_design_mode(View* target,
                                                        const InputIntent* intent,
                                                        Item* out_result) {
@@ -8409,7 +8409,7 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
     DocState* state = (DocState*)doc->state;
 
     // the fallback drops layout resources; transient owners survive until the
-    // post-layout prune checks their DOM identity (D4.5.1v4).
+    // post-layout prune checks their DOM identity (D5.5.1).
 
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
@@ -8548,7 +8548,7 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
     if (!s->active) return;
     uint64_t t_handler = time_now_ns();
     input_context = s->saved_input_ctx;
-    // a synthetic event inside a script shares its outer mutation ledger and commit boundary (D5.4.1).
+    // a synthetic event inside a script shares its outer mutation ledger and commit boundary (D6.4.1).
     if (!s->nested_execution) post_html_handler_rebuild(evcon, t_start, t_handler);
     s->active = false;
 }
@@ -8827,7 +8827,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     // Revalidate the retained host, canonical surface and every target
     // boundary. A Selection-only change does not retarget the immutable
     // action ranges; relevant DOM replacement still fails closed without
-    // choosing a new backend (D7.2.5, D7.5.3).
+    // choosing a new backend (D10.2.1, D9.5.6).
     if (!document) return true;
     if (dom_mutation_epoch(document) != snapshot_epoch &&
         !contenteditable_action_snapshot_still_valid(
@@ -9210,7 +9210,7 @@ bool radiant_queue_timing_events(UiContext* uicon, DomElement* target, RadiantJs
         template_registry_has_author_handler(g_template_registry, css_event_type);
     bool queued = true;
     if (observed) {
-        // D5.3.3: target-wrapper allocation and callbacks can collect either argument.
+        // D6.3.3: target-wrapper allocation and callbacks can collect either argument.
         RootFrame roots(2);
         Rooted<Item> target_root(roots, dom_wrap_element(target));
         Rooted<Item> event_root(roots, ItemNull);
@@ -9728,7 +9728,7 @@ static bool radiant_dispatch_button_pointer_event(
 }
 
 // EventSim pointer and touch input stands in for trusted host input; it
-// activates the target's document as handle_event does for presses (D7.5.4).
+// activates the target's document as handle_event does for presses (D11.3.1).
 static void event_sim_note_activation(UiContext* uicon, View* target) {
     DomElement* element = view_geometry_nearest_dom_element(target, 0);
     radiant_audio_note_activation(element ? element->doc : uicon->document);
@@ -11196,7 +11196,7 @@ struct HoverEventPath {
         nodes = (DomNodeRef*)mem_calloc(depth, sizeof(DomNodeRef), MEM_CAT_LAYOUT);
         if (!nodes) return;
         // handlers may rebuild or detach this chain during the first event.
-        // snapshot and pin every target before invoking author code (D4.5.2).
+        // snapshot and pin every target before invoking author code (D5.5.2).
         for (DomNode* node = element; node; node = node->parent) {
             if (!node->is_element()) continue;
             DomNodeRef ref = dom_node_ref(node);
@@ -12397,7 +12397,7 @@ bool is_view_focusable(View* view) {
             if (elem->get_attribute("tabindex")) return true;
             // designMode promotes its document body to the rich editing host.
             // Keep that document-level rule explicit here: the synthetic body
-            // host has no contenteditable attribute to discover (D7.2.5).
+            // host has no contenteditable attribute to discover (D10.2.1).
             if (delem->doc && delem->doc->design_mode &&
                 dom_document_body_element(delem->doc) == delem) {
                 return true;
@@ -12457,7 +12457,7 @@ void radiant_focus_events_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                          DomNode* new_root) {
     DocState* state = doc ? static_cast<DocState*>(doc->state) : nullptr;
     for (FocusDispatchScope* scope = state ? state->focus_dispatch : nullptr; scope; scope = scope->previous) {
-        // D4.5.2: pending events follow retained identity; original call-stack pointers stay leased.
+        // D5.5.2: pending events follow retained identity; original call-stack pointers stay leased.
         view_state_ref_follow_rebuild(doc, &scope->from, old_root, new_root);
         view_state_ref_follow_rebuild(doc, &scope->to, old_root, new_root);
     }
@@ -12652,7 +12652,7 @@ View* find_view(View* view, DomNode* node) {
 
 // The request is document-owned, not EventContext-owned: a behavior handler
 // runs below the event dispatcher and must not retain a stack EventContext.
-// Node references are pinned across that return boundary (D4.5.1v3).
+// Node references are pinned across that return boundary (D5.5.1).
 typedef struct RadiantNavigationRequest {
     // link is first so the queue core never needs DOM-aware request details.
     QueueNode link;
@@ -13125,7 +13125,7 @@ static void navigation_async_work(uv_work_t* request) {
                                 job->viewport_width, job->viewport_height,
                                 &job->host_config, nullptr, true);
     // The document and its retained evaluator may cross threads only after
-    // the worker releases its quiescent TLS binding (D5.4.1).
+    // the worker releases its quiescent TLS binding (D6.4.1).
     if (!navigation_release_evaluator_for_document_load()) {
         log_error("navigation-async: worker could not release document evaluator");
     }
@@ -13957,7 +13957,7 @@ struct EventDocumentScope {
         owner->type_list = runtime_type_list(runtime);
         owner->pool = runtime_heap(runtime)->pool;
         if (context != owner && !radiant_eval_context_switch(owner)) return;
-        // D5.4.1: iframe hit testing is the quiescent ownership boundary;
+        // D6.4.1: iframe hit testing is the quiescent ownership boundary;
         // following handlers use the evaluator that owns the target document.
         if (!radiant_bind_document_script_host(evcon->ui_context, target_doc)) return;
     }
@@ -14006,7 +14006,7 @@ static bool reconcile_pending_template_tree(UiContext* ui, DomDocument* doc, uns
     PendingTemplateReconcile pending = {ui, depth, changed};
     if (doc->view_tree && doc->view_tree->root)
         view_geometry_walk_elements(doc->view_tree->root, reconcile_embedded_templates, &pending);
-    // the host's next mutation/observer consumer belongs to this document (D5.4.1).
+    // the host's next mutation/observer consumer belongs to this document (D6.4.1).
     EventDocumentScope consumer(ui, doc);
     return pending.changed;
 }
@@ -14808,7 +14808,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                 }
             }
             event_note_pointer_active_frame(pressed_doc);
-            // a trusted press activates the pressed document (D7.5.4).
+            // a trusted press activates the pressed document (D11.3.1).
             radiant_audio_note_activation(pressed_doc);
         }
 
@@ -15970,7 +15970,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
         KeyEvent* key_event = &event->key;
         DocState* state = event_context_target_state(&evcon);
         if (!state) break;
-        // a trusted non-modifier key press activates the focused document (D7.5.4).
+        // a trusted non-modifier key press activates the focused document (D11.3.1).
         if (key_event->key < RDT_KEY_LEFT_SHIFT || key_event->key > RDT_KEY_RIGHT_SUPER)
             radiant_audio_note_activation(event_context_target_document(&evcon));
 
@@ -16103,7 +16103,7 @@ static void handle_event_impl(UiContext* uicon, DomDocument* doc, RdtEvent* even
                     chosen.set(candidate);
                     DomNode* node = static_cast<DomNode*>(radiant_dom_unwrap_node(chosen.get()));
                     if (node && node->is_element()) {
-                        // D7.2.5: package policy chooses; the shared transition commits and dispatches.
+                        // D10.2.1: package policy chooses; the shared transition commits and dispatches.
                         update_focus_state(&evcon, static_cast<View*>(node), true);
                     }
                 }

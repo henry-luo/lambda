@@ -176,7 +176,7 @@ bool input_script_cache_refresh_file_unit(InputScriptCache* cache,
     const SecurityIOClient* io, SecurityIOResult* out_result);
 // Refresh every file-backed dependency reachable from one logical unit. A
 // failed freshness proof retires that unit's importer cone before a caller can
-// reuse its compiled image (D8.5.1v3).
+// reuse its compiled image (D8.5.1).
 bool input_script_cache_refresh_file_dependencies(InputScriptCache* cache,
     uint32_t compilation_unit_id, bool* out_changed);
 

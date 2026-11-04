@@ -1,4 +1,4 @@
-// Shared OPC capture keeps DOCX/PPTX on one bounded ZIP/XML and URI path (D7.5.2).
+// Shared OPC capture keeps DOCX/PPTX on one bounded ZIP/XML and URI path (D11.1.2).
 import x: lambda.doc.xml
 import uri: lambda.doc.uri
 pub let R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"

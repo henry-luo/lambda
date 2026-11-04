@@ -1,4 +1,4 @@
-// shared Ant-inspired contracts for source skins; static tag factories stay with each skin (D7.2.4).
+// shared Ant-inspired contracts for source skins; static tag factories stay with each skin (D9.3.4).
 import base: lambda.ui.dtna
 import c: .component
 

@@ -178,7 +178,7 @@ Velmt handles should be scoped:
 
 If a stale Velmt is used, the API should return an error value and log a distinct prefix such as `VELMT_STALE_HANDLE`.
 
-Current implementation note: the public handle is a Lambda Velmt backed by an immutable C-side `RadiantVelmt` layout snapshot; its `children` face is a pass-scoped VArray (**D7.4.5v2**). Handles are scoped to the active custom layout callback and result parse; after that pass, property reads return `null` rather than exposing stale native state. The public shape exposes `index`, `tag`, `id`, `attrs`, `style`, bounded `children`, descendant `text`, box metrics, and edge metrics. Map-shaped values remain accepted by the helper functions for unit tests and backward-compatible smoke tests.
+Current implementation note: the public handle is a Lambda Velmt backed by an immutable C-side `RadiantVelmt` layout snapshot; its `children` face is a pass-scoped VArray (**D9.5.5**). Handles are scoped to the active custom layout callback and result parse; after that pass, property reads return `null` rather than exposing stale native state. The public shape exposes `index`, `tag`, `id`, `attrs`, `style`, bounded `children`, descendant `text`, box metrics, and edge metrics. Map-shaped values remain accepted by the helper functions for unit tests and backward-compatible smoke tests.
 
 ## 6. Custom layout API
 
@@ -186,7 +186,7 @@ The custom layout API is a pure placement callback.
 
 ### 6.1 Registration
 
-**Automatic package connection (user ruling, 2026-10-16; D7.5.3v2).**
+**Automatic package connection (user ruling, 2026-10-16; D9.5.6).**
 
 HTML selects a shipped layout by name. Radiant resolves `lambda-graph` to
 `lambda.graph.transform.layout` and `lambda-tikz` to
@@ -209,7 +209,7 @@ pub fn layout(parent, children, ctx) {
 The document's evaluator retains imported module state and compiled code.
 Static HTML acquires an evaluator lazily; a synchronous render within Lambda
 uses its active evaluator, avoiding a cross-runtime call under live frames.
-Generated paint retains explicit roots on the owning heap (**D5.3.3**).
+Generated paint retains explicit roots on the owning heap (**D6.3.3**).
 The private native callback table remains an engine/test extension point; it
 is not a DOM API and clearing it cannot disconnect shipped package layouts.
 
@@ -388,10 +388,10 @@ layout_flow_node
 The current implementation uses the same conceptual flow, with a few concrete bridge details:
 
 1. `layout_block` lays out normal in-flow children before invoking custom layout, so each child already has a resolved border-box size from the existing block/inline/flex/grid/table machinery.
-2. `layout_custom_apply` collects eligible child views into internal C `RadiantVelmt` snapshots. These snapshots are not the public Lambda Velmt value; they are the native payload used to preserve the child pointer, child index, normalized border box, and edge metrics for this pass (**D7.4.5v2**).
+2. `layout_custom_apply` collects eligible child views into internal C `RadiantVelmt` snapshots. These snapshots are not the public Lambda Velmt value; they are the native payload used to preserve the child pointer, child index, normalized border box, and edge metrics for this pass (**D9.5.5**).
 3. Each top-level child snapshot normalizes the input box to border-box top-left `(0, 0)` with its resolved `width` and `height`. Nested `children` reads preserve each nested child view's existing local geometry.
 4. Before calling Lambda, the Radiant module starts a pass id, builds host-backed Lambda Velmt values for `parent` and each child, and exposes the child sequence through VArray. Each host object owns an immutable copy of the C snapshot and records the active pass id.
-5. The automatically resolved package `layout` export is invoked as `fn(parent, children, ctx)` (**D7.5.3v2**). The callback can use direct property access such as `child.index`, `child.width`, and `child.style`, or the compatibility helpers such as `radiant.velmt_width(child)`.
+5. The automatically resolved package `layout` export is invoked as `fn(parent, children, ctx)` (**D9.5.6**). The callback can use direct property access such as `child.index`, `child.width`, and `child.style`, or the compatibility helpers such as `radiant.velmt_width(child)`.
 6. The callback returns placements. A placement may identify its child either by the Velmt handle in `child` or by an explicit `index`, depending on the result shape accepted by the parser.
 7. While the pass id is still active, Radiant parses the result and maps placements back to the collected child indices. This keeps returned Velmt handles usable for result parsing without allowing them to escape as live layout objects.
 8. Radiant validates duplicate and missing placements, applies `x` and `y` to each child view as border-box top-left coordinates, applies optional positive custom `z`, and clears stale custom `z` overlays when no `z` is returned.
@@ -457,7 +457,7 @@ This matters because Radiant may need to run the callback more than once:
 
 The API must treat repeated execution as normal.
 
-Package layout exports are pure `fn`s (**D7.5.3v2 / S12.1.1v3**). There is no application-supplied function registration to validate; new shipped layouts enter through the host package catalogue.
+Package layout exports are pure `fn`s (**D9.5.6 / S12.1.1v3**). There is no application-supplied function registration to validate; new shipped layouts enter through the host package catalogue.
 
 ### 8.6 Caching
 
@@ -474,7 +474,7 @@ The runtime cache should be scoped at least per `DomDocument`, with module/packa
 
 If any key changes, the cached runtime entry is invalidated and rebuilt.
 
-**Compiled module cache.** Package layout exports reuse the evaluator's normal module cache and tiering (**D7.5.3v2 / D8.1.1v18**). No parallel callback registry or separately rooted function cache is required. The retained module identity includes:
+**Compiled module cache.** Package layout exports reuse the evaluator's normal module cache and tiering (**D9.5.6 / D8.3.2**). No parallel callback registry or separately rooted function cache is required. The retained module identity includes:
 
 - layout name, for example `graph`
 - package module and exported `layout` function
@@ -597,7 +597,7 @@ After Lambda custom layout works, expose the same model to LambdaJS:
 
 LambdaJS consumers should select the same shipped layout names through their
 HTML/CSS. Connection remains host work; no JS registration surface is proposed
-(**D7.5.3v2**).
+(**D9.5.6**).
 
 The important part is that JS receives Velmt-like layout children, not live mutable DOM elements. That follows Houdini's spirit and avoids procedural reflow loops.
 
@@ -625,8 +625,8 @@ A closer Houdini-compatible API can be evaluated later, but it should not pull i
 
 ### Phase 3: Lambda callback invocation
 
-- automatically connect shipped package layout exports — implemented under D7.5.3v2
-- require shipped package `layout` exports to be pure `fn` (**D7.5.3v2**)
+- automatically connect shipped package layout exports — implemented under D9.5.6
+- require shipped package `layout` exports to be pure `fn` (**D9.5.6**)
 - retain package module state and compiled exports on the document evaluator — implemented; no callback registry roots
 - reuse ordinary package module state and execution tiers for layout exports
 - build scoped Velmt arrays for laid-out children - implemented with host-backed immutable snapshots
@@ -682,7 +682,7 @@ Use graph layout as the proving ground. It is complex enough to validate the API
 
 ~~The MVP exposed `radiant.register_layout(name, callback)` and required graph
 callers to invoke `transform.install()` before rendering.~~ Superseded by the
-2026-10-16 user ruling and **D7.5.3v2**: callback connection is automatic host
+2026-10-16 user ruling and **D9.5.6**: callback connection is automatic host
 work. The removed model stored rooted function values in per-heap registry slots
 and required a heap-cleanup hook; module-owned exports now supply that lifetime.
 

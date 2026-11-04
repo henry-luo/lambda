@@ -1,4 +1,4 @@
-// SQLite must authorize exactly the path it will open (D7.5.2).
+// SQLite must authorize exactly the path it will open (D11.1.2).
 import sqlite: lambda.io.sqlite
 
 pn main() {

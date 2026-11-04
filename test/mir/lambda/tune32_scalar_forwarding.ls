@@ -1,4 +1,4 @@
-// D8.3.2: only a matching scalar consumer justifies inferred forwarding.
+// D7.3.2: only a matching scalar consumer justifies inferred forwarding.
 pn tune32_scalar_pick(a, b) {
     if (a < b) { return a }
     return b

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3/S8.2.4v3: a unique trusted record inside an open array is only a guarded candidate; other maps, non-maps, and invalid indexes keep the generic member read.",
+  "description": "D4.3.3/S8.2.4v3: a unique trusted record inside an open array is only a guarded candidate; other maps, non-maps, and invalid indexes keep the generic member read.",
   "checks": [
     {
       "in_func": "_read_count_#",

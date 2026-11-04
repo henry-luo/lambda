@@ -1,10 +1,10 @@
 # Lambda Box/Unbox Proposal
 
 > **Status: RETIRED 2026-10-23.** C-transpiler-era proposal (`transpile.cpp`,
-> removed per AGENTS rule 14), kept for provenance of **D2.3.1**. The
+> removed per AGENTS rule 14), kept for provenance of **D2.3.2**. The
 > dual-version design is superseded by
 > [`Lambda_Design_Compiling_Dual_Func.md`](../Lambda_Design_Compiling_Dual_Func.md)
-> (DF1–DF17 → **D8.3**); its type-checking trampoline survives there as the
+> (DF1–DF17 → **D7.3**); its type-checking trampoline survives there as the
 > declared-parameter lane (DF2). The `_b<line>`/`_u<line>` naming, the
 > `fn__*` unboxed sys-funcs and all `transpile.cpp` anchors below are historical.
 

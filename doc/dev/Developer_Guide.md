@@ -93,7 +93,7 @@ These libraries and tools are required on every platform.
 | **bzip2** | System package | bzip2-compressed tar input |
 | **liblzma (xz)** | System package | Native 7z LZMA/LZMA2 and xz-compressed tar input |
 | **zstd** | System package | Zstandard-compressed tar input |
-| **libarchive** | Selected sources in `lib/zip/`, provenance in `lib/zip/VENDOR.md` | Memory-only 7z/tar/RAR/RAR5 input; bounded embedding under **D7.5.2** |
+| **libarchive** | Selected sources in `lib/zip/`, provenance in `lib/zip/VENDOR.md` | Memory-only 7z/tar/RAR/RAR5 input; bounded embedding under **D11.1.2** |
 
 #### Radiant Engine Libraries
 
@@ -169,7 +169,7 @@ recipes for ThorVG, Brotli, utf8proc, nghttp2, Google Test, mbedTLS, libpq,
 MariaDB Connector/C and the optional Clang metadata tool. Both paths use
 `utils/generate_premake.py` (`PremakeGenerator`); `utils/build_config.py`
 (`load_build_config`) merges imports and rejects cycles or duplicate targets.
-Dependencies remain static libraries under D7.1.1; the RDB TLS and plugin
+Dependencies remain static libraries under D9.1.1; the RDB TLS and plugin
 profile retains RDB8/RDB11 from `vibe/Lambda_IO_RDB.md`.
 
 ```bash
@@ -395,7 +395,7 @@ checks (LaTeX and LaTeX math are parsed by the direct C parsers in
 
 These follow the same `grammar.js` → `parser.c` pattern. The JS/TS archives
 are built only by `lambda-cst`; normal Lambda builds use the first-party C
-parser under D8.1.3v10.
+parser under D8.4.1.
 
 ---
 
@@ -798,7 +798,7 @@ Renamed 2026-10-03. Current binaries no longer read the old names.
 | `LAMBDA_EXEC_BACKEND` | `interp` \| `auto` \| `jit` (`auto`) | `LAMBDA_TIER` |
 | `LAMBDA_FUNC_JIT_THRESHOLD` | calls before promotion (5) | `LAMBDA_JIT_THRESHOLD` |
 | `LAMBDA_LOOP_JIT_THRESHOLD` | loop back-edges before handoff (10000) | `LAMBDA_JIT_BACKEDGE` |
-| `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`; unset/empty also AUTO, D8.1.3v29) | `JS_EXECUTION_BACKEND` |
+| `JS_EXEC_BACKEND` | `ast` \| `auto` \| `mir` (`auto`; unset/empty also AUTO, D8.4.2) | `JS_EXECUTION_BACKEND` |
 | `JS_FUNC_JIT_THRESHOLD` | (5) | `JS_JIT_THRESHOLD` |
 | `JS_LOOP_JIT_THRESHOLD` | (10000) | `JS_JIT_BACKEDGE` |
 

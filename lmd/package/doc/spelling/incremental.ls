@@ -1,4 +1,4 @@
-// paragraph caches retain lexical results, never DOM nodes or geometry (D7.2.5, S2.5.8).
+// paragraph caches retain lexical results, never DOM nodes or geometry (D10.2.1, S2.5.8).
 import document: .document
 import spelling: lambda.doc.spelling
 import text_offsets: lambda.dom.edit_history

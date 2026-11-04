@@ -26,7 +26,7 @@ enum TypeKind {
     TYPE_KIND_PARAM,
     // A parameter-contract site that records the runtime type observed at
     // entry (`number as T`).  Bound references carry only the stable slot so
-    // module-local Type graphs remain relocatable (D3.1.1v4).
+    // module-local Type graphs remain relocatable (D4.1.1).
     TYPE_KIND_BINDER,
     TYPE_KIND_BOUND_REF,
     // GM5v2: a grammar is a type and so is each of its syntax rules; both
@@ -423,9 +423,9 @@ struct Range : Container {
     bool is_char;    // true when bounds are Unicode codepoints materializing as strings
 };
 
-// D2.6.6v2: containers form ONE single-inheritance chain — Map -> Array ->
+// D3.1.1: containers form ONE single-inheritance chain — Map -> Array ->
 // Element. Map is the base because the attribute face is what every container
-// shares, and a property bag is what a JS program calls an object (D2.6.9v3).
+// shares, and a property bag is what a JS program calls an object (D3.1.5).
 // Keeping it first puts `type`/`data`/`data_cap` at ONE offset in every
 // container, so a cast to any ancestor is valid by construction and the
 // kind-aware offset accessors the previous layout needed all retire.
@@ -662,7 +662,7 @@ static inline Item array_native_lane_read(const Array* array, int64_t index) {
 
 // One element of an Array as an Item, whatever its carrier: a native lane
 // decodes its slot, a boxed array returns the slot itself. Admission into a
-// `T?[]` contract publishes a native lane (D3.2.6), so a reader that indexes
+// `T?[]` contract publishes a native lane (D4.2.6), so a reader that indexes
 // `items` directly takes a lane word for an Item -- a raw int `1` dereferenced
 // as a pointer -- which is how `==`, `in`, `++` and the numeric folds crashed
 // on an admitted `int?[]`. Index must be in range.
@@ -684,7 +684,7 @@ static inline bool array_native_lane_store(Array* array, int64_t index, Item val
             return false;
         }
         // The TypedItem slot is owned by the Array, so no number-frame pointer
-        // can survive this store (D2.5.2v3, D5.2.2v3).
+        // can survive this store (D2.4.2, D6.2.2).
         return typeditem_store_item((TypedItem*)array_native_lane_slot(array, index), value);
     }
     switch (kind) {
@@ -806,7 +806,7 @@ static inline __attribute__((always_inline)) int64_t array_num_element_offset(
 // Tune5 P5 gate: a List and ArrayNum share the same managed header and tail
 // offsets, but their element buffers still have different semantic contracts.
 // Retagging is legal only after this physical proof is true on every build.
-// D2.6.6v2: the single chain Map -> List/Array -> Element. These pin the one
+// D3.1.1: the single chain Map -> List/Array -> Element. These pin the one
 // property the whole design rests on: the attribute face sits at the SAME
 // offset in every container, so an ancestor cast is always valid.
 #pragma clang diagnostic push
@@ -942,7 +942,7 @@ struct SparseArrayMap : Map {
     int64_t sparse_version;          // increments on numeric sparse mutations
 };
 
-// D2.6.6v2: Element adds NO fields — its attribute face is Map's, inherited
+// D3.1.1: Element adds NO fields — its attribute face is Map's, inherited
 // through List. `Object` is a typedef of Element (lambda.h).
 struct Element : List {
     // member functions
@@ -952,7 +952,7 @@ struct Element : List {
     ConstItem get_attr(const char* attr_name) const;
 };
 
-// D2.6.6v2: Element inherits BOTH faces and adds nothing of its own.
+// D3.1.1: Element inherits BOTH faces and adds nothing of its own.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
 static_assert(offsetof(Element, type) == offsetof(Map, type) &&
@@ -1013,7 +1013,7 @@ static_assert(offsetof(VMapVtable, trace) == LAMBDA_GC_OFF_VMAP_VTABLE_TRACE,
 
 #define LAMBDA_VIRTUAL_ABI_VERSION 2u
 
-// D7.4.5v2: VArray and Velmt use the same host metadata prefix as VMap while
+// D9.5.5: VArray and Velmt use the same host metadata prefix as VMap while
 // exposing structural callbacks for their actual semantic container kind.
 struct VirtualVtable {
     uint32_t abi_version;
@@ -1294,7 +1294,7 @@ static inline int64_t lambda_content_count(TypeId type_id, const void* container
 // after this header; only the pointer is needed here.
 struct TypeMap;
 
-// D2.6.6: the packed attribute shape and buffer sit at DIFFERENT offsets in a
+// D3.1.1: the packed attribute shape and buffer sit at DIFFERENT offsets in a
 // map (right after the header) than in an element or object (after the list
 // fields). These two accessors are the only correct way to reach the attribute
 // face of a value whose kind is not statically fixed — reading `.map->type` on
@@ -1306,7 +1306,7 @@ static inline bool lambda_type_id_has_attr_face(TypeId type_id) {
     return type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_MAP;
 }
 
-// D2.6.6v2: every container extends Map, so the shape and its buffer sit at ONE
+// D3.1.1: every container extends Map, so the shape and its buffer sit at ONE
 // offset and a single cast to the shared base reaches them. The kind test that
 // remains selects WHICH kinds have attributes, not where they live.
 static inline struct TypeMap* lambda_attr_shape(TypeId type_id, const void* container) {
@@ -1355,7 +1355,7 @@ static inline LambdaError* it2err(Item item) {
 
 // Error completion from a LambdaError* that may be null (payload allocation
 // failed): a null payload still completes as the pointer-less ERROR sentinel,
-// never as null (D1.4v3). This is the one spelling of "return this error".
+// never as null (D1.4). This is the one spelling of "return this error".
 static inline Item err2it_or_error(LambdaError* err) {
     return err ? err2it(err) : ItemError;
 }

@@ -103,7 +103,7 @@ winning borders by halves ([RAD_05](RAD_05_Intrinsic_Sizing.md)). The paged
 producer also shares the winner rule. `col_edge_max_border` retains the largest
 resolved border on each vertical gridline so cells align consistently. Grid
 arrays borrow nodes and resolved boundaries within the caller's scratch scope;
-selected styles retain their original owners (**D4.5.1v4 /D4.1.4v5**).
+selected styles retain their original owners (**D5.5.1 /D5.1.4**).
 
 `layout_table_border_axis` maps source row/column edges through the table's
 shared logical-side mapping. Conflict candidates and retained cell winners use
@@ -124,8 +124,8 @@ border-box conversion subtracts top/bottom decoration. It must not subtract
 left/right decoration merely because the surrogate variable is named width.
 Collapsed grids retain their resolved outer-half conversion. The existing
 publication step restores physical outer decoration after track sizing
-(CSS Writing Modes 3 §§6.4–7.2; CSS Sizing 3 §3.3; **D4.5.1v4 /
-D4.1.4v5**). Writing-mode M70 tracks qualification.
+(CSS Writing Modes 3 §§6.4–7.2; CSS Sizing 3 §3.3; **D5.5.1 /
+D5.1.4**). Writing-mode M70 tracks qualification.
 
 Step 2 (`layout_table.cpp:6585`) measures every cell with `measure_cell_widths` (`layout_table.cpp:5468`), which returns a border-box `CellWidths{min, max}` — the cell's minimum content width (MCW, narrowest without overflow) and preferred content width (PCW). This is the seam into intrinsic sizing: the actual min/max-content measurement of cell contents is [RAD_05](RAD_05_Intrinsic_Sizing.md)'s `layout_measure_intrinsic_widths`. CSS `min-width`/`max-width` on the cell are folded in by `apply_table_cell_width_constraints` (`layout_table.cpp:5278`), which converts content-box constraints to border-box and lets `min-width` override `max-width` per the used-width rules. Single-column cells feed their MCW/PCW directly into `col_min_widths`/`col_max_widths`; multi-column (colspan) cells are distributed across their spanned columns by `apply_colspan_width_contribution` (`layout_table.cpp:1421`), which raises the columns' min/max only if the span's requirement exceeds the sum already present.
 
@@ -145,7 +145,7 @@ Logical size declarations use the cell's own physical-property winner through
 `layout_cascaded_physical_declaration`. Ignored row/group/column writing modes
 do not become descendant used-flow axes; computed CSS remains available for
 font-relative lengths (CSS Cascade 5 §4.5.1). Direction inheritance is separate.
-These adapters preserve **D4.5.1v4 / D4.1.4v5** owners.
+These adapters preserve **D5.5.1 / D5.1.4** owners.
 
 Table sizing evaluates a retrieved declaration with
 `resolve_element_length_value` (`radiant/resolve_css_style.cpp:3418`), passing
@@ -156,7 +156,7 @@ element's computed font and selected-view style. Read-only queries suppress
 computed-style dependency recording and use bounded substitution scratch;
 they do not reapply CSS or read layout-consumed preferred sizes. This keeps
 `em`/`ch`, CSS math and variables independent of the last descendant visited
-(CSS Values 4 §6.1.1; **D4.5.1v4 / D4.1.4v5**). Fixed-column percentages retain
+(CSS Values 4 §6.1.1; **D5.5.1 / D5.1.4**). Fixed-column percentages retain
 the table content-width basis. `TableCellLengthsUseTheDeclaringFontAndOrientation`,
 `TableAndRowLengthsDoNotBorrowDescendantFonts` and
 `FixedTableColumnLengthsKeepTheirOwnerAndPercentageBasis` cover retained
@@ -177,7 +177,7 @@ module supplies the same normalized source hint; layout does not reparse the
 attribute or read a consumed track size. Winning CSS and owner-bound math retain
 their priority. Span assignment, first-row fallback and distribution use the
 existing shared helpers (CSS 2.2 §17.5.2.1; HTML Rendering;
-**D4.5.1v4 / D4.1.4v5**). M67's retained controls cover this boundary without
+**D5.5.1 / D5.1.4**). M67's retained controls cover this boundary without
 claiming a new zero-column allocation or percentage-overflow policy.
 
 ### 4.5 Step 4 — positioning, row heights, vertical-align
@@ -203,7 +203,7 @@ that class retains proportional weighting through
 §17.5.3 leaves excess-height allocation open; this implements the automatic-row
 priority without claiming the CSS Tables 3 draft's equal-increment algorithm.
 Final row metadata drives row groups, rowspans and cell-content realignment.
-The grid remains transient scratch state under **D4.5.1v4 / D4.1.4v5**.
+The grid remains transient scratch state under **D5.5.1 / D5.1.4**.
 
 Explicit row growth resolves `table_grid_size_declaration` against
 `table_grid_block_size_property` and clamps min/max in that same physical axis.
@@ -234,7 +234,7 @@ Inline-only cells retain their line-box/root-strut measurement path.
 empty-block chains, separators, relative boxes, both border models, flex table
 wrappers and mixed floats through retained layout and causal margin changes.
 The change uses existing flow classification and leaves style snapshot ownership
-unchanged (**D4.5.1v4 /D4.1.4v5**).
+unchanged (**D5.5.1 /D5.1.4**).
 
 For an orthogonal vertical cell in a horizontal grid, content layout prepares
 the cell's own inline measure with `setup_inline` and publishes through shared
@@ -244,7 +244,7 @@ text-align's glyph bounds; alignment shifts update it with the children.
 Horizontal half-leading reconstruction cannot be applied to the published
 vertical text rectangles. The final row-height pass reflows those cells before
 alignment, preserving wrap/unwrap and direction through retained mutations
-(CSS Writing Modes 3 §7.3; **D4.5.1v4 / D4.1.4v5**).
+(CSS Writing Modes 3 §7.3; **D5.5.1 / D5.1.4**).
 
 For a length-specified orthogonal cell, `layout_table_cell_content`
 (`radiant/layout_table.cpp:6004`) uses the declared content-height basis from
@@ -252,7 +252,7 @@ For a length-specified orthogonal cell, `layout_table_cell_content`
 measured inline region constrains flow; glyph overflow beyond it cannot enlarge
 the originating row. Automatic inline sizes retain content-derived measurement.
 This reuses the owner-bound declaration resolver and preserves the existing
-percentage policy (CSS Writing Modes 3 §7.3; **D4.5.1v4 / D4.1.4v5**). M66's
+percentage policy (CSS Writing Modes 3 §7.3; **D5.5.1 / D5.1.4**). M66's
 retained paragraph controls cover the constrained overflow boundary.
 
 For vertical cells in a horizontal grid, cell `vertical-align` consumes the
@@ -266,7 +266,7 @@ retaining row-baseline and content-flow-origin updates only for grid-y shifts.
 Row growth and rowspan alignment skip a second grid-y shift for these cells.
 Line-box leading stays part of the natural extent; glyph ink alone does not
 define the alignment target. Computed style, allocation and ownership remain
-unchanged (**D4.5.1v4 / D4.1.4v5**). Retained geometry, analytic controls and
+unchanged (**D5.5.1 / D5.1.4**). Retained geometry, analytic controls and
 PNG/SVG/PDF parity are qualified in writing-mode M71, alongside exact fixed-line
 intrinsic contributions and the required aggregate gates.
 
@@ -287,11 +287,11 @@ participation. A raw `var()` is only potentially percentage-based; it cannot
 mark a finalized length-valued cell as a percentage row and exclude that row
 from table-height growth. The shared query returns scalar facts from bounded
 substitution scratch; final row heights and line-region ownership keep their
-existing stages (**D4.5.1v4 / D4.1.4v5**). M73's literal/variable controls and
+existing stages (**D5.5.1 / D5.1.4**). M73's literal/variable controls and
 retained row-growth regression cover this repair; its focused and aggregate
 checks are qualified.
 Computed-value and selected-view ownership remain
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 For the reverse orthogonal case, horizontal cells in a vertical logical grid
 temporarily format against physical dimensions while preserving the table's
@@ -304,8 +304,8 @@ placement uses the shared logical-to-physical inline progression, including
 the sideways-lr reversal (CSS Writing Modes 4 §3.2). Retained mode restoration,
 shared-row growth and wrapping are covered by
 `HorizontalCellFlowSurvivesVerticalTablePublicationAndReflow` and
-`OrthogonalCellsUseSharedRowWidthsAndTableInlineProgression`; **D4.5.1v4 /
-D4.1.4v5** remain unchanged. Qualification is tracked in writing-mode M54.
+`OrthogonalCellsUseSharedRowWidthsAndTableInlineProgression`; **D5.5.1 /
+D5.1.4** remain unchanged. Qualification is tracked in writing-mode M54.
 
 The shared vertical publisher consumes an explicit completed physical
 border-box height: measured flow supplies it for an automatic block, and the
@@ -325,7 +325,7 @@ inline-extent query and the ordinary vertical-flow helpers. Temporary setup
 must not expose a stand-in height as a descendant stretch constraint. Legacy
 caption block centering applies through the existing logical-axis margin
 adjustment even when a child had no preallocated boundary. Ownership remains
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 For a parallel caption in an automatic vertical grid, refinement supplies the
 wrapper's physical inline measure through the scoped `used_size_owner` context.
@@ -359,7 +359,7 @@ including sideways-lr in both directions. Retained regressions cover automatic
 HTML/CSS tables, anonymous cells, physical decoration, box-sizing changes and
 collapsed-padding invariance. General vertical caption sizing and segment-varying
 borders along a spanning cell remain partial. This uses existing transient
-state and selected-view ownership under **D4.5.1v4 / D4.1.4v5**; qualification
+state and selected-view ownership under **D5.5.1 / D5.1.4**; qualification
 is tracked in writing-mode M56.
 
 Collapsed tracks already contain their winning half-edges in the grid's own
@@ -369,7 +369,7 @@ translation before mirroring. Declared full physical borders and ignored
 padding cannot impose a second border-box floor. This preserves nonuniform
 physical outer borders in every writing mode and direction. Retained span,
 group, precedence and outer-frame checks are tracked in writing-mode M69;
-broader caption combinations remain partial (**D4.5.1v4 / D4.1.4v5**).
+broader caption combinations remain partial (**D5.5.1 / D5.1.4**).
 
 Parallel vertical cells use `table_cell_grid_content_insets` to derive a
 transient grid-frame copy of physical padding and used borders. Content layout,
@@ -378,7 +378,7 @@ padding contributes to block extent while top/bottom padding constrains line
 capacity. Publication carries used collapsed half-edges rather than rereading
 authored full borders. Physical computed style remains unchanged; orthogonal
 horizontal cells keep their physical content frame (CSS Writing Modes 3 §7.1;
-**D4.5.1v4 / D4.1.4v5**). M63's retained controls verify wrapping and text bounds
+**D5.5.1 / D5.1.4**). M63's retained controls verify wrapping and text bounds
 under asymmetric padding and direction/mode reversal.
 
 ---
@@ -406,7 +406,7 @@ separated gaps and hidden empty cells therefore expose the table background.
 
 The shared column lookup uses published column indices and span geometry.
 Borrowed source projections strip inapplicable track padding/borders without
-mutating canonical styles (**D4.5.1v4 / D4.1.4v5**). A zero-height originating
+mutating canonical styles (**D5.5.1 / D5.1.4**). A zero-height originating
 row still supplies a fixed-size image to a spanning cell; resolved zero-sized
 tiles remain suppressed per CSS Backgrounds 3 §2.9. Paint/scroll extent scans
 include structural table boxes so they do not cull overflowing spanning cells.

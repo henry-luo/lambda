@@ -3,18 +3,18 @@
 > **Last verified against tree:** 2026-10-30 (runtime convergence; qualification is recorded separately).
 >
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).**
-> **Authority:** D8.1.3v43, D8.2.3, D8.5.1v2 and D5.3/D5.4.
+> **Authority:** D8.4.4, D8.2.3, D8.5.1 and D6.3/D6.4.
 > **Primary sources:** `lambda/js/js_execution.cpp`, `lambda/js/mvp-lmd/mvp_lmd_mir.cpp`, `lambda/js/js_code_cache.cpp`, `lambda/js/js_source_module.cpp` and `lambda/js/js_compile_recovery.cpp`.
 
 ## 1. Engines and public entry points
 
-MVP-Lmd is the formal JavaScript MIR compiler (**D8.1.3v25**). The legacy
+MVP-Lmd is the formal JavaScript MIR compiler (**D8.4.2**). The legacy
 `JsMirTranspiler`, its split lowering files and its private context headers
 have been removed. Public `transpile_js_to_mir*` names remain host APIs;
 they select MVP for MIR execution. `transpile_js_module_to_mir` uses the same
 engine selection for modules.
 
-`lambda.exe js app.js` defaults to AUTO (**D8.1.3v29**). Unset, empty and
+`lambda.exe js app.js` defaults to AUTO (**D8.4.2**). Unset, empty and
 `JS_EXEC_BACKEND=auto` selectors begin supported units in AST; unsupported
 units and eligible hot definitions use fast MVP MIR. Explicit `mir` selects
 whole-unit MVP MIR, and `ast` forces the interpreter. The redundant
@@ -36,11 +36,11 @@ lexical receiver payloads use Lambda scalar homes owned by the GC environment.
 Ordinary AST/AUTO and dynamic source now use MVP's realm and semantic operation
 contract. Native ABI/storage adapters preserve host callable and module identity;
 runtime-only realms do not compile an empty MIR unit. Synchronous delegation uses
-MVP's shared iterator protocol on each delegating activation (**D8.1.3v43**).
+MVP's shared iterator protocol on each delegating activation (**D8.4.4**).
 Immutable scope facts may
 place unobservable locals and temporaries in exact activation root slots with
 owned numeric homes; eval, closures, arguments and suspension retain live cells
-(**D5.3.3**, **D8.2.4v2**, **D8.4.1v2**). See the
+(**D6.3.3**, **D8.2.4**, **D7.4.1**). See the
 [alignment audit](../../../vibe/impl/JS_Interpreter_MVP_Alignment.md). A rejected formal
 MIR unit does not enter a second JavaScript MIR compiler.
 
@@ -81,7 +81,7 @@ ownership primitives. See [JS_04](JS_04_MIR_Lowering.md).
 `mvp_lmd_execute_in_runtime` binds the Runtime's canonical EvalContext, heap,
 name pool, DOM context and event-loop turn. The Runtime retains the MVP
 execution and its native units through callable and heap finalization
-(**D5.3/D5.4**). Shared AST/native functions retain their own executable
+(**D6.3/D6.4**). Shared AST/native functions retain their own executable
 capabilities. Promoted AST definitions keep their MVP bodies in precisely
 traced code-record cells; shared compiled-call entries remain available.
 
@@ -102,7 +102,7 @@ resolution and dependency loading. `js_execution.cpp` supplies public execution,
 CommonJS require, dynamic-import adapters and source-cache ingress.
 
 `js_code_cache.cpp` stores immutable MVP code images through InputManager leases
-(**D8.5.1v2**). `JsPreambleState` carries the MVP code owner and host bookkeeping;
+(**D8.5.1**). `JsPreambleState` carries the MVP code owner and host bookkeeping;
 legacy declaration snapshots, inherited name tables and source-buffer ownership
 have been removed. Cached entry execution requires an MVP code image. Each
 receiving realm reconstructs its own metadata and live cells.

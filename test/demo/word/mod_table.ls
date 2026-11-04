@@ -1,4 +1,4 @@
-// table selections stay in source coordinates; chrome and the native caret are projections (D7.2.5).
+// table selections stay in source coordinates; chrome and the native caret are projections (D10.2.1).
 import dom
 import lambda.editor.mod_doc
 import lambda.editor.mod_step

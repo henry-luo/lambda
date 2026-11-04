@@ -19,7 +19,7 @@ typedef struct TerminalReadResult {
 } TerminalReadResult;
 
 // Device callbacks transport bytes and modes only. Lambda owns protocol,
-// editor, rendering and terminal-session policy (D7.1.6, S12.1.3).
+// editor, rendering and terminal-session policy (D9.2.2, S12.1.3).
 typedef struct TerminalTransport {
     void* device;
     bool is_tty;
@@ -30,7 +30,7 @@ typedef struct TerminalTransport {
     int64_t (*write)(void* device, const char* bytes, size_t length);
 } TerminalTransport;
 
-// Completion provider (D8.1.1v17 session services). Given the text before the
+// Completion provider (D8.3.6 session services). Given the text before the
 // caret, returns how many trailing bytes form the word being completed and
 // reports each candidate replacement for that word through `add`.
 typedef void (*TerminalCompletionAdd)(void* sink, const char* text, size_t length);

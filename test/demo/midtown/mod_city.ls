@@ -184,7 +184,7 @@ let CELL_PAIRS = [for (k, o in OBSTACLES, cx in cell_of(o[0])^ to cell_of(o[2])^
 let CELL_MAP = map([for (p in CELL_PAIRS group by p.cell into g) (string(cell), g |> ~.k)])
 pub fn near_obstacles(x, z, r) any^ {
     let ids = [for (cx in cell_of(x - r) to cell_of(x + r), cz in cell_of(z - r) to cell_of(z + r),
-        k in (CELL_MAP[string(cz * CELLS + cx)^] or [])) k];
+        k in (CELL_MAP[string(cz * CELLS + cx)] or [])) k];
     [for (k in unique(ids)) OBSTACLES[k]]
 }
 

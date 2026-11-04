@@ -240,7 +240,7 @@ try {
     check('Radiant inventory includes every baseline phase', () => {
         const selected = new Set(inventory.map(t => t.baseName));
         for (const name of ['test_scene3d_unit_gtest', 'test_map_gtest', 'test_paged_media_gtest',
-            'test_ui_automation_gtest', 'test_radiant_view_ui_gtest', 'test_dom_ui_gtest',
+            'test_ui_automation_gtest',
             'test_page_load_gtest', 'test_radiant_view_gtest', 'test_layout_fuzzy_gtest',
             'test_wpt_css_syntax_gtest', 'test_wpt_input_events_gtest',
             'test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_radiant_render_baseline']) {
@@ -261,7 +261,7 @@ try {
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
         assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*:RadiantViewTest.Photo*'));
-        assert.equal(view.caseWorkers, 6);
+        assert.equal(view.caseWorkers, 7);
         assert.equal(view.exclusive, true);
         assert.equal(view.pinExecutables, true);
         assert.deepEqual(view.artifactDirs, ['radiant_view']);
@@ -277,6 +277,33 @@ try {
             assert.equal(check.exclusive, false);
             assert.equal(check.workerSlots, name === 'test_radiant_page_snapshot' ? 2 : 3);
         }
+    });
+    check('Reduced Radiant inventory preserves the full gate and selects explicit cases', () => {
+        const reduced = JSON.parse(invoke(['--target=radiant', '--category=baseline', '--radiant-baseline', '--list']).stdout);
+        const byName = new Map(reduced.map(t => [t.baseName, t]));
+        const full = new Map(inventory.map(t => [t.baseName, t]));
+        for (const name of ['test_map_gtest', 'test_epub_reader_state']) {
+            assert.ok(full.has(name));
+            assert.ok(!byName.has(name));
+        }
+        const cases = require('./radiant_baseline_cases.json');
+        for (const [name, selected] of Object.entries(cases)) {
+            assert.ok(full.has(name) && byName.has(name), name);
+            assert.equal(new Set(selected).size, selected.length);
+            assert.equal(byName.get(name).expectedCases, selected.length);
+            assert.deepEqual(byName.get(name).runnerArgs,
+                [...full.get(name).runnerArgs, '--gtest_filter=' + selected.join(':')]);
+        }
+        for (const [name, item] of full) {
+            if (!byName.has(name) || cases[name]) continue;
+            assert.deepEqual(byName.get(name), item, name);
+        }
+    });
+    check('Reduced Radiant case lists reject missing cases', () => {
+        const { child, summary } = runSelected(['test_paged_media_gtest'], 'pass', ['--radiant-baseline']);
+        assert.notEqual(child.status, 0);
+        const count = require('./radiant_baseline_cases.json').test_paged_media_gtest.length;
+        assert.ok(summary.failed_test_names.some(name => name.includes(`expected ${count} selected cases, got 4`)));
     });
     check('View workers keep the discovered executables across a concurrent relink', () => {
         const viewer = path.join(fixture, 'relink-viewer.exe');
@@ -412,7 +439,7 @@ try {
     });
     for (const [runner, jobsEnv, workerArg] of [
         ['test_radiant_view_gtest', 'LAMBDA_RADIANT_VIEW_TEST_JOBS', '--radiant-case-worker'],
-        ['test_scene3d_unit_gtest', null, null],
+        ['test_scene3d_unit_gtest', 'LAMBDA_SCENE3D_TEST_JOBS', null],
     ]) for (const [limit, parallel] of [[2, true], [4, true], [4, false]]) {
         check(`${runner} case workers preserve inventory within ${limit} slots with ${parallel ? 'parallel' : 'sequential'} suites`, () => {
             const trace = path.join(fixture, `trace-${runner}-${limit}-${parallel}`);
@@ -427,7 +454,9 @@ try {
             const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
             assert.equal(rows.length, 4);
             assert.ok(rows.every(row => row.cap === '1' && (!workerArg || row.args.includes(workerArg))));
-            const events = rows.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
+            // batched cases share a PID; count processes against the worker limit.
+            const processes = [...new Map(rows.map(row => [row.pid, row])).values()];
+            const events = processes.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
                 .sort((a, b) => a.time - b.time || a.delta - b.delta);
             let active = 0, peak = 0;
             for (const event of events) { active += event.delta; peak = Math.max(peak, active); }
@@ -561,15 +590,14 @@ try {
         assert.equal(child.status, 1);
         assert.ok(summary.failed_test_names.some(t => t.includes('at least 25 passing tests')));
     });
-    check('UI runner aliases retain separate arguments and artifacts', () => {
-        const names = ['test_ui_automation_gtest', 'test_radiant_view_ui_gtest', 'test_dom_ui_gtest'];
+    check('UI automation runs the combined suites once', () => {
+        const names = ['test_ui_automation_gtest'];
         const { child, output, summary } = runSelected(names);
         assert.equal(child.status, 0, child.stderr);
-        assert.equal(summary.level2_c_tests.length, 3);
-        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade', 'view', 'dom'].entries()) {
-            const data = JSON.parse(fs.readFileSync(path.join(output, names[index] + '_results.json'), 'utf8'));
-            assert.equal(data.args[data.args.indexOf('--suite') + 1], suite);
-        }
+        assert.equal(summary.level2_c_tests.length, 1);
+        const data = JSON.parse(fs.readFileSync(path.join(output, names[0] + '_results.json'), 'utf8'));
+        assert.equal(data.args[data.args.indexOf('--suite') + 1], 'baseline,dtna,timeline,wired,clay,blade,view,dom');
+        assert.ok(!inventory.some(t => ['test_radiant_view_ui_gtest', 'test_dom_ui_gtest'].includes(t.baseName)));
     });
     for (const budget of [5, 12]) check(`Nested pools share ${budget} slots, backfill light suites, and leave exclusive checks alone`, () => {
         const trace = path.join(fixture, `trace-suites-${budget}`);

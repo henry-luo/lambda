@@ -566,7 +566,7 @@ CssEnum layout_text_used_direction(DomNode* node) {
     DomElement* source = block ? layout_block_used_flow_source(block) : element;
     if (source && source->is_synthetic() && source->blk &&
         (source->block()->direction == CSS_VALUE_LTR || source->block()->direction == CSS_VALUE_RTL)) {
-        // synthetic style carriers publish resolved view properties without an authored declaration tree (D4.5.1v4).
+        // synthetic style carriers publish resolved view properties without an authored declaration tree (D5.5.1).
         return source->block()->direction;
     }
     return layout_element_css_direction(source);

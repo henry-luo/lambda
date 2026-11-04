@@ -1,4 +1,4 @@
-// S11.4.10/D3.2.4v4: admission keeps open fields and the declared layout.
+// S11.4.10/D4.2.5: admission keeps open fields and the declared layout.
 type Point = {x: int, label: string}
 type Node = {point: Point, next: Node?}
 type Named { x: int, fn twice() => x * 2 }

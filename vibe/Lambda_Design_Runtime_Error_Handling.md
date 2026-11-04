@@ -4,8 +4,8 @@
 
 **Date:** 2026-08-17
 
-**Formal authority:** **D1.4v3**, **DI15v2**, **D5.1.4**, **D5.2.1v3**,
-**D6.3.3**, and **D8.4.3v2** in
+**Formal authority:** **D1.4**, **DI15**, **D6.1.4**, **D6.2.1**,
+**D7.5.3**, and **D7.4.3** in
 [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md), with the
 language-visible failure taxonomy and handlers in **S7.4–S7.6** and native
 system-fault rules in **S7.11** of
@@ -110,7 +110,7 @@ The result shape depends on representation, but failure is always explicit:
 
 - A boxed fallible callable returns one `Item`: success or ERROR-tagged failure.
 - A proven typed/native success lane uses the companion ERROR-`Item` lane of
-  D5.2.1v3; the caller tests that lane before reading the native success lane.
+  D6.2.1; the caller tests that lane before reading the native success lane.
 - A generated-callable helper returning a raw pointer, scalar, or `void` is
   fallible only through an explicit result adapter. Raw result helpers in the
   runtime catalog are otherwise required to be infallible.
@@ -134,7 +134,7 @@ authoritative.
 
 Every fallible call site tests the completion before unboxing, arithmetic,
 property access, mutation, storing into an error-free lane, or invoking another
-success-only helper. This is the runtime counterpart of D2.8.2.
+success-only helper. This is the runtime counterpart of D2.5.2.
 
 Where static proof establishes infallibility, the check may be omitted. Missing
 or unknown effect metadata is fallible/defect-capable, never trusted clean.
@@ -161,7 +161,7 @@ branch to it inside the same activation. The epilogue performs, in order:
 
 1. language-mandated cleanup still owned by the frame;
 2. write-back/iterator/finally/module bookkeeping required by the language;
-3. root-frame and number-home cleanup under D5.1.4;
+3. root-frame and number-home cleanup under D6.1.4;
 4. restoration of frame-local runtime state; and
 5. ordinary return of the explicit failure completion.
 
@@ -319,7 +319,7 @@ No ordinary failure path depends on a native frame surviving suspension:
   the owning language's reporting/propagation policy before returning.
 
 This rule remains true even while native system-fault recovery is retained:
-`LambdaRecoveryFrame` never survives a scheduler yield under D6.3.3.
+`LambdaRecoveryFrame` never survives a scheduler yield under D7.5.3.
 
 ---
 
@@ -327,7 +327,7 @@ This rule remains true even while native system-fault recovery is retained:
 
 ### REH-D13 — `LambdaRecoveryFrame` is fault-only and temporary
 
-*[Revised 2026-10-05 (S7.11.2v2, D5.3.6v2, D6.3.3v2): recovery frames remain fault-only, but each activation has its own LIFO chain and a frame may stay armed across a park on its own stack; no jump crosses a stack. The task-owned durable fault target below is deleted.]*
+*[Revised 2026-10-05 (S7.11.2v2, D6.3.6, D7.5.3): recovery frames remain fault-only, but each activation has its own LIFO chain and a frame may stay armed across a park on its own stack; no jump crosses a stack. The task-owned durable fault target below is deleted.]*
 
 For the time being, native system faults may use non-local recovery because
 normal return can be impossible after stack exhaustion or during OOM/resource
@@ -366,7 +366,7 @@ is the preferred long-term containment boundary.
 
 ## 9. Rejected implementation patterns
 
-The following violate D1.4v3/DI15v2 for ordinary failures:
+The following violate D1.4/DI15 for ordinary failures:
 
 - installing a `setjmp` target for Lambda `raise` or `^` propagation;
 - implementing JS `throw` by jumping to the nearest native catch frame;
@@ -420,12 +420,12 @@ LambdaJS, Jube, and hosted-language paths. The audit result is:
 
 | Area | Landed result | Authority |
 |---|---|---|
-| Lambda ordinary failures | Returned ERROR/companion completions are checked in the immediate activation; handler bodies are outside the consumed fault-only frame. | D1.4v3, REH-D2, REH-D8 |
+| Lambda ordinary failures | Returned ERROR/companion completions are checked in the immediate activation; handler bodies are outside the consumed fault-only frame. | D1.4, REH-D2, REH-D8 |
 | Suspended `pn` handlers | `pn_call() ^ { ... }` stays statement-only; the call parks and resumes in place, so its completion reaches the handler as any call's does. | S7.6.7v4, REH-D12 (superseded) |
-| Native faults | Each activation has its own recovery chain; a fault in a task lands on the task's boundary and completes the task with the fault result; no jump crosses a stack. | D6.3.3v2, S7.11.2v2, REH-D13 |
-| AST interpreter | Handler evaluation and current-error scope use explicit frame signals and rooted scratch slots; recursion-budget errors are ordinary rich completions. | D8.1.1v2, S7.6.1v4 |
-| LambdaJS | The existing explicit completion/error lane remains the sole ordinary exception path; the JS entry boundary is fault-only. | D8.4.3v2, REH-D9 |
-| Jube/host adapters | Guest/module failures are returned at the immediate adapter boundary; recovery frames remain limited to host execution/transaction containment. | D8.4.3v2, REH-D10/REH-D11 |
+| Native faults | Each activation has its own recovery chain; a fault in a task lands on the task's boundary and completes the task with the fault result; no jump crosses a stack. | D7.5.3, S7.11.2v2, REH-D13 |
+| AST interpreter | Handler evaluation and current-error scope use explicit frame signals and rooted scratch slots; recursion-budget errors are ordinary rich completions. | D8.3.1, S7.6.1v4 |
+| LambdaJS | The existing explicit completion/error lane remains the sole ordinary exception path; the JS entry boundary is fault-only. | D7.4.3, REH-D9 |
+| Jube/host adapters | Guest/module failures are returned at the immediate adapter boundary; recovery frames remain limited to host execution/transaction containment. | D7.4.3, REH-D10/REH-D11 |
 | Enforcement | `test/error_handling/check_recovery_boundaries.py` rejects new ordinary recovery sites and checks the typed fault API inventory. | REH-D14 |
 
 No phase broadens C2MIR: the legacy path remains frozen under D1.6. The
@@ -453,3 +453,53 @@ The current mechanisms relevant to the audit are:
 
 This source map is descriptive and may drift. The REH decisions and formal
 IDs, not line numbers, define conformance.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D1.4v4 → D1.4
+
+**D1.4* — Language failures return through every frame.** A fallible
+function returns an explicit completion: Lambda's host ABI uses an `Item`
+success/error carrier or a proven native companion error lane
+(D6.2.1); a private guest ABI uses its own versioned completion until an
+explicit boundary adapter returns to the host. In either ABI, errors,
+throws, and rejections propagate by normal return through **each** caller,
+which routes failure before consuming success and runs its cleanup/epilogue.
+No pending-exception side channel, C++ exception, `setjmp`/`longjmp`, SEH
+unwind, signal jump, or guest unwind implements a language failure or skips
+an intervening frame. The sole temporary exception is an untyped native
+system/resource fault from the closed S7.11.1 set: it may abandon frames
+through `LambdaRecoveryFrame` under D2.5.2/D7.5.3, but that mechanism is
+never an ordinary error or hosted-language exception path. [S7.4.3,
+S7.4.4, S7.11.1–S7.11.4, Runtime_Error_Handling REH-D1–REH-D5, JA5, J3,
+JM22]
+
+### ex-D8.4.3v2 → D7.4.3
+
+**D7.4.3*** **Every hosted-language helper uses an explicit completion
+ABI.** A helper that can produce a Lambda error, LambdaJS throw/rejection,
+or another guest-language exception returns an explicit completion: the
+shared ABI uses an ERROR-tagged `Item` (or the declared companion error
+lane), while a separately versioned guest ABI may use only its
+profile-declared completion adapter. Neither form relies on a pending flag,
+C++ exception, non-local jump, or separate exception poll. MIR lowering tests
+the returned completion in the current activation and routes it to that
+activation's handler/finally/cleanup or error return; propagation to a
+caller then occurs by an ordinary return carrying the same error identity.
+Raw scalar helpers are permitted only when their catalog contract is
+infallible (`PRESERVES`). A guest may retain its own exception payload and
+language semantics, but its adapter must materialize an explicit host
+completion before returning to host code. `LambdaError` is the shared ERROR
+carrier; its Map-compatible resting prologue is traced as a heap reference,
+and JS Error stack materialization may remain lazy. Native system faults are
+outside this helper exception ABI and use only the D1.4 carve-out.
+[S7.4.3, S7.4.4, D1.4, Runtime_Error_Handling REH-D3–REH-D12, JR3]

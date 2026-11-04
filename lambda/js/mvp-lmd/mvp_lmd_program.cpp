@@ -1251,7 +1251,7 @@ void mvp_lmd_destroy(MvpLmdExecution* e) {
     if (!e) return;
     MvpLmdProgram* p = &e->program;
     if (e->owned_runtime) {
-        // D5.3/D5.4.1: one owner retires jobs and heap before compiler metadata.
+        // D6.3/D6.4.1: one owner retires jobs and heap before compiler metadata.
         runtime_cleanup(e->owned_runtime);
         mem_free(e->owned_runtime);
     }
@@ -1279,7 +1279,7 @@ Item mvp_lmd_ensure_runtime_realm(Runtime* runtime) {
     if (!retained) return ItemError;
     auto* execution = (MvpLmdExecution*)mem_calloc(1, sizeof(MvpLmdExecution), MEM_CAT_EVAL);
     if (!execution) return ItemError;
-    // Script ownership keeps nominal records alive until after heap finalization (D5.3).
+    // Script ownership keeps nominal records alive until after heap finalization (D6.3).
     retained->execution = execution;
     execution->owner_context = owner;
     execution->host_runtime = runtime;

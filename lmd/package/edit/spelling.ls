@@ -1,4 +1,4 @@
-// Async spelling checks paint source-mapped underlines without changing editor data (D7.2.5, S13.3.1v2).
+// Async spelling checks paint source-mapped underlines without changing editor data (D10.2.1, S13.3.1v2).
 import dom
 import utf8: lambda.io.utf8
 import text_offsets: lambda.dom.edit_history

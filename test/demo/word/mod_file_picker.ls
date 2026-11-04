@@ -1,4 +1,4 @@
-// Finder owns filesystem snapshots, paths, ordering and selection (S12.1.3 / D7.2.5).
+// Finder owns filesystem snapshots, paths, ordering and selection (S12.1.3 / D10.2.1).
 import dom
 import tree: lambda.dom.tree
 import browser: ~~.finder.mod_model

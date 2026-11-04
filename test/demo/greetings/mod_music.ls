@@ -1,4 +1,4 @@
-// Native audio is document-owned and starts only in preview (D7.5.4).
+// Native audio is document-owned and starts only in preview (D11.3.1).
 import dom
 import E: .mod_effects
 

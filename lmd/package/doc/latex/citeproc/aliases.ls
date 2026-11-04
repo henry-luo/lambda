@@ -2,7 +2,7 @@
 // (vibe/latex/Lambda_Design_BibTeX_CSL.md §7.4). A document that asks for a
 // contributed biblatex style such as `style=apa` gets the CSL style implementing
 // the same published guide. The substitution is always reported; biblatex style
-// files are never executed (D7.2.7).
+// files are never executed (D10.2.2).
 
 import util: lambda.doc.latex.util
 

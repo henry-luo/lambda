@@ -137,8 +137,8 @@ lambda validate [-s <schema>] [-f <format>] [options] <file>
 
 **Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.xhtml`/`.xht`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
 
-Mark auto-detection recognizes only `.mark` (D2.9.1); use `-f mark` for
-arbitrary filenames, including files without an extension (D2.9.2).
+Mark auto-detection recognizes only `.mark` (D10.1.1); use `-f mark` for
+arbitrary filenames, including files without an extension (D10.1.2).
 
 **Built-in schemas** (no `-s` needed):
 
@@ -200,7 +200,7 @@ Wiki input and output accept `wiki:mediawiki`, `wiki:dokuwiki`,
 Unqualified `wiki` and auto-detected `.wiki` input mean MediaWiki; specify
 `-f` for other dialects even when they use `.wiki` or `.txt` filenames.
 All wiki output runs through the `lambda.doc.wiki` Lambda Script package
-(D7.2.4). It fails on conversion diagnostics by default. `--loss allow`
+(D9.3.4). It fails on conversion diagnostics by default. `--loss allow`
 permits degraded output. The same policy applies to the six
 `lambda.doc.misc` targets: `asciidoc`, `man`, `typst`, `eml`, `vcf`, and `ics`.
 DOCX output uses `lambda.doc.docx` with the same strict default. HTML, Markdown
@@ -302,7 +302,7 @@ lambda render <input> -o <output> [options]
 | Extension | Format |
 |-----------|--------|
 | `.html`, `.htm` | HTML |
-| `.xhtml`, `.xht` | XML syntax producing HTML names and a viewable HTML tree (D2.10.1) |
+| `.xhtml`, `.xht` | XML syntax producing HTML names and a viewable HTML tree (D10.1.4) |
 | `.tex`, `.latex` | LaTeX |
 | `.ls` | Lambda Script |
 | `.pdf` | PDF (PDF to PDF is a copy; other targets go through the Lambda PDF package) |
@@ -383,7 +383,7 @@ Source currently means a local-file snapshot at attach. Source stepping and
 evaluation in the document's scope are later work.
 
 In **Live** open **Lambda scratch** and press **Start scratch** for an independent
-persistent functional REPL (S16.7.4–S16.7.6, D8.1.1v18). Run entries with
+persistent functional REPL (S16.7.4–S16.7.6, D8.3.2). Run entries with
 **Cmd/Ctrl+Enter**, expand returned maps/arrays/elements, browse bindings, and
 clear retained results. The scratch process has its own bindings and remains
 independent of the inspected document. JavaScript evaluation is deferred.
@@ -411,18 +411,18 @@ lambda view [document_file] [options]
 | | `--view-key <key>` | Select a named view when the source defines several | |
 | | `--archive` | Browse ZIP package parts, including those inside DOCX/PPTX | |
 | | `--font-dir <dir>` | Additional font directory (repeatable, up to 16) | |
-| | `--autoplay` | Grant audio activation up front, so network documents may start music and speech without a click (D7.5.4) | off |
+| | `--autoplay` | Grant audio activation up front, so network documents may start music and speech without a click (D11.3.1) | off |
 | `-h` | `--help` | Show help | |
 
 Unknown options are silently ignored.
 
-**Audible output (D7.5.4):** a local document may start music and speech from
+**Audible output (D11.3.1):** a local document may start music and speech from
 any `pn` handler. A document loaded over the network may start them only after
 the user has pressed a pointer, ended a touch or pressed a non-modifier key in
 it; `--autoplay` lifts that rule for the session.
 
 **Default file:** `<LAMBDA_HOME>/package/doc/doc_viewer.ls`, the bundled
-`lambda.doc` document viewer (D7.2.4). It browses the current working directory.
+`lambda.doc` document viewer (D9.3.4). It browses the current working directory.
 Its startup splash is `<LAMBDA_HOME>/package/doc/doc_viewer.html`, opened with
 `lambda view` on that path. The viewer uses `./lmd` as the default Lambda home
 and honors `LAMBDA_HOME`.
@@ -440,20 +440,20 @@ the existing input errors.
 
 **Word documents:** `lambda view report.docx` renders the supported paragraphs,
 headings, text formatting, lists, tables, links, and embedded images through
-`lambda.doc.docx` (D7.2.4). The file browser also previews DOCX when selected;
+`lambda.doc.docx` (D9.3.4). The file browser also previews DOCX when selected;
 its Source tab shows the converted HTML. Unsupported content is reported above
 the document. The preview uses flowing pages rather than reproducing Word's
 pagination, headers, or footers.
 
 **PowerPoint presentations:** `lambda view deck.pptx` imports the saved slides
-through `lambda.doc.pptx` (**D7.2.4v4**) and opens the retained Slides player.
+through `lambda.doc.pptx` (**D9.3.4**) and opens the retained Slides player.
 `layout` and `render` use the same importer. The document browser provides slide
 previews and converted HTML; `--archive` exposes the original package parts.
 Slides Open also accepts PPTX and saves its editable copy as `.slides`.
 Unsupported content can produce warnings; see the [import profile](Lambda_Packages.md#29-pptx--powerpoint-import).
 
 **EPUB books:** `lambda view book.epub` opens the `lambda.doc.ebook` reader
-(D7.2.4), with chapter/contents navigation, source anchors, generated pages,
+(D9.3.4), with chapter/contents navigation, source anchors, generated pages,
 search, bookmarks, reading preferences and local resume. Fixed-layout
 XHTML/SVG uses the authored viewport with fit/zoom. The file browser previews
 selected EPUBs and exposes their OPF source. Use `--archive` to inspect package
@@ -461,7 +461,7 @@ parts. See [the supported EPUB profile](Lambda_Packages.md#19-docebook--epub-rea
 for limitations.
 
 **DocBook documents:** `lambda view test/input/docbook/showcase.xml` opens the
-original DocBook 5.x `.xml` through `lambda.doc.docbook` (D7.2.4). The covered
+original DocBook 5.x `.xml` through `lambda.doc.docbook` (D9.3.4). The covered
 roots (`article`, `book`, `set`, `part`, `reference`) are recognized by their
 namespace, including prefixed names. The viewer
 loads bundled xslTNG CSS and captured images directly; no export step is
@@ -472,7 +472,7 @@ See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
 
 `.epub`, `.docx`, `.pptx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
-XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D2.10.1**).
+XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D10.1.4**).
 `.xhtml`/`.xht` files and HTTP `application/xhtml+xml` responses select it.
 XML names remain case-sensitive, and XML whitespace/CDATA are preserved.
 The input must have an XHTML `html` root; external DTDs are never fetched.

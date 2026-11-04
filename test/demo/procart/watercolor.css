@@ -1,0 +1,27 @@
+/* the paper sits on the shared workshop card (world.css + plants.css) */
+[data-workshop=watercolor] .species-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+[data-workshop=watercolor] .species { width: auto; }
+/* the sheet keeps hidden margin cells beyond the visible paper, as Washes does: boundary cells
+   never flow, so pigment piles up there. 372 x 252 cells show 360 x 240. */
+.watercolor-frame { position: relative; overflow: hidden; aspect-ratio: 3 / 2; margin: 18px 22px 0; border-radius: 3px;
+    background: #f7f2e6; box-shadow: 0 1px 4px rgba(60, 50, 30, .18); }
+.watercolor-frame canvas { display: block; width: 103.3333%; aspect-ratio: 372 / 252; margin: -1.6667% 0 0 -1.6667%;
+    cursor: crosshair; touch-action: none; }
+.watercolor-tools { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.watercolor-tools button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 2px;
+    border: 1px solid #cdd3c0; border-radius: 4px; background: #fbfaf3; color: #52664a; cursor: pointer;
+    font: 10px -apple-system, "Helvetica Neue", Arial, sans-serif; line-height: 1.2; text-align: center; }
+.watercolor-tools button.on { background: #dee8d4; border-color: #9cad8a; color: #2f4a30; }
+.watercolor-tools .chip { width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(40, 40, 30, .14); }
+.watercolor-tools .chip.water { background: #dbe9f1; box-shadow: inset -4px -4px 0 #b7d1e0; }
+.watercolor-tools .chip.lift { background: #f1ece0; box-shadow: inset 0 0 0 5px #fbfaf3; border-style: dashed; }
+.watercolor-help { margin: 10px 22px 0; color: #7a806e; font: 11px -apple-system, "Helvetica Neue", Arial, sans-serif; text-align: center; }
+@media (max-width: 900px) {
+    [data-workshop=watercolor] .species-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .watercolor-frame { margin: 14px 14px 0; }
+}
+@media (max-width: 480px) {
+    [data-workshop=watercolor] .species-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .watercolor-tools { gap: 4px; }
+    .watercolor-tools button { font-size: 9px; }
+}

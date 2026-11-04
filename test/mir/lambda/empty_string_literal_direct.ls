@@ -1,4 +1,4 @@
-// S5.1.4v2/D2.4.1: empty literal values can use the immutable shared String.
+// S5.1.4v2/D2.3.4: empty literal values can use the immutable shared String.
 fn empty() string => ""
 fn filled() string => "filled"
 

@@ -1,4 +1,4 @@
-// Editable WordprocessingML packages reuse central ZIP output (D7.5.2, S12.4.1v3).
+// Editable WordprocessingML packages reuse central ZIP output (D11.1.2, S12.4.1v3).
 import c: .export_common
 import errors: .common
 import style: .export_style

@@ -1,4 +1,4 @@
-// lyric identity and continuation are score data, independent of layout and audio (D7.2.5).
+// lyric identity and continuation are score data, independent of layout and audio (D10.2.1).
 import c: .common
 import t: .time
 

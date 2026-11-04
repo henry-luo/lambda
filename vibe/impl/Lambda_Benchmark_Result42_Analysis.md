@@ -153,7 +153,7 @@ line 1701. Raw phase data: `temp/result42_analysis/primes_phases.json`.
 The intended optimization is to establish the **full** contract at the
 boundary from sufficient producer/carrier facts, then reuse its certificate.
 It must retain refined, nullable, rank, and representation checks when those
-facts do not prove them. **D3.3.3v3** requires a trustworthy certificate, not
+facts do not prove them. **D4.3.3** requires a trustworthy certificate, not
 an unconditional element walk for every exact primitive carrier.
 
 ## Cause 2: repeated array checks and loss of the loop-wide shortcut
@@ -186,7 +186,7 @@ isolated by a one-change binary comparison.
 The appropriate follow-up is to carry the complete certificate/storage proof
 into loop specialization and preserve it across proven same-contract writes,
 while invalidating it across operations that can change the carrier. This
-follows **D3.3.3v3**, **D3.3.4**, and total-read **S7.1.1v3**.
+follows **D4.3.3**, **D2.4.3**, and total-read **S7.1.1v3**.
 
 ## Cause 3: Tune22 checks integer sentinel range inside hot comparisons
 

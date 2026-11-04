@@ -68,7 +68,7 @@ Comprehensive restructuring proposal for `lambda/input/` and `lambda/format/` to
 | Textile | `format-textile.cpp` | thin wrapper → `MarkupEmitter` |
 | KV (INI/Prop) | `format-kv.cpp` | `KeyValueFormatConfig` |
 | Graph | `format-graph.cpp` | DOT/Mermaid/D2 output |
-| Math | `lmd/package/doc/math/format.ls`, `format_latex.ls`, `format_ascii.ls` | Script package above IO; XML serialization remains native (D7.1.1, D7.2.8) |
+| Math | `lmd/package/doc/math/format.ls`, `format_latex.ls`, `format_ascii.ls` | Script package above IO; XML serialization remains native (D9.1.1, D10.2.3) |
 
 ### Shared Format Utilities
 

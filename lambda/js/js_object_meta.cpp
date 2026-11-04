@@ -146,7 +146,7 @@ static TypeMap js_error_carrier_type = {};
 // Promise instances use the VMap carrier, while Promise.prototype remains an
 // ordinary shape-backed Map. Keep the exotic callbacks on the carrier-only
 // metadata view so prototype bootstrap writes are not intercepted as payload
-// operations (D7.4.1v2).
+// operations (D9.5.1).
 static const JsClassMeta js_promise_vmap_meta = {
     JS_CLASS_PROMISE, JS_CLASS_FAMILY_ORDINARY,
     JS_CLASS_FLAG_INTRINSIC_PROTO | JS_CLASS_FLAG_NATIVE_PAYLOAD,
@@ -245,7 +245,7 @@ Item js_native_private_array_state(Item receiver, JsClassId brand,
 }
 
 Item js_native_private_array_object(JsClassId brand, Item key, Item state, Item prototype) {
-    // the private record and prototype must survive allocation of their branded owner (D5.3.3).
+    // the private record and prototype must survive allocation of their branded owner (D6.3.3).
     RootFrame roots(4);
     Rooted<Item> key_root(roots, key), state_root(roots, state), proto(roots, prototype);
     Rooted<Item> object(roots, js_new_object_with_class(brand));
