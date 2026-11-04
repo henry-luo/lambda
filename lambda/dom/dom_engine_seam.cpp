@@ -204,6 +204,10 @@ DOM_ENGINE_WEAK bool dom_engine_element_viewport_origin(DomElement* e, float* x,
 DOM_ENGINE_WEAK bool dom_engine_attribute_has_relational_css_dependency(DomDocument* d, const char* n) {
     (void)d; (void)n; return true;
 }
+DOM_ENGINE_WEAK bool dom_engine_attribute_has_css_dependency(DomDocument* d, DomElement* e, const char* n) {
+    (void)d; (void)e; (void)n; return true;
+}
+DOM_ENGINE_WEAK void dom_engine_publish_metadata_change(DomDocument* d) { (void)d; }
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {
     (void)v; (void)f; (void)set;
 }

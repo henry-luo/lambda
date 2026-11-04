@@ -94,7 +94,8 @@ bool prepare_destination(SqliteScope* scope, const char* path) {
     const char* leaf = file_path_basename(path);
     scope->leaf = leaf ? mem_strdup(leaf, MEM_CAT_EVAL) : NULL;
     char* parent = file_path_dirname(path);
-    FileAnchorOptions options = {0, authorize_destination, scope, NULL, NULL};
+    // A successful company-image publication must flush volatile drive caches too.
+    FileAnchorOptions options = {FILE_ANCHOR_FULL_SYNC, authorize_destination, scope, NULL, NULL};
     if (scope->destination && scope->leaf && parent &&
             strcmp(scope->leaf, ".") && strcmp(scope->leaf, "..") &&
             rdb_target_authorized(scope->destination, "sqlite"))

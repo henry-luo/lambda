@@ -157,7 +157,8 @@ view <spelling_tools> state source:null, source_revision:null, paused:false, seq
     skip:null, canvas_paused:false, canvas_opened:false {
     <div id:identity(~.scope),class:"spelling-layer",'aria-hidden':"true",
         'data-spelling-state':if (paused) "paused" else if (failure!=null) "error"
-            else if (report!=null and remaining==0 and painted_seq==seq) "ready" else "pending",
+            // a worker can finish after an earlier frame painted this sequence's incomplete report.
+            else if (report!=null and remaining==0 and painted_seq==seq and frame==null) "ready" else "pending",
         'data-spelling-count':string(len(report.issues or [])),'data-spelling-seq':string(seq),
         'data-spelling-checks':string(checks),'data-spelling-pending':string(remaining),
         'data-spelling-last-paragraphs':string(last_paragraphs),'data-spelling-last-checked':string(last_checked),

@@ -577,6 +577,113 @@ TEST_F(CssStyleNodeTest, BorrowedHtmlHintsRespectOriginsLayersAndAllRollback) {
     }
 }
 
+TEST_F(CssStyleNodeTest, FrozenCascadeCachePreservesWinnersAndBorrowedFallbacks) {
+    CssValue values[5] = {};
+    const CssPropertyCode properties[] = {CSS_PROPERTY_COLOR, CSS_PROPERTY_COLOR,
+        CSS_PROPERTY_MARGIN, CSS_PROPERTY_MARGIN_LEFT, CSS_PROPERTY_ALL};
+    const CssEnum keywords[] = {CSS_VALUE_INITIAL, CSS_VALUE_INHERIT,
+        CSS_VALUE_INITIAL, CSS_VALUE_INHERIT, CSS_VALUE_REVERT_LAYER};
+    CssDeclaration* declarations[5] = {};
+    for (size_t i = 0; i < 5; i++) {
+        values[i].type = CSS_VALUE_TYPE_KEYWORD;
+        values[i].data.keyword = keywords[i];
+        declarations[i] = css_declaration_create(properties[i], &values[i],
+            create_specificity(0, 0, 1), CSS_ORIGIN_AUTHOR, pool);
+        ASSERT_NE(declarations[i], nullptr);
+        declarations[i]->layer_order = i == 4 ? 2 : 1;
+        ASSERT_NE(style_tree_apply_declaration(style_tree, declarations[i]), nullptr);
+    }
+    declarations[1]->presentation_value = true;
+    CssDeclaration* expected[CSS_PROPERTY_COUNT][2] = {};
+    for (int property = 1; property < CSS_PROPERTY_COUNT; property++) {
+        CssPropertyCode code = (CssPropertyCode)property;
+        expected[property][0] = style_tree_get_declaration(style_tree, code);
+        expected[property][1] = style_tree_get_authored_declaration(style_tree, code);
+    }
+    EXPECT_EQ(expected[CSS_PROPERTY_COLOR][0], declarations[1]);
+    EXPECT_EQ(expected[CSS_PROPERTY_COLOR][1], declarations[0]);
+    EXPECT_EQ(expected[CSS_PROPERTY_MARGIN_LEFT][0], declarations[3]);
+    style_tree_init_declaration_cache(style_tree);
+    ASSERT_TRUE(style_tree->declaration_cache_valid);
+    style_tree->canonical_owner = expected;
+    style_tree->declaration_cache_valid = false;
+    style_tree_init_declaration_cache(style_tree);
+    AvlNode* color_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color_node, nullptr);
+    EXPECT_TRUE(((StyleNode*)color_node->declaration)->has_cached_winner);
+    for (int property = 1; property < CSS_PROPERTY_COUNT; property++) {
+        CssPropertyCode code = (CssPropertyCode)property;
+        EXPECT_EQ(style_tree_get_declaration(style_tree, code), expected[property][0]) << property;
+        EXPECT_EQ(style_tree_get_authored_declaration(style_tree, code), expected[property][1]) << property;
+    }
+    // caller-owned hints remain query inputs rather than frozen cache entries.
+    CssDeclaration hint = {};
+    hint.property_code = CSS_PROPERTY_WIDTH;
+    hint.value = &values[0];
+    hint.origin = CSS_ORIGIN_AUTHOR_HINT;
+    EXPECT_EQ(style_tree_get_declaration_with_fallback(style_tree, CSS_PROPERTY_WIDTH, &hint), &hint);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_WIDTH), nullptr);
+    EXPECT_EQ(style_tree_get_computed_value(style_tree, CSS_PROPERTY_COLOR, nullptr), &values[1]);
+    style_tree_invalidate_computed_values(style_tree);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR), declarations[1]);
+    EXPECT_EQ(style_tree_get_authored_declaration(style_tree, CSS_PROPERTY_COLOR), declarations[0]);
+    style_tree->canonical_owner = nullptr;
+}
+
+TEST_F(CssStyleNodeTest, MutableWinnerCacheExpiresAcrossPropertiesAndComputedQueries) {
+    CssValue color = {}, reset = {}, margin = {};
+    color.type = reset.type = margin.type = CSS_VALUE_TYPE_KEYWORD;
+    color.data.keyword = CSS_VALUE_INHERIT;
+    reset.data.keyword = margin.data.keyword = CSS_VALUE_INITIAL;
+    CssSpecificity specificity = create_specificity(0, 0, 1);
+    CssDeclaration* own = css_declaration_create(CSS_PROPERTY_COLOR, &color, specificity, CSS_ORIGIN_AUTHOR, pool);
+    CssDeclaration* all = css_declaration_create(CSS_PROPERTY_ALL, &reset, specificity, CSS_ORIGIN_AUTHOR, pool);
+    CssDeclaration* quad = css_declaration_create(CSS_PROPERTY_FLEX, &margin, specificity, CSS_ORIGIN_AUTHOR, pool);
+    ASSERT_NE(style_tree_apply_declaration(style_tree, own), nullptr);
+    EXPECT_EQ(style_tree_get_computed_value(style_tree, CSS_PROPERTY_COLOR, nullptr), &color);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR), own);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_FLEX_BASIS), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(style_tree, quad), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_FLEX_BASIS), quad);
+    // a declaration query must not leave its winner pointer in the computed-value lane.
+    EXPECT_EQ(style_tree_get_computed_value(style_tree, CSS_PROPERTY_COLOR, nullptr), &color);
+    ASSERT_NE(style_tree_apply_declaration(style_tree, all), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR), all);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_FLEX_BASIS), all);
+    ASSERT_TRUE(style_tree_remove_declaration(style_tree, all));
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR), own);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_FLEX_BASIS), quad);
+    ASSERT_TRUE(style_tree_remove_property(style_tree, CSS_PROPERTY_FLEX));
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_FLEX_BASIS), nullptr);
+    style_tree_clear(style_tree);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR), nullptr);
+}
+
+TEST_F(CssStyleNodeTest, CopyingWinnersPreservesSourceDeclarationOrder) {
+    CssValue reset = {}, color = {};
+    reset.type = color.type = CSS_VALUE_TYPE_KEYWORD;
+    reset.data.keyword = CSS_VALUE_INITIAL;
+    color.data.keyword = CSS_VALUE_INHERIT;
+    CssSpecificity specificity = create_specificity(0, 0, 1);
+    CssDeclaration* all = css_declaration_create(CSS_PROPERTY_ALL, &reset, specificity, CSS_ORIGIN_AUTHOR, pool);
+    CssDeclaration* own = css_declaration_create(CSS_PROPERTY_COLOR, &color, specificity, CSS_ORIGIN_AUTHOR, pool);
+    ASSERT_NE(style_tree_apply_declaration(style_tree, all), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(style_tree, own), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR), own);
+    int all_order = all->source_order, own_order = own->source_order;
+    StyleTree* clone = style_tree_clone(style_tree, pool);
+    ASSERT_NE(clone, nullptr);
+    EXPECT_EQ(all->source_order, all_order);
+    EXPECT_EQ(own->source_order, own_order);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR), own);
+    EXPECT_EQ(style_tree_merge(clone, style_tree), 2);
+    EXPECT_EQ(all->source_order, all_order);
+    EXPECT_EQ(own->source_order, own_order);
+    style_tree_invalidate_computed_values(style_tree);
+    EXPECT_EQ(style_tree_get_declaration(style_tree, CSS_PROPERTY_COLOR), own);
+    style_tree_destroy_owned(clone);
+}
+
 TEST_F(CssStyleNodeTest, CSS4CascadeLevelsImportantDeclarations) {
     // Test CSS4 cascade levels for important declarations (reverse order)
     CssSpecificity same_spec = create_specificity(0, 0, 1, 0, true); // all important

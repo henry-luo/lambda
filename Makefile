@@ -1702,6 +1702,7 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
+	@$(PYTHON) test/sqlite_fullsync_failure_test.py
 	@echo "Running LAMBDA baseline test suite..."
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json

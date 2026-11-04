@@ -713,6 +713,9 @@ static int sqlite_tx_authorize(void* user, int action, const char* arg1,
     // SQLite checks existing rows while stepping an ALTER on a STRICT table.
     if (action == SQLITE_PRAGMA && tx && tx->stepping_alter && arg1 && arg2 &&
             sqlite3_stricmp(arg1, "quick_check") == 0) return SQLITE_OK;
+    // This read-only check lets callers validate all foreign keys in one snapshot.
+    if (action == SQLITE_PRAGMA && arg1 && !arg2 &&
+            sqlite3_stricmp(arg1, "foreign_key_check") == 0) return SQLITE_OK;
     if (action == SQLITE_ATTACH || action == SQLITE_DETACH || action == SQLITE_TRANSACTION ||
         action == SQLITE_SAVEPOINT || action == SQLITE_PRAGMA || action == SQLITE_CREATE_VTABLE ||
         action == SQLITE_DROP_VTABLE) return SQLITE_DENY;
