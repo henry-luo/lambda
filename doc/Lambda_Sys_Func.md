@@ -1569,6 +1569,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.move(src, dst)` | Move/rename file or directory | `io.move(/.old, /.new)` |
 | `io.delete(target)` | Delete file or directory | `io.delete(/.'temp.txt')` |
 | `io.mkdir(path)` | Create directory | `io.mkdir(/.data)` |
+| `io.create_file(path, content)` | Publish a new file without replacing an existing destination | `io.create_file(/.'invoice.txt', text)` |
 | `io.touch(path)` | Create empty file or update timestamp | `io.touch(/.'flag.txt')` |
 | `io.symlink(target, link)` | Create symbolic link | `io.symlink(/.src, /.link)` |
 | `io.chmod(path, mode)` | Change file permissions | `io.chmod(/.'script.sh', "755")` |
@@ -1752,6 +1753,20 @@ pn mark_complete() {
     io.touch(/.build.'.done')^
 }
 ```
+
+##### io.create_file(path, content)
+
+Publish a string or binary payload as a new local file and return its byte
+count. The parent directory must already exist. The operation stages and syncs
+the complete payload before an exclusive publication; an existing destination,
+including a symbolic link, causes an error. If the directory sync fails after
+publication, the error says the file was published but its durability is
+uncertain: inspect the destination before retrying. This immediate I/O effect
+is not undone by a later SQLite rollback (S12.4.4v4). It is unavailable when a
+security I/O client is bound until the broker supports exclusive creation
+(D7.5.2, D7.5.6), and on platforms without the anchored writer, including the
+current Windows implementation. An older Lambda runtime rejects this distinct
+operation; `output` with an unknown mode does not provide the same guarantee.
 
 ##### io.symlink(target, link_path)
 
@@ -2567,6 +2582,7 @@ channels continue to process pixel-array input. See the
 |----------|------|-------------|
 | `print` | 0+ | Print values to console |
 | `output` | 2-3 | Write to file/URL |
+| `io.create_file` | 2 | Atomically publish a new local file without replacement |
 | `io.copy` | 2 | Copy a file |
 | `io.move` | 2 | Move file/directory |
 | `io.delete` | 1 | Delete file/directory |

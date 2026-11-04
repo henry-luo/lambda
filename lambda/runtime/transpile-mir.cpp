@@ -13649,11 +13649,9 @@ static MIR_reg_t mir_unbox_exact_native_numeric_result(
     LambdaNumericDecision decision;
     if (!mir_binary_numeric_decision(binary, &decision)) return boxed;
     if ((binary->op == OPERATOR_IDIV || binary->op == OPERATOR_MOD) &&
-            decision.result == LAMBDA_NUM_INT &&
-            mir_expr_carrier_type(mt, binary->left) == LMD_TYPE_INT &&
-            mir_expr_carrier_type(mt, binary->right) == LMD_TYPE_INT) {
-        // The exact flex-int fallback is still the int lane; this arm is only
-        // for boxed values that reached a generic boundary before lowering.
+            decision.result == LAMBDA_NUM_INT) {
+        // S4.5.3: sized operands also produce flex-int outcomes; native parents
+        // must consume the unboxed lane rather than the runtime helper's tag.
         return emit_unbox_int_lane(mt, BoxedReg(boxed)).r;
     }
     if (decision.result == LAMBDA_NUM_FLOAT) {
@@ -18095,9 +18093,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         LambdaNumericDecision decision = {};
         if (mir_binary_numeric_decision(bi, &decision)) {
             if ((bi->op == OPERATOR_IDIV || bi->op == OPERATOR_MOD) &&
-                    decision.result == LAMBDA_NUM_INT &&
-                    mir_expr_carrier_type(mt, bi->left) == LMD_TYPE_INT &&
-                    mir_expr_carrier_type(mt, bi->right) == LMD_TYPE_INT) {
+                    decision.result == LAMBDA_NUM_INT) {
                 result_rep = VALUE_REP_INT_LANE;
             } else if (decision.result == LAMBDA_NUM_FLOAT) {
                 result_rep = VALUE_REP_F64;

@@ -16,7 +16,7 @@ pub fn path_key(text) string^ {
         let stem = lower(split(part, ".")[0]);
         if (part == "" or part == "." or part == ".." or len(part) > 255 or
             part != trim(part) or ends_with(part, ".") or stem != trim(stem) or
-            not all([for (c in split(part, "")) ord(c) >= 32 and ord(c) < 127 and
+            not all([for (c in split(part, "")^) ord(c) >= 32 and ord(c) < 127 and
                 not contains("<>:\"\\|?*", c)]) or
             contains(["con", "conin$", "conout$", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5",
                 "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5",
@@ -41,7 +41,7 @@ fn action(session) map^ {
     if (not (bytes is binary) or len(bytes) != (if (directory) 0 else node.size))
         raise meta.invalid("package member size")
     return {*: session, action: {kind: 'entry', path: node.entry_path, directory: directory,
-        executable: not directory and band(mode(node), 73) != 0, bytes: bytes}}
+        executable: not directory and band(mode(node)^, 73) != 0, bytes: bytes}}
 }
 
 pub fn begin(bytes) map^ {
@@ -54,7 +54,7 @@ pub fn begin(bytes) map^ {
         if (len(nodes) > 4096) raise meta.invalid("package entry limit")
         let node = nodes[cursor]
         let key = path_key(node.entry_path)^;
-        if (node.is_link == true or band(mode(node), 3584) != 0 or
+        if (node.is_link == true or band(mode(node)^, 3584) != 0 or
             (node.kind != 'dir' and node.kind != 'file')) raise meta.invalid("package member kind or privileged mode")
         if (node.kind == 'dir') { nodes = [*nodes, *[for (child in content(node)^) child]] }
         else { total = total + node.size }

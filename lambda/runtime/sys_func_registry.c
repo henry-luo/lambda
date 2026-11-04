@@ -1344,6 +1344,9 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_MKDIR, "io_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_mkdir", PROFILE_FILE_IO_FPTR(pn_io_mkdir), NULL, NULL, false, 0},
 
+    {SYSPROC_IO_CREATE_FILE, "io_create_file", 2, &TYPE_INT, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_create_file", PROFILE_FILE_IO_FPTR(pn_io_create_file), NULL, NULL, false, 0},
+
     {SYSPROC_IO_TOUCH, "io_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_touch", PROFILE_FILE_IO_FPTR(pn_io_touch), NULL, NULL, false, 0},
 

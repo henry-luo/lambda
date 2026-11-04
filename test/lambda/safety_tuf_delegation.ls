@@ -1,7 +1,8 @@
 import updater: lambda.security.tuf.update
 let base = "test/safety/tuf/fixtures/"
-fn fixture_bytes(filename) => input(base ++ filename, 'binary')^
-fn role_bytes(scenario, path) {
+// fixture IO failures propagate under the same contract as verifier failures.
+fn fixture_bytes(filename) binary^ => input(base ++ filename, 'binary')^
+fn role_bytes(scenario, path) binary^ {
     let routes = input(base ++ scenario ++ "/routes.json", 'json')^
     let filename = if (path == "timestamp.json" or path == "1.snapshot.json") path else routes[path];
     fixture_bytes(scenario ++ "/" ++ filename)^

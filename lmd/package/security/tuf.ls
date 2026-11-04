@@ -5,7 +5,7 @@ import meta: lambda.security.tuf.metadata
 import uri: lambda.security.tuf.path
 
 pub fn bootstrap(raw, expected_sha256) map^ {
-    if (meta.hex(hash(binary(raw), 'sha256')^) != lower(expected_sha256)) raise meta.invalid("bootstrap root fingerprint mismatch")
+    if (meta.hex(hash(binary(raw), 'sha256')^)^ != lower(expected_sha256)) raise meta.invalid("bootstrap root fingerprint mismatch")
     else meta.root(raw)^
 }
 pub fn rotate_root(trusted, raw) map^ {
@@ -69,7 +69,7 @@ pub fn metadata_path(root_metadata, role, revision) string^ =>
     uri.component((if (root_metadata.consistent) revision ++ "." else "") ++ role ++ ".json")^
 pub fn artifact_path(root_metadata, target_path, description) string^ {
     let info = meta.file_info(description)^
-    let hashes = [for (entry in info.hashes where contains(["sha256", "sha384", "sha512"], entry.name)) entry];
+    let hashes = [for (entry in info.hashes where contains(["sha256", "sha384", "sha512"], entry.name)^) entry];
     if (len(hashes) == 0) raise meta.invalid("target has no supported hash")
     else if (not root_metadata.consistent) uri.target_path(target_path)^
     else {

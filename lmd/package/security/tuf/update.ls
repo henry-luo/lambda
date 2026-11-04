@@ -97,7 +97,7 @@ pub fn advance(session, response) map^ {
         let candidate = tuf.rotate_root(session.root, response.bytes)^
         let reset = tuf.rotation_resets(session.root, candidate)^
         let cache = stored(session.cache, "root", response.bytes)
-        let filtered = [for (entry in cache where not reset or not contains(["timestamp", "snapshot"], entry.role)) entry]
+        let filtered = [for (entry in cache where not reset or not contains(["timestamp", "snapshot"], entry.role)^) entry]
         let ordered = [{role: "root", bytes: response.bytes}, *[for (entry in filtered where entry.role != "root") entry]];
         checkpoint({*: session, root: candidate, cache: ordered, rotations: session.rotations + 1}, 'root_saved')
     } else if (session.phase == 'timestamp') {
