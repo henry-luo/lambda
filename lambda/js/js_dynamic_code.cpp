@@ -1,6 +1,6 @@
 // Dynamic JavaScript source: eval() and the Function-family constructors.
 //
-// JSI35 / D8.1.3v20: dynamic source always executes in the AST interpreter,
+// JSI35 / D8.4.3: dynamic source always executes in the AST interpreter,
 // whatever the caller's tier or the unit selector; MIR never lowers it. This
 // file assembles the source text, applies the source-level early errors that
 // depend on the caller's context, and hands the code to js_interp.cpp.

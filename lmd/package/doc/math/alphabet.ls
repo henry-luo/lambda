@@ -1,4 +1,4 @@
-// Font-independent mathematical alphabets shared by SVG and MathML (D7.2.8).
+// Font-independent mathematical alphabets shared by SVG and MathML (D10.2.3).
 // Unicode mathematical alphabets describe semantic variants, not a font's cmap.
 let alphabets = {
     italic: [0x1D434, 0x1D44E, 0], bold: [0x1D400, 0x1D41A, 0x1D7CE],

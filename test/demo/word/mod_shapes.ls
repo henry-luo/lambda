@@ -1,4 +1,4 @@
-// Inline SVG images reuse drawing contours and the editor's image transactions (D7.2.5).
+// Inline SVG images reuse drawing contours and the editor's image transactions (D10.2.1).
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import shapes: lambda.editor.draw.shapes

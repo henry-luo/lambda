@@ -1,6 +1,6 @@
-// D8.3.4v3 (O11v2): a `var` position whose value travels boxed on both edges is
+// D7.3.4 (O11v2): a `var` position whose value travels boxed on both edges is
 // admitted to a raw variant. The borrow's write-back is the boxed path's own
-// CW33 home transport (D8.1.1v10), so the caller must observe every mutation
+// CW33 home transport (D8.3.3), so the caller must observe every mutation
 // the callee makes, on every tier, exactly as it does through `_b`.
 
 type Counter = {hits: int, tag: int}

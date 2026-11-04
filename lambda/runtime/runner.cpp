@@ -388,7 +388,7 @@ extern "C" void lambda_compiler_timing_get(LambdaCompilerTiming* out) {
 void lambda_home_init(void) {
     host_paths_init_from_env();
 #ifndef LAMBDA_NO_LATEX
-    // bundled TeX resources follow the document package namespace (D7.2.4v3, D7.2.7v2).
+    // bundled TeX resources follow the document package namespace (D9.3.4, D10.2.2).
     char* tex_dir = host_path_join(HOST_PATH_HOME, "package/doc/latex/tex");
     tex::set_resource_dir(tex_dir);
     if (tex_dir) mem_free(tex_dir);
@@ -966,7 +966,7 @@ static bool lambda_ast_template_is_reusable_shallow(const Script* script) {
 
 // An executing Runtime sees a shell around a process-cache template.  Cache
 // graph operations must follow the immutable owner, never retain or validate
-// the shell's EvalContext-local edges (D8.5.1v7).
+// the shell's EvalContext-local edges (D8.3.5).
 static const Script* lambda_cache_template_owner(const Script* script) {
     if (!script) return NULL;
     return script->cache_owned_template ? script : script->cache_template;
@@ -1189,7 +1189,7 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
         // AST reuse borrows parser/analysis facts only. A MIR context
         // (including satellites promoted by an earlier execution) is
         // runtime-local and must never be copied into the new shell
-        // (D8.5.1v3).
+        // (D8.5.1).
         instance->jit_context = NULL;
         instance->main_func = NULL;
         instance->mir_gen_initialized = false;
@@ -1252,7 +1252,7 @@ static Script* lambda_ast_template_clone_graph(Runtime* runtime,
     }
 #ifndef LAMBDA_NO_MIR
     // The MIR code is shared, but apply() resolves through a fresh
-    // EvalContext-owned template registry (D8.5.1v7).
+    // EvalContext-owned template registry (D8.3.5).
     if (instance->cache_mir_artifact) lambda_register_mir_view_templates(instance);
 #endif
     return instance;
@@ -1367,15 +1367,15 @@ LambdaError* get_persistent_last_error() {
     return context ? context->last_error : NULL;
 }
 
-// full evaluator handoff needs JS teardown and native stack rebinding (D5.4.1).
-// D5.4.1: only a quiescent owner may release its thread and precise side-stack binding.
+// full evaluator handoff needs JS teardown and native stack rebinding (D6.4.1).
+// D6.4.1: only a quiescent owner may release its thread and precise side-stack binding.
 bool eval_context_transfer_thread(EvalContext* target) {
     if (!target) return false;
     if (context == target) return true;
     if (context) {
         EvalContext* prev = context;
         if (prev->execution_depth != 0) {
-            // D5.4.1: releasing a live guest owner invalidates its open frames.
+            // D6.4.1: releasing a live guest owner invalidates its open frames.
             log_error("eval-switch: outgoing context is executing");
             return false;
         }
@@ -1391,7 +1391,7 @@ bool eval_context_transfer_thread(EvalContext* target) {
         return false;
     }
     // A document preloaded on a worker carries that worker's native stack
-    // limit until its evaluator is bound to this thread (D5.4.1).
+    // limit until its evaluator is bound to this thread (D6.4.1).
     lambda_stack_init();
     target->stack_limit = lambda_stack_recoverable_limit();
     return true;
@@ -1456,7 +1456,7 @@ void transpiler_clear_direct_imports(Transpiler* tp, const Script* script) {
     if (!tp) return;
     ArrayList* direct_imports = tp->direct_imports;
     tp->direct_imports = NULL;
-    // D8.5.1v7: a copied Transpiler can alias the executing Script's runtime
+    // D8.3.5: a copied Transpiler can alias the executing Script's runtime
     // dependency graph. Keep that graph alive while cache overlays rebuild it.
     if (direct_imports && (!script || direct_imports != script->direct_imports)) {
         arraylist_free(direct_imports);
@@ -1478,7 +1478,7 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
 }
 
 // The source/AST cache key is backend-neutral: every profile with the
-// resource cache loads through it, including a T0-only build (D8.5.1v4).
+// resource cache loads through it, including a T0-only build (D8.5.1).
 static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
         const char* path, const char* source, bool inline_source,
         bool is_import) {
@@ -1615,7 +1615,7 @@ static bool interp_force_jit_script(Script* script, Runtime* runtime,bool preser
     InterpSatelliteImage* retained = NULL;
     main_func_t previous_main = script->main_func;
     if (preserve_live_slab && script->jit_context) {
-        // D8.5.1v7: published satellites keep their sealed BSS and code when
+        // D8.3.5: published satellites keep their sealed BSS and code when
         // a native importer needs a complete export image of this T0 module.
         retained = (InterpSatelliteImage*)mem_calloc(1, sizeof(InterpSatelliteImage), MEM_CAT_SYSTEM);
         if (!retained) return false;
@@ -1732,7 +1732,7 @@ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
 }
 
 // Activates a cached AST template in T0. Only the AUTO fallback tail lowers
-// MIR; a T0-only build refuses there like explicit interp (D8.1.1v15).
+// MIR; a T0-only build refuses there like explicit interp (D8.3.1).
 static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         Script* script) {
     if (!runtime || !script) return false;
@@ -1949,7 +1949,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     }
     if (profiling || compiler_timing) profile_get_time(&p4);
     // Allocation reserves dense node IDs and bind publishes graph columns, so
-    // no post-validation index walk remains (D8.2.4/D8.2.5v2).
+    // no post-validation index walk remains (D8.2.4/D8.2.5).
     if (profiling || compiler_timing) p5 = p4;
 #ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
@@ -1979,7 +1979,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     }
 #endif
 
-    // D8.1.1v15: only AUTO may fall back when the walker rejects a script.
+    // D8.3.1: only AUTO may fall back when the walker rejects a script.
     if (lambda_tier_selected() == LAMBDA_TIER_INTERP ||
             lambda_tier_selected() == LAMBDA_TIER_AUTO) {
         profile_time_t plan0, plan1;
@@ -2165,7 +2165,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 #else
     // Build the static closure before the root enters its Runtime. Workers only
     // publish AST templates; import initialization and tier selection stay on
-    // this execution path (D8.1.1v13, D8.5.1v7).
+    // this execution path (D8.3.5, D8.3.5).
     if (runtime && !runtime->ast_prebuild_only && !is_import && !source &&
             lambda_tier_selected() != LAMBDA_TIER_JIT &&
             input_script_cache_ast_enabled(input_manager_global_script_cache())) {
@@ -2226,7 +2226,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     const char* exact_source = source_lease.source();
     size_t exact_source_length = source_lease.source_length();
     // REPL fragments append mutable AST/source history. Until that history is
-    // part of its key, retain only its common source record (D8.5.1v3).
+    // part of its key, retain only its common source record (D8.5.1).
     bool cache_artifact_enabled = input_script_cache_policy(script_cache) != INPUT_SCRIPT_CACHE_OFF &&
         !lambda_mvp_selected() && strcmp(lookup_path, "<repl-session>") != 0;
 
@@ -2330,7 +2330,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             }
             // Generated imports name logical units, but those units still
             // need this Runtime's dense slabs before the cached root enters
-            // MIR. Instantiate the complete cached dependency cone (D8.5.1v3).
+            // MIR. Instantiate the complete cached dependency cone (D8.5.1).
             Script* instance = lambda_ast_template_clone_for_runtime(runtime,
                 cached_template, source_lease.scope());
             if (instance) {
@@ -2355,7 +2355,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
     // T0 AST templates retain only parser/validation/frame-plan facts. A hit
     // always receives a new Script and dense module slab, never an old
-    // EvalContext, satisfying D8.5.1v3 without changing tier policy.
+    // EvalContext, satisfying D8.5.1 without changing tier policy.
     void* cached_ast = NULL;
     if (cache_artifact_enabled && lambda_tier_selected() != LAMBDA_TIER_JIT &&
             input_script_cache_get_ast(raw_lease, &cached_ast)) {
@@ -2419,7 +2419,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         // A waiter can observe READY only after the owner published between
         // this call's first lookup and claim. Retry that normal hit without
         // retiring it; only a lookup that actually rejected an artifact is
-        // untrusted (D8.5.1v3).
+        // untrusted (D8.5.1).
         if (cache_artifact_rejected) {
             lambda_cache_invalidate_untrusted_cone(script_cache,
                 input_script_compilation_unit_id(input_script_lease_input(raw_lease)),
@@ -2652,7 +2652,7 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     lambda_tier_set(was_tier);
     runtime->use_mir_direct = was_mir_direct;
 #ifndef LAMBDA_NO_JS
-    // cached MIR shells also need fresh exports in the importing Runtime (D5.4.3 / D8.5.1v7).
+    // cached MIR shells also need fresh exports in the importing Runtime (D6.4.3 / D8.3.5).
     register_lambda_script_namespace(runtime, script);
 #endif
     return script;
@@ -2700,7 +2700,7 @@ static void repl_report_transpiler_errors(ArrayList* errors) {
 
 // One entry's append transaction over the session Script. Every rejection
 // or failure restores exactly these fields, so an entry is all-or-nothing
-// (D8.1.1v17) and the next one sees the last successful environment.
+// (D8.3.6) and the next one sees the last successful environment.
 typedef struct ReplEntryTxn {
     Script* script;
     AstScript* root;
@@ -2809,7 +2809,7 @@ void interp_repl_session_destroy(InterpReplSession* session) {
         }
         // Each REPL Script receives a unique module id. Releasing its exact
         // root before freeing the Script prevents `clear` from pinning its
-        // former bindings until the whole Runtime exits (D5.3.3).
+        // former bindings until the whole Runtime exits (D6.3.3).
         lambda_module_state_release(script->module_state_id);
         int index = script->index;
         runtime_free_script(runtime, script, true);
@@ -2828,7 +2828,7 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime,
 
     // The normal loader owns AST/pool initialization. Build the empty session
     // through its T0 branch whatever tier the shell selected: the session is
-    // always T0, and the tier only governs satellite promotion (D8.1.1v17).
+    // always T0, and the tier only governs satellite promotion (D8.3.6).
     LambdaTier saved_tier = lambda_tier_selected();
     lambda_tier_set(LAMBDA_TIER_INTERP);
     Script* script = load_script(runtime, "<repl-session>", "", false);
@@ -2916,7 +2916,7 @@ static ReplEntryStatus repl_entry_build(InterpReplSession* session,
     LambdaParseStatus parse_status = lambda_rd_reduce_ast(&tp, fragment_source,
         strlen(source), &parsed_root, &parse_error);
     if (parse_status == LAMBDA_PARSE_INCOMPLETE) {
-        // The C parser is the completeness authority (D8.1.1v17): the driver
+        // The C parser is the completeness authority (D8.3.6): the driver
         // keeps collecting lines, and nothing of this probe is retained.
         free_transpiler_error_list(tp.errors);
         repl_entry_rollback(txn);
@@ -3026,7 +3026,7 @@ ReplEntryStatus interp_repl_session_eval(InterpReplSession* session,
 }
 
 // ---------------------------------------------------------------------------
-// Session services (D8.1.1v17): each reads the live scope and slab or builds
+// Session services (D8.3.6): each reads the live scope and slab or builds
 // an entry without running it; none re-runs anything.
 // ---------------------------------------------------------------------------
 
@@ -3189,7 +3189,7 @@ void runner_setup_context(Runner* runner) {
         heap_init();
         ctx->pool = ctx->heap->pool;
         // Publish the owner pair together so retained-context users always
-        // observe a coherent heap/name-pool generation (D5.2.1v3).
+        // observe a coherent heap/name-pool generation (D6.2.1).
         runtime_context_publish_owners(rt, ctx);
     }
     path_register_pool_provider(runner_path_pool_provider);
@@ -3515,7 +3515,7 @@ void runtime_free_all_scripts(Runtime* runtime) {
     if (runtime->scripts) {
         // Satellites compile a dependent script from its retained AST, which
         // may reference Type descriptors owned by an imported script. Drain
-        // every worker before any dependency pool is released (D8.5.1v6).
+        // every worker before any dependency pool is released (D8.3.4).
         for (int i = 0; i < runtime->scripts->length; i++) {
             interp_satellite_cancel_script((Script*)runtime->scripts->data[i]);
         }
@@ -3580,7 +3580,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     }
 #endif
     if (script->cache_owned_template) {
-        // D8.5.1v2: the cache entry retains its template lease until eviction.
+        // D8.5.1: the cache entry retains its template lease until eviction.
         // Closing it here would evict the image and recursively destroy this
         // Script while runtime cleanup still owns its stack frame.
         return;
@@ -3808,7 +3808,7 @@ void runtime_reset_heap(Runtime* runtime) {
         tmpl_state_destroy();
         // Template entries retain both name-pool strings and JIT body pointers
         // from this evaluation. Keeping them across heap replacement let the
-        // next script dispatch through unmapped code (D5.4.3).
+        // next script dispatch through unmapped code (D6.4.3).
         TemplateRegistry* template_registry = cleanup_context->template_registry;
         cleanup_context->template_registry = NULL;
         template_registry_destroy(template_registry);
@@ -3825,7 +3825,7 @@ void runtime_reset_heap(Runtime* runtime) {
         } else {
             // Lambda DOM imports also allocate Radiant Velmt/VArray wrappers
             // from this heap. Retire their weak cache slots before replacing
-            // the heap even when no JavaScript source ran (D7.4.5v2).
+            // the heap even when no JavaScript source ran (D9.5.5).
             dom_batch_reset();
         }
 
@@ -3872,7 +3872,7 @@ void runtime_reset_heap(Runtime* runtime) {
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
         runtime_shape_tree_release(cleanup_context);
-        // D4.2.1v2/RN-NamePool: GC finalizers may still inspect NameRecords;
+        // D5.2.1/RN-NamePool: GC finalizers may still inspect NameRecords;
         // release the dedicated runtime pool only after heap destruction.
         if (runtime_name_pool(runtime)) {
             name_pool_release(runtime_name_pool(runtime));
@@ -3905,7 +3905,7 @@ void runtime_cleanup(Runtime* runtime) {
     if (!runtime) return;
     runtime_quiesce_satellite_workers(runtime);
     // Document/transaction capsules retire with their owning heap after tasks
-    // join; do not reset the currently active peer (D5.4.2-D5.4.4).
+    // join; do not reset the currently active peer (D6.4.2-D6.4.4).
     EvalContext* cleanup_owner = runtime->eval_context;
     if (cleanup_owner) {
         if (!eval_context_init(cleanup_owner)) return;
@@ -4024,7 +4024,7 @@ void runtime_cleanup(Runtime* runtime) {
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
         runtime_shape_tree_release(cleanup_context);
-        // D4.2.1v2/RN-NamePool: GC finalizers can traverse name-backed
+        // D5.2.1/RN-NamePool: GC finalizers can traverse name-backed
         // shapes, so the dedicated runtime pool outlives heap teardown.
         if (runtime_name_pool(runtime)) {
             name_pool_release(runtime_name_pool(runtime));

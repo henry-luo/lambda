@@ -1,4 +1,4 @@
-// D7.2.5: the gallery shares ribbon chrome; the package owns transition choices.
+// D10.2.1: the gallery shares ribbon chrome; the package owns transition choices.
 import ribbon: ~~.mod_ribbon
 import fx: lambda.slide.transitions
 import model: .mod_transitions

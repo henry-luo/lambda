@@ -28,7 +28,7 @@ enum JsFunctionBodyKind : uint8_t {
 typedef Item (*JsCallEntry)(Item fn_item, Item this_val, Item* args, int argc,
                             uint64_t* result_home, bool args_prerooted);
 
-// Construction is a separate capability under D6.2.2v2. The caller supplies
+// Construction is a separate capability under D7.2.2. The caller supplies
 // newTarget explicitly; an absent entry is the complete IsConstructor answer.
 typedef Item (*JsConstructEntry)(Item fn_item, Item* args, int argc,
                                  Item new_target, uint64_t* result_home,
@@ -119,7 +119,7 @@ struct JsAstBody {
 
 // One JS code record is shared by AST closures and their MVP promotions. Keep
 // definition facts and realm code facts directly on that owner: neither has an
-// independent allocation or identity (D6.2.1, D8.2.3; JSCU52).
+// independent allocation or identity (D7.2.1, D8.2.3; JSCU52).
 struct JsCallableCode {
     // 8-byte group
     const void* definition;

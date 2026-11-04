@@ -4,8 +4,8 @@
 > Implements the first performance step
 > in [JSCU37](../Lambda_Design_Structs_JS.md#10-jscu37--one-construction-and-slot-initialization-mechanism)
 > following the user's implementation request. Authority: **D3.4.5–D3.4.6**
-> (shape/storage consistency), **D3.4.4v2** (name identity), **D4.6.1v2**
-> and **D5.1–D5.4** (precise ownership and reusable-code boundaries).
+> (shape/storage consistency), **D3.4.4** (name identity), **D5.6.1**
+> and **D6.1–D6.4** (precise ownership and reusable-code boundaries).
 > Base source: `57addc5cf`. This record concerns the bounded construction
 > repair; the full JSCU36–43 extraction program remains open.
 

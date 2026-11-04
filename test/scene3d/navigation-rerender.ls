@@ -1,4 +1,4 @@
-// S12.1.5v2/D4.5.2: template intent reconciles into the retained native asset owner.
+// S12.1.5v2/D5.5.2: template intent reconciles into the retained native asset owner.
 import dom
 import nav: lambda.navigation
 

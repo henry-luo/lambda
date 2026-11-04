@@ -1,4 +1,4 @@
-// context-free WFC batch kernel; Lambda owns model construction and options (D7.1.1).
+// context-free WFC batch kernel; Lambda owns model construction and options (D9.1.1).
 #ifndef LIB_PROCGEN_WFC_H
 #define LIB_PROCGEN_WFC_H
 

@@ -42,7 +42,7 @@ static inline bool mir_plan_field_access(void* candidate, Resolve resolve,
     return alternative && alternative != candidate && resolve(alternative, plan);
 }
 
-// Candidates select guards, never prove a receiver's layout (D8.4.1v2).
+// Candidates select guards, never prove a receiver's layout (D7.4.1).
 // Frontends supply their literal/parameter/callee facts; binding traversal is
 // shared because both profiles consume the builder's resolved AST identities.
 struct MirShapeCandidateProfile {

@@ -4,9 +4,9 @@ Native navigation provides bounded graph/grid shortest paths, triangulated
 surface corridors with grounded waypoints, clearance-aware baked domains and
 explicit links
 through `lambda.navigation`. Constructors, validation and queries are pure
-(**S12.1.1v3 / D7.2.4v4**). The reusable provider owns immutable copied graph data
-below runtime/Radiant (**D7.1.1–D7.1.3**); result conversion uses precise roots
-(**D5.3.3**). Scene source bakes run in background workers with checked
+(**S12.1.1v3 / D9.3.4**). The reusable provider owns immutable copied graph data
+below runtime/Radiant (**D9.1.1–D9.1.3**); result conversion uses precise roots
+(**D6.3.3**). Scene source bakes run in background workers with checked
 publication, including bounded dirty-tile updates. Baked-surface capsule agents
 provide terrain following and local avoidance; broader profiles remain outstanding.
 
@@ -156,7 +156,7 @@ profile must not be used as evidence that positive-radius clearance is baked.
 triangle bakes, saved-cell bakes and scene source descriptors accept a `links`
 array. Graph/grid assets reject nonempty link arrays. Endpoints use the asset's
 2D XY or 3D Y-up frame. Links retain owned native data; their construction and
-querying remain pure (**S12.1.1v3 / D7.1.1–D7.1.3 / D7.2.4v4**).
+querying remain pure (**S12.1.1v3 / D9.1.1–D9.1.3 / D9.3.4**).
 
 ```lambda
 import nav: lambda.navigation
@@ -208,7 +208,7 @@ rebaking unchanged source geometry. Equivalent typed-template redraws retain
 the generation. Invalid attachments preserve the prior working cache;
 changed link metadata makes pending jobs stale. Export retains the definitions
 captured by that job, and saved-cell descriptions reopen with those links
-(**D4.5.2 / D5.3.3 / D7.5.3v2–D7.5.4**). `navigation_links` advertises this
+(**D5.5.2 / D6.3.3 / D9.5.6–D11.3.1**). `navigation_links` advertises this
 profile; broad `navigation` remains false pending agents and avoidance.
 
 ## Clearance-aware bakes
@@ -216,7 +216,7 @@ profile; broad `navigation` remains false pending agents and avoidance.
 `bake(triangles, settings, options={})` describes a bounded, Y-up 3D raster bake. Validation
 and path queries build an immutable native domain; a Scene3D asset caches it.
 The description is a pure value and can be formatted, saved and reopened
-(**S12.1.1v3 / D7.1.1–D7.1.3 / D7.2.4v4**). It stores source triangles and
+(**S12.1.1v3 / D9.1.1–D9.1.3 / D9.3.4**). It stores source triangles and
 settings; it is not a serialized binary of the compiled cells.
 
 Each triangle contains three XYZ arrays, or a map with `vertices` containing
@@ -288,7 +288,7 @@ stacked levels. Shared boundary intervals become directed portals, including
 partial edges where unequal rectangles meet. The existing numerical funnel
 shortens a selected region corridor. Grounded waypoints retain departure and
 arrival heights at a step, so smoothing cannot replace a riser with a diagonal
-through unverified support (**D7.1.1–D7.1.3 / D7.2.4v4**).
+through unverified support (**D9.1.1–D9.1.3 / D9.3.4**).
 
 Results use `domain:"voxel_polygons"`, `profile.representation:"polygons"`,
 `region_count` and zero-based region IDs in `nodes`/`corridor` and
@@ -327,8 +327,8 @@ Projection/assembly exhaustion never publishes an unverified movement path.
 
 `lambda.navigation.scene` supplies procedural queries over a live document
 through the existing `radiant.scene3d` host operation (**S12.1.1v3 /
-D7.5.3v2**). Graph data belongs to the document, independently of its GPU
-projection and physics world (**D4.5.2**). A query can create the navigation
+D9.5.6**). Graph data belongs to the document, independently of its GPU
+projection and physics world (**D5.5.2**). A query can create the navigation
 cache without acquiring graphics or physics resources.
 
 Place definitions directly in a scene's `<resources>`. Typed Lambda scenes can
@@ -355,7 +355,7 @@ outer asset schema and the data schema validate. The tag must agree with the
 data's graph/grid/mesh/bake kind. Assets contain world coordinates, accept no object
 transforms, and have no element/non-whitespace text children. JSON strings are
 limited to 16 MiB and parsed into call-local storage; native graphs retain
-copied values rather than parser/GC pointers (**D5.3.3 / D7.1.3**).
+copied values rather than parser/GC pointers (**D6.3.3 / D9.1.3**).
 
 The live module provides:
 
@@ -379,7 +379,7 @@ check for a stored result; future queries also accept the stored generation.
 
 Repeated queries and camera edits reuse compiled graphs. Navigation edits do
 not reproject GPU resources, context recovery preserves native assets, and
-reconciliation does not advance/reset the scene clock (**D2.11.4 / D4.5.2**).
+reconciliation does not advance/reset the scene clock (**D10.1.7 / D5.5.2**).
 An edit attempted during tick sampling rejects before publication and can be
 retried after the tick. Mesh reconciliation compares the owned surface geometry
 and area costs as well as its graph: equal centroids cannot conceal changed
@@ -401,8 +401,8 @@ independently of camera, animation/physics poses and GPU projection. It accepts
 triangle buffers and box/plane primitives. Instancing, skinning and morphing
 require a later explicit pose/instance snapshot profile; shader deformation is
 not sampled. The collector copies native coordinates and fingerprints; workers
-receive no DOM, script values or callbacks (**D4.5.2 / D5.3.3 /
-D7.1.1–D7.1.3 / D7.5.3v2**).
+receive no DOM, script values or callbacks (**D5.5.2 / D6.3.3 /
+D9.1.1–D9.1.3 / D9.5.6**).
 
 | Live operation | Result/behavior |
 |---|---|
@@ -447,7 +447,7 @@ positive integers at most 65,536. The base must be a retained published job for
 the same viewport, resource identity and exact settings. Source edits can retire
 the current domain while that old immutable result remains a valid update base.
 After a dirty job starts, its native reference survives release of the base
-token (**D4.5.2 / D5.3.3**).
+token (**D5.5.2 / D6.3.3**).
 
 The native provider compares canonical triangle multisets, including costs,
 masks and walkability. It marks tiles intersecting the conservative horizontal
@@ -497,7 +497,7 @@ and aggregate receipts are recorded in the [gaming implementation log](../vibe/i
 ## Baked-surface capsule agents
 
 `lambda.navigation.scene` provides document-owned agents over published 3D
-clearance bakes (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+clearance bakes (**S12.1.1v3 / S12.1.5v2 / D5.5.2 / D6.3.3 / D9.5.6**).
 A position-controlled kinematic body must have one solid upright Y-up capsule.
 The baked radius must cover the capsule radius plus movement skin, and baked
 headroom must cover its complete height plus twice the skin. The controller

@@ -53,13 +53,13 @@ context, while current source determines which infrastructure can be reused.
 
 | Ruling | Constraint on this proposal |
 |---|---|
-| [D1.1, D1.3v3](../doc/Lambda_Formal_Design.md#d1-architecture-principles) | Keep one Lambda host architecture and reuse its runtime substrate. A frontend process is a client, not another execution engine inside the target. |
-| [D2.2, D5.2](../doc/Lambda_Formal_Design.md#d2-data-representation) | Preserve numeric kinds and scalar ownership when serializing or retaining inspected values. |
-| [D2.9.1–D2.9.2](../doc/Lambda_Formal_Design.md#d29-mark-file-conventions) | Use Mark Notation for wire values and `.mark` for saved message examples; the data decoder does not execute Lambda source. |
-| [D5.1.1v3, D5.3.1–D5.3.4](../doc/Lambda_Formal_Design.md#d5-execution-state-stacks-and-rooting) | Inspect precise roots and registered activations; never scan native stacks or infer roots from register contents. |
-| [D5.4.1–D5.4.4](../doc/Lambda_Formal_Design.md#d54-runtime-globals-and-evalcontext) | Run target operations on their owning context; use a lazy capsule without changing the frozen JIT-visible prefix. Add no locks, atomic RMWs or coherence operations to repeated execution paths. |
-| [D8.1.1v18, D8.1.3v42](../doc/Lambda_Formal_Design.md#d81-structure) | Support the retained AST interpreters and current MIR engines. Do not assume a bytecode VM, V8 inspector, or general MIR-to-interpreter deoptimization exists. |
-| [S1.8](../doc/Lambda_Formal_Semantics.md#s1-core-principles), D8.1.1's REPL clause | Lambda console input is host-submitted source through the existing REPL pipeline; do not introduce a script-visible string-evaluation API. |
+| [D1.1, D1.3](../doc/Lambda_Formal_Design.md#d1-architecture-principles) | Keep one Lambda host architecture and reuse its runtime substrate. A frontend process is a client, not another execution engine inside the target. |
+| [D2.2, D6.2](../doc/Lambda_Formal_Design.md#d2-value-representation) | Preserve numeric kinds and scalar ownership when serializing or retaining inspected values. |
+| [D10.1.1–D10.1.2](../doc/Lambda_Formal_Design.md#d101-document-formats) | Use Mark Notation for wire values and `.mark` for saved message examples; the data decoder does not execute Lambda source. |
+| [D6.1.1, D6.3.1–D6.3.4](../doc/Lambda_Formal_Design.md#d6-execution-state) | Inspect precise roots and registered activations; never scan native stacks or infer roots from register contents. |
+| [D6.4.1–D6.4.4](../doc/Lambda_Formal_Design.md#d64-context-and-globals) | Run target operations on their owning context; use a lazy capsule without changing the frozen JIT-visible prefix. Add no locks, atomic RMWs or coherence operations to repeated execution paths. |
+| [D8.3.2, D8.4.5](../doc/Lambda_Formal_Design.md#d83-lambda-execution-tiers) | Support the retained AST interpreters and current MIR engines. Do not assume a bytecode VM, V8 inspector, or general MIR-to-interpreter deoptimization exists. |
+| [S1.8](../doc/Lambda_Formal_Semantics.md#s1-core-principles), D8.3.1's REPL clause | Lambda console input is host-submitted source through the existing REPL pipeline; do not introduce a script-visible string-evaluation API. |
 | [S1.4, S9.1](../doc/Lambda_Formal_Semantics.md#s9-mutability-mutable-value-semantics) | Inspection cannot bypass immutable bindings, value semantics, or normal mutation rules. |
 
 ## 2. Does Chrome run DevTools in a separate process?
@@ -177,7 +177,7 @@ and borrowed target buffers never cross the process boundary.
 The initial document connection is a shell-owned `UiContext` service with no
 retained managed values. A document resource invalidates weak handles before
 its storage retires. When runtime-value inspection is added, its retained GC
-handles belong in an opaque per-context capsule under D5.4.2.
+handles belong in an opaque per-context capsule under D6.4.2.
 Ordinary execution with inspection disabled has no event construction,
 debugger statement hooks, new repeated-path locks/atomics, or background heap
 walking. Existing coarse lifecycle boundaries can publish records when enabled.
@@ -197,7 +197,7 @@ or running a document. Explicit interpreter-debug sessions add nonblocking
 control polling at known statement/call/loop checkpoints. These checkpoints
 establish the required precise-root state before inspecting or allocating.
 They use the owner thread's local state and dedicated channel, without a shared
-atomic flag or lock on the execution path (D5.4.4).
+atomic flag or lock on the execution path (D6.4.4).
 
 When paused, the owner thread enters a restricted debugger control loop that
 services inspect/resume commands. It does not run page event handlers, timers,
@@ -287,7 +287,7 @@ preview records. User data remains inside the `value` field. Containers expand
 without calling functions. Typed arrays expose their shape and flatten in logical
 order. `bindings` reads the retained scope; `source` pages accepted session text.
 Scratch entries use the existing functional REPL, independently of the document
-(S16.7.4–S16.7.6, D8.1.1v18). JavaScript evaluation is deferred.
+(S16.7.4–S16.7.6, D8.3.2). JavaScript evaluation is deferred.
 
 The current document `source` result
 is explicitly an `attach_snapshot` of the local source file, not proof of the
@@ -334,7 +334,7 @@ Invalidate document handles on navigation, frame/local handles on resume, and
 all handles on disconnect. Source handles retain exact loaded bytes. DOM
 handles validate live nodes and do not keep detached trees alive. Retained GC
 values use precise roots; retain Input/source/numeric owners explicitly where
-needed (D5.2, D5.3.3). A stale handle returns a normal error. No extra generation
+needed (D6.2, D6.3.3). A stale handle returns a normal error. No extra generation
 or pause token is needed on the wire.
 
 Use the shared Mark reader/writer, with lossless round-trip qualification before
@@ -410,7 +410,7 @@ The frontend exposes connection status and captured process output. The Lambda
 scratch console and passive value expansion are implemented in M2's Lambda
 slice. It runs the existing persistent functional REPL in a separate process,
 keeps declared bindings through result release, and retains expandable values
-with precise RootVector slots and destination-owned number homes (D5.2, D5.3.3).
+with precise RootVector slots and destination-owned number homes (D6.2, D6.3.3).
 It supports forced collection and bounded pages; functions/unsupported entities
 remain opaque. The limits are 256 entries or 4096 bytes per page, 4096 live value
 handles and 65536 handle IDs over a connection. Clear results releases all
@@ -433,7 +433,7 @@ or continuation instead of recursively formatting an unbounded graph.
 
 For **JavaScript**, evaluation is deferred (user direction, 2026-10-26). A future
 console can use the existing dynamic-source AST
-path in the selected realm at an admitted owner-thread boundary (D8.1.3v42).
+path in the selected realm at an admitted owner-thread boundary (D8.4.5).
 Executing submitted source is explicit and distinct from passive inspection.
 Do not add paused-frame evaluation until the debugger can expose the correct
 live lexical environment and handle reentrancy.
@@ -477,7 +477,7 @@ several expressions on one line do not repeatedly stop at the same location.
 Pause the owning isolate's application execution consistently. Initial stepping
 covers synchronous interpreted code; stepping across task/await/generator
 suspension and async ancestry are later capabilities using the existing
-activation owners (D5.1.1v3). Parked activations remain precisely rooted.
+activation owners (D6.1.1). Parked activations remain precisely rooted.
 
 Distinguish a JavaScript throw, an uncaught throw, a Lambda error value, and an
 unhandled/fault diagnostic. Returning an ordinary Lambda error value is not
@@ -500,13 +500,13 @@ tables, live binding materialization, frame registration and precise rooting
 at its debug stops. Inspectable locals need explicit availability states such
 as `optimizedOut`; native registers are not a substitute for this metadata.
 
-Keep emission/rooting policy in `MirEmitter` under D5.3.4. Instrument an explicit
+Keep emission/rooting policy in `MirEmitter` under D6.3.4. Instrument an explicit
 debug code image before entry, starting with unoptimized MIR bodies; existing
 active frames finish under their admitted policy. General deoptimization,
 arbitrary-PC OSR and full optimized stepping are outside the first design.
 Do not patch vendored MIR or promise native stepping before these contracts
 exist. The production JS path is `lambda/js/mvp-lmd/`, not the retired LJS MIR
-backend (D8.1.3v42).
+backend (D8.4.5).
 
 ## 8. Resources, performance and memory
 

@@ -4,7 +4,7 @@
 > **Role**: the design home for the **native DOM layer's code architecture** — where the DOM/web-platform host algorithms live (`lambda/dom/`), the realm-neutral core vs JS-adapter split, how the Jube `radiant` module and the JS runtime link to that core, and the Lambda-facing `import dom` API. Complements the behavior/dispatch docs, which own *what* the DOM layer does; this doc owns *where it lives and who may call it, how*.
 > **Scope**: file/module layout, symbol namespaces, the host-table linkage question, the core/adapter boundary, and the Lambda `dom` module surface. **Out of scope**: event dispatch semantics (`Lambda_Design_DOM_Dispatch.md`), default-action placement (`Lambda_Design_DOM_Default.md`), state storage and waist semantics (`Lambda_Design_DOM_State.md`), the L3 Obscura-parity package (`Lambda_Design_DOM_Pkg.md` Phase 1+), and the DOM data structures themselves (deferred, §6).
 > **Companion docs**: `vibe/Lambda_Design_Native_Module.md` §8 (POC 1 `radiant-dom` — this proposal executes its carve-out half; the host DOM API redesign is Phase 2, §7), `vibe/Lambda_Design_DOM_Pkg.md` (the four-layer stack L1–L4 and Phase-0 gate this delivers), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `vibe/radiant/Radiant_Design_View_Struct.md` (OQ5 — the struct move this doc defers), `doc/dev/js/JS_13_Web_DOM.md`.
-> **Formal anchors**: D8 (module/runtime ownership), D3.4.7/D7.4.1–D7.4.4 (host-object metadata and the single VMap/Jube bridge), D6.2.2v2 (observable property Get + `[[Call]]`), D4.5.1v3 (the Radiant memory seam), S9.2.2 (read views are snapshots), S9.1.4 (state lives in view state), S12.1.3 (mutation only in handlers), S5.1.4 (no reference identity in Lambda).
+> **Formal anchors**: D8 (module/runtime ownership), D3.4.7/D9.5.1–D9.5.4 (host-object metadata and the single VMap/Jube bridge), D7.2.2 (observable property Get + `[[Call]]`), D5.5.1 (the Radiant memory seam), S9.2.2 (read views are snapshots), S9.1.4 (state lives in view state), S12.1.3 (mutation only in handlers), S5.1.4 (no reference identity in Lambda).
 > **Ledger series**: extends the DOM area's `ES#`/`ESO#`/`F#` per `doc/Doc_Convention.md` §4 — no new series. Decisions **ES32–ES38**; open issues **ESO72–ESO83**; migration stages **F22–F27**. Phase 2 continues the series in `Lambda_Design_DOM_Host_API.md` (ES39+, ESO84+, F28+). (Prior: ES31/ESO71 in `Lambda_Design_DOM_Default.md`, F21 in `Lambda_Design_DOM_Dispatch.md`.)
 
 ---
@@ -17,7 +17,7 @@ The web-platform host code — ~28.3k lines across 20 files — lives in `lambda
 
 - The **event record** is one native record both realms read (ES24); the **author cascade** in `js_dom_events.cpp` dispatches JS listeners *and* Lambda author templates in one walk (ES23/F18).
 - The **behavior package** (`lambda/dom/*.ls`) is the UA tier over the same mechanism (ES22), reaching it through `radiant.*` waist primitives.
-- The **wrapper vocabulary** is shared: `~` in a behavior handler and `el` in page JS are the same branded `dom_node` VMap (D7.4.1–D7.4.4).
+- The **wrapper vocabulary** is shared: `~` in a behavior handler and `el` in page JS are the same branded `dom_node` VMap (D9.5.1–D9.5.4).
 
 But the *code architecture* still says otherwise. The same `js_dom.cpp` bodies are reached through three different doors:
 
@@ -77,7 +77,7 @@ Two structural facts worth their weight:
 
 ### 2.2 The four access paths
 
-**(a) JS / declared-interface path.** Property kernel → `radiant_dom_type_bindings[]` member records (`radiant_dom_iface.cpp:1609`) → ordinal handlers (`RADIANT_DOM_OPERATION_BINDING`, `radiant_dom_bridge.cpp:2556`; 83 `JubeDomElementOperation` + 38 `RadiantDocumentOperation` ordinals) → **`#define js_dom_x radiant_host_api->dom->x`** (~125 remap defines, `radiant_dom_bridge.cpp:68+`) → `JubeHostDomAPI` (~216 slots, `jube.h:676–928`; populated `jube_registry.cpp:1507–1731` from ~112 `extern "C"` prototypes at `:997+`) → the `js_dom*.cpp` bodies. Per D6.2.2v2 the member records own the observable Get + `[[Call]]`; the ordinal is the executable capability.
+**(a) JS / declared-interface path.** Property kernel → `radiant_dom_type_bindings[]` member records (`radiant_dom_iface.cpp:1609`) → ordinal handlers (`RADIANT_DOM_OPERATION_BINDING`, `radiant_dom_bridge.cpp:2556`; 83 `JubeDomElementOperation` + 38 `RadiantDocumentOperation` ordinals) → **`#define js_dom_x radiant_host_api->dom->x`** (~125 remap defines, `radiant_dom_bridge.cpp:68+`) → `JubeHostDomAPI` (~216 slots, `jube.h:676–928`; populated `jube_registry.cpp:1507–1731` from ~112 `extern "C"` prototypes at `:997+`) → the `js_dom*.cpp` bodies. Per D7.2.2 the member records own the observable Get + `[[Call]]`; the ordinal is the executable capability.
 
 **(b) Radiant engine direct calls.** `radiant/event.cpp` makes 77 `js_dom_*` references (26 distinct symbols) plus 11 ad-hoc externs (`:48–61`); `window.cpp`, `script_runner.cpp`, `layout.cpp`, `event_sim.cpp`, `cmd_layout.cpp` add more; `radiant/event.hpp:48` leaks two externs into every includer. So the "module boundary" of path (a) is already crossed freely by the engine sitting next to it.
 
@@ -150,7 +150,7 @@ The stems `dom_node`/`dom_element`/`dom_lifecycle` are **reserved** — they bel
 
 What violates the rule moves to thin adapter files in `lambda/js/` (`js_event_adapter.cpp` for the Event classes; `js_dom_adapter.cpp` for prototype/global/meta glue; `js_globals.cpp` stays the publication home). This is DOM_Pkg §3.2's L4 ("the adapter owns the shape") drawn as a compile-time boundary, grep-enforceable.
 
-**Boundary ruling within ES33**: the property-protocol entry points (`dom_get_property`/`dom_set_property`, named/indexed binding handlers) **stay in the core** — they are the realm-shared VMap dispatch of D7.4.4, not JS shape; Lambda member access on `dom_node` VMaps runs through them today. Camel-case spellings remain metadata on the member records (`js_name` in `JubeMemberBind`), never a second dispatch.
+**Boundary ruling within ES33**: the property-protocol entry points (`dom_get_property`/`dom_set_property`, named/indexed binding handlers) **stay in the core** — they are the realm-shared VMap dispatch of D9.5.4, not JS shape; Lambda member access on `dom_node` VMaps runs through them today. Camel-case spellings remain metadata on the member records (`js_name` in `JubeMemberBind`), never a second dispatch.
 
 **Scope refinement**: the rule is *enforced* for the six core families (dom, events, observers, platform, selection, cssom). The six peripherals are governed by ES37.
 
@@ -317,7 +317,7 @@ One **operation catalog** is the single source of truth for the DOM API. From it
 
 ### 7.3 Inputs Phase 2 waits for (why not now)
 
-- the **`import dom` surface in real use** (ES36/F26) — the best evidence for which operations are the true waist and which are per-property plumbing the declared-interface records (D7.4.4) should own outright;
+- the **`import dom` surface in real use** (ES36/F26) — the best evidence for which operations are the true waist and which are per-property plumbing the declared-interface records (D9.5.4) should own outright;
 - the **adapter split settled** (ES33/F25) — so the table is not asked to carry JS-shape traffic that belongs to the adapter;
 - the **frozen bypass inventory** — collected, not grown, during F22–F27.
 
@@ -333,7 +333,7 @@ Exit shape (to be ratified then): one catalog; a `JubeHostDomAPI` small enough t
 | `lambda/jube/jube.h:676–928` | `JubeHostDomAPI` (~216 slots) — **retained** (ES34); renamed-through in F24; reshaped in Phase 2 (ESO78) |
 | `lambda/jube/jube_registry.cpp:997+`, `:1507–1731` | prototype block + table wiring — renamed in F24, layout untouched |
 | `lambda/module/radiant/radiant_dom_bridge.cpp:68+` | ~125 `#define js_x radiant_host_api->dom->x` remaps — proper seam usage; renamed in F24 |
-| `lambda/module/radiant/radiant_dom_iface.cpp:18–308`, `:1609` | declared interfaces + member-record tables — unchanged by this proposal (D7.4.4) |
+| `lambda/module/radiant/radiant_dom_iface.cpp:18–308`, `:1609` | declared interfaces + member-record tables — unchanged by this proposal (D9.5.4) |
 | `lambda/module/radiant/radiant_module.cpp:2754–2952`, `:2960` | the `radiant` module fn table + `JubeModuleDef` — ES38 dedupe target, ES36 template |
 | `radiant/event.cpp` (77 refs), `window.cpp`, `script_runner.cpp`, `layout.cpp`, `event_sim.cpp`, `cmd_layout.cpp`, `radiant/event.hpp:48` | direct-call consumers — includes replace externs (F23) |
 | `radiant/text_edit.cpp:473`, `text_control.cpp:16`, `dom_range.cpp:645`, `lambda/input/css/dom_lifecycle.cpp:39`, `test/test_state_store_stubs.cpp:101` | weak-pair hooks (ES35 atomic rename) |

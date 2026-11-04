@@ -11,7 +11,7 @@
 - [Radiant_Editor_Stage4B.md](../editing/Radiant_Editor_Stage4B.md) — the three-layer model: native substrate (caret, selection, IME, clipboard, event routing) under script-owned editing logic.
 - [RAD_06 — Inline and Text Layout](../../doc/dev/radiant/RAD_06_Inline_and_Text_Layout.md), `doc/Lambda_Sys_Func.md` §parse (the `sourcepos` option).
 
-**Formal anchors:** S12.1.1v2 and S12.1.3 (effectful loading/saving in procedures; rendering is pure, mutation only in handlers); S9.1.4 (state lives in view state); S9.2.2 (read views are snapshots); S5.1.4 (no reference identity — the buffer is a value, versions are values); D7.2.1–D7.2.5 (package loading, state, the editing-policy boundary); D7.5.2 (persistence through the shared IO boundary); D7.5.3 (native mechanism vs script policy). No formal ruling is revised by this proposal.
+**Formal anchors:** S12.1.1v2 and S12.1.3 (effectful loading/saving in procedures; rendering is pure, mutation only in handlers); S9.1.4 (state lives in view state); S9.2.2 (read views are snapshots); S5.1.4 (no reference identity — the buffer is a value, versions are values); D9.3.1–D10.2.1 (package loading, state, the editing-policy boundary); D11.1.2 (persistence through the shared IO boundary); D9.5.6 (native mechanism vs script policy). No formal ruling is revised by this proposal.
 
 **Ledger:** extends the editor area's `CED#` series (`doc/Doc_Convention.md` §4 — no new series). Decisions **CED11–CED22**, with CED14v2 revised 2026-10-06, CED15v2, CED18v2 and CED16v3 revised 2026-10-07, and CED16v4 and CED19v2 revised in P4 (2026-10-07); open questions **OQ6–OQ17** resolved, **OQ18** open; OQ1–OQ5 came from the CodePad proposal (§15.5, OQ2–OQ4 open).
 

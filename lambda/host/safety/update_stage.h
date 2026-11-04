@@ -17,7 +17,7 @@ struct SecurityUpdateStageReport {
     SecurityUpdateProcessReport process;
     SecurityStagedUpdate* staged;
 };
-// D7.5.8: only a live, opaque verified artifact is accepted. No arbitrary byte,
+// D11.2.4: only a live, opaque verified artifact is accepted. No arbitrary byte,
 // destination, install hook, active image or app-worker entrypoint is exposed.
 bool security_update_stage(const SecurityUpdateStageConfig* config, SecurityUpdateJob* job,
     SecurityVerifiedUpdate* artifact, SecurityUpdateStageReport* out);

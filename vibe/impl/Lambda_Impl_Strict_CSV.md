@@ -19,7 +19,7 @@ field, represented as null like the existing reader. Blank physical rows are
 ignored. The ordinary CSV/TSV reader retains its established behavior.
 
 Parsing remains an ordinary pure data transformation where S12.1.3v2 applies;
-input/file reads require D7.5.2/D7.5.5 authority. `flavor` is an existing input
+input/file reads require D11.1.2/D11.2.1 authority. `flavor` is an existing input
 option and this adds a format-specific value without changing a formal ruling
 (S17.8.1). Tests must exercise `parse` and `input`, exact row widths, malformed
 quotes and headers, trailing empty fields, UTF-8/NUL, multiline fields and

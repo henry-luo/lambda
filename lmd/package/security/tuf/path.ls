@@ -1,4 +1,4 @@
-// D7.5.2, D7.5.8: opaque role labels and relative URI references are data,
+// D11.1.2, D11.2.4: opaque role labels and relative URI references are data,
 // never native filesystem paths. Encode components before host URL parsing.
 import utf8: lambda.io.utf8
 import meta: lambda.security.tuf.metadata

@@ -24,13 +24,13 @@ AST node for one is to be added.
 
 **Formal authority:**
 
-- **D1.4v3** and **DI15v2** — every language failure returns through every
+- **D1.4** and **DI15** — every language failure returns through every
   active frame; no language failure skips a frame.
-- **D5.1.4** and **D5.2.1v3** — precise-root cleanup order and the companion
+- **D6.1.4** and **D6.2.1** — precise-root cleanup order and the companion
   error lane for native scalar returns.
-- **D6.3.3** — a native recovery frame never survives suspension or crosses a
+- **D7.5.3** — a native recovery frame never survives suspension or crosses a
   thread boundary.
-- **D8.4.3v2** — every hosted-language helper uses an explicit completion ABI.
+- **D7.4.3** — every hosted-language helper uses an explicit completion ABI.
 - **S7.4**, **S7.6.1v4**, **S7.6.3v2**, **S7.6.7v3**, and **S7.11** — Lambda
   error channels, handler/propagation behavior, suspension, and the closed
   native-fault carve-out.
@@ -52,7 +52,7 @@ ruling and this plan; it must not be hidden in code.
    recovery in APIs, AST metadata, MIR lowering, interpreter behavior, async
    state, tests, and mechanical checks.
 2. Make every ordinary failure an explicit returned completion:
-   ERROR-tagged boxed `Item`, or D5.2.1v3's companion ERROR `Item` beside a
+   ERROR-tagged boxed `Item`, or D6.2.1's companion ERROR `Item` beside a
    native success lane.
 3. Give every generated Lambda and hosted-language function one logical error
    epilogue, reached only by an intra-function branch.
@@ -190,7 +190,7 @@ The following inventory records the pre-rework defect and the landed result.
 | Recovery | `LambdaFaultReason` and `LambdaRecoveryFrame` distinguish fault origins | remaining recovery uses are classified by the machine allowlist; ordinary completion has no recovery-raise edge |
 
 The implementation must preserve working explicit-return paths and remove only
-the coupling or bypasses that violate D1.4v3/DI15v2.
+the coupling or bypasses that violate D1.4/DI15.
 
 ---
 
@@ -404,7 +404,7 @@ Actions:
    all reads/unboxing of the success lane.
 4. Audit boxed paths: ERROR must be tested before property access, arithmetic,
    mutation, fixed-lane store, or success-only helper invocation.
-5. Ensure every error epilogue runs current-frame cleanup in D5.1.4 order.
+5. Ensure every error epilogue runs current-frame cleanup in D6.1.4 order.
    A callee does not restore its caller's roots, number homes, scopes, or
    module state.
 6. Preserve error identity. Do not replace an existing rich error with
@@ -778,7 +778,7 @@ The rework is complete only when all of the following are true:
    describe the landed mechanism consistently.
 
 The implementation is complete for the scoped runtime paths. Appendix A of the
-formal specifications records S7.6.7 and D8.4.3v2 as landed; unrelated open
+formal specifications records S7.6.7 and D7.4.3 as landed; unrelated open
 items in those appendices remain outside this rework.
 
 ## 10. Landed implementation ledger
@@ -796,7 +796,7 @@ items in those appendices remain outside this rework.
 
 The implementation intentionally preserves `pn_call() ^ { ... }`; it does not
 introduce `pn_call() { ... }`, a new grammar rule, or a second procedure-handler
-spelling. All rulings above are governed by D1.4v3, D6.3.3, D8.4.3v2,
+spelling. All rulings above are governed by D1.4, D7.5.3, D7.4.3,
 S7.6.1v4, S7.6.7v3, S7.11, and REH-D1–REH-D14.
 
 ## 11. Validation record

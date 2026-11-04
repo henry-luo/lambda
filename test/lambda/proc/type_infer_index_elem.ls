@@ -2,7 +2,7 @@
 // An indexed read publishes its array's element type as `T?`. The float cases
 // exercise the emitter path that used to reinterpret a BOXED float through the
 // double lane (`dmov`/`deq` with an i64 source); the mutable-binding case pins
-// D3.3.3 — a `var` array's element contract must not be published, because a
+// D4.3.3 — a `var` array's element contract must not be published, because a
 // later store can rewrite it.
 pn main() {
     let floats = [1.5, 2.5, 3.5]

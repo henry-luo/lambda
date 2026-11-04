@@ -290,7 +290,7 @@ static void* js_typed_array_cached_read_data(JsTypedArray* ta) {
     if (shape && shape->backing_kind == ARRAY_NUM_BACKING_BUFFER_HANDLE &&
             shape->backing == ta->base.buffer &&
             shape->resolved_generation == ta->base.buffer->generation) {
-        // D5.3.2: a matching handle generation keeps this borrow live.
+        // D6.3.2: a matching handle generation keeps this borrow live.
         return ta->view->data;
     }
     return NULL;
@@ -1860,7 +1860,7 @@ static Item js_typed_array_new_with_ops(int type_id, int length,
         (Container*)buffer_root.get().map, ab,
         js_typed_array_elem_type(arr_type), 0, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
-    // D5.3.3: the view allocation can collect before the typed-array carrier
+    // D6.3.3: the view allocation can collect before the typed-array carrier
     // reaches its caller, so both the carrier and backing buffer stay rooted.
     JsTypedArray* ta = js_get_typed_array_ptr(carrier_root.get().map);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
@@ -2046,7 +2046,7 @@ static Item js_typed_array_from_buffer_with_ops(int type_id, Item buffer_item,
         (Container*)buffer_root.get().map, ab,
         js_typed_array_elem_type(arr_type), byte_offset, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
-    // D5.3.3: refresh every interior pointer from its exact root after the
+    // D6.3.3: refresh every interior pointer from its exact root after the
     // view allocation; forced collections may relocate either carrier.
     JsTypedArray* ta = js_get_typed_array_ptr(carrier_root.get().map);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
@@ -3113,7 +3113,7 @@ static Item js_dataview_write_value(Item view, JsDataViewOperation operation,
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-// D6.2.2v2: the published callable fixes this operation; display spelling
+// D7.2.2: the published callable fixes this operation; display spelling
 // must never select DataView semantics after function creation.
 extern "C" Item js_dataview_operation_with_ops(Item dv_item,
         JsDataViewOperation operation, Item* args, int argc, const JsBufferViewOps* ops) {

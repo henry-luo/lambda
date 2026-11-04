@@ -1,7 +1,7 @@
 #pragma once
 #include "audio_bus.hpp"
 
-// D4.5.2: one native producer publishes owned stereo PCM to the existing bus callback.
+// D5.5.2: one native producer publishes owned stereo PCM to the existing bus callback.
 static constexpr unsigned AUDIO_STREAM_CAPACITY = 2 * AUDIO_BUS_RATE;
 static constexpr unsigned AUDIO_STREAM_PACKET = 65536;
 enum AudioStreamState { AUDIO_STREAM_READY, AUDIO_STREAM_PLAYING, AUDIO_STREAM_PAUSED,

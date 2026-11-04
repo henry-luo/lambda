@@ -1,4 +1,4 @@
-// S12.1.3 / D4.5.2: workers own native bytes; completed arrays are copied into retained canvases.
+// S12.1.3 / D5.5.2: workers own native bytes; completed arrays are copied into retained canvases.
 import dom
 import radiant
 import updates: ~~.mod_publish

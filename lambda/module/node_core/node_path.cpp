@@ -448,7 +448,7 @@ extern "C" Item js_path_parse(Item path_item) {
 
     Item obj = js_new_object();
     // the fresh object is reachable from nothing while its five properties are
-    // installed, and every install allocates a key and a value (D5.4.2)
+    // installed, and every install allocates a key and a value (D6.4.2)
     JubeScopedRoots obj_roots(node_path_host, 1);
     uint64_t* obj_root = obj_roots.slot(obj);
     if (!obj_root) return obj;
@@ -797,7 +797,7 @@ static Item js_path_win32_parse(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     Item obj = js_new_object();
     // the fresh object is reachable from nothing while its five properties are
-    // installed, and every install allocates a key and a value (D5.4.2)
+    // installed, and every install allocates a key and a value (D6.4.2)
     JubeScopedRoots obj_roots(node_path_host, 1);
     uint64_t* obj_root = obj_roots.slot(obj);
     if (!obj_root) return obj;
@@ -997,7 +997,7 @@ template <typename Target>
 static void js_path_set_method(Item ns, const char* name, Target target,
         int adapter_arity) {
     // building the function value allocates, so the namespace and the key it
-    // will be stored under both need roots across it (D5.4.2)
+    // will be stored under both need roots across it (D6.4.2)
     JubeScopedRoots roots(node_path_host, 2);
     uint64_t* ns_root = roots.slot(ns);
     if (!ns_root) return;
@@ -1037,7 +1037,7 @@ Item node_path_namespace(void) {
     // path.win32 — win32-specific path implementations.
     // path_namespace is already a persistent root (node_path_runtime_attach),
     // but win32_ns is reachable from nothing until it is stored below, and each
-    // install allocates — it must be rooted for the whole build (D5.4.2).
+    // install allocates — it must be rooted for the whole build (D6.4.2).
     Item win32_ns = js_new_object();
     JubeScopedRoots win32_roots(node_path_host, 1);
     uint64_t* win32_root = win32_roots.slot(win32_ns);

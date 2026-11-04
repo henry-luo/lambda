@@ -2532,7 +2532,7 @@
       ]
     },
     "lambda-wasm": {
-      "description": "D7.1.7v6 browser WASM embedding: synchronous AST evaluation and in-memory REPL; runtime separation in progress",
+      "description": "D9.2.3 browser WASM embedding: synchronous AST evaluation and in-memory REPL; runtime separation in progress",
       "output": "build/wasm/lambda-wasm.mjs",
       "build_dir": "temp/wasm-build",
       "source_files": [

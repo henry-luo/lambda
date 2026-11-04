@@ -22,7 +22,7 @@ import font:    .font
 import fixed:   .fixed
 import writer:  .output
 
-// Export a laid-out source through schema-backed native visits (S11.5, D7.4.5v2).
+// Export a laid-out source through schema-backed native visits (S11.5, D9.5.5).
 pub fn render_source(source, options: map) element^ {
     writer.render(source, options)^
 }

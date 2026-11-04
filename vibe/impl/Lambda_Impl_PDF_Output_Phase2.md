@@ -3,7 +3,7 @@
 > **Status:** implementation in progress, 2026-10-15. Native schema bindings and continuous/paged exports are implemented. Production export now calls the Lambda generator; the HPDF-compatible writer has been retired at the user’s request. Generation is functional through the final file value; explicit output alone saves it. Pure-result demand, shared counting and expression rollback are implemented. The complete production migration is not qualified. See §10–§14 for verified scope and remaining gates.
 > **Confirmed direction:** retain shared native tree walking; pass schema-backed views and traversal context to Lambda callbacks in rendering order; Lambda reads view properties and emits PDF directly. Native helpers supply glyph outlines, image bytes and effect rasterization as needed (USER, 2026-10-14). Traversal links stay native; schema pointer access serves property/resource references.
 > **Design basis:** [PDF Output](../Lambda_Design_PDF_Output.md), [Binary Schema](../Lambda_Type_Binary_Schema.md), [Virtual Containers](../Lambda_Design_Type_Virtual.md).
-> **Formal linkage:** S11.5.1v2–S11.5.4 / D3.5.1v2–D3.5.2v2 (binary records/native references and counted spans); S2.6.6v3 / D2.6.12v3, D8.2.6v2 (functional PDF generation and byte destination); D3.1.1v5 (type descriptors); D7.4.1v2 / D7.4.4 / D7.4.5v2 (host boundary and virtual carriers); D2.6.8 (node identity); D4.1.4v5 / D4.5.1v4 (native storage lifetime); D5.3.3–D5.3.4 (precise roots); S12.1.1v3 (effects). PDF follow-ups remain SO48 / DO32.
+> **Formal linkage:** S11.5.1v2–S11.5.4 / D4.4.1–D4.4.2 (binary records/native references and counted spans); S2.6.6v3 / D3.5.1, D8.2.6 (functional PDF generation and byte destination); D4.1.1 (type descriptors); D9.5.1 / D9.5.4 / D9.5.5 (host boundary and virtual carriers); D3.1.3 (node identity); D5.1.4 / D5.5.1 (native storage lifetime); D6.3.3–D6.3.4 (precise roots); S12.1.1v3 (effects). PDF follow-ups remain SO48 / DO32.
 > **Scope:** the next implementation after the [PDF byte-output MVP](Lambda_Impl_PDF_Output_MVP.md), including the unfinished export bridge from the earlier design's phase 1 and the resource/helper work assigned there to phase 2. This numbering is independent of the binary-schema proposal's own phases.
 
 ## 1. Outcome and current starting point
@@ -24,7 +24,7 @@ committed Radiant view + export session
 
 The existing MVP implements raw string/binary contributions and dictionary
 encoding in `<file format:'pdf', …>` on interpreter and MIR Direct
-(S2.6.6v2 / D2.6.12v2). It does not implement a Radiant export package,
+(S2.6.6v2 / D3.5.1). It does not implement a Radiant export package,
 destination forwarding through producer functions, or general byte accounting.
 
 Repository inspection on 2026-10-14, at HEAD `f79e675ef` with local changes
@@ -42,10 +42,10 @@ not a new verification run:
 
 The older binary-schema sketch proposes a new `VElmt` layout, an element
 virtuality flag, a new schema TypeId, and the removed C-text transpiler. Those
-implementation sketches are superseded by D7.4.5v2, D3.1.1v5, and the current
+implementation sketches are superseded by D9.5.5, D4.1.1, and the current
 MIR-only architecture. The backend belongs in `Velmt::data`; it must not
 replace the common carrier header or confuse it with `VirtualOutputElement`.
-The latter is the separate writable PDF destination under D2.6.12v2.
+The latter is the separate writable PDF destination under D3.5.1.
 
 ## 2. Kaitai's pointer model and the additional native requirement
 
@@ -88,7 +88,7 @@ address domain.
 ## 3. Proposed pointer contract
 
 The fixed-record and native-reference subset below is implemented under
-S11.5.1v2, S11.5.2, S11.5.3v3 / D3.5.1v2–D3.5.2v2. Examples using `layout: 'native'`
+S11.5.1v2, S11.5.2, S11.5.3v3 / D4.4.1–D4.4.2. Examples using `layout: 'native'`
 and `pointer: 'native'` are runnable. Native counted spans are specified by S11.5.4 and implemented in P2 (§11).
 The proposed offset-pointer extension remains design notation without runtime support.
 
@@ -129,7 +129,7 @@ Reading `view.bound` returns `null` or another lazy `Velmt`; further property
 access follows its schema after the caller handles null. Scalars behind
 references decode to scalar Items.
 No script-visible address, pointer arithmetic, or new general pointer value is
-introduced (D7.4.1v2). A pointer field occupies its storage slot, not the size
+introduced (D9.5.1). A pointer field occupies its storage slot, not the size
 of its pointee. Reject infinitely recursive inline layouts during schema
 compilation. General recursive reference graphs can be added independently;
 the PDF schema surface needs no parent/sibling navigation.
@@ -221,7 +221,7 @@ Pointer support is still needed for fields such as `DomElement::bound`,
 `font`, `transform`, property subrecords, and pointer-plus-count resource
 arrays. These expose logical property values through the generic schema
 reader. The distinction is purpose: native code navigates the tree, while
-Lambda reads the current view's data. D7.4.1v2 still keeps native addresses
+Lambda reads the current view's data. D9.5.1 still keeps native addresses
 out of script values.
 
 ## 4. Generic schema backend and native binding
@@ -236,7 +236,7 @@ Extend the binary-schema descriptor with the following information:
 - Count/extent dependency, stride, discriminator, and reference-base rule.
 - Native binding identity and ABI version; no handwritten numeric offsets.
 
-Schema types remain `LMD_TYPE_TYPE` descriptors under D3.1.1v5. Select an
+Schema types remain `LMD_TYPE_TYPE` descriptors under D4.1.1. Select an
 appropriate internal type kind/extension during P0; do not introduce the
 standalone `LMD_TYPE_BINARY_SCHEMA` tag from the old sketch. Resolve named
 schemas before binding fields, then reject impossible inline cycles and
@@ -250,7 +250,7 @@ checks its representation and extent, then returns a scalar, subview, or
 array. No PDF code is embedded in that accessor.
 
 Use length-aware field lookup and the existing virtual callbacks. Generate
-the declared host member records from the same schema manifest under D7.4.4;
+the declared host member records from the same schema manifest under D9.5.4;
 do not add a second per-property dispatch table. Every entry path—including
 enumeration, indexed access, validation, and formatters—must observe the same
 field and failure contracts.
@@ -286,7 +286,7 @@ It is not the existing DOM wrapper with its children silently removed; choose
 export-record tags and expose source tag/namespace as metadata when needed.
 The PDF record schema declares no tree children. This fits the binary-schema
 proposal's attribute mapping (§9, decisions 2–3) and the Velmt structural
-contract (D7.4.5v2).
+contract (D9.5.5).
 
 Use `VArray` for declared counted resource fields and native helpers for
 fragment iteration. Fallible preparation must propagate through the existing
@@ -299,14 +299,14 @@ backlinks. Shared targets remain valid and lazy; reject any cyclic descriptor
 expansion in this profile. General cyclic schema projection/equality is a
 separate feature, not a dependency of this export path. Wrapper reuse is keyed
 internally by owner/generation, location and schema. Script-visible identity
-and equality continue to follow D2.6.8 and S5.4.1–S5.4.3, not native addresses.
+and equality continue to follow D3.1.3 and S5.4.1–S5.4.3, not native addresses.
 
 ## 5. Lifetime and selected-view contract
 
 An export session freezes a committed view generation and owns or retains its
 document, view storage, resource owners, and schema metadata for the complete
 export. A GC root for a wrapper does not keep a native arena alive
-(D4.1.4v5 / D4.5.1v4). No schema pointer transfers ownership of its pointee.
+(D5.1.4 / D5.5.1). No schema pointer transfers ownership of its pointee.
 
 These native projections are read-only. Reject writes through fields or
 arrays and attempts to encode native addresses. Byte-schema write-through
@@ -345,7 +345,7 @@ copy that leaf when required by its public lifetime. This does not require
 materializing the view tree.
 
 Trace every retained Item edge through the virtual vtable and root C++ local
-Items with `RootFrame` / `Rooted` (D5.3.3–D5.3.4). Cache admission, schema
+Items with `RootFrame` / `Rooted` (D6.3.3–D6.3.4). Cache admission, schema
 resolution, nested reads, callback errors and partial initialization all need
 failure-safe cleanup. Session close and wrapper destruction must each be
 idempotent with respect to the native resources they release.
@@ -382,9 +382,9 @@ to walk parent or `TextRect::next` links.
 
 Callbacks are synchronous and run through the sanctioned runtime invocation
 path, with rooted callable, arguments, result and emission state
-(D5.3.3–D5.3.4 / D5.4.1). They cannot suspend beneath a native callback barrier
-(D7.4.2v2). Carry the PDF destination explicitly through the adapter; never
-install a global or EvalContext output destination (D2.6.12v2). P0 settles the
+(D6.3.3–D6.3.4 / D6.4.1). They cannot suspend beneath a native callback barrier
+(D9.5.2). Carry the PDF destination explicitly through the adapter; never
+install a global or EvalContext output destination (D3.5.1). P0 settles the
 callback effect signatures and producer-demand ABI under S12.1.1v3 / DO32.
 
 The current `RenderBackend` has several `void` callbacks. Add a shared checked
@@ -414,7 +414,7 @@ This phase consumes existing pagination; it does not add a second paginator.
 ### 6.2 Lambda document construction and byte accounting
 
 Extend `lmd/package/doc/pdf/` with output modules and expose them through the
-existing package facade under D7.2.4v3. Reuse matching coordinate/color helpers
+existing package facade under D9.3.4. Reuse matching coordinate/color helpers
 and the MVP's dictionary encoder rather than writing another encoder for the
 same admitted values. Keep PDF object/reference/stream construction and
 cross-reference/trailer policy in Lambda.
@@ -425,7 +425,7 @@ views and output builders are separate mechanisms; improving one does not
 implement the other. Preserve ordinary function/list behavior outside an
 explicit PDF destination, with interpreter/MIR parity.
 
-Forward eligible **pure function** result paths under D8.2.6v2. PDF loading,
+Forward eligible **pure function** result paths under D8.2.6. PDF loading,
 private layout, callbacks, preparation and construction are functional; only
 saving the completed file is procedural (S2.6.6v3; USER, 2026-10-15). A `pn`
 call remains forbidden in functional content (S12.1.1v3). Bound intermediates
@@ -468,7 +468,7 @@ admitted by the current exporter:
 | Links, page labels, metadata and outlines | Resolved page/source identities and geometry | PDF dictionaries and references across the selected page sequence. |
 
 Do not inspect third-party font/renderer objects with binary schemas. Expose
-those capabilities through declared, owner-aware helpers (D7.4.4), sharing
+those capabilities through declared, owner-aware helpers (D9.5.4), sharing
 existing Lambda-side routines. Promote a needed static helper into its module
 header instead of copying it. New font capabilities, PDF/A, tagged PDF,
 encryption and signatures require separately scoped acceptance; none follows
@@ -590,7 +590,7 @@ It does not change the production CLI PDF writer.
 
 | Milestone | Current state | Remaining acceptance work |
 |---|---|---|
-| P0 | Fixed-record/native-reference metadata, counted-span empty/absent rules and lifetime contracts recorded in S11.5 and D3.5; functional generation/output demand in S2.6.6v3, D2.6.12v3 and D8.2.6v2. | Wider retained-content semantics remain SO48. |
+| P0 | Fixed-record/native-reference metadata, counted-span empty/absent rules and lifetime contracts recorded in S11.5 and D4.4; functional generation/output demand in S2.6.6v3, D3.5.1 and D8.2.6. | Wider retained-content semantics remain SO48. |
 | P1 | Fixed-width byte fields, explicit offsets, nesting, endianness, lazy Velmt access and `binary_decode`. | Counted arrays and full compiler rejection corpus. |
 | P2 | Native references and counted scalar/record/byte spans; shared owner invalidation and precise GC; manifest-generated declarations/bindings with ABI/revision checks; structural invalidation audit (§11). | P2 qualification results are recorded below. Offset pointers, pointer tables and recursive graphs are separate extensions. |
 | P3 | Default/secondary geometry and properties, projected text, fragment identities, pages and contexts; no navigation links. Selected pages, nested independent sessions, repeated exports and trees deeper than 64 views have focused coverage. | Broader feature/platform qualification with P6–P7. |
@@ -604,7 +604,7 @@ It does not change the production CLI PDF writer.
 - `lambda/runtime/binary_schema.{hpp,cpp}` contains the reusable descriptor,
   typed member bindings and byte/native Velmt backend. A native view owns a
   control reference, not its pointee. Selected Item fields and the binary
-  source are precise GC edges (D5.3.3–D5.3.4).
+  source are precise GC edges (D6.3.3–D6.3.4).
 - The direct parser and binder recognize `: binary & {…}` root metadata and
   trailing field `& {…}` maps in a separate AST channel (S11.5.1v2). Unknown
   metadata, invalid address domains, native byte offsets, nullable unboxed
@@ -630,7 +630,7 @@ It does not change the production CLI PDF writer.
 - Imported type declarations previously reused the index last assigned by
   another importing module. Interpreter and MIR type-value materialization
   now use the declaration identity / existing declaration resolver, which
-  makes imported schema values retain their own descriptor (D3.1.1v5).
+  makes imported schema values retain their own descriptor (D4.1.1).
 
 ### Verification
 
@@ -681,7 +681,7 @@ bounded export API, not a production-writer replacement.
 
 ## 11. P2 native reference binding progress (2026-10-15)
 
-The P2 implementation extends **S11.5.3v3–S11.5.4 / D3.5.1v2–D3.5.2v2**.
+The P2 implementation extends **S11.5.3v3–S11.5.4 / D4.4.1–D4.4.2**.
 Native counted spans have lazy VArray access for fixed-width scalars and records;
 `binary[n]` returns an owned binary copy. Counts are a fixed nonnegative integer
 or an admitted integer field, resolved after all fields so declaration order
@@ -756,22 +756,22 @@ below.
   `ViewNodeState` fields, `LayoutViewNode`, `ViewPageBox`, rectangle geometry
   and a callback-local boundary record. Native `size_t` fields use a checked
   width/signedness trait rather than assuming its C++ typedef is `uint64_t`
-  (S11.5.1v2 / D3.5.2v2). Navigation links remain native (§3.4).
+  (S11.5.1v2 / D4.4.2). Navigation links remain native (§3.4).
 - `layout_secondary_visit_page` shares the native painter's ordered fragment,
   boundary, table background, column rule, clipping, glyph and image walk.
   It reads committed secondary views directly; it does not convert a
   `PaintList` into callback events. Visitor failures propagate to the export
-  boundary (D7.4.4).
+  boundary (D9.5.4).
 - `radiant.pdf_walk` accepts `{paged: true, pages: "1,3"}` using the existing
   physical-page selector. Each selected page has its own destination and
   resource array; sequence IDs remain document-wide. Page/fragment records
   retain session ownership and callback scratch invalidates on return
-  (D4.1.4v5 / D4.5.1v4). Selected glyph/image helpers use the native committed
+  (D5.1.4 / D5.5.1). Selected glyph/image helpers use the native committed
   fragment, avoiding a second shaping/layout decision.
 - Lambda plans page/content pairs and resource objects, compresses stream
   payloads once with the existing zlib codec, and computes xref offsets from
   their final encoded bytes. The native dictionary helper reuses PDFBuilder's
-  encoder (S2.6.6v2 / D2.6.12v2). Continuous output remains available through
+  encoder (S2.6.6v2 / D3.5.1). Continuous output remains available through
   the package; production CLI output is not switched.
 - Both continuous and paged callback boundaries reject unsupported
   decorations. An invalid page selection or unsupported rounded boundary
@@ -792,7 +792,7 @@ pn main() {
 }
 ```
 
-This correction is recorded in **S12.1.1v3 / D6.1.1v2** and
+This correction is recorded in **S12.1.1v3 / D7.1.1** and
 `Lambda_Design_PDF_Output.md` §5.5 (USER, 2026-10-15). The shared AST walker
 previously omitted the separate element-content edge and nominal literal
 edges. The colour analysis now enters pure construction context for both
@@ -861,7 +861,7 @@ implementation and qualification gates above.
 
 The latest USER scope makes PDF source loading, layout, callbacks, resource
 preparation and document construction functional; only saving the completed
-file uses a procedure. This is recorded in S2.6.6v3, D2.6.12v3 and D8.2.6v2.
+file uses a procedure. This is recorded in S2.6.6v3, D3.5.1 and D8.2.6.
 The earlier procedural preparation example in §12 is historical and does not
 describe the PDF API. General `pn` restrictions under S12.1.1v3 remain intact.
 
@@ -963,8 +963,8 @@ widening and final added assertion.
 The user requested P6 implementation and retirement of the C++ writer. The
 production CLI, transformed-document and committed-session entry points now
 lend their selected edition to `lambda.doc.pdf.output.render_view`; PDF generation
-remains functional through the completed file (S2.6.6v3, D2.6.12v3,
-D8.2.6v2). Only the final atomic save is procedural. This supersedes the
+remains functional through the completed file (S2.6.6v3, D3.5.1,
+D8.2.6). Only the final atomic save is procedural. This supersedes the
 production-dispatch status in §13; it does not erase that section’s failed or
 unverified qualification gates.
 
@@ -978,7 +978,7 @@ unverified qualification gates.
   gradients and other unsupported resource geometry use a bounded native
   raster capture. Geomap and scene3d content use the existing native painters.
   The Lambda ABI receives independent owned geometric/resource values, never
-  PaintCmd opcodes or a document paint stream (D7.4.4, D7.4.5v2).
+  PaintCmd opcodes or a document paint stream (D9.5.4, D9.5.5).
 - Whole effect groups capture descendant paint once while semantic visits
   and paired begin/end effect observations continue. Pure callbacks emit the resulting owned RGB/alpha resource; child
   paint callbacks do not emit a second copy. Only groups that require backdrop
@@ -995,14 +995,14 @@ unverified qualification gates.
 - Manifest revision 3 adds the point scale to callback context. Traversal and
   native helper pointers remain private. The opaque committed-session
   capability expires after its synchronous call; active evaluators keep their
-  canonical identity (D5.4.1).
+  canonical identity (D6.4.1).
 
 Stack `PaintList` destruction now releases owned paths/images as well as its
-command storage (D4.5.1v4). Decorated shadow captures exposed the missing payload
+command storage (D5.5.1). Decorated shadow captures exposed the missing payload
 cleanup: the phase-6 fixture originally leaked four allocations, and passes the
 memory tracker after the ownership fix. Page backdrop recordings retain
 snapshot image owners until page retirement; callback scratch and source
-sessions retire after those native recordings (D4.1.4v5, D5.3.3–D5.3.4).
+sessions retire after those native recordings (D5.1.4, D6.3.3–D6.3.4).
 
 ### 14.2 Retirement and caller audit
 
@@ -1071,7 +1071,7 @@ retired writer or by weakening its geometry/visual assertion.
 
 The XHTML feature gallery exposed two export defects after P6 retirement.
 Executing page JavaScript binds the document's Input arena to its evaluator.
-PDF generation reused that canonical evaluator correctly (D5.4.1), but
+PDF generation reused that canonical evaluator correctly (D6.4.1), but
 `elmt_with_type` allocated its `<file format:'pdf'>` values as ordinary arena
 DOM elements. `elmt_content_begin` could not initialize their byte destination,
 and the first completed fragment was rejected by the PDF builder.
@@ -1080,7 +1080,7 @@ File candidates now reserve their GC-owned output extension even when a UI
 arena is bound. Attribute buffers follow the element's actual owner, and
 collection content uses a UI arena only when that arena owns the destination.
 The format selector still decides whether the file becomes a byte destination;
-no evaluator or allocator context is replaced (S2.6.6v3, D2.6.12v3).
+no evaluator or allocator context is replaced (S2.6.6v3, D3.5.1).
 
 Continuous gallery export then exposed a marker fully outside the page clip.
 Its valid display list contained only balanced clip commands and no ink.
@@ -1112,7 +1112,7 @@ under `temp/pdf_gallery_*`; the main executable and PDF regression target build.
 
 The user requested wider PDF testing across the formats and input files the
 viewer admits, with root-cause fixes for export errors. Generation still
-follows S2.6.6v3, D2.6.12v3 and D8.2.6v2; the native writer remains retired.
+follows S2.6.6v3, D3.5.1 and D8.2.6; the native writer remains retired.
 
 ### 16.1 Corrections
 
@@ -1158,7 +1158,7 @@ follows S2.6.6v3, D2.6.12v3 and D8.2.6v2; the native writer remains retired.
   not a change to virtual-file content semantics.
 - Large LaTeX tables exposed mutually recursive sibling traversal in the table
   renderer and macro-definition collector. Helpers now return intermediate
-  state, leaving one validated self-tail edge (D8.1.1v18) per traversal.
+  state, leaving one validated self-tail edge (D8.3.2) per traversal.
   `ding.tex` and `omencodings.tex` crashed before PDF emission on interpreter
   and auto; both now export. The 400-row regression fails with the old package
   and passes with the corrected package, including interpreter depth 200.

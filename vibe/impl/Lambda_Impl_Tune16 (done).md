@@ -11,8 +11,8 @@
   `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Tune13.md` (R22 typed-store
   dissection), `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-3 ANY downgrade)
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1, S4.5.3;
-  `doc/Lambda_Formal_Design.md` D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1–D3.3.3, D5.2–D5.3,
-  D8.3.2–D8.3.3, D8.4.1, D8.6.1–D8.6.3
+  `doc/Lambda_Formal_Design.md` D2.2.2, D2.3, D4.2.1–D4.2.3, D4.3.1–D4.3.3, D6.2–D6.3,
+  D7.3.2–D7.3.3, D7.4.1, D8.6.1–D8.6.3
 
 ## 1. What Result25 says
 
@@ -226,7 +226,7 @@ would hit; they gate everything else in this round.
   contradicted by matmul2/quicksort2/spectralnorm2, which annotate `fill()` results and
   keep packed storage. Either the defect is shape-dependent or half the corpus is carrying
   a stale workaround; both possibilities must be resolved. This is TS-3's ANY-downgrade
-  wearing a new coat [`vibe/impl/Lambda_Issue_Type_Support (retired).md` TS-3; D3.2.1].
+  wearing a new coat [`vibe/impl/Lambda_Issue_Type_Support (retired).md` TS-3; D4.2.1].
   Consequence: sha1's `w`/`x`, levenshtein's DP rows, fannkuch's three permutation arrays,
   triangl's five boards, navier's six grids, nbody-js's seven body arrays, hashmap's
   bucket arrays — every hot array in the tail — are deliberately bare.
@@ -237,7 +237,7 @@ would hit; they gate everything else in this round.
   annotations and runs in ~85 ms without them. … The Phase 3 direct-offset path is
   disabled in transpile-mir.cpp." A **>1,400x** annotation penalty, and confirmation that
   the fixed-offset field path B3 was supposed to deliver is switched off. splay2 keeps its
-  node literals bare for the same reason (undocumented). [D3.2.2, D8.3.2; C4 value
+  node literals bare for the same reason (undocumented). [D4.2.3, D7.3.2; C4 value
   semantics — the fix is borrow-not-root on read paths, exactly the distinction splay2's
   L50–54 comment describes manually.]
 - **D-c — `string` return type on a `pn` segfaults the MIR JIT when the result spans a
@@ -329,7 +329,7 @@ are fixed.** The compiler fixes are the perf fixes.
 
 When the stored value's lane statically conforms to the declared element/field type and
 the binding is uniquely owned (`var`), emit a raw store behind the witness — no validator,
-no COW clone, no `lambda_array_set_checked` [D3.2.2, D8.3.2–D8.3.3; C4 value semantics
+no COW clone, no `lambda_array_set_checked` [D4.2.3, D7.3.2–D7.3.3; C4 value semantics
 preserved by the same static-uniqueness argument the B3 in-place-update slice already
 uses]. matmul and json_gen — the two *fully-typed* rows still violating the 5% bar — are
 the acceptance specimens; brainfuck/knucleotide/splay/hashmap follow once C0 types them.
@@ -351,7 +351,7 @@ Sequenced after C0.A.2 (D-b borrow fix) and C0.C (real record types in the canon
 sources): re-enable the direct-offset field path in `transpile-mir.cpp` behind its shape
 guard, land `ShapeEntry.name_id` (Name-Identity W1/W2) so guard checks are id compares,
 and keep the B3 statically-conforming-write and in-place-update slices in the engaged
-path [D3.2.2, D8.3.2–D8.3.3]. Then instrument engagement: count fixed-offset hits vs
+path [D4.2.3, D7.3.2–D7.3.3]. Then instrument engagement: count fixed-offset hits vs
 ShapeEntry-walk fallbacks on deltablue/splay/richards/gcbench — the count, not a fixture,
 is the acceptance evidence. Targets: deltablue −40%, splay typed ≤ untyped, richards ≤3x
 Node, gcbench −30%.
@@ -363,7 +363,7 @@ Node, gcbench −30%.
    previously-raw edge take the boxed wrapper.** When the caller cannot statically prove
    the array witness, emit a caller-side `ensure_typed_array` once and still call the
    raw entry — the fallback must cost no more than the pre-witness arrangement
-   [D3.3.1–D3.3.3; DF9 entry-equivalence]. Add a `mir-check` guard asserting
+   [D4.3.1–D4.3.3; DF9 entry-equivalence]. Add a `mir-check` guard asserting
    raw-vs-boxed edge counts for the raytrace3d shape [D8.6.2].
    Acceptance: raytrace3d typed ≤159 ms; `map_admit_calls` back to ≤362,688.
 2. **Memoize the map-contract relation** (pairs with C3): raytrace3d does 362k–631k
@@ -375,7 +375,7 @@ Node, gcbench −30%.
    and classify every residual call (ensure residue? adopt/restore? boxed element access?),
    then extend the corresponding landed mechanism (B2.2 native edges, witness
    pass-through) until the loop body is call-free. Only a call category with *no* landed
-   mechanism justifies new codegen work [D3.3.1–D3.3.3].
+   mechanism justifies new codegen work [D4.3.1–D4.3.3].
 Targets: nbody 20x → ≤5x C2MIR; raytrace3d ≤159 ms then onward with C0.A.2 and C4.2.
 
 ### C5 — String round (Text suite + base64 + levenshtein)
@@ -407,7 +407,7 @@ locally inferable (literal-initialized locals, monomorphic helpers, witness-prod
 builtins — B1.3 generalized). Let inferred lanes reuse the same B1/B2/C1 machinery.
 Note D-a's flip side: unannotated bindings *already* get better inference than annotated
 ones in half the corpus — C0.A.1 and C7 are two faces of one invariant: **annotation and
-inference must reach the same representation** [D3.2.1]. Target: untyped/Node geo
+inference must reach the same representation** [D4.2.1]. Target: untyped/Node geo
 2.32x → ≤1.8x.
 
 **Order: C0.A + C0.B (compiler) → C0.C/C0.D (sources + re-baseline) in the same phase as
@@ -429,7 +429,7 @@ inference must reach the same representation** [D3.2.1]. Target: untyped/Node ge
   C0 makes the bar *measurable* (today the sources dodge it); C1+C3+C6 are accountable
   for clearing what remains on corrected sources. D-a and D-b are themselves categorical
   bar violations baked into the compiler — their fixes are the bar's enforcement.
-- Non-goals carried forward: no flex-int revival, no Lambda-script inline caches [D8.4.1],
+- Non-goals carried forward: no flex-int revival, no Lambda-script inline caches [D7.4.1],
   no vendored-dep edits, no C2MIR-path changes (frozen, rule 14). LambdaJS remains its own
   round (Tune15 §5 carry-forward; havlak 397x, cd 264x, hashmap 208x, sha1 199x).
 
@@ -441,8 +441,8 @@ closed with tests.
 
 Tune16 is implemented as a compiler/runtime and corpus-repair round. The implementation
 follows the normative rulings in `doc/Lambda_Formal_Semantics.md` S4.1 and S4.5.3 and
-`doc/Lambda_Formal_Design.md` D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1–D3.3.3, D5.2–D5.3,
-D8.3.2–D8.3.3, D8.4.1, and D8.6.1–D8.6.3.
+`doc/Lambda_Formal_Design.md` D2.2.2, D2.3, D4.2.1–D4.2.3, D4.3.1–D4.3.3, D6.2–D6.3,
+D7.3.2–D7.3.3, D7.4.1, and D8.6.1–D8.6.3.
 
 ### 6.1 Landed tracks
 
@@ -506,4 +506,4 @@ The residual gap is therefore recorded rather than hidden: the largest typed/Nod
 are nbody, crypto-sha1, cd, splay, navier-stokes, and raytrace3d, while base64 and the
 Text-family workloads remain dominated by boxed string/binary lanes. These are follow-up
 optimization targets, not unimplemented Tune16 mechanisms; C2MIR remains frozen as required
-by D8.4.1 and the repository agent rules.
+by D7.4.1 and the repository agent rules.

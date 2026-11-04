@@ -10,7 +10,7 @@
 
 **Scope:** Bibliography data, citation processing, and bibliography rendering through the existing LaTeX package and HTML/Radiant output path. Target standard CSL 1.0.2 in stages, with explicit coverage and limitations at every stage.
 
-**Formal linkage:** **D7.2.1–D7.2.4v3** cover source packages, immutable module bindings, and package resolution; **D7.1.2v2, D7.5.2** cover resource acquisition; **S1.8** keeps source and style data separate from executable programs; **S12.1.1v2, S12.4.1v2** cover pure processing and eager input values; **S7.4.1–S7.4.4** cover failures and located errors; **D4.5.1v4, D4.5.2** cover retaining output in Radiant. See the [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), and [documentation convention](../../doc/Doc_Convention.md).
+**Formal linkage:** **D9.3.1–D9.3.4** cover source packages, immutable module bindings, and package resolution; **D9.1.2, D11.1.2** cover resource acquisition; **S1.8** keeps source and style data separate from executable programs; **S12.1.1v2, S12.4.1v2** cover pure processing and eager input values; **S7.4.1–S7.4.4** cover failures and located errors; **D5.5.1, D5.5.2** cover retaining output in Radiant. See the [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), and [documentation convention](../../doc/Doc_Convention.md).
 
 ## 1. Proposal
 
@@ -22,7 +22,7 @@ BibTeX supplies bibliographic data. CSL supplies formatting policy. Citeproc eva
 
 Pandoc provides the architectural comparison: a citation pass consumes bibliography data and CSL, then supplies formatted content to document writers. Its current `citeproc` library is written in Haskell; copying this architecture does not require embedding that implementation or the retired `pandoc-citeproc` executable. [Pandoc citation documentation](https://pandoc.org/MANUAL.html#citations), [jgm/citeproc](https://github.com/jgm/citeproc).
 
-The implementation belongs under `lmd/package/doc/latex/citeproc/`, imported as `lambda.doc.latex.citeproc.*`. It remains part of the existing package, per the selected scope. Package behavior follows **D7.2.1–D7.2.4v3**.
+The implementation belongs under `lmd/package/doc/latex/citeproc/`, imported as `lambda.doc.latex.citeproc.*`. It remains part of the existing package, per the selected scope. Package behavior follows **D9.3.1–D9.3.4**.
 
 The first useful milestone is a general CSL evaluator working with checked numeric and author–year styles. It must evaluate style files, rather than add another collection of named formatting functions. Broader style support follows through additional CSL semantics and fixtures.
 
@@ -80,7 +80,7 @@ Executing `.bst`, `.bbx`, `.cbx`, `.lbx`, or `.dbx` files; invoking BibTeX/Biber
 
 CSL JSON is included because it exposes the processor's data boundary directly. CSL YAML and RIS are later input adapters, not prerequisites for the engine. Markdown citation syntax is a possible later consumer of the same internal modules, without moving them out of `lambda.doc.latex`.
 
-No JavaScript, Lua, Haskell, or external citeproc process is required at runtime. The processor should work wherever the existing LaTeX package is admitted. **D7.1.7v6** explicitly excludes the LaTeX package from `lambda-wasm`; this proposal does not change that profile.
+No JavaScript, Lua, Haskell, or external citeproc process is required at runtime. The processor should work wherever the existing LaTeX package is admitted. **D9.2.3** explicitly excludes the LaTeX package from `lambda-wasm`; this proposal does not change that profile.
 
 ## 4. Processing architecture
 
@@ -98,11 +98,11 @@ flowchart TD
     J --> K[Radiant preview / SVG / PDF]
 ```
 
-Resource acquisition precedes evaluation. Bibliography, style, parent-style and locale bytes become immutable input values through the existing IO boundary (**D7.1.2v2, D7.5.2, S12.4.1v2**). The evaluator receives values and performs no filesystem, network, subprocess, clock, or environment lookup.
+Resource acquisition precedes evaluation. Bibliography, style, parent-style and locale bytes become immutable input values through the existing IO boundary (**D9.1.2, D11.1.2, S12.4.1v2**). The evaluator receives values and performs no filesystem, network, subprocess, clock, or environment lookup.
 
 Style compilation means converting parsed XML to a validated Lambda data structure. It does not generate or execute Lambda source. CSL macros are named declarative subtrees interpreted by the engine; bibliography text and CSL attributes never become executable strings (**S1.8**).
 
-The first engine API processes the complete ordered citation sequence. Internal state is an explicit value threaded through passes. Module bindings remain immutable and documents never share a mutable citation registry (**D7.2.1, S12.1.1v2**). Incremental processing is an optimization after batch correctness, with batch output as its oracle.
+The first engine API processes the complete ordered citation sequence. Internal state is an explicit value threaded through passes. Module bindings remain immutable and documents never share a mutable citation registry (**D9.3.1, S12.1.1v2**). Incremental processing is an optimization after batch correctness, with batch output as its oracle.
 
 ### 4.1 API
 
@@ -297,11 +297,11 @@ The analysis pass must discover all ordinary and generated citation notes before
 
 Retain the `render_result` shape and add citation metadata without changing existing projections. The adapter projects engine output to `latex-cite`, bibliography entries and compatible CSS classes, preserving existing viewer selectors where their meaning still applies.
 
-The result should include citation IDs, resolved style identity/version/hash, parent/locale identities, processor coverage, collation policy and diagnostics. Register `.bib`, CSL JSON, `.csl`, dependent-parent and locale files as assets so the viewer can invalidate results when any input changes. Style/locale parse caches key on captured contents, not path alone; mutable document history is never cached with a style (**D7.1.2v2, D7.2.1**).
+The result should include citation IDs, resolved style identity/version/hash, parent/locale identities, processor coverage, collation policy and diagnostics. Register `.bib`, CSL JSON, `.csl`, dependent-parent and locale files as assets so the viewer can invalidate results when any input changes. Style/locale parse caches key on captured contents, not path alone; mutable document history is never cached with a style (**D9.1.2, D9.3.1**).
 
 Preserve scope-aware citation destinations and separate targets for repeated printed entries. If a reference has no printed destination, render its citation without a dangling link. Backreferences remain document locations; physical page numbers need a separate pagination feedback design.
 
-CSL bibliography layout metadata such as hanging indentation, second-field alignment and entry/line spacing must reach CSS/layout, rather than be approximated with spaces in a string. Preview and exported output must be checked visually. Retained Radiant content follows **D4.5.1v4, D4.5.2**; native bridges must copy or root values under those contracts.
+CSL bibliography layout metadata such as hanging indentation, second-field alignment and entry/line spacing must reach CSS/layout, rather than be approximated with spaces in a string. Preview and exported output must be checked visually. Retained Radiant content follows **D5.5.1, D5.5.2**; native bridges must copy or root values under those contracts.
 
 No new CLI flags are needed for the first implementation. A later proposal may expose `--citeproc`, `--bibliography`, `--csl`, and locale selection on conversion/render commands, reusing the package options. Those flags do not exist merely because they appear here.
 

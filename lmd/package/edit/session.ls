@@ -2,7 +2,7 @@
 // (vibe/radiant/Radiant_Design_Edit_Mode.md §8).
 //
 // A session record is plain data owned by the shell template's instance state
-// (S1.4, D7.2.1): the file identity, its format adapter, the envelope the
+// (S1.4, D9.3.1): the file identity, its format adapter, the envelope the
 // adapter keeps beside the model, the bytes last read from or written to disk
 // (the overwrite check), and the saved checkpoint (dirty state). Reads and
 // writes happen only in the procedures below, called from `on` handlers

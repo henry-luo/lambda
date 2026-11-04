@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3/S7.1.1v3: scalar fields of an admitted record-array element use the direct nullable receiver path, while a string field retains null-preserving generic access.",
+  "description": "D4.3.3/S7.1.1v3: scalar fields of an admitted record-array element use the direct nullable receiver path, while a string field retains null-preserving generic access.",
   "checks": [
     {
       "in_func": "_read_value_#",

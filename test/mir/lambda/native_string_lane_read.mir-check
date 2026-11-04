@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3: an uncertified native string lane takes a physical guard before a direct load; item_at remains the cold fallback.",
+  "description": "D4.3.3: an uncertified native string lane takes a physical guard before a direct load; item_at remains the cold fallback.",
   "checks": [
     {
       "in_func": "_read__raw0_#",

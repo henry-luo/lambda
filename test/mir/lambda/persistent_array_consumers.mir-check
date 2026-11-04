@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3/S11.4.10: dynamic array crossings check the live carrier and certificate, broad containers check the kind, and nullable scalar misses retain full admission.",
+  "description": "D4.3.3/S11.4.10: dynamic array crossings check the live carrier and certificate, broad containers check the kind, and nullable scalar misses retain full admission.",
   "checks": [
     {
       "in_func": "_admit_strings_#",

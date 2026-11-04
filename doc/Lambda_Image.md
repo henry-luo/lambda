@@ -7,7 +7,7 @@
 
 `import img: lambda.image` provides raster values, layered composition,
 animation frames, PSD interchange and image editing. The package lives under
-the bundled package root (**D7.2.4v3**).
+the bundled package root (**D9.3.4**).
 
 ```lambda
 import img: lambda.image
@@ -37,7 +37,7 @@ Raster attributes are `width`, `height`, `sample_type`, `channels`, `color`,
 and sparse copy-on-write tiles for region/paint edits, with
 one through four channels: gray, gray/alpha, RGB or RGBA. The canonical
 pixel snapshot has shape `[height,width,channels]`; `r`, `g`, `b`, `a` are
-declared, non-enumerable channel projections (**D7.4.4 / D7.4.5v2**).
+declared, non-enumerable channel projections (**D9.5.4 / D9.5.5**).
 Absent RGB projections on gray storage return null; `channel` checks names.
 
 Construction, replacement, channel reads and pixel reads preserve value
@@ -45,7 +45,7 @@ snapshots (**S9.1.2 / S9.2.2**). Editing a returned sample array changes that
 array. Use the checked replacement or procedural APIs to publish pixels
 back into a Raster. Region and paint writes share untouched backing and detach
 only edited tiles. Shared native byte storage is GC-accounted once until its
-last owner releases it (**D4.1.4v5**).
+last owner releases it (**D5.1.4**).
 
 ## API
 
@@ -197,7 +197,7 @@ retaining its source asset alone does not authorize byte passthrough.
 - `input(path,'psd')` and automatic PSD detection use the same byte parser
   and produce Input-owned materialized Raster elements. Call `adopt` before
   runtime rendering/editing. No GC Velmt is embedded in static Input data
-  (**D4.1.2 / D5.3.3**).
+  (**D5.1.2 / D6.3.3**).
 - ICC-tagged source samples are marked `unknown` and retained with original
   bytes. This profile does not perform ICC conversion. Strict composition
   refuses unknown working color identities and preserved unsupported visual

@@ -1,4 +1,4 @@
-// S7.1.1v3/D2.5.3: the loop head proves each stable a[i] body read until
+// S7.1.1v3/D2.4.3: the loop head proves each stable a[i] body read until
 // the sole tail increment. Another array or an earlier index write declines.
 pn sum(a: float[]) float^ {
     var i: int = 0

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune27 T27-7 / D5.3.4: post-call typed-array layout reloads are pruned by liveness once the function is complete. `b` is dead after its first reads, so no call site reloads its layout; `a` is read across the allocating loop body and keeps its reload. The golden output under forced GC is the correctness half of this fixture.",
+  "description": "Tune27 T27-7 / D6.3.4: post-call typed-array layout reloads are pruned by liveness once the function is complete. `b` is dead after its first reads, so no call site reloads its layout; `a` is read across the allocating loop body and keeps its reload. The golden output under forced GC is the correctness half of this fixture.",
   "checks": [
     {
       "in_func": "_tune27_layout_reload_liveness_#",

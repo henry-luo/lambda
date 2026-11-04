@@ -1,4 +1,4 @@
-// Package-owned object and markup command policy (D7.2.5).  It composes the
+// Package-owned object and markup command policy (D10.2.1).  It composes the
 // existing checked range wrapper and contextual-fragment mechanisms without
 // giving native code any object-command spelling.
 import dom
@@ -19,7 +19,7 @@ pn wrap_with_attribute(host, edit_context, tag, attribute_name, value) {
     else {
         // Splitting a partial text range replaces the original text wrapper.
         // Read the generic operation's mapped selection node before finding
-        // the newly-created object shell (D7.2.5).
+        // the newly-created object shell (D10.2.1).
         let wrapped_node = dom.edit_node(host, token);
         let wrapper = structure.ancestor_with_tag(host, wrapped_node, tag);
         if (wrapper == null) false

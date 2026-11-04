@@ -175,8 +175,8 @@ substeps. `mod_model.ls` owns editing, care, adoption, and file validation.
 handles native events, files, and frame scheduling.
 
 Scene descriptions and simulation are pure values (**S12.1.3**); handlers own
-effects through the documented package boundary (**D7.2.4v4 / D7.5.3v2**).
-Retained DOM ownership follows **D4.5.1v4**. Shared `lambda.scene3d.dom` helpers
+effects through the documented package boundary (**D9.3.4 / D9.5.6**).
+Retained DOM ownership follows **D5.5.1**. Shared `lambda.scene3d.dom` helpers
 serve Hamlet, Aquarium, and CellScope. `history_snapshot` reuses the existing
 editor undo/redo implementation, and shared surface grid indices serve sphere,
 torus, and tunnel geometry. No engine or formal-spec ruling changes are made.

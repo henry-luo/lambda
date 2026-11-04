@@ -1,6 +1,6 @@
 // S8.2.2v6: XHTML tags retain their expanded namespace identity.
 import h: 'http://www.w3.org/1999/xhtml'
-// D2.10: XML syntax emits the same HTML names and attributes for Radiant.
+// D10.1: XML syntax emits the same HTML names and attributes for Radiant.
 let source = "<?xml version=\"1.0\"?><h:html xmlns:h=\"http://www.w3.org/1999/xhtml\"><h:head/><h:body><h:div id=\"box\" class=\"card\"/><h:p> a <![CDATA[<b>&]]> z </h:p></h:body></h:html>"
 let doc = parse(source, 'xhtml')^
 let html = doc[0]

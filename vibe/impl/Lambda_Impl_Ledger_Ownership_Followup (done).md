@@ -36,7 +36,7 @@ shared insertion-capture helper, which records sharing on its possible source
 roots. The destination also records shared children; later writes through
 either observer rebuild their path. Bare bindings keep their established
 pre-store mark, scalar expressions skip capture, and an RMW handle's final
-store-back keeps its existing exemption (**D4.4.4v4**).
+store-back keeps its existing exemption (**D5.4.4**).
 
 Regression: `test/lambda/proc/ledger_place_insertion.ls`, covering member and
 index stores, conditional and operand-returning RHSs, mutation through both
@@ -46,7 +46,7 @@ interp and AUTO already produce the expected snapshots.
 
 ### LR13-17 — schema loader and imported-type lifetime
 
-**S11.4.1v3 / S16.9.8 / D4.2.6.** The validator's standalone AST builder had no
+**S11.4.1v3 / S16.9.8 / D5.2.5.** The validator's standalone AST builder had no
 Runtime. An import reached the ordinary script-cache loader and dereferenced
 that missing owner. It also lacked the schema file's resolution directory.
 

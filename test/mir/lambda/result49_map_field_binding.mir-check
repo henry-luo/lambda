@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3, S9.3.1: an admitted pointer-array binding guards its live carrier and directly constructs the named record; a dynamic value retains field admission.",
+  "description": "D4.3.3, S9.3.1: an admitted pointer-array binding guards its live carrier and directly constructs the named record; a dynamic value retains field admission.",
   "checks": [
     {
       "in_func": "_from_global_#",

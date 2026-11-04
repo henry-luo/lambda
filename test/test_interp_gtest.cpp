@@ -1,10 +1,10 @@
 //==============================================================================
-// T0 AST interpreter tests (D8.1.1v2, vibe/impl/Lambda_Impl_Ast_Interp.md §5)
+// T0 AST interpreter tests (D8.3.1, vibe/impl/Lambda_Impl_Ast_Interp.md §5)
 //
 // Three layers:
 //   1. Differential — every script in the committed P0 subset must produce
 //      byte-identical output under LAMBDA_EXEC_BACKEND=interp and the default tier,
-//      with zero fallbacks. The goldens are the shared oracle (SI3/D3.3.1).
+//      with zero fallbacks. The goldens are the shared oracle (SI3/D4.3.1).
 //   2. Walker micro-tests — one small source per node family, compared across
 //      tiers so a divergence names the construct that caused it.
 //   3. Frame-plan properties — generated deep expressions must evaluate without
@@ -251,7 +251,7 @@ TEST(InterpWalker, ContainersAndAccess) {
 
 TEST(InterpWalker, RepeatedStaticMemberAccess) {
     // Static dotted names must retain their source meaning while linking to
-    // the active NamePool only once per interpreter activation (D4.6.2v2).
+    // the active NamePool only once per interpreter activation (D5.6.2).
     expect_tiers_agree("static_member_links",
         "let record = {left: 2, nested: {right: 3}}\n"
         "[for (i in 1 to 64) record.left + record.nested.right]\n");
@@ -259,7 +259,7 @@ TEST(InterpWalker, RepeatedStaticMemberAccess) {
 
 TEST(InterpWalker, RepeatedCaptureRead) {
     // Frame planning links this use of `base` to its closure slot; its value
-    // remains the Lambda snapshot capture required by D6.2.3.
+    // remains the Lambda snapshot capture required by D7.2.3.
     expect_tiers_agree("capture_slot_link",
         "fn make_adder(base) { (n) => n + base }\n"
         "let add = make_adder(7)\n"
@@ -267,7 +267,7 @@ TEST(InterpWalker, RepeatedCaptureRead) {
 }
 
 TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
-    // S4.2.2/D8.1.1v10: binder joining and dependent-result specialization
+    // S4.2.2/D8.3.3: binder joining and dependent-result specialization
     // stay on the boxed boundary, so T0, eager MIR, and the shipped default agree.
     const char* path = "test/lambda/type_binder.ls";
     RunResult default_tier = run_script(path, NULL);
@@ -281,7 +281,7 @@ TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     EXPECT_EQ(interp.exit_code, 0);
     EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
 
-    // S11.4.8v2/D3.1.4v2: leading `as T` shares the ordinary non-error
+    // S11.4.8v2/D4.1.4: leading `as T` shares the ordinary non-error
     // boundary and binder representation in every tier.
     const char* leading_path = "test/lambda/type_binder_leading.ls";
     RunResult leading_default = run_script(leading_path, NULL);
@@ -296,7 +296,7 @@ TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     EXPECT_EQ(leading_jit.exit_code, 0);
     EXPECT_EQ(leading_interp.exit_code, 0);
 
-    // D8.3.1v2: the fifth exact key crosses the bounded raw-variant cap;
+    // D7.3.1: the fifth exact key crosses the bounded raw-variant cap;
     // direct scalar and shape-guarded container-pointer edges stay tier-identical.
     const char* raw_variant_path = "test/lambda/type_binder_raw_variants.ls";
     RunResult raw_default = run_script(raw_variant_path, NULL);
@@ -312,7 +312,7 @@ TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     EXPECT_EQ(raw_jit.exit_code, 0);
     EXPECT_EQ(raw_interp.exit_code, 0);
 
-    // D8.3.4v2: a task-free `pn` follows the same direct raw-edge proof as a
+    // D7.3.4: a task-free `pn` follows the same direct raw-edge proof as a
     // `fn`, but keeps its boxed entry for the dynamic `any` call.
     const char* proc_raw_variant_path = "test/lambda/proc/type_binder_proc_raw.ls";
     RunResult proc_raw_default = run_script(proc_raw_variant_path, NULL, /*procedural=*/true);
@@ -348,7 +348,7 @@ TEST(InterpWalker, NullableBoolFieldLaneAgreesAcrossAllTiers) {
     // T29-2: a bool field read through an optional record element is the
     // nullable bool lane. The JIT published it under the wrapper contract's
     // TypeId, so a declared return crashed on the raw byte and a local branch
-    // tested it as an Item (D2.4.1-D2.4.3, D2.5.2v3).
+    // tested it as an Item (D2.3.4-D2.3.5, D2.4.2).
     const std::string path = "test/lambda/proc/typed_record_bool_lane.ls";
     const std::string golden = read_file("test/lambda/proc/typed_record_bool_lane.txt");
     RunResult interp = run_script(path, "interp", true);
@@ -539,7 +539,7 @@ TEST(InterpWalker, Uint64TypedArrayKeepsItsFullWidthLane) {
 TEST(InterpWalker, ProperTypedArrayContractsKeepExactLanesAndRecordLayouts) {
     // T[] admission must cover compact numeric lanes and named map elements in
     // both tiers; the checked push path also rejects an out-of-range u8 value
-    // without publishing a partial append (D3.1.1v2, D3.3.3).
+    // without publishing a partial append (D4.1.1, D4.3.3).
     const char* script = "test/lambda/proc/proc_proper_typed_array.ls";
     RunResult jit = run_script(script, "jit", /*procedural=*/true);
     RunResult interp = run_script(script, "interp", /*procedural=*/true);
@@ -699,9 +699,9 @@ TEST(InterpWalker, ImmutableProcAliasWithTaskStaysPinned) {
     // await, the caller cannot stay in T0, and delegating it needs the boxed
     // MIR satellite. Since the AUTO landing that membrane fails closed on
     // indirect Lambda calls -- the boxed dispatcher has no caller-root
-    // write-back channel for a target it cannot name (D8.1.1v4, D3.3.1). The
+    // write-back channel for a target it cannot name (D8.3.1, D4.3.1). The
     // AUTO retains its counted fallback; explicit T0 rejects before execution
-    // because the task continuation requires MIR (D8.1.1v15).
+    // because the task continuation requires MIR (D8.3.1).
     const char* path = "temp/interp_case_proc_alias_task.ls";
     write_script(path,
         "pn worker() { sleep(1)^ }\n"
@@ -851,7 +851,7 @@ TEST(InterpFramePlan, RecursionDepthBudgetFaultsCleanly) {
 TEST(InterpPromotion, TailIterationsQueueAtDefaultThreshold) {
     // four self-tail edges leave a definition one edge short of the default
     // threshold. This guards against accidentally using call_count (which
-    // also includes the outer entry) as the handoff budget (D8.1.1v5).
+    // also includes the outer entry) as the handoff budget (D8.3.2).
     const char* below_path = "temp/interp_case_tail_handoff_below.ls";
     write_script(below_path,
         "pn loop(n: int, acc: int) int {\n"
@@ -869,7 +869,7 @@ TEST(InterpPromotion, TailIterationsQueueAtDefaultThreshold) {
 
     // The fifth direct self-tail boundary queues a private image. The active
     // frame remains T0 (there is no loop-entry OSR), and later call boundaries
-    // publish the completed image (D8.1.1v12).
+    // publish the completed image (D8.3.4).
     const char* handoff_path = "temp/interp_case_tail_handoff.ls";
     write_script(handoff_path,
         "pn loop(n: int, acc: int) int {\n"
@@ -944,7 +944,7 @@ TEST(InterpFallback, ExcludedScriptsAreCountedNotInterpreted) {
 TEST(InterpWalker, GenericUint64ArrayReadsKeepTheirLane) {
     // The interpreter re-reads a generic array's raw u64 carrier after the
     // shared accessor narrows it, preserving the declared numeric identity
-    // without inspecting native lane words as Item pointers (D3.2.2).
+    // without inspecting native lane words as Item pointers (D4.2.3).
     const char* script = "test/lambda/sized_numeric_collections.ls";
     RunResult jit = run_script(script, "jit");
     RunResult interp = run_script(script, "interp");
@@ -961,7 +961,7 @@ TEST(InterpWalker, FixedArityCallsBeyondFourUseFixedAbi) {
     // fixed-arity callee read its trailing operands from unset registers. The
     // dom catalog's five-argument set_base_and_extent row exposes it: the
     // golden is the oracle, the interpreter the cross-check.
-    // DOM mutators are procedures (D7.4.6), so the script runs as `pn main()`
+    // DOM mutators are procedures (D7.1.1), so the script runs as `pn main()`
     const char* script = "test/lambda/proc/dom_range_selection_ops.ls";
     RunResult jit = run_script(script, "jit", true);
     RunResult interp = run_script(script, "interp", true);

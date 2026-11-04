@@ -5,10 +5,10 @@
 - Scope: the three follow-ups authorized on 2026-09-10: branch-local union and
   record proofs; escape/borrow analysis and guard reuse; whole-renderer
   destination passing and record scalar replacement.
-- Authority: D2.4.1–D2.4.3 (semantic contracts versus carriers), D3.2.4v3
-  (record reification), D3.3.3v3 (representation certificates), D5.3.4
-  (precise roots), D8.2.6 (producer-owned lowering), D8.3.1–D8.3.3
-  (entry planning and boundary proofs), D8.4.2v2 (individual internal ABI
+- Authority: D2.3.4–D2.3.5 (semantic contracts versus carriers), D4.2.5
+  (record reification), D4.3.3 (representation certificates), D6.3.4
+  (precise roots), D8.2.6 (producer-owned lowering), D7.3.1–D7.3.3
+  (entry planning and boundary proofs), D7.4.2 (individual internal ABI
   operands), S9.1.2/S9.3.1 (snapshots).
 
 ## Implemented scope
@@ -42,14 +42,14 @@
    root publication pass. They are unbound from register mirrors because a
    callee writes them. Tail-call parameters own separate cells from argument
    temporaries, and all next arguments are captured before any parameter is
-   replaced. No native-stack GC scanning is involved (D5.3.4).
+   replaced. No native-stack GC scanning is involved (D6.3.4).
 
    The existing `fn_strcat` buffer supplies destination growth. Ordinary
    projection and boxed result materialization freeze the published string.
    Public callbacks still receive normal maps through `_b`; unknown record
-   argument proofs select that admission boundary (D8.3.2–D8.3.3). Boxed input
+   argument proofs select that admission boundary (D7.3.2–D7.3.3). Boxed input
    records are read by field identity, preserving correctness with reordered
-   fields and open-record extras. There is one native body (D8.3.1).
+   fields and open-record extras. There is one native body (D7.3.1).
 
    Scalar-result field contracts remain private lowering evidence even when
    a forward call leaves the public AST projection typed `any` (D8.2.6).
@@ -71,7 +71,7 @@
 - Float and wide-number fields retain the existing record path. Out-of-band
   payloads require destination-owned number storage in addition to Item roots;
   publishing a pointer into a returning callee's number stack is invalid
-  (D5.2.1v3–D5.2.2v3). The scalar destination protocol does not change the
+  (D6.2.1–D6.2.2). The scalar destination protocol does not change the
   numeric companion-return ABI.
 - Guard reuse currently requires stable local bindings in pure functions.
   Mutable procedures, captured/module storage, and views keep checks.
@@ -80,7 +80,7 @@
   not all scalarized. Union validation of the heterogeneous document algebra
   remains substantial: `kind: string` does not establish disjoint record arms.
   None of these changes claim C-equivalent generated code for every typed
-  program (D2.4.1–D2.4.3, D3.3.4).
+  program (D2.3.4–D2.3.5, D2.4.3).
 
 ## Validation
 
@@ -146,8 +146,8 @@ matrix.
 
 String copying falls **86.13%**, but recursive union validation remains large.
 The heterogeneous `Doc` contract has overlapping `kind: string` arms, so a
-discriminant comparison cannot certify every child field (D2.4.1–D2.4.3,
-D3.3.3v3). Boxed field cells, precise root frames, and generic append calls also
+discriminant comparison cannot certify every child field (D2.3.4–D2.3.5,
+D4.3.3). Boxed field cells, precise root frames, and generic append calls also
 remain relative to a C renderer with concrete structs and one buffer.
 
 Provenance and individual samples are in

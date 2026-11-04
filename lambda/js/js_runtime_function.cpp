@@ -62,7 +62,7 @@ static void js_function_store_metadata_property(JsFunction* fn,
     Rooted<Item> key_root(roots, js_name_item(name, name_length));
     // Function metadata is initialized by [[DefineOwnProperty]], not ordinary
     // assignment: its non-writable descriptor must still accept a later
-    // SetFunctionName/SetFunctionLength before publication (D6.2.2v2).
+    // SetFunctionName/SetFunctionLength before publication (D7.2.2).
     js_func_init_property(function_root.get(), key_root.get(), value_root.get());
     js_mark_non_writable(function_root.get(), key_root.get());
     js_mark_non_enumerable(function_root.get(), key_root.get());
@@ -207,12 +207,12 @@ extern "C" bool js_function_has_own_prototype(Item function) {
     }
     if (js_fn_intrinsic_class(fn) == JS_CLASS_SYMBOL ||
             js_fn_intrinsic_class(fn) == JS_CLASS_BIGINT) {
-        // D6.2.2v2: [[Construct]] and own properties are independent.
+        // D7.2.2: [[Construct]] and own properties are independent.
         // Symbol and BigInt deliberately reject construction but still own
         // their specification-defined prototype objects.
         return true;
     }
-    // D6.2.2v2: the finalized construct entry is the authoritative capability;
+    // D7.2.2: the finalized construct entry is the authoritative capability;
     // catalog IDs and mutable function names cannot create an own prototype.
     return fn->construct != NULL ||
         (fn->flags & JS_FUNC_FLAG_GENERATOR) != 0;
@@ -247,7 +247,7 @@ static void js_function_register_pool_pointer_roots(JsFunction* fn) {
     if (!fn || fn->pool_pointer_roots_registered || !context ||
             !context->heap || !context->heap->gc ||
             gc_is_managed(context->heap->gc, fn)) return;
-    // D5.3.3/D5.4.3: rooting a pool-backed function Item does not trace its
+    // D6.3.3/D6.4.3: rooting a pool-backed function Item does not trace its
     // fields. Register raw metadata slots before finalization allocates, or a
     // freshly assigned name/source can be collected through the pool record.
     bool registered = heap_try_register_gc_root((uint64_t*)&fn->name);
@@ -311,7 +311,7 @@ void js_function_finalize_capabilities(JsFunction* fn) {
     if (!fn) return;
     js_function_register_pool_pointer_roots(fn);
     JsConstructEntry inherited_construct = fn->construct;
-    // D6.2.2v2 requires one writer for published executable capabilities;
+    // D7.2.2 requires one writer for published executable capabilities;
     // metadata mutation must re-finalize before the value is republished.
     fn->invoke = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
         ? js_call_entry_bound
@@ -549,7 +549,7 @@ static JsRuntimeState::JsFunctionCacheKey js_native_cache_key(Target target,
     static_assert(sizeof(target) <= sizeof(bits),
         "native target must fit the callable identity key");
     memcpy(&bits, &target, sizeof(target));
-    // D6.2.2v2: call-only and constructable bindings using one C target have
+    // D7.2.2: call-only and constructable bindings using one C target have
     // different capabilities and must never alias through the target cache.
     return {bits, (int16_t)arity, JS_FUNCTION_CACHE_NATIVE, (uint8_t)policy,
         (uint8_t)(constructable ? 1 : 0)};
@@ -639,7 +639,7 @@ static JsFunction* js_alloc_function_storage(bool gc_backed) {
 }
 
 static void js_function_init_common(JsFunction* fn) {
-    // D6.2.2v2: every callable wrapper has the shared layout marker before
+    // D7.2.2: every callable wrapper has the shared layout marker before
     // any JS-only capability or property state is published.
     js_function_init_abi(fn);
     fn->prototype = ItemNull;
@@ -845,7 +845,7 @@ static Item js_new_native_function_impl(JsNativeTarget target,
         : NULL;
     native->arity = (uint8_t)arity;
     native->policy = (uint8_t)policy;
-    // D6.2.2v2: host-native callbacks execute in the caller's module scope; assigning
+    // D7.2.2: host-native callbacks execute in the caller's module scope; assigning
     // the publication scope here makes nested eval copy from an unrelated
     // state and fails Test262's $262.evalScript/agent callbacks.
     fn->home_global = js_get_global_this();
@@ -899,7 +899,7 @@ JS_NATIVE_REST_ARITIES(JS_DECLARE_DISTINCT_NATIVE_REST)
 
 // Publication helpers need binding identity, not target identity.  These
 // private overloads preserve the adapter contract while forcing one function
-// object per installed property; D6.2.2v2 permits body sharing but JC7 makes
+// object per installed property; D7.2.2 permits body sharing but JC7 makes
 // distinct identity the default unless an owner explicitly publishes an alias.
 #define JS_DEFINE_NATIVE_ADAPTER_FACTORY(arity, type) \
     static Item js_new_native_adapter(type target, int adapter_arity, \
@@ -984,7 +984,7 @@ JS_NATIVE_REST_ARITIES(JS_DEFINE_NATIVE_ADAPTER)
         return js_install_native_constructor(object, name, target, arity); \
     }
 
-// D5.2/D6.2.2v2: all native-method publication uses one exact-rooted shape;
+// D6.2/D7.2.2: all native-method publication uses one exact-rooted shape;
 // argument evaluation order must never decide whether the key survives GC.
 #define JS_DEFINE_NATIVE_METHOD(arity) \
     JS_DEFINE_NATIVE_METHOD_INSTALLER(arity, JsNativeP##arity)
@@ -1012,7 +1012,7 @@ Item js_initialize_native_constructor_prototype(Item constructor,
             "native prototype initialization requires a constructor");
     }
     JsFunction* fn = (JsFunction*)constructor_root.get().function;
-    // D5.4.3/D6.2.2v2: native publication initializes the hidden construct
+    // D6.4.3/D7.2.2: native publication initializes the hidden construct
     // payload and the real own data property in one exact-rooted transaction.
     // Ordinary Set cannot do this because a built-in prototype is non-writable
     // once its lazy descriptor has been materialized.
@@ -1123,14 +1123,14 @@ static Item js_new_native_closure_impl(JsNativeTarget target,
     RootFrame roots(2);
     Rooted<Item> env_owner_root(roots,
         (Item){.item = (uint64_t)(uintptr_t)env});
-    // D5.4.3: the caller-built GC environment has no object owner until the
+    // D6.4.3: the caller-built GC environment has no object owner until the
     // fresh callable is attached; root the raw environment across allocation.
     Rooted<Item> fn_root(roots, js_new_native_function_impl(target, call_body,
         construct_body,
         cache_key, exposed_arity, policy, construct_body != NULL, true));
     if (get_type_id(fn_root.get()) != LMD_TYPE_FUNC) return fn_root.get();
     JsFunction* fn = (JsFunction*)fn_root.get().function;
-    // D5.3.3/D6.2.2v2: the typed closure owns its environment before scalar
+    // D6.3.3/D7.2.2: the typed closure owns its environment before scalar
     // rehoming can allocate; invocation reads it without an ABI cast.
     fn->env = env;
     fn->env_size = env_size;
@@ -1143,7 +1143,7 @@ Item js_new_native_payload_function(JsNativeCallBody call_body,
         uint64_t payload, int formal_length, Item* env, int env_size) {
     JsNativeTarget stored = {};
     stored.bits = payload;
-    // D5.3.3/D6.2.2v2: native policy pointers remain outside traced Item slots;
+    // D6.3.3/D7.2.2: native policy pointers remain outside traced Item slots;
     // optional guest arguments use the existing precise closure owner.
     auto key = js_native_cache_key(call_body, formal_length, JS_NATIVE_CALL_BODY);
     return env ? js_new_native_closure_impl(stored, call_body, key,
@@ -1154,7 +1154,7 @@ Item js_new_native_payload_function(JsNativeCallBody call_body,
 
 Item js_new_native_body_constructor_closure(JsNativeCallBody call_body,
         JsNativeConstructBody construct_body, int formal_length, Item* env, int env_size) {
-    // constructor environments use the same precise ownership as native closures (D5.3.3).
+    // constructor environments use the same precise ownership as native closures (D6.3.3).
     JsNativeTarget stored = {};
     return js_new_native_closure_impl(stored, call_body,
         js_native_cache_key(call_body, formal_length, JS_NATIVE_CALL_BODY, true),

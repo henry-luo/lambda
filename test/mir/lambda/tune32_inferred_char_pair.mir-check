@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune32 T32-2: exact inferred string entries reuse byte/Unicode pair fusion; unknown receiver or selection keys retain ordinary access (D8.3.2, S7.1.1v3, S8.2.4v3).",
+  "description": "Tune32 T32-2: exact inferred string entries reuse byte/Unicode pair fusion; unknown receiver or selection keys retain ordinary access (D7.3.2, S7.1.1v3, S8.2.4v3).",
   "checks": [
     {
       "in_func": "_tune32_same_at_#",

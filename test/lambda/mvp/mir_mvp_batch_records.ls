@@ -1,4 +1,4 @@
-// admitted prefixes and container slots survive COW, recursion and GC (D3.2.4v4, D5.3).
+// admitted prefixes and container slots survive COW, recursion and GC (D4.2.5, D6.3).
 type BatchNode = {value: int, next: BatchNode?}
 type BatchRecord = {count: int, values: float[], child: BatchNode?, absent: float[]?}
 type BatchCounter = {count: int}

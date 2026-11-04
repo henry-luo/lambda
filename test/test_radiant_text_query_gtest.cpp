@@ -21161,7 +21161,7 @@ TEST_F(RadiantFrameDelivery, FullscreenCatalogRefusesWindowlessTransitions) {
 }
 
 TEST_F(RadiantFrameDelivery, AudibleOutputGateFollowsDocumentOrigin) {
-    // D7.5.4: a local document may start audio; a network one needs trusted
+    // D11.3.1: a local document may start audio; a network one needs trusted
     // activation or the host grant, and activation is sticky.
     ASSERT_NE(load("test/lambda/ui/_window_fullscreen.ls"), nullptr);
     EXPECT_TRUE(radiant_document_may_start_audio(document));
@@ -21273,7 +21273,7 @@ TEST_F(RadiantAudioCapture, ProceduralReadCopiesWideTimestampsAndPcmIntoOrdinary
     for (unsigned i = 0; i < 2; i++) for (unsigned channel = 0; channel < 2; channel++)
         EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), i, channel), input[i * 2 + channel]);
     ASSERT_TRUE(radiant_capture_stop(document, token));
-    // the copied binary survives closure of the producer and its native queues (D5.3.3).
+    // the copied binary survives closure of the producer and its native queues (D6.3.3).
     EXPECT_FLOAT_EQ(audio_fixture_sample(binary_data(bytes), 1, 0), .5f);
     request.put("frames", push_d(1.5)); EXPECT_EQ(dom_engine_audio_capture(owner.get(), request.value.get()).item, ItemNull.item);
 }

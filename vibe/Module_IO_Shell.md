@@ -6,7 +6,7 @@
 
 The module has been adopted across the codebase — all files under `lambda/` and `radiant/` use `shell_getenv()` instead of raw `getenv()`, and `shell_exec_line()` instead of `popen()`/`posix_spawn()`.
 
-Process launch is part of the central I/O boundary in **D7.5.2**: descriptors/handles are explicitly inherited, process trees are owned for timeout cleanup, and captured output is quota-bounded.
+Process launch is part of the central I/O boundary in **D11.1.2**: descriptors/handles are explicitly inherited, process trees are owned for timeout cleanup, and captured output is quota-bounded.
 
 ## Design Principles
 

@@ -1,4 +1,4 @@
-// D7.2.5: a template-owned stylesheet may affect nodes outside its result subtree.
+// D10.2.1: a template-owned stylesheet may affect nodes outside its result subtree.
 edit <style_app> state phase:0 {
     let kids = [
         if (phase==3) null else <style id:"live-sheet",

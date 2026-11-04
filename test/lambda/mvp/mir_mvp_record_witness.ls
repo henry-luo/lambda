@@ -1,4 +1,4 @@
-// scalar record witnesses must preserve snapshots and precise homes (S9.1.3v2, D5.3).
+// scalar record witnesses must preserve snapshots and precise homes (S9.1.3v2, D6.3).
 // the existing MVP snapshots siblings(box, box); other tiers currently observe the mutation.
 type Counter = {count: int}
 pn bump(var box: Counter) any { box.count = box.count + 1; box.count = box.count + 1 }

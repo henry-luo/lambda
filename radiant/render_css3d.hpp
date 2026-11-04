@@ -7,7 +7,7 @@
 
 // Homogeneous positions and original plane coordinates survive clipping and
 // splitting. Vertex storage is borrowed from the caller's render scratch scope
-// (D4.5.1v4); fragments retain no Lambda values or document ownership.
+// (D5.5.1); fragments retain no Lambda values or document ownership.
 struct Css3dVertex {
     float x, y, z, w;
     float u, v;

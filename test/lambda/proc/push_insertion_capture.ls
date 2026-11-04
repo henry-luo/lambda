@@ -1,7 +1,7 @@
 // LR12-12 (S9.3.1): `push` inserts its value like a literal element, so the
 // stored element is a snapshot. A later write through the pushed binding --
 // a local, a `var` parameter, or a re-borrowing callee -- must not reach it.
-// LR12-13 (D3.2.4v3): a nested store that steps from a declared array into an
+// LR12-13 (D4.2.5): a nested store that steps from a declared array into an
 // element record keeps the array's contract on both tiers.
 type Box = {size: int, tag: int}
 type Holder = {items: Box[], n: int}

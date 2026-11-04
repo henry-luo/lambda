@@ -256,7 +256,7 @@ void te_focus_capture_value(DomElement* elem) {
     uint32_t blen = 0;
     const char* buf = tc_buffer(f, &blen);
 
-    // D4.5.2: a focus session belongs to retained state, not a rebuilt form prop.
+    // D5.5.2: a focus session belongs to retained state, not a rebuilt form prop.
     form_control_store_focus_value(f->state_ref, static_cast<View*>(elem),buf,blen);
     log_debug("text_edit: focus_capture elem=%p len=%u", elem, blen);
 

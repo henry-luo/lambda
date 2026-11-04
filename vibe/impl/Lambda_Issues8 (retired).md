@@ -287,7 +287,7 @@ map field names, and suggest the single-quoted name syntax.
 > reported `["westeast"]` was **adjacent-string merging**, not a return-type
 > misinference: `reverse` built its result with `list_push`, which concatenates
 > adjacent strings. `reverse` was one of the 17 sites converted to `array_push`
-> under D2.6.5 / LR09-R3, which is what closed this.
+> under D3.3.1 / LR09-R3, which is what closed this.
 
 A tail-recursive collector returned `reverse(result)` at its base case and
 prepended strings during descent:
@@ -580,7 +580,7 @@ type, or empty arrays should infer consistently in block-bodied functions.
 ## Collection slice merged adjacent strings — FIXED (self-recorded; confirmed 2026-08-25)
 
 > Confirmed still fixed, and now generalized: this entry's `array_push` remedy
-> is the prior art behind ruling **D2.6.5**, and an audit of all 152
+> is the prior art behind ruling **D3.3.1**, and an audit of all 152
 > `list_push` sites found 19 more with the same defect (`reverse`, `take`,
 > `drop`, `zip`, argument lists, …) — see ledger LR09-R3.
 

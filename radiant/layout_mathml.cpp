@@ -1,4 +1,4 @@
-// MathML package layout and intrinsic measurement preserve the semantic DOM (D7.2.8).
+// MathML package layout and intrinsic measurement preserve the semantic DOM (D10.2.3).
 #include "layout.hpp"
 #include "../lib/tagged.hpp"
 #include <string.h>

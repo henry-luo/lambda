@@ -1,18 +1,18 @@
 # Lambda Impl Proposal: Tune28 — Typed Lane vs C2MIR after Result44/45
 
 - **Date:** 2026-09-16
-- **Status:** IN PROGRESS. T28-1 implemented (§9.1); T28-2 partly blocked by D8.3.4 (§9.2); other tracks open. Evidence in §2–§4 was taken on the
+- **Status:** IN PROGRESS. T28-1 implemented (§9.1); T28-2 partly blocked by D7.3.4 (§9.2); other tracks open. Evidence in §2–§4 was taken on the
   archived Result45 release binary `test/benchmark/exe/lambda-v45-714d448fb2`
   (commit `714d448fb2`, the type-binder merge). Raw captures: `temp/r45prof/`
   (`*.sample.txt` = `sample -wait` at 1 ms, `*.cow.tsv` = `COW_EXEC_PROFILE`,
   `*.mir` = `LAMBDA_MIR_DUMP_PATH`, JIT-pinned throughout).
 - **Formal authority:** S1.6 (specialization unobservable), S4.1.2 (int
   saturation), S9.1.3 (plain-parameter snapshot), S11.4.1v3 (proof reuse);
-  D2.4.1–D2.4.3 (lanes), D3.2.2 / D3.2.4v3 (validator deep on first
-  crossing; elision test), D3.3.3v3 (carrier certificates), **D4.4.4v3** / D4.4.5
-  (borrows: unobservable under S9.1.2 is the ruling, path shape is impl detail), D8.1.1v10 (tier admission), **D8.3.1v2–D8.3.4**
+  D2.3.4–D2.3.5 (lanes), D4.2.3 / D4.2.5 (validator deep on first
+  crossing; elision test), D4.3.3 (carrier certificates), **D5.4.4** / D5.4.5
+  (borrows: unobservable under S9.1.2 is the ruling, path shape is impl detail), D8.3.3 (tier admission), **D7.3.1–D7.3.4**
   (bounded immutable raw variants; check in the callee; two proof paths;
-  visibility), D8.4.1v2 (no inline caches).
+  visibility), D7.4.1 (no inline caches).
 - **Vibe authority:** `Lambda_Design_Type_Generics.md` rev 15 (TG8, TG20v2),
   `impl/Lambda_Impl_Type_Binder.md` (TG-P3.4, TG-P4),
   `impl/Lambda_Impl_Tune27 (done).md` §3 (M1–M8) and §8 (obligations 1–8).
@@ -31,7 +31,7 @@ therefore the valid reference for this proposal.
 
 This round answers three questions with evidence rather than the Tune27
 model: where the remaining 4.4x is, which part of it the newly landed type
-binder (D8.3.1v2 raw variants) can reach, and what the next tracks are.
+binder (D7.3.1 raw variants) can reach, and what the next tracks are.
 Gate: typed/C2MIR ≤ 3.0x on the 63-row population with outputs identical on
 all 138 benchmark scripts across the three tiers.
 
@@ -116,7 +116,7 @@ richards2 runs **3.5 million ownership tests** for 397 ms: every
 `w.tasks[tid].input = …` through `var w: World` re-establishes that `w` is
 unique (M2). The copies are gone (1,000); the *tests* are the cost. splay2's
 826k map copies are the branch-local store-back shape Tune27 §10.12 could
-not admit, now ruled in by D4.4.4v3 (T28-8); they also drive its GC (§3.3).
+not admit, now ruled in by D5.4.4 (T28-8); they also drive its GC (§3.3).
 
 ### 3.3 Dynamic: `sample` top-of-stack (self time)
 
@@ -176,7 +176,7 @@ residue. N1 and N4 are new, cheap, and cross-cutting.
 
 ## 5. The type binder: what it can and cannot buy here
 
-**What landed (D8.3.1v2–D8.3.4, 2026-09-15).** A `fn` whose signature
+**What landed (D7.3.1–D7.3.4, 2026-09-15).** A `fn` whose signature
 carries `as T` binders gets up to four immutable `__rawN` bodies keyed on the
 exact argument-type tuple plus the bound types; `_b` runs the exact-key
 guard chain (scalar tags, normalized container kinds, **descriptor-pointer
@@ -208,14 +208,14 @@ exactly what obligations 1, 4 and 6 need, and they exist now with tests
 1. The **descriptor-identity guard** in `_b` is the record-ABI proof. Once
    `_b` has matched `w`'s `TypeMap*` against `World`'s descriptor, the raw
    body may read `w.cons` as `i64:8(base)` with no null arm on a
-   non-optional field and no layout re-proof — D8.3.3 gives the raw entry
+   non-optional field and no layout re-proof — D7.3.3 gives the raw entry
    exactly two proof paths (exact static edge or `_b`), so the per-access
    guards of N2 are the "third path" that ruling forbids.
 2. The **multi-key plan** generalizes the closed-caller single-key
    inference specialization (`specialization_types[pos]`,
    `transpile-mir.cpp:35770`), which today joins conflicting call sites to
    `ANY` and pays — per its own comment — geomean 1.038 with gcbench +31%,
-   nqueens +30%, binarytrees +28% (T19-4). D8.3.1v2's text keys a variant on
+   nqueens +30%, binarytrees +28% (T19-4). D7.3.1's text keys a variant on
    "the exact argument-type tuple **plus** every selected binder-slot type";
    a function with zero binders has an empty binder part and is a
    degenerate, fully valid case of the same rule.
@@ -238,7 +238,7 @@ tier-matrix gtest.
 
 An immutable module-level `let` bound to a scalar literal (`let K_EDIT = 1`,
 `let NONE = -1`, `let FORWARD = 1`) is a compile-time constant under
-S1.6/D2.4.1; today it is loaded from the module slab as an Item and
+S1.6/D2.3.4; today it is loaded from the module slab as an Item and
 tag-dispatched at every use (70 times in one function). Fold it: the
 emitter already has the RC8 folded-constant path for literals
 (`emit_sysfunc_abi_arg`), and Tune27 §10.x made "immutable module ints
@@ -259,13 +259,13 @@ same way.
   with a literal initializer qualify. Do **not** fold through a call or
   through `import` (const-pool serialization is TGO12's problem).
 
-### T28-2 — Raw record ABI through the D8.3.1v2 guard (N3, obligation 1)
+### T28-2 — Raw record ABI through the D7.3.1 guard (N3, obligation 1)
 
 Lift the three refusals in `mir_callsite_exact_raw_key` for the record
 case, in this order and each independently gated:
 
 1. **`binder_count == 0` → allowed.** A function with no binder has an
-   empty binder part; the key is the argument tuple (D8.3.1v2 text, TG8
+   empty binder part; the key is the argument tuple (D7.3.1 text, TG8
    text). Keep the cap at four and the source-order rule. This alone
    replaces the single-key `specialization_types` join-to-ANY for
    scalar-tuple conflicts and is the T19-4 recovery (pilot rows gcbench,
@@ -281,12 +281,12 @@ case, in this order and each independently gated:
    proven descriptors), and field stores are raw `mov i64:off(base), v`
    plus the store's own contract lane conversion — no
    `lambda_map_path_set_checked_fixed` call. Reads of `w.cons` yield the
-   array carrier *with its certificate proven once* (D3.3.3v3): the layout
+   array carrier *with its certificate proven once* (D4.3.3): the layout
    guard pair of N2 is emitted once per function at first use, not per
    access; a rebinding of the field or a call that may retain `w`
-   invalidates the fact (D4.4.4v2's escape rule).
+   invalidates the fact (D5.4.4's escape rule).
 3. **`pn` and `var` positions.** A `var` record parameter travels through
-   the CW33 home exactly as D8.1.1v10 already does for the `_b` adapter;
+   the CW33 home exactly as D8.3.3 already does for the `_b` adapter;
    the raw body receives the home's raw pointer and the epilogue publishes
    it back. The COW exclusivity question is T28-3's, not this track's: the
    raw body still calls `cow_prepare_write` where the frame fact is
@@ -303,12 +303,12 @@ case, in this order and each independently gated:
   `lambda_map_path_set_checked_fixed`, at most one layout guard pair per
   `w.cons` per body; `LAMBDA_ROOT_WITNESS=1` and `LAMBDA_GC_FORCE_EVERY=1`
   green on the pilot (the raw base pointer must stay rooted through its
-  boxed source — D8.3.1v2's "pointer lanes retain a boxed source root").
-- Risk: medium. The hazards are D8.3.3 (a raw body must never be reached by
+  boxed source — D7.3.1's "pointer lanes retain a boxed source root").
+- Risk: medium. The hazards are D7.3.3 (a raw body must never be reached by
   an unproven value — every direct edge must be statically exact or go
   through `_b`) and S9.1.3 (a *plain* record parameter still needs its
   snapshot on first write; only `var` and provably-unaliased locals skip
-  it). Export ⇒ `_b` mandatory (D8.3.4) is unchanged.
+  it). Export ⇒ `_b` mandatory (D7.3.4) is unchanged.
 
 ### T28-3 — Frame exclusivity for `var` containers (M2, obligation 4)
 
@@ -320,7 +320,7 @@ signature borrows the position via `var` do not retain; a plain-parameter
 pass, a `let` capture, a container store of the value, or a return
 does). With the fact, the raw body prepares the write **once at first
 store** and never re-tests; without it, current behaviour. The ruling
-already exists (D4.4.4v2, D4.4.5): this is the implementation of its
+already exists (D5.4.4, D5.4.5): this is the implementation of its
 "handle for the rest of the frame" reading.
 
 - Pilot: richards2 (3.5M tests → ≤ 50k), hashmap2, deltablue2.
@@ -331,7 +331,7 @@ already exists (D4.4.4v2, D4.4.5): this is the implementation of its
 
 ### T28-4 — Admission on proven recursive carriers is a pointer compare (M1', obligation 3)
 
-prettier_ast2 pays 6.6M `union_admit_calls` that all hit the memo. D3.2.4v3
+prettier_ast2 pays 6.6M `union_admit_calls` that all hit the memo. D4.2.5
 says admission of a *proven physical layout* is a compare; the memo hit is
 already that compare but it sits behind a call, a null-unwrap
 (`lambda_type_accepts_null`), a numeric-boundary probe and a TLS read
@@ -339,7 +339,7 @@ already that compare but it sits behind a call, a null-unwrap
 whose non-null arm is a nominal record or a memoized union, emit
 `descriptor == expected` (or the 8-way probe) inline and call
 `lambda_type_check` only on the miss. The `Doc` recursion is reached
-through the non-null arm as D3.2.4v3 requires (the memory note's
+through the non-null arm as D4.2.5 requires (the memory note's
 "never publish a nullable lane as full_type" trap).
 
 - Pilot: prettier_ast2 (−12–15%), three_way_merge2 / log_pipeline2
@@ -390,7 +390,7 @@ probes *before* T28-1 lands so the ratchet measures each track. Target:
 `c_choose_method` ≤ 1,200 instructions, `run_cube` ≤ 10,000 (Tune27 G9,
 still open).
 
-### T28-8 — Branch-local store-backs and nested handles (CW36, D4.4.4v3)
+### T28-8 — Branch-local store-backs and nested handles (CW36, D5.4.4)
 
 Ruled 2026-09-16: a place handle borrows wherever the borrow is
 unobservable under S9.1.2; the path shape is an implementation detail
@@ -578,7 +578,7 @@ Two findings change the track's shape:
   **only when a parameter is shape-bearing** (a named record), which is the
   case the native lane refuses today (`is_native_param_type_id` is scalars
   only).
-- **`pn` and `var` parameters are excluded by a ratified ruling.** D8.3.4's
+- **`pn` and `var` parameters are excluded by a ratified ruling.** D7.3.4's
   boxed-only exclusions name closures, methods, variadics, `pn`/`var` params
   and may-await procedures, and the planner enforces them. Every one of the
   twelve widest rows is `pn` with `var` record parameters (deltablue2 49 `pn`
@@ -587,7 +587,7 @@ Two findings change the track's shape:
   exclusion**, which is a ruling for the user, not an implementation choice.
 
 The part of N2/N3 that needs no ruling is separate and stays in scope: a
-declared record parameter's descriptor is admitted once by `_b` (D8.3.2), so
+declared record parameter's descriptor is admitted once by `_b` (D7.3.2), so
 the per-access layout-kind and certificate-identity guards on `w.cons[cid]`
 are a re-proof the callee already owns. Hoisting that proof to the first use
 in the function (invalidated by a write to the field or a call that may retain
@@ -595,10 +595,10 @@ the root) is obligation 6 applied to a declared parameter and is the next
 concrete slice.
 
 
-### 9.3 D8.3.4v3 — `var` positions admitted to raw variants (LANDED, subset)
+### 9.3 D7.3.4 — `var` positions admitted to raw variants (LANDED, subset)
 
 The user ruled on 2026-09-16 that `var` parameters and methods leave the
-boxed-only exclusion list. Spec revised in place (D8.3.4v3, formal design
+boxed-only exclusion list. Spec revised in place (D7.3.4, formal design
 8.1.0); deliberation recorded as O11v2 in
 `vibe/Lambda_Design_Compiling_Dual_Func.md`.
 
@@ -607,7 +607,7 @@ position outright. It admits one whose value travels in the *same carrier on
 both edges* -- records, maps and arrays, which are boxed Items either way -- so
 the CW33 home transport the ordinary argument loop already emits applies
 unchanged and the borrow's write-back is literally the `_b` path's
-(D8.1.1v10). A `var` position whose contract would take a raw scalar lane is
+(D8.3.3). A `var` position whose contract would take a raw scalar lane is
 still refused: that is O11's original hazard, a raw carrier replacing the
 caller-owned location, and it has no transport yet.
 
@@ -683,9 +683,9 @@ re-measure the row on a quiet host before recording any figure for it.
 |---|---|
 | T28-1 module-constant fold | landed, committed, pinned by `tune28_module_const_fold` |
 | T28-6 folded constants proven in band | landed, working tree |
-| D8.3.4v3 `var` positions in raw variants | landed (same-carrier subset), working tree, fixture `type_binder_var_record_raw` |
-| D8.3.4v3 methods | **ruled, not implemented** -- needs static receiver resolution and a direct edge, because a method call builds a closure today |
-| binder-free raw keys | not started; permitted by D8.3.1v2, but raw variants replace the conventional native body, so code size needs care |
+| D7.3.4 `var` positions in raw variants | landed (same-carrier subset), working tree, fixture `type_binder_var_record_raw` |
+| D7.3.4 methods | **ruled, not implemented** -- needs static receiver resolution and a direct edge, because a method call builds a closure today |
+| binder-free raw keys | not started; permitted by D7.3.1, but raw variants replace the conventional native body, so code size needs care |
 | certificate-proof hoist (obligation 6) | built, never fired, **reverted** (§9.6) |
 | null-sentinel receiver-arm elision | landed (§9.8): deltablue ccm 3334→3254, module −685 insns |
 | T28-3 `cow_prepare_write` fast path | **skipped**: 1.1% of richards (§9.9) |
@@ -693,8 +693,8 @@ re-measure the row on a quiet host before recording any figure for it.
 | T28-5 memchr `split` + string admission fast path | landed (§9.11): three_way_merge ~0.78, log_pipeline ~0.76–0.89 |
 | T28-7 emission diet | **landed** (§9.17): `run_cube` 17,329 -> 9,655 (target met; cube3d2 wall -46%); `c_choose_method` 2,739 -> 1,997 (target 1,200 not met: per-access record/array layout proofs, N2/N3) |
 | T28-8 / CW36 store-back | **landed** (§9.16) after a revert (§9.14); splay2 map copies 826k→683k, residue is rotation captures of the caller's `var` root (needs a call-site move convention) |
-| D4.4.6 write oracle | conformance fix (§9.16): declarations/returns/blocks now seen; pure builtins and known plain `pn` params no longer writers; decisions run at script finalize |
-| CW24v3 / D4.4.6 place-copy static mark rule | landed (§9.15), working tree, fixture `cow_place_copy_place_written`; closes the S9.1.2 alias leak present since ≤Result42 |
+| D5.4.5 write oracle | conformance fix (§9.16): declarations/returns/blocks now seen; pure builtins and known plain `pn` params no longer writers; decisions run at script finalize |
+| CW24v3 / D5.4.5 place-copy static mark rule | landed (§9.15), working tree, fixture `cow_place_copy_place_written`; closes the S9.1.2 alias leak present since ≤Result42 |
 | open question | why typed code emits ~33M runtime `string` checks |
 
 Gates at the end of the round (v20): `test_lambda_gtest` 923/923, MIR emission
@@ -773,7 +773,7 @@ not close it.
 **The proof, and its deliberate limit.** `mir_receiver_binding_non_null` admits
 only a **named binding** whose declared contract is a non-optional record: its
 declaration or parameter boundary admitted the value and a rebind must re-admit
-it (D3.2.4v3, S9.1.2), so null was never admissible. It refuses a binding whose
+it (D4.2.5, S9.1.2), so null was never admissible. It refuses a binding whose
 contract was widened by reassignment, and a declared type that merely *contains*
 a record (an optional, a union) rather than being one.
 
@@ -1069,7 +1069,7 @@ profile before timing:
   step on `split` results. That contract carries a **type binder**, and every
   array fast path in `runtime_type_admit_array_env` is gated on
   `!binder_dependent` -- by design, because the element walk is what computes
-  `W`'s binding (TG18, D3.3.3v3). The row was rewritten to use binders in
+  `W`'s binding (TG18, D4.3.3). The row was rewritten to use binders in
   `c912d2d6e` / `19757f474`. So the walk here is the price of the binder, not a
   missing proof. (The T28-4 binder-walk short-circuit correctly does not apply:
   this program has binders.)
@@ -1158,7 +1158,7 @@ a later round; the runtime fast path is the cheap, sound half.
 ### 9.14 T28-8 (CW36) — built, caught by its own probes, REVERTED; a pre-existing value-semantics bug
 
 **Re-measured target.** splay2 still performs 825,641 map copies (53.7 MB copied)
-per run, so the D4.4.4v3 target stood.
+per run, so the D5.4.4 target stood.
 
 **What was built.** A path-aware walk (`rmw_branch_local`, `build_ast.cpp`)
 engaged only when the existing rule finds no top-level store-back. Per path it
@@ -1183,7 +1183,7 @@ interp, jit and auto, and again under forced GC:
   control prints `377`. That one is **not** the new walk's fault.
 
 **The pre-existing bug.** A straight-line version of b4, which the existing
-D4.4.4v2 rule accepts, prints `777` on the control too -- and so does a program
+D5.4.4 rule accepts, prints `777` on the control too -- and so does a program
 with no handle and no borrow at all:
 
 ```lambda
@@ -1217,7 +1217,7 @@ written while the copy is alive, so a later write through the root lands in
 place and shows through the copy. c2 (a place copy that *is* mutated) behaves
 correctly (`373`), which fits: the mutated copy is share-marked.
 
-**Why T28-8 is blocked on it.** The D4.4.4 borrow -- v2 and the CW36 extension
+**Why T28-8 is blocked on it.** The D5.4.4 borrow -- v2 and the CW36 extension
 alike -- relies on "the leaf's own share bit still decides whether the handle's
 writes detach". This rule leaves that bit unset for exactly the aliases it
 should protect, so no borrow analysis can be sound on top of it. The revert
@@ -1230,11 +1230,11 @@ reads free), so it is raised with the user rather than changed here. T28-8
 resumes after that fix, with the b5 write-detection bug corrected.
 
 
-### 9.15 CW24v3 / D4.4.6 — the place-copy bind marks on "place written while live" (LANDED)
+### 9.15 CW24v3 / D5.4.5 — the place-copy bind marks on "place written while live" (LANDED)
 
 **Ruling (user, 2026-09-16).** A place copy is share-marked at its bind iff the
 place may be written while the copy is alive, decided statically per binding;
-the copy's own mutation still marks. Recorded as D4.4.6 (formal design 8.2.0)
+the copy's own mutation still marks. Recorded as D5.4.5 (formal design 8.2.0)
 and CW24v3 in `vibe/Lambda_Design_Nested_Mutation.md` §4.3.
 
 **The static fact.** `NameEntry::place_copy_place_written`, decided at
@@ -1338,7 +1338,7 @@ when the path is not DIRTY and, if LIVE, no write through the handle can
 follow. A return, or the end of the bind's list, refuses on DIRTY. A store-back
 clears both; it is final (`cow_borrow_release`, capture skipped) only when
 nothing after it names the handle, otherwise it keeps its capture and the
-share-mark makes later writes copy (D4.4.4v3 condition 4). `if` arms join by
+share-mark makes later writes copy (D5.4.4 condition 4). `if` arms join by
 union. Loops naming the handle refuse, a plain rebind of the handle refuses,
 `h = p(h)` with `h` at a `var` position is a write, and a mutated place copy
 bound from the handle is a write at its bind (it may itself borrow). This time
@@ -1359,7 +1359,7 @@ from FUNCTION_END to `lambda_ast_finalize_script`, which every build path runs
 (runner, REPL, validator, AST dump) once all signatures exist. The CW24
 diagnostic queue is untouched.
 
-**Second finding: a D4.4.6 hole, through the same oracle.** The oracle did not
+**Second finding: a D5.4.5 hole, through the same oracle.** The oracle did not
 descend into `var`/`let` initializers, returns, blocks, `if` expressions in
 conditional form, map/element items, pipes, handlers or `start`. So on v20:
 

@@ -9,7 +9,7 @@ two control-reproduced failures. The earlier predicate-only evidence is in §7.
 
 **Scope:** improve unchanged untyped Lambda programs, retain typed performance, and explain the remaining language/port costs.
 
-**Authority:** S3.4, S4.1.1–S4.1.5, S7.1.1v3, S7.5.3v2, S9.1.2–S9.1.3; D2.4.1–D2.4.3, D3.3.1v2–D3.3.4, D5.3.1–D5.3.4, D8.2.5v3, D8.3.1v2–D8.3.4v4, D8.4.1v2. No semantic change is proposed.
+**Authority:** S3.4, S4.1.1–S4.1.5, S7.1.1v3, S7.5.3v2, S9.1.2–S9.1.3; D2.3.4–D2.3.5, D4.3.1–D2.4.3, D6.3.1–D6.3.4, D8.2.5, D7.3.1–D7.3.4, D7.4.1. No semantic change is proposed.
 
 ## 1. What the comparison establishes
 
@@ -96,7 +96,7 @@ JS_EXEC_BACKEND=mir \
 Run diagnostics serially; `--no-log` suppresses MIR dumps. Timing captures
 must unset profiling/dump switches and use a pinned release executable.
 The Ruby/legacy C-text backends and retired JS inline-cache paths are irrelevant
-to this plan. D8.4.1v2 prohibits adding inline caches to either language.
+to this plan. D7.4.1 prohibits adding inline caches to either language.
 
 ### 2.1 Representative gaps
 
@@ -167,7 +167,7 @@ capture: the historical repeated-admission diagnosis is not the current
 measured bottleneck.
 
 An inferred physical element lane is not a permanent declared `int[]`
-certificate (D3.3.3v3). The plan must preserve binding-local facts, exact
+certificate (D4.3.3). The plan must preserve binding-local facts, exact
 call-shape admission and guarded fallback, rather than fabricate annotations.
 
 ### 3.2 Brainfuck: preserve predicate results without losing errors
@@ -180,7 +180,7 @@ unsupported. The executed difference is tens of millions of truthiness calls.
 Trace the producer's full `MirValue`, native success lane and error edge
 through comparison and condition lowering. The recent Queens repair is a
 regression guard: a boxed error-capable comparison cannot simply be declared
-native boolean (S3.4, D2.4.1–D2.4.3). A guarded successful comparison can branch
+native boolean (S3.4, D2.3.4–D2.3.5). A guarded successful comparison can branch
 directly while its error/null fallback retains the specified semantics.
 
 The JS port also uses `Uint8Array`, `& 0xFF`, an `else if` dispatch chain and
@@ -261,7 +261,7 @@ track. They do not replace unchanged-source engine acceptance.
 ## 4. Proposed implementation sequence
 
 Build on the completed mechanisms in [Tune32 §16](Lambda_Tune32.md#16-phase-ii-implementation-record).
-Use the existing typed pass manager and fact ownership (D8.2.5v3), shared index
+Use the existing typed pass manager and fact ownership (D8.2.5), shared index
 planner, bounded leaf planner, string builder and MIR emitter. Do not introduce
 a second ad hoc inference pass or copy JS lowering code into Lambda.
 
@@ -310,7 +310,7 @@ experiment ready; observational ratios remain labeled as such.
    continue through their specified fallback.
 4. For text search, propagate bounded producer/call facts without re-admitting
    entire arrays on each search. Guard the complete required shape at the
-   existing admission point (D8.3.1v2–D8.3.3); do not specialize a partial
+   existing admission point (D7.3.1–D7.3.3); do not specialize a partial
    argument tuple as if the full raw entry were proved.
 
 **Proposed performance target:** ≥20% less untyped execution time on each of
@@ -361,7 +361,7 @@ matched-port full-content hash is required before claiming JS parity.
    proves them unnecessary. Preserve explicit u32/i32 wrapping and shift rules.
 4. Use `mvp_lmd_mir.cpp`'s `inline_budget`/`inline_call_body` as evidence of a
    working mechanism. Extract shared mechanics only after both clients have
-   converged; semantic admission stays language-specific (D8.2.3v2).
+   converged; semantic admission stays language-specific (D8.2.3).
 
 **Exit:** ≥15% improvement on at least two qualifying recursion/bitwise pilots,
 matching outputs on arithmetic boundary cases, and bounded code size. A failed
@@ -491,7 +491,7 @@ Phase 2 now recognizes scalar comparison results as the closed
 `bool | null | error` Item domain. A branch admits exactly `ITEM_TRUE` using
 one MIR word comparison. The existing error-value routing remains responsible
 for returning an encountered error and skipping the corresponding branch or
-logical RHS (S3.4–S3.5, D2.4.1–D2.4.3).
+logical RHS (S3.4–S3.5, D2.3.4–D2.3.5).
 
 The bounded structural proof also covers `and`/`or` trees whose operands each
 belong to this domain. It does not infer a predicate domain from an arbitrary
@@ -569,7 +569,7 @@ The 142-row output-checked screen found two existing untyped port failures on
 Both wrote an output array through a plain parameter, whose mutations affect a
 snapshot under S9.1.3. Their destination parameters now use `var`; matmul's
 caller also declares the matching `float[]` place contract required by
-D3.3.3v3. No golden was changed. Both corrected scripts match their existing
+D4.3.3. No golden was changed. Both corrected scripts match their existing
 goldens under JIT and auto on both binaries (eight checks), and their 21-pair
 reruns retain matching outputs throughout. These source repairs are not counted
 as engine improvements: each retained row compares the same corrected source
@@ -676,10 +676,10 @@ source and executable provenance.
 **Numeric producers and call facts (phase 1).** An admitted String or ArrayNum
 receiver now refines the compiler's conservative `len` defect classification.
 The whole-source defect table remains conservative; only the currently
-admitted carrier can exclude a deferred host read (D6.1.3, D8.3.3). Open Array
+admitted carrier can exclude a deferred host read (D7.1.3, D7.3.3). Open Array
 carriers retain virtual-child-array handling. The system operand error walk
 also accepts an already established scalar carrier witness. No array element
-candidate is treated as an admission certificate (D3.3.3v3).
+candidate is treated as an admission certificate (D4.3.3).
 
 This connects the existing fill, swap, guarded index and scalar arithmetic
 paths in untyped Levenshtein and text search. It does not remove a nullable
@@ -701,13 +701,13 @@ forwarding and joining bodies as well as indexing bodies. The extension
 requires a string-valued result or a native string length/index consumer;
 plain forwarding into boxed record/array storage keeps Item arguments. This
 avoids adding native-entry guards and unbox/rebox work without a consumer
-benefit (D8.3.3). The existing
+benefit (D7.3.3). The existing
 call-site result cache carries scalar/string results through acyclic helper
 chains. Each helper has its existing expression budget; an epoch sentinel
 breaks cycles and a 32-helper depth cap bounds compiler recursion. String join
 candidates and finalized native result metadata feed the same argument fact
 resolver. Exact call admission and boxed misses remain responsible for unseen
-values (D2.4.1–D2.4.3, D8.3.3). Boxed-entry reachability propagates through
+values (D2.3.4–D2.3.5, D7.3.3). Boxed-entry reachability propagates through
 the existing direct-call graph separately from the fast-shape candidates. A
 public function's fallback can forward a symbol to a helper whose internal
 calls established a string candidate; that helper must retain its own boxed
@@ -721,7 +721,7 @@ admits bounded nested scalar calls and one recursive expansion level. It
 allows at most two nested inline frames and 16 expansions per emitted MIR
 function. A deeper recursive edge remains a real guarded call. The predictive
 array-write scan and actual lowering share the bounded inline path and
-expansion accounting (D8.2.5v3, D8.3.3). The scan restores the emitter's budget
+expansion accounting (D8.2.5, D7.3.3). The scan restores the emitter's budget
 after analysis and visits scalar argument effects in the caller's scope.
 This prevents an inlineable recursive helper from overflowing the compiler
 before lowering. Parameter binding locators are restored after expansion. An inline body cannot
@@ -756,10 +756,10 @@ string/collection builders merely to remove a counter check.
 **Record consumers and ownership (phase 6).** The existing bounded shape
 candidate fixpoint also follows values assigned to members. These remain
 compile-predicted candidates, each checked against the live descriptor; they
-are not runtime inline caches (D8.4.1v2). Null and boolean slots can retag in
+are not runtime inline caches (D7.4.1). Null and boolean slots can retag in
 place. Their guarded read therefore uses the existing live
 `map_shape_field_to_item` descriptor reader, preserving the new tag and width,
-rather than interpreting a slot using its original tag (D2.6.4v3).
+rather than interpreting a slot using its original tag (D2.6.2).
 The shared reader gives non-nullable container-pointer and null/error Item
 slots a direct descriptor dispatch. Both descriptor and general field reads
 reuse the same unaligned-safe slot readers, retaining virtual-carrier tags,
@@ -768,7 +768,7 @@ foreign raw-container normalization, empty slots and nullable native lanes.
 The COW census still records Splay's value-tree copies; its source rebuilds
 rotations through local owners and retained aliases. Puzzle's plain parameters
 retain caller snapshots. Neither supplies a proof for removing those copies, and no
-copy elision or root-reload suppression was added (S9.1.2–S9.1.3, D5.3.3).
+copy elision or root-reload suppression was added (S9.1.2–S9.1.3, D6.3.3).
 
 ### 8.2 Regression coverage and qualification method
 
@@ -870,7 +870,7 @@ unrestricted forwarding, allocating loop duplication and unrestricted
 recursive analysis were rejected. Remaining growth is explicit. In particular,
 CD and Splay do not justify a claim of uniformly better startup latency.
 Removing their safety fallbacks merely to meet a size target would violate
-D8.3.3. Process wall times are retained alongside workload timers in the
+D7.3.3. Process wall times are retained alongside workload timers in the
 final evidence, so compile tradeoffs remain visible. These measurements
 qualify the forced JIT lane, not automatic-tier promotion economics.
 
@@ -936,7 +936,7 @@ The executed profiles identify the removed work independently of timing:
 - Phase 3: existing string fusion improves JSON execution and copying. **The ≥90% generic-join reduction target is not met by the final profitability policy:** `fn_join` falls 360,004 → 140,004 (61.1%); copied bytes fall 7,559,070 → 6,615,320 and growth copies 360,124 → 220,124. The outer builder already performs the same 19,880 in-place appends. Bounded return/admission facts still leave some forwarded calls boxed. Do not substitute earlier rejected-candidate counts for these final counts.
 - Phase 4: bounded recursion improves fib/fibfp; deeper calls, tail calls, overflow and invalid-shift behavior remain covered. SHA-1 improves more modestly.
 - Phase 5: the imported Pi fast inner loop has 12 static instructions versus the control's 54-instruction enclosing span including cold arms. This is not an executed-instruction count. The retained finite proof removes sentinel/conversion work without floating reassociation.
-- Phase 6: record reads improve, but **the ≥15% record-pilot target is not met**. Splay's 951,168 map copies / 62,777,088 bytes and Puzzle's 174,909 numeric-array copies / 15,508,598 bytes remain. Splay's largest sites are `splay_node` (511,476 copies), `rotate_left` (204,491) and `rotate_right` (183,209). Required snapshots/retained owners lack a valid elision proof (S9.1.2–S9.1.3); no required roots or copies were suppressed (D5.3.3).
+- Phase 6: record reads improve, but **the ≥15% record-pilot target is not met**. Splay's 951,168 map copies / 62,777,088 bytes and Puzzle's 174,909 numeric-array copies / 15,508,598 bytes remain. Splay's largest sites are `splay_node` (511,476 copies), `rotate_left` (204,491) and `rotate_right` (183,209). Required snapshots/retained owners lack a valid elision proof (S9.1.2–S9.1.3); no required roots or copies were suppressed (D6.3.3).
 
 Thus all scoped compiler mechanisms have implementations and full-population evidence; some numerical goals and remaining JS advantages are still open. This is not a claim that every proposed speedup target was reached.
 
@@ -1040,7 +1040,7 @@ Every historical JS-winning untyped row has a fresh executed profile and a sourc
 | beng/pidigits | 1.115 | The Lambda port uses arbitrary-precision decimal n values and quotient via remainder/subtraction; JS uses BigInt and division with sign adjustment. Do not narrow this to int53 merely to match JS. |
 | kostya/brainfuck | 3.649 | Phase 2 is already in this fresh control. JS also uses a byte tape, mask, else-if dispatch and joined output; Lambda retains integer tape, remainder, independent ifs and string output. No incremental predicate win is expected here. |
 | kostya/base64 | 1.262 | Raw string length/entry admission removes one boxed boundary per iteration, while 1,333,500 string concatenations and 666,600 index calls remain. JS uses Uint8Array and fragments/join; ports are not representation matched. |
-| kostya/levenshtein | 3.237 | Native producer/length/array/scalar paths eliminate most generic indexing/arithmetic and roots. min3 still takes possibly absent arguments through its boxed entry; no partial tuple is asserted fully admitted (D8.3.3). JS also uses typed arrays and a hoisted character read. |
+| kostya/levenshtein | 3.237 | Native producer/length/array/scalar paths eliminate most generic indexing/arithmetic and roots. min3 still takes possibly absent arguments through its boxed entry; no partial tuple is asserted fully admitted (D7.3.3). JS also uses typed arrays and a hoisted character read. |
 | kostya/json_gen | 3.250 | Forwarded string facts enable existing join fusion, but bounded admission leaves some boxed calls/joins. Both already use the owned outer builder. Floor versus Math.trunc for negative coordinates also prevents a full-content JS parity claim from the length oracle alone. |
 | kostya/collatz | 1.269 | 999,999 generic comparisons remain. Lambda shr(n,1) and JS division by two have different intermediate machine-word semantics; the full dynamic trajectory has no established finite range proof. |
 | larceny/triangl | 1.210 | Both run backtracking, with Lambda bool/int arrays versus JS Uint8Array/Int32Array and different break spelling. Already-native loops have no hot generic helper traffic; remaining indexed/induction guards need their own proofs. |

@@ -10,13 +10,13 @@ charts, weighted word/tag clouds, composable coordinates, and animated
 interactive Lambda views producing SVG. The selected
 [scientific plotting extension](Lambda_Design_Chart_Plot.md) adds topology,
 field/signal analysis, and native 3D figures through `chart.figure`, under
-**S12.1.1v2/D7.5.3**; `chart.render` retains its SVG return contract.
+**S12.1.1v2/D9.5.6**; `chart.render` retains its SVG return contract.
 This document replaces the
 separate chart proposal, round-two report, and advanced-features proposal.
 Implementation plans, module inventories, debugging history, and test reports
 are omitted.
 
-**Specification linkage:** [D7.2.1–D7.2.4](../doc/Lambda_Formal_Design.md#d72-script-packages)
+**Specification linkage:** [D9.3.1–D9.3.4](../doc/Lambda_Formal_Design.md#d93-script-packages)
 cover source packages and the shipped namespace;
 [S12.1.1v2](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system)
 covers pure functions;
@@ -26,7 +26,7 @@ cover exact ordering and stability;
 covers value errors returned for invalid chart specifications.
 [S9.1.4](../doc/Lambda_Formal_Semantics.md#s91-the-model),
 [S12.1.3](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system), and
-[D6.2.3v2](../doc/Lambda_Formal_Design.md#d62-function-values-and-closures) govern
+[D7.2.3](../doc/Lambda_Formal_Design.md#d72-function-values-and-closures) govern
 instance-owned template state and procedural event handlers. Chart-specific choices below remain working
 design rather than new formal-spec rulings.
 
@@ -64,7 +64,7 @@ The design follows these principles:
 - **Declarative interaction.** Vega-Lite parameters describe selection,
   brushing, linked views, input bindings, and pan/zoom. A Lambda view template
   owns each chart instance's state; event handlers update that state and pure
-  rendering derives the next presentation (S9.1.4, S12.1.3, D6.2.3v2).
+  rendering derives the next presentation (S9.1.4, S12.1.3, D7.2.3).
 - **Behaviors share parameter state.** Hover, selection, filtering, and their
   visual feedback are configurable behaviors over those same parameters.
   Visual element states are derived from the chart's state and source data.
@@ -228,7 +228,7 @@ We will **adapt, not clone** Vega-Lite. The Lambda Chart Library will use Lambda
 
 ## 3. Public interface and input forms
 
-The package ships as Lambda source under `lambda.chart.*` (D7.2.1–D7.2.4).
+The package ships as Lambda source under `lambda.chart.*` (D9.3.1–D9.3.4).
 Its primary interfaces are:
 
 | Interface | Contract |
@@ -581,7 +581,7 @@ boundary; Voronoi transforms and general simulation APIs remain excluded.
 
 A reusable composite is an ordinary pure Lambda function returning a chart
 or mark composition (S12.1.1v2). It can be imported and called with data and
-options, just like any other package function (D7.2.1–D7.2.4). An explicit
+options, just like any other package function (D9.3.1–D9.3.4). An explicit
 `mark: {kind: "composite", expand: fn_value, options: {...}}` allows a pure
 factory to participate where a single mark is expected. Its result is a
 finite chart/layer composition; recursive expansion and incompatible
@@ -1104,7 +1104,7 @@ Measurement follows Radiant's SVG text capabilities. General complex-script
 shaping remains a font-engine limitation. Available fonts affect chart geometry;
 viewing SVG with a different resolved font can change text extents. The same
 font resources are needed for reproducible output. Host measurement is a
-read-only function under **D7.4.6** and **S12.1.1v2**; a measurement failure
+read-only function under **D7.1.1** and **S12.1.1v2**; a measurement failure
 returns a chart diagnostic under **S7.4.1**.
 
 Configuration supplies background, typography, mark, axis, grid, legend,
@@ -1315,7 +1315,7 @@ and [selections](https://vega.github.io/vega-lite/docs/selection.html).
 owns its parameter values, selection stores, and active gesture as template
 state. Selected tuples and interval extents retain the identity of their
 originating chart view or element. Two applications of the same specification
-have independent state (S9.1.4, D6.2.3v2). When a parent template rerenders,
+have independent state (S9.1.4, D7.2.3). When a parent template rerenders,
 retain `chart.model(spec, viewport)` as a source value and call `apply` on that
 same model, so its chart state survives the parent update. The model/template
 identity contract is described in [Reactive UI §5](Lambda_Design_Reactive_UI.md#5-instance-state-and-identity);
@@ -1323,7 +1323,7 @@ its durable source-path identity follows RS7.
 
 Only `on` handlers change that state; chart rendering, predicates, expressions,
 and data transformations remain pure (S12.1.3). Interaction policy belongs to
-the chart package through the native DOM/event interface (D7.2.5). This design
+the chart package through the native DOM/event interface (D10.2.1). This design
 does not require a Vega signal runtime. `render` remains useful for a static
 snapshot, including declared initial parameter values.
 
@@ -1515,7 +1515,7 @@ parameter while applying different appearance or
 filter effects in each view. Independent chart instances remain isolated;
 an enclosing Lambda template links them through chart events and parameter
 updates. No module-global selection state or implicit global event bus is
-introduced (S9.1.4, D6.2.3v2).
+introduced (S9.1.4, D7.2.3).
 
 ### Interaction events and custom behaviors
 
@@ -1541,7 +1541,7 @@ updates and named notifications. The chart's procedural handler validates
 and applies those values; effectful application work stays in `on` handlers
 (S12.1.1v2, S12.1.3). Behaviors may be imported as ordinary Lambda values;
 they cannot retain hidden mutable closure or module state (S9.1.4,
-D6.2.3v2). Unsupported streams and invalid commands produce diagnostics
+D7.2.3). Unsupported streams and invalid commands produce diagnostics
 instead of silently falling back.
 
 ## 11. Reusable coordinate grammar
@@ -1674,7 +1674,7 @@ The animation design takes G2's
 [path morphing](https://g2.antv.antgroup.com/en/manual/core/animate/morphing),
 and [keyframe correspondence](https://g2.antv.antgroup.com/en/manual/core/composition/timing-keyframe)
 as references. Lambda represents the policy as specification values and owns
-playback in a chart view/template instance (S9.1.4, D6.2.3v2).
+playback in a chart view/template instance (S9.1.4, D7.2.3).
 
 ### Transition declarations and data-driven timing
 
@@ -1831,5 +1831,5 @@ exclusion of force and contour charts.
 Scientific 3D charts are now covered by the selected
 [plotting extension](Lambda_Design_Chart_Plot.md), implemented incrementally;
 its [implementation record](impl/Lambda_Impl_Chart_Plot.md) lists the remaining
-work. Native scene presentation reuses Radiant under **D7.5.3**, and applied
+work. Native scene presentation reuses Radiant under **D9.5.6**, and applied
 camera state follows **S9.1.4/S12.1.3**.

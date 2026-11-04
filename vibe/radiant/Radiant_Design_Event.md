@@ -825,7 +825,7 @@ explicit readiness contract and loses its last two mutations when run alone.
 Implement readiness at the existing post-load snapshot boundary, using the
 canonical active document's native facts and the existing drain watchdog.
 Preserve frame callback/microtask/layout ordering, precise queue roots and the
-document's evaluator ownership (**D5.3.3 / D5.4.1**, EO5v2). Do not create a
+document's evaluator ownership (**D6.3.3 / D6.4.1**, EO5v2). Do not create a
 second evaluator or retain a JS wrapper to inspect readiness. Unsettled capture
 must remain explicit at its bound. Keep virtual capture-time, delayed timers,
 native request completion and teardown controls separate from ordinary ticker
@@ -843,7 +843,7 @@ polls); no new queue, evaluator, wrapper or per-fixture count is added. A
 `RuntimeExecutionScope` keeps callbacks on that document's evaluator. Failure
 retains the marker, emits a distinct diagnostic and sets the script result to
 an error. The native predicate is declared in `radiant.hpp` and reused at the
-layout command's serialization boundary (**D7.3.3–D7.3.4**). An auto-close
+layout command's serialization boundary (**D9.4.3–D9.4.4**). An auto-close
 document still declaring readiness pending follows ordinary unsuccessful-layout
 cleanup and publishes no partial geometry. The existing batch protocol emits a
 failed terminal frame without payload, continues to the next document when

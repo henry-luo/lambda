@@ -1,4 +1,4 @@
-// Shipped source formatters; native callers only route package invocation (D7.1.1/D7.2.4).
+// Shipped source formatters; native callers only route package invocation (D9.1.1/D9.3.4).
 import c: .misc.common
 import markup: .misc.markup
 import records: .misc.records

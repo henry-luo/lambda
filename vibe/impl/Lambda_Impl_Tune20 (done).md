@@ -25,11 +25,11 @@
   `vibe/Lambda_Tune_Typed_Vs_C2MIR.md` (Result18 M1–M8),
   `vibe/Lambda_Impl_Tune13.md` (typed-array store cloning).
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S5.4 (map equality),
-  S7.1, S8.1–S8.2 (key space); `doc/Lambda_Formal_Design.md` D2.4 (value
-  representation discipline), D2.5.3, D2.6.1–D2.6.3, D3.3 (inference),
+  S7.1, S8.1–S8.2 (key space); `doc/Lambda_Formal_Design.md` D2.3 (value
+  representation discipline), D2.4.3, D3.2.1–D3.2.1, D4.3 (inference),
   **D3.4.1–D3.4.5 (shapes; D3.4.3 note: "runtime-constructed maps do not
-  intern today — they rebuild per transition")**, D4.6 (name identity),
-  **D8.4.1v2 (no inline caches anywhere in the Lambda lane or LambdaJS)**,
+  intern today — they rebuild per transition")**, D5.6 (name identity),
+  **D7.4.1 (no inline caches anywhere in the Lambda lane or LambdaJS)**,
   D8.6.1–D8.6.3 (emission testing gates).
 - **ID series:** `T20-#` (round-prefixed, per the tune-round convention).
 
@@ -187,7 +187,7 @@ that closes C4.1.
 **Consequence for this round:** the dominant rows run — and for now must run
 — on the untyped/inferred map path, so extending declared-contract fast paths
 cannot reach them. The untyped path itself has to get fast — statically,
-since D8.4.1v2 forbids inline caches. That is this round's center of gravity.
+since D7.4.1 forbids inline caches. That is this round's center of gravity.
 (This also future-proofs: dynamic-shaped data from JSON ingestion and guest
 languages stays on this path regardless of how the benchmarks evolve.)
 
@@ -325,7 +325,7 @@ answer. Sub-items, in dependency order:
    map header's `type` word (offset 8 — already written as a compile-time
    constant by `transpile_map`) and compare it against that same constant; on
    mismatch, fall through to the existing `fn_member_by_id` arm. A static
-   compare against an immediate, nothing patched, so D8.4.1v2 is respected.
+   compare against an immediate, nothing patched, so D7.4.1 is respected.
    ⚠ `is_trusted_contract` keeps its *unguarded* path — a declared contract
    still needs no compare.
 
@@ -351,7 +351,7 @@ answer. Sub-items, in dependency order:
      in-place retag path never rebuilds.
    - Representation is unchanged: the guard only runs where the type oracle
      published no native lane, so both arms yield a boxed Item and no consumer
-     sees a new representation [D2.4]. The oracle (`direct_field_result_type`)
+     sees a new representation [D2.3]. The oracle (`direct_field_result_type`)
      was deliberately NOT widened — publishing the field's compile-time lane
      would make the *slow* arm unbox a value whose type may have changed.
 
@@ -480,7 +480,7 @@ answer. Sub-items, in dependency order:
    consequences worth stating: the RHS is now boxed **once, before the receiver
    is loaded**, and the slow arm reuses that register (evaluating it twice would
    run its side effects twice), and the boxed value is rooted across the receiver
-   load because the RHS may allocate and move the map (D5.2). Out-of-band floats,
+   load because the RHS may allocate and move the map (D6.2). Out-of-band floats,
    sized numerics and decimals fail the test and take the generic setter —
    conservative in the safe direction.
 
@@ -787,7 +787,7 @@ statically `int` in the source. hashmap's probe loop pays the same through
 the Tune19 §4 root cause — *expression results still have no representation* —
 in its remaining habitat: results of calls (`fn_len`, sys-funcs) and of
 map/array reads feeding arithmetic, where the lane machinery currently
-re-boxes between every producer and consumer [D2.4, D3.3].
+re-boxes between every producer and consumer [D2.3, D4.3].
 
 Scope for this round: give call-result and container-read expressions a
 ValueRep so int-typed results stay in the int lane through arithmetic chains,
@@ -816,7 +816,7 @@ packed lane the header's `elem_type` names, so walking the elements to learn wha
 the header already states cannot discover a disagreement. `validate_against_array_type`
 now short-circuits when a plain (non-ndim, non-view) ArrayNum's lane equals a
 simple nested contract's TypeId — fast mode only, because the reporting validator
-owes a per-element diagnosis rather than a verdict [D2.6.1, D3.2.1]. This is the
+owes a per-element diagnosis rather than a verdict [D3.2.1, D4.2.1]. This is the
 same argument as Tune19 §7.13's map shape-identity short-circuit, applied to the
 array side. Compact sized lanes (int8/uint16/…) keep the walk.
 
@@ -841,7 +841,7 @@ Mechanics: an `int[]`/`float[]` binding whose producer is statically conforming
 (e.g. `fill(n, 0)`, an ArrayNum-producing sys-func, or a same-typed array) gets
 its witness established **once at the binding**, and element reads/writes inside
 a loop whose subject's witness is loop-invariant use the direct
-`array_float_get`/`set` form with no per-element re-admission [D2.6.2–D2.6.3].
+`array_float_get`/`set` form with no per-element re-admission [D3.2.2–D3.2.1].
 This also retires the T19-B demotion for good (the declared witness unsatisfied
 by `fill`'s producer). raytrace3d's `fn_is` (8.7%) joins here: a type test
 whose operand has a static witness folds to a constant.
@@ -1105,7 +1105,7 @@ range at all, which is an S4 semantics ruling.
 
 ## 4. What NOT to do (inherited decisions)
 
-- **No inline caches, no patched code** — D8.4.1v2 covers both lanes. Every
+- **No inline caches, no patched code** — D7.4.1 covers both lanes. Every
   fast path in T20-1 is a static lowering behind a compile-time-constant guard.
 - **No dynamic O(1) shape index** over `TypeMap.field_index` (Tune19 §8.1:
   1.060 at 0/11 wins). Its precondition is met only by the *static* form

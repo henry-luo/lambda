@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.4.1: checked boolean success/error results retain direct truth tests, including the cold failed float admission.",
+  "description": "D2.3.4: checked boolean success/error results retain direct truth tests, including the cold failed float admission.",
   "checks": [
     {
       "in_func": "_classify_#",

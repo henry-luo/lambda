@@ -2956,7 +2956,7 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
             return nullptr;
         }
         log_info("[Layout] Detected %s file, using format loader", ext);
-        // Script document formats share the configured transform boundary (D7.2.4).
+        // Script document formats share the configured transform boundary (D9.3.4).
         // a saved diff exports all rows for layout/render and a virtual surface for review.
         LambdaDocumentTransformOption diff_surface = {"interactive", LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL,
             nullptr, interactive};
@@ -3299,7 +3299,7 @@ static Input* read_layout_input_file(Url* url, const char* filepath,
     return input;
 }
 
-// load-time layout may already own an evaluator; geometry publication must preserve it (D5.4.1).
+// load-time layout may already own an evaluator; geometry publication must preserve it (D6.4.1).
 static void populate_layout_document(DomDocument* doc, DomElement* root,
                                       Element* html_root, HtmlVersion version,
                                       Url* url) {
@@ -3525,7 +3525,7 @@ Runtime* layout_document_package_runtime(DomDocument* document, const char* pack
     if (!document) return nullptr;
     Runtime* runtime = dom_document_loader_runtime(document);
     if (runtime) {
-        // package paint roots and callbacks outlive JS realm teardown; the document retains their evaluator (D5.3.3).
+        // package paint roots and callbacks outlive JS realm teardown; the document retains their evaluator (D6.3.3).
         if (!document->loader_runtime && !document->lambda_runtime && runtime == document->js.runtime) {
             document->lambda_runtime = runtime;
             document->owns_script_runtime = true;
@@ -3540,7 +3540,7 @@ Runtime* layout_document_package_runtime(DomDocument* document, const char* pack
     if (!runtime) return nullptr;
     runtime_init(runtime);
     runtime->resource_policy = document->resource_policy;
-    // a second static document must acquire its evaluator before module initialization (D5.4.1).
+    // a second static document must acquire its evaluator before module initialization (D6.4.1).
     if (!radiant_eval_context_switch(runtime_get_eval_context(runtime))) {
         log_error("package-layout-runtime: failed to acquire evaluator for %s", package_module);
         release_layout_runtime(runtime);
@@ -3723,7 +3723,7 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
             runtime_init(render_runtime);
         }
         EvalContext* render_context = runtime_get_eval_context(render_runtime);
-        // D5.4.1: bind a loader only from a quiescent evaluator.
+        // D6.4.1: bind a loader only from a quiescent evaluator.
         bool render_bound = render_context && !(context && context->execution_depth != 0) &&
             radiant_eval_context_switch(render_context);
         runtime_bind_ui_result_input(render_runtime, input);
@@ -4202,7 +4202,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     g_lambda_document_load_diagnostic[0] = '\0';
     if (context && context->execution_depth != 0) {
         // A child document may take the thread only after its parent evaluator
-        // has returned; switching with live frames would violate D5.4.1.
+        // has returned; switching with live frames would violate D6.4.1.
         log_error("load_lambda_script_doc: evaluator still executing");
         return nullptr;
     }

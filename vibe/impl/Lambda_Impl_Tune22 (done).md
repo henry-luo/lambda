@@ -23,14 +23,14 @@
   structural finding), `../Lambda_Tune_Typed_Vs_C2MIR.md` (Result18 mechanism
   catalog), `../Lambda_Design_Runtime_COW.md` (CW29–CW34),
   `../Lambda_Design_Compiling_Lane.md` (ValueRep / `MirValue`).
-- **Formal authority cited:** **D8.4.1v2** (no inline caches; specialization
-  over caching), **D8.1.1v9** (tiers; satellite images), **D8.3.1** (one unboxed
-  version per function), **D3.4.1** (packed map storage), **D3.2.4v2** (a named
-  map contract is a reification), **D2.1.6** (a representation includes its
-  lifecycle), **D2.2.2** / **D2.5.1** (int poison and optional lanes),
-  **D2.6.5** (append API), **D5.1.1v2** / **D5.2.2v3** (root and scalar-home
-  stacks), **D5.3.4** (precise rootability), **D5.4.3** (no context value at a
-  baked address), **D4.4.4** (RMW
+- **Formal authority cited:** **D7.4.1** (no inline caches; specialization
+  over caching), **D8.3.3** (tiers; satellite images), **D7.3.1** (one unboxed
+  version per function), **D3.4.1** (packed map storage), **D4.2.5** (a named
+  map contract is a reification), **D2.1.5** (a representation includes its
+  lifecycle), **D2.2.2** / **D2.4.1** (int poison and optional lanes),
+  **D3.3.1** (append API), **D6.1.1** / **D6.2.2** (root and scalar-home
+  stacks), **D6.3.4** (precise rootability), **D6.4.3** (no context value at a
+  baked address), **D5.4.4** (RMW
   place copies, CW34), **S4.1.2** (int is closed and total), **S5.1.1** /
   **S5.1.2** (equality is total; `nan` is unequal to itself), **S7.1.1**
   (invalid reads yield `null`), **S9.1.1** /
@@ -94,7 +94,7 @@ T22-0's coverage, provenance, and reproducibility goals pass. The T22-2
 emission/correctness gates pass, but its 3.0 s / 1.5 s text-search forecasts
 do not: `text_search` remains 14.97 s / 5.30 s. The residual gaps are
 therefore explicitly carried into the design queue; they are not a reason to
-weaken S5.1.2, S9.1.2, or the D5.1.1v2 rooting discipline.
+weaken S5.1.2, S9.1.2, or the D6.1.1 rooting discipline.
 
 ---
 
@@ -206,9 +206,9 @@ prettier_ast total=588 with `dynamic_name=226 member_shape=220`; richards2
 **The structural fact from Tune20 §2.3 still governs the four graph rows**
 (deltablue2, richards2, havlak2, cd2's tree): their nodes are untyped maps
 because typing the holders detaches them at shaped-storage admission
-(D3.2.4v2) while the sources lean on today's C4.1 aliasing. Nothing in the
+(D4.2.5) while the sources lean on today's C4.1 aliasing. Nothing in the
 declared-record machinery can reach them until C4.1 closes; the untyped map
-path itself has to get cheaper, statically (D8.4.1v2).
+path itself has to get cheaper, statically (D7.4.1).
 
 ---
 
@@ -233,7 +233,7 @@ populations with per-cell provenance and raw-sample ranges.
 - Add native C reference ports for the four rows under `text/c2mir/`, using
   `fast_diff.c` as the template, and pin their output/checksum equivalence.
   These ports use the benchmark-only C2MIR reference driver; they do **not**
-  add a C-text Lambda backend, runtime ABI, or product CLI path (D8.1.1v9).
+  add a C-text Lambda backend, runtime ABI, or product CLI path (D8.3.3).
 - Report both populations after the ports land: the unchanged 59-row series
   for comparison with v38, and the new 63-row series for complete coverage.
   Never compare a 59-row geomean directly with a 63-row geomean.
@@ -266,11 +266,11 @@ the literal MIR fixture cover the semantic and emitted shapes.
   `(length, first byte)` only when the scrutinee is the same immutable binding,
   is evaluated once, empty literals have a no-byte-read bucket, and every
   collision bucket still performs full equality. The miss path must be
-  observationally identical to `fn_eq` (D8.4.1v2).
+  observationally identical to `fn_eq` (D7.4.1).
 - **1c context-owned constants without a helper call.** Use the existing
   two-load `state->consts[index]` form in the main module wherever
   `emit_module_state` is available. Re-read through the context-owned state;
-  never bake the constant pointer itself (D5.4.3).
+  never bake the constant pointer itself (D6.4.3).
 
 **Exit:** the join-built ASCII indexing micro loses
 `str_utf8_char_to_byte`; literal-compare dumps contain no `fn_eq` /
@@ -291,7 +291,7 @@ forecast.
 
 - **2a poison-correct int-lane comparison.** `VALUE_REP_INT_LANE` alone is
   not a finite-value proof: the lane includes `nan` and infinities (D2.2.2),
-  and an optional occurrence may include the null sentinel (D2.5.1). Enter a
+  and an optional occurrence may include the null sentinel (D2.4.1). Enter a
   raw `MIR_EQ`/ordered compare only on an edge where both operands are proven
   in-band, statically or by an emitted guard. The out-of-band edge must retain
   the current poison-correct widening: preserve `nan != nan` (S5.1.2), make
@@ -316,7 +316,7 @@ forecast.
 - **2d call-site element witnesses.** Publish an element-lane witness only
   when every admitted call site proves the same element domain and the wrapper
   has the exact runtime carrier/element guard with a boxed fallback. This is a
-  static specialization under D8.1.1v9/D8.4.1v2 and keeps D8.3.1's one
+  static specialization under D8.3.3/D7.4.1 and keeps D7.3.1's one
   unboxed version per function; an inferred type without a runtime guard is
   not a representation proof.
 
@@ -337,7 +337,7 @@ rescans. No String representation or ownership rule changed.
   its final capacity. Reuse or extract the exact-capacity allocation shape
   already used by `array_fill`/fixed-result builders; do not duplicate backing
   ownership or relocation logic. Keep `array_push`'s verbatim element
-  semantics (D2.6.5); remove only growth.
+  semantics (D3.3.1); remove only growth.
 - Continue producing ordinary copied, NUL-terminated Strings. For a String
   source, every part may conservatively inherit the source's `is_ascii` bit;
   for a Symbol source, compute source ASCII once. A false flag may remain
@@ -362,7 +362,7 @@ boundary only for a direct text `split`/`split3` with total text/null operands
 and an exact `string[]` destination; every other path retains the ordinary
 check. `tune22_split_metadata` covers wrong-domain/error/null behavior and
 `tune22_split_success_boundary` pins the removed JIT boundary (S11.4.2,
-D8.4.1v2).
+D7.4.1).
 
 `lambda_type_check` + `lambda_type_matches` +
 `lambda_item_resolve_pending` are 8.7% of three_way_merge and 149/143 sites in
@@ -398,7 +398,7 @@ safepoint-free direct store for a terminal static packed `int` field: after the
 rooted borrow it rechecks the map kind, shape, and in-band Item tag, then writes
 the inline integer payload. Pointer-backed integers and every unproven path
 take the ordinary generic store, so no interior pointer crosses a safepoint and
-no capture or barrier obligation is skipped (D4.4.4, D5.1.1v2, S9.3.1). The
+no capture or barrier obligation is skipped (D5.4.4, D6.1.1, S9.3.1). The
 borrow and direct-store semantic/MIR fixtures pin both the success and fallback
 paths.
 
@@ -411,7 +411,7 @@ paths.
   verify every link's ownership and shape. A success edge may enter a
   safepoint-free direct-store block; no interior slot pointer survives a call
   or allocation. The existing reinstall chain remains the miss path
-  (D4.4.4, D8.4.1v2).
+  (D5.4.4, D7.4.1).
 - The fast leaf store still performs the destination admission, write barrier,
   and S9.3.1 capture/share action. A unique spine does not make capture-by-value
   optional and does not prove a packed field's contract.
@@ -457,7 +457,7 @@ synchronous tail do not incur frame traffic. Operand spills remain conservative
 for evaluation replay, but boxed `Item` arguments now use the traced
 `lambda_async_frame_set/get` half, while raw-word slots hold only non-GC
 scalars. This preserves parked task handles and the precise-root rule of
-D5.1.1v2/D5.3.4. `tune22_async_liveness` pins the named-local and traced
+D6.1.1/D6.3.4. `tune22_async_liveness` pins the named-local and traced
 operand-spill shape; suspension, resume, error, loop-exit, and return fixtures
 cover the task-frame paths.
 
@@ -466,7 +466,7 @@ outside `__TIMING__` would change the workload and hide the codegen cost.
 Engine-side, allocate task-frame slots only for values live across an actual
 suspension point and emit save/restore only around may-suspend edges. After the
 single read resumes, the synchronous k-mer tail must not spill every temporary
-merely because its enclosing `pn` is may-await (D5.1.1v2, D8.1.1v9).
+merely because its enclosing `pn` is may-await (D6.1.1, D8.3.3).
 
 **Exit:** the unchanged benchmark output and timing boundary are pinned; MIR
 frame get/set counts are proportional to the live-across set at `io.read`, not
@@ -496,7 +496,7 @@ which design item earns the next proposal.
 ### 3.9 Ruling/design queue (not executable in this round)
 
 - **T22-D1 — String slices/shared storage.** A parent-backed String is a new
-  physical form under D2.1.6. Specify allocation, tracing/compaction of the
+  physical form under D2.1.5. Specify allocation, tracing/compaction of the
   parent edge, equality/hash bytes, NUL-terminated C consumers, builder
   interaction, pooled/static parents, tiny-slice/large-parent retention, and
   forced-GC gates before implementation. Reuse the existing shared-byte-storage
@@ -507,7 +507,7 @@ which design item earns the next proposal.
 - **T22-D3 — Small-vector scalar replacement.** Represent a proven
   non-escaping `[x,y,z]` as three MIR scalar values and materialize an ArrayNum
   at the first escaping/opaque use. Do not place a fake container in the
-  unscanned number stack: D5.1.1v2/D5.2.2v3 reserve it for scalar homes, while
+  unscanned number stack: D6.1.1/D6.2.2 reserve it for scalar homes, while
   runtime container helpers expect the ordinary GC/container contract.
 - **T22-D4 — Typed `var` array admission.** Resolve structural occurrence
   contract equivalence and mutable borrowed-container representation/rebind
@@ -527,12 +527,12 @@ which design item earns the next proposal.
 
 ## 4. What NOT to do (inherited and new)
 
-- **No inline caches, feedback vectors, or patched code** — D8.4.1v2. Every
+- **No inline caches, feedback vectors, or patched code** — D7.4.1. Every
   fast path is static specialization with an observationally identical miss.
 - **No raw int comparison from `VALUE_REP_INT_LANE` alone.** Prove in-band or
-  handle `nan`, infinity, and optional null according to S5.1.2/D2.5.1.
+  handle `nan`, infinity, and optional null according to S5.1.2/D2.4.1.
 - **No String views in T22-3.** Rooting the parent is necessary but not
-  sufficient; T22-D1 owns the full D2.1.6 representation/lifecycle decision.
+  sufficient; T22-D1 owns the full D2.1.5 representation/lifecycle decision.
 - **No stack-backed fake Array/ArrayNum in the number stack.** T22-D3 uses
   scalar replacement and materializes an ordinary container on escape.
 - **No sysfunc boundary elision from a declared/AST result type alone.** The
@@ -546,7 +546,7 @@ which design item earns the next proposal.
 - **No benchmark-source rewrite to hide runtime cost**, including hand-hoisted
   `len()` or moving knucleotide2's read outside its existing timer.
 - Native C reference ports stay benchmark-only; the legacy Lambda C-text
-  backend remains removed (D8.1.1v9).
+  backend remains removed (D8.3.3).
 - crypto_sha1 / hyphen historical cells retain the Tune21 §4 caveats.
 
 ---

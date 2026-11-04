@@ -5,7 +5,7 @@
 > **Original design records:** 2026-03-27 through 2026-04-12, including later appendices.
 > **Consolidated and reviewed:** 2026-10-08, against tree `62f3c21d2` and the
 > working changes present at review time.
-> **Revised:** 2026-10-13 — **D4.5.3v2** scope (copy at construction, retain downstream), presentation authority by state tier (§2.7), reconciliation within a regenerated result, and ownership of retained nodes (§5.3, §9.1, §9.4, §10.1, §11, §17, §18.1).
+> **Revised:** 2026-10-13 — **D5.5.3** scope (copy at construction, retain downstream), presentation authority by state tier (§2.7), reconciliation within a regenerated result, and ownership of retained nodes (§5.3, §9.1, §9.4, §10.1, §11, §17, §18.1).
 > **Scope:** the `view`/`edit` template model, state and model ownership,
 > pattern dispatch, events, observer-based regeneration, incremental presentation,
 > text interaction, drag-and-drop, prior art, alternatives, and unresolved design.
@@ -24,12 +24,12 @@ collected in the final section.
 | Functional presentation and procedural handlers | **S12.1.1v2–S12.1.3** | This document §§2–3 |
 | State ownership and value semantics | **S1.6**, **S9.1.1–S9.1.7**, **S9.2.4v2**, **S9.3.1** | This document §§5–6; [DOM State](Lambda_Design_DOM_State.md), ES4/ES10/ES11 |
 | Element mutation and content/fragment behavior | **S12.2.2**, **S2.5**, **S2.6.1v2–S2.6.5** | This document §§4, 6, 9 |
-| Event participants and cancellation | **S12.1.3**, **D7.2.5** | [DOM Dispatch](Lambda_Design_DOM_Dispatch.md), ES22–ES29 |
-| Script packages and one document's execution ownership | **D7.2.1–D7.2.4**, **D5.3.3** | [DOM State](Lambda_Design_DOM_State.md), ES11/ES12v2 |
-| Presentation lifetime and the runtime boundary | **D4.5.1v4**, **D4.5.2** | This document §12 |
-| DOM construction from a script and retention downstream | **D4.5.3v2** | This document §5.3, §9.4, §10.1; [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) |
+| Event participants and cancellation | **S12.1.3**, **D10.2.1** | [DOM Dispatch](Lambda_Design_DOM_Dispatch.md), ES22–ES29 |
+| Script packages and one document's execution ownership | **D9.3.1–D9.3.4**, **D6.3.3** | [DOM State](Lambda_Design_DOM_State.md), ES11/ES12v2 |
+| Presentation lifetime and the runtime boundary | **D5.5.1**, **D5.5.2** | This document §12 |
+| DOM construction from a script and retention downstream | **D5.5.3** | This document §5.3, §9.4, §10.1; [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) |
 | Presentation authority by state tier | **S12.1.5v2** | This document §2.7, §9.4, §11 |
-| Execution profiles | **D8.1.1v17**, **D7.1.4v2**, **D7.1.7v6** | This document §§2, 12 |
+| Execution profiles | **D8.3.6**, **D9.2.1**, **D9.2.3** | This document §§2, 12 |
 | Bare `apply` and ordinary statement boundaries | **S16.2** | [Syntax](Lambda_Design_Syntax.md#77-apply-fused-token-retired-decided), §7.7 |
 | Persistence and stable identity | **S12.1.3**, **S9.1.4**, **S9.1.7** | [State Management](radiant/Radiant_Design_State_Management.md), RS1–RS24 |
 
@@ -140,7 +140,7 @@ the ES11 model in [DOM State](Lambda_Design_DOM_State.md).
 ### 2.6 Rendering is independent of the execution tier
 
 Template semantics do not depend on whether a body or handler is interpreted or
-compiled. **D8.1.1v17** defines Lambda's tiered execution. The design no longer
+compiled. **D8.3.6** defines Lambda's tiered execution. The design no longer
 requires every template to be JIT-compiled before it can participate in a UI.
 Likewise, static transformation does not require a window or an event loop.
 
@@ -365,7 +365,7 @@ their observable retention policy.
 
 ### 5.3 Runtime identity and durable identity
 
-**Ordinary markup occurrences — ruled 2026-10-11, scope clarified 2026-10-13 (D4.5.3v2).** Only UI/view-mode DOM construction deep-copies ordinary Elements and their content with MarkBuilder, even when already in the document arena. Reusing one SVG or HTML value in several slots therefore produces independent native nodes and child chains. Normal Lambda evaluation retains value sharing and the existing ownership-based copy optimization. Rooted callables and native handles retain their identity. Copying at the DOM boundary preserves template source/result keys for event dispatch and regeneration. This settles ordinary markup reuse; repeated stateful template applications and durable addressing remain the open questions below.
+**Ordinary markup occurrences — ruled 2026-10-11, scope clarified 2026-10-13 (D5.5.3).** Only UI/view-mode DOM construction deep-copies ordinary Elements and their content with MarkBuilder, even when already in the document arena. Reusing one SVG or HTML value in several slots therefore produces independent native nodes and child chains. Normal Lambda evaluation retains value sharing and the existing ownership-based copy optimization. Rooted callables and native handles retain their identity. Copying at the DOM boundary preserves template source/result keys for event dispatch and regeneration. This settles ordinary markup reuse; repeated stateful template applications and durable addressing remain the open questions below.
 
 The ruling covers how DOM is built from Lambda scripts and nothing downstream. It does not ask a regeneration to rebuild its whole result: an existing occurrence's subtree may be kept and patched in place to present the new result (§10.1), and style, layout and paint reuse every retained structure that is still valid. *Copy at construction, retain downstream.* Retention is the preferred path, not a tolerated exception ([DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md)).
 
@@ -412,7 +412,7 @@ the mutation and schedule every dependent presentation whose inputs changed.
 Editing one instance must not alter the interpretation of unrelated instances
 that share its type/shape. Shared field descriptions remain immutable; a
 layout-changing edit changes the edited value's description without rewriting
-its siblings' contract (**D3.4.3v5**, **D3.4.5**). This is the design invariant
+its siblings' contract (**D3.4.3**, **D3.4.5**). This is the design invariant
 behind the later shared-type correction in the original notes.
 
 ### 6.2 Live reactive editing and immutable editor history
@@ -447,7 +447,7 @@ mutations. Retention limits govern which old versions remain available. Shared
 subtrees must remain valid as long as any retained version uses them.
 
 Text-control history, contenteditable history, and source-document history are
-different domains. **D7.2.5** places contenteditable editing history and command
+different domains. **D10.2.1** places contenteditable editing history and command
 policy in the shipped DOM behavior package. The source-model history proposal
 does not supersede that ruling or merge all undo domains automatically.
 
@@ -727,11 +727,11 @@ This comparison is limited to regenerated results. It does not reintroduce a
 whole-page virtual DOM diff. Its cost depends on the compared output, and a
 semantically unchanged output is not necessarily pointer-identical.
 
-**Reconciliation within a regenerated result.** Retention is ruled (**D4.5.3v2**, user 2026-10-13): a partly changed result does not replace its presentation whole. The matching rules below are the design that realizes it; of them, patching attributes in place is also ruled (user, 2026-10-13). The old result, the new result and the live DOM are walked together in document order, and at each position the first applicable rule decides:
+**Reconciliation within a regenerated result.** Retention is ruled (**D5.5.3**, user 2026-10-13): a partly changed result does not replace its presentation whole. The matching rules below are the design that realizes it; of them, patching attributes in place is also ruled (user, 2026-10-13). The old result, the new result and the live DOM are walked together in document order, and at each position the first applicable rule decides:
 
 1. **Equal subtree → keep.** The new node is equal to the old one (the equality above). The DOM subtree stays in place and is rebound to the new result (§9.1).
 2. **Same tag → patch.** The tag is the same but attributes or children differ. The element is kept, each changed attribute is patched in place (a row whose `class` changed keeps its node — ruled by the user), and its children are reconciled positionally by these rules. Each attribute change and each child insertion, removal or replacement is published as a DOM mutation, so the ordinary mutation path restyles exactly the affected nodes (§10.2).
-3. **Otherwise → fresh copy.** The node is built from the script as **D4.5.3v2** describes, and owner migration runs for it.
+3. **Otherwise → fresh copy.** The node is built from the script as **D5.5.3** describes, and owner migration runs for it.
 
 Matching is positional. Keyed matching (§18.3) can extend rule 2 later without changing rules 1 or 3. Kept and patched nodes keep their resolved style, layout and view state; the retained-layout paths of §10.3 depend on that.
 
@@ -762,7 +762,7 @@ entire event pipeline or for React's behavior.
 
 ### 10.1 Replacing only affected content
 
-Changed result content updates the corresponding DOM: an existing occurrence is kept and patched in place where it can present the new result, and only content that cannot be patched is replaced by a fresh copy (**D4.5.3v2** governs that copy; it does not require replacing what can be kept). Unchanged DOM, resolved styles, and layout results remain reusable, and retained-layout paths (block shift reuse, retained flex items) depend on that. A replacement or patch must preserve the containing order and parent relation and publish the new source/result association. Fragment ranges may need a broader correctness fallback than a single-element replacement.
+Changed result content updates the corresponding DOM: an existing occurrence is kept and patched in place where it can present the new result, and only content that cannot be patched is replaced by a fresh copy (**D5.5.3** governs that copy; it does not require replacing what can be kept). Unchanged DOM, resolved styles, and layout results remain reusable, and retained-layout paths (block shift reuse, retained flex items) depend on that. A replacement or patch must preserve the containing order and parent relation and publish the new source/result association. Fragment ranges may need a broader correctness fallback than a single-element replacement.
 
 Full rebuild remains the correctness path for initial presentation or when the
 change cannot safely be expressed as a local patch. Missing ownership/location
@@ -878,7 +878,7 @@ language realms.
 
 This tier is where Lambda and JS share the *same* state rather than tiers of it (§2.7, **S12.1.5v2**). A behavior template regenerates nothing; it reads and writes the canonical interaction state of the element it matched, which JS reads and writes through the DOM API, so a form control keeps one `checked`, one value and one validity whichever realm acts on it (ES11).
 
-**D7.2.5** assigns full user-agent editing policy to the shipped Lambda DOM
+**D10.2.1** assigns full user-agent editing policy to the shipped Lambda DOM
 package: uncanceled contenteditable actions, structural normalization, history,
 `designMode`, and the complete `execCommand`/`queryCommand*` compatibility surface.
 The engine retains platform transport and generic DOM, event, selection/range,
@@ -908,7 +908,7 @@ applications retain their own session; sharing a loader does not merge the state
 of unrelated pages.
 
 The original assertion that retaining a runtime permits arbitrary long-lived
-presentation pointers into its heap is superseded by **D4.5.2**. A value retained
+presentation pointers into its heap is superseded by **D5.5.2**. A value retained
 across the Lambda/Radiant boundary must have document-owned lifetime or a registered
 root lasting as long as the reference. Transient reading is a borrow. This is an
 ownership contract, not an instruction to disable collection or infer liveness
@@ -950,9 +950,9 @@ are available; browser hydration and transfer of a live session are additional
 contracts, not consequences of serializing HTML.
 
 Build profiles constrain capabilities without changing retained language semantics.
-For example, **D7.1.7v6** retains stateful template application in the browser
+For example, **D9.2.3** retains stateful template application in the browser
 evaluation profile while excluding `emit` and editor-history operations.
-Window/UI commands are separately constrained by **D7.1.4v2**. Headless template
+Window/UI commands are separately constrained by **D9.2.1**. Headless template
 application and opening a live window are distinct capabilities.
 
 ## 13. Text interaction, selection, and clipboard
@@ -1056,7 +1056,7 @@ cause a second edit or restore an obsolete selection.
 History restoration belongs to the same editing authority as ordinary edits.
 Undo/redo should restore value and selection without recording the restore as a
 new edit; a canceled restoration must not advance history. This follows the
-one-writer rationale in ES17 and the package ownership in **D7.2.5** for rich DOM
+one-writer rationale in ES17 and the package ownership in **D10.2.1** for rich DOM
 editing.
 
 ## 14. Drag-and-drop
@@ -1288,10 +1288,10 @@ not lost. Struck wording is historical and is not a current ruling.
 | ~~Synthetic DOM dispatch has a separate activation implementation.~~ | Trusted and synthetic events use the same author/UA model (ES25/ES26) |
 | ~~Continuous pointer/scroll events never reach author templates.~~ | Declaring author templates opt into them; undeclared events avoid template work (ES23v2) |
 | ~~All handler side effects are confined to state/model assignments.~~ | Handlers are `pn` context and can perform other authorized procedural effects (**S12.1.1v2**) |
-| ~~Retaining a runtime makes arbitrary persistent pointers from presentation into its heap safe; copying is unnecessary.~~ | Borrow to read; document ownership or registered roots to keep (**D4.5.2**) |
+| ~~Retaining a runtime makes arbitrary persistent pointers from presentation into its heap safe; copying is unnecessary.~~ | Borrow to read; document ownership or registered roots to keep (**D5.5.2**) |
 | ~~Source parenthood can be identified uniquely from allocation ownership.~~ | Shared source versions require document/version/path context (§6.4) |
 | ~~Every reactive event requires full DOM, CSS, layout, and paint reconstruction.~~ | Local replacement, invalidation, no-op elision, and safe escalation are separate stages (§10) |
-| ~~D4.5.3 requires every regeneration to deep-copy its whole result into fresh DOM, so retained DOM cannot carry style and layout across a re-render.~~ | **D4.5.3v2**: the copy governs construction only; a regeneration keeps and patches existing occurrences, and downstream stages reuse what stays valid (§5.3, §10.1) |
+| ~~D5.5.3 requires every regeneration to deep-copy its whole result into fresh DOM, so retained DOM cannot carry style and layout across a re-render.~~ | **D5.5.3**: the copy governs construction only; a regeneration keeps and patches existing occurrences, and downstream stages reuse what stays valid (§5.3, §10.1) |
 | ~~A regenerated result is compared whole: equal results skip replacement, any other result replaces its presentation.~~ | Reconcile within the result: keep equal subtrees, patch same-tag elements in place, copy the rest (§9.4) |
 | ~~Regeneration must preserve direct DOM edits made under an author template's result, so equality of results alone cannot decide whether retained DOM is kept.~~ | Direct writes are a lower tier of state that yields to regeneration; the engine does not track them, so results alone decide (§2.7, §9.4) |
 | ~~Direct DOM edits inside an author template's result are unsupported; one owner per subtree (S12.1.5, superseded the same day).~~ | One owner per *state*: transient implementation-level state may live in DOM/CSS inside the result and yields to higher-tier regeneration (**S12.1.5v2**, §2.7) |
@@ -1303,7 +1303,7 @@ not lost. Struck wording is historical and is not a current ruling.
 | ~~All text offsets are interchangeable character indices.~~ | DOM UTF-16, Lambda code points, and storage bytes have explicit conversion boundaries (§13.2) |
 | ~~Add `select_delete` as the required deletion protocol.~~ | Selection-aware existing editing events and the common intention/default/input sequence (§13.5) |
 | ~~Focus every newly inserted input as a convenience.~~ | Focus is requested explicitly; insertion alone does not authorize focus theft (§13.1) |
-| ~~Rich text/editing policy remains duplicated in native code and application handlers.~~ | Shared behavior policy with generic engine mechanisms; **D7.2.5** governs contenteditable (§11) |
+| ~~Rich text/editing policy remains duplicated in native code and application handlers.~~ | Shared behavior policy with generic engine mechanisms; **D10.2.1** governs contenteditable (§11) |
 | ~~A full translucent dragged-element copy is required for drag support.~~ | An indicator and target feedback suffice; richer ghost presentation is optional (§14.3) |
 
 ## 18. Outstanding issues and proposals
@@ -1478,3 +1478,29 @@ Further XSLT-style controls remain open:
   event retention remain governed by **RSO1–RSO10**. The proposed extra purity
   lattice must be reconciled explicitly with current **S12.1.1v2–S12.1.3** before
   it changes template or handler semantics.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D4.5.3v2 → D5.5.3
+
+**D5.5.3** **UI/view-mode DOM construction deep-copies ordinary Elements
+and their content through MarkBuilder**, including values already owned by
+the document arena. Each presentation occurrence owns its native parent and
+sibling links. Normal Lambda evaluation retains ordinary value sharing and
+ownership-based copy elision; rooted callables and native handles keep their
+existing identity. DOM copies preserve the evaluator's source/result mapping.
+The ruling governs only how DOM is built from Lambda scripts; it does not
+constrain style, layout or rendering. Incremental presentation fully embraces
+retention: a regeneration may keep an existing occurrence's subtree, patched
+in place to present the new result, and restyle, reflow and repaint reuse
+every retained structure that is still valid. *Copy at construction, retain
+downstream.* [Reactive_UI §5.3, §10.1; user, 2026-10-11, 2026-10-13]

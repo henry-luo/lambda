@@ -16,7 +16,7 @@ Use MVP as a model for **how little work a common operation needs**, then establ
 
 This is an evolution of the current full engine, including Tune10/11. It requires no second value universe, replacement collector, MVP-to-Item bridge, or copied set of JS semantic helpers.
 
-Authority: **S1.11** requires LambdaJS to retain ECMAScript semantics; **D1.3v3** permits shared physical infrastructure with language-specific admission; **D2.4.1–D2.4.3** separate representation from coercion; **D3.3.2v2** says inference selects an implementation, not a source contract. **D8.4.1v2** allows immutable predicted specialization and a semantic fallback, and prohibits mutable inline caches. This proposal changes no formal ruling.
+Authority: **S1.11** requires LambdaJS to retain ECMAScript semantics; **D1.3** permits shared physical infrastructure with language-specific admission; **D2.3.4–D2.3.5** separate representation from coercion; **D4.3.2** says inference selects an implementation, not a source contract. **D7.4.1** allows immutable predicted specialization and a semantic fallback, and prohibits mutable inline caches. This proposal changes no formal ruling.
 
 ### 1.1 Implementation outcome (Tune12)
 
@@ -25,8 +25,8 @@ bounded Number-native return admission, minimal native frames, guarded Number
 and own-element heads, parameter/numeric/typed-array access lowering,
 ordinary-field carriers, verified existing callable entries, and admitted bulk
 RegExp match/replace. It keeps the full semantic continuation for every
-unproved case under **S1.11**, **D5.3.2–D5.3.5**, **D6.2.2v2**, and
-**D8.4.1v2–D8.4.3v2**.
+unproved case under **S1.11**, **D6.3.2–D6.3.5**, **D7.2.2**, and
+**D7.4.1–D7.4.3**.
 
 The exact-release, interleaved 63-row comparison has equal output in all 189
 paired executions and a candidate/control geometric mean of **0.680706x**.
@@ -129,7 +129,7 @@ function add1(x) { return x + 1; }
 console.log(add1("2"));
 ```
 
-prints `21` in full JS and `3` in MVP. Full LambdaJS must not adopt this admission rule (**S1.11**, **D2.4.3**, **D3.3.2v2**).
+prints `21` in full JS and `3` in MVP. Full LambdaJS must not adopt this admission rule (**S1.11**, **D2.3.5**, **D4.3.2**).
 
 ### 4.3 Proposed native lane
 
@@ -139,7 +139,7 @@ Extend the existing `FnAnalysis`/`FnVariantAnalysis`, `JsFuncCollected` native e
 2. Emit an immutable entry selector: already-proved Number actuals call the native entry directly; otherwise a side-effect-free Number guard selects native or the complete boxed body. A string, BigInt, Symbol, object, missing argument or other mismatch enters the boxed body with its original values. Do not coerce to make a guard pass.
 3. Keep F64 locals, loop state and intermediate returns native. Use the shared emitter for arithmetic/comparisons and known calls. Box at the actual Item boundary, not between operations.
 4. Propagate definite initialization independently of value type. Eliminate TDZ checks only where initialization dominates every incoming path; retain checks for captured/possibly uninitialized bindings and paths affected by `eval` or `with`.
-5. Preserve native stack limits and the explicit error companion when required. A numeric recursive kernel still needs correct overflow behavior. Elide root slots only when the variant's actual effects/liveness prove it safe, under **D5.3.2–D5.3.5** and **D8.4.3v2**.
+5. Preserve native stack limits and the explicit error companion when required. A numeric recursive kernel still needs correct overflow behavior. Elide root slots only when the variant's actual effects/liveness prove it safe, under **D6.3.2–D6.3.5** and **D7.4.3**.
 
 Start with noncapturing functions, simple formals, stable local callee bindings, and numeric-only operations. Keep other functions generic. Do not require a speculative mid-loop restart: the entry guard selects a complete implementation before its effects begin. Mutable callees need a current identity check, or remain ordinary calls.
 
@@ -179,7 +179,7 @@ Expected operation flow:
 - New key: allocate one node, append at the tail, insert its pointer into the hash table.
 - Delete: retrieve the node from the hash entry and update its deletion/list state directly.
 
-Reuse the current GC tracing and weak-collection ownership boundaries. Hash-table growth must not invalidate iterator-held node addresses. Preserve iteration during mutation, deletion/reinsertion, additions during `forEach`, clear during iteration, NaN and signed-zero key behavior, weak ephemerons, and scalar-home ownership. This is an internal storage improvement, not permission to import MVP's restricted iterator behavior or change collection semantics (**S1.11**, **D1.3v3**, **D5.3.3**).
+Reuse the current GC tracing and weak-collection ownership boundaries. Hash-table growth must not invalidate iterator-held node addresses. Preserve iteration during mutation, deletion/reinsertion, additions during `forEach`, clear during iteration, NaN and signed-zero key behavior, weak ephemerons, and scalar-home ownership. This is an internal storage improvement, not permission to import MVP's restricted iterator behavior or change collection semantics (**S1.11**, **D1.3**, **D6.3.3**).
 
 **Completion evidence:** no list search in set/add/delete; the scaling curve ceases to be quadratic; focused collection semantics, forced GC and the canonical `knucleotide` row pass. This is the first recommended implementation because its cause and remedy are unusually well isolated.
 
@@ -200,7 +200,7 @@ Therefore the full engine should transfer the small **guarded storage operation*
 
 ### 6.2 Proposed array paths
 
-Extend the existing dense-access physical plan to accept a runtime-guarded receiver from a parameter/local with a numeric index. Do not require literal provenance when the same complete storage guard can establish the facts. Bound code expansion to repeated accesses and hot loops using static analysis, not feedback caches (**D8.4.1v2**).
+Extend the existing dense-access physical plan to accept a runtime-guarded receiver from a parameter/local with a numeric index. Do not require literal provenance when the same complete storage guard can establish the facts. Bound code expansion to repeated accesses and hot loops using static analysis, not feedback caches (**D7.4.1**).
 
 Use separate cases for:
 
@@ -232,7 +232,7 @@ evaluate operands once
 
 For addition, MVP checks Number/Number and immediately adds. Full [`js_add`](../../lambda/js/js_runtime_value.cpp) opens a four-slot root frame before checking types, then handles ToPrimitive/string paths and enters `js_numeric_binary`. That numeric dispatcher performs operand conversion, error/Symbol/BigInt checks, extraction and result creation.
 
-Put a correctly classified Number pair before that work, and share extraction/operation code with the existing numeric implementation. Initially this can use the normal Item result encoder. Only a separately proved raw numeric leaf may claim `NO_GC`/infallible effects; the whole helper remains allocating/throwing when its slow arm can do so. A helper head alone also does not remove the caller's conservative root publication. MIR specialization is needed for that additional gain (**D5.3.2**, **D5.3.4**, **D8.4.3v2**).
+Put a correctly classified Number pair before that work, and share extraction/operation code with the existing numeric implementation. Initially this can use the normal Item result encoder. Only a separately proved raw numeric leaf may claim `NO_GC`/infallible effects; the whole helper remains allocating/throwing when its slow arm can do so. A helper head alone also does not remove the caller's conservative root publication. MIR specialization is needed for that additional gain (**D6.3.2**, **D6.3.4**, **D7.4.3**).
 
 Apply the same pattern to comparisons, present own elements, string-length/character leaves, and common collection operations. Classification must distinguish JS Numbers from Symbols/BigInts even where the host uses overlapping scalar categories. Misses preserve coercion order and exceptions. Reuse/promote existing kernels; do not create parallel `js_fast_*` implementations of full semantics.
 
@@ -250,7 +250,7 @@ Do not replace shaped objects with MVP hash objects on the strength of the aggre
 
 MVP's known calls can bypass most dynamic activation work. Full `js_call_kernel` must support rooted actuals, `this`, new.target, module/realm state, captured `with`, generators/derived constructors, source tracking and returned completion ownership. It already has per-callee body entries, caller-rooted argument variants, and direct MIR calls. Do not replace it with another universal dispatcher.
 
-Extend existing function/call analysis to select the smallest correct entry for a known capability. A noncapturing numeric function that cannot observe activation state should use its native variant. A simple known JS function may use the existing direct-body ABI with the required receiver/context/stack and error handling. A dynamic callee remains on its current executable entry unless its capability and activation requirements are fully proved (**D6.2.2v2**, **D8.4.2v2**).
+Extend existing function/call analysis to select the smallest correct entry for a known capability. A noncapturing numeric function that cannot observe activation state should use its native variant. A simple known JS function may use the existing direct-body ABI with the required receiver/context/stack and error handling. A dynamic callee remains on its current executable entry unless its capability and activation requirements are fully proved (**D7.2.2**, **D7.4.2**).
 
 For methods and built-ins, preserve this sequence:
 
@@ -279,7 +279,7 @@ The 49.12x fresh `regexredux` gap makes this worth an isolated follow-up. It doe
 
 Both `MvpValue` and `Item` are eight bytes. [`flt2it`/`push_d`](../../lambda/runtime/lambda-mem.cpp) already encode most doubles inline in Item, with special zero encoding and a scalar home for out-of-band bit patterns. `js_make_number` uses that path. Full JS does **not** allocate a heap float for every arithmetic result.
 
-Item nevertheless has a broader representation/ownership contract. The captured generic MIR contains checks and transfers for possible scalar-home/companion results even when a benchmark happens to produce ordinary doubles. Better variant facts and native propagation can eliminate that uncertainty locally without changing the public representation (**D2.4**, **D5.3.4**).
+Item nevertheless has a broader representation/ownership contract. The captured generic MIR contains checks and transfers for possible scalar-home/companion results even when a benchmark happens to produce ordinary doubles. Better variant facts and native propagation can eliminate that uncertainty locally without changing the public representation (**D2.3**, **D6.3.4**).
 
 The [abandoned v2 history](JS_MVP_Runtime.md#7-abandoned-v2-item-alignment-experiment) changed values, containers, ownership, helper adapters and JSON integration together. Its regression is evidence against that bundled implementation, not a controlled demonstration that sharing Item intrinsically imposes its entire slowdown. No alternative collector or NaN-boxing rewrite is justified by this study.
 

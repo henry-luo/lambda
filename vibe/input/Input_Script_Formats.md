@@ -11,9 +11,9 @@ does not add an AsciiDoc, groff, or Typst execution engine, send email, or acqui
 external resources during formatting.
 
 **Formal linkage:** normalized document content follows **S2.6.1v2,
-S2.6.2–S2.6.5**. Parser-owned data construction follows **D7.1.5**. Shipped
-source modules and the runtime/IO boundary follow **D7.1.1, D7.2.1–D7.2.4**;
-package invocation retains precise roots under **D5.3.3**. No formal ruling is
+S2.6.2–S2.6.5**. Parser-owned data construction follows **D9.1.4**. Shipped
+source modules and the runtime/IO boundary follow **D9.1.1, D9.3.1–D9.3.4**;
+package invocation retains precise roots under **D6.3.3**. No formal ruling is
 changed. Writer syntax and the record precedence below are the implementation
 contract for these initial profiles, not new language semantics.
 
@@ -159,12 +159,12 @@ whitespace, as RFC 5322 requires.
 - **test/lambda/doc_misc_roundtrip.ls** and its golden pass 31 checks for newly
   authored contacts, calendar events/alarms, MIME messages and attachments,
   built-in routing, validation, and loss diagnostics. Interpreter, JIT, and
-  JIT forced-collection/poisoning runs pass (D5.3.3).
+  JIT forced-collection/poisoning runs pass (D6.3.3).
 - **test/script_format_roundtrip.py**, registered through its Node runner in
   the **input** baseline, runs 43 checks across package, built-in **format**,
   automatic file **output**, and CLI boundaries: **31 pass, 12 fail**. All 16
   record round trips and 15 alias checks pass. Record comparisons retain
-  ordered duplicate map entries (D2.6.5v3), and passing round trips also require
+  ordered duplicate map entries (D3.3.1), and passing round trips also require
   byte-identical output after a second parse/write. UTF-8 scalar boundaries,
   CRLF and RFC physical line limits are checked independently.
 - **make test-lambda-baseline** completed with **7138/7141** passing, including

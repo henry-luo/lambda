@@ -1,4 +1,4 @@
-// boxed and native pointer lanes share checked string[] reads (D2.6.1v3, S7.1.1v3).
+// boxed and native pointer lanes share checked string[] reads (D3.2.1, S7.1.1v3).
 fn fetch_string(values: string[], key: int) string? { return values[key] }
 pn change(var values: string[]) any { values[0] = "changed" }
 pn main() {

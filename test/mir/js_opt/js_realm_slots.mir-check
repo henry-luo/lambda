@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.4, D8.1.3v27: formal intrinsic loops use the owned unit/library slots; the retained AST suffix reservation is checked separately. The terminal CLI plan keeps closed binding facts; counts cover that default entry.",
+  "description": "D6.4, D8.4.2: formal intrinsic loops use the owned unit/library slots; the retained AST suffix reservation is checked separately. The terminal CLI plan keeps closed binding facts; counts cover that default entry.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",

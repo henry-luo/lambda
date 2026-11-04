@@ -1,8 +1,8 @@
 # PowerPoint import
 
 The core milestone imports saved PPTX presentations into the existing editable
-`lambda.slide` element model. Shipped modules follow **D7.2.1/D7.2.4v4**;
-package reads use the existing bounded ZIP/XML readers (**D7.5.2**,
+`lambda.slide` element model. Shipped modules follow **D9.3.1/D9.3.4**;
+package reads use the existing bounded ZIP/XML readers (**D11.1.2**,
 **S12.4.1v2/S14.3.1v2**). Presentation data never becomes Lambda code (**S1.8**).
 
 ## Delivery and acceptance

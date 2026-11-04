@@ -2,9 +2,9 @@
 
 > **Implementation record — 2026-09-10.** Continues the three follow-up tasks
 > in [the struct-authority record](../Lambda_Design_Structs_JS.md), from source base
-> `31d19bac9`. Authority: **D1.3**, **D2.4.1–D2.4.3**, **D3.4.5–D3.4.6**,
-> **D5.2.3**, **D5.3.1–D5.3.4**, **D5.4.3**, **D6.2.2v2**,
-> **D8.4.1v2–D8.4.3v2**, **D8.6.1–D8.6.3**. No ruling or value ABI changes.
+> `31d19bac9`. Authority: **D1.3**, **D2.3.4–D2.3.5**, **D3.4.5–D3.4.6**,
+> **D6.2.3**, **D6.3.1–D6.3.4**, **D6.4.3**, **D7.2.2**,
+> **D7.4.1–D7.4.3**, **D8.6.1–D8.6.3**. No ruling or value ABI changes.
 
 ## 1. Shared operation and construction planning
 
@@ -13,7 +13,7 @@ module-owned name recipe. `MirFieldAccessPlan` selects that construction,
 its field and physical offset. Both lowerings use the same candidate-first,
 unique-field-fallback selection, on top of their existing shared indexed
 candidate traversal. The plan never owns a runtime receiver, changes a source
-contract, or substitutes speculation for a runtime guard (**D2.4.1**, **D8.4.1v2**).
+contract, or substitutes speculation for a runtime guard (**D2.3.4**, **D7.4.1**).
 
 JS object literals and ordinary function constructors use one recipe collector
 and module-name owner. Constructors admit the consecutive prefix of plain
@@ -25,7 +25,7 @@ can select fields from these recipes.
 Two recipe indexes live on the existing per-definition `JsCallableCode`.
 Closures keep independent identity and environments. Allocation activates the
 callee's owning module while resolving the recipe, so a caller's active module
-cannot supply the names (**D5.4.3**, **D6.2.2v2**).
+cannot supply the names (**D6.4.3**, **D7.2.2**).
 
 Lambda and JS now use the same `map_alloc_for_type` combined allocation for a
 known layout: object and payload are published together. The JS adapter supplies
@@ -58,7 +58,7 @@ Bool, int and string lanes join the existing float, null and container lanes.
 Reads share one tag reconstruction path, preserving the int-tagged JS Symbol
 identity. Stores retain lane/type checks and the ordinary owned writer on a
 miss. Descriptor changes, deleted slots, incompatible layouts and host property
-policies still use the semantic kernels (**D1.3**, **D2.4.3**).
+policies still use the semantic kernels (**D1.3**, **D2.3.5**).
 
 Typed-array indexing consumes the runtime's existing `JsTypedArraySpec` table.
 The shared emitter supplies width/sign decoding, element addresses, loads and
@@ -95,7 +95,7 @@ contract than `NO_GC`; a noncollecting property lookup is not pure.
 arguments and immediate constants, and finds the scalar dependency slice needed
 by audited pure calls. Only that slice moves before the loop's sole entry.
 Unrelated arithmetic is not moved. A zero-trip loop may evaluate a total scalar
-leaf early, with no language-visible effect (**D5.3**, **D8.4.3v2**).
+leaf early, with no language-visible effect (**D6.3**, **D7.4.3**).
 
 Memory operands, unknown calls, mutable loop operands, division, unsafe machine
 conversions and pointer-producing calls are excluded. Async/generator lowering
@@ -201,5 +201,5 @@ JS2 proposal still includes additional operation families, class/exotic
 construction plans, Float16/BigInt/clamped-store specialization, and broader
 native result inference. Hoisting alias-sensitive field/buffer/bounds guards
 and reclaiming scalar storage at loop backedges still require separate lifetime
-and invalidation proofs (**D5.2.3**, **D5.3**, **D8.4.1v2**). They are not enabled
+and invalidation proofs (**D6.2.3**, **D6.3**, **D7.4.1**). They are not enabled
 by the pure-scalar flag.

@@ -1,4 +1,4 @@
-// Font-independent math output API and native/CLI adapters (D7.1.1, D7.2.8).
+// Font-independent math output API and native/CLI adapters (D9.1.1, D10.2.3).
 import latex: .format_latex
 import ascii: .format_ascii
 import mathml: .mathml

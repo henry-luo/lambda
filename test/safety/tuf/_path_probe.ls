@@ -1,4 +1,4 @@
-// D7.5.2, D7.5.8: exercise production URI policy without granting IO authority.
+// D11.1.2, D11.2.4: exercise production URI policy without granting IO authority.
 import uri: lambda.security.tuf.path
 fn probe(row) map {
     {id: row.id, role: uri.role_name(row.text), wire: uri.repository_path(row.text), target: uri.target_name(row.text),

@@ -6,9 +6,9 @@ Scope and acceptance are
 [Radiant_Design_WebGL.md §§4–9 and Appendix A](../radiant/Radiant_Design_WebGL.md).
 
 The explicit `lambda.scene3d` module constructs ordinary elements. Pure helpers
-follow S12.1.1v2 and D7.2.1/D7.2.4. Radiant owns rendering behind the DOM boundary
-(D7.5.3); native projections copy values and use generation-checked DOM identities
-(D4.5.1v4/D4.5.2). No borrowed GC value is retained.
+follow S12.1.1v2 and D9.3.1/D9.3.4. Radiant owns rendering behind the DOM boundary
+(D9.5.6); native projections copy values and use generation-checked DOM identities
+(D5.5.1/D5.5.2). No borrowed GC value is retained.
 
 Delivery sequence:
 
@@ -21,7 +21,7 @@ Delivery sequence:
 
 The full host's existing `LAMBDA_HEADLESS_GLFW_WINDOW=1` switch explicitly enables
 hidden GLFW infrastructure for rendered tests. Ordinary headless execution and
-profile C remain windowless (D7.1.4v2). Runtime-only and WASM acquire no GL dependency.
+profile C remain windowless (D9.2.1). Runtime-only and WASM acquire no GL dependency.
 
 The worktree branch is `codex/scene3d-phase1`, following checkpoint
 `62f3c21d2`. Validation logs and matched measurements are under
@@ -29,14 +29,14 @@ The worktree branch is `codex/scene3d-phase1`, following checkpoint
 
 ## Implemented behavior
 
-`lmd/package/scene3d.ls` is the explicit `lambda.scene3d` entry (D7.2.4,
+`lmd/package/scene3d.ls` is the explicit `lambda.scene3d` entry (D9.3.4,
 S16.9.6/S16.9.8). Constructors return ordinary elements; `normalize`/`validate`
 reject malformed descriptions, duplicate/missing references and invalid cameras,
 geometry, transforms and instances. Transform helpers use column-major matrices,
 right-handed Y-up coordinates, Euler XYZ radians and camera FOV degrees.
 
 `radiant/scene3d.cpp` copies DOM attributes and numeric arrays into a document-owned
-projection (D4.5.2). Basic/Lambert materials support sRGB colors, ambient/directional
+projection (D5.5.2). Basic/Lambert materials support sRGB colors, ambient/directional
 lights, local decoded RGBA textures, indexed/non-indexed buffer geometry, boxes,
 planes, parent transforms, visibility and scene-local geometry/material/texture IDs.
 Opaque instances use actual instanced GL draws, batched by winding; transparent
@@ -59,7 +59,7 @@ preserve replaced internals. Media content paints inside its box's transform,
 clipping and opacity scope. Inline scene viewports use the same media dispatcher.
 Immutable snapshots carry display-list leases; replacement/removal invalidates
 the old generation while retaining pixels until the last consumer releases them
-(D4.5.1v4). Projection changes are prepared before retained ancestor-fragment reuse.
+(D5.5.1). Projection changes are prepared before retained ancestor-fragment reuse.
 
 Repeated UI lifetimes also exposed a pre-existing tile-pool lifecycle defect:
 shutdown destroyed the pool but a once-only initializer prevented recreation.
@@ -70,7 +70,7 @@ The Ringworld example additionally exposed an attribute-override lifetime bug:
 replacing an existing field. Camera options replaced the default vectors, then
 procedural geometry allocation collected the replacements before validation.
 Overrides now use the same `ui_prepare_element_field` helper as initial stores
-(D4.5.2/D5.3.3). The forced, poisoning-GC UI regression checks both a replacement
+(D5.5.2/D6.3.3). The forced, poisoning-GC UI regression checks both a replacement
 vector and computed replacement text; it fails with the previous host and passes
 with the fix.
 Follow-up validation passes all 6,405 Lambda/input baseline checks, the 22 native
@@ -92,7 +92,7 @@ held by display lists follow the existing display-list/cache lifetimes.
 Missing graphics returns null with a diagnostic; it never substitutes a blank
 successful snapshot. `make build-headless` succeeds, and `otool -L`/`nm -u` show
 no GLFW/OpenGL dependencies or imports. The package construction golden also
-passes under `lambda-headless.exe` (D7.1.4v2). The core additionally compiles
+passes under `lambda-headless.exe` (D9.2.1). The core additionally compiles
 alone with `LAMBDA_NO_GUI`. No ANGLE or software renderer is bundled.
 JS WebGL/Three.js is implemented separately in [Phase II](Radiant_WebGL_Phase2.md).
 Further page export remains separately scoped.
@@ -102,7 +102,7 @@ Further page export remains separately scoped.
 Import `lambda.scene3d` explicitly (S16.9.6/S16.9.8). The entry exports `Scene`,
 `Vector3`, `Matrix4`; `scene`, `group`, `camera`, `light`, `box`, `plane`,
 `geometry`, `material`, `texture`, `mesh`, `resources`; `normalize`, `validate`;
-and pure `transform`, `multiply`, `point` helpers (D7.2.4/S12.1.1v2).
+and pure `transform`, `multiply`, `point` helpers (D9.3.4/S12.1.1v2).
 See [the mixed Lambda page](../../test/scene3d/mixed.ls) for executable syntax.
 The [Ringworld demo](../../test/demo/scene3d/ringworld.ls) provides a larger
 visual example: procedural banded sphere and annular geometry, three moons,
@@ -145,7 +145,7 @@ page uses the public source package and typed attributes, without JS bootstrap.
 shared resources and transform goldens. `test/scene3d/mixed.ls` has its own text
 golden and an additional native page-pixel assertion. The native runner is part
 of `make test-radiant-baseline`, and `make test-scene3d` is its standalone gate
-(D7.3.5).
+(D9.4.5).
 
 ## Aggregate validation and existing failures
 

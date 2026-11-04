@@ -1,4 +1,4 @@
-// score semantics stay in Lambda; the native host consumes timed MIDI bytes (D7.2.5).
+// score semantics stay in Lambda; the native host consumes timed MIDI bytes (D10.2.1).
 import c: .common
 import t: .time
 import tl: .timeline

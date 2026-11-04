@@ -2,8 +2,8 @@
 
 The contextual Shape Format ribbon edits selected shapes and WordArt. Source
 image atoms retain parameters; SVG carries appearance. This follows S1.4,
-S12.1.3, and D7.2.5. Screen and exported documents use the same graphic, with
-the existing selected-view ownership under D4.5.1v4.
+S12.1.3, and D10.2.1. Screen and exported documents use the same graphic, with
+the existing selected-view ownership under D5.5.1.
 
 ## Core milestone
 

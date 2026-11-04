@@ -7,13 +7,13 @@ neobrutalist borders, [`lambda.ui.wired`](Lambda_UI_Wired.md) for pencil outline
 [`lambda.ui.blade`](Lambda_UI_Blade.md) for detailed fantasy materials,
 equipment slots and resource meters. Clay and Blade expose the broader
 Ant-inspired component set. These are ordinary source packages
-(**D7.2.4**) presented through logical elements (**S12.1.3**).
+(**D9.3.4**) presented through logical elements (**S12.1.3**).
 This page documents the shared Ant-inspired behavior and `dtna` appearance;
 the linked theme guides cover their tokens, APIs and galleries.
 
 `lambda.ui.dtna` is an experimental Ant Design-inspired package for native
 Radiant documents. Its ordinary shipped module is
-`lmd/package/ui/dtna.ls` (**D7.2.4**). Interactive browser distribution is deferred.
+`lmd/package/ui/dtna.ls` (**D9.3.4**). Interactive browser distribution is deferred.
 
 The implementation covers portions of 37 of the 73 AntD 6.6.5 catalog
 entries. No entry is certified complete. The [feature inventory](../test/ui/dtna_reference/catalog.manifest)
@@ -90,7 +90,7 @@ Button supports `variant` (`primary`, `default`, `dashed`, `text`, `link`),
 `type` (`button`, `submit`, `reset`). `loading` accepts a boolean or
 `{delay:milliseconds,icon:content}`; activation remains available during the
 delay and is blocked once the indicator is shown. Pending frames belong to
-the document and stop when the owner disappears (**D7.5.3**).
+the document and stop when the owner disappears (**D9.5.6**).
 Use `href`, `target`, `rel` and `download` for an anchor button, `auto_focus`
 for native autofocus, and `class_names`/`styles` maps for `root`, `icon` and
 `content` parts. `auto_insert_space` defaults to true for a literal two-character
@@ -216,7 +216,7 @@ enclosing handler (**S12.1.1v2–S12.1.3**).
 `checkable_tag(props,child)` accepts `checked` or `default_checked`, `disabled`
 and `icon`. Its native button has checkbox semantics and emits `ui_change`
 with a boolean requested value. Enter/Space and inherited disabled state use
-the DOM behavior package (**D7.2.5**). Controlled/default pairs are exclusive.
+the DOM behavior package (**D10.2.1**). Controlled/default pairs are exclusive.
 Group selection, motion and semantic-part overrides remain outstanding.
 
 Badge supports `count`, `overflow_count`, `show_zero`, `dot`, `status`, `text`,
@@ -239,7 +239,7 @@ it requires a unique component `id` for its SVG mask resource. Lines use linear 
 `to right`, `to left`, `to top`, and `to bottom`. Ring colors have native pixel checks. Percent label positioning is
 not implemented and is diagnosed. Bare system-function references lack
 the runtime's boxed dynamic-call ABI; callbacks must be Lambda functions
-(**D6.2.1/D6.2.2v2**).
+(**D7.2.1/D7.2.2**).
 
 Timeline accepts `items`, `orientation`, `mode:'start'|'end'|'alternate'`,
 `reverse`, `pending`, and `pending_icon`. Items accept `title`, `content`,
@@ -444,7 +444,7 @@ make test262-baseline
 ```
 
 The focused target checks the catalog inventory, package goldens on all three
-execution tiers (**D8.1.1v17**), native-state regressions, and real native
+execution tiers (**D8.3.6**), native-state regressions, and real native
 pointer/type/keyboard fixtures on forced interpreter and JIT paths. The shared
 Radiant baseline includes `dtna`.
 The native gallery capture is an inspection artifact; reference-app pixel
@@ -465,7 +465,7 @@ open presentation-identity issue UI-1. Small/middle/large sizes use 15/20/25px.
 Pointer motion previews without committing; pointer exit restores the selection.
 Repeated selection clears when `allow_clear` is enabled. Left/Right adjust by
 one or half, follow RTL, and stop at the bounds; `keyboard:false` disables these
-arrow adjustments. Native buttons provide Enter/Space activation (**D7.2.5**).
+arrow adjustments. Native buttons provide Enter/Space activation (**D10.2.1**).
 `ui_change` and `ui_hover` use typed action values; hover exit carries `null`.
 A named hidden field submits the selected value as exact text. Controlled
 values request changes while retaining application-owned props
@@ -486,7 +486,7 @@ visibility. They are mutually exclusive. A close emits `ui_action` with
 `action:'close', value:false`; retaining `visible:true` declines the request
 (**S12.1.1v2–S12.1.3**). Closing a nested alert leaves its parent open, including
 when both omit HTML IDs. Native Enter/Space activate the close button
-(**D7.2.5**). Close motion and after-close notification remain outstanding.
+(**D10.2.1**). Close motion and after-close notification remain outstanding.
 
 Alert's `class_names` and `styles` maps address `root`, `icon`, `section`,
 `title`, `description`, `actions` and `close`. Class values and CSS declaration
@@ -501,7 +501,7 @@ true), nonnegative millisecond `delay`, `description` (or compatibility `tip`),
 sizes are 14/20/32px; size changes leave the description font unchanged. Manual
 percentages clamp to 0–100. Automatic progress follows the reference's staged
 200ms updates and parks above 96 until its owner stops spinning. Delays and
-automatic progress use document-owned named frames (**D7.5.3**); removing the
+automatic progress use document-owned named frames (**D9.5.6**); removing the
 owner prevents later delivery. There is no mutable global default indicator.
 
 `indicator` may be authored content or a pure Lambda function receiving

@@ -18,11 +18,11 @@
   implemented (§20).
 - **Formal authority:** **S4.1.2 / S4.2.3** (int saturation to the shared
   inf; nan is unequal), **S7.1.3v2** (an out-of-range read yields null),
-  **D2.4.1–D2.4.3** (native lanes and their null sentinels), **D2.5.3**
-  (flow-sensitive use of an index read's payload), **D3.3.3v3** (array
-  certificates), **D4.3.1** (headers never move; the data zone compacts, so
-  a data pointer is reloaded after any allocation point), **D4.4.4v4** (a
-  handle carries facts valid while the place is unchanged), **D3.2.6** /
+  **D2.3.4–D2.3.5** (native lanes and their null sentinels), **D2.4.3**
+  (flow-sensitive use of an index read's payload), **D4.3.3** (array
+  certificates), **D5.3.1** (headers never move; the data zone compacts, so
+  a data pointer is reloaded after any allocation point), **D5.4.4** (a
+  handle carries facts valid while the place is unchanged), **D4.2.6** /
   **S11.4.10** (verified once, valid while unchanged), S9.1.3 / S9.2.2
   (plain params snapshot; a `var` borrow un-shares first), D5 (precise
   rooting through the side stack).
@@ -155,13 +155,13 @@ that boxes the value and calls `lambda_array_set_checked_inplace_lane` /
 hot plus 2 × 25 cold; `swap`'s two stores are 84 hot instructions against 9
 in C. The value being stored was read from the same certified `int[]` one
 line earlier, so its band is already proven; the share bit and the length
-of a `var` parameter are facts (D4.4.4v4) that cannot change between two
+of a `var` parameter are facts (D5.4.4) that cannot change between two
 stores with no call between them.
 
 **M3 — Root spills and layout reloads around leaf calls.** `math.sqrt` in
 `advance` is emitted as a MAY-GC call: nine root registers are written back
 to the side-stack frame before it, nine reloaded after it, and the data
-pointers of the seven arrays reloaded after that (D4.3.1) — twenty-five
+pointers of the seven arrays reloaded after that (D5.3.1) — twenty-five
 instructions around a one-instruction call, once per inner iteration.
 `sqrt`/`sin`/`cos`/`floor` are libm leaves: they allocate nothing and
 re-enter nothing. Census: `advance` 243 spills, 754 reloads, 304 memory
@@ -198,7 +198,7 @@ index expression that is an affine function of bounded counters: nested
 `c − r + 7` with `r, c ∈ [0, 8)`, `jj + 1` and `ii + mmax` with `mmax < n`,
 `nc4 = remain − nc3`. The proof needs one runtime fact per array per loop —
 `len ≥ bound` — hoisted to the loop head (or the function entry for a `var`
-parameter, D4.4.4v4: the length is a fact until a call that can touch the
+parameter, D5.4.4: the length is a fact until a call that can touch the
 array). Under the proof an element read is one load, and it is **not
 nullable** (S7.1.3v2's null cannot occur), so the whole expression tree
 stays on the plain lane: no sentinel spill/reload/compare per operation, no
@@ -214,7 +214,7 @@ the proof cannot hold (a parameter shorter than the bound).
 
 A store through a certified `T[]` needs: the value in band, the array
 unshared, the index in range. Fold each: the value read from a certified
-lane of the same element type is in band (D3.3.3v3); the share bit of a
+lane of the same element type is in band (D4.3.3); the share bit of a
 `var` parameter or a local is tested once at loop entry and re-tested only
 after a call that can share it (Appendix D's kill rows); the index is
 T30-1's proof. The store becomes the scaled `mov`. Rows: quicksort,
@@ -293,7 +293,7 @@ evidence:
 | cluster | rows (share of samples) | the mechanism |
 |---|---|---|
 | **A** checked boundaries on already-proven values | raytrace3d 47%, towers 33%, crypto_sha1 32%, json 31%, list 26%, cube3d 18%, hashmap 14% | `lambda_type_check` on `float[]`/`int[]` arguments and returns that came from certified fields or same-contract bindings; `int` returns of nullable typed reads admitted through the numeric ladder instead of one null test; `match { case error … case float }` as two `fn_is`; member-to-union returns walked |
-| **B** COW stores and copies | puzzle 74%, richards 55%, splay 46%, hashmap 39%, json 21% | `int[]` cloned on store while a place copy is alive (D4.4.6); record path store as one `lambda_map_path_set_checked_fixed` per write; `var` path borrow re-navigating the spine with `fn_index` per call |
+| **B** COW stores and copies | puzzle 74%, richards 55%, splay 46%, hashmap 39%, json 21% | `int[]` cloned on store while a place copy is alive (D5.4.5); record path store as one `lambda_map_path_set_checked_fixed` per write; `var` path borrow re-navigating the spine with `fn_index` per call |
 | **C** typed-array allocation | cube3d 46%, storage 71%, brainfuck 51%, nqueens 49%, raytrace 15%, splay 16% | `fn_fill` temporaries and `float[]` results allocated per call (Tune29 T29-5 item 2, closed there on cube3d's 25%, wider than that) |
 | **D** strings | json_gen 86%, levenshtein 54%, base64 46%, revcomp 85% (`fn_replace`), regexredux | `fn_strcat_many` copies, `fn_string`, string `fn_eq_depth`, per-char `fn_string_ascii_at` (Tune22's territory) |
 | other | pnpoly `fn_ne` 45%; bounce `is_truthy` 21%; fasta `fn_index`+`fn_lt` 47%; pidigits `fn_numeric_binary` 96%; binarytrees/deriv/gcbench `heap_calloc_class` ~70% (allocation-bound by construction, at parity) | |
@@ -302,8 +302,8 @@ Tracks, to be scheduled after §4: **T30-C1** boundary elision from
 carried proofs (four mechanisms: certified-field array arguments and
 returns incl. raising callees; native null test on scalar returns of
 typed reads; inline tag test for two-member `error` unions; member-to-union
-returns without admission, D8.3.2–D8.3.3); **T30-C2** handle-relative
-direct record stores (D4.4.4v4, Appendix D kill table, richards/splay);
+returns without admission, D7.3.2–D7.3.3); **T30-C2** handle-relative
+direct record stores (D5.4.4, Appendix D kill table, richards/splay);
 **T30-C3** puzzle's shared `int[]` traced to its bind before any code;
 **T30-C4** borrow spine cached per call (hashmap); **T30-C5**
 caller-provided storage for `fill`/`float[]` results (cube3d, storage,
@@ -327,7 +327,7 @@ are sized.
 - Tier parity on every fixture: T0 keeps per-access checks, and every
   proof-elided read or store must print what T0 prints, including the
   out-of-range null and the shared-array copy.
-- No ruling changes. S4.1.2, S7.1.3v2, D4.3.1 and D4.4.4v4 are the four
+- No ruling changes. S4.1.2, S7.1.3v2, D5.3.1 and D5.4.4 are the four
   most likely to be brushed; a track that needs any of them changed stops
   and asks.
 
@@ -756,8 +756,8 @@ here is small — but the witness half of it is genuinely dead code:
 
 `typed_array_witness_closed` nevertheless bailed out for *declared* array
 parameters, to keep their admission for "callers outside the collected
-graph". Those callers cannot reach the raw body, and the admission D3.3.1 and
-D3.3.3 require still happens on every edge; what the closed case drops is the
+graph". Those callers cannot reach the raw body, and the admission D4.3.1 and
+D4.3.3 require still happens on every edge; what the closed case drops is the
 callee re-testing a bit no reachable caller leaves clear. With the bail-out
 removed, queens' four bodies all close (mask 0x1, 0x7, 0xf).
 
@@ -765,7 +765,7 @@ removed, queens' four bodies all close (mask 0x1, 0x7, 0xf).
 predicted branch, and removing it with its cold arms moved no row — while it
 contradicted **ten** emission contracts that pin the admission shape
 (`tune15_typed_array_witness`, `tune26_var_param_proof`, `typed_array_guard`
-and seven more, several citing D3.3.1/D3.3.3). Rewriting ten encoded design
+and seven more, several citing D4.3.1/D4.3.3). Rewriting ten encoded design
 expectations for zero measured gain is not a trade worth making, so the
 bail-out stays with the measurement recorded next to it.
 

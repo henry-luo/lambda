@@ -1,7 +1,7 @@
 # DOCX export implementation
 
 Implemented 2026-10-28. The writer extends the existing script document package
-under **D7.2.1**, **D7.2.4v4**, **D7.5.2** and **S12.4.1v3**. It treats input as
+under **D9.3.1**, **D9.3.4**, **D11.1.2** and **S12.4.1v3**. It treats input as
 data (**S1.8**) and uses existing bounded ZIP/XML facilities. No formal ruling,
 third-party runtime dependency or original-source archive preservation was added.
 

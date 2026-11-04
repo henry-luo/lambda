@@ -1,4 +1,4 @@
-// D7.2.5: hosts declare which boundary attributes stay on the original block.
+// D10.2.1: hosts declare which boundary attributes stay on the original block.
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import lambda.editor.mod_source_pos

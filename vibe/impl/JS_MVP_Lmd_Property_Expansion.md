@@ -47,14 +47,14 @@ an unsupported interaction must not silently take an ordinary-object shortcut.
 
 | Topic | Authority and consequence |
 |---|---|
-| Shared substrate | **D1.3v3**: reuse Lambda/lib implementations first; extract neutral storage primitives from JS code when its semantic adapter cannot be reused |
+| Shared substrate | **D1.3**: reuse Lambda/lib implementations first; extract neutral storage primitives from JS code when its semantic adapter cannot be reused |
 | JS semantics | **S1.11**: JS follows ECMAScript; sharing storage does not replace guest property semantics with Lambda map semantics |
-| Values and containers | **D2.3.2**, **D2.6.6v3**, **D2.6.9v3**: exact carrier checks, ordinary nominal Maps and Arrays, no VMap conversion of plain objects |
-| Nominal contracts | **S2.1.4**, **S11.3.1v2**, **D2.6.10**, **D3.2.4v4**: nominal identity/ancestry and declared field prefixes survive JS representation changes |
-| Shape and key identity | **D3.4.3v5–D3.4.5**, **S8.2.2v5**: shared transitions and canonical UTF-8/lossless WTF-8 keys, with no Unicode normalization or loss of Symbol identity |
-| Metadata/accessors | **D3.4.7–D3.4.8**: immutable class refinement; object-local accessor cells on private virtual shape entries |
-| Ownership and failure | **D1.4v4**, **D1.5v2**, **D5.2–D5.3**, **D8.4.3v2**: explicit completions, destination-owned scalars and precise roots across every callback |
-| Optimization | **D8.4.1v2**: immutable predicted specialization with shared fallback; no new per-site caches or feedback vectors |
+| Values and containers | **D2.3.3**, **D3.1.1**, **D3.1.5**: exact carrier checks, ordinary nominal Maps and Arrays, no VMap conversion of plain objects |
+| Nominal contracts | **S2.1.4**, **S11.3.1v2**, **D3.1.2**, **D4.2.5**: nominal identity/ancestry and declared field prefixes survive JS representation changes |
+| Shape and key identity | **D3.4.3–D3.4.5**, **S8.2.2v5**: shared transitions and canonical UTF-8/lossless WTF-8 keys, with no Unicode normalization or loss of Symbol identity |
+| Metadata/accessors | **D3.4.7–D3.4.7**: immutable class refinement; object-local accessor cells on private virtual shape entries |
+| Ownership and failure | **D1.4**, **D1.5**, **D6.2–D6.3**, **D7.4.3**: explicit completions, destination-owned scalars and precise roots across every callback |
+| Optimization | **D7.4.1**: immutable predicted specialization with shared fallback; no new per-site caches or feedback vectors |
 | Lambda effects | **S12.1.1v2**: arbitrary JS callbacks cannot be hidden inside a pure Lambda field read |
 
 This plan applies those contracts; it does not revise the formal specifications.
@@ -113,7 +113,7 @@ bit is part of this phase.
 Shapes with the same storage but different relevant attributes or semantic
 families must not be treated as interchangeable proofs. Verify reflag/retype,
 delete, spread/copy and constructor-shape paths maintain summaries. Shared
-shapes stay immutable; private accessor shapes obey D3.4.8. Copying or converting
+shapes stay immutable; private accessor shapes obey D3.4.7. Copying or converting
 an accessor never copies a cell pointer into a packed Item slot.
 
 ### 4.2 Operation-specific guards
@@ -187,7 +187,7 @@ the existing catch/finally and generator completion machinery.
 Keep `TypeNominal.base` as declared ancestry. Store the live JS `[[Prototype]]`
 relationship separately. Initial class construction aligns instance/prototype
 and constructor links with that ancestry; later JS link mutation cannot change
-nominal identity or Lambda declared offsets (**S2.1.4**, **D2.6.10**).
+nominal identity or Lambda declared offsets (**S2.1.4**, **D3.1.2**).
 
 Replace the unguarded nominal walk in `mvp_lmd_instanceof` for mutable cases.
 Extend current `super` handling to use the appropriate live home-object or
@@ -219,7 +219,7 @@ General cross-language subclass adapters remain outside this phase.
 Reuse `JsAccessorCell`, its dedicated GC allocation, and
 `ShapeEntry::{flags,byte_offset,accessor}`. Attach a cell only to a private
 shape with `JSPD_IS_ACCESSOR` and `byte_offset == -1`; ordinary data objects
-continue using shared transition shapes (**D3.4.8**).
+continue using shared transition shapes (**D3.4.7**).
 
 Generalize the current data-only descriptor adapter and reuse shared
 validation/application. Install object/class accessors with the correct
@@ -533,7 +533,7 @@ container/type/side-table bit was added.
   lazy function preparation and exotic receiver inspection retain their own
   precise roots. Default indexed definitions enter the existing array storage
   helper before general descriptor conversion; length and extensibility checks
-  still precede the write (**D5.2–D5.3**, **D8.4.3v2**). Small numeric property
+  still precede the write (**D6.2–D6.3**, **D7.4.3**). Small numeric property
   strings reuse Lambda's existing immortal ASCII table.
 - Prototype assumptions use a **compile-time closed-unit proof**, not a new
   runtime epoch. Explicit reflection/mutation, accessors, proxies or unproved
@@ -566,7 +566,7 @@ container/type/side-table bit was added.
   Object projections reserve their output once with
   `array_reserve_append_slots`; local iteration bindings adopt scalar values
   before the body without an intermediate snapshot. Captured bindings and
-  observable paths retain earlier ownership (**D2.6.4**, **D5.2–D5.3**).
+  observable paths retain earlier ownership (**D2.6.2**, **D6.2–D6.3**).
 - Ordinary function construction reuses its nominal shape when the closed unit
   excludes prototype replacement and new-target is the callee. Live and proxy
   new-target paths retain validation and scoped prototype roots. Array method
@@ -583,11 +583,11 @@ container/type/side-table bit was added.
   owner and receiver coincide. It reuses `map_shape_set_resolved`, including
   shared retyping/ownership, before descriptor construction. Accessors, foreign
   declared fields, different receivers, proxies and missing slots retain the
-  full algorithm (**D3.2.4v4**, **D3.4.5**, **D5.2–D5.3**).
+  full algorithm (**D4.2.5**, **D3.4.5**, **D6.2–D6.3**).
   The existing store specialization can retain that exact shared-shape proof
   in mutable units; misses always enter semantic Set. The existing
   `mvp_lmd_cache_property` helper was promoted to the module header for reuse,
-  with no new cache layout or feedback mechanism (**D8.4.1v2**). Negative cases
+  with no new cache layout or feedback mechanism (**D7.4.1**). Negative cases
   cover redefinition as an accessor/non-writable property, deletion followed by
   an inherited setter, and scalar-to-object retyping. Passive descriptor reads
   place roots only around lazy function preparation. Array edits allocate
@@ -596,7 +596,7 @@ container/type/side-table bit was added.
   when a fresh inspection proves that ordinary ancestors have no enumerable
   string properties. `for_in_own_keys_suffice` performs no guest callbacks;
   proxies, function preparation and enumerable ancestors retain the full path
-  (**D3.4.3v5–D3.4.5**, **S8.2.2v5**). The proxy fixture checks keys and trap
+  (**D3.4.3–D3.4.5**, **S8.2.2v5**). The proxy fixture checks keys and trap
   counts: **S1.11** delegates this to
   [ECMAScript 14.7.5.9](https://tc39.es/ecma262/multipage/ecmascript-language-statements-and-declarations.html#sec-enumerate-object-properties),
   which permits different enumeration mechanics for exotic prototype chains.
@@ -613,19 +613,19 @@ container/type/side-table bit was added.
   precede a required initializer or TDZ check. Scalar ownership and the sparse
   fallback remain intact.
   These are compiler facts, with no container bit, side table or new feedback
-  mechanism (**D8.4.1v2**, **D5.2–D5.3**). Normal/forced-GC fixtures pass;
+  mechanism (**D7.4.1**, **D6.2–D6.3**). Normal/forced-GC fixtures pass;
   aggregate performance acceptance remains pending.
 - Named member keys use the existing frontend name pool at compile time.
   `.length`, named methods and named `super` accesses need no repeated runtime
   property-key conversion; computed keys retain their conversion and effects
-  (**S8.2.2v5**, **D1.3v3**). A Text Search profile identified that converter as
+  (**S8.2.2v5**, **D1.3**). A Text Search profile identified that converter as
   its largest sampled native leaf before this change.
 - The existing `mvp_lmd_inherited_member_flags` accepts semantic lookup as an
   option. Ordinary Map chains use the shared traversal without allocating a
   root frame at every missing property. An accessor immediately enters its
   rooted call adapter; arrays, functions and proxies retain receiver-aware
   dispatch. Pure Lambda lookup still rejects guest traps (**S12.1.1v2**,
-  **D5.2–D5.3**).
+  **D6.2–D6.3**).
 - `guarded_array_index_extent` supplements sparse admission with an enclosing
   loop's upper bound. The index must be a local Number; captured/reflected
   bindings, earlier writes, nested-loop revisits and pattern writes reject
@@ -634,7 +634,7 @@ container/type/side-table bit was added.
   array keys, never to scalar typing or arithmetic specialization.
 - Coercion imports retain their existing implementations. Separate `_fixed`
   aliases narrow reentry effects only when the closed unit excludes coercion
-  hooks, dynamic properties, reflection, iterators and Symbols (**D8.4.3v2**).
+  hooks, dynamic properties, reflection, iterators and Symbols (**D7.4.3**).
   The compiler fact does not mark an object as normal. The new
   `observe_coercion_member` shares admission for object properties, class
   methods and class fields; its field case fixes a reproduced capability error
@@ -647,10 +647,10 @@ container/type/side-table bit was added.
   descriptors and holes. No per-object promotion flag was introduced.
   `SparseArrayMap` entries
   own `TypedItem` payloads; GC traces these and accessor/proxy edges precisely
-  (**D2.6.4**, **D2.7.1**, **D5.2–D5.3**). No numeric GC cells were introduced.
+  (**D2.6.2**, **D2.6.1**, **D6.2–D6.3**). No numeric GC cells were introduced.
 - Live JS prototype links use private traced properties. `TypeNominal.base`
-  remains the Lambda declared ancestry (**D2.6.10**). Guest writes reject
-  foreign declared field contracts (**D3.2.4v4**); passive Lambda readers reject
+  remains the Lambda declared ancestry (**D3.1.2**). Guest writes reject
+  foreign declared field contracts (**D4.2.5**); passive Lambda readers reject
   accessors/proxies and sparse element access instead of invoking JS callbacks
   or indexing beyond physical storage (**S12.1.1v2**).
 
@@ -666,7 +666,7 @@ Shared extraction reuses `js_map_store_accessor`, reader-parameterized
 `JsProxyData`, `JsPropertyOps`, and the existing sparse-table allocation,
 lookup/store/index/density primitives. Full LambdaJS retains its own semantic
 wrappers. MIR generic imports are classified for reentry; physical readers
-retain narrower effects (**D8.4.3v2**).
+retain narrower effects (**D7.4.3**).
 
 MVP adapters include `mvp_lmd_set_completion`, `mvp_lmd_define_own_property`,
 descriptor compatibility/SameValue, argument-list and public-key projection,
@@ -680,7 +680,7 @@ check across Map calls, collection methods and spread. Compiler helpers
 admission proof. `branch_sparse_array` shares emission of the existing storage
 guard; `sequence_method_runtime` shares argument rooting and fallback calls.
 These helpers were disclosed before implementation. No new per-site
-feedback cells were introduced (**D8.4.1v2**).
+feedback cells were introduced (**D7.4.1**).
 
 ### Current evidence and acceptance still pending
 
@@ -808,7 +808,7 @@ rejects indexed shape descriptors, inherited indices, proxies and unsuitable
 write policy, then reuses the existing indexed storage helper via an internal
 operation option. No container flag or cached proof is added. The proof lasts
 only across callback-free storage work; scalar homes remain destination-owned
-(**D2.6.4**, **D3.4.3v5–D3.4.8**, **D5.2–D5.3**). Shared Lambda map reads also
+(**D2.6.2**, **D3.4.3–D3.4.7**, **D6.2–D6.3**). Shared Lambda map reads also
 avoid a duplicate accessor check while retaining the passive-reader rejection
 (**S12.1.1v2**).
 
@@ -827,7 +827,7 @@ C-ABI entry point backed by a compile-time specialization of the same property
 implementation. The compiler's existing closed-unit proof selects it; mutable
 units retain general dispatch and native accessor handling remains shared.
 This removes redundant mutable-prototype/proxy checks without duplicating the
-kernel or adding per-container state (**D1.3v3**, **D8.4.3v2**).
+kernel or adding per-container state (**D1.3**, **D7.4.3**).
 The frozen `fixed-dispatch` release (SHA-256
 `8ae55da50302142c1b581c48cd38859a368b42982fd158ee12e08ebffaa97f74`)
 passes **132/132** normal tests and **41/41** focused forced-GC/poison tests;
@@ -853,7 +853,7 @@ setters ran and inherited read-only values blocked construction. Four cases
 reproduce on the frozen `fixed-dispatch` release (`array-creation-before.json`).
 Fresh arrays, map/filter results and internal receiver cells now use the existing
 `array_index_write(..., initialize=true)` option; scalar ownership remains shared
-(**D1.3v3**, **D2.6.4**). The five creation fixtures match Node and pass in MVP.
+(**D1.3**, **D2.6.2**). The five creation fixtures match Node and pass in MVP.
 An initial positive fixture using an array-pattern member target hit the existing
 unsupported-syntax boundary; that syntax was not added by this phase. The
 accepted local-density fixture inventory retains supported map-pattern and
@@ -869,7 +869,7 @@ Microdiff): no candidate interval excludes one against both controls. SHA1's
 also excludes one (`local-density-screen/comparison.json`).
 The subsequent diagnostic change extracts Lambda's existing opt-in address
 logger as `jit_log_code_addresses` and reuses it from MVP. It is disabled during
-timing; sampling profiles remain separate diagnostic evidence (**D1.3v3**).
+timing; sampling profiles remain separate diagnostic evidence (**D1.3**).
 
 The frozen `profile-addresses` release (SHA-256
 `903c60b5aec8da9e15d9e6428e497af861a4ed010e239a40dd6bd411c19321d2`)
@@ -887,7 +887,7 @@ ordinary JS semantics. Body-local lexical initializers run again during replay.
 Calls, captured/external writes, array rebinding and observable coercion remain
 excluded. Updates must be local numeric operations that cannot cause a storage
 bailout. This hoists receiver/storage guards across a nested loop without a
-runtime container flag or new helper (**D8.2.1–D8.2.6**, **D8.4.1v2**).
+runtime container flag or new helper (**D8.2.1–D8.2.6**, **D7.4.1**).
 The frozen `for-replay` release (SHA-256
 `8bcb1956f453f8860ebec33e9c766e6d106bdae28c429a0a16e992a83282723e`)
 passes **135/135** normal and forced-GC/poison tests and **407/407** extracted
@@ -910,7 +910,7 @@ inconclusive (**22.832 / 22.845 / 22.909 ms**) and confirms Deriv remains slower
 rejection into the no-payload path: `js_proxy_carrier_new` keeps `Map::data` null
 and stores traced edges in its trailing carrier. The boundary fixture checks
 both key routes and verifies that guest property mutation preserves that layout
-(**D2.6.6v3**, **S12.1.1v2**).
+(**D3.1.1**, **S12.1.1v2**).
 
 A separate Microdiff profile on `for-replay` shows repeated prototype/storage
 inspection among its leading runtime costs (`microdiff-for-replay-long-leaves.json`).
@@ -937,7 +937,7 @@ the leading costs. Fresh object literals now reuse Lambda's existing physical
 map store for default own data properties, bypassing inherited setters and
 non-writable properties as required by JS creation semantics. Descriptor and
 prototype-setting literal forms retain their own operations (**S1.11**,
-**D1.3v3**, **D3.4.3v5–D3.4.5**). The frozen `literal-storage` release (SHA-256
+**D1.3**, **D3.4.3–D3.4.5**). The frozen `literal-storage` release (SHA-256
 `fd3c3e2e9abe48665a23fe905ae19942381b3253569584f1a782a1765b308476`)
 passes the previous 135 groups, but its new literal group exposes the existing
 object-method `super` admission gap; **135/136 is not acceptance**. Its seven-pair
@@ -955,7 +955,7 @@ extra slot. The callable's slot index fits existing padding, enforced by a size
 assertion. Existing `mvp_lmd_class_super` reads the live prototype; the common
 call/spread path retains `new.target`, constructor TDZ and derived field
 initialization. No new helper or independent closure representation is added
-(**D6.2.3v2–D6.2.4**, **D5.3**, **S1.11**). The frozen `literal-home` release
+(**D7.2.3–D7.2.4**, **D6.3**, **S1.11**). The frozen `literal-home` release
 (SHA-256 `60c1bba557fee1cd44b0248fb5f96a7832e18b9d8f30e714794d3673fbbc198e`)
 passes **137/137** normal and full forced-GC/poison groups, **439/439** extracted
 Node comparisons and **20/20** release home-object snippets
@@ -994,7 +994,7 @@ scalar reads. The previous emitter lost that domain when initialization was not
 proven and emitted generic coercion branches. The existing `read_binding` helper
 now retains possible `undefined` for hoisted `var`, performs the same TDZ check,
 and retains scalar-home snapshots; reflected globals and object-valued domains
-keep their existing paths (**S1.11**, **D2.6.4**, **D6.2.3v2**, **D8.2.1–D8.2.6**).
+keep their existing paths (**S1.11**, **D2.6.2**, **D7.2.3**, **D8.2.1–D8.2.6**).
 No helper or runtime state is added. The `captured-scalars` release (SHA-256
 `852765fe5355647b86bfc5eb1076b6a739ffd0d66e88d1527ad4905dacc2f16e`)
 passes **138/138** normal groups, **9/9** focused forced-GC/poison groups and
@@ -1015,7 +1015,7 @@ the semantic fixtures remain.
 Ordinary method/function receivers now avoid the constructor-only TDZ guard.
 The existing `check_tdz` emitter still checks derived constructors and lexical
 receiver arrows; `new.target` does not depend on receiver initialization.
-No runtime state or helper is added (**S1.11**, **D6.2.3v2–D6.2.4**,
+No runtime state or helper is added (**S1.11**, **D7.2.3–D7.2.4**,
 **D8.2.1–D8.2.6**). The frozen `receiver-tdz` release (SHA-256
 `005372918d303a7f7596027935d96177d0c10d6014a3ad412e37137b8f99470c`)
 passes **140/140** normal groups, **13/13** focused forced-GC/poison groups and
@@ -1031,12 +1031,12 @@ existing padding and summarizes only its own bounded shape chain. Shared hash
 insertion/build and transition creation maintain the fact; detached clones
 recompute it. Prototype lookup can omit a private-link probe when none exists.
 It said nothing about inherited properties, accessors, proxy behavior or sparse
-storage; it was not a replacement normal/special flag (**D3.4.3v5–D3.4.5**,
+storage; it was not a replacement normal/special flag (**D3.4.3–D3.4.5**,
 **D3.4.7**). Fresh array literal initialization reuses `array_index_write` with
 a reserved-slot count. The existing two-slots-per-item reservation covers both
 visible entries and potential scalar homes. Constant prefix indices omit
 redundant bounds checks; scalar ownership and post-spread generic handling
-remain intact (**D2.6.4**, **D2.7.1**, **D5.3**). No helper is added.
+remain intact (**D2.6.2**, **D2.6.1**, **D6.3**). No helper is added.
 The frozen release (SHA-256
 `1144c36552290574acbeed435160cd25ae3ab135bc2ff605d6e0503c18266f51`)
 passes **142/142** normal and full forced-GC/poison groups and **492/492** Node
@@ -1054,7 +1054,7 @@ reuses the earlier checksum-verified extended workload). Inherited array reads
 now avoid assignment-state preparation. Passive Map/Array prototype traversal
 can tail-dispatch through existing helpers; accessors root their inputs at
 invocation, and function/proxy paths retain a three-slot precise frame before
-potential collection. Writes retain their existing ownership path (**D5.3**,
+potential collection. Writes retain their existing ownership path (**D6.3**,
 **S1.11**). New cases cover allocating getters/traps, prototype mutation, array
 and function prototypes, abrupt completion and revocation. No helper is added.
 The frozen `inherited-read` release (SHA-256
@@ -1111,7 +1111,7 @@ prototype and inherited constructor and the live species getter uses the
 existing native identity entry. Any own constructor, prototype change, user
 getter, deletion, or proxy takes semantic dispatch. Existing `object_value` was
 promoted to `mvp_lmd_object_value` in the module header; no duplicate helper,
-identity cache or object flag was added (**D1.3v3**, **D3.4.7**, **D5.3**).
+identity cache or object flag was added (**D1.3**, **D3.4.7**, **D6.3**).
 Twelve new Node cases and focused forced-GC checks pass; that checkpoint passes
 145/145 normal groups.
 
@@ -1144,8 +1144,8 @@ observable prototype links. Admission permits exactly one indexed write and
 no other indexed access, calls or nested loops; an out-of-bounds key restores
 numeric locals and replays the iteration before its store. Existing scalar-home
 storage handles out-of-band Numbers. This is a lexical proof, with no retained
-normal flag, cache or epoch (**D1.3v3**, **D2.6.4**, **D3.4.7**,
-**D8.2.1–D8.2.6**, **D8.4.3v2**).
+normal flag, cache or epoch (**D1.3**, **D2.6.2**, **D3.4.7**,
+**D8.2.1–D8.2.6**, **D7.4.3**).
 
 That capture also exposes a new Brainfuck regression (94.809 ms versus
 42.320/42.281 ms on the two controls). The named-property inference correction
@@ -1186,14 +1186,14 @@ change imports existing `typemap_hash_lookup_key` and reuses
 `map_shape_field_to_item` for present own fields when the compiler proves an
 ordinary map in a closed unit without receiver/property callbacks. Missing
 fields retain the original fallback and scalar snapshots remain shared
-(**D1.3v3**, **D2.6.4**, **D3.4.3v5–D3.4.5**, **D8.4.3v2**).
+(**D1.3**, **D2.6.2**, **D3.4.3–D3.4.5**, **D7.4.3**).
 
 The same prepared checkpoint removes `Object.prototype.toString`'s redundant
 outer root frame: successful brand checks are passive, semantic lookup owns
 the receiver across reentry, and no receiver is used afterward. Any returned
 tag is copied to native `StrBuf` storage before the next GC allocation. The
 observable tag lookup, proxy errors and getter effects remain mandatory
-(**S1.11**, **D5.2–D5.3**). Both changes reuse existing helpers; their new
+(**S1.11**, **D6.2–D6.3**). Both changes reuse existing helpers; their new
 fixtures pass in the frozen `own-map-tag` release (SHA-256
 `97ab362f55b31153f67012f7997d7855f9c98f6901efede15d9cc584e93c2bc0`):
 **150/150** normal and full forced-GC/poison groups, **577/577** extracted
@@ -1217,7 +1217,7 @@ The local-method checkpoint passes **151/151** normal and full forced-GC/poison
 groups and **586/586** Node cases. A further passive own-query path
 reuses `mvp_lmd_property_has` for canonical string keys on non-proxy maps, where
 neither conversion nor lookup can reenter or collect. Other receivers and
-keys retain rooted semantic dispatch (**D5.2–D5.3**, **S1.11**). The combined
+keys retain rooted semantic dispatch (**D6.2–D6.3**, **S1.11**). The combined
 `passive-own` release (SHA-256
 `08641c43fc414f4b4b0b48daec0d292eb34d07b5d73ca2a12c5bb1736ba4f094`)
 passes **153/153** normal and full forced-GC/poison groups and **600/600** Node
@@ -1247,10 +1247,10 @@ differs. This is diagnostic evidence, with more frequent GC than the canonical
 workload. A prepared forwarding change removes the intermediate heap array
 used by bound/call/apply paths: arguments go directly into shared `RootSpan`
 slots and side-stack scalar homes, with incoming snapshots before prefix
-getters and cleanup on abrupt completion (**D2.7.1**, **D5.2–D5.3**).
+getters and cleanup on abrupt completion (**D2.6.1**, **D6.2–D6.3**).
 It adds no helper. A separate optional nonnegative mode on existing
 `em_unbox_finite_int_item` removes sign extension for proven unchanged integer
-array literals; other callers keep the signed default (**D2.4.3**,
+array literals; other callers keep the signed default (**D2.3.5**,
 **D8.2.1–D8.2.6**). The frozen `forward-span` release (SHA-256
 `db3f69a068426a5729f8b18949d9d802ce70e1cafb90b7f1c1f4e641ed2471eb`)
 passes **155/155** normal and full forced-GC/poison groups and **616/616**
@@ -1267,7 +1267,7 @@ is inconclusive against the identical peer. The next prepared changes avoid
 sorting an already ordered own-key snapshot and borrow native Map pair values
 only until both uncaptured local bindings adopt their scalars. Captured,
 external, reflected and protocol paths keep their ownership boundaries
-(**D5.2–D5.3**, **D8.2.1–D8.2.6**). No helper or container flag is added;
+(**D6.2–D6.3**, **D8.2.1–D8.2.6**). No helper or container flag is added;
 forced-GC and performance confirmation are pending.
 
 The frozen `ordered-bind` release (SHA-256
@@ -1330,7 +1330,7 @@ array storage and scalar coercion; dynamic behavior must remain observable.
 Three general changes address avoidable work in the remaining regression paths:
 
 - Reuse `String.is_ascii` to prove canonical UTF-8 Map keys without a byte scan;
-  non-ASCII keys still use Lambda's canonicalization (**S8.2.2v5**, **D4.6.1v4**).
+  non-ASCII keys still use Lambda's canonicalization (**S8.2.2v5**, **D5.6.1**).
   Property-key conversion now calls the existing `canonical_string` once.
 - Batch long primitive string chains through existing `fn_strcat_many`, using
   Lambda's existing 64-piece ceiling. Promote `emit_vararg_call_common` to
@@ -1338,11 +1338,11 @@ Three general changes address avoidable work in the remaining regression paths:
   prototype identity includes the function because MVP creates one emitter
   per function. Short chains retain fixed-arity calls; source evaluation and
   conversion order, object/Symbol fallback and precise roots remain intact
-  (**S1.11**, **D5.2–D5.3**, **D8.2.1–D8.2.6**). No runtime helper is added.
+  (**S1.11**, **D6.2–D6.3**, **D8.2.1–D8.2.6**). No runtime helper is added.
 - Reorder indexed writes so an existing element needs one bounds decision.
   The append edge alone checks capacity and updates length immediately before
   the shared store, with no intervening safepoint. Sparse, descriptor and
-  scalar-home fallbacks remain intact (**D2.6.4**, **D2.7.1**, **D5.3**).
+  scalar-home fallbacks remain intact (**D2.6.2**, **D2.6.1**, **D6.3**).
 
 The frozen `primitive-batch` candidate is
 `632fe75643ac6050ce94c6b23dee87a53bfacbda40957d96909309dbb8be679a`.
@@ -1381,7 +1381,7 @@ borrow option only for uncaptured, non-global, non-native local bindings,
 outside inlining, with no external/reflected/intrinsic binding. Initialization
 immediately invokes the existing `write_binding` adoption into the local home,
 without a call between the read and adoption. This removes an intermediate
-snapshot while retaining the final owned copy (**D2.7.1**, **D5.3**, **D8.2.1–D8.2.6**).
+snapshot while retaining the final owned copy (**D2.6.1**, **D6.3**, **D8.2.1–D8.2.6**).
 Captured/global/native bindings and destructuring retain their existing path;
 callback reads retain their own lifetime safeguards. No helper is added.
 The `local-adopt` candidate, SHA-256
@@ -1438,7 +1438,7 @@ The following array-pair refinement reuses the existing `borrow_pair` local
 ownership proof for native Array destructuring. Both uncaptured local bindings
 adopt their components before body execution; callback-capable reads still
 snapshot immediately, so a second getter cannot overwrite the first value
-(**D2.7.1**, **D5.3**, **D8.2.1–D8.2.6**). No helper or representation flag is
+(**D2.6.1**, **D6.3**, **D8.2.1–D8.2.6**). No helper or representation flag is
 added. Among the 83 frozen benchmark sources, array-pattern loop heads occur
 in Fasta, Knucleotide, Regexredux and Map Iteration.
 
@@ -1495,7 +1495,7 @@ sampling coverage. Exact binaries, sources, samples and outputs are retained.
 Raytrace's diagnostic MIR still contains sparse-storage checks. Its closed-unit
 proof rejects unbounded writes through global loop indices and postincrements;
 the retained guards are required until a stronger proof establishes physical
-storage (**D2.6.4**, **D8.2.1–D8.2.6**). This identifies a code-generation
+storage (**D2.6.2**, **D8.2.1–D8.2.6**). This identifies a code-generation
 limitation, not a measured attribution of the entire remaining 1.8% gap.
 The full 83-row screen belongs to `local-adopt`; the final release has this
 eight-row follow-up. No full-population, zero-regression claim is made.

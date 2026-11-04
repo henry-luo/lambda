@@ -1306,7 +1306,7 @@ int main(int argc, char **argv) {
 
 TEST_F(DomNodeBaseTest, ResolvedMarkNamespacesRetainDomQualifiedAttributeAccess) {
     doc->xml_document = true;
-    test_input->ui_mode = true;  // view copies isolate DOM mutations under D4.5.3.
+    test_input->ui_mode = true;  // view copies isolate DOM mutations under D5.5.3.
     MarkBuilder builder(test_input);
     Target* svg = namespace_target(pool, "http://www.w3.org/2000/svg", "s", ':');
     Target* link = namespace_target(pool, "http://www.w3.org/1999/xlink", "xlink", ':');

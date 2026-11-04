@@ -1,5 +1,5 @@
 // root_vector.cpp - growable, address-stable, precisely rooted Item vector.
-// See root_vector.h for the contract (D5.1.1v2, D5.4.2; JSCU12).
+// See root_vector.h for the contract (D6.1.1, D6.4.2; JSCU12).
 #include "../../lib/arraylist.h"
 #include "../lambda-data.hpp"   // full Item definition; lambda.h only forward-declares it in C++
 #include "root_vector.h"
@@ -212,7 +212,7 @@ extern "C" void root_vector_destroy(RootVector* v) {
     Context* owner = root_vector_owner(v);
     // unregister only from the heap the blocks are registered with; an older
     // heap's registry died with it
-    // an already-unregistered vector needs no access to its retired context (D5.3.3).
+    // an already-unregistered vector needs no access to its retired context (D6.3.3).
     bool live = v->heap_generation != 0 && heap_generation_for(owner) == v->heap_generation;
     if (live) root_vector_unregister_ranges(v, owner, v->block_count);
     for (int i = 0; i < v->block_count; i++) {

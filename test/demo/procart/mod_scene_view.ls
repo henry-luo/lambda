@@ -1,4 +1,4 @@
-// shared retained orbit controls and instanced scene construction (S12.1.3 / D7.5.3v2).
+// shared retained orbit controls and instanced scene construction (S12.1.3 / D9.5.6).
 import dom
 import drawing: lambda.procart.scene
 import s: lambda.scene3d

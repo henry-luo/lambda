@@ -28,7 +28,7 @@ static int g_custom_layout_registry_count = 0;
 static CustomLayoutUnknownLogEntry g_custom_layout_unknown_logs[CUSTOM_LAYOUT_MAX_UNKNOWN_LOGS];
 static int g_custom_layout_unknown_log_count = 0;
 
-// shipped layouts resolve to package exports; documents never install callbacks (D7.5.3v2).
+// shipped layouts resolve to package exports; documents never install callbacks (D9.5.6).
 static const struct {
     const char* name;
     const char* module;

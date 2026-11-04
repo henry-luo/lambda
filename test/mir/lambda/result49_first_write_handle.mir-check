@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.4.4v4: a first packed-bool write binds one unique record handle for adjacent fields; a changed index ends that proof. Packed leaves use byte stores.",
+  "description": "D5.4.4: a first packed-bool write binds one unique record handle for adjacent fields; a changed index ends that proof. Packed leaves use byte stores.",
   "checks": [
     {
       "in_func": "_set_flags_#",

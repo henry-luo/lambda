@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "P4 / D4.4.4v4 / S9.1.2: aligned int and packed bool leaves use guarded raw stores, while an unaligned int leaf and failed ownership guards retain checked COW stores.",
+  "description": "P4 / D5.4.4 / S9.1.2: aligned int and packed bool leaves use guarded raw stores, while an unaligned int leaf and failed ownership guards retain checked COW stores.",
   "checks": [
     {
       "in_func": "_update_#",

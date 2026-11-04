@@ -69,7 +69,7 @@ TEST_F(MimeDetectTest, FilenameDetection) {
 }
 
 TEST_F(MimeDetectTest, MarkCanonicalExtension) {
-    // D2.9.1: existing case-insensitive matching applies to the sole Mark extension.
+    // D10.1.1: existing case-insensitive matching applies to the sole Mark extension.
     EXPECT_STREQ(detect_mime_from_filename(detector, "data.mark"), "text/x-mark");
     EXPECT_STREQ(detect_mime_from_filename(detector, "/site.v2/data.MARK"), "text/x-mark");
     const char* source = "'extension-check'";

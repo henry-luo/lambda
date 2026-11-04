@@ -1,4 +1,4 @@
-// S12.1.3 / D4.5.3v2: retain the owner and capture node; handlers publish only paint/controls.
+// S12.1.3 / D5.5.3: retain the owner and capture node; handlers publish only paint/controls.
 import dom
 import draw: lambda.editor.draw
 import model: .model

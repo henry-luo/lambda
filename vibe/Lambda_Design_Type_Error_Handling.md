@@ -15,11 +15,11 @@ remain separate from these ratified changes.
 S16.2.6v2 (handler convenience and classification);
 S7.4.1v2–S7.4.2v4, S7.4.5v2–S7.4.6v3,
 S7.5.1v6, S7.5.3v3–S7.5.5, S11.4.2v3, S12.1.4v4, S12.3.4v2,
-D5.2.1v5 (ordinary-error unification and union-only particular errors);
+D6.2.1 (ordinary-error unification and union-only particular errors);
 S7.5.1v6, S7.5.2v4 (initializer and reassignment acknowledgement);
 S7.7.1v3, S7.7.2v2, S7.7.4v2, S7.7.5v3, S7.7.6v2, S7.7.7v4, S11.4.1v5, S11.4.6v4,
 S11.4.7v3, S12.2.1v3, SI14v3 (validation and binding outcomes);
-D2.8.3v3, D3.2.2v3, D3.2.3v3 (representation and recorded type facts);
+D2.5.3, D4.2.3, D4.2.4 (representation and recorded type facts);
 S2.5.3v3, S2.5.4v3, S12.1.2v3 (procedural results);
 S7.6.1v9, S7.6.7v5 (uniform handler results);
 S7.6.2v5, S7.6.6v6, S10.1.7v4, S16.4.3v4 (single-arm handler surface).
@@ -150,7 +150,7 @@ and scope remain open. No new must-inspect rule is introduced here.
 
 **Decided 2026-11-02, USER. Authority: S7.4.1v2–S7.4.2v4,
 S7.4.5v2–S7.4.6v3, S7.5.1v6, S7.5.3v3–S7.5.5, S11.4.2v3,
-S12.1.4v4, S12.3.4v2; representation: D1.4v4, D5.2.1v5.
+S12.1.4v4, S12.3.4v2; representation: D1.4, D6.2.1.
 Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Decision and rationale
@@ -300,7 +300,7 @@ ordinary-error convention, including dynamic `call` (S12.3.4v2).
 Element/field mutation rejection/reporting and no-invalid-write contracts remain.
 TE-18.2 separately extends continued outcome binding to whole-variable reassignment.
 
-The physical ABI is an implementation choice under D1.4v4/D5.2.1v5. Boxed
+The physical ABI is an implementation choice under D1.4/D6.2.1. Boxed
 outcomes and proven native success/error lanes can represent the same semantic
 outcome. No new exception unwinding, result object, or native error sentinel
 is introduced, and equivalent type spellings cannot change caller behavior.
@@ -327,7 +327,7 @@ semantics.
 ## TE-13.3 — Particular error outcomes use ordinary unions
 
 **Decided 2026-11-02, USER. Authority: S7.4.2v4, S11.4.2v3;
-representation: D5.2.1v5. Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
+representation: D6.2.1. Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Decision
 
@@ -784,7 +784,7 @@ acknowledgement warning (TE-13.1).
 whole outcome.** If a deferred check against `T` can fail, the effective type
 includes `T | error`, or a sound conservative approximation when `T` itself is
 runtime-dependent. The compiler records the declared target and effective
-type separately (D3.2.3v3). No invalid original value is passed off as a `T`;
+type separately (D4.2.4). No invalid original value is passed off as a `T`;
 failure yields an error instead. If `T` already admits error, the union need
 not add a distinct alternative. A binding proven error-free may retain the
 clean type and representation.
@@ -794,7 +794,7 @@ it can be decided, with an error-bearing outcome where admission must be
 deferred. It is not a requirement that every annotation be proven before
 compilation can proceed, and it is not permission to store an error in a
 native `T` slot. Error-bearing outcomes remain represented safely until
-discharged or proven error-free (D2.8.1, D2.8.3v3).
+discharged or proven error-free (D2.5.1, D2.5.3).
 
 ### Validation as an expression
 
@@ -861,7 +861,7 @@ admission retain their own contracts pending follow-up.
 ## TE-18.2 — Whole-variable reassignment follows initializer admission
 
 **Decided 2026-11-02, USER. Authority: S7.5.2v4, S7.7.4v2–S7.7.7v4,
-S11.4.1v5, S12.2.1v3, SI14v3; representation: D2.8.3v3, D3.2.3v3.
+S11.4.1v5, S12.2.1v3, SI14v3; representation: D2.5.3, D4.2.4.
 Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 ### Decision
@@ -927,7 +927,7 @@ Effective types must reflect all reachable assignments, including branch joins
 and loop back edges. A prior clean initializer or annotation cannot justify
 unboxing a later error. A later clean assignment or valid narrowing can establish
 error freedom on its path; joins must still include other reachable outcomes
-(SI14v3, D2.8.3v3, D3.2.3v3).
+(SI14v3, D2.5.3, D4.2.4).
 
 `count = e ^ { fallback }` handles errors from `e`, not a subsequent admission
 failure of the annotation. It receives no blanket diagnostic exemption.
@@ -960,7 +960,7 @@ The retired rules and their rationale are preserved in
 
 ## TE-13.4 — Error unions retain normal admission
 
-**Decided 2026-11-03, USER. Authority: S7.4.2v4/S11.4.6v4/D3.2.4v5.
+**Decided 2026-11-03, USER. Authority: S7.4.2v4/S11.4.6v4/D4.2.5.
 Implemented and caller-qualified in M8; full parity is waived by USER (2026-11-03; Appendix A).**
 
 `T | error`, `T^`, and particular-error unions `T | E` apply T's ordinary
@@ -1060,9 +1060,9 @@ suffix; callers use the single `^ { ... }` handler, explicit checks or branching
 value or rich validation error and continue; no implicit declaration exit or
 stale old variable value remains (S7.7.2v2/S7.7.4v2). Effective outcomes survive
 joins, captures and borrow publication; native lanes require valid normal-kind
-proofs (SI14v3/D2.8.3v3). Error unions apply ordinary conversion, array
+proofs (SI14v3/D2.5.3). Error unions apply ordinary conversion, array
 certification and record reification, including invocation-selected targets
-(S11.4.6v4/D3.2.4v5). The approved cross-block PHI optimizer fix and its recorded
+(S11.4.6v4/D4.2.5). The approved cross-block PHI optimizer fix and its recorded
 patch are implemented; its regression is part of the passing MIR gate.
 Public validation-expression syntax, dedicated typed-loop admission, and
 field/element-store policy remain separate follow-ups.
@@ -1253,7 +1253,7 @@ for comparison, not as current rulings.
 ~~A deferred initializer failure leaves its name unbound and exits the declaring
 block; the successful declaration guard makes every subsequent use clean.~~
 Replaced by **TE-18.1 / S7.7.2v2 / S11.4.1v4**: validation is a value-producing
-check; deferred failure binds an error outcome and continues. **D2.8.3v2**
+check; deferred failure binds an error outcome and continues. **D2.5.3**
 requires proof of error freedom before native use, not an implicit block exit.
 
 The earlier design protected annotated native values with one dominating
@@ -1327,7 +1327,7 @@ unchanged parameter and mutation clauses still apply at their own boundaries.
 >   representation proof only while the actual carrier matches that proof;
 >   otherwise it re-admits before optimized access. This internal choice never
 >   changes the contract, values, or failure behavior. [S7.7.2, S7.10.6,
->   D3.3.3v3, TE-1, TE-2, TE-4, TE-9]
+>   D4.3.3, TE-1, TE-2, TE-4, TE-9]
 >
 > - **S11.4.6*** User-defined types are enforced by the validator: deep, on
 >   first crossing, or a rich error with a validator path and no binding.
@@ -1345,28 +1345,28 @@ unchanged parameter and mutation clauses still apply at their own boundaries.
 >   by **exact embedding** only (S4.4.1) — never lossy coercion; assignment
 >   never silently corrupts data. [Design_Procedural §3]
 >
-> - **D2.8.3*** **Lane entry is gated on static proof, never on runtime
+> - **D2.5.3*** **Lane entry is gated on static proof, never on runtime
 >   rescue.** Admission is read from the destination contract (§S7.8.1): a
 >   provably infallible source enters branch-free; a source only inferable
 >   as `T | error` is **not lane-eligible** and stays boxed until
 >   discharged — never a checked lane store that might fail mid-mutation. A
 >   declaration's entry guard then dominates every use of the binding in its
->   scope (§S7.7.2), so D2.8.1 and D2.8.2 hold **by construction rather than
+>   scope (§S7.7.2), so D2.5.1 and D2.5.2 hold **by construction rather than
 >   by per-use guards**. The gating analysis is `may_defect` with
->   fail-closed polarity (D6.1.3): unknown ⇒ defect-capable ⇒ demotion,
+>   fail-closed polarity (D7.1.3): unknown ⇒ defect-capable ⇒ demotion,
 >   which is viral through unanalyzed callers — so the effect split is a
 >   **prerequisite** for lane routing, not a later optimization, and an
 >   unannotated literal that boxes solely for unproven fallibility must be
 >   diagnosed rather than silently demoted. [TE-17, TE-18; IEH I3, I4]
 >
-> - **D3.2.2*** The **validator is the runtime enforcer** for user-defined
+> - **D4.2.3*** The **validator is the runtime enforcer** for user-defined
 >   types: deep, on first crossing, producing a rich error with a validator
 >   path — or the binding never exists. Constrained types (`T that …`)
 >   enforce the base only, for now; `is`, `fn_is`, the emitter, and the
 >   validator must consolidate onto the shared foundation (a known
 >   three-way divergence today). [TE-10, TE-6 P5]
 >
-> - **D3.2.3** Declared and effective types are **separate recorded facts**
+> - **D4.2.4** Declared and effective types are **separate recorded facts**
 >   (declaration on the binding node, inference beside it): an annotation is
 >   a contract (semantics S11.4.1); inference is never a binding contract
 >   and may never override what it proved. [TE-1, TE §8.1]
@@ -1749,7 +1749,7 @@ scope of their current formal successors.
 >   caller's contract* — the keyword makes the dependence visible in the
 >   declaration. [C20-2–C20-6, C20.6, Features §3.6]
 
-> - **D5.2.1v3** Function wide-scalar returns use the **companion-lane
+> - **D6.2.1** Function wide-scalar returns use the **companion-lane
 >   convention**: a may-be-wide boxed return is the pair `[item, scalar]` —
 >   lane 2 a raw 64-bit payload (never a pointer), live iff lane 1 is a
 >   **pending Item** (reserved tag `0x1E`, kind in the payload). A pending
@@ -2558,7 +2558,7 @@ historical wording, not alternate current rules.
 >   representation proof only while the actual carrier matches that proof;
 >   otherwise it re-admits before optimized access. This internal choice never
 >   changes the contract, values, or failure behavior. [S7.7.2, S7.10.6,
->   D3.3.3v3, TE-1, TE-2, TE-4, TE-9]
+>   D4.3.3, TE-1, TE-2, TE-4, TE-9]
 
 #### Prior S11.4.6v2
 
@@ -2587,9 +2587,9 @@ historical wording, not alternate current rules.
 >   by **exact embedding** only (S4.4.1) — never lossy coercion; assignment
 >   never silently corrupts data. [Design_Procedural §3]
 
-#### Prior D2.8.3v2
+#### Prior D2.5.3
 
-> - **D2.8.3v2*** **Lane entry is gated on static proof, never on runtime
+> - **D2.5.3*** **Lane entry is gated on static proof, never on runtime
 >   rescue.** Admission is read from the destination contract (§S7.8.1): a
 >   provably infallible source enters branch-free; a source only inferable
 >   as `T | error` is **not lane-eligible** and stays boxed until
@@ -2598,16 +2598,16 @@ historical wording, not alternate current rules.
 >   (§S7.7.2v2); its annotation alone therefore does not prove later uses clean.
 >   Its effective outcome stays error-capable until discharge or a valid proof
 >   excludes the error on the use path. Only that clean path may use native
->   storage and operators (D2.8.1–D2.8.2). The gating analysis is `may_defect` with
->   fail-closed polarity (D6.1.3): unknown ⇒ defect-capable ⇒ demotion,
+>   storage and operators (D2.5.1–D2.5.2). The gating analysis is `may_defect` with
+>   fail-closed polarity (D7.1.3): unknown ⇒ defect-capable ⇒ demotion,
 >   which is viral through unanalyzed callers — so the effect split is a
 >   **prerequisite** for lane routing, not a later optimization, and an
 >   unannotated literal that boxes solely for unproven fallibility must be
 >   diagnosed rather than silently demoted. [TE-17, TE-18.1; IEH I3, I4]
 
-#### Prior D3.2.2v2
+#### Prior D4.2.3
 
-> - **D3.2.2v2*** The **validator is the runtime enforcer** for user-defined
+> - **D4.2.3*** The **validator is the runtime enforcer** for user-defined
 >   types: deep, on first crossing, producing a rich error with a validator
 >   path as the failed validation outcome. A deferred initializer binds that
 >   outcome without exiting its block (S7.7.2v2); other boundaries consume it
@@ -2616,9 +2616,9 @@ historical wording, not alternate current rules.
 >   validator must consolidate onto the shared foundation (a known
 >   three-way divergence today). [TE-10, TE-6 P5, TE-18.1]
 
-#### Prior D3.2.3v2
+#### Prior D4.2.4
 
-> - **D3.2.3v2*** Declared and effective types are **separate recorded facts**
+> - **D4.2.4*** Declared and effective types are **separate recorded facts**
 >   (declaration on the binding node, inference beside it): an annotation is
 >   a strict admission contract (S11.4.1v4). A deferred initializer's effective
 >   type includes the validation-error alternative (S7.7.2v2); preserving that
@@ -2691,9 +2691,9 @@ The exact provisional follow-up and formal rules replaced by this decision:
 >   return contracts; when error is disclosed, caller acknowledgement is
 >   uniform. [TE-5, TE-13.2]
 
-#### Prior D5.2.1v4
+#### Prior D6.2.1
 
-> - **D5.2.1v4*** Function wide-scalar returns use the **companion-lane
+> - **D6.2.1*** Function wide-scalar returns use the **companion-lane
 >   convention**: a may-be-wide boxed return is the pair `[item, scalar]` —
 >   lane 2 a raw 64-bit payload (never a pointer), live iff lane 1 is a
 >   **pending Item** (reserved tag `0x1E`, kind in the payload). A pending
@@ -2768,3 +2768,34 @@ Appendix A and the implementation plan; these notes preserve the starting gaps.
 > (`lambda/runtime/interp_plan.cpp`) and `transpile_content_value`
 > (`lambda/runtime/transpile-mir.cpp`) exclude these handlers when selecting the
 > block result. These are implementation gaps, not exceptions to the ruling.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.8.3v3 → D2.5.3
+
+**D2.5.3*** **Lane entry is gated on static proof, never on runtime
+rescue.** Admission is read from the destination contract (§S7.8.1): a
+provably infallible source enters branch-free; a source only inferable
+as `T | error` is **not lane-eligible** and stays boxed until
+discharged — never a checked lane store that might fail mid-mutation.
+A deferred initializer or whole-variable reassignment binds an admitted
+value or error and continues (§S7.7.2v2, §S7.7.4v2); its annotation alone
+therefore does not prove later uses clean. Reassignments and branch/loop
+joins must update that proof before any native use.
+Its effective outcome stays error-capable until discharge or a valid proof
+excludes the error on the use path. Only that clean path may use native
+storage and operators (D2.5.1–D2.5.2). The gating analysis is `may_defect` with
+fail-closed polarity (D7.1.3): unknown ⇒ defect-capable ⇒ demotion,
+which is viral through unanalyzed callers — so the effect split is a
+**prerequisite** for lane routing, not a later optimization, and an
+unannotated literal that boxes solely for unproven fallibility must be
+diagnosed rather than silently demoted. [TE-17, TE-18.1–TE-18.2; IEH I3, I4]

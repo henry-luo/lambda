@@ -19,7 +19,7 @@ static bool render_lambda_pdf(RenderExportSession* session, const char* filename
     if (!session || !filename || !session->document || !session->ui_context) return false;
     Runtime* runtime = context ? context->runtime : nullptr;
     if (!runtime) {
-        // the UI owns cached modules across batch jobs; no Items cross evaluator lifetimes (D5.4.1).
+        // the UI owns cached modules across batch jobs; no Items cross evaluator lifetimes (D6.4.1).
         if (context && context->execution_depth) return false;
         runtime = ui_context_loader_runtime(session->ui_context);
         if (!runtime) return false;

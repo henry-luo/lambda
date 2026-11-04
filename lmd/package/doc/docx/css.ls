@@ -1,4 +1,4 @@
-// Shared document presentation for direct viewing and the file browser (D7.2.4).
+// Shared document presentation for direct viewing and the file browser (D9.3.4).
 pub let STYLESHEET = "
   .docx-viewer { margin: 0; background: #eef1f5; color: #232a35;
                  font-family: Arial, sans-serif; }

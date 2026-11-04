@@ -23,7 +23,7 @@ fn stage(effect, selected, strength) element^ {
     role: "img", 'aria-label': effect.title ++ " applied to the selected artwork"})
 }
 
-// typed shader maps stay Lambda values when a control rebuilds the gallery (D7.5.3v2).
+// typed shader maps stay Lambda values when a control rebuilds the gallery (D9.5.6).
 view <gallery> state selected: "text", strength: 40 {
     <div id: "gallery", 'data-source': selected, 'data-strength': string(strength),
         <section class: "workbench", 'aria-label': "Effect controls",

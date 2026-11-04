@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T22-4: a total text split producer still crosses the one shared String[] admission boundary, which publishes the representation certificate before later direct reads (S11.4.1v3, D3.3.3v3).",
+  "description": "T22-4: a total text split producer still crosses the one shared String[] admission boundary, which publishes the representation certificate before later direct reads (S11.4.1v3, D4.3.3).",
   "checks": [
     {
       "in_func": "_tune22_split_words_#",

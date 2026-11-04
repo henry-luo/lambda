@@ -1,6 +1,6 @@
 // S11.1.6v3: an element pattern's content section is a sequence-pattern slot.
 // The children match as `[c, d]` matches an array -- runs, literal items, and
-// the whole content. D2.6.6v3: the pattern lives on the declared type only.
+// the whole content. D3.1.1: the pattern lives on the declared type only.
 
 type UL = <ul <li>*>
 type NonEmpty = <ul <li>+>

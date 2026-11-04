@@ -471,13 +471,13 @@ TEST(JsOpt, PropertySiteCacheContractRejectsMutableCells) {
         "\tcall\tp, mvp_lmd_class_property_fixed, %r1, %r2, %r3, 0, 0\n");
     EXPECT_NONFATAL_FAILURE(mir_check::expect_js_no_site_caches(
         "\tcall\tp, mvp_lmd_class_property, %r1, %r2, %r3, 0, 0, 123\n"),
-        "D8.4.1v2: obsolete JS property cache operand");
+        "D7.4.1: obsolete JS property cache operand");
     EXPECT_NONFATAL_FAILURE(mir_check::expect_js_no_site_caches(
         "\tcall\tp, mvp_lmd_class_property_fixed, %r1, %r2, %r3, 0, 0, %r4\n"),
-        "D8.4.1v2: obsolete JS property cache operand");
+        "D7.4.1: obsolete JS property cache operand");
     EXPECT_NONFATAL_FAILURE(mir_check::expect_js_no_site_caches(
         "\tcall\tp, mvp_lmd_class_property, %r1, %r2, %r3, 0, 0, 0\n"),
-        "D8.4.1v2: obsolete JS property cache operand");
+        "D7.4.1: obsolete JS property cache operand");
 }
 
 TEST(JsOpt, TraceParserFailsClosed) {

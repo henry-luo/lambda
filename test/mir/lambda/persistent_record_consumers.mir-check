@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.2.4v4/S11.4.10: optional record roots use admitted field offsets with a checked null fallback; returned-record guards also recognize persistent prefixes.",
+  "description": "D4.2.5/S11.4.10: optional record roots use admitted field offsets with a checked null fallback; returned-record guards also recognize persistent prefixes.",
   "checks": [
     {
       "in_func": "_set_optional_#",

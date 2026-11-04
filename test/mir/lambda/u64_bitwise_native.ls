@@ -1,4 +1,4 @@
-// S4.4.4 / D2.4: only proven raw u64 operands may use native word operations.
+// S4.4.4 / D2.3: only proven raw u64 operands may use native word operations.
 fn lane(a: u64, b: u64) u64 => bxor(bor(a, b), band(a, b))
 fn logical(a: u64) u64 => ushr(a, 11)
 fn widths(a: u64) array => [ushr(a, 0), ushr(a, 1), ushr(a, 63), ushr(a, 64), ushr(a, 128)]

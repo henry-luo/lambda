@@ -163,7 +163,7 @@ The `HASHMAP_DEFINE_*` macro family in `lib/hashmap_helpers.h` replaces the prop
 
 ### 2.6 Geometry / math helpers — ⏳ partial
 
-- ✅ `lib/math_utils.h` shipped — `lib_math::clamp/sign/lerp/abs_val/min_val/max_val` (C++ templates in `lib_math` namespace, opt-in via `using`) plus C-and-C++-compatible `LMB_*` macros (CLAMP/SIGN/LERP/ABS/MIN/MAX). Also byte saturation/rounding, unit clamping, shared float pi/tau and double pi constants, float/double angle conversion, and positive-period wrapping. This keeps provider-neutral primitives in `lib` (D7.1.3).
+- ✅ `lib/math_utils.h` shipped — `lib_math::clamp/sign/lerp/abs_val/min_val/max_val` (C++ templates in `lib_math` namespace, opt-in via `using`) plus C-and-C++-compatible `LMB_*` macros (CLAMP/SIGN/LERP/ABS/MIN/MAX). Also byte saturation/rounding, unit clamping, shared float pi/tau and double pi constants, float/double angle conversion, and positive-period wrapping. This keeps provider-neutral primitives in `lib` (D9.1.3).
 - ✅ Migrated:
   - [radiant/render_filter.cpp:34](../radiant/render_filter.cpp) — `clamp_01` now delegates to `clamp_unit`
   - [radiant/layout_containing_block.cpp:8](../radiant/layout_containing_block.cpp) — `clamp_non_negative` now uses `lib_math::max_val`
@@ -210,7 +210,7 @@ See §1.7 — 9 stock comparators added; `input-latex-tables.cpp` migrated.
 ### 3.4 Content-addressed cache key in `lib/cache_key.h` — not needed
 
 `enhanced_file_cache.cpp` owns the SHA-256 cache path, and `input_http` uses
-that cache directly.  In line with D1.3v3's shared-host-substrate rule, a
+that cache directly.  In line with D1.3's shared-host-substrate rule, a
 second generic cache-key API would duplicate the native HTTP cache identity
 and could reintroduce a compatibility path.
 

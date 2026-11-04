@@ -4,7 +4,7 @@
  * ES39/ES40 (vibe/Lambda_Design_DOM_Host_API.md). Each `dom_core_*` function
  * is a core operation: either it *is* the mechanism or it is a one-call
  * delegation to the ordinal executor / property protocol in dom_ops.h (the
- * realm-shared entries, D7.4.4). Each `dom_fp_*` function is the native fast
+ * realm-shared entries, D9.5.4). Each `dom_fp_*` function is the native fast
  * path of a DERIVED row and must equal that row's derivation string (ES43):
  * the oracle tests in test/lambda/dom_derive_*.ls hold it to that.
  *
@@ -70,7 +70,7 @@ extern "C" Item dom_absent_to_null(Item v) {
  *
  * The property protocol answers JS `undefined` when a property does not exist
  * on this node kind -- Text has no firstElementChild, and CharacterData has no
- * children -- because that protocol is realm-shared (D7.4.4) and undefined is
+ * children -- because that protocol is realm-shared (D9.5.4) and undefined is
  * what a JS caller must see. Lambda has no undefined: absence is null. So the
  * catalog's reads normalise at this boundary, and only here; the JS door keeps
  * undefined by calling dom_get_property_impl itself.
@@ -368,7 +368,7 @@ extern "C" void* dom_create_backed_element_ns_bridge(void* document_ptr,
         const char* tag, const char* namespace_uri) {
     return dom_create_backed_element_identity((DomDocument*)document_ptr, tag, namespace_uri, true);
 }
-// Property WRITES through the realm-shared protocol (D7.4.4). These were kept
+// Property WRITES through the realm-shared protocol (D9.5.4). These were kept
 // out of the Lambda face because they faulted with no JS realm (ESO81); the
 // fault was the unguarded prototype fallback in the getter, not the write, so
 // with that guarded they are ordinary neutral operations.
@@ -413,7 +413,7 @@ extern "C" Item dom_core_invoke(Item n, Item op, Item args) {
     int64_t argc = get_type_id(args) == LMD_TYPE_ARRAY ? js_array_length(args) : 0;
     if (argc <= 0) return dom_element_operation_impl(n, operation, nullptr, 0);
     // The executor allocates while it reads this span, so the unpacked arguments
-    // live in a root region, not a native buffer (D5.2.1). The region is sized to
+    // live in a root region, not a native buffer (D6.2.1). The region is sized to
     // argc and fails closed on reservation overflow, so no arity cap is needed.
     RootSpan roots((size_t)argc);
     Item* unpacked = roots.items();
@@ -700,7 +700,7 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
 extern "C" Item dom_core_computed_style(Item n, Item prop) {
     // The style wrapper is heap-managed. Root both operands and the temporary
     // across the nested core calls: a Lambda package call may allocate while
-    // resolving a property, unlike the JS-only fast path (D5.3.3).
+    // resolving a property, unlike the JS-only fast path (D6.3.3).
     RootFrame roots(3);
     Rooted<Item> node(roots, n);
     Rooted<Item> property(roots, prop);
@@ -748,7 +748,7 @@ extern "C" Item dom_fp_document_element(Item n) {
     return (doc && doc->root) ? dom_wrap_element(doc->root) : ItemNull;
 }
 
-// D7.4.5v2: Lambda and JS share the owner-backed VArray; Lambda's DOM remains
+// D9.5.5: Lambda and JS share the owner-backed VArray; Lambda's DOM remains
 // fixed for the run, so no second membership snapshot is needed.
 // children / child_nodes also live in dom.cpp: both answer the live VArray
 // backend directly rather than asking the property protocol for it.

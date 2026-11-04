@@ -750,7 +750,7 @@ static StyleCanonicalEntry* style_epoch_create_entry(
     entry->tree = tree;
     entry->recipe_count = builder->count;
     tree->canonical_owner = entry;
-    // D4.1.4v5: shared canonical trees finish their cache writes before publication.
+    // D5.1.4: shared canonical trees finish their cache writes before publication.
     tree->declaration_cache_valid = false;
     style_tree_init_declaration_cache(tree);
     PoolStats after = {};

@@ -97,7 +97,7 @@ since untransformed rectangular overflow may otherwise exist only as bounds
 during recording.
 Serial and tiled replay share this path; a tile restores the image's world
 placement using the vector target's offset. The image borrows scratch pixels,
-so replay flushes the image batch before releasing its scope (**D4.5.1v4**).
+so replay flushes the image batch before releasing its scope (**D5.5.1**).
 `RdtVectorTest.OuterShadowsRespectNestedClipsAcrossReplayModes` checks hard and
 blurred shadows under nested rectangular/rounded clips, including tile offsets.
 
@@ -113,13 +113,13 @@ A complete subtree visit (`RADIANT_PAINT_ALL`) owns element markers and may
 reuse a whole cached fragment. A split background/float/foreground visit does
 not own that contiguous payload: `render_element_marker_begin` and
 `render_block_try_retained_fragment` reject partial phases. Complete atomic and
-outer visits retain their existing marker/cache contract (**D4.5.1v4 /
-D4.1.4v5**). A cache for individual phases would require explicit phase identity;
+outer visits retain their existing marker/cache contract (**D5.5.1 /
+D5.1.4**). A cache for individual phases would require explicit phase identity;
 a view ID alone cannot represent that ownership.
 
 **Capture** runs after recording. `retained_dl_cache_capture` (`retained_display_list.cpp:360`) scans the recorded list for `DL_BEGIN_ELEMENT` markers and calls `retained_dl_cache_store_marker` (`:319`) for each; if the range is retainable (`dl_item_is_retainable_for_fragment`, `render.hpp`, per-item at `retained_display_list.cpp:312`) it deep-copies the item range into the per-view fragment via `retained_dl_copy_range` (`:186`), which re-deep-copies clip-shape polygons into the fragment's own arena (`retained_dl_copy_clip_shape_stack`, `:39`) so the fragment is independently immutable.
 
-**Lifetime** follows the arena ownership policy in **D4.5.1v4**. After capture, fragments whose `last_stored_epoch` does not match the completed frame are removed, releasing their display lists and arenas. Replaced view IDs therefore do not accumulate across reactive redraws. Current fragments, including markers copied by retained replay, remain available for the next frame.
+**Lifetime** follows the arena ownership policy in **D5.5.1**. After capture, fragments whose `last_stored_epoch` does not match the completed frame are removed, releasing their display lists and arenas. Replaced view IDs therefore do not accumulate across reactive redraws. Current fragments, including markers copied by retained replay, remain available for the next frame.
 
 **Paint layers** (2026-10-21, [RAD_16 §8](RAD_16_Animation_Frame_Scheduling.md)) retain pixels rather than commands. A subtree moved by a presentation transform is captured into a surface and recorded as one image item. The surface is the item's resource owner: a fragment or frame recording that outlives a recapture reads it through its handle. The frame cache keys on the layer override, so a parity render without layers never replays a layered recording.
 
@@ -154,7 +154,7 @@ sampling alone can miss thin stems at slide-thumbnail scales. The shared
 area filtering and glyph masks; glyph normalization includes transparent space
 outside the bitmap. Full-surface and tile-offset replay use the same page-space
 footprint. Magnified, rotated and projective glyphs retain bilinear sampling.
-Retained bitmap ownership remains **D4.1.4v5**.
+Retained bitmap ownership remains **D5.1.4**.
 
 ---
 
@@ -171,7 +171,7 @@ Retained bitmap ownership remains **D4.1.4v5**.
 
 ## 10. Captured glyph-run font selection (2026-10-11)
 
-**D4.5.1v4 / D4.1.4v5** require deferred commands to outlive temporary paint state. `paint_glyph_run()` copies the selected `FontBox` into `PaintGlyphRun::captured_font` and clears the pointer to the mutable walker context. `paint_glyph_run_font()` selects that copied box for validation, glyph outlines and raster lowering. Its style remains borrowed from the live document/native owner during the paint pass. A value snapshot remains valid when the command buffer grows; storing a pointer to the snapshot's old command address would not.
+**D5.5.1 / D5.1.4** require deferred commands to outlive temporary paint state. `paint_glyph_run()` copies the selected `FontBox` into `PaintGlyphRun::captured_font` and clears the pointer to the mutable walker context. `paint_glyph_run_font()` selects that copied box for validation, glyph outlines and raster lowering. Its style remains borrowed from the live document/native owner during the paint pass. A value snapshot remains valid when the command buffer grows; storing a pointer to the snapshot's old command address would not.
 
 `TextOverflowPaint.RecordedGlyphRunsRetainFontSelectionAfterPaintContextChanges` verifies that switching the walker from 20px to 30px and growing the command buffer leaves earlier glyph outlines at their recorded font. The original pointer-only path failed this control. Generated ellipsis text uses the existing owned text payload when an effect group defers lowering.
 

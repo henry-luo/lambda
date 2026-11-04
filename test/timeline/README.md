@@ -3,7 +3,7 @@
 The [proposal](../../vibe/Lambda_Pkg_Chart_Timeline.md) is the full implementation
 contract. [Progress](../../vibe/impl/Lambda_Impl_Chart_Timeline.md) records work and
 open gates. Runtime behavior follows S12.1.1v2/S12.1.3, S9.1.4/S9.3.1,
-S7.4.1/S7.4.2, and D8.1.1v17.
+S7.4.1/S7.4.2, and D8.3.6.
 
 The revised contract covers pure/native acceptance across 27 feature families.
 Browser delivery, automatic resource lifecycle, export, and accessibility/

@@ -12,7 +12,7 @@ The engine sits in front of the existing direct parser (the digester). Rather th
 - A token produced by expansion is written in canonical form. Every byte of it maps back to the main-file offset of the call site.
 - Raw constructs (`verbatim`-family environments, `\verb`, `\lstinline`, `\directlua`, `filecontents`, `tikzpicture` islands) are copied as source spans without tokenization.
 
-When nothing is expanded, the reconstruction is byte-identical to the input, so existing documents keep their AST. The digester's `source_offset` maps through the offset map, so AST offsets and diagnostics still point into the main file (**S7.4.1–S7.4.4**). This realizes §9.2's "one digester": the direct parser stays the only producer of the LaTeX Mark AST (**S2.6.3–S2.6.5, D2.6.5v4**).
+When nothing is expanded, the reconstruction is byte-identical to the input, so existing documents keep their AST. The digester's `source_offset` maps through the offset map, so AST offsets and diagnostics still point into the main file (**S7.4.1–S7.4.4**). This realizes §9.2's "one digester": the direct parser stays the only producer of the LaTeX Mark AST (**S2.6.3–S2.6.5, D3.3.1**).
 
 **Echo rule.** Some definition and counter commands are invoked directly from main-file tokens: the `\newcommand` family, `\newenvironment` family, `\def` family, `\newcounter`/`\setcounter`/`\addtocounter`/`\stepcounter`, and `\newlength`/`\setlength`/`\addtolength`. These are executed *and* their exact source span is echoed, so the script analysis keeps seeing them. Other primitives invoked from main-file tokens are echoed only when they have a visible typesetting effect.
 
@@ -100,7 +100,7 @@ Acceptance needs a pinned BibLaTeX/Biber reference run, which requires installin
     - `\read` runs its own line reader (multi-line until braces balance; an unmatched `}` ends the record; the line takes `\endlinechar` under current catcodes) and no longer swallows the caller's next token or fires `\everyeof`;
     - `\readline` appends `\endlinechar`;
     - file names drop `"` (TeX Live quoting), and `\input` shares `scan_file_name`;
-    - `\pdffilesize`/`\pdffilemoddate`/`\pdfmdfivesum [file]`/`\pdfescapestring`/`\pdfescapename`/`\pdfunescapehex` are exact. File queries see only what `\input` could read (D7.5.2); anything else reads as missing.
+    - `\pdffilesize`/`\pdffilemoddate`/`\pdfmdfivesum [file]`/`\pdfescapestring`/`\pdfescapename`/`\pdfunescapehex` are exact. File queries see only what `\input` could read (D11.1.2); anything else reads as missing.
     - Macro calls pop exhausted input levels before pushing (TeX §390). This keeps tail recursion flat.
     - Allocation now follows plain (`\count19` languages, `\insc@unt` = `\count20`).
   - **Memory.**
@@ -133,7 +133,7 @@ Acceptance needs a pinned BibLaTeX/Biber reference run, which requires installin
     - The registry accepts the `calc` and `shapes.geometric` libraries.
   - **Results:** all 51 LaTeX tests pass.
   - **Found on the way:** a runtime defect. `++` flattens arrays of packed float arrays, and spreading them yields nulls. It is filed as a separate task; the plot code avoids it.
-- 2026-10-12, one front end (**D7.2.7**, ratified the same day):
+- 2026-10-12, one front end (**D10.2.2**, ratified the same day):
   - **Input layer.** `parse_latex_direct` always runs the engine; a file input without `base` resolves beside-document files from its own URL. The unexpanded branch, the `expand` parse option (`tex_expand`) and the `LAMBDA_TEX_EXPAND` knob are gone. An engine that cannot start (allocation failure) yields an error, never a raw parse. Math keeps its definition-triggered expansion.
   - **Callers.** The native document transform now uses the path-source mode with `latex.render_document_file`, so `lambda convert` and Radiant's LaTeX loader parse through `latex.parse_source` and the engine receives the adapter registry. The doc viewer and the doc-editor UI test call `latex.parse_file`.
   - **Script.** `render_generic` no longer substitutes macros; `macros.ls` keeps only `get_defs`/`find_macro` for TikZ islands, bussproofs and `\familydefault`. `macro_depth` is gone from the info record.

@@ -6,8 +6,8 @@
 > **Package:** `lambda.doc.spelling`.
 > **Scope:** offline spelling checks and correction suggestions for prose,
 > followed by document and editor integration and qualified language packs.
-> **Spec linkage:** D7.2.1/D7.2.3 govern source packages and state;
-> D7.2.4v3/D7.2.6 govern the namespace and facade; S2.5.8/S17.4.1 govern text
+> **Spec linkage:** D9.3.1/D9.3.3 govern source packages and state;
+> D9.3.4/D9.3.5 govern the namespace and facade; S2.5.8/S17.4.1 govern text
 > positions; S6.2.2v3 governs sort order; S17.7.1/S17.7.2 govern case operations;
 > S12.1.1v3 governs effects. The dictionary format in §4.3 is adopted package
 > policy; other APIs and defaults remain proposed. No formal language ruling changes.
@@ -17,7 +17,7 @@
 Implement the checker in Lambda Script, with an explicit entry module at
 `lmd/package/doc/spelling.ls` and helpers and data under `doc/spelling/`.
 This gives the requested `import spelling: lambda.doc.spelling` without a
-resolver exception, consistent with **D7.2.4v3/D7.2.6**.
+resolver exception, consistent with **D9.3.4/D9.3.5**.
 
 Start with **English, prepared dictionaries, and deterministic suggestions**:
 
@@ -185,10 +185,10 @@ personal-dictionary file writes are `pn` operations, following **S12.1.1v3**.
 The host can load once and reuse the immutable checker across checks.
 
 Package imports must not read user dictionaries or build a large suggestion
-index at module initialization. **D7.2.1** requires immutable module bindings;
-**D7.2.3** caches imported packages, not an implicitly shared user session.
+index at module initialization. **D9.3.1** requires immutable module bindings;
+**D9.3.3** caches imported packages, not an implicitly shared user session.
 Any later runtime cache must be context-owned and keyed by resource identity.
-Route resource reads through the existing IO boundary (**D7.1.2v2/D7.5.2**).
+Route resource reads through the existing IO boundary (**D9.1.2/D11.1.2**).
 
 An offline Python preparation utility is acceptable as development tooling.
 Released checks must not require Python, Node.js, a shell subprocess, or a
@@ -403,7 +403,7 @@ their painted rectangles. Displayed slide text uses a snapshot of visible DOM
 text leaves with native range geometry, because the compiled slide canvas has no
 editor source map. It honors `spellcheck=false` and inherited language on those
 leaves. The resulting wavy overlays leave source data,
-formatting, selection and undo untouched (**D7.2.5**). Suggestions, broader language profiles and
+formatting, selection and undo untouched (**D10.2.1**). Suggestions, broader language profiles and
 complete document-adapter coverage remain separate milestones.
 
 **Incremental follow-up (2026-10-29).** Acceptance covers continuous physical
@@ -430,7 +430,7 @@ and canvas blocks. The continuous Word replay checks completed results before
 typing stops and verifies one paragraph in the edited-document batch. The
 required Lambda baseline passes **8,438/8,438** checks. Syntax and diff checks
 pass. No formal ruling changes; editing policy remains package-owned
-(**D7.2.5**).
+(**D10.2.1**).
 
 Two interleaved 120-character release pairs per document compare the committed
 package snapshot against the updated packages using the same native binary.
@@ -615,7 +615,7 @@ are integration concerns; the core checker remains a deterministic transform.
 Show underlines as non-document decorations. Apply a chosen suggestion through
 the existing edit transaction so undo and selection mapping remain correct.
 The spelling package must not introduce a second editing path or native editing
-policy, consistent with **D7.2.5**.
+policy, consistent with **D10.2.1**.
 
 ## 8. Multilingual and engine alternatives
 

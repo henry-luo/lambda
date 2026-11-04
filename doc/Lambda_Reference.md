@@ -21,7 +21,7 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 ### Key Features
 
 - **Pure functional core**: immutable data (arrays, maps, elements), first-class functions and types; `pn` procedures for controlled side effects
-- **Two execution tiers**: an AST interpreter runs a script immediately and the MIR JIT compiles hot functions to native code (D8.1.1)
+- **Two execution tiers**: an AST interpreter runs a script immediately and the MIR JIT compiles hot functions to native code (D8.3.1)
 - **Cross-platform**: macOS, Linux and Windows with consistent behavior
 - **Rich type system**: static checking with inference; union, occurrence and element types, string patterns, constrained types, nominal object types — and every type doubles as a schema
 - **Document processing**: some 30 input formats and 20 output formats through one Mark data model, plus the Radiant layout and rendering engine (see [Lambda_Doc_Pipeline.md](Lambda_Doc_Pipeline.md))
@@ -352,7 +352,7 @@ format(report, 'json')      // the script's result is its output
 ### Document Processing
 
 XHTML input produces an HTML-compatible element tree using strict XML syntax
-(**D2.10.1**): `input("page.xhtml", 'xhtml')^` or `parse(source, 'xhtml')^`.
+(**D10.1.4**): `input("page.xhtml", 'xhtml')^` or `parse(source, 'xhtml')^`.
 `.xhtml` and `.xht` are detected automatically. Namespace identity, XML case
 sensitivity, whitespace and CDATA are preserved; the tree can be viewed in
 Radiant or formatted as `'html'`. See [XHTML support and examples](Markup_Formats_Support.md#xhtml-input--html-document-tree).

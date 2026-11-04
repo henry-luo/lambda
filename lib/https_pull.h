@@ -29,7 +29,7 @@ typedef struct HttpsPullResponse {
     size_t size;
     char location[HTTPS_PULL_URL_LIMIT]; // never followed by this mechanism
 } HttpsPullResponse;
-// Trusted mechanism only (D7.5.2): anonymous HTTPS GET, one hop, no browser
+// Trusted mechanism only (D11.1.2): anonymous HTTPS GET, one hop, no browser
 // cookies/cache/proxy/auth, OS-only trust, public peer filtering and bounded IO.
 // Caller separately admits the URL/origin, owns policy checks and authenticates
 // returned metadata/artifacts before publication or execution.

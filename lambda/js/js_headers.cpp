@@ -457,7 +457,7 @@ Item js_install_headers(Item global) {
     }
     Item* retained = js_realm_slot(&js_runtime_state.realm_slots, JS_REALM_SLOT_HEADERS_CONSTRUCTOR);
     if (!retained) return ItemError;
-    *retained = ctor.get(); // canonical native factory survives global reassignment (D5.4.3).
+    *retained = ctor.get(); // canonical native factory survives global reassignment (D6.4.3).
     js_set_key_cstr(target.get(), "Headers", ctor.get());
     js_mark_non_enumerable(target.get(), js_name_item("Headers"));
     return ctor.get();

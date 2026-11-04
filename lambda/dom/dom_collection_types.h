@@ -1,7 +1,7 @@
 #pragma once
 
 // module-owned collection metadata has process lifetime; runtime callers borrow
-// its identity through a lower-owned registry (D7.1.3 / D7.5.3, D4.5.1v4).
+// its identity through a lower-owned registry (D9.1.3 / D9.5.6, D5.5.1).
 #define DOM_COLLECTION_HOST_TYPES(OP) \
     OP(node_list) \
     OP(html_collection) \

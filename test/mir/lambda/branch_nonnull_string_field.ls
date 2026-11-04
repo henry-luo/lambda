@@ -1,4 +1,4 @@
-// S7.1.1v3/D3.2.6: a stable receiver narrowed by a null test can read a
+// S7.1.1v3/D4.2.6: a stable receiver narrowed by a null test can read a
 // required string slot directly; an unguarded or rebound receiver still chains null.
 type Reading = {text: string, count: int}
 

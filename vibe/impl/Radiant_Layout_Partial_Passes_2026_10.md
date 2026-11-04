@@ -1363,7 +1363,7 @@ sizing, multicolumn and Markdown inventories have no losses;
 full matches**. Authority: [CSS Flexbox 1 §4](https://www.w3.org/TR/css-flexbox-1/#flex-items),
 [CSS Text 3 §8.1](https://www.w3.org/TR/css-text-3/#text-indent-property),
 [CSS Sizing 3 §5.1](https://www.w3.org/TR/css-sizing-3/#cyclic-percentage-size).
-Pass-local anonymous item state retains the existing ownership of D4.5.1v4.
+Pass-local anonymous item state retains the existing ownership of D5.5.1.
 
 ### Selected terminal soft-hyphen sources and completed inline struts
 
@@ -1508,7 +1508,7 @@ list; unplaced empty-line anchors keep their static fallback. Both counting
 and filling visit the anchor without descending into its independent flow.
 Inline containing-block extents and explicit self-alignment retain their own
 existing resolution paths. Metadata stays with the current positioned view and
-line under D4.5.1v4; no DOM text or line width is changed.
+line under D5.5.1; no DOM text or line width is changed.
 
 Fresh Chromium controls compare signed indents, a preceding word, both nested
 span directions in an LTR run, the child's own indentation, explicit insets,
@@ -1647,7 +1647,7 @@ fragments, while prefix/suffix limits apply at each candidate. CSSOM uses the
 existing numeric computation owner for font-relative integer math and follows
 the canonical component omission checks in the WPT computed-value controls.
 The generated property name is appended through the sole name catalog, retaining
-existing IDs under D4.6.1v4; no generated file is maintained by hand.
+existing IDs under D5.6.1; no generated file is maintained by hand.
 
 All 21 layout controls match current Chromium. Computed-value checks additionally
 follow the current specification and pinned WPT: the current browser rejects
@@ -1898,7 +1898,7 @@ policy and text rectangle that owns each advance. The current line and both
 break candidates share one small hanging-state record. At a forced break, walk
 back from the physical line end, hanging unconditional units and overflowing
 conditional portions until a fitting conditional unit stops the suffix. Track
-ASCII ink trimming on its owning rectangle. View-pool records follow D4.5.1v4
+ASCII ink trimming on its owning rectangle. View-pool records follow D5.5.1
 lifetime ownership, and candidate snapshots borrow immutable records. `pre` and
 `break-spaces` spaces retain their advances and end an earlier hanging suffix.
 
@@ -2728,7 +2728,7 @@ No grid production change is included in this milestone.
 The follow-up inspection also confirms the grid style pass counts only
 element items and its scratch capacity excludes text. A future implementation
 should promote the existing scratch-lived anonymous-item factory from flex
-instead of copying it, preserving the pass-owned lifetime in D4.5.1v4.
+instead of copying it, preserving the pass-owned lifetime in D5.5.1.
 
 ## Round 9: anonymous grid text items
 
@@ -2739,7 +2739,7 @@ require an anonymous block container for each child text sequence, with
 whitespace-only sequences suppressed. CSS Text 3 §8.1 makes inherited
 indentation apply to the anonymous block's first line, using its own width.
 No Lambda semantics ruling changes. Scratch wrappers and run records remain
-owned by the enclosing layout pass, following D4.5.1v4 and D4.1.4v5.
+owned by the enclosing layout pass, following D5.5.1 and D5.1.4.
 
 Diagnosis: flattened grid collection excludes text; the no-element fallback
 formats direct text against the entire container instead of a grid area.
@@ -2877,7 +2877,7 @@ is the balance probe and its formatting-context state, not CSS parsing or
 painting. CSS Text 4 `text-wrap-style:balance` requires separate forced-break
 groups and unchanged auto line counts for groups of five or fewer lines;
 its allowed disable threshold is above ten lines. No Lambda semantics or
-formal design ruling changes. D4.5.1v4 / D4.1.4v5 govern temporary measurement
+formal design ruling changes. D5.5.1 / D5.1.4 govern temporary measurement
 storage and prohibit retaining a string or scratch pointer beyond its owner.
 
 Design: expose the existing inline-text collector for both intrinsic height
@@ -3019,7 +3019,7 @@ and [§10.8](https://www.w3.org/TR/CSS22/visudet.html#line-height) size rows fro
 the cell's line boxes. Inline font boxes, glyph ink, atomic margin boxes and
 line-height have distinct roles. Relative visual offsets do not enlarge normal
 flow (§9.4.3). No Lambda formal ruling changes; existing temporary measurement
-ownership remains under D4.5.1v4 / D4.1.4v5.
+ownership remains under D5.5.1 / D5.1.4.
 
 Design: retain the existing inline extent collector, use its positioned origin
 when consuming its line-stack height, and center explicit line-height around
@@ -3125,7 +3125,7 @@ Design: geometry publication must preserve evaluator identity. Remove runtime
 assignment from that helper and initialize Markdown's optional runtime explicitly
 at its loader boundary. Reuse existing document teardown and compiler draining;
 do not add global shutdown ordering, delays, or disable compilation. Existing
-D5.3.3 / D5.4.1 and D8.5.1v7 govern the continuous ownership and compiler-cache
+D6.3.3 / D6.4.1 and D8.3.5 govern the continuous ownership and compiler-cache
 lifetime; no formal ruling changes. Acceptance: transient JS plus an embedded
 load blocker forces MathML layout during load, retains the same document-owned
 runtime across geometry publication, behavior initialization and retained reflow,
@@ -3183,7 +3183,7 @@ and one evaluator may queue events for multiple documents.
 Design/acceptance: register one existing document resource per queue/document
 pair, backed by the actual runtime capsule. Either owner cancels that document's
 pending iframe/image entries and releases their pins while the registry is live;
-document callbacks use the stored capsule without rebinding TLS (D5.3.3 / D5.4.1).
+document callbacks use the stored capsule without rebinding TLS (D6.3.3 / D6.4.1).
 Reuse resource registration/release and the current queue shapes. Verify pin
 release on runtime-resource retirement without touching a second document's
 queue, then document-first retirement, normal draining and runtime shutdown.
@@ -3270,7 +3270,7 @@ lookup, promoting its static helper through `layout_table.hpp` if needed.
 Source tracks/groups stop painting independent background rectangles. Cells
 record their propagated layers in the existing raster/export background path,
 preserving their DOM order, current transform/effect scope and canonical style
-owners (D4.5.1v4 / D4.1.4v5). Fast boundary paths must use the same model; cells
+owners (D5.5.1 / D5.1.4). Fast boundary paths must use the same model; cells
 without their own background or boundary still need propagated layers. Do not
 copy traversal helpers, rebuild table layout during paint, or special-case
 spanning-cell visibility. Include solid and gradient sources, both border
@@ -3287,7 +3287,7 @@ all of these through one producer, without mutating source styles. PDF's
 `radiant_pdf_walk.cpp` uses the shared full boundary producer for its graphic
 path but also has a direct simple-boundary dispatch; that optimization must
 observe the same table-background policy. Preserve functional snapshot/export
-ownership under S2.6.6v3 and the existing module boundary under D7.3.3–D7.3.4.
+ownership under S2.6.6v3 and the existing module boundary under D9.4.3–D9.4.4.
 
 Active round 12 plan: restore usable striped/spanning Markdown tables by fixing
 the background producer, after round 11's complete qualification. Acceptance
@@ -3304,7 +3304,7 @@ graphic path must consume that same plan; primitive/direct fast paths may run
 only where the plan has no extra table layers. Reuse the existing column lookup
 and ancestor-offset helpers. Painting gets a temporary effective source box
 with inapplicable track padding/borders removed, without altering its computed
-style (D4.5.1v4 / D4.1.4v5). Keep source selection independent of backend and do
+style (D5.5.1 / D5.1.4). Keep source selection independent of backend and do
 not introduce another renderer traversal or table-layout cache. The native
 pixel test must fail first. Verification budget: focused pixel checks and
 browser/native captures, targeted SVG/PDF exports, neighboring table/Markdown
@@ -3327,7 +3327,7 @@ Round 12 focused implementation is complete. The shared source/coverage plan
 now drives raster, SVG and PDF, including PDF's former direct simple-boundary
 dispatch. The column lookup is promoted rather than copied; the third borrowed
 boundary projection shape is extracted as `view_with_boundary`. Its synchronous
-use preserves canonical source ownership under D4.5.1v4 / D4.1.4v5 and functional
+use preserves canonical source ownership under D5.5.1 / D5.1.4 and functional
 PDF resources under S2.6.6v3. Existing source padding remains unchanged after
 painting and retained reflow. The pixel assertion helper is shared with the map
 tests rather than duplicated.
@@ -3417,7 +3417,7 @@ The next finite milestone is owner-correct intrinsic box substitution: valid
 inherited/overridden variables, multi-token padding, math/fallbacks, invalid
 computed declarations, cyclic percentage padding and retained reflow. Reuse
 the existing substitution, cascade, box-side and scratch-owner helpers under
-D4.5.1v4 / D4.1.4v5. Establish native failures and browser controls before
+D5.5.1 / D5.1.4. Establish native failures and browser controls before
 editing. Focused intrinsic/table checks and cast lint precede exact layout and
 required Radiant qualification; extend module/export checks only for changes
 to those consumers or ownership boundaries. Percentage/rowspan intrinsic model
@@ -3443,7 +3443,7 @@ padding probes now use the measured element, the existing component cascade,
 whole-declaration substitution/validation and shared physical/logical side
 projection. Cyclic percentage terms resolve against zero while preserving
 length terms. Invalid computed padding keeps its cascade win and initial zero;
-canonical style ownership remains unchanged (D4.5.1v4 / D4.1.4v5).
+canonical style ownership remains unchanged (D5.5.1 / D5.1.4).
 
 The side projector is extracted from the existing scroll-spacing consumer,
 and the repeated element-direction/writing-mode mapping is shared rather than
@@ -3609,7 +3609,7 @@ The ASan executable predates round 14 arithmetic; this evidence qualifies the
 unchanged URL path only. `diagnosis-pending.json` retains both executable hashes
 and the raw crash logs. No round 15 engine edit has started.
 
-Treat the owner defect as the next finite prerequisite. **D4.1.4v5 / D4.2.6**
+Treat the owner defect as the next finite prerequisite. **D5.1.4 / D5.2.5**
 require preserving the chosen lifetime owner through Input/pool teardown.
 `dom_document_replace_url` already preserves URL carrier identity by exchanging
 owned fields. Assess extracting/reusing that operation for redirects and base
@@ -3818,7 +3818,7 @@ raw PNG comparison retains 1,976 differing pixels; geometry parity does not
 establish exact raster parity. Final rendering and exact layout/full Radiant
 qualification follow after complete native build preparation. The complete
 result is copied by the existing constraint-keyed cache, preserving selected
-view/snapshot ownership (**D4.5.1v4 /D4.1.4v5**); the old width-pair-only cache
+view/snapshot ownership (**D5.5.1 /D5.1.4**); the old width-pair-only cache
 description in RAD_05 §2.2 was corrected against the current implementation.
 
 The first exact round 17 gate stops with **two sizing regressions**
@@ -3947,7 +3947,7 @@ controls pass at 1×/2× through retained reflow, along with **151 native** and
 do not claim exact PNG parity (`round18/pixels-first.json`). Affected baseline
 categories and required aggregate qualification are still pending. The existing
 cache copies the complete result, including the new interior width, under
-**D4.5.1v4 /D4.1.4v5**; no ownership ruling changes.
+**D5.5.1 /D5.1.4**; no ownership ruling changes.
 
 Affected categories first retain zero failures: **887 full /93 partial text**,
 **169 inline**, **776 sizing**, **57 table**, and Markdown improves to **52
@@ -4026,7 +4026,7 @@ table-width discrepancy. The preceding goal turn made verified progress and
 closed round 18; both required aggregates completed with zero failures.
 
 **Design/owner:** add a distinct typed baseline-middle value, appending its enum
-and keyword entry so existing value IDs remain stable (**D4.6.1v4**). A shared
+and keyword entry so existing value IDs remain stable (**D5.6.1**). A shared
 HTML presentational-hint adapter applies to `img`, `iframe`, `embed`, `object`
 and image-button inputs before author CSS. Case-insensitive center/middle use
 the legacy value; absolute-middle aliases use ordinary CSS middle; top/texttop
@@ -4037,7 +4037,7 @@ bottom-hint spec/browser disagreement rather than claiming complete alias
 conformance. Promote/generalize `layout_middle_inline_contribution` and share
 midpoint math with inline line contributions and final placement. Parent-font
 x-height affects CSS middle; it must not affect legacy baseline-middle. Keep
-selected style groups and snapshots owned under **D4.5.1v4 /D4.1.4v5**.
+selected style groups and snapshots owned under **D5.5.1 /D5.1.4**.
 
 **Finite acceptance:** `layout_legacy_replaced_alignment.html` has 37 controls:
 ordinary baseline; center/middle and case folding; top/texttop; absolute-middle
@@ -4068,8 +4068,8 @@ became inline. A borrowed declaration now enters the existing cascade lookup
 with a distinct author-hint origin: CSS Cascade 5 §6.5 makes it independent for
 normal ordering/layers and part of author for `revert`. The lookup applies the
 existing rollback filters across the property, shorthand and `all`; it neither
-writes to canonical style trees nor allocates retained payloads (**D4.5.1v4 /
-D4.1.4v5**). Float dispatch reads the current cascade when used properties are
+writes to canonical style trees nor allocates retained payloads (**D5.5.1 /
+D5.1.4**). Float dispatch reads the current cascade when used properties are
 dirty. Keep the initial failed regression and assertion trace in `round19/`.
 The test observer also now carries an explicit expected float value, so a
 mutation of the row named `left` does not accidentally assert its old state.
@@ -4146,7 +4146,7 @@ height from consumed/promoted boundary margins, potentially counting the same
 chain twice or treating negative overflow as extra height. Confirm the cursor
 and preserved `view_boundary_flow_margin` before changing this owner; reuse
 existing flow classification/metrics rather than adding a paragraph/tag rule.
-Keep selected style/snapshot ownership unchanged (**D4.5.1v4 /D4.1.4v5**).
+Keep selected style/snapshot ownership unchanged (**D5.5.1 /D5.1.4**).
 
 **Finite acceptance:** eighteen permanent controls cover ordinary/flex tables,
 leading/trailing/no empty blocks, positive/negative/mixed margin chains,
@@ -4237,7 +4237,7 @@ source rows, span occupancy and resolved style boundaries, replaces full cell
 borders with winning half edges, and includes the table's outer half edges.
 Keep the official style resolver and scoped scratch storage; do not create a
 parallel border parser or mutate retained used cell metadata. Selected style
-ownership remains governed by **D4.5.1v4 /D4.1.4v5**.
+ownership remains governed by **D5.5.1 /D5.1.4**.
 
 **Finite acceptance:** seventeen Ahem controls cover ordinary/block/atomic,
 min/max-content, one/two/five columns, wider/mixed/hidden borders, col/row spans,
@@ -4320,7 +4320,7 @@ ignore inline boundaries within words; visible hyphens consume width, and a
 conditional hyphen's generated mark participates in fitting. Reuse
 `measure_hyphenate_character` and the existing float-aware line edge/spacing
 policy. Keep lookahead observational and style ownership unchanged
-(**D4.5.1v4 /D4.1.4v5**); no selector offsets, extra breaks or tolerance changes.
+(**D5.5.1 /D5.1.4**); no selector offsets, extra breaks or tolerance changes.
 
 **Finite acceptance:** 23 permanent controls cover widths bracketing the first
 hyphen, nested/smaller-font inlines, actual earlier fitting breaks, separating
@@ -4352,7 +4352,7 @@ lookahead borrowing the preceding text's `hyphenate-character`/`hyphens` state.
 The following inline now enters the existing view/font scopes and resolves
 stale styles under `ComputeSize` with its flow context restored afterward.
 This uses the official resolver and existing ownership scopes
-(**D4.5.1v4 /D4.1.4v5**), not another CSS parser or temporary property pointers.
+(**D5.5.1 /D5.1.4**), not another CSS parser or temporary property pointers.
 The first failed probe command expected a nonempty establishing-element id;
 the saved raw metric trace still isolates the 22px union. No diagnostic logging
 remains in production. Recheck native/paged and neighboring categories before
@@ -4430,7 +4430,7 @@ advances for visual placement/range union; remove the competing ink cursor.
 Visible glyphs beside segment breaks still need their fallback advances; the
 existing line-break filter already excludes the breaks themselves. This is
 local scratch/geometry work, with style/snapshot owners unchanged
-(**D4.5.1v4 /D4.1.4v5**). No library/vendor, font-name substitution or baseline/
+(**D5.5.1 /D5.1.4**). No library/vendor, font-name substitution or baseline/
 tolerance change is planned.
 
 **Finite acceptance:** seventeen advance-range controls cover plain/trailing
@@ -4534,8 +4534,8 @@ as a segment break. Actual layout, bidi, paragraph collection and paint still
 classify it as LF; intrinsic measurement mostly already counts it as a space.
 A six-mode Ahem matrix under `round24/` separates literal HTML, escaped CR,
 space, LF, CRLF and whitespace-only controls. Parser/source storage ownership
-stays under **D4.2.6**; style/snapshot ownership stays under
-**D4.5.1v4 / D4.1.4v5**. No DOM payload rewrite is allowed for CSS processing.
+stays under **D5.2.5**; style/snapshot ownership stays under
+**D5.5.1 / D5.1.4**. No DOM payload rewrite is allowed for CSS processing.
 
 **Finite acceptance:** normalize literal newlines in DATA/RCDATA/RAWTEXT/script,
 CDATA/plaintext, attributes and comments while preserving numeric-reference CR
@@ -4680,7 +4680,7 @@ preserved LF as a forced boundary. A measured continuation must count one
 collapsed separator with the source font/spacing rather than all raw bytes or
 the ancestor font. Reuse existing whitespace/advance helpers; do not replace
 lookahead with min/max equality or introduce a fixture-specific boundary.
-Style/view probes remain observational (**D4.5.1v4 /D4.1.4v5**).
+Style/view probes remain observational (**D5.5.1 /D5.1.4**).
 
 **Acceptance/verification budget:** a permanent Ahem fixture and native geometry
 regression compare nowrap SPACE (one/five), collapsed TAB/LF, `pre` SPACE,
@@ -4729,7 +4729,7 @@ inherited family falls through to the initial Times font even though its DOM
 parent still owns Ahem. Exclude this self-alias and obtain the parent's family
 before falling back to the initial font. Add a source/parent family assertion
 alongside unchanged two-density geometry tolerances. This retains style owners
-under **D4.5.1v4 /D4.1.4v5** without changing either ruling or the intrinsic scope
+under **D5.5.1 /D5.1.4** without changing either ruling or the intrinsic scope
 header. Temporary logger/debugger probes are removed from source before the
 final build. The focused two-density regression remains a qualification gate.
 
@@ -4850,7 +4850,7 @@ A reduced Ahem control confirms the causal direction: the 20px child probes a
 repair scopes each text probe to its actual owner's computed font, preserving
 the active first-line font and restoring the caller through `LayoutFontScope`.
 No boundary, width, offset or fixture-specific exception is added; selected
-style ownership remains **D4.5.1v4 /D4.1.4v5**. CSS Text 3 §5.5 and §7 govern
+style ownership remains **D5.5.1 /D5.1.4**. CSS Text 3 §5.5 and §7 govern
 cross-inline opportunities and source spacing.
 
 **Finite acceptance/verification:** ten fitting/overflowing controls cover
@@ -4924,7 +4924,7 @@ system color-font face into the platform backend, retaining the same face for
 measurement/rendering. Share the descriptor-copy shape before adding its third
 variant. Preserve non-color system UI optical/weight state and exact document
 font data. Returned CoreText references remain explicitly owned; retain the
-selected face before releasing old aliases (**D4.5.1v4 /D4.1.4v5** ownership).
+selected face before releasing old aliases (**D5.5.1 /D5.1.4** ownership).
 Fourteen native controls cover eight sizes, concrete/fallback families, an
 extended emoji cluster, CSS letter spacing, a width that fits two emoji, and an
 ASCII control, with fresh/retained 1×/2× and causal size edits. The original
@@ -5013,7 +5013,7 @@ existing CoreText shaping-line factory, preflighting every run before visiting
 glyphs. Reuse the raster kernel with font-local glyph IDs, with an explicit
 cache-key namespace separate from Unicode scalars. Keep bitmap buffers in the
 existing font-cache lifetime, since display lists borrow them
-(**D4.5.1v4 /D4.1.4v5**). Share cluster/face selection across layout and paint.
+(**D5.5.1 /D5.1.4**). Share cluster/face selection across layout and paint.
 Cover ordinary/shadow/effect ink, following ASCII with CSS letter spacing,
 supported and unsupported compositions, two densities and retained repaint/cache
 reset. CSS Fonts 4 §5.3 governs cluster matching; CSS Text 3 §7.2 applies spacing
@@ -5114,7 +5114,7 @@ A typographic unit receives one letter-spacing increment (CSS Fonts 4 §5.3;
 CSS Text 3 §7.2). Reuse the existing transform segment builder with original word
 context; case expansion is preflighted unit by unit before ink emission. Keep
 DOM bytes and source-owned ranges unchanged (CSS Text 3 §2.1;
-**D4.5.1v4 /D4.1.4v5**). Contextual scripts need their full run and remain on the
+**D5.5.1 /D5.1.4**). Contextual scripts need their full run and remain on the
 existing path. Canonical scalar fallback and SVG outline cluster placement stay
 separate, with no claim of complete multilingual shaping.
 
@@ -5183,8 +5183,8 @@ be wrong. The same defect survives SVG export and Chromium replay, identifying
 the shared paint walk rather than the raster backend. The existing child walk
 mixes ordinary blocks and floats in source order, and hit testing reverses that
 same sequence. Reuse stacking classifiers, scoped ancestry replay and the block
-phase drivers; preserve view/style ownership (**D4.5.1v4 /D4.1.4v5**) and module
-boundaries (**D7.3.3–D7.3.4**). The finite acceptance/verification plan and raw
+phase drivers; preserve view/style ownership (**D5.5.1 /D5.1.4**) and module
+boundaries (**D9.4.3–D9.4.4**). The finite acceptance/verification plan and raw
 captures are under `round31/next-float-paint-diagnosis.json`; no round31 engine or
 test changes have been made. Valid combined text transforms need a separate
 spec milestone: Chromium rejects them, so its rejection cannot justify dropping
@@ -5219,9 +5219,9 @@ self-hit deferral. Do not copy the negative-layer ancestry walker.
 Partial visits no longer own a complete contiguous subtree fragment. Guard
 whole-fragment reuse and element markers by that ownership property instead of
 replaying a whole cached subtree in one phase. Whole atomic/root visits retain
-the existing cache contract (**D4.5.1v4 /D4.1.4v5**); a future cache for individual
+the existing cache contract (**D5.5.1 /D5.1.4**); a future cache for individual
 phases would need explicit identity and is not implied by a view ID. Preserve
-module boundaries (**D7.3.3–D7.3.4**) and retain float exclusion geometry and
+module boundaries (**D9.4.3–D9.4.4**) and retain float exclusion geometry and
 source bytes. Independent soft-break optimization and no-float stacking debt
 remain separate; no fixture-specific order or background clipping is allowed.
 
@@ -5310,8 +5310,8 @@ reinsert behavior. No assertions or expectations change.
 CSS DOM data helpers; the public C DOM API delegates to that implementation.
 An initial full build exposed the dependency on the high-level DOM module in
 standalone layout runners. The shared helper removes that dependency under
-**D7.3.3–D7.3.4** without copying the predicate or adding test stubs. Selected
-view/style ownership remains **D4.5.1v4 /D4.1.4v5**.
+**D9.4.3–D9.4.4** without copying the predicate or adding test stubs. Selected
+view/style ownership remains **D5.5.1 /D5.1.4**.
 
 **Open export evidence:** 16 of 18 static fixture/scale/format combinations pass
 across PNG/SVG/PDF at 1×/2×. One 2× text sample differs in SVG and PDF; all six

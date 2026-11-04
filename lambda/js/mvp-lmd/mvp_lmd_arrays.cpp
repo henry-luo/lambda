@@ -71,7 +71,7 @@ extern "C" int64_t mvp_lmd_array_indices_use_own_storage(Item owner) {
             ShapeEntry* length = typemap_hash_lookup(shape, "length", 6);
             if (length && (length->flags & JSPD_NON_WRITABLE)) return false;
         }
-        // D8.4.1v2: the field index summarizes names only; links and policy stay live.
+        // D7.4.1: the field index summarizes names only; links and policy stay live.
         if (mvp_lmd_shape_has_indexed_keys(shape)) return false;
         if (!library && !mvp_lmd_class_record(owner)) return true;
         owner = mvp_lmd_get_prototype_with_library(owner, library);

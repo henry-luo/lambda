@@ -40,7 +40,7 @@ P7's existing parallel-transport sweep is promoted and extended with per-ring
 radii and taper normals. Its frame and buffer-merging helpers serve both plant
 paths; existing constant-radius primitive output remains unchanged. Rodrigues
 rotation is promoted from the existing Scene3D camera module. No engine/native
-generator changes or third-party source imports are involved (**PG9 / D7.2.4v4**).
+generator changes or third-party source imports are involved (**PG9 / D9.3.4**).
 
 `test/demo/procart/trees.ls` loads four standalone `tree-*.mark` specimens. The
 controller caches architecture across detail/visibility changes. Stored seeds

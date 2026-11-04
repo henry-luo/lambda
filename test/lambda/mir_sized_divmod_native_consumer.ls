@@ -1,4 +1,4 @@
-// S4.5.3, D2.4.1: sized div/mod leave the machine domain before native consumers.
+// S4.5.3, D2.3.4: sized div/mod leave the machine domain before native consumers.
 fn remainder_next(value: u8, divisor: int) => value % divisor + 1
 fn quotient_next(value: u8, divisor: int) => value div divisor + 1
 fn signed_next(value: i8, divisor: u8) => [value % divisor + 1, value div divisor + 1]

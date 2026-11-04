@@ -1,4 +1,4 @@
-// An equation's source draft is UI state; only a validated transaction changes its atom (S12.1.3, D7.2.5).
+// An equation's source draft is UI state; only a validated transaction changes its atom (S12.1.3, D10.2.1).
 import dom
 import image: lambda.editor.mod_image
 import equation: .mod_equation

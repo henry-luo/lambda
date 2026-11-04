@@ -425,7 +425,7 @@ CoreText text for Times and bundled CMU faces at 8/16/96px and 1×/2× density.
 The separate font-resource omission is fixed as
 [RAD07-L2](Radiant_Issue_Ledger.md#rad07-l2): document packages now declare the
 bundled CMU and KaTeX faces through a shared Lambda-home stylesheet helper
-(D7.2.4), so default LaTeX math uses those faces rather than system fallback.
+(D9.3.4), so default LaTeX math uses those faces rather than system fallback.
 The historical measurements below cover the earlier implementation only.
 
 - Modified: `lib/font/font_rasterize_ct.c` — kept font smoothing enabled
@@ -850,8 +850,8 @@ all platforms are verified.
 ## 11. Text overflow paint contract (2026-10-11)
 
 This focused delivery extends the existing text pipeline; the migration estimates
-above retain their historical scope. Ownership follows **D4.5.1v4 / D4.1.4v5**
-and shared rendering boundaries follow **D7.3.3–D7.3.4**. No formal ruling changes.
+above retain their historical scope. Ownership follows **D5.5.1 / D5.1.4**
+and shared rendering boundaries follow **D9.4.3–D9.4.4**. No formal ruling changes.
 
 [CSS Overflow 3 §5.1](https://www.w3.org/TR/css-overflow-3/#text-overflow)
 requires ellipsis to affect painting while preserving layout and pointer targets.
@@ -901,7 +901,7 @@ Native tests repeat 256 scopes without modifying source geometry, restore nested
 scope state, and preserve recorded font selection while the command buffer grows.
 
 A recorded glyph run captures its `FontBox` by value and borrows the live
-owner's style under **D4.5.1v4 / D4.1.4v5**. Lowerers use the captured selection
+owner's style under **D5.5.1 / D5.1.4**. Lowerers use the captured selection
 rather than a mutable walker address. This preserves a marker's block font after
 the iterator restores a differently styled text run. The source control failed
 when an earlier 20px run observed the walker's later 30px selection.
@@ -928,7 +928,7 @@ uses its existing owner-font adapter, including dirty declaration reads before
 the next layout pass. Explicit inheritance copies the parent's computed count;
 invalid substituted values and non-inherited CSS-wide resets compute to `none`.
 The computed scalar survives declaration replacement, while temporary parser and
-formatter trees are released after each read (**D4.5.1v4 / D4.1.4v5**). No formal
+formatter trees are released after each read (**D5.5.1 / D5.1.4**). No formal
 ruling changes. Acceptance includes invalid declarations preserving an earlier
 winner, calculated rounding, causal font/custom-value changes and restoration,
 visible clamp effects and repeated-read memory stability. Immediate dirty geometry
@@ -963,7 +963,7 @@ the existing flex direction consumer without overwriting the authored computed
 
 The native cascade serializer and clamp-winner lookup are shared module helpers,
 not copied resolvers. Temporary computation is scratch-owned; scalar display
-flags carry no borrowed declaration pointers (**D4.5.1v4 / D4.1.4v5**). Acceptance
+flags carry no borrowed declaration pointers (**D5.5.1 / D5.1.4**). Acceptance
 requires live display/orientation/count changes and restoration, variable/default
 and inheritance cases, same-context/BFC descendants, real geometry/marker paint,
 export references and repeated-read lifetime controls. Full legacy flex property
@@ -978,7 +978,7 @@ block view tag exists, so grid rows do not reserve space for discarded lines.
 spacing, and live count changes/removal/restoration. This does not change the
 bounded applicability contract above.
 
-The added catalog entry preserves every existing NameId (**D4.6.1v4**). Intrinsic
+The added catalog entry preserves every existing NameId (**D5.6.1**). Intrinsic
 min-content measurement keeps break-all letters separate while retaining
 punctuation and grapheme restrictions; flex's text fast path passes inherited
 wrap properties through the shared measurement helper. Flex-item flow bypasses
@@ -1025,7 +1025,7 @@ combined/full-width/math-auto syntax does not qualify its paint consumer.
 
 Use the existing grapheme, transform and font helpers. Paint scratch belongs to
 the scope and contains no retained source pointers after teardown
-(**D4.5.1v4 / D4.1.4v5**). Do not reverse UTF-8 bytes or create a second renderer.
+(**D5.5.1 / D5.1.4**). Do not reverse UTF-8 bytes or create a second renderer.
 The existing source-to-glyph/shaping limitations still belong to P2.1; fitting
 physical edges alone does not establish correct mixed-bidi or complex-script
 shaping. Later glyph-cluster transport must preserve this visual-edge contract.
@@ -1053,7 +1053,7 @@ from the selected face; it sacrifices searchable text for portable font geometry
 as the existing inline-SVG text exporter does. Decorations, shadows, color glyphs,
 complex-script shaping and missing-outline cases require separate qualification.
 This changes no formal ruling: paths are command-owned until lowering or teardown
-under **D4.5.1v4 / D4.1.4v5**. Each outlined run keeps its visible text as an escaped
+under **D5.5.1 / D5.1.4**. Each outlined run keeps its visible text as an escaped
 accessible title through the existing semantic-group paint commands. Diagram
 labels must survive outlining without adding hidden font-painted text.
 
@@ -1084,7 +1084,7 @@ negative as well as positive spacing when live text is required.
 
 This follows [CSS Text 3 §4.1](https://www.w3.org/TR/css-text-3/#white-space-rules)
 and [§7](https://www.w3.org/TR/css-text-3/#spacing). Scratch text and captured
-font styles retain **D4.5.1v4 / D4.1.4v5** ownership. Qualification requires
+font styles retain **D5.5.1 / D5.1.4** ownership. Qualification requires
 native source-offset controls, independent visible-pixel references in all three
 output formats, effect fallback and causal inherited-style mutation. Computed
 word-spacing normal/initial serializes as `0px`, including declaration reads
@@ -1140,7 +1140,7 @@ selected face. SVG must retain accessible marker names through semantic paint
 commands, with no receiving-viewer font dependency. Route marks through their
 actual effect/transform destination and include them in text-shadow silhouettes
 before per-layer alpha. Complete all source borrows synchronously; deferred
-paths/images own their geometry under **D4.5.1v4 / D4.1.4v5**. Reuse the existing
+paths/images own their geometry under **D5.5.1 / D5.1.4**. Reuse the existing
 outline and text-spacing helpers, and extract the common native/SVG shape before
 adding a third exporter-local implementation.
 
@@ -1195,7 +1195,7 @@ comparison retained. SVG and direct Poppler pass that unchanged strong-color
 control; the official SVG matrix passes 126 formats /2,466 assertions. These
 results qualify the horizontal/output-density profile, not broader FT-17
 shaping, fragmentation, ruby or vertical contexts. Deferred resources retain
-owned payloads under **D4.5.1v4 / D4.1.4v5**.
+owned payloads under **D5.5.1 / D5.1.4**.
 
 ## 18. Inside image-marker baseline contract (2026-10-15)
 
@@ -1221,7 +1221,7 @@ Qualify natural/density-adjusted image sizes, larger images, marker font struts,
 normal/explicit line heights, empty/text contents and causal font/source changes.
 Compare real pixels with independent inline-image references and keep the
 existing image-sampling/resource controls. No new declaration or image lifetime
-owner is needed (**D4.5.1v4 / D4.1.4v5**). Outside placement, default-sized
+owner is needed (**D5.5.1 / D5.1.4**). Outside placement, default-sized
 gradients, wrapping, bidi/vertical and fragmented contexts need separate
 acceptance evidence; the current outside-marker policy must not be silently
 replaced by the inside-inline rule. This bounded P1.3 increment builds on the affine checkpoint, whose core gate
@@ -1293,7 +1293,7 @@ Qualify the reproduced matrix, larger/smaller descendants, explicit lengths,
 zero leading, wrapping and causal font/leading changes with browser geometry
 and native pixels. Keep the marker regression and existing mixed-font controls.
 This adds layout-local scalar state, with no new declaration, font or image
-lifetime owner (**D4.5.1v4 / D4.1.4v5**). Vertical, bidi, shaping, ruby and
+lifetime owner (**D5.5.1 / D5.1.4**). Vertical, bidi, shaping, ruby and
 fragmented layout remain separately qualified profiles.
 
 The first draft fixes all 24 line boxes and 126 live geometry/pixel checks, but

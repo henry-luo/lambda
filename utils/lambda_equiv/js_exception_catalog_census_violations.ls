@@ -3,5 +3,5 @@ import .js_exception_catalog_render
 
 pn main() {
     let failed = print_catalog(null, true, false)^
-    if (failed) { raise error("D8.4.3 exception catalog contract violation") }
+    if (failed) { raise error("D7.4.3 exception catalog contract violation") }
 }

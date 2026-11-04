@@ -54,7 +54,7 @@ static void history_retire_runtime(DomDocumentResourceData* data) {
         root_vector_destroy(&entry->roots);
         entry->state = ItemNull;
     }
-    // session history URLs survive the realm; heap-backed state cannot (D5.3.3).
+    // session history URLs survive the realm; heap-backed state cannot (D6.3.3).
     history->owner = nullptr;
 }
 

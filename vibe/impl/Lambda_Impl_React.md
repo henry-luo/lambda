@@ -10,9 +10,9 @@ of LambdaJS/Radiant. Add `test/js/react.js`, its HTML document and golden to
 the existing auto-discovered JS unit harness. Fix failures in shared runtime,
 DOM bindings or event mechanisms, never in React or a fixture-only shim.
 
-The production parser/execution path remains D8.1.3v42; declared host members
-follow D7.4.4; native handoffs and retained callbacks follow D5.3.3 and the
-Radiant ownership seam D4.5.1v4/D4.5.2. Form policy stays in the shipped DOM
+The production parser/execution path remains D8.4.5; declared host members
+follow D9.5.4; native handoffs and retained callbacks follow D6.3.3 and the
+Radiant ownership seam D5.5.1/D5.5.2. Form policy stays in the shipped DOM
 behavior package (DOM Default ES5/ES25/ES26); native code supplies dispatch,
 activation staging and canonical state mechanisms. No formal ruling changes
 are proposed.
@@ -98,7 +98,7 @@ Implemented:
 
 - Added the generated React fixture, readable JSX suite, pinned npm lock and
   MIT license; its full golden agrees with headless Chromium 148.
-- Published native input.checked and textarea.value accessors through D7.4.4.
+- Published native input.checked and textarea.value accessors through D9.5.4.
 - Behavior matching now reads live DOM attributes. The original source value
   had no `type` for a freshly created input, so package activation never matched.
 - The shared native click scope roots a package completion through propagation;

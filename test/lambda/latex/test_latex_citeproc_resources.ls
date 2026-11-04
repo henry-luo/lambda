@@ -1,4 +1,4 @@
-// Local styles, locales and CSL JSON share the package resource boundary (D7.1.2v2).
+// Local styles, locales and CSL JSON share the package resource boundary (D9.1.2).
 import latex: lambda.doc.latex.latex
 import html: lambda.doc.latex.to_html
 let base = "test/lambda/latex/fixtures/citeproc"

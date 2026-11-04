@@ -3,7 +3,7 @@
 **Date:** 2026-10-28. **Status:** implemented; qualified with two pre-existing baseline failures.
 **Design:** [Type Enforcement TE-19.1](../Lambda_Design_Type_Enforcement.md#te-191--persistent-contract-proofs-in-runtime-descriptors).
 **Authority:** S11.4.1v3, S11.4.10, S2.1.4, S11.3.1v2;
-D3.2.4v4, D3.2.6, D3.4.3v5, D3.4.5.
+D4.2.5, D4.2.6, D3.4.3, D3.4.5.
 
 ## Root cause and scope
 
@@ -176,7 +176,7 @@ claiming universal improvement.
 
 **Date:** 2026-10-28. **Status:** analysis complete; the tuning candidates below
 are not implemented or speedup-qualified. Authority remains S11.4.10,
-D3.2.4v4 and D3.2.6. This audit changes no language ruling.
+D4.2.5 and D4.2.6. This audit changes no language ruling.
 
 ### Latest recorded result and current reproduction
 
@@ -257,7 +257,7 @@ The root member-store gate in
 That helper does not reach through `SplayNode?`. Consequently the direct
 writer's full field-contract and storage-lane proofs are never considered
 for this root, even after a null guard. This is the consumer case explicitly
-covered by D3.2.4v4's non-null-arm requirement.
+covered by D4.2.5's non-null-arm requirement.
 
 A small executable probe, `controls/optional_write.ls` with its `.txt` oracle,
 writes 1,000 times through each of `Record` and `Record?`, with an explicit
@@ -285,7 +285,7 @@ shape as a declared layout.
 
 Both variants still perform 951,168 COW map copies. A type/layout certificate
 does not prove ownership, so dropping these copies is not licensed by
-S11.4.10 or D3.2.6.
+S11.4.10 or D4.2.6.
 
 ### 2. jq_records: preserve array producers and simplify broad boundaries
 
@@ -325,7 +325,7 @@ Two concrete directions follow:
   `string[]`. In `lambda-vector.cpp`, the `Array*` overload of
   `array_transform_copy_cert` intentionally clears the certificate because
   its result has boxed Item slots. Simply copying a native pointer-lane
-  certificate onto that result would violate D3.3.3v3. An implementation must
+  certificate onto that result would violate D4.3.3. An implementation must
   preserve/rebuild the lane or carry a separately valid semantic proof.
 
 Typed jq also makes 120,030 extra `fn_string` calls, but the erased-source
@@ -362,7 +362,7 @@ No benchmark sources or engine code were changed for this audit.
 ## Compiler consumers follow-up (2026-10-28)
 
 This follow-up implements the record and array consumer opportunities above,
-under S11.4.10, D3.2.4v4, D3.2.6 and D3.3.3v3. The audit and its timings remain
+under S11.4.10, D4.2.5, D4.2.6 and D4.3.3. The audit and its timings remain
 the historical control evidence.
 
 - **Record reads:** one shared MIR layout guard accepts exact descriptors and

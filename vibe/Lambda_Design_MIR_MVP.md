@@ -4,13 +4,13 @@
 
 **Status:** experimental typed compiler behind an explicit selector, with
 native scalar/array kernels, typed records, checked mutation and precise `var`
-write-back (**S9.1.3v2, D5.3, D8.4.1v2**). Coverage now extends to **48 rows**:
+write-back (**S9.1.3v2, D6.3, D7.4.1**). Coverage now extends to **48 rows**:
 the original 28 plus 20 additional recursion, record, allocation, text and
 numerical workloads. Runtime types and data layouts remain unchanged.
 
 The latest batch adds rooted decimal dispatch, bounded recursive inlining,
 admitted record layouts, successful producer domains and guarded float/error
-comparisons (**D3.2.4v4, D5.2–D5.3, D8.2.6v2, S7.7.3**). Runtime types,
+comparisons (**D4.2.5, D6.2–D6.3, D8.2.6, S7.7.3**). Runtime types,
 data layouts and the precise ownership model remain shared.
 
 The complete 30-pair, 48-row primary, including matched batched Sumfp, qualifies
@@ -95,7 +95,7 @@ value ABI and heap do not fit this project's fixed-data-model requirement.
 The last point follows the [JS MVP integration record](jube/JS_MVP_Integration.md):
 its historical public adapter weakened optimization facts when a shared runtime
 was present. The lesson is to separate ownership from actual operation effects,
-not to create another standalone runtime (**D5.4.1–D5.4.4**, **D8.4.1v2**).
+not to create another standalone runtime (**D6.4.1–D6.4.4**, **D7.4.1**).
 
 Existing Lambda tuning also changes the starting point. The older
 [typed/C2MIR analysis](<impl/Lambda_Tune_Typed_Vs_C2MIR (done).md>) identified
@@ -112,15 +112,15 @@ The [formal semantics](../doc/Lambda_Formal_Semantics.md) and
 
 | Contract | Authority |
 |---|---|
-| MIR Direct remains the execution backend; AUTO/interpreter policy is separate from MIR implementation selection | **D1.6**, **D8.1.1v18** |
-| Existing `Item` boundary, scalar encodings, arrays, maps, shapes, and layout descriptors | **D1.2v2**, **D2.1–D2.6** |
-| Semantic type, planned representation, emitted value, and machine register class are distinct | **D2.4.1–D2.4.3** |
+| MIR Direct remains the execution backend; AUTO/interpreter policy is separate from MIR implementation selection | **D1.6**, **D8.3.2** |
+| Existing `Item` boundary, scalar encodings, arrays, maps, shapes, and layout descriptors | **D1.2**, **D2.1–D3** |
+| Semantic type, planned representation, emitted value, and machine register class are distinct | **D2.3.4–D2.3.5** |
 | Int53 saturation/poison, machine-integer wrapping, numeric promotion, division, and remainder | **S4.1.1–S4.1.5**, **S4.2**, **S4.4–S4.5** |
-| Declared types are enforced contracts; admission can normalize a value | **S11.4.1v3–S11.4.5**, **D8.3.5** |
-| Missing reads, nullable lanes, checked writes, COW snapshots, and `var` borrows | **S7.1–S7.2**, **D2.5**, **S9.1–S9.2** |
-| Canonical runtime owner, precise GC, scalar homes, and returned failures | **D1.4v4–D1.5v2**, **D5.1–D5.4** |
-| One indexed AST and pass manager; demand-driven lowering | **D8.2.4v2–D8.2.6v2** |
-| Proven direct native entries, checked boxed boundaries, immutable specialization | **D8.3.1v2–D8.3.5**, **D8.4.1v2–D8.4.2v2** |
+| Declared types are enforced contracts; admission can normalize a value | **S11.4.1v3–S11.4.5**, **D7.3.5** |
+| Missing reads, nullable lanes, checked writes, COW snapshots, and `var` borrows | **S7.1–S7.2**, **D2.4**, **S9.1–S9.2** |
+| Canonical runtime owner, precise GC, scalar homes, and returned failures | **D1.4–D1.5**, **D6.1–D6.4** |
+| One indexed AST and pass manager; demand-driven lowering | **D8.2.4–D8.2.6** |
+| Proven direct native entries, checked boxed boundaries, immutable specialization | **D7.3.1–D7.3.5**, **D7.4.1–D7.4.2** |
 | Emission budgets, release MIR artifacts, and dynamic GC oracles | **D8.6.1–D8.6.3** |
 
 There is no new `Item` encoding, array representation, heap, collector, root
@@ -148,7 +148,7 @@ flowchart TD
 Use the existing compiler pass manager and indexed compilation unit. Register
 the MVP stages in that schedule, declaring their inputs, outputs, and timings;
 do not introduce a second AST, pass scheduler, binding resolver, or private
-recursive core-node walker (**D8.2.4v2–D8.2.5v3**).
+recursive core-node walker (**D8.2.4–D8.2.5**).
 
 Planning establishes:
 
@@ -157,7 +157,7 @@ Planning establishes:
   and whether a boundary must check or normalize a value.
 - Transitive call effects: allocation/GC, error completion, reentry, mutation,
   backing-store invalidation, and number-stack use. `fn` purity alone does not
-  establish `NO_GC` or the other effects (**D6.1.3v2**, **D5.3.2**).
+  establish `NO_GC` or the other effects (**D7.1.3**, **D6.3.2**).
 - Range and array-layout proofs sufficient for the selected lowering, with
   explicit invalidation on a write, rebind, or call that can break them.
 - Result demand and the lifetime events supplied to the shared emitter.
@@ -166,12 +166,12 @@ Planning establishes:
 their declaring nodes. Reuse function analysis and ABI-plan records. Retained
 type-only optimization facts follow the existing `Type` side-record rule;
 transient lowering state holds local control-flow proofs. Do not add an
-ID-keyed per-node fact database (**D8.2.5v3**).
+ID-keyed per-node fact database (**D8.2.5**).
 
 Analyze recursive call groups conservatively to a fixed point before choosing
 their ABI. Unknown facts select a correct checked path, never an optimistic
 native entry. Start with one useful native shape per eligible function;
-bounded multi-variant specialization is a later extension of **D8.3.1v2**.
+bounded multi-variant specialization is a later extension of **D7.3.1**.
 
 ### 4.2 Scalar expressions and calls
 
@@ -179,12 +179,12 @@ Expression lowering returns the shared `MirValue`, including its full contract,
 representation, and ownership provenance. Consumers request a native value,
 boxed value, destination, branch, or discard. Branches avoid materializing
 boxed booleans; discard avoids building a result while preserving effects and
-required failures (**D2.4**, **D8.2.6v2**).
+required failures (**D2.3**, **D8.2.6**).
 
 Typed scalar parameters, locals, intermediates, and returns stay native end to
 end. A proven direct call passes native operands directly; an open or unproven
 edge uses the existing checked boxed entry. Generate only the entries required
-by visibility and the call plan (**D8.3.2–D8.3.4v4**).
+by visibility and the call plan (**D7.3.2–D7.3.4**).
 
 An `int` annotation does not prove finite arithmetic: Lambda's int lane includes
 poison and saturates outside the int53 band. Use native arithmetic without a
@@ -196,14 +196,14 @@ a route to parity (**S4.1–S4.5**).
 Proven admission is not necessarily an identity operation: `int` entering a
 `float` contract still needs normalization. Keep semantic conversion separate
 from `em_require_rep()`, and reuse the existing boundary-redundancy analysis
-(**S11.4.5**, **D2.4.3**, **D8.3.5**).
+(**S11.4.5**, **D2.3.5**, **D7.3.5**).
 
 Use the existing native success/error and boxed wide-scalar companion lanes.
 Pending scalar returns resolve before storage, rooting, or escape. Scalar-only
 functions can have zero roots and no number homes when proven; this does not
 remove stack-exhaustion handling or required failure propagation. Shared emitter
 finalization owns all root-store insertion and frame decisions
-(**D5.1.2**, **D5.2.1v3**, **D5.3.1–D5.3.4**).
+(**D6.1.2**, **D6.2.1**, **D6.3.1–D6.3.4**).
 
 ### 4.3 Loops and typed arrays
 
@@ -211,14 +211,14 @@ Finite integer-range loops use native induction variables when endpoint and
 overflow semantics are proven. Preserve range emptiness, inclusive endpoints,
 evaluation order, and break/continue. Elide comprehension construction only
 under actual discard demand; a statement's syntactic position alone is not a
-proof that its result is unused (**D8.2.6v2**, **S16.6**).
+proof that its result is unused (**D8.2.6**, **S16.6**).
 
 Typed arrays retain their existing `Array`, native-array, or `ArrayNum` layout.
 An annotation establishes a contract, not an eternal backing-pointer guarantee.
 Resolve storage through the shared `LaneStorageDesc` and array-contract helpers;
 retain a rooted owner plus the exact representation witness. In particular,
 `bool[]` must use its real descriptor rather than assuming numeric-array storage
-(**D2.6.1v3**, **S11.4.1v3**).
+(**D3.2.1**, **S11.4.1v3**).
 
 A proved in-bounds read becomes an indexed native load. Otherwise preserve the
 nullable read and its downstream contract behavior; never manufacture zero or
@@ -226,7 +226,7 @@ erase absence. A write checks the new value before commit and observes COW.
 Fresh exclusive arrays can avoid repeated detach work; an aliased array still
 detaches as required. Plain parameters preserve snapshots, and `var` parameters
 carry the existing borrow home and publish replacements through it
-(**D2.5.3**, **S9.1.2–S9.1.3**, **S9.2.2**, **D8.3.4v4**).
+(**D2.4.3**, **S9.1.2–S9.1.3**, **S9.2.2**, **D7.3.4**).
 
 Hoist length, layout, bounds, or exclusivity checks only across operations proven
 to preserve them. After an allocating, alias-writing, reentrant, or otherwise
@@ -263,7 +263,7 @@ is distinct from a Lambda language error. A runtime-dependent guard miss must
 have a complete admitted path; otherwise admission rejects that capability.
 Neither a capability failure nor a silent backend fallback counts as a passing
 benchmark. Language errors from admitted operations propagate normally
-(**D1.4v4**, **S7.4**, **S11.4**).
+(**D1.4**, **S7.4**, **S11.4**).
 
 ## 6. Runtime-helper policy
 
@@ -276,20 +276,20 @@ already exists, and no requirement to rewrite one merely to call this a fresh MV
 Each helper change records its callers, preconditions, result representation,
 completion behavior, transitive GC/reentry/mutation effects, and scalar-owner
 contract. Document the cost removed and validate the generic boundary and fast
-path. Unknown effects remain conservative (**D5.3.2**, **D8.4.3v2**).
+path. Unknown effects remain conservative (**D6.3.2**, **D7.4.3**).
 
 Likely candidates are a narrow checked-array preparation operation or a cheaper
 semantic leaf behind an existing API, if profiling identifies them. Ordinary
 numeric operations, known calls, and in-bounds loads should become MIR rather
 than a new layer of helper calls. Public builtin ABIs remain compatible
-(**D6.4.1**).
+(**D7.6.1**).
 
 Promote a reusable existing `static` helper into its owning module's header
 instead of copying it. Put broadly reusable fixes in the shared runtime; reserve
 `mvp_runtime.cpp` for genuinely MVP-specific adapters or experimentally separate
 implementations. Count that code and its transitive dependencies in the audit.
 All allocating C/C++ paths use precise `RootFrame`/`Rooted` ownership; no
-conservative stack scanning or private heap is introduced (**D1.5v2**, **D5.3.3**).
+conservative stack scanning or private heap is introduced (**D1.5**, **D6.3.3**).
 
 ## 7. Focused benchmark population
 
@@ -505,7 +505,7 @@ where the current code combines lifecycle and lowering; never call old lowering
 as an adapter. Code and metadata remain alive for all users, and cache identity
 distinguishes the compiler implementation/build. Initially an MVP artifact may
 remain uncached rather than masquerading as a production artifact
-(**D5.4**, **D8.5.1v7**).
+(**D6.4**, **D8.3.5**).
 
 Existing reuse points to inspect before adding code:
 

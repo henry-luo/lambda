@@ -236,7 +236,7 @@ static inline bool validator_numeric_item_embeds(ConstItem item, Type* target) {
     // TypeId-only lattice could not see it, because the discriminator lives in
     // the VALUE, not the type. That divergence made `c.n = c.n + 1n` on an
     // `integer` field fail admission with "expected type, got decimal"
-    // (D3.2.2's known three-way divergence; Tune19 §12.8).
+    // (D4.2.3's known three-way divergence; Tune19 §12.8).
     if (actual == LMD_TYPE_DECIMAL && unwrap_type(target) == &TYPE_INTEGER) {
         Decimal* dec = ((Item*)&item)->get_decimal();
         return dec && dec->storage_kind == DECIMAL_BIGINT;

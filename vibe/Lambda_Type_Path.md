@@ -184,7 +184,7 @@ Lexical shadowing chooses the namespace/binding before lowering; it is not a
 runtime search through every namespace. Identifier spelling and symbol
 spelling produce the same `NameKey` identity when used as a key in the same
 identity scope; string subscripts normalize by the same exact contents,
-consistent with **S8.2.2v2** and **D4.6.1v2**.
+consistent with **S8.2.2v2** and **D5.6.1**.
 
 A standalone symbol still evaluates to its key value. When a symbol is used as
 a static reference head, its namespace supplies the root just as it does for
@@ -201,7 +201,7 @@ The canonical internal identity is `(NamespaceId, NameId)` plus remaining
 typed keys, not a `String*` address. Raw `NameId` values are scoped and are not
 portable serialization. Persisted/linked references carry their qualified
 root and key spellings and are resolved into the receiving NamePool, following
-**D4.6.2v2**.
+**D5.6.2**.
 
 Every reference is globally resolvable *within its resolution universe*: the
 linked program/module graph, its identity pools, and the active
@@ -242,10 +242,10 @@ changes because a request happened to fail. A different application/isolate
 may deliberately install a different `/` mount, just as it may install a
 different module/import environment.
 
-The resolver belongs to the isolate's canonical `EvalContext` (**D5.4.1**) and
+The resolver belongs to the isolate's canonical `EvalContext` (**D6.4.1**) and
 is immutable during one evaluation. There is no mutable process-global
 namespace or cross-isolate ambient registry. Frozen provider catalogs may be
-process-global under **D5.4.4**; the context-specific root/namespace bindings
+process-global under **D6.4.4**; the context-specific root/namespace bindings
 may not be.
 
 ### 2.5 Absolute provider paths

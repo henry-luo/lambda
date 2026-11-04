@@ -1,4 +1,4 @@
-// S7.7.3/D2.4.1: successful imported scalar calls retain their native carriers.
+// S7.7.3/D2.3.4: successful imported scalar calls retain their native carriers.
 import native: .mod_ledger_long_names
 fn step(x: u64) u64 => native.native_word(x) + 1u64;
 fn uncertain(value) u64^ { let admitted: u64 = value; admitted }

@@ -1,4 +1,4 @@
-// A group is one image atom with recoverable member sources and an embedded SVG (D7.2.5).
+// A group is one image atom with recoverable member sources and an embedded SVG (D10.2.1).
 import lambda.editor.mod_step
 import objects: .mod_objects
 

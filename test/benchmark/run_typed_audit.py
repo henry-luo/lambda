@@ -2,7 +2,7 @@
 """Pinned-tier typed/untyped or same-source release comparison.
 
 Reuse the paired runner's timing/output gate. Interpreter eligibility is checked
-in a separate instrumented process, outside every timed sample (D8.1.1v15).
+in a separate instrumented process, outside every timed sample (D8.3.1).
 """
 
 import argparse

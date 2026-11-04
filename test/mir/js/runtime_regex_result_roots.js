@@ -1,4 +1,4 @@
-// D5.3.3: RegExp result, named-groups, indices, keys, and capture values stay
+// D6.3.3: RegExp result, named-groups, indices, keys, and capture values stay
 // rooted while property creation allocates and may collect.
 const expression = /(?<left>a)(?<right>b)?/dg;
 const match = expression.exec("ab");

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.6.4v3, D8.4.1v2: inferred packed layouts use exact shape guards and descriptor-aware slot kernels.",
+  "description": "D2.6.2, D7.4.1: inferred packed layouts use exact shape guards and descriptor-aware slot kernels.",
   "checks": [
     {
       "in_func": "_tune32_phase2_record_#",

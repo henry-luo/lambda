@@ -22,10 +22,10 @@ not Lambda's map collection type.
 The proposal uses its source/layer/style separation and mapping concepts as
 references; it does not promise its complete JavaScript API or style support.
 
-**Specification linkage:** D7.2.1–D7.2.4 cover packages and namespaces;
+**Specification linkage:** D9.3.1–D9.3.4 cover packages and namespaces;
 S12.1.1v2/S12.1.3 cover pure computation and procedural view handlers;
-S7.4.1–S7.4.2 cover errors; D4.5.1v4/D4.5.2 and D5.3.3 cover native ownership;
-D7.4.1v2/D7.4.2v2/D7.4.4 and D7.5.2/D7.5.3 cover host resources, async work,
+S7.4.1–S7.4.2 cover errors; D5.5.1/D5.5.2 and D6.3.3 cover native ownership;
+D9.5.1/D9.5.2/D9.5.4 and D11.1.2/D9.5.6 cover host resources, async work,
 IO, and the Radiant boundary. This proposal applies those contracts without
 changing the formal specifications. See [Formal Design](../doc/Lambda_Formal_Design.md),
 [Formal Semantics](../doc/Lambda_Formal_Semantics.md), and
@@ -165,17 +165,17 @@ a chart's fitted projection scale is not a tiled map's zoom convention.
 
 | Authority | Consequence for the package |
 |---|---|
-| **D7.2.3/D7.2.4** — packages distribute as source; “`lambda.*` is the one root for everything Lambda ships” | Use an explicit source entry module. A script package and built-in module cannot own the same path. |
+| **D9.3.3/D9.3.4** — packages distribute as source; “`lambda.*` is the one root for everything Lambda ships” | Use an explicit source entry module. A script package and built-in module cannot own the same path. |
 | **S16.9.6/S16.9.8** — dotted imports and existing resolution roots | `lambda.map` requires a real `lmd/package/map.ls`; there is no implicit directory index. The name is a recommendation subject to review. |
 | **S12.1.1v2** — “`fn` is pure and deterministic under any schedule” | Validation, camera math, style compilation, and rendering from supplied snapshots stay pure. Network requests, file output, live cache changes, and clock sampling do not occur inside those functions. |
 | **S12.1.3** — “template body = pure `fn` transformation” | Camera, selection, loading status, and playback belong to each view instance; `on` handlers perform updates. |
 | **S7.4.1/S7.4.2** — value errors versus raised errors | Invalid specifications return deliberate `T \| error` values. Procedural loading/export APIs declare and engage raised failures when appropriate. |
-| **D4.5.1v4/D4.5.2** — “pin, gen-check, copy-as-value”; “Radiant never retains a GC pointer” | Native render records copy data into document-owned storage or hold an explicitly registered root. Tile completion cannot retain a borrowed Lambda value. |
-| **D5.3.3** — slot-backed `RootFrame` / `Rooted<T>` | Native decoding/building and script handoffs use precise roots; no conservative stack scanning. |
-| **D7.4.1v2/D7.4.4** — opaque resource IDs and declared host interfaces | Renderer and request resources are checked host objects/IDs, never raw pointers in script values. |
-| **D7.4.2v2/D7.5.2** — host async delivery and central IO | Reuse the host scheduler and IO policy. Packages do not create another event loop or bypass resource acquisition. |
-| **D7.5.3** — “Lambda reaches Radiant only through the `radiant-dom` module” | Map mechanisms extend that boundary where needed; core Lambda does not link a map renderer. |
-| **D7.3.5** — every module kind names its conformance gate | Define package, rendering, interaction, and any added web-platform gates before claiming support. |
+| **D5.5.1/D5.5.2** — “pin, gen-check, copy-as-value”; “Radiant never retains a GC pointer” | Native render records copy data into document-owned storage or hold an explicitly registered root. Tile completion cannot retain a borrowed Lambda value. |
+| **D6.3.3** — slot-backed `RootFrame` / `Rooted<T>` | Native decoding/building and script handoffs use precise roots; no conservative stack scanning. |
+| **D9.5.1/D9.5.4** — opaque resource IDs and declared host interfaces | Renderer and request resources are checked host objects/IDs, never raw pointers in script values. |
+| **D9.5.2/D11.1.2** — host async delivery and central IO | Reuse the host scheduler and IO policy. Packages do not create another event loop or bypass resource acquisition. |
+| **D9.5.6** — “Lambda reaches Radiant only through the `radiant-dom` module” | Map mechanisms extend that boundary where needed; core Lambda does not link a map renderer. |
+| **D9.4.5** — every module kind names its conformance gate | Define package, rendering, interaction, and any added web-platform gates before claiming support. |
 
 The map package is a visualization library, so `lambda.map` is proposed beside
 `lambda.chart` and `lambda.graph`. Document-specific adapters can live below
@@ -379,7 +379,7 @@ and translucent polygons before enabling those paint properties.
 The host owns requests and caches; the Lambda view owns the logical source
 revision, loading state, and resulting snapshots. Reuse central network/IO
 mechanisms and extend cancellation/completion surfaces only where a concrete
-map fixture requires it (D7.4.2v2, D7.5.2).
+map fixture requires it (D9.5.2, D11.1.2).
 
 Use these distinct cache stages:
 
@@ -397,7 +397,7 @@ bounded retries. Pan/style/source replacement cancels obsolete work; a late
 completion must pass document, map-instance, and source-generation checks.
 An off-thread decoder consumes owned bytes and returns owned native data;
 it never traverses the live DOM or borrows a GC object. Page-thread integration
-follows **RC1**, and host completion delivery follows D7.4.2v2.
+follows **RC1**, and host completion delivery follows D9.5.2.
 [Radiant concurrency](radiant/Radiant_Design_Concurrency.md)
 
 Provider URLs, credentials, attribution, source bounds, and caching permission
@@ -587,7 +587,7 @@ source/layer changes, feature queries, event subscriptions, and disposal. JS
 updates pass the same schema/style validation and source-generation rules as
 Lambda updates. Reuse the existing map instance, cartography, tile cache, and
 renderer; do not create a second JS-owned scene graph. JS callbacks and host
-wrappers obey D7.4.1v2/D7.4.4 and D4.5.2/D5.3.3's precise ownership rules.
+wrappers obey D9.5.1/D9.5.4 and D5.5.2/D6.3.3's precise ownership rules.
 
 Choose familiar MapLibre-style names only where behavior is deliberately
 specified. This is a Lambda native-map API, not a drop-in `maplibregl.Map`
@@ -606,7 +606,7 @@ remain proposals; they do not silently resolve gaps in existing rulings.
 |---|---|---|
 | Product direction | **Selected:** native Lambda/Radiant | Flat vector painter and export details remain engineering choices |
 | Element | **Selected:** `<geomap ...>` | Dedicated geographic tag; HTML `<map>` remains the image-map element |
-| Public namespace | Explicit `lambda.map` entry module with `maps` as the example alias | Confirm visualization classification and name under D7.2.4 |
+| Public namespace | Explicit `lambda.map` entry module with `maps` as the example alias | Confirm visualization classification and name under D9.3.4 |
 | First delivery | Offline GeoJSON navigation/query/export, then tiled v0.2 | Is a tiled street basemap required in the first release? |
 | Style support | MapLibre subset imported into native source/layer elements | Select exact reference styles and properties in preparation |
 | Label resources | Pinned local fonts and bounded sprites initially | Require external glyph PBFs or line labels for v0.2? |
@@ -650,8 +650,8 @@ physical wheel dispatch and cancellation are in
 integration, but should not be listed as wholly missing engine features.
 
 The current evidence supports extending these mechanisms under
-**D7.5.3/D7.4.2v2**, retaining **S12.1.3**'s package-owned interaction policy and
-**D4.5.1v4/D4.5.2/D5.3.3**'s ownership contracts. It does not identify a need
+**D9.5.6/D9.5.2**, retaining **S12.1.3**'s package-owned interaction policy and
+**D5.5.1/D5.5.2/D6.3.3**'s ownership contracts. It does not identify a need
 for a new language feature, compiler backend, GC model, or browser engine.
 
 ## Appendix A. Development outline and code locations
@@ -677,7 +677,7 @@ per the documentation convention. All paths marked **new** are proposed.
 | **new** `test/lambda/map/`, `test/map/`, `test/demo/map/` | Package goldens, binary/render/interaction fixtures, and a self-contained demo |
 
 Do not register a native built-in at `lambda.map` while the script entry owns
-that path (D7.2.4). A native codec extension must follow D7.3/D7.4 rather than
+that path (D9.3.4). A native codec extension must follow D9.4/D9.5 rather than
 exposing arbitrary core symbols. If a defect truly belongs in a vendored
 dependency, stop for approval and retain an approved patch under `patches/`;
 do not edit vendor code in place.

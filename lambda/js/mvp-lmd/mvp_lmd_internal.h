@@ -2,7 +2,7 @@
 // (mvp_lmd_mir.cpp) and the MIR-free program/realm runtime
 // (mvp_lmd_program.cpp). MIR names appear only as field types; a
 // build without MIR (LAMBDA_NO_MIR) can instantiate runtime-only realms
-// without compiler plans or generated code (D8.1.3v42).
+// without compiler plans or generated code (D8.4.5).
 #pragma once
 
 #include "mvp_lmd.h"

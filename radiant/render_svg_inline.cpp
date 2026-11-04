@@ -621,7 +621,7 @@ static void svg_style_collect_sheets(SvgStyleContext* style, Element* elem) {
 
 static void svg_style_destroy(SvgStyleContext* style) {
     if (!style) return;
-    // D4.2: external template documents outlive all borrowed resolution facts in this walk.
+    // D5.2: external template documents outlive all borrowed resolution facts in this walk.
     for (SvgResourceDocument* resource = style->resources; resource;) {
         SvgResourceDocument* next = resource->next;
         svg_resource_document_destroy(resource);
@@ -633,7 +633,7 @@ static void svg_style_destroy(SvgStyleContext* style) {
         if (entry->text_hit_path) rdt_path_free(entry->text_hit_path);
     SvgStyleMap::destroy(style->entries);
     if (style->isolated_document) {
-        // D4.2.6: layout payloads release borrowed fonts/images before their private document owner.
+        // D5.2.5: layout payloads release borrowed fonts/images before their private document owner.
         view_tree_shell_destroy(style->isolated_document, style->isolated_document->view_tree);
         if (style->isolated_ui) image_cache_cleanup(style->isolated_ui);
         if (style->isolated_surface) image_surface_destroy(style->isolated_surface);
@@ -693,7 +693,7 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
     style->isolated_document = input ? dom_document_create(input) : nullptr;
     style->document = style->isolated_document;
     if (!style->document) { svg_style_destroy(style); return false; }
-    // isolated SVG uses the same namespace/name interpretation as parsed HTML (D2.11.2).
+    // isolated SVG uses the same namespace/name interpretation as parsed HTML (D10.1.5).
     style->document->page_kind = DOM_PAGE_KIND_HTML;
     style->document->resource_policy = host ? host->resource_policy : INPUT_RESOURCE_ALLOW_NETWORK;
     dom_document_borrow_input_resources(style->document);
@@ -1084,7 +1084,7 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
         // the SVG traversal inherits internally; seed its root from surrounding HTML CSS, ignoring HTML attributes.
         prop->value = svg_style_property_value(ctx, dom_element_to_element(parent->as_element()), name);
     }
-    // D4.5.1v4: another use instance can replace the document's borrowed sample pool in this walk.
+    // D5.5.1: another use instance can replace the document's borrowed sample pool in this walk.
     if (generation && prop->value) prop->value = pool_strdup(style->pool, prop->value);
     prop->next = entry->properties;
     entry->properties = prop;
@@ -2034,7 +2034,7 @@ static void svg_use_resource_cache_destroy(DomDocumentResourceData* data) {
     SvgUseResourceCache* cache = (SvgUseResourceCache*)data;
     for (SvgResourceDocument* document = cache->documents; document;) {
         SvgResourceDocument* next = document->next;
-        // instance controls release their borrowed DOM refs before the source owner is destroyed (D4.2.6).
+        // instance controls release their borrowed DOM refs before the source owner is destroyed (D5.2.5).
         svg_animation_forget_source_document(cache->document, document->style.document);
         svg_resource_document_destroy(document); document = next;
     }
@@ -8089,7 +8089,7 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
     bool valid = dl_validate_or_log(&dl, "svg_export_vector");
     // resolved image pixels feed the paint list until the consumer has run
     ImageSurfaceReadScope read_scope;
-    // the consumer runs before the recording owner expires (D4.2.2v2); unrepresentable pixel operations select shared replay.
+    // the consumer runs before the recording owner expires (D5.2.2); unrepresentable pixel operations select shared replay.
     size_t text_index = 0;
     DisplayListCursor cursor(&dl);
     while (valid && cursor.next()) {
@@ -8696,7 +8696,7 @@ static SvgPaintStamp svg_paint_stamp(RasterRenderContext* rdcon, DomElement* ele
     const SvgInitialPaint* paint, ImageSurface* image = nullptr) {
     DomDocument* document = rdcon->ui_context->document;
     if (image) {
-        // SVG image style is isolated (D2.11.2); source/time and shared paint resources invalidate its pixels.
+        // SVG image style is isolated (D10.1.5); source/time and shared paint resources invalidate its pixels.
         double time = rdt_picture_animation_time(image->pic);
         uint64_t animation = 0;
         memcpy(&animation, &time, sizeof(animation));

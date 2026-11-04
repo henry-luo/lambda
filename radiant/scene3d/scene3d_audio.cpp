@@ -740,7 +740,7 @@ static const char* audio_schedule(Scene3dAudio* state, MapReader fields) {
     uint64_t candidates[AUDIO_CUE_BATCH] = {}, fresh[AUDIO_CUE_BATCH] = {};
     AudioPlayerLease prepared[AUDIO_CUE_BATCH] = {}, targets[AUDIO_CUE_BATCH] = {};
     bool new_voice[AUDIO_CUE_BATCH] = {}, new_binding[AUDIO_CUE_BATCH] = {};
-    // reader decoding/copying stays on the main owner; the callback only swaps retained PCM pointers (D4.5.2).
+    // reader decoding/copying stays on the main owner; the callback only swaps retained PCM pointers (D5.5.2).
     for (unsigned i = 0; i < count && !error; i++) if (clips[i]) {
         auto* source = sources[i];
         if (!source->player) {
@@ -963,7 +963,7 @@ Item scene3d_audio_operate(Scene3dAudio* state, Item request) {
             get_type_id(bytes) != LMD_TYPE_BINARY) return fail("audio clip: requires encoded bytes within native clip limits");
         auto* root = dom_node_ref_validate(state->document, state->root);
         if (!root || !root->is_element() || !dom_element_is_connected(root->as_element())) return fail("audio clip: detached scene");
-        // decode and quota admission precede replacement; existing cursors retain their old immutable PCM (D4.5.2).
+        // decode and quota admission precede replacement; existing cursors retain their old immutable PCM (D5.5.2).
         uint64_t token = radiant_audio_open(state->document, binary_data(bytes.get_binary()), bytes.get_binary()->len);
         if (!token) return fail("audio clip: decode or document admission failed");
         RdtAudioInfo info = {}; radiant_audio_info(state->document, token, &info);

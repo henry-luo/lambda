@@ -1,4 +1,4 @@
-// NSPasteboard is a byte transport; the editing package chooses what to copy (D7.2.5).
+// NSPasteboard is a byte transport; the editing package chooses what to copy (D10.2.1).
 #ifdef __APPLE__
 #import <Cocoa/Cocoa.h>
 #include "clipboard_mac.hpp"

@@ -1,7 +1,7 @@
 #pragma once
 #include "audio_cues.hpp"
 
-// D7.5.4: explicit output-free jobs use private virtual clocks, never document activation.
+// D11.3.1: explicit output-free jobs use private virtual clocks, never document activation.
 static constexpr unsigned AUDIO_RENDER_JOBS = 4, AUDIO_RENDER_STEP = 4096, AUDIO_RENDER_WAV_HEADER = 58;
 static constexpr size_t AUDIO_RENDER_BYTES = 64u * 1024u * 1024u, AUDIO_RENDER_DOCUMENT_BYTES = 128u * 1024u * 1024u;
 enum AudioRenderState { AUDIO_RENDER_READY, AUDIO_RENDER_RUNNING, AUDIO_RENDER_COMPLETE, AUDIO_RENDER_CANCELLED, AUDIO_RENDER_ERROR };

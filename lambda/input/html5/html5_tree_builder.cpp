@@ -413,7 +413,7 @@ Element* html5_parse_n(Input* input, const char* html, size_t length, Html5Parse
 
 Element* parse_svg_document(Input* input, const char* source) {
     if (!input || !source) return nullptr;
-    // external SVG shares HTML foreign-content parsing and its published owner (D2.11.2).
+    // external SVG shares HTML foreign-content parsing and its published owner (D10.1.5).
     Element* document = html5_parse(input, source);
     input->root = document ? Item{.element = document} : ItemError;
     ElementReader svg = ElementReader(document).findChildElement("html")

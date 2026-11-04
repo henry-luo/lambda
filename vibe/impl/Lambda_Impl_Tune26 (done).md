@@ -21,8 +21,8 @@
   [typed-array implementation, §§13–14](Lambda_Impl_Typed_Array.md),
   [Tune24](Lambda_Impl_Tune24.md), [Tune25](Lambda_Impl_Tune25.md).
 - **Authority:** [formal design](../../doc/Lambda_Formal_Design.md)
-  **D2.2.2**, **D2.4.1–D2.4.3**, **D3.3.2v2–D3.3.4**, **D5.3.4**,
-  **D8.2.6**, **D8.3.1–D8.3.3**, **D8.4.3v2**;
+  **D2.2.2**, **D2.3.4–D2.3.5**, **D4.3.2–D2.4.3**, **D6.3.4**,
+  **D8.2.6**, **D7.3.1–D7.3.3**, **D7.4.3**;
   [formal semantics](../../doc/Lambda_Formal_Semantics.md)
   **S4.1.2**, **S7.1.1v3**, **S7.1.3v2**, **S9.1.2**, **S9.2.2**,
   **S11.4.1v3**. Tune26 changes implementation and performance acceptance;
@@ -171,7 +171,7 @@ declaration, while the COW profile reported zero checked-store fallbacks.
    then use that result's proof for all initialized elements. Reuse the
    existing fill allocation/kernel and failure ordering. Materialize the
    destination certificate only at a successfully enforced explicit boundary;
-   inferred element narrowing remains binding-local under D3.3.3v3.
+   inferred element narrowing remains binding-local under D4.3.3.
 4. For an exact carrier whose invariants already imply every element's base
    contract, install the interned certificate without boxing/visiting each
    element. Typed empty arrays receive the correct empty carrier and proof.
@@ -205,7 +205,7 @@ run separately from timings. T0 and JIT must use the same admission relation.
   match, index interval and stable extent. In the successful region emit
   direct native loads; remove redundant certificate and bounds checks there.
   Feed the extent proof to nullable-read lowering so a proven in-bounds read
-  remains native under D3.3.4. Preserve the public `T?` result elsewhere.
+  remains native under D2.4.3. Preserve the public `T?` result elsewhere.
 - Support BOOL explicitly through its actual packed carrier. Parameterize
   width/lane handling for the existing integer/float/sized families instead
   of adding a copied bool-only loop implementation.
@@ -213,7 +213,7 @@ run separately from timings. T0 and JIT must use the same admission relation.
   affine matrix indices through one checked interval transfer. Prove index
   multiplication and address arithmetic cannot overflow; use full-width
   comparisons and retain Tune25's `2^32` regression cases.
-- Keep one native function body under D8.3.1. Guarded fast/checked regions
+- Keep one native function body under D7.3.1. Guarded fast/checked regions
   may share the existing structured loop lowering. A guard miss before entry
   runs the original checked path; no fallback may replay completed effects.
 - Unknown/reentrant calls, owner replacement, growth, representation changes
@@ -278,7 +278,7 @@ ordering and partial effects; do not prevalidate the whole loop transactionally.
 Continue the existing evaluation order: evaluate/root RHS, evaluate key,
 then load the current owner. A key call may allocate, capture or replace it.
 Same-contract direct calls reuse admitted descriptors; uncertain public calls
-enter `_b` and check once in the callee (D8.3.2–D8.3.3). Keep array `var`
+enter `_b` and check once in the callee (D7.3.2–D7.3.3). Keep array `var`
 write-back through the existing caller home. No extra specialized ABI,
 conservative GC scanning, or unrooted cached buffer pointer is introduced.
 
@@ -453,7 +453,7 @@ language ruling.
   with typed-array formals now selects the existing raw-array witness body even
   when it has no scalar lanes or scalar return.  `var` formals deliberately
   retain the adapter because they may publish a replacement owner through the
-  caller home (D3.3.3, D8.3.2–D8.3.3).
+  caller home (D4.3.3, D7.3.2–D7.3.3).
 - T26-2 extends dense-loop analysis to BOOL, same-owner writes whose separate
   write proof is valid, and independently proved roots.  In particular, a
   `var` destination stays on the checked COW path while a distinct readonly
@@ -472,17 +472,17 @@ language ruling.
   from one that retains, forwards, captures, or rebinds its parameter.  The
   AST records those effects so direct native calls retain caller-home
   publication only where a callee can replace the caller-visible owner
-  (S9.2.1, S9.2.2, D3.3.3v3).  A same-index non-null float[] store can use
+  (S9.2.1, S9.2.2, D4.3.3).  A same-index non-null float[] store can use
   the compact COW/OOB helper after its entry contract proof; nullable
   cross-array reads still branch to lambda_array_set_checked_inplace_lane
-  before their lane sentinel can reach storage (S4.1, S7.1.3v2, D3.3.3v3).
+  before their lane sentinel can reach storage (S4.1, S7.1.3v2, D4.3.3).
 - A T26-5 Navier-Stokes bisection isolated the remaining typed penalty to
   non-null `float` declaration/assignment boundaries in `lin_solve`: their
   almost-never-taken `lambda_type_check` calls split the hot loop and extended
   numeric-register liveness across a may-GC edge.  Synchronous known-null
   failures now branch to deferred terminal blocks while retaining the exact
-  E201 diagnostic and the shared function epilogue (S4.1, D2.4.1,
-  D5.2-D5.3).  The focused MIR fixtures pin both indexed and arithmetic
+  E201 diagnostic and the shared function epilogue (S4.1, D2.3.4,
+  D6.2-D6.3).  The focused MIR fixtures pin both indexed and arithmetic
   boundary shapes.
 
 Focused evidence for the r20 release candidate was:
@@ -500,7 +500,7 @@ snapshot to observe `2.0` rather than its old value.  The expected result was
 `12 2`; the trial produced `22 2`.  This establishes that call-boundary
 preparation alone does not prove exclusive ownership after an in-body snapshot
 capture.  The retained-effect analysis keeps that dynamic COW case guarded,
-preserving S9.2.2 and D3.3.3v3.
+preserving S9.2.2 and D4.3.3.
 
 ### Measured performance evidence
 

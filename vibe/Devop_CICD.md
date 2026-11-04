@@ -3,9 +3,9 @@
 > **Retired 2026-10-19:** The GitHub Actions workflows and their runner and
 > notification scripts described here have been removed. This proposal remains
 > as a historical record; the reusable Linux image is now at
-> `docker/Dockerfile.linux`. Formal requirements D1.10 and D7.3.5 still call
+> `docker/Dockerfile.linux`. Formal requirements D1.10 and D9.4.5 still call
 > for enforcement and module conformance gates in CI. No replacement CI
-> configuration is checked into this repository, so the D7.3.5 CI wiring is
+> configuration is checked into this repository, so the D9.4.5 CI wiring is
 > currently absent; these formal rulings are unchanged.
 
 ## Overview

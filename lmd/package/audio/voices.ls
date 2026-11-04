@@ -1,4 +1,4 @@
-// D7.5.4: one shared native handle lifetime and bounded overlap policy.
+// D11.3.1: one shared native handle lifetime and bounded overlap policy.
 import dom
 pub pn close(owner,voices) { for (token in voices) dom.audio_close(owner,token) }
 pub pn start(owner,voices,bytes,gain=1.0,limit=14) map^ {

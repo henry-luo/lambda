@@ -1,4 +1,4 @@
-// D4.5.2 / S12.1.3: native pixels are copied into a retained document-owned canvas.
+// D5.5.2 / S12.1.3: native pixels are copied into a retained document-owned canvas.
 import dom
 import img: lambda.image
 import model: .model

@@ -14,8 +14,8 @@ The `<document>` element is a **virtual container** that:
 
 ## XHTML admission
 
-**Adopted 2026-10-15; catalog revision 2026-10-26 — D2.10.1v2**, with name identity governed by
-**S8.2.2v6** and **D3.4.4v4**. The dedicated `xhtml` format reuses strict XML
+**Adopted 2026-10-15; catalog revision 2026-10-26 — D10.1.4**, with name identity governed by
+**S8.2.2v6** and **D3.4.4**. The dedicated `xhtml` format reuses strict XML
 parsing and emits the HTML parser's tree representation for direct Radiant
 consumption. `.xhtml`/`.xht` and `application/xhtml+xml` select it; an explicit
 format overrides the filename.
@@ -28,7 +28,7 @@ matching closing tags. Qualified attributes and namespace declarations remain
 intact. Existing DOM namespace metadata carries resolved element identity,
 including default-namespace resets and XHTML inside SVG `foreignObject`.
 All names are created through `MarkBuilder`, sharing the HTML parser's
-interning path without mutating shared element types (D3.4.3v5).
+interning path without mutating shared element types (D3.4.3).
 
 XHTML produces `#document`, `#doctype` and `#comment` nodes and omits the XML
 declaration from document children. Text whitespace and decoded CDATA survive.
@@ -66,7 +66,7 @@ their failures without hiding them; checks begin after page load and the
 first animation frame. `RadiantViewTest.LoadsXhtmlFeatureGallery` verifies
 the checklist and click/rerun behavior. The gallery also exposed and covers
 the type selector's XML document check: the XHTML namespace alone must not
-enable HTML case-insensitive matching (D2.10.1, S8.2.2v6).
+enable HTML case-insensitive matching (D10.1.4, S8.2.2v6).
 
 The gallery's 27 checks and nine replay assertions pass in interactive views
 at 1120 px and 480 px widths. Static layout/render currently exposes a
@@ -80,7 +80,7 @@ that failed check visible with the observed values; it does not suppress it.
 ### XML Parser (`input-xml.cpp`)
 
 The ordinary `xml` profile creates a virtual `<document>` wrapper element;
-the `xhtml` profile uses `#document` under D2.10.1:
+the `xhtml` profile uses `#document` under D10.1.4:
 
 ```cpp
 // Create a document root element to contain all top-level elements
@@ -248,3 +248,37 @@ This would enable:
 - Consistent schema validation patterns
 - Uniform processing logic
 - Clean roundtrip behavior across all formats
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](../impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.10.1v2 → D10.1.4
+
+**D10.1.4** **`xhtml` uses XML syntax and emits the HTML element tree.**
+Explicit `input`/`parse` format `xhtml`, filename extensions `.xhtml` and
+`.xht` (case-insensitive), and MIME `application/xhtml+xml` select the
+strict XML 1.0/UTF-8 parser with namespace validation and whitespace
+preservation. The document element is `{http://www.w3.org/1999/xhtml}html`.
+Output uses the HTML parser's `#document`, `#doctype` and `#comment`
+representations; an XML declaration is omitted from document children.
+XHTML, SVG and MathML element prefixes resolve to their local names,
+keeping namespace identity; ordinary HTML attributes keep their names
+and string values, and qualified attributes retain their namespace.
+Name handling preserves XML case sensitivity (S8.2.2v6); it never folds
+foreign names such as `viewBox` or `foreignObject`. XML tree structure,
+CDATA text and self-closing boundaries survive without HTML reparsing.
+Radiant admits the result through its HTML DOM/CSS/layout pipeline in
+standards mode, including when no doctype is present. The recognized public
+identifiers in HTML §14.2 select its built-in named-character-reference
+catalog, without DTD fetching. Other doctypes retain inert identifiers and
+admit only XML's five predefined named entities. Internal subsets, arbitrary
+entity declarations and unknown named entities are unsupported.
+[Input_XML §XHTML admission; USER 2026-10-15, catalog extension 2026-10-26]

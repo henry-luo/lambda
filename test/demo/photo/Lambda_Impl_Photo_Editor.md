@@ -15,7 +15,7 @@ Native font measurement fits single-line captions without glyph distortion.
 The retained canvas and editor tree remain stable (**S12.1.3**). Only the small
 SVG overlay and layer options are replaced when their content changes. Preview
 and export call the same SVG scene builder; PNG composition reuses
-`radiant.export_document` through the existing host seam (**D7.5.3**). The
+`radiant.export_document` through the existing host seam (**D9.5.6**). The
 adjusted background and completed export use neighboring temporary files,
 which are removed before publishing or returning a write error. The existing
 document exporter adds an explicit PNG `transparent:true` option so the photo
@@ -25,7 +25,7 @@ levels/effects; version 1 loads supply defaults for those fields.
 
 PNG encoding now converts premultiplied paint to straight channels at the
 shared encoder boundary, including data-URI and strip exports; a single private
-row preserves retained-source ownership (**D4.5.2**). Flex-item scrollers also
+row preserves retained-source ownership (**D5.5.2**). Flex-item scrollers also
 convert content height back to a border-box extent before calculating their
 range, keeping the inspector's final controls reachable with padding. The
 creative replay exercises those controls, and native pixel tests cover padded
@@ -71,8 +71,8 @@ and limits. The sections below preserve the original plan and acceptance targets
 Completed engine fixes include shape-preserving numeric unary operations,
 `last` receiver context on the MIR defect-capable indexing path, reflected range
 values, disabled-control focus cleanup, and preserving authored flex/grid button
-alignment. The shared canvas owns its pixel copy (**D4.5.2**); allocation paths
-use precise roots (**D5.3.3**). No vendor changes or formal-ruling changes are needed.
+alignment. The shared canvas owns its pixel copy (**D5.5.2**); allocation paths
+use precise roots (**D6.3.3**). No vendor changes or formal-ruling changes are needed.
 
 Verification on 2026-10-10:
 
@@ -195,14 +195,14 @@ Follow the existing formal contracts:
 - **S12.1.3:** “template body = pure `fn` transformation; mutation only in
   `on` handlers (`pn`).” UI rendering and recipe evaluation are pure;
   orchestration, canvas upload, and file writes belong in procedures.
-- **S1.4 / D7.2.1:** mutable session state belongs to a template instance or
+- **S1.4 / D9.3.1:** mutable session state belongs to a template instance or
   procedure activation; module bindings remain immutable.
-- **D4.5.1v4 / D4.5.2:** Radiant owns its surfaces under document lifetimes;
+- **D5.5.1 / D5.5.2:** Radiant owns its surfaces under document lifetimes;
   “borrow to read, copy or root to keep.” Pixel upload copies into a native
   surface and never leaves a borrowed GC array pointer in the render tree.
-- **D5.3.3:** native adapters use `RootFrame` / `Rooted` across allocations and
+- **D6.3.3:** native adapters use `RootFrame` / `Rooted` across allocations and
   callbacks. Precise rooting also covers pending preview/source values.
-- **D7.1.1 / D7.1.2v2 / D7.5.3:** keep resource acquisition in the existing
+- **D9.1.1 / D9.1.2 / D9.5.6:** keep resource acquisition in the existing
   I/O layer and reach Radiant through the existing module/host seam. Do not
   add an upward Radiant dependency to `lambda-rt`.
 
@@ -460,7 +460,7 @@ before adding handles; DOM overlays alone are insufficient for exported art.
   reset undo, source replacement, schema validation, and recipe round trips.
 - Native surface tests: strided arrays, invalid shape/type, allocation failure,
   canvas replacement, resize, stale generations, and document close. Use
-  forced collection to prove seam rooting under **D5.3.3**.
+  forced collection to prove seam rooting under **D6.3.3**.
 - Decode exported PNGs and compare pixels/dimensions with the pipeline result.
   For preview parity, compare the same evaluation size; a downsampled proxy
   is not expected to match every full-resolution edge after resampling.
@@ -559,7 +559,7 @@ language-level worker semantics; cooperative tasks remain as specified by
    value of floating-point rounding. Existing `as_float()` remains float64;
    bounded double scratch makes a global dtype change unnecessary.
    N-D array construction also attaches its rooted shape before allocating the
-   payload (**D5.3.3 / D4.3.1**). Previously, allocating a tiny shape after a large
+   payload (**D6.3.3 / D5.3.1**). Previously, allocating a tiny shape after a large
    pixel buffer could collect and promote that unwritten buffer. The shared
    ArrayNum factory now performs the payload allocation last. A native regression
    checks nursery ownership at return and dimensions/bytes after later collection.
@@ -573,7 +573,7 @@ language-level worker semantics; cooperative tasks remain as specified by
    preview/export lanes over the existing thread pool. Each lane has one active
    and one replaceable pending request. Workers retain native pixel copies and
    coefficients, never a GC pointer, evaluator context or DOM node
-   (**D4.5.2 / D5.3.3 / D7.5.3**). UI frame callbacks poll completion and publish
+   (**D5.5.2 / D6.3.3 / D9.5.6**). UI frame callbacks poll completion and publish
    only a matching current recipe/source. Cancellation is checked per scanline
    and between PNG rows. Document teardown cancels, joins and frees jobs/caches.
    Encoded exports avoid copying full-resolution pixels back into the GC heap.
@@ -669,7 +669,7 @@ button's panel in a later frame; `doc_state_request_reflow` then validated the
 partially committed tree before the existing post-handler focus cleanup ran.
 Frame delivery now opens a nested state batch and closes it after reconciliation
 and focus cleanup. The final interaction assertion remains enabled; the retained
-tree contract (**S12.1.3 / D4.5.1v4**) is unchanged.
+tree contract (**S12.1.3 / D5.5.1**) is unchanged.
 
 An in-process `RadiantFrameDelivery` regression calls the frame tick directly,
 without a host batch, then checks focus/pseudo-state cleanup and validation.
@@ -699,7 +699,7 @@ above it. The same exported markup was centered in Chromium.
 
 Stored line-height now resolves `unset`/`inherit` through the existing inherited
 value helper and `initial` to `normal`, before storing its owned computed value
-(**D4.5.1v4**). This follows the [CSS Variables invalid-value rule](https://www.w3.org/TR/css-variables-1/#invalid-variables).
+(**D5.5.1**). This follows the [CSS Variables invalid-value rule](https://www.w3.org/TR/css-variables-1/#invalid-variables).
 The scene also installs typography, sizing and color tokens through the shared
 DTNA token helper, preserving the retained tree (**S12.1.3**). The 34-pixel Add
 text button now has 20-pixel leading and a measured text-center offset of zero.
@@ -725,12 +725,12 @@ following retained style reset invoked full form-control teardown. That release
 closed the popup before it could be painted. The shared teardown table now uses
 its existing reset-specific release hook to rebuild only cached font handles;
 the live control and canonical interaction state survive restyling
-(**S12.1.5v2**, **D4.5.1v4**). Detached and retired controls continue to close
+(**S12.1.5v2**, **D5.5.1**). Detached and retired controls continue to close
 their popup through full release.
 
 The photo Escape handler also intercepted the select's own dismissal key.
 An open select now receives Escape through the DOM package before editor-level
-actions run (**D7.2.4**), so dismissing the crop menu preserves the crop draft.
+actions run (**D9.3.4**), so dismissing the crop menu preserves the crop draft.
 
 An in-process regression fails before the lifecycle fix and passes afterward:
 the control identity, selected option, hover and open popup survive retained

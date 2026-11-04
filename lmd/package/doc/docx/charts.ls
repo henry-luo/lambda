@@ -1,4 +1,4 @@
-// DrawingML chart caches are data; the shipped chart package owns SVG layout (D7.2.4, S1.8).
+// DrawingML chart caches are data; the shipped chart package owns SVG layout (D9.3.4, S1.8).
 import c: .common
 import package: .package
 import chart: lambda.chart.chart

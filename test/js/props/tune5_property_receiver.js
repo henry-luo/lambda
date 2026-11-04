@@ -1,4 +1,4 @@
-// Tune5 receiver and eight-operation lock: D6.2.2v2, D8.4.3.
+// Tune5 receiver and eight-operation lock: D7.2.2, D7.4.3.
 let proto = {
   get value() { return this.marker; },
   set value(v) { this.marker = v; }

@@ -208,7 +208,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_OBJECT_LITERAL:
     // Named patterns are compiled into Script::type_list by the shared
     // prepass before T0 starts. Their bodies are build-time syntax, not
-    // ordinary evaluator expressions (D8.1.1v2).
+    // ordinary evaluator expressions (D8.3.1).
     case AST_NODE_STRING_PATTERN:
     case AST_NODE_SYMBOL_PATTERN:
     case AST_NODE_PATTERN_RANGE:
@@ -709,7 +709,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // `t[i, j]` carries a chain of index expressions for one N-D subscript.
     // Literal coordinates use the checked runtime N-D reader, even when a call
     // returns the array. Requiring a literal receiver rejected image.sample's
-    // read_region(...)^[0,0] before any imported function ran (D8.1.1).
+    // read_region(...)^[0,0] before any imported function ran (D8.3.1).
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* field = (AstFieldNode*)node;
         if (field->field && field->field->next &&
@@ -1634,7 +1634,7 @@ static void plan_handler(PlanCtx* outer, AstViewNode* view,
     plan_walk(handler->body, &pc);
 
     // View-handler activation publishes the matched model in one additional
-    // frame home before evaluating the body (D5.3.3). Include that home in the
+    // frame home before evaluating the body (D6.3.3). Include that home in the
     // handler plan or the first callee expression can exhaust the scratch
     // window while the model is still live.
     uint32_t body_need = 1 + plan_need(handler->body);
@@ -1828,7 +1828,7 @@ static void plan_scan_proc_block(AstListNode* list_node) {
     list_node->interp_proc_scanned = true;
 }
 
-// D8.1.1v18: a `for` statement hands off like a `while` when its walk is the
+// D8.3.2: a `for` statement hands off like a `while` when its walk is the
 // plain one -- a single source with no join and no stream clause -- so the
 // walk's whole hidden state is its snapshot and the next position, which the
 // continuation takes as two trailing parameters.
@@ -1839,7 +1839,7 @@ static bool plan_for_statement_can_hand_off(AstForNode* for_node) {
         !for_node->group && !for_node->order && !for_node->limit && !for_node->offset;
 }
 
-// D8.1.1v14/v18: a `while` or a plain `for` statement that is a direct statement
+// D8.3.2/v18: a `while` or a plain `for` statement that is a direct statement
 // of a callable body can hand the running activation to compiled code at its head
 // test. There T0's live state is the frame's named slots (plus, for a `for`,
 // its walk's snapshot and position), and the statements from the loop to the
@@ -2075,7 +2075,7 @@ bool interp_plan_script(Script* script) {
     pc.script = script;
     pc.plan = &script->interp_plan;
     // Module-level bindings live in the per-context module slab, not in a
-    // per-activation window: they outlive the top-level frame (D7.2.1/AI6).
+    // per-activation window: they outlive the top-level frame (D9.3.1/AI6).
     pc.storage = BINDING_STORAGE_MODULE;
     plan_assign_scope(&pc, root->global_vars);
 
@@ -2154,7 +2154,7 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment) {
 
 // Satellites reuse T0's planned module slab. The bounded path admits only
 // reads and stable imports; captures, nested definitions, generators, and
-// replacement writes remain on T0 (D8.1.1v2 §5.2-§5.3).
+// replacement writes remain on T0 (D8.3.1 §5.2-§5.3).
 bool interp_satellite_import_binding(const Script* importer,
         const NameEntry* entry, Script** out_owner, int* out_slot) {
     if (out_owner) *out_owner = NULL;
@@ -2168,7 +2168,7 @@ bool interp_satellite_import_binding(const Script* importer,
     int slot = entry->slot;
     // Function-local imported names do not receive their own module-slab
     // entry. Derive their exported slot for this lowering only; cache templates
-    // must not retain a prior execution's resolution in NameEntry (D8.5.1v2).
+    // must not retain a prior execution's resolution in NameEntry (D8.5.1).
     if ((!storage_assigned || storage != BINDING_STORAGE_MODULE || slot < 0) &&
             owner && entry->node) {
         AstScript* owner_root = (AstScript*)owner->ast_root;
@@ -2203,13 +2203,13 @@ bool interp_satellite_import_supported(const Script* importer,
     return supported;
 }
 
-// T21-3b (D8.1.1v6): an untyped `var` parameter crosses a tier boundary
+// T21-3b (D8.3.3): an untyped `var` parameter crosses a tier boundary
 // through the CW33 home-transport cells (Context::mir_var_homes) -- the
 // satellite prologue and epilogue implement the generated side, and T0
-// sets/consumes the same cells around its calls. D8.1.1v8 admitted TYPED
+// sets/consumes the same cells around its calls. D8.3.3 admitted TYPED
 // `var` parameters (`var x: float[]`, `var p: Rec`) with a pin on bodies
 // that REBIND one, because the generated entry then had no home for such a
-// position. D8.1.1v10: every publishable `var` position now consumes its
+// position. D8.3.3: every publishable `var` position now consumes its
 // home in the generated prologue and publishes its final boxed value in the
 // epilogue (the `_b` wrapper forwards T0's cell to the raw body), so a
 // rebind reaches the T0 caller exactly as an untyped one does and the pin
@@ -2219,7 +2219,7 @@ bool interp_satellite_import_supported(const Script* importer,
 // is a type name, a scalar literal, or a union of those -- MIR lowers them as
 // `fn_is`/`fn_eq` against loads from the image's own type list and const
 // pool, exactly as it lowers `x is T` and `x == lit`. Named string/symbol
-// patterns, ranges, and constrained `that` arms stay in T0 (D8.1.1v9).
+// patterns, ranges, and constrained `that` arms stay in T0 (D8.3.3).
 static bool interp_satellite_match_pattern_supported(AstNode* pattern) {
     while (pattern && pattern->node_type == AST_NODE_PRIMARY &&
             ((AstPrimaryNode*)pattern)->expr) {
@@ -2277,7 +2277,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
     case AST_NODE_VIEW:
         sc->ok = false;
         return;
-    // T21-3 / D8.1.1v6: local `var` declarations, rebinding assignments and
+    // T21-3 / D8.3.3: local `var` declarations, rebinding assignments and
     // (T21-3b) indexed/member stores are all owned by the promoted activation:
     // a store through a local or a value parameter replaces a MIR register
     // the satellite roots itself, a store through a module binding goes to
@@ -2287,7 +2287,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
     case AST_NODE_MATCH_EXPR:
         // Pattern arms that carry compiled regex/type-list state are owned by
         // the T0 module activation; a satellite has no equivalent pattern
-        // image, so those keep the whole match expression in T0 (D5.2). Type
+        // image, so those keep the whole match expression in T0 (D6.2). Type
         // and literal arms have no such state (T27-6).
         if (!interp_satellite_match_supported((AstMatchNode*)node)) {
             sc->ok = false;
@@ -2311,7 +2311,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
             // A satellite cannot prove the target ABI for an indirect Lambda
             // call. An `any` callee may resolve to a `var` procedure after
             // promotion, and the boxed dispatcher has no caller-root
-            // write-back channel to defer that edge to (D3.3.1 / D5.2).
+            // write-back channel to defer that edge to (D4.3.1 / D6.2).
             //
             // Deliberately broader than "local dynamic binding". A named
             // `fn`/`pn` callee never reaches this point at all -- for those
@@ -2332,7 +2332,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
             // Object-method field identifiers resolve through the receiver's
             // shape, not a stable scalar/module slot. The satellite native
             // lane cannot reconstruct that receiver field contract (D2.2.2,
-            // D5.2), so keep the method in T0.
+            // D6.2), so keep the method in T0.
             sc->ok = false;
             return;
         }
@@ -2366,12 +2366,12 @@ const char* interp_satellite_refusal(const Script* script, const AstFuncNode* fn
         Type* contract = param->contract_type ? param->contract_type :
             (Type*)param;
         TypeId tid = contract ? contract->type_id : LMD_TYPE_ANY;
-        // D8.1.1v7: aggregate and structured VALUE parameters (`float[]`,
+        // D8.3.3: aggregate and structured VALUE parameters (`float[]`,
         // `Rec`, `map`) are admitted. The v5 pin argued the satellite's raw
         // carrier specialization could mis-decode them, but a satellite is
         // entered through its boxed `_b` wrapper, which admits each argument
         // under the declared contract exactly as the eager module compiler's
-        // wrapper does before the raw entry sees it (D2.2.2, D3.2.1); the
+        // wrapper does before the raw entry sees it (D2.2.2, D4.2.1); the
         // pin kept nbody2, pnpoly2, gcbench2, deriv2, ray2 and array1 in T0
         // at 9-110x their JIT time. A typed `var` parameter stays pinned
         // above (no CW33 home under the raw-lane ABI).
@@ -2381,12 +2381,12 @@ const char* interp_satellite_refusal(const Script* script, const AstFuncNode* fn
     // capability scanner. The old satellite-only walk checked nested
     // definitions and imports but skipped system ABI, COW, index-shape, and
     // call-signature guards; complex promoted bodies then ran a MIR subset
-    // that silently dropped layout/PDF/editor state (D8.1.1v4).
+    // that silently dropped layout/PDF/editor state (D8.3.1).
     ScanCtx full_scan = {true, AST_NODE_NULL};
     interp_scan_visit(fn->body, &full_scan);
     if (!full_scan.ok) return interp_node_kind_name(full_scan.reject);
     // cached import nodes may retain retired prebuild-worker Scripts; resolve
-    // eligibility through this execution's import overlay (D8.5.1v7).
+    // eligibility through this execution's import overlay (D8.3.5).
     SatelliteScanCtx sc = {script, true, AST_NODE_NULL};
     interp_scan_satellite_node((AstNode*)fn->body, &sc);
     return sc.ok ? NULL : interp_node_kind_name(sc.reject);

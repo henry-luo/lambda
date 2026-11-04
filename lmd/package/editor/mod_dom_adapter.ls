@@ -115,7 +115,7 @@ fn history_recorded(tx, changed) any^ =>
 pub fn apply_transaction(editor, tx) any^ {
   if (tx == null) editor
   else {
-    // hosts may derive review annotations before a transaction enters history (D7.2.5).
+    // hosts may derive review annotations before a transaction enters history (D10.2.1).
     let filtered = if (editor.transaction_filter==null) tx else editor.transaction_filter(editor,tx)^
     let tx2 = transaction.tx_set_meta(filtered, "scrollIntoView", true)
     let next = input_intent.state_after_intent(editor, tx2)

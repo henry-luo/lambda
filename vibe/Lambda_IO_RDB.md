@@ -1520,7 +1520,7 @@ behind the same descriptor:
 - Public domain license — no licensing concerns
 - Version: latest stable (≥ 3.45.0)
 
-**Build integration**: Add `sqlite3.c` to `build_lambda_config.json` under a new `sqlite` source group, compiled as C with `-DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION`. Thread-safe SQLite is required for parked concurrent database tasks (D7.2.4v4).
+**Build integration**: Add `sqlite3.c` to `build_lambda_config.json` under a new `sqlite` source group, compiled as C with `-DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION`. Thread-safe SQLite is required for parked concurrent database tasks (D9.3.4).
 
 ---
 
@@ -1646,18 +1646,18 @@ Each `.ls` file paired with a `.txt` expected-output file.
 >
 > DuckDB is out of scope (RDB13v2). ADBC is §9 Phase 5.
 > **Spec linkage:**
-> - D7.3.2: modules are lazily loaded, transactionally registered and
+> - D9.4.2: modules are lazily loaded, transactionally registered and
 >   size-gated.
-> - D7.3.3: one host-API tier, no host-internal symbol imports.
-> - D7.3.4: core never links modules; the descriptor is ground truth.
-> - D7.3.5: every module kind names its gate.
-> - D7.4.1v2: system resources are integer rids.
-> - D7.4.3: no core types cross the boundary.
+> - D9.4.3: one host-API tier, no host-internal symbol imports.
+> - D9.4.4: core never links modules; the descriptor is ground truth.
+> - D9.4.5: every module kind names its gate.
+> - D9.5.1: system resources are integer rids.
+> - D9.5.3: no core types cross the boundary.
 > - S12.4.1–S12.4.3: `input()` is not a resource; block-exit auto-close; GC is
 >   a backstop only.
 > - Jube ADRs: JA3, JA5, JA7, JA9, JA16 (`vibe/Lambda_Design_Jube_Architecture.md`).
 > - Nothing here is in the formal specs yet. Ratification needs a JA3
->   amendment (RDB2), a D7.3.5 gate row (RDB8), and a D7 ruling for the
+>   amendment (RDB2), a D9.4.5 gate row (RDB8), and a D7 ruling for the
 >   JA16.1–JA16.4 connection registry.
 > **Ledger:** there is no IO-wide ID series.
 > - Host-level rulings that apply to any module, not only databases, extend
@@ -1685,7 +1685,7 @@ Each `.ls` file paired with a `.txt` expected-output file.
    adapter that turns rows into column batches, so the DataFrame path has one
    consumer interface (§13.6). Phase 1 has only row drivers.
 5. **Zero host cost when unused.** `lambda.exe` links no client library
-   (D7.3.4, JA4). The module loads the first time a driver it provides is
+   (D9.4.4, JA4). The module loads the first time a driver it provides is
    needed.
 6. **No change above the driver line** for row access. `input-rdb.cpp`, the
    schema → type mapping (§2.4), FK navigation (§2.5) and the query builder
@@ -1697,17 +1697,17 @@ Each `.ls` file paired with a `.txt` expected-output file.
 | ID | Ruling | Status |
 |----|--------|--------|
 | **JA16.1** | **Connection management is host-owned.** Any long-lived external connection or session that a module's code opens (a database session, a broker connection) **registers with the host connection registry** before first use. The host decides when it closes and is the only party that calls close. Modules own the *mechanism* (the vendor library's socket and protocol); the host owns the *lifecycle*. | proposed (user direction 2026-10-02) |
-| **JA16.2** | The registry is a **resource kind in the host's JA7 rid table**, not a second table. Script-visible values hold a rid or a pool key, never a native handle (D7.4.1v2). Every entry has an **owner scope** (`CALL`, `BLOCK`, `POOL`) that fixes when it auto-closes (§13.5.2). | proposed |
+| **JA16.2** | The registry is a **resource kind in the host's JA7 rid table**, not a second table. Script-visible values hold a rid or a pool key, never a native handle (D9.5.1). Every entry has an **owner scope** (`CALL`, `BLOCK`, `POOL`) that fixes when it auto-closes (§13.5.2). | proposed |
 | **JA16.3** | **Authorise before connecting, verify after.** The host asks the driver to *resolve* a URI into its concrete targets, authorises them under the active realm and permission policy, and then lets the driver connect. At registration the reported peer must be one of the authorised targets; otherwise registration is refused and the driver must close. | proposed |
 | **JA16.4** | Vendor-internal sockets and files are exempt from the JA16 checker **only inside registered connections**. Lambda's own driver sources get no exemption. | proposed |
 | **RDB1** | Every RDB backend beyond SQLite ships in **one** Jube module, `rdb-drivers`, with all vendor libraries statically linked in. Imports are limited to the OS allowlist (§13.7). | proposed (user direction 2026-10-02) |
 | **RDB2** | The module is a **kind-2 native module of a new flavor, 2c "host-subsystem provider"**. It registers *backends behind a host-owned API* (`lib/rdb.h`) and exposes no namespace, globals or types to scripts. | proposed; amends JA3 |
-| **RDB3** | Drivers cross the boundary as **versioned, size-gated `RdbDriver` tables** (`lib/rdb_abi.h`) listed in a field appended to `JubeModuleDef`. The module calls no host symbol (D7.3.3). It reaches the host only through `RdbHostAPI`. | proposed |
+| **RDB3** | Drivers cross the boundary as **versioned, size-gated `RdbDriver` tables** (`lib/rdb_abi.h`) listed in a field appended to `JubeModuleDef`. The module calls no host symbol (D9.4.3). It reaches the host only through `RdbHostAPI`. | proposed |
 | **RDB4** | Discovery is **manifest-driven and lazy**. The manifest says `"engine": "rdb"` and provides `rdb:<driver>`. On a registry miss, `rdb_open()` calls a resolver hook installed by `lambda-io`, which activates the module that provides the driver. The specifier catalog files `rdb` entries in a **separate provider index** (fix for problem 1, §13.4.1). | proposed |
 | **RDB5** | `RdbDriver` gains a **dialect record** (placeholder style, identifier quoting, read-only mechanism) and a **capability mask**. `rdb_query.cpp` renders SQL through the dialect instead of hard-coding SQLite's `?N`. | proposed |
 | **RDB6** | Row access returns **raw cells only** (`RdbValue`). Datetime, JSON and decimal decoding stays in the host (§2.3), so typing is identical across backends. | proposed |
 | **RDB7** | **Optional column-batch API** (`result_schema`, `fetch_batch`) in the Arrow C Data Interface layout, gated by `RDB_CAP_COLUMNAR`. Drivers without it are served by a host shredding adapter, and `rdb_fetch_batch()` is one API for both (§13.6). | proposed (user direction 2026-10-02) |
-| **RDB8** | Vendor sources are built **unmodified** from pinned upstream releases (CLAUDE.md rule 16). The module lands with its **architecture gate**, **licence gate** and **driver corpus** wired into CI (D7.3.5, JA9). | proposed |
+| **RDB8** | Vendor sources are built **unmodified** from pinned upstream releases (CLAUDE.md rule 16). The module lands with its **architecture gate**, **licence gate** and **driver corpus** wired into CI (D9.4.5, JA9). | proposed |
 | **RDB11** | **TLS is done by the host (route B).** The client libraries are built without TLS and connect in plaintext to a host-owned private Unix socket. For each local connection the host opens the upstream connection to an authorised target, performs the wire protocol's TLS upgrade with its own mbedTLS (PostgreSQL `SSLRequest`; MySQL's in-handshake upgrade), and relays bytes (§13.15). No vendor patch, and one TLS stack and one CA policy for the whole runtime. | proposed (user direction 2026-10-05) |
 | **RDB12** | **SHA-2 MySQL logins are Lambda-side plugins.** A TLS-free Connector/C has no crypto backend, so it has no `caching_sha2_password` / `sha256_password`. The module registers its own implementations through the public `mysql_client_register_plugin` API, hashing through `RdbHostAPI.sha256`. They send a cleartext password only when the host bridge guarantees TLS upstream. | proposed |
 | **RDB13v2** | **DuckDB is out of scope.** The module ships PostgreSQL and MySQL/MariaDB only; DuckDB's scheme and file extensions are not detected. The column-batch API (RDB7) stays as the interface any future column-store driver would use. | proposed (user direction 2026-10-05, revised the same day) |
@@ -1767,7 +1767,7 @@ resolution for every module.**
    resolver.
 5. At activation the loader checks that the descriptor's driver names equal
    the manifest's `provides` exactly. Any mismatch rolls the activation back
-   transactionally (D7.3.2, D7.3.4).
+   transactionally (D9.4.2, D9.4.4).
 
 **Tests:**
 - the existing catalog suite still passes with an `rdb` manifest present;
@@ -1779,7 +1779,7 @@ resolution for every module.**
 There is **one driver table, `RdbDriver`**, defined in `lib/rdb_abi.h`. The
 in-host SQLite driver and every module driver fill in the same table. A Jube
 module hands its tables to the host through a field appended at the end of
-`JubeModuleDef` and gated on `struct_size` (D7.3.2):
+`JubeModuleDef` and gated on `struct_size` (D9.4.2):
 
 ```c
 const RdbDriver* const* rdb_drivers;   // RDB3
@@ -1787,7 +1787,7 @@ int32_t rdb_driver_count;
 ```
 
 `lambda/jube/jube.h` includes `lib/rdb_abi.h`, so that header is part of the
-one host-API tier (D7.3.3). The table, abridged:
+one host-API tier (D9.4.3). The table, abridged:
 
 ```c
 typedef struct RdbDriver {
@@ -1851,7 +1851,7 @@ typedef struct RdbHostAPI {
   host runs `SELECT COUNT(*)` through the dialect. The host also derives
   forward-FK `link_name`s and reverse FKs, so a driver reports only forward
   FKs and every backend navigates identically (§2.5).
-- **No core types cross the boundary (D7.4.3).** Drivers see opaque `conn`
+- **No core types cross the boundary (D9.5.3).** Drivers see opaque `conn`
   and `stmt` handles. Schema metadata goes into an opaque `meta` arena through
   `meta_alloc`/`meta_strdup`, which the host binds to the connection's pool.
   Logging goes through `host->log`.
@@ -1870,7 +1870,7 @@ typedef struct RdbHostAPI {
 - **Errors are return values (JA5).** Codes are `RDB_OK`, `RDB_ERROR`,
   `RDB_CONN_LOST` and `RDB_UNSUPPORTED`. Drivers use only the C APIs
   (`libpq-fe.h`, `mysql.h`).
-- **No `Item` crosses (D7.4.1v2).** Row string payloads are valid until the
+- **No `Item` crosses (D9.5.1).** Row string payloads are valid until the
   next `step()`/`finalize()` (§6.3.4). Batches follow Arrow release semantics
   (§13.6).
 - **Module lifecycle.** `init` runs `mysql_library_init` once and `shutdown`
@@ -1900,7 +1900,7 @@ Each live native connection is one rid in the JA7 rid table (resource kind
 
 | Field | Purpose |
 |---|---|
-| `rid` | identity in the context rid table (D7.4.1v2). A `CALL`-scoped connection has no script owner, so it is a *native-owned* row (`runtime_resource_table_add_native_owned`): no rooted Item, but teardown still runs its close callback. |
+| `rid` | identity in the context rid table (D9.5.1). A `CALL`-scoped connection has no script owner, so it is a *native-owned* row (`runtime_resource_table_add_native_owned`): no rooted Item, but teardown still runs its close callback. |
 | driver, native handle | for host-initiated `close` / `cancel` / `ping` / `reset` |
 | owner scope + owner token | when it auto-closes (§13.5.2) |
 | redacted URI | logs, diagnostics, error text (RDB9) |
@@ -1932,7 +1932,7 @@ Global triggers apply in every scope:
 6. realm or page teardown in Radiant (JA15): every entry tagged with that
    realm closes;
 7. process exit and module shutdown: the host closes every remaining entry
-   *before* calling the module's `shutdown` (D7.3.2: process-lifetime
+   *before* calling the module's `shutdown` (D9.4.2: process-lifetime
    modules, ordered teardown);
 8. GC backstop (S12.4.3): if a `BLOCK` handle is ever collected while still
    open, which is a compiler bug, the finalizer **logs a leak** naming the
@@ -2089,7 +2089,7 @@ script is checked in; no vendor patch is needed (RDB8).
 | **MariaDB Connector/C 3.3.21** | cmake, `-DWITH_SSL=OFF -DWITH_EXTERNAL_ZLIB=OFF -DWITH_CURL=OFF -DWITH_UNIT_TESTS=OFF -DCLIENT_PLUGIN_DIALOG=OFF -DCLIENT_PLUGIN_AUTH_GSSAPI_CLIENT=OFF -DCLIENT_PLUGIN_REMOTE_IO=OFF -DCLIENT_PLUGIN_MYSQL_OLD_PASSWORD=OFF -DCLIENT_PLUGIN_CLIENT_ED25519=OFF` | `libmariadbclient.a` (bundled zlib included) | **The 3.3 line, not 3.4:** 3.4's CMake refuses a TLS-free build and its core login code calls the crypto backend unconditionally; 3.3 builds TLS-free unmodified and is maintained alongside 3.4 (3.3.21 released 2026-09-03). Built-in logins: `mysql_native_password`; the SHA-2 logins come from the module (RDB12). |
 
 The module links strictly: no `-undefined dynamic_lookup`, so any host-symbol
-import fails the link (D7.3.3); it exports only `jube_module`.
+import fails the link (D9.4.3); it exports only `jube_module`.
 
 **Symbol containment.** The DSO carries Connector/C's bundled zlib, which the
 host also links, and on Linux the host exports its symbols to modules. The
@@ -2221,7 +2221,7 @@ fixture password appears in `log.txt` after the corpus runs (§13.11).
 
 The drivers live in `lambda/module/rdb/`: `rdb_pg.cpp`, `rdb_mysql.cpp`, and
 `rdb_drivers_module.cpp` (descriptor plus small module-local helpers; the
-module links no host lib code, D7.3.3). Host-generic work (FK `link_name`s,
+module links no host lib code, D9.4.3). Host-generic work (FK `link_name`s,
 reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
 
 | Concern | PostgreSQL (libpq) | MySQL / MariaDB (Connector/C 3.3) |
@@ -2239,7 +2239,7 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
 | Logins | libpq's own (SCRAM-SHA-256, md5, password); SCRAM channel binding is unavailable (`channel_binding=require` rejected) | `mysql_native_password` built in; `caching_sha2_password` / `sha256_password` Lambda-side (RDB12) |
 | Known gaps | `.pgpass` lookups match the bridge directory, not the real host (use the URI or `PGPASSWORD`) | full SHA-2 auth needs `ssl-mode=REQUIRED` or stronger |
 
-### 13.11 Conformance gates (RDB8, D7.3.5)
+### 13.11 Conformance gates (RDB8, D9.4.5)
 
 - **Architecture gate**, `make check-rdb-module-architecture`
   (`utils/check_rdb_module_architecture.py`, macOS and Linux):
@@ -2247,10 +2247,10 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
   - dynamic dependencies are a subset of the §13.7 allowlist (`otool -L` /
     `readelf -d`);
   - no import is bound by dynamic lookup, so nothing resolves against the
-    host (D7.3.3; `nm -m`);
+    host (D9.4.3; `nm -m`);
   - every `rdb:<driver>` in the manifest resolves through the module under
     test, and an unknown driver does not (the loader's manifest-vs-descriptor
-    check, D7.3.4). The probe reads script output, not `log.txt`, so it also
+    check, D9.4.4). The probe reads script output, not `log.txt`, so it also
     works on release hosts; `--expect-absent` checks a manifest-only bundle;
   - no `socket`/`connect`/`bind`/`listen`/`accept`/`getaddrinfo`/`open`/
     `openat`/`fopen`/`creat` import in Lambda's driver objects (JA16.4: the
@@ -2324,7 +2324,7 @@ further, since the host then owns the network socket itself.
    pool key and borrow `CALL`-scoped connections (§13.5.5), or should lazy
    database access go only through a future `open(db)` scoped resource?
 2. **Q2: RDB2 classification.** Is a host-subsystem provider (2c) a new
-   flavor of kind 2, or a fifth module kind? Either way JA3 and the D7.3.5 gate
+   flavor of kind 2, or a fifth module kind? Either way JA3 and the D9.4.5 gate
    table need a row.
 3. **Q3: pool policy defaults.** Idle timeout, per-URI cap, and whether
    pooled connections may cross Radiant realms. The proposal is **no**: the
@@ -2344,7 +2344,7 @@ further, since the host then owns the network socket itself.
 | R1 redaction (problem 2) | ✅ `rdb_redact_uri()` covers URI userinfo (up to the last `@` before the query, so an unescaped `/` in a password stays masked), password-like query parameters and libpq key/value pairs (blanks around `=` included). Applied in `lib/rdb.c`, the SQLite driver, `input-rdb.cpp` (logs, Input URL, `db.name`), `item_to_target` and `input_from_target` (which logged full URLs, credentials included). |
 | R2 POD records, dialect, capabilities | ✅ `lib/rdb_abi.h`. The query builder (`rdb_query_build(pool, conn, …)`), `input-rdb.cpp` and `rdb_row_count()` render through `rdb_append_ident` / `rdb_append_placeholder` / the dialect's `like_escape`. Embedded quote characters are doubled, which the old code did not do. |
 | R3 connection registry (JA16.1–JA16.3) | ✅ for `CALL` scope. `lib/rdb.c` runs resolve → authorise → open → structural registration check → close through the registry. `lambda/runtime/rdb_host.cpp` binds it to the context rid table (`RUNTIME_RESOURCE_RDB_CONNECTION`, group `DATABASE`). The `authorize` hook allows and logs every target until the JA16 policy model exists (Jube ADR open item 8). `BLOCK` and `POOL` scopes wait on `open(db)` and on Q1/Q3. Triggers 3 (task cancel) and 4 (statement timeout) have their driver ops but no runtime caller yet. |
-| R4 catalog fix (problem 1) + resolver | ✅ The catalog admits `engine: "rdb"` into a separate provider index, unknown engines still fail closed, and `jube_rdb_resolve_driver()` loads the providing module, checks its drivers against the manifest (D7.3.4) and rolls back a mismatch (D7.3.2). Exercised by the real module: `input("postgresql://…")` and `input("mysql://…")` catalog, activate and register their drivers lazily. |
+| R4 catalog fix (problem 1) + resolver | ✅ The catalog admits `engine: "rdb"` into a separate provider index, unknown engines still fail closed, and `jube_rdb_resolve_driver()` loads the providing module, checks its drivers against the manifest (D9.4.4) and rolls back a mismatch (D9.4.2). Exercised by the real module: `input("postgresql://…")` and `input("mysql://…")` catalog, activate and register their drivers lazily. |
 | R5 column batches | ✅ `rdb_result_schema()` / `rdb_fetch_batch()` with the host shredding adapter (`lib/rdb_batch.c`). DECIMAL/DATETIME/JSON columns are utf8 with Arrow field metadata `lambda.rdb_type`. |
 | R6 host TLS bridge | ✅ `lib/rdb_tunnel.c` (POSIX; Windows reports "not available yet"). PostgreSQL and MySQL negotiation paths without TLS are tested against fake servers. **The TLS handshake itself, verify-ca/full, and MySQL's sequence-shifted auth relay are untested until real servers run** (R8/R9). |
 | R7 build + module + gates | ✅ `utils/build-rdb-deps.sh` (libpq 18.6, Connector/C 3.3.21, no patches; `mysql_clear_password` off), `make build-rdb-deps` / `build-rdb-drivers`, the `rdb-drivers` target (strict link, only `jube_module` exported, system-only imports). **Gates:** `make check-rdb-module-architecture` (`utils/check_rdb_module_architecture.py`: exports, OS-only dependencies, no dynamic-lookup imports, no raw IO in Lambda's driver objects, every provided driver activates) and `make verify-rdb-module-licenses`; both fail on seeded negatives. `LICENSES/`, `SOURCES.md` and the archive overrides are in place. |
@@ -2508,7 +2508,7 @@ type mapping, retry policy, or a security bypass. Those remain open; see
 implementation checkpoint and acceptance cases. Existing read-only `input()`
 remains eager and call-scoped (S12.4.1v3); the existing host registry owns
 connection lifecycle (JA16.1–JA16.4). Confined app database authorization
-remains subject to D7.5.2.
+remains subject to D11.1.2.
 
 The earlier RDB14 left the block form and rollback-only exit outcome undecided;
 RDB14v2 resolved both; RDB14v3 added successful control-flow exits and one-statement autocommit;
@@ -2521,7 +2521,7 @@ at scope exit. Nested transactions and explicit `commit`/`rollback` inside a
 SQLite scope are currently rejected. `existing(path)` supplies a target that
 fails if the file is absent and rejects transient-memory paths. All SQLite
 entry points reject `file:` URIs and paths longer than the registry target's
-1,023-byte capacity: D7.5.2 requires the authorized path to match the actual
+1,023-byte capacity: D11.1.2 requires the authorized path to match the actual
 open, even if SQLite URI processing is globally enabled. Prefix a literal
 filename beginning `file:` with `./`;
 the SQLite driver reads its additive `sqlite_no_create` open option only when
@@ -2535,13 +2535,13 @@ cross-platform qualification remains open.
 `create(path)` instead acquires a private, registered in-memory SQLite
 transaction and publishes its committed image through a held create-only file
 anchor. Both the requested and canonical destination are authorized and
-rechecked during publication (D7.5.2). The image is capped at 64 MiB; a file
+rechecked during publication (D11.1.2). The image is capped at 64 MiB; a file
 published with unconfirmed directory durability reports an uncertain outcome.
 The anchor implementation fails closed on Windows; Linux and interruption
 recovery remain to be qualified. `clone(source,path)` takes an online SQLite
 backup under a pinned read snapshot, checks SQLite integrity and foreign keys,
 then exposes it as an `open` transaction that publishes through the same
-create-only anchor (S12.4.4v4, D7.5.2, D7.5.6). The snapshot includes committed
+create-only anchor (S12.4.4v4, D11.1.2, D11.2.2). The snapshot includes committed
 WAL data and is capped at 64 MiB. Worker cancellation is joined before release,
 and owner-held pins protect both connections during teardown. Application-level
 validation and attachments remain the caller's responsibility.
@@ -2549,11 +2549,11 @@ validation and attachments remain the caller's responsibility.
 a separate create-only destination before its first modifying SQL statement.
 Failure or uncertainty poisons the scope; an already published preimage is an
 independent external effect and survives a later scope rollback (S12.4.4v4,
-D7.5.6). Both paths need separate authorization and uncertain outcomes require
+D11.2.2). Both paths need separate authorization and uncertain outcomes require
 inspection. The 64 MiB and platform limitations also apply. `execute` accepts
 SQLite statement metadata when no rows are returned; a returned row poisons
 the transaction. SQLite's internal `quick_check` is admitted only while
 stepping an authorizer-identified ALTER; direct pragmas remain denied.
-The existing D7.5.2 confined-app denial is unchanged. See
+The existing D11.1.2 confined-app denial is unchanged. See
 [the implementation checkpoint](impl/Lambda_Impl_RDB_Write.md) for limits,
 security, tests and remaining work.

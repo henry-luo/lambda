@@ -48,7 +48,7 @@ bool lambda_type_contract_has_binder(Type* type, bool include_refs, int depth) {
     }
     if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
         // The generic container descriptors are compact Type prefixes. Casting
-        // one to TypeMap reads unrelated globals through `shape` (D3.3.3).
+        // one to TypeMap reads unrelated globals through `shape` (D4.3.3).
         if (type == &TYPE_MAP || type == &TYPE_OBJECT || type == &TYPE_ELMT) return false;
         FOR_EACH_MAP_FIELD(type, field) {
             if (lambda_type_contract_has_binder(field->type, include_refs, depth + 1)) return true;
@@ -257,7 +257,7 @@ static LambdaWideResultProof wide_result_proof_inner(const Type* type,
 
     // `any`, its exclusion variants, and abstract integer/number contracts do
     // not name a closed value domain. Their physical carrier is not proof of
-    // an inline result (D2.4.1).
+    // an inline result (D2.3.4).
     if (type->type_id == LMD_TYPE_ANY || type == &TYPE_INTEGER ||
             type == &TYPE_NUMBER || type == &TYPE_TYPE || type == &TYPE_NONE) {
         return LAMBDA_WIDE_RESULT_UNKNOWN;
@@ -337,7 +337,7 @@ LambdaWideResultProof lambda_type_wide_result_proof_for_type_id(TypeId type_id) 
 
 // A literal contract names one value; its TypeId is the carrier it shares with
 // every other value of that carrier. No layout, storage or certificate proof
-// stands in for admitting the value itself (D3.3.3v3).
+// stands in for admitting the value itself (D4.3.3).
 static inline bool contract_is_value_singleton(const Type* type) {
     return type && (type->is_literal || type->is_const);
 }
@@ -1416,7 +1416,7 @@ static bool array_num_layout_proves_contract_rank(const ArrayNum* array,
     if (!array->is_ndim || !array->extra) return false;
     const ArrayNumShape* shape = (const ArrayNumShape*)(uintptr_t)array->extra;
     // Only an owned shape makes the flattened leaf buffer a durable proof of
-    // every nested axis; aliased storage stays at the dynamic boundary (D3.3.3v3).
+    // every nested axis; aliased storage stays at the dynamic boundary (D4.3.3).
     return shape->ndim == rank &&
         shape->backing_kind == ARRAY_NUM_BACKING_GC_OWNED && !shape->base;
 }
@@ -1465,7 +1465,7 @@ ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
 
 // A counted certificate proves lengths only while the value still has them:
 // they are fixed by the contract, not the carrier, and a push or splice
-// changes them without touching the lane (D3.3.3v3, S11.1.1v3).
+// changes them without touching the lane (D4.3.3, S11.1.1v3).
 static bool array_value_meets_cert_counts(Item value, const ArrayRepCert* cert) {
     return !(cert->flags & ARRAY_REP_CERT_COUNTED) ||
         lambda_array_value_meets_counts(value, cert->array_contract);
@@ -1505,7 +1505,7 @@ static bool array_representation_matches_cert(Item value,
     TypeId value_type = get_type_id(value);
     if (value_type == LMD_TYPE_ARRAY_NUM) {
         // The immutable certificate already resolved nullable/sized numeric
-        // spellings; only the live carrier can have changed (D3.3.3v3).
+        // spellings; only the live carrier can have changed (D4.3.3).
         return lambda_array_num_matches_cert(value, cert);
     }
     if (value_type != LMD_TYPE_ARRAY || !value.array) return false;
@@ -2092,7 +2092,7 @@ bool lambda_type_layout_proves_contract(Type* type) {
         if (!type) return false;
         // A literal is a singleton value. Its carrier is shared with every
         // other string/int, so no lane or element tag can stand in for the
-        // per-element admission that selects it (D3.3.3v3).
+        // per-element admission that selects it (D4.3.3).
         if (contract_is_value_singleton(type)) return false;
         if (type->type_id != LMD_TYPE_TYPE) return true;
         // Follow exactly the layers the lane resolver walks (optional, null
@@ -2189,7 +2189,7 @@ void lambda_function_set_outcome_contract(Pool* pool, TypeFunc* function,
     function->return_contract = contract;
     function->has_explicit_return_contract = is_explicit;
     if (!is_explicit) return;
-    // D5.2.1v5: retain the native success domain as derived ABI metadata.
+    // D6.2.1: retain the native success domain as derived ABI metadata.
     function->error_type = lambda_type_error_outcomes(pool, contract);
     function->can_raise = function->error_type != NULL;
     // A clean dependent return still denotes its binder/parameter, not the

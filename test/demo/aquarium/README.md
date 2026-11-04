@@ -66,9 +66,9 @@ the shell; `mod_present.ls` reconciles retained objects and updates transforms;
 `aquarium.ls` handles input, files, and frame scheduling. No JavaScript
 application, Three.js runtime, model downloads, or textures are required.
 
-The package boundary follows **D7.2.4v4 / D7.5.3v2**; pure scene construction
+The package boundary follows **D9.3.4 / D9.5.6**; pure scene construction
 and effectful event handlers follow **S12.1.3**. Scene nodes and controls are
-retained under **D4.5.1v4**. The shared `lambda.scene3d.dom.mount` helper was
+retained under **D5.5.1**. The shared `lambda.scene3d.dom.mount` helper was
 extracted from CellScope so both demos preserve typed geometry/transform arrays
 when creating DOM nodes. No language or engine ruling changes are introduced.
 

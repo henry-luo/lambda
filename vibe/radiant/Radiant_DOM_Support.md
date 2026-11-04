@@ -1,13 +1,13 @@
 # Radiant DOM Support — Coverage, Roadmap, Non-Goals
 
 **Status:** implementation reference — updated 2026-09-11; DOM2 library, WPT, and native UI coverage is integrated into the Radiant baseline gate, with two animation/library fixtures still outstanding. **Three scope changes are recorded in this revision** (see §0).
-**Context:** consolidates the DOM API surface implemented by LambdaJS over Radiant (`lambda/dom/dom*.cpp`, `radiant/`), the library-compatibility gap analyses (`vibe/jube/Transpile_Js30_jQuery.md`, `Transpile_Js34_Bootstrap.md`), and the design docs `doc/dev/js/JS_13_Web_DOM.md`, `doc/dev/radiant/RAD_15/16/18/19/21`. Goal statement: **jQuery and Bootstrap fully supported; rich-text editors supported both as model owners and through the shipped user-agent editing action, including `execCommand` (D7.2.5); canvas-based graphics editors supported through a real Canvas 2D backend (§2.7).**
+**Context:** consolidates the DOM API surface implemented by LambdaJS over Radiant (`lambda/dom/dom*.cpp`, `radiant/`), the library-compatibility gap analyses (`vibe/jube/Transpile_Js30_jQuery.md`, `Transpile_Js34_Bootstrap.md`), and the design docs `doc/dev/js/JS_13_Web_DOM.md`, `doc/dev/radiant/RAD_15/16/18/19/21`. Goal statement: **jQuery and Bootstrap fully supported; rich-text editors supported both as model owners and through the shipped user-agent editing action, including `execCommand` (D10.2.1); canvas-based graphics editors supported through a real Canvas 2D backend (§2.7).**
 **Implementation path:** all new DOM surface MUST follow the Jube module-owned DOM bridge — [Lambda_Jube_DOM.md](../Lambda_Jube_DOM.md) (DOM1: `radiant` module registration, branded non-owning VMap wrappers, module-side wrapper cache) and [Lambda_Jube_DOM2.md](../Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol; the property/method dispatch home for everything in §2). New APIs land as module-owned dispatch under `lambda/module/radiant/`, not as new ad-hoc branches in `lambda/dom/dom.cpp`. Downstream consumer: [Lambda_Design_DOM_Pkg.md](../Lambda_Design_DOM_Pkg.md) (the Lambda `dom` package rides the same protocol).
 
 Three implementation tiers exist and must be distinguished when reading this doc:
 
 - **Native (C++)** — real behavior over Radiant's `DomNode`/`DomElement` tree, in `lambda/dom/`: `dom.cpp`, `dom_core.cpp`, `dom_events.cpp`, `dom_selection.cpp`, `dom_cssom.cpp`, `dom_clipboard.cpp`, `dom_xhr.cpp`, `dom_fetch.cpp`, `dom_formdata.cpp`, `dom_canvas.cpp`, `dom_observers.cpp`. (The DOM layer moved out of `lambda/js/` and dropped its `js_` prefix on 2026-09-01, DOM API F22–F26; file names below follow the current tree.)
-- **Lambda DOM behavior package** — the `.ls` sources under `lambda/dom/` (`commands.ls`, `edit_*.ls`, `editing.ls`, `caret.ls`, …) that own user-agent editing policy under D7.2.5. Policy lives here, never in native Radiant.
+- **Lambda DOM behavior package** — the `.ls` sources under `lambda/dom/` (`commands.ls`, `edit_*.ls`, `editing.ls`, `caret.ls`, …) that own user-agent editing policy under D10.2.1. Policy lives here, never in native Radiant.
 - **Browser preamble** — compatibility aliases remain, but the roadmap APIs below are native runtime/module dispatch and no longer shadowed by fixed-value observer, storage, metric, lifecycle, or XHR stubs.
 
 ---
@@ -16,7 +16,7 @@ Three implementation tiers exist and must be distinguished when reading this doc
 
 | Change | Was | Is | Authority |
 |---|---|---|---|
-| **`execCommand` / `queryCommand*` / `designMode`** | non-goal ("editors own their edits"; the entry points were inert feature-detect stubs) | **goal, and shipped** — the Lambda DOM behavior package owns the full legacy editing surface | **D7.2.5** (Implemented 2026-09-07); binding design [Radiant_Design_Editable.md](Radiant_Design_Editable.md) §20; release record [Radiant_Editable_UA6_Report.md](Radiant_Editable_UA6_Report.md) |
+| **`execCommand` / `queryCommand*` / `designMode`** | non-goal ("editors own their edits"; the entry points were inert feature-detect stubs) | **goal, and shipped** — the Lambda DOM behavior package owns the full legacy editing surface | **D10.2.1** (Implemented 2026-09-07); binding design [Radiant_Design_Editable.md](Radiant_Design_Editable.md) §20; release record [Radiant_Editable_UA6_Report.md](Radiant_Editable_UA6_Report.md) |
 | **Shadow DOM / Web Components** | non-goal | **still a non-goal** — unchanged | §3.1 |
 | **Canvas 2D** | out of scope (`OffscreenCanvas.measureText` only, for text metrics) | **new goal, not started** — a real `CanvasRenderingContext2D` over the existing `RdtVector` backend | §2.7; no `D#` ruling covers canvas yet — the roadmap items below are this doc's ledger until one exists |
 
@@ -57,13 +57,13 @@ ruling, §2.7 is a *working* scope commitment: promote it to a `D#` ruling in
 
 ### 1.4 Selection / Range / clipboard / editing — native
 
-`lambda/dom/dom_selection.cpp` over `radiant/dom_range.{hpp,cpp}` (RAD_18); editing policy in `lambda/dom/*.ls` (RAD_18, D7.2.5).
+`lambda/dom/dom_selection.cpp` over `radiant/dom_range.{hpp,cpp}` (RAD_18); editing policy in `lambda/dom/*.ls` (RAD_18, D10.2.1).
 
 - **Range**: all boundary setters, `collapse`, `selectNode(Contents)`, `cloneContents`/`extractContents`/`deleteContents`/`insertNode`/`surroundContents`, `compareBoundaryPoints`/`comparePoint`/`isPointInRange`/`intersectsNode`, `getBoundingClientRect`/`getClientRects`, `toString`.
 - **Selection**: anchor/focus props (+ legacy base/extent aliases), `addRange`/`removeRange`/`getRangeAt`, `collapse*`, `extend`, `modify`, `setBaseAndExtent`, `selectAllChildren`, `deleteFromDocument`, `containsNode`.
 - **`StaticRange`** for `beforeinput.getTargetRanges()`.
 - **Clipboard** (`dom_clipboard.cpp` over `radiant/clipboard.cpp`): `navigator.clipboard.readText/writeText/read/write`, `ClipboardItem`; copy/cut/paste events with `clipboardData`; full `DataTransfer` (`setData`/`getData`/`items`/`files`/`types`/`dropEffect`/`effectAllowed`) shared across a drag gesture.
-- **contenteditable / designMode — full user-agent editing (D7.2.5, shipped 2026-09-07).** `contenteditable` enables focus/selection and cancelable `beforeinput`/`input`. An author editor that cancels the relevant `keydown`, clipboard/drop event, or `beforeinput` — or a registered model handler that claims the edit — still owns its transaction entirely, and the UA package must not perform a second mutation or record a second history entry. When nothing claims the edit, the **Lambda DOM behavior package** (`lambda/dom/*.ls`) performs the browser-owned default action: text and structural insertion/deletion, inline formatting, lists, indent/outdent, objects, clipboard and drop insertion policy, normalization, typing state, and UA editing history — then collapses Selection and publishes observer records.
+- **contenteditable / designMode — full user-agent editing (D10.2.1, shipped 2026-09-07).** `contenteditable` enables focus/selection and cancelable `beforeinput`/`input`. An author editor that cancels the relevant `keydown`, clipboard/drop event, or `beforeinput` — or a registered model handler that claims the edit — still owns its transaction entirely, and the UA package must not perform a second mutation or record a second history entry. When nothing claims the edit, the **Lambda DOM behavior package** (`lambda/dom/*.ls`) performs the browser-owned default action: text and structural insertion/deletion, inline formatting, lists, indent/outdent, objects, clipboard and drop insertion policy, normalization, typing state, and UA editing history — then collapses Selection and publishes observer records.
 - **Legacy editing commands — implemented, not stubbed.** `document.execCommand(name, ui, value)` and all five `queryCommand*` methods (`Supported`/`Enabled`/`State`/`Indeterm`/`Value`) plus `designMode` are real, and route through the *same* gate as platform input: one command registry, one enabled predicate, one planner, one normalization pass, one history transaction (`Radiant_Design_Editable.md` §20.3). Keyboard bold cannot diverge from `execCommand("bold")`. Command coverage includes `bold`/`italic`/`underline`/`strikeThrough`/`sub`/`superscript`, `formatBlock`, `insertText`/`insertHTML`/`insertParagraph`/`insertLineBreak`/`insertHorizontalRule`/`insertImage`, `createLink`/`unlink`, `insertOrderedList`/`insertUnorderedList`, `indent`/`outdent`, the `justify*` family, `removeFormat`, `delete`/`forwardDelete`, `undo`/`redo`, `selectAll`, `styleWithCSS`, and `defaultParagraphSeparator`. Entry points: [dom.cpp:5709](../../lambda/dom/dom.cpp) (`dom_document_exec_command_bridge`), registry in `lambda/dom/commands.ls`.
 - **`beforeinput.inputType` is the full spec vocabulary** — ~70 values including `insertReplacementText`, `insertFromPaste`/`insertFromPasteAsQuotation`, `insertCompositionText`, `deleteWord*`/`deleteSoftLine*`/`deleteHardLine*`, `deleteByCut`/`deleteByDrag`, `format*` (bold through `formatJustify*`), and `historyUndo`/`historyRedo`/`historyRestore`.
 - **Ownership boundary.** Native Radiant retains platform key/text/IME/clipboard/drop transport, the common transaction gate, Selection/Range/StaticRange mechanics, observer plumbing, and generic *checked* DOM mutation. It owns no command tables and no formatting rules: a native primitive says *how* to perform a checked tree operation, never *which* operation a command needs (`Radiant_Design_Editable.md` §20.2).
@@ -150,7 +150,7 @@ Native: `documentElement`/`body`/`head`/`title`/`doctype`/`implementation`, `def
 
 ### 2.6 Full user-agent editing — delivered (scope change, §0)
 
-27. ✅ **`contenteditable`/`designMode` default actions, `execCommand`, and all five `queryCommand*` surfaces**, owned by the Lambda DOM behavior package under **D7.2.5** (implemented 2026-09-07). Both public entry points — platform input and `execCommand` — join before policy selection, so they share one command registry, enabled predicate, planner, normalization pass, and history transaction. Native Radiant keeps transport and generic checked mutation only. Verification (`Radiant_Editable_UA6_Report.md`): `make test-editable-ua` green — package-disabled behavior, editable UI fixtures, 31 CodeMirror/Editor.js/ProseMirror integrations, legacy form editing, 3/3 applicable WPT `contenteditable` cases, 313/313 input-event assertions, 4/4 pinned Chromium cases; `make test-radiant-baseline`, `make test-lambda-baseline`, and `make lint` green.
+27. ✅ **`contenteditable`/`designMode` default actions, `execCommand`, and all five `queryCommand*` surfaces**, owned by the Lambda DOM behavior package under **D10.2.1** (implemented 2026-09-07). Both public entry points — platform input and `execCommand` — join before policy selection, so they share one command registry, enabled predicate, planner, normalization pass, and history transaction. Native Radiant keeps transport and generic checked mutation only. Verification (`Radiant_Editable_UA6_Report.md`): `make test-editable-ua` green — package-disabled behavior, editable UI fixtures, 31 CodeMirror/Editor.js/ProseMirror integrations, legacy form editing, 3/3 applicable WPT `contenteditable` cases, 313/313 input-event assertions, 4/4 pinned Chromium cases; `make test-radiant-baseline`, `make test-lambda-baseline`, and `make lint` green.
 
 Conformance here has a stated meaning, not a promise to copy one browser (`Radiant_Design_Editable.md` §20.1): the pinned WPT contenteditable/editing/input-events/Selection slices and the pinned Chromium editing corpus pass, WPT wins on disagreement, exclusions are named with a reason in a reviewed manifest, and passing through harness-side emulation or expected-result rewrites is *not* conformance. No runtime branch may inspect a test name, corpus, URL, or harness mode.
 
@@ -194,7 +194,7 @@ on `rdt_vector_get_caps`, never on backend identity.
 
 > **Retired non-goal.** "No `document.execCommand`" was a non-goal in every
 > revision of this doc through 2026-07-19. It is now a **goal, and shipped** under
-> D7.2.5 — see §0 and §2.6. Legacy editors that require `execCommand` inline
+> D10.2.1 — see §0 and §2.6. Legacy editors that require `execCommand` inline
 > formatting are inside the compatibility target; Editor.js in particular moved
 > from §5.4 (rejected) to the integration suite. Form text controls
 > (`input`/`textarea`) are still natively edited (RAD_19) on their own path.
@@ -230,9 +230,9 @@ running in light DOM are in scope.
 
 - **`WebSocket`** — browser document realms now expose the WHATWG constructor,
   state, EventTarget events, binary modes and asynchronous send/close queue.
-  The transport is shared with `lambda.io.websocket` (**D7.2.4v4**); IO runs
-  on native tasks outside the JS host frame (**D7.4.2v2**), and document
-  retirement cancels it (**D5.3.3**). Chromium/native interop and focused
+  The transport is shared with `lambda.io.websocket` (**D9.3.4**); IO runs
+  on native tasks outside the JS host frame (**D9.5.2**), and document
+  retirement cancels it (**D6.3.3**). Chromium/native interop and focused
   browser API tests are in `test/websocket`. See
   [the chat implementation plan](../impl/Lambda_Impl_Chat.md#6-websocket-web-interoperability-requirement-2026-11-02)
   for the supported milestone and remaining conformance work.
@@ -288,7 +288,7 @@ Suites marked ✅ already have a runner; ◻ = vendored in `ref/wpt/`, runner st
 | `domparsing/` | ◻ | `innerHTML`/`insertAdjacentHTML` fragment parsing |
 | `selection/` | ✅ | §1.4 |
 | `input-events/` | ✅ | §1.4 / §2.6 editing contract; roadmap #22 |
-| `contenteditable/`, `editing/` (manifest-selected) | ✅ | §1.4 / §2.6; D7.2.5 acceptance |
+| `contenteditable/`, `editing/` (manifest-selected) | ✅ | §1.4 / §2.6; D10.2.1 acceptance |
 | `html/canvas/` | ◻ | §2.7 — the acceptance suite for the canvas track |
 | `pointerevents/` capture tests | ◻ | §2.7 item #33 (`setPointerCapture`) |
 | `uievents/`, `pointerevents/`, `touch-events/` | ◻ | §1.2; roadmap #14 (touch) |
@@ -307,7 +307,7 @@ Suites marked ✅ already have a runner; ◻ = vendored in `ref/wpt/`, runner st
 | `clipboard-apis/` | ✅ | §1.4 |
 | `css/css-syntax/`, html5lib | ✅ | parser conformance |
 
-**Explicitly skipped suites (non-goals, §3):** `shadow-dom/`, `custom-elements/`, `websockets/`, `workers/`, `IndexedDB/`. `editing/` is **no longer skipped** — under D7.2.5 its manifest-selected cases run in the two editing runners above. `webgl/`, `webgpu/`, and `html/canvas/*offscreen*worker*` stay out per §2.7's stated limits.
+**Explicitly skipped suites (non-goals, §3):** `shadow-dom/`, `custom-elements/`, `websockets/`, `workers/`, `IndexedDB/`. `editing/` is **no longer skipped** — under D10.2.1 its manifest-selected cases run in the two editing runners above. `webgl/`, `webgpu/`, and `html/canvas/*offscreen*worker*` stay out per §2.7's stated limits.
 
 Practical notes: (a) new runners should clone the `test_wpt_selection_gtest.cpp` pattern — recursive discovery, helper-script allowlist, shim injection, stdout result parsing; (b) full-tree runs are a non-goal — WPT is ~50k tests, most irrelevant to Radiant; curated per-suite runners with pinned pass/fail baselines (like `wpt_form_baseline.txt`) are the model; (c) Radiant's WebDriver endpoint (RAD_23, `Radiant_WebDriver.md`) is the eventual transport if we ever want upstream `wptrunner` integration, but the in-process gtest runners are cheaper and are the committed path.
 
@@ -364,6 +364,6 @@ Zepto / Select2 (redundant with jQuery), Shoelace / Material Web (web components
 - ✅ CSSOM View, DOM Nodes, ResizeObserver, IntersectionObserver, and CSS Transitions runners have ratcheting passing-file baselines.
 - ⚠️ `make dom-ui` drives 35 native input/layout fixtures and is part of both `make test-extended` and `make test-radiant-baseline`; 33 currently pass, with `collapse` and `jquery_fx` outstanding.
 - ✅ Input Events, DOM Ranges, and HTML reflection runners are ratcheting and baseline-gated.
-- ✅ **UA editing (§2.6, D7.2.5).** `make test-editable-ua` green: package-disabled behavior, editable UI fixtures, 31 editor integrations, legacy form editing, 3/3 applicable WPT `contenteditable` cases, 313/313 input-event assertions, 4/4 pinned Chromium cases. Manifest verification (`make` targets calling `verify_contenteditable_manifest.mjs`) checks every selected file's hash and the pinned corpus revision, so an unrelated upstream `HEAD` move cannot silently waive a case.
+- ✅ **UA editing (§2.6, D10.2.1).** `make test-editable-ua` green: package-disabled behavior, editable UI fixtures, 31 editor integrations, legacy form editing, 3/3 applicable WPT `contenteditable` cases, 313/313 input-event assertions, 4/4 pinned Chromium cases. Manifest verification (`make` targets calling `verify_contenteditable_manifest.mjs`) checks every selected file's hash and the pinned corpus revision, so an unrelated upstream `HEAD` move cannot silently waive a case.
 - ◻ **Canvas 2D (§2.7).** No gate yet. The track's exit criteria must include: a `html/canvas/` WPT runner following the `test_wpt_selection_gtest` pattern; pointer-capture cases from `pointerevents/` for item #33; L2 goldens plus L3 interactions for the chosen canvas-library representatives; and a rendering comparison against the existing layout/render baseline so a canvas surface cannot regress page paint.
 - Final repository baseline and lint results are recorded in the implementation-plan handoff.

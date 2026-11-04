@@ -11417,7 +11417,7 @@ TEST(RenderOutputParity, ExternalSvgImagesShareHtmlNamesAndResourceOwners) {
         ASSERT_TRUE(render_document_fixture(html, pdf)); ASSERT_TRUE(rasterize_fixture_pdf(pdf, pdf_pngs[i]));
         ASSERT_TRUE(render_document_fixture(html, svg)); ASSERT_TRUE(render_document_fixture(svg, svg_pngs[i]));
     }
-    // html foreign content recognizes canonical XLink names; literal XML aliases remain unknown (D2.11.2).
+    // html foreign content recognizes canonical XLink names; literal XML aliases remain unknown (D10.1.5).
     // the same three-color reference verifies image, external use and paint-server ownership across outputs.
     for (size_t i = 0; i < 2; i++) {
         expect_pngs_exactly_equal(pngs[2], pngs[i]); expect_pngs_exactly_equal(pdf_pngs[2], pdf_pngs[i]);

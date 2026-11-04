@@ -1,4 +1,4 @@
-// ordinary shipped facade; presentation stays pure and handlers own effects (D7.2.4; S12.1.3).
+// ordinary shipped facade; presentation stays pure and handlers own effects (D9.3.4; S12.1.3).
 import c: lambda.ui.core.component
 import shell: lambda.ui.core.presentation
 import theme: .bold.tokens

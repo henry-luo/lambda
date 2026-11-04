@@ -8,7 +8,7 @@ image. Its 18 equipment/spell illustrations and ornaments are original SVG;
 no pixel sprites, downloaded RPGUI assets, external fonts or image services
 are required at runtime.
 
-Blade is an ordinary shipped source package (**D7.2.4**). Qualified
+Blade is an ordinary shipped source package (**D9.3.4**). Qualified
 `<blade.*>` descriptors retain their authored names (**S2.4.3v3**); pure views
 present them and event procedures update application state (**S12.1.3**).
 Constructors, `render` and `page` report invalid props through the raised
@@ -147,7 +147,7 @@ The HTML export can be inspected in a browser; interactive browser
 distribution remains deferred.
 
 `make test-ui-blade ARGS='--jobs 2'` runs source contracts and native fixtures
-across interpreter, automatic and MIR JIT tiers (**D8.1.1v18**). Checks include
+across interpreter, automatic and MIR JIT tiers (**D8.3.2**). Checks include
 all shared constructors, vector scaling, input ownership, keyboard activation,
 controlled slot requests, cooldown/disabled controls, retained tabs, table
 sorting/selection/paging, forms, token inheritance, mixed theme scopes and

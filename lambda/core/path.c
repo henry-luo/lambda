@@ -101,7 +101,7 @@ static Path* path_alloc_op(Pool* pool, Path* base, LPathSegmentType type,
 }
 
 // Compatibility lifecycle hooks: roots are now allocated in the requesting
-// pool, so another evaluator's teardown cannot invalidate them (D5.4.2).
+// pool, so another evaluator's teardown cannot invalidate them (D6.4.2).
 void path_init(void) {}
 void path_reset(void) {}
 

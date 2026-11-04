@@ -6,14 +6,14 @@
 > `lmd/package/doc/ebook/`.
 > **Scope:** Load EPUB 2/3 publications and present them in Radiant with
 > ordinary eReader behavior. Other ebook formats are outside this scope.
-> **Formal linkage:** D7.2.1–D7.2.4 govern source packages and the document
+> **Formal linkage:** D9.3.1–D9.3.4 govern source packages and the document
 > namespace; S12.1.1v3 and S12.1.3 govern pure transformations and procedural
 > reader interaction; S12.4.1v2 and S14.3.1v2 govern captured ZIP input and
-> deferred member access; D7.1.2v2 governs resource acquisition;
-> S7.4.2/S7.4.4 govern failures and diagnostics; D4.1.3, D4.1.4v5, and
-> D4.5.1v4 govern input, resource, and retained-view ownership; D5.3.3 governs
+> deferred member access; D9.1.2 governs resource acquisition;
+> S7.4.2/S7.4.4 govern failures and diagnostics; D5.1.3, D5.1.4, and
+> D5.5.1 govern input, resource, and retained-view ownership; D6.3.3 governs
 > precise native roots. S2.6.1v2/S5.4.3 govern ordered, namespace-aware
-> document content, and D7.2.8 governs document-math projection.
+> document content, and D10.2.3 governs document-math projection.
 > These are proposed package contracts, not new language rulings. No formal
 > specification change is proposed.
 
@@ -21,7 +21,7 @@
 
 Keep the package name **`ebook`**, imported as **`lambda.doc.ebook`**. It
 names the reader and publication APIs and fits the document package grouping
-in D7.2.4. Its implemented format scope is EPUB only. Provide the public
+in D9.3.4. Its implemented format scope is EPUB only. Provide the public
 entry file explicitly; package imports do not imply a directory index.
 
 | Candidate | Assessment |
@@ -197,7 +197,7 @@ when a container offers more than one. `linear: false` content remains
 reachable through navigation without joining ordinary next-page traversal.
 
 The API should distinguish acquiring a source from transforming captured
-data, following S12.1.1v3 and D7.1.2v2:
+data, following S12.1.1v3 and D9.1.2:
 
 | Proposed export | Effect and contract |
 |---|---|
@@ -242,7 +242,7 @@ See [EPUB font obfuscation](https://www.w3.org/TR/epub-33/#sec-font-obfuscation)
 Preserve the chapter's original source tree and a mapping into its rendered
 DOM. Parse XHTML as XML-aware content, retaining SVG/MathML namespace identity
 and ordered mixed content (S2.6.1v2/S5.4.3). Route supported MathML through the
-document-math package under D7.2.8. Do not reparse everything as forgiving HTML
+document-math package under D10.2.3. Do not reparse everything as forgiving HTML
 and lose source positions or semantics. Unsupported required content uses a
 declared fallback or fails visibly, rather than disappearing.
 
@@ -262,10 +262,10 @@ directory or rewrite paths with textual search-and-replace.
 
 Extend the existing IO/resource-provider seam to serve fonts, CSS, images and
 SVG from retained publication bytes. Radiant receives resources through that
-seam; it does not fetch or unzip them itself (D7.1.2v2). Support resource
+seam; it does not fetch or unzip them itself (D9.1.2). Support resource
 leases through layout/paint and release them on chapter eviction or reader
-close under D4.1.3/D4.1.4v5/D4.5.1v4. GC-visible cached values require precise
-root ownership under D5.3.3; native stack scanning is not an ownership
+close under D5.1.3/D5.1.4/D5.5.1. GC-visible cached values require precise
+root ownership under D6.3.3; native stack scanning is not an ownership
 mechanism.
 
 The first profile is offline. Block publication-driven network requests,
@@ -299,7 +299,7 @@ visible passage. Recompose, resolve it, and reveal the corresponding range.
 Key layout caches by chapter/rendition, viewport, preferences, font/resource
 readiness and layout generation. A late font load must invalidate affected
 pagination and restore the anchor. Resource and view generations follow
-D4.5.1v4; stale layout callbacks cannot act on retired chapter state.
+D5.5.1; stale layout callbacks cannot act on retired chapter state.
 
 Compute book progress from a deterministic source-text measure or completed
 chapter measures, and label estimates while the index is incomplete. Screen
@@ -342,7 +342,7 @@ fingerprint with the publication identifier as descriptive metadata. Moving
 an unchanged file should retain its state. A changed edition must trigger
 locator validation; unresolved bookmarks remain visible as unresolved.
 Write atomically, preserve state through chapter eviction, and keep separate
-reader instances independent (D7.2.1, S12.1.3).
+reader instances independent (D9.3.1, S12.1.3).
 
 ## 9. Delivery milestones and acceptance
 

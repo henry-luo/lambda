@@ -9,7 +9,7 @@ typedef struct SecurityUpdateDownload {
     SecurityUpdateResult policy;
     uint32_t hops;
 } SecurityUpdateDownload;
-// Trusted updater only (D7.5.7-D7.5.8), never an app/worker request surface.
+// Trusted updater only (D11.2.3-D11.2.4), never an app/worker request surface.
 // public_path is a repository-relative public role/artifact name, not user
 // content. A successful result is UNVERIFIED bytes; the caller must authenticate
 // them before parsing artifacts, extracting, publishing or executing anything.

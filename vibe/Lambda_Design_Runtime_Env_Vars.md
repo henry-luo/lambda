@@ -128,7 +128,7 @@ present in every build because `lambda/main.cpp` reads it with an ungated
 
 `RADIANT_JS_SOURCE_CACHE` and `RADIANT_JS_SOURCE_CACHE_BYTES` are retired.
 Remote JavaScript source snapshots are cache-admitted through `InputManager`
-after generic HTTP disk-fetch reuse (D8.5.1v3); neither setting has a runtime
+after generic HTTP disk-fetch reuse (D8.5.1); neither setting has a runtime
 effect.
 
 | Variable | Effect / accepted value | Debug | Release | Release profile |

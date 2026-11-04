@@ -664,7 +664,7 @@ def lambda_run_cmd(script_path, tier):
 
 
 # LambdaJS set 1 pins MIR; set 2 times the configured default end to end.
-# D8.1.3v27 makes MVP MIR the unset default; explicit AST/AUTO overrides remain.
+# D8.4.2 makes MVP MIR the unset default; explicit AST/AUTO overrides remain.
 def lambdajs_run_cmd(script_path, backend):
     # JS_EXECUTION_BACKEND is the pre-2026-10-03 name, still read by archived binaries
     prefix = (f"JS_EXEC_BACKEND={backend} JS_EXECUTION_BACKEND={backend} "

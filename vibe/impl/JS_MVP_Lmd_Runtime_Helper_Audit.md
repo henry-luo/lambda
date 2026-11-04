@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-17
 **Base revision:** `6c14534a7`, following the uncommitted legacy MIR retirement.
-**Authority:** USER audit request; **D8.1.3v25**, **D5.3/D5.4**, **D6.2.2v2**,
-**D8.4.1v2**.
+**Authority:** USER audit request; **D8.4.2**, **D6.3/D6.4**, **D7.2.2**,
+**D7.4.1**.
 **Status:** source audit and focused JS verification complete; TypeScript and
 aggregate qualification boundaries are recorded below.
 
@@ -69,7 +69,7 @@ were not reformatted to manufacture the reduction.
 | `js_dynamic_import` | Existing runtime import tests; production uses the reference-aware `_at` entry |
 | `js_regex_scanner_needs_backtrack` | Scanner contract tests |
 | `js_async_iterator_close_result` | Raw iterator close contract tests |
-| `lambda_side_root_contains_span` | Live argument-span diagnostics under `#ifndef NDEBUG` (**D5.3/D5.4**) |
+| `lambda_side_root_contains_span` | Live argument-span diagnostics under `#ifndef NDEBUG` (**D6.3/D6.4**) |
 
 At this checkpoint the document lease adapter's lookup/adopt functions had
 callers in `radiant/script_runner.cpp`, while production supplied a null session
@@ -131,7 +131,7 @@ are not inferred from this source audit or focused checks.
 
 ## Document-cache adapter retirement
 
-**2026-10-17, USER; base `b37f6877a`; D8.1.3v25, D8.5.1v2, D5.3/D5.4.**
+**2026-10-17, USER; base `b37f6877a`; D8.4.2, D8.5.1, D6.3/D6.4.**
 
 Remove the `JsMirLeaseSession` type, request/adoption/lease helpers, declarations,
 runner state and layout setter hooks. Delete cached document-preamble and
@@ -164,7 +164,7 @@ checkpoint's pass counts above describe the preceding implementation.
 
 ## Interpreter convergence follow-up — 2026-10-30
 
-The **D8.1.3v43** migration reuses the audit after ordinary AST/AUTO adopts MVP
+The **D8.4.4** migration reuses the audit after ordinary AST/AUTO adopts MVP
 operations. The fresh census parses **48 translation units** without compiler
 diagnostics: **4,564 production-referenced**, **nine test-only**, **20 conditional
 build** bodies and **one manually reviewed implicit lifetime call**. There are
@@ -190,7 +190,7 @@ only actual side-root spans may borrow the prerooted path; native host/species
 argument arrays use the shared copied-root path. Shared reducers, Symbol
 creation, named data storage and host namespace publication are promoted or
 parameterized existing helpers rather than duplicated implementations
-(**D5.3.3**, **D6.2.2v2**, **D8.4.1v2**). The added
+(**D6.3.3**, **D7.2.2**, **D7.4.1**). The added
 `mvp_lmd_callback_call` extracts the identical callback adapter before its
 third use in the shared Array operations; collections and typed arrays reuse
 the same entry.

@@ -1,4 +1,4 @@
-// D7.2.4v4/S12.1.1v3: import is inert; acquisition is explicit and queries are pure.
+// D9.3.4/S12.1.1v3: import is inert; acquisition is explicit and queries are pure.
 import c: .chinese.common
 import syllables: .chinese.syllables
 import pack: .chinese.pack

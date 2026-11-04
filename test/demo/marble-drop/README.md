@@ -105,7 +105,7 @@ recorded in [`Marble_Drop_Debug_Performance.md`](../../../vibe/impl/Marble_Drop_
 through `dom.audio_open`/`dom.audio_play`, with at most eight overlapping voices.
 Bytes are cached after first use; playback handles open only for a cue and are
 closed when finished, superseded, muted or the document closes. The local demo's
-audible output follows **D7.5.4** in the
+audible output follows **D11.3.1** in the
 [formal design](../../../doc/Lambda_Formal_Design.md).
 The seven small mono WAVs are original synthesized effects. Rebuild them with
 `python3 test/demo/marble-drop/_generate_sounds.py`; Python is not used by the game.

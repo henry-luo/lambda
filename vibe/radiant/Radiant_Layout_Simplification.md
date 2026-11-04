@@ -18,9 +18,9 @@ multicol have different CSS algorithms, passes, and mutation rules. They keep
 separate algorithm bodies. The simplification is to stop each body from
 reimplementing box math, speculative-pass setup, and DOM construction policy.
 
-This follows **D7.1.1**: the work stays inside the `radiant` layer and does not
+This follows **D9.1.1**: the work stays inside the `radiant` layer and does not
 introduce upward dependencies or a new cross-layer service. It also follows
-**D4.5.1v2**: helpers borrow the existing document arena, view pools, and
+**D5.5.1**: helpers borrow the existing document arena, view pools, and
 `LayoutContext`; no new individually-owned layout graph or GC lifetime is
 introduced.
 
@@ -85,8 +85,8 @@ hidden inside formatting-context files.
 **Execution architecture extension (2026-10-20, adopted; implementation in
 progress):** [CSS Cascade §3.47](Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs)
 and **VR15** replace execution-count invalidation with stable computed-style
-inputs and cached sizing/layout queries. Ownership remains **D4.5.1v4 /
-D4.1.4v5 / D4.5.2**. These changes extend the behavior-neutral extraction plan
+inputs and cached sizing/layout queries. Ownership remains **D5.5.1 /
+D5.1.4 / D5.5.2**. These changes extend the behavior-neutral extraction plan
 below; the legacy height estimator remains an estimate until its consumers
 migrate to retained results.
 
@@ -144,7 +144,7 @@ checks its containing constraints before preserving assigned layout sizes;
 ratio transfer and cyclic intrinsic contributions use shared sizing policy.
 Vertical flow still owns inline constraints in mutable props and keeps its
 legacy adapter until retained flow results replace those reads (**VR15**;
-selected-view ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+selected-view ownership **D5.5.1 / D5.1.4 / D5.5.2**).
 
 The first milestone-3b consumer removes speculative height from row-flex
 preparation, with explicit validity for partial measurements. At the assigned
@@ -165,7 +165,7 @@ and environment before borrowing geometry. Loader root publication preserves
 that tree; real resets restore authored table runs/first-letter text and refresh
 retained list/pseudo owners. Complete geometry and lifecycle state publish before
 observer sampling. This removes duplicate document flow, independently of the
-remaining per-query fragment-storage migration (**D4.5.1v4 / D4.1.4v5 / D4.5.2**).
+remaining per-query fragment-storage migration (**D5.5.1 / D5.1.4 / D5.5.2**).
 Ordinary invalidation retains its view pool; retained pool ownership does not
 extend flex sizing work or scalar-cache validity beyond their measurement pass.
 General flex estimator/ancestor-height fidelity remains open (**VR15**).
@@ -261,9 +261,9 @@ small-caps codepoint conversion and loaded-glyph advance handling across its
 text-width and width-dependent-height paths. `layout_table.cpp` reuses the
 collapsed-border candidate helper and anonymous-run flushers, then drops
 repetitive per-cell/per-column trace blocks while retaining phase-level
-diagnostics. This keeps algorithm ownership local under **D7.1.1** and keeps
+diagnostics. This keeps algorithm ownership local under **D9.1.1** and keeps
 anonymous nodes and layout state in the existing arenas/pools under
-**D4.5.1v2**.
+**D5.5.1**.
 
 Final measured result:
 

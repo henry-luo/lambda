@@ -1,4 +1,4 @@
-// D3.3.3v3/S8.2.4v3: an open array can hold an admitted record alongside
+// D4.3.3/S8.2.4v3: an open array can hold an admitted record alongside
 // another map or a non-map; the field read must guard the actual shape.
 type IdleData = {control: int, icount: int}
 type World = {datas: array}

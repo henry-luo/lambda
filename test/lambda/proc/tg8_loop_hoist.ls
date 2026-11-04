@@ -1,4 +1,4 @@
-// D8.3.4/DF16: `value` is immutable across the loop. The first call admits an
+// D7.3.4/DF16: `value` is immutable across the loop. The first call admits an
 // int raw key; the loop then uses one entry guard for its int fast sibling and
 // the unchanged `_b` sibling for the string case.
 fn choose_type(value: any as T) int => 1;

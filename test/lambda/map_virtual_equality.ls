@@ -1,4 +1,4 @@
-// S5.4.1 / D7.4.5v2: key-unordered map equality ignores the storage carrier.
+// S5.4.1 / D9.5.5: key-unordered map equality ignores the storage carrier.
 let native = {a: 1, b: null, nested: {x: [2, 3]}}
 let virtual = map(["nested", map(["x", [2, 3]]), 'b', null, "a", 1.0])
 type Named { a: int }

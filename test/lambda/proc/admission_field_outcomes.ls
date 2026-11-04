@@ -1,4 +1,4 @@
-// S7.7.2v2/D2.8.3v3: member reads retain a failed receiver's actual outcome.
+// S7.7.2v2/D2.5.3: member reads retain a failed receiver's actual outcome.
 type Box = {n: int, message: int, code: int}
 fn opaque(value) => value
 pn member_loop() {

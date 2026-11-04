@@ -149,8 +149,8 @@ document — it would improve the typed benchmark column across the board.
 ### TS-4 — A named map type on a **local** is a COW value root, not a borrow — **RESOLVED 2026-09-14**
 
 > **Status update.** The historical aliasing expectation is not the current
-> rule: a local map binding is a COW snapshot under **D4.4.1–D4.4.2**, with a
-> guarded borrow only for D4.4.4's proven read-modify-write place. Release
+> rule: a local map binding is a COW snapshot under **D5.4.1–D5.4.2**, with a
+> guarded borrow only for D5.4.4's proven read-modify-write place. Release
 > `splay2` now preserves all 8,000 nodes, `raytrace3d2` passes, and the
 > current one-million-iteration typed-local probe is faster than its untyped
 > counterpart. The central fixed ledger §14 preserves the measurements; the

@@ -1,4 +1,4 @@
-// Retained presentation branches keep their DOM identity and live control values (D4.5.3).
+// Retained presentation branches keep their DOM identity and live control values (D5.5.3).
 import dom
 view <projection_counter> state count: 0 {
     <section id:"counter", ["data-count"]:string(count),

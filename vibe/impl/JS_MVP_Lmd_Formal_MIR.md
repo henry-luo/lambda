@@ -1,14 +1,14 @@
 # JS MVP: activate the formal MIR engine
 
 **Date:** 2026-10-17. **Status:** functional migration complete; benchmark timing deferred.
-**Authority:** D8.1.3v25; [MVP design §36](../jube/JS_MVP_Lmd.md#36-formal-javascript-mir-engine).
+**Authority:** D8.4.2; [MVP design §36](../jube/JS_MVP_Lmd.md#36-formal-javascript-mir-engine).
 
 ## Contract
 
 MVP-Lmd supplies normal JavaScript MIR execution. Dynamic source continues in
 the retained AST interpreter. Unsupported features produce real failures;
 there is no implicit legacy compiler retry. Reuse shared Lambda ownership,
-precise roots, shapes and operation kernels (D1.3v3, D3.4, D5.2–D5.3).
+precise roots, shapes and operation kernels (D1.3, D3.4, D6.2–D6.3).
 
 ## Work
 
@@ -52,10 +52,10 @@ the shared `lambda.exe` is not used as the identity of a release result.
 - The normal public Script/Module entry, CLI, and formal MIR Test262 batch
   select MVP. The parser's existing module-goal scanner is shared with the
   public adapter. Explicit AST selection remains available; dynamic source
-  continues through the retained interpreter (D8.1.3v25).
+  continues through the retained interpreter (D8.4.2).
 - Public results use the caller's heap. Runtime Script retirement retains
   generated code and metadata for escaped closures; shared host calls enter
-  their MVP callable ABI without casting them to `JsFunction` (D5.3).
+  their MVP callable ABI without casting them to `JsFunction` (D6.3).
 - Fixed public buffer/child-realm exposure, hosted `with` capture and
   `@@unscopables`, recursive stack recovery, large-class metadata rooting,
   closed-class fallback to Object.prototype, console aliases, disposal
@@ -168,18 +168,18 @@ This does not clear the aggregate gate or the real host/promotion gaps.
 | Ordinary JavaScript CLI/public Script | MVP MIR |
 | JavaScript ES modules | MVP MIR, or explicitly selected AST |
 | Formal MIR Test262 source/harness batches | MVP body; shared native assertion helpers or retained AST harness |
-| `eval` / Function-family dynamic source | Retained AST, as required by D8.1.3v25 |
+| `eval` / Function-family dynamic source | Retained AST, as required by D8.4.2 |
 | Document/preamble compiled artifacts | MVP MIR; shared code images with fresh realm metadata |
 | Explicit AUTO function promotion and loop handoff | MVP satellite bodies through the native callable ABI |
-| TypeScript-specific lowering | Shared C AST admission and MVP parameter initialization; no legacy MIR fallback (D8.1.3v25) |
+| TypeScript-specific lowering | Shared C AST admission and MVP parameter initialization; no legacy MIR fallback (D8.4.2) |
 
 Module/child-realm ownership, interleaved `with`/eval records, host properties,
 CommonJS, timers, process events and cooperative agents are implemented and
 covered by the later evidence below. Unicode 17 is the selected target and its
-generated tables are checked for reproducibility (**S17.7.1, D8.1.3v25**).
+generated tables are checked for reproducibility (**S17.7.1, D8.4.2**).
 
 Native worker threads and browser-wide DOM/Web compatibility remain separate
-qualification scopes (**D6.3.1-D6.3.2**). Fresh document realms still reconstruct
+qualification scopes (**D7.5.1-D7.5.2**). Fresh document realms still reconstruct
 frontend metadata before exact-image code reuse. Removing that frontend cost,
 open-realm specialization and benchmark performance acceptance remain deferred;
 none is represented by a functional-suite pass. The final shared Lambda,
@@ -192,7 +192,7 @@ Child realms now receive separate module controllers/registries in the existing
 EvalContext, while retaining the host resource policy. The shared dynamic-import
 loader is promoted and queues a captured policy; `mvp_lmd_dynamic_import` is the
 new thin realm adapter. The existing native-payload callable factory accepts an
-optional precise closure environment (D5.3.3, D6.2.2v2). A two-child-realm module
+optional precise closure environment (D6.3.3, D7.2.2). A two-child-realm module
 identity/TLA/nested-import check passes normally and with forced/poisoned GC on
 `module_bridge1`.
 
@@ -231,7 +231,7 @@ Public entries retain one execution owner per heap, with separate compiler
 units sharing the realm's global and intrinsic slots. Declaration preflight
 checks the whole Script before publishing bindings; global lexicals remain
 off `globalThis`. Existing native functions cross through the retained
-interpreter's callable adapter, including its identity cache (D5.3, D6.2.2v2).
+interpreter's callable adapter, including its identity cache (D6.3, D7.2.2).
 The shared global getter/setter and binding lookup now observe this realm.
 Module admission checks the existing resource policy before both warm registry
 lookup and queued import creation; the queued loader checks again at entry.
@@ -294,7 +294,7 @@ the missing `Buffer.from` discrepancy.
 ### Relocatable code images and document activation
 
 Continuation entry: `8b450390fc4f4d99eb2dc347b9c5c2043f250225`.
-Under **D8.1.3v25, D8.5.1v2 and D5.3**, document preambles, cached external
+Under **D8.4.2, D8.5.1 and D6.3**, document preambles, cached external
 classic scripts and their uncached consumer path now enter MVP. Shared module
 artifacts use the same InputManager cache and dependency invalidation service.
 Dynamic source still uses the retained interpreter.
@@ -354,7 +354,7 @@ continuation. Benchmark timing remains deferred at the user's request.
 ### Shared RegExp match state and streaming replacement
 
 `regexp2` keeps the normal formal MIR entry and reuses the existing runtime
-kernels (D8.1.3v25). The earlier pinned CLI returned `undefined` for legacy
+kernels (D8.4.2). The earlier pinned CLI returned `undefined` for legacy
 RegExp captures/context; its million-run wide replacement exceeded the
 15-second reproducer deadline. The unchanged integration test had exceeded
 120 seconds. Both cases now complete correctly; these are functional timeout
@@ -377,13 +377,13 @@ quantified built-in classes with safe byte spans. The loop copies directly to
 the existing `StrBuf` and records only the final match, eliminating retained
 per-hit arrays and repeated UTF-16 prefix scans. Overrides, callable
 replacements and other patterns keep the existing JS protocol path
-(D8.1.3v25).
+(D8.4.2).
 
 `RegExp.compile()` now refreshes its Unicode matching mode as well as flags
 and matcher metadata. Validation also exposed a shared teardown defect:
 `heap_destroy()` freed the heap without clearing its owner's pointer. Later
 root-vector retirement inspected that freed allocation. The shared destructor
-now clears the pointer; roots remain precise (D5.3/D5.4), and a direct Item-suite
+now clears the pointer; roots remain precise (D6.3/D6.4), and a direct Item-suite
 regression covers retirement after destruction.
 
 Release SHA-256:
@@ -412,7 +412,7 @@ the initial outcomes and their replays. Benchmark timing remains deferred.
 
 The formal entry now imports already prepared host globals into the active MVP
 realm and reuses the shared lazy namespace catalog for Intl, Buffer and other
-host services (D8.1.3v25). Existing MVP intrinsics retain their identity. Window
+host services (D8.4.2). Existing MVP intrinsics retain their identity. Window
 aliases are rebound to the active global; lazy values are resolved once into
 that global. Document/UI bindings are installed at the formal entry before the
 first unit is instantiated.
@@ -423,7 +423,7 @@ enumeration to the existing shared property/exotic operations. Callable ABI,
 existing nominal metadata and host virtual-container identity select this
 boundary; ordinary MVP containers gain no `is_normal` flag. Shared host reads
 of MVP functions dispatch by ABI instead of interpreting the legacy function
-tail (D6.2.2v2). `mvp_lmd_project_keys` extracts the existing proxy projection
+tail (D7.2.2). `mvp_lmd_project_keys` extracts the existing proxy projection
 loop for reuse. Other new adapters are `js_install_host_namespace_slots` and
 `mvp_lmd_import_host_globals`.
 
@@ -441,7 +441,7 @@ admits host virtual carriers at generated reads, writes and sloppy receiver
 entry. Shared errors retain their native class while preserving a separately
 mutable public `name`. Prepared Window import also rebinds the document's
 precise `defaultView` root; rebinding only global alias properties left this
-readonly host getter pointing at the retired staging global (D5.3).
+readonly host getter pointing at the retired staging global (D6.3).
 
 Array `keys` and `entries` now use the existing sequence iterator carrier,
 projection and stepping kernels. Their installation reuses the shared builtin
@@ -471,8 +471,8 @@ budget had been reached.
 
 Large open entries now capture actual callable properties and reuse
 `mvp_lmd_class_invoke` after that same emission budget, with the existing
-argument-root span and pending scalar-result handling (D6.2.2v2, D5.2.1v3,
-D5.3). Closed-unit lowering, small entries, function bodies, specialized calls
+argument-root span and pending scalar-result handling (D7.2.2, D6.2.1,
+D6.3). Closed-unit lowering, small entries, function bodies, specialized calls
 and dynamic-source interpretation keep their existing policies. No new runtime
 helper or vendor change is involved. The finalized DOM entry falls to 162,584
 instructions and 57,703 analysis blocks; the unchanged fixture completes and
@@ -493,12 +493,12 @@ these kernels. Freezing the public object does not freeze its internal value;
 public `__time__` fields, inherited Date prototypes and proxies cannot forge
 the Date brand. Native Date construction roots its input before allocation and
 uses destination-owned scalar storage instead of a static numeric ring
-(D5.3/D5.4). The DOM `valueAsDate` setter validates through the shared kernel.
+(D6.3/D6.4). The DOM `valueAsDate` setter validates through the shared kernel.
 
 Host arrays can expose native functions directly in elements or own methods,
 without going through a foreign property read. Generic invocation now checks
 the published callable ABI before reading an MVP tail and reuses the existing
-identity-cached native bridge (D6.2.2v2). Array companion metadata selects the
+identity-cached native bridge (D7.2.2). Array companion metadata selects the
 existing foreign descriptor/prototype service; this restores FileList methods,
 branding and inherited accessors without a new container flag. Ordinary MVP
 array storage and closed direct calls retain their dispatch policy.
@@ -507,7 +507,7 @@ The announced `mvp_lmd_program_for_global` resolves a native callable's existing
 home global to a retained MVP realm. Native wrappers and Promise job policy use
 that owner when available; prepared host globals that predate MVP retain the
 existing caller policy. This fixes a native-callable admission failure that
-otherwise poisoned child-realm Promise jobs (D8.1.3v25, D5.3). The focused and
+otherwise poisoned child-realm Promise jobs (D8.4.2, D6.3). The focused and
 forced-GC gates above include those child-realm cases. The real DOM Date setter
 probe also checks frozen Dates, subclasses, invalid Dates, and rejected forged
 or proxy receivers. These are correctness results; performance remains deferred.
@@ -516,7 +516,7 @@ The AUTO audit confirms that existing promotion admission permits calls, global
 reads and top-level bindings. Publishing an isolated function into a fresh MVP
 realm would lose those environments. The gate remains disabled until a shared
 realm/environment publication adapter is implemented; enabling the old switch
-would also reactivate the legacy loop compiler (D8.1.3v25).
+would also reactivate the legacy loop compiler (D8.4.2).
 
 ### Shared host clocks
 
@@ -529,7 +529,7 @@ and `js_date_now`, including no-argument Date construction and the Date function
 call. Its private host origin is removed. The existing Date numeric reader is
 promoted for reuse; no new clock kernel or helper is introduced. This keeps
 native callbacks and the formal engine on the same existing runtime state
-(D5.3, D8.1.3v25). The focused check advances virtual and frame clocks explicitly,
+(D6.3, D8.4.2). The focused check advances virtual and frame clocks explicitly,
 collects between reads, and verifies Date construction and stable timeOrigin.
 
 Release pin `host27` has SHA-256
@@ -569,7 +569,7 @@ and catalog functions such as `fetch`. The existing eager AST bootstrap and
 the lazy formal engine use the same family installers. Only an owned marker
 may be replaced: deleted globals, user replacements and descriptor attributes
 survive sibling materialization, including after `preventExtensions`
-(D8.1.3v25, D6.2.2v2, D3.4.3v5).
+(D8.4.2, D7.2.2, D3.4.3).
 
 Native property reads, Set, descriptor definitions, own-key reflection and
 prototype walks derive ownership from the existing Function ABI and nominal
@@ -577,7 +577,7 @@ extension metadata. They enter the existing MVP kernels for MVP storage;
 ordinary storage gains no `is_normal` flag. Shared reflection converts
 canonical Symbol keys back to their observable identities. Native typed arrays
 and host iterators use the active MVP realm's intrinsic prototype identities
-(D3.4.4v4, D3.4.7, D6.2.2v2).
+(D3.4.4, D3.4.7, D7.2.2).
 
 A lazy descriptor read can publish an entire host family and relocate Map
 storage. `DefineOwnProperty` now refreshes its shape entry and rooted descriptor
@@ -587,7 +587,7 @@ the first iterator succeeded, but a fresh iterator read an empty cached `next`
 slot. Native writes now retain MVP shape ownership, and iterator caches use an
 unforgeable private key through the existing private-slot operations. Caching
 preserves the next-method snapshot without exposing keys or invoking guest
-cache properties, proxy traps or extensibility checks (D3.4.3v5, D5.3/D5.4).
+cache properties, proxy traps or extensibility checks (D3.4.3, D6.3/D6.4).
 
 Public Runtime timers reuse native Timeout handles, coercion and cancellation;
 standalone benchmark hosts retain numeric handles. DOM string handlers reuse
@@ -595,14 +595,14 @@ the shared scheduling/coercion policy and execute classic source through the
 retained AST interpreter in the active realm. Timeout construction precisely
 roots each unpublished handle and method. Window messaging/listeners use the
 existing DOM EventTarget service; they no longer require an initialized Radiant
-script API (D5.3/D5.4, D8.1.3v25).
+script API (D6.3/D6.4, D8.4.2).
 
 Source classes can extend native host constructor wrappers through their
 existing construct/newTarget protocol. Lambda nominal ancestry is retained
 separately from mutable JS constructor/prototype links; native factories keep
 their physical brands. Internal Blob creation materializes the shared private
 prototype before the public binding is read and preserves user overrides
-(D2.6.9v3, D3.4, D6.2.2v2).
+(D3.1.5, D3.4, D7.2.2).
 
 New helpers announced before coding: `js_install_host_global_group`,
 `js_materialize_host_global_group`, `mvp_lmd_import_host_property`,
@@ -624,7 +624,7 @@ catalog reports zero violations.
 The host follow-up also routes `for…in` on native virtual collections through
 the existing foreign own-key, descriptor and prototype operations. The ordinary
 MVP no-callback proof excludes those objects; iteration and live-key checks
-otherwise retain the same algorithm (D3.4.7, D6.2.2v2).
+otherwise retain the same algorithm (D3.4.7, D7.2.2).
 
 `createRequire` now retains its filename in the shared native closure layout;
 `js_require_at` reuses the existing document/file resolver and loader policy.
@@ -635,7 +635,7 @@ for the public lazy binding. These two helpers were announced before coding.
 The original `dynamic_adapter_span` fixture then exposed a separate planning
 bug: an early single-host intrinsic allocated the host span without assigning
 its siblings' slot indices. Public realm planning now indexes the complete
-span before global publication (D5.3, D6.2.2v2, D8.1.3v25).
+span before global publication (D6.3, D7.2.2, D8.4.2).
 
 
 The retained AST does not receive the new formal-only lazy require binding;
@@ -660,7 +660,7 @@ the same semantic helper used by the retained interpreter. MVP previously
 copied the class member's whole span, including `static` and leading comments.
 Class constructors still expose their complete class source; other functions
 share the existing method-span policy. No new helper is introduced
-(D6.2.2v2, D8.1.3v25).
+(D7.2.2, D8.4.2).
 
 
 `host43` passes all 12 formerly failing static-method source cases; its complete
@@ -670,7 +670,7 @@ for the RegExp `$&` getter. The existing `js_regexp_name_is_identifier` helper
 is promoted for shared NativeFunction source validation. Valid constructor
 names retain their text; names that cannot form an IdentifierName use the
 existing anonymous native-function spelling, without changing `.name` or
-property identity (D6.2.2v2).
+property identity (D7.2.2).
 
 
 Final runtime pin `host44` has SHA-256
@@ -689,8 +689,8 @@ retained-interpreter binary operation as `mvp_lmd_dynamic_binary` and uses it
 only after primitive, nullish and object-identity equality paths. The MIR
 import declares reentry and precise Item operands. Function enumeration calls
 the existing callable preparation helper before reading its own storage;
-non-enumerable inherited accessors remain unread (D5.3/D5.4, D6.2.2v2,
-D8.1.3v25). The helper promotion was announced before coding.
+non-enumerable inherited accessors remain unread (D6.3/D6.4, D7.2.2,
+D8.4.2). The helper promotion was announced before coding.
 
 
 Latest release pin `host45` has SHA-256
@@ -706,7 +706,7 @@ acceptance remain open. Benchmark timing remains deferred.
 
 The next migration increment reuses `load_script_mir_direct`, the canonical
 module registry and the existing Lambda procedure-to-Promise membrane
-(D7.2.1, D8.1.3v25). New helpers announced before implementation:
+(D9.3.1, D8.4.2). New helpers announced before implementation:
 `js_load_lambda_module`, extracted from the interpreter loader, and
 `prepare_lambda_module`, which publishes foreign exports into the existing
 precisely rooted module slabs. Lambda dependencies are not parsed as JS and
@@ -718,7 +718,7 @@ the existing module namespace exotic, with its own exact root and the same
 readonly/sorted export policy as JS modules. The callable adapter accepts Core
 exports only at module publication, preserving their compact ABI and invoking
 them through `js_call`/`fn_call_into`; the module slab owns the adapter rather
-than a new realm-wide cache (D5.3/D5.4.3, D6.2.2v2). Public `pn` exports keep
+than a new realm-wide cache (D6.3/D6.4.3, D7.2.2). Public `pn` exports keep
 the existing Promise scheduler and ordering. This does not add support for
 Lambda public variables beyond the shared namespace builder's current exports.
 
@@ -726,16 +726,16 @@ Packed Lambda maps reuse `map_shape_field_to_item` for reads, while writes
 continue to require the existing owner/contract admission. Returned Lambda
 VMaps reuse the native data-map read path, preserving null versus a missing
 field. They do not change the representation of ordinary JS objects or Maps
-(D3.4.3v5, D3.4.7). Resting native errors read their owned fields through the
+(D3.4.3, D3.4.7). Resting native errors read their owned fields through the
 existing `js_get_key_core` carrier path rather than losing their message in
-ordinary map/prototype lookup (D6.2.2v2).
+ordinary map/prototype lookup (D7.2.2).
 
 Custom-element registration previously cast MVP constructors to `JsFunction`
 and crashed in `js_fn_class_ensure`. The announced `_custom_element_class_name`
 helper selects the existing JS class association or MVP's private shape slots
 by callable ABI. Frozen constructors retain this internal association without
 an observable property, a new Container flag or a new native payload layout
-(D3.4.7, D5.3, D6.2.2v2). Validation includes constructor identity, duplicate
+(D3.4.7, D6.3, D7.2.2). Validation includes constructor identity, duplicate
 registration, native `super()` construction, fields and GC.
 
 Checkpoint `host52` passes 758/758 MVP units, 91/91 focused normal and
@@ -750,7 +750,7 @@ The DOM lookup called shared `js_is_callable`, whose MVP branch incorrectly
 required a non-null body pointer. Default class constructors instead dispatch
 through MVP class metadata. The capability query now reuses
 `mvp_lmd_is_callable`; calling a class still throws, and construction retains
-MVP's native-super/new-target protocol (D6.2.2v2). Shared
+MVP's native-super/new-target protocol (D7.2.2). Shared
 `js_construct_value` also routes MVP constructors through that protocol before
 reading any JsFunction tail. This keeps native adapters and interpreter
 callbacks on the formal callable ABI.
@@ -785,7 +785,7 @@ acceptance remain open. Benchmark timing remains deferred.
 ### Direct eval and interleaved object environments
 
 The formal MIR eval bridge now retains Object Environment Records in the same
-`JsInterpEnv` chain as parameter, block and variable records (D5.3, D8.1.3v25).
+`JsInterpEnv` chain as parameter, block and variable records (D6.3, D8.4.2).
 MIR allocates a record at a `with` statement only when its function needs the
 eval environment bridge. Its object is a sixth contiguous traced metadata
 Item; escaped eval closures and suspended MIR activations retain it through
@@ -799,7 +799,7 @@ reference keeps its original object through RHS evaluation and supplies that
 object as the receiver of a call or tagged template. `typeof` uses the same
 resolved reference without repeating HasBinding. Eval-created vars continue
 to bind in the existing caller VariableEnvironment; object records do not
-become declaration targets (D8.1.3v21, D8.1.3v25).
+become declaration targets (D8.4.3, D8.4.2).
 
 Helpers announced before coding: promote the shared
 `js_with_binding_is_visible` helper and add `js_with_get_binding_value`, which
@@ -835,7 +835,7 @@ The existing definition-owned `FnPromotionCell` now publishes an MVP body
 through the native JsBody ABI. The original callable remains `self`, so named
 recursion, construction, descriptors and equality retain their identity.
 Definition roots retain compiled bodies between closure instances; Runtime
-Script retirement owns their metadata and code (D5.3, D6.2.2v2, D8.1.3v25).
+Script retirement owns their metadata and code (D6.3, D7.2.2, D8.4.2).
 
 All satellites in an AUTO runtime reuse MVP's existing shared-realm unit
 mechanism. Their library borrows the native realm's intrinsic prototypes and
@@ -845,7 +845,7 @@ leaks. Global variables continue through the original slab and global-property
 mirror; lexical cells remain in the original slab. Native property operations
 resolve the owning MVP program from existing callable/nominal metadata, so
 escaped objects and implicit errors retain their realm without a Container
-flag (D3.4.7, D5.3/D5.4, D6.2.2v2).
+flag (D3.4.7, D6.3/D6.4, D7.2.2).
 
 Helpers announced before coding: `mvp_lmd_compile_function_satellite`,
 `mvp_lmd_call_function_satellite`, `mvp_lmd_compile_loop_satellite`,
@@ -872,14 +872,14 @@ The module environment projects the existing source record into the retained
 interpreter, with no copied import values or second export authority. New helper
 announced before coding: `js_module_environment_binding`; it selects the existing
 resolved import or local slab and reuses `js_module_binding_get` and Lambda's
-owned module-slot writer (D5.3, D7.2.1, D8.1.3v25). Imports remain readonly,
+owned module-slot writer (D6.3, D9.3.1, D8.4.2). Imports remain readonly,
 local writes remain live through exports, and reads preserve the target TDZ.
 
 MIR retains one precisely traced environment between module instantiation and
 evaluation. Hoisted functions and eval-created closures retain that same record
 across host calls, awaits, generators and GC. Module vars stay off the global
 object; module eval receives undefined `this`. Ordinary units without direct
-eval allocate no additional environment (D5.3/D5.4, D8.1.3v25).
+eval allocate no additional environment (D6.3/D6.4, D8.4.2).
 
 Release pin `host77`, SHA-256
 `73a4a0cee65b07a8ab29a578ca4e6fa51e80c53add9900c4796271ad0a394097`,
@@ -899,7 +899,7 @@ these focused results do not close the broader migration or deferred timing gate
 Open-program property reads now resolve Boolean and BigInt values through
 their realm prototypes even when a large call site cannot use the compact
 callee path. Missing properties still produce undefined; detached methods
-retain their existing receiver validation (D8.1.3v25).
+retain their existing receiver validation (D8.4.2).
 
 The existing dynamic callable adapter is renamed
 `mvp_lmd_dynamic_import_value` and also reuses
@@ -908,7 +908,7 @@ native call results, packed Lambda field reads, descriptors, projections,
 module exports, Promise callbacks and resumed await values. Packed foreign
 maps are admitted only for reads; existing mutation admission remains the
 authority. MVP class resolution is reused to keep ordinary class accesses
-off this foreign path (S4.9.1, D3.4.7, D5.3/D5.4, D8.1.3v25).
+off this foreign path (S4.9.1, D3.4.7, D6.3/D6.4, D8.4.2).
 
 Native JSON parsing now uses the existing strict parser's JS Number option,
 including wide integer rounding and negative zero. JSON text does not cross
@@ -945,7 +945,7 @@ that handle through Lambda's existing `RefCount`; ordinary buffer data access
 and typed-array loops keep their existing layout and resolver. Growth updates
 the one shared handle, including length-tracking TypedArray and DataView
 clones. Fixed-length views retain their original offset and extent
-(D2.4.1, D5.3/D5.4, D8.1.3v25).
+(D2.3.4, D6.3/D6.4, D8.4.2).
 
 Helpers announced before coding: `js_arraybuffer_allocate_handle`,
 `js_arraybuffer_retain`, and `js_sharedarraybuffer_clone_with_ops`. All native
@@ -988,7 +988,7 @@ A child realm's Lambda import exposed an allocator collision: its private
 Runtime counter assigned module IDs already used by the shared EvalContext's
 JS module slabs. The unchanged import path reported `sealed layout changed`
 and left the import completion pending. The physical table and allocation
-authority must have the same owner (D5.4.3, D7.2.1, D8.5.1v2).
+authority must have the same owner (D6.4.3, D9.3.1, D8.5.1).
 
 New helper announced before coding: `runtime_module_state_owner`. The
 EvalContext retains its canonical allocator Runtime once, while a borrowed
@@ -996,7 +996,7 @@ controller can still select its own module registry and execution metadata.
 Script registration, direct slab reservation and generation retirement reuse
 that existing owner's counter. No second counter or module table is added;
 the new owner pointer is at the Context tail, preserving established hot
-offsets (D8.1.3v10).
+offsets (D8.4.1).
 
 Release pin `host85`, SHA-256
 `a6b4c87d88e265feee707f3376dee55f83c66be9e5f15339df250424ceb1d87f`,
@@ -1018,7 +1018,7 @@ also applies after the existing instruction budget in oversized straight-line
 functions. Lexical loops and known numeric operations retain their established
 emission. Generic arithmetic reuses `mvp_lmd_dynamic_binary` and its stable scalar
 home; coercion order, BigInt errors and possible string results remain observable
-(**D6.2.2v2, D5.3/D5.4, D8.1.3v25**).
+(**D7.2.2, D6.3/D6.4, D8.4.2**).
 
 Pin `host87` passes 778/778 units and both 110-case focused runs (normal and
 forced/poisoned GC). BN matches its original golden; its largest MIR function
@@ -1033,12 +1033,12 @@ Script tests. Its new agent-state ownership test passes normally and with forced
 poisoned GC: globals, queues, timer callbacks and teardown stay with their owner.
 The new `js_runtime_state_create_agent` / `js_runtime_state_destroy_agent` reuse
 realm initialization, queues and exact roots while retaining the shared
-EvalContext (**D5.4, D6.3.1**). Timer capture now retains the execution-state
+EvalContext (**D6.4, D7.5.1**). Timer capture now retains the execution-state
 selector; activation ambient state also preserves the borrowed Runtime controller.
 
 The next candidate replaces the legacy synchronous agent simulation with strong
 Lambda `Activation`s, independent AST source realms and FIFO reports. Dynamic
-agent strings use the retained interpreter (**D8.1.3v25**). Broadcast clones the
+agent strings use the retained interpreter (**D8.4.2**). Broadcast clones the
 existing SAB carrier and retains its shared handle; blocking waits park, and
 notifications scan real waiters at the same backing handle and byte offset.
 No report rewriting or substituted atomic values are retained. Announced helpers
@@ -1047,7 +1047,7 @@ are `js_agent_checkpoint`, `js_agent_pump`, `js_agent_state_at`,
 existing agent factory is shared by both frontends; `MvpLmdRealmScope` gains a
 native-realm option. Functional, forced-GC and canonical agent qualification are
 pending. This cooperative single-context implementation does not claim the
-worker-thread isolation audit in **D6.3.2** is complete.
+worker-thread isolation audit in **D7.5.2** is complete.
 
 
 The first real-agent pin (`host89`) passes three integration checks normally and
@@ -1057,7 +1057,7 @@ it now checks the supported object's identity and callable method instead. The
 canonical slice exposed a separate standalone-owner gap. The existing
 `mvp_lmd_prepare_module_realm` factory is now shared with the lazy agent getter;
 retained native Scripts join the program's existing post-heap metadata owner
-(**D5.4, D8.1.3v25**), rather than being freed while unreachable GC functions can
+(**D6.4, D8.4.2**), rather than being freed while unreachable GC functions can
 still refer to their AST.
 
 Release pin `host90`, SHA-256
@@ -1083,7 +1083,7 @@ is `underscore_lib`: 113 of 114 assertions pass, and a minimal local alias of
 to an unresolved global name, although the runtime reads its live host/global
 property. The next candidate uses K_ANY for this general unresolved-name case;
 no builtin-name special case or new helper is added (**D8.2.4-D8.2.6,
-D8.1.3v25**). Direct replay on `host92` restores Underscore's original 114/114
+D8.4.2**). Direct replay on `host92` restores Underscore's original 114/114
 golden and passes the local/nested alias reproducer; integrated qualification
 is in progress.
 
@@ -1099,8 +1099,8 @@ All 31 legacy JS MIR sidecars have been ported to formal MVP scope/ABI
 contracts and pass (32/32 including corpus discovery) on `host91`. Review
 preserves rooted argument spans, callable ABI/context/unit guards, source
 throw versus catch conversion, packed-field and descriptor fallback,
-BigInt result joins and scalar-home ownership (**D5.3/D5.4, D6.2.2v2,
-D8.4.3v2**). Changed contracts are explicit: open Script globals require
+BigInt result joins and scalar-home ownership (**D6.3/D6.4, D7.2.2,
+D7.4.3**). Changed contracts are explicit: open Script globals require
 mutable lookup; local hoisted functions use shared closure cells; global
 declaration instantiation precedes the emitted entry; bounded loop counters
 can use the integer lane; for-in yields String keys; nonescaping local
@@ -1110,7 +1110,7 @@ literals may fold. The size ratchet and aggregate baseline remain open.
 
 The agent integration's ambient restoration reverted a module controller
 installed lazily by same-owner async work. Restoration now applies only when
-switching execution owners (**D5.4, D6.3.1**). The paired diagnostic fails on
+switching execution owners (**D6.4, D7.5.1**). The paired diagnostic fails on
 `host94` and passes on `host95`; all 101 affected dynamic-import cases and the
 selected top-level-await case pass on `host95`. The complete `host91` recount
 was 39,750/40,261, with 502 failures and nine timeouts (142 unresolved); selected
@@ -1122,7 +1122,7 @@ selection before BigInt arithmetic, primitive writes with their original
 receiver, strict unresolved references captured before RHS effects, constructor
 spread, Script arrow receivers, primitive subclass nominal ancestry and
 synchronous generator prototype selection after parameter initialization
-(**D3.4.7, D5.3/D5.4, D6.2.2v2, D8.1.3v25**). The new private compiler helper
+(**D3.4.7, D6.3/D6.4, D7.2.2, D8.4.2**). The new private compiler helper
 `primitive_operand` was announced before coding and extracts existing
 conversion emission. Function-name definition uses the owning program's
 canonical pool; a shape's `StrView` is never a runtime String.
@@ -1132,7 +1132,7 @@ families, while the existing sequence family represents Array iterators.
 Existing descriptor setters install nonenumerable iterator aliases and proper
 tags. String iteration reuses the same carrier and stepping logic after
 RequireObjectCoercible/ToString. No normal-container flag or replacement
-storage is introduced (**D3.4, D5.3**).
+storage is introduced (**D3.4, D6.3**).
 
 Release `host102` (`4e5b3f7e99ab20aedfd27e9a325f03386249a40013ea8d0dafd58648f29ade40`)
 passes **799/799 units**, **131/131 focused checks** normally and under
@@ -1151,16 +1151,16 @@ hoisting replaces parameter bindings while preserving the implicit `arguments`
 binding against Annex B block declarations. Computed anonymous class names
 precede static initialization. Primitive deletion boxes only primitive
 alternatives and retains Array, Function and typed-view carriers in the kind
-proof (**D8.1.3v25, D8.2.4-D8.2.6**).
+proof (**D8.4.2, D8.2.4-D8.2.6**).
 
 Unused private names use existing owned module slots instead of allocating a
 closure cell for every spelling. Actual captures retain the shared Lambda
-closure-cell ABI (**D6.2.2v2, D5.4**). Oversized passive module declarations
+closure-cell ABI (**D7.2.2, D6.4**). Oversized passive module declarations
 use one immutable initialization plan through the new helper
 `mvp_lmd_private_names_initialize`, which calls the existing private-name
 operation and owned-slot store. Private class metadata uses Lambda `array()`
 and append-slot reservation; guest sparse-array policy must not turn an
-internal dense slab into a carrier with a null item buffer (**D5.3**). The
+internal dense slab into a carrier with a null item buffer (**D6.3**). The
 original 8,326-name canonical class now completes within the unchanged
 10-second deadline. A 9,000-name unit covers the allocation boundary.
 
@@ -1190,9 +1190,9 @@ running on `host108`.
 
 All 31 JS emission sidecars pass (32 checks including discovery). Seven JS
 size ratchets now select formal `mvp_lmd_program`/`mvp_lmd_fN` scopes, with
-zero slack and reviewed precise frames (**D8.6.1, D5.3/D5.4**). The ERROR-tag
+zero slack and reviewed precise frames (**D8.6.1, D6.3/D6.4**). The ERROR-tag
 counter recognizes direct `beq`/`bne` comparisons as well as materialized `eq`,
-preserving the gate across the emitter change (**D8.4.3v2**). Reviewed release
+preserving the gate across the emitter change (**D7.4.3**). Reviewed release
 module instruction counts are:
 
 | Probe | Retired LJS | Formal MIR | Main reason for the changed contract |
@@ -1213,7 +1213,7 @@ also pass with `host108` Darwin debug; other platforms are not measured.
 The shared RegExp engine's resource failure crossed into a generic MVP
 RangeError and lost its message. Both match and replacement paths now pass the
 existing diagnostic through `mvp_lmd_fail`'s existing detail parameter. The
-original router resource test passes unchanged (**D8.1.3v25, D8.4.3v2**).
+original router resource test passes unchanged (**D8.4.2, D7.4.3**).
 
 Large passive Array literals previously emitted one initialization per element;
 the 10,001-element optimization fixture produced a 99,939-line MIR artifact.
@@ -1222,7 +1222,7 @@ now use an immutable frontend Item table and Lambda's existing
 `array_copy_owned_items`. Allocation/reservation remains dense and fresh,
 wide scalars copy into destination-owned homes, and hole sentinels retain
 absence. Effectful elements, spread and BigInt allocation keep ordered
-evaluation. No new runtime helper is added (**D5.3/D5.4, D8.2.4-D8.2.6**).
+evaluation. No new runtime helper is added (**D6.3/D6.4, D8.2.4-D8.2.6**).
 The same fixture emits a 1,575-line artifact on `host110`; a 7,000-element unit
 checks fresh identity, holes, tiny floats, packed integer identity and GC lifetime.
 
@@ -1233,7 +1233,7 @@ the trace-schema fixture has a sidecar too. The checks pin 1,323 arithmetic,
 coercion, field, typed-lane, ownership and fallback counts across the formal
 Item entries. JS operations, output assertions and the trace-on/off semantic
 and MIR differential remain covered; retained AST kernel tests retain their
-runtime counters (**D8.1.3v25, D8.2.4-D8.2.6, D8.6.1**).
+runtime counters (**D8.4.2, D8.2.4-D8.2.6, D8.6.1**).
 
 Two obsolete expectations are corrected against ECMAScript:
 [MakeConstructor](https://tc39.es/ecma262/multipage/ordinary-and-exotic-objects-behaviours.html#sec-makeconstructor)
@@ -1264,12 +1264,12 @@ The aggregate gate exposed three integration defects after activation:
 - The native prototype-reservation assertion observed retired LJS storage.
   Its original operation now runs in both tiers: the native suffix counter is
   zero for formal MIR and one for AST, with identical output and a formal MIR
-  sidecar (**D8.1.3v25, D8.6.1**).
+  sidecar (**D8.4.2, D8.6.1**).
 - String timers used indirect eval semantics and discarded top-level lexical
   declarations. They now execute classic Script source in the retained AST
   interpreter. Callback conversion precedes delay coercion; receiver arguments,
   source and converted scalars have precise homes across either conversion
-  (**D5.3/D5.4, D8.1.3v25**). Dynamic classic scripts explicitly remain in AST
+  (**D6.3/D6.4, D8.4.2**). Dynamic classic scripts explicitly remain in AST
   even at the minimum AUTO function/loop thresholds. The original timer golden
   passes in both AUTO and AST. `host114` passes all **212 Script tests** and
   **15 forced/poisoned-GC interpreter/interop/agent checks**.
@@ -1281,7 +1281,7 @@ The generated test-host link rule also incorrectly treated the static runtime
 archive as a module and linked every host to `node-core`. Debug hosts could
 then bind private C++ module symbols that disappear in release modules. The
 generator now uses the static host providers and retains the host export
-allowlist needed by runtime-loaded modules (**D7.3.4-D7.3.6**). The Script and
+allowlist needed by runtime-loaded modules (**D9.4.4-D9.4.6**). The Script and
 Lambda-error test targets also drop their explicit redundant module link in
 `build_lambda_config.json`; CLI/library target configurations are unchanged.
 The generator selftest covers both static runtime entry configurations and
@@ -1293,8 +1293,8 @@ now accepts the shared host operations: it constructs a fresh realm-local
 RegExp through the existing constructor, with rooted source/pattern/flags.
 Line terminators and other source shapes still receive parser validation;
 other host early errors remain in their realm-local parser. Both direct and
-indirect eval reuse this path without compiling dynamic source (**D8.1.3v25,
-D5.3/D5.4**). No new production helper is introduced. Release `host115`
+indirect eval reuse this path without compiling dynamic source (**D8.4.2,
+D6.3/D6.4**). No new production helper is introduced. Release `host115`
 (`138f6d9fd20aed882137b70ee2afa914a42be9d37f6155ab810bd856c9a627c4`)
 passes **198/198** original canonical RegExp literal/Annex B cases with the
 unchanged deadline, including the 65,536-iteration eval cases. Its fresh
@@ -1338,7 +1338,7 @@ membrane, in an open Script realm. CLI selection is limited to inline
 harnessless Test262 jobs; file-backed batch profiles retain ordinary globals.
 Helpers are installed before Script declarations, then the existing
 `mvp_lmd_prepare_script_bindings` performs declaration checks/publication, so
-`var assert;` preserves the installed callable (**D8.1.3v25**).
+`var assert;` preserves the installed callable (**D8.4.2**).
 
 Native assertion callbacks also exposed implicit MVP errors without a resting
 JavaScript payload. Reading their constructor through the native carrier path
@@ -1346,7 +1346,7 @@ could treat an MVP callable as a legacy `JsFunction`. The existing
 `MvpLmdRealmScope::complete` accepts an error-payload option at the shared
 call/construct adapter. Materialization occurs only for failed returns, in the
 callee's realm; ordinary call results and Lambda interop retain their existing
-flow (**D6.2.2v2, D8.4.3v2, D5.3/D5.4**). An attempted broad native-realm reset
+flow (**D7.2.2, D7.4.3, D6.3/D6.4**). An attempted broad native-realm reset
 was rejected after it regressed Lambda integer interop, before qualification.
 
 The earlier whole audit exposed eleven numeric-operator coercion-order failures
@@ -1357,7 +1357,7 @@ are nonthrowing. Addition and relational comparison retain their distinct
 primitive-conversion order. The new shared AST predicate
 `js_ast_property_is_proto_setter` is announced before addition and reused by
 both front ends: anonymous functions/classes used as `__proto__` setter values
-do not receive property-name inference (**D8.1.3v25**).
+do not receive property-name inference (**D8.4.2**).
 
 Release `host120`
 (`4bed3d327f9b29af01b67b32ad37ee640d7c0fcb031ea56ae87be7981c203bc5`)
@@ -1380,7 +1380,7 @@ The shared aggregate exposed four JS MIR size increases from the new early
 Symbol check. Primitive right operands cannot run coercion hooks, so the guard
 is retained only when the right operand can be an object. Its Symbol test uses
 the existing high-byte tag directly: the shared value contract statically
-asserts that Symbol is outside inline-double space (**D2.1.3-D2.1.4, D2.2.1, D8.4.3v2**). This avoids
+asserts that Symbol is outside inline-double space (**D2.1.1-D2.1.3, D2.2.1, D7.4.3**). This avoids
 generic tag dispatch and a possible container load.
 
 Six of the seven JS size probes retain their exact prior budgets. The generic
@@ -1414,7 +1414,7 @@ bindings and declare available companions as variables rather than hoisted
 functions. Helper-preserving `var assert;`, uninitialized destructuring targets,
 catch/block companions and later Script lexical collisions have focused native
 coverage. This changes only declaration setup, adds no helper and does not alter
-the MIR emission budgets (**D8.1.3v25, D8.4.3v2**).
+the MIR emission budgets (**D8.4.2, D7.4.3**).
 
 Corrected optimized `host124`
 (`75a7220a9726cb5f350d32250c8fc14854dd124a303198af98a1a4636c7ca16f`)
@@ -1434,14 +1434,14 @@ its aggregate score.
 
 ## Functional closeout (2026-10-17)
 
-The formal engine is activated and qualified under **D8.1.3v25**. The exact
+The formal engine is activated and qualified under **D8.4.2**. The exact
 optimized `host124` executable is published as the shared `lambda.exe`; its
 SHA-256 is `75a7220a9726cb5f350d32250c8fc14854dd124a303198af98a1a4636c7ca16f`.
 Dynamic source remains in the retained AST interpreter. Unicode property,
 identifier, emoji and simple-fold data use Unicode 17; the existing normalization
 library also reports 17.0.0. Generated tables reproduce from their recorded
 sources, and raw/escaped Unicode 17 identifiers pass MIR/interpreter checks
-(**S17.7.1, D8.1.3v25**).
+(**S17.7.1, D8.4.2**).
 
 | Final current-build gate | Result |
 |---|---|
@@ -1464,7 +1464,7 @@ the complete aggregate, rather than only on isolated replay.
 
 All four Node DSOs were forcibly rebuilt against the current headers and their
 build-local manifest metadata refreshed. Fresh static Script/Lambda-error test
-hosts have no `node-core` load dependency (**D7.3.4-D7.3.6**). No Node baseline
+hosts have no `node-core` load dependency (**D9.4.4-D9.4.6**). No Node baseline
 was run. The approved MIR address-validation delta remains recorded under
 `patches/` and reverse-checks cleanly (**D8.6.2-D8.6.3**).
 
@@ -1483,12 +1483,12 @@ The earlier native-harness failures and superseded audits remain separate.
 Functional migration is complete. Benchmark timing/performance acceptance,
 native worker threads, broader browser compatibility and other-platform
 qualification retain the boundaries defined above; none is silently inferred
-from these functional results (**D6.3.1-D6.3.2, D8.6.3**).
+from these functional results (**D7.5.1-D7.5.2, D8.6.3**).
 
 ## TypeScript parameter admission repair (2026-10-18)
 
 The active MIR engine now admits the C parser's retained `TsParameterNode`
-wrappers under **D8.1.3v25**. Eleven existing TypeScript goldens previously
+wrappers under **D8.4.2**. Eleven existing TypeScript goldens previously
 stopped at admission. The shared child catalog exposed these wrappers only
 to the AST index, leaving ordinary analysis walkers unable to see their
 binding patterns and default expressions. The catalog now describes both
@@ -1501,7 +1501,7 @@ Two exposed cases also aborted during lowering: the TS-only `type()` intrinsic
 already emitted a call to `ts_type_info`, but the active engine's import table
 omitted the helper. Its existing implementation is now registered with an
 Item argument/result and a collecting-call contract; lexical bindings named
-`type` continue through ordinary call dispatch (**D5.3.3, D8.1.3v25**).
+`type` continue through ordinary call dispatch (**D6.3.3, D8.4.2**).
 
 Existing goldens and harness expectations are unchanged. The new
 `test/ts/parameter_shapes.ts` golden covers typed defaults, rest, destructuring,

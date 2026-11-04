@@ -4,7 +4,7 @@
 `stone` and `grass` elements into a native Scene3D page. User direction,
 2026-10-28, replaces PG11's generic `generate` instances with semantic tags.
 Generation stays pure (**S12.1.1v3**); presentation and retained camera ownership
-follow **S12.1.5v2 / D7.5.3v2**. The working design is
+follow **S12.1.5v2 / D9.5.6**. The working design is
 [Procart PG11](../Lambda_Design_Procart.md).
 
 **Acceptance:** load literal Mark recipes/composition; inherit and override
@@ -51,7 +51,7 @@ foliage seed-replay failure described below; no engine workaround was added.
 - The shared orbit component now starts from the supplied home camera and
   scales zoom limits to its distance. Its former fixed specimen camera would
   jump when controlling a world-sized scene. Native output remains ordinary
-  Scene3D elements (**D7.5.3v2 / S12.1.5v2**).
+  Scene3D elements (**D9.5.6 / S12.1.5v2**).
 
 ## Verification — 2026-10-28
 
@@ -82,7 +82,7 @@ captures are under `temp/procart-meadow/`; desktop/mobile previews are
 
 **Engine repair update, 2026-10-28.** LR07-50 is fixed: dynamic calls borrowed
 wide seeds from movable argument-List scalar tails. Explicit caller-owned numeric
-homes preserve the seed through GC (**D4.3.1 / D5.2.3 / D5.3.3**). The unchanged
+homes preserve the seed through GC (**D5.3.1 / D6.2.3 / D6.3.3**). The unchanged
 foliage replay now passes; the paired reduced regression fails on the preserved
 old executable and passes all three tiers under GC stress. See the
 [engine repair record](Lambda_Impl_Eden_Engine_Repairs.md) for current aggregate
@@ -101,7 +101,7 @@ were not altered. The central record is [LR07-50](<../Lambda_Issue_Ledger (fixed
 the CLI schema exposed a null `Runtime` in the import-cache path. The actual
 schema now has its own type-only file, separate from implementation imports;
 it validates successfully. The general CLI defect and debugger evidence are
-recorded in [LR13-17](<../Lambda_Issue_Ledger (fixed).md#lr13-17>). The general loader defect was fixed 2026-10-29 under S11.4.1v3/S16.9.8/D4.2.6; the standalone schema remains the application entry point.
+recorded in [LR13-17](<../Lambda_Issue_Ledger (fixed).md#lr13-17>). The general loader defect was fixed 2026-10-29 under S11.4.1v3/S16.9.8/D5.2.5; the standalone schema remains the application entry point.
 
 The next feature increment can expose more existing plant families and extract
 a reusable caller-registered scene resolver from this first application profile.

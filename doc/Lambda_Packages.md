@@ -1,6 +1,6 @@
 # Lambda Packages
 
-Lambda ships a set of **packages**: libraries written in Lambda Script itself, distributed as source with the runtime and imported under the reserved `lambda.*` namespace (D7.2.4v3). Some are libraries you call from your own scripts: charts, graph layout and diagram rendering, math and LaTeX typesetting, PDF rendering and OpenAPI tools. Others are parts of the engine that happen to be written in Lambda: the `lambda edit` application, its editor model, and the browser behaviour behind HTML forms, links and editing in Radiant. This page lists them all, explains how their import paths resolve, and documents the public API of each library.
+Lambda ships a set of **packages**: libraries written in Lambda Script itself, distributed as source with the runtime and imported under the reserved `lambda.*` namespace (D9.3.4). Some are libraries you call from your own scripts: charts, graph layout and diagram rendering, math and LaTeX typesetting, PDF rendering and OpenAPI tools. Others are parts of the engine that happen to be written in Lambda: the `lambda edit` application, its editor model, and the browser behaviour behind HTML forms, links and editing in Radiant. This page lists them all, explains how their import paths resolve, and documents the public API of each library.
 
 > **Related Documentation**:
 > - [Lambda Modules](Lambda_Modules.md) — `import` syntax, `pub` exports and module resolution
@@ -51,7 +51,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | Package | Import path | Status | What it does | Used by the CLI |
 |---------|-------------|--------|--------------|-----------------|
 | `image` | `lambda.image`, `lambda.image.edit` | Initial native `u8` profile | Raster Velmts, layered composition, animation, PSD/GIF I/O and snapshot editing/history; see [Image Package](Lambda_Image.md) | `input(path, 'psd')` and automatic PSD detection |
-| `ime.chinese` | `lambda.ime.chinese` | M4 Traditional profile | Simplified and OpenCC-prepared Traditional pinyin packs, pure candidates/session reduction, partial selection, punctuation, paging, settings and explicit learning persistence; the DOM adapter adds native candidates, profile selection and window/document opt-in. See [Chinese IME](Lambda_IME_Chinese.md). Namespace: D7.2.4v4. | `./lambda.exe view test/demo/ime/chinese.ls` (prepare the local pack first) |
+| `ime.chinese` | `lambda.ime.chinese` | M4 Traditional profile | Simplified and OpenCC-prepared Traditional pinyin packs, pure candidates/session reduction, partial selection, punctuation, paging, settings and explicit learning persistence; the DOM adapter adds native candidates, profile selection and window/document opt-in. See [Chinese IME](Lambda_IME_Chinese.md). Namespace: D9.3.4. | `./lambda.exe view test/demo/ime/chinese.ls` (prepare the local pack first) |
 | `doc.wiki` | `lambda.doc.wiki` | Initial static profiles | Wiki-family writers, shared tasks, and loss reports | `lambda convert -t wiki:<flavor>` |
 | `doc.misc` | `lambda.doc.misc` | Initial source profiles | AsciiDoc, man, Typst, EML, vCard, and iCalendar writers | `lambda convert -t asciidoc` / `man` / `typst` / `eml` / `vcf` / `ics` |
 | `doc.ebook` | `lambda.doc.ebook` | Initial horizontal LTR EPUB profile | EPUB 2/3 publications, chapters, navigation, search and an interactive reader | `lambda view book.epub`; also `layout`, `render`, and file-browser preview |
@@ -71,7 +71,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
 | `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native primitive/convex dynamics, joints, capsule movement, physical bones and live ragdoll handoff/recovery/replay; mesh/heightfield environments, queries, batch simulation and trajectory analysis. See [Physics](Lambda_Physics.md). | `lambda demo scene3d` |
-| `navigation` | `lambda.navigation` | Native graph/grid/surface navigation | Pure versioned descriptions and bounded weighted A* in 2D/3D, filters, diagonal clearance and separate partial/budget outcomes. `lambda.navigation.scene` adds live cached assets, atomic edits and generation checks through the existing Radiant host boundary (S12.1.1v3 / D4.5.2 / D7.5.3v2). Triangulated surfaces add grounded funnel paths; 3D cell bakes add radius/headroom/step clearance and compatible-profile queries. Source-selected background bake jobs support cancellation, generation-checked publication and saved compiled cells with provenance. The polygon profile merges clear cells into convex regions and uses grounded portal/funnel paths. Explicit links retain projected action endpoints, clearance, costs and traversal indices, with live connectivity edits over retained bakes. Baked-surface capsule agents now use the shared scene clock, fair path budgets, controller feedback, explicit link handoff and bounded priority-aware local avoidance. Bounded dirty-tile jobs reuse raw clearance cells and publish immutable, generation-checked domains. Broader agent profiles remain pending. See [Navigation](Lambda_Navigation.md). | `test/lambda/navigation/paths.ls` |
+| `navigation` | `lambda.navigation` | Native graph/grid/surface navigation | Pure versioned descriptions and bounded weighted A* in 2D/3D, filters, diagonal clearance and separate partial/budget outcomes. `lambda.navigation.scene` adds live cached assets, atomic edits and generation checks through the existing Radiant host boundary (S12.1.1v3 / D5.5.2 / D9.5.6). Triangulated surfaces add grounded funnel paths; 3D cell bakes add radius/headroom/step clearance and compatible-profile queries. Source-selected background bake jobs support cancellation, generation-checked publication and saved compiled cells with provenance. The polygon profile merges clear cells into convex regions and uses grounded portal/funnel paths. Explicit links retain projected action endpoints, clearance, costs and traversal indices, with live connectivity edits over retained bakes. Baked-surface capsule agents now use the shared scene clock, fair path budgets, controller feedback, explicit link handoff and bounded priority-aware local avoidance. Bounded dirty-tile jobs reuse raw clearance cells and publish immutable, generation-checked domains. Broader agent profiles remain pending. See [Navigation](Lambda_Navigation.md). | `test/lambda/navigation/paths.ls` |
 | `procart` | `lambda.procart`, `lambda.procart.{rng,noise,field,sample,geom,grid,lsystem,text,wfc,terrain,adapt}` | Library with native batch kernels | Deterministic procedural art: keyed randomness, value/Perlin/simplex/cellular noise with fractals and domain warp, scalar fields, Poisson and low-discrepancy sampling, Delaunay/Voronoi/hull/Lloyd, caves, dungeons and mazes on tile grids, L-systems with a turtle, Tracery-style text grammars and Markov names, wave function collapse, eroded terrain with rivers and biomes, and image/chart/Scene3D/SVG adapters; see [§26](#26-procart--procedural-art) | None; import from a Lambda script |
 | `procart.scene` | `lambda.procart.{scene,adjust,primitive,rules,schema}` | Library | Stored drawing grammar: nine primitives, inherited transforms/colors, weighted recursive rules, cumulative repetition, global limits and caller-registered semantic objects; see [§26](#26-procart--procedural-art) | Procart → Form studies |
 | `procart.plant` | `lambda.procart.{plant,apex,turtle3d,plant_schema}` | Library | Per-level tree architecture, directional growth, tapered branches, instanced leaves, shared-skeleton LODs and parametric L-system plants; see [§26](#26-procart--procedural-art) | Procart → Tree studio |
@@ -124,7 +124,7 @@ r.nodes |> ~.id          // ["a", "b"]
 
 ### 2.1 How paths resolve
 
-The `lambda.*` root is reserved for everything Lambda ships (D7.2.4v3). Shipped package paths map onto the `package/` directory of the Lambda home:
+The `lambda.*` root is reserved for everything Lambda ships (D9.3.4). Shipped package paths map onto the `package/` directory of the Lambda home:
 
 | Import path | Loads |
 |-------------|-------|
@@ -144,14 +144,14 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4v3). Shipped 
 | `lambda.sys.<name>` | A system function, reachable even when a script shadows its name (S17.2.1, S17.2.2) |
 
 - **Name an existing module.** There is no implicit directory index, so `import chart: lambda.chart` fails with E217; write `lambda.chart.chart`. `lambda.slide` has an explicit `package/slide.ls` entry file.
-- **`lambda.doc.*` groups document packages and the bundled viewer.** Math, PDF and LaTeX live in `package/doc/{math,pdf,latex}/`, matching their `lambda.doc.*` imports (D7.2.4v3). The viewer and its resources live in `package/doc/`. `lambda.math` remains the built-in math module.
+- **`lambda.doc.*` groups document packages and the bundled viewer.** Math, PDF and LaTeX live in `package/doc/{math,pdf,latex}/`, matching their `lambda.doc.*` imports (D9.3.4). The viewer and its resources live in `package/doc/`. `lambda.math` remains the built-in math module.
 - **An alias is a binding name**, so it can be neither a keyword nor `lambda` itself (S16.10.1v2). Choose another alias for the `edit` package:
 
 ```lambda error=E100
 import edit: lambda.edit.edit
 ```
 
-- **Packages are compiled from source.** A module is compiled the first time a process imports it and is then shared by every script that imports it; compiled code is only a local cache (D7.2.3).
+- **Packages are compiled from source.** A module is compiled the first time a process imports it and is then shared by every script that imports it; compiled code is only a local cache (D9.3.3).
 
 ### 2.2 Where packages live
 
@@ -173,7 +173,7 @@ Run from a directory that has no `lmd/`, without `LAMBDA_HOME`, and every `lambd
 
 ## 3. Writing Your Own Packages
 
-Any `.ls` file is a package in this sense: a compilation unit whose `pub` declarations (`pub fn`, `pub pn`, `pub let`, `pub type`) are its exports (D7.2.1). Its module-scope bindings are immutable, so `var` belongs inside a `pn`. Import it with a leading dot, which resolves from the importing file's directory, so the pair below works from any working directory:
+Any `.ls` file is a package in this sense: a compilation unit whose `pub` declarations (`pub fn`, `pub pn`, `pub let`, `pub type`) are its exports (D9.3.1). Its module-scope bindings are immutable, so `var` belongs inside a `pn`. Import it with a leading dot, which resolves from the importing file's directory, so the pair below works from any working directory:
 
 ```lambda no-run
 // no-run: shows two files in one block
@@ -190,7 +190,7 @@ stats.mean(xs)                  // 6
 stats.spread(xs)                // 7
 ```
 
-Keep your packages next to the scripts that use them. The `lambda.*` namespace is reserved for what Lambda ships (D7.2.4v3), and there is no package manager, registry or search path for third-party packages: share a package by sharing its source files. See [Lambda_Modules.md](Lambda_Modules.md) for the full import rules.
+Keep your packages next to the scripts that use them. The `lambda.*` namespace is reserved for what Lambda ships (D9.3.4), and there is no package manager, registry or search path for third-party packages: share a package by sharing its source files. See [Lambda_Modules.md](Lambda_Modules.md) for the full import rules.
 
 ---
 
@@ -452,7 +452,7 @@ array of `{text, font}` records. `font` contains `font_family`, `font_size`
 (CSS pixels), `font_weight`, `font_style`, and optional `letter_spacing` /
 `word_spacing`. `faces` is `null` for installed fonts, or an array of
 `{font_family, data: binary, font_weight?, font_style?}` snapshots acquired by
-Lambda IO (**D7.1.2v2**). Chart labels use this API without constructing HTML.
+Lambda IO (**D9.1.2**). Chart labels use this API without constructing HTML.
 Results include advance/width, height, baseline, separate `ink` and `logical`
 bounds, and `resolved_fonts` (the actual face families used, including fallback).
 An empty string has zero bounds and an empty font list. Placement and fallback
@@ -461,7 +461,7 @@ are shared with Radiant's SVG painter; this does not add a new shaping engine.
 height, x-height, cap-height, space width, units per em, underline thickness,
 OS/2 subscript/superscript baseline offsets, and resolved family.
 Both APIs return copied values or `null` on invalid input/failure
-(**D4.2.2v2, D7.4.6, S12.1.1v2**). Batch-local font caches expire with the query.
+(**D5.2.2, D7.1.1, S12.1.1v2**). Batch-local font caches expire with the query.
 
 The existing read-only host function
 `radiant.measure_svg_text(html, width, height)` measures each direct `<text>`
@@ -470,13 +470,13 @@ children can supply font resources. It returns copied `width` (advance),
 `height`, `baseline`, and baseline-relative `left`, `top`, `right`, `bottom`
 bounds covering character cells and visible glyphs. Empty text has zero
 metrics; invalid input or failed measurement returns null. Viewport dimensions
-must be positive integers. This follows **D7.4.6** / **S12.1.1v2**; only scalar
-facts escape the transient document under **D4.2.2v2**.
+must be positive integers. This follows **D7.1.1** / **S12.1.1v2**; only scalar
+facts escape the transient document under **D5.2.2**.
 
 `radiant.graphemes(text)` returns the original text as an array of extended
 grapheme clusters, following the bundled Unicode segmentation data. Empty
 text returns `[]`; invalid UTF-8 returns null. It preserves spelling without
-normalization and is read-only under **D7.4.6** / **S12.1.1v2**. Chart truncation
+normalization and is read-only under **D7.1.1** / **S12.1.1v2**. Chart truncation
 uses these boundaries; ordinary `split` retains its **S17.1.1** contract.
 
 Both `chart.render(spec, viewport = null)` and `chart.render_spec(spec, viewport = null)`
@@ -540,7 +540,7 @@ and a runnable waterfall example.
 Use `chart.interactive` to display a stateful chart in a Lambda view. It adopts
 Vega-Lite's `params` grammar. Parameter values and per-view selection stores
 belong to each applied chart template; `on` handlers update them and rendering
-stays pure (S9.1.4, S12.1.3, D6.2.3v2).
+stays pure (S9.1.4, S12.1.3, D7.2.3).
 
 ```lambda
 import chart: lambda.chart.chart
@@ -621,7 +621,7 @@ Chart entry points return value errors on invalid data or options, while the
 direct wordcloud APIs below raise errors (S7.4.1–S7.4.2).
 
 `lambda.chart.wordcloud` lays out weighted words and renders an SVG element.
-It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4v3).
+It ships as Lambda source under the same package namespace (D9.3.1–D9.3.4).
 Each input record has a nonempty, single-line `text`, a finite positive
 `weight` (`int`, `i64` or `float`), and an optional `color` string. Phrases and
 Unicode text are supported. Records can also override `font_size`,
@@ -711,7 +711,7 @@ The viewable gallery at `test/demo/wordcloud.ls` compares four configurations:
 
 `lambda.chart.timeline` presents historical events as chronological cards, a
 time axis, or an active story. It uses the ordinary source-package and view
-mechanisms (**D7.2.1–D7.2.4v3/D7.2.6, S2.4.3v3/S12.1.3**).
+mechanisms (**D9.3.1–D9.3.4/D9.3.5, S2.4.3v3/S12.1.3**).
 Implementation is in progress against the
 [timeline proposal](../vibe/Lambda_Pkg_Chart_Timeline.md); the
 [acceptance inventory](../test/timeline/reference_inventory.json) records open
@@ -775,7 +775,7 @@ instead constructs a structural presentation with the same qualified tag and
 attribute values; its new content is unconstrained. Highlighting uses that
 operation so string-only source types can render marks without changing their
 source or claiming that the presentation is still a nominal instance
-(**S2.1.4, S2.6.2–S2.6.4, S17.4.1, D4.5.2**).
+(**S2.1.4, S2.6.2–S2.6.4, S17.4.1, D5.5.2**).
 
 Filtering immediately reconciles the active event, keeps selection, and restores
 the nearest visible event after an empty result. Collapsing a focused group moves
@@ -847,7 +847,7 @@ with the accepted session identity and status. Native decoder state survives
 rerenders and resize; source changes replace it. `model(spec, viewport, {media:false})`
 leaves command execution to the application. Inferred or explicit remote
 providers use application controllers. Native decoding remains macOS-specific;
-cross-platform and hosted-player parity are still open (**D7.5.3, D4.5.1v4**).
+cross-platform and hosted-player parity are still open (**D9.5.6, D5.5.1**).
 
 A retained native model accepts a dispatched `timeline_action` with
 `{type:"source_update", spec:next_spec, expected_revision:old_revision}`.
@@ -914,7 +914,7 @@ let svg = transform.render_svg(g, 480, 160)
 type(svg)                                    // string
 ```
 
-Radiant automatically connects the `lambda-graph` layout to the package callback when it encounters the generated HTML (**D7.5.3v2**); no installation call is needed. This also works when serialized HTML is opened in a fresh Radiant process. Other HTML renderers do not implement this layout, so the HTML from `to_html` is meant for Radiant. From the command line:
+Radiant automatically connects the `lambda-graph` layout to the package callback when it encounters the generated HTML (**D9.5.6**); no installation call is needed. This also works when serialized HTML is opened in a fresh Radiant process. Other HTML renderers do not implement this layout, so the HTML from `to_html` is meant for Radiant. From the command line:
 
 ```bash
 lambda render flow.mmd -o flow.svg                           # light palette
@@ -983,7 +983,7 @@ contains(format(el, 'html'), "<text") // true
 importing Radiant. Runtime `format(ast, 'math')`, the `math-latex`, `math-ascii`
 and `math-mathml` targets, procedural `output` and CLI conversion all use this
 package. Native IO retains generic XML serialization; math traversal and
-conversion live entirely in Lambda (**D7.1.1**, **D7.2.4v3**, **D7.2.8**).
+conversion live entirely in Lambda (**D9.1.1**, **D9.3.4**, **D10.2.3**).
 
 The font-independent `lambda.doc.math.mathml` module exposes the same conversion
 and parsing APIs without importing Radiant. Runtime
@@ -993,7 +993,7 @@ groups/fences, alphabets, simple text, accents, spacing, phantoms and matrices;
 unsupported TeX constructs report errors. The renderer also accepts a documented
 Presentation MathML subset through its separate Core policy, sharing measured
 SVG geometry with TeX. Radiant paints that subset in HTML while preserving the
-MathML DOM; full CSS and accessibility integration remain open (**D7.2.8**).
+MathML DOM; full CSS and accessibility integration remain open (**D10.2.3**).
 
 `fonts` uses the same binary face records as Radiant's metrics API. An explicit
 `font_family` without `fonts` uses installed fonts. MATH is optional: ordinary
@@ -1013,7 +1013,7 @@ corner kerns, variants and assembly connectors. `font.fallback: true` enables
 codepoint fallback (off by default), and each glyph reports its actual family, weight, style and size.
 Invalid font data returns `null`; a codepoint with no glyph returns a null entry.
 Distances use the requested CSS pixel size; MATH percentages remain percentages.
-Algorithms stay in Lambda and font parsing stays in `lib/font` (**D7.1.1**).
+Algorithms stay in Lambda and font parsing stays in `lib/font` (**D9.1.1**).
 
 The legacy `lambda.doc.math.mathlive` renderer and its fixed metrics tables
 have been removed; use `lambda.doc.math.math`.
@@ -1024,19 +1024,19 @@ have been removed; use `lambda.doc.math.math`.
 
 ## 7. `latex` — LaTeX to HTML
 
-The latex package renders a parsed LaTeX document as HTML. Parse with `latex.parse_file(path)` or `latex.parse_source(text, base)`. Every LaTeX parse first runs Lambda's TeX expansion engine (**D7.2.7v2**): document macros, `.sty`/`.cls` files beside the document, bundled programming packages such as `etoolbox`, `xkeyval` and expl3, and Lambda's own bindings for `physics`, the `mathtools` macros, `xspace`, `csvsimple`, `unicode-math`'s alphabets and the configuration macros of `tocloft`, `authblk`, `titling`, `minitoc`, `glossaries`, `nomencl` and `acronym` run as TeX, while Radiant keeps layout. A bare `input(path, 'latex')` also expands, but without the package's adapter registry, so parse through the package when you render. The package covers the `article`, `book` and `report` document classes and profiles of the common others (KOMA-Script, memoir, the AMS classes, IEEEtran, llncs, elsarticle, revtex, acmart, `letter` and `exam`), sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
+The latex package renders a parsed LaTeX document as HTML. Parse with `latex.parse_file(path)` or `latex.parse_source(text, base)`. Every LaTeX parse first runs Lambda's TeX expansion engine (**D10.2.2**): document macros, `.sty`/`.cls` files beside the document, bundled programming packages such as `etoolbox`, `xkeyval` and expl3, and Lambda's own bindings for `physics`, the `mathtools` macros, `xspace`, `csvsimple`, `unicode-math`'s alphabets and the configuration macros of `tocloft`, `authblk`, `titling`, `minitoc`, `glossaries`, `nomencl` and `acronym` run as TeX, while Radiant keeps layout. A bare `input(path, 'latex')` also expands, but without the package's adapter registry, so parse through the package when you render. The package covers the `article`, `book` and `report` document classes and profiles of the common others (KOMA-Script, memoir, the AMS classes, IEEEtran, llncs, elsarticle, revtex, acmart, `letter` and `exam`), sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
 
-Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4v3**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D7.2.7v2**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
+Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D9.3.1–D9.3.4**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D10.2.2**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
 
-The bounded `biblatex` profile reads multiple local `.bib` resources, supports ten common entry types, six built-in citation/bibliography styles, source-order citation commands, `\nocite`, filtered and scoped `\printbibliography`, and English/German/French strings. It handles common BibTeX strings and inheritance, creates internal citation links, and reports missing or unsupported requests with source locations (**D7.1.2v2, S12.4.1, S7.4.1–S7.4.4**). `backend=biber` selects this local profile; no Biber process or arbitrary style file is run. See [Phase 2 behavior and boundaries](../vibe/latex/Lambda_Design_BibTeX_CSL.md#21-the-built-in-biblatex-and-natbib-profile).
+The bounded `biblatex` profile reads multiple local `.bib` resources, supports ten common entry types, six built-in citation/bibliography styles, source-order citation commands, `\nocite`, filtered and scoped `\printbibliography`, and English/German/French strings. It handles common BibTeX strings and inheritance, creates internal citation links, and reports missing or unsupported requests with source locations (**D9.1.2, S12.4.1, S7.4.1–S7.4.4**). `backend=biber` selects this local profile; no Biber process or arbitrary style file is run. See [Phase 2 behavior and boundaries](../vibe/latex/Lambda_Design_BibTeX_CSL.md#21-the-built-in-biblatex-and-natbib-profile).
 
-A document that declares `\usepackage[style=apa]{biblatex}`, `style=ieee`, or `\usepackage[authordate]{biblatex-chicago}` (or its default notes style) is formatted by the matching bundled CSL style automatically. The `csl-style-alias` diagnostic names the CSL style used, and biblatex options or style customizations that CSL cannot follow are reported rather than applied. An experimental CSL processor is also available directly through `render_result(ast, {base_uri: ".", citeproc: {style: "apa", locale: "en-US"}})`. It is implemented entirely in Lambda script within `lambda.doc.latex` (**D7.2.1–D7.2.4v3, S1.8, S12.4.1v2**). It accepts local BibTeX/BibLaTeX or CSL JSON resources, evaluates custom CSL XML, and bundles `ieee`, `apa`, `chicago-author-date`, and `chicago-fullnote-bibliography` styles plus English/German/French locales. It preserves citation links, scoped prints, and note-style footnotes. CSL mode rejects conflicting legacy style/sorting options and reports unsupported constructs. Locale collation and complete CSL conformance remain outstanding. See the [CSL API, resource options and coverage](../lmd/package/doc/latex/citeproc/README.md).
+A document that declares `\usepackage[style=apa]{biblatex}`, `style=ieee`, or `\usepackage[authordate]{biblatex-chicago}` (or its default notes style) is formatted by the matching bundled CSL style automatically. The `csl-style-alias` diagnostic names the CSL style used, and biblatex options or style customizations that CSL cannot follow are reported rather than applied. An experimental CSL processor is also available directly through `render_result(ast, {base_uri: ".", citeproc: {style: "apa", locale: "en-US"}})`. It is implemented entirely in Lambda script within `lambda.doc.latex` (**D9.3.1–D9.3.4, S1.8, S12.4.1v2**). It accepts local BibTeX/BibLaTeX or CSL JSON resources, evaluates custom CSL XML, and bundles `ieee`, `apa`, `chicago-author-date`, and `chicago-fullnote-bibliography` styles plus English/German/French locales. It preserves citation links, scoped prints, and note-style footnotes. CSL mode rejects conflicting legacy style/sorting options and reports unsupported constructs. Locale collation and complete CSL conformance remain outstanding. See the [CSL API, resource options and coverage](../lmd/package/doc/latex/citeproc/README.md).
 
-For PDF export, `hyperref` links and anchors become link annotations and destinations, and its title, author, subject and keywords become PDF Info metadata. `geometry` supplies fixed `@page` paper size and margins for a one-page export; automatic page breaking still requires the separate paged path. `graphicx` trim/clip uses the same supported CSS `clip-path` shapes in SVG and PDF. These remain Lambda-script package policies under **D7.2.1–D7.2.4v3**; unsupported options and commands follow **S7.4.1–S7.4.4** diagnostics.
+For PDF export, `hyperref` links and anchors become link annotations and destinations, and its title, author, subject and keywords become PDF Info metadata. `geometry` supplies fixed `@page` paper size and margins for a one-page export; automatic page breaking still requires the separate paged path. `graphicx` trim/clip uses the same supported CSS `clip-path` shapes in SVG and PDF. These remain Lambda-script package policies under **D9.3.1–D9.3.4**; unsupported options and commands follow **S7.4.1–S7.4.4** diagnostics.
 
 Phase III adds bounded theorem/proof, table, language, TikZ/PGFPlots, `natbib`, `caption`/`subcaption`, English `cleveref`, and unhighlighted `listings` profiles. Raw code and document-local `filecontents` bibliographies are preserved. `hyperref` headings and plain-text `\pdfbookmark` titles become hierarchical PDF outlines. `render_result.assets` records image/bibliography paths, origin, availability and source offsets; availability checks local existence, not successful decoding or remote fetching. See the [sample compatibility report](../test/latex/samples/COMPATIBILITY.md).
 
-For the shared paged PDF path, pass `{target: "pdf", paged: true}` while generating the standalone HTML, then export it with `lambda render --paged`. The bounded `fancyhdr`/`lastpage` profile supplies text, running marks and page counters. Continuous output diagnoses unresolved page counters. Paged tables and columns, native Thai shaping/line breaking, exact font substitutions, and TeX typography remain explicit limits (**S7.4.1–S7.4.4**). Unicode PDF glyphs use searchable text with embedded font programs and ToUnicode maps. Lua, biblatex style files, and package files from a TeX installation are excluded (**S1.8, D7.2.7**).
+For the shared paged PDF path, pass `{target: "pdf", paged: true}` while generating the standalone HTML, then export it with `lambda render --paged`. The bounded `fancyhdr`/`lastpage` profile supplies text, running marks and page counters. Continuous output diagnoses unresolved page counters. Paged tables and columns, native Thai shaping/line breaking, exact font substitutions, and TeX typography remain explicit limits (**S7.4.1–S7.4.4**). Unicode PDF glyphs use searchable text with embedded font programs and ToUnicode maps. Lua, biblatex style files, and package files from a TeX installation are excluded (**S1.8, D10.2.2**).
 
 ```lambda
 import latex: lambda.doc.latex.latex
@@ -1063,7 +1063,7 @@ name(page)                               // 'html'
 | `render_file_to_html(path)` | Parses a LaTeX file and returns an HTML string |
 | `render_string(source)`, `render_string_to_html(source)` | Meant to render LaTeX source text; see the note below |
 
-`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. `render_document_file` sets `source_path`, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change the math package's font selection; `lambda view`, `layout` and `render` always render the standalone page.
+`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. `render_document_file` sets `source_path`, which the LaTeX package uses as the resource base when `base_uri` is absent (**D9.1.2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change the math package's font selection; `lambda view`, `layout` and `render` always render the standalone page.
 
 `render_string` and `render_string_to_html` parse source text directly. For resources referenced from a source string, parse it and call `render` or `render_result` with an explicit `base_uri`.
 
@@ -1129,7 +1129,7 @@ output (`{paged: true, pages: "1,3"}`), backgrounds and borders,
 positioned PDF text, image pixels with alpha masks, translucent fills/text,
 transforms and shared native clip geometry.
 The native walker owns traversal; the Lambda schema exposes properties and
-typed nullable references, without sibling/parent links (**S11.5 / D3.5**).
+typed nullable references, without sibling/parent links (**S11.5 / D4.4**).
 Lambda writes drawing operators, resources, stream lengths and cross-reference
 offsets. Text uses selected embedded fonts, ToUnicode and logical ActualText,
 so ordinary text remains searchable and selectable. Affine transforms remain
@@ -1138,10 +1138,10 @@ Decorated text and simple opacity groups preserve text operators. Complex
 graphics use vector resources or shared native raster captures, with text
 semantics retained where available. Links, metadata, destinations, outlines and
 page labels are written by the package. The production `lambda render` PDF
-route uses this same package (**S2.6.6v3 / D2.6.12v3**). Font subsetting and
+route uses this same package (**S2.6.6v3 / D3.5.1**). Font subsetting and
 complex SVG text paint coverage remain follow-up work.
 
-Fixed intake accepts `import_pages` (`"all"` or positive source ordinals/ranges such as `"2,49-53"`) and `max_pages` (a positive admitted-page budget, default 10,000). It validates original media/crop/bleed/trim/art boxes and signed quarter-turn rotation, retains the original one-based source ordinal, and embeds self-contained SVG vector resources. Native commands use `lambda view file.pdf --paged` and `lambda render file.pdf --paged -o result.pdf`; `--import-pages` and `--import-page-limit` select source pages and set the import budget. Preview `--pages` and output `--export-pages` address the resulting physical sequence independently. Failed imports preserve an existing output file. This adapter uses the configured package bridge under **D7.5.3**, dependency policy under **D7.1.2v2**, and the common selected-page lifetime under **D4.5.1v4 / D4.1.4v5**. Reversed/empty boxes, non-default `UserUnit` and unresolved image/form handles currently receive explicit profile errors. PDF page-label number trees retain decimal/Roman/repeated-letter styles, prefixes, starts, Unicode and empty labels through source selection and PDF export. Invalid label trees fail paged intake. Text selection and complete content-stream conformance remain outstanding.
+Fixed intake accepts `import_pages` (`"all"` or positive source ordinals/ranges such as `"2,49-53"`) and `max_pages` (a positive admitted-page budget, default 10,000). It validates original media/crop/bleed/trim/art boxes and signed quarter-turn rotation, retains the original one-based source ordinal, and embeds self-contained SVG vector resources. Native commands use `lambda view file.pdf --paged` and `lambda render file.pdf --paged -o result.pdf`; `--import-pages` and `--import-page-limit` select source pages and set the import budget. Preview `--pages` and output `--export-pages` address the resulting physical sequence independently. Failed imports preserve an existing output file. This adapter uses the configured package bridge under **D9.5.6**, dependency policy under **D9.1.2**, and the common selected-page lifetime under **D5.5.1 / D5.1.4**. Reversed/empty boxes, non-default `UserUnit` and unresolved image/form handles currently receive explicit profile errors. PDF page-label number trees retain decimal/Roman/repeated-letter styles, prefixes, starts, Unicode and empty labels through source selection and PDF export. Invalid label trees fail paged intake. Text selection and complete content-stream conformance remain outstanding.
 
 `opts` may be `null`. Options: `title` (the HTML title, default `"PDF Document"`), `css` (replaces the default page stylesheet), `background` (the page colour, default `"white"`), `show_label` (draws a "Page n" label on each page), `max_pages` (how many pages `pdf_to_html` renders, default 48), and `id_prefix` (the generated SVG resource namespace, default `"pdf"`; use distinct prefixes when embedding multiple PDFs in one DOM tree). Each page extends this namespace with its zero-based page index, so its clipping paths, patterns and shading resources cannot collide with other pages' definitions.
 
@@ -1264,7 +1264,7 @@ line/cubic paths, loops and parallel edges, plus version-4 archives with legacy
 v1–v3 reading. `lambda.editor.draw.view.surface(document, {id, width, height})`
 provides an independent retained canvas. The Draw demo reuses the package while
 keeping its application shell and reading existing v1–v3 files. Package ownership follows
-**D7.2.4v3**, with pure model edits and procedural presentation under
+**D9.3.4**, with pure model edits and procedural presentation under
 **S1.4, S12.1.3**. See the [API and support boundary](../lmd/package/editor/draw/README.md).
 
 ### 10.2.2 `editor.raster` — layered raster editing
@@ -1276,8 +1276,8 @@ adjustments and undo/redo.
 `layers`, `lookup`, `commands` and `command_state` support independent inspectors.
 `lambda.editor.raster.interaction` groups pointer previews into one transaction;
 the optional `.view` module presents copied pixels in a retained native canvas.
-Package placement follows **D7.2.4v3**, snapshots follow **S9.1.2 / S9.2.2**, and
-procedural presentation follows **S12.1.3 / D4.5.2**.
+Package placement follows **D9.3.4**, snapshots follow **S9.1.2 / S9.2.2**, and
+procedural presentation follows **S12.1.3 / D5.5.2**.
 
 The [Photos demo](../test/demo/photos/README.md) supplies the workspace and file
 dialogs. It supports tiled painting/selections, crop previews, affine transforms,
@@ -1290,13 +1290,13 @@ high-depth/ICC editing and background jobs are outstanding. See the
 
 ### 10.3 `dom` — browser behaviour for HTML
 
-`lambda.dom.*` implements the user-agent behaviour of HTML documents in Radiant, written as `view` templates with `on` handlers (see [Reactive_UI.md](Reactive_UI.md)): form controls and their state, constraint validation, form submission and `application/x-www-form-urlencoded` encoding, link navigation, sequential focus and `autofocus`, `<details>` and `<summary>`, context menus, keyboard activation, caret movement, scrolling keys, IME composition, ARIA reflection, and the editing of `contenteditable` regions, including `designMode`, `execCommand` and the `queryCommand*` functions. Radiant loads `lambda.dom.dom` once per document, the first time an event reaches an element the package governs, and registers its templates as behaviour templates on the page's elements rather than as the page's own templates. Editing policy belongs to this package, never to native code (D7.2.5).
+`lambda.dom.*` implements the user-agent behaviour of HTML documents in Radiant, written as `view` templates with `on` handlers (see [Reactive_UI.md](Reactive_UI.md)): form controls and their state, constraint validation, form submission and `application/x-www-form-urlencoded` encoding, link navigation, sequential focus and `autofocus`, `<details>` and `<summary>`, context menus, keyboard activation, caret movement, scrolling keys, IME composition, ARIA reflection, and the editing of `contenteditable` regions, including `designMode`, `execCommand` and the `queryCommand*` functions. Radiant loads `lambda.dom.dom` once per document, the first time an event reaches an element the package governs, and registers its templates as behaviour templates on the page's elements rather than as the page's own templates. Editing policy belongs to this package, never to native code (D10.2.1).
 
 #### Native DOM API colours
 
 `import dom` exposes the native DOM API used by those behaviour packages and
 applications. Its published signatures distinguish reads (`fn`) from effects
-(`pn`), as required by **D7.4.6**. Reads remain `fn` even when the node can be
+(`pn`), as required by **D7.1.1**. Reads remain `fn` even when the node can be
 mutated later. Property reads such as `node.id` likewise need no procedural
 context. Both `fn` and `pn` callers can use `fn` APIs; only `pn` callers can
 use `pn` APIs (**S12.1.1v3**).
@@ -1312,7 +1312,7 @@ use `pn` APIs (**S12.1.1v3**).
 | `fn selection_boundaries(s: any) -> map` | Read selection endpoints. |
 | `pn set_attribute(n: any, name: string, value: string) -> null` | Write an attribute and run its reflection hooks. |
 | `pn focus_set(n: any, from_keyboard: bool) -> bool` | Move focus. |
-| `pn clipboard_read() -> map` | Read one owned native clipboard snapshot as `{html, text, image}` (nullable strings). `image` is an embedded raster data URI, independent of the HTML alternative. Image-only clipboards also become HTML with an embedded image. Packages choose paste policy (**D7.2.5**, **D7.4.6**). |
+| `pn clipboard_read() -> map` | Read one owned native clipboard snapshot as `{html, text, image}` (nullable strings). `image` is an embedded raster data URI, independent of the HTML alternative. Image-only clipboards also become HTML with an embedded image. Packages choose paste policy (**D10.2.1**, **D7.1.1**). |
 | `pn scroll_into_view(n: any) -> bool` | Change scroll position. |
 | `pn check_validity(form: any) -> bool` | Run validation, which can dispatch `invalid` events. |
 
@@ -1326,7 +1326,7 @@ Native members preserve the same distinction: `node.get_attribute(name)` is
 and selection writes are `pn`. A member callee resolved at runtime still
 reports E224 when an `fn` attempts to invoke a procedure (**S12.1.1v3**).
 
-The engine-specific DOM helpers follow the same rule (**D7.4.6**):
+The engine-specific DOM helpers follow the same rule (**D7.1.1**):
 
 | Radiant signature | Behavior |
 |---|---|
@@ -1350,13 +1350,13 @@ the demo index, and named demos use `lambda demo <name>`; see the
 The viewer browses the current working directory and loads documents on selection. Its
 Seti icon font and license ship in `package/doc/icons/`, and its bundled math fonts
 come from `package/doc/math/fonts/`. These application resources belong to the shipped
-`lambda.doc` package (D7.2.4v3); UI event fixtures remain under `test/ui/`.
+`lambda.doc` package (D9.3.4); UI event fixtures remain under `test/ui/`.
 
 ---
 
 ## 11. `map` — Geographic Maps
 
-`lambda.map` is an explicit public package entry under D7.2.4v3. It produces a
+`lambda.map` is an explicit public package entry under D9.3.4. It produces a
 native Radiant `<geomap>` viewport. The initial implementation accepts inline,
 typed GeoJSON and a bounded subset of MapLibre Style Specification version 8:
 ordered `background`, `fill`, `line` and `circle` layers with hex/transparent
@@ -1393,9 +1393,9 @@ preserve that view's state across parent rerenders (S12.1.1v2, S12.1.3).
 | `fit_bounds(camera, bounds, padding = 0.0)`, `update(camera, event)` | Return a new camera; bounds may cross the dateline |
 | `query_source(model, source_id)`, `query_rendered(model_or_frame, point_or_box, options = {})` | Source features / indexed painted hits, in reverse paint order |
 | `plan(model, viewport = null)`, `render_frame(frame)` | Immutable camera/path/feature/index snapshot / its SVG element |
-| `snapshot(node)`, `query_displayed(node, point_or_box, options = {})` | Functions reading the last painted native frame (D7.4.6) |
+| `snapshot(node)`, `query_displayed(node, point_or_box, options = {})` | Functions reading the last painted native frame (D7.1.1) |
 | `model(spec, options = {})`, `interactive(spec, options = {})` | A reactive view model / its applied native viewport |
-| `to_svg(model, viewport = null)` | An SVG element from the same native paint compiler (D7.5.3) |
+| `to_svg(model, viewport = null)` | An SVG element from the same native paint compiler (D9.5.6) |
 
 The camera uses Web Mercator, fractional zoom from −2 to 22, bearing, zero pitch
 and one world copy. Geographic calculations use a 512 CSS pixel world at zoom
@@ -1414,7 +1414,7 @@ The [supported manifest](../test/map/README.md) records limits and reference tes
 Query coordinates are viewport CSS pixels: `[x,y]` or a rectangle
 `[[left,top],[right,bottom]]`. Options select `layers` and a `radius` tolerance.
 Historical frame values retain their geometry and feature metadata across
-resize/removal (D4.5.2, D5.3.3). Input coordinates use shared inverse CSS-plane
+resize/removal (D5.5.2, D6.3.3). Input coordinates use shared inverse CSS-plane
 mapping, including rotation/skew/perspective.
 
 Optional interaction options include `controls:true`, `feature_list:true`,
@@ -1583,7 +1583,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 
 ## 14. `eps` — EPS Rendering
 
-The EPS package lives under the document namespace (**D7.2.4v3**). A C+ parser
+The EPS package lives under the document namespace (**D9.3.4**). A C+ parser
 reads the EPS envelope and scans source objects; Lambda Script executes the
 PostScript machine and emits portable SVG. The initial profile supports vector
 paths, colors, strokes, transforms, clipping, procedures, common stack/control
@@ -1646,7 +1646,7 @@ budgets, tests and remaining resource/font/image work.
 
 ## 15. `docx` — Word DOCX Import and Export
 
-`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4v4. It reads a
+`lambda.doc.docx` is a shipped script module under D9.3.1/D9.3.4. It reads a
 local `.docx` path or a captured ZIP file tree and converts the document's main
 story to semantic HTML elements. The source package is read through Lambda's
 bounded ZIP input (S12.4.1v2/S14.3.1v2); conversion follows relationships and
@@ -1674,18 +1674,18 @@ subscript; tabs and breaks; simple lists with numbering starts, continuation
 and nesting, including lists with hidden markers; tables with grid spans and
 vertical merges; hyperlinks and simple bookmarks; embedded raster images;
 and clustered column charts rendered from their cached category/series values.
-Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4v4), retain explicit RGB
+Charts reuse `lambda.chart.chart` for SVG layout (D9.3.4), retain explicit RGB
 series colors and titles, and contribute a data table to extracted text.
 Paragraph-relative column anchors support left/right square wrapping,
 centered largest-side wrapping, and top/bottom wrapping at paragraph top.
 Signed column-start and paragraph offsets with square wrapping on both sides
-use CSS float margins (D7.2.4v4); this remains a flowing approximation of Word.
+use CSS float margins (D9.3.4); this remains a flowing approximation of Word.
 No-wrap column/paragraph anchors with explicit offsets retain their extents
 and front/behind-text layer order. Inset raster crops keep their saved frames.
 Flat DrawingML rectangles support validated solid RGB/theme fills with no
 outline; a supported modern compatibility branch takes precedence over its
 fallback. Decorative rectangles are hidden from accessibility text (S1.8,
-D7.2.4v4).
+D9.3.4).
 The viewer also reads the document theme, inherited and direct run properties
 (font family, size, color, tracking and capitalization), paragraph spacing,
 table grid widths, cell shading and borders, row heights, and page size/margins.
@@ -1694,7 +1694,7 @@ available to the host font resolver for a matching face. CSS remains a flow
 preview and does not reproduce Word's full layout engine.
 Footnotes, endnotes and comments become numbered links and appended ordered
 sections, with each kind numbered in first-reference order and repeated
-references sharing one entry (D7.2.4v4). Links in annotations resolve against
+references sharing one entry (D9.3.4). Links in annotations resolve against
 that annotation part's relationships. Extracted text includes reference marks
 and labelled annotation text after the main body. Text-box paragraphs/tables
 are retained after their containing paragraph, with a placement diagnostic.
@@ -1710,7 +1710,7 @@ represent document notes and are excluded from annotation content.
 Simple and complex fields display their saved text and links, including cached
 TOC/page-reference results. Instructions are never executed or refreshed
 (S1.8). Table rows retain omitted leading/trailing grid columns as empty HTML
-slots, preserving the alignment of financial tables (D7.2.4v4).
+slots, preserving the alignment of financial tables (D9.3.4).
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -1738,7 +1738,7 @@ Underlying source/ZIP errors keep their existing codes. All 17 pinned Mammoth
 DOCX reference documents import; the external-image and floating-text-box
 fixtures report their unsupported resources/geometry. Mammoth's embedded
 style-map extension does not override Lambda's explicit `style_map` option
-(S1.8, D7.2.4v4). See the [fixture inventory](../test/input/docx/README.md).
+(S1.8, D9.3.4). See the [fixture inventory](../test/input/docx/README.md).
 
 ### DOCX export
 
@@ -1746,7 +1746,7 @@ style-map extension does not override Lambda's explicit `style_map` option
 element tree and returns `{archive, diagnostics}`. `archive` is a constructed
 ZIP `<fs>` tree with real WordprocessingML paragraphs, runs, styles, numbering,
 relationships and media; Word can edit the resulting document. This extends the
-script package under D7.2.1/D7.2.4v4 and uses central IO under D7.5.2.
+script package under D9.3.1/D9.3.4 and uses central IO under D11.1.2.
 
 ```lambda
 import docx: lambda.doc.docx
@@ -1795,7 +1795,7 @@ is strict, and `--loss allow` permits diagnosed degradation.
 Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
 
 `lambda view report.docx` presents the imported Word document with the shared
-`lambda.doc.docx.view` presentation module (D7.2.4v4). The bundled file browser
+`lambda.doc.docx.view` presentation module (D9.3.4). The bundled file browser
 also previews DOCX and exposes its converted HTML on the Source tab. Use
 `lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
 content is listed above the preview; Word pagination is outside this profile.
@@ -1804,14 +1804,14 @@ content is listed above the preview; Word pagination is outside this profile.
 
 Open the original sample directly with
 `./lambda.exe view test/input/docbook/showcase.xml`. The XML viewer recognizes
-DocBook namespaces and uses the package's HTML/CSS presentation (D7.2.4v3);
+DocBook namespaces and uses the package's HTML/CSS presentation (D9.3.4);
 the document browser keeps the original XML in its Source tab.
 The usual extension is `.xml`; the namespace
 `http://docbook.org/ns/docbook` identifies DocBook. The current direct-view
 roots are `article`, `book`, `set`, `part`, and `reference`.
 
 `lambda.doc.docbook` is an initial native Lambda port of the official DocBook
-xslTNG 2.8.5 HTML/CSS transformation (D7.2.4v3). Java and XSLT are used only to
+xslTNG 2.8.5 HTML/CSS transformation (D9.3.4). Java and XSLT are used only to
 regenerate reference fixtures; package execution has no Java dependency.
 
 ```lambda
@@ -1898,7 +1898,7 @@ gate; expected bodies are refreshed separately using the pinned processor.
 `lambda.doc.wiki` serializes Mark Doc to MediaWiki, DokuWiki, TikiWiki, TWiki,
 Vimwiki, XWiki 2.1, ZimWiki, Creole 1.0, Jira, and Confluence wiki markup.
 A shared Lambda Script traversal uses declarative syntax profiles; native code
-routes calls and owns package invocation (D7.1.1, D7.2.4v3).
+routes calls and owns package invocation (D9.1.1, D9.3.4).
 
 ```lambda
 import wiki: lambda.doc.wiki
@@ -1943,7 +1943,7 @@ and the [working design](../vibe/input/Input_Wiki.md).
 
 `lambda.doc.misc` writes Mark Doc as **AsciiDoc**, **troff/man**, or **Typst**,
 and serializes email/contact/calendar maps as **EML**, **vCard**, or
-**iCalendar**. All six writers are Lambda Script source modules (D7.2.4v3).
+**iCalendar**. All six writers are Lambda Script source modules (D9.3.4).
 
 ```lambda
 import writers: lambda.doc.misc
@@ -1984,7 +1984,7 @@ Native tool conformance remains unverified.
 
 `lambda.doc.ebook` loads EPUB 2/3 publications and displays their XHTML/SVG
 chapters in Radiant. Publication parsing and chapter projection are pure;
-`read` captures a local file procedurally (S12.1.1v3, S12.1.3, D7.1.2v2).
+`read` captures a local file procedurally (S12.1.1v3, S12.1.3, D9.1.2).
 ZIP members retain their captured source and decode lazily
 (S12.4.1v2, S14.3.1v2). No ebook decoder dependency is required.
 
@@ -2073,7 +2073,7 @@ offers a virtual changed-file list and unified surface, hunk navigation, search,
 selection/copy, lazy file loading and refresh. `to_html` exports every loaded
 file and row. Binary, mode, rename, symlink, submodule and conflict changes keep
 their own metadata and summaries. Repository access is procedural; parsing and
-presentation are pure (S12.1.1v3/S12.1.3, D7.2.4v3/D7.2.6).
+presentation are pure (S12.1.1v3/S12.1.3, D9.3.4/D9.3.5).
 
 ```lambda no-run
 import diff: lambda.doc.diff
@@ -2085,7 +2085,7 @@ See [Git and patch review](Lambda_Diff.md) for the API, options, model and limit
 
 ## 21. doc.readability — Article extraction
 
-`lambda.doc.readability` finds the main article of a web page, as Firefox Reader View does: it is a port of Mozilla Readability.js 0.6.0 that passes all 130 of Mozilla's test pages. `parse` takes an HTML string or a parsed document and returns the article as an element (`content`) and as HTML (`html`), with its `title`, `byline`, `excerpt`, `site_name`, `published_time`, `lang`, `dir`, `text` and `length`, or `null` when the page has no content. `readerable` is Readability's quick check that a page is worth parsing. Both are pure; `read` loads a file first (D7.2.4v3/D7.2.6).
+`lambda.doc.readability` finds the main article of a web page, as Firefox Reader View does: it is a port of Mozilla Readability.js 0.6.0 that passes all 130 of Mozilla's test pages. `parse` takes an HTML string or a parsed document and returns the article as an element (`content`) and as HTML (`html`), with its `title`, `byline`, `excerpt`, `site_name`, `published_time`, `lang`, `dir`, `text` and `length`, or `null` when the page has no content. `readerable` is Readability's quick check that a page is worth parsing. Both are pure; `read` loads a file first (D9.3.4/D9.3.5).
 
 ```lambda no-run
 import rd: lambda.doc.readability
@@ -2627,7 +2627,7 @@ presets, editing, saved casts and garden tours. These are articulated rigid
 parts; generation is pure (**S12.1.1v3**), without biological effects.
 See [PG17](../vibe/Lambda_Design_Procart.md#14-p12--articulated-character-recipes-pg17).
 
-Reusable native-audio helpers follow **D7.5.3–D7.5.4**:
+Reusable native-audio helpers follow **D9.5.6–D11.3.1**:
 `lambda.audio.pcm.wav(samples,rate=24000)^` is a procedural mono 16-bit WAV encoder
 (8–96 kHz, clipped samples, original Soundflow quantization).
 `lambda.audio.voices.start(owner,voices,bytes,gain=1,limit=14)` reaps ended handles,
@@ -2643,9 +2643,9 @@ encoders or voice loops. No spatial-panning or field-recording claim is implied.
 
 `lambda.scene3d` builds ordinary Lambda elements for Radiant's native
 `<scene3d>` viewport. Scene construction and validation are pure
-(**S12.1.1v3**); the source package lives under **D7.2.4v4**, while Radiant
-owns rendering, GPU resources and the published image (**D4.5.1v4 /
-D4.5.2**). The qualified graphics profile is native macOS OpenGL. A headless
+(**S12.1.1v3**); the source package lives under **D9.3.4**, while Radiant
+owns rendering, GPU resources and the published image (**D5.5.1 /
+D5.5.2**). The qualified graphics profile is native macOS OpenGL. A headless
 build without graphics reports graphics unavailable; pure validation still
 works. See the [scene design](../vibe/radiant/Radiant_Design_WebGL.md#4-lambda-package-and-scene-elements)
 for the complete vocabulary and embedding rules.
@@ -2756,7 +2756,7 @@ Capabilities expose `animation_masks`, `animation_reference_additive`,
 `animation_event_provenance` and `animation_event_replay`; `animation_graphs`
 remains false. The root-motion and authored cue-replay profiles below are
 implemented; wider M5 profiles and qualification remain outstanding
-(**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
+(**S12.1.1v3 / S12.1.5v2 / D5.5.2 / D9.5.6**).
 
 ### Native animation markers and timing events
 
@@ -2778,7 +2778,7 @@ are deferred to M13.
 ```
 
 The scene root receives queued `marker`, `loop` and `finished` events after a
-successful native sample (**S12.1.5v2 / D4.5.2 / D5.3.3**). Event fields are
+successful native sample (**S12.1.5v2 / D5.5.2 / D6.3.3**). Event fields are
 `clip`, numeric `action`, `marker` (empty on loop/finish), crossing `time` in
 mixer seconds, `clipTime`, `iteration`, physical `direction` (+1/-1), normalized
 `weight`, and `loopDelta` (aggregate signed wraps on loop events). `revision`
@@ -2817,7 +2817,7 @@ Pose seek/reset emits no marker, loop, completion or controller-state cues.
 Internal completion transitions still reconstruct controller playback; explicit
 cue replay remains future work. Host event delivery uses the existing traced
 queue and does not call arbitrary scripts inside native sampling
-(**D7.5.3v2**).
+(**D9.5.6**).
 
 ### Native root-translation extraction
 
@@ -2868,7 +2868,7 @@ world replay retains displacement sampling for physical consumption.
 Counters belong to the current native owner and can restart when replay/reset
 reconstructs it; preserve the scene/owner session identity when storing traces.
 Snapshots copy numbers under the existing precise-root and host-boundary
-contracts (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+contracts (**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 The `animation_root_translation` capability advertises this extraction profile.
 The separate `root_motion_capsule` and `root_motion_replay` capabilities
@@ -2912,7 +2912,7 @@ identity and retain total. Seek resets quaternion total to identity and changes
 the shared root epoch. Compatible key edits preserve totals/playback; rejected
 roles/work retain working native clocks and copied data. The
 `animation_root_rotation` capability advertises full 3D quaternion extraction
-(**S12.1.5v2 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 ### Physical root translation
 
@@ -2964,7 +2964,7 @@ belongs to the last completed physics tick; repeated reads do not advance it,
 and saved records survive later ticks and replay. Root-source/profile/parameter
 admission retains committed controller feedback on rejection. Whole-scene
 transactions spanning simultaneous physics and animation edits remain a wider
-M1 extension (**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+M1 extension (**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 A source quaternion is consumed in the same target transaction as translation.
 Translation uses the source parent's pre-turn axes. When that parent follows
@@ -3045,7 +3045,7 @@ malformed/stale submissions return an immediate error. Application receipts
 refer to the command phase, before later simulation stages. They do not promise
 that subsequent physics/contact work completes; inspect `faulted` and the
 completed scene/physics tick for that result. Whole-tick cross-service rollback
-remains a wider M1 extension (**S12.1.5v2 / D4.5.2 / D5.3.3**).
+remains a wider M1 extension (**S12.1.5v2 / D5.5.2 / D6.3.3**).
 
 Commands run before navigation, animation and physics, with no script callbacks
 inside those stages. Queuing does not start an otherwise manually controlled
@@ -3054,14 +3054,14 @@ explicitly playing inactive animation service; paused/root-coupled physics keeps
 its existing ownership. While commands are pending, automatic delivery uses
 bounded fixed ticks; once they drain, animation-only views resume exact selected
 frame sampling. Repeated reads and zero elapsed time do not consume batches
-(**D2.11.4**).
+(**D10.1.7**).
 
 Reset/replay reconstructs authored state and drops pending batches. Previously
 applied command history is not replayed implicitly; M13 owns recording,
 retargeting and logical decisions. Runtime capabilities `command_batches` and
 `animation_command_batches` advertise this queue/animation profile; other
 service command kinds remain separate native components. The thin runtime
-wrapper adds no graph algorithm (**S12.1.1v3 / D7.5.3v2**).
+wrapper adds no graph algorithm (**S12.1.1v3 / D9.5.6**).
 
 ### Explicit authored animation-cue replay
 
@@ -3079,7 +3079,7 @@ does not apply subsequent native commands or replay application decisions.
 Recording/resubmitting those decisions remains M13. This explicit operation
 preserves live playheads, poses, root totals, world identity, pause/automatic
 mode, fractional clock debt and pending command batches. Ordinary seek/reset
-continues to emit no replay cues (**S12.1.1v3 / S12.1.5v2 / D2.11.4 / D4.5.2**).
+continues to emit no replay cues (**S12.1.1v3 / S12.1.5v2 / D10.1.7 / D5.5.2**).
 
 The copied result contains `session`, `generation`, source `revision`,
 `command_revision`, live `world_identity`, `replay_sequence`, `from_tick`,
@@ -3099,7 +3099,7 @@ An empty result queues no job. Those fields describe queue admission, not
 handler completion. Reconstruction and event construction finish before any
 handler runs. Delivery follows existing DOM event rules; handler effects are
 not a transaction and document teardown invalidates the queued target
-(**D5.3.3 / D7.5.3v2**).
+(**D6.3.3 / D9.5.6**).
 
 Replayed DOM events have `replay: true`, decimal-string `replaySequence` and
 window-local decimal-string `sequence`. Live events have `replay: false` and
@@ -3117,7 +3117,7 @@ logical graph or command-history replay is a separate later package feature.
 
 Import `lambda.scene3d.runtime` to control a live scene DOM node. Every operation
 is procedural (**S12.1.1v3**) and uses the existing `radiant-dom` host boundary
-(**D7.5.3v2**); constructing a scene does not invoke these procedures.
+(**D9.5.6**); constructing a scene does not invoke these procedures.
 
 | Procedure | Behavior |
 |---|---|
@@ -3141,9 +3141,9 @@ Saved snapshots retain their values after later edits or playback. They do
 not serialize the solver or implement package logical-state replay.
 
 Active physics uses bounded fixed substeps with retained tick debt. Legacy
-animation-only views retain exact selected-frame sampling (**D2.11.4**) through
+animation-only views retain exact selected-frame sampling (**D10.1.7**) through
 the same scheduler entry. Compatible template regeneration, camera changes and
-graphics recovery preserve native scene state (**D4.5.3v2 / S12.1.5v2**).
+graphics recovery preserve native scene state (**D5.5.3 / S12.1.5v2**).
 Seek/reset replays authored input; it does not restore later commands or a saved
 solver checkpoint. The remaining gaming features and qualification limits are
 tracked in the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md).
@@ -3158,7 +3158,7 @@ Doppler, bounded bus/DSP graphs, native sample-time cues and explicit offline
 PCM/WAV jobs, named MIDI/speech routes and macOS video-track output with named
 scene routes. Prepared MIDI/speech/video snapshots now join explicit offline jobs;
 explicit microphone acquisition uses the host capture seam below
-(**D7.5.3v2 / D7.5.4 / D7.5.10**).
+(**D9.5.6 / D11.3.1 / D11.3.2**).
 
 Opening encoded bytes prepares owned 48000-Hz interleaved stereo float PCM
 without opening an output device. The portable decoder supports PCM WAV, MP3
@@ -3166,7 +3166,7 @@ and FLAC; macOS retains platform decoding, including AAC/M4A, through Core Audio
 Codec availability remains platform-dependent. Source bytes may be released
 after open. Invalid, unsupported or over-budget input returns `null` and leaves
 existing clips intact. Decoding and channel/rate conversion happen before the
-audio callback (**D4.5.2**).
+audio callback (**D5.5.2**).
 
 Native limits are 256 MiB of encoded input and 256 MiB of retained PCM per clip,
 512 MiB of decoded-player/stream storage and 128 combined decoded clips and
@@ -3195,7 +3195,7 @@ from the previous platform player's output.
 
 Local documents retain ordinary audible starts. Network documents require their
 own sticky activation or the host grant; muted playback and decoding retain
-**D7.5.4** behavior. These existing play rows keep their start gate with the
+**D11.3.1** behavior. These existing play rows keep their start gate with the
 host's offline output backend; explicit buffer/file jobs are described below.
 See the [gaming implementation record](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md)
 for qualification and remaining scope.
@@ -3211,14 +3211,14 @@ the shared output. Silent videos retain the platform video clock.
 
 The native profile admits finite media up to 24 hours, a two-second PCM ring
 and one decoded packet of at most 65536 frames. Control-thread polling prepares
-PCM; the audio callback only consumes owned samples (**D4.5.2**). Each stream
+PCM; the audio callback only consumes owned samples (**D5.5.2**). Each stream
 reserves its ring storage against the document's shared reader/byte limits.
 Decoder failure, voice admission failure and output loss fail the media owner;
 no second audible player takes over. Removal and document teardown retire the
 reader before releasing its storage.
 
 Network play, unmute and a positive gain increase from zero require the same
-sticky activation as other audible output (**D7.5.4**). A refused command returns
+sticky activation as other audible output (**D11.3.1**). A refused command returns
 `false`; JavaScript reports `NotAllowedError`. Removing authored `muted` without
 activation pauses playback. These checks also apply to the host's offline
 backend. Named video routes and prepared export snapshots are described below. Microphone acquisition,
@@ -3228,7 +3228,7 @@ other platform backends and release/device qualification remain pending.
 
 The `scene3d/runtime` procedures `audio_snapshot(node)`, `audio_clip(node,
 request)`, `audio_clip_drop(node, request)` and `audio_command(node, request)`
-use the existing procedural host boundary (**D7.5.3v2**). Acquiring an encoded
+use the existing procedural host boundary (**D9.5.6**). Acquiring an encoded
 clip is explicit; a pure `audio-source` description does not fetch or decode.
 Every mutation requires the snapshot's opaque `session`; preserve native u64
 values (JS BigInts) or exact decimal strings rather than converting through JS
@@ -3241,7 +3241,7 @@ sources; assets and source players share the document's 128-player/512-MiB
 limits and global 96-voice bound. Each source has an independent cursor/filter/
 meter over immutable shared PCM, charged once per sample owner. Replacing or
 dropping an asset leaves already playing readers on their retained samples
-until stop/restart or teardown (**D4.5.2**).
+until stop/restart or teardown (**D5.5.2**).
 
 Declare a leaf `audio-source` with `id`, `clip` and ordinary transform attributes
 beneath the scene or a transformed group, body or bone. IDs must be unique
@@ -3273,7 +3273,7 @@ limits above. Positions/velocities are bounded to +/-1e6 per component. Fixed
 physics ticks and selected animation-only frames supply poses in scene seconds;
 repeated reads do not erase estimated velocity. Authored same-time jumps reset
 estimation. The `teleport` command also skips the next positive-time estimate.
-Selected animation snapshots retain **D2.11.4** timing.
+Selected animation snapshots retain **D10.1.7** timing.
 
 Commands use `{session, source, identity, action}` with the source snapshot's
 identity and `play`, `pause`, `resume`, `stop` or `teleport`. Play starts a fresh
@@ -3284,13 +3284,13 @@ Scene pause/time scale affect pose sampling; source transport and pitch remain
 explicit. A successful scene seek/reset stops sources and resets their velocity
 estimators, retaining acquired assets. Compatible template rebuilds preserve
 identities/cursors; removed sources, scenes and documents retire callback
-readers before freeing native storage (**D4.5.2 / D5.3.3**).
+readers before freeing native storage (**D5.5.2 / D6.3.3**).
 
 Snapshots copy clips, source transport/pose/target and current gain/pitch,
 cursor/duration, rendered-frame count and peak/RMS meters, listener metadata,
 scene time, document audio clock and native storage accounting. They expose no
 DOM, graphics or player tokens. Network playback and audible gain changes use
-authored gain for **D7.5.4**, including distant/attenuated sources and the host
+authored gain for **D11.3.1**, including distant/attenuated sources and the host
 offline backend. Device loss marks active players `error`; explicit play can
 prepare a new reader from the retained asset. The cue and explicit render-job
 contracts below define their additional behavior. Named video routes are
@@ -3304,9 +3304,9 @@ Declare `audio-bus` nodes under a scene, with unique `id` names. A source's
 its implicit `master` routes into the existing document submix. An explicit
 `audio-bus id="master"` controls that scene's master. Other documents and default
 MIDI/speech/decoded voices retain their document routes. Definitions prepare
-native storage without opening an output device; source play retains **D7.5.4**.
+native storage without opening an output device; source play retains **D11.3.1**.
 Use existing procedural DOM attribute/child edits for live bus controls, and
-`runtime.audio_snapshot(node)` to inspect the admitted plan (**D7.5.3v2**).
+`runtime.audio_snapshot(node)` to inspect the admitted plan (**D9.5.6**).
 
 A scene admits 16 buses including master, four sends and four ordered inserts
 per bus, with at most 8 MiB retained graph storage. Each document has eight scene
@@ -3342,7 +3342,7 @@ identity. Matching insert positions/kinds retain history across parameter
 changes; changing delay length or insert kind starts fresh state. Compatible
 template rebuilds and graphics recovery preserve routing and histories.
 Removed/stale routes stay silent rather than falling through to the dry output
-(**D4.5.2 / D5.3.3 / S4.9.1**).
+(**D5.5.2 / D6.3.3 / S4.9.1**).
 
 Actual delay/filter/reverb work keeps the submix alive after its final source
 voice retires. Delay/filter activity uses a 1e-12 quiet floor; the reused reverb
@@ -3359,7 +3359,7 @@ MIDI preparation now retains its synth without a voice/device. Play admits a
 voice; pause/end removes it while retaining cursor and reverb-send controls.
 Reverb tails continue after MIDI voice retirement. A muted MIDI transport may
 play without activation; positive audible starts and live gain changes retain
-**D7.5.4**. Graph/source snapshots copy ordered insert parameters, send target/
+**D11.3.1**. Graph/source snapshots copy ordered insert parameters, send target/
 current gains, bus peak/RMS/frame meters, routing generation/storage/activity and
 fault state. Prepared provider export uses the render jobs below; explicit
 microphone capture uses its own document grant. Routing factories and music/voice/occlusion
@@ -3368,7 +3368,7 @@ policy remain deferred M13.
 ### Native Scene3D sample-time cues
 
 `runtime.audio_schedule(node, request)` admits copied transport commands through
-the existing host waist (**D7.5.3v2**, proposal §9.2). Read `audio_snapshot(node)`
+the existing host waist (**D9.5.6**, proposal §9.2). Read `audio_snapshot(node)`
 first. A request contains its `session`, `cue_epoch` as `epoch`, the next
 `cue_sequence + 1` as `sequence`, and an `events` array of 1–32 maps:
 
@@ -3405,12 +3405,12 @@ coordinator without adding a solver phase. Direct audio-frame cues follow the
 document sample clock independently of scene pause/scale. Source playback also
 continues independently. Pitch follows authored pitch and Doppler by default;
 `pitch_follow="true"` additionally multiplies it by scene time scale, clamped to
-the source's 0.125–8 range. Selected animation sampling retains **D2.11.4**.
+the source's 0.125–8 range. Selected animation sampling retains **D10.1.7**.
 
 Queued play retains its admitted PCM across asset replacement/drop, and uses
 the source's latest published spatial/gain/pitch parameters at delivery.
 Positive authored-gain play/resume and raising an armed muted source's gain
-require the existing document activation (**D7.5.4**). Template and graphics
+require the existing document activation (**D11.3.1**). Template and graphics
 recovery retain cues. Immediate source transport cancels its remaining cues;
 source removal cancels that source, device loss cancels pending delivery, and
 successful scene seek/reset cancels all pending cues and advances `cue_epoch`.
@@ -3426,7 +3426,7 @@ event/source/clip identities, operation/clock, effective `requested` sample,
 Delivery, admission and cancellation are distinct observations; history can
 overwrite old rows. Source rows add `armed` and `pitch_follow`.
 
-Native readers and commands have explicit ownership (**D4.5.2 / D5.3.3**).
+Native readers and commands have explicit ownership (**D5.5.2 / D6.3.3**).
 Preparation and retired-reader cleanup occur on the main owner; the callback
 only applies copied commands and swaps retained PCM readers at split-buffer
 deadlines. Prepared provider snapshots join render jobs below; microphone
@@ -3439,7 +3439,7 @@ policy remain deferred M13.
 Existing document MIDI sessions and speech utterances can explicitly join an
 admitted scene bus through `runtime.audio_provider_route(node, request)`.
 This reuses their native transports and the document submix; it creates no
-second mixer or playback clock (**D7.5.3v2 / D4.5.2**).
+second mixer or playback clock (**D9.5.6 / D5.5.2**).
 
 | Procedure | Request and behavior |
 |-----------|----------------------|
@@ -3470,11 +3470,11 @@ silences its routed voices atomically and makes retained providers fail with
 `route_lost`; it does not fall back to audible default output. Failed providers
 remain queryable through their ordinary document rows and require a new session
 or utterance for playback. Read/default-detach remains available after invalid
-authored scene edits (**D4.5.2 / D5.3.3**).
+authored scene edits (**D5.5.2 / D6.3.3**).
 
 Route preparation for inactive/paused providers opens no device. Audible
 play/resume, active positive-gain rewiring (including default detach), and
-authored bus edits affecting active positive-gain providers retain **D7.5.4**
+authored bus edits affecting active positive-gain providers retain **D11.3.1**
 activation. These checks use provider state as well as DSP tail state, so a dry
 MIDI/speech input cannot evade the gate. Muted preparation/playback and bus
 edits with paused providers remain allowed.
@@ -3487,14 +3487,14 @@ On macOS, an admitted audio-bearing HTML media source exposes an exact
 `audio_token` in `dom.media_info(node)`; unavailable/silent sources expose null.
 Use that ticket with the provider read/route procedures above and
 `provider: "video"`. It identifies the selected native source in its requesting
-document, independently of scene/bus identities (**S4.9.1 / D7.5.3v2**). A foreign
+document, independently of scene/bus identities (**S4.9.1 / D9.5.6**). A foreign
 document's ticket or a retired source ticket rejects.
 
 Routes can be assigned before PCM starts, while paused, or during playback.
 Rewiring preserves media time and queued samples. `gain` includes the media's
 mute state and volume, before the scene bus fader. HTML media commands retain
 transport control; no second player is created. Active audible rewires use the
-same **D7.5.4** activation gate. Authored bus edits affecting active video also
+same **D11.3.1** activation gate. Authored bus edits affecting active video also
 check its positive-gain intent, including when a muted dry bus has no DSP tail.
 Early denied network play with `preload=none`
 preserves its visible `NotAllowedError` while readiness is polled.
@@ -3502,7 +3502,7 @@ preserves its visible `NotAllowedError` while readiness is polled.
 A retained DOM element keeps its selected decoder, cursor and route ticket
 when detached; removal pauses playback, and reattachment preserves them.
 Source reload/replacement, native disposal and document teardown retire the
-ticket and release route references (**D4.5.2 / D5.3.3**). Bus deletion is fenced
+ticket and release route references (**D5.5.2 / D6.3.3**). Bus deletion is fenced
 by ready/paused references. Graph-owner removal faults ready, paused and playing
 providers with `route_lost`; no default output takes over. Default detach can
 release the reference, but playback requires source reload after the fault.
@@ -3513,7 +3513,7 @@ qualification remain pending.
 ### Native Scene3D offline audio render jobs
 
 `runtime.audio_render_open(node, request)` creates an explicit output-free native
-job (**D7.5.4 / D7.5.3v2**, proposal §9.2). Supply the current scene `session`,
+job (**D11.3.1 / D9.5.6**, proposal §9.2). Supply the current scene `session`,
 an output length `frames`, and clip `events`, prepared `providers`, or both.
 Clip events use the cue schema above; source/clip identities come from
 `audio_snapshot`. Optional `scene_time` (default
@@ -3549,7 +3549,7 @@ provider-only job. Each provider snapshot reserves `frames * 8` PCM bytes plus
 reader metadata within the existing document PCM/reader limits; output storage
 has its separate limits below. Preparation is finite and synchronous; explicit
 render steps remain capped at 4096 frames. Physical/release latency and peak
-memory qualification remain open (**D4.5.2 / D5.3.3 / D7.5.4**).
+memory qualification remain open (**D5.5.2 / D6.3.3 / D11.3.1**).
 
 Opening copies the referenced authored audio descriptions and current selected
 native poses, listener and bus/insert/send graph into private readers and fresh
@@ -3592,14 +3592,14 @@ device callback or ordinary frame polling; callers explicitly step it. The
 host-wide offline playback backend retains audible-output gating.
 
 Native jobs reuse the submix, cue and DSP kernel with explicit reader ownership
-(**D4.5.2 / D5.3.3**). File output uses the existing IO provider; microphone
+(**D5.5.2 / D6.3.3**). File output uses the existing IO provider; microphone
 acquisition uses the separate input permission below. Release
 deadlines/peak memory, cross-platform execution and broader combined-scene
 qualification remain M12 work.
 
 ### Explicit microphone capture
 
-**D7.5.10** requires an explicit procedure plus both an OS permission and a
+**D11.3.2** requires an explicit procedure plus both an OS permission and a
 host grant for the requesting document. `view --microphone document.html`
 grants the initial document; it does not start capture or grant audible output.
 Embedded hosts use `radiant_capture_grant(document, granted)`. Child frames and
@@ -3610,14 +3610,14 @@ report `unavailable` until a host supplies an OS-authorized native backend.
 
 `dom.audio_capture(owner, request)` is a procedure returning a copied map or
 `null` for an invalid operation/ticket. It shares the existing host waist
-(**D7.5.3v2**) and supports:
+(**D9.5.6**) and supports:
 
 | Request | Behavior |
 |---|---|
 | `{op: "open"}` | Mint a document-local ticket; request OS consent only after the host grant. A second pending/active acquisition is rejected. |
 | `{op: "status", token: ticket}` | Poll permission/device state and copy diagnostics. |
 | `{op: "read", token: ticket, frames: 4096}` | Copy up to 4096 contiguous frames into `data`, an interleaved stereo `f32le` binary at 48000 Hz. Empty reads return an empty binary. |
-| `{op: "monitor", token: ticket, gain: 0.5}` | Enable separate dry monitoring through the document submix; positive gain requires **D7.5.4** output permission. Zero disables monitoring. Gain is finite and within `[0,1]`. |
+| `{op: "monitor", token: ticket, gain: 0.5}` | Enable separate dry monitoring through the document submix; positive gain requires **D11.3.1** output permission. Zero disables monitoring. Gain is finite and within `[0,1]`. |
 | `{op: "stop", token: ticket}` | Retire the device and monitor, release native PCM and keep terminal diagnostics. |
 
 States are `denied`, `pending`, `capturing`, `unavailable`, `stopped`, `revoked`,
@@ -3638,7 +3638,7 @@ inventing silence. Monitoring starts off, and `monitor_dropped` reports its
 independent overflow. Output-device loss disables monitoring while recording
 continues; `monitor_lost` requires an explicit re-enable. Input-device loss,
 OS/host revocation, stop and document teardown join the producer before freeing
-queues (**D4.5.2 / D5.3.3**); unread native PCM is discarded. Source code keeps
+queues (**D5.5.2 / D6.3.3**); unread native PCM is discarded. Source code keeps
 only copied records/binaries. Hardware timing and physical permission/hotplug
 qualification remain outside this profile.
 
@@ -3650,7 +3650,7 @@ The route applies to monitoring through the bus's gain/mute/solo, sends and
 ordered effects. It never changes raw recording PCM or advances either reader.
 Preparation while permission is pending opens no device. Positive monitoring,
 audible rewiring/default detachment, and bus edits affecting a positive monitor
-retain **D7.5.4**; a host input grant under **D7.5.10** cannot authorize output.
+retain **D11.3.1**; a host input grant under **D11.3.2** cannot authorize output.
 
 The route remains pinned while monitoring is off, so removing a retained bus
 rejects until explicit detach, rebind or capture close. Graph-owner loss silences
@@ -3663,7 +3663,7 @@ terminal and over-capacity route requests preserve the existing binding.
 Capture `position` reports the input sample timeline in seconds; exact frame
 counters remain available from `dom.audio_capture`. Live capture is explicitly
 rejected as a prepared offline-job provider; export never consumes recording
-data or implicitly acquires input (**D4.5.2 / D5.3.3 / S4.9.1**).
+data or implicitly acquires input (**D5.5.2 / D6.3.3 / S4.9.1**).
 
 ### Native CPU/GPU mesh particles
 
@@ -3673,7 +3673,7 @@ body. The bounded CPU and GPU profiles render basic meshes or planar billboards 
 instanced vertex fetch; geometry/material references and inline definitions work
 as for meshes. Opaque, masked and center-sorted transparent presentation are
 supported. Shader, lit and deformed particle meshes reject. Builders/presets
-remain M13 (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
+remain M13 (**S12.1.1v3 / S12.1.5v2 / D5.5.2 / D9.5.6**).
 
 ```html
 <particle-emitter id="sparks" backend="cpu" space="local" seed="42"
@@ -3711,7 +3711,7 @@ remain M13 (**S12.1.1v3 / S12.1.5v2 / D4.5.2 / D7.5.3v2**).
 matrix. Geometry/material references, vertex colors, UV0/UV1, material UV
 transforms, texture sheets and color/opacity curves retain the shared mesh
 paths. Native positions, velocities, age, spawn sequence and collision radii
-are unchanged (**D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**). For example:
+are unchanged (**D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**). For example:
 
 ```html
 <particle-emitter id="cutouts" backend="gpu" presentation="billboard"
@@ -3754,7 +3754,7 @@ scale/roll. Rendering packs these into spare affine components of the retained
 draws read scale/roll from existing birth and pose texels; update targets stay
 288 bytes per padded slot. Camera-only attribute edits do not rebuild geometry, add ordinary
 particle readback or create a computed CPU GPU-motion mirror
-(**D4.5.2 / D7.5.3v2**).
+(**D5.5.2 / D9.5.6**).
 
 #### Native particle spawn commands
 
@@ -3762,7 +3762,7 @@ particle readback or create a computed CPU GPU-motion mirror
 the existing shared scene command queue. Native payloads own their copied
 numbers and identities; later edits to the submitted map cannot change them.
 There is no script callback inside the particle update. Event-to-effect rules
-and preset composition remain M13 (**D4.5.2 / D5.3.3 / D7.5.3v2**).
+and preset composition remain M13 (**D5.5.2 / D6.3.3 / D9.5.6**).
 
 Take `session`, `generation` and `service_generation` from
 `runtime.particle_snapshot(node)`, and the target's `id`/`identity` from its
@@ -3820,7 +3820,7 @@ later package rules. Depth is caller-supplied bounded provenance; no recursive
 rule evaluator or automatic event mapping runs natively. GPU origins and added
 velocity remain in immutable birth recipes, with no ordinary particle readback
 or CPU motion mirror. Timing follows the Scene3D proposal's §3.2/M6; copied
-ownership and template authority retain **D4.5.2 / D5.3.3 / D7.5.3v2 /
+ownership and template authority retain **D5.5.2 / D6.3.3 / D9.5.6 /
 S12.1.5v2**. Capabilities report `particles_spawn_commands` and
 `particles_child_queues` for this bounded profile.
 
@@ -3833,7 +3833,7 @@ age-zero birth sample. A zero-size living head can keep a visible trail.
 Expiry, collision kill and recycling end that head's trail; retired tails and
 effect composition remain outside this profile. Capabilities report
 `particles_cpu_trails=true`, `particles_gpu_trails=true` and `particles_trails=true`
-(**D2.11.4 / D4.5.2 / D7.5.3v2**).
+(**D10.1.7 / D5.5.2 / D9.5.6**).
 
 ```html
 <particle-trail segments="16" lifetime=".5" width=".05" fade="true"></particle-trail>
@@ -3865,7 +3865,7 @@ or removing the child resets derived trail history while preserving head
 position, velocity, age and sequence. Whole-particle-phase failure publishes
 neither new head state nor trail samples. Templates and graphics recovery
 retain native history; seek/reset reconstruct it from admitted authored input
-(**S12.1.5v2 / D4.5.2 / D5.3.3**).
+(**S12.1.5v2 / D5.5.2 / D6.3.3**).
 
 `runtime.particle_trail(node, emitter_id, index=0)` copies one living particle's
 newest-first history, with at most 64 `{position, age}` records. `age` is time
@@ -3874,7 +3874,7 @@ sequence, simulation space, configuration and generation metadata. It includes
 retained points outside the current window, so increasing the window can reveal
 them; changing the returned values cannot edit native history. Whole JavaScript
 numbers are accepted as bounded indices. Missing emitters, disabled trails and
-nonliving indices return errors (**D4.5.2 / D5.3.3 / D7.5.3v2**).
+nonliving indices return errors (**D5.5.2 / D6.3.3 / D9.5.6**).
 
 At most 1048576 padded point slots are admitted per scene. Storage rounds
 capacity up to rows of 64 heads (or one shorter row), with at most 4096 point
@@ -3898,14 +3898,14 @@ of actual tick partitions; stateful noise/velocity/collision keeps its existing
 4096-tick motion journal. Its exhaustion faults the clock while preserving
 committed trails. Recovery replays retained partitions and ring heads over the
 anchors, including births, recycled slots and mixed row layouts. CPU/GPU point
-precision follows their existing float profiles (**D2.11.4 / D4.5.2 / D4.5.3v2 /
-D5.3.3 / D7.5.3v2**).
+precision follows their existing float profiles (**D10.1.7 / D5.5.2 / D5.5.3 /
+D6.3.3 / D9.5.6**).
 
 #### Particle velocity-over-life curves
 
 `particle-velocity-curve` adds authored transport to native dynamic velocity;
 it neither accumulates its full value every tick nor replaces force-driven
-motion or collision impulses (**D2.11.4 / D4.5.2 / D5.3.3**). For example:
+motion or collision impulses (**D10.1.7 / D5.5.2 / D6.3.3**). For example:
 
 ```html
 <particle-velocity-curve times="0 .25 1" values="0 0 0 2 0 0 -1 0 0"></particle-velocity-curve>
@@ -3945,10 +3945,10 @@ native sampler. No ordinary-tick particle readback, computed CPU GPU-motion
 mirror or target growth is added: padded update storage stays 288 bytes per
 slot. The two native record arrays retain an additional three-float dynamic
 velocity per slot; `storage_bytes` includes actual padding and history cost
-(**D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**D5.5.2 / D6.3.3 / D9.5.6**).
 
 `particle-noise` adds bounded smooth temporal value-noise acceleration in
-simulation-space axes (**D2.11.4 / D4.5.2 / D5.3.3**). At most one child is
+simulation-space axes (**D10.1.7 / D5.5.2 / D6.3.3**). At most one child is
 accepted. `strength` gives three nonnegative acceleration amplitudes (default
 `1 1 1`, each at most 1000000); `frequency` gives lattice intervals per second
 of particle age (default 1, range 0–1024). Frequency times the maximum lifetime,
@@ -3995,7 +3995,7 @@ including alpha-tested shadows. Otherwise an opacity curve containing a value
 below one selects transparent presentation. Color/opacity edits retain motion,
 sequence and age, taking effect on the next successful fixed tick without a
 GPU motion checkpoint. Copied sample `color` is RGBA before material factors
-(**D2.11.4 / D4.5.2 / D5.3.3**).
+(**D10.1.7 / D5.5.2 / D6.3.3**).
 
 Transparent particles sort back-to-front by simulated center in the current
 view, separately inside each emitter. Equal depths use current palette/device
@@ -4017,7 +4017,7 @@ draw index (eight bytes per slot). These renderer resources are separate from
 native simulation storage. `Scene3dStats.particle_sort_passes` counts device
 ordering passes; particle snapshot `gpu_passes` continues to count update
 kernels. Built-in ordering uses the scene context's native program ownership,
-not the authored shader quota (**D4.5.2 / D7.5.3v2**).
+not the authored shader quota (**D5.5.2 / D9.5.6**).
 
 Sort targets and palettes are preallocated at projection and reused across
 ordinary frames. Context loss rebuilds them from retained native state; camera
@@ -4029,7 +4029,7 @@ M13.
 #### Particle texture sheets
 
 One optional `particle-sheet` child selects atlas cells on CPU/GPU from fixed
-particle age (**D2.11.4 / D4.5.2 / D5.3.3**). Cells use top-left row-major
+particle age (**D10.1.7 / D5.5.2 / D6.3.3**). Cells use top-left row-major
 indices, starting at zero. The default grid is one cell, preserving ordinary
 material UVs.
 
@@ -4079,7 +4079,7 @@ one frame integer per capacity slot; its existing 80-byte rendering palette
 packs frame into an unused affine lane restored before transformation. GPU
 poses use the rotation texel's unused fourth component, keeping update storage
 at 288 bytes per padded slot. Ordinary GPU ticks and rendering add no particle
-readback (**D4.5.2 / D5.3.3 / D7.5.3v2**).
+readback (**D5.5.2 / D6.3.3 / D9.5.6**).
 
 Scalar controls are finite and bounded by 1000000, with the stricter ranges
 above. Each scene tick admits at most 4096 attempted births, including drops and
@@ -4094,7 +4094,7 @@ the particle stage explicitly; the snapshot includes a diagnostic. This is
 particle-stage atomicity; earlier physics work is outside that transaction.
 
 Particles run after physics on the shared coordinator. Active emitters require
-fixed ticks rather than animation-only fractional sampling (**D2.11.4**).
+fixed ticks rather than animation-only fractional sampling (**D10.1.7**).
 Storage is preallocated to capacity. CPU instances update one retained matrix
 buffer's live prefix. GPU instances fetch position/scale and rotation directly from float
 targets using a retained slot-ID attribute, including shadow draws. Culling never
@@ -4126,7 +4126,7 @@ position/velocity in that simulation space, size, local `rotation` radians and
 RGBA `color` multipliers before material factors, plus numeric atlas `frame`
 (0–65535, an ordinary integer in JS). Unsigned counters remain exact (BigInts in JS, **S4.9.1**); e.g. use
 `String(snapshot.emitters[0].sequence)`. Returned data owns its values and can be
-edited without changing the native owner (**D4.5.2 / D5.3.3**).
+edited without changing the native owner (**D5.5.2 / D6.3.3**).
 
 GPU spawning, analytical gravity/drag integration, all five curve kinds and texture-sheet sampling execute in
 GLSL 330 fragment passes on RGBA32F targets; compute shaders are unnecessary.
@@ -4166,7 +4166,7 @@ sequence and motion. Samples copy device orientation on explicit GPU queries.
 Context recovery reconstructs the committed curves/poses without advancing time;
 equivalent templates retain them, and authored replay uses current curves.
 No angular dynamics or angular collision response is implied by mesh rotation
-(**S12.1.5v2 / D2.11.4 / D4.5.2 / D5.3.3 / D7.5.3v2**).
+(**S12.1.5v2 / D10.1.7 / D5.5.2 / D6.3.3 / D9.5.6**).
 
 ### Mesh-surface particle emission
 
@@ -4175,7 +4175,7 @@ unambiguous static `geometry` definition in the scene. The emission surface is
 separate from the geometry drawn for each particle. Existing box/plane/buffer
 intake and ID lookup are shared with native geometry/navigation consumers;
 source placement is the emitter's local frame, not a mesh node's placement
-(**S12.1.5v2 / D7.1.1–D7.1.3 / D7.5.3v2**).
+(**S12.1.5v2 / D9.1.1–D9.1.3 / D9.5.6**).
 
 ```html
 <geometry id="canopy" type="plane" size="4 2 1"></geometry>
@@ -4203,7 +4203,7 @@ static geometry snapshot. Positive area prefixes must remain strictly increasing
 in the shared float representation; distributions losing a positive weight to
 rounding reject. Tables copy only admitted triangle coordinates, flat normals
 and area prefixes, owning them independently of DOM/input/decoder pools
-(**D4.5.2 / D5.3.3**).
+(**D5.5.2 / D6.3.3**).
 
 Compatible surface edits affect subsequent births. Existing particles retain
 their original recipes, including through GPU context loss. Up to eight distinct
@@ -4239,7 +4239,7 @@ initial velocity and the mesh basis take that affine frame once; stored motion
 then remains in world space. Later emitter/ancestor movement, rotation or scale
 changes affect new births. Gravity is a world vector in this mode; drag is scalar.
 No carrier velocity is implicitly added. Mesh size multiplies the retained birth
-basis, including nonuniform scale/shear (**D2.11.4 / S12.1.5v2**).
+basis, including nonuniform scale/shear (**D10.1.7 / S12.1.5v2**).
 
 Visible and shadow draws use retained world poses without applying the current
 emitter transform again. GPU random births and motion stay on the device; three
@@ -4264,7 +4264,7 @@ Like collision-dependent replay, publication uses coordinated scene seek after
 checking source, clock, animation and physics/world dependencies; a particle-only
 native handoff rejects. Replay reconstructs current authored descriptions, not
 later control history. Samples and the copied `space` field obey the same owned
-value/precise-root rules as other particle snapshots (**D4.5.2 / D5.3.3 / D7.5.3v2**).
+value/precise-root rules as other particle snapshots (**D5.5.2 / D6.3.3 / D9.5.6**).
 See the [world-space component](../vibe/impl/Radiant_Impl_Scene3D_Gaming.md#m6-native-world-space-cpugpu-emission--2026-10-31).
 
 ### Native CPU particle scene collisions
@@ -4273,7 +4273,7 @@ A CPU mesh emitter can contain one empty `particle-collision` description. It
 sweeps an inline sphere through the admitted scene physics world after physics
 completes each fixed tick. No particle body/collider is inserted into the world.
 Primitives, convex shapes, meshes and heightfields use the shared native query
-kernels (**S12.1.5v2 / D2.11.4 / D4.5.2 / D7.5.3v2**).
+kernels (**S12.1.5v2 / D10.1.7 / D5.5.2 / D9.5.6**).
 
 ```html
 <particle-collision profile="scene" response="bounce" radius=".05" skin=".001"
@@ -4328,7 +4328,7 @@ tick, query-world identity, numeric body/collider IDs, world center/contact
 point/normal, incoming/outgoing velocity, kind (`impact`/`kill`), overlap flag
 and a fraction within the fixed tick. Birth overlaps use fraction 0. Unsigned
 fields remain exact BigInts in JS (**S4.9.1**). Returned values own their data
-(**D4.5.2 / D5.3.3**).
+(**D5.5.2 / D6.3.3**).
 
 After processing copied rows, call
 `runtime.acknowledge_particle_events(node, emitter, through, session, generation)`
@@ -4356,7 +4356,7 @@ A GPU mesh emitter accepts one `particle-collision profile="analytic"` with
 1–8 explicit planes/spheres in simulation coordinates. Local emitters use local
 coordinates; world emitters use world coordinates independently of later emitter
 movement. These volumes are separate from physics bodies and camera depth.
-Device motion remains native-owned (**S12.1.5v2 / D2.11.4 / D4.5.2 / D7.5.3v2**).
+Device motion remains native-owned (**S12.1.5v2 / D10.1.7 / D5.5.2 / D9.5.6**).
 
 ```html
 <particle-collision profile="analytic" response="bounce" radius=".05"
@@ -4418,7 +4418,7 @@ geometry and the final world matrix for the object or instance. It shares
 camera/ray/triangle helpers and tests point radii, anchors and clipped ribbons;
 texture alpha and scene occlusion are outside this query. See the
 [profile and return fields](../vibe/radiant/Radiant_Design_WebGL.md#points-sprites-and-lines-m6-selected-profile).
-Construction and picking retain **S12.1.1v3 / D7.2.4v4**.
+Construction and picking retain **S12.1.1v3 / D9.3.4**.
 
 ### Visibility and object LOD
 
@@ -4440,7 +4440,7 @@ outside the geometric level groups.
 Shadows use level 0; environment captures select by capture-origin distance.
 LOD selection is not exported to glTF. See the
 [qualified profile](../vibe/radiant/Radiant_Design_WebGL.md#conservative-visibility-and-object-lod-m7-selected-profile)
-for bounds, counters and limits (**S12.1.1v3 / D4.5.2 / D7.2.4v4**).
+for bounds, counters and limits (**S12.1.1v3 / D5.5.2 / D9.3.4**).
 The interactive fixture is [test/scene3d/lod.ls](../test/scene3d/lod.ls).
 
 ### Materials and lighting
@@ -4471,7 +4471,7 @@ Both factors default to 0 and accept [0,1]. `clearcoat-roughness` defaults to
 `clearcoat-normal-scale` (default 1). `sheen-color-texture` reads sRGB RGB;
 `sheen-roughness-texture` reads linear A. These maps use the same independent
 UV selectors/transforms as standard maps. Factor/color tracks reuse existing
-playback without relinking (**S12.1.1v3, D2.11.4**). See the
+playback without relinking (**S12.1.1v3, D10.1.7**). See the
 [qualified profile](../vibe/radiant/Radiant_Design_WebGL.md#physical-materials-m4-selected-profile).
 
 The scene's `tone-mapping` is `'none'` by default, or `'neutral'`/`'aces'`;
@@ -4490,8 +4490,8 @@ Opaque and masked geometry retain linear HDR radiance until an output pass
 tone-maps each antialiasing sample. The authored background keeps its display
 color, and transparent surfaces blend afterward against the opaque depth.
 Rendering still publishes one document-owned image per changed frame
-(**D4.5.1v4 / D4.5.2**); repeated fixed-time captures reuse that frame
-(**D2.11.4**).
+(**D5.5.1 / D5.5.2**); repeated fixed-time captures reuse that frame
+(**D10.1.7**).
 
 `physical` also supports transmission: `transmission` [0,1] defaults to 0,
 `ior` ≥1 to 1.5 and `thickness` ≥0 to 0 mesh units. `attenuation-color` defaults
@@ -4514,7 +4514,7 @@ Lambda describes the scene and its GLSL; the GPU does per-frame work such as ver
 
 `scene3d.model.INSTANCE_LIMIT` names the 16384-instance per-mesh bound.
 Procart scene lowering splits larger equal-material groups into bounded meshes,
-preserving source IDs, matrices and material options (**S12.1.1v3 / D7.3.5**).
+preserving source IDs, matrices and material options (**S12.1.1v3 / D9.4.5**).
 
 With a shader material, a mesh's `instance-count` (up to 16384) draws instances the vertex shader places itself (`gl_InstanceID`), and `instance-data` maps up to six names to 1–4 numbers per instance. Shader meshes are drawn as one batch and do not cast shadows.
 
@@ -4573,8 +4573,8 @@ as authored values, and stopping playback restores the authored state.
 `lambda.scene3d.postprocessing` constructs an ordered color-pass chain. Place
 one `post.chain(children)` directly in the scene; `s.postprocessing(children)`
 is the same constructor. Each chain accepts at most eight effects. Construction
-and validation stay pure (**S12.1.1v3 / D7.2.4v4**); Radiant owns execution,
-retained targets and shader programs (**D4.5.1v4 / D4.5.2**).
+and validation stay pure (**S12.1.1v3 / D9.3.4**); Radiant owns execution,
+retained targets and shader programs (**D5.5.1 / D5.5.2**).
 
 ```lambda
 import s: lambda.scene3d
@@ -4626,7 +4626,7 @@ identity on UV0. An explicitly requested missing set is diagnosed. Normal maps
 use the selected/transformed frame, including rotations and mirrors. Custom
 GLSL receives raw `uv`/`uv1`; `color` is vec3 for RGB/default geometry and vec4
 for RGBA geometry. See the [fidelity fixture](../test/scene3d/model-fidelity.ls).
-These remain pure scene values (**S12.1.1v3, D7.2.4v4**).
+These remain pure scene values (**S12.1.1v3, D9.3.4**).
 
 ### Assets, export and limits
 
@@ -4689,8 +4689,8 @@ colors.hex(colors.rgb(hsv.h+10,hsv.s,hsv.v))
 ## 29. pptx — PowerPoint import
 
 `lambda.doc.pptx` imports local `.pptx` paths or captured ZIP roots into the
-editable `lambda.slide` model (**D7.2.1/D7.2.4v4**). It shares DOCX's bounded
-OPC ZIP/XML capture and checked relationship resolution (**D7.5.2**); prefixes
+editable `lambda.slide` model (**D9.3.1/D9.3.4**). It shares DOCX's bounded
+OPC ZIP/XML capture and checked relationship resolution (**D11.1.2**); prefixes
 and relocated part names do not determine document meaning.
 
 ```lambda

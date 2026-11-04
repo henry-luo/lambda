@@ -2,10 +2,10 @@
 
 > **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
 
-> **Activation update, 2026-10-16 — D8.1.3v25:** ordinary JavaScript
+> **Activation update, 2026-10-16 — D8.4.2:** ordinary JavaScript
 > Script/Module MIR execution now selects `lambda/js/mvp-lmd/`; dynamic source
 > remains in the retained AST interpreter. Document/preamble code images now
-> use MVP with per-realm metadata (D8.5.1v2); host coverage and AUTO promotion
+> use MVP with per-realm metadata (D8.5.1); host coverage and AUTO promotion
 > remain incomplete. This older detailed-design set still describes
 > legacy lowering in several sections; use the
 > [formal MIR implementation record](../../../vibe/impl/JS_MVP_Lmd_Formal_MIR.md)
@@ -18,14 +18,14 @@
 
 ## 1. What LambdaJS is, and its design goals
 
-LambdaJS reuses Lambda's runtime instead of shipping a separate JS VM. A `.js` or `.ts` source is parsed by the first-party C lexer and hybrid recursive-descent/Pratt parser, reduced directly to a typed AST, and JIT-compiled (or interpreted) by the shared MIR backend; the resulting code calls a large C/C++ runtime that implements JS semantics over Lambda `Item` values. The vendored JS/TS Tree-sitter grammars remain only in `lambda-cst` for reference/differential checks under D8.1.3v10. The design optimizes for four goals, each visible throughout the set:
+LambdaJS reuses Lambda's runtime instead of shipping a separate JS VM. A `.js` or `.ts` source is parsed by the first-party C lexer and hybrid recursive-descent/Pratt parser, reduced directly to a typed AST, and JIT-compiled (or interpreted) by the shared MIR backend; the resulting code calls a large C/C++ runtime that implements JS semantics over Lambda `Item` values. The vendored JS/TS Tree-sitter grammars remain only in `lambda-cst` for reference/differential checks under D8.4.1. The design optimizes for four goals, each visible throughout the set:
 
 - **Unified runtime** — JS values *are* Lambda `Item` values (no marshalling boundary); see [JS_03 — Value Model & Memory](JS_03_Value_Model.md).
 - **Near-native performance** — multi-phase type inference plus native arithmetic / shaped-object / fast-dispatch paths; see [JS_15 — Performance & Optimization](JS_15_Performance.md).
 - **DOM integration** — JS manipulates Radiant `DomElement` trees through standard DOM/CSSOM APIs; see [JS_13 — Web Platform](JS_13_Web_DOM.md).
 - **Reuse over reimplementation** — JSON, URL, regex (RE2), interning, the GC, and the JIT are shared Lambda subsystems, not JS-specific copies.
 
-Across this design set, callable values follow **D6.2.2v2**: dynamic call and
+Across this design set, callable values follow **D7.2.2**: dynamic call and
 construction use distinct per-callee capabilities, `newTarget` is explicit,
 and an ordinary member call observes property `Get -> Call`.
 
@@ -59,7 +59,7 @@ Inside the engine, a front-end feeds a multi-phase MIR transpiler; the runtime c
 
 <img alt="Compilation pipeline overview" src="diagram/pipeline_overview.svg" width="318">
 
-Source → first-party C parse/direct AST reduction → validation/binding/indexing → AUTO admission → AST execution, with fast MVP MIR for unsupported units and eligible hot promotion → drain the event loop → result. AUTO is the default; explicit `JS_EXEC_BACKEND=mir` selects whole-unit MVP MIR (**D8.1.3v29**). The full pipeline, phase model, and tier policy are in [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md).
+Source → first-party C parse/direct AST reduction → validation/binding/indexing → AUTO admission → AST execution, with fast MVP MIR for unsupported units and eligible hot promotion → drain the event loop → result. AUTO is the default; explicit `JS_EXEC_BACKEND=mir` selects whole-unit MVP MIR (**D8.4.2**). The full pipeline, phase model, and tier policy are in [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md).
 
 ---
 
@@ -117,7 +117,7 @@ A handful of decisions recur across the set and are worth knowing before diving 
 - **`Item` everywhere.** Every JS value is a 64-bit tagged `Item`; objects are Lambda `Map` structs with a `TypeMap` shape. This is what makes interop with Lambda's parsers/formatters and Radiant free. ([JS_03](JS_03_Value_Model.md), [JS_06](JS_06_Objects_Properties_Prototypes.md))
 - **Metadata-selected object operations.** Immutable `TypeMap::js_meta` selects the semantic class/family and its `JsPropertyOps`; the 4-bit `map_kind` remains only a physical storage/tracing tag. ([JS_06](JS_06_Objects_Properties_Prototypes.md))
 - **Boxed-by-default, native-on-proof codegen.** MIR carries boxed `Item`s unless type inference proves a value and its consumer are numeric, enabling native arithmetic and shaped-slot access without losing generality. ([JS_04](JS_04_MIR_Lowering.md), [JS_15](JS_15_Performance.md))
-- **AUTO with hot MIR promotion.** Supported units start in the AST interpreter; unsupported units and eligible hot definitions use fast MVP MIR. Explicit AST and MIR choices remain available (**D8.1.3v29**). ([JS_01](JS_01_Compilation_Pipeline.md), [JS_15](JS_15_Performance.md))
+- **AUTO with hot MIR promotion.** Supported units start in the AST interpreter; unsupported units and eligible hot definitions use fast MVP MIR. Explicit AST and MIR choices remain available (**D8.4.2**). ([JS_01](JS_01_Compilation_Pipeline.md), [JS_15](JS_15_Performance.md))
 - **Preamble + batch process model.** test262/Node conformance runs compile a shared harness once and then each test against that snapshot inside a persistent, crash-recoverable worker. ([JS_01](JS_01_Compilation_Pipeline.md), [JS_16](JS_16_Testing.md))
 - **Shape and metadata ownership.** Property descriptors use `ShapeEntry` flags and `JsAccessorPair`; built-in identity uses immutable `TypeMap::js_meta`, while private names use NamePool identity. The Tune6 migration is complete under **D3.4.7**. ([JS_06](JS_06_Objects_Properties_Prototypes.md))
 - **Generator-based async.** Async functions reuse the generator state-machine transform; the event loop is libuv with a custom microtask queue layered on top. ([JS_08](JS_08_Iterators_Generators.md), [JS_09](JS_09_Async_Modules.md))

@@ -1,4 +1,4 @@
-// S7.4.2, D2.4.1–D2.4.3: a parameter-error guard must preserve the
+// S7.4.2, D2.3.4–D2.3.5: a parameter-error guard must preserve the
 // boxed value/error join until propagation checks it, including native returns.
 fn positive(x) float^ {
     if (not (x is number) or x <= 0 or x == inf or x is nan)

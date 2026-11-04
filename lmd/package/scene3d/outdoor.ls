@@ -1,4 +1,4 @@
-// S12.1.1v3 / D7.2.4v4: outdoor materials and motion are pure descriptions.
+// S12.1.1v3 / D9.3.4: outdoor materials and motion are pure descriptions.
 import animation: .animation
 import t: .transform
 

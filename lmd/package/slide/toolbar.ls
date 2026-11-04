@@ -1,4 +1,4 @@
-// D7.2.5: reuse the packaged icon catalog for retained player controls.
+// D10.2.1: reuse the packaged icon catalog for retained player controls.
 import icons: lambda.ui.dtna.icons
 import dom
 

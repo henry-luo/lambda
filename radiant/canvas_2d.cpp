@@ -258,7 +258,7 @@ static bool canvas_dimensions_supported(int width, int height) {
     return pixels <= RADIANT_CANVAS_MAX_PIXELS;
 }
 
-// Retires a WebGL canvas's published snapshot; leases keep its pixels for retained consumers (D4.5.1v4).
+// Retires a WebGL canvas's published snapshot; leases keep its pixels for retained consumers (D5.5.1).
 static void canvas_retire_snapshot(CanvasEntry* entry) {
     image_surface_bump_generation(entry->surface);
     image_surface_snapshot_release(entry->surface);
@@ -429,7 +429,7 @@ extern "C" bool radiant_canvas_set_pixels(void* canvas_element, const uint8_t* r
         entry->surface->height != (int)height) { // INT_CAST_OK: bounded bitmap pixel count
         if (!canvas_replace_surface(entry, (int)width, (int)height)) return false; // INT_CAST_OK: bounded bitmap pixel count
     }
-    // copy before returning: the GC array must never become a retained paint pointer (D4.5.2).
+    // copy before returning: the GC array must never become a retained paint pointer (D5.5.2).
     for (uint32_t row = 0; row < height; row++) {
         uint32_t* destination = (uint32_t*)((uint8_t*)entry->surface->pixels + row * entry->surface->pitch);
         for (uint32_t col = 0; col < width; col++) {

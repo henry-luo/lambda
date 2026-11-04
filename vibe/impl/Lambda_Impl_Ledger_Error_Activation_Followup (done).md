@@ -4,7 +4,7 @@
 **Date:** 2026-10-29. **Base:** `911b13d9f`.
 
 This pass implements existing **S7.4.4 / S8.2.4v3 / S11.4.1v3 /
-S12.3.4 / S12.3.6 / D1.4v4 / D5.1.1v3 / D5.3.3 / D5.3.6v2** rulings.
+S12.3.4 / S12.3.6 / D1.4 / D6.1.1 / D6.3.3 / D6.3.6** rulings.
 No semantics or design ruling changes. Earlier qualifications in the active
 ledger remain historical checkpoints.
 
@@ -14,11 +14,11 @@ ledger remain historical checkpoints.
 |---|---|
 | LR02-32 | An inline element subscript is parsed through the existing primary-type-slot parser, as query operands are. `e[<p>]` reaches the type-key query under S8.2.4v3. Bare tag-name policy is unchanged. |
 | LR02-33 | A known builtin without a compatible registry row is E206 before execution. Re-resolve pre-bound singleton rows after counting arguments; preserve user shadows, qualified exports, pipe injection, and the existing S10.1.1v4 set-operand fold. |
-| LR10-14 | Error members read only their own payload. A compatibility sentinel never reads ambient `last_error`. Integer conversion, formatted runtime errors, parser cleanup, glTF formatting and virtual writes retain owned diagnostics under S7.4.4; structural-equality depth exhaustion fills its existing explicit completion payload under D1.4v4. |
+| LR10-14 | Error members read only their own payload. A compatibility sentinel never reads ambient `last_error`. Integer conversion, formatted runtime errors, parser cleanup, glTF formatting and virtual writes retain owned diagnostics under S7.4.4; structural-equality depth exhaustion fills its existing explicit completion payload under D1.4. |
 | LR10-15 | Deferred checks carry a lazy source descriptor. T0 and MIR keep source coordinates at declarations and caller-owned parameter admission; generated scalar, structural, binder, native-u32 and terminal-null admission paths share one runtime call. Resolve the source point only on failure, retaining successful admission fast paths under S11.4.1v3. |
-| LR08-13 | Interpreted environments occupy exact side-root slots in their activation segments. Abandonment releases those roots without running a destructor. Realm-owned persistent global environments retain explicit registration; temporary scopes do not. D5.1.1v3 / D5.3.3. |
+| LR08-13 | Interpreted environments occupy exact side-root slots in their activation segments. Abandonment releases those roots without running a destructor. Realm-owned persistent global environments retain explicit registration; temporary scopes do not. D6.1.1 / D6.3.3. |
 | LR12-43 | New stack lifetimes clear retired shadow state before priming. ASan receives start/finish fiber-switch notifications for normal, nested and base-stack transitions, with terminal fake-stack retirement. Cold-stack serialization preserves application poison while copying inactive physical frame bytes. Exact GC roots and native-stack scanning policy are unchanged. |
-| LR10-17 | The original finite 3,072-frame native probe is already contained on this checkout. A permanent direct activation regression complements the existing unbounded recursion case, under S7.11.1v2 / S7.11.2v2 / D5.3.6v2. |
+| LR10-17 | The original finite 3,072-frame native probe is already contained on this checkout. A permanent direct activation regression complements the existing unbounded recursion case, under S7.11.1v2 / S7.11.2v2 / D6.3.6. |
 
 `runtime_error_itemf` is a private shared producer; it formats into its own
 record before allocating the returned heap payload or replacing the diagnostic

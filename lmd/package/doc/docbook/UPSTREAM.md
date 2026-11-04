@@ -4,7 +4,7 @@
 `b26a7c42445b5aae1e3e6cda866513427b2b061c`, from the
 [official repository](https://codeberg.org/DocBook/xslTNG).
 **Status:** Initial `core-html` profile, 2026-10-15; a partial native port.
-**Formal linkage:** D7.2.4 places this source package at `lambda.doc.docbook`;
+**Formal linkage:** D9.3.4 places this source package at `lambda.doc.docbook`;
 S12.1.1v3 separates conversion from acquisition/export; S1.8 keeps input and
 locale templates as data. No formal ruling changes.
 
@@ -77,7 +77,7 @@ file browser uses the same XML route and retains the original source tab.
 Automatic tiering/MIR executes the package. Forced interpreter activation
 currently rejects the runtime's unsupported map-index assignment node in the
 procedural media loader. No package-specific tier override or interpreter
-workaround is installed (D8.1.1).
+workaround is installed (D8.3.1).
 
 ## Reproduce and update
 

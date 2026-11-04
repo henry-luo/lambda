@@ -31,7 +31,7 @@ strictness runs; the final Lambda/input baseline passed **8,732/8,732**. [Implem
 
 ## Place borrows, row snapshots and async requalification — 2026-11-03
 
-The user clarified **S9.1.3v3 / S9.2.2v2 / D4.4.7**. Rooted place homes now
+The user clarified **S9.1.3v3 / S9.2.2v2 / D5.4.6**. Rooted place homes now
 publish rebinds, COW detaches and scalar updates on both tiers; row/view values
 snapshot. [LR12-10](<Lambda_Issue_Ledger (fixed).md#lr12-10>) and
 [LR12-14](<Lambda_Issue_Ledger (fixed).md#lr12-14>) moved to the fixed ledger.
@@ -72,7 +72,7 @@ The user adopted **S10.1.1v5**: ordinary expressions now use the type-pattern pr
 
 Implemented the long-name portion of **LR07-11**, correctness residues 1–4 of
 **LR12-24**, and strict-T0 row stores for **LR12-31**, under existing
-**S1.6 / S7.7.2–S7.7.6 / D6.1.3v2 / D8.1.1v18** rulings. LR07-11's scope
+**S1.6 / S7.7.2–S7.7.6 / D7.1.3 / D8.3.2** rulings. LR07-11's scope
 and loop caps and LR12-24's proof/join optimization residues remain open.
 LR12-31 moved to the [fixed ledger](<Lambda_Issue_Ledger (fixed).md#lr12-31>).
 Implementation and qualification: [containment follow-up](<impl/Lambda_Impl_Ledger_Containment_Followup (done).md>).
@@ -82,7 +82,7 @@ No pending ruling was decided.
 
 Implemented the remaining **S16.9.5** nominal/attribute presence cases,
 **LR01-5** profile capacity and **LR12-6** owner-scoped dry-run configuration
-(**D5.4.1–D5.4.4**). Their records are in the
+(**D6.4.1–D6.4.4**). Their records are in the
 [fixed ledger](<Lambda_Issue_Ledger (fixed).md>).
 **LR03-40 / S8.2.2v6** has its four core discrepancies repaired, but remains
 PARTIAL because Mark namespace serialization needs a ruling. No new policy was
@@ -108,7 +108,7 @@ release tier/GC checks **90/90**, ASan **14/14**, and S16 harnesses
 
 Fixed **LR02-32**, **LR02-33**, **LR08-13**, **LR10-14**, **LR10-15** and
 **LR12-43** under existing **S7.4.4 / S8.2.4v3 / S11.4.1v3 / S12.3.4 /
-S12.3.6 / D5.1.1v3 / D5.3.3 / D5.3.6v2** rulings. Five older records
+S12.3.6 / D6.1.1 / D6.3.3 / D6.3.6** rulings. Five older records
 already pass and now have permanent regression coverage: **LR05-16**,
 **LR07-20**, **LR07-39**, **LR07-48** and **LR10-17**. All eleven moved to
 the [fixed ledger](<Lambda_Issue_Ledger (fixed).md>), preserving their original
@@ -126,7 +126,7 @@ in that implementation record.
 ## Ownership follow-up — 2026-10-29
 
 Fixed **LR12-32**, **LR12-34** and **LR13-17** under existing **S9.1.2 /
-S9.1.3 / S9.3.1 / S11.4.1v3 / S16.9.8 / D4.2.6** rulings. **LR12-41** was
+S9.1.3 / S9.3.1 / S11.4.1v3 / S16.9.8 / D5.2.5** rulings. **LR12-41** was
 already fixed and is now verified with a permanent regression. All four
 records moved to the [fixed ledger](<Lambda_Issue_Ledger (fixed).md>).
 No pending-ruling policy was changed.
@@ -200,7 +200,7 @@ passes **3978/3978**.
 ### Direct implementation pass — 2026-09-05
 
 Six independently reproduced items were resolved without changing a language
-ruling: LR02-18 (**S12.3.3v2**, **D2.6.7**), LR05-3 (**S6.2.2v3**), LR07-12,
+ruling: LR02-18 (**S12.3.3v2**, **D3.1.4**), LR05-3 (**S6.2.2v3**), LR07-12,
 LR08-8, LR10-1, and LR10-4. Focused JIT/T0 fixtures and the error regression
 suite pass; the resolution records are in the fixed issue ledger.
 
@@ -304,7 +304,7 @@ they need rulings, not fixes. *2026-09-22:* the list/array kind gaps were ruled
 [LR05-12](<Lambda_Issue_Ledger (fixed).md#lr05-12>), [LR12-28](<Lambda_Issue_Ledger (fixed).md#lr12-28>). P1 of the list fixes then found
 [LR02-18](<Lambda_Issue_Ledger (fixed).md#lr02-18>) (reference grammar has no list literal) and fixed
 [LR02-19](<Lambda_Issue_Ledger (fixed).md#lr02-19>) (let-group item loss, another wrong value with no error).
-The effect-colour work of the same day (D7.4.6, ES48) fixed
+The effect-colour work of the same day (D7.1.1, ES48) fixed
 [LR12-30](<Lambda_Issue_Ledger (fixed).md#lr12-30>) (an `fn` could call a built-in procedure). Moving the
 effect examples into a `pn` found [LR10-9](<Lambda_Issue_Ledger (fixed).md#lr10-9>): E228 is checked only in
 top-level expression statements. Triaging the baseline gate against a clean control
@@ -332,7 +332,7 @@ The survey's other correctness claims are not yet reproduced; they stay in the p
 
 ### Grammar/C disagreement pass — 2026-09-25
 
-The 2026-09-24 grammar work noted five disagreements between the two front ends without filing them. Each was re-run at `293b7a175` on `lambda.exe` and on the reference grammar, regenerated with the pinned tree-sitter CLI 0.25.10 (S16 harnesses: 343/343 C, 330/330 Tree-sitter). Under D8.1.2v3, each is judged against the rulings.
+The 2026-09-24 grammar work noted five disagreements between the two front ends without filing them. Each was re-run at `293b7a175` on `lambda.exe` and on the reference grammar, regenerated with the pinned tree-sitter CLI 0.25.10 (S16 harnesses: 343/343 C, 330/330 Tree-sitter). Under D8.1.1, each is judged against the rulings.
 - **Four reproduce** and are filed as [LR02-24](<Lambda_Issue_Ledger (fixed).md#lr02-24>)–[LR02-27](#lr02-27). LR02-24 and LR02-26 were fixed on 2026-09-25, with LR02-20.
 - **The fifth no longer reproduces.** The grammar had lexed keywords as type names (`let x: if = 1`, `fn f() pn { 1 }`). Since 538dca7b0 reserved them, both front ends reject every probe.
 - **Checking LR02-24 found [LR03-14](<Lambda_Issue_Ledger (fixed).md#lr03-14>), and fixing it found [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>).** Both had one cause and were fixed later on 2026-09-25 (see "Range type fix" below).
@@ -342,7 +342,7 @@ Setup note: the checkout first needed `npm install`. `node_modules` still held C
 ### Wrong-value fix pass — 2026-09-25
 
 The "wrong value, no error" group was triaged against the rulings; each defect a ruling covers was fixed on both tiers, and the rest wait on a decision.
-- **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D7.2.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
+- **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D9.3.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
 - **Fixed in part:** [LR04-9](<Lambda_Issue_Ledger (fixed).md#lr04-9>) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
 - **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), plus the residues above.
 - **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](<Lambda_Issue_Ledger (fixed).md#lr07-22>), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>), [LR12-31](<Lambda_Issue_Ledger (fixed).md#lr12-31>)–[LR12-34](<Lambda_Issue_Ledger (fixed).md#lr12-34>). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
@@ -355,7 +355,7 @@ The six "error containment is only partly built" items were worked on both tiers
 - **Fixed and archived:** [LR10-9](<Lambda_Issue_Ledger (fixed).md#lr10-9>) (E228 in every position), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>) (the error members, `error(msg, source)`, `last_error` rooting) and [LR12-25](<Lambda_Issue_Ledger (fixed).md#lr12-25>) (`print` of an error, `string(err)` escaping containment).
 - **Implemented, waiting on a ruling:** [LR03-13](#lr03-13) (a call through a declared function-type contract checks its result).
 - **Ruled and fixed:** [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>): `raise v` of a non-error is `raise error(v)` (S7.4.6, TE-21, user ruling of 2026-09-27).
-- **TE-17 I3 landed, residue open:** [LR12-24](#lr12-24), with the D6.1.3 `may_defect` fixed point it was blocked on.
+- **TE-17 I3 landed, residue open:** [LR12-24](#lr12-24), with the D7.1.3 `may_defect` fixed point it was blocked on.
 - **Found on the way, all reproduced:** [LR02-31](<Lambda_Issue_Ledger (fixed).md#lr02-31>), [LR10-14](<Lambda_Issue_Ledger (fixed).md#lr10-14>)–[LR10-16](<Lambda_Issue_Ledger (fixed).md#lr10-16>) and [LR12-36](<Lambda_Issue_Ledger (fixed).md#lr12-36>), which was fixed and archived later the same day. A `type` or function value in an `any` map slot read back as an error on both tiers (`typeditem_to_item` had no arm for either); fixed in passing.
 
 Verified: `make test-lambda-baseline` 5974/5974 once the four emission-size probes are re-baselined (`test/mir/mir_budgets.json`, reasons recorded there). New fixtures, pinned on interp, jit and auto: `proc/defect_value_flow`, `proc/rejected_error_value_flow`, `contract_return_check`, `error_members`, `raise_non_error`, `proc/print_error_value`. `normalize_error`'s golden had pinned the hidden early return S7.7.1 forbids and now reads the value flow.
@@ -379,7 +379,7 @@ Probing the fixes found [LR07-28](<Lambda_Issue_Ledger (fixed).md#lr07-28>), an 
 
 ### Range type fix — 2026-09-25
 
-[LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) (`is` against a union holding a range) and [LR03-14](<Lambda_Issue_Ledger (fixed).md#lr03-14>) (range-typed parameters) had one cause: a range type wore `LMD_TYPE_RANGE`, the tag of a range value, where D3.1.1v4 puts it under the shared `LMD_TYPE_TYPE` tag. The same cause made a range-typed map field segfault at a call boundary. All three are fixed on every tier; the two records are archived, and LR03-18's describes the segfault. Checking the fix found three older defects, each reproduced on the binary from before it, and left one residue:
+[LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) (`is` against a union holding a range) and [LR03-14](<Lambda_Issue_Ledger (fixed).md#lr03-14>) (range-typed parameters) had one cause: a range type wore `LMD_TYPE_RANGE`, the tag of a range value, where D4.1.1 puts it under the shared `LMD_TYPE_TYPE` tag. The same cause made a range-typed map field segfault at a call boundary. All three are fixed on every tier; the two records are archived, and LR03-18's describes the segfault. Checking the fix found three older defects, each reproduced on the binary from before it, and left one residue:
 - [LR03-19](<Lambda_Issue_Ledger (fixed).md#lr03-19>): in a nominal object type, a union- or range-typed field that is not last reads back a wrong value.
 - [LR03-20](<Lambda_Issue_Ledger (fixed).md#lr03-20>): object construction does not check its field contracts. Fixed the same day.
 - [LR07-30](<Lambda_Issue_Ledger (fixed).md#lr07-30>): a range-typed `var` changes its member's representation on the JIT.
@@ -531,8 +531,8 @@ AST lookup (`lambda/runtime/runner.cpp:2224`) but selects an AST build claim
 because MIR reuse is disabled (`:2266`). The READY claim retries the same
 lookup (`:2291`) indefinitely. These selection conditions are unchanged from
 the pre-rework `0452aaabc` source. The claim and hit paths must agree on the
-artifact kind without changing the requested execution tier (D8.1.1v18,
-D8.5.1v3). This is separate from error-union admission. Bounded LLDB trace and
+artifact kind without changing the requested execution tier (D8.3.2,
+D8.5.1). This is separate from error-union admission. Bounded LLDB trace and
 source comparison: `temp/error-handling/m8-terminal-no-cache-stack.log` and
 `m8-cache-retry-root-review.json`; qualification record:
 [type/error implementation](<impl/Lambda_Impl_Type_Error_Handling (done).md>).
@@ -648,7 +648,7 @@ The positional form is documented and used:
 - `doc/Doc_Convention.md` uses it in its `type`-marker example (:214, :232).
 - The S11.1.5v2 fixture `test/lambda/proc/fn_pn_function_types.ls` spells it on five lines (`PureUnary`, `ProcUnary`, `apply_fn`, `apply_pn`, and the `is` checks).
 
-S11.1.5v2 shows only named parameters, and Design_Syntax §7.29 leaves the form "Not decided here". Under D8.1.2v3, no ruling yet says which side is wrong.
+S11.1.5v2 shows only named parameters, and Design_Syntax §7.29 leaves the form "Not decided here". Under D8.1.1, no ruling yet says which side is wrong.
 
 **Needs a ruling:** may a signature spell a parameter by its type alone?
 - **If it may,** C must read `int` as a type, and the grammar must accept the form.
@@ -919,7 +919,7 @@ same. An error reaching a string-typed unboxing adapter becomes the static
 same pattern at `lambda-eval.cpp:4020`). Contradicts **S7.4** / **S7.10**
 (errors are never ordinary values) and **S1.6**.
 
-*Fixed 2026-09-25:* the `max` case had been fixed by a20e59b4f. The rest were registry rows that return an ordinary error but declared `may_error=false`, so a call typed as its success shape and the JIT unboxed the error: `slice` (both arities), `take`, `drop`, `replace` (both), `url_resolve`, `symbol/2`, `chr`, `real`, `imag`, `ndim` and `sort/2` (a string became `"<error>"`, a symbol null, a float `nan`, an int `0`). They now declare it (S11.4.9, D6.1.3), and `sys_func_call_may_return_error` keeps provably clean calls clean: constant integer offsets on a text, materialized or range source; all-text `replace`; a complex `real`/`imag`; an error-free `chr` or `ndim` operand. `format` returned `String*`; it now returns an Item (D6.4.1), so an error operand stays an error instead of the text `"<error>"`, and a bad format is an error on both tiers. The string builders keep their in-place appends: a `string | error` part of an owned chain or a flattened leaf takes a cold error edge or the all-string guard (hyphen2's append profile is unchanged at 11,092 calls). Corpus: three typed benchmark bindings (`hyphen_typed.ls`, `json2.ls`) and `openapi_json` rescue with `or ""`, and `Lambda_Func.md`'s variadic `printf` example, which never worked (`format` has no printf mode), was replaced. Fixture `test/lambda/proc/sysfunc_text_error_lane.ls`; `slice_float_indices.ls` is now pinned on every tier (it was wrong on the JIT, hidden by `auto`).
+*Fixed 2026-09-25:* the `max` case had been fixed by a20e59b4f. The rest were registry rows that return an ordinary error but declared `may_error=false`, so a call typed as its success shape and the JIT unboxed the error: `slice` (both arities), `take`, `drop`, `replace` (both), `url_resolve`, `symbol/2`, `chr`, `real`, `imag`, `ndim` and `sort/2` (a string became `"<error>"`, a symbol null, a float `nan`, an int `0`). They now declare it (S11.4.9, D7.1.3), and `sys_func_call_may_return_error` keeps provably clean calls clean: constant integer offsets on a text, materialized or range source; all-text `replace`; a complex `real`/`imag`; an error-free `chr` or `ndim` operand. `format` returned `String*`; it now returns an Item (D7.6.1), so an error operand stays an error instead of the text `"<error>"`, and a bad format is an error on both tiers. The string builders keep their in-place appends: a `string | error` part of an owned chain or a flattened leaf takes a cold error edge or the all-string guard (hyphen2's append profile is unchanged at 11,092 calls). Corpus: three typed benchmark bindings (`hyphen_typed.ls`, `json2.ls`) and `openapi_json` rescue with `or ""`, and `Lambda_Func.md`'s variadic `printf` example, which never worked (`format` has no printf mode), was replaced. Fixture `test/lambda/proc/sysfunc_text_error_lane.ls`; `slice_float_indices.ls` is now pinned on every tier (it was wrong on the JIT, hidden by `auto`).
 *Requalified 2026-11-03:* **the inferred-string reassignment residue is fixed**
 by S7.7.4v2's continued binding outcomes. `var line = "a"; line = line ++
 slice(s, 1.5, 3)` retains the error and executes later statements on interp,
@@ -948,7 +948,7 @@ Both tiers also leak internal names: `_takes3_317`, `fn_call2`, "representation 
 <a id="lr07-40"></a>**LR07-40 · Unknown argument names are dropped; duplicate slots are diagnosed (S12.3.2) · PARTIAL (found 2026-09-26, while fixing LR07-19)**
 Original reproducer: with `fn f(a, b = 2) => [a, b]`, both `f(1, zz: 5)` and `f(5, a: 1)` silently produced `[1, 2]`; argument normalization either skipped an unknown name or overwrote a filled slot. **Fixed 2026-10-28:** duplicate positional/named and named/named slots report E206 before normalization, including method calls. Positional arguments after named ones still fill the next empty slot, as documented. **Residue:** unknown argument names are still ignored; their policy remains outside this implementation pass. See [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
 
-<a id="lr07-42"></a>**LR07-42 · An async procedure's state machine grows quadratically with its calls: ~300 ms to compile `beng/knucleotide` (D8.1.1v2) · OPEN (found 2026-10-03, by the AUTO benchmark sweep)**
+<a id="lr07-42"></a>**LR07-42 · An async procedure's state machine grows quadratically with its calls: ~300 ms to compile `beng/knucleotide` (D8.3.1) · OPEN (found 2026-10-03, by the AUTO benchmark sweep)**
 `test/benchmark/beng/knucleotide.ls` (rewritten in `c839925ca`) runs a 2–3 ms workload, but AUTO takes ~318 ms end to end and eager JIT ~236 ms (quiet machine, release). The v50 binary shows the same cost on the new script, so this is a codegen cost, not a recent regression. `main` reads its input with `io.read(INPUT_PATH)^`. That makes it an async procedure (the concurrency planner logs "pn main suspends because it calls io_read"), and an async procedure must run as a resumable MIR state machine. T0 therefore compiles it synchronously at first entry, together with its 8 direct callees (`interp_make_closure` → `compile_ast_function_satellite`). Under `LAMBDA_SATELLITE_CLUSTER_SKIP`, the image costs 315 ms with every member and 23 ms with `main` alone. Most of the cost follows `print_count`, a one-line callee: skipping it leaves 82 ms. The size is in `main` itself: **54,254 MIR lines**, of 59,238 for the whole module.
 
 Two causes multiply:
@@ -961,7 +961,7 @@ Confirmation: replacing `io.read(INPUT_PATH)^` with the synchronous `input(INPUT
 Possible fixes, independent and combinable:
 
 - **(A) Save only what is live across each state.** Restrict `async_save_spills` / `async_restore_spills` to registers live at the suspension point, from a liveness pass over the async function or from the tracked set pruned at scope exits. Cost becomes linear in the number of states, with no semantic change. This is the larger codegen change.
-- **(B) Emit no suspendable unwind where the scope can own no handle.** Under S13.3.1 a block owns only the handles started in it, so a procedure (or block) with no `start` in its body can skip the park/resume state at its error exits and unwind synchronously. This removes 10 of `main`'s 12 states here. It depends on the task-scope rules: confirm that nothing else, such as `io.read`'s own task, can be registered in the caller's scope after its await completes. It needs a ruling (D8.1.1v2 / S13.3).
+- **(B) Emit no suspendable unwind where the scope can own no handle.** Under S13.3.1 a block owns only the handles started in it, so a procedure (or block) with no `start` in its body can skip the park/resume state at its error exits and unwind synchronously. This removes 10 of `main`'s 12 states here. It depends on the task-scope rules: confirm that nothing else, such as `io.read`'s own task, can be registered in the caller's scope after its await completes. It needs a ruling (D8.3.1 / S13.3).
 
 Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide.ls` on a debug build, then `wc -l temp/mir_dump.txt`, and count `lambda_async_frame_set_state` in `_main`. Analysis record: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) §12.6.
 
@@ -1172,7 +1172,7 @@ predicate behind a temporary switch, median of 7, nine rows between −0.6% and
 +0.3% (deltablue +0.1%/+0.2%, nbody −0.1%, richards −0.5%, splay −0.2%). The
 hot path gains one compare-and-branch per native call to a defect-capable
 callee, which is what TE-15 budgeted for. TE-15 still names the `may_defect`
-call-graph fixed point (D6.1.3) as what removes it, and says it "must be built
+call-graph fixed point (D7.1.3) as what removes it, and says it "must be built
 before, not after, the routing work".
 
 Verified after the fix: baseline 5631/5634 (Lambda runtime 3527/3530), MIR
@@ -1214,7 +1214,7 @@ diverges: T0 true, JIT false — the S1 store class), `temp/t30/h/err_prop.ls`,
 `Lambda_Impl_Type_Enforce (done).md`, so the tracking pointer is stale and the
 remaining round-2 work reads as finished.
 
-*2026-09-27 — TE-17 I3 and the D6.1.3 fixed point landed; the other origination classes are fixed.*
+*2026-09-27 — TE-17 I3 and the D7.1.3 fixed point landed; the other origination classes are fixed.*
 - **The fixed point.** `mir_solve_may_defect` (`transpile-mir.cpp`) runs once per compile, before any variant is registered. It first records each function's own origination sites, each judged by the emitter's own gate: declaration and reassignment boundaries, element and field stores, CRUD, `open`, `start`, handler statements, deferred object fields, computed-key maps, call admissions and array boundaries, the system rows that can fail, and the return boundary. It then takes the least fixed point over the call edges. An import reads build_ast's conservative fact (`TypeFunc::defect_known`/`may_defect`, `ast_note_function_defect`); anything else fails closed.
 - **Lane gating (I3).** A call whose value may be an error it does not declare is a boxed join to every planner: the carrier oracle, the lane witness, the lane proof and boundary redundancy. That covers a defect-capable callee, a call through a function-type contract ([LR03-13](#lr03-13)), and a system function that rejects (S11.4.3) or passes through (S7.9.3) an operand that may be one. So are a member or element of such a value and arithmetic over it. `type()` is exempt, since it observes an error (S7.9.1).
 - **Keeping the cost down, within the rulings.** `==`/`!=` of an `int | error` join against an in-band int compares Item words (S5.1.2). Integer arithmetic over joins tests for the first error and runs on the int lanes (S7.9.3), and `int()` of a join is the join itself. A destination whose contract the join's success already satisfies (the callee's own return proved it) tests only the error arm: declarations, reassignments, returns, arguments and the typed-array witness. A record literal built in its contract counts no return boundary in the solve, and a record binding's fields stay on their typed path (its record call has already returned any error).
@@ -1223,7 +1223,7 @@ remaining round-2 work reads as finished.
 
 Fixture `test/lambda/proc/defect_value_flow.ls`, pinned on every tier; the base build fails it (T0 prints pointer bits and `0` for errors, and the JIT crashes). `make test-lambda-baseline` 5974/5974 with the emission budgets re-baselined for four probes (tune4 +14, cube3d +82, deltablue +217, prettier_ast +53 module instructions; reasons in `test/mir/mir_budgets.json`). Runtime: release builds, paired A/B against the base, 15 pairs over 27 typed rows (`run_paired_benchmarks.py`, artifacts `temp/errc/ab*.json`). 20 rows are within ±2% and three are faster (prettier_ast −3.8%). Slower: deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (between −4.5% and +15.6% across four runs), and queens +12% on a 70 µs run. Before the join lowerings, storage and queens had been +22% and cube3d +8%.
 
-**Correctness follow-up (2026-10-31), S7.7.2–S7.7.6 / D6.1.3v2.**
+**Correctness follow-up (2026-10-31), S7.7.2–S7.7.6 / D7.1.3.**
 Residues 1–4 are fixed: deferred declaration and reassignment failures end their
 declaring block (including iteration-local and comma-separated bindings), fresh
 parameter admission failures become the call's value, checked assignment/store
@@ -1269,8 +1269,8 @@ Likewise `var b = [1]; b[5] = 2` only logs "index 5 out of bounds"
 contradict **S7.1.3v2** (writes are checked and raise through the `T^`
 channel).
 
-*Fixed 2026-09-25 (push):* S9.1.1 makes `push(b, v)` mean `b' = b ++ [v]`, and index writes already keep an open packed array's lane or widen it in place. `array_num_push_open` (`lambda-eval.cpp`) does the same for push: it appends in the lane when every item fits and otherwise converts to a generic Array, then spreads a list (D2.6.5v3); a view or an N-D array refuses, as splice does. `pn_push_cow` no longer checks an open binding against a past admission's certificate (SI3v2): after `pn g(x: int[])` had admitted `u`, `push(u, "s")` had failed. `proc/jit_tail_if_push_error` now fails its push on a matrix, and `proc-ext/list_var_mutation`, green at last, moved to the baseline. Fixture `test/lambda/proc/push_open_packed.ls`.
-*Fixed 2026-11-03 (direct writes, S7.1.3v3 / S7.7.6v2):* the setter already returned a rich E302, but both tiers could discard it in a procedure without a declared error return. T0 now establishes the store boundary for unannotated roots as well. MIR's raw positional fallback arms route the setter's error through that boundary before statement-result discard. The original `pn main() { var b = [1]; b[5] = 2; print("unreachable") }` reports E302, exits one and never prints the marker on interp/jit/auto. Native-result transport no longer blocks this fix (D6.1.3v2). `proc/ledger_index_write_error` checks recovery, native int/float results, unchanged snapshots, skipped tails and inner-block containment; the original main is a negative regression. See [implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
+*Fixed 2026-09-25 (push):* S9.1.1 makes `push(b, v)` mean `b' = b ++ [v]`, and index writes already keep an open packed array's lane or widen it in place. `array_num_push_open` (`lambda-eval.cpp`) does the same for push: it appends in the lane when every item fits and otherwise converts to a generic Array, then spreads a list (D3.3.1); a view or an N-D array refuses, as splice does. `pn_push_cow` no longer checks an open binding against a past admission's certificate (SI3v2): after `pn g(x: int[])` had admitted `u`, `push(u, "s")` had failed. `proc/jit_tail_if_push_error` now fails its push on a matrix, and `proc-ext/list_var_mutation`, green at last, moved to the baseline. Fixture `test/lambda/proc/push_open_packed.ls`.
+*Fixed 2026-11-03 (direct writes, S7.1.3v3 / S7.7.6v2):* the setter already returned a rich E302, but both tiers could discard it in a procedure without a declared error return. T0 now establishes the store boundary for unannotated roots as well. MIR's raw positional fallback arms route the setter's error through that boundary before statement-result discard. The original `pn main() { var b = [1]; b[5] = 2; print("unreachable") }` reports E302, exits one and never prints the marker on interp/jit/auto. Native-result transport no longer blocks this fix (D7.1.3). `proc/ledger_index_write_error` checks recovery, native int/float results, unchanged snapshots, skipped tails and inner-block containment; the original main is a negative regression. See [implementation and qualification](<impl/Lambda_Impl_Ledger_Handler_Write_Followup (done).md>).
 
 *Remaining (needs a ruling):* whether a write error from a plain `pn` must escape a **discarded statement-position call in its caller**, rather than being available as the call's result. This separate caller-boundary policy is not decided by repairing the originating store.
 
@@ -1322,8 +1322,8 @@ accepts it, `runtime_union_map_rep_proves_cached` returns false without
 recording that result; `runtime_type_admit_value` then reaches
 `lambda_type_matches` (`:10842`), which invokes
 `runtime_validate_value_against_type` (`:1665`). The first deep validation is
-required by **D3.2.2**; subsequent crossings of that unchanged accepted value
-still revalidate it. **S11.4.1v3** permits reuse, and **D3.2.4v3** defines the
+required by **D4.2.3**; subsequent crossings of that unchanged accepted value
+still revalidate it. **S11.4.1v3** permits reuse, and **D4.2.5** defines the
 physical-proof condition. The remaining work is a sound negative-proof or
 post-validation certificate for stable untrusted shapes, with invalidation on
 shape transition. [Tune27 M1/T27-1](impl/Lambda_Impl_Tune27 (done).md) records
@@ -1352,7 +1352,7 @@ the enabled `test_validator_gtest` cases complete without a crash.
 `test_validator_gtest.exe` and `test_validator_input_gtest.exe` now abort at
 startup with `dyld: symbol not found in flat namespace '_LIT_BOOL'`.
 The validation DSO imports `LIT_BOOL` and other private compiler globals;
-the host contains them as local symbols after the **D7.3.6** export allowlist
+the host contains them as local symbols after the **D9.4.6** export allowlist
 is applied. Both the import in `build_ast.cpp` and that export policy are
 present in HEAD `5fd9e797e`, before the P2 changes. P2's schema helper imports
 also require a valid internal link boundary. This run obtains no verdicts
@@ -1374,7 +1374,7 @@ the raw textual scan and filename map (`validator/ast_validate.cpp:270`–`312`)
 
 Not attributed. The `elmt code clean up` commit (2cdcc1ea1) touches none of the files involved — not `build_lambda_config.json`, not `lambda-data.cpp`, not `runner.cpp`, not any validator or test source. The two remaining candidates are the object-redesign commit (da7a97b13), which reshaped `lambda.h`/`lambda-data.cpp` heavily, and the merged upstream `DOM: seven linkage lies and a dead local` (dbe7b7dba). Confirming which needs a from-scratch build of an older tree; a worktree attempt stalled on re-fetching vendored `re2`.
 
-**Consequence for the specs:** the D2.6.6v2 content-arity claim can only be read from the code, not run. `validate_against_element_type` does enforce `content_length`, and an element-kinded nominal type reaches that arm by tag, so the old "not implemented" note is wrong — but "conformant" cannot be asserted until this is fixed. Both conformance rows now say exactly that.
+**Consequence for the specs:** the D3.1.1 content-arity claim can only be read from the code, not run. `validate_against_element_type` does enforce `content_length`, and an element-kinded nominal type reaches that arm by tag, so the old "not implemented" note is wrong — but "conformant" cannot be asserted until this is fixed. Both conformance rows now say exactly that.
 
 
 
@@ -1613,12 +1613,12 @@ features. Linux/Windows P13 runtime smoke remains open. Broader SVG2 vector effe
 viewport/screen selectors), filter component transfer/convolution and the larger
 SVG document/cache architecture remain explicit limits rather than full support
 claims. These are SVG behavior gaps; no Lambda ruling changed. Retained resources
-follow **D4.2.2v2–D4.2.6/D4.5.1v4** (pin, gen-check, copy-as-value).
+follow **D5.2.2–D5.2.5/D5.5.1** (pin, gen-check, copy-as-value).
 The plan separates implemented cases, historical checkpoints and open gates.
 
 2026-10-29: numeric Lambda attributes now reach the DOM text boundary and SVG
 presentation fallback through the shared number formatter and document-owned
-attribute store (**D4.5.1v4/D4.5.2**). Numeric opacity/stroke/focus and exact
+attribute store (**D5.5.1/D5.5.2**). Numeric opacity/stroke/focus and exact
 string parity pass the focused native replay on all three tiers with forced
 poisoning GC. Required Radiant qualification and the exact old-host CSS failure
 comparison are recorded separately; no clean aggregate claim is made.
@@ -1645,7 +1645,7 @@ option's native selectedness/dirty bits; the fresh option wrappers retain
 authored `selected` defaults. `dom_option_is_selected` and native form-data
 queries then read those defaults instead of the chosen value. Preserve native
 control state in the general presentation lifecycle, respecting changed authored
-defaults; do not add a second selection owner inside a theme (**D7.2.5;
+defaults; do not add a second selection owner inside a theme (**D10.2.1;
 S12.1.3**).
 
 <a id="ui-3"></a>**UI-3 · Native overflow clips retain earlier flex dimensions · OPEN (found 2026-10-10)**
@@ -1661,7 +1661,7 @@ focused engine regression and a shared lifecycle fix. The native viewer also
 shows a mispositioned block-button label after its initial relayout; that
 observation still needs isolation from the clipping defect. No compensating
 padding, fixed heights or theme-specific layout branches are added. The
-package exercises ordinary CSS through the existing engine (**D7.2.4;
+package exercises ordinary CSS through the existing engine (**D9.3.4;
 S12.1.3**).
 
 # Appendix B — Cross-cutting clusters

@@ -1,4 +1,4 @@
-// D8.3.3/S4.1: admit complete compact-int tuples; sized and error joins retain their domains.
+// D7.3.3/S4.1: admit complete compact-int tuples; sized and error joins retain their domains.
 pn words(values, count) {
     let a = values[0]
     let b = values[1]

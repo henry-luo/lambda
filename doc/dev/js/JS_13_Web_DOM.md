@@ -14,10 +14,10 @@
 ## 1. Purpose & scope
 
 Current Web-platform host objects are native VMaps branded by the
-Radiant/JS DOM bridges. Under **D3.4.7/D7.4.1–D7.4.3**, the property kernel
+Radiant/JS DOM bridges. Under **D3.4.7/D9.5.1–D9.5.3**, the property kernel
 resolves their host-family metadata and delegates through the single VMap/Jube
 bridge; declared member records and record-owned hooks remain authoritative under
-D7.4.4. Physical `MapKind` tags
+D9.5.4. Physical `MapKind` tags
 are not DOM semantic classifiers. This document describes DOM-node VMaps,
 document/foreign-document VMaps, CSSOM/style host resources, and the
 the metadata-qualified CSS namespace ordinary object.
@@ -30,16 +30,16 @@ The DOM/CSSOM layers are **views over Radiant's structures**: a wrapper Map neve
 
 <img alt="DOM bridge & lazy layout" src="diagram/d13_dom_bridge.svg" width="720">
 
-**Native node wrapping.** `dom_wrap_element` returns a branded native VELMT whose `host_type` identifies the Radiant DOM-node interface and whose `host_data` points at the `DomNode` (D7.4.5v2). `dom_unwrap_element` tests this native brand through the Radiant bridge; property lookup, enumeration, descriptors, prototypes, and expandos enter the shared property protocol.
+**Native node wrapping.** `dom_wrap_element` returns a branded native VELMT whose `host_type` identifies the Radiant DOM-node interface and whose `host_data` points at the `DomNode` (D9.5.5). `dom_unwrap_element` tests this native brand through the Radiant bridge; property lookup, enumeration, descriptors, prototypes, and expandos enter the shared property protocol.
 
-**Identity cache.** `dom_cached_node_wrapper` / `dom_cache_node_wrapper` in `dom_cssom.cpp` use a realm-owned hash index and collector-registered weak slots. Entries lease native node generations through the document registry, preserving repeated wrapper identity without rooting unreachable wrappers (D4.5.1v4). The document stub uses the Document interface, so `range.startContainer === document` holds.
+**Identity cache.** `dom_cached_node_wrapper` / `dom_cache_node_wrapper` in `dom_cssom.cpp` use a realm-owned hash index and collector-registered weak slots. Entries lease native node generations through the document registry, preserving repeated wrapper identity without rooting unreachable wrappers (D5.5.1). The document stub uses the Document interface, so `range.startContainer === document` holds.
 
 **Captured validation and event interfaces (verified 2026-10-21).**
 `HTMLInputElement.prototype.value` and `validity` are published before the first
 wrapper exists. `ValidityState` is a cached live native view over the input,
-with declared readonly flag getters and receiver validation (**D7.4.4**).
+with declared readonly flag getters and receiver validation (**D9.5.4**).
 Its weak identity cache and traced node owner preserve detached reads through
-collection (**D4.5.1v4, D5.3.3**). `dom_validity_fields.def` supplies the native
+collection (**D5.5.1, D6.3.3**). `dom_validity_fields.def` supplies the native
 snapshot, getter bindings and interface declarations from one flag catalog.
 `EventTarget` publishes its existing listener methods on its prototype;
 `SecurityPolicyViolationEvent` uses the native Event record and traced immutable
@@ -49,11 +49,11 @@ script interface, without claiming CSP policy enforcement. The corresponding
 
 **React compatibility (2026-10-25).** `HTMLInputElement.prototype.checked` and
 `HTMLTextAreaElement.prototype.value` publish their declared native accessors
-before wrapper creation (**D7.4.4**), allowing React's instance value trackers
+before wrapper creation (**D9.5.4**), allowing React's instance value trackers
 to delegate to the original setters. Behavior predicates inspect current DOM
 attributes. Native click dispatch holds a precisely rooted package completion
 across author listeners: checkbox/radio policy performs pre-activation, then
-commits notifications or restores canceled activation (**D5.3.3**, DOM Dispatch
+commits notifications or restores canceled activation (**D6.3.3**, DOM Dispatch
 ES26). Completion retains the behavior dispatch/emit context so nested form
 notifications share the normal reactive event path. Native Promise expandos
 use the shared metadata property protocol in MIR as well as AST; own keys
@@ -68,10 +68,10 @@ bundled browser path; remaining React/browser scope is listed in the
 fixtures cover controllers, Streams, Frames, Drive, and HTTP forms against
 Lambda's native server. Realm-owned custom-element definitions and weak state
 preserve native wrapper identity during construction/upgrades; private fields
-use the native property hooks in AST and MIR (**D3.4.7, D7.4.4**). Attribute
+use the native property hooks in AST and MIR (**D3.4.7, D9.5.4**). Attribute
 callbacks run at setter boundaries; connection callbacks use the backup
 microtask queue. Construction frames, queued reactions, and template caches
-have precise roots (**D5.3.3**). Complete custom-element reaction stacks remain
+have precise roots (**D6.3.3**). Complete custom-element reaction stacks remain
 outside this milestone. `DOMParser` uses the inert full HTML document parser,
 preserving head metadata. Range removal updates both the native links and Mark
 children. Window scrolling delegates to the existing document scroll root in
@@ -90,13 +90,13 @@ compare the settled box after the current script's writes; temporary hide/read/
 restore/read sequences cannot publish intermediate sizes and feed their own
 callbacks. MutationObserver delivery remains separately queued. Realm-owned
 pending/sampling flags reset with observer state; callbacks and targets keep
-the existing precise roots (**D5.3.3**). The stable-checkpoint JS fixture agrees
+the existing precise roots (**D6.3.3**). The stable-checkpoint JS fixture agrees
 with Chrome and checks that a subsequent real size change still notifies.
 
 **Host namespace prototypes (verified 2026-10-21).** `Performance` links the
 existing clock/entry methods through its EventTarget-derived prototype. MVP
 namespaces use their own traced prototype/deletion protocol, preserving public
-identity and method overrides (**D6.2.2v2, D3.4.7**). Global and Node `URLSearchParams` share the node-url-owned
+identity and method overrides (**D7.2.2, D3.4.7**). Global and Node `URLSearchParams` share the node-url-owned
 prototype and method identities, including iterator publication. No instance
 needs to exist before a library captures those methods.
 
@@ -112,7 +112,7 @@ prototype methods backed by private records. Resource observers support
 asynchronous delivery, buffered observation, draining and disconnect, independent
 of timeline capacity. Observers advertise `resource`, `mark` and `measure`;
 observation does not manufacture layout-shift records. Realm-owned exact roots retain
-buffers, registered observers and prototypes (**D5.3.3, D5.3.5**).
+buffers, registered observers and prototypes (**D6.3.3, D6.3.5**).
 `test/js/performance_resource_buffer` checks the callable surface;
 `RadiantViewTest.ResourceTimingBuffersTrackFetchAndXhrAcrossGc` exercises actual
 HTTP requests and overflow callbacks in AST/MIR with collecting, poisoning GC,
@@ -124,7 +124,7 @@ and [Performance Timeline observation](https://www.w3.org/TR/performance-timelin
 
 **User Timing** stores native PerformanceMark/PerformanceMeasure records with
 document-clock timestamps, cloned detail data, captured branded getters and
-canonical constructors (**D5.3.3**, **D5.3.5**, **D6.2.2v2**). `mark`, `measure`,
+canonical constructors (**D6.3.3**, **D6.3.5**, **D7.2.2**). `mark`, `measure`,
 timeline queries, clearing and buffered/asynchronous observation retain the same
 entry identities. Internal metadata remains independent of public property
 shadows. `performance_user_timing` checks explicit timestamps, named and numeric
@@ -136,7 +136,7 @@ partial; this implements the core [User Timing algorithms](https://www.w3.org/TR
 The realm's monotonic/epoch clock pair is captured at script entry, after host
 clock configuration and before user code can record an earlier `Date.now()`
 timestamp. A full heap-epoch reset retires the pair; later scripts in the same
-realm retain it (**D6.2.2v2**). The lazy `performance.now()` fallback also captures
+realm retain it (**D7.2.2**). The lazy `performance.now()` fallback also captures
 the origin before sampling the current clock, keeping its first result nonnegative.
 At virtual time zero, the epoch origin uses Date's whole-millisecond precision;
 otherwise Date rounding places every frozen initial timestamp before that origin.
@@ -147,7 +147,7 @@ High Resolution Time permits a coarser implementation-defined
 produce a `TypeError` completion. Returning normal null from a native constructor
 previously caused `[[Construct]]` to create a URL-branded object without its
 private record, deferring the failure to an unrelated property getter
-(**D6.2.2v2**). Explicit null bases undergo string conversion; undefined bases
+(**D7.2.2**). Explicit null bases undergo string conversion; undefined bases
 remain absent. `test/js/url_constructor_errors` compares invalid parses,
 empty-input resolution, valid construction and coercion exceptions with Node,
 following the [URL constructor](https://url.spec.whatwg.org/#dom-url-url).
@@ -158,13 +158,13 @@ the original text. Missing attributes return an empty string and invalid URLs
 retain their raw text. A base element resolves its own href against the document
 fallback. One native resolver supplies these getters and anchor URL components;
 the declaring HTML prototypes publish captured `src` accessors through the
-existing member installer (**D7.4.4**, ownership **D5.3.3**).
+existing member installer (**D9.5.4**, ownership **D6.3.3**).
 `test/js/dom_url_reflection` checks base changes, missing/empty/invalid values,
 captured getters and neighboring element types against Chromium. This repairs
 Ghost's `new URL(script.src)` startup path following HTML's
 [URL attribute reflection](https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#reflecting-content-attributes-in-idl-attributes).
 
-**Attribute nodes.** `DomAttr` is a document-owned node with independent namespace/name/value storage, an optional owner element, and a Node-derived `Attr` interface. `getAttributeNode`, `NamedNodeMap`, and attribute-node mutation methods share canonical native identity. Replacement detaches the old Attr without changing its value; attached `value` writes use ordinary mutation handling. A live Attr wrapper leases its owner, and adoption transfers registry leases while retaining the physical source pool. Removed attributes and their strings recycle through native retirement (D4.5.1v4); temporary MutationRecord fields use precise roots until the observer's pending list owns them (D5.3.3).
+**Attribute nodes.** `DomAttr` is a document-owned node with independent namespace/name/value storage, an optional owner element, and a Node-derived `Attr` interface. `getAttributeNode`, `NamedNodeMap`, and attribute-node mutation methods share canonical native identity. Replacement detaches the old Attr without changing its value; attached `value` writes use ordinary mutation handling. A live Attr wrapper leases its owner, and adoption transfers registry leases while retaining the physical source pool. Removed attributes and their strings recycle through native retirement (D5.5.1); temporary MutationRecord fields use precise roots until the observer's pending list owns them (D6.3.3).
 
 **Document proxy & foreign docs.** Bare `document` resolves to a singleton branded VMap whose `host_data` is the active browsing-context `DomDocument*`. The Radiant declared interface publishes document operations as concrete callable properties; properties use `js_document_proxy_get_property`. `document.implementation.createHTMLDocument`/`createDocument` build branded foreign-document VMaps whose bridge swaps the active document around the same declared operations when needed.
 
@@ -178,7 +178,7 @@ inline/computed style, CSSOM, and document/foreign-document proxies are
 recognized by host metadata before ordinary map property access. Their type
 prototypes and property hooks publish callable method values; an ordinary
 source method call still performs observable property `Get` followed by the
-stored function's `[[Call]]`, as required by **D6.2.2v2**. Host dispatch helpers
+stored function's `[[Call]]`, as required by **D7.2.2**. Host dispatch helpers
 implement the selected method body after lookup; they are not compiler
 receiver/name call routes.
 
@@ -191,72 +191,72 @@ Document declared operations cover `getElementById`, `getElementsByClassName`/`T
 
 The native interface tables also publish `Document.cookie`, `Document.write`, and `Element.innerHTML` on their canonical prototypes. Libraries can inspect and wrap the same accessors and methods used by instance reads, rather than encountering an absent descriptor.
 
-**DocumentType and ChildNode prototypes (verified 2026-10-09).** `DocumentType` is a non-constructible Node-derived interface. Doctype wrappers select it by native node kind even though their allocation shares comment storage (**D3.4.7**). The existing Jube `dom_node` bindings publish `before`, `after`, `replaceWith`, and `remove` on Element, CharacterData, and DocumentType prototypes; receiver checks and operation bodies remain shared (**D7.4.4, D6.2.2v2**). `test/ui/dom/document_type_interface` checks doctype branding, captured mutations on elements/text/comments, detached doctypes, and forged receivers, including forced-collection runs. This follows the [DOM ChildNode mixin](https://dom.spec.whatwg.org/#interface-childnode).
+**DocumentType and ChildNode prototypes (verified 2026-10-09).** `DocumentType` is a non-constructible Node-derived interface. Doctype wrappers select it by native node kind even though their allocation shares comment storage (**D3.4.7**). The existing Jube `dom_node` bindings publish `before`, `after`, `replaceWith`, and `remove` on Element, CharacterData, and DocumentType prototypes; receiver checks and operation bodies remain shared (**D9.5.4, D7.2.2**). `test/ui/dom/document_type_interface` checks doctype branding, captured mutations on elements/text/comments, detached doctypes, and forged receivers, including forced-collection runs. This follows the [DOM ChildNode mixin](https://dom.spec.whatwg.org/#interface-childnode).
 
-**History interface (verified 2026-10-09).** `dom_install_history_interface` uses the existing realm interface installer to publish the non-constructible `History` interface and link the native `history` object to `History.prototype`. The prototype owns `pushState`, `replaceState`, `back`, `forward`, and `go`; their observable names and WebIDL lengths are independent of their native adapter arities (**D6.2.2v2**). `dom_history.cpp` retains the receiver identity in its realm-lifetime context capsule, rejects forged receivers, and releases its exact root before heap replacement (**D5.3.5, D5.4.2**). Captured prototype methods share the existing Radiant history operations. `test/ui/dom/history_interface` checks the prototype, branding, illegal construction, receiver validation, and captured calls; the existing hash and popstate fixtures check traversal delivery. The interface follows the [HTML History surface](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-history-interface); cross-document reload remains outside the existing traversal implementation.
+**History interface (verified 2026-10-09).** `dom_install_history_interface` uses the existing realm interface installer to publish the non-constructible `History` interface and link the native `history` object to `History.prototype`. The prototype owns `pushState`, `replaceState`, `back`, `forward`, and `go`; their observable names and WebIDL lengths are independent of their native adapter arities (**D7.2.2**). `dom_history.cpp` retains the receiver identity in its realm-lifetime context capsule, rejects forged receivers, and releases its exact root before heap replacement (**D6.3.5, D6.4.2**). Captured prototype methods share the existing Radiant history operations. `test/ui/dom/history_interface` checks the prototype, branding, illegal construction, receiver validation, and captured calls; the existing hash and popstate fixtures check traversal delivery. The interface follows the [HTML History surface](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-history-interface); cross-document reload remains outside the existing traversal implementation.
 
-**TreeWalker interface (verified 2026-10-09).** The realm publishes `TreeWalker` with an illegal constructor and the existing `nextNode`, `firstChild`, and `nextSibling` traversal operations on its prototype. `dom_create_tree_walker_bridge` creates a metadata-branded walker and binds that prototype; captured methods use their current receiver instead of a per-instance bound argument. Forging the prototype or string tag does not satisfy the native receiver check (**D3.4.7, D6.2.2v2**). Interface-member installation and instance prototype binding are shared with Storage and History. `test/ui/dom/tree_walker_interface` checks traversal, captured calls on different walkers, and forged-receiver rejection.
+**TreeWalker interface (verified 2026-10-09).** The realm publishes `TreeWalker` with an illegal constructor and the existing `nextNode`, `firstChild`, and `nextSibling` traversal operations on its prototype. `dom_create_tree_walker_bridge` creates a metadata-branded walker and binds that prototype; captured methods use their current receiver instead of a per-instance bound argument. Forging the prototype or string tag does not satisfy the native receiver check (**D3.4.7, D7.2.2**). Interface-member installation and instance prototype binding are shared with Storage and History. `test/ui/dom/tree_walker_interface` checks traversal, captured calls on different walkers, and forged-receiver rejection.
 
-**DOMImplementation interface (verified 2026-10-09).** The realm exposes the existing document-creation operations on `DOMImplementation.prototype` and binds `document.implementation` to it, so scripts can capture and call those methods through their native receiver. The shared interface installers retain an illegal constructor, string tag and WebIDL method lengths; forged receivers fail the singleton identity check (**D3.4.7, D6.2.2v2**). `test/ui/dom/document_implementation_interface` covers captured methods, document creation, identity and receiver checks. Created doctypes retain their public/system identifiers in the backing element; their name and identifiers are exposed through shared DOM property reads, while `nodeValue` and `textContent` are null instead of inherited comment data (**D1.3v3**). Surface: [DOM Standard §4.5.1](https://dom.spec.whatwg.org/#interface-domimplementation).
+**DOMImplementation interface (verified 2026-10-09).** The realm exposes the existing document-creation operations on `DOMImplementation.prototype` and binds `document.implementation` to it, so scripts can capture and call those methods through their native receiver. The shared interface installers retain an illegal constructor, string tag and WebIDL method lengths; forged receivers fail the singleton identity check (**D3.4.7, D7.2.2**). `test/ui/dom/document_implementation_interface` covers captured methods, document creation, identity and receiver checks. Created doctypes retain their public/system identifiers in the backing element; their name and identifiers are exposed through shared DOM property reads, while `nodeValue` and `textContent` are null instead of inherited comment data (**D1.3**). Surface: [DOM Standard §4.5.1](https://dom.spec.whatwg.org/#interface-domimplementation).
 
-**HTML resource interfaces (verified 2026-10-09).** The shared HTML tag catalog also selects the Area, Base, Embed, Frame, Object, Picture, Source and Track prototypes. Resource wrappers retain their constructor identity and HTMLElement ancestry (**D3.4.7, D6.2.2v2**). The existing guarded `href` binding is published on the declaring Anchor, Area, Base and Link prototypes, allowing captured getters and setters to use native receivers even after a wrapper's prototype changes. `test/ui/dom/html_resource_interfaces` verifies that surface in both execution tiers and under forced collection (**D5.3.3**).
+**HTML resource interfaces (verified 2026-10-09).** The shared HTML tag catalog also selects the Area, Base, Embed, Frame, Object, Picture, Source and Track prototypes. Resource wrappers retain their constructor identity and HTMLElement ancestry (**D3.4.7, D7.2.2**). The existing guarded `href` binding is published on the declaring Anchor, Area, Base and Link prototypes, allowing captured getters and setters to use native receivers even after a wrapper's prototype changes. `test/ui/dom/html_resource_interfaces` verifies that surface in both execution tiers and under forced collection (**D6.3.3**).
 
-**Node base URI (verified 2026-10-09).** `Node.prototype.baseURI` publishes the declared `dom_node.base_uri` member through the canonical property reader (**D7.4.4**). Document proxies and all native node kinds resolve their owning document, including detached CharacterData and attributes retained by the registry (**D1.3v3**). The reader selects the first connected `base[href]` in tree order, resolves its URL against the document URL, and falls back for invalid or prohibited schemes. `test/ui/dom/node_base_uri` checks captured getters, base mutation/removal, receiver validation and adoption. Surface: [DOM Node baseURI](https://dom.spec.whatwg.org/#dom-node-baseuri) and [HTML document base URLs](https://html.spec.whatwg.org/multipage/urls-and-fetching.html#document-base-url).
+**Node base URI (verified 2026-10-09).** `Node.prototype.baseURI` publishes the declared `dom_node.base_uri` member through the canonical property reader (**D9.5.4**). Document proxies and all native node kinds resolve their owning document, including detached CharacterData and attributes retained by the registry (**D1.3**). The reader selects the first connected `base[href]` in tree order, resolves its URL against the document URL, and falls back for invalid or prohibited schemes. `test/ui/dom/node_base_uri` checks captured getters, base mutation/removal, receiver validation and adoption. Surface: [DOM Node baseURI](https://dom.spec.whatwg.org/#dom-node-baseuri) and [HTML document base URLs](https://html.spec.whatwg.org/multipage/urls-and-fetching.html#document-base-url).
 
-**Captured document properties (verified 2026-10-09).** The Document interface publishes its existing native property bindings, including `implementation`, `defaultView`, `currentScript`, tree roots and document metadata. Captured getters use the native receiver and its document, including foreign documents and wrappers with changed prototypes (**D3.4.7, D7.4.4**). `test/ui/dom/document_captured_properties` checks those paths and rejects forged receivers. The shared adoption path now transfers registry ownership for detached nodes as well as attributes, preserving their owner-document-dependent properties (**D1.3v3, D4.5.1v4**).
+**Captured document properties (verified 2026-10-09).** The Document interface publishes its existing native property bindings, including `implementation`, `defaultView`, `currentScript`, tree roots and document metadata. Captured getters use the native receiver and its document, including foreign documents and wrappers with changed prototypes (**D3.4.7, D9.5.4**). `test/ui/dom/document_captured_properties` checks those paths and rejects forged receivers. The shared adoption path now transfers registry ownership for detached nodes as well as attributes, preserving their owner-document-dependent properties (**D1.3, D5.5.1**).
 
 **Captured collection lengths (verified 2026-10-09).** NodeList and HTMLCollection
 publish readonly prototype getters before the first wrapper exists. Declared
 inheritance admits native RadioNodeList, form-control and options collections
 while rejecting unrelated brands, including after public prototype changes
-(**D3.4.7, D7.4.4**). Form named-property access and `elements.namedItem()` share
+(**D3.4.7, D9.5.4**). Form named-property access and `elements.namedItem()` share
 the rooted collection lookup; multiple matches return a live filtered
-RadioNodeList (**D1.3v3, D5.3.3**).
+RadioNodeList (**D1.3, D6.3.3**).
 `test/ui/dom/collection_captured_length` passes 12 assertions in MIR and AST,
 normally and under forced collection, and agrees with Chromium. Surface:
 [HTML form-control collections](https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#htmlformcontrolscollection).
 
 **Captured dataset getters (verified 2026-10-09).** HTMLElement and SVGElement
 publish separate declared getters with namespace-specific native receiver
-checks (**D3.4.7, D7.4.4**). Retained dataset reads, writes and `Reflect.set`
+checks (**D3.4.7, D9.5.4**). Retained dataset reads, writes and `Reflect.set`
 share the DOM catalog bridge, so reads see current attributes after additions
-and removals (**D1.3v3, D5.3.3**). The appended `get_data` row preserves existing
+and removals (**D1.3, D6.3.3**). The appended `get_data` row preserves existing
 catalog offsets. `test/ui/dom/dataset_captured_getters` passes 12 assertions in
 both tiers, normally and under forced collection, and agrees with Chromium.
 Dataset views still use ordinary Map storage; SameObject identity, dynamic
 enumeration and deletion remain incomplete.
 
 **Captured Window close state (verified 2026-10-09).** The Window global owns a
-readonly native `closed` accessor with receiver validation (**D6.2.2v2**).
+readonly native `closed` accessor with receiver validation (**D7.2.2**).
 Its catalog read uses the attached host's approved-close state, including the
 initial script stage before `UiContext.document` is published, and reports a
-closed context when no host remains (**D1.3v3, D4.5.1v4**).
+closed context when no host remains (**D1.3, D5.5.1**).
 `test/ui/dom/window_closed_captured_getter` verifies captured access and the
 platform close transition in both tiers and under forced collection; its
 initial descriptor and brand checks agree with Chromium. Surface:
 [HTML Window.closed](https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-window-closed).
 
-**Observer interfaces (verified 2026-10-09).** The realm installs distinct MutationObserver, ResizeObserver, and IntersectionObserver constructors with shared prototype operations, string tags, names, and WebIDL lengths. The adapter rejects construction without `new`; captured methods validate the native receiver's observer kind (**D6.2.2v2**). `takeRecords` retains the drained array while allocating its replacement, and observer fields use interned keys so allocating a value cannot collect a temporary property key (**D5.3.5, D5.4.1**). `test/ui/dom/observer_interfaces` checks captured observation, draining, disconnection, and forged/cross-kind receivers in normal and forced-collection runs. The published operations follow the [MutationObserver](https://dom.spec.whatwg.org/#interface-mutationobserver), [ResizeObserver](https://drafts.csswg.org/resize-observer/#resize-observer-interface), and [IntersectionObserver](https://w3c.github.io/IntersectionObserver/#intersection-observer-interface) interface definitions.
+**Observer interfaces (verified 2026-10-09).** The realm installs distinct MutationObserver, ResizeObserver, and IntersectionObserver constructors with shared prototype operations, string tags, names, and WebIDL lengths. The adapter rejects construction without `new`; captured methods validate the native receiver's observer kind (**D7.2.2**). `takeRecords` retains the drained array while allocating its replacement, and observer fields use interned keys so allocating a value cannot collect a temporary property key (**D6.3.5, D6.4.1**). `test/ui/dom/observer_interfaces` checks captured observation, draining, disconnection, and forged/cross-kind receivers in normal and forced-collection runs. The published operations follow the [MutationObserver](https://dom.spec.whatwg.org/#interface-mutationobserver), [ResizeObserver](https://drafts.csswg.org/resize-observer/#resize-observer-interface), and [IntersectionObserver](https://w3c.github.io/IntersectionObserver/#intersection-observer-interface) interface definitions.
 
-**Media-query ownership and delivery (verified 2026-10-09).** `dom_match_media` retains its query input and EventTarget object through construction; interned field names survive allocations of their values/functions. The existing accessor installer publishes `matches` without a second descriptor-building path. Resize notification roots the target and change event through field population and dispatch (**D5.3.3, D5.3.5**). The canonical EventTarget dispatcher owns `onchange` delivery, so the notifier no longer invokes that handler twice. `test/ui/dom/match_media_gc_ownership` checks initial values, allocating legacy/onchange callbacks, listener removal, live matching, and exactly one delivery per resize. All 12 assertions pass under forced collection and poisoned frees; both resize states agree with Chromium and the [CSSOM View MediaQueryList interface](https://drafts.csswg.org/cssom-view/#the-mediaquerylist-interface).
+**Media-query ownership and delivery (verified 2026-10-09).** `dom_match_media` retains its query input and EventTarget object through construction; interned field names survive allocations of their values/functions. The existing accessor installer publishes `matches` without a second descriptor-building path. Resize notification roots the target and change event through field population and dispatch (**D6.3.3, D6.3.5**). The canonical EventTarget dispatcher owns `onchange` delivery, so the notifier no longer invokes that handler twice. `test/ui/dom/match_media_gc_ownership` checks initial values, allocating legacy/onchange callbacks, listener removal, live matching, and exactly one delivery per resize. All 12 assertions pass under forced collection and poisoned frees; both resize states agree with Chromium and the [CSSOM View MediaQueryList interface](https://drafts.csswg.org/cssom-view/#the-mediaquerylist-interface).
 
-**History state cloning (verified 2026-10-09).** Recursive `structuredClone` destinations, enumerated keys, and child values stay precisely rooted until publication (**D5.3.5, D5.4.1**). Array clones append into an empty destination rather than creating leading holes. `JsStructuredClone.RetainsRecursiveDestinationsAcrossEveryAllocation` checks distinct nested objects and array contents under forced collection and poisoned frees in both AST and MIR; the History interface fixture verifies state after `replaceState` under the same stress.
+**History state cloning (verified 2026-10-09).** Recursive `structuredClone` destinations, enumerated keys, and child values stay precisely rooted until publication (**D6.3.5, D6.4.1**). Array clones append into an empty destination rather than creating leading holes. `JsStructuredClone.RetainsRecursiveDestinationsAcrossEveryAllocation` checks distinct nested objects and array contents under forced collection and poisoned frees in both AST and MIR; the History interface fixture verifies state after `replaceState` under the same stress.
 
 **BroadcastChannel core (verified 2026-10-22).** A declared Jube host interface
-shares the EventTarget dispatcher (**D7.4.4**). Same-name document peers in one
+shares the EventTarget dispatcher (**D9.5.4**). Same-name document peers in one
 evaluator receive asynchronous MessageEvents in creation order, excluding the
 sender. Sending snapshots the data once; delivery clones it independently for
 each destination. Shared cloning preserves cycles/aliases and rejects callable,
 proxy and unsupported host values. Open channels with message listeners retain
 their wrappers; closed listener cycles are traced and collectable rather than
-permanently rooted (**D5.3.3, D5.4.2–D5.4.3**). Closing cancels pending delivery and
+permanently rooted (**D6.3.3, D6.4.2–D6.4.3**). Closing cancels pending delivery and
 later sends raise InvalidStateError. AST/MIR document fixtures cover messaging
 and GC; the messaging output agrees with Chromium 148. Cross-evaluator/worker
 routing is deferred. See the [implementation milestone](../../../vibe/impl/Radiant_Impl_Broadcast_Channel.md).
 
 **Browser global publication (verified 2026-10-22).** Browser document realms
 exclude Node-only globals during catalog admission, lazy lookup and Jube module
-activation; module records declare that exposure (**D7.3.3–D7.3.4**). CLI Node
+activation; module records declare that exposure (**D9.4.3–D9.4.4**). CLI Node
 compatibility and explicit imports remain available in their existing profiles.
 This prevents browser bundles with empty server imports from selecting their
 Node branch merely because a host `process` object exists. The DOM integration
@@ -265,7 +265,7 @@ forced collection.
 
 **Autofocus dispatch (verified 2026-10-09).** The existing package policy selects the candidate (**ES30**), then `radiant_run_autofocus` receives the enclosing host's `UiContext` for the public focus/focusin dispatch. An author listener can insert a stylesheet and trigger retained layout through that same context; a document-only event context cannot supply its viewport or layout services. Window and document-rebuild callers pass their current host explicitly. `test/ui/js_autofocus_listener_relayout` reproduces the former null-context crash and checks focused identity and geometry after the listener's full recascade.
 
-**Web Animation cancellation (verified 2026-10-09).** `Animation.prototype.cancel` operates on the receiver's native effect through an ordinary shared method (**D6.2.2v2**). Cancellation makes `currentTime` unresolved, excludes the effect from sampling/computed-style queries, and requests layout without a DOM mutation. The existing CSS-animation transform-restoration helper also clears a retained sample when the cascade has no transform declaration. Effect state remains document-owned (**D4.5.1v4**); a later numeric seek reactivates it, including the preceding timestamp, and recaptures underlying values after intervening style changes. Current-time conversion keeps its receiver/input rooted and preserves thrown values (**D5.3.5, D5.4.1**). `test/ui/dom/animation_cancel` checks sizing, opacity, transforms, repeat cancellation, shared-method metadata, receiver rejection, and neutral-keyframe resampling across host event commits; its 13 script checks agree with Chromium, and all 17 native UI assertions pass under forced collection. `Element.getAnimations({subtree})` now enumerates those native Web Animation effects in creation order, returning the original wrappers and fresh result arrays. Canceling removes the active registry root; numeric seeking registers the same wrapper again. A private branded record retains its target wrapper and native holder, so a retained Animation protects its document-owned state (**D4.5.1v4**, **D5.3.3**, **D5.3.5**). Enumeration of CSS animations/transitions, shadow-tree enumeration and Document.getAnimations remain unsupported. This implements cancellation of the existing explicitly sampled effects following [Web Animations cancellation](https://www.w3.org/TR/web-animations-1/#canceling-an-animation); automatic playback, finished promises, and playback-event dispatch remain incomplete.
+**Web Animation cancellation (verified 2026-10-09).** `Animation.prototype.cancel` operates on the receiver's native effect through an ordinary shared method (**D7.2.2**). Cancellation makes `currentTime` unresolved, excludes the effect from sampling/computed-style queries, and requests layout without a DOM mutation. The existing CSS-animation transform-restoration helper also clears a retained sample when the cascade has no transform declaration. Effect state remains document-owned (**D5.5.1**); a later numeric seek reactivates it, including the preceding timestamp, and recaptures underlying values after intervening style changes. Current-time conversion keeps its receiver/input rooted and preserves thrown values (**D6.3.5, D6.4.1**). `test/ui/dom/animation_cancel` checks sizing, opacity, transforms, repeat cancellation, shared-method metadata, receiver rejection, and neutral-keyframe resampling across host event commits; its 13 script checks agree with Chromium, and all 17 native UI assertions pass under forced collection. `Element.getAnimations({subtree})` now enumerates those native Web Animation effects in creation order, returning the original wrappers and fresh result arrays. Canceling removes the active registry root; numeric seeking registers the same wrapper again. A private branded record retains its target wrapper and native holder, so a retained Animation protects its document-owned state (**D5.5.1**, **D6.3.3**, **D6.3.5**). Enumeration of CSS animations/transitions, shadow-tree enumeration and Document.getAnimations remain unsupported. This implements cancellation of the existing explicitly sampled effects following [Web Animations cancellation](https://www.w3.org/TR/web-animations-1/#canceling-an-animation); automatic playback, finished promises, and playback-event dispatch remain incomplete.
 
 ---
 
@@ -303,7 +303,7 @@ record is not default-prevented (ES22–ES29).
 `fire_listeners` snapshots matching listeners before invocation, preserving
 `once`, removal, and `AbortSignal` behavior under mutation. The one native
 record carries `eventPhase`, `currentTarget`, `default_prevented`, and the
-stop state for both realms through the D3.4.7/D7.4.1–D7.4.4 host bridge.
+stop state for both realms through the D3.4.7/D9.5.1–D9.5.4 host bridge.
 `stopPropagation`/`stopImmediatePropagation` read only `__stop_prop` and
 `__stop_imm` on that record; the former thread-local mirrors are retired.
 Teardown clears the dispatch/stop state while preserving cancellation according
@@ -312,9 +312,9 @@ checkbox/radio/popover policy is the shared UA-tier claim protocol instead.
 
 **MessageEvent native interface (verified 2026-10-09).** The constructor has
 separate call/construct capabilities and applies `newTarget.prototype`
-(**D6.2.2v2**). Readonly prototype getters validate the native Event record's
+(**D7.2.2**). Readonly prototype getters validate the native Event record's
 class and read a private, GC-traced payload; public shadows and prototype
-changes cannot replace that payload (**D7.4.4**, **D5.3.3**). Dictionary
+changes cannot replace that payload (**D9.5.4**, **D6.3.3**). Dictionary
 conversion follows inherited-member and alphabetical order, and `ports`
 owns a frozen sequence. `initMessageEvent` converts arguments before updating
 the record and leaves a dispatching event unchanged. The shared Jube protocol
@@ -348,7 +348,7 @@ removal compare the declaration block's serialization before and after the
 edit, as required by [CSSOM's declaration-setting contract](https://drafts.csswg.org/cssom/#set-a-css-declaration).
 An unchanged block does not publish an attribute mutation or invalidate layout;
 `cssText` retains its unconditional attribute-update behavior. Comparison
-strings belong to the declaration view's scratch pool (**D4.5.1v4**) rather
+strings belong to the declaration view's scratch pool (**D5.5.1**) rather
 than the stylesheet's persistent pool. The
 `cssom_idempotent_declaration_writes` UI fixture covers ordinary, important,
 custom, shorthand and named writes, removal, `cssText`, and an observer that
@@ -375,7 +375,7 @@ Child-list edits also check whether a descendant/child `:has()` selector has
 a possible anchor in the edited parent's ancestry. Unrelated insertions and
 removals keep the local recascade; sibling/column relations and possible
 ancestor anchors retain the broad path. Static anchor tests reuse the selector
-matcher, and journal ownership remains document-scoped (**D4.5.1v4**).
+matcher, and journal ownership remains document-scoped (**D5.5.1**).
 When neither structural selectors nor relational anchors depend on a child-list
 edit, the cascade visits only the inserted subtree; removals retain existing
 styles. Layout still processes the dirty ancestry. Position and `:empty`
@@ -388,7 +388,7 @@ ancestor changes, stylesheet insertion, and a sibling dependency.
 
 `document.styleSheets` returns an array of wrapped sheets (`dom_cssom_get_document_stylesheets`, `:1228`); `HTMLStyleElement.sheet` finds the sheet parsed from that `<style>` element. The **CSS namespace** object (`CSS.supports`, `CSS.escape`, `CSS.registerProperty`) is a metadata-qualified ordinary `Object.create(null)` Map created by `js_get_css_object_value`, with realm-local methods installed as real non-enumerable properties. Physical `map_kind` is not consulted for ordinary property reads.
 
-**Registration path verified 2026-10-06:** `js_intrinsic_css_register_property_body` selects its native executable through the builtin catalog (**D6.2.2v2**) and calls the CORE DOM catalog operation through the Jube host API (**D7.3.3–D7.3.4**). `dom_css_register_property_operation` roots the definition and converted strings across getters and coercion (**D5.3.3**), then uses the shared syntax/initial-value parser. `css_register_document_property` retains an owned definition in the document pool (**D4.5.1v4**). `css_find_document_property_registration` gives that definition precedence over active stylesheet rules. Registration marks global style change; layout and computed-style reads use the same registration lookup. The four `test/ui/css_registration_api*.json` fixtures cover 66 browser-confirmed conversion, validation, complete-name and live-style assertions; cross-realm invocation, branded rule interfaces and registered-property interpolation still require implementation or verification.
+**Registration path verified 2026-10-06:** `js_intrinsic_css_register_property_body` selects its native executable through the builtin catalog (**D7.2.2**) and calls the CORE DOM catalog operation through the Jube host API (**D9.4.3–D9.4.4**). `dom_css_register_property_operation` roots the definition and converted strings across getters and coercion (**D6.3.3**), then uses the shared syntax/initial-value parser. `css_register_document_property` retains an owned definition in the document pool (**D5.5.1**). `css_find_document_property_registration` gives that definition precedence over active stylesheet rules. Registration marks global style change; layout and computed-style reads use the same registration lookup. The four `test/ui/css_registration_api*.json` fixtures cover 66 browser-confirmed conversion, validation, complete-name and live-style assertions; cross-realm invocation, branded rule interfaces and registered-property interpolation still require implementation or verification.
 
 ---
 
@@ -399,8 +399,8 @@ ancestor changes, stylesheet insertion, and a sibling dependency.
 `postscriptNames` selects exact face names; an empty sequence selects no faces.
 WebIDL conversion failures reject the Promise. The realm adapter delegates to
 the same fallible `dom.query_local_fonts(options)^` catalog operation used by Lambda;
-the new slot is appended to preserve existing host offsets (**D7.4.4**), and
-temporary values retain precise roots through getters and allocation (**D5.3.3**).
+the new slot is appended to preserve existing host offsets (**D9.5.4**), and
+temporary values retain precise roots through getters and allocation (**D6.3.3**).
 This desktop-host milestone exposes metadata records under Radiant's existing
 local application access model. `FontData.blob()`, branded readonly FontData
 objects, browser permission prompts, secure-context and Permissions Policy
@@ -415,17 +415,17 @@ Measurement uses **Lambda's unified font engine** (`lib/font/`): a singleton `Fo
 
 ## 8. XHR / fetch / FormData / clipboard, Selection/Range
 
-**HTML media playback** shares the retained native audio/video decoder with layout and controls. `HTMLMediaElement.prototype.play()` returns a pending promise that settles on actual playback or rejects on permission failure, unsupported input, pause, or source replacement. Branded accessors expose native mute, volume, time, duration and readiness; audible playback requires document activation (**D7.5.4**). Pending promises and their element wrappers have precise realm roots (**D5.3.3**, **D5.3.5**). HTTP sources use the document resource manager; each decoder owns an immutable temporary file until decoder teardown, so cache replacement, eviction and manager destruction cannot invalidate its bytes (**D4.5.1v4**). `dom_media_playback` exercises local and HTTP MP4 playback in AST/MIR with forced collection; the resource-manager regression covers replacement and eviction. Streaming protocols, the complete media-event lifecycle and precise seek-completion reporting remain partial; see the [HTML media-element algorithms](https://html.spec.whatwg.org/multipage/media.html#media-elements).
+**HTML media playback** shares the retained native audio/video decoder with layout and controls. `HTMLMediaElement.prototype.play()` returns a pending promise that settles on actual playback or rejects on permission failure, unsupported input, pause, or source replacement. Branded accessors expose native mute, volume, time, duration and readiness; audible playback requires document activation (**D11.3.1**). Pending promises and their element wrappers have precise realm roots (**D6.3.3**, **D6.3.5**). HTTP sources use the document resource manager; each decoder owns an immutable temporary file until decoder teardown, so cache replacement, eviction and manager destruction cannot invalidate its bytes (**D5.5.1**). `dom_media_playback` exercises local and HTTP MP4 playback in AST/MIR with forced collection; the resource-manager regression covers replacement and eviction. Streaming protocols, the complete media-event lifecycle and precise seek-completion reporting remain partial; see the [HTML media-element algorithms](https://html.spec.whatwg.org/multipage/media.html#media-elements).
 
-**XMLHttpRequest** (`lambda/dom/dom_xhr.cpp`) stores request state in its realm capsule. Asynchronous requests reuse fetch's libuv transport; explicit synchronous requests use `http_fetch`. Completion walks `readyState` 2→3→4 and dispatches callbacks. Construction roots the wrapper, status descriptor, and upload target until publication; methods use the shared rooted native installer (**D5.3.3**, **D6.2.2v2**). The asynchronous body handoff consumes an ArrayBuffer so UTF-8 text decoding cannot alter transport bytes. The HTTP backing (`http_fetch`, `FetchResponse`) is shared with [JS_14 — Node Compatibility](JS_14_Node_Compat.md).
+**XMLHttpRequest** (`lambda/dom/dom_xhr.cpp`) stores request state in its realm capsule. Asynchronous requests reuse fetch's libuv transport; explicit synchronous requests use `http_fetch`. Completion walks `readyState` 2→3→4 and dispatches callbacks. Construction roots the wrapper, status descriptor, and upload target until publication; methods use the shared rooted native installer (**D6.3.3**, **D7.2.2**). The asynchronous body handoff consumes an ArrayBuffer so UTF-8 text decoding cannot alter transport bytes. The HTTP backing (`http_fetch`, `FetchResponse`) is shared with [JS_14 — Node Compatibility](JS_14_Node_Compat.md).
 
-**fetch** (`lambda/dom/dom_fetch.cpp`) returns `Promise<Response>`. `lambda/js/js_response.cpp` publishes native `Response` and `Request` constructors. Branded private records own GC-traced body bytes and Headers (**D3.4.7**, **D5.3.3**). Captured getters and methods validate those records even after the public prototype changes. Non-null bodies are consumed once; `text` decodes UTF-8, `json` rejects malformed JSON, and `arrayBuffer`/`bytes`/`blob` produce owned native values. `clone` independently owns bytes and a Headers snapshot. The cached `body` getter exposes null for absent bodies and a byte-backed readable stream otherwise; its retained pull closure shares the consumed flag with the Body methods. Request adds URL/method validation, request-input copying and dependent abort signals. It reuses the Response byte/consumption mechanism for local data-router loaders and actions. Constructor input supports strings, ArrayBuffer views, and native Blob/File values. Streaming input bodies, complete stream locking/tee/cancellation, `formData`, static Response factories, the remaining RequestInit policies and passing Request objects directly to the fetch transport remain incomplete; see the [Fetch Body specification](https://fetch.spec.whatwg.org/#body-mixin). Pinned React ecosystem fixtures and the runtime fixes they exposed are recorded in `vibe/impl/Lambda_Impl_React_Ecosystem.md`.
+**fetch** (`lambda/dom/dom_fetch.cpp`) returns `Promise<Response>`. `lambda/js/js_response.cpp` publishes native `Response` and `Request` constructors. Branded private records own GC-traced body bytes and Headers (**D3.4.7**, **D6.3.3**). Captured getters and methods validate those records even after the public prototype changes. Non-null bodies are consumed once; `text` decodes UTF-8, `json` rejects malformed JSON, and `arrayBuffer`/`bytes`/`blob` produce owned native values. `clone` independently owns bytes and a Headers snapshot. The cached `body` getter exposes null for absent bodies and a byte-backed readable stream otherwise; its retained pull closure shares the consumed flag with the Body methods. Request adds URL/method validation, request-input copying and dependent abort signals. It reuses the Response byte/consumption mechanism for local data-router loaders and actions. Constructor input supports strings, ArrayBuffer views, and native Blob/File values. Streaming input bodies, complete stream locking/tee/cancellation, `formData`, static Response factories, the remaining RequestInit policies and passing Request objects directly to the fetch transport remain incomplete; see the [Fetch Body specification](https://fetch.spec.whatwg.org/#body-mixin). Pinned React ecosystem fixtures and the runtime fixes they exposed are recorded in `vibe/impl/Lambda_Impl_React_Ecosystem.md`.
 
-**FormData** (`dom_formdata.cpp`) carries native branding and entries with IDL methods and Blob/File coercion. **Navigator** (`dom_clipboard.cpp`) has a native interface prototype with branded readonly getters. Its existing host preferences and clipboard/permissions/serviceWorker objects live in a private traced record; `languages` is frozen, and captured getters ignore public shadows (**D3.4.7**, **D5.3.3**). The shared interface installer supplies an illegal constructor with the correct zero-argument metadata (**D6.2.2v2**). **navigator.clipboard** uses the platform clipboard store and native ClipboardItem/Blob/File objects.
+**FormData** (`dom_formdata.cpp`) carries native branding and entries with IDL methods and Blob/File coercion. **Navigator** (`dom_clipboard.cpp`) has a native interface prototype with branded readonly getters. Its existing host preferences and clipboard/permissions/serviceWorker objects live in a private traced record; `languages` is frozen, and captured getters ignore public shadows (**D3.4.7**, **D6.3.3**). The shared interface installer supplies an illegal constructor with the correct zero-argument metadata (**D7.2.2**). **navigator.clipboard** uses the platform clipboard store and native ClipboardItem/Blob/File objects.
 
-**Intl locale and decimal formatting** use native branded, private records with precisely rooted strings and cached bound format functions (**D5.3.3**, **D5.3.5**, **D6.2.2v2**). `Intl.Locale` parses language/script/region/variant tags, preserves extensions, and applies language/script/region options. `maximize()` and `minimize()` use the complete pinned CLDR 48 likely-subtag table, preserving supplied subtags, variants and extensions; traced native closures retain the intrinsic constructor when the public namespace is replaced. The table is regenerated with `utils/generate_js_locale_data.py` from the source URL and digest recorded in `js_intl_likely_subtags.h`; it uses the existing Unicode license. See [ECMA-402 Locale methods](https://tc39.es/ecma402/#sec-intl.locale.prototype.maximize) and [CLDR likely-subtag algorithms](https://unicode.org/reports/tr35/#Likely_Subtags). Canonical alias data, extension reordering, private-use tags and locale-info methods remain unsupported. `Intl.NumberFormat` supplies English decimal grouping, integer/fraction padding, half-expand rounding, `trailingZeroDisplay`, consistent `formatToParts()`, and fresh `resolvedOptions()` metadata; non-English data, currency/percent/unit styles, significant-digit/compact/scientific notation and alternate rounding modes remain partial or unsupported. The fixtures compare the implemented path with Chromium; this does not claim full ECMA-402 coverage.
+**Intl locale and decimal formatting** use native branded, private records with precisely rooted strings and cached bound format functions (**D6.3.3**, **D6.3.5**, **D7.2.2**). `Intl.Locale` parses language/script/region/variant tags, preserves extensions, and applies language/script/region options. `maximize()` and `minimize()` use the complete pinned CLDR 48 likely-subtag table, preserving supplied subtags, variants and extensions; traced native closures retain the intrinsic constructor when the public namespace is replaced. The table is regenerated with `utils/generate_js_locale_data.py` from the source URL and digest recorded in `js_intl_likely_subtags.h`; it uses the existing Unicode license. See [ECMA-402 Locale methods](https://tc39.es/ecma402/#sec-intl.locale.prototype.maximize) and [CLDR likely-subtag algorithms](https://unicode.org/reports/tr35/#Likely_Subtags). Canonical alias data, extension reordering, private-use tags and locale-info methods remain unsupported. `Intl.NumberFormat` supplies English decimal grouping, integer/fraction padding, half-expand rounding, `trailingZeroDisplay`, consistent `formatToParts()`, and fresh `resolvedOptions()` metadata; non-English data, currency/percent/unit styles, significant-digit/compact/scientific notation and alternate rounding modes remain partial or unsupported. The fixtures compare the implemented path with Chromium; this does not claim full ECMA-402 coverage.
 
-**Selection / Range** are native VMap host objects backed by `radiant/dom_range`. The declared member records publish `Range.commonAncestorContainer` and Selection's readonly attributes as branded prototype accessors (**D7.4.4**); captured getters read current native boundaries and reject forged receivers. Script mutations of the selected Range preserve selection direction even when the Range collapses, as required by the [Selection API](https://www.w3.org/TR/selection-api/#dfn-direction). The interaction validator accepts that state while retaining enum, boundary, and shadow consistency checks. `StaticRange` remains an immutable snapshot used by `InputEvent.getTargetRanges()`.
+**Selection / Range** are native VMap host objects backed by `radiant/dom_range`. The declared member records publish `Range.commonAncestorContainer` and Selection's readonly attributes as branded prototype accessors (**D9.5.4**); captured getters read current native boundaries and reject forged receivers. Script mutations of the selected Range preserve selection direction even when the Range collapses, as required by the [Selection API](https://www.w3.org/TR/selection-api/#dfn-direction). The interaction validator accepts that state while retaining enum, boundary, and shadow consistency checks. `StaticRange` remains an immutable snapshot used by `InputEvent.getTargetRanges()`.
 
 ---
 

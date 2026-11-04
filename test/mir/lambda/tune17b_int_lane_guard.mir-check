@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.6.2-D2.6.3: raw int stores need a 64-bit null exclusion, not an int53 band guard: poison lanes are valid. A 32-bit BEQS truncates INT_LANE_NULL to zero and wrongly rejects finite zero. Preserve the cold typed setter for absent reads.",
+  "description": "D3.2.2-D3.2.1: raw int stores need a 64-bit null exclusion, not an int53 band guard: poison lanes are valid. A 32-bit BEQS truncates INT_LANE_NULL to zero and wrongly rejects finite zero. Preserve the cold typed setter for absent reads.",
   "checks": [
     {
       "in_func": "_tune17b_swap_#",

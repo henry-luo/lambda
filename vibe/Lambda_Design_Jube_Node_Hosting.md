@@ -345,7 +345,7 @@ surface.
 No C++ unwinding across the module boundary. Handlers return status codes and
 carry any JS abrupt completion as the same returned ERROR `Item`; boundary
 conversion uses `JubeHostScriptAPI.throw_value`/`error_lane_payload` with no
-ambient pending state (D8.4.3).
+ambient pending state (D7.4.3).
 
 ### P7. Static first, dynamic second, behaviorally identical
 Every module lands first as a statically registered `JubeModuleDef` (same
@@ -765,7 +765,7 @@ standard host byte-identical across bundle packaging, and lands static-first
   zlib stops linking into the Node module image while remaining host-owned for
   the codec provider. *Gate:* dynamic load green on macOS + Linux; identical
   behavior against the golden fixture (P7-style diffing), under the
-  D7.3.2/D7.3.4 DSO/dependency rules and D7.4.3's opaque-table boundary.
+  D9.4.2/D9.4.4 DSO/dependency rules and D9.5.3's opaque-table boundary.
 - **N5 — libuv leaves.** `node-fs`, then `node-net` (net+dns), then
   `node-child-process`, static→dynamic each, converting rooting per JN9 and
   every direct `uv_*`/JS-queue call to the §9.1 request API (JN8). *Gate per

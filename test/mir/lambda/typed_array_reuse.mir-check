@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3: relay keeps its public entry admission; add/size reuse the admitted Vec witness, and cold append enforces the binding contract explicitly.",
+  "description": "D4.3.3: relay keeps its public entry admission; add/size reuse the admitted Vec witness, and cold append enforces the binding contract explicitly.",
   "checks": [
     {
       "in_func": "_relay_#",

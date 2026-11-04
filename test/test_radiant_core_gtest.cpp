@@ -3619,7 +3619,7 @@ TEST(DomRetirementOwnerArenaTest, SharedUiSourceSurvivesMutationRetirementAndRed
     auto* source_type = (TypeElmt*)source.element->type;
     Target ns = {};
     TypeNominal nominal = {};
-    // D2.6.6v2 resolves nominal tags through their declared type name.
+    // D3.1.1 resolves nominal tags through their declared type name.
     nominal.type_name = source_type->name;
     source_type->ns = &ns;
     source_type->nominal = &nominal;

@@ -19,9 +19,9 @@ not an accepted baseline. Close finite milestones and retain unresolved conforma
 CSS Writing Modes [Level 3](https://www.w3.org/TR/css-writing-modes-3/) and
 [Level 4](https://www.w3.org/TR/css-writing-modes-4/) govern layout behavior;
 the HTML and XML specifications govern document loading. Existing Lambda
-contracts remain authoritative: **D2.10.1v2** for XHTML admission,
-**D4.1.4v5 / D4.5.1v4** for allocation ownership, **D5.3.3 / D5.4.1** for
-precise roots and evaluator lifetime, and **D7.3.3–D7.3.4** for module boundaries.
+contracts remain authoritative: **D10.1.4** for XHTML admission,
+**D5.1.4 / D5.5.1** for allocation ownership, **D6.3.3 / D6.4.1** for
+precise roots and evaluator lifetime, and **D9.4.3–D9.4.4** for module boundaries.
 No CSS fix requires a Lambda language semantic change.
 
 ## Initial evidence
@@ -41,7 +41,7 @@ Distinct findings, requiring separate repairs:
 - The crash stack enters `StateStore::destroy` from `free_document`, through
   `reset_foreign_document_cache` during script-runtime batch reset. Isolate
   the owning document and allocation before changing destruction order.
-- `block-flow-direction-004.xht` is rejected at `&nbsp;`. **D2.10.1** explicitly
+- `block-flow-direction-004.xht` is rejected at `&nbsp;`. **D10.1.4** explicitly
   excludes non-predefined named entities. Expanding that policy is pending
   user direction; it must use the HTML Standard's recognized public-ID
   catalog, with corresponding formal and working-design updates.
@@ -101,8 +101,8 @@ batch documents as well. Expose optional phase timing through the same
 function, keeping the existing unprofiled entry point for native clients.
 Transfer the CLI's URL and loader-pool aliases before the canonical owner
 releases them. A refused teardown retains its backing pool; it cannot proceed
-to parser-input destruction. This preserves **D4.1.4v5 / D4.5.1v4** ownership
-and **D5.4.1** quiescent runtime transitions without a second cleanup algorithm.
+to parser-input destruction. This preserves **D5.1.4 / D5.5.1** ownership
+and **D6.4.1** quiescent runtime transitions without a second cleanup algorithm.
 
 Regression: a standalone iframe fixture adopts text and removes its frame,
 then a second scripted document runs in the same CLI batch. Require both
@@ -119,7 +119,7 @@ embedding pins immediately, then release their physical storage after the
 parent's state and view teardown. The parent Input context therefore cannot
 cascade ahead of its children. Remove the obsolete thread-local queue and its
 idle drains rather than add another lifetime decision. This uses the existing
-tracked allocation/arena/resource ownership model, **D4.1.4v5 / D4.5.1v4**.
+tracked allocation/arena/resource ownership model, **D5.1.4 / D5.5.1**.
 
 ## Completion record
 
@@ -136,12 +136,12 @@ Data-URL design: decode through the existing `parse_data_uri` implementation,
 then select HTML or XHTML using the shared MIME classifier. Bypass filename
 dispatch for opaque data payloads. Percent decoding, base64 and fragments stay
 in the shared decoder; no new transport parser is introduced. This follows
-[Fetch §6](https://fetch.spec.whatwg.org/#data-urls) and **D2.10.1v2**. Initial
+[Fetch §6](https://fetch.spec.whatwg.org/#data-urls) and **D10.1.4**. Initial
 admission covers HTML/XHTML MIME types; unsupported types do not become HTML.
 
 Entity design: recognized public IDs select the existing `html_entity_lookup`
 table after validating the doctype. Keep strict XML syntax and exact,
-semicolon-terminated names. The approved **D2.10.1v2** revision and
+semicolon-terminated names. The approved **D10.1.4** revision and
 `vibe/input/Input_XML.md` describe the same catalog boundary. Native parser
 coverage includes text/attributes, multi-codepoint/supplementary replacements,
 unknown IDs/entities, and rejected internal subsets.
@@ -703,7 +703,7 @@ for local font sources before its existing missing-relative-mirror fallback.
 Do not introduce a per-family/path/font-name substitution or patch font vendors.
 Keep HTTP download lifecycle, ordered `src` fallback, data/local faces and
 stylesheet-relative URL bases in their current owners. Font allocations remain
-font-owned under **D4.5.1v4 / D4.1.4v5**.
+font-owned under **D5.5.1 / D5.1.4**.
 
 Finite acceptance: root-relative TTF, root file URL and root-relative WOFF
 sources must produce the same glyph geometry as direct file-URL controls using
@@ -743,7 +743,7 @@ not depend on body tags or WPT filenames. Use the existing stretch-fit/minmax
 and box conversion helpers; keep CSS keywords distinct from resolved sizes.
 Logical flow measurements must remove surrogate-axis decorations and add the
 correct physical-axis decorations exactly once before geometry publication.
-Retained views remain owned under **D4.5.1v4 / D4.1.4v5**.
+Retained views remain owned under **D5.5.1 / D5.1.4**.
 
 Finite acceptance: 24 controls across vertical-lr/rl, nested/root flow, plain,
 inline-only border, block-only border, asymmetric padding, margins and both box
@@ -811,7 +811,7 @@ have no text rectangle/paint width and must not acquire a span's border edge.
 Retain the existing opaque outside/independent inside treatment for isolates;
 plaintext uses its own first-strong paragraph direction, and isolate-override
 also supplies the inner override. Root inline overrides apply to block containers
-as required by §2.2. Scratch arrays remain line-owned under **D4.5.1v4**.
+as required by §2.2. Scratch arrays remain line-owned under **D5.5.1**.
 
 Finite acceptance: CSS scopes versus equivalent source-control geometry for
 normal/embed/override under both directions, pure Latin plus following numbers,
@@ -864,7 +864,7 @@ visual `DCBA`, with raster input positions and vector glyph bytes checked.
 Preserve source/query rectangles. Publish immutable, source-indexed directional
 paint runs from the existing UAX #9 result, relative to each owning TextRect.
 Use existing TextRect/view-pool allocation, recycling and snapshot ownership
-under **D4.5.1v4 / D4.1.4v5**. Audit every clone/release path before adding child
+under **D5.5.1 / D5.1.4**. Audit every clone/release path before adding child
 run storage. Reuse the existing render paint-entry/RTL cluster pipeline for
 ordinary bidi runs, preserving logical source labels and grapheme boundaries.
 Clipping and ellipsis retain their existing owner and consume the same entries;
@@ -929,7 +929,7 @@ for a neutral-only paragraph. Reuse the shared inline-boundary style resolver
 rather than duplicate its CSS-wide/HTML-direction handling. Keep computed
 `direction` unchanged, as required by §2.2, and share the paragraph query between
 block plaintext and inline plaintext isolation. Ownership remains unchanged under
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 
 Finite acceptance: RTL→Latin and Latin→RTL soft wraps, neutral-only leading lines
@@ -996,7 +996,7 @@ font/inline edges, forced breaks, and available-size mutations. Admit only flows
 whose contributions are represented by this query; retain existing fallback for
 nested orthogonal formatting contexts, forms/replaced boxes, flex/grid/table,
 floats, multicolumn and containment until their axis-specific owners are joined.
-No new ownership is introduced (**D4.5.1v4 / D4.1.4v5**).
+No new ownership is introduced (**D5.5.1 / D5.1.4**).
 
 Verification budget: causal native controls versus independent explicit-height
 controls, original available-size family, neighboring sizing/inline/text gates,
@@ -1044,7 +1044,7 @@ Reconcile end-only insets after final sizing, independently of which algorithm
 published that size. Reuse the existing physical-axis positioned solver and
 containing-block geometry, rather than add a vertical-only coordinate formula.
 Retain static-axis and explicit start-inset ownership; no allocation change is
-needed (**D4.5.1v4 / D4.1.4v5**).
+needed (**D5.5.1 / D5.1.4**).
 
 Finite acceptance: both vertical block directions and paragraph directions,
 auto versus definite child inline-size, physical padding/borders/margins,
@@ -1102,7 +1102,7 @@ Use it to select the font metric's computed writing-mode/text-orientation pair.
 Expose the typed computed keyword for native consumers without adding another
 ad hoc ancestor walk. This milestone converts the font-unit owner; independent
 direction/geometry consumers retain their own subsequent acceptance cases. Preserve the selected declaration
-owner and allocation boundaries (**D4.5.1v4 / D4.1.4v5**).
+owner and allocation boundaries (**D5.5.1 / D5.1.4**).
 
 Finite acceptance: local/inherited upright versus initial/mixed/sideways,
 inherit/unset, variable-supplied values and an inherited-value mutation; vertical
@@ -1161,7 +1161,7 @@ existing logical flow origin rather than an already provisionally aligned box.
 Preserve relative offsets when assigning the resolved positions; extract the
 existing physical-to-flow relative-offset projection and reuse it instead of
 copying its writing-mode mapping. No retained ownership is added
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 Finite acceptance: image/inline-block lines with and without a Latin prefix,
 LTR/RTL, start/left/center alignment, first/last relatively positioned object,
@@ -1244,7 +1244,7 @@ nearest fixed scrollport and initial containing block constraints. Share the
 orthogonal-inline predicate between used length conversion and automatic-height
 classification. Keep its effective basis in resolved-style geometry dependency
 keys so ancestor constraint and viewport mutations cannot reuse stale values.
-No new retained pointers are needed (**D4.5.1v4 / D4.1.4v5**).
+No new retained pointers are needed (**D5.5.1 / D5.1.4**).
 
 Finite acceptance: perpendicular horizontal/vertical boxes; percentage and calc
 preferred inline sizes; definite/indefinite/zero containing dimensions; fixed
@@ -1309,7 +1309,7 @@ must consume used sizes, including zero, and a definite inline dimension must
 not suppress automatic block-axis publication. Reuse physical box conversion,
 stretch-fit and existing signed margin-collapse helpers. Generalize the existing
 root child self-collapse predicate by axis rather than copying it. Selected views
-retain their existing owners (**D4.5.1v4 / D4.1.4v5**).
+retain their existing owners (**D5.5.1 / D5.1.4**).
 
 Finite acceptance: vertical-lr/rl roots with automatic block size and automatic
 or definite inline size; empty bodies and absolute-only bodies with/without
@@ -1379,7 +1379,7 @@ asymmetric root/body decorations, empty/restored text and viewport changes.
 Preserve prior root, orthogonal and positioned controls. Root pseudo-element
 siblings, containment propagation and general mixed-inline intrinsic composition
 remain separate owners. No retained ownership changes are required
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 **Blocking prerequisites found by neighboring checks.** The corrected content-box
 basis exposed callers that accidentally depended on intrinsic style resolution
@@ -1514,7 +1514,7 @@ root mode is horizontal. Repair the decision, then its consumers:
   A typed CSSOM value consumer shares existing cascade, substitution and reset
   semantics before an unresolved body's layout style exists. Current resolved
   containment flags provide the fast path. Its temporary pool owns the read;
-  no expression or view payload escapes (**D4.5.1v4 / D4.1.4v5**).
+  no expression or view payload escapes (**D5.5.1 / D5.1.4**).
 - Remove the later body-mode fallback. Root physical origins and block margins
   follow the selected root used mode, even when its body is orthogonal.
 - Block orthogonality uses the parent's used layout axis. Comparing against the
@@ -1582,7 +1582,7 @@ before editing. Establish required transient layout metadata without changing
 computed style, and reuse the ordinary flow/margin publication owners instead
 of adding a root-pseudo offset or another body-only extent formula. CSS Writing
 Modes 3 §§7.1–7.2, CSS 2.2 §§9.4.1/8.3.1 and generated-content box ordering govern
-this behavior; ownership remains **D4.5.1v4 / D4.1.4v5**.
+this behavior; ownership remains **D5.5.1 / D5.1.4**.
 
 Finite acceptance: the two original failures; vertical-lr/rl body modes; roots
 with no ordinary declarations versus explicit horizontal-tb; fixed before/after
@@ -1664,7 +1664,7 @@ currently set `block.direction` after constructing line state without using that
 owner; confirm the first disagreement in `line.inline_base_direction`. Trace the
 inline-block's text position before/after its own final line and parent atomic
 placement to distinguish repeated alignment from coordinate publication.
-Selected style/view ownership remains **D4.5.1v4 / D4.1.4v5**.
+Selected style/view ownership remains **D5.5.1 / D5.1.4**.
 
 Finite acceptance: the three originals; block, inline-block, cell and caption
 controls with inherited/default `start` versus explicit physical alignment; RTL
@@ -1746,7 +1746,7 @@ Normative owners: [CSSOM View §9](https://www.w3.org/TR/cssom-view/#extensions-
 for source-range rectangles and font advances, CSS Writing Modes bidi inline
 model and [UAX #9 X9/§5.2](https://www.unicode.org/reports/tr9/#Retaining_Explicit_Formatting_Characters)
 for directional controls. Reuse existing source-indexed bidi data and fragment
-iterators; preserve **D4.5.1v4 / D4.1.4v5** selected-view ownership and retained
+iterators; preserve **D5.5.1 / D5.1.4** selected-view ownership and retained
 cloning/recycling. Do not split authored DOM or add fixture-specific serialization rules. Preserve
 browser geometry and comparison tolerances. The qualification follow-up below
 records the separately demonstrated legacy normalization defect.
@@ -1934,7 +1934,7 @@ horizontal controls; inherited numeric versus fixed line-height; a forced second
 line and a retained font/line-height mutation. First obtain independent browser
 ranges and native causal controls. Central-baseline choice, per-inline leading
 and line-over mapping may require coordinated ownership repair; no prototype is
-retained yet. Preserve **D4.5.1v4 / D4.1.4v5** and existing nonvertical behavior.
+retained yet. Preserve **D5.5.1 / D5.1.4** and existing nonvertical behavior.
 Use focused controls and original alignments in the edit loop; qualify with native,
 relevant inline/text/sizing suites, canonical writing audit, exact user command
 and the required Radiant aggregate at the finite boundary.
@@ -1989,7 +1989,7 @@ positioned its content inside that box. Extracted that common placement shape;
 text and BR now retain their own half-leading. The paragraph's primary and
 fallback font metrics use the same dominant-baseline adapter. Central synthesis
 uses the font content-area midpoint, per CSS Writing Modes 3 §4.2. Font size and
-parent font references retain their resolved owners (**D4.5.1v4 / D4.1.4v5**).
+parent font references retain their resolved owners (**D5.5.1 / D5.1.4**).
 
 The line-relative offset calculation now maps line-over to block-start for
 vertical-lr while the finalized current line's extent is available. This avoids
@@ -2123,7 +2123,7 @@ count padding twice (10px then 20px as padding changes); their shared helper mus
 return a content-relative baseline because both publishers add the content offset.
 That correction passes all flex/grid states. The same dominant-font adapter is
 now used by explicit textarea editable-line exports, with selected-view metrics
-kept local per **D4.5.1v4 / D4.1.4v5**. Last-line overflow remains under diagnosis.
+kept local per **D5.5.1 / D5.1.4**. Last-line overflow remains under diagnosis.
 
 The remaining table defect occurs at the source-to-physical publication boundary.
 Pre-publication row baselines use the logical grid block axis correctly; the
@@ -2544,7 +2544,7 @@ from the shared final line solver. The solver has the real line origin, selected
 content/synthesized baseline, all contributors and top/bottom constraints; the
 geometry publisher must not synthesize another first-line baseline. Cache one
 pass-produced scalar beside the atomic line ID, reset it before layout and copy
-it through the existing geometry snapshot owner. Keep D4.5.1v4 region/pool
+it through the existing geometry snapshot owner. Keep D5.5.1 region/pool
 ownership and copy-as-value contracts; no language ruling changes.
 
 Acceptance before broad qualification: 24 retained wrapping states (two vertical
@@ -2577,7 +2577,7 @@ The hot DOM size ratchets reject storing this scalar on every `DomNode` (80→88
 bytes, also enlarging text and elements). Preserve those limits: keep the scalar
 in existing optional `DomElementExt` metadata, with zero reads/resets avoiding
 allocation on cold elements. Fragment reset also clears it; measurement snapshots
-copy it explicitly with the atomic line ID. This follows D4.5.1v4/D4.1.4v5's
+copy it explicitly with the atomic line ID. This follows D5.5.1/D5.1.4's
 existing pool retention and copy-as-value ownership, without changing either
 ruling. Browser geometry validates all 24 new retained states, including automatic
 orthogonal sizing. The before-repair native matrix has the intended failures
@@ -2640,7 +2640,7 @@ user's request with all source changes and restart evidence preserved.
 **Outcome / priority.** Repair the sole `wpt-css-inline` aggregate regression,
 `dominant-baseline-mixed-writing-modes-002`, as a bounded follow-up. The prior
 writing-mode goal remains stopped. Preserve the selected-style ownership rules
-of **D4.5.1v4 / D4.1.4v5**; no formal CSS baseline ruling covers this behavior.
+of **D5.5.1 / D5.1.4**; no formal CSS baseline ruling covers this behavior.
 
 **Diagnosis and design.** The fixture is in quirks mode. `line_break` contributes
 the block's explicit root strut even when the existing quirks predicate says
@@ -2739,7 +2739,7 @@ unqualified patch is evidence only, not an implementation to restore wholesale.
 In particular, content baselines measured from block-start must be converted to
 the parent's line-over coordinate with the corresponding physical margin.
 Any required cached scalar belongs in optional element metadata and existing
-geometry snapshots, following **D4.5.1v4 / D4.1.4v5**; do not enlarge hot DomNode
+geometry snapshots, following **D5.5.1 / D5.1.4**; do not enlarge hot DomNode
 storage or introduce an ownership ruling.
 
 **Acceptance / scope.** Reproduce the 24 retained wrapping states with both
@@ -2866,7 +2866,7 @@ has no resolved inline-size to preserve. Investigate a logical inline contributi
 query that shares existing text normalization, min-run boundary rules and font
 measurement. Do not treat a physical-width query or formatted line maximum as a
 logical max-content contribution. Reuse the common sizing formula and existing
-measurement/snapshot contracts (**D4.5.1v4 / D4.1.4v5**); keep caller font, flow
+measurement/snapshot contracts (**D5.5.1 / D5.1.4**); keep caller font, flow
 owner and published geometry intact across probes.
 
 **Acceptance.** Strengthen the 24-state wrapping regression to assert the used
@@ -2900,7 +2900,7 @@ break metadata stays inside each atomic formatting context. The available-space
 fit-content formula is unchanged.
 
 The query uses `LayoutMeasureScope`, per-child `LayoutViewScope`, block and font
-scopes (**D4.5.1v4 / D4.1.4v5**). Selecting the measured child before style
+scopes (**D5.5.1 / D5.1.4**). Selecting the measured child before style
 resolution is necessary: resetting the caller's view instead corrupts retained
 auto sizing. The child also receives the shared computed-display box role before
 style resolution: an unclassified inline has no block sizing slots in the legacy
@@ -3023,7 +3023,7 @@ provisional dimensions during absolute layout. It cannot establish final used
 size ownership. An explicit borrowed `used_size_owner`, set by the grid formatter
 and checked against the current box, distinguishes algorithm-assigned dimensions
 from provisional constraints and prevents inheritance into descendant boxes
-(**D4.5.1v4 / D4.1.4v5**). Restore ordinary absolute/normal-flow sizing while
+(**D5.5.1 / D5.1.4**). Restore ordinary absolute/normal-flow sizing while
 retaining grid-assigned wrapping and physical publication.
 
 The alignment matrix covers fixed tracks, gaps, distributed content alignment,
@@ -3095,7 +3095,7 @@ and orthogonal child writing modes. Distinguish natural width/height from track
 inline/block axes, retain declared grid sizes and automatic minima, and mutate
 the available inline size and resource dimensions. Reuse the existing resource,
 box-metric and contribution APIs; preserve selected-view/region ownership
-(**D4.5.1v4 / D4.1.4v5**). Use focused native/browser checks while establishing
+(**D5.5.1 / D5.1.4**). Use focused native/browser checks while establishing
 the cause, then relevant grid/replaced neighbors, the canonical M24 delta,
 dimension-cast lint and the required Radiant milestone gate. Do not absorb the
 independent WPT reporter-DOM differences or font-metric backlog into this stage.
@@ -3138,7 +3138,7 @@ item's content formatter independently before editing. Determine where the
 item's writing mode stops affecting block-child progress, and whether the width
 query disagrees with canonical flow measurement. Reuse existing block formatting,
 logical-axis mapping and intrinsic APIs; preserve the flex algorithm's main/cross
-used constraints and selected-view ownership (**D4.5.1v4 / D4.1.4v5**).
+used constraints and selected-view ownership (**D5.5.1 / D5.1.4**).
 
 **Acceptance / budget.** Fully match the original and reduce it to rectangular
 block children in both vertical directions, with a parallel horizontal control.
@@ -3181,7 +3181,7 @@ that duplicate mapping with the cascade's existing component winner/projection
 APIs. Sizing neighbors expose `ortho-writing-mode-001`: the width fold reads a
 provisional percentage margin based on outer width instead of the orthogonal
 inline basis. Re-resolve that margin through the existing spacing helper inside
-a measurement snapshot, preserving **D4.5.1v4 / D4.1.4v5**. `button-min-width`
+a measurement snapshot, preserving **D5.5.1 / D5.1.4**. `button-min-width`
 also needs its native block-axis label centering at canonical text publication,
 where the old flex-only text mapper already supplied it. Both neighbor losses
 remain unqualified (`temp/wpt-m26-neighbors.log`).
@@ -3254,7 +3254,7 @@ vertical finalizer assigns a new content-derived width after earlier constraint
 resolution. Reuse `layout_apply_min_max_axis` with the actual candidate box
 convention, applying constraints before child geometry uses the final width.
 Keep overflow extents distinct from the constrained used border box, and retain
-parent-owned flex/grid sizes (**D4.5.1v4 / D4.1.4v5**).
+parent-owned flex/grid sizes (**D5.5.1 / D5.1.4**).
 [CSS Sizing 3 §3.1 and §3.3](https://www.w3.org/TR/css-sizing-3/#sizing-properties)
 govern min/max and box edges;
 [CSS Writing Modes 3 §7.3](https://www.w3.org/TR/css-writing-modes-3/#orthogonal-flows)
@@ -3347,7 +3347,7 @@ independently. `vertical_child_block_contribution` recursively promotes overflow
 only for a definite vertical width; determine whether that rule confuses
 intrinsic sizing with used normal-flow progress. Reuse the existing used-flow
 and overflow owners, preserving margins and selected-view ownership
-(**D4.5.1v4 / D4.1.4v5**). The relevant normative boundaries are
+(**D5.5.1 / D5.1.4**). The relevant normative boundaries are
 [CSS 2.2 §10.6.3/§10.6.7](https://www.w3.org/TR/CSS22/visudet.html#normal-block)
 and their [CSS Writing Modes 3 §7.4 mapping](https://www.w3.org/TR/css-writing-modes-3/#logical-to-physical).
 No implementation change or acceptance claim has been made for this stage.
@@ -3381,7 +3381,7 @@ call sites. Existing margin helpers retain adjacency; existing content-bounds
 and scroll owners retain overflow. Do not apply an intrinsic-size contribution
 rule to the normal-flow cursor. The repeated native query setup is extracted
 into one fixture helper, retaining its caller-view preservation assertion
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 **Neighbor feedback / line ownership.** The first implementation passes all
 290 native cases and raises the canonical inventory to **1,462/1,980**: four
@@ -3507,7 +3507,7 @@ edge from the containing flow. Reuse the existing in-flow margin/axis helpers
 rather than adding an orthogonal-only margin solver. Explicit self-alignment
 continues through the existing CSS Align 3 §6.1.1 owner after base placement;
 auto margins retain priority. No ownership or language ruling changes
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 **Finite acceptance.** Vertical-lr and vertical-rl containers, LTR/RTL container
 direction independent of child direction; asymmetric content edges; fixed,
@@ -3627,7 +3627,7 @@ Use the shared logical-to-physical start predicate for this distinction, includi
 self-alignment; remove the normal-block path's separate bottom-edge override.
 The existing surrogate mapping continues to own atomic lines. Do not change
 font metrics, normal-flow block progression or child sizing. Ownership contracts
-remain **D4.5.1v4 / D4.1.4v5**.
+remain **D5.5.1 / D5.1.4**.
 
 **Finite acceptance.** Extend the existing retained margin control across
 horizontal, vertical-lr and vertical-rl child flows, independently of parent and
@@ -3738,7 +3738,7 @@ sideways flows. Keep the line-relative cursor/direction until publication;
 project both the cursor and selected margin edge through the shared axis mapping.
 The parent's block direction chooses physical X independently of inline RTL.
 Reuse the existing anchor fields and containing-block offset owner, adding no
-allocation or second positioned layout path (**D4.5.1v4 / D4.1.4v5**).
+allocation or second positioned layout path (**D5.5.1 / D5.1.4**).
 
 **Finite acceptance.** Original bordered sideways cases; horizontal/principal
 vertical/sideways static parents with independent containing-block mode and
@@ -3876,7 +3876,7 @@ Floats cannot enter the normal-block cursor or margin-collapse sequence.
 Resolve final BFC block extent on the block axis; do not enlarge the vertical
 inline size using a logical float-bottom value. Reuse M31's prefix correction
 where a prior normal block supplies the source cursor. No allocation or view
-ownership changes (**D4.5.1v4 / D4.1.4v5**).
+ownership changes (**D5.5.1 / D5.1.4**).
 
 **Finite acceptance.** Existing contiguous-image originals in both vertical
 block directions. A browser/native matrix covers horizontal and four vertical/
@@ -4055,7 +4055,7 @@ normal vertical extent/publication consumes them once, including RTL margin
 resolution. Existing source-prefix correction supplies prior normal content.
 Use the same query and margin equation for horizontal and vertical consumers;
 do not introduce a second search or final-coordinate corrections. The view and
-property owners remain unchanged (**D4.5.1v4 / D4.1.4v5**).
+property owners remain unchanged (**D5.5.1 / D5.1.4**).
 
 The original plan's finite acceptance and verification budget still apply.
 Intrinsically sized replaced/fragmented/nested combinations stay explicit
@@ -4195,7 +4195,7 @@ inline-size constraints and normal margins must be recomputed against space
 there. Reuse one shared interval/search and one margin equation. Remove stale
 state rather than offsetting final coordinates. Preserve CSS2 §9.5.2 clearance
 and margin-collapse semantics and CSS Writing Modes line/block mappings;
-existing ownership rulings remain **D4.5.1v4 / D4.1.4v5**. Do not conflate
+existing ownership rulings remain **D5.5.1 / D5.1.4**. Do not conflate
 clearance with an arbitrary BFC shift in margin-collapse bookkeeping.
 
 Scope the milestone to that shared ordering/state repair, with the existing
@@ -4235,7 +4235,7 @@ Centralize the repeated active-clear side predicate before adding another
 caller. Reuse the existing fit, BFC offsets, axis/margin helpers, automatic-size
 constraints and publication. Do not add fixture-specific offsets, separate
 packing or a second margin equation. Selected view/property ownership remains
-**D4.5.1v4 / D4.1.4v5**. The preceding M34 finite plan and gate budget apply;
+**D5.5.1 / D5.1.4**. The preceding M34 finite plan and gate budget apply;
 production implementation and qualification follow this causal result.
 
 
@@ -4331,7 +4331,7 @@ publication; diagnose the first disagreement instead of forcing a parent size.
 Reuse existing sizing/axis helpers. CSS Writing Modes §7.3 and CSS Inline's
 atomic-inline line sizing govern the prerequisite; text-combine-upright §9.1
 continues to govern the next composition stage. Keep allocation ownership
-**D4.5.1v4 / D4.1.4v5** unchanged.
+**D5.5.1 / D5.1.4** unchanged.
 
 Scope M35 to that shared parent/atomic extent repair with explicit border boxes
 and an indefinite containing inline measure. Combined-run horizontal shaping,
@@ -4372,7 +4372,7 @@ block frame when called before vertical publication; existing horizontal and
 post-publication consumers retain their default frame. Parameterize that shared
 collector and reuse `LayoutFloatMetrics` for box/exclusion dimensions rather
 than creating another alignment algorithm. CSS Writing Modes §7 and CSS Inline
-line sizing govern the repair. Ownership stays **D4.5.1v4 / D4.1.4v5**.
+line sizing govern the repair. Ownership stays **D5.5.1 / D5.1.4**.
 
 The preceding finite M35 acceptance and verification budget apply. Composition
 shaping/compression/decorations remain independent. No M35 candidate is yet
@@ -4417,7 +4417,7 @@ as logical pairs; do not rotate authored physical declarations. Scope this
 prerequisite to those existing control classes and UA button spacing. Other
 widget interaction/paint and native-font fidelity stay partial. CSS Writing
 Modes §7.2 and HTML rendering §15.5.2–4/§15.5.16–17 govern these consumers;
-ownership remains **D4.5.1v4 / D4.1.4v5**. Add the form native coverage and form
+ownership remains **D5.5.1 / D5.1.4**. Add the form native coverage and form
 layout neighbors to the existing verification budget before the required gate.
 
 The nested retained control independently confirms 90 browser states. Its first
@@ -4472,7 +4472,7 @@ ordinary vertical viewport seeding away from the replaced root. Do not reinstall
 natural metrics as authored CSS. Independent browser controls cover the actual
 replacement, three writing modes, physical 71×37 sizing and restoration; add
 the same retained native control before editing this owner (CSS 2.1 replaced
-sizing / CSS Writing Modes §7.2; **D4.5.1v4 / D4.1.4v5** unchanged).
+sizing / CSS Writing Modes §7.2; **D5.5.1 / D5.1.4** unchanged).
 
 **M35 final candidate and partial-record audit.** The final inventory has
 1,556/1,980 full matches, 424 mismatches and zero execution errors: 35 gains,
@@ -4521,7 +4521,7 @@ physical sizes before editing. Trace the first disagreement in
 `calc_button_size`; reuse shared forced-line intrinsic text measurement and
 line-height/font helpers instead of counting a fixture's lines or fitting its
 box. CSS Text whitespace processing and HTML button rendering govern it;
-ownership remains **D4.5.1v4 / D4.1.4v5**. Scope native button/submit/reset label
+ownership remains **D5.5.1 / D5.1.4**. Scope native button/submit/reset label
 measurement; HTML button flow children remain a control. Platform fallback-font
 fidelity and the separately observed vertical textarea baseline fallback remain
 partial. Budget focused browser/native controls, the original, accepted form/
@@ -4589,7 +4589,7 @@ through the existing non-space line transition. Text/row-based native controls
 project intrinsic axes before CSS physical sizing, UA padding follows logical
 axes, and a replaced root retains its measured used size without writing it
 into CSS auto-size slots. Real HTML button flow children retain their own size
-owner. Existing ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged.
+owner. Existing ownership rulings **D5.5.1 / D5.1.4** are unchanged.
 
 The final executable SHA-256 is
 `9471bf9f6ea55bf98f05bab8174818d93ae28c58cd11fdb3eeddfa53709d62e5`.
@@ -4652,7 +4652,7 @@ retained tests must fail before production changes; browser/CLI controls retain
 raw case identities. Native glyph paint is already a separate incomplete
 consumer and is not qualified by this geometry milestone. CSS Text §3–4,
 HTML rendering §15.5.3/§15.5.12 and CSS Writing Modes §7.2 govern the repair;
-allocation/selected-view ownership stays **D4.5.1v4 / D4.1.4v5**. No raw fixture
+allocation/selected-view ownership stays **D5.5.1 / D5.1.4**. No raw fixture
 or reference changes are authorized.
 
 **Implementation refinement before qualification.** The first build found a
@@ -4736,7 +4736,7 @@ lines while authored overrides and CSS-wide resets remain live. Native labels
 share DOM inline whitespace normalization, keep the longest line's inline
 measure, omit an empty terminal line, and sum block advances before physical
 axis projection. Selected-font setup restores the surrounding layout state.
-The ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged. Native label paint,
+The ownership rulings **D5.5.1 / D5.1.4** are unchanged. Native label paint,
 normal fallback-font line height, broader control baselines and the remaining
 424 raw mismatches are still partial. M36's finite acceptance is complete;
 the overall goal remains active and incomplete.
@@ -4792,7 +4792,7 @@ helper conflates explicit zero with normal, so report that distinction through
 its existing resolver rather than checking for a positive scalar. Add causal
 retained native tests before production edits. CSS 2.1 §10.8.1 and HTML
 rendering §15.5.3/§15.5.12 govern the metric choice; transient ownership remains
-**D4.5.1v4 / D4.1.4v5**. The preceding finite scope and verification budget apply.
+**D5.5.1 / D5.1.4**. The preceding finite scope and verification budget apply.
 
 **Candidate validation; required gate pending.** The new retained regression
 fails on M36 and passes after the repair. Its 270 states cover button/submit/
@@ -4850,7 +4850,7 @@ The qualified snapshot, source copies, patch and manifest are
 M37's finite acceptance is complete. Broader native baselines, native glyph
 paint, generated WPT report DOM differences and the remaining 424 raw
 mismatches are still partial; the overall goal remains active and incomplete.
-Existing ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged.
+Existing ownership rulings **D5.5.1 / D5.1.4** are unchanged.
 
 **Next finite milestone / M38 plan.** P1: publish native input-button label
 baselines from their actual line metrics. Common multilingual or multiline
@@ -4871,7 +4871,7 @@ fitting the original row's offsets. Reuse the shared line-font collector,
 forced-line traversal and existing logical baseline conversion helpers;
 do not add another glyph scan or physical-axis baseline formula. CSS Inline
 3 §§3–4, CSS Align 3 §9.1, HTML button layout and CSS Writing Modes dimensional
-mapping govern this work; **D4.5.1v4 / D4.1.4v5** remain the ownership contract.
+mapping govern this work; **D5.5.1 / D5.1.4** remain the ownership contract.
 Keep textarea-specific baseline policy, native glyph paint and report-DOM
 fidelity as separate limits. Budget causal browser/native controls, the
 original, relevant accepted form/inline/alignment neighbors, canonical
@@ -4922,7 +4922,7 @@ compatibility limit until its internal content-baseline owner is established.
 The selected core is parallel line baselines, shared content-origin
 publication and standards-based orthogonal fallback; no result is waived.
 CSS Inline 3 §§3–4/A.3, CSS Align 3 §9.1 and HTML button layout govern the
-repair; **D4.5.1v4 / D4.1.4v5** still govern transient ownership. Add failing
+repair; **D5.5.1 / D5.1.4** still govern transient ownership. Add failing
 retained regressions before production edits; keep the preceding verification
 budget and record every original/corpus disagreement honestly.
 
@@ -5026,7 +5026,7 @@ complete button content group. Empty atomic boxes use ordinary placement.
 Orthogonal button layout supplies the anonymous content-box baseline, while
 ordinary atoms retain their margin-box source. First/last selection, font-size,
 value, mode and RTL mutation and restoration pass retained controls. Ownership
-still follows **D4.5.1v4 / D4.1.4v5**. The twelve 0.5px font-metric differences,
+still follows **D5.5.1 / D5.1.4**. The twelve 0.5px font-metric differences,
 native glyph paint, report-DOM fidelity, default-whitespace `<br>` text
 publication and the remaining 422 writing-mode mismatches remain partial.
 M38's finite baseline milestone is complete; the overall goal remains active
@@ -5052,7 +5052,7 @@ original page. Reuse forced-line and shared group-alignment/axis publication
 helpers; do not copy another mapper or fit either line to reference offsets.
 Keep native value-label paint and minor font metric precision separate.
 CSS Text forced breaks/alignment, HTML button layout and CSS Writing Modes
-dimensional mapping govern this repair; **D4.5.1v4 / D4.1.4v5** still govern
+dimensional mapping govern this repair; **D5.5.1 / D5.1.4** still govern
 ownership. Budget causal browser/native controls, the original, relevant
 accepted form/inline/flex-path neighbors, canonical writing-mode delta,
 lint/diff and one required Radiant gate.
@@ -5074,7 +5074,7 @@ Evidence: `temp/wpt-m39-button-lines-{browser,before}.json` and
 `temp/wpt-m39-trace-cli.log`. CSS Text 3 §§5/6 (forced breaks and each line's
 inline alignment), CSS Writing Modes 3 §3.2 (column progression), and HTML
 §15.5.3 (button formatting context and fit-content inline size) govern these
-coordinates. **D4.5.1v4 / D4.1.4v5** remain unchanged.
+coordinates. **D5.5.1 / D5.1.4** remain unchanged.
 
 **M39 implementation and focused evidence.** `line_align` selects the physical
 axis that owns the inline measure before deciding whether shrink-to-fit needs
@@ -5155,7 +5155,7 @@ native labels and ordinary atomic flow; row/column containers with parallel
 and orthogonal axes; forced breaks, auto versus authored dimensions, asymmetric
 decoration and one retained content/mode/size mutation/restoration sequence.
 Use CSS Flexbox intrinsic/base/cross-size rules and CSS Writing Modes
-orthogonal dimension mapping, retaining **D4.5.1v4 / D4.1.4v5** ownership.
+orthogonal dimension mapping, retaining **D5.5.1 / D5.1.4** ownership.
 Keep glyph paint, font quantization, script-generated report DOM and compound
 table/ruby behavior separate. Budget focused causal browser/native evidence,
 relevant accepted neighbors, canonical writing-mode delta, lint/diff and one
@@ -5185,7 +5185,7 @@ size containment and min/max constraints. Include empty containers, decoration,
 row/column directions and retained content/style/mode restoration. Verify the
 two zero-inline-size range fixtures and the original sideways fixture without
 claiming its independent direction issue solved. CSS Flexbox §§9.2/9.4 and CSS
-Writing Modes §7 govern sizing; **D4.5.1v4 / D4.1.4v5** ownership is unchanged.
+Writing Modes §7 govern sizing; **D5.5.1 / D5.1.4** ownership is unchanged.
 Native-label stale metrics, forced-line intrinsic measurement and sideways
 direction remain separate follow-ons. Qualification budget stays as planned.
 
@@ -5290,7 +5290,7 @@ axis finalizer preserves decoration, empty content, explicit zero, min/max and
 assigned sizes. Nested flex keeps its physical content frame and initializes
 children through the shared collector after capturing its own constraints;
 retained width changes and restoration pass. Ownership remains
-**D4.5.1v4 / D4.1.4v5**. This finite milestone is qualified; native intrinsic
+**D5.5.1 / D5.1.4**. This finite milestone is qualified; native intrinsic
 projection, sideways direction, eight inherited horizontal containment controls,
 compound typography/table/ruby and 422 raw writing-mode mismatches remain open.
 The overall goal is active and incomplete.
@@ -5314,7 +5314,7 @@ font/value/size mutation/restoration sequence. Include HTML button and ordinary
 flow controls to challenge role dispatch, while keeping their independent
 forced-line intrinsic-flow repair separate. CSS Writing Modes dimensional
 mapping, CSS Flexbox §§9.2/9.4 and HTML widget writing-mode rules govern this
-work; **D4.5.1v4 / D4.1.4v5** continue to govern ownership. Budget focused
+work; **D5.5.1 / D5.1.4** continue to govern ownership. Budget focused
 browser/native causal cases, relevant accepted neighbors, canonical WPT delta,
 lint/diff and one required Radiant aggregate after the implementation stabilizes.
 No M41 probe or code has started.
@@ -5341,7 +5341,7 @@ text/textarea/select controls in parallel/orthogonal row and column contexts,
 UA/asymmetric decoration and auto/zero/authored inline size, with ordinary-flow
 controls (`temp/wpt-m41-native-browser.json`). CSS Flexbox §§9.2/9.4, CSS
 Writing Modes dimensional mapping and HTML §§15.5.2/15.5.8 govern the behavior;
-**D4.5.1v4 / D4.1.4v5** ownership is unchanged. No engine edit yet.
+**D5.5.1 / D5.1.4** ownership is unchanged. No engine edit yet.
 
 **M41 design refinement / implementation.** Natural intrinsic metrics and used
 content sizes are distinct query contracts. Reusing a used-size measurement for
@@ -5404,7 +5404,7 @@ the used query, and final non-stretch replaced-box alignment adds decoration
 through the existing box conversion helper. Range UA metadata, including the
 existing list-height option, is shared rather than duplicated. No fixture
 condition, fitted dimension, reference, tolerance or harness policy changed;
-**D4.5.1v4 / D4.1.4v5** ownership is unchanged.
+**D5.5.1 / D5.1.4** ownership is unchanged.
 
 Four new native regressions cover 702 retained states: 96 range default/zero/
 query-purity states; 540 native flex-versus-flow states through font, label,
@@ -5455,7 +5455,7 @@ contributions, block advances and flex row/column consumers. Reuse the existing
 the needed contract; do not copy glyph loops or replace child structure with a
 native label. Normative rules are CSS Text §§3–5, CSS Sizing intrinsic sizes,
 CSS Flexbox §§9.2/9.4 and CSS Writing Modes §7. Existing transient ownership
-remains **D4.5.1v4 / D4.1.4v5**.
+remains **D5.5.1 / D5.1.4**.
 
 Acceptance scope: preserved LF versus `<br>`, horizontal/vertical-lr/vertical-rl,
 parallel and orthogonal row/column parents, auto/authored inline sizes, and
@@ -5507,7 +5507,7 @@ natural query; ordinary contributions and authored preferred sizes retain the
 used query. The raw-before controls record both defects without tolerance
 changes. Repeat the affected sizing family and required
 qualification after the shared repair stabilizes. Ownership remains
-**D4.5.1v4 / D4.1.4v5**; no baseline or tolerance change is authorized or needed.
+**D5.5.1 / D5.1.4**; no baseline or tolerance change is authorized or needed.
 
 **M41 repaired focused outcome.** The shared percentage reset and the automatic
 preferred-height intrinsic branch pass all **331/331** native tests
@@ -5564,7 +5564,7 @@ The qualified executable, 23 source/doc copies, patch and manifest are
 `temp/wpt-m41-qualified.patch` and `temp/wpt-m41-qualified-state.json`.
 The snapshot records the final canonical delta, all 426 browser size controls,
 five new regressions with 798 retained states, required gate and remaining
-limits. Existing ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged.
+limits. Existing ownership rulings **D5.5.1 / D5.1.4** are unchanged.
 This finite milestone is qualified. The long-running goal stays active with
 414 raw writing-mode mismatches; the M42 ordinary-flow forced-line intrinsic
 plan above is next, and no M42 probe or code has started.
@@ -5609,7 +5609,7 @@ boundary, not a redefinition of the remaining conformance objective.
 CSS Text [§§3–5](https://www.w3.org/TR/css-text-3/#white-space-property), CSS
 Sizing [§5.1](https://www.w3.org/TR/css-sizing-3/#intrinsic-sizes), CSS Flexbox
 [§§9.2/9.4](https://www.w3.org/TR/css-flexbox-1/#algo-main-item) and CSS Writing
-Modes §7 govern the result; ownership stays **D4.5.1v4 / D4.1.4v5**.
+Modes §7 govern the result; ownership stays **D5.5.1 / D5.1.4**.
 Verification budget: one failing retained native case, focused browser and
 query-purity controls, related accepted form/inline/sizing checks, full WPT
 delta, dimension lint/diff, and one required Radiant aggregate after source
@@ -5633,7 +5633,7 @@ also check natural dimensions independently of authored size and preserve
 committed subtree geometry. Independent line-edge controls confirm larger/zero
 leading and leading/terminal/intermediate empty lines
 (`temp/wpt-m42-line-edges-browser.json`). Build is in progress; no qualification
-claim yet. **D4.5.1v4 / D4.1.4v5** ownership is unchanged.
+claim yet. **D5.5.1 / D5.1.4** ownership is unchanged.
 
 **M42 consumers and focused outcome.** The first candidate confirms that the
 same physical result must reach both main and hypothetical cross sizing. The
@@ -5691,7 +5691,7 @@ containing-size change to identify the first disagreement. Reuse shared
 percentage/cascade/box helpers; no percent-value exception or empty-fixture fit.
 Bound verification to the original case, causal controls, affected accepted
 sizing/position neighbors, canonical delta and one required Radiant aggregate
-after stable source. Ownership stays **D4.5.1v4 / D4.1.4v5**. No M43 probe or
+after stable source. Ownership stays **D5.5.1 / D5.1.4**. No M43 probe or
 code has started; qualify M42 first.
 
 **M42 qualified checkpoint.** The required Radiant aggregate exits 0: **6,555
@@ -5713,7 +5713,7 @@ qualified executable, 24 source/doc copies, patch and manifest are
 This closes the direct forced-line sizing milestone, not the conformance goal.
 The goal stays active; investigate the upstream percentage-padding dependency
 under M43 next. No M43 probe or code has started, and ownership remains
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 ### Milestone 43: cyclic percentage padding in shrink-to-fit contributions
 
@@ -5738,7 +5738,7 @@ through the existing math/substitution/box helpers with the cyclic percentage
 term at zero; retain fixed calc terms and borders. Preserve definite bases and
 resolve final padding using the containing block's inline axis after its size
 exists. CSS Writing Modes §7.2, CSS Sizing §5.2.1 and CSS 2.2 §8.4 govern the
-behavior; ownership remains **D4.5.1v4 / D4.1.4v5**.
+behavior; ownership remains **D5.5.1 / D5.1.4**.
 
 Acceptance: the original upstream case; percentage and calc padding with empty
 and fixed-content children; horizontal float/inline-block shrink-to-fit parents
@@ -5775,7 +5775,7 @@ The new regression fails on M42 (`temp/wpt-m43-causal-before.log`) and covers
 float/inline-block parents, definite size edits and auto restoration. Its
 geometry and intrinsic-query expectations are independently checked by 96
 border/basis browser controls (`temp/wpt-m43-bordered-browser.json`). The second
-build is in progress. No qualification claim yet; **D4.5.1v4 / D4.1.4v5** are
+build is in progress. No qualification claim yet; **D5.5.1 / D5.1.4** are
 unchanged.
 
 **M43 expression and range refinement.** The 192 positive-term retained states
@@ -5835,7 +5835,7 @@ Trace UA defaults → current intrinsic facts → inline/replaced used box befor
 editing. Inspect the paint consumer and keep any independent fidelity gap
 explicit; geometry matching does not by itself qualify value/fill painting.
 Use HTML rendering rules and CSS Writing Modes dimensional mapping; existing
-ownership stays **D4.5.1v4 / D4.1.4v5**. Bound verification to causal native and
+ownership stays **D5.5.1 / D5.1.4**. Bound verification to causal native and
 browser controls, accepted form/sizing neighbors, the full WPT delta, lint/diff
 and one required Radiant aggregate after stable source. Compound ruby/table,
 sideways progression, structured-inline measurement and script-report DOM
@@ -5864,7 +5864,7 @@ The qualified executable, 24 source/doc copies, patch and manifest are
 This closes the measured horizontal shrink-to-fit percentage-padding contract,
 including fixed math terms, borders, final percentage resolution and padding's
 used range. The inherited vertical-parent controls and remaining upstream
-failures stay open. Ownership remains **D4.5.1v4 / D4.1.4v5**. The full goal is
+failures stay open. Ownership remains **D5.5.1 / D5.1.4**. The full goal is
 active; next is the M44 progress/meter sizing investigation, with no M44 probe
 or code started yet.
 
@@ -5890,7 +5890,7 @@ fallback each assume horizontal writing. Extract one shared UA physical-size
 producer from these repeated shapes, then let the existing authored physical/
 logical-size cascade continue to win. Preserve image/video/SVG natural axes,
 explicit auto values, and existing selected-view/style ownership
-(**D4.5.1v4 / D4.1.4v5**); no new payload or formal ruling is needed.
+(**D5.5.1 / D5.1.4**); no new payload or formal ruling is needed.
 
 **Acceptance and verification budget.** Independently captured 192 Chromium
 controls vary widget, three writing modes, native/none appearance, 20/32px
@@ -5977,7 +5977,7 @@ See `temp/wpt-writing-m44-candidate.json` and
 (139/139) and raw box (17/17) neighbors pass. Dimension lint and diff checks
 pass. The 23 code-file/CLI fingerprints are frozen in
 `temp/wpt-m44-candidate-code-state.json`. The required Radiant aggregate is
-next; M44 is not yet qualified. Ownership remains **D4.5.1v4 / D4.1.4v5**,
+next; M44 is not yet qualified. Ownership remains **D5.5.1 / D5.1.4**,
 and no corpus, references, tolerances, assertions or skips have changed.
 
 **Next priority / M45 plan.** Investigate ordinary `select` automatic sizing
@@ -5997,7 +5997,7 @@ with spaces versus an unbreakable label, authored versus default fonts and
 physical/logical sizes, plus retained option/font/appearance restoration. Check
 HTML select rendering and CSS UI appearance behavior against independent
 browser controls, and inspect existing select painting's appearance flag.
-Keep selected-view/style ownership **D4.5.1v4 / D4.1.4v5**. Budget causal native
+Keep selected-view/style ownership **D5.5.1 / D5.1.4**. Budget causal native
 and browser checks, affected accepted form/sizing neighbors, canonical WPT
 delta, lint/diff and one required Radiant aggregate after stable source. The
 sixty previously recorded native select block-height controls are related
@@ -6032,7 +6032,7 @@ This closes the selected logical widget UA sizing and retained-data milestone,
 including author overrides, absent natural dimensions and decorated positioned
 content-size conversion. It does not qualify widget painting or erase the
 sixteen fractional inline-parent differences. Ownership remains
-**D4.5.1v4 / D4.1.4v5**. The full goal remains active with 407 raw geometry
+**D5.5.1 / D5.1.4**. The full goal remains active with 407 raw geometry
 mismatches. Next is M45 appearance-less select sizing; no M45 probe or code has
 started.
 
@@ -6065,8 +6065,8 @@ and ordinary CSS styles. [HTML Rendering §15.5.16](https://html.spec.whatwg.org
 provides select's default preferred-size role. Chromium's own menu-list sizing
 code independently confirms full-label measurement and separate CSS/internal
 padding; it is diagnostic evidence, not a copied implementation or a replacement
-for those standards. Selected-view/style ownership remains **D4.5.1v4 /
-D4.1.4v5**; no formal ruling changes or new lifetime payloads are required.
+for those standards. Selected-view/style ownership remains **D5.5.1 /
+D5.1.4**; no formal ruling changes or new lifetime payloads are required.
 
 **Evidence and verification budget.** Captured 144 independent controls varying
 H/VLR/VRL, native/none, default/20px Ahem fonts, short/spaced/unbreakable labels,
@@ -6098,7 +6098,7 @@ ignore a nonempty option `label`. Add one borrowed-label selector in the
 existing view/select module, reuse it in the full-label measurement and existing
 paint text accessor, and preserve normalized DOM-text fallback. This directly
 aligns the label being measured with the label displayed, with no new storage
-or ownership change (**D4.5.1v4 / D4.1.4v5**).
+or ownership change (**D5.5.1 / D5.1.4**).
 
 A Chromium UA-shadow inspection (`temp/wpt-m45-shadow-browser.json`) further
 narrows the height residue: native inner boxes have 1px block padding per side;
@@ -6156,7 +6156,7 @@ and sizing 776/776, with zero failures (`temp/wpt-m45-neighbors.log`). Dimension
 lint and diff checks pass. The 24 code-file and CLI hashes are unchanged through
 these checks (`temp/wpt-m45-candidate-code-state.json`). M45 awaits its required
 Radiant aggregate; the full conformance goal remains active. Existing ownership
-is unchanged (**D4.5.1v4 / D4.1.4v5**).
+is unchanged (**D5.5.1 / D5.1.4**).
 
 **M45 height root cause established before closing.** A causal browser font
 restoration changes primitive Ahem height 24→22 while preserving its width;
@@ -6230,7 +6230,7 @@ against the empty control (`temp/wpt-m45-final-paint.log`). Final dimension
 lint and diff checks pass. The current 24 code-file/CLI hashes are frozen in
 `temp/wpt-m45-candidate-code-state.json`; the final required aggregate must
 qualify this newer binary. The first passing gate remains separately recorded.
-Ownership stays **D4.5.1v4 / D4.1.4v5**, and the full goal remains incomplete.
+Ownership stays **D5.5.1 / D5.1.4**, and the full goal remains incomplete.
 
 **Next priority / M46 plan.** Return to a plain upstream orthogonal-flow failure
 rather than extending the now corrected native select theme cases. The pair
@@ -6248,7 +6248,7 @@ source-derived unscripted control separating size from scrolling, definite/
 automatic orthogonal containing widths and retained root scroll restoration.
 Use CSS Writing Modes orthogonal sizing and CSSOM View scrolling/coordinate
 rules; reuse existing axis and viewport-state helpers. Preserve existing
-selected ownership (**D4.5.1v4 / D4.1.4v5**) and precise roots if a DOM/script
+selected ownership (**D5.5.1 / D5.1.4**) and precise roots if a DOM/script
 owner is involved. Budget causal browser/native geometry and any affected DOM
 checks, focused accepted layout neighbors, canonical WPT delta and one final
 Radiant aggregate after stable code; add the required core/DOM gate if the fix
@@ -6285,8 +6285,8 @@ padding restoration, shared label selection for horizontal painting, and the
 selected font-cell/native-inner-padding contract. The sixty prior native
 select size controls now all match. The twelve grid controls, 24 original
 primitive initial-webfont captures, broader baselines/vertical painting and
-the remaining upstream failures stay open. Ownership remains **D4.5.1v4 /
-D4.1.4v5**. Work stops at the user's wrap-up request; no active goal remains
+the remaining upstream failures stay open. Ownership remains **D5.5.1 /
+D5.1.4**. Work stops at the user's wrap-up request; no active goal remains
 registered, and the broader objective is not complete. M46 is only a recorded investigation plan,
 with no probes or engine edits started and no qualification processes left
 running.
@@ -6312,7 +6312,7 @@ itself instead of the viewport. Add the horizontal viewport finalization after
 committed root geometry, without changing its used size or adding offsets.
 Reuse descendant bounds, declared root/body overflow propagation, resolved
 writing mode/direction and the existing signed StateStore range setter. Preserve
-vertical range handling and selected ownership (**D4.5.1v4 / D4.1.4v5**).
+vertical range handling and selected ownership (**D5.5.1 / D5.1.4**).
 
 [CSSOM View §2](https://www.w3.org/TR/cssom-view/#scrolling-area) defines the
 viewport scrolling area's edges from the initial containing block and
@@ -6371,7 +6371,7 @@ required aggregate's actual baseline selection instead. Dimension lint and diff
 checks pass. Six code/test hashes and the CLI fingerprint are frozen in
 `temp/wpt-m46-candidate-code-state.json`. The required Radiant aggregate is
 running on that source; do not replace its executables until it terminates.
-Ownership remains **D4.5.1v4 / D4.1.4v5** and the full goal stays active.
+Ownership remains **D5.5.1 / D5.1.4** and the full goal stays active.
 
 **Required-gate blocker and bounded refinement.** The merged UI inventory's
 `css_grid_capacity` fails all 24 assertions on the first candidate. Its root
@@ -6447,7 +6447,7 @@ browser geometry improves 22→30/30, the retained hit/pixel regression covers a
 short and relatively shifted/restored root, and unchanged scrolling UI fixtures
 pass. General root border/used-height contexts, negative root CSSOM setters and
 the absolute-table percentage/math defect remain partial. Ownership stays
-**D4.5.1v4 / D4.1.4v5**; no formal ruling or corpus-policy changes are needed.
+**D5.5.1 / D5.1.4**; no formal ruling or corpus-policy changes are needed.
 
 The exact `make layout suite=wpt-css-writing-modes` exits 0 with 1,578
 matches / 402 mismatches (`temp/wpt-m46-user-command.log`). The qualified CLI,
@@ -6472,7 +6472,7 @@ Acceptance: the exact `sizing-orthog-htb-in-vrl-001-ref.xht`, bounded width/heig
 controls distinguishing initial and established containing blocks, and retained
 containing-size/style restoration. Reuse the existing math evaluator and selected
 computed-value owner; do not add a table-specific formula or reparse CSS strings.
-Preserve **D4.5.1v4 / D4.1.4v5**. Budget causal native/browser cases, affected
+Preserve **D5.5.1 / D5.1.4**. Budget causal native/browser cases, affected
 accepted positioning/sizing neighbors, canonical WPT delta and a required Radiant
 gate after stable source. Table-grid algorithms, general root negative scrolling
 and the existing longer-tail families remain separate unless they block this
@@ -6506,7 +6506,7 @@ percentages must share this basis; do not encode math as a separate formula.
 ancestor-established blocks and the initial fallback; fixed positioning does
 not use a merely relative ancestor. [CSS Values 4 §10.11](https://www.w3.org/TR/css-values-4/#calc-computed-value)
 retains unresolved percentages in math until used-value information exists.
-Selected style/view ownership remains **D4.5.1v4 / D4.1.4v5**; no new retained
+Selected style/view ownership remains **D5.5.1 / D5.1.4**; no new retained
 payload or formal ruling is required.
 
 Acceptance includes the original `sizing-orthog-htb-in-vrl-001-ref.xht`, all
@@ -6541,7 +6541,7 @@ width changing on the script-created absolute wrapper. The new style call can
 arrive through deferred flex layout while `lycon->view` still names a sibling.
 Bind both current DOM node and view around that call using `LayoutViewScope`,
 and restore both afterward, preserving the existing selected owner contract
-(**D4.5.1v4 / D4.1.4v5**). Add a small retained flex-sibling geometry/background
+(**D5.5.1 / D5.1.4**). Add a small retained flex-sibling geometry/background
 regression. Keep the neighbor fixture and its reference unchanged; the first
 candidate is not qualified until this shared context error is repaired.
 
@@ -6577,7 +6577,7 @@ qualification also covers the zero-height leaf change. Lint/diff checks pass.
 Twelve cumulative code/test hashes and the CLI are frozen in
 `temp/wpt-m47-candidate-code-state.json`; the required Radiant aggregate is
 running on that candidate. Keep its binaries unchanged until it terminates.
-Ownership remains **D4.5.1v4 / D4.1.4v5**, and the full goal stays active.
+Ownership remains **D5.5.1 / D5.1.4**, and the full goal stays active.
 
 **M47 qualified checkpoint.** The required aggregate exits 0 with **6,612
 total, 6,470 full passes, 140 accepted partials, two existing skips and no
@@ -6619,7 +6619,7 @@ Budget causal native/browser controls, affected root/position/sizing neighbors,
 the canonical WPT delta, integer-cast lint and one required Radiant gate on
 stable source. Keep vertical root sizing and absolute/fixed inset algorithms
 separate unless a shared defect blocks the selected contract. Preserve
-**D4.5.1v4 / D4.1.4v5**. M48 has no probes or code edits yet; the full goal
+**D5.5.1 / D5.1.4**. M48 has no probes or code edits yet; the full goal
 remains active.
 
 ### M48 — Principal direction and horizontal root margin placement
@@ -6651,7 +6651,7 @@ After min/max sizing, horizontal normal-flow roots use
 `layout_resolve_in_flow_margins` before descendants are laid out; the old
 table-only auto-centering branch is removed. The viewport range uses the same
 principal direction. No second margin formula, fixture predicate or retained
-style payload is introduced (**D4.5.1v4 / D4.1.4v5**).
+style payload is introduced (**D5.5.1 / D5.1.4**).
 
 The causal regression fails on M47 and passes after the repair. All **342/342
 native tests pass**, including **144 retained margin/direction states** and
@@ -6689,7 +6689,7 @@ The qualified executable, 18 source/document copies, cumulative patch and
 manifest are `temp/wpt-m48-qualified.exe`, `temp/wpt-m48-qualified-source/`,
 `temp/wpt-m48-qualified.patch` and `temp/wpt-m48-qualified-state.json`.
 No fixtures, captures, tolerances or acceptance policies changed. The full goal
-remains active under **D4.5.1v4 / D4.1.4v5**.
+remains active under **D5.5.1 / D5.1.4**.
 
 **Next priority / M49 plan.** Investigate positioned image box sizing. The
 completed inventory's cached `abs-pos-vlr-border-001.html` tree and unchanged
@@ -6716,7 +6716,7 @@ Acceptance includes the original border/padding test and reference pairs,
 independent minimal browser controls and a causal retained regression. Budget
 focused checks, affected sizing/positioning/replaced-image neighbors, canonical
 WPT delta, integer-cast lint and a required Radiant gate after stable source.
-Selected owner contracts remain **D4.5.1v4 / D4.1.4v5**. M49 has no engine
+Selected owner contracts remain **D5.5.1 / D5.1.4**. M49 has no engine
 edit yet; keep this checkpoint intact before starting its probes.
 
 ### Writing-mode baseline admission — requested 2026-10-28
@@ -6748,7 +6748,7 @@ The focused shared runner reports **1,600 passed, 380 partial, zero failed or
 skipped**, and executes all 1,980 entries
 (`temp/wpt-writing-baseline/focused.log`). Full configured layout and Radiant
 integration verification are pending. Existing engine ownership contracts
-**D4.5.1v4 / D4.1.4v5** are unchanged. M49 remains planned and has no new
+**D5.5.1 / D5.1.4** are unchanged. M49 remains planned and has no new
 probe or engine edit while this requested admission is verified.
 
 **Admission qualified.** The configured layout target passes **5,274 total:
@@ -6806,7 +6806,7 @@ size. Preserve authored automatic-axis identity across retained resource and
 decoration changes. Remove the superseded image-only 40×30 fallback and
 handwritten intrinsic ratio branch; do not replace them with fitted constants.
 Keep general alt-text/icon rendering and independent resource-selection policy
-separate. Ownership remains **D4.5.1v4 / D4.1.4v5**; no new payload is needed.
+separate. Ownership remains **D5.5.1 / D5.1.4**; no new payload is needed.
 
 Acceptance/budget: causal retained declared-size and loaded-auto controls first,
 the exact upstream border/padding test and reference pairs, the 172 immutable
@@ -6889,7 +6889,7 @@ superseded handwritten ratio/margin branch and arbitrary image fallback;
 shared facts, constraints and box/axis helpers own the result. The two original
 HTML test documents fully match; their references' independent normal RTL div
 placement remains partial and unchanged. All 288 browser controls and 576
-retained states pass. Existing owner contracts remain **D4.5.1v4 / D4.1.4v5**.
+retained states pass. Existing owner contracts remain **D5.5.1 / D5.1.4**.
 
 After the aggregate terminated, strengthen the two unique repaired baseline
 entries from scored partials to required full matches, preserving every other
@@ -6920,7 +6920,7 @@ stage; introduce no separate RTL offset or duplicate cascade query.
 used constraint equation. Keep root placement and unrelated table/fragment
 algorithms in their existing paths. Budget causal native/browser checks,
 affected accepted neighbors, raw canonical delta, lint/diff and one required
-Radiant gate on stable source. Preserve **D4.5.1v4 / D4.1.4v5**. M50 has no
+Radiant gate on stable source. Preserve **D5.5.1 / D5.1.4**. M50 has no
 probe or engine edit yet; the full conformance goal remains active.
 
 The strengthened writing-mode baseline exits 0 with **1,602 full, 378 partial,
@@ -6966,7 +6966,7 @@ Materialize existing used-margin storage when a previously boundaryless RTL box
 needs it, so repeated finalization is idempotent. Refresh the owning BFC offset
 and already registered descendant float geometry when the box moves. No new
 retained payload or independent width/RTL formula is needed; preserve
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 Acceptance remains the two original reference divs, narrower/overflowing and
 intermediate intrinsic widths, explicit-width counterparts, independent parent/
@@ -7030,7 +7030,7 @@ expectations (`temp/wpt-m50-user-command.log`). The user-requested baseline
 and both configuration-driven gate integrations are complete. M50 closes the
 measured normal RTL intrinsic-width placement and fit-content spacing defect;
 it does not claim complete writing-mode conformance. Owner contracts remain
-**D4.5.1v4 / D4.1.4v5**. Save the qualified code/CLI, source copies, linked
+**D5.5.1 / D5.1.4**. Save the qualified code/CLI, source copies, linked
 corpus fingerprints and promotion patch in `temp/wpt-m50-qualified-state.json`.
 The original conformance goal remains active; no next milestone probe has run.
 
@@ -7057,7 +7057,7 @@ solver and logical-axis mapping for over-constrained pairs; its current
 horizontal-RTL-only branch cannot express vertical block/inline start edges.
 Confirm each direction rule independently before changing it. Shared flex/grid
 axis callers remain counterexamples. No new payload or ownership rule is needed;
-preserve **D4.5.1v4 / D4.1.4v5**.
+preserve **D5.5.1 / D5.1.4**.
 
 [CSS Position 3 §3.3](https://www.w3.org/TR/css-position-3/#relative-position)
 defines visual movement without size/flow changes and gives the containing
@@ -7136,7 +7136,7 @@ source-paired movement controls and 480 retained states pass. Twelve unchanged
 absolute static-placement controls, the table/float-based relative-offset
 references and the remaining raw WPT failures stay open. In particular, this
 does not qualify complete inline, table or writing-mode conformance. Existing
-owner contracts remain **D4.5.1v4 / D4.1.4v5**.
+owner contracts remain **D5.5.1 / D5.1.4**.
 
 After the aggregate terminated, strengthened the eleven repaired baseline
 entries from partial scores to required full matches, preserving all 1,980
@@ -7184,7 +7184,7 @@ branch already records and honors that identity. Prefer automatic recipients
 when present, then reuse the existing proportional row-extra helper and final
 row/cell realignment. Extract shared recipient filtering before adding another
 count/sum/apply traversal. No copied row algorithm or fixture offsets are needed;
-transient metadata remains scratch-owned under **D4.5.1v4 / D4.1.4v5**.
+transient metadata remains scratch-owned under **D5.5.1 / D5.1.4**.
 
 [CSS 2.2 §17.5.3](https://www.w3.org/TR/CSS22/tables.html#height-layout)
 requires the declared table height to act as a minimum and defines row minima
@@ -7237,7 +7237,7 @@ Update the shared UA defaults/serialization, resolve that direct-parent value
 before author CSS, and consume the computed cell alignment without a second
 ancestor search. Presentational `valign` belongs on its own element before the
 author cascade; remove the old parent-row attribute search. This is an original
-acceptance prerequisite under the same D4.5.1v4 / D4.1.4v5 owners.
+acceptance prerequisite under the same D5.5.1 / D5.1.4 owners.
 
 Before this alignment repair, the new retained native regression fails on the
 first direct-row block case; 108 exact-source XHTML controls cover direct/grouped
@@ -7289,7 +7289,7 @@ The milestone delivers explicit table grid budgeting, automatic-row growth and
 computed HTML table alignment through retained changes. It does not qualify
 complete table, inline or writing-mode conformance. The eight collapsed
 content-box controls, two percentage-basis controls and 40 zero-font inline
-placements remain recorded limitations. Owner contracts **D4.5.1v4 / D4.1.4v5**
+placements remain recorded limitations. Owner contracts **D5.5.1 / D5.1.4**
 are unchanged. Save the main-tree patch, binary, sources and linked corpus
 fingerprints in `temp/wpt-m52-qualified-state.json`; the strict baseline has its
 own promotion patch. No test remains running, and the long-running goal stays
@@ -7337,7 +7337,7 @@ size, physical child arrangement and following flow through mutation. Use
 focused checks, accepted table/sizing/inline neighbors, the canonical WPT delta,
 integer-cast lint and one required Radiant gate on frozen code/CLI. Preserve all
 baseline floors/captures/tolerances. Keep transient measurements and published
-geometry under the unchanged **D4.5.1v4 / D4.1.4v5** ownership contracts.
+geometry under the unchanged **D5.5.1 / D5.1.4** ownership contracts.
 
 **Causal evidence.** The 120 exact-source controls initially agree 20/120
 (`temp/wpt-m53-before-audit.json`). Four decorated horizontal RTL controls have
@@ -7371,7 +7371,7 @@ margin fallback reads the children's used RTL overconstraint adjustment as
 though it were a computed margin. Copy the clean computed margin baseline
 through the resolved-style module's existing freshness/context checks before
 falling back to legacy boundary state; never borrow the record or change the
-used positions. This preserves the **D4.5.1v4 / D4.1.4v5** split between
+used positions. This preserves the **D5.5.1 / D5.1.4** split between
 immutable computed inputs and published geometry. Caption controls initially
 agree 46/120 and reach 78/120 after the BFC repair, with no lost agreement;
 the independent margin, asymmetric box and atomic-line limitations stay visible.
@@ -7399,7 +7399,7 @@ font context for both layout and CSSOM metric queries, and release the temporary
 reference within the shared helper. Do not publish a speculative handle into
 the `FontProp` or borrow a different box's metrics. This implements
 [CSS Values 4 §6.1.1](https://www.w3.org/TR/css-values-4/#font-relative-lengths)
-under the unchanged **D4.5.1v4 / D4.1.4v5** lifetime contracts. The causal native
+under the unchanged **D5.5.1 / D5.1.4** lifetime contracts. The causal native
 checks cover 200 retained cell/caption states and 40 track/font-axis states;
 both fail before their corresponding fixes. Qualification remains pending.
 
@@ -7488,7 +7488,7 @@ pass. The current code and CLI are frozen for diagnosis in
 The prepared baseline promotes only the 13 new full matches and rejects those
 13 saved M52 results. Live baseline expectations remain unchanged until the
 required Radiant gate terminates. No fixture, capture, tolerance or formal
-ownership ruling changed (**D4.5.1v4 / D4.1.4v5**).
+ownership ruling changed (**D5.5.1 / D5.1.4**).
 
 **Neighbor prerequisite.** Both sizing failures are horizontal, so the vertical
 publisher is not their owner. `layout_intrinsic_horizontal_margin_pair` seeds
@@ -7497,7 +7497,7 @@ skips a plain percentage rather than replacing it with zero. The resulting
 negative used margin leaks into shrink-to-fit width (50px instead of 100px).
 Route percentages through the existing zero-percentage intrinsic length helper
 as well, preserving fixed terms in `calc()`. This follows CSS Sizing 3 §5.2.1
-and keeps the computed/used distinction under **D4.5.1v4 / D4.1.4v5**. Add a
+and keeps the computed/used distinction under **D5.5.1 / D5.1.4**. Add a
 retained absolute/inline-block regression with positive/negative margins,
 fixed-plus-percentage math and reset on both sides (20 states).
 
@@ -7618,7 +7618,7 @@ The qualified source/binary/linked-corpus checkpoint is
 348 writing-mode fixtures still lack full conformance. Keep the asymmetric
 orthogonal cell decoration and atomic-line packing differences explicit;
 rank the remaining shared defects by common-page impact before selecting M54.
-No next feature probe has run, and **D4.5.1v4 / D4.1.4v5** remain unchanged.
+No next feature probe has run, and **D5.5.1 / D5.1.4** remain unchanged.
 
 ### M54 — Preserve horizontal content inside vertical table cells
 
@@ -7657,7 +7657,7 @@ edit loop. Once stable, run the full native query suite, table/inline/sizing
 neighbors, the canonical 1,980-file delta and the required Radiant aggregate.
 Promote only new full matches after all gates terminate successfully; preserve
 all partial floors, source fixtures, captures and tolerances. Ownership remains
-**D4.5.1v4 / D4.1.4v5**; no formal ruling changes.
+**D5.5.1 / D5.1.4**; no formal ruling changes.
 
 **Implementation, pending qualification.** Horizontal orthogonal cell content
 now borrows a physical frame while the table retains logical grid dimensions.
@@ -7741,7 +7741,7 @@ column progression. All **432** independent controls agree; integer-cast lint
 and diff checks pass. Parallel cells and horizontal-table controls retain their
 observed behavior. Broader mixed-cell baseline alignment, collapsed-border,
 caption, font and inline conformance remain partial. Existing ownership rulings
-**D4.5.1v4 / D4.1.4v5** are unchanged.
+**D5.5.1 / D5.1.4** are unchanged.
 
 The qualified source/binary/corpus checkpoint is
 `temp/wpt-m54-qualified-state.json`. The long-running goal remains **active**:
@@ -7793,7 +7793,7 @@ native and browser comparisons precede inline/sizing/table neighbors and the
 canonical 1,980-file delta. Freeze stable code and run the required full Radiant
 gate once; promote only new fulls after it terminates successfully. Preserve
 every baseline floor, raw fixture, capture and tolerance. Ownership rulings
-**D4.5.1v4 / D4.1.4v5** remain unchanged.
+**D5.5.1 / D5.1.4** remain unchanged.
 
 **Status:** planned; independent controls and causal ownership evidence are
 next. No M55 production edit has been made.
@@ -7897,7 +7897,7 @@ integer-cast lint and diff checks pass. Horizontal and overflow-synthesis
 controls retain their observed behavior. Separate inline-table sizing, generic
 font fallback/metrics and broader mixed-flow/fragmentation conformance remain
 partial; no fixture, reference or tolerance was changed. Ownership rulings
-**D4.5.1v4 / D4.1.4v5** remain unchanged.
+**D5.5.1 / D5.1.4** remain unchanged.
 
 The qualified source/binary/corpus checkpoint is
 `temp/wpt-m55-qualified-state.json`. The long-running goal remains **active**:
@@ -7951,7 +7951,7 @@ sizing/multicol neighbors, all native queries, the canonical 1,980-file delta
 and the required Radiant aggregate on frozen code. Promote only new fulls after
 the gate terminates, preserving all other floors, source fixtures, references
 and tolerances. Use serial builds while disk headroom is limited. Existing
-ownership rulings **D4.5.1v4 / D4.1.4v5** remain unchanged.
+ownership rulings **D5.5.1 / D5.1.4** remain unchanged.
 
 **Implementation.** Automatic table publication now converts the
 completed border box independently of authored box-sizing. Normal block flow
@@ -8006,7 +8006,7 @@ Proof: `temp/wpt-m56-baseline-promotion.json`,
 `temp/wpt-m56-promoted-baseline.log` and `temp/wpt-m56-user-command.log`.
 
 The qualified checkpoint is `temp/wpt-m56-qualified-state.json`. No Lambda
-ruling changes; **D4.5.1v4 / D4.1.4v5** remain unchanged. The goal remains
+ruling changes; **D5.5.1 / D5.1.4** remain unchanged. The goal remains
 **active**, with vertical caption sizing, asymmetric collapsed track/cell
 conflicts, empty collapsed tables, font fallback/metrics and broader mixed-flow
 conformance still partial. Rank the remaining shared defects by common-page
@@ -8037,7 +8037,7 @@ measure follows the grid. CSS Writing Modes 3 §7.4 maps caption-side top/bottom
 to the table's block-start/block-end, while caption content uses its own flow:
 <https://www.w3.org/TR/CSS22/tables.html#model>,
 <https://www.w3.org/TR/css-writing-modes-3/#logical-direction-layout>.
-Existing selected-view and transient-grid ownership **D4.5.1v4 / D4.1.4v5**
+Existing selected-view and transient-grid ownership **D5.5.1 / D5.1.4**
 remain authoritative; no Lambda ruling change is proposed.
 
 **Finite acceptance.** Automatic separated HTML tables with parallel captions
@@ -8113,7 +8113,7 @@ Proof: `temp/wpt-m57-baseline-promotion.json`,
 
 **Wrap-up checkpoint.** Source, CLI and linked corpus snapshots are recorded in
 `temp/wpt-m57-qualified-state.json`. No fixture, reference, tolerance or Lambda
-ruling changes; **D4.5.1v4 / D4.1.4v5** remain unchanged. The broader conformance
+ruling changes; **D5.5.1 / D5.1.4** remain unchanged. The broader conformance
 objective is incomplete, with 311 raw mismatches and the separately recorded
 multiple-caption, collapsed-grid, font and mixed-flow limits. The user requested
 wrap-up: stop here without selecting M58. Earlier generated M56 per-fixture copies and
@@ -8143,7 +8143,7 @@ block sizes, mixed-sign collapse and empty border-edge positions. Writing Modes
 3 §7.4 maps those rules into the containing flow's block axis:
 <https://www.w3.org/TR/CSS22/box.html#collapsing-margins>,
 <https://www.w3.org/TR/css-writing-modes-3/#logical-direction-layout>.
-Existing ownership **D4.5.1v4 / D4.1.4v5** remains unchanged.
+Existing ownership **D5.5.1 / D5.1.4** remains unchanged.
 
 **Finite acceptance.** Cover one/multiple/nested empty siblings, leading and
 trailing empties, positive/negative margin sets, automatic and zero block sizes,
@@ -8226,7 +8226,7 @@ all other floors remain unchanged. The promoted focused baseline accepts
 `make layout suite=wpt-css-writing-modes` exits **0**, explicitly reporting the
 **293 raw mismatches**. Proof: `temp/wpt-m58-{baseline-promotion.json,
 promoted-baseline.log,user-command.log}`. Ownership rulings
-**D4.5.1v4 / D4.1.4v5** remain unchanged.
+**D5.5.1 / D5.1.4** remain unchanged.
 
 The qualified checkpoint is `temp/wpt-m58-qualified-state.json`, based on merged
 HEAD `87eb25b6d`. The long-running goal remains **active** with **293** raw
@@ -8264,7 +8264,7 @@ BFC and constrains later floats by prior margin boxes. Writing Modes 3 §7.4
 maps those rules to the containing flow:
 <https://www.w3.org/TR/CSS22/visuren.html#float-position>,
 <https://www.w3.org/TR/css-writing-modes-3/#logical-direction-layout>.
-Selected-view/pool ownership **D4.5.1v4 / D4.1.4v5** remains unchanged.
+Selected-view/pool ownership **D5.5.1 / D5.1.4** remains unchanged.
 
 **Finite acceptance.** Earlier and later floats in separate normal block
 wrappers must share exclusions in horizontal, vertical and sideways modes,
@@ -8337,7 +8337,7 @@ again at publication. Replacing only the walk exposed that inconsistent owner.
 CSS 2.2 §9.2.1.1 makes the split block a sibling of anonymous blocks in its
 containing block's formatting context. Use the same block-only coordinate walk
 as registration and remove both inline-origin compensations. The float fit owns
-any exclusion shift and width reduction. Ownership **D4.5.1v4 / D4.1.4v5** is
+any exclusion shift and width reduction. Ownership **D5.5.1 / D5.1.4** is
 unchanged.
 
 Twenty-four independent browser controls vary direction, float side, padding and
@@ -8356,7 +8356,7 @@ retained test then isolates a stale wrapper union: its child moves correctly,
 but the split-inline extrema still include the prior position. Rebuild that
 union when its owning inline layout starts; keep the existing presence-bit and
 extrema helper instead of clearing unrelated retained state. No new storage or
-owner (**D4.5.1v4 / D4.1.4v5**). Verify the same 36 moved/restored states before
+owner (**D5.5.1 / D5.1.4**). Verify the same 36 moved/restored states before
 repeating the canonical and aggregate qualification.
 
 **Complete candidate evidence.** All **365 native tests** pass, including the
@@ -8391,7 +8391,7 @@ promoted baseline check and the exact requested
 **291 raw mismatches**. No fixture, capture, comparator or tolerance changes.
 Evidence: `temp/wpt-m59-{baseline-promotion.json,baseline-promotion.patch,
 promoted-baseline.log,user-command.log}`. Ownership rulings
-**D4.5.1v4 / D4.1.4v5** remain unchanged.
+**D5.5.1 / D5.1.4** remain unchanged.
 
 The qualified checkpoint is `temp/wpt-m59-qualified-state.json`, based on merged
 HEAD `87eb25b6d`. The long-running goal remains **active** with **291** raw
@@ -8421,7 +8421,7 @@ containment before its existing own-size constraint consumer. Its early
 `authored_definite_width` check also excludes math expressions that the later
 consumer already supports. Reuse that computation and the existing min/max
 solver, preserving content-only versus contribution queries and cyclic
-percentage policy. No new retained owner (**D4.5.1v4 / D4.1.4v5**).
+percentage policy. No new retained owner (**D5.5.1 / D5.1.4**).
 Sources: <https://www.w3.org/TR/css-contain-2/#size-containment>,
 <https://www.w3.org/TR/css-sizing-3/#intrinsic-sizes>.
 
@@ -8482,7 +8482,7 @@ qualified checkpoint is `temp/wpt-m60-qualified-state.json`, based on merged
 HEAD `87eb25b6d`, and the long-running goal remains **active**. Independent grid
 row-height, orthogonal scrollport/margin/fragmentation, font/glyph and scripted
 conformance limitations stay open. Rank the next common-page defect before M61;
-no next feature probe ran. Ownership **D4.5.1v4 / D4.1.4v5** is unchanged.
+no next feature probe ran. Ownership **D5.5.1 / D5.1.4** is unchanged.
 
 ### M61 — Resolve upright used direction without changing computed inheritance
 
@@ -8510,7 +8510,7 @@ horizontal formatting context. Sideways writing modes use horizontal typography.
 Reuse the typed cascaded keyword consumer and the existing used-flow source
 selection, then feed the resulting class policy into the shared UAX #9 pass.
 Preserve source bytes and computed style; no retained owner change
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 Source: <https://www.w3.org/TR/css-writing-modes-3/#text-orientation>.
 
 **Finite acceptance / budget.** Local/inherited/reset/variable orientation,
@@ -8589,7 +8589,7 @@ cumulative/incremental patches and evidence are retained by
 The long-running goal remains **active**. Continue the shared glyph advances,
 vertical substitutions and paint pipeline next, with the documented oracle
 limitation visible rather than fitting source order to Chromium. Ownership
-**D4.5.1v4 / D4.1.4v5** remains unchanged.
+**D5.5.1 / D5.1.4** remains unchanged.
 
 ### M62 — Orient glyph units through shared metrics and paint frames
 
@@ -8637,8 +8637,8 @@ gsub-probe.json}`. Source:
    checks alone do not complete this feature.
 
 The CSS contract is Writing Modes 3 §5.1/§5.1.1/§5.1.2 and UAX #50. Native frame
-and font-style captures retain the selected-view owners under **D4.5.1v4 /
-D4.1.4v5**; synchronous selected-face callbacks borrow handles only during the
+and font-style captures retain the selected-view owners under **D5.5.1 /
+D5.1.4**; synchronous selected-face callbacks borrow handles only during the
 visit. No vendor edits, source-byte rewriting or new conservative roots.
 
 **Finite acceptance / budget.** Ahem and proportional Latin, CJK punctuation
@@ -8668,7 +8668,7 @@ milestone.
 
 Two prerequisite root causes were reproduced rather than fitted:
 
-- **Selected font identity (D4.5.1v4 / D4.1.4v5).** Native fallback selected a
+- **Selected font identity (D5.5.1 / D5.1.4).** Native fallback selected a
   CoreText collection face while parsed tables described file face zero. In the
   Songti probe, the native water glyph ID was 1211 but the parsed cmap reported
   1528; punctuation incorrectly synthesized 28px instead of its authored 20px
@@ -8709,7 +8709,7 @@ matching can reshape a normalized segment without rewriting its source offsets.
 The PDF selected-glyph adapter previously discarded the orientation frame; it now
 records a complete font-space text matrix composed from the common glyph frame
 and synthetic italic shear. Its Lambda writer emits that matrix, with precise
-RootFrame ownership (**D5.3.3**), and preserves the run's logical ActualText.
+RootFrame ownership (**D6.3.3**), and preserves the run's logical ActualText.
 
 The bounded 36-case visible matrix covers Arial `Ag`, Hiragino `「水、`, and Ahem
 `A + acute, X` in both vertical and both sideways modes, with mixed/upright/sideways
@@ -8763,7 +8763,7 @@ and that each partial DOM range occupies its painted physical inline interval.
 The owning contract is a selected-face text query with a resolved LTR/RTL/auto
 shaping direction, optional source byte range, and outputs for glyph positions,
 advance and range caret offsets. It borrows the selected face synchronously
-(**D4.5.1v4 / D4.1.4v5**). The existing glyph visitor delegates to it; native
+(**D5.5.1 / D5.1.4**). The existing glyph visitor delegates to it; native
 CoreText line creation, selected-face validation and range conversion are shared.
 Canonical matching preserves original source offsets by mapping normalized
 prefix boundaries only after the source range expands to whole typographic units.
@@ -9003,7 +9003,7 @@ producer without fitting the final table rectangle or changing border winners.
 grid's inline/block dimensions to physical height/width; CSS 2.2
 [§17.5.3](https://www.w3.org/TR/CSS22/tables.html#height-layout) distributes a table
 block-size budget among rows. Reuse the existing declaration and constraint
-helpers. Preserve computed style/view ownership (**D4.5.1v4 / D4.1.4v5**).
+helpers. Preserve computed style/view ownership (**D5.5.1 / D5.1.4**).
 The milestone covers explicit inline sizing with automatic content-based row
 extent in horizontal, vertical and sideways modes, HTML/CSS tables, and retained
 size/reset restoration. General collapsed-border axis mapping, text-combine
@@ -9143,7 +9143,7 @@ full-width characters undergo the inverse CSS full-width transform before
 compression. Source DOM text and computed style stay intact; range/source
 mapping must refer to the original characters. These are external CSS rules,
 not new Lambda language rulings. Selected-face callback ownership and captured
-style lifetime retain **D4.5.1v4 / D4.1.4v5**.
+style lifetime retain **D5.5.1 / D5.1.4**.
 
 **Design stages.**
 
@@ -9205,7 +9205,7 @@ coverage, geometric compression when one unit lacks a variant, and original
 source partial ranges. A new paragraph-base request preserves number order
 inside RTL text. CoreText primary carets can belong to the neighboring bidi run;
 the native query now uses the selected run's advance edges at source boundaries.
-Selected-face lifetime stays synchronous under **D4.5.1v4 / D4.1.4v5**.
+Selected-face lifetime stays synchronous under **D5.5.1 / D5.1.4**.
 
 Evidence: `temp/wpt-m64-{causal-before.log,unit-font.log,range-focused.log,
 cascade-wrap-focused.log,browser.json}`. The independent browser flow controls
@@ -9222,7 +9222,7 @@ composition, two ordinary units and another composition). The old path produced
 120×120. The logical inline sizing path omitted non-atomic compositions and fell
 back to physical-width estimation. It now consumes the existing square-unit
 measurement for plain undecorated inline owners, under the same speculative
-style/font ownership scopes (**D4.5.1v4 / D4.1.4v5**). Decorated/nested owners
+style/font ownership scopes (**D5.5.1 / D5.1.4**). Decorated/nested owners
 retain the existing general fallback and remain partial.
 
 This exposed the line breaker's separate outer-space advance: internal
@@ -9312,7 +9312,7 @@ source change or a new unresolved concern.
 
 ### M65 — Resolve table constraints in their declaring style environment
 
-**Design / finite acceptance (qualified).** D4.5.1v4 and D4.1.4v5 keep
+**Design / finite acceptance (qualified).** D5.5.1 and D5.1.4 keep
 computed inputs owned by their selected view and separate from layout-consumed
 geometry. CSS Values 4 §6.1.1 requires local font-relative lengths to use the
 declaring element's metrics; `ch` additionally follows its writing mode and
@@ -9347,7 +9347,7 @@ length queries suppress recording and consume substitutions in bounded scratch.
 All table constraint paths now pass the actual declaration owner, including
 fixed columns/groups and the table's final explicit size. The former temporary
 numeric-font-size override is removed. No formal ruling or grid/percentage
-sizing policy changed (**D4.5.1v4 / D4.1.4v5**).
+sizing policy changed (**D5.5.1 / D5.1.4**).
 
 Three new native regressions cover **38 retained control states** for cell,
 row, table, column and column-group lengths, including variables and absolute
@@ -9389,7 +9389,7 @@ table/composition limitations remain deferred rather than weakening floors.
 paragraphs are common inputs to shrink-to-fit and table sizing. CSS Writing
 Modes 3 §7.3 sizes an orthogonal contribution from the child's used block
 extent; CSS Text 3 §§4–5 determine whitespace and permitted line breaks. Keep
-computed-style and selected-view ownership unchanged (**D4.5.1v4 / D4.1.4v5**).
+computed-style and selected-view ownership unchanged (**D5.5.1 / D5.1.4**).
 
 Independent controls disprove the initial border hypothesis: all 32 combinations
 of four vertical/sideways modes, cell/caption roles and border/padding changes
@@ -9424,7 +9424,7 @@ repair two boundaries: normalized whitespace no longer drops `nowrap`, and a
 length-specified orthogonal cell's inline glyph overflow does not enlarge its
 row minimum. Forced-line inline widths no longer act as physical block-width
 minima. These are measured-axis and constraint ownership fixes, not adjusted
-fixture dimensions (**D4.5.1v4 / D4.1.4v5**).
+fixture dimensions (**D5.5.1 / D5.1.4**).
 
 The new native regression passes 576 retained states; three neighboring native
 tests pass as well. Ninety-six static native/Chromium controls match both box
@@ -9478,7 +9478,7 @@ in HTML documents. CSS 2.2 §17.5.2.1 gives a non-auto column width priority ove
 first-row cells, then divides remaining space among unconstrained columns. HTML
 Rendering maps a `col` width attribute to its physical CSS width through the
 dimension-value parser, including zero. Keep computed preferred inputs separate
-from consumed track geometry (**D4.5.1v4 / D4.1.4v5**).
+from consumed track geometry (**D5.5.1 / D5.1.4**).
 
 The candidate defect spans stages: `resolve_htm_style.cpp` does not materialize
 column width hints, and `table_resolve_fixed_column_css_width` requires an
@@ -9521,7 +9521,7 @@ properties and containment exclusions. The latter asserts a native containment
 flag that excludes reusable records, proving hint semantics do not depend on a
 cache hit. Zero cases compare HTML with equivalent CSS rather than treating
 observed browser allocation as a new normative ruling. No formal ruling changes
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 **M67 qualified.** The frozen final canonical delta reaches **1,766 full /
 214 partial** with exactly four gains:
@@ -9569,7 +9569,7 @@ resolution. `layout_measure_direct_inline_intrinsics` already supplies logical
 text/atomic-inline contributions, and `layout_resolve_intrinsic_size_keyword`
 already implements the CSS Sizing 3 clamp. Reuse those rather than measuring
 physical width or changing the transform. CSS Writing Modes 3 §7.3 determines
-the element's own inline axis. Preserve **D4.5.1v4 / D4.1.4v5** ownership;
+the element's own inline axis. Preserve **D5.5.1 / D5.1.4** ownership;
 no formal ruling changes are proposed.
 
 **Finite scope / acceptance.** Share preferred inline-keyword resolution between
@@ -9695,7 +9695,7 @@ The frozen source/binary/requirement checkpoint is
 controls, rejected-candidate evidence and guarded promotion are the corresponding
 `temp/wpt-m68-*` artifacts. No further broad checks are needed without a
 relevant change or new concern. No formal rulings change
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 The long-running goal remains active. Next triage is constrained auto-height
 and last-child margin propagation in the remaining available-size article
@@ -9740,7 +9740,7 @@ table-axis adapter, rather than adding per-mode side switches. Use it for both
 style-only intrinsic queries and committed conflict resolution. Resolved cell
 edges stay physical for content/layout/paint consumers; transient table metadata
 continues in source-grid axes until geometry publication. Preserve selected
-owner and computed/used separation (**D4.5.1v4 / D4.1.4v5**).
+owner and computed/used separation (**D5.5.1 / D5.1.4**).
 
 Acceptance: the 120 dimension controls, retained mode/direction/border changes,
 winning width/color/style precedence, nonuniform outer edges, spans and row/
@@ -9876,8 +9876,8 @@ collapsed outer-half handling and the existing final physical-decoration
 publication contract. The evidence does not justify replacing the whole grid
 coordinate representation. CSS Writing Modes 3 §§6.4–7.2 and CSS Sizing 3
 §3.3 require this mapping; CSS 2.2 §17.6.1 supplies separate borders/padding.
-Computed styles and selected owners remain unchanged (**D4.5.1v4 /
-D4.1.4v5**).
+Computed styles and selected owners remain unchanged (**D5.5.1 /
+D5.1.4**).
 
 **Acceptance / verification budget.** First add a causal retained native
 regression, then implement the shared conversion. Require the 480 analytic
@@ -9910,7 +9910,7 @@ post-promotion layout gate passes all 5,274 (4,944 full / 330 partial).
 Integer-cast lint and diff checks pass. No API or module dependency changed;
 M69's existing runtime-import audit debt remains separately recorded.
 `temp/wpt-m70-qualified-state.json` retains source, binary, capture, baseline
-and control hashes. Ownership rulings **D4.5.1v4 / D4.1.4v5** are unchanged.
+and control hashes. Ownership rulings **D5.5.1 / D5.1.4** are unchanged.
 
 **Next action.** The overall goal remains active. Two orthogonal table-cell
 fixtures have correct cell boxes but retain natural text positions under
@@ -9954,7 +9954,7 @@ physical x in its block-flow direction. Reuse the existing cell-content shift
 walker with an axis parameter; keep row-baseline/flow-origin updates on the
 grid y axis. Orthogonal cells must not receive the old grid-y alignment again
 after row or rowspan growth. Computed style and selected owners remain
-unchanged (**D4.5.1v4 / D4.1.4v5**); no per-fixture branch or new allocation.
+unchanged (**D5.5.1 / D5.1.4**); no per-fixture branch or new allocation.
 
 **Acceptance / verification budget.** Add a causal retained native regression
 before editing engine code. Require all 480 native analytic box/content controls
@@ -10060,7 +10060,7 @@ inventory/delta, analytic reports and hashed command logs.
 The M69 module-boundary audit still records six existing runtime imports from
 unchanged HEAD callers; it is not a green audit. M71 uses existing functions
 within the same Radiant archive and changes no public signature, import,
-dependency or owner (**D4.5.1v4 / D4.1.4v5**). Broader estimator/list/root sizing,
+dependency or owner (**D5.5.1 / D5.1.4**). Broader estimator/list/root sizing,
 asymmetric decoration interop and the five COL/COLGROUP rectangle disagreements
 remain separate audits. The overall goal remains active with 194 partial
 cases. Next investigate the completed orthogonal cell's used inline region and
@@ -10087,7 +10087,7 @@ the two stages must consume the same constraints. Existing
 box without rewriting authored `auto` or percentage policy. The shared
 vertical intrinsic line packer already measures constrained block extents;
 audit its inline basis before adding any estimator. Ownership remains
-**D4.5.1v4 / D4.1.4v5**; no ruling change is proposed.
+**D5.5.1 / D5.1.4**; no ruling change is proposed.
 
 **Scope / acceptance.** Own-vertical table cells in horizontal grids; automatic
 and definite inline sizes, row growth, ordinary left/center/right/start/end
@@ -10222,8 +10222,8 @@ The module-boundary command remains non-green for the same six unapproved
 imports. The 80 unexpandable-justification controls and wider deferred-value
 audit also remain explicitly incomplete. Zero-inline/complex estimates and
 the earlier browser-panel integration issue retain their separate scope.
-Computed/selected-view ownership remains **D4.5.1v4 / D4.1.4v5**; module helper
-extensions remain within the audited Radiant archive (**D7.3.3–D7.3.4**).
+Computed/selected-view ownership remains **D5.5.1 / D5.1.4**; module helper
+extensions remain within the audited Radiant archive (**D9.4.3–D9.4.4**).
 The overall goal stays active with 192 partial WPT cases. M73 triage records
 deferred-size classification/row assignment and the actual first disagreement
 in the parent-shrink-to-fit browser panels; investigate their owners before
@@ -10252,7 +10252,7 @@ the draft's detailed distribution and assigned cell geometry. M73 preserves the
 existing distribution policy and changes only its computed-value classification.
 A literal and the same substituted value must take the same decision path.
 Keep selected style/view ownership and borrowed computation under
-**D4.5.1v4 / D4.1.4v5**, and module boundaries under **D7.3.3–D7.3.4**.
+**D5.5.1 / D5.1.4**, and module boundaries under **D9.4.3–D9.4.4**.
 
 Sources: [CSS Variables 1 §3](https://www.w3.org/TR/css-variables-1/#using-variables),
 [CSS Writing Modes 3 §7.3](https://www.w3.org/TR/css-writing-modes-3/#orthogonal-flows),
@@ -10405,8 +10405,8 @@ when space permits and moves them forward when they cannot fit; §9.5.1 retains
 preceding-line/block/float constraints and packs as high as possible. CSS Writing
 Modes 3 §§7.1, 7.5 map the dimensions and line-left/right edges, so a vertical
 mapping cannot erase a completed line-fit decision. Preserve selected view/style
-ownership (**D4.5.1v4 / D4.1.4v5**) and module boundaries
-(**D7.3.3–D7.3.4**); no formal ruling or CSS policy change is proposed.
+ownership (**D5.5.1 / D5.1.4**) and module boundaries
+(**D9.4.3–D9.4.4**); no formal ruling or CSS policy change is proposed.
 Sources: [CSS 2.2 floats](https://www.w3.org/TR/CSS22/visuren.html#floats),
 [Writing Modes principles](https://www.w3.org/TR/css-writing-modes-3/#vertical-layout),
 [line-relative mappings](https://www.w3.org/TR/css-writing-modes-3/#line-mappings).
@@ -10455,7 +10455,7 @@ block correction as its parent cursor, takes the later candidate, then applies
 its existing clearance, preceding-float and space-search constraints. It no
 longer relies on a temporary physical `block->y` write for this logical input.
 The default unspecified minimum preserves other callers. No extra packer or
-persistent node state is introduced (**D4.5.1v4 / D4.1.4v5**).
+persistent node state is introduced (**D5.5.1 / D5.1.4**).
 
 
 **Focused outcome.** The candidate passes all 1,280 independent analytic controls
@@ -10549,7 +10549,7 @@ Writing Modes 3 §7.1 maps that calculation onto physical height in vertical flo
 CSS 2.2 §8.3.1 block-margin collapsing is mapped onto the containing block's
 block axis; it cannot consume a physical top margin that lies on the containing
 inline axis. Preserve computed/style and view ownership
-(**D4.5.1v4 / D4.1.4v5**) and module boundaries (**D7.3.3–D7.3.4**).
+(**D5.5.1 / D5.1.4**) and module boundaries (**D9.4.3–D9.4.4**).
 Sources: [normal block widths](https://www.w3.org/TR/CSS22/visudet.html#blockwidth),
 [margin collapsing](https://www.w3.org/TR/CSS22/box.html#collapsing-margins),
 [vertical mapping](https://www.w3.org/TR/css-writing-modes-3/#vertical-layout).
@@ -10631,7 +10631,7 @@ qualification. A transient BFC flag propagates the need for a final inline pass;
 the assigned-size pass rebuilds lines and float exclusions in source order.
 Share assigned block-context setup with flex and grid content consumers instead
 of adding a third copy. Authored CSS size records and selected-view ownership
-remain unchanged (D4.5.1v4 / D4.1.4v5). Qualification is still pending.
+remain unchanged (D5.5.1 / D5.1.4). Qualification is still pending.
 
 
 **Focused evidence.** The BFC replay passes the 6,912-state margin/line
@@ -10676,7 +10676,7 @@ approved baseline stays unchanged. That audit remains failing. The adjacent
 positioned-descendant audit retains eight improved existing block offsets with
 no new/worsened field. Broader positioned geometry, image fallback rendering
 and harness-report integration stay separate; no workaround hides them.
-Ownership rulings D4.5.1v4 / D4.1.4v5 and boundaries D7.3.3–D7.3.4 are unchanged.
+Ownership rulings D5.5.1 / D5.1.4 and boundaries D9.4.3–D9.4.4 are unchanged.
 
 The overall goal remains active. Next reduce the common RTL first-line atomic
 placement discrepancy in `float-contiguous-vrl-006-ref.xht`: its first two
@@ -10707,7 +10707,7 @@ both fail; resource loading alone is not the cause.
 line box; direction and bidi determine their ordering, while text alignment
 uses that line's available inline region. Writing Modes 3 §2/§7 maps these
 inline coordinates into vertical/sideways flow. Preserve selected-view/style
-ownership (D4.5.1v4 / D4.1.4v5) and module boundaries (D7.3.3–D7.3.4).
+ownership (D5.5.1 / D5.1.4) and module boundaries (D9.4.3–D9.4.4).
 Sources: [inline formatting](https://www.w3.org/TR/CSS22/visuren.html#inline-formatting),
 [inline direction](https://www.w3.org/TR/css-writing-modes-3/#inline-base-direction).
 No formal ruling changes.
@@ -10773,7 +10773,7 @@ Extract the existing float frame's line-left/right margin conversion and share
 it with provisional atomic placement and bidi advances. This preserves the
 existing float calculation and avoids a third copy of axis/reversal logic.
 These are transient membership and coordinate-frame fixes, preserving
-D4.5.1v4 / D4.1.4v5; no capture, tolerance or retained owner change.
+D5.5.1 / D5.1.4; no capture, tolerance or retained owner change.
 
 
 **Core candidate result.** The browser-validated retained regression now passes
@@ -10827,7 +10827,7 @@ is unchanged. Hashes and command evidence are frozen in
 The fresh module audit still exits two for the same six unapproved runtime
 imports from unchanged HEAD callers; all strict module DSOs link. There is no
 new import and the approved baseline is unchanged. That audit is not green.
-The existing D4.5.1v4 / D4.1.4v5 owners and D7.3.3–D7.3.4 boundaries remain.
+The existing D5.5.1 / D5.1.4 owners and D9.4.3–D9.4.4 boundaries remain.
 Broader paragraph/line metrics, positioned descendants and missing-image
 fallback rendering stay separate work; full conformance is not claimed.
 
@@ -10856,8 +10856,8 @@ positions after losing the preserved line break.
 `pre-line`, `break-spaces`). Variables §3 makes invalid substituted declarations
 invalid at computed-value time, without falling back to an earlier declaration.
 Register this grammar in the existing shared keyword-set validator, already used
-by parser admission and post-substitution validation. Preserve D4.5.1v4 /
-D4.1.4v5 owners and D7.3.3–D7.3.4 boundaries; no formal ruling changes.
+by parser admission and post-substitution validation. Preserve D5.5.1 /
+D5.1.4 owners and D9.4.3–D9.4.4 boundaries; no formal ruling changes.
 Sources: [invalid declarations](https://www.w3.org/TR/CSS22/syndata.html#parsing-errors),
 [white-space grammar](https://www.w3.org/TR/css-text-3/#white-space-property),
 [invalid substituted values](https://www.w3.org/TR/css-variables-1/#invalid-at-computed-value-time).
@@ -10929,7 +10929,7 @@ and comparison evidence in `temp/wpt-m77-input-audit.json`. No formatter or
 PDF golden changes are included in this milestone.
 
 Hashes and command evidence are in `temp/wpt-m77-qualified-state.json` and its
-proof artifacts. D4.5.1v4 / D4.1.4v5 owners and D7.3.3–D7.3.4 boundaries remain
+proof artifacts. D5.5.1 / D5.1.4 owners and D9.4.3–D9.4.4 boundaries remain
 unchanged; this local validator/serializer repair needs no new module audit.
 The previously recorded six unapproved runtime imports remain unresolved.
 
@@ -10958,7 +10958,7 @@ occupying each line after alignment, including each enclosing inline's own
 line-height. Inline decorations do not add to this height. The block strut
 sets a minimum, not a replacement for larger participating boxes.
 Source: [line height calculations](https://www.w3.org/TR/CSS22/visudet.html#line-height).
-Preserve D4.5.1v4 / D4.1.4v5 pass-local ownership and D7.3.3–D7.3.4 module
+Preserve D5.5.1 / D5.1.4 pass-local ownership and D9.4.3–D9.4.4 module
 boundaries; no formal ruling changes.
 
 **Owner and repair design.** Entry-time flags do not establish membership in a
@@ -11047,8 +11047,8 @@ empty whitespace fragments and accepted atomic content. Pending start edges
 remain attached to their first word, preserving plain-only middle lines.
 `layout_include_inline_box_metrics` shares the union/classification path;
 `view_get_layout_position` supplies export origins before the existing
-transform/clip projection. D4.5.1v4 / D4.1.4v5 stack/pass ownership and
-D7.3.3–D7.3.4 boundaries remain unchanged. No fixture offset or paint tolerance
+transform/clip projection. D5.5.1 / D5.1.4 stack/pass ownership and
+D9.4.3–D9.4.4 boundaries remain unchanged. No fixture offset or paint tolerance
 is introduced.
 
 The native regressions verify **272 retained states** (240 packing/leading and
@@ -11113,7 +11113,7 @@ DOM content, preserving its hidden/out-of-flow/whitespace filtering. Actual
 fragments retain the existing geometry owner. Invalidate retained text/atomic
 line membership at the existing per-flow setup, so an unvisited old fragment
 cannot impersonate current-pass content. TextRect storage remains ViewTree-owned;
-D4.5.1v4 / D4.1.4v5 ownership and D7.3.3–D7.3.4 boundaries do not change.
+D5.5.1 / D5.1.4 ownership and D9.4.3–D9.4.4 boundaries do not change.
 
 **Finite acceptance.** Variable unequal padding/border, default and explicit
 slice, LTR/RTL, five writing modes and narrow/wide/narrow retained reflow must
@@ -11172,8 +11172,8 @@ Do not accept the candidate merely because existing partial floors permit it.
 The source-edge query now checks the text view's existing pass-local
 `inline_line_number` marker, stamped on actual text/soft-hyphen commitment.
 Per-flow setup clears view markers without destroying cached TextRect lines
-used by retained reflow. No allocation, field or ABI is added; D4.5.1v4 /
-D4.1.4v5 ownership remains unchanged. Eight retained Ahem BR states and six
+used by retained reflow. No allocation, field or ABI is added; D5.5.1 /
+D5.1.4 ownership remains unchanged. Eight retained Ahem BR states and six
 independent browser frames protect visual line ends. These native neighbor
 checks already pass on the rejected binary; the existing CSS Text fixtures
 and score-preserving A/B inventory are the causal regression evidence.
@@ -11188,7 +11188,7 @@ share the existing line-relative edge calculation across all five writing
 modes. Per-flow view markers reject unvisited retained text; committed text
 stamps its marker while preserving cached TextRect line metadata. No fixture
 adjustment, geometry offset, tolerance change, allocation field or ABI is
-introduced. D4.5.1v4 / D4.1.4v5 ownership and D7.3.3–D7.3.4 boundaries remain
+introduced. D5.5.1 / D5.1.4 ownership and D9.4.3–D9.4.4 boundaries remain
 unchanged.
 
 The native regressions exercise **360 retained states**: 320 unequal-edge,
@@ -11264,8 +11264,8 @@ Per-line geometry still uses the existing fragment collector and paint paths;
 synthetic per-line scope replays must not become a second paragraph input.
 Cache source-indexed levels in `LayoutContext::pass_arena`, borrowed by the
 flow context and reset when its inline pass begins. Never retain scratch-scope
-storage in a later line or erase cached TextRect lines. D4.1.4v5 / D4.5.1v4
-ownership and D7.3.3–D7.3.4 module boundaries remain authoritative; no Lambda
+storage in a later line or erase cached TextRect lines. D5.1.4 / D5.5.1
+ownership and D9.4.3–D9.4.4 module boundaries remain authoritative; no Lambda
 semantic ruling changes. Reuse rendered child traversal where projection is
 available; identify source-admission gaps explicitly rather than fitting them.
 
@@ -11305,7 +11305,7 @@ breaks; soft-wrap width removal has no explicit bidi handoff.
 Add `TextRect::collapsed_space_advance` at that existing trim owner. Bidi uses
 the recorded trim to suppress the raw suffix without subtracting it from the
 rectangle twice; published pieces carry it only on the final source piece.
-D4.1.4v5 / D4.5.1v4 view-pool ownership remains unchanged. No directional flag
+D5.1.4 / D5.5.1 view-pool ownership remains unchanged. No directional flag
 or fixture coordinate is used to infer that a soft-wrap trim occurred.
 The expanded 320-state model checks every source glyph, including separators
 inside word text nodes, and agrees with Chromium in every selected field.
@@ -11344,7 +11344,7 @@ existing alignment helpers. Atomic boxes inside sideways wrappers also omitted
 the parent's used line-axis reversal; project the border box using that axis
 while retaining its independent content frame. These repairs address shared
 input/coordinate owners, without source-name or fixture-coordinate conditions.
-D4.1.4v5 / D4.5.1v4 ownership and D7.3.3–D7.3.4 boundaries remain unchanged.
+D5.1.4 / D5.5.1 ownership and D9.4.3–D9.4.4 boundaries remain unchanged.
 
 **Current limits.** A source traversal containing an unresolved shadow slot
 uses the existing per-line fallback because its rendered source projection is
@@ -11402,7 +11402,7 @@ old resolved left/right strings. Only the two failing text origins move.
 Preserve the fixture, Linux capture, baseline requirements and tolerances.
 Verify the original case, all 60 recorded CSS Lists requirements and the
 configured layout-baseline group. No engine code or ownership rule changes:
-D4.1.4v5 / D4.5.1v4 and D7.3.3–D7.3.4 remain unchanged.
+D5.1.4 / D5.5.1 and D9.4.3–D9.4.4 remain unchanged.
 
 **Verified.** The original case matches all 97 elements and 80 text nodes. All
 60 recorded CSS Lists requirements pass (52 full, eight existing partial).
@@ -11436,7 +11436,7 @@ all previous source, reset, nested-scope and atomic controls.
 UAX #9 §3.3.2 / §3.4 and CSS Writing Modes 3 §2.4 govern levels and line order.
 Use source-indexed paragraph levels and the established glyph/query owners if
 a discrepancy is found; never replay arbitrary controls or fit a source name.
-D4.1.4v5 / D4.5.1v4 and D7.3.3–D7.3.4 ownership/boundaries remain unchanged.
+D5.1.4 / D5.5.1 and D9.4.3–D9.4.4 ownership/boundaries remain unchanged.
 Budget: the expanded native model and relevant bidi/inline neighbors first,
 then all 1,980 writing-mode and 1,009 CSS Text scores, relevant exact output
 pairs and one stable full Radiant milestone gate. Preserve the repaired CSS
@@ -11502,8 +11502,8 @@ the containing inline axis, including zero, then reuse the percentage-spacing
 classifier and bounded BFC final-inline pass when an automatic inline size
 settles. The assigned-size pass applies the existing context-sensitive CSS
 cache and rebuilds descendants and float exclusions. Avoid a new fixed-point
-loop, fixture lookup or coordinate adjustment. D4.1.4v5 / D4.5.1v4 selected-view
-ownership and D7.3.3–D7.3.4 boundaries remain unchanged.
+loop, fixture lookup or coordinate adjustment. D5.1.4 / D5.5.1 selected-view
+ownership and D9.4.3–D9.4.4 boundaries remain unchanged.
 
 **Finite acceptance and budget.** The original content widths are 300px and
 100px. A native retained regression mirrors the 400 analytic/browser states:
@@ -11645,9 +11645,9 @@ placement. The generic forced-break path flushes horizontal inline advances
 into physical-width maxima before vertical mapping can replace them. Reuse
 the existing complete-paragraph physical metrics owner
 `layout_measure_direct_text_intrinsic_size`, preserving CSS box/size constraints
-and read-only query ownership (D4.1.4v5 / D4.5.1v4). Do not count fixture-specific
+and read-only query ownership (D5.1.4 / D5.5.1). Do not count fixture-specific
 breaks, reuse an earlier committed width or introduce per-mode offsets.
-D7.3.3–D7.3.4 boundaries remain unchanged.
+D9.4.3–D9.4.4 boundaries remain unchanged.
 
 **Finite acceptance and budget.** First run a red native regression matching
 the 384 browser states. Check automatic/explicit wrappers, both directions,
@@ -11698,7 +11698,7 @@ siblings take a maximum, including their own edges and supported min/max rules.
 Percentage-bearing, transferred-ratio, generated, multicolumn and unsupported
 mixed flows continue to their established owners rather than receiving a guessed
 scalar result. Existing selected-owner and measurement scopes preserve committed
-geometry under D4.1.4v5 / D4.5.1v4; no API or D7 boundary is added.
+geometry under D5.1.4 / D5.5.1; no API or D7 boundary is added.
 
 **Candidate evidence.** The initial causal native run has 624 failed assertions,
 including 384 wrong physical intrinsic scalars and no geometry mutation from
@@ -11753,8 +11753,8 @@ margin sides through that frame, then map positions once. Preserve the existing
 wrap-reverse treatment without reversing it twice. Audit baseline-stabilization
 get/set callers so the same content-box frame and decorations are invertible.
 Do not add a sideways flag, copy the mapping table or patch item coordinates.
-Selected owners and pass-local scratch remain governed by D4.1.4v5 /
-D4.5.1v4; D7.3.3–D7.3.4 interfaces and formal rulings do not change.
+Selected owners and pass-local scratch remain governed by D5.1.4 /
+D5.5.1; D9.4.3–D9.4.4 interfaces and formal rulings do not change.
 
 **Finite acceptance and budget.** First retain a causal red native regression
 for the independently checked core equations: all five writing modes, both
@@ -11850,8 +11850,8 @@ offset when both inline insets are auto. Do not substitute the full containing
 height: eight additional controls independently verify 32 such retained states.
 Preserve the existing opposing-inset stretch, explicit/intrinsic size, ratio,
 replaced, containment and unsupported complex-flow owners. Preserve authored
-auto and resolve fresh after font/containing-size changes. D4.1.4v5 /
-D4.5.1v4 selected/memory owners and D7.3.3–D7.3.4 boundaries remain unchanged;
+auto and resolve fresh after font/containing-size changes. D5.1.4 /
+D5.5.1 selected/memory owners and D9.4.3–D9.4.4 boundaries remain unchanged;
 no formal ruling changes.
 
 **Finite acceptance and verification budget.** Retain a causal native regression
@@ -11980,7 +11980,7 @@ for projection and the block-level automatic-inline sentinel. Preserve physical
 CSS/HTML specified dimensions, loaded-image facts and empty-alternative behavior.
 The image-input caller continues consuming the same logical metric with its
 existing native-control sizing owner. No icon/font constants are fitted or
-changed. D4.1.4v5 / D4.5.1v4 ownership and D7.3.3–D7.3.4 boundaries stay intact;
+changed. D5.1.4 / D5.5.1 ownership and D9.4.3–D9.4.4 boundaries stay intact;
 no formal ruling changes.
 
 **Done criteria and budget.** Retain a native regression covering the independent
@@ -12051,7 +12051,7 @@ source node. Establish the boxless element as the text-style context for its
 child traversal and restore it afterwards through existing `LayoutViewScope`.
 Keep the containing flow/cursors and selected view-tree ownership intact. Use
 the existing orientation/shaping policy without new mode tables, metrics,
-synthetic principal boxes or offsets. D4.1.4v5 / D4.5.1v4 and D7.3.3–D7.3.4
+synthetic principal boxes or offsets. D5.1.4 / D5.5.1 and D9.4.3–D9.4.4
 remain unchanged; no new formal ruling or module interface is required.
 
 **Finite acceptance and budget.** Retain the 240-state native source/reference
@@ -12128,7 +12128,7 @@ contribute their own line baseline sets only in the compatible inline axis.
 Keep flex, grid and table generation with their existing model owners; do not
 replace their contracts with a blanket box-type rule. Preserve parent line
 baselines when a child has no eligible set, and preserve synthesis when the
-parent has none. D4.1.4v5 / D4.5.1v4 ownership and D7.3.3–D7.3.4 boundaries remain
+parent has none. D5.1.4 / D5.5.1 ownership and D9.4.3–D9.4.4 boundaries remain
 unchanged; no formal ruling changes.
 
 **Independent model and scope.** Sixty source/reference controls cover five
@@ -12219,7 +12219,7 @@ reuse the existing overflow/clip/range owners with finalized dimensions. Keep
 the current phase for horizontal, flex, grid, table, multicol and positioned
 geometry owners, including replaced/native controls. Preserve genuine overflow, decorations, clipping and mutation
 restoration. Avoid a shrink-to-fit cap, a size fudge, new context fields or
-parent-view mutation. D4.1.4v5 / D4.5.1v4 selected ownership and D7.3.3–D7.3.4
+parent-view mutation. D5.1.4 / D5.5.1 selected ownership and D9.4.3–D9.4.4
 boundaries remain intact; no formal ruling changes.
 
 **Finite model and acceptance.** An independent 112-control model agrees with
@@ -12341,8 +12341,8 @@ policy into the coherent text-layout owner and call it from the ordinary
 inline-boundary owner with the adjacent source characters and resolved wrap
 policy. Preserve real separators, hyphens, CJK boundaries, glue and atomic
 neighbors. Retain source bytes, composition geometry, computed inheritance and
-selected-view ownership (D4.1.4v5 / D4.5.1v4), and module boundaries
-(D7.3.3–D7.3.4). No formal ruling changes.
+selected-view ownership (D5.1.4 / D5.5.1), and module boundaries
+(D9.4.3–D9.4.4). No formal ruling changes.
 
 **Finite acceptance and budget.** Check plain word, space-before, space-after,
 hyphen, CJK, word-joiner and atomic-neighbor controls in five modes and both
@@ -12465,7 +12465,7 @@ axis policy and font/half-leading metrics; verify it against authored ordinary
 text with the same logical reservation. Obtain font/color from the same selected
 style source as ordinary text and capture font/text payloads through the existing
 paint APIs. Do not fabricate DOM text children under a void element. Preserve
-D4.1.4v5 / D4.5.1v4 ownership and D7.3.3–D7.3.4 dependency placement; keep
+D5.1.4 / D5.5.1 ownership and D9.4.3–D9.4.4 dependency placement; keep
 CSS-aware preparation out of lightweight utilities. No formal ruling changes.
 
 **Finite core and verification budget.** Deliver auto-sized single-line labels
@@ -12527,7 +12527,7 @@ Reuse the existing line-relative box-edge mapping (currently margin-specific)
 for the span's decoration bounds while that source flow is selected. Preserve
 physical edges after publication. This repairs the bounding owner instead of
 adding a media-paint offset or weakening the independent reference. Standards:
-CSS Writing Modes §6.3–6.4 and CSS Text §7.1; D4.1.4v5 / D4.5.1v4 selected-view
+CSS Writing Modes §6.3–6.4 and CSS Text §7.1; D5.1.4 / D5.5.1 selected-view
 ownership remains unchanged.
 
 **First implementation evidence.** The shared span edge mapping removes all 24
@@ -12613,7 +12613,7 @@ dimension lint / diff checks pass. Missing-image single-line labels now use the
 shared selected-font glyph preparation and ordinary output paths; image-own
 leading, logical reservation sides and unpublished decorated-span bounds follow
 the existing CSS calculations. Retained semantic commands own normalized label
-bytes (D4.5.1v4), while synchronous native paint borrows its live selected font.
+bytes (D5.5.1), while synchronous native paint borrows its live selected font.
 No fixture, reference, baseline or tolerance changes. The unchanged six-import
 audit limit and main's separate ten navigation-motion failures remain open; no
 complete-main-gate claim is made. Delivery evidence:
@@ -12642,8 +12642,8 @@ existing `BlockContext::used_size_owner` for algorithmically assigned dimensions
 the existing root-view/vertical-inline policy for viewport-owned inline space,
 and the existing ratio/flex/table definiteness branches. Do not tag a partial
 root constraint as a two-axis assignment or add a second inheritance walk.
-Selected-view and transient-context ownership remain D4.1.4v5 / D4.5.1v4; keep
-the repair in the layout owner per D7.3.3–D7.3.4. No formal ruling changes.
+Selected-view and transient-context ownership remain D5.1.4 / D5.5.1; keep
+the repair in the layout owner per D9.4.3–D9.4.4. No formal ruling changes.
 
 **Finite acceptance.** Five child writing modes, both directions and size versus
 layout+size containment must preserve fallback space through automatic and
@@ -12741,7 +12741,7 @@ also resets live box publication, so it cannot be used for this virtual page
 containing region. Reuse the existing ownership field rather than restoring the
 broad nonnegative-height predicate or adding a page-float exception. Rerun the
 two causal page tests, all 504 paged cases and the required aggregate after the
-producer repair. D4.1.4v5 / D4.5.1v4 selected/transient context ownership and the
+producer repair. D5.1.4 / D5.5.1 selected/transient context ownership and the
 existing module placement remain unchanged.
 
 **Page prerequisite verified.** Both previously failing page-float regressions
@@ -12807,8 +12807,8 @@ values with `layout_box_component_value` (which already delegates logical pairs
 to `css_pair_side_value` after substitution). Reuse the scalar inset resolver
 for each side. Preserve existing cascade priority and one-value behavior; do not
 write another list splitter or add mode-specific offsets. Selected view/style
-ownership remains D4.1.4v5 / D4.5.1v4, with layout/CSS dependency placement per
-D7.3.3–D7.3.4. No formal ruling changes.
+ownership remains D5.1.4 / D5.5.1, with layout/CSS dependency placement per
+D9.4.3–D9.4.4. No formal ruling changes.
 Source: [CSS Logical Properties §4.3](https://www.w3.org/TR/css-logical-1/#propdef-inset-block).
 
 **Finite acceptance and budget.** Cover inline/block pairs in five modes, both

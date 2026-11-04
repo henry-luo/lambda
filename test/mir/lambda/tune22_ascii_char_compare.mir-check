@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T22-6: a String character equality against one ASCII byte calls the allocation-free character comparator, while Unicode and absence retain their source semantics (S5.1.1/2, D8.4.1v2).",
+  "description": "T22-6: a String character equality against one ASCII byte calls the allocation-free character comparator, while Unicode and absence retain their source semantics (S5.1.1/2, D7.4.1).",
   "checks": [
     {
       "in_func": "_char_is_zero_#",

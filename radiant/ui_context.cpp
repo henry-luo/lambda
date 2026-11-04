@@ -568,7 +568,7 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);
     // the realm can outlive this arena; retire its listener pins while the
-    // document registry and precise-root owner are still valid (D4.5.2).
+    // document registry and precise-root owner are still valid (D5.5.2).
     dom_events_release_document(doc);
 
     if (timer_owner && js_runtime_state_for(timer_owner)) {
@@ -644,7 +644,7 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
     if (owned_runtime) {
-        // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D5.4.1).
+        // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D6.4.1).
         if (!radiant_eval_context_switch(runtime_get_eval_context(owned_runtime.get()))) {
             log_error("free_document: could not rebind owned runtime for cleanup; runtime retained");
             owned_runtime.release();

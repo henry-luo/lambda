@@ -1,8 +1,8 @@
 # Lambda source and input acquisition inventory
 
-Authority: **D7.5.2, D7.5.5**, pure resolution **S2.4.4 / S16.9.8**,
-context ownership **D5.4.2–D5.4.4**, and immutable cache ownership
-**D8.5.1v7**. Surveyed against this working tree on 2026-11-03.
+Authority: **D11.1.2, D11.2.1**, pure resolution **S2.4.4 / S16.9.8**,
+context ownership **D6.4.2–D6.4.4**, and immutable cache ownership
+**D8.3.5**. Surveyed against this working tree on 2026-11-03.
 
 This inventory covers Lambda source loading, ordinary input, path acquisition
 and task reads with an explicitly bound client.
@@ -51,7 +51,7 @@ that a selected data read does not authorize source identity acquisition.
 | `input.cpp::input_from_local_path` | Data bytes use `security_io_read_bytes(..., source=false)` with the archive byte ceiling. Parser options carry the same borrowed client for this synchronous parse. | Inputs/caches do not retain a client pointing into a Runtime. |
 | `input-dir.cpp` | Bound enumeration constructs the ordinary list of child Paths from broker results. No raw stat/list fallback follows a denial. | At most 4,096 visited entries and the broker byte ceiling; symlinks, hardlinked files, special files, protected objects and reserved stage names are filtered before delivery. Each child's optional metadata requires separate authorization. |
 | `file_broker.cpp::security_file_input_kind`, `security_file_enumerate` | Policy precedes acquired-object classification/listing; held directory anchors and no-follow object checks enforce root/protected-object binding. Acquisitions are revalidated before returning the owned result. | Classification supplies only kind, not general metadata. Enumeration is bounded, nonrecursive, and fails without returning partial results on overflow or observed directory mutation. |
-| `input-tex-latex.cpp` | Local/bundled probes and actual data reads use the client. Both `tex` and `latex` inherit the acquired document location. Inline `parse()` also carries its client's authority. | The parser's narrower beside-document rule and local file/byte budgets remain in force (D7.2.7v2). Bundled files require their own admitted read scope. |
+| `input-tex-latex.cpp` | Local/bundled probes and actual data reads use the client. Both `tex` and `latex` inherit the acquired document location. Inline `parse()` also carries its client's authority. | The parser's narrower beside-document rule and local file/byte budgets remain in force (D10.2.2). Bundled files require their own admitted read scope. |
 | `input-tex-format.cpp::load_expl3_format` | Scoped engines build a private format with that client's bundled-resource reads. They cannot consume an ambient process-global format as authorization. | This preserves expl3 functionality at the cost of rebuilding scoped formats. A dependency-manifest cache is future optimization; denied scoped builds do not poison the host cache. |
 | `input-graph-structurizr-resolver.cpp` | Scoped include paths normalize lexically, retain the narrower document-root check, then classify/read/list through the broker. | Existing depth/file/aggregate-byte budgets remain; network includes are still rejected. The byte limit applies during acquisition, replacing the old size-probe/read race. |
 | `input-zip.cpp::fs_parse_uncached` | A captured member is parsed from immutable archive bytes with an explicit closed external-resource client. | Lazy member caches never retain live grants or external includes from an earlier caller. Archive-relative external-resource resolution is not implemented; ordinary byte-only formats continue to work. |
@@ -62,8 +62,8 @@ ambient read after refusal. Ordinary pure parsing retains the same data model.
 
 ## Path metadata, traversal and task reads
 
-Authority: **D7.5.2, D7.5.5**, reference operations **S2.4.4, S2.4.6–S2.4.7**,
-context lifetime **D5.4.2–D5.4.4**, precise roots **D5.3.3**, total `len`
+Authority: **D11.1.2, D11.2.1**, reference operations **S2.4.4, S2.4.6–S2.4.7**,
+context lifetime **D6.4.2–D6.4.4**, precise roots **D6.3.3**, total `len`
 **S7.6**. Runtime acquisition now lives in `runtime/path_runtime.c` rather
 than the representation implementation in `core/path.c`.
 
@@ -73,7 +73,7 @@ than the representation implementation in `core/path.c`.
 | `path_is_directory`, `path_longest_existing_prefix` | READ/ENUMERATE classification uses the client before file/document navigation; these probes do not demand general METADATA. | Nonlocal external providers cannot enter an ambient scoped resolver. In-memory `temp` documents remain available. |
 | `path_resolve_for_iteration`, wildcard traversal | One sorted directory facade supplies iteration and `*`/`**`, without raw stat/list fallback. Optional metadata is separately authorized. | Scoped closure limits are 4,096 entries across sibling subtrees and 64 levels; links are not traversed. Overflow/refusal discards partial output. Recursive result arrays have precise root frames. |
 | `security_context.cpp` path snapshots | Context-owned capsule, semantic path keys and stable explicit GC roots. A broker session/namespace epoch invalidates snapshots on admission, restriction, revocation and observed expiry. Publication checks the acquisition's stamp again. | At most 4,096 entries; a stamp is not object authority. Actual acquisitions retain anchored object/protection checks. No scoped heap result is stored on a shared Path spine. |
-| `lambda-eval.cpp::force_document` | READ/ENUMERATE is checked before reusing a captured document head. Scoped SYS provider forces and dynamic SYS members are denied. | Existing in-memory document versions are data; source cache hits continue their stronger exact-byte dependency reauthorization under D8.5.1v7. |
+| `lambda-eval.cpp::force_document` | READ/ENUMERATE is checked before reusing a captured document head. Scoped SYS provider forces and dynamic SYS members are denied. | Existing in-memory document versions are data; source cache hits continue their stronger exact-byte dependency reauthorization under D8.3.5. |
 | `doc_context.cpp`, `core/path.c::path_get_root` | Document heads/node identities are realm capsules with owner-bound precise roots. Scheme roots allocate in the requesting pool, sharing the existing `path_new` constructor. | Another evaluator cannot read or clear these heads, or reuse a root pointer into a retired pool. Dynamic realm capsules release before heap destruction. |
 | `concurrency.cpp::pn_io_read` | Owned path plus copied client enters the existing offload pool, with no Runtime/TLS access on the worker. Owner-stack delivery checks READ again before constructing a GC value. | Cancellation and scheduler teardown join the borrowed transport. Revocation before delivery suppresses the result. Unbound hosts retain their existing uv filesystem mechanism. |
 | `concurrency.cpp::pn_io_exec3` | Scoped calls deny before constructing a process request. | This covers `io.exec`, not every process adapter. |
@@ -93,11 +93,11 @@ at their runtime adapters, before native acquisition or offload creation.
 into success. Database host authorization also refuses a bound caller before
 driver open; this does not establish authority propagation for future offloaded
 database adapters. These services remain unsupported until broker operations
-and their qualifications exist (**D7.5.2, D7.5.5, D7.5.8**).
+and their qualifications exist (**D11.1.2, D11.2.1, D11.2.4**).
 
 Write-set transactions, confinement and retained edit values now belong to an
 evaluation-context capsule, with explicit-owner precise GC roots and teardown
-(**D5.4.2–D5.4.4, D5.3.3**). Peer execution/reset/heap release cannot observe or
+(**D6.4.2–D6.4.4, D6.3.3**). Peer execution/reset/heap release cannot observe or
 discard another owner's pending edits. A foreign document cannot enter the
 current owner's set. In-memory document edits do not publish filesystem bytes;
 `output()` remains the brokered publication route.
@@ -112,7 +112,7 @@ as a complete sandbox.
 
 ## Broker transport and experimental confined worker
 
-**D7.5.2 / D7.1.1–D7.1.3** keep raw transport mechanisms in
+**D11.1.2 / D9.1.1–D9.1.3** keep raw transport mechanisms in
 `lib/ipc_stream.*`; `lambda/io/security_channel.*` owns the bounded wire codec
 and callback dispatch. The mechanism adopts only an already connected local
 stream, applies one monotonic deadline, rejects ancillary data, closes received
@@ -132,7 +132,7 @@ without retrying (**S7.4.5**).
 
 `host/safety/worker.cpp` installs the channel client before entry acquisition
 and joins its task/prebuild borrowers before transport teardown. The build
-profile follows **D7.1.6**, excludes MIR/JIT and the DevTools/JS/DOM/Radiant/Jube
+profile follows **D9.2.2**, excludes MIR/JIT and the DevTools/JS/DOM/Radiant/Jube
 hosts, and contains no policy/file-broker/grant-store management implementation.
 The signed macOS fixture now runs real entry/import/data/output, metadata,
 recursive traversal and async reads over that channel. Its syscall control
@@ -141,7 +141,7 @@ per-app separation, other egress/process/debug routes, concurrency with trusted
 revocation/publication, quotas and production launch/persistence still need
 M2 qualification. No complete offline sandbox release is claimed.
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, worker bootstrap also validates
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, worker bootstrap also validates
 kernel descriptor roles and one startup thread before runtime/source IO.
 Only the actual null input device, two anonymous output pipes and one connected
 local stream remain. Extra low/high descriptors, file/FIFO redirection and a
@@ -157,11 +157,11 @@ applies policy before loading the separate T0 runtime. Its only extra native
 read/map allowance is the canonical sealed runtime image, not an app-selected
 path or directory. The host checks nested package code and retains hardened
 library validation. Local composition controls and the still-unqualified
-publisher/deployment gate are recorded separately (**D7.5.1–D7.5.2, D7.5.5–D7.5.7**).
+publisher/deployment gate are recorded separately (**D11.1.1–D11.1.2, D11.2.1–D11.2.3**).
 
 ## Trusted admission and restoration
 
-Under **D7.5.5–D7.5.7**, `host/safety/admission.*` now builds an ad-hoc
+Under **D11.2.1–D11.2.3**, `host/safety/admission.*` now builds an ad-hoc
 principal/source manifest before exposing its client, supplies a base protected
 catalog and restores supported file selections from the matching store binding.
 The additional host-only source capture obtains canonical name, bytes and
@@ -188,7 +188,7 @@ not the production launch path; ordinary CLI execution remains unbound.
 
 `host/safety/private_storage.*` routes the virtual data, cache and per-admission
 temp mounts (`/.lambda/app-data`, `/.lambda/app-cache`, `/.lambda/app-temp`) to
-the principal bound by admission's private channel (**D7.5.2, D7.5.5–D7.5.7**).
+the principal bound by admission's private channel (**D11.1.2, D11.2.1–D11.2.3**).
 The worker never selects a physical owner root. Reads, classification, stat,
 enumeration and writes use a separate PRIVATE-scope anchored file broker;
 source/canonical-source acquisition is denied. The main protected catalog
@@ -204,14 +204,14 @@ usage without admission/recovery and performs explicitly requested persistent-da
 reset through an object/principal-bound random intent and bounded cleanup steps.
 Live sessions refuse reset; a pending intent blocks new admissions until trusted
 resumption completes. No reset/inspection opcode is present in worker IPC.
-Uninstall retains data by default (**D7.5.9**); installed-app integration remains
+Uninstall retains data by default (**D11.2.5**); installed-app integration remains
 pending. Persistent-data repair, the full
 crash/power-loss matrix, deployment and remaining OS gates stay open.
 The private-Darwin process backend was approved experimentally on 2026-11-03;
 qualification is required before any default rollout.
 
 Host-private quota policy uses a typed principal-keyed protected-state slot
-(**D7.5.2, D7.5.7**). Admission reads saved policy under its owner lock before
+(**D11.1.2, D11.2.3**). Admission reads saved policy under its owner lock before
 creating a live session. Trusted edits/default restoration require no live
 session or pending reset and an exact generation; the worker protocol remains
 unchanged. Records bind account/profile and principal, not code fingerprints;

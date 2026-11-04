@@ -1,4 +1,4 @@
-// reads remain callable from fn, including after a host mutation (D7.4.6).
+// reads remain callable from fn, including after a host mutation (D7.1.1).
 import dom
 import radiant
 import controller: lambda.edit.controller

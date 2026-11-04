@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3, S7.1.1v3: ord of a typed indexed string decodes without building an intermediate character and keeps the absent/Unicode path.",
+  "description": "D4.3.3, S7.1.1v3: ord of a typed indexed string decodes without building an intermediate character and keeps the absent/Unicode path.",
   "checks": [
     {
       "in_func": "_typed_ord_index_#",

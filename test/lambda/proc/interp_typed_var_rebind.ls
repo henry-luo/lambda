@@ -1,4 +1,4 @@
-// D8.1.1v8: a body that REBINDS a typed `var` parameter stays in T0 (the raw
+// D8.3.3: a body that REBINDS a typed `var` parameter stays in T0 (the raw
 // satellite has no home to publish through), and its callers -- T0 or a
 // promoted satellite -- observe the rebind through the transported home.
 // The eager JIT (LAMBDA_EXEC_BACKEND=jit) loses this rebind today: its direct native

@@ -2,7 +2,7 @@
 
 2026-10-28. Native macOS OpenGL profile. This extends the existing Scene3D
 materials, lights, shared animation and resource ownership; it adds no language
-semantics. **S12.1.1v3**, **D2.11.4**, **D4.5.1v4–D4.5.3v2** and **D7.2.4v4**
+semantics. **S12.1.1v3**, **D10.1.7**, **D5.5.1–D5.5.3** and **D9.3.4**
 remain authoritative. See the [design](../vibe/radiant/Radiant_Design_WebGL.md#outdoor-atmosphere-foliage-wind-and-water)
 and [qualification record](../vibe/impl/Radiant_Impl_Scene3d_Eden.md).
 
@@ -151,5 +151,5 @@ is prior art for a separate reflective-water profile.
 Outdoor material effects have no glTF equivalent in this implementation; export
 diagnoses them instead of silently dropping them. Save native descriptions as
 Mark data. Fog is likewise outside static glTF export. These facilities preserve
-the selected-frame capture contract (**D2.11.4**) and keep ecological time
+the selected-frame capture contract (**D10.1.7**) and keep ecological time
 independent from rendering (**S12.1.1v3**, Eden ED2).

@@ -42,7 +42,7 @@ JS_EXEC_BACKEND=auto ./lambda.exe js test/js/react_router.js --document test/js/
 Tests use real DOM properties and React commit completion. Native setters
 simulate an external text edit without updating React's own value tracker.
 No framework compatibility shims are installed. The JSX/npm authoring step
-is external; this fixture qualifies bundled browser JavaScript (D8.1.3v42).
+is external; this fixture qualifies bundled browser JavaScript (D8.4.5).
 The implementation record and remaining scope are in
 `vibe/impl/Lambda_Impl_React.md` and
 `vibe/impl/Lambda_Impl_React_Ecosystem.md`.

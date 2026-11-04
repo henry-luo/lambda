@@ -13,8 +13,8 @@ suite source, golden and DOM fixture where needed. Running committed tests
 requires neither npm nor network access.
 
 This follows the bundled guest-JavaScript execution boundary in
-**D8.1.3v42**. Native property dispatch follows **D3.4.7/D7.4.4** and
-retained callbacks and GC ownership follow **D5.3.3/D4.5.1v4/D4.5.2**.
+**D8.4.5**. Native property dispatch follows **D3.4.7/D9.5.4** and
+retained callbacks and GC ownership follow **D6.3.3/D5.5.1/D5.5.2**.
 No new language or platform ruling is proposed. Fix any demonstrated failure
 in shared Lambda runtime mechanisms, never by patching upstream packages or
 installing fixture-only compatibility shims.
@@ -86,7 +86,7 @@ remain distinct follow-on scopes.
   through the append-only Jube script API; both interfaces retain their own
   validation. URLSearchParams now supports sequences/records, duplicate entries,
   iterator failures and USVString normalization. The constructor and its inputs
-  retain precise roots (**D5.3.3**). The small constructor regression covers
+  retain precise roots (**D6.3.3**). The small constructor regression covers
   independent copies, iterable pairs, records, conversion and invalid inputs.
 - Data routing required a native Request constructor and Response.body.
   Added a bounded in-memory Request implementation, sharing native interface
@@ -105,7 +105,7 @@ remain distinct follow-on scopes.
   and ports.
 - Forced collection exposed unpublished collection-iterator values and iterator
   result keys, plus Proxy ownKeys trap results retained across invariant checks.
-  Added precise temporary roots at those publication boundaries (**D5.3.3**);
+  Added precise temporary roots at those publication boundaries (**D6.3.3**);
   no conservative scanning or upstream package changes are involved.
   Byte-stream reader creation/read servicing likewise roots its unpublished
   closure, controller, source and result while body pulls allocate.

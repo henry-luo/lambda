@@ -5,8 +5,8 @@ Status: in progress (2026-09-30). This records measured slices against the
 are not met. No language ruling has changed. The implementation must preserve
 **S4.1.1–S4.1.2** (total numeric operations), **S7.1.1v3** (nullable reads),
 **S7.1.3v2** (checked writes), **S9.1.2–S9.1.3** (snapshots),
-**D3.2.4v4** (trusted record representation), **D3.3.3v3** (array certificates),
-and **D5.3.1–D5.3.4** (precise GC roots).
+**D4.2.5** (trusted record representation), **D4.3.3** (array certificates),
+and **D6.3.1–D6.3.4** (precise GC roots).
 
 ## P0: frozen comparison and executed evidence
 
@@ -40,8 +40,8 @@ investigation priorities rather than removable Lambda overhead by themselves.
 
 | Executed diagnostic | Finding | Next proof needed |
 |---|---|---|
-| Prettier AST, 16× diagnostic repetition | Sampling placed 604/3,844 samples at `lambda_type_check_env` and 442 at `fn_member_by_id`; COW counters recorded 735,232 exact trusted-map admissions, with no field reification. | Remove redundant boundary/access work while retaining **D3.2.4v4**. |
-| Richards | Sampling found `fn_map_set` and `fn_index` among the largest helpers; prior counters recorded 710,700 unique map mutations but only 1,000 map copies. | Reuse place/shape facts across safe calls under **D4.4.4v4**. |
+| Prettier AST, 16× diagnostic repetition | Sampling placed 604/3,844 samples at `lambda_type_check_env` and 442 at `fn_member_by_id`; COW counters recorded 735,232 exact trusted-map admissions, with no field reification. | Remove redundant boundary/access work while retaining **D4.2.5**. |
+| Richards | Sampling found `fn_map_set` and `fn_index` among the largest helpers; prior counters recorded 710,700 unique map mutations but only 1,000 map copies. | Reuse place/shape facts across safe calls under **D5.4.4**. |
 | Splay | The site census records 951,168 map copies / 62.8 MB; `splay_node` and the two rotations account for 94.5%. | Prove which dead snapshots can move under **S9.1.3**; nearby marks do not establish causality. |
 | Towers / NBody | Towers had 8,191 unique ArrayNum mutations and no recorded shared copies; NBody had no recorded COW table activity. | Measure bounds, numeric, and call/root protocol before changing COW. |
 | Three-way merge | Native sampling was led by memory copying, GC, indexed reads, string join, and map lookup. | Separate required text bytes from avoidable representation and ownership work. |
@@ -52,7 +52,7 @@ An opt-in `LAMBDA_EXEC_PROFILE=1` JIT census now counts executed calls by
 helper, raw, boxed, indirect, and unresolved entry name. The shared emitter
 places the counter before each emitted call only when profiling is selected at
 compilation; prologue stack probes and async frame entry are included. Ordinary
-MIR has no profile import (**D5.4.4**). A GTest pins opt-in emission, zero
+MIR has no profile import (**D6.4.4**). A GTest pins opt-in emission, zero
 overflow, a known raw and helper count, identical JIT output, and absence of
 the profile file when disabled. The reporter is
 `test/benchmark/report_lambda_exec_calls.py`; 12 diagnostic TSVs and the
@@ -91,7 +91,7 @@ SHA1 10.62M / 101.91M, Richards 31.14M / 85.67M, and Splay 23.30M /
 zero counter overflow. Artifacts: `temp/result49_common_overhead/
 p0_root_exec_profiles/`. These are source-level executed protocol counts, not
 machine instructions or CPU time; the release timing tests below show why
-that distinction matters (**D5.3.1**, **D5.4.4**).
+that distinction matters (**D6.3.1**, **D6.4.4**).
 
 An opt-in `COW_EXEC_PROFILE_SITES=1` diagnostic records the caller PC of
 actual share marks, unique writes, and shared copies, with the existing
@@ -102,7 +102,7 @@ ordinary helper's counter delta; the helpers themselves contain no site-only
 branches. Runtime-only events appear in an explicit zero-PC fallback row.
 `report_cow_sites.py` joins JIT PCs to `LAMBDA_MIR_LOG_CODE_ADDR` notices.
 Ordinary MIR emits no site updates or per-operation site-flag tests
-(**D5.4.4**).
+(**D6.4.4**).
 
 The final diagnostic Splay run at
 `temp/result49_common_overhead/p5_sites/splay_delta_report.json` counted
@@ -114,7 +114,7 @@ and 184,752 share-mark counts are nearby, but temporal proximity does not
 prove those marks caused the later copies: prior ownership and the runtime
 spine test also matter. Exact source statements and alias conditions must be
 proved before removing a mark under **S9.1.2–S9.1.3** and
-**D4.4.4v4–D4.4.6**. This is diagnostic attribution, not a timing result.
+**D5.4.4–D5.4.5**. This is diagnostic attribution, not a timing result.
 The site-profile optimization GTest checks that per-site mark/copy/write totals
 equal the aggregate counters, that a generated copy site is visible, and that
 the separate sites file is absent when either profile switch is off. The
@@ -151,7 +151,7 @@ means were 0.9941× entry-module compile time, 0.9928× process peak RSS,
 across all MIR contexts. No row exceeded 1.25× compile time or 1.10× code
 bytes. Raw samples, function counts, and binary hashes are in
 `temp/result49_common_overhead/p4_final_compiler_metrics63_exact.json`
-(**D8.2.5v3**).
+(**D8.2.5**).
 
 ## Retained engine changes and checks
 
@@ -163,8 +163,8 @@ edges conservative, and clones its raw-entry summary rather than publishing
 the solution into a shared AST. Before linking, it scans every claimed emitted
 body and rejects any collecting call; an optimization GTest injects a false
 claim and verifies rejection. Declaration order, a mutual cycle, more than 64
-bodies, and a forward allocating edge have MIR fixtures (**D5.3.2–D5.3.4**,
-**D8.2.5v3**). The pre-lowering classifier is bounded to boolean control flow
+bodies, and a forward allocating edge have MIR fixtures (**D6.3.2–D6.3.4**,
+**D8.2.5**). The pre-lowering classifier is bounded to boolean control flow
 and direct calls: seemingly scalar integer and float syntax can still emit
 box_int64_value, push_d, or a checked return boundary. The emitted-graph
 verifier caught those false claims during the full baseline, and the early
@@ -188,8 +188,8 @@ The scalar-boxing import audit corrected `push_d`, `box_int64_value`,
 effects. The first three may write a reserved number-stack home but cannot
 collect Lambda GC objects; the latter two encode an inline Item. Their number
 stack effects remain distinct. Debug `AutoAssertNoGC` scopes and the
-fail-closed import audit protect the classification (**D5.2.2v3**,
-**D5.3.2**). A MIR fixture pins rootless raw producers and one-slot
+fail-closed import audit protect the classification (**D6.2.2**,
+**D6.3.2**). A MIR fixture pins rootless raw producers and one-slot
 live-string callers for i64, u64, and a tiny float; forced-GC output matches.
 The 63-row/three-pair release screen against the rootless-probe predecessor
 was 1.0066× overall with equal outputs, so this is a proven root-protocol
@@ -215,7 +215,7 @@ Artifacts: `temp/result49_common_overhead/{p1_readonly_length_text9.json,
 p1_readonly_length_typed63_screen.json,p1_readonly_length_family_report.json,
 p1_readonly_text_three_way_merge.tsv}`. The complete Lambda/Input baseline
 passed **6,085/6,085**, including 258 forced-GC and 207 MIR emission checks
-after the stronger rootless/one-root expectations were pinned (**D5.3.1–D5.3.2**).
+after the stronger rootless/one-root expectations were pinned (**D6.3.1–D6.3.2**).
 
 P2 uses exact int53 interval endpoints for products, avoiding host floating
 rounding at the finite/poison boundary (**S4.1.2**). An attempted additional
@@ -252,7 +252,7 @@ A dominated `0 <= i < len(a)` fact now proves a rank-one typed-array read
 in-bounds when the index and array homes are stable for the complete function.
 The reversed `<` comparison is recognized; one-sided, different-array,
 branch-join, and rebound cases keep the nullable fallback (**S7.1.1v3**,
-**D2.5.3**). This extension exposed a pre-existing direct-call carrier bug:
+**D2.4.3**). This extension exposed a pre-existing direct-call carrier bug:
 a raw `float?` result's null sentinel was boxed as `nan` at an Item consumer.
 The call nullability oracle and native return boxing now consult the declared
 return contract only when it names the raw lane. An initial change boxed the
@@ -273,7 +273,7 @@ tail `i = i + 1` writes the counter. Earlier writes and nested captures
 decline. The nullability consumer shares this proof, so a positive loop body
 emits one raw load and arithmetic operation without a second bounds or null
 branch; the mismatched-array and early-write bodies retain their fallback
-(**S7.1.1v3**, **D2.5.3**). MIR and forced-GC tests pass.
+(**S7.1.1v3**, **D2.4.3**). MIR and forced-GC tests pass.
 
 The completed 6,070/6,070 Lambda/Input baseline covered this loop form.
 Its isolated 63-row/three-pair release screen against the branch-only build
@@ -294,7 +294,7 @@ subtype, and reserved payload bits for i8/i16/i32/u8/u16/u32 before skipping
 `int()` opens a proven-total compact integer payload directly as a native
 IntLane. This removes one helper call at each admitted parameter crossing and
 another for `int(x)` in the representative fixture (**S4.4.1**,
-**D2.4.1–D2.4.3**). A separately labeled one-million-call u32 microbenchmark
+**D2.3.4–D2.3.5**). A separately labeled one-million-call u32 microbenchmark
 measured 0.4862× time over nine alternating release pairs, with equal sum;
 it is not a frozen-corpus result. No frozen row appears to use the exact u32
 parameter shape, so this mechanism does not establish broad improvement.
@@ -308,7 +308,7 @@ for such producers, using its direct u32 decode only on the successful tag.
 Nullable native-int shift operands stay on the boxed helper. The MIR and
 JIT/interpreter/forced-GC fixture pins wide counts, negative counts, nested
 errors, and nullable operands (**S4.4.4**, **S11.4.1v3**,
-**D2.4.1–D2.4.3**). The retained error path adds a cold return-boundary check
+**D2.3.4–D2.3.5**). The retained error path adds a cold return-boundary check
 in SHA1's `rol`; the existing MIR sidecar now records that diagnostic arm.
 
 The corrected release's nine-pair SHA1 pilot was 1.0307×, with one candidate
@@ -325,7 +325,7 @@ index. The index planner consults the existing physical-carrier, null, and
 error oracles; a nullable or fallible call keeps the boxed path. The existing
 certified pointer-array reader also handles declared `string[]` alongside
 reified map arrays, preserving its `item_at` fallback and out-of-range null
-under **D2.4.1–D2.4.3**, **D3.3.3v3**, **S7.1.1v3**, and
+under **D2.3.4–D2.3.5**, **D4.3.3**, **S7.1.1v3**, and
 **S11.4.1v3**. The MIR/forced-GC fixture exercises a direct read, a compound
 index with `shr`, a negative-shift fallback, and an unproved array. The
 pointer-array extension alone did not remove Base64's generic calls: its
@@ -360,7 +360,7 @@ An additional P2 string-array arm guards the physical native pointer-lane
 descriptor (array tag, lane flag/kind, and String pointer type) before loading
 one checked slot. This lets `split()` results use a direct read even without
 an explicit full-array certificate; certified arrays retain the existing
-path, and all other carriers retain `item_at` (**D3.3.3v3**, **S7.1.1v3**).
+path, and all other carriers retain `item_at` (**D4.3.3**, **S7.1.1v3**).
 The first guard accidentally read the map-shape pointer byte rather than
 `Container.type_id` and regressed merge to 1.0468× over nine pairs; profiling
 showed `item_at` increase from 27.29M to 52.64M. Correcting that root cause
@@ -376,7 +376,7 @@ p2_native_string_lane_typeid_merge.tsv}`.
 
 The next P2 slice inlines `len` for flat arrays from the common `List.length`
 header and retains the audited helper on the N-D shape path (**S8.3.1v2**,
-**D5.3.1**). The MIR fixture checks the header read and the cold helper, and
+**D6.3.1**). The MIR fixture checks the header read and the cold helper, and
 an executed-call GTest requires the two N-D calls while flat-array calls
 disappear. In three-way merge, `fn_len_l` fell **41.382M→0** and root reloads
 **1.643B→1.533B**. Nine paired release runs were nevertheless **0.9940×**
@@ -391,7 +391,7 @@ The dense numeric-array root guard had a separate representation error: it
 loaded `Map.type` at byte 8 instead of `Container.type_id` at byte 0. That
 made a valid `ArrayNum` fail its one-time loop guard and run the generic loop
 copy. The corrected guard keeps the rank/layout, element-lane, and full
-certificate tests before any direct access (**D3.3.3v3**, **S7.1.1v3**).
+certificate tests before any direct access (**D4.3.3**, **S7.1.1v3**).
 The 63-row three-pair release screen was **0.9909×** overall; the numeric-array
 family was **0.9813×** with a confidence interval crossing 1. Longer paired
 checks found quicksort **0.7701×** (9/9 wins), nbody **0.8878×** (8/9), sieve
@@ -412,7 +412,7 @@ p2_dense_typeid_numeric9.json,p2_dense_quicksort_branch_debug.tsv}`.
 P3 replaces the native stack-probe helper with MIR's supported BSTART
 stack-pointer primitive only in entries with zero GC root slots. The generated
 guard still compares the current stack position with the context limit and
-branches to the existing recovery path (**D5.1.2**, **S7.11.1v2**,
+branches to the existing recovery path (**D6.1.2**, **S7.11.1v2**,
 **S7.11.4**). A two-second native Fib sample attributed 178 of 1,543 samples
 (11.5%) directly to the previous probe leaf. Using BSTART in every entry
 improved the 63-row screen to 0.9765× against the preceding candidate, but
@@ -436,9 +436,9 @@ p3_rootless_compiler_metrics63_exact.json}.
 P4 reads aligned named fields directly even when another field is byte-packed;
 nullable receiver bool/float reads preserve the null Item. Selected aligned
 packed path stores take the direct lane, while misaligned and dynamic stores
-keep the checked fallback (**D2.6.1**, **D3.2.4v4**, **S7.1.1v3**). A data-zone
+keep the checked fallback (**D3.2.1**, **D4.2.5**, **S7.1.1v3**). A data-zone
 pointer is reacquired after an allocating right-hand side before direct field
-writes (**D4.4.4v4**). Exact trusted-map admissions and exact array certificate
+writes (**D5.4.4**). Exact trusted-map admissions and exact array certificate
 crossings now return before the general runtime admission ladder. Their
 structural and forced-GC fixtures live under `test/mir/lambda/`.
 
@@ -459,8 +459,8 @@ For dynamic reads of a closed declared record, the builder now prepares its
 existing `TypeMap` name index once when it has at least four unique named
 string fields. A runtime `NameId` read uses that index only when there is no
 spread and the table is complete; other shapes retain source-order traversal.
-This keeps byte-key and last-writer semantics under **D3.4.3v3** and
-**D4.6.1v2–D4.6.2v2**. The nine-pair Richards pilot was 0.9396× (8/9 wins),
+This keeps byte-key and last-writer semantics under **D3.4.3** and
+**D5.6.1–D5.6.2**. The nine-pair Richards pilot was 0.9396× (8/9 wins),
 while DeltaBlue, Prettier AST, Splay, and three-way merge were near parity.
 The immediate-predecessor 63-row/three-pair screen was 0.9958× overall and
 0.9962× for record graphs; the gain remains narrow rather than a P4-wide
@@ -472,14 +472,14 @@ outputs matched, nine paired release runs regressed Richards to 1.0297×,
 DeltaBlue to 1.0959×, and Prettier AST to 1.0272×. These declared shapes
 usually lack a populated hash table, so computing a hash before the chain
 fallback adds work to the very access path it was intended to shorten. The
-semantic fixture remains useful for future access changes (**D4.6.1v2**).
+semantic fixture remains useful for future access changes (**D5.6.1**).
 
 An ordinary-map hash hint in `map_get_for_owner_keyed` was also removed. Its
 nine-pair pilot against the preceding release was 0.9987× on Richards, 1.0131×
 on DeltaBlue, 1.0007× on Prettier AST, 0.9951× on three-way merge, and 0.9971×
 on Splay, with equal outputs. A transition-tree table can also contain a
 same-byte descendant with a different NameId; such a miss still requires the
-ordered chain under **D3.4.3v3**. The attempted fixture used an index assignment
+ordered chain under **D3.4.3**. The attempted fixture used an index assignment
 that triggered an interpreter fallback, so it did not establish JIT coverage
 and was removed with the unproductive fast path.
 
@@ -491,7 +491,7 @@ paths; shrinking static call counts alone did not meet P3's performance gate.
 
 A P4 length-stability experiment reused the existing whole-body resize/alias
 proof to keep an ArrayNum length register across collecting calls while still
-reloading its relocatable data pointer (**D4.4.4v4**). A MIR/forced-GC fixture
+reloading its relocatable data pointer (**D5.4.4**). A MIR/forced-GC fixture
 confirmed the intended one-load shape and unchanged results. On release,
 however, Navier–Stokes slowed to 1.0310× in nine pairs and 1.0297× in a
 separate 31-pair confirmation (one candidate win). The large function lost 35
@@ -529,7 +529,7 @@ solver, but a negative shift in its operand still produces an error Item.
 The U32 lowering already guards its successful Item and returns a plain int;
 the declared int return can therefore forward the error and skip
 lambda_type_check on the success path (**S4.4.4**, **S7.9.3**,
-**S11.4.1v3**, **D2.4.1**). The proof is restricted to this exact U32
+**S11.4.1v3**, **D2.3.4**). The proof is restricted to this exact U32
 lowering. The MIR fixture checks that the cold conversion and error branch
 remain while the second type check disappears; forced-GC and tier parity
 pass. SHA1 improved **0.9887×** against the preceding candidate over 31
@@ -593,7 +593,7 @@ fields. The producer must have the destination's fields in order, each field
 must have a proven redundant boundary, and the binding may neither mutate nor
 escape. It reuses the record-result field homes; a literal whose value escapes
 or whose field requires a runtime check still builds the ordinary map
-(**S9.1.2**, **D2.4.1**, **D8.2.6**). A bool literal's narrow static Type is
+(**S9.1.2**, **D2.3.4**, **D8.2.6**). A bool literal's narrow static Type is
 recognized as an exact value for a bool record slot. The
 `scalar_record_literal_binding` MIR fixture pins all three cases, and tier
 parity and forced-GC pass. A same-source release probe executed 200,000
@@ -622,7 +622,7 @@ three-way merge returns `""` on an out-of-range word; the ordinary literal
 loaded that immutable value through the module slab on every call. A literal
 whose `TypeString` has zero length now uses the existing process-lifetime
 `ItemEmptyString` object. Nonempty literals retain their module constants
-(**S5.1.4v2**, **D2.4.1**). The `empty_string_literal_direct` MIR fixture pins
+(**S5.1.4v2**, **D2.3.4**). The `empty_string_literal_direct` MIR fixture pins
 both paths, and interpreter/JIT/forced-GC agree. An executed JIT profile of
 the same three-way source changed `lambda_module_state_for_unit` from
 31,383,005 to 528,005 calls; the three `word_at` raw variants each went from
@@ -641,7 +641,7 @@ path. The admission uses an explicit string return contract and a direct call
 or immutable local; both operands are evaluated once. A string-tag pair uses
 pointer identity and `fn_str_eq_ptr`, while null and error values retain the
 original `fn_eq`/`fn_ne` path (**S5.1.1–S5.1.2**, **S7.1.1v3**,
-**S11.4.1v3**, **D2.4.1**). `string_join_equality_guard` pins the successful
+**S11.4.1v3**, **D2.3.4**). `string_join_equality_guard` pins the successful
 and error paths. The full Lambda/Input baseline passed 6,098/6,098. In the
 three-way merge diagnostic, `fn_eq` fell from 21.747M to 10.428M calls, but
 the new string-pointer helper was still classified as collecting and added
@@ -663,7 +663,7 @@ The same P2 guard now accepts a declared `string[]` element read, directly
 or through one immutable local. That declaration describes the successful
 element, not the read's Item carrier: the string tag is checked at runtime,
 and an out-of-range null uses the generic equality path (**S7.1.1v3**,
-**D2.4.1–D2.4.3**). `string_array_join_equality` pins equal, unequal, and
+**D2.3.4–D2.3.5**). `string_array_join_equality` pins equal, unequal, and
 out-of-range operands; forced-GC and tier parity agree. The complete
 Lambda/Input baseline passed 6,102/6,102. Its executed three-way profile
 reduced `fn_eq` from 10.428M to zero calls, with `fn_str_eq_ptr` rising from
@@ -682,7 +682,7 @@ call when a boxed string success reaches a local binding or insertion. The
 same guarded-success oracle covers a direct string, explicit string-return
 join, or declared `string[]` read; the physical string tag is tested after
 evaluating the value once. The cold arm still marks a malformed or absent
-read through the existing helper (**S9.1.2**, **S9.3.1**, **D2.4.1**).
+read through the existing helper (**S9.1.2**, **S9.3.1**, **D2.3.4**).
 `string_cow_capture_guard` pins both guarded calls and the dynamic fallback;
 JIT, interpreter, and forced-GC output agree. In the executed three-way
 diagnostic, `cow_bind_var` fell from 25.346M calls to zero and
@@ -698,7 +698,7 @@ p5_string_cow_guard_typed63_report.json}`.
 P1 now classifies `cow_bind_var` and its profiled entry as non-collecting and
 non-reentrant. Their current implementation marks a COW header bit, returns
 the original Item, and updates only bounded diagnostic counters; a later
-write owns any detach allocation (**D5.3.2**, **S9.1.2**). The import audit
+write owns any detach allocation (**D6.3.2**, **S9.1.2**). The import audit
 verified 92 NO_GC entries and 287 call-graph nodes; the native-root audit
 checked 17,288 functions. The `CowBindingDoesNotReloadLiveOwner` opt GTest
 pins a required dynamic mark with one fewer live-owner reload. At equal
@@ -722,7 +722,7 @@ checks.
 
 A broader P5 experiment skipped a COW helper for every tagged non-container
 Item at these binding and insertion sites, preserving the helper for raw
-container pointers (**S9.1.2**, **S9.3.1**, **D2.4.1**). It removed all
+container pointers (**S9.1.2**, **S9.3.1**, **D2.3.4**). It removed all
 430,200 `cow_bind_var` calls in Richards and 10,080 in DeltaBlue. Yet five
 nine-pair release focus rows were near parity, and the 63-row three-pair
 screen was 1.0059× overall with no family improving by 5%. DeltaBlue gained
@@ -735,7 +735,7 @@ p5_tagged_cow_guard_typed63_report.json}`.
 
 A P3 probe experiment admitted MIR `BSTART` for root-bearing entries with at
 most 64 MIR locals, aiming to remove the native-stack helper from short typed
-helpers while excluding large root-bearing bodies (**D5.1.2**). `word_at`'s
+helpers while excluding large root-bearing bodies (**D6.1.2**). `word_at`'s
 three raw variants had 53 locals and gained the inline probe; Bounce's hot
 `random_next` raw body had 77 locals and retained the helper. The six-row,
 nine-pair release pilot measured three-way merge at 0.9760×, DeltaBlue at
@@ -751,7 +751,7 @@ p3_small_probe_bounce_control.tsv,p3_small_probe_bounce_candidate.tsv}`.
 P0 now has an optional caller breakdown for its existing executed-call census.
 `LAMBDA_EXEC_PROFILE_CALLERS=1` records `caller -> target` instead of aggregating
 all calls to one helper; it emits no instrumentation when profiling is off
-(**D5.4.4**). The caller GTest pins the two distinct `fn_len_l` sites in the
+(**D6.4.4**). The caller GTest pins the two distinct `fn_len_l` sites in the
 read-only-length fixture. A Prettier diagnostic attributes 4.170M
 `lambda_module_state_for_unit` calls to `flat_length` and 0.926M to
 `render_doc`; the caller table reported zero overflow. Typed three-way merge
@@ -769,8 +769,8 @@ answers for; the JIT execution boundary selects the current slab in
 previous hint after execution or recovery. Generated entries compare that
 context-owned key with their module layout and use the slab directly on a hit;
 cross-module calls and absent/rebound hints keep the audited lookup. The
-semantic `active_module_state` selector is untouched (**D5.4.3**,
-**D7.2.1**, **D8.5.1v2**). A profiler GTest pins a zero-call own-module case and
+semantic `active_module_state` selector is untouched (**D6.4.3**,
+**D9.3.1**, **D8.5.1**). A profiler GTest pins a zero-call own-module case and
 an imported-function fallback; focused LambdaJS module tests pass. The typed
 Prettier diagnostic drops 6.699M executed module-state helper calls to zero.
 
@@ -788,7 +788,7 @@ p4_jit_hint_short_controls31.json,p4_jit_hint_prettier.tsv,
 p4_jit_hint_import.tsv}`.
 
 An additional BSS-load removal baked the logical unit ID into source-backed
-MIR (**D5.4.3**), but its six-row nine-pair release pilot was near parity on
+MIR (**D6.4.3**), but its six-row nine-pair release pilot was near parity on
 Prettier (1.0026×), DeltaBlue (0.9918×), merge (0.9909×), and Raytrace3D
 (0.9919×), with SHA1 at 1.0117×. It was removed; the guarded context hint
 above remains. Artifact: `temp/result49_common_overhead/p4_jit_imm_focus9.json`.
@@ -804,7 +804,7 @@ optional. That exclusion forced `fn_member_by_id`, an Item-to-string decode,
 and generic length work in Prettier's hot `flat_length` routine. The direct
 reader now consumes the branch fact when selecting and guarding its native
 field lane; an unguarded optional receiver and a rebound procedural parameter
-retain the generic null-preserving path (**S7.1.1v3**, **D3.2.6**).
+retain the generic null-preserving path (**S7.1.1v3**, **D4.2.6**).
 `branch_nonnull_string_field.ls` and its MIR sidecar pin both sides of the
 decision; the interpreter and forced JIT produce `hello||null|null`.
 Executed `flat_length -> fn_member_by_id` calls fell from **1,744,640 to 0**
@@ -828,7 +828,7 @@ P0's executed profile now counts each speculative record-field guard's entry
 and fast arm by caller, source byte, and field name. A branch-proof fixture
 records 31 attempts but only one fast hit at its `.value` site, so fallback
 frequency is visible rather than inferred from static MIR. The counters emit
-no instructions with profiling disabled (**D5.4.4**). The DeltaBlue diagnostic
+no instructions with profiling disabled (**D6.4.4**). The DeltaBlue diagnostic
 then showed **zero fast hits** on several hot `w.vars[index].val` guards and
 347,440 `c_execute -> fn_member_by_id` calls.
 
@@ -839,7 +839,7 @@ selection and refused to recover the `Variable[]` element contract. It now
 uses the declared integer value contract to classify that key as positional
 (**S8.2.4v3**), and the MIR field reader consumes the admitted array element's
 trusted record layout while retaining the invalid-index null arm
-(**D3.3.3v3**, **S7.1.1v3**). The nested typed-index MIR fixture covers direct
+(**D4.3.3**, **S7.1.1v3**). The nested typed-index MIR fixture covers direct
 int/bool reads, nullable out-of-bounds reads, and the still-generic string
 read. In a diagnostic DeltaBlue run, `c_execute -> fn_member_by_id` fell
 **347,440 -> 0**, and `c_execute` root reloads fell **5,399,500 -> 1,980**;
@@ -873,7 +873,7 @@ does not identify a positional index, so a static classification would
 discard valid type/selection behavior. Instead, the field reader speculates
 the declared element layout and checks the live map's exact shape before a
 direct load; failed checks still call `fn_member_by_id` (**S8.2.4v3**,
-**D3.3.3v3**). `trusted_array_dynamic_index_field` pins the successful
+**D4.3.3**). `trusted_array_dynamic_index_field` pins the successful
 field read, an out-of-bounds null, and a selection-key fallback. DeltaBlue's
 executed `c_execute -> fn_member_by_id` calls fell from **80,880 to 12,000**,
 with **68,880** field-guard hits; root reloads fell from **11.204M to
@@ -902,7 +902,7 @@ P2/P5 now gives a unique open `Array` with a boxed string value and spare
 capacity a direct append. It checks the live string tag, array kind,
 static/immortal flags, native-lane bit, representation certificate, COW bit,
 reserved tail, and remaining capacity; every failed check keeps the ordinary
-`pn_push_cow` path (**S2.5.1v2**, **S9.1.2**, **D2.6.5v3**). The source oracle
+`pn_push_cow` path (**S2.5.1v2**, **S9.1.2**, **D3.3.1**). The source oracle
 admits a direct string carrier, literal, declared `string[]` read, or an
 immutable binding proved to hold one; the runtime tag guard protects nullable
 and malformed values. `open_string_array_push` pins growth, snapshot detach,
@@ -946,7 +946,7 @@ Its indexed reads tried an ArrayNum numeric arm and called `fn_index` for the
 actual `Array`.
 The new arm checks the live Array kind and exact representation certificate,
 then reads the Item slot; out-of-bounds, wrong-carrier, and uncertified values
-retain the generic path (**S7.1.1v3**, **D3.3.3v3**). An existing pointer-lane
+retain the generic path (**S7.1.1v3**, **D4.3.3**). An existing pointer-lane
 map retains its former certificate-only path. The extended
 `trusted_array_dynamic_index_field` fixture covers a map value, a valid null
 slot, an out-of-range read, the newly admitted wider record shape, and a
@@ -1013,7 +1013,7 @@ an aggregate code-size increase. Base64 generated bytes were 1.1117× with
 time was 0.511–0.52× original across the cumulative campaigns. Raw samples,
 exact code lengths, and binary hashes are in
 `temp/result49_common_overhead/p4_nullable_map_final_compiler_metrics63.json`
-(**D8.2.5v3**).
+(**D8.2.5**).
 
 P4 now guards field reads from rank-one open arrays of admitted records with
 the exact runtime record layout. Richards executed 527,000 guards, all fast,
@@ -1024,14 +1024,14 @@ loads after the same guard; this handles Richards' `fn_id` at byte offset 35
 without asking MIR to select an unaligned word load. Its remaining 328,650
 generic field calls fell to zero, and the direct 31-pair comparison measured
 0.9634× with 28/31 wins. Inferred layouts, wrong carriers, and out-of-bounds
-reads still use the generic arm (**D3.3.3v3**, **S7.1.1v3**). The two MIR
+reads still use the generic arm (**D4.3.3**, **S7.1.1v3**). The two MIR
 fixtures and opt-profile GTests pin guard attempts, hits, and fallbacks.
 Artifacts: `temp/result49_common_overhead/{p4_open_array_field_typed63_screen_report.json,
 p4_unaligned_int_baseline_green.log,p4_unaligned_int_vs_original63x5_report.json}`.
 
 P3 now stores a checked cross-unit module-state resolution in the active
 context's module hint. Later calls in that context check the logical unit ID
-inline and reuse the context-owned slab (**D5.4.3**). Richards' executed
+inline and reuse the context-owned slab (**D6.4.3**). Richards' executed
 `lambda_module_state_for_unit` calls fell from 657,350 to one, and Hyphen's
 from 47,787 to 8,385. Direct 31-pair release comparisons measured Richards
 at 0.9890× and Hyphen at 0.9908×, with equal output. The new cold store
@@ -1045,7 +1045,7 @@ P2 shape selection now avoids a module-wide layout guess for an escaped
 parameter or an unresolved parameter with several call sources. Those
 conditions give no evidence that the module's one observed literal shape is
 the parameter's layout; explicit candidate layouts remain guarded as before
-(**D2.4.1–D2.4.3**). In Prettier, executed field-guard attempts fell from
+(**D2.3.4–D2.3.5**). In Prettier, executed field-guard attempts fell from
 2,365,440 to 17,152 with no lost fast hits. DeltaBlue's 80,880 attempts,
 68,880 hits, and 12,000 generic arms were unchanged. A direct 31-pair
 Prettier comparison measured 0.9892×, 23/31 wins, equal output. The opt
@@ -1063,7 +1063,7 @@ p2_ambiguous_final_vs_original63x5_report.json}`.
 
 A nullable-record string-field extension was tested and removed. Its
 null-preserving direct read passed the 6,122-test baseline and forced-GC
-fixture (**S7.1.1v3**, **D3.2.6**), but typed Prettier's executed helper and
+fixture (**S7.1.1v3**, **D4.2.6**), but typed Prettier's executed helper and
 root counts were identical on both builds, and the all-63 three-pair screen
 was 1.0065× with no established gain. The existing dominated non-null string
 read remains. Artifacts: `temp/result49_common_overhead/
@@ -1076,7 +1076,7 @@ Item. A recursive backedge reuses the frame only when every non-integer
 argument is the same read-only admitted parameter; changing scalar arguments
 cross their declared boundary in source order before rebinding. Procedural,
 nullable, error-bearing, and changing-owner forms retain the ordinary call
-and return path (**D8.2.6**, **D5.3.1**, **S9.1.2**). The MIR fixture pins a
+and return path (**D8.2.6**, **D6.3.1**, **S9.1.2**). The MIR fixture pins a
 positive allocating recursive body and two negative shapes; the opt-in
 profile GTest pins its frame count. The final source passed the full
 **6,125/6,125** Lambda/Input baseline. In typed Prettier, executed
@@ -1108,7 +1108,7 @@ p3_ascii_len_focus6x17.json`.
 P5 recognizes rank-one `int[]` literals whose every member is a finite
 decimal integer. After one allocation, it writes each lane directly without
 an intervening safepoint; dynamic, nullable, or out-of-band members keep the
-checked setter path (**S4.1.2**, **D3.3.3v3**, **D5.3.1**). The MIR fixture
+checked setter path (**S4.1.2**, **D4.3.3**, **D6.3.1**). The MIR fixture
 checks both forms, its profile GTest observes three setters only for the
 dynamic form, and forced-GC JIT/interpreter output agrees. The zeroed
 direct-store checkpoint passed the full **6,128/6,128** baseline. In Splay,
@@ -1127,8 +1127,8 @@ p5_int_literal_baseline.log}`.
 For the same proven literal shape, P5 now calls the existing uninitialized
 numeric-array allocator, then fills every lane before the next safepoint.
 The helper may return a zero-length header on data-allocation failure; the
-emitted store path checks the data pointer before writing (**D5.3.1**,
-**D3.3.3v3**). The complete **6,128/6,128** baseline and GC audits passed.
+emitted store path checks the data pointer before writing (**D6.3.1**,
+**D4.3.3**). The complete **6,128/6,128** baseline and GC audits passed.
 Against the zeroed direct-store checkpoint, 41 release pairs measured Splay
 at **0.9946×** (30/41 wins), with equal output. The 63-row three-pair screen
 was **0.9986×** overall. Its apparent Cube3D slowdown was not supported by
@@ -1142,8 +1142,8 @@ p5_int_literal_uninit_controls31.json}`.
 P5 applies the same uninitialized allocator to float literals whose members
 are already in double lanes. Every lane is filled before the nullable
 fallback or any other collecting call; a null data pointer skips the stores
-and retains the allocator's empty-header failure behavior (**D5.3.1**,
-**D3.3.3v3**, **S7.1.3v2**). The existing nullable/guarded MIR fixtures were
+and retains the allocator's empty-header failure behavior (**D6.3.1**,
+**D4.3.3**, **S7.1.3v2**). The existing nullable/guarded MIR fixtures were
 updated to pin materialization versus scalarized cases, and a profile GTest
 pins eight allocations plus one nullable fallback. Forced-GC JIT and
 interpreter outputs agree; the complete baseline passed **6,129/6,129**,
@@ -1186,16 +1186,16 @@ compile-cost tradeoff; the new float allocator does not run in that workload.
 Base64 measured **1.1778×** compile time and **1.1117×** generated bytes,
 below the per-workload trigger, versus **0.5175×** execution time. Raw samples
 and binary hashes: `temp/result49_common_overhead/
-p5_float_uninit_compiler_metrics63.json` (**D8.2.5v3**).
+p5_float_uninit_compiler_metrics63.json` (**D8.2.5**).
 
 P4 now separates relocating typed-array data from a proven stable logical
 length after a collecting call. A read-only parameter or local with an exact
 array certificate keeps its length only when the whole body has no rebind,
 resize, `var` handoff, capture, or unknown call; the data pointer still
-reloads (**D4.4.4v4**, **S7.1.3v2**, **S9.1.2**). Writable array caches keep
+reloads (**D5.4.4**, **S7.1.3v2**, **S9.1.2**). Writable array caches keep
 the conservative length reload to avoid extra register pressure. Both
 post-call and rebind reloads use the existing liveness pruning and the opt-in
-executed profile counts only retained reloads (**D5.4.4**). The positive and
+executed profile counts only retained reloads (**D6.4.4**). The positive and
 two resizing fallbacks are pinned by `stable_array_length_after_gc` MIR and
 profile tests; forced-GC JIT/interpreter outputs agree. The final debug
 baseline passed **6,132/6,132**, including 274 forced-GC tests and 224 MIR
@@ -1209,7 +1209,7 @@ p4_layout_final_focus8x17.json}`.
 
 A follow-up P0 experiment tried deferring a post-safepoint register reload
 when its uniquely owned canonical root slot would survive until the next
-collecting call within the same basic block (**D5.3.1**). It reduced
+collecting call within the same basic block (**D6.3.1**). It reduced
 microdiff's profiled root reload count from **21.37M to 9.11M**, with
 unchanged root stores and forced-GC output. The experimental code passed
 **6,135/6,135** baseline tests. But the eight-workload compiler comparison
@@ -1232,7 +1232,7 @@ the lane can hold `INT_LANE_NULL`, and writing it directly made JIT and
 interpreter disagree. The retained lowering compares that sentinel and
 routes it to the existing cold E201 admission/error path before the direct
 store. Literal/const fields, dynamic or module bindings, errors, and nullable
-values retain the checked setter (**D3.2.1–D3.2.2**, **S7.1.3v2**, **D5.3.1**).
+values retain the checked setter (**D4.2.1–D4.2.3**, **S7.1.3v2**, **D6.3.1**).
 The MIR fixture pins the direct store and nullable fallback; forced-GC JIT
 and interpreter outputs agree for both the valid and absent-link cases. The
 full baseline passed **6,134/6,134**; GC audits and whitespace checks passed.
@@ -1256,7 +1256,7 @@ p4_live_int_guarded_noise4x31.json,
 p4_live_int_guarded_compiler_focus8.json}`.
 
 The next P4/P5 diagnostic checked Splay's two rotation helpers against the
-existing **D4.4.5** move-out planner. Both `var left = node.left` and `var
+existing **D5.4.5** move-out planner. Both `var left = node.left` and `var
 right = node.right` are already accepted as move-out borrows. Their finalized
 MIR calls `cow_bind_rmw_handle`, which skips a mark only when the complete
 runtime spine is unique; it retains `cow_bind_var` on a shared spine. The
@@ -1275,7 +1275,7 @@ predicate includes plain and virtual maps. Named/shaped and first-class type
 values retain fn_is. A syntactic simple error type instead compares the
 self-tagged Error Item high byte, preserving an actual error value as the
 subject (**S11.1.2v2**, **S2.5.1v2**, **S11.4.1v3**,
-**D2.4.1–D2.4.3**). The MIR fixture pins all three paths, including a true
+**D2.3.4–D2.3.5**). The MIR fixture pins all three paths, including a true
 error result; JIT/interpreter and forced-GC outputs agree.
 
 In Microdiff's opt-in diagnostic, the map/array slice replaced **207,050**
@@ -1320,7 +1320,7 @@ admission before writing a trusted scalar record field. Previously
 run, routing every valid iteration through the checked map setter. A direct
 nullable indexed expression still uses that setter; a named local retains the
 physical int lane and rejects the null sentinel before the raw store
-(**S7.1.3v2**, **D3.2.2**, **D5.3.1–D5.3.4**). The MIR fixture pins both
+(**S7.1.3v2**, **D4.2.3**, **D6.3.1–D6.3.4**). The MIR fixture pins both
 paths, the cold type error, and JIT/interpreter/forced-GC parity; the complete
 Lambda/Input baseline passed **6,136/6,136**.
 
@@ -1351,7 +1351,7 @@ p4_nullable_local_store_vs_original63x5_report.json`.
 
 A P1/P3 plain-map `at` trial guarded dynamic receivers and called a new
 audited `NO_GC` map-name reader, retaining `fn_at` for other kinds
-(**S8.1.1**, **S8.2.2v2**, **D5.3.2**). It passed 6,138 Lambda/Input tests and
+(**S8.1.1**, **S8.2.2v2**, **D6.3.2**). It passed 6,138 Lambda/Input tests and
 selected the reader for all 106,600 Microdiff map-name checks, but executed
 `diff_map` root stores and reloads were unchanged. The unprofiled 31-pair
 release comparison was **0.9989×** (13/31 wins), with equal output. The extra
@@ -1361,7 +1361,7 @@ p4_plain_map_at_microdiff31.json}`.
 
 An audited P1 trial marked `iter_key_at` as non-collecting: it reads a
 prebuilt key-list root chunk and returns an existing symbol or inline integer
-(**S8.1.1**, **D5.3.2**). In Microdiff's `diff_map`, 106,600 calls kept the
+(**S8.1.1**, **D6.3.2**). In Microdiff's `diff_map`, 106,600 calls kept the
 same output while executed root reloads fell **16,465,600→15,612,800**.
 Seventeen-pair Microdiff and Richards timings were near parity; Prettier was
 **1.0056×** over 31 pairs (9/31 wins), and the all-63 three-pair screen was
@@ -1377,7 +1377,7 @@ A P2 multi-shape member-read trial targeted Prettier's `flat_length`:
 eight literal document shapes share a `kind` string slot at offset zero, while
 the existing unique-shape guard cannot select any of them. A bounded set of
 header-shape checks followed by the packed read was emitted, with the generic
-accessor retained on a miss (**D2.4.1–D2.4.3**, **D3.2.4v4**). The 17-pair
+accessor retained on a miss (**D2.3.4–D2.3.5**, **D4.2.5**). The 17-pair
 release comparison found Prettier at **1.0002×**, Richards at **0.9965×**, and
 Microdiff at **0.9852×**, all with matching output. This did not establish a
 Prettier benefit; the extra eight comparisons were reverted. Raw artifact:

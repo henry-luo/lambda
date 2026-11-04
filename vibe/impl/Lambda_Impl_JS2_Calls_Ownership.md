@@ -2,8 +2,8 @@
 
 > **Implemented — 2026-09-10.** Tasks 3 and 4 of the JS tuning
 > follow-up, continuing [JSCU40–JSCU41](../Lambda_Design_Structs_JS.md#13-jscu40--one-function-plan-return-contract-and-entry-obligation).
-> Authority: **D1.4v3**, **D5.2.1v3–D5.2.3**, **D5.3.1–D5.3.4**,
-> **D5.4.2**, **D6.2.2v2**, **D8.3.1–D8.3.4**, **D8.4.3v2**, **D8.6.1–D8.6.3**.
+> Authority: **D1.4**, **D6.2.1–D6.2.3**, **D6.3.1–D6.3.4**,
+> **D6.4.2**, **D7.2.2**, **D7.3.1–D7.3.4**, **D7.4.3**, **D8.6.1–D8.6.3**.
 > Source base: `fa254c56b`, including the earlier tasks 1 and 2 committed in
 > `8d4e08671`. No semantics ruling changes.
 
@@ -13,7 +13,7 @@ JS's native variant previously omitted its return-shape descriptor. Generated
 native functions returned one scalar and placed any thrown Error carrier in
 `JsAsyncAwaitState::native_throw_lane`. Each caller then imported a separate
 take/clear helper. This duplicated the normal/error transport already owned by
-`FnReturnAnalysis` and `MirCallResult` (**D8.4.3v2**).
+`FnReturnAnalysis` and `MirCallResult` (**D7.4.3**).
 
 The native variant now publishes `RETURN_SHAPE_NATIVE_ERROR` and the companion
 transport chosen by `em_companion_transport`. Native definitions, forward-call
@@ -36,7 +36,7 @@ removed. The async handoff's precise root span now covers its one remaining
 Item. Validation caught the stale two-Item span during this migration: reset
 wrote into the following runtime IDs, breaking thousands of async Test262
 cases. Correcting the span fixes the ownership/layout error; the Test262 runner
-is unchanged (**D5.3.1**, **D5.4.2**).
+is unchanged (**D6.3.1**, **D6.4.2**).
 
 ### Invocation depth
 
@@ -51,14 +51,14 @@ Public-wrapper-to-body and boxed-body-to-native calls explicitly select an
 already-counted internal transition. A source call counts once whether it uses
 a native body, an internal boxed body or dynamic dispatch. The counter update
 after a generated call is an inline memory operation: no helper runs while a
-boxed pending companion is awaiting materialization (**D5.2.1v3**).
+boxed pending companion is awaiting materialization (**D6.2.1**).
 
 This permits ordinary non-tail self-recursion through the existing direct-call
 paths. Native entry eligibility and exact argument guards remain unchanged;
 functions whose return analysis remains `any`, including addition-based recursive
 functions, use the internal boxed ABI. Captures, argument objects, spread,
 reassigned bindings, dynamic scope and suspension retain their existing call
-admission rules (**D6.2.2v2**, **D8.3.1–D8.3.4**).
+admission rules (**D7.2.2**, **D7.3.1–D7.3.4**).
 
 ## Task 4: consume shared ownership facts
 
@@ -68,7 +68,7 @@ copied that already-owned Item into another scalar home. The shared `MirValue`
 now records `SCALAR_PROVENANCE_ACTIVATION_EXTENT` after resolution, and JS uses
 that fact to skip the redundant adoption. Other direct results retain the
 existing conservative adoption path. Both Lambda and JS consume the same
-materializer and ownership descriptor (**D5.2.1v3**).
+materializer and ownership descriptor (**D6.2.1**).
 
 The helper catalog also records audited stable results using one initializer:
 
@@ -86,7 +86,7 @@ The helper catalog also records audited stable results using one initializer:
 These return values need no number-home adoption. Their collection, reentry,
 coercion and fallibility remain conservative independently of that ownership
 fact. The change does not globally disable JS helper adoption or classify module,
-environment or property loads as owned (**D5.2.3**). No loop watermark reclamation
+environment or property loads as owned (**D6.2.3**). No loop watermark reclamation
 or mutation-based guard hoisting is added.
 
 ## Validation and measurements
@@ -190,7 +190,7 @@ establish a CPS-closure optimization. No benchmark programs were edited.
 
 The guard and completion changes also affect generated code and startup.
 Execution timing is not a compiler-time measurement, and these runs do not
-claim **D8.6.4v2**'s separate compiler-only consolidation exit ratchets.
+claim **D8.6.4**'s separate compiler-only consolidation exit ratchets.
 
 ```sh
 python3 test/benchmark/run_paired_benchmarks.py --language js \

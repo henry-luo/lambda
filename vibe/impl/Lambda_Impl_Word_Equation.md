@@ -1,8 +1,8 @@
 # Word Equation ribbon and source editor
 
-S1.4, S12.1.3, and D7.2.5: the document's image atom owns equation source and
+S1.4, S12.1.3, and D10.2.1: the document's image atom owns equation source and
 formatting. Draft source is UI state; a validated transaction replaces the
-source SVG and retains the surrounding document. D4.5.1v4 governs selected-view
+source SVG and retains the surrounding document. D5.5.1 governs selected-view
 and export ownership.
 
 ## Finite milestone

@@ -1,4 +1,4 @@
-// Closures snapshot their captures by value (D6.2.3) on every tier.
+// Closures snapshot their captures by value (D7.2.3) on every tier.
 // - A closure made in a comprehension at module level captures that iteration's
 //   loop variable; the T0 interpreter read the variable's module slot, which holds
 //   the last value once the comprehension ends.

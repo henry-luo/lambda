@@ -1,4 +1,4 @@
-// D7.2.4v4 / S12.1.3: retained procedural meshes, with no model or texture downloads.
+// D9.3.4 / S12.1.3: retained procedural meshes, with no model or texture downloads.
 import s: lambda.scene3d
 import g: ~~.scene3d._geometry
 import cage: .mod_cage

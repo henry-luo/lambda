@@ -26,7 +26,7 @@ choose another document. Without `--doc`, Word starts with the studio sample.
 If recovery copies are present, choose **Later** to continue opening the requested
 document, or **Recover** to open the selected snapshot instead. Both choices
 retain existing recovery files until a verified save. Startup file effects run
-in handlers/procedures (**S12.1.3**, **S13.3.1v2**, **D7.2.5**).
+in handlers/procedures (**S12.1.3**, **S13.3.1v2**, **D10.2.1**).
 
 Use the release build for interactive typing. `make build` creates a debug
 executable with detailed layout logging; it is useful for debugging, but its
@@ -75,7 +75,7 @@ negative/fallback representation can differ from Word's.
 
 The selector reuses Finder's filesystem snapshots, path helpers, ordering,
 selection, history, and icons; Word retains its import and unsaved-change flow
-(**S12.1.3**, **D7.2.5**). The `file_picker` native replay and
+(**S12.1.3**, **D10.2.1**). The `file_picker` native replay and
 `word_file_picker_test.ls` golden cover this flow.
 
 While a document has unsaved changes, Word writes a new recovery snapshot every
@@ -95,7 +95,7 @@ recovery versions. Failed or conflicting saves, exports, cancellation, and
 discarding edits leave the snapshots in place; other documents' versions remain
 available. The sleeping timer is owned and cancelled by the document
 (**S13.3.1v2**); file effects stay in handlers/procedures and recovery policy stays
-in the app (**S12.1.3**, **D7.2.5**).
+in the app (**S12.1.3**, **D10.2.1**).
 
 The interface follows photo-album's white panels, cool gray sidebar, blue
 accents, rounded controls, and system typography. Both demos use the shared
@@ -139,7 +139,7 @@ outside the citation.
 Source records and fields survive editable snapshots and HTML; PDF preserves
 the formatted output. A copied citation carries an embedded source, so pasting
 it into another document keeps it resolvable. State and source positions remain
-owned by the immutable editor model (**S1.4**, **D7.2.5**). This core workflow
+owned by the immutable editor model (**S1.4**, **D10.2.1**). This core workflow
 does not include Zotero integration, CSL style installation, note citations, or
 Word citation-field/DOCX source interoperability. Each field cites one source.
 The existing restriction on structural edits during tracked changes also
@@ -352,7 +352,7 @@ applies to citation insertion and bibliography updates.
   between normal and facing-page inside/outside edges without discarding fields.
   Mirrored pages alternate margins in the editor, thumbnails, headers/footers
   and PDFs; rulers track the visible page and edit the corresponding stored edge.
-  Margin changes support undo and editable/HTML round trips (**D7.2.5**).
+  Margin changes support undo and editable/HTML round trips (**D10.2.1**).
   Invalid margins or insufficient header/column space keep the document intact.
 - Columns: Layout → Columns offers One, Two, Three, and More Columns for a custom
   count (1–6), spacing in millimetres, and an optional separator line. Columns
@@ -361,14 +361,14 @@ applies to citation insertion and bibliography updates.
   snapshots, HTML round trips, thumbnails, Read Mode and Web Layout. Page setup
   and ruler margins retain at least 20 mm per column. PDF uses paginated native
   body regions through `radiant.export_document` with `source_format:"xhtml"`
-  (**D2.10**, **D7.2.5**). Unequal Left/Right presets, section-specific settings
+  (**D10.1**, **D10.2.1**). Unequal Left/Right presets, section-specific settings
   and explicit column breaks remain unsupported.
 - Review: comments anchored to selected text, author and quoted context, a
   sidebar, previous/next and Go to text, resolve/reopen, and delete. Overlapping
   anchors survive character formatting and editing; comment changes support undo.
   Comments and page settings survive editable snapshots and exported HTML imports.
 - Dictionary and Translate: Review → Dictionary (or Look Up in the context menu) defines the selected word, or the word at the caret, through the [Free Dictionary API](https://dictionaryapi.dev) (`GET https://api.dictionaryapi.dev/api/v2/entries/en/<word>`). The pane lists the phonetic spelling, then each part of speech with up to four definitions and examples, plus synonyms that look themselves up on click. A speaker button beside the headword reads it aloud through `dom.speak` (en-US); clicking it again, or closing the pane, stops the reading, and `speechend`/`speecherror` reset the button. Review → Translate (or Translate in the context menu) sends the selection, or the caret's paragraph, to Google Translate's keyless web endpoint (`translate.googleapis.com/translate_a/single?client=gtx`), detecting the source language and targeting one of 13 languages. Copy puts the translation on the clipboard, and Insert replaces the source text in one undoable step. If the document changed since the request, Insert replaces the current selection instead. Each request runs in a document-owned task (`start(…,{owner:'document'})` → `io.fetch`), which reports back through a `word_lookup` event, so the window keeps responding while it waits. A newer search drops an older one's late answer. Enter searches in the Dictionary field; Ctrl/⌘ Enter translates. Lookups also work in Read Mode. The pane takes the right-hand slot from Comments and Changes. dictionaryapi.dev ignores case, but its Cloudflare edge caches each spelling separately and can hold a stale HTML 404 page for a valid word ("evening", "happy"). An HTML 404 therefore retries the capitalized spelling. Only the API's own JSON `No Definitions Found` reads as an unknown word; other failures read as a temporary outage.
-- Spelling: red wavy underlines appear directly beneath possible English (US) misspellings, including words split by inline formatting. Checking starts when each document opens and continues during uninterrupted typing. A 350 ms coalescing interval starts with the first edit and is not restarted by later keys. One document-owned task and isolated process check changed paragraphs in bounded batches (**S13.1.3v2**, **S13.3.1v2**); newly edited paragraphs take priority over the initial document scan. Unchanged paragraphs reuse cached results. Underlines outside the edited text survive pending checks, and completed results can paint unchanged words while the paragraph keeps growing. Current source spans remap cached issues after formatting, paragraph insertion or deletion. IME composition pauses checking; opening another document cancels the old job and rejects its late results. The checker reads the prepared dictionary and its line-offset index; full dictionary validation remains an explicit preparation step. Underlines use source-mapped range geometry outside the document and its undo history (**D7.2.5**, **S2.5.8**). It excludes code, math, deleted text, `spellcheck=false`, and non-English regions. Correction suggestions and grammar checks are future work.
+- Spelling: red wavy underlines appear directly beneath possible English (US) misspellings, including words split by inline formatting. Checking starts when each document opens and continues during uninterrupted typing. A 350 ms coalescing interval starts with the first edit and is not restarted by later keys. One document-owned task and isolated process check changed paragraphs in bounded batches (**S13.1.3v2**, **S13.3.1v2**); newly edited paragraphs take priority over the initial document scan. Unchanged paragraphs reuse cached results. Underlines outside the edited text survive pending checks, and completed results can paint unchanged words while the paragraph keeps growing. Current source spans remap cached issues after formatting, paragraph insertion or deletion. IME composition pauses checking; opening another document cancels the old job and rejects its late results. The checker reads the prepared dictionary and its line-offset index; full dictionary validation remains an explicit preparation step. Underlines use source-mapped range geometry outside the document and its undo history (**D10.2.1**, **S2.5.8**). It excludes code, math, deleted text, `spellcheck=false`, and non-English regions. Correction suggestions and grammar checks are future work.
 
   Underlines follow the document when scrolling and clip at the document
   scrollport. The `spelling_scroll` native replay checks italic “Tefillin” in
@@ -452,7 +452,7 @@ applies to citation insertion and bibliography updates.
 
 To create an editable Microsoft Word copy, choose **Export** and enter a `.docx`
 path. Text formatting, headings, lists, merged tables, links, raster pictures and
-page dimensions use `lambda.doc.docx`'s export profile (D7.2.4v4). Diagnosed losses
+page dimensions use `lambda.doc.docx`'s export profile (D9.3.4). Diagnosed losses
 appear in the yellow **Document conversion warnings** notice. Comments, pending
 revision semantics, header/footer stories and multiple columns are not included
 in this copy; keep `.word.json` to retain all editor state. Export does not mark
@@ -501,7 +501,7 @@ This port keeps the command/session boundary and translates document operations
 into Lambda's existing immutable editor transactions. It reuses the editor's
 insertion, deletion, structural editing, history, IME, and DOM-selection bridge
 instead of introducing another editing engine. **S12.1.3** makes the template
-body a pure projection and handlers the state owner; **D7.2.5** keeps editing
+body a pure projection and handlers the state owner; **D10.2.1** keeps editing
 policy in Lambda packages, with Radiant providing the native mechanisms.
 
 | WordCraft source | Lambda implementation |
@@ -526,15 +526,15 @@ Their selection positions are remapped explicitly, including backwards ranges;
 ordinary replace-step mapping would collapse positions inside a replaced leaf.
 Text leaves retain separate inline wrappers in the live projection, so
 Mark content normalization cannot merge away their source paths when formatting
-is cleared (**S2.6.5**, **D7.2.5**). The toolbar retains its geometry in UI state;
+is cleared (**S2.6.5**, **D10.2.1**). The toolbar retains its geometry in UI state;
 viewport movement only repositions its overlay, preserving document selection.
 Replace all applies existing insertion transactions from the final match
 backwards and composes their steps into one history item. View changes and
 selection movement never change the saved document checkpoint (**S1.4**,
-**D7.2.1**).
+**D9.3.1**).
 
 Page settings and comment metadata are document attributes, so the same editor
-history restores them atomically with text marks (**S1.4**, **D7.2.5**). HTML
+history restores them atomically with text marks (**S1.4**, **D10.2.1**). HTML
 exports carry this metadata in a named meta element. Comments use IDs on span
 marks, allowing overlapping anchors without a second offset-mapping system.
 Case-insensitive search maps folded Unicode characters back to source positions,
@@ -545,11 +545,11 @@ editor already retains `id` on the original paragraph when Enter splits it,
 so the new paragraph never duplicates the target. Moving a bookmark removes
 the old target and assigns the new one in one transaction; imported unrelated
 IDs are preserved. Covers, blank pages, symbols, and bookmark mutations all
-use the same editor history (**S1.4**, **D7.2.5**).
+use the same editor history (**S1.4**, **D10.2.1**).
 
 Screen sheets wrap the original model children without changing their source
 paths. The paragraph schema marks page boundaries and cover roles
-`keep_on_split:false`, so Enter does not duplicate them (**D7.2.5**).
+`keep_on_split:false`, so Enter does not duplicate them (**D10.2.1**).
 Shapes store their parameters in an image's `data-word-shape` attribute;
 regenerating its SVG, dimensions, and metadata is one transaction (**S1.4**).
 Equations and Word Art follow the same image transaction, preserving editable
@@ -562,9 +562,9 @@ shape/Word Art editability; a picture retains its original image source.
 `mod_handles.ls` projects selection chrome outside the editable surface and
 temporarily previews dimensions/rotation in the DOM. Pointer release commits
 once, while Escape, pointer cancellation, or lost capture restores the original
-source and style without changing history or dirty state (**S1.4**, **D7.2.5**).
+source and style without changing history or dirty state (**S1.4**, **D10.2.1**).
 The parent projects the document before passing its rendered body to the gesture
-controller, so preview redraws retain source bindings (**S12.1.3**, **D7.2.5**).
+controller, so preview redraws retain source bindings (**S12.1.3**, **D10.2.1**).
 The workspace forwards its non-bubbling selection notifications to the document
 controller so ribbon bindings continue to follow the caret.
 Moves reuse `lambda.editor.mod_image` transactions and the drop-caret measurement
@@ -574,7 +574,7 @@ Angles are stored with a CSS image transform, shared by the canvas and exported
 HTML/PDF; rotating a shape no longer shrinks its artwork to fit a fixed viewport.
 
 Selected pictures and generated objects supply their clipboard payload from the
-model through `lambda.edit.controller` (**D7.2.5**). Copy preserves history and
+model through `lambda.edit.controller` (**D10.2.1**). Copy preserves history and
 selection; Cut captures the same payload before deleting the atom. Native
 transport receives image bytes, HTML, and alternative text. Rich paste retains
 the image attributes declared by Word's schema, including editable object
@@ -583,14 +583,14 @@ copy, PNG bytes, SVG/HTML alternatives, paste, Cut, and undo; the model golden
 `word_clipboard_test.ls` also checks escaping and exclusion of undeclared attrs.
 
 Tracked changes use the editor's optional transaction filter before history is
-recorded (**D7.2.5**). Insertion and deletion span marks carry revision ID, kind,
+recorded (**D10.2.1**). Insertion and deletion span marks carry revision ID, kind,
 and author; the Changes pane is derived from those marks. Accept/reject transforms
 the marked leaves instead of restoring an old document, preserving other edits.
 Transient IME updates stay unmarked; the committed composition is tracked once.
 
 Toolbar pointer events carry a hit position for the button as well as an
 optional document selection. The controller accepts document selections but
-uses hit-position fallback only inside the editing surface (**D7.2.5**).
+uses hit-position fallback only inside the editing surface (**D10.2.1**).
 Form-control positions never replace the document selection. Empty paragraphs
 receive a projected zero-width space so their node-position carets have a line
 box; this placeholder is absent from saved documents.
@@ -600,13 +600,13 @@ and selection completion use `lambda.edit.controller`, shared with the general
 editor shell. Ribbon selectors and search fields use `lambda.ui.controls` with
 declarative change actions; Word supplies command IDs and state updates. Live
 control synchronization, typed option values, caret preservation, and IME handling
-belong to the shared control package (**S12.1.3**, **D7.2.5**). See
+belong to the shared control package (**S12.1.3**, **D10.2.1**). See
 [the shared API](../../../doc/dev/Shared_Editing.md).
 
 Reactive subtree replacement now retires detached inline stylesheets and
 publishes their replacements through the existing CSSOM collector. A changed
 sheet invalidates the style epoch and recascades the whole document, since its
-selectors may affect siblings outside the template (**D7.2.5**). The Review
+selectors may affect siblings outside the template (**D10.2.1**). The Review
 workflow verifies that resolve/reopen changes the anchor's computed highlight.
 
 Two integration details matter when extending the demo: `file` is a reserved
@@ -619,16 +619,16 @@ could instantiate their shared dependency twice in one runtime. Registering
 the second shell rebound the logical code unit to its uninitialized slab while
 JIT-promoted functions were executing the first import. The loader now reuses
 the existing non-retired instance, preserving execution-local state ownership
-(**D7.2.1**, **D8.5.1v7**). The native regression is
+(**D9.3.1**, **D8.3.5**). The native regression is
 `InputScriptCacheTest.CachedDiamondKeepsSharedPromotionSlab`.
 
 Native selection restoration chooses the most specific recorded source owner
-before an ancestor's structural fallback (**D7.2.5**). Generated table wrappers
+before an ancestor's structural fallback (**D10.2.1**). Generated table wrappers
 change DOM child indices; accepting the document-root guess first moved clicks
 to other cells or paragraphs. The pointer regression clicks empty and populated
 cells, types without resetting selection, and repeats after zooming.
 
-Caret and selection geometry use viewport coordinates throughout (**D7.2.5**).
+Caret and selection geometry use viewport coordinates throughout (**D10.2.1**).
 The pointer's block origin already includes scrolling; saving that scroll again
 as an iframe translation shifted the caret above the clicked line. The scroll
 regression verifies the caret's painted pixels as well as focus and typing.
@@ -706,7 +706,7 @@ text selection within one cell, automatic cell/row/column/table selection in
 both drag directions, live previews, keyboard extension, cancellation, zoom,
 and ordinary editing after a cell-range selection. Logical node/multi-node
 selections retain source paths while native text geometry receives a caret in
-the first cell (**D7.2.5**). Cell lookup uses native DOM identity, so similarly
+the first cell (**D10.2.1**). Cell lookup uses native DOM identity, so similarly
 structured cells cannot alias. A raster unit test checks actual dashed, dotted,
 and double collapsed-border pixels and color at 1× and 2× scaling.
 The viewport replay checks caret/list clipping above the workspace and stable
@@ -719,14 +719,14 @@ stable typing. Native scrollbar drags in both directions update both rulers
 while held, including at clamped limits; unchanged offsets emit no extra scroll
 events. Paper/orientation/margin changes update the rulers and bottom
 status bar, including at narrow widths. `mod_ruler.ls` keeps this chrome outside
-the document's caret clip and source tree (**D7.2.5**).
+the document's caret clip and source tree (**D10.2.1**).
 The ruler-edit replay covers all four margins; first-line, hanging, left, and
 right indents; live guides, exact cancellation, range and caret preservation,
 undo/redo, keyboard adjustments, read mode, and zoom with horizontal scrolling.
 Model goldens check size limits, header space, selected paragraphs, imported
 length units, and table-cell paragraph creation with mapped selection and undo.
 Ruler previews stay outside document history; a completed gesture uses the same
-page or paragraph transaction as the dialogs (**S1.4**, **D7.2.5**).
+page or paragraph transaction as the dialogs (**S1.4**, **D10.2.1**).
 The margins replay checks presets and previews, custom mode/field preservation,
 validation, mirrored page/ruler geometry, thumbnails, stories, editing and file
 round trips. The export fixture checks exact preset text edges and alternating
@@ -736,12 +736,12 @@ continuous page flow, story visibility, window/zoom reflow, image handles and
 resizing, and selection/undo preservation across page breaks and view changes.
 It also checks stable Space/arrow-key scrolling and narrow status bars.
 `mod_view.ls` keeps presentation choices outside the document and its history
-(**D7.2.5**).
+(**D10.2.1**).
 The navigation replay checks closing/reopening, keyboard tabs, heading jumps,
 live page thumbnails, blank-page navigation and typing, search-result jumps,
 read-only selection, Web Layout, zoom, and paper orientation. Read Mode uses
 ordinary Selection operations rather than the editable-surface completion bridge;
-leaf wrappers keep those selections aligned with the source (**D7.2.5**).
+leaf wrappers keep those selections aligned with the source (**D10.2.1**).
 The page-break typing replay checks immediate typing after a paragraph split,
 an empty new page, and undo/redo. It also puts the native caret on the editor's
 unmapped wrapper to verify typing retains the document and logical caret.
@@ -751,7 +751,7 @@ views and file round trips. `tests/proc/_columns_export.ls` checks default HTML 
 XHTML export; the long PDF must contain five sheets and no leading blank. When
 `pdftotext` is available, the harness verifies all 100 paragraphs appear once and
 headers/page fields repeat correctly. Applied source nodes remain singular
-through the presentation wrappers (**D7.2.5**).
+through the presentation wrappers (**D10.2.1**).
 The context-menu replay checks clipboard edits, selection preservation,
 formatting, history, keyboard navigation, read-mode copying, and small-window bounds.
 The focused-item replay checks each item menu and its command target, including
@@ -763,7 +763,7 @@ The empty-list replay checks immediate typing and typing after leaving and
 returning with the mouse or arrow keys, including a blank item between filled
 items, numbered lists, and undo/redo. Empty model containers map their rendered
 placeholder back to the container caret; the placeholder never creates a model
-text child (**D7.2.5**). The source-position bridge unit tests also distinguish
+text child (**D10.2.1**). The source-position bridge unit tests also distinguish
 that placeholder from authored zero-width text.
 The shape replay checks that the gallery clips before the following controls,
 wheel scrolling reaches the last shape, and the dialog remains scrollable in a

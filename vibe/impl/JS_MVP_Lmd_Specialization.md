@@ -1,8 +1,8 @@
 # JS MVP method and field specialization
 
 2026-10-09. Implements the bounded first step of [MVP §24](../jube/JS_MVP_Lmd.md#24-method-specialization-and-stable-class-fields).
-Authority: **S1.11**, **D1.3v3**, **D3.4.3v5–D3.4.6**, **D5.2–D5.3**,
-**D6.2.3v2–D6.2.4**. No semantic ruling changes.
+Authority: **S1.11**, **D1.3**, **D3.4.3–D3.4.6**, **D6.2–D6.3**,
+**D7.2.3–D7.2.4**. No semantic ruling changes.
 
 ## Implementation and limits
 

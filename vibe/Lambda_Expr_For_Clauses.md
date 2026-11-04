@@ -23,8 +23,8 @@
 | Keys bound by name, `into` binds the array of rows (FC1-B; §6.1) | S14.1.1v2 |
 | Key equality, null group, group order, scoping, key names (FC2–FC4, FC3-B, FC9; §6.2–§6.3) | S14.1.2v2; S5.2.1v2, S5.6.1v2*, S5.6.2 |
 | Join `on`: equality conjunctions, `?` side, null keys, order (FC5–FC7; §7) | S14.1.3 |
-| Join tuples share runtime shapes (Appendix A) | D3.4.3v5 |
-| Virtual array carrier for zero-copy groups (FC11) | D7.4.5v2* |
+| Join tuples share runtime shapes (Appendix A) | D3.4.3 |
+| Virtual array carrier for zero-copy groups (FC11) | D9.5.5* |
 | Laziness belongs to the data, not to `for` (§5.3) | S14.3.1v3* |
 | Generators after a `let` (§4.1) | **no ruling yet** — [i8-genafterlet](<Lambda_Issue_Ledger.md#i8-genafterlet>) |
 
@@ -471,7 +471,7 @@ for (x in 1 to 20, let sq = x * x
 - **FC8 ✓** — one canonical value hash, consistent with `==` (S5.6.2), serves grouping and joining; it was the shared prerequisite step S0. Appendix A
 - **FC9 ✓** — an omitted `as` infers a key name from a trailing field access only; anything else, including a bare loop variable, is a compile error demanding `as`; names colliding with each other or with the `into` name are compile errors; no generated names (user-confirmed 2026-07-11; the `into` collision added 2026-10-20 with FC1-B). → S14.1.2v2. §6.2
 - **FC10 ✗ retired 2026-10-20** — the group element's tag `group`. FC1-B has no group element. Appendix S
-- **FC11 ✓ v2** — two-phase group construction. Phase 1 materializes each group's rows as a plain array (shipped). Phase 2 makes `g` a zero-copy **`varray`** view over the hash bucket (D7.4.5v2*), step S5. Revised 2026-10-20: the v1 plan was a `velmt` view, which would have inherited element content semantics (§6.1). §11
+- **FC11 ✓ v2** — two-phase group construction. Phase 1 materializes each group's rows as a plain array (shipped). Phase 2 makes `g` a zero-copy **`varray`** view over the hash bucket (D9.5.5*), step S5. Revised 2026-10-20: the v1 plan was a `velmt` view, which would have inherited element content semantics (§6.1). §11
 
 ---
 
@@ -488,7 +488,7 @@ for (x in 1 to 20, let sq = x * x
 
 - **Generators after a `let`** — [i8-genafterlet](<Lambda_Issue_Ledger.md#i8-genafterlet>): keep the fixed generator/let prefix (Option A) or let generators follow `let`s (Option B). The tail after the lets is phase-ordered under both, and S14.1.2v2 now enforces that part.
 - **What `limit` counts.** The window trims the result stream, so a body that yields several items per row is limited by items, not rows: `for (x in [1, 2, 3] limit 2) (x, x)` gives `(1, 1)`. SQL's reading and the pipeline argument in §4.4 count rows; `order by` already moves rows as units (§5.1). Unruled.
-- **FC11 Phase 2 (S5).** Zero-copy `g` as a `varray` over the bucket. The `varray` carrier exists (D7.4.5v2*); groups still copy their row handles into a plain array.
+- **FC11 Phase 2 (S5).** Zero-copy `g` as a `varray` over the bucket. The `varray` carrier exists (D9.5.5*); groups still copy their row handles into a plain array.
 
 ---
 
@@ -508,12 +508,12 @@ for (x in 1 to 20, let sq = x * x
 
 - `lambda_item_hash` / `lambda_item_compare` (`lambda-data-runtime.cpp`) — the FC8 canonical hash and equality, also used by `vmap`.
 - `fn_group_by_keys(rows, keys, key_count)` (`lambda-data-runtime.cpp`) — one pass bucketing rows by key in insertion order (FC4); returns one record per group, `[members, key_1, …, key_n]`, with `members` a plain array filled by the verbatim append and a multi-key tuple split into its parts.
-- `fn_join_seed_tuples`, `fn_hash_join_tuples`, `fn_cross_join_tuples` (`lambda-data-runtime.cpp`) — tuple elements (tag `tuple`, on the runtime shape tree, D3.4.3v5) with parallel index arrays; the hash stage builds on the new source and probes in prior order (FC7), padding with null on a left-join miss; the cross stage expands nested-loop.
+- `fn_join_seed_tuples`, `fn_hash_join_tuples`, `fn_cross_join_tuples` (`lambda-data-runtime.cpp`) — tuple elements (tag `tuple`, on the runtime shape tree, D3.4.3) with parallel index arrays; the hash stage builds on the new source and probes in prior order (FC7), padding with null on a left-join miss; the cross stage expands nested-loop.
 - `fn_order_rows(rows, keys, desc_mask, key_count)` (`lambda-vector.cpp`) — stable merge sort of the rows by one key per row (a tuple when there are several specs), compared spec by spec under the total order; the rows hold one body value each, and the result spreads them back into a fresh stream. `for_window` then applies offset, limit and `limit last`.
 
 **Both tiers** share three shapes: one key builder for group, order and join keys (`interp_eval_key_item` / `mir_box_key_item`: the value for one expression, an array tuple for several); one group stage (`interp_for_emit_groups` / `mir_emit_group_stage`) that binds the `into` array and each key name per record and runs the body; and, with `order by`, a verbatim push of each body value so that a multi-item body sorts as one row.
 
-**Evaluation order.** Rows run bindings → lets → `where`; the body is evaluated for every admitted row, and its sort key recorded beside it, **before** the stable sort and the window. The body therefore runs even for rows a `limit` later drops; there is no early termination. A grouped `for` collects the admitted rows and keys, builds the group records, then evaluates `order by` and the body per group. Mid-loop handoff from T0 to compiled code covers only a plain `for` statement — one source, no join, `group`, `order`, `limit` or `offset` (D8.1.1v18*).
+**Evaluation order.** Rows run bindings → lets → `where`; the body is evaluated for every admitted row, and its sort key recorded beside it, **before** the stable sort and the window. The body therefore runs even for rows a `limit` later drops; there is no early termination. A grouped `for` collects the admitted rows and keys, builds the group records, then evaluates `order by` and the body per group. Mid-loop handoff from T0 to compiled code covers only a plain `for` statement — one source, no join, `group`, `order`, `limit` or `offset` (D8.3.2*).
 
 **Tests.** `test/lambda/for_clauses_test.ls` (row clauses; tests 46–47 cover multi-key order and multi-item bodies), `for_group_test.ls` (keys as bindings, null rows, string members, word count, group windowing), `for_join_test.ls`, `for_join_s3b_test.ls` (index/key bindings, mixed stages), `for_join_group_test.ls`, `list_kind_for_clauses.ls` (S2.5.2v2 list kind), `io_sqlite_for_clauses.ls` (RDB rows). Negatives in `test/lambda/negative/semantic/`: `for_group_key_name.ls`, `for_group_key_collision.ls`, `for_join_non_equi.ls`, `for_clause_placement.ls` (`test_lambda_errors_gtest`).
 

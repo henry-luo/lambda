@@ -57,8 +57,8 @@
 > policy is hosted by `jube_node_permission.cpp`, while `node-core` owns only
 > the Node-visible `process.permission` object. Their manifests, dependency
 > metadata, and dynamic registry smoke are landed. This is the namespace
-> ownership step required by D7.3.2/D7.3.3; the provider-table and fully
-> shielded async/rooting conversion required by D7.4.2 remains follow-up work.
+> ownership step required by D9.4.2/D9.4.3; the provider-table and fully
+> shielded async/rooting conversion required by D9.5.2 remains follow-up work.
 > The N3.3 process inventory is now committed under
 > `test/benchmark/hosted_node/`: host-core retains startup, queue, lifecycle,
 > signal, IPC, and resource-table surfaces, while `node-core` installs the
@@ -1060,7 +1060,7 @@ versioned host codec provider.
   stream facade; the host retains only the versioned byte/stateful codec
   provider. The parity fixture now compares the dynamic image with its golden
   behavior output; no static checkpoint or catalog-free fallback is used.
-  This is the D7.3.2/D7.3.4 DSO-and-dependency boundary with D7.4.3's
+  This is the D9.4.2/D9.4.4 DSO-and-dependency boundary with D9.5.3's
   opaque, versioned host-table contract.
 - [x] **N4.5** Absent-module negatives: bundle copy without the dylib →
   `require('zlib')` yields `MODULE_NOT_FOUND` + host log naming `node-zlib`
@@ -1170,9 +1170,9 @@ manifest/build target from the N4 generator → dynamic flip → absent negative
   - [x] Move the Node crypto namespace into `node-crypto`, move DNS into the
     `node-net` leaf, and host permission policy under `jube_node_permission`;
     add manifests, dependency metadata, and the dynamic registry smoke. This
-    records the DSO/manifest ownership boundary of D7.3.2/D7.3.3; the
+    records the DSO/manifest ownership boundary of D9.4.2/D9.4.3; the
     strict `jube.h` and fully shielded async/provider boundary required by
-    D7.3.3/D7.4.2 remains follow-up work.
+    D9.4.3/D9.5.2 remains follow-up work.
   Sub-task order: (1) extract one host-owned, versioned crypto-provider table
   over the existing static mbedTLS/digest implementation; (2) `node-crypto`
   module (the node:crypto surface, ≈6–7k lines after the split); (3) leave

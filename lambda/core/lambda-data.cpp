@@ -53,7 +53,7 @@ Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
 TypeArray TYPE_ARRAY;
 Type TYPE_MAP = {.type_id = LMD_TYPE_MAP};
 Type TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
-// D2.6.6v2 phase 2 (OB14): there is no object TypeId. `object` is still a TYPE
+// D3.1.1 phase 2 (OB14): there is no object TypeId. `object` is still a TYPE
 // (S2.1.1v3) meaning "carries a nominal record", and it is always matched by
 // POINTER identity (`== &TYPE_OBJECT`), never by its tag; the tag here only
 // routes it into the container arm of the type switches.
@@ -300,7 +300,7 @@ void init_typetype() {
     EmptyElmt.type_id = LMD_TYPE_ELEMENT;  EmptyElmt.type_index = -1;  EmptyElmt.name = {0};
 
     memset(&EmptyObject, 0, sizeof(TypeObject));
-    // D2.6.6v2 phase 2: the empty nominal shape is map-kinded like any
+    // D3.1.1 phase 2: the empty nominal shape is map-kinded like any
     // attribute-only declaration; it carries no nominal record.
     EmptyObject.type_id = LMD_TYPE_MAP;  EmptyObject.type_index = -1;
 }
@@ -725,7 +725,7 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
 
 // js_number selects the JS reading. Lambda keeps a stored i64/u64 typed as
 // stored at every magnitude: re-typing an in-band one as `int` on read made
-// `[2i64, "a"][0]` an int while `[2^53 i64, "a"][0]` stayed i64 (S9.3.1, D2.6.2).
+// `[2i64, "a"][0]` an int while `[2^53 i64, "a"][0]` stayed i64 (S9.3.1, D3.2.2).
 // JS has one number type, so its readers may return an in-band i64/u64 as an
 // inline int and skip allocating a scalar home on every property read.
 static Item scalar_storage_read_as(Item item, bool immortal, bool js_number);
@@ -1252,7 +1252,7 @@ static Item map_container_slot_to_item(void* field_ptr, TypeId type_id) {
     memcpy(&value, field_ptr, sizeof(value));
     if (!value) return ItemNull;
     // raw foreign containers acquire their physical tag on the ordinary read;
-    // virtual carriers already own theirs (D2.6.4v3, D3.4.3v5).
+    // virtual carriers already own theirs (D2.6.2, D3.4.3).
     if (!is_virtual_container_type_id(type_id) && value->type_id == LMD_TYPE_RAW_POINTER)
         value->type_id = type_id;
     return {.container = value};
@@ -1697,7 +1697,7 @@ static TypeId classify_storage_domain(const Type* type) {
         }
         // TB5: a constrained contract stores in its BASE type's lane. The
         // predicate is an admission-time check on the value, not a property of
-        // how the value is carried (D3.2.2* already scopes constrained types to
+        // how the value is carried (D4.2.3* already scopes constrained types to
         // base enforcement).
         //
         // ⚠ Unwound as a LOOP, not a recursive call. Recursion here defeats
@@ -1811,7 +1811,7 @@ Type* lambda_type_nullable_lane_base(Type* type, bool* nullable) {
 }
 
 // ---------------------------------------------------------------------------
-// SCU7: the one total storage resolver (D2.6.1, D3.4.6).
+// SCU7: the one total storage resolver (D3.2.1, D3.4.6).
 //
 // Arm 1 is the native-lane table: a payload with a raw register/slot form.
 // It is exactly the set the JIT and the array boundary already treated as
@@ -1900,7 +1900,7 @@ LaneStorageDesc lambda_persistent_lane_storage_desc_for(Type* type) {
             (desc.base_contract->type_id == LMD_TYPE_INT64 ||
              desc.base_contract->type_id == LMD_TYPE_UINT64)) {
         // Persistent destinations own wide optional payloads inline; the
-        // scalar Item ABI remains unchanged (D2.5.2v3, D2.6.4v3).
+        // scalar Item ABI remains unchanged (D2.4.2, D2.6.2).
         desc.kind = LANE_STORAGE_TYPED_ITEM;
         desc.byte_size = (uint8_t)sizeof(TypedItem);
     }

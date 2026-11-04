@@ -1,5 +1,5 @@
 {
-  "name": "D2.11.2 SMIL QName aliases in external SVG follow browser inline HTML parsing",
+  "name": "D10.1.5 SMIL QName aliases in external SVG follow browser inline HTML parsing",
   "html": "test/ui/svg_smil_namespaces.html",
   "viewport": {
     "width": 260,

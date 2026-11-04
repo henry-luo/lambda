@@ -27,7 +27,7 @@ Flex is entered from block layout: `layout_flex_content` is declared and called 
 
 ### 1.1 Retained query results
 
-**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: row and column preparation
+**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2**: row and column preparation
 request inline contributions before height at the assigned wrapping width.
 `flex_measure_completed_flow` and final flow share `FlexMeasuredFlow` entries;
 `LayoutFlowResult` owns copied fragments, placements and algorithm output rather

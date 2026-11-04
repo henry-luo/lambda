@@ -186,7 +186,7 @@ static inline void parse_rfc_property_params(StringBuf* sb, const char** pos,
 }
 
 // RFC record formats keep repeated fields in an ordered array alongside
-// their convenience maps; append each entry verbatim per D2.6.5v3.
+// their convenience maps; append each entry verbatim per D3.3.1.
 static inline List* rfc_new_entry_list(Input* input) {
     List* list = (List*)pool_calloc(input->pool, sizeof(List));
     if (list) list->type_id = LMD_TYPE_ARRAY;

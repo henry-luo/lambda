@@ -1,12 +1,12 @@
 # Lambda Release Packaging — Design & Implementation Proposal
 
-> **Superseded in part (2026-09-29).** The two-home scheme below (`./lambda` in dev, `./lmd` in release, `LAMBDA_HOME_RELEASE`) is retired. The source checkout now keeps runtime assets in `./lmd/` itself, and `g_lambda_home` is `"./lmd"` everywhere; `prepare_release.sh` copies `lmd/` unchanged. The former `input/` assets moved into their packages: validator schemas and view stylesheets to `lmd/package/doc/`, math/KaTeX CSS and fonts to `lmd/package/math/`, LaTeX CSS, CMU fonts and `base.js` to `lmd/package/latex/`. See D7.2.4's impl footnote.
+> **Superseded in part (2026-09-29).** The two-home scheme below (`./lambda` in dev, `./lmd` in release, `LAMBDA_HOME_RELEASE`) is retired. The source checkout now keeps runtime assets in `./lmd/` itself, and `g_lambda_home` is `"./lmd"` everywhere; `prepare_release.sh` copies `lmd/` unchanged. The former `input/` assets moved into their packages: validator schemas and view stylesheets to `lmd/package/doc/`, math/KaTeX CSS and fonts to `lmd/package/math/`, LaTeX CSS, CMU fonts and `base.js` to `lmd/package/latex/`. See D9.3.4's impl footnote.
 >
 > **Removed (2026-10-12).** The LaTeX.js-era `lmd/package/latex/css/` (`base.css`, `article.css`, `book.css`) and `lmd/package/latex/js/base.js` were deleted because nothing loaded them; LaTeX output styling comes from `lmd/package/latex/css.ls` and `fonts/cmu-combined.css`. The `lmd/package/math/katex.css` named below no longer exists either. Rows below that name these files are historical.
 
-> **Math package moved (2026-10-15).** Document math source and bundled fonts now live in `lmd/package/doc/math/`, matching `lambda.doc.math.*` through the generic resolver (**D7.2.4v2**). Release preparation already copies the whole `lmd/` tree. Earlier paths below are historical.
+> **Math package moved (2026-10-15).** Document math source and bundled fonts now live in `lmd/package/doc/math/`, matching `lambda.doc.math.*` through the generic resolver (**D9.3.4**). Release preparation already copies the whole `lmd/` tree. Earlier paths below are historical.
 
-> **PDF and LaTeX packages moved (2026-10-15).** Their source and resources now live in `lmd/package/doc/pdf/` and `lmd/package/doc/latex/`, imported as `lambda.doc.pdf.*` and `lambda.doc.latex.*` (**D7.2.4v3**). Native document loading, PDF export and the bundled TeX resource directory follow these paths. Release preparation copies them in the existing `lmd/` tree.
+> **PDF and LaTeX packages moved (2026-10-15).** Their source and resources now live in `lmd/package/doc/pdf/` and `lmd/package/doc/latex/`, imported as `lambda.doc.pdf.*` and `lambda.doc.latex.*` (**D9.3.4**). Native document loading, PDF export and the bundled TeX resource directory follow these paths. Release preparation copies them in the existing `lmd/` tree.
 
 ## 1. Overview
 

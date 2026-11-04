@@ -1,4 +1,4 @@
-// D7.2.5: authoring choices share the effect vocabulary used by the compiler.
+// D10.2.1: authoring choices share the effect vocabulary used by the compiler.
 pub let catalog = [
     {id:'appear',label:"Appear",family:'entrance'},
     {id:'blinds-in',label:"Blinds",family:'entrance'},

@@ -4,7 +4,7 @@
 `test/benchmark/exe/lambda-v37-4758dc7165`) against `test/benchmark/Overall_Result36.md` (commit `33a178ed0`,
 archived `lambda-v36-33a178ed0`); per-row ratios computed from `benchmark_results_v36.json` / `_v37.json`.
 Machine drift control: Node.js geomean R37/R36 = 1.004x, C2MIR 1.024x — the two runs are
-comparable. Between the two commits Tune21 landed in full (T21-1..5), then D8.1.1v6 (satellite admission +
+comparable. Between the two commits Tune21 landed in full (T21-1..5), then D8.3.3 (satellite admission +
 write-back), the T20-5 GC slices (nursery pacing, lazy zeroing), CW34 (read-modify-write handle borrows) and two
 JIT correctness fixes; the merge also brought the 2026-09-05 upstream commits.
 
@@ -24,7 +24,7 @@ JIT correctness fixes; the merge also brought the 2026-09-05 upstream commits.
 Per-row geomeans R37/R36 over the 59 rows: **untyped JIT 0.708x**, typed JIT 0.925x,
 **auto e2e untyped 0.383x**, auto e2e typed 0.763x. The round's two
 levers did what the proposal predicted: untyped-lane parity (T21-2) collapsed the untyped/typed gap (18 → 10 rows,
-untyped/Node 1.37 → 0.97), and the D8.1.1v6 admission widening turned the auto tier from 4.1x Node to 1.5x.
+untyped/Node 1.37 → 0.97), and the D8.3.3 admission widening turned the auto tier from 4.1x Node to 1.5x.
 The static ceiling moved less (5.67 → 5.12) because its widest rows are the container-protocol family
 (deltablue 106x, havlak 42x, cd 33x, hashmap 30x, cube3d 28x) that Tune21 explicitly did not slice.
 
@@ -108,7 +108,7 @@ next step is one binary per slice on triangl2/cube3d/nqueens2, and the T21-2a wi
 | r7rs/cpstak | 92.7 | 16.3 | 0.18x |
 | larceny/diviter | 107253.9 | 19241.9 | 0.18x |
 
-These are the D8.1.1v6 rows: bodies that were pinned to T0 for an `any` parameter, a local `var`, an indexed
+These are the D8.3.3 rows: bodies that were pinned to T0 for an `any` parameter, a local `var`, an indexed
 store or an untyped `var` parameter now promote, and the tier lands within 0.35–0.7x of Node on the R7RS/BENG
 micro rows because Lambda's startup is a third of Node's.
 
@@ -117,7 +117,7 @@ micro rows because Lambda's startup is a third of Node's.
 15 ms, pnpoly typed 1.6 s / 14 ms, gcbench typed 1.6 s / 175 ms, deriv typed 427 ms / 13 ms. Two known pins:
 the once-called `main` hot loop (no loop-entry OSR — mandelbrot, matmul, navier_stokes, diviter) and typed
 aggregate parameters (`float[]`, record contracts — nbody2, pnpoly2, gcbench2, deriv2). Both are named in
-D8.1.1v6 as deliberate; they are now the whole auto-tier residual.
+D8.3.3 as deliberate; they are now the whole auto-tier residual.
 
 **Three cells need a reading note.**
 
@@ -151,7 +151,7 @@ migrations (richards, splay, havlak2, hashmap), and fast_diff/microdiff's verifi
 1. **typed hashmap stalls on T0/auto** — **FIXED 2026-09-07** (`lambda/runtime/interp.cpp`,
    `interp_plan.cpp`): (a) `interp_coerce_parameter_binding` no longer widens a plain packed numeric array at a
    `var` parameter's `any[]` boundary — the parameter borrows the caller's container (S9.1.3), MIR admits the
-   packed carrier in place under the open contract (D3.2.1), and the copy both lost the writes and cost O(n) per
+   packed carrier in place under the open contract (D4.2.1), and the copy both lost the writes and cost O(n) per
    call; N-D/view carriers still take the boundary. (b) `plan_need`'s call arm budgets the three scratch homes
    a CW25 place-borrow argument holds while its path keys evaluate (and the declarator arm budgets the four the
    CW34 bind holds). hashmap2 now finishes on every tier (interp 7.3 s, auto 7.0 s, jit 110 ms, all PASS); the
@@ -177,7 +177,7 @@ migrations (richards, splay, havlak2, hashmap), and fast_diff/microdiff's verifi
      `and` refused it as a native operand, boxed both sides and called `is_truthy` twice (v36's reads were plain
      `bool`, one `fn_not`). **Fixed (2026-09-07):** `mir_expr_native_bool_operand` admits a nested native
      `and`/`or` (both operands native) and `not`; the native arms already publish `(VALUE_REP_I64, BOOL)` and
-     test `== 1`, so the nullable lane's null (2) stays falsy at every gate (S3, D2.5.1). triangl2 `is_truthy`
+     test `== 1`, so the nullable lane's null (2) stays falsy at every gate (S3, D2.4.1). triangl2 `is_truthy`
      2 → 0, release A/B **0.59x** (triangl 0.62x); probe `test/lambda/proc/bool_lane_and_chain.ls` (out-of-range
      operands in every position, three tiers and the v37 archive agree). Found on the way, same blindness in two
      more places: (a) the index emitter's "type-valued subscript" guard (`arr[int]`) tested `type_id ==
@@ -203,7 +203,7 @@ migrations (richards, splay, havlak2, hashmap), and fast_diff/microdiff's verifi
    path. Covered by `test/lambda/proc/typed_var_record_store.ls` (index, member, computed-key, int→float and
    rejected shapes; golden identical on three tiers; the previous binary prints the stale values). hashmap/hashmap2
    read 1.05–1.09x on the release A/B with byte-identical MIR dumps — link-layout noise, not this change.
-4. **Auto-tier residue — D8.1.1v7 (2026-09-07).** Two policy changes: a loop-bodied procedure promotes at its
+4. **Auto-tier residue — D8.3.3 (2026-09-07).** Two policy changes: a loop-bodied procedure promotes at its
    first entry (the once-called `main` rows), and aggregate/structured value-parameter contracts are admitted to
    satellites (the typed rows). Release auto e2e (wall ms, `temp/lambda_t38_final.exe` → `t41_final`, median of 3;
    jit reference alongside): mandelbrot 4040 → 75 (jit 77), matmul 2255 → 40 (39), brainfuck2 6598 → 346 (347),
@@ -217,19 +217,19 @@ migrations (richards, splay, havlak2, hashmap), and fast_diff/microdiff's verifi
    takes it from 20.7 s to 0.29 s and is neutral elsewhere; satellite call-site specialization is the design item.
    The static-ceiling family (deltablue/havlak/cd/hashmap/cube3d) is untouched by design: T20-1 map field
    protocol, (B) "moved argument" (crypto_aes) and the tenured-zone reclamation (brainfuck's 195 MB RSS).
-   **Follow-up, D8.1.1v8 (2026-09-07): the scan pins are gone.** Every pinned body in navier_stokes, nbody2 and
+   **Follow-up, D8.3.3 (2026-09-07): the scan pins are gone.** Every pinned body in navier_stokes, nbody2 and
    json2 had a typed `var` parameter. They are admitted now: every `var` position travels through the CW33 home
    cells on the boxed edges, the `_b` wrapper prepares (un-share-at-borrow), admits and stores the container back
    through the home, and a satellite's dynamic edge transports typed positions and reloads them keeping the raw
    descriptor; a body that REBINDS a typed `var` parameter, and its direct satellite callers, stay in T0 (the
    raw entry has no home to publish a rebind through; the eager tier loses it -- DO29). Release auto e2e
    (median of 3, wall ms, `t45` → `t46`, jit reference): navier_stokes 11.1 s → 281 ms (jit 264; 40x → 1.06x), awfy/nbody2 1230 → 83 ms (jit 84; parity), beng/nbody2 1207 → 87 ms (jit 83), json2 194 → 91 ms (jit 80; 2.4x → 1.13x); jetstream/nbody2 flat at 104 ms (it was never pinned), richards 702 → 684 ms and deltablue 371 → 376 ms unchanged (their residue is the map field protocol, not a scan pin). Eager JIT A/B `t45 → t46` (×3) on the `var`-heavy rows richards, deltablue, havlak, json2, nbody2, navier_stokes, quicksort, permute, towers, hashmap2, cd2, splay: 0.98–1.03, flat. Gates: auto / jit / interp sweeps (763 scripts) 0 regressions -- the jit sweep counts the new `interp_typed_var_rebind` fixture as its 5th known failure (DO29, T0 golden); `make test-lambda-baseline` 4137 / 4137; `make interp-sweep` regenerated; auto-tier golden check over all 113 benchmark rows 109 PASS with the four pre-existing T0 divergences (cd2_orig, fasta, nbody, spectralnorm).
-   **Follow-up, D8.1.1v9 (2026-09-07): the satellite cluster.** richards/deltablue paid 1.2-1.4x for boxed dynamic
+   **Follow-up, D8.3.3 (2026-09-07): the satellite cluster.** richards/deltablue paid 1.2-1.4x for boxed dynamic
    dispatch between one-definition images, diviter 66x for a raw entry inferred without its callers. A satellite
    image is now the target plus its direct-callee closure in module order, with call-site collection over the
    whole module and every member's boxed entry published. Release auto e2e (median of 3, wall ms, `t46` → `t47`,
    jit reference): diviter 19.96 s → 349 ms (jit 345; 66x → 1.01x), richards 786 → 620 ms (jit 614; 1.01x), deltablue 464 → 348 (jit 347; 1.00x), deltablue2 1039 → 365 (jit 370), havlak 274 → 237 (jit 238; 0.99x), json2 193 → 77 (jit 75; 1.02x), navier_stokes 292 (jit 288), jetstream/richards 72 → 77 (jit 74), base64 38 → 40 (jit 40), hashmap2 1093 → 162 (jit 160), cd 1122 → 973 (jit 974), cd2 1296 → 787 (jit 807), spectralnorm 99 → 41 (jit 41; its T0 divergence is gone because the module promotes as one image), nbody2 1348 → 97 (jit 112); the self-timed deltablue workload is 127 ms on both tiers, so every remaining auto/jit difference is startup plus the image compile. ⚠ splay 256 → 446 (jit 444): the uninferred per-function satellites had been 1.7x FASTER than the eager tier here; with the eager tier's call-site inference the auto tier now matches it (DO30 -- an eager-tier item: `splay_find(tree, key)` takes a float `key` lane and `next_random`/`insert_new_node` native float returns, and the inferred code is slower than the boxed bodies). Gates: auto / jit / interp sweeps (764 scripts) 0 regressions (jit: the DO29 fixture is its 5th known failure); `make test-lambda-baseline` 4138 / 4138; `make interp-sweep` regenerated; benchmark golden check on the EAGER and the AUTO tier 111 / 113 each (cd2_orig and nbody pre-existing; fasta and spectralnorm now pass on auto); eager A/B `t45 → t51` on 16 rows 0.90–1.07 (fib 1.11 on a 1.7 ms row).
-   **splay (DO30) — closed as a collector defect (D4.3.4, 2026-09-07).** The 256 ms the one-definition satellites
+   **splay (DO30) — closed as a collector defect (D5.3.3, 2026-09-07).** The 256 ms the one-definition satellites
    had shown was under-tracing: node links in `null`-typed lanes at unaligned offsets were invisible to the mark
    phase and freed while linked; every tier reproduced it under forced collections. With `null` lanes marked
    conservatively the whole tree is traced on every tier and splay's auto time equals the eager tier's; the

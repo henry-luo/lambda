@@ -1,4 +1,4 @@
-// D7.2.5 / S12.1.3: recovery policy stays in the app; the document owns its sleeping task.
+// D10.2.1 / S12.1.3: recovery policy stays in the app; the document owns its sleeping task.
 import dom
 import files: .mod_io
 import session: lambda.edit.session

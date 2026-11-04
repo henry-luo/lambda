@@ -1,4 +1,4 @@
-// S7.7.4v2/D5.1.3/D5.2.3: publishing a new outcome preserves scalar snapshots.
+// S7.7.4v2/D6.1.3/D6.2.3: publishing a new outcome preserves scalar snapshots.
 fn identity(value: any) any => value
 fn checked(value) float^ {
     let admitted: float = value

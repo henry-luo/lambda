@@ -28,7 +28,7 @@ struct EmitDirectParseState {
 static void emit_release_direct_parse(EmitDirectParseState* state) {
     if (!state || !state->input) return;
     Pool* pool = state->input->pool;
-    // the pool releases the Input it holds, registries included (D4.2.6)
+    // the pool releases the Input it holds, registries included (D5.2.5)
     if (pool) pool_destroy(pool);
     state->input = NULL;
 }

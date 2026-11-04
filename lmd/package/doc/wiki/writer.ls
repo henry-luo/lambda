@@ -1,4 +1,4 @@
-// One pure Mark Doc traversal for all wiki writers (S2.6, D7.2.4).
+// One pure Mark Doc traversal for all wiki writers (S2.6, D9.3.4).
 import tasks: .tasks
 import c: lambda.doc.misc.common
 fn twiki_word_at(chars,index) any^ {

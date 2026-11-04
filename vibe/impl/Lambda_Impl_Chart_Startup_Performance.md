@@ -100,7 +100,7 @@ committed viewport geometry and chooses a pending visible tile first; pending
 tiles elsewhere continue in document order. All 44 cards and their scroll
 positions exist immediately, without pagination. Each applied tile owns its
 chart state, so completing another tile preserves selection (**S12.1.3**,
-**D4.5.3v2**).
+**D5.5.3**).
 
 This is page-level cooperative scheduling on the existing UI thread. It does
 not introduce concurrent access to the DOM or turn an individual chart render
@@ -164,7 +164,7 @@ The normal gallery now applies all 44 dashboard charts while constructing the
 page. The deferred panel, frame queue, placeholders, and their CSS are removed.
 `tests/eager.json` replaces the incremental replay and requires all chart SVGs
 on the first frame, including the last tile, and again after navigation.
-Applied chart ownership remains per view (**S12.1.3, D4.5.3v2**).
+Applied chart ownership remains per view (**S12.1.3, D5.5.3**).
 
 ### Causes and implementation
 
@@ -181,7 +181,7 @@ format in thread-local storage. A second or format change refreshes it through
 `localtime_r` / `localtime_s`, avoiding the shared `localtime` result as well.
 The same release benchmark takes **8.0 ms** with timestamps and **5.9 ms** without.
 Existing DEBUG messages and `log.conf` are preserved. This changes diagnostics
-only, consistent with **D5.4.4** ("diagnostics may never feed semantics").
+only, consistent with **D6.4.4** ("diagnostics may never feed semantics").
 
 Release diagnostics also identified avoidable chart generation work:
 
@@ -260,7 +260,7 @@ functional color syntax become a failed probe instead of an RGBA array
 containing an error. Chart sampling uses the non-raising probe, retaining normal
 color/alpha interpolation and the existing incompatible-paint crossfade policy.
 The minimal reproducer produces byte-identical SVG without runtime errors.
-No logging level or error reporting policy was changed (**D5.4.4**).
+No logging level or error reporting policy was changed (**D6.4.4**).
 
 The new error-sensitive regression also exposed entering containers passing an
 absent source parent to `content`. Their keyed source-child list is now empty,
@@ -314,7 +314,7 @@ Runtime `is` checks also invoked the reporting validator, including constructing
 error trees and correction suggestions that a Boolean caller discards. They
 now use its existing predicate mode and preserve the caller's previous mode.
 Generic map/element kind checks reuse `lambda_type_matches` directly; these
-compact types have no shape to inspect (**D3.2.1**). Explicit validation retains
+compact types have no shape to inspect (**D4.2.1**). Explicit validation retains
 its reporting path, and failed virtual reads still propagate as errors.
 
 The first baseline exposed two pre-existing discrepancies in predicate mode:
@@ -339,7 +339,7 @@ The chart package removes further repeated work within one pure render:
   are unchanged.
 
 This reuse follows **S12.1.1v3**; applied-view ownership remains **S12.1.3 /
-D4.5.3v2**. Diagnostic changes do not affect semantics (**D5.4.4**).
+D5.5.3**. Diagnostic changes do not affect semantics (**D6.4.4**).
 
 ### Qualification
 
@@ -463,13 +463,13 @@ directly.
 
 Static applied charts reuse their already-reconciled parameter state. Ordinary
 behavior compilation does not build unused factory defaults. Per-view state
-ownership is unchanged (**S12.1.3 / D4.5.3v2**).
+ownership is unchanged (**S12.1.3 / D5.5.3**).
 
 Native changes retain the existing ownership boundaries:
 
 - Planned function-local reads remain direct slot loads inside an enclosing
   view activation; view state and capture reads retain their overlay route
-  (**D6.2.3 / S12.1.3**).
+  (**D7.2.3 / S12.1.3**).
 - Predicate validation of bare scalar union arms, literals and set operations
   returns the existing verdict singletons instead of discarded reports.
   Explicit validation still reports errors (**S11.1.1v3 / S11.2.1**).
@@ -477,7 +477,7 @@ Native changes retain the existing ownership boundaries:
   retain their own layout. Independent computed styles skip unused geometry
   probes, while used-box context validation remains for boxes with geometry.
   Clean ancestor displays serve writing-mode queries; dirty ancestors still
-  resolve normally (**D4.5.1v4 / D2.11.1**).
+  resolve normally (**D5.5.1 / D10.1.5**).
 
 The static dashboard golden changes only SVG `d` attributes: all **6,652**
 elements and their remaining serialized content are identical after masking

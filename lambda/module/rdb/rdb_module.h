@@ -1,5 +1,5 @@
 // rdb-drivers Jube module: shared helpers for the PostgreSQL and MySQL drivers.
-// The module reaches the host only through RdbHostAPI (RDB3, D7.3.3), so it
+// The module reaches the host only through RdbHostAPI (RDB3, D9.4.3), so it
 // carries small local helpers instead of linking host lib code.
 #pragma once
 

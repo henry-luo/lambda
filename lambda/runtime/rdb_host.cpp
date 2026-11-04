@@ -14,7 +14,7 @@ static void rdb_host_close_row(void* user) {
 }
 
 static int rdb_host_authorize(const char* driver, const RdbTarget* targets, int count) {
-    // D7.5.2: no database service exists in the initial confined profile.
+    // D11.1.2: no database service exists in the initial confined profile.
     if (lambda_current_security_io()) return RDB_ERROR;
     for (int i = 0; i < count; i++) {
         const RdbTarget* t = &targets[i];
@@ -65,7 +65,7 @@ static const RdbRegistryHooks rdb_host_hooks = {
 void rdb_host_install(void) {
     rdb_set_registry_hooks(&rdb_host_hooks);
 #ifndef LAMBDA_NO_JUBE
-    // runtime-only hosts retain connection ownership without a Jube driver resolver (D7.1.6).
+    // runtime-only hosts retain connection ownership without a Jube driver resolver (D9.2.2).
     rdb_set_driver_resolver(jube_rdb_resolve_driver);
 #endif
 }

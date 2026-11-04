@@ -1,4 +1,4 @@
-// D3.2.4v4: exact trusted records cross repeated and nullable boundaries
+// D4.2.5: exact trusted records cross repeated and nullable boundaries
 // unchanged; a differently laid-out dynamic record still needs admission.
 type Node = {value: int, next: Node?}
 type Box = {node: Node?, label: string}

@@ -501,7 +501,7 @@ bool css_register_document_property(DomDocument* doc,
     if (!entry) return false;
     entry->registration = *source;
     CssPropertyRegistration* target = &entry->registration;
-    // The document retains an owned definition after argument conversion and parser scratch are released (D4.5.1v4).
+    // The document retains an owned definition after argument conversion and parser scratch are released (D5.5.1).
     target->name = pool_dup_n(pool, source->name, name_length);
     target->syntax = pool_strdup(pool, source->syntax);
     target->initial_text_length = source->initial_text_length ? source->initial_text_length :

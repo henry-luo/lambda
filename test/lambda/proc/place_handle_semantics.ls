@@ -1,4 +1,4 @@
-// T29-1 (D4.4.4v4, CW37 Appendix D): a record place spelled repeatedly in a
+// T29-1 (D5.4.4, CW37 Appendix D): a record place spelled repeatedly in a
 // `pn` body is read and written through a synthesized handle. Every probe
 // below changes the place, its container, its key or its ownership between
 // two spellings; each must observe exactly what per-access navigation would.

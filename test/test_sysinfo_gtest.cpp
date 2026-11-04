@@ -131,7 +131,7 @@ TEST_F(SysInfoTest, test_invalid_sys_url) {
 // The sys.* cache is per thread, but its Input and cached Items live in the
 // eval context's pool, which test-batch tears down after every script. Each
 // later script must rebuild the cache rather than read the first one's freed
-// Items (D4.2.6; vibe/Memory_Context.md §16.4).
+// Items (D5.2.5; vibe/Memory_Context.md §16.4).
 static const char* batch_section(const char* out, int index, size_t* len) {
     const char* p = out;
     for (int i = 0; i <= index; i++) {

@@ -1,9 +1,9 @@
 // T29-2: a bool field read through an optional record element yields the
-// nullable bool lane (0/1/2, D2.5.2v3). The member emitter published that raw
+// nullable bool lane (0/1/2, D2.4.2). The member emitter published that raw
 // lane with the wrapper contract's TypeId, so every consumer read it as an
 // Item: a declared return passed the raw byte to the type check (a crash), and
 // a local binding branched on it through is_truthy (a wrong answer). The
-// descriptor now carries the lane's own TypeId (D2.4.1-D2.4.3).
+// descriptor now carries the lane's own TypeId (D2.3.4-D2.3.5).
 type Task = {link: int, pp: bool, tw: bool, th: bool}
 type World = {n: int, tasks: Task?[]}
 

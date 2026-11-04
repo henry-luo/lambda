@@ -14,11 +14,11 @@ this scope.
 behavior package; retain only platform transport and generic DOM mechanisms in
 native code; pass the applicable pinned WPT and Chrome/Chromium editing suites.
 
-> **Formal authority.** D7.2.5 assigns all UA editing policy, normalization,
+> **Formal authority.** D10.2.1 assigns all UA editing policy, normalization,
 > history, `designMode`, and command/query semantics to the Lambda DOM behavior
-> package. D7.2.1–D7.2.4 govern package state, initialization, distribution,
-> and naming; D7.3.5 requires a conformance gate; D7.5.3 governs the explicit
-> Lambda↔Radiant contract. D1.10 requires executable enforcement. D5.3.3
+> package. D9.3.1–D9.3.4 govern package state, initialization, distribution,
+> and naming; D9.4.5 requires a conformance gate; D9.5.6 governs the explicit
+> Lambda↔Radiant contract. D1.10 requires executable enforcement. D6.3.3
 > requires precise roots across every native allocation/callback boundary.
 > S9.1.7 forbids global mutable language state, and S12.1.3 confines reactive
 > mutation to handlers. This plan must be revised before implementation if it
@@ -106,7 +106,7 @@ Native code may:
 - root Lambda/DOM objects and provide a generic atomic DOM transaction.
 
 A native helper that switches on `bold`, `insertParagraph`, a command alias,
-or an `inputType` to choose DOM structure is UA policy and violates D7.2.5.
+or an `inputType` to choose DOM structure is UA policy and violates D10.2.1.
 A helper that performs a parameterized checked `split_node`, `move_node`, or
 `replace_text` operation is mechanism and is allowed.
 
@@ -121,7 +121,7 @@ A helper that performs a parameterized checked `split_node`, `move_node`, or
 - Do not accept a passed-test baseline that depends on harness mutation or
   expected-output rewriting.
 - Do not select a final import name that collides with the built-in
-  `import dom` module; D7.2.4 requires one meaning per package path.
+  `import dom` module; D9.3.4 requires one meaning per package path.
 - Do not add asynchronous edit plans in this phase.
 - Do not optimize by adding command-shaped native fast paths.
 
@@ -139,7 +139,7 @@ These apply to every phase and review:
 3. **No contenteditable native fallback.** If the package cannot initialize or
    its handler raises, the edit fails visibly and is logged; it does not fall
    back to command-specific C++ behavior. This is the contenteditable-specific
-   consequence of D7.2.5 and supersedes the older fail-open migration rule.
+   consequence of D10.2.1 and supersedes the older fail-open migration rule.
 4. **Plan before mutation.** Resolve policy and validate a complete plan before
    the first DOM write.
 5. **Atomic apply.** A rejected or stale plan changes nothing. A failure during
@@ -162,7 +162,7 @@ These apply to every phase and review:
     table.
 12. **Precise rooting.** Any `Item`, wrapper, fragment, Range, or callback that
     crosses a native allocation/safepoint uses `RootFrame`, `Rooted`, handles,
-    or `PersistentRooted` under D5.3.3. Native-stack scanning is not an option.
+    or `PersistentRooted` under D6.3.3. Native-stack scanning is not an option.
 13. **Standard containers.** Native work uses project `Str`, `ArrayList`, and
     `HashMap`, never `std::` containers.
 14. **No generated-file edits.** Build changes go through
@@ -188,7 +188,7 @@ not contractual; symbols and responsibilities are.
 
 | Source | Landed behavior | Phase-9 gap |
 |---|---|---|
-| `lambda/dom/dom.ls` | package entry and behavior registration | import-path migration remains governed by D7.2.4; no second DOM namespace may be created |
+| `lambda/dom/dom.ls` | package entry and behavior registration | import-path migration remains governed by D9.3.4; no second DOM namespace may be created |
 | `lambda/dom/form.ls` | body-scoped `domedit` and `execcommand` behavior hooks | document editing API transport is Boolean/verdict-shaped and has no query/design-mode result channel |
 | `lambda/dom/dom_edit.ls` | text/replacement insertion, simple deletion, composition splice/caret, plain paste/drop, cut/drag deletion, paragraph/line-break delegation, formatting delegation | context comes through native pending-range side channels; cross-tree rules, whitespace, typing style, normalization, and history are incomplete |
 | `lambda/dom/commands.ls` | case-insensitive subset for bold/italic/underline/strike, HTML/text insertion, backward/forward deletion, paragraph, and line break | conditional registry, single-text formatting assumptions, no query API, no typing state, no block/list/object/history/clipboard command families |
@@ -382,7 +382,7 @@ typing value is captured in an immutable closure expecting later mutation
 This plan uses the physical path `lambda/dom` because that is the
 current tree. It does not establish `lambda.dom` as the package import name:
 `import dom` already identifies the built-in DOM mechanism module. When the
-D7.2.4 package-path migration reaches this package, select and migrate to one
+D9.3.4 package-path migration reaches this package, select and migrate to one
 non-colliding name in a separate atomic change. Do not introduce aliases that
 let the same path resolve to both the built-in module and behavior package.
 
@@ -649,7 +649,7 @@ History is package state and is added after generic transactions are stable:
   deterministically.
 
 Retained DOM wrappers and package history values require explicit lifetime/GC
-tests under D5.3.3; a passing functional undo test is not enough.
+tests under D6.3.3; a passing functional undo test is not enough.
 
 ### 6.7 `designMode` and document APIs
 
@@ -1046,7 +1046,7 @@ a native shortcut around an unmet earlier exit gate.
 
 #### UA-1.6 Establish the no-fallback rule
 
-- update the DOM-state working docs to note the D7.2.5 contenteditable
+- update the DOM-state working docs to note the D10.2.1 contenteditable
   exception to historical fail-open migration behavior;
 - ensure package load/handler failure returns no UA mutation;
 - add once-per-document diagnostics and focused tests;
@@ -1301,7 +1301,7 @@ a native shortcut around an unmet earlier exit gate.
 - update `RAD_18_Editing_Selection_Ranges.md` and related diagrams;
 - update DOM state/default/API working docs where ownership or failure behavior
   changed;
-- update the design §20 status and the D7.2.5 implementation-status appendix;
+- update the design §20 status and the D10.2.1 implementation-status appendix;
 - revise formal rulings/version only if implementation evidence changes a
   ruling, following `doc/Doc_Convention.md`;
 - add generated suite targets to required baseline/CI through
@@ -1374,7 +1374,7 @@ At each phase, search native source for:
 
 Allowed matches are limited to IDL publication/coercion, generic event names,
 test runner inventory, logging labels, and comments/history. Every executable
-match is reviewed against D7.2.5.
+match is reviewed against D10.2.1.
 
 ### 11.2 Duplicate-helper audit
 
@@ -1558,9 +1558,9 @@ Stop and return to design review if:
   rather than a generic mechanism;
 - package state cannot be made per-document and precisely rooted;
 - atomic rollback cannot preserve DOM/Selection/observer invariants;
-- the final behavior-package import path cannot satisfy D7.2.4;
+- the final behavior-package import path cannot satisfy D9.3.4;
 - passing a suite would require modifying vendor code or branching on tests;
-- implementation evidence changes D7.2.5 or another formal ruling.
+- implementation evidence changes D10.2.1 or another formal ruling.
 
 ---
 
@@ -1578,7 +1578,7 @@ Stop and return to design review if:
 | Typing state becomes stale | wrong command state or formatting | host/selection/mutation epoch scoping, author-mutation invalidation |
 | Editor history double-records | undo applies twice | one-owner gate, cancellation before package apply/history begin |
 | Package loading is too costly | first input latency or per-key overhead | compile cache, release measurement, optimize shared planner only after profiling |
-| Package naming collision | built-in `dom` shadowed | D7.2.4 hold point and one atomic namespace migration |
+| Package naming collision | built-in `dom` shadowed | D9.3.4 hold point and one atomic namespace migration |
 | Platform-only clipboard tests | hidden product gaps | explicit OS exclusion plus in-process policy/serialization tests |
 | Scope overwhelms review | regressions hidden in giant patches | behavior-family slices, monotonic promotion, phase exit gates |
 
@@ -1613,7 +1613,7 @@ For a conformance promotion, record:
 
 ### Ownership
 
-- [x] D7.2.5 is realized: all UA edit/command/query/history policy is in the
+- [x] D10.2.1 is realized: all UA edit/command/query/history policy is in the
       Lambda DOM behavior package.
 - [x] Native code contains no contenteditable command table, block/list/
       formatting rule, typing state, normalization policy, or UA history.
@@ -1624,7 +1624,7 @@ For a conformance promotion, record:
 ### State and safety
 
 - [x] Package editing state is per document and contains no mutable global.
-- [x] All native crossings use precise rooting under D5.3.3.
+- [x] All native crossings use precise rooting under D6.3.3.
 - [x] No pending-range/apply-epoch/caret TLS channel remains for DOM editing.
 - [x] Plans reject stale/cross-document/cross-host/false-island inputs.
 - [x] Partial failure rolls back DOM, Selection, observer queue, and history.

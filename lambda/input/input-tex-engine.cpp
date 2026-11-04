@@ -1705,7 +1705,7 @@ void expand(Engine* e, const Token& t, const Meaning& m) {
         size_t count = tmp->length;
         bool found = true;
         if (of_file) {
-            // only what \input could read is visible (D7.5.2); anything else reads as a missing file
+            // only what \input could read is visible (D11.1.2); anything else reads as a missing file
             static const char* exact[] = {""};
             int32_t file = -1;
             StrBuf* fname = strbuf_new();

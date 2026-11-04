@@ -5,8 +5,8 @@ tuning passes 54 benchmark output oracles and resolves the original performance
 regressions. Broader semantic/GC gates remain open as detailed below.
 Scope: [JS_MVP_Lmd §21](../jube/JS_MVP_Lmd.md#21-classes-and-inheritance-aligned-with-lambda).
 Authority: **S1.11**, **S2.1.3v2**, **S2.1.4**, **S11.3.1v2**,
-**S12.3.3v2**, **D2.6.6v3–D2.6.10**, **D3.4.3v5–D3.4.5**,
-**D5.3**, **D6.2.2v2**. This implements the existing shared-runtime design;
+**S12.3.3v2**, **D3.1.1–D3.1.2**, **D3.4.3–D3.4.5**,
+**D6.3**, **D7.2.2**. This implements the existing shared-runtime design;
 it does not revise the formal rulings.
 
 ## Implemented boundary
@@ -44,14 +44,14 @@ excluded. Unsupported runtime combinations return explicit capability errors.
 - A small `TypeNominalExtension` member callback carries guest lookup semantics.
   `lambda_object_member` checks it after own fields and before Lambda method
   binding. Lambda's bound methods and JS's explicit receivers remain distinct
-  at the language boundary (**S1.11**, **D2.6.9v3**).
+  at the language boundary (**S1.11**, **D3.1.5**).
 - Runtime nominal checks reuse `lambda_nominal_derives_from`. Different
   instance shapes keep the same class record. Prototype metadata has its own
   nominal record so it is not mistaken for an ordinary instance.
 - Constructor, prototype and static-property values live in three registered
   program slots per class. Records and blueprints are evaluation-owned;
   function tails contain only program/home pointers. Function objects, Maps,
-  arguments, receivers and new targets use precise roots (**D5.3**).
+  arguments, receivers and new targets use precise roots (**D6.3**).
 - Class units use a seven-argument boxed MIR entry carrying receiver/new target.
   Existing units retain their five-argument entry and original Function size;
   existing direct native calls retain their specialized signatures. The call
@@ -116,7 +116,7 @@ establish the hardware cause or satisfy the no-regression requirement.
 No padding, linker-order workaround or benchmark-specific path is shipped.
 
 The follow-up reduces native mutation overhead using the existing borrowed
-argument contract (**D5.1.3**, **D5.3.3**). `mvp_lmd_property_set` and
+argument contract (**D6.1.3**, **D6.3.3**). `mvp_lmd_property_set` and
 `mvp_lmd_property_delete` have only audited MIR callers or the class dispatcher,
 which forwards the same rooted arguments. They create no intermediate GC
 values before calling the shared shape functions and never reenter JS.
@@ -216,14 +216,14 @@ python3 temp/mvp_classes_20261008/class_bench.py
   same-type writes reuse `map_field_store`. Inherited method values remain
   reachable from permanent class root slots. Shape changes and private shapes
   take the ordinary dispatcher, preserving own overrides and metadata write
-  rejection (**D3.4.3v5–D3.4.5**).
+  rejection (**D3.4.3–D3.4.5**).
 - Cache hits reuse `map_shape_field_to_item` and `map_field_store` as non-GC
   imports. Borrowed field scalars still enter the caller's scalar home before
   a safepoint. Ordinary methods use the existing seven-argument MIR entry after
   checking the extended carrier, runtime context and non-constructor flag.
   Construction retains the native bridge; pending scalar returns and the
   companion slot retain the existing caller-consumption protocol
-  (**D5.1.3**, **D5.2.1v3**, **D5.3.3**, **D6.2.2v2**).
+  (**D6.1.3**, **D6.2.1**, **D6.3.3**, **D7.2.2**).
 - `type_tree_delete_field` moves the existing deletion replay into a bounded
   cache on immutable tree-owned shapes. Deletion and retyping share plan
   storage and the payload migration routine; private fallback behavior and
@@ -236,7 +236,7 @@ python3 temp/mvp_classes_20261008/class_bench.py
   ordinal a false hit. Only existing-entry hits seed the cache, avoiding a
   previous-key comparison for bulk unique insertion. Packed integer equality
   avoids unnecessary double conversion. The C GC layout and C++ layout
-  assertions include the new scalar field (**D5.3**).
+  assertions include the new scalar field (**D6.3**).
 
 ### Measurement boundary
 

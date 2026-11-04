@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04 (ratified into the formal specs 2026-10-05)
 **Status:** **RATIFIED (user, 2026-10-05); implemented P0–P5 in the `runtime-async` worktree, uncommitted — see §10.1.** P6 revised the formal specs (§11). Open: JSCU25 weak registration (RA8), RA-O items. WebAssembly is not a target (RA-O1 closed).
-**Spec linkage:** RA1, RA3, RA13–RA15 → D5.1.1v3; §4.5 → D5.3.6v2, D6.3.3v2, S7.11.2v2; RA1 → S7.6.7v4, D8.3.4v4; RA1, RA11 → D6.1.3v2; RA10 → D7.4.2v2; RA11, RA12 → D8.1.1v16. Relied on unchanged: D5.1.3, D5.3.2, D6.2.2v2, D6.3.1, S13.1–S13.2.
+**Spec linkage:** RA1, RA3, RA13–RA15 → D6.1.1; §4.5 → D6.3.6, D7.5.3, S7.11.2v2; RA1 → S7.6.7v4, D7.3.4; RA1, RA11 → D7.1.3; RA10 → D9.5.2; RA11, RA12 → D8.3.2. Relied on unchanged: D6.1.3, D6.3.2, D7.2.2, D7.5.1, S13.1–S13.2.
 **Working designs it amends:** `vibe/Lambda_Design_Concurrency.md` (K2-R, K10, K17, §10.5–§10.6), `vibe/Lambda_Design_Ast_Interpreter.md` (AI11, AI24), `vibe/Lambda_Design_Structs_JS.md` (JSCU25, JSCU26, JSCU32).
 **Ledger series:** `RA#` (decisions), `RA-O#` (open items).
 **Evidence base:** the line references in §2 come from a code survey on 2026-10-04 against the working tree at `8e81166df`. LOC figures in §9 are estimates derived from identifier counts and region sizes, not measured diffs.
@@ -38,7 +38,7 @@ The design reverses K2-R (state machines over fibers). §4.1 explains why the tw
 
 **Non-goals**
 
-- No change to observable semantics. JS job ordering, Lambda's macrotask resume order (D6.3.1), structured-concurrency scopes, mailbox semantics (S13.2) and error values stay as they are.
+- No change to observable semantics. JS job ordering, Lambda's macrotask resume order (D7.5.1), structured-concurrency scopes, mailbox semantics (S13.2) and error values stay as they are.
 - No change to the reactor. libuv stays the one loop (K3, K10 layer 1).
 - No multi-threaded scheduling of tasks. K7 already rules that tasks never migrate between threads.
 
@@ -51,13 +51,13 @@ The design reverses K2-R (state machines over fibers). §4.1 explains why the tw
 | Case | Mechanism | Parked state | Resumed by |
 |---|---|---|---|
 | Lambda, MIR | State machine with re-descent. A may-await procedure returns `ITEM_TASK_SUSPENDED` up the chain (`transpile-mir.cpp:8512`). Every poll re-invokes the root procedure (`concurrency.cpp:1352`); each activation re-enters its frame by a cursor (`lambda_async_frame_enter_current`, `concurrency.cpp:1160`) and dispatches on a saved state. The suspended call is re-invoked and the leaf builtin returns the stored resume value. | `LambdaAsyncFrame` list per task, `mem_calloc` slots, root-registered | FIFO run queue in `LambdaScheduler`, macrotask position |
-| Lambda, interp | None. A may-await or task-context procedure is compiled to a MIR satellite when it is defined (`interp.cpp:2544`); an ineligible body sends the whole script to MIR; explicit `interp` rejects it (AI11, AI24, D8.1.1v15). | — | — |
+| Lambda, interp | None. A may-await or task-context procedure is compiled to a MIR satellite when it is defined (`interp.cpp:2544`); an ineligible body sends the whole script to MIR; explicit `interp` rejects it (AI11, AI24, D8.3.1). | — | — |
 | JS, MIR | Per-function state machine `fn(ctx, env, input, state)` returning a `[value, next_state]` array (`js_mir_function_class_lowering.cpp:1185`). Locals are saved and restored around each suspension (`js_mir_completion.cpp:30,94`). | `JsAsyncFrameCarrier` / `JsGeneratorMapCarrier`, GC-owned | Promise reaction → microtask → `js_async_drive` (`js_runtime.cpp:32070`) |
 | JS, interp | Replay. Each resume re-executes the body from the top. A ledger returns recorded results for awaits and yields already passed (`js_interp.cpp:824`); `JsInterpContinuation` cursors (loop, try, list, array-binding) and `JsInterpExpressionReplay` records stop completed work from running twice (`js_interp.cpp:225–290`). | Same carriers plus the `ast_*` replay fields of `JsSuspendedActivation` (`js_runtime_state.hpp:617`) | Same `js_async_drive` |
 
 What is shared already: the libuv loop (`lib/uv_loop.c`), the 32-byte `DurableActivation` base (`durable_activation.hpp`), the promise/handle bridge (`concurrency_js.cpp`), and the phase order "microtask drain, then Lambda `run_ready`" (`uv_loop.c:40`).
 
-**Verification finding, 2026-10-07:** The native chart/PDF concurrency suite reproduces `SIGBUS`/`SIGSEGV` when independent evaluation threads retire schedulers through the same process-global libuv queues. **D5.4.4** requires context-owned event-loop custody and **D5.4.1** permits only quiescent handoff. A thread-local substitution is insufficient: large-stack execution and retained iframe runtimes also need their native handles and checkpoint clients to follow the canonical owner. That broader repair remains open; the trial was removed after it stalled document-editor navigation. The separate AUTO MIR-cache admission assertion also remains open. No test expectation was removed. The CSSOM delivery retains only the verified teardown correction that returns to its retiring evaluator after a foreign document callback under **D5.4.1** and **D5.3.3**.
+**Verification finding, 2026-10-07:** The native chart/PDF concurrency suite reproduces `SIGBUS`/`SIGSEGV` when independent evaluation threads retire schedulers through the same process-global libuv queues. **D6.4.4** requires context-owned event-loop custody and **D6.4.1** permits only quiescent handoff. A thread-local substitution is insufficient: large-stack execution and retained iframe runtimes also need their native handles and checkpoint clients to follow the canonical owner. That broader repair remains open; the trial was removed after it stalled document-editor navigation. The separate AUTO MIR-cache admission assertion also remains open. No test expectation was removed. The CSSOM delivery retains only the verified teardown correction that returns to its retiring evaluator after a foreign document callback under **D6.4.1** and **D6.3.3**.
 
 ### 2.2 Colour in the tiering logic
 
@@ -117,8 +117,8 @@ K2-R (`Lambda_Design_Concurrency.md` §4.2.3–§4.2.5) chose state machines ove
 
 | K2-R factor | Then (2026-07-08) | Now |
 |---|---|---|
-| 4. GC interaction — "the decisive row" | A parked fiber stack is a GC root; v1 would scan it conservatively, and level 1 would be gated on G1. | Conservative native-stack scanning is retired (CLAUDE rule 15). Under D5.1.1v2 the native C stack is invisible to the collector and every live Item is on the precisely scanned root stack. A parked native stack needs no scanning at all; only its root-stack segment does, and that is an exact `[base, top)` range. |
-| 2. "Awaits never occur inside C frames" | True for MIR-compiled Lambda. | False for the AST interpreter, which did not exist as T0 until D8.1.1v2 (2026-08-15). Interpreted code is C frames all the way down; this is the reason AI11 had to send suspending procedures to MIR. |
+| 4. GC interaction — "the decisive row" | A parked fiber stack is a GC root; v1 would scan it conservatively, and level 1 would be gated on G1. | Conservative native-stack scanning is retired (CLAUDE rule 15). Under D6.1.1 the native C stack is invisible to the collector and every live Item is on the precisely scanned root stack. A parked native stack needs no scanning at all; only its root-stack segment does, and that is an exact `[base, top)` range. |
+| 2. "Awaits never occur inside C frames" | True for MIR-compiled Lambda. | False for the AST interpreter, which did not exist as T0 until D8.3.1 (2026-08-15). Interpreted code is C frames all the way down; this is the reason AI11 had to send suspending procedures to MIR. |
 | 3. "The machinery half-exists" | One JS lowering existed. | Two lowerings and one replay engine exist, and they diverge (§2.3). The machinery is now the cost. |
 | 1. Closed world | The transform is one more whole-program analysis. | Still true, and no longer needed. |
 
@@ -133,7 +133,7 @@ One record replaces `LambdaAsyncFrame`, the suspension half of `JsSuspendedActiv
 ```c
 typedef enum { ACT_NEW, ACT_RUNNING, ACT_SUSPENDED, ACT_DONE } ActivationStatus;
 
-typedef struct Activation Activation;            // GC-owned carrier (D5.1.1)
+typedef struct Activation Activation;            // GC-owned carrier (D6.1.1)
 typedef Item (*ActivationEntry)(Activation* self, Item arg);
 
 Activation*      activation_create(ActivationEntry entry, Item arg);
@@ -151,15 +151,15 @@ Item             activation_call_on_base(Item (*fn)(void*), void* arg);  // run 
 
 ### 4.3 Stacks, side stacks and the collector
 
-D5.1.1v2 names three stack-like mechanisms: the native C stack, the watermarked side stacks (root and number), and heap async frames. An activation gets its own instance of the first two, and the third disappears.
+D6.1.1 names three stack-like mechanisms: the native C stack, the watermarked side stacks (root and number), and heap async frames. An activation gets its own instance of the first two, and the third disappears.
 
 - **Native stack.** One reservation per activation, committed lazily, with a guard page. The collector never looks at it.
-- **Root-stack segment.** The activation's own `[base, top)` range. It is the activation's Item region in the sense of D5.1.1v2: the collector traces it *through the owner* (the carrier), exactly as it traces a JS environment today. No root-range registration.
+- **Root-stack segment.** The activation's own `[base, top)` range. It is the activation's Item region in the sense of D6.1.1: the collector traces it *through the owner* (the carrier), exactly as it traces a JS environment today. No root-range registration.
 - **Number-stack segment.** The activation's own range, never scanned.
 
-Because each activation's segments are at fixed addresses for its lifetime, interior pointers held by frames (`InterpFrame::slots`, `Rooted<>` homes, MIR frame slots) stay valid across a park. Nothing is copied or re-homed, which keeps D5.1.3 intact.
+Because each activation's segments are at fixed addresses for its lifetime, interior pointers held by frames (`InterpFrame::slots`, `Rooted<>` homes, MIR frame slots) stay valid across a park. Nothing is copied or re-homed, which keeps D6.1.3 intact.
 
-Stacks are pooled. An activation that returns hands its stack back to the process-wide pool, bounded at 32 mappings. Idle mappings have no live root range. **D1.3v3, D5.1.1v3, D5.3:** the 2026-10-18 implementation batches idle-page trimming at collections, preserving the retained-first acquisition order and one warm idle mapping. Other mappings are reclaimed before reuse after trimming; teardown releases the pool. Between collections, retained usable storage is bounded by 96 MiB, committed on touch. This policy does not alter parked-stack compaction (RA13) or owner tracing (RA15). Final release, forced-GC, benchmark and integration results, including known baseline failures and retry-only cases, are recorded in [JS MVP §36.6](jube/JS_MVP_Lmd.md#366-jq-generator-stack-reuse).
+Stacks are pooled. An activation that returns hands its stack back to the process-wide pool, bounded at 32 mappings. Idle mappings have no live root range. **D1.3, D6.1.1, D6.3:** the 2026-10-18 implementation batches idle-page trimming at collections, preserving the retained-first acquisition order and one warm idle mapping. Other mappings are reclaimed before reuse after trimming; teardown releases the pool. Between collections, retained usable storage is bounded by 96 MiB, committed on touch. This policy does not alter parked-stack compaction (RA13) or owner tracing (RA15). Final release, forced-GC, benchmark and integration results, including known baseline failures and retry-only cases, are recorded in [JS MVP §36.6](jube/JS_MVP_Lmd.md#366-jq-generator-stack-reuse).
 
 **RA3.** A parked activation contributes exactly one root range to a collection: its root-stack segment, traced through the carrier. Parked native stacks and number segments are never scanned.
 
@@ -173,7 +173,7 @@ Everything that is thread-local *and* LIFO with the call stack must switch with 
 
 - side-stack watermarks: root base/top/limit, number base/top/limit;
 - the recoverable stack limit used by overflow checks (`lambda-stack.h`);
-- the recovery-frame chain head (D5.3.6);
+- the recovery-frame chain head (D6.3.6);
 - the scheduler's current task;
 - the interpreter frame chain heads for both interpreters;
 - JS ambient state: `js_current_this`, the `with` chain, the active module state id, the async-hooks current resource.
@@ -186,7 +186,7 @@ Today `js_async_drive` and `lambda_scheduler_run_one` save and restore parts of 
 
 ### 4.5 Recovery frames
 
-D6.3.3 says recovery frames never survive a scheduler yield, and D5.3.6 makes them TLS-LIFO per boundary. With one chain per activation both stay true in the sense that matters: a jump never crosses a stack, and each chain is LIFO. What changes is that a frame may now remain armed across a park, because the stack it lives on is preserved.
+D7.5.3 says recovery frames never survive a scheduler yield, and D6.3.6 makes them TLS-LIFO per boundary. With one chain per activation both stay true in the sense that matters: a jump never crosses a stack, and each chain is LIFO. What changes is that a frame may now remain armed across a park, because the stack it lives on is preserved.
 
 This removes the Lambda async-frame fault routing (`async_route_fault`, `fault_target_state`, the handler state emission around `transpile-mir.cpp:22027–22190`): a statement handler in a suspending procedure is an ordinary handler. Whether to lift the compile-time rejection of value handlers with suspending operands (§2.3) is a separate semantics question and is not decided here (RA-O6).
 
@@ -225,7 +225,7 @@ Activation        suspension only: stack, segments, status, value slot, ambient
 
 - One `RuntimeJobQueue` (`async.cpp`) with lanes: nextTick, microtask, task, animation frame. The Lambda FIFO run queue becomes the task lane.
 - One drain routine replaces `lambda_scheduler_drain` and `js_event_loop_drain`, with one watchdog.
-- Ordering is D6.3.1, unchanged: a Lambda resume is a macrotask in FIFO readiness order and never interrupts a JS job or its microtask checkpoint. A JS activation is resumed by its reaction job on the microtask lane; the task lane never resumes a JS activation.
+- Ordering is D7.5.1, unchanged: a Lambda resume is a macrotask in FIFO readiness order and never interrupts a JS job or its microtask checkpoint. A JS activation is resumed by its reaction job on the microtask lane; the task lane never resumes a JS activation.
 
 **RA9.** Readiness policy is the only per-language difference in the scheduler: microtask lane for JS activations, task lane for Lambda tasks.
 
@@ -245,9 +245,9 @@ Activation        suspension only: stack, segments, status, value slot, ambient
 - An async function with no `await` in its body keeps the existing direct path (`js_async_wrap_return`) and creates no activation.
 - Top-level await is a normal await in both tiers. `js_await_sync`, `js_await_sync_incremental`, `js_p5_module_await` and the single-shot module split are deleted.
 
-**The membrane** (K10 layer 3) is unchanged in meaning: a may-await `pn` invoked from JS is dispatched as a fresh task and returns a Promise. The `may_await` fact is still computed, but only as an interface fact for this wrapper and for diagnostics. It no longer selects a compilation strategy (D6.1.3).
+**The membrane** (K10 layer 3) is unchanged in meaning: a may-await `pn` invoked from JS is dispatched as a fresh task and returns a Promise. The `may_await` fact is still computed, but only as an interface fact for this wrapper and for diagnostics. It no longer selects a compilation strategy (D7.1.3).
 
-**Native frames.** D7.4.2 shields modules from the async substrate, and §4.4 of the concurrency design forbids suspending with a host-API frame on the stack. Under state machines that was impossible by construction; here it is enforced by a per-activation barrier depth that `activation_suspend` checks. A violation is a fault, not undefined behaviour.
+**Native frames.** D9.5.2 shields modules from the async substrate, and §4.4 of the concurrency design forbids suspending with a host-API frame on the stack. Under state machines that was impossible by construction; here it is enforced by a per-activation barrier depth that `activation_suspend` checks. A violation is a fault, not undefined behaviour.
 
 **RA10.** A suspension attempted with a native barrier on the activation's stack, or with no current activation, is a reported fault.
 
@@ -264,7 +264,7 @@ Activation        suspension only: stack, segments, status, value slot, ambient
 
 **Tiering (G3).** A function's tier is the entry its callable currently points at. An activation runs whatever its callee entries are at the time; a function can be interpreted in one activation and compiled in the next, and loop handoff inside a live activation is an ordinary call on the same stack. The following are deleted:
 
-- Lambda: satellite publication at definition for may-await procedures (`interp.cpp:2544–2562`), `interp_async_proc_satellite_supported` and the whole-script fallback it triggers, and the task-backed rejection in strict `interp` (the async clause of D8.1.1v15 / AI24).
+- Lambda: satellite publication at definition for may-await procedures (`interp.cpp:2544–2562`), `interp_async_proc_satellite_supported` and the whole-script fallback it triggers, and the task-backed rejection in strict `interp` (the async clause of D8.3.1 / AI24).
 - JS: the `is_async || is_generator` promotion rejection and the suspended-activation handoff refusal.
 
 **RA11.** No tier-selection code reads function colour. Hit counters are the only input.
@@ -276,7 +276,7 @@ Activation        suspension only: stack, segments, status, value slot, ambient
 ## 7. What does not change
 
 - JS observable behaviour: job ordering, run-to-completion, promise resolution, generator protocol. test262 is the gate.
-- D6.3.1 ordering and the K13 capture rule.
+- D7.5.1 ordering and the K13 capture rule.
 - S13 handle, mailbox and failure semantics; S7.11 fault semantics.
 - K7: tasks never migrate between threads. K31 worker isolates remain the multicore road; each isolate has its own scheduler and its own activation pool.
 - `JsPromise`. It is still the model for a completable.
@@ -289,7 +289,7 @@ Activation        suspension only: stack, segments, status, value slot, ambient
 **8.1 Parked memory (the main cost).** A state-machine frame is a few hundred bytes. A parked activation holds at least one committed page each for its native stack, root segment and number segment: about 12 KB with 4 KB pages and 48 KB with the 16 KB pages of Apple Silicon. A thousand simultaneously pending JS activations is tens of megabytes. K10 layer 2 gave this as a reason not to move JS to fibers, and it is still the strongest objection. Mitigations, in order of preference:
 
 1. Pooling makes activations that complete promptly free; only *parked* ones hold pages.
-2. Root and number segments can share one committed page, growing toward each other, if D5.1.1's "two strictly separate mappings" is read as "two disjoint, exactly bounded ranges" (RA-O3).
+2. Root and number segments can share one committed page, growing toward each other, if D6.1.1's "two strictly separate mappings" is read as "two disjoint, exactly bounded ranges" (RA-O3).
 3. Cold-park compaction: copy the used bytes of a long-parked activation to a heap blob and decommit its pages, restoring to the same addresses on resume. Parked cost then approaches the stackless figure at the price of a copy (RA-O4). Not in the first version.
 4. Fallback: keep the JS MIR state machines as a second Activation kind (§10, gate G-P3).
 
@@ -392,7 +392,7 @@ P1 comes before the JS work because Lambda's async test surface is the smaller o
 **P2 — done.** Interpreted JS generator, async and module bodies run once on their own (weak) activation; `yield`, `await` and `yield*` park in place, and `js_interp_resume_{generator,async,module_async}` became thin activation steps. Deleted: the replay ledgers, the four continuation kinds (loop, try, list, array binding), expression replay, the `JS_INTERP_YIELD`/`JS_INTERP_AWAIT` completion kinds, and every replay-only field on the suspended-activation records. The `js_interp_eval` wrapper that existed only for replay is gone (its own comment put the may-suspend walk at 18–31% of T0 time). A JS ambient hook carries the call-activation chain, the `with` chain and the per-call flags; the body enters its creation-time `with` chain once, on its own stack. The module file and namespace scopes now bracket each resume in the driver. Parked activations are traced through their carriers and abandoned by the carriers' finalizers; the stack pool is drained after a heap is destroyed.
 - Gates: test262 AST tier 40261/40261; MIR tier 39983/40261 with the same 278 MIR-only failures as the untouched base; JS suite 484/484 in both the AST and default tiers; JS script gtests 191/191.
 - Net change after P2: about −2,590 tracked lines against +913 new, roughly −1,680.
-- **Follow-up 2026-10-29 (D5.1.1v3 / D5.3.3):** [LR08-13](<Lambda_Issue_Ledger (fixed).md#lr08-13>) is fixed. `JsInterpEnvRoot` owns an exact object-pointer side-root slot, released with its activation segment on abandonment. Persistent realm globals retain explicit registry ownership. Generator and async cycle regressions leave the global root count unchanged. The broader RA-O2 owner inventory remains open.
+- **Follow-up 2026-10-29 (D6.1.1 / D6.3.3):** [LR08-13](<Lambda_Issue_Ledger (fixed).md#lr08-13>) is fixed. `JsInterpEnvRoot` owns an exact object-pointer side-root slot, released with its activation segment on abandonment. Persistent realm globals retain explicit registry ownership. Generator and async cycle regressions leave the global root count unchanged. The broader RA-O2 owner inventory remains open.
 
 **P3 — measured (2026-10-04, release build, Apple Silicon, 16 KB pages).** AST tier, base (replay) against new (activations):
 
@@ -435,7 +435,7 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
 - Gates (2026-10-04): test262 MIR 39983/40261 with the base's exact failure set; AST 40261/40261; the 693 module, top-level-await and dynamic-import baseline tests 693/693 under MIR (three import-rejection cases had depended on the old synchronous drain); JS suite 484/484 under MIR and default; JS script gtests 191/191; forced-promotion sweep (`auto`, both thresholds 1) over every `test/js` script with a golden, identical to the base; Lambda baseline 6206/6206. The node baseline cannot run in this worktree: `require("net")` fails on the untouched base too.
 - Net change so far: about −3,600 tracked lines (−2,600 in `lambda/js`) against +1,123 new, roughly −2,470.
 
-**P5 — done in its lean form (2026-10-05).** Scope ruling (user, 2026-10-05): "impl P5, so that max loc can be reduced". Of the two readings offered, the literal one (a `LambdaTask` record per JS async call, the Lambda run queue as a `RuntimeJobQueue` lane, one drain replacing `js_event_loop_drain`) would have added code and per-call cost. It would also have restructured the two queues whose separation gives D6.3.1 ordering by construction. So P5 unified the protocol and the waits instead.
+**P5 — done in its lean form (2026-10-05).** Scope ruling (user, 2026-10-05): "impl P5, so that max loc can be reduced". Of the two readings offered, the literal one (a `LambdaTask` record per JS async call, the Lambda run queue as a `RuntimeJobQueue` lane, one drain replacing `js_event_loop_drain`) would have added code and per-call cost. It would also have restructured the two queues whose separation gives D7.5.1 ordering by construction. So P5 unified the protocol and the waits instead.
 - **One driver per carrier kind, one protocol for both tiers.** A body parks with a bare payload and finishes with its value, or with its rejection as an error. The `[value, state]` markers, their array allocation per await and per yield, and the state numbers are gone.
   - Async functions and module bodies of both tiers park through `js_await_park`. `js_async_drive` is a single activation step that reads the status, replacing three branches.
   - Generators of both tiers park through `js_gen_park(value, kind)`. The kind is yield, await or yield*, and yield* takes its iterator there. `js_generator_next` has one path instead of an AST branch and a MIR branch.
@@ -443,11 +443,11 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
   - Each record names its body entry. The current file and the active module namespace are now carried by the ambient swap (core and JS hooks), so a body sets them once at entry, like its `with` chain.
 - **One wait outside an activation.** `js_await_sync` (MIR's drain-everything path) and `js_await_sync_incremental` (the interpreter's FIFO-preserving one) were a tier divergence. They are one function now: run jobs only until this promise's reaction has, then fall back to the bounded loop drain.
 - **Wide scalars at the transfer boundary.** The deleted marker arrays had owned a yielded or returned wide scalar; a raw transfer would leave it pointing into the activation's number segment. The JS driver step re-homes the value in its own frame before the segment can be compacted or released. Doing this in the language-neutral activation layer broke `proc/wide_scalar_across_await.ls`, because a Lambda frame does not keep the number top above its own slots across a runtime call; Lambda tasks keep their owned result slots.
-- Not done: **JSCU25 weak registration.** Counting parked JS async activations in the Lambda scheduler's live count adds code, and it would hold a Lambda end-of-run drain on a never-settling promise until the watchdog fires. It stays open for a ruling. The drains keep their own policies (D6.3.1); a shared watchdog helper measured at about 20 lines of gain and was not taken.
+- Not done: **JSCU25 weak registration.** Counting parked JS async activations in the Lambda scheduler's live count adds code, and it would hold a Lambda end-of-run drain on a never-settling promise until the watchdog fires. It stays open for a ruling. The drains keep their own policies (D7.5.1); a shared watchdog helper measured at about 20 lines of gain and was not taken.
 - Gates (2026-10-05): test262 MIR with the base's exact 278 failures; AST 40261 with 0 regressions; module/TLA/dynamic-import set 693/693; JS suite 484/484 (MIR and default); JS script gtests 191/191; MIR emission 32/32 (one anchor moved from the removed marker to `js_gen_park`); MIR ratchet 20/20; forced-promotion sweep identical to the base; Lambda baseline 6206/6206; Lambda concurrency scripts 25/25 in both tiers plain and under forced GC; JS async/generator scripts under forced GC unchanged (two failures that also fail on the base); wide doubles across yield/await match node in both tiers.
 - Net change after P5: about −4,040 tracked lines (−3,035 in `lambda/js`) against +1,123 new, roughly −2,920.
 
-**P6 — done (2026-10-05).** Ratification (user, 2026-10-05: "proceed to P6", plus two explicit rulings on the S7 rows and the D6.1.3 wording). The formal specs were revised in place, `Lambda_Formal_Design.md` 23.0.0 and `Lambda_Formal_Semantics.md` 57.0.0, as recorded in §11.
+**P6 — done (2026-10-05).** Ratification (user, 2026-10-05: "proceed to P6", plus two explicit rulings on the S7 rows and the D7.1.3 wording). The formal specs were revised in place, `Lambda_Formal_Design.md` 23.0.0 and `Lambda_Formal_Semantics.md` 57.0.0, as recorded in §11.
 - **Vibe records:**
   - Concurrency: K14v2, K15v2 and K17v2, with notes at §4.2.3–§4.6 and §10.5–§10.7.
   - Ast_Interpreter: AI11v2 and AI24v2.
@@ -460,7 +460,7 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
   - A cached module image drained the event loop even when nested; now, like a compiled module, only the entry drains.
 - **Doc-agent findings left open:**
   - `doc/Lambda_Concurrency.md` says a value-producing handler over a procedure call compiles and yields `null`, but its own example `let r = wait(h) ^ { 0 }` is rejected at compile time, because `wait` may suspend. This predates this work.
-  - At this checkpoint RA-O2 (`JsInterpEnvRoot` leak on abandonment) was unchanged; the specific leak was fixed on 2026-10-29 under D5.1.1v3 / D5.3.3 (see the P2 follow-up).
+  - At this checkpoint RA-O2 (`JsInterpEnvRoot` leak on abandonment) was unchanged; the specific leak was fixed on 2026-10-29 under D6.1.1 / D6.3.3 (see the P2 follow-up).
 - **Gates:**
   - test262 MIR with the base's exact failure set; AST 40261/40261; module/TLA/dynamic-import set 693/693.
   - JS suite 484/484 (MIR and default); JS script gtests 191/191.
@@ -475,7 +475,7 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
   - **Noticed on the way:** the JS C parser rejects `export async function` ("expected declaration after export") on the base as well; the fixture declares then exports by list.
 - **RA6 — implemented 2026-10-05 (user: "proceed to impl RA6").**
   - **The fiber primitive.** `fiber_call_on(stack_top, fn, arg)` runs `fn` beneath a parked stack and returns. It is assembly on AArch64 and System V x86-64; Windows x64 runs `fn` in place, because its stack probes read TIB bounds the call does not swap.
-  - **The wrapper.** `activation_call_on_base` runs the work 256 bytes below the base stack's saved pointer, under the base stack's bounds and recoverable limit. The work runs inside its own execution boundary, so a fault lands on the base stack (D5.3.6v2) and the caller sees a failed call.
+  - **The wrapper.** `activation_call_on_base` runs the work 256 bytes below the base stack's saved pointer, under the base stack's bounds and recoverable limit. The work runs inside its own execution boundary, so a fault lands on the base stack (D6.3.6) and the caller sees a failed call.
   - **Guards.** While the work runs, no activation may resume or park: both are refused and logged. A nested call made from work already on the base stack runs in place.
   - **Routed through it:** the JS P2 satellite compile and the loop-continuation compile (`js_mir_compile_satellite_unit`), and the dynamic-source parse (`js_interp_prepare_script_mode`: eval and the Function constructors). Each can be triggered inside a generator or async body and executes no script.
   - **Not routed:**
@@ -483,31 +483,31 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
     - Dynamic `import()` loads, which evaluate the module and so may resume other activations.
   - **Gates:** gtest `StackHungryWorkRunsOnTheBaseStack` (about 3 MB of live frames, which no 2 MB activation stack holds, complete through the call); test262 MIR with the base's exact failure set, AST 0 regressions; JS suite 484/484 (default and MIR); script gtests 191/191; forced-promotion sweep identical to the base; Lambda baseline 6207/6207.
   - **Stack size.** It is unchanged (RA14, 2 MB); a smaller one is RA-O5's call.
-  - **Historical finding:** a bounded C recursion with 1 KB frames that overflows an activation's stack dies with an uncaught SIGBUS. The fault is not recognized as a stack overflow, so it is re-raised. The existing unbounded-recursion test (512-byte frames) is contained. The same recursion run directly on an activation reproduces it without RA6, so this is a containment gap from P0 in the fault-address window of `is_stack_overflow_fault`, still to be diagnosed — ledger [LR10-17](<Lambda_Issue_Ledger (fixed).md#lr10-17>). **Verified resolved 2026-10-29 (S7.11.1v2 / S7.11.2v2 / D5.3.6v2):** the original finite native recursion now lands on its activation boundary on macOS. A permanent direct native probe complements the unbounded case; no signal-handler change is attributed to this pass.
+  - **Historical finding:** a bounded C recursion with 1 KB frames that overflows an activation's stack dies with an uncaught SIGBUS. The fault is not recognized as a stack overflow, so it is re-raised. The existing unbounded-recursion test (512-byte frames) is contained. The same recursion run directly on an activation reproduces it without RA6, so this is a containment gap from P0 in the fault-address window of `is_stack_overflow_fault`, still to be diagnosed — ledger [LR10-17](<Lambda_Issue_Ledger (fixed).md#lr10-17>). **Verified resolved 2026-10-29 (S7.11.1v2 / S7.11.2v2 / D6.3.6):** the original finite native recursion now lands on its activation boundary on macOS. A permanent direct native probe complements the unbounded case; no signal-handler change is attributed to this pass.
 - **Net change, all of P0–P6:** about −4,210 tracked code lines (`lambda/`, `lib/`) against +1,145 new, roughly −3,070.
 
 ## 11. Rulings this design revises
 
-Ratified by the user on 2026-10-05 ("proceed to P6"), and applied in place: `Lambda_Formal_Design.md` 22.0.0 → 23.0.0, `Lambda_Formal_Semantics.md` 56.0.0 → 57.0.0 (master's 56.0.0 added S17.8.1 the day before). The table keeps the original proposal; the column on the right records what was written. Rows below the rule were found during P6, where a ruling still described the retired mechanism; the two S rulings and the D6.1.3 wording were put to the user and ruled the same day.
+Ratified by the user on 2026-10-05 ("proceed to P6"), and applied in place: `Lambda_Formal_Design.md` 22.0.0 → 23.0.0, `Lambda_Formal_Semantics.md` 56.0.0 → 57.0.0 (master's 56.0.0 added S17.8.1 the day before). The table keeps the original proposal; the column on the right records what was written. Rows below the rule were found during P6, where a ruling still described the retired mechanism; the two S rulings and the D7.1.3 wording were put to the user and ruled the same day.
 
 | Ruling | Before | Revised to |
 |---|---|---|
 | **K2-R** (`Lambda_Design_Concurrency.md` §4.2.3, §10.5) | May-await state machines; fibers superseded | Stackful activations; state machines retired. The fiber reference design of §4.2.4 becomes the adopted one, on precise side stacks. |
 | **K17** (§10.7) | Unify layers 1, 2, 5; keep 3, 4 per language | Layers 1, 2 and 4 cease to exist (no transform, no frame, one calling convention). Layer 3 stays per language (RA9). Layer 5 as is. |
 | **K10 layer 2** (§4.6) | JS stays on its state machines | JS semantics unchanged; its suspension mechanism moves to activations, subject to G-P3. |
-| **D5.1.1v2** | Third mechanism is "heap async frames", a tail-bearing container traced through its owner | **D5.1.1v3**: "activation stacks" — a native stack and side-stack segments per activation; the root segment is the Item region traced through the owner; native stack and number segment never scanned. |
-| **D5.3.6**, **D6.3.3** | Recovery frames TLS-LIFO; never survive a scheduler yield | **D5.3.6v2**, **D6.3.3v2**: one LIFO chain per activation; a frame may stay armed across a park on its own stack; no jump crosses a stack. |
-| **D6.1.3** | `may_await` analysis (drives the transform) | **D6.1.3v2** (user, 2026-10-05, wording changed from the proposal): `may_await` is an effect fact — the call may park, so it may collect and re-enter — feeding call metadata and GC planning; it drives no transform and no tier choice. The proposal's "JS membrane and diagnostics only" was false of the code. |
-| **D8.1.1v15**, **AI11**, **AI24** | Suspending definitions bypass T0; strict `interp` rejects task-backed bodies | **D8.1.1v16**: T0 executes them; the rejection clause is removed; promotion and loop handoff read hit counters only (RA11, RA12). |
+| **D6.1.1** | Third mechanism is "heap async frames", a tail-bearing container traced through its owner | **D6.1.1**: "activation stacks" — a native stack and side-stack segments per activation; the root segment is the Item region traced through the owner; native stack and number segment never scanned. |
+| **D6.3.6**, **D7.5.3** | Recovery frames TLS-LIFO; never survive a scheduler yield | **D6.3.6**, **D7.5.3**: one LIFO chain per activation; a frame may stay armed across a park on its own stack; no jump crosses a stack. |
+| **D7.1.3** | `may_await` analysis (drives the transform) | **D7.1.3** (user, 2026-10-05, wording changed from the proposal): `may_await` is an effect fact — the call may park, so it may collect and re-enter — feeding call metadata and GC planning; it drives no transform and no tier choice. The proposal's "JS membrane and diagnostics only" was false of the code. |
+| **D8.3.1**, **AI11**, **AI24** | Suspending definitions bypass T0; strict `interp` rejects task-backed bodies | **D8.3.2**: T0 executes them; the rejection clause is removed; promotion and loop handoff read hit counters only (RA11, RA12). |
 | **JSCU26**, **JSCU32** | Move `LambdaAsyncFrame` onto the JS env carrier; shared `JsSuspendedActivation` prefix | Superseded: there is no Lambda async frame, and the shared prefix reduces to the Activation. JSCU25 stands. |
 | **Stage B** (§10.6) | Deferred M:N of parked state machines over a thread pool | Withdrawn as a road. K7 and K31 stand. |
-| **D7.4.2** and concurrency §4.4 | No suspension under a host-API frame, true by construction | **D7.4.2v2**: same rule, enforced at run time (RA10): the host's `call_function` raises a native barrier; `activation_suspend` beneath it is a reported fault. |
+| **D9.5.2** and concurrency §4.4 | No suspension under a host-API frame, true by construction | **D9.5.2**: same rule, enforced at run time (RA10): the host's `call_function` raises a native barrier; `activation_suspend` beneath it is a reported fault. |
 | **S7.11.2** (found in P6) | "Recovery frames never survive a scheduler yield" | **S7.11.2v2** (user, 2026-10-05): a task's boundaries live on its own activation and stay armed across its parks; a fault in a task is contained there and the task completes with the fault result. |
 | **S7.6.7v3** (found in P6) | A handler over a suspending `pn` call resumes through durable completions, the caller's state machine and a fault carve-out | **S7.6.7v4** (user, 2026-10-05): the call parks and resumes in place, so its error reaches the handler as a non-suspending call's does; handlers stay statement-only. |
-| **D8.3.4v3** (found in P6) | TG8 raw variants for "task-free synchronous" `pn` only | **D8.3.4v4**: any fixed-arity `pn`, suspending or not (the colour gate was removed in P1 under RA11). |
-| **D5.2.2v3** (editorial) | "async frames" listed among scalar-ownership boundaries | Removed; no such frame exists. |
+| **D7.3.4** (found in P6) | TG8 raw variants for "task-free synchronous" `pn` only | **D7.3.4**: any fixed-arity `pn`, suspending or not (the colour gate was removed in P1 under RA11). |
+| **D6.2.2** (editorial) | "async frames" listed among scalar-ownership boundaries | Removed; no such frame exists. |
 
-Unchanged and relied on: D5.1.3, D5.3.2, D6.2.2v2, D6.3.1, S7.11, S13.1–S13.2, K3, K7, K13, K31.
+Unchanged and relied on: D6.1.3, D6.3.2, D7.2.2, D7.5.1, S7.11, S13.1–S13.2, K3, K7, K13, K31.
 
 ---
 
@@ -523,7 +523,7 @@ Unchanged and relied on: D5.1.3, D5.3.2, D6.2.2v2, D6.3.1, S7.11, S13.1–S13.2,
 | RA6 | Non-suspending stack-hungry native work runs on the base stack | ratified, implemented 2026-10-05 (`activation_call_on_base`; see §10.1) |
 | RA7 | Abandonment frees the stack and arena and runs no code | ratified, implemented (P0, P2) |
 | RA8 | Task is the only scheduling record, Activation the only suspension record | ratified; implemented with one deviation — JSCU25 is built as weak registration of the JS async carrier, not as a `LambdaTask` record (see §10.1, JSCU25) |
-| RA9 | Readiness lane is the only per-language scheduler difference | ratified; queues stay separate (P5 ruling, D6.3.1) |
+| RA9 | Readiness lane is the only per-language scheduler difference | ratified; queues stay separate (P5 ruling, D7.5.1) |
 | RA10 | Suspending under a native barrier, or with no activation, is a reported fault | ratified, implemented (P0, barrier P6) |
 | RA11 | Tier selection reads hit counters only, never function colour | ratified, implemented (P1, P4) |
 | RA12 | AI11 retired: T0 executes suspending definitions | implemented (P1) |
@@ -536,7 +536,7 @@ Unchanged and relied on: D5.1.3, D5.3.2, D6.2.2v2, D6.3.1, S7.11, S13.1–S13.2,
 | ID | Question |
 |---|---|
 | RA-O1 | ~~Is WebAssembly a live target?~~ **Closed 2026-10-04 (user): not a target.** |
-| RA-O2 | **Inventory remains open:** native frames owning heap memory across a possible suspension (both interpreters and helpers calling back into script). The known `JsInterpEnvRoot` case, [LR08-13](<Lambda_Issue_Ledger (fixed).md#lr08-13>), is fixed under D5.1.1v3 / D5.3.3 as of 2026-10-29; that does not complete the general audit. |
+| RA-O2 | **Inventory remains open:** native frames owning heap memory across a possible suspension (both interpreters and helpers calling back into script). The known `JsInterpEnvRoot` case, [LR08-13](<Lambda_Issue_Ledger (fixed).md#lr08-13>), is fixed under D6.1.1 / D6.3.3 as of 2026-10-29; that does not complete the general audit. |
 | RA-O3 | May root and number segments share one mapping with an exact watermark between them, to halve the minimum parked footprint? |
 | RA-O4 | Cold-park compaction: thresholds, and whether it is needed at all after G-P3 measurements. |
 | RA-O5 | Activation stack reservation size, and whether stack-overflow depth inside an activation should match the top-level budget. |
@@ -601,7 +601,7 @@ In short, the design takes Go's programming model and leaves out its growable st
 
 ## Sanitizer ownership follow-up — 2026-10-29
 
-Under **D5.1.1v3 / D5.3.3 / D5.3.6v2**, reusable native stacks now begin
+Under **D6.1.1 / D6.3.3 / D6.3.6**, reusable native stacks now begin
 a new ASan lifetime at priming and report fiber switches, including base-stack
 work and terminal fake-stack retirement. Cold-stack serialization preserves
 application poison. The 160-byte priming failure in
@@ -610,3 +610,45 @@ locals survive compaction and an actual expired scoped local still triggers
 ASan. Original live runtime and mesh event fixtures pass with forced/poisoned
 GC and stack-use-after-return checking enabled.
 Receipt: [error and activation follow-up](<impl/Lambda_Impl_Ledger_Error_Activation_Followup (done).md>).
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D5.1.1v3 → D6.1.1
+
+**D6.1.1** Three stack-like mechanisms with distinct owners: the native
+C stack (invisible to GC); **watermarked side stacks** — the root stack,
+precisely scanned `[base, top)`, and the **number stack, never
+scanned** — two strictly separate mappings; and **activation stacks** —
+every suspendable body (a Lambda task; a JS generator, async function or
+module body; in either tier) runs once on a native stack of its own, with
+its own root and number segments, and parks in place. *A parked
+activation's root segment is the one Item region it contributes, traced
+through its owner (the task, or the generator/async carrier); its native
+stack and number segment are never scanned.* LIFO lifetimes live on the
+side stacks, an activation's included; non-LIFO lifetimes own their
+scalars in tail regions of their own allocation. (Revised 2026-10-05, v3:
+the third mechanism was the heap async frame, a tail-bearing container a
+transformed function spilled into; no tier transforms a function in order
+to suspend it.) [SF2, SF12, Stack_Frame §5.1, Runtime_Async RA1, RA3,
+RA13–RA15]
+
+### ex-D5.3.6v2 → D6.3.6
+
+**D6.3.6** Recovery frames form **one LIFO chain per activation** (the
+thread's base stack is one), a frame per boundary (execution entry, task
+body, handler, module transaction, guest entry), each with an exact
+side-root + number-stack checkpoint; landing restores the watermarks before
+inspecting the fault; the outer barrier retires abandoned inner chains. A
+frame may stay armed across a park on its own stack; *no jump ever crosses
+a stack*. (Revised 2026-10-05, v2: v1 kept one chain per thread, which a
+park on another stack would interleave. Supersedes the single shared
+recovery point.) [Rooting §2.1a, ER, Runtime_Async §4.5]

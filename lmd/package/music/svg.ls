@@ -1,4 +1,4 @@
-// Ordinary SVG elements keep music on the existing Radiant/export path (D7.1.2v2).
+// Ordinary SVG elements keep music on the existing Radiant/export path (D9.1.2).
 import c: .common
 import f: .fonts
 import s: lambda.chart.svg

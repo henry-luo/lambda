@@ -31,7 +31,7 @@ passing replacement gate.
 | `utils/check_gc_effects.py` | Pending native source scanner rewrite. |
 | `utils/check_gc_root_hazards.py` | Pending native source scanner rewrite. |
 | `utils/check_state_machine.py` | `check_state_machine.ls` parses the enum and rule tables, validates all 14 complete families and 14 invariant bindings, and matched the Python checker's current output byte for byte. |
-| `utils/lint/rules/structural/check_dom_editable_architecture.py` | `check_dom_editable_architecture.ls` checks the D7.2.5/D7.5.3 source boundary. It gathers all 1,250 Python-visible production sources before reading them and reports the same current registry-owner failure as Python. |
+| `utils/lint/rules/structural/check_dom_editable_architecture.py` | `check_dom_editable_architecture.ls` checks the D10.2.1/D9.5.6 source boundary. It gathers all 1,250 Python-visible production sources before reading them and reports the same current registry-owner failure as Python. |
 | `utils/lint/rules/structural/no_new_per_file_header.py` | Blocked on a native Git index/status reader; its decision depends on staged and untracked status. |
 | `utils/lint/tidy/explicit_cast_check.py` | Blocked on a native libclang AST/type interface. |
 | `utils/extract_doc_blocks.py` | `extract_doc_blocks.ls` extracts the current 534 runnable units and 5 no-run entries; every `.ls` matched byte for byte and its index matched as JSON. The formatter uses two-space indentation for `indent: 1`, so index bytes differ. This extractor is called by `check_doc_blocks.py`. |

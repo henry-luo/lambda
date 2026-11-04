@@ -117,7 +117,7 @@ enum EnumTypeId {
     LMD_TYPE_VARRAY,  // virtual indexed sequence; public semantic type is array
     LMD_TYPE_MAP,
     LMD_TYPE_VMAP,  // virtual map with vtable dispatch (hashmap, treemap, etc.)
-    // D2.6.6v2 phase 2 (OB14): `LMD_TYPE_OBJECT` is GONE. Nominal-ness is a
+    // D3.1.1 phase 2 (OB14): `LMD_TYPE_OBJECT` is GONE. Nominal-ness is a
     // property of the type descriptor (TypeMap::nominal, cached by
     // Type::is_nominal), never a container kind — a nominal value is an ordinary
     // MAP or ELEMENT, and `object` survives only as a TYPE (`TYPE_OBJECT`),
@@ -133,7 +133,7 @@ enum EnumTypeId {
     LMD_TYPE_COUNT,  // number of semantic type IDs; reserved tags below are excluded
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
 
-    // D2.1.4/D2.1.6: register occupied Item tags without admitting language types.
+    // D2.1.3/D2.1.5: register occupied Item tags without admitting language types.
     LMD_TYPE_PENDING = 0x1E,   // unresolved scalar return; payload kind selects its lane
     LMD_TYPE_SENTINEL = 0x1F,  // internal JS hole/iterator markers; payload selects the marker
 };
@@ -219,7 +219,7 @@ LAMBDA_STATIC_ASSERT(LMD_TYPE_COUNT <= 0x20,
                      "Lambda TypeIds must stay out of double discriminator space");
 LAMBDA_STATIC_ASSERT(LMD_CONTAINER_HEAP_START <= 0x20,
                      "TypeId space must stay inside the 000 octant; 0x80-0x9F is inline-int space");
-// D7.4.5v2: the enum order is an enforced classification ABI. Array-like
+// D9.5.5: the enum order is an enforced classification ABI. Array-like
 // carriers form one closed range, Velmt immediately follows Element, and no
 // valid TypeId follows Error.
 LAMBDA_STATIC_ASSERT(LMD_TYPE_ARRAY_NUM == LMD_TYPE_RANGE + 1 &&
@@ -232,7 +232,7 @@ LAMBDA_STATIC_ASSERT(LMD_TYPE_COUNT == LMD_TYPE_ERROR + 1,
                      "Error must be the last valid TypeId");
 LAMBDA_STATIC_ASSERT(LMD_TYPE_RANGE == 16 && LMD_TYPE_VARRAY == 19 &&
                      LMD_TYPE_VELMT == 23 && LMD_TYPE_ERROR == 27,
-                     "D7.4.5v2 TypeId ABI changed without an ABI revision");
+                     "D9.5.5 TypeId ABI changed without an ABI revision");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_RAW_POINTER), "raw pointer tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_NULL), "null tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_UNDEFINED), "undefined tag must be non-double");
@@ -771,7 +771,7 @@ typedef struct Type {
     uint8_t kind:4;      // TypeKind: sub-classification (SIMPLE, UNARY, BINARY, PATTERN)
     uint8_t is_literal:1;  // is a literal value
     uint8_t is_const:1;  // is a constant expr
-    // D2.6.6v2 phase 2: set only on a real TypeMap/TypeElmt that carries a
+    // D3.1.1 phase 2: set only on a real TypeMap/TypeElmt that carries a
     // nominal record. It lives on the BASE because "is this type nominal?" must
     // be answerable of ANY Type* — the bare singletons (TYPE_MAP, TYPE_ELMT,
     // LIT_TYPE_MAP, …) share the map/element tag but are plain `Type`s, so
@@ -785,7 +785,7 @@ typedef struct Type {
 // lossy TypeId.
 typedef struct ArrayRepCert ArrayRepCert;
 
-// D2.6.6v2 / D3.4.1: gc_heap.c is C while the runtime carriers live in C++.
+// D3.1.1 / D3.4.1: gc_heap.c is C while the runtime carriers live in C++.
 // Keep its byte-level view in one canonical C ABI layout and assert the real
 // C and C++ structs against it where their full definitions are available.
 typedef struct LambdaGcContainerLayout {
@@ -833,7 +833,7 @@ typedef struct LambdaGcTypeMapLayout {
     uint8_t has_named_shape;
     uint8_t is_trusted_contract;
     void* shape;
-    void* last;  // D3.4.3v3: a tree node's chain may continue past it
+    void* last;  // D3.4.3: a tree node's chain may continue past it
 } LambdaGcTypeMapLayout;
 
 typedef struct LambdaGcShapeEntryLayout {
@@ -960,7 +960,7 @@ typedef struct VArray VArray;
 typedef struct Velmt Velmt;
 typedef struct VirtualContainer VirtualContainer;
 typedef struct Element Element;
-// S2.1.3 / D2.6.6: an object IS a nominally-typed element, so it shares
+// S2.1.3 / D3.1.1: an object IS a nominally-typed element, so it shares
 // Element's layout rather than defining a fourth container shape. The two
 // differ only in their TypeId and in which type struct the `type` slot holds
 // (TypeObject* vs TypeElmt*), both of which extend TypeMap.
@@ -1101,7 +1101,7 @@ enum MapKind {
 #define CONTAINER_ARRAY_FLAG_NATIVE_LANE (1u << 4)
 // raw masks remain part of the container ABI for code that snapshots `flags`
 // without a Container pointer (notably the moving GC).
-// D2.6.6v2/D2.6.11: bit 6 was `has_js_props`, retired when the JS companion map
+// D3.1.1/D3.1.1: bit 6 was `has_js_props`, retired when the JS companion map
 // moved into the array's own attribute face. It is reserved for the phase-2
 // `is_nominal` cache bit (S2.1.4) — the flags byte is otherwise full, and the
 // container header must stay eight bytes.
@@ -1131,7 +1131,7 @@ struct Container {
             uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
             uint8_t is_static:1;         // read-only const-pool/static data container
             uint8_t is_immortal:1;       // storage outlives every execution frame (input arena/const pool)
-            uint8_t nominal_reserved:1;  // reserved for the D2.6.11 `is_nominal` cache bit
+            uint8_t nominal_reserved:1;  // reserved for the D3.1.1 `is_nominal` cache bit
             uint8_t has_ctor_reserved:1; // map has constructor slots awaiting initialization
         };
     };
@@ -1257,7 +1257,7 @@ _Static_assert(JS_ELEMENTS_STATE_MASK == (uint8_t)(0x20u | 0x40u | 0x80u),
 // A descriptor carries the full semantic contract for a packed carrier. TypeId
 // alone cannot distinguish int from int?, even though both have LMD_TYPE_INT.
 //
-// SCU7 (D2.6.1, D3.4.6): ONE total resolver, `lambda_lane_storage_desc_for`,
+// SCU7 (D3.2.1, D3.4.6): ONE total resolver, `lambda_lane_storage_desc_for`,
 // answers for every well-formed contract. Every other storage decision -- the
 // TypeId that decodes a packed slot, the slot width, the "native lane" tests
 // the JIT and the array boundary make -- is a projection of this record.
@@ -1293,7 +1293,7 @@ enum ArrayRepCertFlags {
     // some axis has a fixed length (`T[n]`): lengths are not a carrier fact,
     // so every reuse re-checks them against the live value
     ARRAY_REP_CERT_COUNTED = 1u << 3,
-    // the resolved numeric leaf carrier proves every admitted value (D3.3.3v3)
+    // the resolved numeric leaf carrier proves every admitted value (D4.3.3)
     ARRAY_REP_CERT_PRIMITIVE_VALUES = 1u << 4,
 };
 
@@ -1326,7 +1326,7 @@ static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
         int64_t length;
     };
 
-    // D2.6.6v2: List/Array extends Map — the attribute face comes FIRST in
+    // D3.1.1: List/Array extends Map — the attribute face comes FIRST in
     // every container, so a cast to any ancestor is valid by construction.
     struct List {
         // 8-byte Container header, byte-for-byte with `struct Container`.
@@ -1360,7 +1360,7 @@ static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
         uint8_t ctor_reserved_mask_lo;
         uint8_t ctor_reserved_mask_hi;
         uint8_t reserved_state;
-        //--------------------- Map face (D2.6.6v2)
+        //--------------------- Map face (D3.1.1)
         void* type;
         void* data_shape;   // named to avoid colliding with the element union below
         int data_cap;
@@ -1412,7 +1412,7 @@ static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
     };
 
 
-    // D2.6.6v2: Element extends Array extends Map. The attribute face is FIRST,
+    // D3.1.1: Element extends Array extends Map. The attribute face is FIRST,
     // at Map's own offsets; the content face follows. Object is Element.
     struct Element {
         // 8-byte Container header, byte-for-byte with `struct Container`.
@@ -1436,7 +1436,7 @@ static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
         ArrayRepCert* rep_cert;  // non-GC full-contract representation proof
     };
 
-// D2.6.6v2: the C mirror of the container chain (Map -> List/Array -> Element)
+// D3.1.1: the C mirror of the container chain (Map -> List/Array -> Element)
 // must match the C++ definitions in lambda.hpp byte for byte. gc_heap.c is C and
 // compiles against THIS mirror, so the C++ static_asserts cannot reach it — a
 // silent divergence here mistraces the heap. These are that guard.
@@ -1602,12 +1602,12 @@ void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items 
 Item for_window(Array* out, Item offset, Item limit, int64_t flags);
 Array* array_spreadable();  // constructs a spreadable empty array
 // Box an inferred pointer lane's words in place and drop the lane. An inferred
-// lane is a representation choice, not a source contract (D3.3.1v2, D3.3.3v3),
+// lane is a representation choice, not a source contract (D4.3.1, D4.3.3),
 // so any consumer that reads `items[]` directly must widen first. Returns false
 // when the array has no inferred pointer lane to widen.
 bool array_widen_inferred_pointer_lane(Array* array);
-void array_push(Array* arr, Item item);  // sequence append: splices a list (D2.6.5v3)
-void array_push_verbatim(Array* arr, Item item);  // verbatim append: one value, one item (D2.6.5v3)
+void array_push(Array* arr, Item item);  // sequence append: splices a list (D3.3.1)
+void array_push_verbatim(Array* arr, Item item);  // verbatim append: one value, one item (D3.3.1)
 // S9.3.1 capturing append for Lambda literals/comprehensions; array_push does not capture.
 void array_push_capture(Array* arr, Item item);
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
@@ -1710,7 +1710,7 @@ struct Function {
     // Trailing only: generated code pokes type_id at offset 0 and
     // closure_field_count at offset 2, so no field may shift.
     // AST definition site (AstFuncNode*) — the T0 body plus, with `def_module`,
-    // the (module, node) identity D6.2.1/S5.5.1 already require. NULL for
+    // the (module, node) identity D7.2.1/S5.5.1 already require. NULL for
     // natively-compiled and foreign entries.
     const void* def;
     struct Script* def_module;  // owner of def's const_list / type_list / slab
@@ -1922,8 +1922,8 @@ Symbol* name_key_symbol_ns(const char* name, size_t len, struct Target* ns);
 
 // ---------------------------------------------------------------------------
 // Pending Items — return-value convention v3 (RV3, see
-// `vibe/Lambda_Design_Compiling_Return_Value.md`, formal spec D5.2.1v3 /
-// D8.4.2v3).
+// `vibe/Lambda_Design_Compiling_Return_Value.md`, formal spec D6.2.1 /
+// D7.4.2).
 //
 // A shape-2 return is the pair `[item, scalar]`: lane 1 carries an ordinary
 // Item unless the returned value is a WIDE scalar (int64 / uint64 /
@@ -1950,7 +1950,7 @@ Symbol* name_key_symbol_ns(const char* name, size_t len, struct Target* ns);
 // Return-value convention v3 is the only generated-function ABI. Shape-2
 // payloads use a MIR pair or Context::mir_companion_slot; side-number-stack
 // addresses remain only at explicit native/host ownership boundaries
-// (D5.2.1v3, D5.2.2v3). The fixed revision rejects stale cached modules.
+// (D6.2.1, D6.2.2). The fixed revision rejects stale cached modules.
 #define LAMBDA_RETURN_CONVENTION_REVISION 3
 
 #define ITEM_PENDING_TAG    ((uint64_t)LMD_TYPE_PENDING)
@@ -2051,7 +2051,7 @@ static inline bool is_map_family_type_id(TypeId type_id) {
 }
 
 // The kind that carries BOTH an attribute face and a content face. Since
-// D2.6.6v2 gives the materialized face to ELEMENT; D7.4.5v2 adds VELMT as its
+// D3.1.1 gives the materialized face to ELEMENT; D9.5.5 adds VELMT as its
 // representation-transparent virtual counterpart.
 static inline bool is_element_family_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_VELMT;
@@ -2571,7 +2571,7 @@ static inline bool item_is_error(Item item) {
 
 // Error completion from a LambdaError* that may be null (payload allocation
 // failed): a null payload still completes as the pointer-less ERROR sentinel,
-// never as null (D1.4v3). This is the one spelling of "return this error".
+// never as null (D1.4). This is the one spelling of "return this error".
 static inline Item err2it_or_error(LambdaError* err) {
     return err ? err2it(err) : ITEM_ERROR;
 }
@@ -2699,7 +2699,7 @@ typedef struct PropertyKeySpec {
 // Immutable BSS metadata for one sealed MIR module. `module_id` is either a
 // dense slab ID or a logical compilation unit marked by the flag above; each
 // Runtime resolves the latter to a dense local slab. Mutable bindings remain
-// per EvalContext (D8.5.1v2).
+// per EvalContext (D8.5.1).
 typedef struct LambdaModuleLayout {
     uint32_t module_id;
     uint32_t var_count;
@@ -2713,9 +2713,9 @@ typedef struct LambdaModuleLayout {
 } LambdaModuleLayout;
 
 // A satellite contributes a sealed suffix to its owner's key table. The image
-// is compiled without the receiving runtime's state (D8.5.1v7), and other
+// is compiled without the receiving runtime's state (D8.3.5), and other
 // satellites may publish first, so the suffix is placed only when publication
-// links it; `property_key_base` records where (D4.6.2v2).
+// links it; `property_key_base` records where (D5.6.2).
 #define LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS 0x80000000u
 
 typedef struct LambdaModuleVarRef {
@@ -3093,7 +3093,7 @@ extern "C" {
     Type* lambda_binder_value_type(Item value);
     // Box a selected contract as a first-class `type` value. Binder frames
     // retain the inner contract for admission; expression reads need this
-    // self-tagged wrapper (D3.1.1v4).
+    // self-tagged wrapper (D4.1.1).
     Item lambda_type_value_from_contract(Type* contract);
     // Admit an exact primitive ArrayNum, or reify an empty ordinary Array,
     // under a rank-one primitive T[] contract and install its certificate.
@@ -3624,18 +3624,18 @@ extern "C" {
     Item pn_io_text_search3(Item source, Item query, Item options);
     Item pn_io_fetch1(Item target);
     Item pn_io_fetch2(Item target, Item options);
-    // lambda.io.mail (D7.2.4v4; vibe/Lambda_Demo_Mail.md §5.3)
+    // lambda.io.mail (D9.3.4; vibe/Lambda_Demo_Mail.md §5.3)
     Item pn_io_mail_open(Item url, Item options);
     Item pn_io_mail_command2(Item session, Item command);
     Item pn_io_mail_command3(Item session, Item command, Item args);
     Item pn_io_mail_command4(Item session, Item command, Item args, Item options);
     Item pn_io_mail_idle(Item session, Item seconds);
     Item pn_io_mail_send(Item url, Item options, Item message);
-    // lambda.io.secret (D7.2.4v4; vibe/Lambda_Demo_Mail.md ML6)
+    // lambda.io.secret (D9.3.4; vibe/Lambda_Demo_Mail.md ML6)
     Item pn_io_secret_get(Item service, Item account);
     Item pn_io_secret_set(Item service, Item account, Item value);
     Item pn_io_secret_delete(Item service, Item account);
-    // lambda.io.loopback (D7.2.4v4; vibe/Lambda_Demo_Mail.md MG7)
+    // lambda.io.loopback (D9.3.4; vibe/Lambda_Demo_Mail.md MG7)
     Item pn_io_websocket_open1(Item url);
     Item pn_io_websocket_open2(Item url, Item options);
     Item pn_io_websocket_send(Item connection, Item data);
@@ -3723,7 +3723,7 @@ extern "C" {
     void cow_profile_note_vmap_rejection(void);
     void cow_profile_dump(void);
     // MIR Direct's opt-in executed call census. IDs are registered while
-    // lowering and incremented only by diagnostic MIR (D5.4.4).
+    // lowering and incremented only by diagnostic MIR (D6.4.4).
     enum LambdaExecCallKind {
         LAMBDA_EXEC_CALL_HELPER = 1,
         LAMBDA_EXEC_CALL_RAW = 2,

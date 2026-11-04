@@ -1,4 +1,4 @@
-// typed arithmetic retains the shared decimal and BigInt rules (S4.4, D5.3).
+// typed arithmetic retains the shared decimal and BigInt rules (S4.4, D6.3).
 fn decimal_ops(a: decimal, b: decimal) any {
     return [a + b, a - b, a * b, a / b, a div b, a % b]
 }

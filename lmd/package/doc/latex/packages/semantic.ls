@@ -1,4 +1,4 @@
-// Bounded semantic inference rules and T-diagram source model (D7.2.1–D7.2.4).
+// Bounded semantic inference rules and T-diagram source model (D9.3.1–D9.3.4).
 import util: ~~.util
 import math: lambda.doc.math.math
 

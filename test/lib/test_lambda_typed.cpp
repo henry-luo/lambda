@@ -296,7 +296,7 @@ TEST(LambdaTypedItem, ShapeRefBorrowsAndAdvancesShapeEntries) {
     shape = lam::shape_next(&owner, shape);
     EXPECT_FALSE((bool)shape);
 
-    // D3.4.3v3: a type whose chain continues past its last field stops there
+    // D3.4.3: a type whose chain continues past its last field stops there
     owner.last = &first;
     shape = lam::shape_next(&owner, lam::shape_borrow(&first));
     EXPECT_FALSE((bool)shape);

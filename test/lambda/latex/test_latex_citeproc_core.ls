@@ -1,4 +1,4 @@
-// CSL tree evaluation and locale fallback are data-driven (D7.2.3, S1.8).
+// CSL tree evaluation and locale fallback are data-driven (D9.3.3, S1.8).
 import cp: lambda.doc.latex.citeproc.citeproc
 import data: lambda.doc.latex.citeproc.data
 import loc: lambda.doc.latex.citeproc.locale

@@ -21,8 +21,8 @@ baseline passes **8,736/8,736**, including 2,112 reused unchanged input-parser
 cases. See [this batch's results](#2026-11-04-batch-tuning-of-every-full-mir-miss).
 Historical campaign counts below describe their own archived sources.
 
-Authority: **D1.4v4, D1.6, D2.4.1–D2.4.3, D5.2–D5.3,
-D8.2.4v2–D8.2.6v2, D8.4.1v2–D8.4.2v2**; numeric semantics
+Authority: **D1.4, D1.6, D2.3.4–D2.3.5, D6.2–D6.3,
+D8.2.4–D8.2.6, D7.4.1–D7.4.2**; numeric semantics
 **S4.1, S4.4–S4.5**, declared contracts **S11.4.1v5**, and error
 containment **S3.5, S7.7.2–S7.7.3**. No formal ruling changes.
 
@@ -33,7 +33,7 @@ containment **S3.5, S7.7.2–S7.7.3**. No formal ruling changes.
 - Prior increment committed d4733c37b; this checkpoint accompanies the batch commit.
 - Preserve unrelated AGENTS/formal-spec/RDB/Radiant/DOM changes in the shared checkout.
 - Goal remains open: all valid rows must beat Full MIR, with original 28 performance retained.
-- Authority: S7.7.2v2–S7.7.3, S9.1.2, S9.3.1, S11.2.1, D2.4.3, D3.2.4v4, D5.2–D5.3, D7.4.5v2, D8.4.2v2.
+- Authority: S7.7.2v2–S7.7.3, S9.1.2, S9.3.1, S11.2.1, D2.3.5, D4.2.5, D6.2–D6.3, D9.5.5, D7.4.2.
 - Root: `temp/lambda_mir_mvp/tune48_batch/`; no vendor or formal ruling changes.
 - Fresh control release SHA b09fddd90d240ae9152ef293a006fbdcb3be173bc5fd11e16bcaed4d955e8f6b.
 - Primary v7 binary: `final-release.exe`, SHA a7a20904f412b94d1877f8e08bc545824b13121ffc24f6734a1c544f28e33bb0.
@@ -99,7 +99,7 @@ MVP. The ordinary per-runtime loaded-script registry remains in use.
 Values, types, objects, `Context`, GC and helper implementations are shared.
 There is no private heap or value ABI. `MirValue`, `FnVariantAnalysis`, return
 companions, scalar homes, root liveness and stack-overflow recovery come from the
-shared emitter (**D2.4**, **D5.2–D5.3**). Boxed bindings and reads adopt cold scalar
+shared emitter (**D2.3**, **D6.2–D6.3**). Boxed bindings and reads adopt cold scalar
 bytes into owned homes; native scalar recursion avoids collecting-call ceremony
 when its effect plan proves that safe. Lowering rejects an emitted collecting
 call that violates a planned noncollecting function.
@@ -135,7 +135,7 @@ no-MIR builds exclude both MVP implementation files.
   `and` condition. A different enclosing loop, extra writes or an unknown bound
   withhold that proof. A fixed point handles dependencies between bindings;
   expression ranges are queried transiently, with wide intermediate arithmetic
-  preventing overflow in the proof itself (**D8.2.5v3**).
+  preventing overflow in the proof itself (**D8.2.5**).
 - **Native consumers:** proven finite arithmetic, comparisons and int-to-double
   conversion omit poison/overflow checks. Finite Item packing/unpacking uses the
   shared representation primitives, retaining helper paths for nonfinite lanes.
@@ -162,7 +162,7 @@ AST node, so later range/representation queries never read expired stack storage
   retain real calls and stack guards. Arguments evaluate once before fresh
   parameter/local registers are installed, and each inline return has its own
   join. The same lowering handles `fn`, `pn`, early returns and nested scalar
-  calls (**D8.3.3**, **D5.3.6v2**).
+  calls (**D7.3.3**, **D6.3.6**).
 - **Integer guards:** add/subtract need a finite result and one finite operand
   to exclude all lane sentinels. When neither operand is statically finite,
   checking one operand after the result is sufficient; the old slow helpers
@@ -178,12 +178,12 @@ AST node, so later range/representation queries never read expired stack storage
 - **Branch demand:** proven Boolean `and`/`or` conditions branch directly with
   ordinary short-circuit order. `while` tests before entry, then branches back
   conditionally; `continue` still reaches that test. This avoids temporary
-  Boolean joins and an unconditional backedge (**S3.4**, **D8.2.6v2**).
+  Boolean joins and an unconditional backedge (**S3.4**, **D8.2.6**).
 - **Floating constants:** each distinct literal bit pattern gets one register
   definition at function entry. MIR otherwise materializes these literals as
   loads inside a loop, including Mandelbrot's `2.0` and `4.0` each iteration.
   The compile-time pool distinguishes signed zero and NaN payloads, and all
-  floating arithmetic retains its original order and native representation (**D2.4.3**).
+  floating arithmetic retains its original order and native representation (**D2.3.5**).
 
 ## Use and admitted surface
 
@@ -272,7 +272,7 @@ into `mir_container_access.hpp`; both emitters now call them.
 
 - **Reads and writes:** int/bool indexing uses existing nullable scalar lanes;
   invalid reads retain null, including negative and 64-bit out-of-bounds keys
-  (**S7.1.1v3**, **D2.4**). The float extension below adds native float reads. Native stores
+  (**S7.1.1v3**, **D2.3**). The float extension below adds native float reads. Native stores
   require a matching primitive layout, writable owner and valid index. The
   existing checked setter owns detachment, dynamic admission and failed stores
   (**S7.1.3v2**, **S11.4.1v3**).
@@ -281,20 +281,20 @@ into `mir_container_access.hpp`; both emitters now call them.
   of fixed suffix slots in the precise root frame. Callees consume those
   transport cells before calling out and publish each replacement; callers
   reload after normal and error returns. This handles nested forwarding,
-  reassignment and mixed plain/`var` arguments (**S9.1.2–S9.1.3**, **D5.3.1**).
+  reassignment and mixed plain/`var` arguments (**S9.1.2–S9.1.3**, **D6.3.1**).
 - **Array descriptors:** layout, length and mutability guards are refreshed
   after binding replacement and borrowed calls; captures revoke the writable
   fact. A guarded extent covers indices with a proven nonnegative interval.
   Buffer pointers are normally reloaded at access. A two-statement scalar
   store loop may retain its buffer because only its checked-store fallback
   can collect; that fallback reloads the buffer before the backedge
-  (**D4.4.4v4**, **D4.4.6**).
+  (**D5.4.4**, **D5.4.5**).
 - **Integer proofs:** a private scalar parameter gets an interval only when
   every direct call supplies one and the parameter is never assigned. Range
   induction and nonnegative guarded steps extend local counter proofs. A loop
   condition can narrow a read only before the first body write of that binding;
   the proof passes through a nested loop only when that entire loop never
-  writes the binding (**D8.2.5v3**, **S4.1**).
+  writes the binding (**D8.2.5**, **S4.1**).
 - **Array reduction:** the exact body `sum = sum + a[i]; i = i + 1` under
   `i < limit` gets a four-lane reduction only when `fill` and every write prove
   the complete element interval. Whole-array reassignment or a mutable borrow
@@ -302,7 +302,7 @@ into `mir_container_access.hpp`; both emitters now call them.
   start, physical layout, array length and a trip bound derived from the
   element magnitude. Every partial sum and merge must fit int53. Other inputs
   execute the original checked loop; no result or iteration is omitted
-  (**S4.1.2**, **D4.4.4v4**).
+  (**S4.1.2**, **D5.4.4**).
 
 The focused gate now has **13 groups**, covering all six benchmark goldens,
 forced-GC benchmark execution, reduction MIR, and the new
@@ -488,18 +488,18 @@ SHA-256 and all compiler/benchmark/timer hashes are retained in the raw report.
 
 `beng/spectralnorm2.ls` and `awfy/nbody2.ls` run unchanged, completing coverage
 of the eight selected workloads. The runtime value model, array certificates,
-borrow transport and precise collector are unchanged (**D2.4**, **D4.4**, **D5.3**).
+borrow transport and precise collector are unchanged (**D2.3**, **D5.4**, **D6.3**).
 
 - Native float reads use the existing nullable float lane. Its reserved NaN
   payload denotes absence; ordinary NaN, signed zero and subnormals remain
   numbers. Arithmetic propagates absence, boxing maps it to null, declared
   float boundaries reject it, and stores take the checked setter on absence
-  (**D2.5**, **S7.1.1v3**, **S7.1.3v2**, **S11.4.1v3**). The null-test emitter
+  (**D2.4**, **S7.1.1v3**, **S7.1.3v2**, **S11.4.1v3**). The null-test emitter
   is shared with production; comparison semantics retain the checked path.
 - Homogeneous primitive literals allocate through the existing initialized
   `array_num_new` constructor, now registered as a JIT import. The array is
   precisely rooted while members evaluate, and each store reloads its buffer.
-  Destination admission installs the ordinary array certificate (**D5.3.1**).
+  Destination admission installs the ordinary array certificate (**D6.3.1**).
 - Immutable numeric module bindings use native scalar slots and call-free
   initialization. Dependencies must be earlier immutable scalar expressions.
   Unsupported module calls reject during planning, before MIR construction
@@ -511,14 +511,14 @@ borrow transport and precise collector are unchanged (**D2.4**, **D4.4**, **D5.3
   reentering calls; its buffer pointers remain valid for that body. Emission
   verifies that it introduced no collecting call. Short/shared inputs execute
   the original checked operations, retaining partial-update/error behavior
-  (**D4.4.4v4**, **D8.4.1v2**, **S9.1.2–S9.1.3**).
+  (**D5.4.4**, **D7.4.1**, **S9.1.2–S9.1.3**).
 - Outer counter bounds now survive a nested loop that never writes that
   counter, including writes after the current use. Previously an extent of six
   for nbody's five-element arrays forced every access through the helper.
   Scalar numeric conversions and float `sqrt` use native lanes. Division by
   a proven positive integer power of two uses its exactly representable
   reciprocal, preserving IEEE rounding without reassociating expressions
-  (**S4.5.2**, **D8.2.5v3**).
+  (**S4.5.2**, **D8.2.5**).
 
 All **15 focused groups** pass on the archived release, including all eight
 benchmark goldens and forced/poisoned GC on the four array benchmarks.
@@ -578,7 +578,7 @@ In a fresh checkout, build with `make release` and use `--exe ./lambda.exe`. The
 Coverage grows from eight to **13 unchanged typed benchmarks**: `r7rs/tak`,
 `r7rs/ack`, `larceny/quicksort`, `kostya/matmul`, and `kostya/collatz` join the
 original population. Runtime types, data models, allocation, rooting and ABI
-remain shared (**D2.4**, **D5.3**, **D8.4.2v2**).
+remain shared (**D2.3**, **D6.3**, **D7.4.2**).
 
 - `shr` uses the existing shared guarded bitwise emitter. Finite int53 operands
   and a count below 64 take native arithmetic right shift; negative/large
@@ -692,7 +692,7 @@ whole-language performance.
 
 This follow-up keeps the same 13 Lambda workloads, goldens, C ports and timing
 boundaries. It changes compiler decisions, preserving the existing runtime data
-model, helpers, collector and MIR vendor code (**D1.2v2**, **D1.4v4**, **D1.6**).
+model, helpers, collector and MIR vendor code (**D1.2**, **D1.4**, **D1.6**).
 
 ### Native regions and boundaries
 
@@ -702,7 +702,7 @@ model, helpers, collector and MIR vendor code (**D1.2v2**, **D1.4v4**, **D1.6**)
   still happen. A compatible declared scalar destination consumes a native
   return directly, routing the error companion to that destination's ordinary
   failure boundary. Other fallible call consumers retain their boxed error
-  join and success contract (**D8.2.6v2**, **D8.4.2v2**, **S7.7.2–S7.7.4**).
+  join and success contract (**D8.2.6**, **D7.4.2**, **S7.7.2–S7.7.4**).
 - **Finite integer regions:** closed scalar loops may guard an inferred input
   interval, then execute four ordinary iterations. Interval transfer proves
   every arithmetic operation and shift finite throughout those iterations.
@@ -721,20 +721,20 @@ model, helpers, collector and MIR vendor code (**D1.2v2**, **D1.4v4**, **D1.6**)
   layout, writable state and bounds are checked before entering. A closed
   function with matching parameter initializers can reuse the proof through
   its final indexed operations. Calls, captures, owner replacement and other
-  invalidating operations keep the checked path (**D4.4.4v4**, **S9.1.2–S9.1.3**).
+  invalidating operations keep the checked path (**D5.4.4**, **S9.1.2–S9.1.3**).
   Quicksort's partition now uses native loads/stores in this guarded body.
 - **Entry guards and borrows:** dense entries branch directly on each array's
   witness. Only the checked sibling builds persistent layout/COW metadata and
   retains borrow write-back addresses. Both siblings consume the caller's
   transient borrow cells before nested calls. Forward-only array bindings keep
   their precise root/home without rebuilding unused indexing metadata
-  (**D5.3**, **S9.1.3**). This removes register spills observed in nbody's entry.
+  (**D6.3**, **S9.1.3**). This removes register spills observed in nbody's entry.
 - **Finite ranges and construction:** a finite procedural `for` omits its
   unreachable range-error path. A single nonnegative conditional increment
   may use the range's maximum trip count; an enclosing loop that retains the
   accumulator rejects that proof. Typed primitive fill calls reuse an immutable
   certificate owned with the compiled contract. The existing constructor still
-  checks counts/values and owns allocation/rooting (**D3.3.3v3**, **D5.3**,
+  checks counts/values and owns allocation/rooting (**D4.3.3**, **D6.3**,
   **S11.4.1v3**).
 - **Exact numeric conversions:** bounded integer expressions divided by positive
   powers of two can remain a scaled integer while every intermediate is exactly
@@ -744,12 +744,12 @@ model, helpers, collector and MIR vendor code (**D1.2v2**, **D1.4v4**, **D1.6**)
   (**S4.4.1–S4.4.3**, **S4.5.2**). Spectralnorm's denominator needs one int-to-double
   conversion. Read-only private parameters whose incoming values all agree can
   use their proven constant; floating constants compare by bits, including the
-  sign of zero (**D8.3.1v2**).
+  sign of zero (**D7.3.1**).
 
 Boundary tests also exposed an unused-iterator crash: the shared AST index did
 not publish `for` clause bindings, and the binding rewrite occurred after node
 publication. The builder now rewrites that edge before indexing and the index
-publishes the iterator even without an identifier use (**D8.2.4v2**). This fixes
+publishes the iterator even without an identifier use (**D8.2.4**). This fixes
 the underlying binding identity rather than adding an MVP-only synthetic local.
 
 ### Qualification
@@ -857,7 +857,7 @@ Quicksort still has recursive call/borrow costs and poison-aware comparisons;
 nbody still pays function-entry and borrow costs; spectralnorm includes heap
 temporaries and Lambda formatting; sieve's short measurement includes runtime
 construction. These identify further measurements, not fully attributed cost
-breakdowns. Keep the shared ownership and failure behavior (**D4.4**, **D5.3**,
+breakdowns. Keep the shared ownership and failure behavior (**D5.4**, **D6.3**,
 **S7.7**, **S9.1**) and the original workload boundaries. General language
 coverage, AUTO/embedding integration and production replacement remain later
 milestones.
@@ -881,7 +881,7 @@ counts, Lambda sources and goldens are unchanged.
 - **Nullable inferred locals:** admission recognizes inferred optional primitive
   lanes as well as binary unions. Producer/effect analysis still widens an
   unproven indexed result to an owned Item; no absent read is treated as a proven
-  float (**S7.1.1v3**, **D2.4.1**, **D5.2.3**). Declared nullable signatures remain
+  float (**S7.1.1v3**, **D2.3.4**, **D6.2.3**). Declared nullable signatures remain
   outside the current admission boundary.
 - **Sine and bitwise OR:** `math.sin` shares one native-math predicate across
   producer proofs, effects, calls and dense-body admission. Only proven float
@@ -895,7 +895,7 @@ counts, Lambda sources and goldens are unchanged.
   helper. It roots operands, detaches snapshots, permits element-kind changes,
   and returns the replacement owner. Typed primitive arrays retain checked
   contract enforcement and native guards (**S12.2.1**, **S9.1.2**, **S11.4.1v3**,
-  **D4.4**, **D5.3**). Brainfuck exercises inferred tape/stack arrays and a typed
+  **D5.4**, **D6.3**). Brainfuck exercises inferred tape/stack arrays and a typed
   returned jump table across repeated allocations.
 
 No runtime data layout, GC algorithm, runtime helper implementation, vendor
@@ -1027,7 +1027,7 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
 
 This batch preserves the 28 workloads from the preceding expansion. The Lambda
 sources, C references and golden-output hashes are unchanged. The runtime value
-model and container layouts are unchanged (**D2.4.1–D2.4.3**). C2MIR remains an
+model and container layouts are unchanged (**D2.3.4–D2.3.5**). C2MIR remains an
 external benchmark reference, not an execution back end.
 
 ### Lowering changes
@@ -1045,12 +1045,12 @@ external benchmark reference, not an execution back end.
   The existing four-lane array reduction also counts packed booleans and handles
   inclusive limits. Guards retain short arrays, negative starts, nonzero initial
   accumulators and unsafe trip counts. These are transient queries over the
-  shared AST, not another node-fact graph (**D8.2.5v3**).
+  shared AST, not another node-fact graph (**D8.2.5**).
 - Read-only array calls use the shared mutation/retention analysis. A dead
   scratch in a complete local owner permutation permits root moves without
   creating snapshots. Full MIR and MVP share the AST recognizer. The MVP uses
   the same invariant-array admission proof as ordinary assignment; an observed
-  scratch still captures a snapshot (**S9.1.2**, **D5.3.1**).
+  scratch still captures a snapshot (**S9.1.2**, **D6.3.1**).
 - ASCII `ord(s[i])` and indexed character equality avoid temporary strings;
   Unicode, embedded NUL and missing characters retain their semantics. String
   concatenation flattens source-order leaves and simple string-returning
@@ -1061,7 +1061,7 @@ external benchmark reference, not an execution back end.
   and native error results. Fresh locals, storage witnesses and precise roots
   belong to each expansion; an inlined failure joins at its call boundary.
   Array contracts carried as Item remain eligible when their container domain
-  is proven (**D5.3**, **D8.4.2v2**). Successful native call results can flow into
+  is proven (**D6.3**, **D7.4.2**). Successful native call results can flow into
   array stores while failed calls retain the checked error path.
 - Scalar self-tail calls evaluate arguments before simultaneous parameter
   replacement. Other recursion retains stack checks. Positive integral float
@@ -1167,17 +1167,17 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
 ## Follow-up tuning of the same 28 rows — 2026-11-02
 
 This pass keeps the benchmark sources, C ports, expected outputs, runtime types
-and storage layouts unchanged (**D2.4.1–D2.4.3**). It continues to use the shared
+and storage layouts unchanged (**D2.3.4–D2.3.5**). It continues to use the shared
 AST and physical emitter, with no production lowering or benchmark-specific
-replacement kernels (**D8.2.5v3**).
+replacement kernels (**D8.2.5**).
 
 ### Changes and proof boundaries
 
 - Borrowed array accessors can inline, including discarded Item returns.
   Nested expansions reserve disjoint slices of the caller's precise argument
   root span; replacement owners propagate through the same write-back cells.
-  Actual arguments are evaluated before publication (**D5.3.1**, **D5.3.5**,
-  **D8.4.2v2**). Existing mutation/retention analysis also recognizes pure builtin
+  Actual arguments are evaluated before publication (**D6.3.1**, **D6.3.5**,
+  **D7.4.2**). Existing mutation/retention analysis also recognizes pure builtin
   actuals that cannot mutate an earlier argument, while retaining their GC roots.
 - Array iterations guard storage, writability and every distinct index before
   effects. Existing single-store loops and lone accesses whose presence is
@@ -1188,7 +1188,7 @@ replacement kernels (**D8.2.5v3**).
   a guard miss executes the checked iteration exactly once. Shared eligibility
   queries reject captures, owner replacement and collecting/reentrant calls.
   Character comparison retains its noncollecting Unicode/absence fallback
-  (**S7.1.1v3**, **S9.1.2**, **D4.4.4v4**, **D5.3.2**).
+  (**S7.1.1v3**, **S9.1.2**, **D5.4.4**, **D6.3.2**).
 - A loop repeatedly calling one closed numeric array procedure can guard its
   owners and complete extents once, then inline the native kernel. The checked
   call remains for short, shared or incompatible storage. No allocation,
@@ -1208,7 +1208,7 @@ replacement kernels (**D8.2.5v3**).
   expansions; real recursive activations retain stack checks. Larger
   noncollecting scalar helpers receive a 192-node per-callee limit within the
   existing total budget. Inlined array accessors reuse caller storage witnesses
-  only when capture-free numeric bodies preserve them (**D4.4.4v4**).
+  only when capture-free numeric bodies preserve them (**D5.4.4**).
 - Consecutive discarded equality branches on one unchanged native integer local
   dispatch to at most one arm when their finite literal keys are distinct.
   Duplicate keys, selector mutation and consumed branch values keep their
@@ -1346,16 +1346,16 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
 ## Region and predicate tuning of the same 28 rows — 2026-11-02
 
 This pass extends the existing MVP planner and emitter. Runtime types, layouts
-and runtime helpers are unchanged (**D2.4.1–D2.4.3**). Proofs use the shared AST
+and runtime helpers are unchanged (**D2.3.4–D2.3.5**). Proofs use the shared AST
 and transient binding intervals, with no additional node-type graph
-(**D8.2.5v3**).
+(**D8.2.5**).
 
 ### Implementation
 
 - Whole numeric loops can guard array storage, writability and complete index
   extents once. The shared closed-region query excludes capture, replacement,
   reentry and collecting calls; emission checks the collecting-call count.
-  Checked siblings preserve shared owners and failed accesses (**D4.4.4v4**,
+  Checked siblings preserve shared owners and failed accesses (**D5.4.4**,
   **S9.1.2**, **S7.1.1v3**). This removes repeated guards from Primes and Bounce.
 - Counter bounds include positive scaled counters with nonnegative finite
   offsets. Branch predicates refine unchanged, already-finite integer locals
@@ -1493,8 +1493,8 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
 ## Recursive ownership and string construction tuning — 2026-11-02
 
 This pass keeps the same 28 workloads, runtime types, container layouts and
-runtime helpers (**D2.4.1–D2.4.3**). It extends the MVP's transient analyses of
-the shared AST and existing direct-call ABI (**D8.2.5v3**, **D8.4.2v2**).
+runtime helpers (**D2.3.4–D2.3.5**). It extends the MVP's transient analyses of
+the shared AST and existing direct-call ABI (**D8.2.5**, **D7.4.2**).
 
 ### Implementation
 
@@ -1512,7 +1512,7 @@ the shared AST and existing direct-call ABI (**D8.2.5v3**, **D8.4.2v2**).
   keep their rooted borrow cells. A separate closed-use proof preserves
   length, lane and conservative writability witnesses across indexed writes;
   replacement, snapshot capture and escaping uses invalidate it
-  (**D5.3.1**, **D4.4.4v4**).
+  (**D6.3.1**, **D5.4.4**).
 - Integer parameter ranges start at private external callers and must reach
   a fixed point over every self edge. A preceding sole-return guard refines
   an immutable parameter on the continuing path. Overflowing or unresolved
@@ -1523,7 +1523,7 @@ the shared AST and existing direct-call ABI (**D8.2.5v3**, **D8.4.2v2**).
   owners; only fixed access extents are inherited. Leaf accessors are proved
   before their error effects are narrowed within the guarded body. One bounded
   recursive expansion amortizes entry checks, while real self calls retain
-  stack recovery (**D4.4.4v4**, **S7.11.1v2**). Buffer pointers are carried only
+  stack recovery (**D5.4.4**, **S7.11.1v2**). Buffer pointers are carried only
   through noncollecting expansions; emitted collecting calls reject the proof.
 - An adjacent, single-use string constructor can contribute its pieces directly
   to an append. The AST index's declaration identifier is excluded from read
@@ -1643,20 +1643,20 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
 ## Constructor admission and native update tuning — 2026-11-02
 
 This pass preserves the same 28 workloads, runtime types, container layouts and
-shared helpers (**D2.4.1–D2.4.3**). The changes remain in MVP planning/lowering
-and reuse the shared AST and direct-call ABI (**D8.2.5v3**, **D8.4.2v2**).
+shared helpers (**D2.3.4–D2.3.5**). The changes remain in MVP planning/lowering
+and reuse the shared AST and direct-call ABI (**D8.2.5**, **D7.4.2**).
 
 ### Implementation
 
 - Constructor success now uses the same invariant primitive-array proof as
   ordinary admission. The old generic relation rechecked arrays that a typed
   `fill` had already admitted. Boxed errors still take the ordinary boundary
-  before any native array witness becomes available (**S9.1.3**, **D2.8.2**).
+  before any native array witness becomes available (**S9.1.3**, **D2.5.2**).
 - Contextual `fill` lowering is shared by bindings and direct-call arguments.
   It passes the parameter's existing immutable representation certificate to
   the shared constructor, avoiding runtime metadata resolution. Count/value
   evaluation order, allocation, error checking and precise roots stay with
-  the existing helper (**D5.3.1**, **S9.1.3**).
+  the existing helper (**D6.3.1**, **S9.1.3**).
 - Successfully admitted primitive literals and matching typed fills establish
   fresh packed storage. Their initial native/writable witnesses no longer
   inspect the same physical carrier and COW flags again. Snapshot captures
@@ -1671,7 +1671,7 @@ and reuse the shared AST and direct-call ABI (**D8.2.5v3**, **D8.4.2v2**).
   misses retain the original expression/store, including snapshot detachment,
   negative remainder, poison, dynamic element kinds and failed writes
   (**S4.1.2**, **S9.1.2**). No buffer pointer crosses a collecting call
-  (**D4.4.4v4**).
+  (**D5.4.4**).
 - Finite integer division/remainder by a known positive power of two uses
   shifts/masks. Negative dividends receive the truncation-toward-zero bias;
   non-finite lanes retain the checked helper (**S4.1.2**). Power-of-two tests
@@ -1806,7 +1806,7 @@ too small to qualify reliably. The gate and its threshold remain unchanged.
 ### Implementation
 
 Runtime types, array layouts and ownership semantics remain unchanged
-(**D2.4.1–D2.4.3**, **S9.1.2–S9.1.3**).
+(**D2.3.4–D2.3.5**, **S9.1.2–S9.1.3**).
 
 - Proven singleton integer bindings now materialize their value directly,
   including immutable module constants and locals whose complete write set
@@ -1820,7 +1820,7 @@ Runtime types, array layouts and ownership semantics remain unchanged
 - Self-tail calls can reuse their current frame when every array parameter is
   forwarded unchanged and the existing recursive effect analysis proves it
   read-only. Scalar arguments are evaluated before parameter replacement;
-  allocations retain the same precise root protocol (**D5.3.1–D5.3.4**).
+  allocations retain the same precise root protocol (**D6.3.1–D6.3.4**).
 - Discarded conditional arms can reuse the existing closed-array-region guard.
   This removes repeated checks within FFT's bit-reversal swaps even though its
   surrounding loop also changes indices in a nested loop. Guard misses execute
@@ -1831,7 +1831,7 @@ Runtime types, array layouts and ownership semantics remain unchanged
   guards the count and integer poison values, and passes scalar bits directly.
   The shared allocator, construction roots and certificate installation remain
   in the runtime. Counted contracts and guard misses keep the existing checked
-  constructor (**D3.3.3v3**, **S9.1.3**, **D5.3.3**). The import remains
+  constructor (**D4.3.3**, **S9.1.3**, **D6.3.3**). The import remains
   `MAY_GC` with conservative reentry metadata. A repeated NQueens profile
   identified array construction and allocation as the principal helper costs.
 - Small constant integer fills passed to proven read-only, nonescaping
@@ -1840,7 +1840,7 @@ Runtime types, array layouts and ownership semantics remain unchanged
   forwarded boundary from replacing an Input-owned certificate with activation
   metadata. Mutable or retained actuals, effectful arguments, counted contracts
   and uncertain values keep runtime construction
-  (**D4.1.1v2–D4.1.3**, **S9.1.2–S9.1.3**).
+  (**D5.1.1–D5.1.3**, **S9.1.2–S9.1.3**).
 
 The first 100-sample report,
 [`tune28_native_fill_2026-11-02.json`](../../test/benchmark/lambda_mvp/tune28_native_fill_2026-11-02.json),
@@ -2002,7 +2002,7 @@ PYTHONPYCACHEPREFIX=./temp/pycache python3 test/benchmark/lambda_mir_mvp.py \
 Small one-dimensional numeric arrays now keep their payload beside the existing
 `ArrayNum` header when both fit an existing GC object size class. This removes
 the second allocation and its construction root frame. Objects remain nonmoving
-(**D4.3.1–D4.3.2v2**); the header, lane representations, capacity semantics and
+(**D5.3.1–D5.3.1**); the header, lane representations, capacity semantics and
 runtime type model are unchanged. Larger and multidimensional arrays retain
 data-zone allocation. Growth copies the lanes into the ordinary data zone;
 views retain their base owner and COW snapshots still detach (**S9.1.2**).
@@ -2015,10 +2015,10 @@ native temporary bytes using the existing canonical renderer (**S4.1.2**), then
 uses the existing owned-string join. Poison values keep the canonical generic
 conversion. Generic conversions publish precise input and converted-string roots;
 the finite-only path needs no additional frame before the join's own allocating
-path (**D5.3.2–D5.3.3**). Argument expressions still evaluate once in source order.
+path (**D6.3.2–D6.3.3**). Argument expressions still evaluate once in source order.
 
 Adjacent literal fragments, including literals forwarded through recipe
-parameters, coalesce into one Input-owned constant (**D4.1.1v2**). The existing
+parameters, coalesce into one Input-owned constant (**D5.1.1**). The existing
 Full MIR literal recognizer was promoted into the shared AST module. JSON's
 outer object append now passes eight fragments instead of twenty-six, and its
 inner coordinate object passes five. Prefix ownership, alias freezing, Unicode
@@ -2182,7 +2182,7 @@ increment, stable key inputs, and a closed body. The generated entry checks a
 positive finite step, native writable/readable owners and both index endpoints.
 Guard misses enter the original checked loop before any source effects. This
 preserves short arrays, negative indices, snapshots and mutation errors
-(**S7.1.1v3**, **S9.1.2**, **D4.4.4v4**). The existing iteration planner and closed
+(**S7.1.1v3**, **S9.1.2**, **D5.4.4**). The existing iteration planner and closed
 region emitter provide the shared eligibility and lowering; no workload names
 or benchmark constants participate in the optimization.
 
@@ -2311,7 +2311,7 @@ non-affine bit-reversal accesses outside the strided proof. Unknown array
 element ranges still require checked arithmetic in several integer kernels;
 scalar loop bounds do not prove those stored values finite (**S4.1.1–S4.1.2**).
 Allocation-heavy search also retains the normal runtime ownership costs
-(**S9.1.2**, **D4.3.1**, **D4.4.4v4**). Broader value-range and ownership proofs
+(**S9.1.2**, **D5.3.1**, **D5.4.4**). Broader value-range and ownership proofs
 remain necessary before removing those checks or allocations.
 
 ### Validation
@@ -2374,7 +2374,7 @@ unchanged. Coverage and performance qualification remain separate gates.
   across allocation; existing insertion-ownership rules avoid share-marking
   scalars and freshly produced children. Direct stores require matching trusted
   layout and unique storage. Other cases use the existing checked map runtime
-  (**S9.1.2, S9.1.3v2, S9.3.1, S11.4.1v5, D2.6.1v3, D5.3**).
+  (**S9.1.2, S9.1.3v2, S9.3.1, S11.4.1v5, D3.2.1, D6.3**).
 - General and heterogeneous array literals, ordinary array-key iteration with
   a captured source, base-type `match`, and the existing `cos`, `round` and
   `slice` builtins. Value-producing comprehensions and general match patterns
@@ -2382,17 +2382,17 @@ unchanged. Coverage and performance qualification remain separate gates.
 - Nullable native returns retain their semantic contract. Item null and native
   pointer null are converted explicitly; scalar nullable lanes retain their
   own sentinels. Recursive records and mixed arrays exercise these boundaries
-  under collection and freed-memory poisoning (**D2.4.3, D5.3**).
+  under collection and freed-memory poisoning (**D2.3.5, D6.3**).
 - Unannotated mutable container contents remain observations rather than write
   contracts. An inferred array may change element type, and an inferred map may
   accept a different field value. Closed homogeneous literal tables can retain
   a private representation proof after all writes and `var` borrows have been
-  excluded; the public AST type remains unchanged (**S12.2.1v3, D3.3.3v3**).
+  excluded; the public AST type remains unchanged (**S12.2.1v3, D4.3.3**).
 - Immutable module literal tables use the existing Input arena and ordinary
   COW rules. Constant string-table indices and nullable String[] reads avoid
   repeated generic dispatch. Null text pieces use the join identity only when
   another piece guarantees a string result; owned multi-piece append reuses the
-  existing fixed-arity helpers (**D4.1.2, S9.1.2, S10.6.1**).
+  existing fixed-arity helpers (**D5.1.2, S9.1.2, S10.6.1**).
 - Finite table domains feed guarded indexed loops. A typed integer declaration
   may retain the finite element domain after its existing admission check;
   an unguarded absent read never becomes a finite integer proof
@@ -2402,7 +2402,7 @@ unchanged. Coverage and performance qualification remain separate gates.
   guarded kernels require exclusive writable owners before borrowing storage.
   Same-binding aliases, distinct snapshot aliases, short arrays and partial
   writes followed by a rejected read are covered explicitly
-  (**S9.1.3v2, D8.4.1v2**).
+  (**S9.1.3v2, D7.4.1**).
 
 The additional native C references use the same kernel-timing macros as the
 original rows. BENG and JetStream NBody share the existing AWFY kernel; the
@@ -2525,7 +2525,7 @@ areas for further proofs and measurement:
   bounds for its changing search stack and indirect indices.
 - GCbench, Deriv, Binarytrees and the AWFY record rows retain allocation and
   typed call/root boundaries. Native field stores are implemented; reducing
-  those remaining boundaries must preserve **S9.3.1** and precise **D5.3** roots.
+  those remaining boundaries must preserve **S9.3.1** and precise **D6.3** roots.
 - Fasta and Base64 still construct text through repeated owned append; their C
   ports write contiguous byte buffers. Cube3D and Raytrace3D allocate and return
   small float arrays across calls, beyond the present allocation-free kernel
@@ -2575,12 +2575,12 @@ reference was changed. The original 28 remain the regression control.
   admissions are proven. A local observed only by returns can adopt
   that return layout too. Unknown fields still use checked admission, and an
   ordinary error companion remains whenever a field or call can fail
-  (**S11.4.1v5, D8.4.1v2**). Nullable native pointers need a full boundary check
+  (**S11.4.1v5, D7.4.1**). Nullable native pointers need a full boundary check
   on their absence arm; an already admitted present value stays native.
 - Read-only record cursors retain the same trusted shape across rebinding.
   Field mutation and `var` borrowing exclude that proof; assignment to another
   shape widens it. Exact shape identity is required: first-class type equality
-  is not a physical record-layout certificate (**S12.2.1v3, D3.3.3v3**).
+  is not a physical record-layout certificate (**S12.2.1v3, D4.3.3**).
 - Primitive inferred arrays retain a private domain only after their initializer
   and every indexed write pass the effect fixed point. Replacement, borrowing,
   a changing element kind, an unknown producer, or a potentially failed fill
@@ -2597,21 +2597,21 @@ reference was changed. The original 28 remain the regression control.
   its buffer after allocation. Native literals construct with the existing
   primitive constructor and destination certificate; short arrays and other
   layouts retain the original checked construction. These bodies never retain
-  an interior pointer across GC (**D2.6.1v3, D5.3, S11.4.1v5**).
+  an interior pointer across GC (**D3.2.1, D6.3, S11.4.1v5**).
 - Erased-value stores into plain, uncounted primitive arrays reuse the runtime's
   existing preplanned setter and live primitive-carrier proof. A valid
   compiler-owned certificate need not have the runtime interner's identity;
   repeatedly comparing its semantic type made Fasta regress despite identical
   hot-loop MIR. The shared helper still checks keys, values, COW ownership and
   the actual carrier; masks, invalid values and incompatible layouts retain
-  checked admission (**D3.3.3v3, S9.1.3v2, S11.4.1v5**).
+  checked admission (**D4.3.3, S9.1.3v2, S11.4.1v5**).
 - Forwarded `var` arguments reuse an enclosing precise owner home when the actual
   occurs once. Aliased actuals keep the original call cells; replaced owners are
   reloaded on return. Record insertion avoids a duplicate capture after a named
   read that already captured its snapshot. The required capture remains for
   borrowed member/index results. Fresh map/array locals observed only by returns
   transfer their owner without a redundant snapshot capture; any other use
-  preserves the ordinary capture (**S9.1.2–S9.1.3v2, S9.3.1, D5.3**).
+  preserves the ordinary capture (**S9.1.2–S9.1.3v2, S9.3.1, D6.3**).
 
 Runtime types, layouts, GC and the production MIR lowering are unchanged. No
 vendor code or benchmark-specific native replacement was introduced.
@@ -2754,10 +2754,10 @@ reduce those gaps but do not complete their qualification. Puzzle still needs
 a proof before removing snapshots across restored recursive mutation
 (**S9.1.3v2**); Triangl retains checked indirect search indices. Deriv and the
 AWFY record workloads still allocate owners and cross typed call/root
-boundaries (**D3.2.4v3, D5.3**). Fasta retains the dynamic integer conversion
+boundaries (**D4.2.5, D6.3**). Fasta retains the dynamic integer conversion
 and text construction paths. Cube3D and Raytrace3D now have guarded allocating
 vector bodies, while their callers still allocate and return arrays across
-calls. Further extent and escape proofs must preserve **D2.6.1v3, D5.3 and
+calls. Further extent and escape proofs must preserve **D3.2.1, D6.3 and
 S9.3.1**. The existing decimal-versus-native-big-integer Pidigits gap remains.
 
 The original eight C2MIR misses are Sieve, FFT, NQueens, Bounce, Queens,
@@ -2842,7 +2842,7 @@ original goldens. The release candidate is SHA-256
   canonical pointer identity had incorrectly introduced a collecting helper
   into a planned noncollecting literal conversion; the focused fixture now
   covers all four int/float literal combinations
-  (**S4.1.2, S4.2.1, S7.9.3, D2.4.3**).
+  (**S4.1.2, S4.2.1, S7.9.3, D2.3.5**).
 - The existing modular array update accepts a positive constant multiplier,
   named constant operands, a non-power-of-two positive modulus, and an explicit
   `int()` wrapper. Entry guards prove the multiplication and addition both
@@ -2855,7 +2855,7 @@ original goldens. The release candidate is SHA-256
   retaining the generic comparison for other carriers and invalid positions.
   `ArrayNum` float slots are non-nullable; nullable native lanes use `Array`.
   Buffer addresses are reloaded from precise owner roots, and a witness is used
-  only in its owning activation (**D2.4.3, D2.6.1v3, D3.3.3v3, D5.3**).
+  only in its owning activation (**D2.3.5, D3.2.1, D4.3.3, D6.3**).
 - Unknown loop predicates now share branch lowering: `and`/`or` preserve their
   evaluation order without constructing the selected Item, and a guarded float
   comparison can branch from its native predicate. A lexical condition target
@@ -2864,14 +2864,14 @@ original goldens. The release candidate is SHA-256
   (**S3.4–S3.5, S12.1.2v3**).
 - Enforced `string[]` reads accept both boxed Items and native `String*` words.
   The existing eight-byte addressing and tag mask work for both carriers;
-  bounds and alternate shapes retain their fallback (**D2.6.1v3, S7.1.1v3**).
+  bounds and alternate shapes retain their fallback (**D3.2.1, S7.1.1v3**).
 - Scalar record writers reuse one shape/exclusivity witness when shared AST
   references prove a closed call graph: known scalar fields, no retention or
   owner replacement, and identical shapes at forwarded boundaries. Captures
   invalidate exclusivity, checked writes refresh it, and forwarding-only frames
   reserve just their precise owner home. Unused witnesses in recursive
   forwarding frames were removed before final qualification
-  (**D3.2.4v4, S9.1.3v2, D5.3**).
+  (**D4.2.5, S9.1.3v2, D6.3**).
 - The shared `fn_index` preserves an encountered error base/key instead of
   converting it into absence. Error bases use the existing member reader so
   computed diagnostic fields agree with dot access; invalid reads of non-error
@@ -3078,7 +3078,7 @@ This pass targets the remaining Full MIR misses, especially Triangl and
 Pidigits. Authority: **S3.4–S3.5**, checked absence **S7.1.1v3, S7.9.3**,
 immutable snapshots and borrows **S9.1.2–S9.1.3v2**, decimal arithmetic
 **S4.4.1–S4.4.2, S4.5.1–S4.5.4**, representation and precise ownership
-**D2.4.3, D5.3**, and checked compiler facts **D8.2.6v2**. No formal ruling
+**D2.3.5, D6.3**, and checked compiler facts **D8.2.6**. No formal ruling
 changes.
 
 ### Root causes and lowering
@@ -3134,7 +3134,7 @@ The expanded 38-file starting corpus is reconstructed from that revision
 under `temp/lambda_mir_mvp/tune48d/base_sources/`; the original 35-file capture
 is retained separately. Full MIR and the previous MVP use the same frozen
 starting release. The C2MIR comparator remains the independent C benchmark
-ports, not a restored Lambda C-text backend (**D8.2.4v2**).
+ports, not a restored Lambda C-text backend (**D8.2.4**).
 
 The three changed fixtures were also checked on the frozen starting and final
 releases under interpreter, AUTO and Full JIT. Starting and final outputs agree
@@ -3331,9 +3331,9 @@ C2MIR remains the independent C-port reference; the removed Lambda C-text backen
 is not involved (**D1.6**).
 
 **Root causes and implementation.** A normalized fallible return has a successful
-native contract and an error alternative (**S11.4.2v3, D5.2.1v5**). MVP now plans
+native contract and an error alternative (**S11.4.2v3, D6.2.1**). MVP now plans
 both from `TypeFunc::return_contract`; ordinary error values never enter a native
-success slot (**D2.4.3**). Deferred initialization and whole-variable reassignment
+success slot (**D2.3.5**). Deferred initialization and whole-variable reassignment
 store their admitted value or validation error and continue (**S7.7.2v2,
 S7.7.4v2**). Explicit propagation selects the return path, after `var` write-back
 and with ordinary enclosing-return validation (**S7.6.3v3, S11.4.10**). Parameter
@@ -3352,14 +3352,14 @@ still becomes a stored outcome (**S7.7.2v2, S11.4.10**).
 
 The compiler retains successful-domain facts independently of the error Item.
 Compact scalar outcomes avoid COW and scalar-home copies; unknown and wide
-scalar domains keep their existing ownership (**D5.3**). Adjacent single-use
+scalar domains keep their existing ownership (**D6.3**). Adjacent single-use
 validation/discharge declarations fuse without an intermediate boxed result;
 additional consumers or intervening effects prevent that proof. Native nullable
 returns admit their success lane directly, keeping full outcome validation on
 Item paths. Closed noncollecting bodies may refine int/bool outcome locals only
 when every initializer and write passes the guarded proof; allocating variants
 restore the boxed domains. Builtin carets retain existing numeric producer facts
-so they can participate in that proof (**D8.2.6v2**).
+so they can participate in that proof (**D8.2.6**).
 
 **Validation and qualification.** See the checkpoint for active artifacts. The
 new `mir_mvp_propagation` golden covers deferred outcomes, native/error return
@@ -3405,7 +3405,7 @@ native domain. The compiler now hypothesizes the float success domain, requires
 the complete noncollecting initializer/write proof, and allocates a separate D
 register only after that proof succeeds. Restoring the saved bindings preserves
 the checked Item sibling. Allocating variants retain their ordinary domains;
-no raw float enters a boxed root slot (**D2.4.3, D5.3, D8.2.6v2**).
+no raw float enters a boxed root slot (**D2.3.5, D6.3, D8.2.6**).
 
 The new fixture exercises a unique writable float array, an aliased snapshot that
 selects COW fallback, and an empty-array validation error, in three GC modes.
@@ -3504,7 +3504,7 @@ A fresh release control includes the intervening shared COW changes; only
 `mvp_mir.cpp` differs between that control and this candidate. The earlier
 `tune48f/` results remain historical evidence with their own source identity.
 Both use release self-reported execution windows, the same unchanged workloads,
-and independent C2MIR C ports (**D1.6, D8.4.2v2**).
+and independent C2MIR C ports (**D1.6, D7.4.2**).
 
 **String growth.** Deferred `string | error` storage stopped selecting the owned
 append path. Base64's MIR then captured its prefix and invoked generic `fn_join`
@@ -3516,7 +3516,7 @@ ABI. Unknown fragments use a guarded text/null path; other kinds replay the
 original join tree over the already evaluated operands. The fallback preserves
 sequence shape and earlier join-error precedence (**S7.9.3, S10.6.1**). Ordinary
 reads still freeze an escaping string snapshot; precise roots cover fragments
-and both result paths (**S9.1.2, D5.3**). Existing shared append helpers are reused.
+and both result paths (**S9.1.2, D6.3**). Existing shared append helpers are reused.
 
 **Guarded loop kernels.** The loop planner now applies the same successful
 int/bool/float hypotheses as the complete function proof. Every initializer and
@@ -3524,7 +3524,7 @@ write must satisfy the closed-body proof under the array entry guards. A
 conservative generic-conversion reentry flag no longer vetoes that proof before
 it runs; actual unproved/reentrant calls still reject the closed body. Inline
 locals choose their native representations before new registers are allocated,
-so float success never reuses an Item register (**D2.4.3, D8.2.6v2**). Short,
+so float success never reuses an Item register (**D2.3.5, D8.2.6**). Short,
 shared or alternate-layout arrays retain the original checked loop. No shared
 runtime layout, data model, GC scanner or vendored code changes.
 
@@ -3545,7 +3545,7 @@ Full MIR's recursive `solve` emits `lambda_array_scalar_snapshot` at three plain
 parameter entries; MVP emits three general `cow_capture_value` calls. Full's
 existing helper uses a precisely rooted GC header with a confined fixed scratch
 payload for compact int/bool arrays, falling back to ordinary COW for other
-shapes (**S9.1.2, D5.3**). Its escape/index/recursive-transfer proof is currently
+shapes (**S9.1.2, D6.3**). Its escape/index/recursive-transfer proof is currently
 static in `transpile-mir.cpp`. Reusing this optimization requires extracting a
 shared analysis interface; copying its static proof or weakening lifetime
 checks would violate the implementation constraints. The MIR difference is a
@@ -3621,8 +3621,8 @@ Evidence: [48-row primary](../../test/benchmark/lambda_mvp/tune48_guarded_2026-1
 
 ## 2026-11-03: confined recursive array snapshots
 
-Authority: **S9.1.2–S9.1.3v2, S7.7.3, D2.4.3, D5.3,
-D8.2.6v2 and D8.4.2v2**. No formal ruling, runtime data layout or GC ownership
+Authority: **S9.1.2–S9.1.3v2, S7.7.3, D2.3.5, D6.3,
+D8.2.6 and D7.4.2**. No formal ruling, runtime data layout or GC ownership
 rule changes. Final performance artifacts are under `temp/lambda_mir_mvp/tune48j/`.
 
 Puzzle's emitted MVP recursion captured three Boolean array owners before each
@@ -3688,7 +3688,7 @@ write-back join before later parameters were initialized. Snapshot-bearing
 entries now initialize all arguments first; ordinary entries also consume their
 borrow homes before allocation. The native sibling MIR checks require the later
 arguments and home consumption before the helper. An aliasing wrapper exercises
-the inline form while retaining its real recursive edge (**S7.6.3v3, D5.3**).
+the inline form while retaining its real recursive edge (**S7.6.3v3, D6.3**).
 
 Final measurements use a SHA-verified frozen benchmark corpus. Concurrent edits
 removed propagation from three live benchmark scripts, so the old binaries
@@ -3819,34 +3819,34 @@ The combined implementation changes these shared compiler paths:
 
 - Typed decimal operations dispatch directly to the existing precisely rooted
   decimal arithmetic. Generic operands retain ordinary dispatch, and BigInt and
-  decimal results preserve their existing rules (**S4.4, D5.3**).
+  decimal results preserve their existing rules (**S4.4, D6.3**).
 - Small self-recursive array procedures may expand once even when their bodies
   contain loops. The next recursive edge remains a real guarded call; expansion
-  budgets and precise scratch ownership remain enforced (**D5.3, D8.2.6v2**).
+  budgets and precise scratch ownership remain enforced (**D6.3, D8.2.6**).
 - MVP field reads use storage descriptors and the shared admitted-prefix guard.
   Closed read-only record parameters cache layout validity; writers retain
   their exclusive-storage witness. Container-pointer slots retain null and
-  fallback guards (**D2.3.2, D2.4.3, D3.2.4v4**).
+  fallback guards (**D2.3.3, D2.3.5, D4.2.5**).
 - Successful producer facts survive Item transport, unchanged locals and typed
   pointer-element projections. They preserve error alternatives, declared write
   contracts and call-site admission. A discharged call drops Error from its
-  continuing domain, like unary caret (**S7.7.2v2–S7.7.3, D8.4.2v2**).
+  continuing domain, like unary caret (**S7.7.2v2–S7.7.3, D7.4.2**).
 - Unchanged scalar outcomes reuse binding-owned number homes. Native match
   joins require an explicit scalar boundary and complete outcome coverage;
   partial matches retain null completion and untyped matches retain selected
   tags. The existing erased-float-array comparison now also guards immutable
-  float/error thresholds before its native path (**D5.2.3, S11.2.1, S6.1.2v2**).
+  float/error thresholds before its native path (**D6.2.3, S11.2.1, S6.1.2v2**).
 - Guarded allocating array kernels can expand native scalar leaves after a
   complete body proof. Their checked paths, rooted owners and ordinary helper
-  effects remain available (**D5.3, D8.2.6v2**).
+  effects remain available (**D6.3, D8.2.6**).
 
 Ownership tests exposed two defects while extending those paths. A retained
 member/index child now captures ownership at binding, return and map-insertion
 boundaries; transient reads remain borrows (**S9.1.2, S9.3.1**). Nullable
 container fields now store zero for tagged null. Their physical writer preserves
 existing virtual-carrier pointers instead of applying a stricter semantic tag
-check; renderer and DOM regressions verify this distinction (**D2.4.3,
-D7.4.5v2**). Runtime types, data layouts and precise GC ownership are unchanged.
+check; renderer and DOM regressions verify this distinction (**D2.3.5,
+D9.5.5**). Runtime types, data layouts and precise GC ownership are unchanged.
 
 All **48 benchmark goldens**, **18 forced-GC benchmarks** and **nine targeted
 GC/emission/provenance groups** pass. New fixture pairs cover admitted prefixes,

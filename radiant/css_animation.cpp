@@ -724,7 +724,7 @@ static bool css_animation_compute_property(CssAnimState* state, LayoutContext* l
         if (inherit && capture_underlying_value(dom_parent_element(state->element),
                 property->property_code, &inherited)) {
             computed->value = inherited.value;
-            // computed transform caches own copies, never a parent's mutable view-pool chain (D4.5.1v4).
+            // computed transform caches own copies, never a parent's mutable view-pool chain (D5.5.1).
             if (property->value_type == ANIM_VAL_TRANSFORM)
                 computed->value.transform = radiant::clone_transform_list(
                     state->pool, inherited.value.transform);
@@ -1952,7 +1952,7 @@ void css_animation_tick(AnimationInstance* anim, float t) {
                 state->filter_applied = true;
             }
             if (result.value_type == ANIM_VAL_TRANSFORM) {
-                // D4.5.1v4: replace the live borrow before reclaiming the preceding sample.
+                // D5.5.1: replace the live borrow before reclaiming the preceding sample.
                 int slot = animation_transform_slot(property);
                 radiant::destroy_transform_list(state->pool, state->sampled_transform[slot]);
                 state->sampled_transform[slot] = lam::own(result.value.transform);
@@ -2112,7 +2112,7 @@ static void capture_animation_underlying(CssAnimState* state) {
                 captured.value.filter = state->underlying_filter;
             }
             if (captured.value_type == ANIM_VAL_TRANSFORM) {
-                // D4.5.1v4: snapshots cannot borrow a relayout-owned function list.
+                // D5.5.1: snapshots cannot borrow a relayout-owned function list.
                 TransformFunction* copy = radiant::clone_transform_list(
                     state->pool, captured.value.transform);
                 if (captured.value.transform && !copy) continue;

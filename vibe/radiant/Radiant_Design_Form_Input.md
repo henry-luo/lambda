@@ -141,12 +141,12 @@ struct FormControlProp {
 
 The change-on-blur baseline (`value_at_focus` and byte length) belongs to
 `ViewState.data.form`, alongside the retained value and undo history, rather
-than the pooled `FormControlProp` (D4.5.2). Rebuilding a focused control with the
+than the pooled `FormControlProp` (D5.5.2). Rebuilding a focused control with the
 same identity and authored default retains that baseline; a changed default
 starts a fresh baseline. `dom.value_at_focus` reads it without creating state.
 The pending focus-event sequence also retains its original node leases and
 follows same-identity rebuilds between callbacks, so `change` cannot strand the
-subsequent `blur` on a retired presentation node (D4.5.2/D7.2.5).
+subsequent `blur` on a retired presentation node (D5.5.2/D10.2.1).
 
 **Rationale:** `ViewState.data.form.current_value` is canonical and shared with `js_dom.cpp`; the form prop only caches its pointer. The undo ring snapshots the *whole* value; for typical input sizes (< a few KB) memory is negligible and rollback is O(1) on the buffer side.
 

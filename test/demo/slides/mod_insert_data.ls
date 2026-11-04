@@ -1,4 +1,4 @@
-// D7.2.5: Insert dialogs retain typed settings and use existing Word catalogs.
+// D10.2.1: Insert dialogs retain typed settings and use existing Word catalogs.
 import charts: ~~.word.mod_chart
 import smartart: ~~.word.mod_smartart
 import wordart: ~~.word.mod_wordart

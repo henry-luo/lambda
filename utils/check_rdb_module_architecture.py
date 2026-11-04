@@ -6,11 +6,11 @@ Checks a built module image:
   1. it exports exactly the Jube entry point (`jube_module`);
   2. its dynamic dependencies are OS/system libraries only (RDB1);
   3. it imports no symbol by dynamic lookup, i.e. nothing from the host
-     (D7.3.3; the module is linked without -undefined dynamic_lookup);
+     (D9.4.3; the module is linked without -undefined dynamic_lookup);
   4. Lambda's own driver objects call no socket or file API: vendor archives
      may, inside registered connections only (JA16.4);
   5. every `rdb:<driver>` the manifest provides resolves through the module
-     (the loader cross-checks manifest against descriptor, D7.3.4), and an
+     (the loader cross-checks manifest against descriptor, D9.4.4), and an
      unknown driver does not (the probe can tell the difference).
 
 usage: utils/check_rdb_module_architecture.py [--module-dir DIR] [--lambda EXE]

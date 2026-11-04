@@ -646,7 +646,7 @@ static void test_radiant_view_check_http_language(size_t selected, bool gc_stres
     strbuf_free(event_source);
     const ShellEnvEntry env[] = {
         {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"},
-        // D5.3.3: stress native handoffs separately from the complete header matrix.
+        // D6.3.3: stress native handoffs separately from the complete header matrix.
         {"LAMBDA_GC_FORCE_EVERY", gc_stress ? "1" : nullptr},
         {"LAMBDA_GC_POISON_FREED", gc_stress ? "1" : nullptr}, {nullptr, nullptr},
     };
@@ -2277,7 +2277,7 @@ TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
 }
 
 TEST(RadiantViewTest, WordDocumentsOpenAsDocumentPreviews) {
-    // D7.2.4: the DOCX package supplies the preview through ordinary view dispatch.
+    // D9.3.4: the DOCX package supplies the preview through ordinary view dispatch.
     ShellResult result = test_radiant_view_run_logged_headless(
         "test/input/zip/office.docx", "test/ui/doc_viewer_docx_archive.json", nullptr);
     EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
@@ -3299,7 +3299,7 @@ TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
     ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
     ASSERT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
-    // D4.1.1v2: descriptor type changes must not move a runtime Map payload
+    // D5.1.1: descriptor type changes must not move a runtime Map payload
     // from the GC data zone back through the pool allocator on later appends.
     EXPECT_EQ(nullptr, shell_result.stdout_buf
         ? strstr(shell_result.stdout_buf, "pool_free: pointer") : nullptr);
@@ -3338,7 +3338,7 @@ TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
 }
 
 TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
-    // D4.5.2: a UI-mode script result lives in the document's untraced arena.
+    // D5.5.2: a UI-mode script result lives in the document's untraced arena.
     // A runtime symbol, a non-spreadable array or a group element left there
     // as a GC pointer is collected, and its memory reused, before the DOM build
     // reads it; forced, poisoning collection makes that deterministic.
@@ -3410,7 +3410,7 @@ TEST(RadiantViewTest, DoomCssConsumersAndNativeEffectsSurviveForcedGcAndClose) {
 }
 
 TEST(RadiantViewTest, PromotedDocumentTransformUsesCallerStackLimit) {
-    // D5.3.6v2: package initialization retires its large-stack worker before
+    // D6.3.6: package initialization retires its large-stack worker before
     // the native loader invokes a retained export on the caller's stack.
     const ShellEnvEntry env[] = {
         {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
@@ -3508,7 +3508,7 @@ static void test_radiant_view_expect_canvas_frames(const char* output) {
 }
 
 TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
-    // D4.5.2 / D5.3.3: one replay checks retained pixels, repaint-only frames and clean close.
+    // D5.5.2 / D6.3.3: one replay checks retained pixels, repaint-only frames and clean close.
     constexpr size_t base_count = sizeof(RADIANT_IMAGE_GC_ENV) / sizeof(RADIANT_IMAGE_GC_ENV[0]);
     ShellEnvEntry env[base_count + 1];
     memcpy(env, RADIANT_IMAGE_GC_ENV, sizeof(RADIANT_IMAGE_GC_ENV));

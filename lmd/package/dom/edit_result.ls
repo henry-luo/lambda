@@ -1,4 +1,4 @@
-// The package-visible outcome of one editing operation (D7.2.5).  Keeping
+// The package-visible outcome of one editing operation (D10.2.1).  Keeping
 // this record separate from an event verdict lets queries, command calls, and
 // platform input describe the same result without an ambient native channel.
 
@@ -49,7 +49,7 @@ pub fn model_applied(changed, selection_changed, history_recorded,
 }
 
 // A model surface's selection can reach past what the DOM shows, so it names
-// the text a copy or cut puts on the clipboard; Radiant transports it (D7.2.5).
+// the text a copy or cut puts on the clipboard; Radiant transports it (D10.2.1).
 pub fn with_clipboard_text(edit_result, text) => { *: edit_result, clipboard_text: text }
 
 pub fn with_clipboard_html(edit_result, html, text="") =>

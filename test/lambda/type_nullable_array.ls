@@ -1,7 +1,7 @@
 // Nullable array `T[]?` (S11.1.6v2: `T?` is `T | null`): an `int[]` value or
 // `null`, never a bare `int`. The `?` binds outside the whole array, so the
 // inline spelling is the type an alias spells `type Vec = int[]; Vec?`, and
-// it differs from `T?[]`, an array whose elements may be null (D3.1.1v2).
+// it differs from `T?[]`, an array whose elements may be null (D4.1.1).
 // `int[]?` had never parsed: the suffix chain left the `?` as trailing input.
 
 type Vec = int[]
@@ -52,7 +52,7 @@ let z: int[]? = []
 "5.4"; [[1] is int[]? | string, "s" is int[]? | string, 5 is int[]? | string]
 
 '6. a T?[] binding holds its elements, whatever lane carries them'
-// Admission into `T?[]` publishes a native lane (D3.2.6) whose slots are lane
+// Admission into `T?[]` publishes a native lane (D4.2.6) whose slots are lane
 // words, not Items. Printing one crashed, `==`/`in`/`++` read raw words, and
 // converting it into `i8[]` or `float[]` was refused although the same values
 // in a plain array are admitted.

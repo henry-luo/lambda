@@ -1,4 +1,4 @@
-// Representation-neutral editing descriptor registry (D7.2.5).
+// Representation-neutral editing descriptor registry (D10.2.1).
 //
 // This module is pure: it owns canonical command/input spellings and policy
 // metadata, but imports neither a DOM session nor the editor model.

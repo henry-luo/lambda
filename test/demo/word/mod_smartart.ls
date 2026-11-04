@@ -1,4 +1,4 @@
-// Layouts retain their text and arrangement alongside self-contained SVG (D7.2.5).
+// Layouts retain their text and arrangement alongside self-contained SVG (D10.2.1).
 import objects: .mod_objects
 import shapes: .mod_shapes
 import colors: lambda.ui.core.component

@@ -9,17 +9,17 @@ Radiant is Lambda's HTML/CSS/SVG layout, rendering and interaction engine. It tu
 | `lambda view page.html` | Opens the page in an interactive window. Page scripts run on LambdaJS; links, forms, scrolling, selection and animations are live. |
 | `lambda edit doc.md` | The viewer as an editor: rich text for Markdown and HTML, a drawing editor for SVG. |
 
-HTML and XHTML are browsing inputs. XHTML (`.xhtml`, `.xht`, or `application/xhtml+xml`) uses strict XML parsing and emits the same HTML names for the DOM/CSS/layout pipeline (**D2.10.1**); XML case sensitivity, whitespace and foreign namespaces are preserved. LaTeX, Markdown, XML, Lambda script results and diagram sources reach Radiant through document converters. Explicit paged rendering also accepts Markdown (through its browsing loader and GitHub-style stylesheet), XSL-FO (`.fo`, `.xslfo`), native Radiant page documents (`.rpd`) and fixed PDF pages. These paged inputs have a narrower formatting profile than the browsing engine; see [§8.1](#81-paged-media-and-formatting-inputs) and [Lambda_CLI.md](Lambda_CLI.md).
+HTML and XHTML are browsing inputs. XHTML (`.xhtml`, `.xht`, or `application/xhtml+xml`) uses strict XML parsing and emits the same HTML names for the DOM/CSS/layout pipeline (**D10.1.4**); XML case sensitivity, whitespace and foreign namespaces are preserved. LaTeX, Markdown, XML, Lambda script results and diagram sources reach Radiant through document converters. Explicit paged rendering also accepts Markdown (through its browsing loader and GitHub-style stylesheet), XSL-FO (`.fo`, `.xslfo`), native Radiant page documents (`.rpd`) and fixed PDF pages. These paged inputs have a narrower formatting profile than the browsing engine; see [§8.1](#81-paged-media-and-formatting-inputs) and [Lambda_CLI.md](Lambda_CLI.md).
 
 DocBook 5.x `.xml` documents can be opened directly with
 `lambda view test/input/docbook/showcase.xml`. Namespace-aware XML dispatch
 selects the shipped `lambda.doc.docbook` package and its upstream xslTNG CSS
-(D7.2.4). The current profile covers core document structures, tables, notes
+(D9.3.4). The current profile covers core document structures, tables, notes
 and navigation; [DocBook format support](Markup_Formats_Support.md#312-docbook)
 records the remaining gaps. Transformation parity and Radiant layout coverage
 are separate checks, and the original CSS retains external font imports.
 
-**Document and views.** Browsing CSS and layout use the parsed Lambda/Mark DOM, and scripts mutate those same nodes. Paged composition uses the browsing layout with print styles and fragmentation hooks. The DOM-embedded views are its workspace; published editions retain independent fragments, page geometry, fonts and image resources. Returning to browsing requires a browsing relayout. Resource ownership follows **D4.5.1v4** and **D4.1.4v5** in [Lambda_Formal_Design.md](Lambda_Formal_Design.md). See [Lambda_Doc_Pipeline.md](Lambda_Doc_Pipeline.md) and [RAD_23](dev/radiant/RAD_23_Paged_Composition.md).
+**Document and views.** Browsing CSS and layout use the parsed Lambda/Mark DOM, and scripts mutate those same nodes. Paged composition uses the browsing layout with print styles and fragmentation hooks. The DOM-embedded views are its workspace; published editions retain independent fragments, page geometry, fonts and image resources. Returning to browsing requires a browsing relayout. Resource ownership follows **D5.5.1** and **D5.1.4** in [Lambda_Formal_Design.md](Lambda_Formal_Design.md). See [Lambda_Doc_Pipeline.md](Lambda_Doc_Pipeline.md) and [RAD_23](dev/radiant/RAD_23_Paged_Composition.md).
 
 > **Status (alpha, audited 2026-10-10; focused text/image/clip/focus/export checks refreshed 2026-10-12; paged Markdown, overfull-line, collapsed-border and HTML-default checks added 2026-10-14; SVG enhancements refreshed 2026-10-18).** This matrix describes the current source in `lambda/input/css/`, `lambda/dom/`, `radiant/` and `lib/font/`, with focused native, UI and export evidence. Legend: ✅ supported · ◐ partial, with remaining gaps stated · ❌ not supported. *Parsed only* means syntax is accepted without a consumer; *not verified* means implementation or runtime evidence is insufficient. Support in browsing, raster output, vector export and explicit paged composition can differ.
 
@@ -46,7 +46,7 @@ Recent implemented areas include namespace/language/direction selectors, live CS
 The [2026-10-18 SVG enhancement](../vibe/impl/Radiant_Impl_SVG_Support.md#14-outstanding-work-follow-up)
 adds individual 2D transforms, CSS paint animation/transitions,
 `feComponentTransfer`, rect/circle/ellipse CSS geometry and current-DOM saves
-with selected virtual-frame snapshots (**D2.11.3–D2.11.4**). Focused interactive,
+with selected virtual-frame snapshots (**D10.1.6–D10.1.7**). Focused interactive,
 export/reopen and scoped sanitizer checks pass. Broader resource combinations,
 Linux/Windows execution and a green aggregate qualification remain outstanding;
 network sprites are deferred. See [§15](#15-svg) and [§17](#17-output-targets)
@@ -67,7 +67,7 @@ lambda view report.html --paged                  # native print preview
 
 **Contents:** [Conformance](#1-conformance-summary) · [HTML](#2-html) · [Selectors](#3-css-selectors) · [At-rules](#4-at-rules) · [Cascade](#5-cascade-inheritance-and-custom-properties) · [Values](#6-values-units-and-functions) · [Properties](#7-css-property-coverage) · [Layout](#8-layout-modes) · [Box model](#9-box-model-and-sizing) · [Backgrounds](#10-backgrounds-and-borders) · [Text and fonts](#11-text-and-fonts) · [Effects](#12-visual-effects) · [Animation](#13-transitions-and-animations) · [Interaction](#14-interaction) · [SVG](#15-svg) · [Images](#16-image-formats) · [Output](#17-output-targets) · [Known limitations](#18-known-limitations) · [Related](#19-related-documentation)
 
-**Custom-token serialization (2026-10-07).** Authored and computed custom properties preserve quotes, number/escape spelling, UUIDs, whitespace and comments through `var()` substitution. Shared winning declarations and caller-owned pools follow **D4.5.1v4**. New token boundaries receive empty comments; typed registered colors use computed serialization. Parser fixes retain comment-only values and normalize escaped EOF, strings and missing block delimiters. The permanent fixture improves from 3/43 to 43/43. The consecutive-token WPT improves from 65/72 to 69/72; three old comment-removal expectations conflict with [CSS Custom Properties 2 §4.1](https://drafts.csswg.org/css-variables-2/#serializing-custom-props). Chromium agrees on 26 checks, with seventeen explicit comment-preservation differences. Debug gates pass 6,288 Lambda/input cases and 4,054 Radiant cases plus 352 recorded partials. ASan/release pass 252 native cases, 563 assertions, repeated evaluations and dynamic layouts; release memory ceilings hold. The refreshed runtime-only CLI passes nine SQLite fixtures in both execution tiers with forced collection and zero tracked allocations. The strict boundary audit remains at 260 against 165. The registry remains 386 names; complete CSSOM, substitution limits, consumer reclassification and P0–P5 remain open. [Implementation record](<../vibe/impl/Radiant_Impl_CSS_Selector_Property_Support (retired).md>).
+**Custom-token serialization (2026-10-07).** Authored and computed custom properties preserve quotes, number/escape spelling, UUIDs, whitespace and comments through `var()` substitution. Shared winning declarations and caller-owned pools follow **D5.5.1**. New token boundaries receive empty comments; typed registered colors use computed serialization. Parser fixes retain comment-only values and normalize escaped EOF, strings and missing block delimiters. The permanent fixture improves from 3/43 to 43/43. The consecutive-token WPT improves from 65/72 to 69/72; three old comment-removal expectations conflict with [CSS Custom Properties 2 §4.1](https://drafts.csswg.org/css-variables-2/#serializing-custom-props). Chromium agrees on 26 checks, with seventeen explicit comment-preservation differences. Debug gates pass 6,288 Lambda/input cases and 4,054 Radiant cases plus 352 recorded partials. ASan/release pass 252 native cases, 563 assertions, repeated evaluations and dynamic layouts; release memory ceilings hold. The refreshed runtime-only CLI passes nine SQLite fixtures in both execution tiers with forced collection and zero tracked allocations. The strict boundary audit remains at 260 against 165. The registry remains 386 names; complete CSSOM, substitution limits, consumer reclassification and P0–P5 remain open. [Implementation record](<../vibe/impl/Radiant_Impl_CSS_Selector_Property_Support (retired).md>).
 
 ## 1. Conformance Summary
 
@@ -87,7 +87,7 @@ Layout conformance is measured against a real browser. A test page is laid out w
 | Native views, paged composition and FO refinement | **500 / 500** paged; **124 / 124** retained reuse; both remaining paged export failures repaired | refreshed 2026-10-18 | Shared layout, captions/tables, provider replay/break choices, fixed/static furniture and retained paint have controls. FO/native preview and physical-PDF pairs pass. Independent raster equivalence, full PDF and release timing/size targets remain qualification limits; see the integration record. |
 | SVG/vector primitives | **169 / 169** pass | normal `test_rdt_vector_gtest.exe`, re-run 2026-10-18 | Includes shared transform matrices, component-transfer arithmetic/alpha/color-space and compiled-table ownership/admission controls. The earlier 148-case ASan receipt is historical; current scoped sanitizer evidence is listed in §17. |
 | SVG portable export | **162 / 162** SVG-fixture format checks pass | `test/svg/test_svg_export.cjs`, macOS 2026-10-18 | PNG/SVG/PDF at 1×/2×; initial and live edited CSS geometry also matches literal-attribute references with caches off/eager. The combined runner passes 178/180 checks; the two remaining failures are CSS-containment PDF output. See [§17](#17-output-targets). |
-| Native DOM graphics/CSS providers | **78 / 78** pass | matching ASan `test_dom_range_gtest.exe`, re-run 2026-10-13 | Complete immutable publication, absence/conflicts/concurrency and lower-runtime ownership follow **D7.1.3 / D7.5.3 / D4.5.1v4**. 177 deferred /40 unapproved imports remain after eight removed state/layout imports; all four strict DSOs build and boundary closure is not claimed. |
+| Native DOM graphics/CSS providers | **78 / 78** pass | matching ASan `test_dom_range_gtest.exe`, re-run 2026-10-13 | Complete immutable publication, absence/conflicts/concurrency and lower-runtime ownership follow **D9.1.3 / D9.5.6 / D5.5.1**. 177 deferred /40 unapproved imports remain after eight removed state/layout imports; all four strict DSOs build and boundary closure is not claimed. |
 | Export parity controls | **266 / 270** pass | `RenderOutputParity.*:CanvasWebGlExportTest.*`, protected `native_state45q_*`, 2026-10-13 | Independent references exercise PNG/SVG/PDF at both densities, including decorated/blurred/translucent shadows, source-ink overflow, group opacity and private capture margins. 38 raw assertions remain failed: ordered-background PDF edges, outside-stop PDF colors, styled vector clip fringes and coincident opacity-union PDF fringes. Core 6797; Radiant 5425 full /353 partial /1 skipped; scoped ASan 1169; 837 live assertions per runtime; SVG 126 formats /2466 assertions. Older PDF-input page regressions remain separate debt; this suite is not complete export conformance. |
 
 The layout inventory below was counted on 2026-09-28. The 15-suite gate list and its recorded full/partial entries were checked again on 2026-10-10 and are unchanged; this is not a fresh browser comparison or a full current conformance percentage. Current focused checks are listed separately above.
@@ -142,7 +142,7 @@ Elements with special behaviour:
 | `<canvas>` | ◐ | 2D context: rectangles; paths with lines, Bézier curves and arcs; fill, stroke and clip; `save`/`restore`; `translate`/`rotate`/`scale`; `drawImage` with image, canvas and SVG image sources (3/5/9 arguments, crops, transforms, clips and self-copy); solid colours; line width, cap and join; `globalAlpha`; `font`, `fillText`, `measureText`, `textAlign`. Bounded 2D PNG/SVG/PDF controls cover opaque/translucent backing pixels, saved drawing state, translation, identity brightness and group opacity at 1×/2×. WebGL controls additionally cover premultiplied/straight and preserved/discarded buffers on the full native GLFW host; windowless controls explicitly opt into its existing hidden-window option. Dirty GPU pixels refresh before owned vector paint snapshots, while repeated reads retain the current surface. Default null-host exports cannot create WebGL contexts. Missing: gradients and patterns, `getImageData`/`putImageData`, `strokeText`, `setTransform`, `ellipse`, `arcTo`, shadows and compositing modes. Native `webgl2` supports the [selected Three.js/WebGL profile](../test/webgl/README.md), including PBR, image/canvas textures, shadows, postprocessing and shared native animation; full browser conformance is not claimed. At most 4,096 px per side. |
 | `<scene3d>` | ◐ | Native retained meshes, points, anchored sprites and clipped bevel lines, conservative frustum culling and distance LOD; cameras, lighting, clearcoat/sheen/transmission PBR, HDR environments, shadows, per-map UV0/UV1 transforms, RGBA vertex colors, imported cameras, instancing and shared bone/morph animation. Custom GLSL materials, GPU simulations and selected bloom/FXAA/custom color passes are available. See [the package profile](Lambda_Packages.md#27-scene3d--native-3d-scenes) and [native demos](../test/demo/scene3d/README.md); full Three.js parity is not claimed. |
 | Inline `<svg>` | ◐ | See [§15](#15-svg). |
-| `<math>` (MathML) | ◐ | The math package paints the documented Presentation MathML subset through retained SVG layers: tokens, fractions, scripts/limits, roots, accents, spacing, phantoms and basic matrices. The source DOM remains intact and annotations stay inert. Native reflow and font-constant checks cover the subset; full Core/CSS, descendant font-face and accessibility conformance remain open (**D7.2.8**, [Math_Support.md](Math_Support.md)). |
+| `<math>` (MathML) | ◐ | The math package paints the documented Presentation MathML subset through retained SVG layers: tokens, fractions, scripts/limits, roots, accents, spacing, phantoms and basic matrices. The source DOM remains intact and annotations stay inert. Native reflow and font-constant checks cover the subset; full Core/CSS, descendant font-face and accessibility conformance remain open (**D10.2.3**, [Math_Support.md](Math_Support.md)). |
 | `<details>`, `<summary>` | ✅ | Disclosure marker, `open`, and exclusive groups through `name`. |
 | `<dialog>` | ◐ | A closed dialog is hidden and `showModal()` centres it. A non-modal `open` dialog gets no UA border, padding or positioning, `::backdrop` is not painted, and `close()` now updates `returnValue` and queues the close event; `show()` remains missing. |
 | `popover` attribute | ✅ | |
@@ -160,11 +160,11 @@ Selectors are parsed in `lambda/input/css/css_parser.cpp` and matched in `lambda
 
 | Selector | Status | Notes |
 |---|---|---|
-| Type, universal `*`, class, ID | ✅ | Type names are case-insensitive for HTML and case-sensitive in XML/XHTML documents (D2.10.1); class and ID are case-sensitive, with the quirks-mode exception. |
+| Type, universal `*`, class, ID | ✅ | Type names are case-insensitive for HTML and case-sensitive in XML/XHTML documents (D10.1.4); class and ID are case-sensitive, with the quirks-mode exception. |
 | Attribute `[a]`, `[a=v]`, `[a~=v]`, `[a\|=v]`, `[a^=v]`, `[a$=v]`, `[a*=v]`, the `i` and `s` flags | ✅ | `s` forces a case-sensitive value comparison even when the matcher is in a case-insensitive mode. |
 | Namespaces `ns\|E`, `\|E`, `[ns\|a]`, `[\|a]`, `[*\|a]` | ✅ | `@namespace` resolves named and default type namespaces; attributes without a prefix stay in the null namespace. Qualified, null and wildcard attribute selectors match parsed attributes and live `setAttributeNS` state, including independent values for identical qualified names in different namespaces. DOM queries reject undeclared named prefixes but accept null and wildcard forms. |
 | Combinators: descendant, `>`, `+`, `~` | ✅ | |
-| Column combinator `\|\|` | ◐ | HTML `<col>`/`<colgroup>` membership selects `<td>`/`<th>` through the table slot model, including column and cell spans; queries and live stylesheet restyling are tested. Other host-language grids remain open ([Selectors 5 §9.1](https://drafts.csswg.org/selectors-5/#the-column-combinator), [HTML table model](https://html.spec.whatwg.org/multipage/tables.html#forming-a-table)). Temporary occupancy follows **D4.5.1v4**. |
+| Column combinator `\|\|` | ◐ | HTML `<col>`/`<colgroup>` membership selects `<td>`/`<th>` through the table slot model, including column and cell spans; queries and live stylesheet restyling are tested. Other host-language grids remain open ([Selectors 5 §9.1](https://drafts.csswg.org/selectors-5/#the-column-combinator), [HTML table model](https://html.spec.whatwg.org/multipage/tables.html#forming-a-table)). Temporary occupancy follows **D5.5.1**. |
 | `:root`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()`, `:first-of-type`, `:last-of-type`, `:only-of-type` | ✅ | An+B syntax including `odd`/`even`. |
 | `:nth-of-type()`, `:nth-last-of-type()` | ✅ | Count same-type element siblings. |
 | `:nth-child(An+B of S)`, `:nth-last-child(An+B of S)` | ✅ | Filter element siblings through `S` before applying An+B, including negative steps. |
@@ -202,18 +202,18 @@ Specificity and selector-list handling now count supported pseudo-classes, pseud
 
 | At-rule | Status | Notes |
 |---|---|---|
-| `@media` | ◐ | Supported: `all`, `screen`, and `print` when exporting HTML to PDF; `width` and `height` with `min-`/`max-`, exact, and one/two-sided range comparisons (px, em, rem, with em fixed at the 16 px initial font size); `aspect-ratio` with ratio values; `resolution` with dppx/x, dpi and dpcm, following the window's device scale, which layout synchronizes into the document cascade (`test/ui/media_resolution_device_scale.json`; the legacy `-webkit-min-device-pixel-ratio` is not recognized); `orientation`; `prefers-color-scheme` (defaults to `light`); `prefers-reduced-motion` (defaults to `no-preference`); `and`, `or`, `not`, `only` and comma lists. Boolean `width`, `height`, `aspect-ratio`, `resolution`, `color`, `monochrome` and `orientation` are evaluated; unknown features and media types do not match. `hover`, `pointer`, `any-hover` and `any-pointer` support keyword/boolean queries and native environment updates. Primary and aggregate devices remain distinct; desktop GLFW publishes mouse capabilities, while headless fixtures set explicit values. Unknown capabilities stay unknown and are never inferred from viewport width. `css_input_capabilities` checks live control geometry/paint, event payloads and one listener notification per effective change under AST/MIR; broader platform/hotplug contexts remain unqualified. `speech` never matches. `CssEngineTest.MediaQueryRangeBooleanAndOrUseFeatureValues`, `MediaRatioAndResolutionUseTypedRangeValues`, `MediaQueryPrintContextInvalidatesCachedResults`, `RenderOutputParity.MediaRangeAndOrSelectVisibleRules`, and `PdfPrintMediaSelectsRulesAndLinkedStylesheet` check evaluation and paint. The temporary condition parser follows **D4.5.1v4**. |
+| `@media` | ◐ | Supported: `all`, `screen`, and `print` when exporting HTML to PDF; `width` and `height` with `min-`/`max-`, exact, and one/two-sided range comparisons (px, em, rem, with em fixed at the 16 px initial font size); `aspect-ratio` with ratio values; `resolution` with dppx/x, dpi and dpcm, following the window's device scale, which layout synchronizes into the document cascade (`test/ui/media_resolution_device_scale.json`; the legacy `-webkit-min-device-pixel-ratio` is not recognized); `orientation`; `prefers-color-scheme` (defaults to `light`); `prefers-reduced-motion` (defaults to `no-preference`); `and`, `or`, `not`, `only` and comma lists. Boolean `width`, `height`, `aspect-ratio`, `resolution`, `color`, `monochrome` and `orientation` are evaluated; unknown features and media types do not match. `hover`, `pointer`, `any-hover` and `any-pointer` support keyword/boolean queries and native environment updates. Primary and aggregate devices remain distinct; desktop GLFW publishes mouse capabilities, while headless fixtures set explicit values. Unknown capabilities stay unknown and are never inferred from viewport width. `css_input_capabilities` checks live control geometry/paint, event payloads and one listener notification per effective change under AST/MIR; broader platform/hotplug contexts remain unqualified. `speech` never matches. `CssEngineTest.MediaQueryRangeBooleanAndOrUseFeatureValues`, `MediaRatioAndResolutionUseTypedRangeValues`, `MediaQueryPrintContextInvalidatesCachedResults`, `RenderOutputParity.MediaRangeAndOrSelectVisibleRules`, and `PdfPrintMediaSelectsRulesAndLinkedStylesheet` check evaluation and paint. The temporary condition parser follows **D5.5.1**. |
 | `@import` | ◐ | Local files and http(s), nested up to 5 levels. Imported rules apply at the import rule's source position. `layer()`/anonymous `layer`, `supports()` and media conditions use the corresponding layer/supports/media evaluators; imports after ordinary rules are ignored. Media feature coverage remains partial. |
 | `@font-face` | ◐ | `font-family`; `src` with `url()` plus `format()` (woff2, woff, truetype, opentype) and the first `local()`; `font-style` normal, italic or oblique (no angle); `font-weight` as a single value (no ranges); `unicode-range`. `font-display` is parsed and ignored. Top-level rules only. Remote (http/https) font URLs are skipped by the synchronous loader (see [§11](#11-text-and-fonts)). |
 | `@keyframes` | ◐ | Top-level rules with validated supported endpoints; important declarations are ignored. Per-stop timing and property-specific intervals are sampled; selector lists and broader value grammar remain partial; see §13. `@-webkit-keyframes` is dropped. |
 | `@supports` | ◐ | `not`, `and`, `or`, parentheses, `selector()` and property-value checks work for validated properties. `(display: bogus)` is false. Value validation is still incomplete across the full property registry. |
 | `@layer` | ◐ | Named, nested, anonymous and order-statement layers rank declarations across stylesheets and layered imports; `!important` reverses that order, and `revert-layer` rolls back longhands and `all` across layers. |
 | `@container` | ◐ | Browsing size queries apply named/unnamed/nested conditions, comma lists, physical/logical axes, ratio/orientation and boolean/range/math values. Owner fonts/custom properties and live resize/viewport changes have native and UI controls (`css_container_*`). Independent print/secondary views retain their own measurements and stabilize before commit, with fragmented content-size and export controls. Unknown features cannot select a container. Broader containment/consumer coverage, full shadow/pseudo contexts, style/scroll-state queries and broader grammar remain open. |
-| CSS nesting (`&`, nested rules) | ◐ | Nested style rules apply at multiple depths, including implicit descendants, `&` in compounds or elsewhere in the selector, parent selector lists with `:is()` specificity, and declarations interleaved with child rules. Nested `@media`/`@supports` conditions apply relative selectors and direct declarations. Standalone `&` uses `:scope` in stylesheets and DOM selector parsing. CSSOM serializes nested rules and declaration runs in source order, reflects declaration edits, and rebinds descendants when an outer `selectorText` changes (`RenderOutputParity.NestedCssomSerializesAndRebindsAfterSelectorMutation`). Focused parser, query, paint, live restyling and CSS Syntax WPT ambiguity/error-recovery cases pass. Nested size `@container` rules apply in browsing and independent-view consumers; broader condition contexts remain open. Nested style/group lists now remain live through insertion and deletion; relative rules, declaration runs, ownership, namespace restrictions and named mutation errors pass 38 live assertions (`test/ui/css_nested_rule_mutation.json`). `test/ui/cssom_identity.json` verifies stable sheet/rule/declaration/list wrappers, distinct declarations, sheet/rule expandos, rule prototypes, empty descriptor styles and detached access (36 checks). Native tests cover forced collection, parent retention, imported-sheet detachment, worker handoff and direct document destruction. Declaration method/priority writes and stylesheet ownership/disabled state add 53 live assertions. Complete interface member semantics and realm crossing remain open. The parsed rule source follows **D4.5.1v4** ownership. |
+| CSS nesting (`&`, nested rules) | ◐ | Nested style rules apply at multiple depths, including implicit descendants, `&` in compounds or elsewhere in the selector, parent selector lists with `:is()` specificity, and declarations interleaved with child rules. Nested `@media`/`@supports` conditions apply relative selectors and direct declarations. Standalone `&` uses `:scope` in stylesheets and DOM selector parsing. CSSOM serializes nested rules and declaration runs in source order, reflects declaration edits, and rebinds descendants when an outer `selectorText` changes (`RenderOutputParity.NestedCssomSerializesAndRebindsAfterSelectorMutation`). Focused parser, query, paint, live restyling and CSS Syntax WPT ambiguity/error-recovery cases pass. Nested size `@container` rules apply in browsing and independent-view consumers; broader condition contexts remain open. Nested style/group lists now remain live through insertion and deletion; relative rules, declaration runs, ownership, namespace restrictions and named mutation errors pass 38 live assertions (`test/ui/css_nested_rule_mutation.json`). `test/ui/cssom_identity.json` verifies stable sheet/rule/declaration/list wrappers, distinct declarations, sheet/rule expandos, rule prototypes, empty descriptor styles and detached access (36 checks). Native tests cover forced collection, parent retention, imported-sheet detachment, worker handoff and direct document destruction. Declaration method/priority writes and stylesheet ownership/disabled state add 53 live assertions. Complete interface member semantics and realm crossing remain open. The parsed rule source follows **D5.5.1** ownership. |
 | `@page` | ◐ | Explicit paged composition applies named pages, `:first`/`:left`/`:right`/`:blank`, paper size/orientation, percentage margins, page backgrounds and selected margin-box styles/content. Page counters, named strings and running content have focused coverage. Flat PDF export applies active paper size/margins to one page; full publishing/page-context coverage remains incomplete. See [§8.1](#81-paged-media-and-formatting-inputs). |
 | `@namespace` | ✅ | Named declarations bind type, universal and attribute selectors; the default declaration binds only type and universal selectors. Quoted and `url(...)` forms work; declarations after ordinary rules are ignored. DOM queries have no stylesheet namespace context. |
-| `@scope` | ◐ | Start/end boundaries, implicit owner scopes, nested roots, relative selectors, direct declarations, specificity/proximity order and live class changes apply. CSSOM exposes boundaries and live scoped insertion/deletion. Parser/cascade checks, 27 browser-confirmed live assertions and raster/SVG/PDF export checks pass (`test/ui/css_scope_rules.json`, `RenderOutputParity.ScopeRootsLimitsAndProximityReachRasterSvgAndPdf`). Broader shadow/import contexts and wrapper interfaces need audit. State follows **D4.5.1v4**. |
-| `@property` | ◐ | Valid registrations control defaults, inheritance and computed-value validation. Tested numeric math and absolute/viewport/`em`/`rem`, angle/time/resolution units compute on the declaration owner, including transform lengths and integer lists; mixed percentages remain available to the final consumer. Font-size and direct variable cycles invalidate their dependencies. CSSOM descriptors, computed values and live insertion/deletion pass 35 browser-confirmed assertions; registered math passes 18 more. PNG/SVG/PDF output matches explicit-value references. Other relative units, full image/color/URL computation, nonlinear percentage/nonfinite math edges, broader contexts, interfaces and registered-property interpolation remain open (`test/ui/css_registered_properties.json`, `css_registered_math.json`). Ownership follows **D4.5.1v4**. |
+| `@scope` | ◐ | Start/end boundaries, implicit owner scopes, nested roots, relative selectors, direct declarations, specificity/proximity order and live class changes apply. CSSOM exposes boundaries and live scoped insertion/deletion. Parser/cascade checks, 27 browser-confirmed live assertions and raster/SVG/PDF export checks pass (`test/ui/css_scope_rules.json`, `RenderOutputParity.ScopeRootsLimitsAndProximityReachRasterSvgAndPdf`). Broader shadow/import contexts and wrapper interfaces need audit. State follows **D5.5.1**. |
+| `@property` | ◐ | Valid registrations control defaults, inheritance and computed-value validation. Tested numeric math and absolute/viewport/`em`/`rem`, angle/time/resolution units compute on the declaration owner, including transform lengths and integer lists; mixed percentages remain available to the final consumer. Font-size and direct variable cycles invalidate their dependencies. CSSOM descriptors, computed values and live insertion/deletion pass 35 browser-confirmed assertions; registered math passes 18 more. PNG/SVG/PDF output matches explicit-value references. Other relative units, full image/color/URL computation, nonlinear percentage/nonfinite math edges, broader contexts, interfaces and registered-property interpolation remain open (`test/ui/css_registered_properties.json`, `css_registered_math.json`). Ownership follows **D5.5.1**. |
 | `@counter-style`, `@starting-style`, `@font-feature-values`, `@view-transition` | ❌ | Skipped with their block; rules inside `@starting-style` are lost. |
 | `@charset` | ✅ | Used to decode external stylesheets. |
 
@@ -392,7 +392,7 @@ Every mode below lays out the same tree, and all positions and sizes are fractio
 | Fixed PDF pages | ◐ | Import all pages or explicit source ranges, retaining page boxes/origins, quarter-turn rotation and source labels through common preview/export. Page-budget overflow fails rather than silently truncating. General PDF import fidelity is still limited by the PDF package. |
 | Native typesetting providers | ◐ | `PagedNativeFlowBinding` connects replayable body/static/nested providers to shared page-flow struts and line minima. Producer-owned line alternatives, signed break preferences, forced/forbidden boundaries, ordered vertical glue, body marks and forward targets retain source identities and immutable paint owners. Native insertion/float scheduling and static mark/target events remain diagnosed outside this profile. The old page-plan/policy and hold/reinsert engine stays removed; a complete TeX frontend is not implemented. |
 
-Paged editions retain their own fragment generations and resource ownership under **D4.5.1v4 / D4.1.4v5**. Historical passing totals for the old item engine do not qualify the new flow; the migrated paged/reuse suites and FO/native pair controls qualify their admitted behavior; aggregate, independent-reference, platform and release/performance results remain recorded separately. Native/FO equivalence alone does not establish FOP conformance. See the [integration record](../vibe/impl/Radiant_Impl_Paged_Integration.md) and [output options in §17.1](#171-paged-preview-and-export).
+Paged editions retain their own fragment generations and resource ownership under **D5.5.1 / D5.1.4**. Historical passing totals for the old item engine do not qualify the new flow; the migrated paged/reuse suites and FO/native pair controls qualify their admitted behavior; aggregate, independent-reference, platform and release/performance results remain recorded separately. Native/FO equivalence alone does not establish FOP conformance. See the [integration record](../vibe/impl/Radiant_Impl_Paged_Integration.md) and [output options in §17.1](#171-paged-preview-and-export).
 
 ## 9. Box Model and Sizing
 
@@ -420,7 +420,7 @@ Status is for the raster painter (PNG, JPEG and the `lambda view` window); SVG a
 | `linear-gradient()`, `radial-gradient()`, `conic-gradient()`, `repeating-*` | ◐ | Qualified linear/radial stop computation and range colors reach raster/SVG/PDF; all eleven registered 2× PDF range edge comparisons pass. Broader conic/repeating output contexts remain partial. |
 | `background-clip`, including `text` | ✅ | SVG output renders `background-clip: text` as invisible text. |
 | `background-blend-mode` | ❌ | `multiply` over two gradient layers did not blend in a spot check. |
-| `background-attachment` | ◐ | `scroll`, `fixed` and `local` validate before cascade. Raster `fixed` uses the viewport positioning area while keeping the element's background clip; `local` sizes the positioning area to scrollable overflow and follows its live scroll position. Both work through the longhand and a single-layer `background` shorthand. `inherit` copies the parent's computed attachment. `RenderOutputParity.FixedBackgroundAttachmentUsesViewportPosition`, `LocalBackgroundAttachmentSizesToScrollableContent` and `LocalBackgroundAttachmentMovesWithScrollContent` compare pixels. Multilayer backgrounds, transformed containing blocks and independent SVG/PDF attachment qualification remain open; vector image producers now share the raster positioning and clip plan. The computed state follows **D4.5.1v4**. |
+| `background-attachment` | ◐ | `scroll`, `fixed` and `local` validate before cascade. Raster `fixed` uses the viewport positioning area while keeping the element's background clip; `local` sizes the positioning area to scrollable overflow and follows its live scroll position. Both work through the longhand and a single-layer `background` shorthand. `inherit` copies the parent's computed attachment. `RenderOutputParity.FixedBackgroundAttachmentUsesViewportPosition`, `LocalBackgroundAttachmentSizesToScrollableContent` and `LocalBackgroundAttachmentMovesWithScrollContent` compare pixels. Multilayer backgrounds, transformed containing blocks and independent SVG/PDF attachment qualification remain open; vector image producers now share the raster positioning and clip plan. The computed state follows **D5.5.1**. |
 | `border-style` | ✅ | `solid`, `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, mixed per side. SVG and PDF output draw `dashed` and `dotted` borders as solid. |
 | `border-radius` | ✅ | Per-corner and elliptical radii; backgrounds, borders and overflow clipping follow the curve. Focused math, inherited units and resizing checks pass; complete computed CSSOM serialization remains partial. |
 | `border-image` | ◐ | Linear-gradient and raster `url()` sources paint from longhands or the shorthand with nine-slice source cuts, one-to-four slice/width/outset values, `fill`, and two-axis `stretch`/`repeat`/`round`/`space` tiling. The shorthand competes with explicit longhands by cascade order (`RenderOutputParity.BorderImageShorthandCompetesWithLonghandsInCascade`). The `enhance5_spec_border_image_gradient_01` browser reference matches exactly; focused raster cases check used areas, repeat tiles, URL crops, intrinsic `auto` width and center fill. Raster/SVG/PDF share the nine-slice producer for raster URL and linear-gradient sources, including selected `image-set()` density and owned gradient stops under deferred effects. Focused untranslated/translated 1×/2× references require visible selected-color coverage. Slice clips follow the tiles' transform and export bounds include translated content. Radial/conic and SVG URL/vector sources, broader transformed sampling and projective export and independent/paged consumers remain open. |
@@ -459,7 +459,7 @@ Radiant uses Lambda's own font engine (`lib/font/`) for font loading, glyph metr
 | `word-spacing` | ◐ | Computed spacing reaches horizontal ASCII-space paint, ellipsis fitting and effect fallback after whitespace collapse/preservation. Eight browser references pass PNG/SVG/PDF at 1×/2×; 139 live checks cover computation, inherited mutation, frame-committed geometry and pixels. `normal` computes to `0px`. Tabs, complete Unicode separators, cross-node/shaping/vertical contexts and decoration placement remain open. |
 | `text-transform` | ◐ | Keyword-set validation rejects unknown, duplicate and conflicting case tokens. Shared computed reads preserve inheritance, invalid-substitution defaulting and combined values; repeated native reads release scratch. Suffix painting preserves source capitalization boundaries across raster, shadows and exports (`css_text_overflow_rtl`). Full-width/combined/math-auto paint, language-sensitive case mapping and general Unicode word boundaries remain unqualified. |
 | `text-indent` | ✅ | Lengths, percentages, `calc()`, `hanging` and `each-line`; the modifier WPT browser comparison matches all boxes and text runs. |
-| `line-height` | ◐ | Shared typed computation preserves inherited number multipliers and declaration-owned percentages/lengths, including math, variables, font-shorthand leading, zero fonts, deep/live reads and originating pseudo fonts. Invalid dimensional math preserves earlier declarations; negative/NaN math clamps after computation. `cssom_line_height_values.json` verifies 63 Chromium-confirmed values. Two render regressions verify line boxes, live mutation, zoom once, and multiline PNG/SVG/PDF output. Retained lengths follow **D4.5.1v4**. `cssom_font_metric_units.json` adds 58 Chromium-confirmed metric and parent/root leading checks. Shared font metrics and two additional paint regressions verify inherited metric lengths, live family/root-leading mutation and PNG/SVG/PDF at 1×/2×. Other font-affecting properties, native inherited orientation, complete pseudo variable scopes and infinity handling remain open. |
+| `line-height` | ◐ | Shared typed computation preserves inherited number multipliers and declaration-owned percentages/lengths, including math, variables, font-shorthand leading, zero fonts, deep/live reads and originating pseudo fonts. Invalid dimensional math preserves earlier declarations; negative/NaN math clamps after computation. `cssom_line_height_values.json` verifies 63 Chromium-confirmed values. Two render regressions verify line boxes, live mutation, zoom once, and multiline PNG/SVG/PDF output. Retained lengths follow **D5.5.1**. `cssom_font_metric_units.json` adds 58 Chromium-confirmed metric and parent/root leading checks. Shared font metrics and two additional paint regressions verify inherited metric lengths, live family/root-leading mutation and PNG/SVG/PDF at 1×/2×. Other font-affecting properties, native inherited orientation, complete pseudo variable scopes and infinity handling remain open. |
 | `vertical-align` | ✅ | Replaced HTML `align=center/middle` uses the parent baseline; CSS `middle` also uses parent x-height. Hint/author precedence, rollback and retained transitions have native controls. The legacy `bottom` hint's spec/browser disagreement remains open. |
 | `text-decoration` | ◐ | Horizontal solid/dashed/dotted/double/wavy lines use shared native/SVG/PDF metrics and complete ink gaps at 1×/2×. Current/transparent color state, resets/inheritance and shorthand component winners have live references. Decorations participate in complete shadow silhouettes, foreground lines follow shadows, and translated solid/wavy paint matches placed geometry. Exact patterned vector clip fringes remain failed; broader decorating-box/fragment geometry, emphasis, shaping and vertical contexts remain open. |
 | `text-shadow` | ◐ | Selected-font horizontal grayscale glyphs and decorations preserve authored layer and background/shadow/foreground order. Sharp/blurred/partial-alpha layers, colored backdrops, translation and smaller source owners have exact PNG/SVG/PDF references at both densities. Each complete silhouette receives layer alpha once; private zero-alpha capture margins are trimmed before publication. Live mutation, font/source retirement and atomic failure have normal/ASan controls. Emphasis, color fonts, fragmented/ancestor geometry, nonuniform/projective transforms and independent/paged contexts remain open. |
@@ -480,15 +480,15 @@ Status is for the raster painter; SVG and PDF output differ as listed in [§17](
 | Feature | Status | Notes |
 |---|---|---|
 | 2D transforms, `transform-origin` | ✅ | |
-| 3D transforms, `perspective`, `perspective-origin`, `transform-style`, `backface-visibility` | ◐ | 4×4 matrices are projected with perspective; intersecting planes have no depth sorting. Hidden backfaces use the accumulated context's inverse-transpose normal in HTML paint and hit testing. Independent preserved child planes can paint while input excludes their hidden ancestor. Existing opacity, overflow, filter, blend, radial-mask and paint-containment state flattens the used context while CSSOM retains the computed keyword. `RenderOutputParity.BackfacesRespectThreeDimensionalContextsInRasterAndSvg` and `test/ui/backface_visibility.json` check raster/SVG, live changes, input and containing blocks. The six PDF face samples match an untransformed PDF reference after rasterization. Unsupported grouping effects, SVG descendant scenes and broader PDF scenes remain open. The draft and Chrome 154 differ on three additional grouping/containing-block checks; see the [implementation record](<../vibe/impl/Radiant_Impl_CSS_Selector_Property_Support (retired).md#p4--make-parsed-only-properties-effective-by-subsystem>). State follows **D4.5.1v4**. |
+| 3D transforms, `perspective`, `perspective-origin`, `transform-style`, `backface-visibility` | ◐ | 4×4 matrices are projected with perspective; intersecting planes have no depth sorting. Hidden backfaces use the accumulated context's inverse-transpose normal in HTML paint and hit testing. Independent preserved child planes can paint while input excludes their hidden ancestor. Existing opacity, overflow, filter, blend, radial-mask and paint-containment state flattens the used context while CSSOM retains the computed keyword. `RenderOutputParity.BackfacesRespectThreeDimensionalContextsInRasterAndSvg` and `test/ui/backface_visibility.json` check raster/SVG, live changes, input and containing blocks. The six PDF face samples match an untransformed PDF reference after rasterization. Unsupported grouping effects, SVG descendant scenes and broader PDF scenes remain open. The draft and Chrome 154 differ on three additional grouping/containing-block checks; see the [implementation record](<../vibe/impl/Radiant_Impl_CSS_Selector_Property_Support (retired).md#p4--make-parsed-only-properties-effective-by-subsystem>). State follows **D5.5.1**. |
 | `opacity` | ✅ | |
-| `filter` | ◐ | `blur()`, `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `opacity()`, `saturate()`, `sepia()`, `drop-shadow()`, with the limits in [§6.5](#65-transform-filter-easing-and-shape-functions). Functions execute in authored order; `url()` has a native SVG-graph consumer. Glyph blur device-length conversion has 1×/2× references; broader computation, URL/transform/backdrop contexts and exact PDF export parity remain partial (CI-18 / D4.5.1v4). |
+| `filter` | ◐ | `blur()`, `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `opacity()`, `saturate()`, `sepia()`, `drop-shadow()`, with the limits in [§6.5](#65-transform-filter-easing-and-shape-functions). Functions execute in authored order; `url()` has a native SVG-graph consumer. Glyph blur device-length conversion has 1×/2× references; broader computation, URL/transform/backdrop contexts and exact PDF export parity remain partial (CI-18 / D5.5.1). |
 | `backdrop-filter` | ◐ | Same supported functions as `filter`; raster output and SVG/PDF raster fallbacks use the recorded page backdrop. Vector output flattens this fallback to an opaque image; broader backdrop/stacking fidelity remains open. |
 | `mix-blend-mode`, `background-blend-mode` | ◐ | The 11 separable modes (`multiply`, `screen`, `overlay`, `darken`, `lighten`, `color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`, `exclusion`). `hue`, `saturation`, `color`, `luminosity` and `plus-lighter` fall back to `normal`. `background-blend-mode` now composites ordered layers against the isolated background color/layer backdrop through the shared plan (**CI-18**). Live component-period controls and actual outputs pass; two preserved 2× PDF edge assertions remain in the ordered-background group. |
 | `isolation` | ◐ | `auto`/`isolate` resolve through computed styles; `isolate` contains negative block layers in its own stacking context. Blend-group isolation remains partial. |
 | `clip-path` | ◐ | Basic shapes and supported `path()` commands in raster, SVG and PDF output ([§6.5](#65-transform-filter-easing-and-shape-functions)); HTML URL clips and geometry boxes remain unsupported; SVG URL clips use the separate §15 resource path. |
 | `clip` (legacy `rect()`) | ❌ | Ignored (verified). |
-| `mask-image` | ◐ | Existing radial masks use computed radius/center/stop values and alpha coverage on the flattened subtree. PNG/SVG/PDF effect capture passes 30 comparisons at 1×/2× with positive paint and cleared-content checks; nested opacity, clips, blend, density and retained-payload rejection have native/ASan controls. [Live mutations](../test/ui/css_radial_masks.json) pass 30 assertions. Full URL/linear/multilayer/inline/ellipse/paged mask consumers and the other mask properties remain open (**CI-18 / D4.5.1v4**). |
+| `mask-image` | ◐ | Existing radial masks use computed radius/center/stop values and alpha coverage on the flattened subtree. PNG/SVG/PDF effect capture passes 30 comparisons at 1×/2× with positive paint and cleared-content checks; nested opacity, clips, blend, density and retained-payload rejection have native/ASan controls. [Live mutations](../test/ui/css_radial_masks.json) pass 30 assertions. Full URL/linear/multilayer/inline/ellipse/paged mask consumers and the other mask properties remain open (**CI-18 / D5.5.1**). |
 | `box-shadow` | ✅ | See [§10](#10-backgrounds-and-borders). |
 | `z-index`, stacking contexts | ◐ | Signed positioned block layers belong to their nearest real context across paragraph/ordinary-block ancestors. Negative layers precede flow content; positive layers follow it. Both retain ancestor clips, containing-block coordinates and reverse hit order. Numeric zero and auto differ. Zero-level descendant lifting, negative inline spans and full isolation/flex/grid context rules remain partial ([RAD_13](dev/radiant/RAD_13_Render_Walk_Painters.md)). |
 | `overflow` clipping | ◐ | Bounded hidden-overflow clips retain owning-box coordinates through translation, scale/reflection, rounded and nested geometry in PNG/SVG/PDF at 1x/2x. Forty causal live pixels and 18 transformed plus 36 sharp intersection comparisons pass. Full logical/axis-specific clipping, clip-margin boxes, gradient/image boundaries and broader paged/effect consumers remain unqualified (CI-18). |
@@ -508,7 +508,7 @@ Animations run on the frame clock of `lambda view` ([RAD_16](dev/radiant/RAD_16_
 | Web Animations keyframes | ◐ | `Element.animate()` and `KeyframeEffect` accept multi-property sequence frames and property-indexed scalar/iterable lists for the 32 sampling properties. Numeric values convert to CSS strings. Authored/missing offsets, per-frame easing, enumerable getter/iterator order, validation and thrown-value identity have Chromium-backed consumer tests; an 80-frame sequence verifies dynamic growth. `KeyframeEffect` snapshots keyframes and supported duration/easing at construction. Multi-property sizing, translation, opacity pixels and explicit seeks are tested in all entry forms. Shorthand/logical/custom properties, timeline offsets, default composition, complete timing/playback/fill APIs and live underlying refresh remain open. |
 | Timing functions | ◐ | See [§6.5](#65-transform-filter-easing-and-shape-functions). |
 | Transitions | ◐ | Wired for 30 properties: `opacity`, text/background colors, six sizing longhands, `aspect-ratio`, and all four physical border colors/widths, insets, margins and paddings. Snapshot tracks grow with the property set; 20 concurrent side effects and retargeting after growth are tested. Lists preserve all names, repeat shorter timing lists and use the last matching entry, including `all`. Shorthand/longhand cascade, variables, `none`, computed lists, live geometry/paint and completed-effect release are tested. Transform/discrete targets, calculated times and faster reversal remain open. Of the 10 WPT transition-event tests that are run, 1 passes. |
-| Events | ◐ | `animationstart`, `animationiteration`, `animationend`, `animationcancel`, `transitionend`, `transitioncancel`. CSS/SVG timing delivery is queued outside layout through traced timer arguments under **D5.3.3** and **D4.5.1v4**. Delayed/negative-delay/zero-duration starts, iteration/end elapsed time, cancellation and a layout-changing start handler pass 17 live assertions in `test/ui/css_animation_events.json`. Complete phase changes, `transitionrun` and `transitionstart` remain open. |
+| Events | ◐ | `animationstart`, `animationiteration`, `animationend`, `animationcancel`, `transitionend`, `transitioncancel`. CSS/SVG timing delivery is queued outside layout through traced timer arguments under **D6.3.3** and **D5.5.1**. Delayed/negative-delay/zero-duration starts, iteration/end elapsed time, cancellation and a layout-changing start handler pass 17 live assertions in `test/ui/css_animation_events.json`. Complete phase changes, `transitionrun` and `transitionstart` remain open. |
 | SVG SMIL animation | ◐ | Live document-time animation and timeline controls; see [§15](#15-svg) for the supported classes and timing limits. |
 | SVG CSS paint animation and transitions | ◐ | `fill`, `stroke`, `fill-opacity`, `stroke-opacity`, `stroke-width` and `stroke-dashoffset` sample through the shared SVG presentation adapter. Colors, scalars and compatible lengths reach paint, computed reads and hit geometry; live retargeting, priority/inheritance, pause/resume and removal are covered. Paint-server/`none` and dash-list interpolation, geometry animation, additive CSS/SMIL composition and CSS effects inside isolated SVG images/use-instance trees remain outside this increment. |
 | Animated GIF, Lottie | ◐ | Play in `lambda view`; static output shows the first frame (GIF) or an empty box (Lottie). |
@@ -526,7 +526,7 @@ Opacity math accepts numbers or percentages; adding them together is invalid und
 | Focus | ✅ | Tab order follows `tabindex`, plus `autofocus`; `:focus-visible` follows keyboard focus. Focus behaviour is written in Lambda in the `dom` package ([Lambda_Packages.md §10.3](Lambda_Packages.md#103-dom--browser-behaviour-for-html)). |
 | Interaction pseudo-classes | ✅ | `:hover`, `:active`, `:focus`, `:focus-within`, `:focus-visible`, `:target`, `:checked`, `:valid`/`:invalid` and `:placeholder-shown` restyle live; see [§3](#3-css-selectors). |
 | Scrolling | ◐ | Mouse wheel and scrollbar dragging, overlay scrollbars (shown on hover or drag for `overflow: auto`, always for `scroll`), `scrollbar-gutter`, and sticky positioning that follows the scroll. `scroll-snap-type`/`scroll-snap-align` affect wheel and programmatic scroll positions in live view; `overscroll-behavior` controls wheel and native Arrow/Page/Space chaining on each axis. Horizontal-writing, one-axis mandatory snap panes retain a validated selected target through committed relayout, removal and eligibility changes (`scroll_snap_relayout`); paired/vertical-writing resnap and touch chaining remain unqualified. `scroll-behavior: smooth` animates CSSOM scroll writes and `scrollIntoView()` in live panes and the viewport; anchor navigation also follows the root smooth scrolling value. Fixed containing-block sizing and percentage math have bounded viewport/transformed-ancestor coverage; broader fixed scrolling and fragmentation remain partial. |
-| `contenteditable` (rich and `plaintext-only`) | ✅ | Radiant fires `beforeinput` and the `dom` package performs the edit, per ruling D7.2.5 in [Lambda_Formal_Design.md](Lambda_Formal_Design.md): editing policy belongs to the Lambda DOM behaviour package, not to native code. 50+ `inputType`s; WPT input-events: 20 files pass. |
+| `contenteditable` (rich and `plaintext-only`) | ✅ | Radiant fires `beforeinput` and the `dom` package performs the edit, per ruling D10.2.1 in [Lambda_Formal_Design.md](Lambda_Formal_Design.md): editing policy belongs to the Lambda DOM behaviour package, not to native code. 50+ `inputType`s; WPT input-events: 20 files pass. |
 | Form text controls | ✅ | Native caret, selection, undo and IME; see [§2](#2-html). |
 | Text selection, `Selection` and `Range` | ◐ | Native selection and live range/selection behavior have UI coverage, including drag and scroll-edge selection. Word/sentence movement in `Selection.modify()` remains approximate; complete browser Range/Selection conformance is not claimed. |
 | Clipboard | ◐ | An in-memory clipboard plus plain text through the OS; no rich (HTML) OS clipboard. |
@@ -541,31 +541,31 @@ Opacity math accepts numbers or percentages; adding them together is invalid und
 Radiant parses and paints SVG itself, whichever way it arrives: inline `<svg>` in HTML, a standalone `.svg` file given to `lambda render` or `lambda view`, `<img src="x.svg">`, CSS `url(x.svg)`, `data:` SVG URIs, SVG `<image href="x.svg">`, and external `<use href="f.svg#id">`. ThorVG is the rasterizer underneath; its own SVG loader is not used. Design: [RAD_14 — SVG, Vector Graphics & Diagram Layout](dev/radiant/RAD_14_SVG_Vector_Graph.md). SVG *output* is covered in [§17](#17-output-targets).
 
 **Parsing policy (2026-10-18):** SVG embedded in HTML follows browser-standard
-HTML5 foreign-content parsing (**D2.11.1**). External SVG uses that same parser
-and Mark element model (**D2.11.2**), including HTML name adjustments, namespace
+HTML5 foreign-content parsing (**D10.1.5**). External SVG uses that same parser
+and Mark element model (**D10.1.5**), including HTML name adjustments, namespace
 rules and HTML integration points. XML-only prefix bindings and self-closing
 XHTML syntax therefore follow the same behavior as inline HTML SVG. This is
 Lambda's external-SVG admission profile; explicit XML/XHTML documents retain
-their XML syntax (**D2.10.1**). See the
+their XML syntax (**D10.1.4**). See the
 [shared-parser record](../vibe/impl/Radiant_Impl_SVG_Support.md#12-shared-svg-parser-implementation-record).
 
 **2026-10-18 enhancement:** interactive icons and diagrams now have individual
 2D transforms, CSS fill/stroke effects, component-transfer filters and CSS
 rect/circle/ellipse geometry. Paint, DOM geometry and pointer targeting share
 the resolved state. Current-DOM saves preserve edits; selected virtual-frame
-saves retain sampled state when reopened (**D2.11.3–D2.11.4**). The
+saves retain sampled state when reopened (**D10.1.6–D10.1.7**). The
 [enhancement record](../vibe/impl/Radiant_Impl_SVG_Support.md#14-outstanding-work-follow-up)
 records acceptance and remaining resource/platform limits. Earlier text,
 paint-server, clip/mask, marker, filter, embedded-HTML and SMIL work is recorded
 in the [SVG closeout](../vibe/impl/Lambda_Impl_SVG_Support.md#716-p12-remaining-timing-instance-dom-and-final-closeout).
-Retained source/sample ownership follows **D4.2.6/D4.5.1v4**,
+Retained source/sample ownership follows **D5.2.5/D5.5.1**,
 “pin, gen-check, copy-as-value.”
 
 ### 15.1 Elements
 
 | Element | Status | Notes |
 |---|---|---|
-| SVG namespace identity | ✅ | XML/XHTML-hosted SVG and FO instream graphics retain expanded namespace/local-name identity, including geometry/text dispatch and namespaced references. Inline HTML and external SVG use HTML namespace assignment under **D2.11.1–D2.11.2**. Actual foreign-namespace elements are excluded; native namespace controls pass. |
+| SVG namespace identity | ✅ | XML/XHTML-hosted SVG and FO instream graphics retain expanded namespace/local-name identity, including geometry/text dispatch and namespaced references. Inline HTML and external SVG use HTML namespace assignment under **D10.1.5–D10.1.5**. Actual foreign-namespace elements are excluded; native namespace controls pass. |
 | `<svg>`, nested `<svg>` | ✅ | `viewBox` and `preserveAspectRatio` (alignment, `meet`, `slice`, `none`). Default size 300 × 150; with only a `viewBox` it fills the container width at the viewBox ratio. Root and nested overflow follow authored CSS/presentation values; visible ink can extend beyond the viewport, while hidden overflow clips in viewport space. |
 | `<g>` | ✅ | Group opacity composites overlapping shapes once, with or without a root `viewBox`, including nested groups and a nonzero viewBox origin. |
 | `<path>` | ✅ | All commands (`M L H V C S Q T A Z`, absolute and relative), arcs included. Invalid data retains complete preceding segments; incomplete parameter sets are not emitted. |
@@ -578,7 +578,7 @@ Retained source/sample ownership follows **D4.2.6/D4.5.1v4**,
 | `<use>`, `<symbol>`, `<defs>` | ✅ | `href` and `xlink:href`, `x`/`y`, the symbol's `viewBox` and `preserveAspectRatio`, external `file.svg#id`, a cycle guard, nesting up to 16 levels. |
 | `<image>` | ✅ | Shared PNG/JPEG/GIF/WebP/SVG and data-URI resources; document-relative URLs, x/y, all aspect alignments, meet/slice/none, transformed clipping and opacity. GIF frames invalidate recorded paint. Referenced SVG images isolate styles and block external file references; standalone SVG has a live document DOM. |
 | `<switch>` | ✅ | First eligible child, conditional language/extension checks, no-match behavior and live mutation. |
-| `<foreignObject>` | ✅ | Transformed/clipped HTML layout, paint, input and mutation. Prefixed XHTML names are preserved in XML/XHTML hosts; external SVG follows HTML parsing under **D2.11.2**. SVG images use isolated styles and secure image restrictions. |
+| `<foreignObject>` | ✅ | Transformed/clipped HTML layout, paint, input and mutation. Prefixed XHTML names are preserved in XML/XHTML hosts; external SVG follows HTML parsing under **D10.1.5**. SVG images use isolated styles and secure image restrictions. |
 | `<style>` inside SVG | ✅ | Uses the shared CSS parser, selector matcher and cascade, including lists, combinators, specificity and `!important`; external image documents retain isolated styles. |
 | `<title>`, `<desc>` | ✅ | Not painted, as in browsers; no tooltip. |
 | `<linearGradient>`, `<radialGradient>` | ✅ | See the paint-server table below. |
@@ -614,17 +614,17 @@ Retained source/sample ownership follows **D4.2.6/D4.5.1v4**,
 | `opacity`, `fill-opacity`, `stroke-opacity` | ✅ | Shapes, containers, text and referenced content share source capture, filter, clip/mask and final opacity ordering. |
 | `stroke-width`, `stroke-linecap`, `stroke-linejoin`, `stroke-dashoffset` | ✅ | Stroke width validates nonnegative authored numbers/lengths/percentages and typed math; number-only calculations reach paint, and negative computed widths clamp. |
 | `stroke-dasharray` | ✅ | Preserves zero-length round-cap dots, repeats odd lists, treats all-zero/invalid negative lists as solid, and resolves percentages against the viewport diagonal. |
-| Registered SVG reference and keyword CSS | ◐ | Eight marker, vector-effect, interpolation and anchor names share defaults, inheritance, grammar, cascade and generated CSSOM accessors. `test/ui/cssom_svg_references.json` checks 64 browser-matched values, shorthand/member priority and removal, pending variables, live stroke hits and a positioned SVG matrix. `marker` has three longhands and no presentation-attribute form. PNG/SVG/PDF comparisons verify markers, affine non-scaling strokes, text anchoring, mask luminance and filter color space. Native snapshots follow **D4.5.1v4** and IDs follow **D4.6.1v4**; SVG matrix construction stays rooted under **D5.3.3**. General shorthand serialization, effect sampling, use-instance inheritance, gradient/compositing interpolation and broader vector/text behavior remain open. |
-| Registered SVG presentation CSS | ◐ | Fifteen additional opacity, stroke, winding/order and gradient/filter color properties now share registered grammar, cascade and full-length computed getters with SVG painting. `test/ui/cssom_svg_properties.json` checks 55 values against Chromium; `RenderOutputParity.SvgPresentationMathKeywordsAndInheritedLengthsReachPaint` checks visible output. Math and inherited font-relative dashes reach PNG/SVG/PDF consumers. Native output follows **D4.5.1v4**; appended property names retain existing **D4.6.1v4** identities. The six selected fill/stroke color, opacity, width and dash-offset properties now sample CSS keyframes/transitions through the shared SVG presentation adapter (`svg_css_motion`, `svg_css_transition`). Additional joins, paint-server/discrete interpolation, geometry animation and complete serialization remain open. |
+| Registered SVG reference and keyword CSS | ◐ | Eight marker, vector-effect, interpolation and anchor names share defaults, inheritance, grammar, cascade and generated CSSOM accessors. `test/ui/cssom_svg_references.json` checks 64 browser-matched values, shorthand/member priority and removal, pending variables, live stroke hits and a positioned SVG matrix. `marker` has three longhands and no presentation-attribute form. PNG/SVG/PDF comparisons verify markers, affine non-scaling strokes, text anchoring, mask luminance and filter color space. Native snapshots follow **D5.5.1** and IDs follow **D5.6.1**; SVG matrix construction stays rooted under **D6.3.3**. General shorthand serialization, effect sampling, use-instance inheritance, gradient/compositing interpolation and broader vector/text behavior remain open. |
+| Registered SVG presentation CSS | ◐ | Fifteen additional opacity, stroke, winding/order and gradient/filter color properties now share registered grammar, cascade and full-length computed getters with SVG painting. `test/ui/cssom_svg_properties.json` checks 55 values against Chromium; `RenderOutputParity.SvgPresentationMathKeywordsAndInheritedLengthsReachPaint` checks visible output. Math and inherited font-relative dashes reach PNG/SVG/PDF consumers. Native output follows **D5.5.1**; appended property names retain existing **D5.6.1** identities. The six selected fill/stroke color, opacity, width and dash-offset properties now sample CSS keyframes/transitions through the shared SVG presentation adapter (`svg_css_motion`, `svg_css_transition`). Additional joins, paint-server/discrete interpolation, geometry animation and complete serialization remain open. |
 | `stroke-miterlimit`, `paint-order` | ✅ | Acute miter cutoffs and every fill/stroke/marker permutation; paint and pointer geometry share stroke facts. |
 | `vector-effect` | ◐ | `none` and affine `non-scaling-stroke`. SVG2's at-risk `non-scaling-size`, `non-rotation`, `fixed-position`, combined effects and explicit `viewport`/`screen` selectors remain unsupported ([§8.13](https://www.w3.org/TR/SVG2/coords.html#VectorEffects)). |
 | `text-anchor` | ✅ | |
 | Presentation attributes vs CSS | ✅ | Shared author cascade, including inline importance and selector-list specificity; presentation attributes have specificity zero. Invalid paint declarations preserve earlier valid declarations. |
 | **Page stylesheets reaching SVG content** | ✅ | Host selectors style inline SVG descendants. Host class/style changes and stylesheet text replacement invalidate retained SVG paint; external image documents remain isolated. |
-| Computed `fill`, `stroke`, `stroke-width` | ◐ | Shared CSS/presentation cascade, inheritance, invalid-substitution fallback, currentColor, absolute/font-relative lengths, percentages, math, URL fallback colors and complete strings are verified by `test/ui/cssom_svg_paint.json` (36 checks). Paint and CSSOM share stylesheet/import URL bases; local fragments and empty URLs remain literal. Caller-owned output follows **D4.5.1v4**, with existing generated names under **D4.6.1v4**. Selected CSS fill/stroke effects now reach these getters and paint; pseudo values and broader SVG CSSOM remain open. |
+| Computed `fill`, `stroke`, `stroke-width` | ◐ | Shared CSS/presentation cascade, inheritance, invalid-substitution fallback, currentColor, absolute/font-relative lengths, percentages, math, URL fallback colors and complete strings are verified by `test/ui/cssom_svg_paint.json` (36 checks). Paint and CSSOM share stylesheet/import URL bases; local fragments and empty URLs remain literal. Caller-owned output follows **D5.5.1**, with existing generated names under **D5.6.1**. Selected CSS fill/stroke effects now reach these getters and paint; pseudo values and broader SVG CSSOM remain open. |
 | CSS shape geometry | ◐ | `rect`: x/y/width/height/rx/ry; `circle`: cx/cy/r; `ellipse`: cx/cy/rx/ry. Applicable CSS overrides attributes; unitless numbers, px, percentages, em/rem, linear length-percentage math, variables, CSS-wide defaults and auto radii reach shared paint/bounds/hits and object-bounding-box gradients/clips. Live variable/font edits, invalid substitution and attribute restoration after CSS removal are covered. Initial and edited PNG/SVG/PDF match literal-attribute references at 1×/2× with caches off/eager. Other element contexts, CSS path data and geometry animation remain outside this increment. |
-| Current SVG DOM source save | ✅ | **D2.11.3:** shared namespace-aware serialization preserves current elements, text, attributes, styles and references, including edits. Standalone SVG-to-SVG saves retain authored dimensions and animation declarations; ordinary `XMLSerializer` also serializes the current DOM. General HTML-page SVG/PDF retains paint export. |
-| Selected virtual-frame SVG snapshot | ◐ | **D2.11.4:** targeted interactive SVG saves project the selected CSS/SMIL frame and disable animation/script drivers in the output without mutating live DOM/time. Repeated fixed-frame files are byte-identical. Reopened-frame controls include independent local/file-backed use instances with rewritten IDs/references, sibling filter resources and an embedded frozen SVG image. Nested resource closure, SVG images inside use templates and complete host inheritance remain unqualified. See [§17](#17-output-targets) for capture usage. |
+| Current SVG DOM source save | ✅ | **D10.1.6:** shared namespace-aware serialization preserves current elements, text, attributes, styles and references, including edits. Standalone SVG-to-SVG saves retain authored dimensions and animation declarations; ordinary `XMLSerializer` also serializes the current DOM. General HTML-page SVG/PDF retains paint export. |
+| Selected virtual-frame SVG snapshot | ◐ | **D10.1.7:** targeted interactive SVG saves project the selected CSS/SMIL frame and disable animation/script drivers in the output without mutating live DOM/time. Repeated fixed-frame files are byte-identical. Reopened-frame controls include independent local/file-backed use instances with rewritten IDs/references, sibling filter resources and an embedded frozen SVG image. Nested resource closure, SVG images inside use templates and complete host inheritance remain unqualified. See [§17](#17-output-targets) for capture usage. |
 | Font properties on `<g>` | ✅ | Presentation attributes and shared CSS inherit family, size, weight and slant into descendant text. |
 | `display="none"` | ✅ | |
 | `visibility` | ◐ | Inherited hidden content retains geometry; explicit visible descendants paint and receive pointer targets, including programmatically scrolled hidden panes. Hidden/collapsed ordinary text retains advances. Qualified PNG/SVG/PDF and causal live controls cover the bounded paint/hit behavior; flat hidden-link annotations have bounded PDF tests; table collapse and broader fragment/effect/backface/focus contexts remain open. |
@@ -683,12 +683,12 @@ The image decoders linked into `lambda` are libpng, libjpeg-turbo, giflib and li
 | Colour management | PNG: RGBA without colour-space chunks; JPEG: quality 85, no ICC profile | — | DeviceRGB, no ICC profile |
 
 `lambda render drawing.svg -o saved.svg` saves the current standalone SVG DOM
-under **D2.11.3**, preserving authored dimensions, text, styles, references and
+under **D10.1.6**, preserving authored dimensions, text, styles, references and
 animation declarations. Interactive saves include DOM edits. Page fitting and
 `--scale` in the table apply to rendered-page output.
 
 For a stable animated snapshot, advance the existing virtual timer and capture
-the selected SVG root after that frame settles (**D2.11.4**). For example, the
+the selected SVG root after that frame settles (**D10.1.7**). For example, the
 event/virtual-timer input can capture an inline root at 1,000 ms:
 
 ```json
@@ -735,7 +735,7 @@ For multipage reports within the supported formatting profile, use `--paged` PDF
 - Five full CLI fixtures pass the supported ASan profile, including imported
   frame export/reopen and live edited PDF capture. Seventeen memory-context and
   seven factory unit tests also pass with ASan after the dependency-order teardown
-  fix (**D4.2.1v3**). Leak detection is disabled for the CLI checks; tracked leaks
+  fix (**D5.2.1**). Leak detection is disabled for the CLI checks; tracked leaks
   remain, so this is scoped lifetime evidence.
 
 SVG text and local/embedded font paint fixtures retain vector outlines in SVG
@@ -743,7 +743,7 @@ and PDF; DOM source saves retain their text nodes. Linux/Windows export runtime
 smoke remains pending, and required aggregate qualification is still failed.
 The [follow-up receipt](../vibe/impl/Radiant_Impl_SVG_Support.md#14-outstanding-work-follow-up)
 records the separate batch results and remaining owners. Recording snapshots
-follow **D4.5.1v4**'s “pin, gen-check, copy-as-value” seam.
+follow **D5.5.1**'s “pin, gen-check, copy-as-value” seam.
 
 Ordinary CLI paint exports sample document time zero, including active negative
 intervals; intervals already ended before zero do not contribute. No CLI
@@ -796,7 +796,7 @@ The gaps most likely to change how a real page looks, with the section that has 
 - Inline SVG shares the page cascade; external SVG images retain isolated styles ([§15](#15-svg)).
 - Individual SVG transforms cover static 2D shapes/groups/local-use descendants. SVG 3D/perspective and individual-property animation, paint-server/`none` and dash-list interpolation, geometry animation and CSS effects inside isolated SVG images/use-instance trees remain outside the enhancement ([§15](#15-svg)).
 - SVG filter convolution, animated component-transfer parameters, broader SVG2 vector effects and motion/discard animation remain outside the implemented inventory. Text retains the general font shaping limits ([§15](#15-svg)).
-- Fixed-frame SVG snapshots cover the tested local/file-backed instances and local SVG image import; nested resource closure, images inside use templates and complete host inheritance remain unqualified (**D2.11.4**). Network sprites are deferred; wall-clock animation capture is outside the requirement. Linux/Windows SVG export runtime smoke remains pending ([§17](#17-output-targets)).
+- Fixed-frame SVG snapshots cover the tested local/file-backed instances and local SVG image import; nested resource closure, images inside use templates and complete host inheritance remain unqualified (**D10.1.7**). Network sprites are deferred; wall-clock animation capture is outside the requirement. Linux/Windows SVG export runtime smoke remains pending ([§17](#17-output-targets)).
 - AVIF, BMP, TIFF and ICO images do not load ([§16](#16-image-formats)).
 
 **Output**
@@ -841,8 +841,8 @@ Sanitizer coverage instruments the owned CSS/DOM/lifecycle/paint subset and
 native regression translation units; remaining host objects use debug_native,
 and leak detection is disabled. The boundary improves to 213 deferred /76
 unapproved imports with no additions and an unchanged 165 allowance, so its
-strict gate still fails (**D7.1.3 /D7.5.3**). Bounded clip and focus results above
-follow **D4.5.1v4 /D4.1.4v5**; they do not establish the remaining family limits.
+strict gate still fails (**D9.1.3 /D9.5.6**). Bounded clip and focus results above
+follow **D5.5.1 /D5.1.4**; they do not establish the remaining family limits.
 
 **Flat PDF links and host providers (2026-10-12, CI-18).** Protected
 `consumer31q_*` adds ten PDF URI-presence controls at 1x/2x. Native and matching
@@ -855,14 +855,14 @@ per runtime. Full exports improve to 244/246 groups and retain the same nineteen
 range comparisons and two ordered PDF boundaries. After rebuilding two proven
 stale boundary objects, the unchanged audit removes two more imports to 211
 deferred /74 unapproved, with no additions and no allowance change
-(**D7.1.3 /D7.5.3**). The first duplicate-symbol failure is preserved separately.
-Owned payloads and interaction identity remain **D4.5.1v4 /D4.1.4v5**.
+(**D9.1.3 /D9.5.6**). The first duplicate-symbol failure is preserved separately.
+Owned payloads and interaction identity remain **D5.5.1 /D5.1.4**.
 
 
-**Event provider qualification (2026-10-12, D7.1.3 /D7.5.3):** Protected
+**Event provider qualification (2026-10-12, D9.1.3 /D9.5.6):** Protected
 `events32q_*` moves eighteen event host calls behind a lower-owned immutable
 provider while preserving native implementation, public module names, traced
-payloads and dispatch identity (**D4.5.1v4 /D4.5.2**). Five provider tests cover
+payloads and dispatch identity (**D5.5.1 /D5.5.2**). Five provider tests cover
 all mandatory fields, operation/argument routing, eight creation-flag combinations
 and 200,000 concurrent event calls. Fresh required gates pass 6,765 Lambda/input
 and 5,368 full /353 partial /one skipped Radiant; 1,107 matching sanitizer cases,
@@ -872,24 +872,24 @@ boundaries. Ninety normal and 136 sanitizer source inputs match their protected
 binaries. The four strict DSOs build; the raw boundary removes 18 imports from
 211/74 to 193 deferred /56 unapproved with no additions and an unchanged 165
 allowance. Thirty-seven imports are removed since 230/93; remaining strict
-closure follows **D7.3.3–D7.3.4**. The clipped-text draft stays unapplied and
+closure follows **D9.4.3–D9.4.4**. The clipped-text draft stays unapplied and
 unqualified at the vector edges. No formal ruling changes.
 
 
-**Event workflow qualification (2026-10-12, D7.1.3 /D7.5.3):** Protected
+**Event workflow qualification (2026-10-12, D9.1.3 /D9.5.6):** Protected
 `workflow33q_*` removes four remaining synthetic/author-template imports through
 the existing event provider, preserving implementations and dispatch identity
-(**D4.5.1v4 /D4.5.2**). Required gates, 1,107 matching sanitizer cases, 525 live
+(**D5.5.1 /D5.5.2**). Required gates, 1,107 matching sanitizer cases, 525 live
 assertions per runtime and Canvas golden pass; exports 244/246 retain the same
 nineteen range comparisons and two ordered PDF edges. Ninety-one normal and 136
 sanitizer inputs match protected binaries. The raw boundary improves 193/56 to
 189 deferred /52 unapproved with no additions or allowance change; 41 imports
-are removed since 230/93. Strict closure remains open (**D7.3.3–D7.3.4**).
+are removed since 230/93. Strict closure remains open (**D9.4.3–D9.4.4**).
 
 
 **Editing/factory/context ownership qualification (2026-10-12):** Protected
 `ownership34q_*` qualifies two editing host callbacks, the lower shared fragment
-factory and runtime-owned evaluator transfer (**D7.1.3 / D7.5.3 / D7.2.5 / D5.4.1**).
+factory and runtime-owned evaluator transfer (**D9.1.3 / D9.5.6 / D10.2.1 / D6.4.1**).
 Required gates pass 6,766 Lambda/input and 5,368 full /353 partial /one skipped
 Radiant cases; seven matching sanitizer runners pass 1,144 cases and eighteen
 live fixtures pass 534 assertions per runtime. Canvas golden passes; exports
@@ -897,10 +897,10 @@ live fixtures pass 534 assertions per runtime. Canvas golden passes; exports
 normal and 140 sanitizer inputs match protected binaries. The raw boundary is
 185 deferred /48 unapproved, four fewer with no additions or allowance change;
 45 imports are removed since 230/93. Strict closure remains open
-(**D7.3.3–D7.3.4**). No formal ruling or CSS-family promotion changes.
+(**D9.4.3–D9.4.4**). No formal ruling or CSS-family promotion changes.
 
 
-**Bounded gradient text qualification (2026-10-12, CI-18 / D4.5.1v4):**
+**Bounded gradient text qualification (2026-10-12, CI-18 / D5.5.1):**
 `text_clip35rq_final_*` and the rebuilt `text_clip35v_*` export runner qualify
 per-pixel linear glyph gradients, owner positioning, foreground preservation
 and selected-font vector contours for opaque constant intervals. Forty-two
@@ -915,7 +915,7 @@ Text tiling, multiple/color/URL/radial/conic layers, ancestor/fragment/shaping/
 color-font coverage and continuous/transparent vector edges remain open.
 
 
-**Text tile/layer qualification (2026-10-12, CI-18 / D4.5.1v4):** Protected
+**Text tile/layer qualification (2026-10-12, CI-18 / D5.5.1):** Protected
 `text_tiles36q_*` qualifies authored size/position/repetition/no-repeat, clipped
 color and linear layers, coverage before composition, native clip-aware replay
 and immutable publication lifetime. All 84 PNG/SVG/PDF comparisons pass on both
@@ -928,7 +928,7 @@ fragment/shaping/color-font, transformed layer AA, shadow/decoration/emphasis
 and independent/paged contexts remain open. No full-family promotion.
 
 
-**Historical text shadow/filter-density qualification (2026-10-12, CI-18 / D4.5.1v4):**
+**Historical text shadow/filter-density qualification (2026-10-12, CI-18 / D5.5.1):**
 Protected `text_effects37q_*` and reviewed `text_effects37r_*` qualify horizontal
 selected-font shadow order, isolated per-layer blur, clipped background and
 foreground preservation, device-length conversion and hinted bitmap capture
@@ -958,7 +958,7 @@ and 2,466 assertions. The module audit retains 177 deferred imports and forty
 unapproved imports against the unchanged 165 allowance; all four strict DSOs
 build. Source snapshots, binaries, raw failures and copied exports are protected
 under `temp/css_support_p1/background_layers/emphasis46mq_protected_artifacts.json`
-(**D7.1.3 / D7.3.3–D7.3.4 / D7.5.3 / D4.5.1v4 / D4.1.4v5**).
+(**D9.1.3 / D9.4.3–D9.4.4 / D9.5.6 / D5.5.1 / D5.1.4**).
 
 
 The latest protected aggregate is `native_control47q_*` (2026-10-13): 6,797 core
@@ -967,7 +967,7 @@ cases; Radiant 5,428 full /353 partial /one skipped; 1,171 scoped ASan cases;
 assertions; SVG 126 formats /2,466 assertions. Nine form/scroll/document-tick
 imports move to lower-owned host calls, leaving 168 deferred /31 unapproved
 imports with the unchanged 165 allowance and all four strict DSOs building
-(**D7.1.3 / D7.3.3–D7.3.4 / D7.5.3 / D4.5.1v4 / D4.1.4v5**). Inventory scope
+(**D9.1.3 / D9.4.3–D9.4.4 / D9.5.6 / D5.5.1 / D5.1.4**). Inventory scope
 remains 410 names and twenty-one bounded partial families. Offscreen text ink
 and additional SVG host operations remain unpromoted isolated continuations.
 
@@ -983,7 +983,7 @@ cases and 415 live assertions per AST/MIR runtime. Other host/vendor objects
 remain ordinary debug; leak detection is disabled. The current inventory joins
 411 existing names and twenty-one bounded partial families. Boundary debt stays
 168 deferred /31 unapproved against allowance 165; all four strict DSOs build
-(**D7.1.3 / D7.3.3–D7.3.4 / D7.5.3 / D4.5.1v4 / D4.1.4v5**). The raw UA-default
+(**D9.1.3 / D9.4.3–D9.4.4 / D9.5.6 / D5.5.1 / D5.1.4**). The raw UA-default
 regression trial and transformed antialias probes remain in the implementation
 record. P0–P1 remain active; broad control, independent/paged and transformed
 edge coverage is not completed by these bounded fixtures.
@@ -991,8 +991,8 @@ edge coverage is not completed by these bounded fixtures.
 The 2026-10-15 host-ownership increment passes the unchanged module audit with
 137 deferred /zero unapproved imports, allowance 165, and all four strict DSOs
 linking. The lower-owned provider routes the 31 newly unapproved native imports
-without changing CSS support classifications (**D7.1.3 / D7.5.3 /
-D7.3.3–D7.3.4**). Provider/range tests pass 78 cases normally and under scoped
+without changing CSS support classifications (**D9.1.3 / D9.5.6 /
+D9.4.3–D9.4.4**). Provider/range tests pass 78 cases normally and under scoped
 ASan; 194 DOM/SVG fixtures pass 2,034 live assertions per AST/MIR runtime in
 both configurations. Six production owners and two test units are instrumented;
 other host/vendor objects remain ordinary debug and leak detection is disabled.
@@ -1008,7 +1008,7 @@ grid increment separately qualifies pseudo font-relative computed lengths,
 including dirty font/variable reads and inheritance, with twelve browser/live
 checks and bounded repeated-read memory coverage. Pseudo used track snapshots,
 broader contexts and the five known aggregate failures remain open
-(**D7.1.3 / D7.5.3 / D4.5.1v4 / D4.1.4v5**).
+(**D9.1.3 / D9.5.6 / D5.5.1 / D5.1.4**).
 
 The subsequent receiving-pseudo color and failed-image alternative baseline
 increments qualify dirty/default/inherited colors and sized fallback-image
@@ -1021,7 +1021,7 @@ fifteen changed owners and three test units passes the vector suite and four
 editor fixtures on each AST/MIR runtime. Other host/vendor objects are ordinary
 debug and leak detection is disabled. The unchanged boundary audit passes with
 137 deferred /zero unapproved imports against allowance 165 and four strict
-DSOs (**D7.1.3 / D7.5.3 / D4.5.1v4 / D4.1.4v5**).
+DSOs (**D9.1.3 / D9.5.6 / D5.5.1 / D5.1.4**).
 
 These results do not close the twenty-one bounded partial CSS families. The
 preceding complete exporter still has six failing groups (forty raw assertions,
@@ -1036,7 +1036,7 @@ partial /one skipped over 6,004 inputs, with zero failures. Scoped ASan over
 nineteen changed owners and three test units passes 124 computation and 162
 vector cases; 59 live fixtures pass 2,841 assertions per AST/MIR runtime.
 Inventory remains 411 names, now with twenty-two bounded partial families
-(**CI-18 / D4.5.1v4 / D4.1.4v5**).
+(**CI-18 / D5.5.1 / D5.1.4**).
 
 Quartz PDF reference captures now explicitly convert to sRGB before raw-byte
 comparison. The unchanged open-circle emphasis assertion passes; the complete
@@ -1047,7 +1047,7 @@ broader profile-aware image input or close P0–P1. The refreshed Lambda/input
 aggregate passes 6,964/6,964, including all 313 forced-GC cases. Reporting actual
 reference/schedule boundaries prevents a long multi-process case from appearing
 idle; the 180-second idle limit, stress schedules and exit/output assertions
-remain unchanged (**D5.3.3 / D5.4.1**).
+remain unchanged (**D6.3.3 / D6.4.1**).
 
 Computed opacity now retains declaring/pseudo font state during dirty reads;
 layout, CSSOM and SVG scalar reads share percentage/range computation. The
@@ -1056,7 +1056,7 @@ over 6,006 inputs. Scoped ASan passes 125 computation and 162 vector cases,
 plus 2,865 live assertions in each AST/MIR runtime across sixty fixtures.
 The inventory remains 411 names and twenty-two partial families; percentage
 quotient/product cancellation and broader paint/export limits remain open
-(**D4.5.1v4 / D4.1.4v5; CI-18**).
+(**D5.5.1 / D5.1.4; CI-18**).
 
 The subsequent integer stack-level repair qualifies calculated `z-index`,
 owner-font/pseudo/dirty computed values, explicit inherited levels and
@@ -1068,7 +1068,7 @@ literal PNG/SVG/PDF references at both densities. Inventory now records
 twenty-three partial families. Its matching complete exporter passes 278/283,
 retaining thirty-nine raw assertions in the same five failing groups. Full stacking-context identity/depth ordering,
 flex/grid applicability and selected/paged contexts remain open
-(**D4.5.1v4 / D4.1.4v5; CI-18**).
+(**D5.5.1 / D5.1.4; CI-18**).
 
 Calculated `order` now reaches both flex and grid item storage and placement,
 including live font/variable/class changes and inherited computed levels.
@@ -1080,7 +1080,7 @@ pairs match literal PNG/SVG/PDF references at both densities. Inventory remains
 411 names, now with twenty-four partial families; complete ordering, axes,
 animation and selected/paged contexts remain open. The latest complete exporter
 is the preceding stack-level runtime's 278/283 configuration with thirty-nine
-raw assertions (**D4.5.1v4 / D4.1.4v5; CI-18**).
+raw assertions (**D5.5.1 / D5.1.4; CI-18**).
 
 Calculated grow/shrink longhands now reach positive/negative free-space
 layout, inherited factors in the tested contexts and distinct computed-value
@@ -1093,7 +1093,7 @@ exporter passes 280/285 with the same thirty-nine raw assertions. Inventory
 covers 411 names and twenty-five partial families. The matching flex-factor
 runtime passes 6,964 Lambda/input cases, including 313 forced-GC cases.
 Grid-parent factor inheritance, shorthand competition and broader contexts
-remain open (**D4.5.1v4 / D4.1.4v5; CI-18**).
+remain open (**D5.5.1 / D5.1.4; CI-18**).
 
 
 The next bounded factor increment preserves computed values when a grid-item
@@ -1111,7 +1111,7 @@ A separate existing ordinal-parity check retains 170 raw assertions on both
 predecessor and repaired binaries. The storage checkpoint’s complete exporter passes 281/286 groups with the same
 39 raw assertions. The matching catalog-fix runtime passes all 6,964 core/input
 cases, including 313 forced-GC cases. Shorthand competition and broader flex contexts remain
-unqualified (**D4.5.1v4 / D4.1.4v5; D7.4.4 / D7.3.3; CI-18**).
+unqualified (**D5.5.1 / D5.1.4; D9.5.4 / D9.4.3; CI-18**).
 
 
 Typed `flex` shorthand members now share validation/projection with their
@@ -1128,7 +1128,7 @@ and the original adapter retry passes all 6,964 core/input cases, including 313
 forced-GC cases, with the unchanged 180-second idle limit. The earlier raw
 failures remain recorded. Inherited used bases without parent flex storage,
 full shorthand reflection, mixed/intrinsic bases and broader contexts remain
-open (**D4.5.1v4 / D4.1.4v5; CI-18**).
+open (**D5.5.1 / D5.1.4; CI-18**).
 
 
 Inherited `flex-basis` now preserves declaration-owner lengths and percentages
@@ -1141,7 +1141,7 @@ assertions per AST/MIR runtime across 66 fixtures. Fifteen exporter cases in
 direct/grid-parent contexts and both densities provide 60 literal-reference
 pairs and 180 exact PNG/SVG/PDF comparisons. Full shorthand reflection, mixed
 and intrinsic bases, broader axes, motion and paged contexts remain open
-(**D4.5.1v4 / D4.1.4v5; CI-18**).
+(**D5.5.1 / D5.1.4; CI-18**).
 
 
 `image-rendering` computed reads now share cascade/default/substitution handling;
@@ -1158,13 +1158,13 @@ the same 39 raw paint/PDF assertions. Inventory covers 411 names /27 bounded
 partial families; its parser now recognizes all 185 accessor row invocations,
 including wrapped and direct/derived forms. Projective footprints, noninteger
 browser filtering, image-marker baseline layout and other image consumers
-remain open (**D4.5.1v4 / D4.1.4v5; CI-18; RSC1 / RSC7**).
+remain open (**D5.5.1 / D5.1.4; CI-18; RSC1 / RSC7**).
 
 
 The 2026-10-15 inside-marker checkpoint (`b0aefdadcec95…`, **FT-18 / CI-18**)
 shares replaced-image baselines and per-face leading with inline layout. The
 shared pseudo identity registry also routes marker computed declarations through
-the DOM wrapper (**D4.6.1v4; D7.3.3 / D7.3.4**). Native live checks pass 95/95;
+the DOM wrapper (**D5.6.1; D9.4.3 / D9.4.4**). Native live checks pass 95/95;
 96 reference pairs pass 288 exact PNG/SVG/PDF comparisons at two densities.
 Chromium agrees in all 96 image/line bounds, while 48 text-spacing comparisons
 and eight live same-URL image-set density checks retain distinct differences.
@@ -1201,7 +1201,7 @@ broader family contexts remain open. Protected evidence is under
 
 The final 2026-10-15 snapshot checkpoint (`f77ce37219bd…`, **SN1**) lets explicit
 `reftest-wait` frame chains use the existing bounded drain while preserving
-ordinary ticker sampling (**D5.3.3 / D5.4.1 / D8.4.3v2**). The layout command
+ordinary ticker sampling (**D6.3.3 / D6.4.1 / D7.4.3**). The layout command
 rejects captures still pending at that bound, emits no partial geometry and
 preserves batch cleanup and continuation. Scoped ASan passes 135 computation,
 122 text and 164 vector tests; two CLI recovery controls pass on each AST/MIR

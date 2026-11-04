@@ -357,7 +357,7 @@ TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
     }
     size_t bytes_after = 0, count_after = 0;
     pool_get_stats(block->pool, &bytes_after, &count_after);
-    // read projections must not accumulate allocations in a retained stylesheet (D4.5.1v4).
+    // read projections must not accumulate allocations in a retained stylesheet (D5.5.1).
     EXPECT_EQ(bytes_after, bytes_before); EXPECT_EQ(count_after, count_before);
     key_root.set(js_name_item("parentRule"));
     style_key_root.set(js_name_item("style"));
@@ -4259,7 +4259,7 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
 
     Runtime runtime = {};
     runtime_init(&runtime);
-    // roots unwind before runtime cleanup, including assertion failures (D5.3.3).
+    // roots unwind before runtime cleanup, including assertion failures (D6.3.3).
     struct EventRuntimeCleanup {
         Runtime* runtime;
         DomDocument** document;
@@ -4382,7 +4382,7 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
     }
     size_t after_bytes = 0, after_count = 0;
     pool_get_stats(context->pool, &after_bytes, &after_count);
-    // D4.5.1v4: unobserved Lambda-document events retain no timer shapes.
+    // D5.5.1: unobserved Lambda-document events retain no timer shapes.
     EXPECT_EQ(after_bytes, before_bytes);
     EXPECT_EQ(after_count, before_count);
 }

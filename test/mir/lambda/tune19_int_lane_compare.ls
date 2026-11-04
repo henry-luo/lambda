@@ -1,6 +1,6 @@
 // T19-C: an ORDERED comparison between two int lanes must lower to a native
 // integer compare even when one side is a declared `int[]` read, whose public
-// type is `int?` (D2.5.3). Before this the pair was widened through
+// type is `int?` (D2.4.3). Before this the pair was widened through
 // emit_int_lane_to_double -- a band test, an i2d and a cold call PER OPERAND,
 // including for the literal 0, whose value the compiler already knows.
 //

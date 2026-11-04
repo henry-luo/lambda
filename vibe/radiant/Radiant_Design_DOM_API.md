@@ -199,7 +199,7 @@ behavior may remain, but it must not be described as complete support.
   cap/join styles, `clearRect`, `fillText()`, and font-aware `measureText()`.
   Its authoritative state lives in Radiant, with a plain-value projection that
   keeps JS-visible properties correct after `restore()`; it crosses the DOM
-  boundary only through the explicit bridge required by **D7.5.3**. Offscreen
+  boundary only through the explicit bridge required by **D9.5.6**. Offscreen
   drawing, `strokeText`, even-odd clipping, gradients, images,
   pixels/readback/export, WebGL, and WebGPU remain deferred; see
   `Radiant_Design_Canvas.md`.

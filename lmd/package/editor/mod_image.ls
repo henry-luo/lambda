@@ -1,4 +1,4 @@
-// Image selection and sizing are model transactions, so one resize is one undo (D7.2.5).
+// Image selection and sizing are model transactions, so one resize is one undo (D10.2.1).
 import .mod_doc
 import .mod_step
 import .mod_source_pos

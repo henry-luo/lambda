@@ -1672,7 +1672,7 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
     }
     input->ui_mode = false;
 
-    // picture sources share the inline HTML SVG parser and Element model (D2.11.2).
+    // picture sources share the inline HTML SVG parser and Element model (D10.1.5).
     lam::Temp<char> buf(mem_dup_n((const char*)data, size, MEM_CAT_RENDER));
     if (!buf) { mem_pool_destroy(pool); return nullptr; }
     Element* svg_root = parse_svg_document(input, buf.get());

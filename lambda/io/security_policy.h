@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-// D7.5.2: the broker classifies acquired objects; lexical paths are never grants.
+// D11.1.2: the broker classifies acquired objects; lexical paths are never grants.
 typedef uint64_t SecurityOperations;
 enum {
     SECURITY_READ = 1ULL << 0,

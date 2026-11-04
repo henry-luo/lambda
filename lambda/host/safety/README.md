@@ -1,6 +1,6 @@
 # Host and worker safety components
 
-The broker-side components implement **D7.5.2, D7.5.5–D7.5.8**.
+The broker-side components implement **D11.1.2, D11.2.1–D11.2.4**.
 `grant_store.cpp`, `file_broker.cpp`, `private_storage.cpp`, `admission.cpp` and `supervisor.cpp`
 now belong to the dedicated host executable and isolated qualification fixtures;
 they are absent from worker images. The same host now includes protected package
@@ -22,8 +22,8 @@ Directory metadata grants no file authority. It does not admit grants. The dedic
 installed publisher qualification and default CLI integration remain pending.
 Ordinary CLI execution retains its existing unbound model.
 
-`update_download.h` is a trusted updater component under **D7.5.2,
-D7.5.7–D7.5.8**, linked only by host/test targets. It constructs public
+`update_download.h` is a trusted updater component under **D11.1.2,
+D11.2.3–D11.2.4**, linked only by host/test targets. It constructs public
 repository-relative requests from a live admitted job, rechecks exact origins
 on bounded redirects and delegates raw HTTPS to `lib/https_pull`. Fresh handles
 exclude browser state, ambient credentials/proxies and CA-file overrides;
@@ -77,7 +77,7 @@ retried blindly. Atomic-save checks detect observed version/namespace changes;
 metadata checks are not atomic compare-and-swap against arbitrary external
 writers. The eventual platform transaction still needs M2 race qualification.
 
-The runtime client binding follows **D5.4.2–D5.4.4** through a context-lifetime
+The runtime client binding follows **D6.4.2–D6.4.4** through a context-lifetime
 capsule extension, without changing `EvalContext` layout. The host must outlive
 its client binding. `output()` consults it for raw, binary, structured, lazy-file
 and ZIP output, and delegates parent creation to the broker. Current CLI launches
@@ -103,7 +103,7 @@ revalidates before delivery. Scoped expl3 formats build privately until a
 reauthorizable format-cache dependency manifest exists. Captured archive
 members cannot acquire external resources through their lazy parse cache.
 Path metadata, `exists`, directory traversal, wildcard force and async
-`io.read` also use the client (**D7.5.2, D7.5.5**). Directory walks share a
+`io.read` also use the client (**D11.1.2, D11.2.1**). Directory walks share a
 finite entry/depth budget. Scoped snapshots belong to their EvalContext and
 have precise heap roots; broker session/namespace epochs invalidate them on
 authority changes and expiry. A stamp cannot authorize object acquisition.
@@ -136,7 +136,7 @@ ledger and aggregate evidence are in
 [`security_channel`](../../io/security_channel.h) serializes the seven
 acquisition callbacks over a privately inherited, connected AF_UNIX stream.
 Raw descriptor transfer stays in `lib/ipc_stream.*`; the neutral I/O layer
-owns framing and dispatch, preserving **D7.5.2 / D7.1.1–D7.1.3**.
+owns framing and dispatch, preserving **D11.1.2 / D9.1.1–D9.1.3**.
 The trusted launcher owns endpoint creation, child identity, confinement,
 environment and handle inheritance. A claimed principal, a session number
 or same-UID peer credentials cannot establish admission. The connection's
@@ -194,7 +194,7 @@ and ZIP output (**S7.4.5**). No grant, approval, store, endpoint creation or
 native loading operation exists in this schema.
 
 Build the bootstrap with `make build-safety-worker`. It extends the reduced
-host under **D7.1.6**, excludes MIR/JIT, networking, DevTools, JS/TS, DOM,
+host under **D9.2.2**, excludes MIR/JIT, networking, DevTools, JS/TS, DOM,
 Radiant and Jube host modules, and explicitly excludes policy management.
 It retains required image/font mechanisms and their libraries. Its current
 limits are 1 MiB frames, 64 MiB cumulative channel bytes, 8,192 requests and
@@ -214,7 +214,7 @@ qualification remain M2 gates.
 
 ## Host ad-hoc admission and remembered selections
 
-[`admission.h`](admission.h) implements the host side of **D7.5.5–D7.5.7**.
+[`admission.h`](admission.h) implements the host side of **D11.2.1–D11.2.3**.
 It receives a trusted entry/project selection, installation paths and additional
 protected-directory declarations. It never parses or executes script source.
 Before publishing its client, it captures code through the file broker, binds
@@ -289,7 +289,7 @@ teardown finish. The host obtains no approval from stdin, a worker frame, a
 source manifest or an environment variable. Session/persistent selection and
 revocation UI are still pending; the underlying host management APIs exist.
 
-`lib/confined_process.*` owns platform mechanisms (**D7.5.2**): strict sealed
+`lib/confined_process.*` owns platform mechanisms (**D11.1.2**): strict sealed
 bundle verification; Apple publisher and exact worker identity/entitlement
 checks; suspended `posix_spawn`; dynamic child code-hash comparison; new process
 session; clean environment; explicit fd 0..3; output pipes; cancellation and
@@ -315,7 +315,7 @@ Those options are absent from the production executable. It never opens the
 real `~/.lambda/setting`. Current process-policy tests do not need OS app
 containers; the original App Sandbox probe remains historical evidence.
 
-This does not complete **M2 / D7.5.1, D7.5.5–D7.5.7**. The private Darwin
+This does not complete **M2 / D11.1.1, D11.2.1–D11.2.3**. The private Darwin
 interface is an experimental candidate, approved by the user on 2026-11-03 as an experiment;
 qualification is required before any default rollout.
 Complete catalog/installed-app admission, persistent root
@@ -332,7 +332,7 @@ Platform references: [Apple static code validation](https://developer.apple.com/
 
 ## Broker-owned private data, cache and temporary files
 
-`private_storage.*` implements the host service under **D7.5.2, D7.5.5–D7.5.7**.
+`private_storage.*` implements the host service under **D11.1.2, D11.2.1–D11.2.3**.
 The following virtual mounts are independent of CWD and project selection. They
 use the existing broker channel; its admitted principal selects the physical
 owner. A worker cannot name another owner or receive a native directory handle.
@@ -387,7 +387,7 @@ identity, uses distinct REMOVE guards, and syncs parent directories after unlink
 Unsafe or oversized retained trees fail closed for trusted repair. This covers
 process death, not every power-loss/filesystem-corruption case.
 
-Under **D7.5.9**, uninstall retains persistent data by default. The installer
+Under **D11.2.5**, uninstall retains persistent data by default. The installer
 must expose deletion as a separate explicit action; installed-app lifecycle
 integration remains pending. Host-only `security_private_storage_inspect`
 reports bounded class usage, quota excess, live/abandoned session counts and
@@ -429,7 +429,7 @@ is added to the worker. Graphical quota UI, uninstall integration,
 persistent-data repair and full power-loss/deployment qualification remain open.
 
 Quota overrides live in protected `setting/storage-{a|s}-<principal>.quota`
-records under **D7.5.2, D7.5.7**. A typed principal-keyed state slot constructs
+records under **D11.1.2, D11.2.3**. A typed principal-keyed state slot constructs
 these names; it accepts no arbitrary path and cannot select grant or updater
 records. The fixed 160-byte record contains the principal kind/digest, profile
 digest, generation, custom/default mode, three byte/entry limits and integrity
@@ -461,7 +461,7 @@ ordinary launch. Installed lifecycle and graphical quota UI remain pending.
 
 The protected settings/profile namespace and private brokers now use
 `FILE_ANCHOR_STRICT_STORAGE`: private ownership, trusted parents, one device and
-full storage syncing (**D7.5.2, D7.5.7**). Directory creation syncs child then
+full storage syncing (**D11.1.2, D11.2.3**). Directory creation syncs child then
 parent before returning an anchor. Create-mode retry resyncs retained edges;
 read-only acquisition does not sync. Creating a regular lock/lease syncs the
 empty file and parent before exposing its stream; later content needs its own
@@ -507,7 +507,7 @@ on qualification.
 The normal CLI remains unbound. Debug/task-port, mappings, remaining hardware
 and malicious-worker/crash coverage still need qualification.
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, the launcher now separately clears
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, the launcher now separately clears
 registered Mach send rights, task exception ports and the bootstrap port through
 spawn actions before child startup. FD `CLOEXEC` does not close these resources:
 [XNU explicitly inherits them](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/ipc_tt.c).
@@ -538,7 +538,7 @@ These results do not complete the kernel-port/debug audit or M2.
 
 ### Early runtime loading experiment
 
-Under **D7.5.1–D7.5.2 / D7.5.5–D7.5.7**, native constructors must also run
+Under **D11.1.1–D11.1.2 / D11.2.1–D11.2.3**, native constructors must also run
 inside the boundary. The direct-linked worker fails the constructor gate even
 with a clean descriptor table: a constructor can retain a file mapping after
 closing its fd. No VM metadata allowlist is treated as proof that prior file
@@ -576,7 +576,7 @@ without using claimed OS container names.
 
 ## Authorization through response publication
 
-Under **D7.5.2 / D7.5.5–D7.5.7**, the supervisor uses
+Under **D11.1.2 / D11.2.1–D11.2.3**, the supervisor uses
 `security_admission_delivery_guard` with guarded channel dispatch. After complete
 request validation, the host captures its authority stamp before invoking the
 operation. Before publishing the response it checks that same session/epoch,
@@ -611,7 +611,7 @@ gap, while the other M2 release requirements above remain open.
 
 ## Protected package-update controls
 
-[`update_controls.h`](update_controls.h) implements the **D7.5.7–D7.5.8**
+[`update_controls.h`](update_controls.h) implements the **D11.2.3–D11.2.4**
 control plane. It neither fetches nor verifies remote metadata. A trusted
 installer/verifier must supply authenticated public package configuration; a
 root fingerprint in this API is a binding, not proof of a valid remote signature.
@@ -687,7 +687,7 @@ signature admission is checked before account settings open. The test-only
 `--fixture-updates` path exists only in the isolated fixture executable.
 
 `update_metadata` implements opaque per-package verifier checkpoints under
-**D7.5.7–D7.5.8**. Initialization is explicit/create-only and matches the root
+**D11.2.3–D11.2.4**. Initialization is explicit/create-only and matches the root
 bytes to the admitted out-of-band SHA-256 fingerprint. Full-role replacement
 is atomic, generation-checked and serialized with live policy using the same
 settings lock as the update catalog. No lock is held while downloading or
@@ -731,7 +731,7 @@ publisher loading remains unqualified with identity setup skipped by user
 request. Conformance, managed-image admission/publication, activation/recovery and installed
 catalog coordination remain open; delivery stays disabled.
 
-Under **D7.5.2, D7.5.8**, the same offline runtime has the fixed
+Under **D11.1.2, D11.2.4**, the same offline runtime has the fixed
 `lambda-package-stage-v1` decoder entry. Its [Lambda Script policy](../../../lmd/package/security/Stage.md)
 validates the complete bounded ZIP namespace, then emits exact regular-file or
 directory records through a separate stage operation sequence. Only a fixed-size
@@ -760,7 +760,7 @@ data remains untouched. The anchored tree primitives were extracted from
 Active image selection, installed catalog/publisher/capability admission and
 active-version recovery remain separate pending gates; delivery stays disabled.
 
-Under **D7.5.2, D7.5.7–D7.5.8**, cached role names are bounded opaque UTF-8
+Under **D11.1.2, D11.2.3–D11.2.4**, cached role names are bounded opaque UTF-8
 labels inside the existing record, with exact byte identity and unchanged v1
 layout. They never select settings filenames. The verifier encodes each role
 as one URL component. Native transport independently validates canonical path

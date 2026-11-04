@@ -1,5 +1,5 @@
 // test_latex_macros.ls — Test macro definition collection
-// Coverage: macros.ls — get_defs, find_macro (substitution retired with D7.2.7)
+// Coverage: macros.ls — get_defs, find_macro (substitution retired with D10.2.2)
 
 import macros: lambda.doc.latex.macros
 

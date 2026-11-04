@@ -13,7 +13,7 @@ instead of adding another collection of benchmark-specific fast paths.
 
 The [formal semantics](../doc/Lambda_Formal_Semantics.md) and
 [formal design](../doc/Lambda_Formal_Design.md) remain authoritative. In
-particular, **S1.6**, **D2.4.1–D2.4.3**, **D5.3.1–D5.3.4**, and **D8.2.5v3**
+particular, **S1.6**, **D2.3.4–D2.3.5**, **D6.3.1–D6.3.4**, and **D8.2.5**
 govern representation transparency, proof ownership, precise rooting, and the
 single compiler pipeline. This proposal changes no ruling or public ABI.
 
@@ -164,7 +164,7 @@ branches, spills, and cache pressure; counters alone do not attribute CPU time.
 
 Instrumentation is enabled at compilation/run setup. Emit no counter updates
 or per-operation flag tests when disabled; avoid locks/atomics in normal hot
-paths (**D5.4.4**). Timing runs use uninstrumented release binaries. Diagnostic
+paths (**D6.4.4**). Timing runs use uninstrumented release binaries. Diagnostic
 runs use the same source and workload but are reported separately.
 
 P0 deliverables: complete source/build manifest, A/A noise check, source-relative
@@ -215,11 +215,11 @@ Use the existing fields independently: `may_gc`, `may_reenter`,
 `may_set_exception`, `may_return_error`, `may_suspend`, and `has_unknown_call`.
 Also preserve the existing number-stack/watermark effect. `NO_GC` does not mean
 no mutation, no error, no scalar-home allocation, or no reentry. Purity alone
-does not establish any of those claims (**D6.1.3**, **D5.2.3**).
+does not establish any of those claims (**D7.1.3**, **D6.2.3**).
 
 Reuse the function collection/canonicalization and fixed-point experience of
 `mir_solve_may_defect()`; factor common graph machinery instead of copying its
-walk for every effect. Preserve its separate defect meaning (**D6.1.3**).
+walk for every effect. Preserve its separate defect meaning (**D7.1.3**).
 The existing solver deliberately owns its answers per compilation because
 satellite compiles share ASTs. New solved entry effects and path summaries must
 likewise be compilation-owned and immutable while consumed. Reuse the
@@ -229,7 +229,7 @@ into a shared AST memo that another compile can overwrite.
 ### 5.3 Scheduling and implementation boundary
 
 Place graph collection and solving inside the existing typed pass manager
-(**D8.2.5v3**). The initial effect pass can produce conservative results; after
+(**D8.2.5**). The initial effect pass can produce conservative results; after
 entry/representation planning, refine effects for the exact planned entries
 before MIR lowering. Declare dependencies and record both costs in the same
 compiler timing stream. No alternate pipeline or general second IR is needed.
@@ -243,8 +243,8 @@ AST purity walk while ignoring an allocating generated fallback.
 This avoids relying on a post-finalization graph pass to remove already
 inserted root protocol. Retain the emitted-graph scan as a verifier, then retire
 the 64-body list as an effect authority. Do not mutate finalized MIR or rerun
-frame finalization piecemeal. **D5.3.2** requires transitive verification, and
-**D5.3.4** keeps root/final-store insertion exclusively in `MirEmitter`.
+frame finalization piecemeal. **D6.3.2** requires transitive verification, and
+**D6.3.4** keeps root/final-store insertion exclusively in `MirEmitter`.
 
 Acceptance: forward and reverse declaration orders produce equivalent effect
 summaries and hot-path root protocol; a closed recursive component is precise;
@@ -256,7 +256,7 @@ pilots must show a measured protocol reduction before claiming performance value
 
 ### 6.1 One source of facts, with explicit lifetimes
 
-Respect the four authorities in **D2.4.1–D2.4.3**: AST semantic contract,
+Respect the four authorities in **D2.3.4–D2.3.5**: AST semantic contract,
 analysis representation, emitted `MirValue`, and MIR physical registers.
 Do not infer semantic signedness, nullability, or safety from `MIR_T_I64`.
 
@@ -265,7 +265,7 @@ Reuse `FnVariantAnalysis`, existing binding analysis, `MirValue`, and
 lowering/control-flow state tied to actual bindings and their invalidations.
 Type-invariant optimization facts may use the existing lazy `Type` side record;
 node-specific facts must not be placed on shared type singletons. Do not add
-an ID-keyed per-node fact database (**D8.2.5v3**).
+an ID-keyed per-node fact database (**D8.2.5**).
 
 The first shared fact set should answer:
 
@@ -292,7 +292,7 @@ analysis arithmetic must itself avoid host overflow.
 Propagate representation demand through locals, branches, comparisons, and
 native call/results using `em_require_rep()` and **D8.2.6**. Preserve
 `FnReturnAnalysis` as the sole return-shape/companion authority
-(**D5.2.1v3**). Eliminate round trips only when the source semantic value remains
+(**D6.2.1**). Eliminate round trips only when the source semantic value remains
 identical. Keep `u32` arithmetic in its admitted lane where this is proven;
 do not silently reinterpret Lambda `int` arithmetic as C wrapping arithmetic.
 
@@ -309,9 +309,9 @@ intermediate arithmetic is proven safe. Prove each participating array's
 extent independently; equal loop counts do not imply equal lengths.
 
 When the proof holds, use the raw lane directly and avoid repeated bounds/null
-tests. Otherwise preserve **S7.1.1v3** and **D2.5.3**: an invalid read produces
+tests. Otherwise preserve **S7.1.1v3** and **D2.4.3**: an invalid read produces
 `null`, not a fabricated native value. Writes retain hard-error behavior under
-**S7.1.3v2**, and ArrayNum storage remains non-null (**D2.6.2**).
+**S7.1.3v2**, and ArrayNum storage remains non-null (**D3.2.2**).
 
 Hoisted guards must be side-effect free and must not eagerly raise an error
 on an empty or untaken loop. A failed proof guard selects the ordinary path,
@@ -329,7 +329,7 @@ P1/P2 facts. Prefer small scalar/access helpers whose inlining exposes range,
 bounds, and lifetime facts. Use deterministic code-growth budgets and measured
 call frequency; exclude recursive expansion and unsupported control flow.
 Do not introduce runtime-feedback specialization or mutable generated code
-(**D8.3.1v2–D8.3.4v3**).
+(**D7.3.1–D7.3.4**).
 
 Inlining must evaluate arguments once in source order and preserve admission,
 error propagation, plain-parameter snapshots, and `var` write-back. The initial
@@ -348,18 +348,18 @@ A cold allocating fallback still makes the containing callable entry
 safepoint, avoid the corresponding publication. Do not label a whole function
 `NO_GC` because its common path allocates nothing. Do not add an unchecked
 third entry, arbitrary range-keyed variants, or a new return ABI; existing
-raw entries retain the two proof-producing paths of **D8.3.3**.
+raw entries retain the two proof-producing paths of **D7.3.3**.
 
 Let existing emitter liveness and frame finalization exploit fewer safepoints.
 Zero-root-frame elision, canonical dirty-live stores, scratch-slot coloring,
-and fixed argument-root suffixes already exist (**D5.3.1**, **D5.3.5**). The
+and fixed argument-root suffixes already exist (**D6.3.1**, **D6.3.5**). The
 work is to improve the facts they receive, not replace them with per-call
 root pushes. Number homes and watermarks remain separately owned
-(**D5.1.1v2–D5.1.4**, **D5.2.2v3–D5.2.3**).
+(**D6.1.1–D6.1.4**, **D6.2.2–D6.2.3**).
 
 If counters show a wide mutable local pushing a new scalar home on each loop
-iteration, implement its declaration-owned reusable home under **D5.2.2v3**.
-Only reclaim an iteration's number-stack extent when **D5.2.3** proves that no
+iteration, implement its declaration-owned reusable home under **D6.2.2**.
+Only reclaim an iteration's number-stack extent when **D6.2.3** proves that no
 live Item points into it. This is a distinct, measured slice; it must not
 reintroduce the retired caller-home function-return ABI or treat number slots
 as GC roots.
@@ -368,7 +368,7 @@ The tiny `lambda_stack_is_exhausted` call is a separate measured candidate in
 call-heavy scalar code. First measure its executed share. If material,
 evaluate a Lambda-side equivalent probe using supported MIR/platform
 facilities, with cross-platform overflow/recovery tests. Preserve entry limit
-checking under **D5.1.2**; no vendor patch, assumed frame-size budget, or removal
+checking under **D6.1.2**; no vendor patch, assumed frame-size budget, or removal
 of recursion protection is part of P3.
 
 Acceptance: lower executed calls/root publication/frame traffic in selected
@@ -399,7 +399,7 @@ The summary describes a proof; it does not change the source calling convention.
 | Retention or new observable snapshot | Identity/layout as independently proven | Drop uniqueness proof; preserve required share marking |
 | Unknown/reentrant call | Only facts independently stable under arbitrary permitted effects | Conservatively invalidate affected mutable state and honor safepoints |
 
-**D4.4.4v4** requires data-zone pointers to be reloaded after allocation points;
+**D5.4.4** requires data-zone pointers to be reloaded after allocation points;
 stable object headers do not make array buffers or packed-field pointers
 stable. `NO_GC` alone also does not protect a buffer from resize/replacement.
 
@@ -409,10 +409,10 @@ and logical mutation have distinct invalidation reasons. Keep surviving
 logical length facts only with proof; reload live data pointers when required.
 Use existing emitter ownership and record reloads through its established path.
 
-Expand synthesized place handles only within **D4.4.4v4**: runtime spine test,
+Expand synthesized place handles only within **D5.4.4**: runtime spine test,
 tier-shared static decision, and required store-back or share mark on every
 writing path. Preserve partial writes on error and `var` home publication.
-Snapshot and move-out behavior remains **S9.1.2–S9.1.3**, **D4.4.5–D4.4.6**.
+Snapshot and move-out behavior remains **S9.1.2–S9.1.3**, **D5.4.5–D5.4.5**.
 
 Acceptance: nested-loop and reordered-call fixtures reuse unaffected facts;
 prefix mutation, aliasing, reentry, and allocation fixtures invalidate exactly
@@ -431,12 +431,12 @@ cleanup. At an escape, materialize once into correctly owned storage; if that
 allocation can collect, scalar-held references remain precise roots. An
 unknown consumer, capture, dynamic indexing, or unsupported merge declines
 scalar replacement. Destination-owned scalar storage and companion returns
-continue to follow **D5.2**, rather than inventing another ABI.
+continue to follow **D6.2**, rather than inventing another ABI.
 
 For Splay, first attribute copies to exact share-mark and mutation sites.
 Distinguish required copies from marks caused by conservative lifetime
 analysis. Extend existing permitted borrow/store-back and move-out shapes
-only where **D4.4.4v4–D4.4.6** prove snapshots unobservable. Count eliminated
+only where **D5.4.4–D5.4.5** prove snapshots unobservable. Count eliminated
 copies and bytes, then measure execution time and GC separately.
 
 A general consuming-call convention or changed snapshot contract is outside
@@ -468,7 +468,7 @@ diagnostics through the logging API. Shared emitter changes also require
 relevant LambdaJS coverage, since root and representation behavior is shared.
 
 Do not edit MIR/vendor sources, resurrect C-text transpilation, introduce
-conservative native-stack scanning, or add dynamic inline caches (**D8.4.1v2**).
+conservative native-stack scanning, or add dynamic inline caches (**D7.4.1**).
 No source rewrite is included in engine-performance figures. A separate
 all-`u32` SHA1 experiment may quantify a source-representation ceiling, but it
 must retain its own label and samples.

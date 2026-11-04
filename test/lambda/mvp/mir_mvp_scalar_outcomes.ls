@@ -1,4 +1,4 @@
-// scalar outcome facts preserve selected tags, absence and owned number homes (S11.2.1, D5.2.3).
+// scalar outcome facts preserve selected tags, absence and owned number homes (S11.2.1, D6.2.3).
 fn scalar_checked(value: any) float^ { return value }
 fn scalar_checked_int(value: any) int^ { return value }
 fn scalar_ordered(value: any) any {

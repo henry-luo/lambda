@@ -90,19 +90,19 @@ tested explicitly rather than treated as an implementation bug.
 
 | Authority | Ruling applied here |
 |---|---|
-| **D7.2.1 / D7.2.3 / D7.2.4v4** | The scene helper package is a source-distributed Lambda module under the reserved `lambda.*` root; graphics resources belong to the renderer, not module-scope mutable state. |
+| **D9.3.1 / D9.3.3 / D9.3.4** | The scene helper package is a source-distributed Lambda module under the reserved `lambda.*` root; graphics resources belong to the renderer, not module-scope mutable state. |
 | **S12.1.1v3** | Pure scene construction/normalization stays in `fn`; rendering effects belong to Radiant's host lifecycle. |
 | **S16.9.6 / S16.9.8** | Use ordinary dotted package paths and existing resolution roots; no new import syntax or implicit directory entry point. |
-| **D7.4.1v2** | "raw C pointers never become script-visible"; native resources use opaque resource IDs and host projections. |
-| **D7.4.4** | "Declared interfaces + record-owned hooks are the ONLY host-object protocol"; WebGL contexts and objects use that protocol. |
-| **D7.5.3** | "Lambda reaches Radiant only through the `radiant-dom` module"; graphics stays behind the DOM host boundary. |
-| **D4.5.1v4** | Radiant has native lifetime ownership; its seam is "pin, gen-check, copy-as-value". |
-| **D4.5.2** | "Radiant never retains a GC pointer"; keep a script value only by copying it or holding a registered root. |
-| **D5.3.3** | Native helpers use "slot-backed `RootFrame` / `Rooted<T>`" and continuously rooted handoffs. |
-| **D7.4.2v2** | Modules are "fully shielded from the async substrate"; completion and event delivery use existing host facilities. |
-| **D7.3.5** | "Every module kind names its conformance gate, wired into CI"; Phase I uses package/native-rendering corpora, Phase II adds applicable web-platform slices, and Phase III adds animation parity, SVG regressions and interactive rendered fixtures. |
-| **D7.1.4v2** | Headless profile C retains its null windowing backend and existing dependency exclusions. |
-| **D7.1.7v6** | `lambda-wasm` remains the browser evaluation profile; this native graphics proposal does not expand it. |
+| **D9.5.1** | "raw C pointers never become script-visible"; native resources use opaque resource IDs and host projections. |
+| **D9.5.4** | "Declared interfaces + record-owned hooks are the ONLY host-object protocol"; WebGL contexts and objects use that protocol. |
+| **D9.5.6** | "Lambda reaches Radiant only through the `radiant-dom` module"; graphics stays behind the DOM host boundary. |
+| **D5.5.1** | Radiant has native lifetime ownership; its seam is "pin, gen-check, copy-as-value". |
+| **D5.5.2** | "Radiant never retains a GC pointer"; keep a script value only by copying it or holding a registered root. |
+| **D6.3.3** | Native helpers use "slot-backed `RootFrame` / `Rooted<T>`" and continuously rooted handoffs. |
+| **D9.5.2** | Modules are "fully shielded from the async substrate"; completion and event delivery use existing host facilities. |
+| **D9.4.5** | "Every module kind names its conformance gate, wired into CI"; Phase I uses package/native-rendering corpora, Phase II adds applicable web-platform slices, and Phase III adds animation parity, SVG regressions and interactive rendered fixtures. |
+| **D9.2.1** | Headless profile C retains its null windowing backend and existing dependency exclusions. |
+| **D9.2.3** | `lambda-wasm` remains the browser evaluation profile; this native graphics proposal does not expand it. |
 
 The rulings above are in [Lambda Formal Design](../../doc/Lambda_Formal_Design.md).
 The S-numbered rulings are in
@@ -153,7 +153,7 @@ The retired idea note's directions remain distinct from the new scene path:
 | Declarative Lambda 3D mixed with HTML/SVG | Phase I: scene elements → Radiant scene renderer → shared native GL core. |
 | JavaScript WebGL in native `<canvas>` | Phase II: JS adapter → shared native GL core; Three.js owns the scene on that path. |
 | GPU acceleration of Radiant's own 2D page painter | Independent optimization behind `RdtVector`; not a prerequisite for native 3D. |
-| Radiant running in a browser through WASM | Separate future proposal; browser-provided WebGL is a different host boundary, and current D7.1.7v6 does not include Radiant. |
+| Radiant running in a browser through WASM | Separate future proposal; browser-provided WebGL is a different host boundary, and current D9.2.3 does not include Radiant. |
 
 Existing GLFW infrastructure supplies context creation and platform function
 loading. Its current shell context is not automatically the required modern
@@ -175,7 +175,7 @@ the selected `<scene3d>` element name.
 
 The earlier `import graphics: lambda.3d` suggestion fails current parsing, while
 `lambda.scene3d` uses the existing dotted-name syntax (S16.9.6/S16.9.8).
-This recommends an ordinary name, not a grammar exception. Under D7.2.4 this
+This recommends an ordinary name, not a grammar exception. Under D9.3.4 this
 is a general graphics package beneath `lambda.<package>`; document-format
 adapters may consume it without changing the reserved namespace hierarchy.
 
@@ -185,7 +185,7 @@ There is no implicit directory index. The package provides scene types,
 constructors, reusable geometry/material descriptions, validation, and pure
 transform helpers. GPU creation and drawing remain in Radiant; package
 functions produce data and do not hide effectful GL calls inside `fn`
-(D7.2.1/D7.2.3, S12.1.1v2).
+(D9.3.1/D9.3.3, S12.1.1v2).
 
 ### Element vocabulary and embedding
 
@@ -246,8 +246,8 @@ class and option.
 | Shader material | `type:'shader'` takes GLSL 330 `vertex` and `fragment` bodies behind a host prefix (the built-in attributes `position`, `normal`, `uv`, `uv1`, `color`, `tangent`, `instance_matrix`; the uniforms `model_matrix`, `view_matrix`, `projection_matrix`, `camera_position`; the output `fragment_color`, linear and premultiplied when `transparent`), `color` stays vec3 for RGB/default geometry and becomes vec4 for RGBA geometry; custom shaders apply their own map coordinates. Plus a `uniforms` map of numbers, number arrays, `#rrggbb` colors (linear) or texture IDs for `sampler2D`. Every active uniform needs a value of its declared type. Tracks animate them as `<material>.uniforms.<name>`; linked programs survive re-projection while their source is unchanged ([SH1, SH2, SH6](../impl/Radiant_Impl_Scene3d_Shaders.md)). `alpha-to-coverage` antialiases cut-out alpha. A sampler uniform may also name a simulation variable as `"<simulation>.<variable>"`, read at its latest records. |
 | `<simulation>` | GPU simulation state ([SH5, SH6](../impl/Radiant_Impl_Scene3d_Shaders.md)): `id` (no dots), integer `width` × `height` records (at most 262144), `timestep` (default 1/60 s, in (0, 1]), a `uniforms` map of numbers, number arrays and colors that must include a numeric `time`, and one to four `<variable name shader initial?>` children. Each variable is a pair of RGBA32F targets; a step renders every variable with its fragment `shader` body, which reads all variables' previous records through samplers named after them, plus `resolution` (vec2) and `delta` (the timestep), and writes `fragment_color`. The simulation advances in fixed steps toward its `time` uniform (driven by a track such as `<simulation>.uniforms.time`), at most 240 per frame before it resynchronizes; time moving backwards restarts it from `initial` (zeros when omitted). It belongs to the viewport and survives re-projection while its id, size, timestep, variables, shaders and initial records are unchanged. |
 | `<environment>` | Scene content captured from its origin for lighting/reflections, or `src` naming a local equirectangular Radiance `.hdr` image; content and `src` are exclusive. Content may contain groups, meshes, lights and resources, but no cameras, nested environments or shadow-casting lights. `background` defaults to black, `near` to 0.1 and `far` to 100. It is never drawn in the view. `s.environment('room'/'sky'/'image', options)` constructs one. |
-| Image effect presets | `lambda.scene3d.effects` builds channel split, liquid/rolling distortion, sliding doors and flies as ordinary shader materials, with a periodic `phase` clip. Raster images, SVG files and pure SVG values share the texture path; SVG rasterization uses the existing image renderer with bounded dimensions and a separate straight-alpha upload. **S12.1.1v3 / D7.2.4v4 / D7.5.3v2** retain the package/host boundary. See the [API](../../doc/Lambda_Scene3d_Effects.md) and [implementation record](../impl/Radiant_Impl_Scene3d_Effects.md). |
-| `<postprocessing>` / `<effect>` | One direct scene child holds up to eight ordered color effects. `type:'bloom'` reads opaque HDR radiance and takes nonnegative `strength`/`threshold`/`radius`; defaults 1/1/2, with radius in logical viewport pixels and an opaque background required. `type:'fxaa'` is a directional display-color FXAA profile. `type:'shader'` takes a GLSL fragment body and authored `uniforms`, behind host `color_input`, `resolution` and `fragment_color`, preserving input alpha. Linear effects precede display effects; custom `domain` defaults to `'linear'`, or `'display'` after tone mapping and transparent draws. Effect IDs bind numeric/uniform tracks through the shared clock (**S12.1.1v3 / D4.5.2**). [Continuation](../impl/Radiant_Impl_Scene3d_Three_Features.md) |
+| Image effect presets | `lambda.scene3d.effects` builds channel split, liquid/rolling distortion, sliding doors and flies as ordinary shader materials, with a periodic `phase` clip. Raster images, SVG files and pure SVG values share the texture path; SVG rasterization uses the existing image renderer with bounded dimensions and a separate straight-alpha upload. **S12.1.1v3 / D9.3.4 / D9.5.6** retain the package/host boundary. See the [API](../../doc/Lambda_Scene3d_Effects.md) and [implementation record](../impl/Radiant_Impl_Scene3d_Effects.md). |
+| `<postprocessing>` / `<effect>` | One direct scene child holds up to eight ordered color effects. `type:'bloom'` reads opaque HDR radiance and takes nonnegative `strength`/`threshold`/`radius`; defaults 1/1/2, with radius in logical viewport pixels and an opaque background required. `type:'fxaa'` is a directional display-color FXAA profile. `type:'shader'` takes a GLSL fragment body and authored `uniforms`, behind host `color_input`, `resolution` and `fragment_color`, preserving input alpha. Linear effects precede display effects; custom `domain` defaults to `'linear'`, or `'display'` after tone mapping and transparent draws. Effect IDs bind numeric/uniform tracks through the shared clock (**S12.1.1v3 / D5.5.2**). [Continuation](../impl/Radiant_Impl_Scene3d_Three_Features.md) |
 | Scene-local resource definitions/references | Optional shared geometry/material/texture IDs; native caches own derived GPU resources. |
 
 Common object attributes include `id`, position, rotation, scale, and visibility.
@@ -261,10 +261,10 @@ camera. Resolve the named active camera; missing/duplicate IDs, invalid near/far
 ranges, malformed arrays, or unknown geometry/material types produce diagnostics
 instead of silent output.
 
-The scientific chart extension reuses this native boundary (**D7.5.3**):
+The scientific chart extension reuses this native boundary (**D9.5.6**):
 `lambda.scene3d.camera` provides pure projection, clipping, rays, billboards,
 and orbit/pan/zoom calculations under **S12.1.1v3**. SVG/PDF export embeds the
-same document-owned scene snapshot (**D4.5.1v4**), with labels remaining vector
+same document-owned scene snapshot (**D5.5.1**), with labels remaining vector
 content. Full Radiant exports lazily acquire a hidden graphics host when scene
 pixels are requested; numerical analysis itself never acquires one. Export
 fails on an unavailable/invalid scene, while live documents remain usable for
@@ -283,7 +283,7 @@ arbitrary HTML nested in the 3D subtree is not an initial feature.
 sheen; it does not imply the remaining Three.js physical extensions. The
 zero-extension defaults recover standard shading. Numeric/color properties
 use existing tracks and remain uniforms, with native ownership unchanged
-(**S12.1.1v3, D4.5.1v4, D7.2.4v4**).
+(**S12.1.1v3, D5.5.1, D9.3.4**).
 
 | Property | Default / range | Map channel |
 |---|---|---|
@@ -314,7 +314,7 @@ Presence of a transmission factor, map or track selects the retained shader
 feature; subsequent numeric edits remain uniforms. `transmission-texture`
 reads linear R and `thickness-texture` reads linear G,
 with independent UV coordinates. Numeric/color tracks use the existing mixer
-(**S12.1.1v3, D2.11.4**); native targets retain **D4.5.1v4–D4.5.3v2** ownership.
+(**S12.1.1v3, D10.1.7**); native targets retain **D5.5.1–D5.5.3** ownership.
 
 One shared resolved linear opaque image supplies bounded screen refraction
 before tone mapping and ordinary alpha blending. A fixed nine-tap filter
@@ -381,8 +381,8 @@ path. Near-plane clipping precedes ribbon expansion and interpolates endpoint
 colors/UVs; degenerate projected segments draw nothing. Complex joins, dashes,
 lit particles and general curve construction are later profiles. Pure picking
 reuses `scene3d.camera` clipping/ray/triangle helpers, preserving source IDs and
-a declared point radius. The profile retains **S12.1.1v3, D4.5.1v4/D4.5.2,
-D7.2.4v4 and D7.3.5**. Named pixel, sizing, clipping, picking, lifetime and
+a declared point radius. The profile retains **S12.1.1v3, D5.5.1/D5.5.2,
+D9.3.4 and D9.4.5**. Named pixel, sizing, clipping, picking, lifetime and
 camera-retention cases qualify each finite submilestone before closure.
 
 glTF modes 0 (points), 1 (independent lines) and 3 (line strip) load through
@@ -454,13 +454,13 @@ explicit profile choice, rather than a claim of complete
 across main/capture/shadow views. `lod_skips` counts rejected presentation and
 capture candidates; `lods` and `lod_state_bytes` expose current nodes and
 retained selection metadata. Unchanged cached frames do no visibility, draw
-or readback work. These choices retain **S12.1.1v3, D4.5.1v4/D4.5.2,
-D7.2.4v4 and D7.3.5**; no formal ruling changes are introduced.
+or readback work. These choices retain **S12.1.1v3, D5.5.1/D5.5.2,
+D9.3.4 and D9.4.5**; no formal ruling changes are introduced.
 
 ### Outdoor atmosphere, foliage, wind and water
 
 The Eden outdoor profile extends the native material/lighting path under
-**S12.1.1v3**, **D2.11.4**, **D4.5.1v4–D4.5.3v2** and **D7.2.4v4**. It adds
+**S12.1.1v3**, **D10.1.7**, **D5.5.1–D5.5.3** and **D9.3.4**. It adds
 no language rulings. The public API, field units and admitted limits live in the
 [outdoor guide](../../doc/Lambda_Scene3d_Outdoor.md); qualification lives in the
 [Eden implementation record](../impl/Radiant_Impl_Scene3d_Eden.md).
@@ -548,7 +548,7 @@ Composite the authored background after that conversion so its
 display color is preserved. Transfer opaque depth to the display target and
 draw transparent surfaces there, retaining the existing after-tone-map blend
 contract. The display target uses the existing sRGB framebuffer conversion and
-premultiplied snapshot publication (**D4.5.1v4 / D4.5.2**). Tone mapping defaults
+premultiplied snapshot publication (**D5.5.1 / D5.5.2**). Tone mapping defaults
 to `'none'` even when standard materials are present (SP4); adding a PBR mesh
 does not change the rest of the scene's colors. Basic/Lambert output with no
 new features remains the compatibility guard. Instancing, skeletal poses and
@@ -596,8 +596,8 @@ transform attributes. A camera-only edit retains the projection and its
 environment/shadow caches, refreshes cameras and renders a new main-pass
 snapshot. Animation/physics generations still refresh poses; mixed edits,
 camera identity/topology changes and context loss take the full validation
-path. These caches retain native data, never GC pointers (**D4.5.1v4 /
-D4.5.2**). The [implementation record](../impl/Radiant_Scene3d_PBR_Shadows.md#11-progress)
+path. These caches retain native data, never GC pointers (**D5.5.1 /
+D5.5.2**). The [implementation record](../impl/Radiant_Scene3d_PBR_Shadows.md#11-progress)
 holds the pixel-oracle results, invalidation checks and Dreamhome release
 measurement; reduced whole-page frame cost remains follow-on work.
 
@@ -628,16 +628,16 @@ the native contexts of its documents form one share group, so the presenter can
 sample a viewport's presented texture without a readback (USER, 2026-11-02;
 [GPU compositor](Radiant_Design_GPU_Compositor.md) Q7/C3). The shared object
 namespace never reaches scripts or packages: GL names stay inside the native
-core (D7.4.1v2), and budgets remain per context. Resource IDs and native GL
+core (D9.5.1), and budgets remain per context. Resource IDs and native GL
 names have separate identities. Changes/removal invalidate the
 appropriate projection or cache entries; stale retained paint data keeps its
-published image alive until released (D4.5.1v4).
+published image alive until released (D5.5.1).
 
 Scene elements and Lambda numeric arrays are ordinary values. During
 projection/upload, borrow only for the call; copy retained scene/mesh/material
 data into native/document-owned storage. Retained IDs do not pin a borrowed GC
 pointer. Any retained script-identity value uses an explicit registered root
-(D4.5.2/D5.3.3). GPU release runs with the correct context on the owning thread,
+(D5.5.2/D6.3.3). GPU release runs with the correct context on the owning thread,
 and document teardown releases resources without JS finalizers or `dispose()`.
 
 Validate finite transforms, geometry component counts, index/attribute bounds,
@@ -650,7 +650,7 @@ diagnostic rather than a successful blank viewport.
 Build shared conversion/dispatch helpers instead of repeated per-type copies.
 All first-party code follows Lambda's C+ conventions and C++17 with existing
 `lib` containers, ownership facilities, and logging. Future host objects and
-JS wrappers follow D7.4.1v2/D7.4.4; they are not Phase I prerequisites.
+JS wrappers follow D9.5.1/D9.5.4; they are not Phase I prerequisites.
 
 ## 6. GLSL policy: native shaders first, ES adaptation in Phase II
 
@@ -741,7 +741,7 @@ an explicit time for deterministic animation tests and capture.
 
 In Phase II, WebGL draws/clears and existing animation-frame callbacks dirty
 their canvas; the same presentation boundary resolves its image. Script-visible
-events use existing host scheduling (D7.4.2v2). Library `flush()` calls are not
+events use existing host scheduling (D9.5.2). Library `flush()` calls are not
 required to repaint, and synchronous readback observes preceding GPU writes.
 
 ### First presentation path: GPU → bitmap
@@ -904,7 +904,7 @@ A canvas selects one mode on its first successful context request; repeated
 requests preserve identity and incompatible modes return `null`. Keep Canvas
 2D state separate. Use context/kind/generation-branded resource wrappers and
 program/link-generation uniform locations. Follow the ownership and declared
-host-interface contracts in D7.4.1v2/D7.4.4; never expose GL names or retain a
+host-interface contracts in D9.5.1/D9.5.4; never expose GL names or retain a
 borrowed JS buffer pointer. Validate detachment, offsets, sizes, and ranges
 before borrowing/copying uploads. Preserve application state and errors across
 internal resolve/readback.
@@ -1051,11 +1051,11 @@ sampling supports repeatable tests/capture. SVG and 3D share scheduling while
 retaining their independently controllable timelines. Paused/finished playback
 lets the page loop park when no active playback/control envelope or other page
 work needs frames. Events use existing host scheduling
-(D7.4.2v2); GL work remains on its owning thread.
+(D9.5.2); GL work remains on its owning thread.
 
 Playback records, bindings and sampled state have document ownership and
 generation validation. Retained JS targets use registered roots and declared
-host interfaces (D4.5.2/D5.3.3, D7.4.1v2/D7.4.4); no borrowed JS array or object
+host interfaces (D5.5.2/D6.3.3, D9.5.1/D9.5.4); no borrowed JS array or object
 pointer survives a call. Detachment, root replacement and teardown cancel the
 affected bindings and release caches. Graphics loss suspends presentation;
 CPU playback follows its existing play/pause state. Restoration uploads the
@@ -1079,7 +1079,7 @@ addons, hashes and browser references under `test/demo/scene3d/`.
 | Lifecycle, GC and performance | Two scenes/canvases, target removal, repeated play/stop/uncache, resize, loss/restoration during a crossfade, forced GC and teardown preserve resources and event order. Record bounded CPU/GPU/cache growth, animation sampling cost and release frame pacing on named hardware. |
 
 Wire the focused animation, SVG regression, native rendering and interaction
-gates into the existing test lanes (D7.3.5). Retain the Phase I/II rendering,
+gates into the existing test lanes (D9.4.5). Retain the Phase I/II rendering,
 Lambda, JS runtime and selected Khronos/WPT gates. Implementation sequencing
 and measured progress belong in a Phase III implementation record; this
 section selects behavior and completion evidence.
@@ -1120,7 +1120,7 @@ provider for rendered tests. Ordinary headless runs remain windowless; do not
 silently create a GLFW window for every headless test. Failure to acquire a
 valid provider returns `null`. Record the actual driver, including whether it
 uses hardware or software; Radiant bundles no software renderer. Keep the
-D7.1.4v2 headless-C profile on its null backend with native 3D/WebGL unavailable.
+D9.2.1 headless-C profile on its null backend with native 3D/WebGL unavailable.
 Adding graphics support to that profile requires a separately reviewed
 formal-profile change. The runtime-only CLI and current WASM profile do not
 acquire graphics dependencies.
@@ -1150,7 +1150,7 @@ services with Radiant, plus the Lambda package as source. The JS API and ES
 source adapter are Phase II additions. No ANGLE/GLES/EGL/translator library or
 browser installation is required. Initialize the graphics provider lazily when
 a scene viewport or supported future canvas context needs it. Keep the
-D7.1.4v2 null backend for builds excluding native graphics, without stripping the common
+D9.2.1 null backend for builds excluding native graphics, without stripping the common
 Radiant source set or leaking GL types into runtime-facing headers.
 
 Build declarations belong in `build_lambda_config.json`; generated Lua is never
@@ -1275,7 +1275,7 @@ let animated = input("character.a3d")^
 let triangle = parse("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", 'obj')^
 ```
 
-**D4.1.3** places input allocations in the Input pool/arena, outside GC
+**D5.1.3** places input allocations in the Input pool/arena, outside GC
 rooting. Parsed strings, numeric values, arrays, maps, and elements all belong
 to that Input; no value borrows a temporary line buffer. **S2.5.1v2** and
 **S2.6.3** keep arrays as single content items. **S2.6.4** merges adjacent
@@ -1441,15 +1441,15 @@ extensions; selected macOS Phase III evidence is recorded
 
 | Location | Responsibility |
 |---|---|
-| `lmd/package/scene3d.ls` and `lmd/package/scene3d/` | Explicit public module, scene types/constructors, pure normalization and transform/geometry helpers (D7.2.1 / D7.2.4v4, S12.1.1v3). |
-| Existing Lambda element/DOM admission and `radiant-dom` boundary | Admit the root/scene subtree as document-owned values; no direct runtime-to-GL link (D7.5.3). |
+| `lmd/package/scene3d.ls` and `lmd/package/scene3d/` | Explicit public module, scene types/constructors, pure normalization and transform/geometry helpers (D9.3.1 / D9.3.4, S12.1.1v3). |
+| Existing Lambda element/DOM admission and `radiant-dom` boundary | Admit the root/scene subtree as document-owned values; no direct runtime-to-GL link (D9.5.6). |
 | `radiant/layout_block.cpp`, `radiant/render_svg_inline.cpp`, shared declarations in `radiant/render.hpp`, and existing replaced-content dispatch | Reuse/extract SVG intrinsic sizing, viewBox validation, and fitting helpers; keep scene children out of HTML box layout; use float layout dimensions. |
 | `radiant/scene3d.cpp` and `radiant/scene3d_math.hpp` | Scene projection with SVG-style projected-frame fitting, references, transforms/cameras, geometry, materials/lights, draw ordering, invalidation, and document-owned caches. |
 | `radiant/gl_core.cpp` | Context/resource tables, explicit core-context creation/function loading, shader services, validated native uploads, scoped state/draws, FBOs, resolve/readback, accounting and owning-thread lifetime. |
 | `radiant/ui_context.cpp` / `radiant/window.cpp` | Existing full-host GLFW infrastructure and explicit hidden-window test opt-in; ordinary headless operation stays windowless. |
 | `radiant/canvas_2d.cpp`, `render_canvas_content`, and existing image painting | Extract shared snapshot/image-presentation helpers; preserve Canvas 2D behavior. |
 | `radiant/render.hpp`, SVG/PDF dispatch, and image-generation support | Snapshot lifetime and follow-on scene/canvas export. |
-| Phase II `lambda/dom/dom_canvas.cpp` / declared host interfaces | Context selection, JS resource wrappers and argument conversion above the shared native GL core (D7.4.1v2/D7.4.4). |
+| Phase II `lambda/dom/dom_canvas.cpp` / declared host interfaces | Context selection, JS resource wrappers and argument conversion above the shared native GL core (D9.5.1/D9.5.4). |
 | Phase III `radiant/svg_animation.cpp`, `radiant/animation.cpp`, and shared declarations | Extract/extend shared timeline, typed sampling and composition services; preserve the SVG adapter and add clip/action/mixer policy and 3D bindings. Reuse `radiant_tick_document_animations`, `RadiantFrameClock` and the existing page loop. |
 | Phase III scene projection and declared JS/native animation bridge | Consume shared sampled values for native scenes and Three.js objects; own/revalidate bindings, root script identities, invalidate changed generations, and keep all GL calls in the rendering path. |
 | `build_lambda_config.json` | First-party build wiring and existing system-GL dependencies; no ANGLE dependency. |
@@ -1544,7 +1544,7 @@ constrain the current design.
 
 ## 15. Asset loading into native scenes
 
-**D7.2.4v4**, **D4.1.3**, and **S12.1.1v3** apply: `lambda.scene3d` exposes
+**D9.3.4**, **D5.1.3**, and **S12.1.1v3** apply: `lambda.scene3d` exposes
 source-package constructors; the input layer resolves model dependencies and
 owns the resulting values; the document host owns graphics and playback.
 Section 14's raw `obj`, `mtl`, `gltf`, and `a3d` inputs retain their original
@@ -1595,7 +1595,7 @@ base64 decoder. Images stored in glTF buffer views become image data URIs for
 the existing image acquisition path. Missing dependencies produce input errors.
 
 Decoded buffers are Input-owned binary values. Geometry, materials, skeletons,
-and tracks are rebuilt in the destination Input arena (**D4.1.3**), with no
+and tracks are rebuilt in the destination Input arena (**D5.1.3**), with no
 retained parser scratch pointers. Enum attributes use Lambda symbols; IDs,
 names, paths and URIs use strings. Numeric streams remain arrays, preserving
 component boundaries under **S2.6.4**. No new runtime value type is required.
@@ -1618,7 +1618,7 @@ component encodings, declared buffer lengths, accessor bounds and increasing
 sparse indices. Required `KHR_mesh_quantization` enables integer positions,
 normalized signed byte/short normals, signed or unnormalized UVs, and signed
 position/normal morph displacements. Dequantization uses the existing node or
-skin transforms and copies decoded values into the destination Input (**D4.1.3**).
+skin transforms and copies decoded values into the destination Input (**D5.1.3**).
 `KHR_texture_transform` remains per textureInfo: geometry UVs are not baked.
 Both streams flip from glTF's top origin into native lower-origin coordinates.
 The affine matrix is conjugated by that flip (`F · T · R · S · F`), including
@@ -1627,9 +1627,9 @@ the core selector. See the [Khronos definition](https://github.com/KhronosGroup/
 Authored tangents remain usable for unrotated/unscaled UV0 normal maps; other
 normal-map frames come from the actual transformed UV derivatives. Without
 normals, tangents are ignored and flat normals are generated. These are
-Input-owned descriptions under **D4.1.3 / D4.5.2**, with native projection
-ownership unchanged (**D4.5.1v4**).
-`EXT_meshopt_compression` views decode once, before any accessor reads them, through a bounds-checked implementation of the extension's attribute, triangle and index codecs and its octahedral, quaternion and exponential filters (`lambda/input/input-meshopt.cpp`). Decoded bytes are loader scratch; accessors copy their values into the destination Input as before (**D4.1.3**). Fallback buffers are never read, so an optional meshopt extension still decodes the compressed data. Only bitstream version 0 attributes and version 1 index streams, the versions this extension defines, are accepted.
+Input-owned descriptions under **D5.1.3 / D5.5.2**, with native projection
+ownership unchanged (**D5.5.1**).
+`EXT_meshopt_compression` views decode once, before any accessor reads them, through a bounds-checked implementation of the extension's attribute, triangle and index codecs and its octahedral, quaternion and exponential filters (`lambda/input/input-meshopt.cpp`). Decoded bytes are loader scratch; accessors copy their values into the destination Input as before (**D5.1.3**). Fallback buffers are never read, so an optional meshopt extension still decodes the compressed data. Only bitstream version 0 attributes and version 1 index streams, the versions this extension defines, are accepted.
 It is a supported-profile loader, not a complete glTF schema
 validator. Raster sampling honors glTF wrap and min/mag filters, generates
 mipmaps when requested, and accounts for their GPU storage. glTF's top-origin
@@ -1695,7 +1695,7 @@ A3D quaternion actions use this engine's SLERP interpolation.
 
 ### glTF and GLB export
 
-`format(scene, 'gltf')` returns a self-contained glTF 2.0 JSON string with its buffer in a data URI; `format(scene, 'glb')` returns GLB 2.0 bytes as a binary value. `lambda convert model.obj -t glb -o model.glb` loads any supported model through `scene3d-asset` (`-f` names the source format) and writes the result. The exporter lives in `lambda/format/format-gltf.cpp`, below the runtime and Radiant (**D7.1.1**), and reads the same vocabulary the renderer draws. Box and plane geometry come from the shared generator in `lib/mesh_primitive.h`, and buffer geometry without normals receives the renderer's area-weighted normals, so an exported scene shades as it rendered.
+`format(scene, 'gltf')` returns a self-contained glTF 2.0 JSON string with its buffer in a data URI; `format(scene, 'glb')` returns GLB 2.0 bytes as a binary value. `lambda convert model.obj -t glb -o model.glb` loads any supported model through `scene3d-asset` (`-f` names the source format) and writes the result. The exporter lives in `lambda/format/format-gltf.cpp`, below the runtime and Radiant (**D9.1.1**), and reads the same vocabulary the renderer draws. Box and plane geometry come from the shared generator in `lib/mesh_primitive.h`, and buffer geometry without normals receives the renderer's area-weighted normals, so an exported scene shades as it rendered.
 
 | Scene element | glTF |
 |---|---|

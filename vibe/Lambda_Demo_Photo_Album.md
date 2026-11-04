@@ -19,10 +19,10 @@ separate; the album is a viewer and storyteller.
 S1.4 (values never alias; session state is explicit), S12.1.1v3 and S12.1.3
 (pure `fn` templates, mutation only in `pn` handlers), S12.4.1v3 (resource
 acquisition is `pn`-only). [Formal Design](../doc/Lambda_Formal_Design.md)
-D7.2.4v3 (shipped `lambda.*` packages the demo imports), D7.5.3v2 (the
-Lambda↔Radiant boundary), D7.1.2v2 (all file IO through `lambda-io`), D4.5.1v4
-and D4.5.2 (Radiant owns native pixels and never retains GC pointers),
-D5.3.3 (precise rooting in any native helper), D7.5.4 (audible output is gated
+D9.3.4 (shipped `lambda.*` packages the demo imports), D9.5.6 (the
+Lambda↔Radiant boundary), D9.1.2 (all file IO through `lambda-io`), D5.5.1
+and D5.5.2 (Radiant owns native pixels and never retains GC pointers),
+D6.3.3 (precise rooting in any native helper), D11.3.1 (audible output is gated
 by document origin; it governs the film soundtrack). The slide-package rulings
 SLD1–SLD7 in [Lambda_Pkg_Slides.md](Lambda_Pkg_Slides.md) govern the slideshow
 and film playback.
@@ -386,7 +386,7 @@ slide package, not worked around in the demo (§5, G4).
 
 **Soundtrack.** An optional score is composed in Lambda and played through the
 `lambda.music` package's SoundFont, as the cityscape film does. The tempo is
-fixed, so shot boundaries align to beats. Audible output follows D7.5.4. Tests
+fixed, so shot boundaries align to beats. Audible output follows D11.3.1. Tests
 run with the offline audio output.
 
 *As built (M5):* motion uses `keyframes` on each photo; a chapter card's tile
@@ -495,7 +495,7 @@ Session (owned by the entry procedure, mutated only in pn handlers)
 The library is a single immutable value (S1.4). Each feature keeps its own
 model in the session and renders through a pure template (S12.1.3). Handlers
 are `pn` procedures that compute a new session and publish it. File reads use
-`input()` and the thumbnail channel, which sit in `lambda-io` (D7.1.2v2), and
+`input()` and the thumbnail channel, which sit in `lambda-io` (D9.1.2), and
 acquisition stays in `pn` code (S12.4.1v3).
 
 ### 4.2 Modules

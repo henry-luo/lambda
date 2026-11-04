@@ -1,6 +1,6 @@
 import radiant: radiant
 
-// painting, export and queries share the native expression compiler (D7.5.3).
+// painting, export and queries share the native expression compiler (D9.5.6).
 pub fn validate(layer) any^ {
     let result = radiant.geomap_validate_layer(layer);
     if (result is string) error("map: " ++ result) else result

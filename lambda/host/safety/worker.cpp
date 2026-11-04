@@ -11,7 +11,7 @@
 static int worker_run(int broker_fd, uint64_t session, const char* entry, const char* working_directory, bool preconfined) {
     if (!entry || !*entry || !session) return 2;
     // Apply the irreversible native-IO boundary before runtime initialization,
-    // source acquisition or user callbacks (D7.5.1-2).
+    // source acquisition or user callbacks (D11.1.1-2).
     if (!confined_process_worker_handles(broker_fd) || !confined_process_worker_limits() ||
             (preconfined ? !process_sandbox_is_applied(getpid()) : !process_sandbox_enter_offline())) return 2;
     // A host consent wait may last 30 seconds; the independent supervisor owns

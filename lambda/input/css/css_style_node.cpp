@@ -1531,7 +1531,7 @@ void style_tree_get_statistics(StyleTree* style_tree, int* total_nodes,
 
 // destination-owned declaration records preserve source order in the source tree.
 // borrowed values still require the source pool to outlive the copy; owned
-// payloads use the existing cascade-copy retention policy (D4.1.4v5).
+// payloads use the existing cascade-copy retention policy (D5.1.4).
 StyleTree* style_tree_clone(StyleTree* source, Pool* target_pool) {
     if (!source || !target_pool) return NULL;
 

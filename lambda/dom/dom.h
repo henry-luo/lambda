@@ -207,7 +207,7 @@ bool dom_is_html_canvas_element(Item item);
 
 // Insert through the Mark-aware DOM mutation path. Native clients that create
 // detached DOM nodes must use these bridges so the view tree and the backing
-// Lambda Element stay in lockstep (D5.3.3).
+// Lambda Element stay in lockstep (D6.3.3).
 Item dom_append_child_bridge(void* parent, Item child);
 Item dom_remove_child_bridge(void* parent, Item child);
 bool dom_remove_backed_child(struct DomElement* parent, struct DomNode* child);
@@ -284,7 +284,7 @@ bool dom_is_element(Item item);
 /**
  * Get the document proxy object for bare 'document' identifier resolution.
  * Returns a singleton Map-based proxy whose callable properties are installed
- * as direct targets under D6.2.2v2; dynamic data properties use the getter.
+ * as direct targets under D7.2.2; dynamic data properties use the getter.
  * @return Document proxy Item
  */
 Item js_get_document_object_value(void);
@@ -483,7 +483,7 @@ void dom_batch_reset(void);
 void dom_collections_release_context(void);
 
 // Wrap a materialized creation-time membership list as an immutable NodeList
-// VArray. The backend precisely traces the retained list (D5.2.1v3/D7.4.5v2).
+// VArray. The backend precisely traces the retained list (D6.2.1/D9.5.5).
 Item dom_static_node_list_from_array(Item items);
 Item dom_static_radio_node_list_from_array(Item items);
 Item dom_static_rect_list_from_array(Item items);

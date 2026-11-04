@@ -324,7 +324,7 @@ extern "C" Item js_dom_url_create_object_url(Item object) {
     uint64_t id = __atomic_fetch_add(&blob_url_next_id, 1, __ATOMIC_RELAXED);
     strbuf_append_format(url, "blob:%s/%llu", origin && *origin ? origin : "null", (unsigned long long)id);
     entry->url = mem_dup_n(url->str, url->length, MEM_CAT_SYSTEM);
-    // D4.5.1v4: decoding and selected editions can outlive the script heap that created the Blob.
+    // D5.5.1: decoding and selected editions can outlive the script heap that created the Blob.
     if (!entry->url || !dom_document_add_resource(document, entry, blob_url_destroy)) {
         strbuf_free(url); blob_url_destroy(entry); return ItemError;
     }
@@ -432,7 +432,7 @@ static Item file_reader_read_as_data_url(Item blob) {
     js_elements_set_int(state.get(), FILE_READER_READY, (Item){.item = i2it(1)});
     js_elements_set_int(state.get(), FILE_READER_RESULT, ItemNull);
     js_elements_set_int(state.get(), FILE_READER_ERROR, ItemNull);
-    // precise callback environments retain both the reader and immutable source until completion (D5.3.3).
+    // precise callback environments retain both the reader and immutable source until completion (D6.3.3).
     Item values[] = {reader.get(), source.get(), generation, (Item){.item = i2it(0)}};
     js_schedule_native_env(dom_schedule_task, file_reader_read_task, 0, values, 4);
     return make_js_undefined();
@@ -506,7 +506,7 @@ extern "C" Item js_blob_slice(Item start_item, Item end_item, Item type_item) {
 // =============================================================================
 
 extern "C" Item js_file_new(Item parts, Item name_item, Item options) {
-    // native FormData callers have no JS construction receiver to retain the new File (D5.3.3).
+    // native FormData callers have no JS construction receiver to retain the new File (D6.3.3).
     RootFrame roots(4);
     Rooted<Item> parts_root(roots, parts);
     Rooted<Item> name_root(roots, name_item);
@@ -643,7 +643,7 @@ extern "C" Item js_clipboard_item_get_type(Item type_item) {
     }
     // If it's already a Blob, resolve directly. If it's a string, wrap in Blob.
     if (get_type_id(rep_root.get()) == LMD_TYPE_STRING) {
-        // D5.3.3: Blob construction can collect an unrooted representation.
+        // D6.3.3: Blob construction can collect an unrooted representation.
         parts_root.set(js_array_new(0));
         js_array_push(parts_root.get(), rep_root.get());
         options_root.set(js_new_object());
@@ -835,7 +835,7 @@ static bool dt_record_string_type_is(Item record, const char* type, size_t type_
 
 // InputEvent exposes a frozen snapshot of its transfer payload. Clipboard and
 // drag events keep their mutable DataTransfer, but listener writes must not
-// rewrite an edit that has already committed (D7.2.5).
+// rewrite an edit that has already committed (D10.2.1).
 static bool dt_is_read_only(Item dt) {
     Item read_only = dom_realm_get_cstr(dt, "__read_only");
     return get_type_id(read_only) == LMD_TYPE_BOOL && it2b(read_only);
@@ -1284,7 +1284,7 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
     return prevented;
 }
 
-// D7.2.5: expose document event transport; command policy stays in the package.
+// D10.2.1: expose document event transport; command policy stays in the package.
 extern "C" Item dom_engine_clipboard_copy_event(void) {
     RootFrame roots(1);
     Rooted<Item> document_root(roots, js_get_document_object_value());
@@ -1324,7 +1324,7 @@ extern "C" void js_drag_session_end(void) {
 extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
         const char* type, double client_x, double client_y) {
     if (!js_active_runtime_state) return false;
-    // D5.3.3: callbacks can collect the target and event before cancellation is read back.
+    // D6.3.3: callbacks can collect the target and event before cancellation is read back.
     RootFrame roots(2);
     Rooted<Item> target_root(roots, target_item);
     Rooted<Item> event_root(roots, ItemNull);
@@ -1896,7 +1896,7 @@ extern "C" Item js_lambda_clipboard_write_records(Item arr) {
 }
 
 extern "C" Item js_lambda_clipboard_read_records(void) {
-    // D5.3.3: record and key construction may collect before the snapshot is published.
+    // D6.3.3: record and key construction may collect before the snapshot is published.
     RootFrame roots(4);
     Rooted<Item> out_root(roots, js_array_new(0));
     Rooted<Item> rec_root(roots, ItemNull);
@@ -2041,7 +2041,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     M("text", js_blob_text) M("arrayBuffer", js_blob_array_buffer) M("slice", js_blob_slice)
 #define JS_CLIPBOARD_INSTALL_PROTO_METHOD(name, target) \
     js_clipboard_set_method(proto_root.get(), name, target);
-    // D5.3/D5.4.3: registration allocates while publishing each property, so
+    // D6.3/D6.4.3: registration allocates while publishing each property, so
     // constructor/prototype locals must remain exact roots until publication.
     RootFrame global_roots(1);
     Rooted<Item> global_root(global_roots, global_this);
@@ -2126,7 +2126,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         }
         dom_realm_init_constructor_prototype(ctor_root.get(),
             proto_root.get());
-        // D5.4.3/D6.2.2v2: FileList arrays and the realm constructor must share
+        // D6.4.3/D7.2.2: FileList arrays and the realm constructor must share
         // the same precisely rooted prototype; otherwise a nursery relocation
         // splits instanceof identity from the public constructor property.
         g_file_list_proto = proto_root.get();

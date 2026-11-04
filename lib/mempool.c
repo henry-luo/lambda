@@ -104,7 +104,7 @@ MEMPOOL_WEAK size_t mem_vm_region_reserved_bytes(const MemVmRegion* region) {
 typedef struct PoolBlock PoolBlock;
 typedef struct PoolExtent PoolExtent;
 
-// A resource the pool owns without holding it as a block (D4.2.6). The record
+// A resource the pool owns without holding it as a block (D5.2.5). The record
 // is itself a pool block, so it needs no release of its own.
 typedef struct PoolCleanup {
     void (*fn)(void* arg);

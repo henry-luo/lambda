@@ -1,4 +1,4 @@
-// S12.1.3 / D4.5.2: one retained shell owns native controls and copied canvas pixels.
+// S12.1.3 / D5.5.2: one retained shell owns native controls and copied canvas pixels.
 import dom
 import resources: ~~.mod_resources
 import img: lambda.image

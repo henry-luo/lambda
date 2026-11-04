@@ -154,7 +154,7 @@ const char* get_continuation_prompt() {
 
 
 // Tab completes the identifier run before the caret against the live session
-// (D8.1.1v17). A member step after `.` has no static candidate list, so it
+// (D8.3.6). A member step after `.` has no static candidate list, so it
 // completes nothing rather than offering unrelated top-level names.
 static size_t repl_complete(void* opaque, const char* line, size_t length,
                             TerminalCompletionAdd add, void* sink) {

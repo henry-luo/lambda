@@ -1,4 +1,4 @@
-// D2.5.2v3: persistent i64?/u64? Map fields own an inline TypedItem payload.
+// D2.4.2: persistent i64?/u64? Map fields own an inline TypedItem payload.
 type I64Row = {value: i64?}
 type U64Row = {value: u64?}
 

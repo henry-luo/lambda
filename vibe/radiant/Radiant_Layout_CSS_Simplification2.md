@@ -4,7 +4,7 @@
 **Status:** proposal (analysis complete, implementation not started)
 **Scope:** `radiant/` layout + CSS style resolution (~80.3K LOC measured below). Paint, events, editing, state are out of scope.
 **Predecessor:** `vibe/radiant/Radiant_Layout_Simplification.md` (round 1, 2026-08-09, −1,030 LOC realized). Round 1 was intra-file dedup and explicitly excluded the CSS resolver. Round 2 is structural: it unifies parallel engines and parallel tables, not just repeated lines.
-**Governing rulings:** **D7.1.1** (all work stays inside the `radiant` archive layer; the one exception — keyframes parsing — moves *down* into `lambda/input/css`, which the layering DAG permits) and **D4.5.1v3** (all new structs live in existing arenas/view pools/scratch; no new ownership graph, no GC'd layout state).
+**Governing rulings:** **D9.1.1** (all work stays inside the `radiant` archive layer; the one exception — keyframes parsing — moves *down* into `lambda/input/css`, which the layering DAG permits) and **D5.5.1** (all new structs live in existing arenas/view pools/scratch; no new ownership graph, no GC'd layout state).
 
 ## 1. Measured baseline (2026-08-16)
 

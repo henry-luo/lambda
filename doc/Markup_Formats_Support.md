@@ -36,7 +36,7 @@ All lightweight markup flavors (Markdown, reStructuredText, AsciiDoc, …) parse
 | LaTeX | `latex` | see §3.1 — a `latex_document` tree, not Mark Doc |
 | Typst | `typst` | |
 | HTML5 | `html` / `html5` | passes the html5lib test suite; see §1.4 |
-| XHTML | `xhtml` | Strict XML syntax producing an HTML document tree (D2.10.1); see [XHTML input](#xhtml-input--html-document-tree) |
+| XHTML | `xhtml` | Strict XML syntax producing an HTML document tree (D10.1.4); see [XHTML input](#xhtml-input--html-document-tree) |
 | Mark | `mark` | Lambda's own notation, read back losslessly |
 
 In Lambda scripts all of these are loaded with `input()`:
@@ -57,7 +57,7 @@ let document = parse("= Heading =\n\n**bold**", "wiki:creole")^
 ```
 
 These readers extend the shared MediaWiki parser and construct normalized
-Mark Doc (S2.6.1v2, S2.6.2–S2.6.5; D7.1.5). They preserve dynamic macros and
+Mark Doc (S2.6.1v2, S2.6.2–S2.6.5; D9.1.4). They preserve dynamic macros and
 unsupported source features as inert raw nodes with diagnostics. Rich task
 states retain progress ranges and source markers; tags use existing metadata
 where their scope is defined. See [wiki coverage and limits](../vibe/input/Input_Wiki.md).
@@ -193,7 +193,7 @@ HTML5 is a first-class input format and is preserved verbatim, whitespace text n
 Ten explicit profiles have readers and writers. Readers extend the shared
 native wiki parser; all writers live in the shipped **`lambda.doc.wiki`**
 Lambda Script package. Each reader constructs the same normalized Mark Doc
-vocabulary (S2.6.1v2, S2.6.2–S2.6.5; D7.1.5), with no dialect-specific root.
+vocabulary (S2.6.1v2, S2.6.2–S2.6.5; D9.1.4), with no dialect-specific root.
 
 The common static profile covers headings, paragraphs, emphasis, code,
 nested lists, links, images, rules, and tables. Dialect-specific mappings and
@@ -392,7 +392,7 @@ permissive. [MusicXML sheet music](Lambda_Music.md) uses the strict profile.
 #### XHTML input → HTML document tree
 
 The dedicated **`xhtml` input format** uses strict XML 1.0/UTF-8 parsing and
-returns the HTML-compatible `<#document>` tree for Radiant (**D2.10.1**).
+returns the HTML-compatible `<#document>` tree for Radiant (**D10.1.4**).
 Filename detection recognizes `.xhtml` and `.xht`, case-insensitively;
 Radiant also selects this parser for HTTP `application/xhtml+xml` responses,
 including after redirects. Explicit format selection accepts any filename.
@@ -780,7 +780,7 @@ mail.subject
 
 ### 3.5 vCard (VCF)
 
-One card parses into a map with descriptive keys: `version`, `full_name`, a structured `name` (`family`, `given`, `additional`, `prefix`, `suffix`), `email`, `phone`, `organization`, `title`, structured `address` maps, `url`, `birthday`, and `note`. Its `entries` array preserves every property in source order, including repeated fields, with `name`, `value`, and optional `parameters` fields. Use `entries` to inspect repeated values and parameter types; the `properties` map remains a convenience view. A file with several cards returns `{contacts: [...]}`, with one map per card. The ordered entry and contact arrays use the sequence append of **D2.6.5v3**.
+One card parses into a map with descriptive keys: `version`, `full_name`, a structured `name` (`family`, `given`, `additional`, `prefix`, `suffix`), `email`, `phone`, `organization`, `title`, structured `address` maps, `url`, `birthday`, and `note`. Its `entries` array preserves every property in source order, including repeated fields, with `name`, `value`, and optional `parameters` fields. Use `entries` to inspect repeated values and parameter types; the `properties` map remains a convenience view. A file with several cards returns `{contacts: [...]}`, with one map per card. The ordered entry and contact arrays use the sequence append of **D3.3.1**.
 
 Parameterized VCF/ICS entries also retain `parameter_source`, preserving
 quoted commas and repeated parameter names for serialization. Both formats
@@ -872,7 +872,7 @@ files |: ends_with(~.name, ".cpp") |> ~.name       // all .cpp file names
 ### 3.12 DocBook
 
 `lambda.doc.docbook` provides an initial native Lambda port of official
-DocBook xslTNG 2.8.5, whose source stylesheets use XSLT 3.0 (D7.2.4). It
+DocBook xslTNG 2.8.5, whose source stylesheets use XSLT 3.0 (D9.3.4). It
 transforms DocBook 5.x XML into HTML/CSS publications without Java at runtime.
 The usual filename extension is `.xml`; document identity comes from the
 `http://docbook.org/ns/docbook` namespace, including prefixed root names.
@@ -974,8 +974,8 @@ Where a target lacks a concept the conversion is predictable rather than silentl
 ### 5.1 Wiki Output
 
 All wiki output uses the shipped **`lambda.doc.wiki`** Lambda Script package
-(D7.2.4), including MediaWiki. Runtime `format()`, formatted file `output()`, and
-CLI conversion invoke it above the IO boundary (D7.1.1). The native MediaWiki
+(D9.3.4), including MediaWiki. Runtime `format()`, formatted file `output()`, and
+CLI conversion invoke it above the IO boundary (D9.1.1). The native MediaWiki
 formatter has been retired. Use any selector in the [coverage table](#15-wiki-dialect-coverage).
 
 ```lambda
@@ -1007,11 +1007,11 @@ runtime-free `format_data` API refuses wiki output.
 
 ### 5.2 AsciiDoc, Man, Typst, and Personal Data Output
 
-The shipped **`lambda.doc.misc`** source package (D7.2.4) implements
+The shipped **`lambda.doc.misc`** source package (D9.3.4) implements
 `asciidoc`, `man`, `typst`, `eml`, `vcf`, and `ics`. The prose writers consume
 normalized Mark Doc; record writers consume their existing parser maps.
 Runtime `format`, file `output`, and CLI conversion invoke the same package
-above the IO boundary (D7.1.1).
+above the IO boundary (D9.1.1).
 
 ```bash
 ./lambda.exe convert guide.md -t asciidoc -o guide.adoc

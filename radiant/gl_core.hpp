@@ -7,7 +7,7 @@ struct ImageSurface;
 struct NativeGlContext;
 struct Bound;
 
-// native names never cross the graphics waist (D7.4.1v2); IDs are context branded.
+// native names never cross the graphics waist (D9.5.1); IDs are context branded.
 struct NativeGlResource { uint64_t id; };
 enum NativeGlKind { NATIVE_GL_BUFFER, NATIVE_GL_VERTEX_ARRAY, NATIVE_GL_TEXTURE,
     NATIVE_GL_PROGRAM, NATIVE_GL_TARGET, NATIVE_GL_SHADER, NATIVE_GL_FRAMEBUFFER, NATIVE_GL_RENDERBUFFER };

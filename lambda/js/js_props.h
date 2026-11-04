@@ -1,5 +1,5 @@
 // js_props.h — canonical ECMAScript property kernels.
-// Shape tombstones, accessors, descriptors, and D8.4.3 error propagation
+// Shape tombstones, accessors, descriptors, and D7.4.3 error propagation
 // converge here rather than through parallel property mechanisms.
 
 #ifndef LAMBDA_JS_PROPS_H
@@ -185,7 +185,7 @@ typedef enum {
                                // error_lane carries its exact ERROR Item
 } JsSetterDispatchStatus;
 
-// D8.4.3: an accessor setter's abrupt completion remains in the returned
+// D7.4.3: an accessor setter's abrupt completion remains in the returned
 // value; property dispatch must not stash it in ambient thread-local state.
 typedef struct JsSetterDispatchResult {
     JsSetterDispatchStatus status;
@@ -296,7 +296,7 @@ bool js_ordinary_reserved_constructor_slot_can_initialize(Item target,
                                                            Item key,
                                                            ShapeEntry* entry);
 
-// ToPropertyDescriptor. Failures return the D8.4.3 merged ERROR Item.
+// ToPropertyDescriptor. Failures return the D7.4.3 merged ERROR Item.
 Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out);
 
 // guest adapters share ToPropertyDescriptor ordering without sharing call ABIs.

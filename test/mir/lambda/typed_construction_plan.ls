@@ -1,4 +1,4 @@
-// D3.2.4v4, S7.7.2, S9.1.2–S9.1.3: fresh layouts, failure order and snapshots.
+// D4.2.5, S7.7.2, S9.1.2–S9.1.3: fresh layouts, failure order and snapshots.
 type Node = {value: int, next: Node?}
 
 pn bump(var trace: int[], value) {

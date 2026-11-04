@@ -1,4 +1,4 @@
-// Presentation MathML layout; Core's policies never read TeX companion data (D7.2.8).
+// Presentation MathML layout; Core's policies never read TeX companion data (D10.2.3).
 // Algorithms: https://www.w3.org/TR/2025/CR-mathml-core-20250624/ §§3–5.
 import mml: .mathml
 import operators: .mathml_operators

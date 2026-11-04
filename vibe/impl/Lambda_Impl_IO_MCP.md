@@ -4,8 +4,8 @@
 > 2026-10-18.
 > **Design:** [Lambda_IO_MCP.md](../Lambda_IO_MCP.md).
 > **Formal anchors:** **S12.1.1v3** (procedural I/O), **S12.4** (scoped
-> resources), **D5.3.3** (precise ownership), **D7.1.2v2/D7.5.2** (I/O
-> ownership/policy), **D7.2.4v3** (built-in namespaces).
+> resources), **D6.3.3** (precise ownership), **D9.1.2/D11.1.2** (I/O
+> ownership/policy), **D9.3.4** (built-in namespaces).
 
 ## First delivery
 

@@ -1,4 +1,4 @@
-// D8.3.4/DF16: one invariant dynamic binder argument in a hot loop; compare
+// D7.3.4/DF16: one invariant dynamic binder argument in a hot loop; compare
 // the `_b` loop with the optional entry-guarded raw-loop sibling in release.
 fn specialize(value: any as T) int => 1;
 let seed = specialize(0);

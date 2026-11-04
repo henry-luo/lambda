@@ -1,4 +1,4 @@
-// D5.3.3: context-local URI and character caches own GC Items only through
+// D6.3.3: context-local URI and character caches own GC Items only through
 // their registered exact root range. The forced-GC GTest runs this at every
 // allocation so a stale cached Item is observed immediately.
 for (let i = 0; i < 32; i++) {
@@ -29,7 +29,7 @@ for (let i = 0; i < 32; i++) {
   if (String.fromCharCode(0xD83D, 0xDE00) !== "😀") {
     throw new Error("four-byte character cache returned a stale Item");
   }
-  // D5.3.5: moving collections must preserve the cached Unicode source itself.
+  // D6.3.5: moving collections must preserve the cached Unicode source itself.
   const unicode = ("é😀" + i).repeat(4);
   const length = unicode.length;
   const churn = new Array(16).fill("temporary" + i);

@@ -1,4 +1,4 @@
-// D8.4.1v2/D3.4.6: shared descriptors admit native regions without learned slots.
+// D7.4.1/D3.4.6: shared descriptors admit native regions without learned slots.
 class Point {
   constructor(x, y) { this.x = x; this.y = y; }
   plus(other) { return new Point(this.x + other.x, this.y + other.y); }

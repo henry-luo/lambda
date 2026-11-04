@@ -57,7 +57,7 @@ let m2 = multiply(5, 3)   // 15
 
 // Test 11: Optional typed parameter
 // An omitted optional parameter is null, including at a typed nullable lane
-// boundary (D2.5.1); the explicit value follows the `a + b` branch.
+// boundary (D2.4.1); the explicit value follows the `a + b` branch.
 fn opt_typed(a: int, b?: int) => if (b) a + b else a * 2
 
 let o1 = opt_typed(5)      // 10 (b=null is falsy, so a*2=10)

@@ -1,4 +1,4 @@
-// sketch overlays never participate in layout, focus, or hit testing (D7.2.5).
+// sketch overlays never participate in layout, focus, or hit testing (D10.2.1).
 pub let css = "
 .wired-root,.wired-config-provider{font-family:var(--wired-font-family);font-size:var(--wired-font-size);line-height:var(--wired-line-height);color:var(--wired-text);background:var(--wired-background)}
 .wired-root{box-sizing:border-box;min-height:100vh;padding:36px}.wired-root *{box-sizing:border-box}

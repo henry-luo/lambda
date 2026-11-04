@@ -2,7 +2,7 @@
 
 Checked on 2026-10-07 against the unchanged 31 originals. All 93 target records parse and serialize; all 62 native SVG/PDF exports succeed. The 30 non-Lua samples have no unsupported-output placeholders. Lua source parses safely and receives located unsupported-lua diagnostics (**S1.8, S7.4.1–S7.4.4**).
 
-**Supported** means the used bounded constructs render in that target. **Partial** means the used output or a declared package has a diagnosed limit/substitution. **Unsupported** identifies the Lua-generated content. Native corpus exports use the continuous/fixed-page path: these statuses do not promise TeX page breaks, float placement, exact font metrics or typography. Shared paged output is checked separately with the page-style fixture. Static source adapters follow **D7.2.1–D7.2.4**.
+**Supported** means the used bounded constructs render in that target. **Partial** means the used output or a declared package has a diagnosed limit/substitution. **Unsupported** identifies the Lua-generated content. Native corpus exports use the continuous/fixed-page path: these statuses do not promise TeX page breaks, float placement, exact font metrics or typography. Shared paged output is checked separately with the page-style fixture. Static source adapters follow **D9.3.1–D9.3.4**.
 
 | Sample | HTML | SVG | PDF | Checked constructs | Limits |
 |---|---|---|---|---|---|
@@ -45,7 +45,7 @@ python3 test/latex/samples/audit.py --target all --export
 python3 test/latex/samples/audit.py --sample spacetime_diagrams --target all --export
 ```
 
-Artifacts, JSON records and stderr logs are written under `temp/latex_phase3/audits/`. Full audits write `summary_all.json`; selected audits write `summary_all_selected.json`. A nonzero CLI/export status, parse failure, serialization error or empty output/artifact fails the runner. Each record includes activated packages, located diagnostics, image/bibliography resolution, selected visible text and artifact size. Resource availability checks local existence; remote resources are not fetched by this check (**D7.1.2v2, S12.4.1**).
+Artifacts, JSON records and stderr logs are written under `temp/latex_phase3/audits/`. Full audits write `summary_all.json`; selected audits write `summary_all_selected.json`. A nonzero CLI/export status, parse failure, serialization error or empty output/artifact fails the runner. Each record includes activated packages, located diagnostics, image/bibliography resolution, selected visible text and artifact size. Resource availability checks local existence; remote resources are not fetched by this check (**D9.1.2, S12.4.1**).
 
 The captured [phase3_audit.json](phase3_audit.json) records all three targets. The [package design](../../../vibe/Lambda_Pkg_Latex.md#10-verification) describes adapters, host capabilities and broader validation limits. [TeX Live reference PDFs and comparisons](../reference/phase3/README.md) cover table geometry, spacetime paths and subcaptions; zero diagnostics alone is not visual acceptance.
 

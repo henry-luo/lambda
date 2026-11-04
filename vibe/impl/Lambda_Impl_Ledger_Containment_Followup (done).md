@@ -3,8 +3,8 @@
 **Status:** selected scope complete; qualification retains one pre-existing PDF golden failure.
 **Date:** 2026-10-31.
 
-This pass implements existing **S1.6 / S7.7.2–S7.7.6 / D6.1.3v2 /
-D8.1.1v18** rulings. It introduces no new policy for pending-ruling items.
+This pass implements existing **S1.6 / S7.7.2–S7.7.6 / D7.1.3 /
+D8.3.2** rulings. It introduces no new policy for pending-ruling items.
 
 ## Bounded scope and acceptance
 
@@ -39,13 +39,13 @@ Inlining preserves nested block joins and checked-store reports.
 
 An interpreter parameter rejection no longer signals its caller. A MIR parameter
 check rejoins the call before any native unboxing. Unresolved callable analysis
-fails closed under D6.1.3v2. Admission guards are call-site facts, separate from
+fails closed under D7.1.3. Admission guards are call-site facts, separate from
 the callee-body effect fixed point; recursive inferred native proofs remain
 available. Inlining requires the full argument contract, including singleton
 and range constraints, rather than only the matching physical scalar lane. The admission join wraps only
 argument checks, not the existing post-call ABI checks. Sized bitwise helpers
 retain a boxed result when the carrier oracle admits an error: a success-kind
-classification alone cannot authorize unboxing (S7.9.3 / D2.4.1–D2.4.3).
+classification alone cannot authorize unboxing (S7.9.3 / D2.3.4–D2.3.5).
 `ledger_call_carriers.ls` covers successful imported bool/u64 calls, wrapping
 u64 arithmetic, rejected imported admission and sized bitwise error flow. Inferred record bindings retain a boxed error-capable
 result when their callee can fail; success-only scalar-record destinations cannot

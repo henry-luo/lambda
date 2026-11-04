@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.2.1-D3.3.1/S11.4.3: an indexed item from a certified outer builder retains the untyped consumer's error guard without repeating its identity admission; the raw consumer has no generic index helper.",
+  "description": "D4.2.1-D4.3.1/S11.4.3: an indexed item from a certified outer builder retains the untyped consumer's error guard without repeating its identity admission; the raw consumer has no generic index helper.",
   "checks": [
     {
       "in_func": "_sum_codes_#",

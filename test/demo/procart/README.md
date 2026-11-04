@@ -178,7 +178,7 @@ or **Cap spots** toggle the selected form's details; **Flowers** controls blosso
 on flowering forms. Visibility keeps the framing stable. Fern and herb remain
 foliage plants. Generation is pure (**S12.1.1v3**); free-angle turtle coordinates
 use the package's tolerance tier (**PG2**). Retained camera changes cross the DOM
-boundary under **D7.5.3v2 / S12.1.3**.
+boundary under **D9.5.6 / S12.1.3**.
 
 `mod_plants.ls` owns the catalog, seeded model and controls; `mod_botanical.ls`
 draws the illustrations; `mod_plant_solids.ls` builds shared solid organs;

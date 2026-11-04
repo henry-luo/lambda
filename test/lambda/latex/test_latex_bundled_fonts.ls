@@ -26,7 +26,7 @@ let options = {source_path: "elsewhere/paper.tex"}
 "native document:"; bundled_faces(latex.render_document(ast, options))
 "standalone HTML:"; bundled_faces(parse(latex.render_to_html(ast, {*:options, standalone: true}), "html")^)
 "fragment stylesheet links:"; len(stylesheet_links(latex.render(ast, {standalone: false})))
-// D7.2.9 references used bundled faces without embedding their bytes.
+// D10.2.4 references used bundled faces without embedding their bytes.
 let standalone_math = math.render_standalone(parse("x^2", {type: "math", flavor: "latex"})^)
 "standalone math:"; {svg: name(standalone_math) == 'svg',
     text: contains(format(standalone_math, 'html'), "<text"),

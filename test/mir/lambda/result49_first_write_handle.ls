@@ -1,4 +1,4 @@
-// D4.4.4v4: consecutive writes through one typed record place bind a writing
+// D5.4.4: consecutive writes through one typed record place bind a writing
 // handle on the first store. A later index change must navigate again.
 type Flags = {pp: bool, tw: bool, th: bool, marker: int}
 type World = {tasks: Flags?[]}

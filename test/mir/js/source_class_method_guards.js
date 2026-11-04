@@ -1,4 +1,4 @@
-// D8.4.1v2: a fixed class candidate must still observe live shadows and prototypes.
+// D7.4.1: a fixed class candidate must still observe live shadows and prototypes.
 class Counter {
   constructor(x) { this.x = x; }
   read(n) { return this.x + n; }

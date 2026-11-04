@@ -41,12 +41,12 @@ typedef enum CRetType {
 // One physical carrier required by one C ABI parameter. A NULL descriptor
 // array keeps the historical all-Item ABI; an explicit array is indexed by the
 // fixed Lambda arity. This records the ABI slot independently of the semantic
-// argument type (D2.4.1-D2.4.3).
+// argument type (D2.3.4-D2.3.5).
 typedef struct SysFuncArgDesc {
     ValueRep required_rep;
 } SysFuncArgDesc;
 
-// How a system function's success type is computed [S11.4.9, D3.3.5].
+// How a system function's success type is computed [S11.4.9, D4.3.4].
 // The zero value must stay FIXED so an unaudited row keeps today's behavior
 // (its declared `success_type`/`return_type`) rather than silently deriving
 // something from an argument it was never checked against. `result_arg_index`
@@ -319,7 +319,7 @@ static inline ScalarReturnClass jit_import_scalar_return_class(const JitImportMe
      JIT_EXCEPTION_PRESERVES, 0}
 
 // A length observation reads a mutable container/string but cannot collect,
-// reenter, or retain its raw pointer; it is not a pure scalar call (D5.3.1).
+// reenter, or retain its raw pointer; it is not a pure scalar call (D6.3.1).
 #define JIT_IMPORT_READ_ONLY_LENGTH \
     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, \
      JIT_ARG_CLASS(0, JIT_VALUE_RAW_GC_POINTER), \
@@ -444,7 +444,7 @@ static inline bool sysfunc_returns_optional_int(const SysFuncInfo* info) {
     }
 }
 
-// intrinsic failures are independent of an operand's carried error (D6.1.3)
+// intrinsic failures are independent of an operand's carried error (D7.1.3)
 static inline bool sysfunc_originates_defect(const SysFuncInfo* info) {
     if (!info) return false;
     if (sysfunc_returns_optional_int(info)) return true;

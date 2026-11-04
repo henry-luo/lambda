@@ -11,8 +11,8 @@ The original stays alongside the effects. The layout becomes one column on
 mobile, and breadcrumbs lead back to the Scene3D collection.
 
 Construction and control edits use Lambda view state (**S12.1.1v3**,
-**D7.5.3v2**). Radiant owns shader programs, texture uploads and timeline playback
-(**D4.5.1v4**, **D4.5.2**). There is no per-frame Lambda or JavaScript callback.
+**D9.5.6**). Radiant owns shader programs, texture uploads and timeline playback
+(**D5.5.1**, **D5.5.2**). There is no per-frame Lambda or JavaScript callback.
 
 See the [package guide](../../../../doc/Lambda_Scene3d_Effects.md) for API,
 uniforms, file and generated-SVG sources, and custom GLSL. These are independent

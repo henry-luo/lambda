@@ -10,7 +10,7 @@ struct Arena;
  * MarkEditor describes a map's or element's new fields with it -- import the
  * old shape, then add, retype or remove -- and container_rebuild_with_new_shape
  * turns the list into transition-tree steps, or a chain the container owns
- * when the tree declines (D3.4.3v3). It makes no ShapeEntry itself.
+ * when the tree declines (D3.4.3). It makes no ShapeEntry itself.
  *
  * SCU10: drafts grow from the document. The builder embeds no field-count
  * limit; its draft arrays live in the caller's arena (no

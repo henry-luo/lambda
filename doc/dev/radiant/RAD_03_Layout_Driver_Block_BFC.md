@@ -46,8 +46,8 @@ and custom-layout documents retain their existing effect adapter.
 
 `layout_pass.cpp` separately owns reusable flow snapshots; scalar measurement
 restoration does not retire those results. Selected-view pools own every copied
-payload, with generation and input checks before publication (**D4.5.1v4 /
-D4.1.4v5 / D4.5.2**). See [the integrated implementation record](../../../vibe/impl/Radiant_Impl_Retained_Layout.md)
+payload, with generation and input checks before publication (**D5.5.1 /
+D5.1.4 / D5.5.2**). See [the integrated implementation record](../../../vibe/impl/Radiant_Impl_Retained_Layout.md)
 for acceptance and verification.
 
 ## 2. The state backbone: `LayoutContext`, `BlockContext`, `Linebox`
@@ -100,7 +100,7 @@ supply both, while computed root CSS and logical-property mapping remain intact
 [CSS 2.2 §10.3.3](https://www.w3.org/TR/CSS22/visudet.html#blockwidth)). Existing
 visibility/containment boundaries use that same producer. Absolute/fixed root
 insets and vertical-flow root placement retain their separate sizing paths.
-No new retained owner is introduced (**D4.5.1v4 / D4.1.4v5**).
+No new retained owner is introduced (**D5.5.1 / D5.1.4**).
 
 Horizontal viewport ranges are finalized separately after the root's used
 geometry, body margins and relative offsets are committed.
@@ -116,7 +116,7 @@ as `hidden` for programmatic scrolling. The range setter retires stale flags
 and clamps retained positions on viewport growth or overflow removal.
 `layout_apply_pending_viewport_scroll` publishes the final clamped request.
 Existing selected-view ownership remains
-**D4.5.1v4 / D4.1.4v5**. Negative root CSSOM writes and broader root
+**D5.5.1 / D5.1.4**. Negative root CSSOM writes and broader root
 used-height/clip behavior remain separately limited.
 
 Root clipping and scrollbar consumers share `layout_scrollport_rect`: ordinary elements use their
@@ -181,7 +181,7 @@ retain their own positioning paths. Multipass width changes use the same
 finalizer. A changed origin refreshes the active BFC offset and registered
 descendant float geometry. Used margins live in the existing selected-view
 boundary storage, including otherwise boundaryless RTL boxes
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 The seam with §9.5 float *positioning* (as opposed to *avoidance*) is in `block_context.cpp`: `block_context_add_float`, `block_context_space_at_y`, `block_context_find_y_for_width`, and `block_context_position_float` (§4.4). The float pre-scan that lays floats out before inline content is `prescan_and_layout_floats` ([RAD_11](RAD_11_Positioned_Float_Multicol_Lists.md)).
 
@@ -228,7 +228,7 @@ before resolving the current declarations. These rules follow
 [CSS 2.2 §8.3.1](https://www.w3.org/TR/CSS22/box.html#collapsing-margins),
 [Writing Modes 3 §7.4](https://www.w3.org/TR/css-writing-modes-3/#logical-direction-layout)
 and [CSS Cascade 5 §7](https://www.w3.org/TR/css-cascade-5/#defaulting).
-No retained ownership changes (**D4.5.1v4 / D4.1.4v5**).
+No retained ownership changes (**D5.5.1 / D5.1.4**).
 
 ### 4.7 Float coordinates across sibling publication
 
@@ -255,7 +255,7 @@ parent extent must not replace an RTL child's authored margin with an
 overconstraint result before intrinsic sizing finishes.
 The earlier float remains registered across empty sibling wrappers in the same
 BFC; a new formatting context keeps its existing isolation. These are transient
-coordinate conversions, with no new retained owner (**D4.5.1v4 / D4.1.4v5**).
+coordinate conversions, with no new retained owner (**D5.5.1 / D5.1.4**).
 See [CSS 2.2 §9.5.1](https://www.w3.org/TR/CSS22/visuren.html#float-position)
 and [Writing Modes 3 §7.4](https://www.w3.org/TR/css-writing-modes-3/#logical-direction-layout).
 
@@ -276,7 +276,7 @@ The transient `vertical_auto_inline_size_constrained` flag lets flex retain that
 definite constraint without changing authored `auto`. Natural flex queries and
 the existing flex-item assignment protocol remain distinct consumers. This
 prevents late root stretch from changing a body box after RTL child placement.
-No retained ownership change: **D4.5.1v4 / D4.1.4v5**.
+No retained ownership change: **D5.5.1 / D5.1.4**.
 
 Ordinary parallel flow children also fill the containing inline **margin box**.
 Late automatic growth uses `layout_stretch_fit_content_box_size`, including
@@ -293,7 +293,7 @@ use `layout_setup_assigned_block_context`, shared with final flex/grid content;
 the automatic block size still follows the new content. Own inline min/max
 limits precede deferred alignment and vertical physical publication, while
 natural flow extents remain available to overflow accounting. Authored CSS and
-selected-view ownership stay under **D4.5.1v4 / D4.1.4v5**.
+selected-view ownership stay under **D5.5.1 / D5.1.4**.
 
 ## 5. RAII context scopes
 

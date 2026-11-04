@@ -27,7 +27,7 @@ bool mvp_reject(LambdaMvpModule* m, AstNode* node, const char* reason) {
 ValueRep mvp_rep(Type* type) {
     if (!type) return VALUE_REP_ITEM;
     // an ordinary error alternative needs Item transport until discharge;
-    // its type-expression pointer is not a runtime value (S7.8.1, D2.4.3).
+    // its type-expression pointer is not a runtime value (S7.8.1, D2.3.5).
     if (lambda_type_accepts_error(type)) return VALUE_REP_ITEM;
     // full contracts, including nullable and union types, select their carrier.
     return lambda_canonical_rep(type);
@@ -387,7 +387,7 @@ static TypeMap* contextual_map_contract(LambdaMvpModule* m, AstNode* literal) {
         ? shape : NULL;
 }
 
-// query transient scalar producer proofs; the shared AST remains the sole type graph (D8.2.5v3).
+// query transient scalar producer proofs; the shared AST remains the sole type graph (D8.2.5).
 Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool dense_arrays) {
     AstNode* n = ast_unwrap_primary_to_leaf(source);
     if (!n) return &TYPE_NULL;
@@ -549,7 +549,7 @@ LambdaMvpModule* lambda_mvp_create(Transpiler* tp, MIR_context_t ctx) {
 }
 
 // Demand-only interval query over the shared AST and immutable binding plans;
-// it never publishes a second node-type/fact table (D8.2.5v3).
+// it never publishes a second node-type/fact table (D8.2.5).
 static MvpIntRange array_element_range(LambdaMvpModule*, MvpBinding*, int depth = 0);
 static MvpIntRange counter_bound(LambdaMvpModule*, NameEntry*, AstNode*, int depth = 0);
 static MvpIntRange condition_range(LambdaMvpModule* m, NameEntry* entry, AstNode* source,
@@ -1584,7 +1584,7 @@ static MvpIntRange array_element_range(LambdaMvpModule* m, MvpBinding* binding, 
     if (!range.finite) return {};
     AstIndex* index = &m->tp->ast_index;
     // value copies detach before writing; only direct writes/borrows of this
-    // root can change its element domain (S9.1.2, D4.4.6).
+    // root can change its element domain (S9.1.2, D5.4.5).
     for (AstNodeId i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         if (node->node_type == AST_NODE_ASSIGN_STAM &&
@@ -1891,7 +1891,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             ? lambda_type_remove_error(m->tp->pool, f->declared_result) : signature->returned;
         if (!success) success = f->declared_result;
         // the ordinary error alternative travels in the companion, never in a
-        // successful scalar lane (S11.4.2v3, D2.4.3).
+        // successful scalar lane (S11.4.2v3, D2.3.5).
         plan_return(f, success == &TYPE_ANY_NO_ERROR || success == &TYPE_NONE ||
             mvp_boundary_proven(f->declared_result, &TYPE_ERROR) ? f->declared_result : success, false);
         if (f->ast->node_type == AST_NODE_PROC && f->abi.result.normal.abi_rep != VALUE_REP_ITEM &&
@@ -2253,7 +2253,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         m->entry.abi.effects.may_reenter |= m->main->abi.effects.may_reenter;
         m->entry.abi.effects.may_return_error |= m->main->abi.effects.may_return_error;
     }
-    // publish one final return ABI after recursive error effects have converged (D8.4.2v2).
+    // publish one final return ABI after recursive error effects have converged (D7.4.2).
     for (uint32_t i = 0; i < m->function_count; i++)
         plan_return(&m->functions[i], m->functions[i].result_contract, false);
     plan_integer_ranges(m);

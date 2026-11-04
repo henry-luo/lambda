@@ -1,4 +1,4 @@
-// T29-2 (D3.2.6): a required field of a verified record is always present, so
+// T29-2 (D4.2.6): a required field of a verified record is always present, so
 // its packed slot is read with no empty-slot arm, and a member read through it
 // needs no receiver null test. Optional fields and records that may be null
 // keep both arms; a record passed as a value still reads its fields directly.

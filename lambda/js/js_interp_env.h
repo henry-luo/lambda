@@ -45,7 +45,7 @@ typedef struct JsInterpEnv {
     uint64_t with_object;
     struct AstNode* function_node;
     // Set on the declarative record of a direct eval linked to an interpreted
-    // caller (D8.1.3v21): its slots hold that eval Script's top-level
+    // caller (D8.4.3): its slots hold that eval Script's top-level
     // declarations, and `outer` continues into the caller frame's environments.
     struct JsScript* eval_script;
     struct JsSourceModuleRecord* source_module; // registry-owned through heap finalization

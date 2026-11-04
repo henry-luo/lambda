@@ -1,14 +1,14 @@
 #pragma once
 
 // Context capsules: one directory and one lifecycle for every subsystem's
-// context-owned state (D5.4.2, D5.4.3; JSCU15).
+// context-owned state (D6.4.2, D6.4.3; JSCU15).
 //
 // `EvalContext` holds a small array of slots indexed by a compile-time id.
 // Reading a capsule is one indexed load; construction is the only cold path.
 // Each subsystem owns its own immutable `ContextCapsuleOps` next to its
 // implementation and passes it to `context_capsule_ensure`, so the runtime
 // never names a subsystem symbol -- the ops records stay frozen and
-// process-global (D5.4.4) without a central table that would force every
+// process-global (D6.4.4) without a central table that would force every
 // linked target to carry every subsystem.
 //
 // Lifecycle is a table walk, not a hand-maintained fan-out: `release_heap`
@@ -79,7 +79,7 @@ typedef struct ContextCapsuleExtension {
 
 // A capsule slot and its lifecycle contract are one directory entry. Keeping
 // the two facts in one record prevents a context owner from publishing state
-// without its teardown authority (D5.4.2, D5.4.4).
+// without its teardown authority (D6.4.2, D6.4.4).
 typedef struct ContextCapsuleSlot {
     void* capsule;
     const struct ContextCapsuleOps* ops;

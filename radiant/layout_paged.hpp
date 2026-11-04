@@ -29,7 +29,7 @@ struct PagedNativeFlowBinding {
     DomElement* source; // an empty r:flow/static-content; null registers a nested-only provider
     const TypesetFlowProvider* provider;
     TypesetResume start;
-    ViewNativeOwner owner; // retains immutable glyph/image/exact/solution payloads with published editions (D4.5.1v4)
+    ViewNativeOwner owner; // retains immutable glyph/image/exact/solution payloads with published editions (D5.5.1)
     void* context;
     PagedNativeMaterialFn material;
     PagedNativeBreakFn break_candidate; // pure preference/legality; shared flow still owns page commitment

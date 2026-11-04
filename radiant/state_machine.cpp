@@ -909,7 +909,7 @@ static void validate_view_state_registry(DocState* state,
                 }
                 if (live_view) {
                     DomElement* live_element = live_view->is_element() ? lam::dom_require_element(live_view) : NULL;
-                    // D4.5.1v3: a registered control owns its value while detached layout props are absent.
+                    // D5.5.1: a registered control owns its value while detached layout props are absent.
                     if (!live_element || (!live_element->form && !is_form_control(live_element))) {
                         report_fail(report, "view form state is not owned by a form control");
                     } else if (live_element->form) {

@@ -1,5 +1,5 @@
 // A type definition read inside a function, and a call whose result is a type
-// value, give that type on every tier (D8.1.1v17). The eager JIT gave a
+// value, give that type on every tier (D8.3.6). The eager JIT gave a
 // `pub type` a module slot that captured its read in the module's functions
 // (a `pub grammar`'s slot was never written), and a caller unboxed a call
 // typed as a type value as the value the type names: `0` for `int`, null for

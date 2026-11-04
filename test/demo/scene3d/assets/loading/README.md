@@ -22,4 +22,4 @@ under CC0. `_generate.py` regenerates every asset using Python 3's standard libr
 Geometry is deliberately small so fixed-time rendered assertions can cover
 binding, interpolation, texture orientation and recovery without large assets.
 The supported rendering profile is documented in WebGL design §15, following
-D4.1.3/D7.2.4 and the shared animation ownership boundary in S12.1.1v2.
+D5.1.3/D9.3.4 and the shared animation ownership boundary in S12.1.1v2.

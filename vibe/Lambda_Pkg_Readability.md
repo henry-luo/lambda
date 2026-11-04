@@ -2,7 +2,7 @@
 
 > **Status:** implemented 2026-10-21 as `lambda.doc.readability`, a port of Mozilla Readability.js 0.6.0 and `Readability-readerable.js`. Conformance: **130/130** of Mozilla's own test pages (content, metadata and `readerable`), plus 8/8 synthetic pages checked against Readability.js output (§7).
 > **Supersedes:** `vibe/Readability_Plan.md`, `vibe/Readability_Progress.md` and `vibe/Readability_Tune.md` (2026-02), and the 1,701-line `utils/readability2.ls` they described. Their history is kept in [Appendix A](#appendix-a-history-the-2026-02-port).
-> **Spec linkage:** D7.2.4v3/D7.2.6 (the `lambda.doc.*` package path and facade), S16.8.9 (computed keys, and the missing computed tag behind RD2), S11.1.2v4 (string-pattern islands), S17.1.1 (ECMAScript `split`), S17.7.1 (`ignore_case`), S11.4.3/D3.3.2v2 (the implicit `any \ error` return contract, E208), S7.6.7v5 (procedure handlers retain their values; LR10-13 is resolved).
+> **Spec linkage:** D9.3.4/D9.3.5 (the `lambda.doc.*` package path and facade), S16.8.9 (computed keys, and the missing computed tag behind RD2), S11.1.2v4 (string-pattern islands), S17.1.1 (ECMAScript `split`), S17.7.1 (`ignore_case`), S11.4.3/D4.3.2 (the implicit `any \ error` return contract, E208), S7.6.7v5 (procedure handlers retain their values; LR10-13 is resolved).
 > **Authority:** package design (RD1–RD8, open items RD-O1–RD-O8). Nothing here revises an S#/D# ruling; RD-O1 asks for one.
 > **Reference source:** `ref/readability/source` (git-ignored checkout of `@mozilla/readability` 0.6.0; `Readability.js` 2,812 lines, `Readability-readerable.js` 122 lines, test pages under `test/test-pages/`).
 

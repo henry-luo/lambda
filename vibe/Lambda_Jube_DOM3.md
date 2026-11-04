@@ -229,7 +229,7 @@ not an engine change.
 
 Non-goals: migrating behavior *implementations* to Lambda script (that is
 `Lambda_Design_DOM_Pkg.md` Phase 3 — DOM3 builds its seam); event objects (already ordinary
-maps; no dispatch to fix); inline caches (**ruled out entirely** by D8.4.1v2/LC1v2 as of 2026-09-09 — static resolution and compile-predicted guards are the sanctioned mechanisms); binary signature
+maps; no dispatch to fix); inline caches (**ruled out entirely** by D7.4.1/LC1v2 as of 2026-09-09 — static resolution and compile-predicted guards are the sanctioned mechanisms); binary signature
 form (D0b); dataset (`js_dataset_get_property` is already zero-strcmp algorithmic conversion —
 it becomes a named-hook, unchanged).
 
@@ -334,7 +334,7 @@ typedef struct JubeTypeBinding {
 ```
 
 Handlers return status ints; any abrupt completion remains the returned ERROR
-`Item` under D8.4.3, matching `JubeHostObjectOps` without a pending flag.
+`Item` under D7.4.3, matching `JubeHostObjectOps` without a pending flag.
 Same-name members with different `applies_to`/`guard` are legal; **declaration order is
 resolution order** (first matching guard wins), preserving today's ordering-dependent overloads
 (`<select>.remove(index)` before `ChildNode.remove()`, dom.cpp:12550) as visible data.
@@ -908,7 +908,7 @@ Release-build microbenchmark of hot property access (`parentNode` walk, `value` 
 text controls, computed-style read) before/after; record numbers in this doc. Explicitly
 **deferred**: binary signature blobs (D0b), interned-pointer key fast path (needs pooled keys at
 the JS atom layer — worth doing when measurements say so). *(The former third item, per-site
-inline caches keyed on (typedef, interned name), is **withdrawn**: D8.4.1v2/LC1v2 ban per-site
+inline caches keyed on (typedef, interned name), is **withdrawn**: D7.4.1/LC1v2 ban per-site
 cache state in LambdaJS as of 2026-09-09. The equivalent win comes from DOM4 static ordinal
 resolution plus compile-predicted guards.)*
 

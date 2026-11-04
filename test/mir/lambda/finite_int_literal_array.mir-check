@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S4.1.2/D3.3.3v3: finite literal int arrays use direct freshly allocated lanes; dynamic members retain checked stores.",
+  "description": "S4.1.2/D4.3.3: finite literal int arrays use direct freshly allocated lanes; dynamic members retain checked stores.",
   "checks": [
     {
       "in_func": "_literal_#",

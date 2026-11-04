@@ -1,4 +1,4 @@
-// T20-3 #3 (D2.4.1-D2.4.3): the inline native shift/bitwise lowering is a
+// T20-3 #3 (D2.3.4-D2.3.5): the inline native shift/bitwise lowering is a
 // MIR word instruction, so each operand opens its proven `int` lane. The
 // registry row for shl/shr describes only the boxed fn_*_item fallback; when
 // the emitter asked that descriptor for the inline operands it boxed them

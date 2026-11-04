@@ -1,4 +1,4 @@
-// D4.4.4v4 / S9.1.2: a typed path may store an aligned leaf of a record
+// D5.4.4 / S9.1.2: a typed path may store an aligned leaf of a record
 // containing a packed bool; an unaligned leaf keeps the checked COW path.
 type Entry = {id: int, ready: bool, count: int}
 type Store = {entries: Entry?[]}

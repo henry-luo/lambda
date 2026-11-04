@@ -9,7 +9,7 @@ struct JsInterpHostOps;
 
 // The common durable part of generator and async execution. It owns exactly
 // the outliving activation edges; each state machine keeps its own semantic
-// tail (D5.1.1v2, D6.2.2v2; JSCU32).
+// tail (D6.1.1, D7.2.2; JSCU32).
 struct JsSuspendedActivation : DurableActivation {
     Context* runtime_context = NULL;
     void* state_fn = NULL;

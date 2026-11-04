@@ -1,4 +1,4 @@
-// Each private image needs its own runtime-linked key suffix (D8.5.1v7).
+// Each private image needs its own runtime-linked key suffix (D8.3.5).
 // Computed keys prevent a static literal-shape guard from hiding a bad NameId.
 fn read_left(row) => row.satellite_left
 fn read_right(row) => row.satellite_right

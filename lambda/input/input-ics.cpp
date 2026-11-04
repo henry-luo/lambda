@@ -344,7 +344,7 @@ void parse_ics(Input* input, const char* ics_string) {
                     // The ordered entry list retains nested components among their siblings.
                     rfc_append_entry(ctx, active->entries, component_type, component_item);
                 } else {
-                    // D2.6.5v3 keeps top-level components in their source sequence.
+                    // D3.3.1 keeps top-level components in their source sequence.
                     array_append((Array*)components_list, component_item, input->pool);
                     rfc_append_entry(ctx, calendar_entries, component_type, component_item);
                 }

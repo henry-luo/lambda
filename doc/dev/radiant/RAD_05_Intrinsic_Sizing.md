@@ -50,7 +50,7 @@ Normal block and absolute layout use the resolver for vertical/sideways physical
 height before measuring column widths. The caller supplies normal containing
 space or the inset-modified absolute containing space, stores the used result,
 and applies numeric min/max constraints. Authored computed values retain their
-keyword identity (**D4.5.1v4 / D4.1.4v5**). Text, supported atomic inlines and
+keyword identity (**D5.5.1 / D5.1.4**). Text, supported atomic inlines and
 forced boundaries share the existing scoped measurer. Unsupported block-child,
 generated, floating, multicolumn and size-contained contributions retain their
 existing separate paths; the `fit-content(<limit>)` function also remains
@@ -67,7 +67,7 @@ contributions (CSS Writing Modes 3 §7.3; CSS Sizing 3 §4). Retained text/mode
 changes are covered by `AutomaticOrthogonalTracksMeasureLineBlockExtents`.
 The broader unconstrained estimator and its legacy inline-size consumers remain
 separate work. Ownership and computed style remain unchanged
-(**D4.5.1v4 / D4.1.4v5**); qualification is recorded in writing-mode M71.
+(**D5.5.1 / D5.1.4**); qualification is recorded in writing-mode M71.
 
 Writing-mode M72 extends this query with an optional positive inline measure,
 using the existing wrapped text/BR block estimator. The preferred-inline
@@ -78,7 +78,7 @@ measurement receives its content measure before computing the physical block
 contribution. `resolve_element_definite_length_value` substitutes against the
 owning element before classifying a definite length, percentage or `auto`.
 Its bounded scratch and the ordinary owner-length query share the same context
-setup (**D4.5.1v4 / D4.1.4v5**). Zero-inline and complex-content estimates retain
+setup (**D5.5.1 / D5.1.4**). Zero-inline and complex-content estimates retain
 their existing separate path. M73 resolves the subsequent deferred-size audit:
 `layout_css_size_facts` substitutes and validates the owner's preferred-size
 declaration in bounded scratch, then returns only automatic/percentage/pure-
@@ -88,7 +88,7 @@ shares those facts rather than treating every unresolved variable as a pure
 percentage. The 64 analytic controls cover lengths, percentages, mixed math and
 automatic values; the retained regression also covers nested fallbacks and row
 growth/restoration. Broader deferred sizing contexts remain separate work
-(**D4.5.1v4 / D4.1.4v5**); M73 focused and aggregate qualification is complete.
+(**D5.5.1 / D5.1.4**); M73 focused and aggregate qualification is complete.
 
 ## 2. Result types and the caches
 
@@ -118,7 +118,7 @@ space, known dimensions, block size and parent size before reusing an entry.
 including first/last soft and forced segments; caching only the numeric min/max
 pair would lose continuity through a nested inline. The element's measurement
 flag still prevents re-entrancy. Cache invalidation and speculative measurement
-preserve the selected-view contract (**D4.5.1v4 / D4.1.4v5**).
+preserve the selected-view contract (**D5.5.1 / D5.1.4**).
 
 `LayoutIntrinsicMinRun` is transient reducer state shared by ordinary intrinsic
 measurement and table-cell content measurement. Its first/interior/last segment
@@ -148,7 +148,7 @@ baseline through `css_resolved_style_copy_margin` when its existing context and
 freshness checks succeed. Published RTL overconstraint adjustments in a child's
 boundary are used geometry, not computed input to a subsequent shrink query.
 Legacy uncached state remains the fallback. The copy retains no style-record
-alias (**D4.5.1v4 / D4.1.4v5**). The shared flow-container classifier includes
+alias (**D5.5.1 / D5.1.4**). The shared flow-container classifier includes
 table cells and captions, so vertical block sequences accumulate on their own
 block axis rather than taking a horizontal maximum of child widths.
 
@@ -156,11 +156,11 @@ An authored percentage must replace a previously resolved margin seed with its
 zero-basis intrinsic contribution; fixed terms in `calc()` remain. Inline-block
 publication treats percentage margins and padding as the same cyclic spacing
 dependency, so their used overflow cannot enlarge a correctly measured
-intrinsic width (CSS Sizing 3 §5.2.1; **D4.5.1v4 / D4.1.4v5**).
+intrinsic width (CSS Sizing 3 §5.2.1; **D5.5.1 / D5.1.4**).
 
 ### 2.3 The re-entrancy guard
 
-**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2** (scoped source refresh,
+**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2** (scoped source refresh,
 2026-10-21): `IntrinsicMeasureScope` uses `LayoutViewScope` to bind and restore
 both `elmt` and `view`. Recursive resolution must not style the parent's element
 through a child's view. Ordered preparation marks provisional used values for
@@ -188,7 +188,7 @@ LF; counting its advance is intentional. Paragraph collection and forced-edge
 queries share the CSS whitespace resolver with real layout. The former
 literal-source width disagreement came from bypassed HTML preprocessing, not a
 special intrinsic CRLF width rule. The DOM payload stays unchanged
-(**D4.2.6 / D4.5.1v4 / D4.1.4v5**; CSS Text §4).
+(**D5.2.5 / D5.5.1 / D5.1.4**; CSS Text §4).
 
 `compute_text_height_at_width` (`intrinsic_sizing.cpp:1349-1516`) simulates line breaking: it greedily packs break-units into lines at a given available width and multiplies the resulting line count by line-height (CSS Flexbox §9.4). This is the honest wrapping simulation used by height estimation ([§6](#6-height-measurement-an-admitted-estimation)); the header comment (`:1343-1348`) notes it replaced an older division-based estimate that over-counted wrapping for varied word lengths.
 
@@ -225,7 +225,7 @@ authored-width classifier uses the shared length/math resolver before deciding
 whether containment supplies the size; equivalent absolute math and plain
 lengths therefore keep the same preferred-size owner. Content-only queries keep
 their separate preferred-size shortcut policy and cache identity. No new
-retained owner (**D4.5.1v4 / D4.1.4v5**); see
+retained owner (**D5.5.1 / D5.1.4**); see
 [CSS Containment 2 §3.1](https://www.w3.org/TR/css-contain-2/#size-containment).
 Nine controls in `layout_responsive_image_minimum.html` cover dimension hints,
 CSS widths, direct/inline-wrapped images, percentage math, minimum constraints
@@ -237,13 +237,13 @@ existing min/max values to content-size intervals and retains box-edge inputs
 for an explicit border-box ratio. `layout_replaced_content_size` solves both
 axes against those intervals; callers publish their used border boxes through
 the existing conversions. The adapter returns transient values and preserves
-selected style/view ownership (**D4.5.1v4 / D4.1.4v5**). Bounded geometry and
+selected style/view ownership (**D5.5.1 / D5.1.4**). Bounded geometry and
 retained qualification are recorded in
 [writing-mode M49](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m49--positioned-images-preserve-the-contentborder-box-distinction).
 
 **Phase 4 — per-mode content accumulation.** If no short-circuit fired, the algorithm branches on the resolved inner display. The block/inline path is the default; the others intercept before it.
 
-- **Table**: CSS display selects the table path; a restyled HTML table measures its anonymous grid through normal block children. Source rows/cells are measured under their inherited fonts, then `layout_table_place_span` assigns occupancy using shared bounded HTML spans and row-group limits. Single-column contributions establish track minima before multi-column deficits are distributed. Collapsed borders use the same `LayoutTableBorderGrid` / `layout_table_collapsed_edge` resolver as used layout (CSS 2.2 §17.6.2–§17.6.2.1): replace full cell borders with winning half edges, then add the outer halves once. Fractional content/padding remains fractional. Table padding and authored borders are added only in the separate model; collapsed winners already include the table's border. Separate spacing uses current table-role metadata or resolved/inherited CSS. Scratch arrays borrow computed boundaries and do not replace selected style owners (**D4.5.1v4 /D4.1.4v5**). `layout_table_intrinsic_collapsed_borders.html` covers both border models, block/atomic wrappers, min/max-content, conflicts, spans, group borders, fractional padding, a decorated parent and retained collapse changes. Captions contribute their own intrinsic minimum.
+- **Table**: CSS display selects the table path; a restyled HTML table measures its anonymous grid through normal block children. Source rows/cells are measured under their inherited fonts, then `layout_table_place_span` assigns occupancy using shared bounded HTML spans and row-group limits. Single-column contributions establish track minima before multi-column deficits are distributed. Collapsed borders use the same `LayoutTableBorderGrid` / `layout_table_collapsed_edge` resolver as used layout (CSS 2.2 §17.6.2–§17.6.2.1): replace full cell borders with winning half edges, then add the outer halves once. Fractional content/padding remains fractional. Table padding and authored borders are added only in the separate model; collapsed winners already include the table's border. Separate spacing uses current table-role metadata or resolved/inherited CSS. Scratch arrays borrow computed boundaries and do not replace selected style owners (**D5.5.1 /D5.1.4**). `layout_table_intrinsic_collapsed_borders.html` covers both border models, block/atomic wrappers, min/max-content, conflicts, spans, group borders, fractional padding, a decorated parent and retained collapse changes. Captions contribute their own intrinsic minimum.
 - **Grid** (`:3606-3744`): if `display.inner == grid`, it reads `grid_template_columns->track_count`, sums the **fixed-length** track sizes and column gaps (`:3688-3697`), adds padding/border, applies its own max-width clamp (`:3719-3734`), and **early-returns** — bypassing the generic constraint tail. This is a coarse approximation: percentage and flexible (`fr`) tracks contribute nothing here; real track sizing lives in [RAD_09](RAD_09_Grid_Layout.md).
 - **Flex** (detected `:3599-3822`): resolves `is_row_flex`, `is_flex_wrap`, and `flex_gap`, flipping `is_row_flex` for vertical writing modes (`:3800-3803`). Accumulation happens in the shared child loop (`:4310-4327`): for a **row** flex container, max-content sums child max-contents, and min-content sums child min-contents *unless the container wraps*, in which case min-content is the largest single item (CSS Flexbox §9.9.1); for a **column** flex container (and for block), both min and max are the max over children. Flex gaps are added after the loop (`:4611-4619`).
 - **Block / inline generic loop** (`:3884-4600`): iterates children, classifying each as inline-level (`is_inline_level_element`, `:1517`) or block. Inline children accumulate into an *inline run*: `inline_max_sum` is the running sum along a line (max-content), while `inline_min_sum` is the max of child min-contents. Block children flush the run and take the max. It threads forced-break propagation via `first_line_max` / `last_line_max` (`:4388-4415`), text-indent (`:4355`), collapsible-space handling, and floats (`float_max_sum` / `float_min_max`, `:4572-4600`). It also materializes and measures `::before` / `::after` pseudo-content (`:3507`, and the pseudo helpers at `:1790-1841`) and propagates the parent's definite height to children so percentage/aspect-ratio children can resolve (`:3825-3883`).
@@ -255,7 +255,7 @@ are subtracted with their own measured advance. A parent's space width can
 otherwise turn a fitting smaller-font/word-spacing group into an extra line
 (CSS Text 3 §4.1.1/§7.1). The 30-control nowrap-separator fixture includes both
 source-font challenges; selected style groups remain owned by their elements
-(**D4.5.1v4 /D4.1.4v5**).
+(**D5.5.1 /D5.1.4**).
 
 **Phase 5 — box extras and constraints (`:4900-5039`).** Horizontal padding + border are added with a three-tier resolve (view `bound` → CSS longhand → shorthand), *unless* a replaced flag said the value already includes them. Then the min-width floor is applied and the max-width clamp (CSS 2.1 §10.4) with content-box/border-box adjustment — but tables never clamp min-content below content (§4.1, `:5034-5038`).
 
@@ -265,7 +265,7 @@ the whole declaration before projecting a side. `layout_resolve_box_component_va
 shares this operation with final table percentage-spacing updates; queries use
 the measured element even when the caller's active view is the table. This
 implements [CSS Variables 1 §3.1–§3.2](https://www.w3.org/TR/css-variables-1/#shorthand-variables)
-without mutating canonical style payloads (**D4.5.1v4 / D4.1.4v5**). Resolved
+without mutating canonical style payloads (**D5.5.1 / D5.1.4**). Resolved
 values are consumed inside bounded scratch scopes. Cyclic percentage terms
 contribute zero to intrinsic sizing while their fixed math terms remain;
 the used stage resolves percentages against the final table inline size

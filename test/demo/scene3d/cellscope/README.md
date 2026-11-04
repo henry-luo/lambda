@@ -40,7 +40,7 @@ The first remote selection can take time to download, decode, and mount.
 A centered **Loading 3D specimen** popup shows the specimen name before work
 starts, for the main and comparison views. Its bar is indeterminate: the
 synchronous loader does not expose byte progress. Separate document frames
-paint the popup before HTTP/decode/mount work (**D7.5.3**); it closes when loading
+paint the popup before HTTP/decode/mount work (**D9.5.6**); it closes when loading
 finishes or an error is displayed. Changing the selection cancels a queued load.
 Failures display an error with **Retry model**. Remote specimens and their
 thumbnails need a network connection on first use. Camera changes reuse the
@@ -71,9 +71,9 @@ reaches its clearance distance, further zoom narrows the field of view;
 the camera stays outside the specimen. Comparison views use the same zoom.
 
 The application, event handlers, and frame callbacks are Lambda. The
-`lambda.scene3d` package describes retained geometry and materials (**D7.2.4**);
-handlers update DOM attributes (**S12.1.3**, **D4.5.1v4**). GLB decoding uses the
-native input layer and Input-owned values (**D4.1.3**). Runtime operation needs
+`lambda.scene3d` package describes retained geometry and materials (**D9.3.4**);
+handlers update DOM attributes (**S12.1.3**, **D5.5.1**). GLB decoding uses the
+native input layer and Input-owned values (**D5.1.3**). Runtime operation needs
 no React, Three.js, JavaScript application, or npm installation.
 
 Models are illustrative and not to scale; imported organelles cannot be picked individually.

@@ -231,7 +231,7 @@ bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,
         return false;
     }
     if (stops && (!borrowed_stops || *borrowed_stops != stops)) return false;
-    // deferred SVG/PDF effects outlive the painter's local payloads (D4.5.1v4).
+    // deferred SVG/PDF effects outlive the painter's local payloads (D5.5.1).
     *owned_path = lam::own((RdtPath*)*path);
     if (stops) *owned_stops = lam::own_arr(stops);
     return true;
@@ -1093,7 +1093,7 @@ void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run) {
     if (!cmd) return;
     cmd->glyph_run = *glyph_run;
     if (const FontBox* font = paint_glyph_run_font(glyph_run)) {
-        // deferred lowering follows the recorded selection after the walker restores its context (D4.5.1v4).
+        // deferred lowering follows the recorded selection after the walker restores its context (D5.5.1).
         cmd->glyph_run.captured_font = *font;
         cmd->glyph_run.has_captured_font = true;
         cmd->glyph_run.font = nullptr;

@@ -1,4 +1,4 @@
-// D2.10.1: inspect namespace and name identity without reparsing the source as HTML.
+// D10.1.4: inspect namespace and name identity without reparsing the source as HTML.
 (function () {
     var html_ns = 'http://www.w3.org/1999/xhtml';
     var svg_ns = 'http://www.w3.org/2000/svg';

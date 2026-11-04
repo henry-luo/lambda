@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Exception-effect catalog census and D8.4.3 conformance lint (static).
+"""Exception-effect catalog census and D7.4.3 conformance lint (static).
 
-D8.4.3: "Fallible JS/Jube helpers use the merged Item error ABI ... Raw scalar
+D7.4.3: "Fallible JS/Jube helpers use the merged Item error ABI ... Raw scalar
 helpers are permitted only when their catalog contract is infallible
 (PRESERVES)."
 
@@ -11,10 +11,10 @@ This reads `lambda/runtime/sys_func_registry.c` and the helper definitions in
   1. the exception_effect distribution over registry rows (the P5 worklist --
      a row with no explicit effect defaults to JIT_EXCEPTION_MAY_SET, so the
      lane re-enters UNKNOWN after the call and a tag test is emitted),
-  2. D8.4.3 conformance, in three tiers:
+  2. D7.4.3 conformance, in three tiers:
      tier A -- a helper whose C return type is neither `Item` nor `void`, but
        whose catalog does not declare both its raw scalar transport and an
-       infallible PRESERVES effect. D8.4.3 forbids this: raw 0/1, comparison,
+       infallible PRESERVES effect. D7.4.3 forbids this: raw 0/1, comparison,
        and double results cannot carry an ERROR Item. This fails the lint.
      tier B -- a `void` helper with a non-PRESERVES row. It cannot publish a
        replacement error Item, so the emitter must retain the preceding carrier
@@ -24,7 +24,7 @@ This reads `lambda/runtime/sys_func_registry.c` and the helper definitions in
        publication gate would suppress its real error carrier.
 
 Exit status is 1 when any tier violates the contract, so this can run as a lint.
-Polarity rule (D6.1.3): a row becomes PRESERVES only by mechanical
+Polarity rule (D7.1.3): a row becomes PRESERVES only by mechanical
 verification, never by absence of evidence -- this tool reports candidates,
 it never certifies one.
 
@@ -106,7 +106,7 @@ def main():
     ap.add_argument("--show-void", action="store_true",
                     help="list the tier B void rows")
     ap.add_argument("--violations", action="store_true",
-                    help="print only the D8.4.3 violation list")
+                    help="print only the D7.4.3 violation list")
     args = ap.parse_args()
 
     root = pathlib.Path(args.root).resolve()
@@ -128,7 +128,7 @@ def main():
             if eff != DEFAULT_EFFECT:
                 print(f"  {eff:<10} {name}")
 
-    # D8.4.3: raw scalar helpers need both an explicit raw transport and an
+    # D7.4.3: raw scalar helpers need both an explicit raw transport and an
     # infallible catalog effect; only boxed Items enter the merged error lane.
     # Scoped by --prefix: the Lambda-side fn_* helpers are lowered by the
     # Lambda transpiler, which does not publish into the JS merged Item lane.

@@ -1,7 +1,7 @@
 #pragma once
 
 // Typed pool: individual allocation and release of one object type, with
-// type-stable storage (D4.5.1 type-stable pools).
+// type-stable storage (D5.5.1 type-stable pools).
 //
 // A released object's slot is kept on this pool's own free list and only ever
 // handed back as another T, never returned to the backing Pool for other

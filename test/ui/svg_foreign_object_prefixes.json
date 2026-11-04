@@ -1,5 +1,5 @@
 {
-  "name": "External SVG foreignObject prefixes follow HTML parsing (D2.11.2)",
+  "name": "External SVG foreignObject prefixes follow HTML parsing (D10.1.5)",
   "html": "test/ui/svg_foreign_object_prefixes.html",
   "viewport": {
     "width": 260,

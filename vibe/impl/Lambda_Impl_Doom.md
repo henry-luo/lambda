@@ -40,8 +40,8 @@ original DOOM demo-file compatibility, multiplayer, arbitrary WAD loading or
 features absent from cssDOOM. Fullscreen, touch and gamepad are follow-on input
 features; keyboard controls must provide a complete playable path.
 
-Use the full host: **D7.1.6** explicitly excludes Radiant and JS/TS from
-`lambda-cli`; **D7.1.4v2** distinguishes native-window, runtime-headless and
+Use the full host: **D9.2.2** explicitly excludes Radiant and JS/TS from
+`lambda-cli`; **D9.2.1** distinguishes native-window, runtime-headless and
 null-windowing profiles. A Lambda-only application does not require changing
 those build profiles or removing the host's existing JS capability.
 
@@ -246,7 +246,7 @@ cost before the full level is wired in.
 
 Keep this generic and usable by windowless CSS rendering. An optional accelerated
 path may reuse native graphics services, but must not make ordinary CSS rendering
-silently depend on a live GL context or break **D7.1.4v2**'s headless profiles.
+silently depend on a live GL context or break **D9.2.1**'s headless profiles.
 Do not modify ThorVG or another vendor to implement the feature in place.
 
 ### CSS consumers and native services
@@ -279,14 +279,14 @@ Do not modify ThorVG or another vendor to implement the feature in place.
   consumers before claiming this effect; a static translucent sprite is not
   equivalent completion. Other decorative effects follow the P0 inventory.
 
-**D7.1.2v2** requires "All resource IO lives in `lambda-io`"; use its acquisition
-and decoding paths, not direct fetches in Radiant. **D7.5.3** keeps the
-Lambda↔Radiant embed/module contracts explicit, and **D7.1.1** preserves the
+**D9.1.2** requires "All resource IO lives in `lambda-io`"; use its acquisition
+and decoding paths, not direct fetches in Radiant. **D9.5.6** keeps the
+Lambda↔Radiant embed/module contracts explicit, and **D9.1.1** preserves the
 leftward static-library layering. New general services stay behind those seams.
 
-Native render data follows **D4.5.1v4** and **D4.5.2**: document-owned copies or
+Native render data follows **D5.5.1** and **D5.5.2**: document-owned copies or
 registered roots, generation-checked handles, scoped scratch and reclaimed old
-fragments. Any retained Lambda callback/value uses **D5.3.3** precise roots.
+fragments. Any retained Lambda callback/value uses **D6.3.3** precise roots.
 Never restore native-stack scanning. Use C+ library equivalents, distinct log
 prefixes, concise root-cause comments and `float` layout positions/dimensions.
 
@@ -318,7 +318,7 @@ credits for translated code; record map/art/sound provenance separately instead
 of assuming the source-code license covers every resource. Begin with E1M1's
 transitive texture, sprite, HUD and sound closure, then expand by map/type.
 
-Load through paths relative to the importing module/demo. **D7.2.6** makes
+Load through paths relative to the importing module/demo. **D9.3.5** makes
 relative imports resolve against the importing script; retain that behavior.
 Test launching from a different working directory. Eliminate Vite `public/`
 mapping and root `/assets/...` assumptions. The release demo must run offline
@@ -480,9 +480,9 @@ keep their owner, and immutable background URLs reuse the canonical string cache
 Exact template-handler lookup avoids scheduling nonexistent animation listeners.
 Font cache lookup builds its key without a per-hit arena allocation. Immutable
 map transitions reuse the full admitted type contract rather than creating a new
-shape per mutation (**D3.4.3v5**, **D3.4.5**); the 4,096-mutation regression checks
+shape per mutation (**D3.4.3**, **D3.4.5**); the 4,096-mutation regression checks
 bounded ownership. Promoted native document transforms restore the caller's stack
-limit after their large-stack initialization worker retires (**D5.3.6v2**).
+limit after their large-stack initialization worker retires (**D6.3.6**).
 These fixes retain normal automatic function promotion.
 
 The E1M6 release trace exposed a cross-language shape contamination: JS bootstrap
@@ -526,13 +526,13 @@ pre-fix measurements remain diagnostic evidence only.
 
 Relative resource resolution works from a different working directory. Shared
 RFC 3986 dot-segment normalization preserves the slash needed after `../`;
-imports remain governed by **D7.2.6**, acquisition by **D7.1.2v2**. All 79 URL
+imports remain governed by **D9.3.5**, acquisition by **D9.1.2**. All 79 URL
 regressions pass. The live-select regression covers native option selectedness.
 
 Native relative mouse capture releases on blur, navigation and close. macOS sound
 uses AVAudioPlayer over Lambda-acquired WAV bytes, with document-generation tokens
 and 32 voices. Pause/resume, stale-token rejection and teardown are tested under
-**D4.5.1v4** and **D4.5.2**. Other platforms visibly report an absent audio backend.
+**D5.5.1** and **D5.5.2**. Other platforms visibly report an absent audio backend.
 Nine CSS/effects/input/audio probes run collection on every allocation, poisoning,
 first-call promotion and synchronous satellite publication, and close with zero
 tracked live allocations.

@@ -694,7 +694,7 @@ static int _arena_chunk_range_compare(const void* record, const void* key, void*
     uintptr_t address = (uintptr_t)key;
     if (address < start) return 1;
     // Read the current bump extent so reset, rewind and tail retirement cannot
-    // leave stale ownership proofs in the address index (D4.1.4v5).
+    // leave stale ownership proofs in the address index (D5.1.4).
     return address - start < chunk->used ? 0 : -1;
 }
 

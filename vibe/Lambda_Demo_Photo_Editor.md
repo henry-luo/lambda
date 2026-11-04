@@ -20,9 +20,9 @@ filters, text/shapes, history and PSD exchange.
 **S9.1.5v2** governs tree-shaped authored values; **S12.1.1v3 / S12.1.3** govern
 procedural effects and pure reactive views; **S7.4.1–S7.4.5 / S17.8.1** govern
 errors and options. [Formal Design](../doc/Lambda_Formal_Design.md)
-**D7.1.1 / D7.1.2v2 / D7.1.3 / D7.2.4v3** govern native/package boundaries and import paths;
-**D7.4.4 / D7.4.5v2** govern Raster's declared virtual-element interface;
-**D4.1.4v5 / D4.5.1v4 / D4.5.2 / D5.3.3 / D7.5.3v2** govern native storage,
+**D9.1.1 / D9.1.2 / D9.1.3 / D9.3.4** govern native/package boundaries and import paths;
+**D9.5.4 / D9.5.5** govern Raster's declared virtual-element interface;
+**D5.1.4 / D5.5.1 / D5.5.2 / D6.3.3 / D9.5.6** govern native storage,
 document resources, precise roots and host boundaries. This proposal applies
 those contracts without changing either formal spec.
 
@@ -121,7 +121,7 @@ new runtime dependency.
 The canvas and overlays are separate retained surfaces. The checkerboard,
 marching ants, cursor, guides and transform handles never enter exported pixels.
 Keep layer rows and focused controls stable while pixels or tool values change
-(**S12.1.3 / D4.5.1v4**). Properties follow the selected layer, mask or effect.
+(**S12.1.3 / D5.5.1**). Properties follow the selected layer, mask or effect.
 Layer rows show thumbnails, visibility, name, kind, mask, effects and lock state;
 clicking a mask thumbnail explicitly changes the paint target.
 
@@ -223,7 +223,7 @@ flowchart TB
 and image-model validation. `lambda.editor.raster` owns editing commands,
 selection/tool state machines, transactions and view models. The demo owns its
 menus, styling, bundled examples, application file dialogs and workspace layout.
-This follows **D7.1.1 / D7.1.2v2 / D7.1.3 / D7.2.4v3**.
+This follows **D9.1.1 / D9.1.2 / D9.1.3 / D9.3.4**.
 
 Ship the public entry as `lmd/package/editor/raster.ls`; supporting modules live
 under `lmd/package/editor/raster/`. `import raster: lambda.editor.raster` resolves
@@ -333,11 +333,11 @@ document identity and generation. Cancellation, document replacement and window
 close retire the work; teardown cancels/joins workers and releases leases.
 
 Workers retain no borrowed GC Items, evaluator context or DOM pointers
-(**D4.5.2 / D5.3.3 / D7.5.3v2**). Runtime bridges use precise `RootFrame`/`Rooted`
+(**D5.5.2 / D6.3.3 / D9.5.6**). Runtime bridges use precise `RootFrame`/`Rooted`
 ownership. Radiant receives copied pixels or explicit native leases owned by its
-document resources (**D4.5.1v4**). Textures and display caches are derived resources;
+document resources (**D5.5.1**). Textures and display caches are derived resources;
 they never become the only copy of editable pixels. Native COW storage uses the
-existing allocation substrate (**D4.1.4v5**).
+existing allocation substrate (**D5.1.4**).
 
 Initially retain the image package's published limits: 16 million pixels/64 MiB
 per Raster, 128 MiB PSD source/output and 256 MiB decoded PSD storage. More layers
@@ -515,7 +515,7 @@ do not weaken fixtures or substitute cached previews to pass qualification.
 Package model/command fixtures belong under `test/lambda/editor/` with a Photos
 prefix; native replays register in the existing UI/Radiant harness. Every new
 golden-driven `.ls` gets its `.txt`. Include automatic execution, forced
-interpreter/JIT runs (**D8.1.1v18**), forced GC, poisoned frees, malformed/truncated
+interpreter/JIT runs (**D8.3.2**), forced GC, poisoned frees, malformed/truncated
 PSD/project data, unsupported saves, write failure and pending-job teardown.
 Compare exported data as well as screenshots and DOM assertions.
 
@@ -622,7 +622,7 @@ layers with selection-derived/paintable masks, scoped lower-sibling processing,
 masked opacity and project persistence. Levels and Curves can create new
 adjustment layers or edit existing retained effects. Optional shape-preserving
 smooth curves keep the existing linear default and share processing with the
-graph preview (**S9.1.2 / S9.2.2 / D4.5.2**). Spatial backdrop filters, adjustment
+graph preview (**S9.1.2 / S9.2.2 / D5.5.2**). Spatial backdrop filters, adjustment
 transforms/clipping/styles and native PSD adjustment interchange remain outside
 this profile. See [qualification and limits](impl/Lambda_Impl_Photos.md).
 
@@ -646,7 +646,7 @@ center. These are per-tab view settings, outside authored history; new guides
 reuse authored guide transactions (**S9.1.2 / S9.2.2 / S12.1.3**). Shared pure
 camera geometry drives every overlay. Grid generation/rasterization is limited
 to the visible interval; navigator resizing/upload waits until live editing
-finishes and reuses the retained composite (**D4.5.2**). Rulers use pixels only,
+finishes and reuses the retained composite (**D5.5.2**). Rulers use pixels only,
 guide positions and Move placement retain whole-pixel semantics. Physical units,
 guide locks/layout presets, custom crop handles/ratios and equal-gap smart guides
 remain outside this profile, alongside the previously recorded typography, PSD,

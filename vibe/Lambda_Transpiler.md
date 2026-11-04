@@ -14,10 +14,10 @@
 - **Ledger:** `DD#` — the transpiler design-decision series. **DD1–DD4 keep the
   meanings they had in `Lambda_Transpile_Map.md`** (now
   `impl/Lambda_Transpile_Map (retired).md`) (cited from
-  `doc/Lambda_Formal_Design.md` D3.4 and §D3 as *"Transpile_Map DD1–DD4"*);
+  `doc/Lambda_Formal_Design.md` D3.4 and §D4 as *"Transpile_Map DD1–DD4"*);
   DD5+ extend the series over the rest of the area.
-- **Spec linkage:** D8 (compilation pipeline), D8.1 (structure), D8.3
-  (dual-function compiling), D8.4 (dispatch policy), D8.5 (MIR module cache),
+- **Spec linkage:** D8 (compilation pipeline), D8.3 (structure), D7.3
+  (dual-function compiling), D7.4 (dispatch policy), D8.5 (MIR module cache),
   D3.4 (shape and typed-map field layout), LC1v2 (specialization over caching,
   both lanes).
 - **Convention:** source references name symbols, not line numbers — line
@@ -546,8 +546,8 @@ results land in typed variables.
 
 > **Status note.** DD8 is the ancestor of the current dual-function design,
 > which has since been elaborated into DF1–DF17 in
-> `Lambda_Design_Compiling_Dual_Func.md` and ratified as D8.3. Where the two
-> differ, **DF/D8.3 wins**. In today's code the pair appears as
+> `Lambda_Design_Compiling_Dual_Func.md` and ratified as D7.3. Where the two
+> differ, **DF/D7.3 wins**. In today's code the pair appears as
 > `needs_boxed_entry` / `needs_boxed_slow_body` on the per-function native
 > info, not as the `_n`/`_b` C symbols this record's early sections describe.
 
@@ -1103,7 +1103,7 @@ the caller depends on.
 The C path's three variants (main, `_u` unboxed, `_w` wrapper) were to be
 consolidated into two (`_n` native, `_b` boxed). Both schemes died with the C
 back end. The *ruling* survives as DD8 and, in current form, as DF1–DF17 /
-D8.3: one natively-typed body plus one boxed entry, with dynamic dispatch
+D7.3: one natively-typed body plus one boxed entry, with dynamic dispatch
 bound to the boxed one.
 
 ### R7 — ~~`func_list[]` auto-generated from the system-function registry~~ — SKIPPED

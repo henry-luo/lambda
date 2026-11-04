@@ -1,4 +1,4 @@
-// ordinary source theme facade; pure views and handlers share native mechanisms (D7.2.4; S12.1.3).
+// ordinary source theme facade; pure views and handlers share native mechanisms (D9.3.4; S12.1.3).
 import c: lambda.ui.core.component
 import shell: lambda.ui.core.presentation
 import base: lambda.ui.dtna

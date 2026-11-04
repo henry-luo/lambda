@@ -1,7 +1,7 @@
 # Lambda browser WASM build
 
 **Verified:** 2026-10-06, Emscripten 6.0.11, Node 24.7.0 and Chromium
-154.0.8037.57 on macOS arm64. Profile authority: **D7.1.7v6**;
+154.0.8037.57 on macOS arm64. Profile authority: **D9.2.3**;
 working design: `vibe/Lambda_Design_Static_Modules.md` §13.4 (SM17).
 
 ## Build
@@ -11,7 +11,7 @@ working design: `vibe/Lambda_Design_Static_Modules.md` §13.4 (SM17).
 `utils/build_wasm.py`; it does not use desktop archives or generated Lua.
 It compiles 189 project sources and utf8proc, plus WASM archives for mpdecimal
 and the existing, unmodified RE2. Other in-memory document codecs and shared
-type-validation code remain; further removals are proposals under D7.1.7v6.
+type-validation code remain; further removals are proposals under D9.2.3.
 
 `LAMBDA_NO_CSS_INPUT` removes stylesheet dispatch and inline CSS parsing.
 `LAMBDA_NO_GRAPH_INPUT` removes graph dispatch and Structurizr include resolution.
@@ -37,11 +37,11 @@ these scale image samples rather than providing general numeric casts.
 `LAMBDA_NO_EMIT` excludes `emit`. Internal template transactions and `apply`
 remain. The REPL now registers each admitted fragment's view declarations,
 restores the registry on failed execution, and removes its module's entries and
-context-owned reconciliation/state before AST teardown (D5.3.3).
+context-owned reconciliation/state before AST teardown (D6.3.3).
 
 No sources under `lambda/js/` enter this profile. The shared NamePool skips the
 JS well-known-name catalog under `LAMBDA_NO_JS`; those spellings still work as
-ordinary Lambda keys through normal interning (D4.6.1v3, D4.6.2v2).
+ordinary Lambda keys through normal interning (D5.6.1, D5.6.2).
 
 `LAMBDA_NO_LOG` selects the disabled stub inside `lib/log.c`. The header strips
 all logging levels and their arguments; the stub retains the callable ABI,
@@ -50,13 +50,13 @@ reports logging disabled, and has no formatting, configuration or IO providers.
 profile dump bodies and traversal callbacks. `LAMBDA_NO_CLI` removes the
 validator's file-backed command and
 console reports while retaining in-memory validation. Host-returned REPL values,
-structured source diagnostics and explicit procedural `print` remain (D5.4.4).
+structured source diagnostics and explicit procedural `print` remain (D6.4.4).
 
 `LAMBDA_NO_MEMTRACK` excludes `lib/memtrack.c`, tracker initialization, counters,
 registries and fault injection. `lib/mem_alloc.c` supplies the lean allocation
 provider and the string-allocation helpers shared with native builds. Zero-size,
 checked multiplication/addition and failed-realloc ownership remain intact;
-precise GC, Pool/Arena and MemContext ownership are retained (D4.2.5v3, D5.3.3).
+precise GC, Pool/Arena and MemContext ownership are retained (D5.2.4, D6.3.3).
 
 `LAMBDA_NO_STR_SIMD` excludes `lib/str_simd.c` and its packed-pair preparation
 and dispatch. `str.c` uses its existing scalar rare-byte search instead. WASM
@@ -94,7 +94,7 @@ source manifest and raw/gzip bytes. Only a successful link publishes artifacts.
 ## ABI and lifetime
 
 Lambda's pointer and Item layout requires 64-bit C pointers (D2.1.1,
-D2.1.7). The build uses `-sMEMORY64=2`: LLVM compiles a 64-bit ABI and Binaryen
+D2.1.6). The build uses `-sMEMORY64=2`: LLVM compiles a 64-bit ABI and Binaryen
 lowers the memory operations to wasm32. It therefore does not require browser
 memory64 support. See [Emscripten's MEMORY64 setting](https://emscripten.org/docs/tools_reference/settings_reference.html#memory64).
 The module uses `-Oz`, LTO, constructor evaluation, a 4 MiB C stack, growing
@@ -115,7 +115,7 @@ Returned C text is borrowed until the next eval/reset/shutdown. `ccall` with
 return type `string` copies it into a JavaScript string before that boundary.
 Tagged Items and raw GC objects never cross the JavaScript API. Diagnostics
 arrive through the module's `print`/`printErr` callbacks. REPL source, bindings,
-module state and precise roots follow D4.6.2v2 and D5.3.3. Native VM reservations
+module state and precise roots follow D5.6.2 and D6.3.3. Native VM reservations
 are replaced by eagerly backed linear-memory extents with checked bounds and
 logical commit accounting; WASM cannot provide per-page native guard protection.
 
@@ -199,7 +199,7 @@ The native REPL also returns 15 and 17 for retained `make_adder(10)` calls.
 The new regression exposed and fixed a shared REPL defect: fragment finalization
 was reading the previous module's AST index and missed nested captures. Each
 fragment now owns and publishes its own analysis graph before finalization,
-then appends admitted nodes to the session index (D4.6.2v2, D6.2.3, D8.2.4).
+then appends admitted nodes to the session index (D5.6.2, D7.2.3, D8.2.4).
 
 After the builtin/formatter exclusions and REPL template-registration fix, the
 full native Lambda baseline passes **6,243/6,243**. Its log is

@@ -82,10 +82,10 @@ than 20-pixel tiles; transparent pixels retain correct alpha in uploads/exports.
 The application keeps its DOM tree and canvas stable while handlers publish
 new pixels (**S12.1.3**). History stores immutable recipes (**S1.4**); it does not
 retain a separate image per edit. The host copies borrowed pixels into
-Radiant's document-owned surface (**D4.5.1v4 / D4.5.2**), and native allocations
-use precise roots (**D5.3.3**).
+Radiant's document-owned surface (**D5.5.1 / D5.5.2**), and native allocations
+use precise roots (**D6.3.3**).
 Workers retain native copies of input pixels and coefficients, with no borrowed
-GC pointers, evaluator context or DOM access (**D4.5.2 / D5.3.3 / D7.5.3**).
+GC pointers, evaluator context or DOM access (**D5.5.2 / D6.3.3 / D9.5.6**).
 Document resources cancel and join their workers at teardown. Their pending-work
 hook lets headless assertions wait for real background work before advancing
 the virtual clock. Cooperative Lambda tasks are unchanged (**S13.1.3v2**).

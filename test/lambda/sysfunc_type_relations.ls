@@ -1,4 +1,4 @@
-// S11.4.9/D3.3.5: registry relations instantiate result contracts from calls.
+// S11.4.9/D4.3.4: registry relations instantiate result contracts from calls.
 fn first_int(values: int[]) int => values[0] or 0;
 fn first_text(values: string[]) string => values[0] or "";
 fn first_split_char(values: string[]) string => slice(values[0], 0, 1) or "";

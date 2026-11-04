@@ -1375,7 +1375,7 @@ static CTLineRef font_platform_face_line(FontHandle* handle, CTFontRef selected,
     entry->direction = request->direction;
     entry->width_feature = request->width_feature;
     // range queries share the complete immutable line; source buffers may be edited
-    // or freed after this call, so the bounded key belongs to the face (D4.1.4v5).
+    // or freed after this call, so the bounded key belongs to the face (D5.1.4).
     memcpy(entry->text, request->text, (size_t)request->byte_len);
     return line;
 }
