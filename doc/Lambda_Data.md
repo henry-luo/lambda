@@ -833,6 +833,30 @@ Key-value mappings with structural typing:
 map([k1, v1, k2, v2, ...])
 ```
 
+#### Duplicate Keys
+
+Repeated explicit keys are a compile error, including a bare name repeated in
+quoted form or across an intervening spread (S2.3.1v2):
+
+```lambda error=E242
+{a: 1, b: 2, a: 3}
+```
+
+Computed keys and overlapping spreads are allowed. The last value wins and the
+key keeps its first insertion position. The result has one field per key:
+
+```lambda
+let key = "a"
+let result = {[key]: 1, b: 2, [key]: 3}
+result              // {a: 3, b: 2}
+len(result);        // 2
+(result == {a: 3, b: 2})  // true
+```
+
+The same rules apply to element/object attribute lists. A bracketed key is
+computed even when its expression is constant; spread overlaps remain allowed
+when the source fields are statically known (S16.8.9v2).
+
 #### Computed Map Keys
 
 Use `[expression]: value` when a map field name is known only at run time.
