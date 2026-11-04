@@ -5086,12 +5086,7 @@ static void retain_render_branch(DomDocument* doc, const RenderRetainedBranch& b
     while (attrs.next(&key, &value)) {
         if (before.has_attr(key) && fn_eq_strict(before.get_attr(key).item(), value.item()) == BOOL_TRUE) continue;
         const char* old = node->get_attribute(key);
-        if (!radiant_attribute_has_css_dependency(doc, node, key) &&
-            dom_element_set_non_style_metadata(node, key, value.cstring())) {
-            // non-style metadata remains observable without invalidating ancestor layout.
-            doc->mutation_epoch++;
-            dom_observers_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
-        } else {
+        if (!dom_set_non_style_metadata(node, key, value.cstring())) {
             node->set_attribute(key, value.cstring());
             dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
         }

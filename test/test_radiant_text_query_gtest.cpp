@@ -20,6 +20,7 @@
 #include "../radiant/css_resolved_style.hpp"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_core.h"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"
@@ -47,6 +48,7 @@ extern "C" uint64_t radiant_query_font_build_count(void);
 ArrayList* build_view_stack(EventContext* context, View* target);
 void fire_events(EventContext* context, ArrayList* stack);
 void update_hover_state(EventContext* context, View* target);
+void update_active_state(EventContext* context, View* target, bool is_active);
 
 
 #ifdef __APPLE__
@@ -697,6 +699,146 @@ protected:
         return result;
     }
 };
+
+TEST_F(RadiantTextQuery, ActiveAncestryCommitsOneCascadePerTransition) {
+    DomElement* result = load_script_source(
+        "<!doctype html><style>*{padding:0;border:0} #outer:active{padding-left:11px} "
+        "#result{width:40px;height:10px} #result:active{width:80px}</style>"
+        "<div id=outer><div><button id=result>Press</button></div></div>");
+    ASSERT_NE(result, nullptr);
+    ASSERT_NE(radiant_document_ensure_state(document, "active-ancestry-test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* outer = dom_find_element_by_id(document->root, "outer");
+    ASSERT_NE(outer, nullptr);
+
+    StyleEpochStats before = {}, after = {};
+    style_epoch_get_stats(document, &before);
+    radiant_recascade_document(document);
+    style_epoch_get_stats(document, &after);
+    uint64_t one_cascade = after.lookup_count - before.lookup_count;
+    ASSERT_GT(one_cascade, 0u);
+
+    EventContext event = {};
+    event.ui_context = &ui;
+    event.target_document = document;
+    for (bool active : {true, false}) {
+        SCOPED_TRACE(active);
+        style_epoch_get_stats(document, &before);
+        update_active_state(&event, result, active);
+        style_epoch_get_stats(document, &after);
+        // ancestor depth must not multiply the full-document cascade.
+        EXPECT_EQ(after.lookup_count - before.lookup_count, one_cascade);
+        EXPECT_EQ(document->state->pseudo_state_batch_depth, 0u);
+        layout_html_doc(&ui, document, false);
+        EXPECT_FLOAT_EQ(result->width, active ? 80.0f : 40.0f);
+        EXPECT_FLOAT_EQ(outer->boundary()->padding.left, active ? 11.0f : 0.0f);
+    }
+}
+
+TEST_F(RadiantTextQuery, InteractionColorsRepaintLeafAncestorsAndInheritedCurrentColor) {
+    DomElement* result = load_script_source(
+        "<!doctype html><style>body{margin:0} #outer{padding:4px;"
+        "background:rgb(200,201,202);color:rgb(20,30,40)}"
+        "#outer:active,#outer:hover{background:rgb(210,211,212);color:rgb(100,110,120)}"
+        "#result{display:block;border:0;padding:0;width:40px;height:20px;"
+        "background:rgb(70,80,90)} #result:active,#result:hover{background:var(--pressed,rgb(10,20,30))}"
+        "#sibling{width:38px;height:18px;border:1px solid;background:currentColor}</style>"
+        "<div id=outer><div><button id=result></button></div><div id=sibling></div></div>");
+    ASSERT_NE(result, nullptr);
+    ASSERT_NE(radiant_document_ensure_state(document, "active-paint-test"), nullptr);
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    render_html_doc(&ui, document->view_tree, nullptr);
+    ASSERT_FALSE(ui.render_failed);
+    ASSERT_FALSE(document->state->needs_reflow);
+    ASSERT_FALSE(document->state->reflow_scheduler.pending);
+    ASSERT_EQ(document->js.mutation_count, 0);
+    ASSERT_EQ(document->js.host_ui_context, &ui);
+    ASSERT_NE(dom_get_or_create_doc_node(document), nullptr);
+    uint64_t generation = document->view_tree->document_layout_count;
+    EventContext event = {};
+    event.ui_context = &ui;
+    event.target_document = document;
+    const struct { bool hover; bool active; } cases[] = {
+        {false, true}, {false, false}, {true, true}, {true, false},
+        {true, true}, {true, false}};
+    for (const auto& entry : cases) {
+        bool active = entry.active;
+        SCOPED_TRACE(entry.hover);
+        SCOPED_TRACE(active);
+        if (entry.hover) update_hover_state(&event, active ? result : nullptr);
+        else update_active_state(&event, result, active);
+        EXPECT_FALSE(document->state->needs_reflow);
+        EXPECT_EQ(document->view_tree->document_layout_count, generation);
+        ASSERT_TRUE(layout_update_document(&ui, document));
+        EXPECT_EQ(document->view_tree->document_layout_count, generation);
+        render_html_doc(&ui, document->view_tree, nullptr);
+        ASSERT_FALSE(ui.render_failed);
+        test_radiant_expect_surface_pixel(ui.surface, 1, 1,
+            active ? 210 : 200, active ? 211 : 201, active ? 212 : 202);
+        test_radiant_expect_surface_pixel(ui.surface, 5, 5,
+            active ? 10 : 70, active ? 20 : 80, active ? 30 : 90);
+        test_radiant_expect_surface_pixel(ui.surface, 5, 25,
+            active ? 100 : 20, active ? 110 : 30, active ? 120 : 40);
+        test_radiant_expect_surface_pixel(ui.surface, 4, 25,
+            active ? 100 : 20, active ? 110 : 30, active ? 120 : 40);
+    }
+}
+
+TEST_F(RadiantTextQuery, UnstyledMetadataPreservesGeometryAndCssDependenciesReflow) {
+    DomElement* result = load_script_source(
+        "<!doctype html><style id=theme>#result{width:40px;height:20px}"
+        "[data-sized] #result{width:80px}</style><link id=sheet><div id=outer><div id=result></div></div>");
+    ASSERT_NE(result, nullptr);
+    ASSERT_NE(radiant_document_ensure_state(document, "metadata-layout-test"), nullptr);
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    uint64_t generation = document->view_tree->document_layout_count;
+    uint64_t epoch = document->mutation_epoch;
+    for (const char* name : {"data-natural-width", "aria-label"}) {
+        ASSERT_TRUE(dom_set_non_style_metadata(result, name, "changed"));
+        EXPECT_STREQ(result->get_attribute(name), "changed");
+        EXPECT_EQ(document->mutation_epoch, ++epoch);
+        EXPECT_EQ(document->js.mutation_count, 0);
+        EXPECT_FALSE(document->state->needs_reflow);
+        ASSERT_TRUE(layout_update_document(&ui, document));
+        EXPECT_EQ(document->view_tree->document_layout_count, generation);
+    }
+    DomElement* outer = dom_find_element_by_id(document->root->as_element(), "outer");
+    ASSERT_NE(outer, nullptr);
+    EXPECT_FALSE(dom_set_non_style_metadata(outer, "data-sized", "true"));
+    ASSERT_TRUE(outer->set_attribute("data-sized", "true"));
+    dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, outer, outer->parent, "data-sized", nullptr);
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    EXPECT_GT(document->view_tree->document_layout_count, generation);
+    EXPECT_FLOAT_EQ(result->width, 80.0f);
+    for (const char* id : {"theme", "sheet"}) {
+        DomElement* owner = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(owner, nullptr);
+        EXPECT_FALSE(dom_set_non_style_metadata(owner, "data-revision", "true"));
+    }
+}
+
+TEST_F(RadiantTextQuery, AttrValuesKeepMetadataStyleInvalidation) {
+    DomElement* result = load_script_source(
+        "<!doctype html><style>#result::before{content:attr(data-label)}</style><div id=result></div>");
+    ASSERT_NE(result, nullptr);
+    EXPECT_FALSE(dom_set_non_style_metadata(result, "data-label", "changed"));
+}
+
+TEST_F(RadiantTextQuery, HiddenComputedDimensionsSurviveCleanMetadataWrites) {
+    DomElement* result = load_script_source(
+        "<!doctype html><style>#result{display:none;width:52px;height:24px}</style><button id=result></button>");
+    ASSERT_NE(result, nullptr);
+    ASSERT_NE(radiant_document_ensure_state(document, "hidden-size-test"), nullptr);
+    ASSERT_TRUE(layout_update_document(&ui, document));
+    for (unsigned query = 0; query < 3; query++) {
+        ASSERT_TRUE(dom_set_non_style_metadata(result, "data-measured", "true"));
+        for (CssPropertyCode property : {CSS_PROPERTY_WIDTH, CSS_PROPERTY_HEIGHT}) {
+            String* value = css_prop_serialize_computed_value(document->document_pool, result, property, 0);
+            ASSERT_NE(value, nullptr);
+            EXPECT_STREQ(value->chars, property == CSS_PROPERTY_WIDTH ? "52px" : "24px");
+        }
+    }
+}
 
 TEST(CounterFormatting, JapaneseInformalAndCjkDecimal) {
     const struct { int value; const char* expected; } cases[] = {

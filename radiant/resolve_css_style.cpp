@@ -1938,6 +1938,8 @@ CssEnum layout_element_css_writing_mode(DomElement* element) {
     for (DomNode* node = element; node; node = node->parent) {
         if (!node->is_element()) continue;
         DomElement* ancestor = node->as_element();
+        if (layout_cached_inheritance_excludes(ancestor, CSS_PROPERTY_WRITING_MODE))
+            return CSS_VALUE_HORIZONTAL_TB;
         CssDeclaration* declaration = ancestor && ancestor->specified_style
             ? style_tree_get_declaration(ancestor->specified_style, CSS_PROPERTY_WRITING_MODE)
             : nullptr;
@@ -5455,7 +5457,11 @@ static bool collect_inherited_declaration_mask(StyleNode* node, void* context) {
         return false;
     }
     auto include = [&](CssPropertyCode code) {
-        if (css_property_runtime_inherited(code)) *mask |= UINT64_C(1) << ((unsigned)code % 64);
+        const CssProperty* metadata = css_property_get_by_code(code);
+        // flow queries inherit CSS properties outside the ordinary resolver's dispatch list.
+        if (css_property_runtime_inherited(code) ||
+            (metadata && metadata->inheritance == PROP_INHERIT_YES))
+            *mask |= UINT64_C(1) << ((unsigned)code % 64);
     };
     include(property);
     const CssProperty* definition = css_property_get_by_code(property);
@@ -5466,6 +5472,21 @@ static bool collect_inherited_declaration_mask(StyleNode* node, void* context) {
 }
 
 // ancestry, cascade edits and DOM moves invalidate this selected-view cache (D4.5.1v4).
+static bool inherited_declaration_mask_is_current(radiant::LayoutCache* cache,
+        DomDocument* doc, uint32_t generation) {
+    return cache && generation && cache->inherited_generation == generation &&
+        cache->inherited_style_epoch == doc->style_query_epoch &&
+        cache->inherited_mutation_epoch == doc->mutation_epoch;
+}
+
+bool layout_cached_inheritance_excludes(DomElement* element, CssPropertyCode property) {
+    DomDocument* doc = element ? element->doc.get() : nullptr;
+    uint32_t generation = doc && doc->view_tree ? doc->view_tree->measurement_cache_generation : 0;
+    radiant::LayoutCache* cache = element ? element->layout_cache.get() : nullptr;
+    return inherited_declaration_mask_is_current(cache, doc, generation) &&
+        !(cache->inherited_declaration_mask & (UINT64_C(1) << ((unsigned)property % 64)));
+}
+
 static uint64_t inherited_declaration_mask(LayoutContext* context, DomElement* element) {
     DomDocument* doc = context->doc;
     uint32_t generation = doc && doc->view_tree ? doc->view_tree->measurement_cache_generation : 0;
@@ -5479,12 +5500,16 @@ static uint64_t inherited_declaration_mask(LayoutContext* context, DomElement* e
     for (DomElement* ancestor = element; ancestor; ancestor = dom_parent_element(ancestor)) {
         if (ancestor->doc != doc) return UINT64_MAX;
         radiant::LayoutCache* inherited = within_root ? ancestor->layout_cache.get() : nullptr;
-        if (inherited && inherited->inherited_generation == generation &&
-            inherited->inherited_style_epoch == doc->style_query_epoch &&
-            inherited->inherited_mutation_epoch == doc->mutation_epoch) {
+        if (inherited_declaration_mask_is_current(inherited, doc, generation)) {
             mask |= inherited->inherited_declaration_mask;
             break;
         }
+        // synthetic carriers may own resolved flow without authored declarations.
+        if (ancestor->is_synthetic()) { mask = UINT64_MAX; break; }
+        // direction also inherits HTML dir/bdi/telephone hints outside the CSS tree.
+        if (dom_element_has_directionality_hint(ancestor) ||
+            (ancestor->blk && ancestor->block()->direction == CSS_VALUE_RTL))
+            mask |= UINT64_C(1) << ((unsigned)CSS_PROPERTY_DIRECTION % 64);
         style_tree_foreach(ancestor->specified_style, collect_inherited_declaration_mask, &mask);
         if (mask == UINT64_MAX) break;
         if (ancestor == doc->root) within_root = false;
@@ -8657,6 +8682,7 @@ static CssEnum css_parse_webkit_text_align(const CssValue* value) {
 
 CssEnum layout_element_css_direction(DomElement* element) {
     for (DomElement* parent = element; parent; parent = dom_parent_element(parent)) {
+        if (layout_cached_inheritance_excludes(parent, CSS_PROPERTY_DIRECTION)) return CSS_VALUE_LTR;
         CssEnum specified = layout_specified_keyword(
             parent, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
         if (specified == CSS_VALUE_LTR || specified == CSS_VALUE_RTL) return specified;
@@ -8725,8 +8751,6 @@ struct LayoutComponentCascade {
     bool vertical_inline_axis;
     LayoutLogicalSides sides;
     const CssPropertyCode* family;
-    CssPropertyCode* sources;
-    size_t count;
 };
 
 static bool box_component_source_matches(const CssPropertyCode* family,
@@ -8744,10 +8768,7 @@ static bool box_component_source_matches(const CssPropertyCode* family,
     return false;
 }
 
-static bool collect_component_cascade_source(StyleNode* node, void* context) {
-    LayoutComponentCascade* query = (LayoutComponentCascade*)context;
-    CssPropertyCode source = node->property_code;
-    if (source <= CSS_PROPERTY_UNKNOWN || source >= CSS_PROPERTY_COUNT) return true;
+static bool component_cascade_source_matches(CssPropertyCode source, const LayoutComponentCascade* query) {
     bool matches = source == query->property ||
         css_physical_size_alias(source, query->vertical_inline_axis) == query->property;
     // placement shorthands have noncontiguous members; share CSSOM's component mask.
@@ -8772,9 +8793,14 @@ static bool collect_component_cascade_source(StyleNode* node, void* context) {
     for (int index = 0; definition && index < definition->longhand_count; index++) {
         matches |= definition->longhand_props[index] == query->property;
     }
-    if (matches) query->sources[query->count++] = source;
-    return true;
+    return matches;
 }
+
+struct LayoutComponentSources {
+    LayoutLogicalSides sides;
+    bool valid;
+    uint64_t members[(CSS_PROPERTY_COUNT + 63) / 64];
+};
 
 CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
                                                      CssPropertyCode property) {
@@ -8787,13 +8813,33 @@ CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
 CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,
         const LayoutLogicalSides& sides) {
     if (!style || property <= CSS_PROPERTY_UNKNOWN || property >= CSS_PROPERTY_COUNT) return nullptr;
-    // pseudo CSSOM and layout share component winners, including all and layer rollback.
-    bool vertical = sides.inline_start == CSS_BOX_SIDE_TOP || sides.inline_start == CSS_BOX_SIDE_BOTTOM;
+    // aliases depend only on the property and logical axes. Reuse their source
+    // set instead of scanning every declaration for every component query.
+    static thread_local LayoutComponentSources cached[CSS_PROPERTY_COUNT] = {};
+    LayoutComponentSources& entry = cached[property];
+    if (!entry.valid || entry.sides.inline_start != sides.inline_start ||
+        entry.sides.inline_end != sides.inline_end || entry.sides.block_start != sides.block_start ||
+        entry.sides.block_end != sides.block_end) {
+        bool vertical = sides.inline_start == CSS_BOX_SIDE_TOP || sides.inline_start == CSS_BOX_SIDE_BOTTOM;
+        LayoutComponentCascade query = {property, vertical, sides, box_component_family(property)};
+        memset(entry.members, 0, sizeof(entry.members));
+        for (int source = CSS_PROPERTY_DISPLAY; source < CSS_PROPERTY_COUNT; source++) {
+            if (component_cascade_source_matches((CssPropertyCode)source, &query))
+                entry.members[source / 64] |= UINT64_C(1) << (source % 64);
+        }
+        entry.sides = sides;
+        entry.valid = true;
+    }
     CssPropertyCode sources[CSS_PROPERTY_COUNT];
-    LayoutComponentCascade query = {property, vertical, sides,
-        box_component_family(property), sources, 0};
-    style_tree_foreach(style, collect_component_cascade_source, &query);
-    return style_tree_get_component_declaration(style, sources, query.count);
+    size_t count = 0;
+    for (size_t word = 0; word < sizeof(entry.members) / sizeof(entry.members[0]); word++) {
+        uint64_t bits = entry.members[word];
+        while (bits) {
+            sources[count++] = (CssPropertyCode)(word * 64 + __builtin_ctzll(bits));
+            bits &= bits - 1;
+        }
+    }
+    return style_tree_get_component_declaration(style, sources, count);
 }
 
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
@@ -8834,8 +8880,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     }
     DomElement* current_element = lycon->view && lycon->view->is_element()
         ? lycon->view->as_element() : nullptr;
-    bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
-    prop_id = css_physical_size_alias(prop_id, inline_axis_is_vertical);
+    // ordinary physical properties do not depend on an inherited writing mode.
+    CssPropertyCode horizontal_alias = css_physical_size_alias(prop_id, false);
+    CssPropertyCode vertical_alias = css_physical_size_alias(prop_id, true);
+    prop_id = horizontal_alias == vertical_alias ? horizontal_alias
+        : layout_element_inline_axis_is_vertical(current_element) ? vertical_alias : horizontal_alias;
     bool grid_projection = grid_mask && (css_grid_property_mask(decl->property_code) & grid_mask) && decl->property_code != prop_id;
     bool flex_projection = decl->property_code == CSS_PROPERTY_FLEX && prop_id != CSS_PROPERTY_FLEX;
     CssPropertyCode value_property = decl->pending_shorthand_code > 0 ? decl->pending_shorthand_code : grid_projection ? decl->property_code : decl->property_code == CSS_PROPERTY_CONTAINER ||
@@ -8871,12 +8920,13 @@ void css_apply_computed_property(CssPropertyCode prop_id,
     const CssDeclaration* decl, const CssValue* value, int64_t specificity,
     LayoutContext* lycon) {
     DomElement* current_element = lycon->view->as_element();
-    bool inline_axis_is_vertical = layout_element_inline_axis_is_vertical(current_element);
-    bool vertical_block_start_is_right = layout_element_writing_mode(current_element) == WM_VERTICAL_RL;
+    LayoutLogicalSides logical_sides = layout_element_logical_sides(current_element);
+    bool inline_axis_is_vertical = logical_sides.inline_start == CSS_BOX_SIDE_TOP ||
+        logical_sides.inline_start == CSS_BOX_SIDE_BOTTOM;
+    bool vertical_block_start_is_right = logical_sides.block_start == CSS_BOX_SIDE_RIGHT;
     ViewSpan* span = lam::view_require_element(lycon->view);
     // computed properties belong to the element before a provisional view acquires its box role (VR15).
     ViewBlock* block = css_property_box(lycon);
-    LayoutLogicalSides logical_sides = layout_element_logical_sides(current_element);
     bool inline_direction_rtl = logical_sides.inline_start == CSS_BOX_SIDE_RIGHT ||
         logical_sides.inline_start == CSS_BOX_SIDE_BOTTOM;
     if (css_property_is_ignored(prop_id) ||

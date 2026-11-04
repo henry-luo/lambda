@@ -50,7 +50,11 @@ typedef struct StyleNode {
     CssDeclaration* winning_decl;    // Current winning declaration
     WeakDeclaration* weak_list;      // Sorted list of losing declarations
     bool needs_recompute;            // Flag for computed value invalidation
-    void* computed_value;            // Cached computed value
+    bool has_cached_winner;          // context-free cascade result, expired by any tree mutation
+    union {
+        void* computed_value;        // mutable trees cache their computed value
+        CssDeclaration* cached_winner; // declaration reads cache their cascade winner
+    };
     uint32_t compute_version;        // Version for cache invalidation
 } StyleNode;
 
@@ -69,9 +73,10 @@ typedef struct StyleTree {
     int next_source_order;           // Next source order counter
     uint32_t compute_version;        // Global compute version for cache invalidation
     void* canonical_owner;           // StyleCanonicalEntry for epoch-owned immutable trees
-    struct StyleDeclarationCache* declaration_cache; // possible properties of immutable canonical cascades
+    uint64_t declaration_presence;  // conservative absence filter, stored without a side allocation
     uint32_t borrow_ref_count;       // Generated pseudo boxes borrowing this tree
     bool retired_borrow_source;      // Detached pseudo tree pending its last borrower
+    bool declaration_cache_valid;    // mutations expire all affected cached winners
 } StyleTree;
 
 // ============================================================================
@@ -141,6 +146,9 @@ CssDeclaration* css_declaration_clone_owned(
 
 // Reclaim a declaration snapshot that owns all of its payload fields.
 void css_declaration_destroy_owned(CssDeclaration* declaration, Pool* pool);
+
+// compare cascade winners by metadata and serialized value, not allocation identity.
+bool css_declaration_winner_equal(const CssDeclaration* left, const CssDeclaration* right);
 
 /**
  * Increment declaration reference count

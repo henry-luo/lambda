@@ -413,6 +413,32 @@ TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) 
     dom_lifecycle_destroy(&doc);
 }
 
+TEST_F(StateStoreDomMutationTest, FocusDoesNotPopulateUnrelatedSubtrees) {
+    DocState* doc_state = state();
+    lam::ArrayList<DomElement*> children(MEM_CAT_LAYOUT);
+    for (int i = 0; i < 512; i++) {
+        DomElement* child = make_element();
+        ASSERT_TRUE(children.append(child));
+        ASSERT_TRUE(orphan->append_child(child));
+    }
+    live->tag_name = lam::up("button");
+    live->tag_id = MARKUP_NAME_BUTTON;
+    doc_state->transition_depth++;
+    focus_set_programmatic(doc_state, live, true);
+    doc_state->transition_depth--;
+    EXPECT_EQ(focus_get(doc_state), live);
+    EXPECT_TRUE(state_get_bool(doc_state, root, STATE_FOCUS_WITHIN));
+    EXPECT_TRUE(state_get_bool(doc_state, live, STATE_FOCUS_VISIBLE));
+    // focus state scales with the ancestor path, including on the first transition.
+    EXPECT_LE(hashmap_count(doc_state->state_map), 4u);
+    for (DomElement* child : children) {
+        EXPECT_FALSE(state_get_bool(doc_state, child, STATE_FOCUS_WITHIN));
+        EXPECT_EQ(view_state_get(doc_state, child), nullptr);
+        orphan->remove_child(child);
+        delete child;
+    }
+}
+
 TEST_F(StateStoreDomMutationTest, BulkPruningPreservesLiveValuesAndRebuildsFocusPath) {
     DocState* doc_state = state();
     lam::ArrayList<DomElement*> children(MEM_CAT_LAYOUT);

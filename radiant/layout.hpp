@@ -374,6 +374,7 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
 
 bool layout_element_inline_axis_is_vertical(DomElement* element);
 CssEnum layout_element_css_writing_mode(DomElement* element);
+bool layout_cached_inheritance_excludes(DomElement* element, CssPropertyCode property);
 WritingMode layout_element_writing_mode(DomElement* element);
 int css_logical_corner_index(CssPropertyCode property, DomElement* element);
 bool layout_inline_element_is_orthogonal(DomElement* element);
@@ -5260,10 +5261,13 @@ static inline LayoutLogicalSides layout_logical_sides(bool inline_vertical,
 
 inline LayoutLogicalSides layout_element_logical_sides(DomElement* element) {
     bool rtl = layout_element_css_direction(element) == CSS_VALUE_RTL;
+    // resolve inherited writing-mode once for all three physical-axis decisions.
+    CssEnum css_mode = layout_element_css_writing_mode(element);
+    WritingMode mode = layout_writing_mode_from_css(css_mode);
     // CSS Writing Modes 4 maps sideways-lr inline-start to bottom in LTR and top in RTL.
-    if (layout_writing_mode_reverses_line_axis(layout_element_css_writing_mode(element))) rtl = !rtl;
-    return layout_logical_sides(layout_element_inline_axis_is_vertical(element),
-        layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl);
+    if (layout_writing_mode_reverses_line_axis(css_mode)) rtl = !rtl;
+    return layout_logical_sides(mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL,
+        mode == WM_VERTICAL_RL, rtl);
 }
 // Logical box properties all resolve to the same physical side pair. Keeping
 // the pair selection here prevents margin, padding, and inset from drifting
