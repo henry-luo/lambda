@@ -25,7 +25,7 @@ pub fn initial(start = START) {
     {token: 0, last: null, t: 0.0, started: false, paused: false, help: false, handles: null, keys: NO_KEYS, touch: NO_KEYS,
      car: car, traffic: tr.spawn(16), peds: pd.spawn(24), mission: ms.initial(), camera: cam.initial(car),
      look: "day", lights: false, auto: null, shown: {speed: "   ", timer: "   ", gear: "N", place: "", street: "", look: "", mission: "", cash: ""},
-     toast: "", toast_until: 0.0, smashed: [], best_air: 0.0, top_speed: 0.0, drag: null, tour: 0.0, frames: 0}
+     toast: "", toast_until: 0.0, smashed: [], best_air: 0.0, top_speed: 0.0, drag: null, tour: 0.0, frames: 0, speed_cap: null}
 }
 
 // ---- controls
@@ -57,14 +57,32 @@ fn auto_drive(car, before, after, dt) {
 }
 fn player_record(car) => {id: "player", player: true, x: car.x, z: car.z, heading: car.heading, hl: v.HALF_LENGTH, hw: v.HALF_WIDTH}
 
+// ---- speed governor. The native scene pauses itself once its unsimulated time (lag) passes two
+// seconds, and a faster car costs more per frame. Past `hold` seconds of lag the car may not speed up;
+// past `slow` the cap eases down toward `floor` m/s; under `clear` it lifts at `release` m/s².
+pub let GOVERNOR = {hold: 0.25, slow: 0.6, clear: 0.08, floor: 8.0, ease: 6.0, release: 4.0}
+pub fn govern(cap, lag, speed, dt) {
+    let held = max(GOVERNOR.floor, min(cap or speed, speed));
+    if (lag > GOVERNOR.slow) max(GOVERNOR.floor, held - GOVERNOR.ease * dt)
+    else if (lag > GOVERNOR.hold) held
+    else if (cap == null or lag > GOVERNOR.clear) cap
+    else (let raised = cap + GOVERNOR.release * dt, if (raised >= v.SPEC.gears[4]) null else raised)
+}
+// pedals under a cap: no throttle at or over it, and brake in proportion to any excess
+pub fn capped(pedals, cap, car) => if (cap == null) pedals
+    else (let over = v.forward_speed(car) - cap,
+        if (over < 0.0) pedals else {*: pedals, throttle: 0.0, brake: max(pedals.brake, u.clamp(over * 0.3, 0.0, 0.6))})
+
 // ---- the pure step
 fn say(st, text, t, seconds = 2.6) => {*: st, toast: text, toast_until: t + seconds}
-pub fn advance(st, dt, t) any^ {
+pub fn advance(st, dt, t, lag = 0.0) any^ {
     if (st.paused or dt <= 0.0) {*: st, t: t}
     else {
         let drive = st.started and st.auto == null
+        let cap = govern(st.speed_cap, lag, v.forward_speed(st.car), dt)
         let auto = if (st.auto == null) null else tr.step_car(st.auto, st.traffic, t, dt, false)
-        let car = if (auto != null) auto_drive(st.car, st.auto, auto, dt) else v.step(st.car, if (drive) controls(st) else v.IDLE, dt, st.traffic)
+        let car = if (auto != null) auto_drive(st.car, st.auto, auto, dt)
+            else v.step(st.car, if (drive) capped(controls(st), cap, st.car) else v.IDLE, dt, st.traffic)
         let traffic = tr.step(st.traffic, player_record(car), t, dt, car.hits)
         let peds = pd.step(st.peds, car, dt)
         let mission = if (st.started) ms.step(st.mission, car, t) else st.mission
@@ -77,13 +95,15 @@ pub fn advance(st, dt, t) any^ {
             else {*: rig, position: [sin(tour) * 230.0, 105.0, 0.0 - cos(tour) * 230.0], target: [0.0, 20.0, 0.0], fov: 52.0}
         let speed = v.speed(car)
         let next = {*: st, t: t, car: car, auto: auto, traffic: traffic, peds: peds, mission: mission, camera: camera, tour: tour,
-            top_speed: max(st.top_speed, speed), frames: st.frames + 1}
+            top_speed: max(st.top_speed, speed), frames: st.frames + 1, speed_cap: cap}
+        let governed = drive and st.speed_cap == null and cap != null
         let air = car.airtime > 0.6
         let crash = car.impact > 9.0
         if (mission.message != null) say(next, mission.message, t, 3.5)
         else if (air) say({*: next, best_air: max(st.best_air, car.airtime)}, "Airtime " ++ numbers.fixed(car.airtime, 1) ++ " s" ++
             (if (car.airtime > st.best_air) "  · new best" else ""), t)
         else if (crash) say(next, "Crunch! Damage " ++ string(int(car.damage) ^ { 0 }) ++ "%", t, 1.8)
+        else if (governed) say(next, "Speed held: the 3D scene is falling behind", t)
         else next
     }
 }
@@ -101,8 +121,17 @@ fn beacon_target(kind, m, t) any^ {
     let active = m.target != null and ((kind == "pickup" and m.phase == "pickup") or (kind == "drop" and m.phase == "deliver"));
     target("beacon-" ++ kind, if (active) [m.target.x, city.CURB, m.target.z] else [0.0, sc.PARKED_Y, 0.0], u.quat(t * 1.6))
 }
+// the rear indicator on the side the front wheels point toward (positive steer turns left) blinks at
+// 1.5 Hz once the wheels pass 30% of the speed's steering lock
+pub fn signal(car, t) any^ => (let blink = t * 1.5 - floor(t * 1.5) < 0.55, let turn = car.steer / v.steer_lock(v.forward_speed(car)),
+    if (not blink) null else if (turn > 0.3) "l" else if (turn < -0.3) "r" else null)
+fn indicator_targets(car, t) {
+    let lit = signal(car, t)
+    let q = u.quat(car.heading, car.pitch, car.roll);
+    [for (k, side in ["l", "r"]) target(sc.INDICATOR_IDS[k], if (lit == side) [car.x, car.y, car.z] else [0.0, sc.PARKED_Y, 0.0], q)]
+}
 pub fn commands(st, eye) => [target("camera-rig", eye, cam.look(eye, st.camera.target)), target("player", [st.car.x, st.car.y, st.car.z], u.quat(st.car.heading, st.car.pitch, st.car.roll)),
-    *wheel_targets(st.car), *[for (a in st.traffic) target(a.id, [a.x, 0.0, a.z], u.quat(a.heading))],
+    *wheel_targets(st.car), *indicator_targets(st.car, st.t), *[for (a in st.traffic) target(a.id, [a.x, 0.0, a.z], u.quat(a.heading))],
     *[for (p in st.peds) target(p.id, [p.x, p.y, p.z], u.quat(p.heading))],
     beacon_target("pickup", st.mission, st.t), beacon_target("drop", st.mission, st.t)]
 
@@ -205,10 +234,12 @@ pub pn sync(st) {
     return {*: st, shown: {*: st.shown, speed: padded(string(int(round(v.speed(st.car) * 3.6)) ^ { 0 }), 3), timer: timer, gear: gear}}
 }
 
-// the native scene clock drives the signals; reading it keeps traffic in step with the lamps
-pub pn scene_time(st, dt) {
+// the native scene clock drives the signals; reading it keeps traffic in step with the lamps. Its
+// debt, scene time not yet simulated, is the lag the speed governor watches.
+pub pn scene_clock(st, dt) {
     let snap = runtime.snapshot(st.handles.scene)
-    return if (snap is map and snap.time is number) float(snap.time) else st.t + dt
+    let live = snap is map and snap.time is number
+    return {t: if (live) float(snap.time) else st.t + dt, lag: if (live and snap.debt is number) float(snap.debt) else 0.0}
 }
 // lighting and headlight edits, made once per change
 pub pn apply_edits(st, edits) {

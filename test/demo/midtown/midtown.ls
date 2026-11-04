@@ -23,13 +23,14 @@ fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target), "midtown")
 pn frame(owner, st, now) {
     let dt = if (st.last == null) 0.0 else u.clamp((now - st.last) / 1000.0, 0.0, 0.05)
     let started = if (PROFILE) clock() else 0
-    let t = present.scene_time(st, dt)
-    let stepped = present.advance(st, dt, t)
+    let scene = present.scene_clock(st, dt)
+    let stepped = present.advance(st, dt, scene.t, scene.lag)
     let simulated = if (PROFILE) clock() else 0
     let next = present.sync(stepped)
     if (PROFILE) {
         print("MIDTOWN_PROFILE frame_ms=" ++ string(if (st.last == null) 0.0 else now - st.last) ++ " step_ms=" ++ string((simulated - started) * 1000) ++
-            " sync_ms=" ++ string((clock() - simulated) * 1000) ++ "\n")
+            " sync_ms=" ++ string((clock() - simulated) * 1000) ++ " debt_ms=" ++ string(scene.lag * 1000) ++
+            " cap=" ++ string(stepped.speed_cap) ++ "\n")
     }
     let token = if (next.paused) 0 else dom.request_frame(owner, "drive_frame")
     return {*: next, last: if (next.paused) null else now, token: token}
@@ -42,7 +43,7 @@ pn begin(owner, st, auto) {
     let started = {*: st, started: true, camera: cam.cut_to(st.camera, st.car, "chase")}
     return if (auto) toggle_auto(started) else started
 }
-fn toggle_auto(st) => if (st.auto != null) {*: st, auto: null} else present.engage_auto(st)
+fn toggle_auto(st) any^ => if (st.auto != null) {*: st, auto: null} else present.engage_auto(st)
 
 // commands from buttons and keys
 pn command(owner, st, act) {
@@ -121,7 +122,7 @@ on click(evt) {
     st = command(owner, st, dom.get_attribute(button, "data-act"))
     pressed_states(owner, st)
     // keys keep driving the car after a button click
-    if ((st.started)^) dom.focus_set(st.handles.scene, false)^
+    if ((st.started)^) dom.focus_set((st.handles.scene)^, false)
     return 'handled'
 }
 on keydown(evt) {
@@ -163,7 +164,7 @@ on pointerdown(evt) {
         return 'prevent-default'
     }
     if (dom.closest(evt.target, "scene3d") == null) { return 'pass' }
-    dom.focus_set(st.handles.scene, false)^
+    dom.focus_set((st.handles.scene)^, false)
     dom.set_pointer_capture(st.handles.scene, evt.pointerId)
     st = {*: st, drag: {pedal: null, x: evt.clientX, y: evt.clientY}}
     return 'prevent-default'
@@ -199,7 +200,7 @@ on blur(evt) {
     return 'pass'
 }
 on closerequest(evt) {
-    if ((st.token > 0 and st.handles != null)^) dom.cancel_frame(st.handles.owner, st.token)^
+    if ((st.token > 0 and st.handles != null)^) dom.cancel_frame((st.handles.owner)^, (st.token)^)
     st = {*: st, token: 0, paused: true}
     return 'pass'
 }
