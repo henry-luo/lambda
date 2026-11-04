@@ -1,5 +1,21 @@
 # Lambda duplicate literal keys
 
+## Remote integration qualification (2026-11-04)
+
+- User requested publication to remote master and deletion of the task worktree.
+- Integrated only duplicate-key commit `1838506bf2` onto remote master
+  `5faef303a`, producing `6111d803b2`; the patch IDs match. The unrelated local
+  parent `64be60daa1` was excluded from publication. No merge conflicts.
+- On that integrated source, `make test-lambda-baseline` passes **8,757/8,757**:
+  6,645 Lambda/runtime tests and 2,112 input tests, with local loopback/media
+  permissions. Interpreter/AUTO/JIT golden checks under forced GC and the
+  strict/relaxed duplicate-key diagnostic checks also pass.
+- S2.3.1v2, S16.8.9v2 and D3.4.1v2 remain the applicable rulings. Diff checks
+  and generated formal-index freshness pass.
+- Evidence is retained outside the disposable worktree, in the main checkout's
+  `temp/map-duplicate-keys-merge/` directory: `lambda-baseline-integrated.log`,
+  `integrated-test-summary.json`, focused logs and the publication checkpoint.
+
 ## Completion record (2026-11-04)
 
 - Implemented the user-approved option 1 in `temp/map-duplicate-keys`, branch
