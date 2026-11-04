@@ -52,7 +52,7 @@ settings restart the exact stroke; completion still records its complete point
 sequence as one transaction. Selection coverage has undo history without dirtying
 document pixels. Panning has no image history. `mark_saved(session,snapshot)` tracks a content
 checkpoint independently of selection/camera state. History reuses
-`lambda.editor.mod_history`, including target restoration (**S9.2.2**).
+`lambda.editor.core.history`, including target restoration (**S9.2.2**).
 
 The optional `lambda.editor.raster.view` module copies rendered pixels into a
 retained native canvas and computes camera/target presentation (**D4.5.2**).

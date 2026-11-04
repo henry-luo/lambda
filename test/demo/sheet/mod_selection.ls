@@ -1,7 +1,7 @@
 // S12.1.3 / D7.2.5: range gestures own model selection; the host supplies pointer transport.
 import dom
 import m: .mod_model
-import capture: ~~.mod_splitter
+import capture: lambda.ui.core.splitter
 
 fn port(owner) => dom.get_element_by_id(dom.root_node(owner),"grid-scroll")
 pub fn cell(target) {

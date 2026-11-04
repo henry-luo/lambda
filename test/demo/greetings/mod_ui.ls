@@ -3,7 +3,7 @@
 // draws state; each control names its command with data-act (and data-arg),
 // which greetings.ls dispatches.
 import controls: lambda.ui.controls
-import icons: ~~.mod_icons
+import icons: lambda.ui.workspace.icons
 import A: .mod_art
 import T: .mod_templates
 import M: .mod_model

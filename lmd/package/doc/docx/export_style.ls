@@ -1,6 +1,6 @@
 // CSS lengths use 96 dpi; Word runs use half-points and paragraphs use twips.
 import c: .export_common
-import inline: lambda.editor.mod_inline_format
+import inline: lambda.editor.core.inline_format
 import colors: lambda.slide.color
 import tokens: lambda.ui.dtna.tokens
 import values: lambda.slide.common

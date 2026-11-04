@@ -6,13 +6,13 @@ import charts: ~~.mod_chart
 import transform: ~~.mod_transform
 import focused: ~~.mod_context
 import files: ~~.mod_io
-import controller: lambda.edit.controller
+import controller: lambda.editor.controller
 import outcome: lambda.dom.edit_result
-import image: lambda.editor.mod_image
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_step
+import image: lambda.editor.image
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
+import lambda.editor.core.step
 
 let empty = model.open_editor(node('doc',[node('p',[text("Keep this text")])]))
 let entries = [for (entry in graphics.catalog where contains(graphics.illustration_kinds,entry.kind)^) entry]

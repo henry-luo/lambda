@@ -1,22 +1,24 @@
 // A native three-pane Notes workspace, using the Finder/Word demo conventions.
 import dom
-import context: ~~.mod_context_menu
-import lambda.editor.mod_editor
-import controller: lambda.edit.controller
+import context: lambda.ui.core.menu
+import focus: lambda.ui.core.focus
+import workspace_dialog: lambda.ui.workspace.dialog
+import lambda.editor.model
+import controller: lambda.editor.controller
 import resources: ~~.mod_resources
 import app: .mod_app
 import model: .mod_model
 import ui: .mod_ui
 import images: .mod_images
 
-let CSS = input(url_resolve(resources.entry_uri()^,"note.css"),'text')^
+let CSS = workspace_dialog.css ++ input(url_resolve(resources.entry_uri()^,"note.css"),'text')^
 
-edit <notes_app> state st:app.initial() {
+edit <notes_app> () any^ state st:app.initial() {
     <body id:"notes",class:if (st.sidebar) "" else "sidebar-hidden",
         ["data-selected"]:st.selected,["data-folder"]:st.folder,["data-dirty"]:string(model.dirty(st)),
         ui.toolbar(st);
         <main class:"workspace",ui.sidebar(st);ui.note_list(st);ui.editor(st)>
-        ui.menus(st);ui.dialog(st)
+        ui.menus(st);ui.dialog(st)^
     >
 }
 on note_image_position(evt) { images.position(st.editor,evt.node or evt.target) }
@@ -97,14 +99,10 @@ on contextmenu(evt) {
 on keydown(evt) {
     let key = lower(string(evt.key))
     if ((st.dialog!=null)^) {
-        if (evt.key=="Tab") {
-            let card = dom.query_selector(dom.root_node(evt.target),".dialog-card")
-            let fields = dom.query_selector_all(card,"input,button")
-            let at = [for (i,field in fields where field==evt.target) i][0] or 0
-            dom.focus_set(fields[(at+(if (evt.shiftKey) len(fields)^-1 else 1))%len(fields)^],false)
-            return 'prevent-default'
-        }
-        let id = if (evt.key=="Escape") "dialog.cancel" else if (evt.key=="Enter") "dialog.confirm" else null
+        let card = dom.query_selector(dom.root_node(evt.target),".dialog-card")
+        let dialog_key = focus.dialog_key(card,evt)^
+        if (dialog_key=='handled') { return 'prevent-default' }
+        let id = if (dialog_key=='dismiss') "dialog.cancel" else if (evt.key=="Enter") "dialog.confirm" else null
         if (id!=null) {
             st = app.command(st,id,{},evt.target)
             app.finish(st,evt.target)^
@@ -112,11 +110,12 @@ on keydown(evt) {
         }
         return 'pass'
     }
-    if ((st.menu=="context" and contains(["ArrowUp","ArrowDown","Home","End"],evt.key))^) {
+    let menu_key = if (st.menu=="context") context.key_action(string(evt.key))^ else 'pass'
+    if ((menu_key=='navigate')^) {
         context.navigate(evt.target,"note-context-menu",evt.key)^
         return 'prevent-default'
     }
-    if ((st.menu=="context" and evt.key=="Tab")^) {
+    if ((menu_key=='dismiss' and evt.key=="Tab")^) {
         st = {*:st,menu:""}
         controller.focus(evt.target)^
         app.finish(st,evt.target,true)^

@@ -18,10 +18,10 @@
 // templates and the full `edit_open` -> `edit_exec` wiring through
 // `lambda.editor.mod_editor` land in S2.2.
 
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_md_schema
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.schema.markdown
+import lambda.editor.core.source_pos
 import dom
 
 let SOURCE_PATH = './test/input/simple.md'

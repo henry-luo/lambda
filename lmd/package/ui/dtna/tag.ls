@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import dom
 import c: lambda.ui.core.component
 import tokens: .tokens
@@ -22,7 +23,7 @@ pub fn descriptor(kind, props, child) element^ {
     else if (color != "" and color != "default" and not c.has(presets,color) and not c.has(semantics,color) and
         not (if (variant(props)^ == "solid") c.css_color(color) else tokens.color(color)))
         raise c.fail(kind,"custom filled/outlined colors require #rrggbb; solid accepts a CSS color")
-    else c.node(kind,props,child,if (checkable) ["disabled","icon","checked","default_checked"]
+    else descriptor.node(kind,props,child,if (checkable) ["disabled","icon","checked","default_checked"]
         else ["disabled","icon","color","status","variant","bordered","closable","close_icon","visible","default_visible","href","target"])^
 }
 fn colors(props) any^ {

@@ -2187,6 +2187,15 @@ test-map: build-radiant-baseline
 	@./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*map_*'
 
 # Shipped dtna source contracts plus native pointer/keyboard interaction.
+.PHONY: check-ui-boundaries check-package-structure
+check-ui-boundaries:
+	@python3 utils/check_ui_boundaries.py
+
+check-package-structure:
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" python3 utils/check_package_structure.py
+
+test-lambda-baseline: check-ui-boundaries check-package-structure
+
 .PHONY: test-ui-dtna
 test-ui-dtna: build
 	@python3 test/ui/dtna_reference/check_catalog.py

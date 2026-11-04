@@ -1,9 +1,9 @@
 import model: ~~.mod_model
 import home: ~~.mod_home
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 // Change Case maps each selected run and keeps the selection on the same characters.
 let runs = model.open_editor(node('doc',[node('p',[text("the open "),text_marked("STUDIO. every",[mark('strong',true)]),text(" week")])]))

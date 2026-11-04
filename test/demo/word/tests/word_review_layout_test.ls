@@ -2,10 +2,10 @@ import model: ~~.mod_model
 import page: ~~.mod_page
 import review: ~~.mod_review
 import files: ~~.mod_io
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let doc = node('doc',[node('p',[text("Hello world")])])
 let editor = model.open_editor(doc)

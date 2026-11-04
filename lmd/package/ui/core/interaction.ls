@@ -1,6 +1,9 @@
 import dom
 import c: lambda.ui.core.component
 
+// Hosts provide modifier flags; applications retain their own key maps and eligibility rules.
+pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
+
 // nested components must not interpret each other's bubbling DOM events.
 pub fn root(node, evt, family = "dtna") {
     let selector = "." ++ family ++ "-" ++ string(c.kind(node))

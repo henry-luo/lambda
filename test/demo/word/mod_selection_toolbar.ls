@@ -1,6 +1,6 @@
 // selection chrome reads native range geometry; formatting stays in model commands (D7.2.5).
 import dom
-import lambda.editor.mod_source_pos
+import lambda.editor.core.source_pos
 
 pub fn available(editor) any^ => editor.selection.kind=='text' and
     editor.selection.anchor!=editor.selection.head and selection_to_string(editor.doc,editor.selection)!=""

@@ -1,9 +1,9 @@
 // Stage-4 drawing schema validation (mod_drawing_schema + mod_doc_schema).
 // Validates Mark drawing trees against the combined doc schema. Outputs are
 // booleans / counts (Lambda's printer collapses adjacent bare strings).
-import lambda.editor.mod_edit_schema
-import lambda.editor.mod_drawing_schema
-import lambda.editor.mod_doc_schema
+import lambda.editor.schema.core
+import lambda.editor.draw.schema
+import lambda.editor.schema.document
 
 let sch = doc_schema
 

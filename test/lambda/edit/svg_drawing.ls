@@ -2,10 +2,10 @@
 // (vibe/radiant/Radiant_Design_Edit_Mode.md §6): the source tree is the model,
 // the prologue is kept as text, edits are Steps on the tree, and the surface
 // projection adds only editor-owned markers.
-import sv: lambda.edit.svg
-import dr: lambda.edit.drawing
-import lambda.edit.model
-import lambda.editor.mod_doc
+import sv: lambda.editor.format.svg
+import dr: lambda.editor.surface.drawing
+import lambda.editor.format.model
+import lambda.editor.core.doc
 
 let source = "<?xml version=\"1.0\"?>
 <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\" [

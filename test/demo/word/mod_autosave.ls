@@ -1,7 +1,7 @@
 // D7.2.5 / S12.1.3: recovery policy stays in the app; the document owns its sleeping task.
 import dom
 import files: .mod_io
-import session: lambda.edit.session
+import session: lambda.editor.session
 
 pub let interval_ms = 120000
 let suffix = ".autosave.word.json"

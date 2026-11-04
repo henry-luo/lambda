@@ -1,5 +1,5 @@
 import model: ~~.mod_model
-import geom: lambda.editor.mod_geom
+import geom: lambda.editor.draw.geometry
 import scene: ~~.mod_scene
 let st = model.initial()
 let ids = ["n1","n2","n3","e1","e2"]

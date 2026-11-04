@@ -2,9 +2,9 @@
 // §8): the parsed head, doctype and attributes are an envelope written back
 // as read; the body's flow content is the editor model; elements outside the
 // profile are retained whole; the round-trip gate guards open and save.
-import html: lambda.edit.html
-import lambda.edit.model
-import lambda.editor.mod_doc
+import html: lambda.editor.format.html
+import lambda.editor.format.model
+import lambda.editor.core.doc
 
 fn load(src) => html.import_text(src) ^ { {error: ^.message} }
 fn written(src) any^ {

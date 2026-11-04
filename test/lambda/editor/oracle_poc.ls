@@ -2,12 +2,12 @@
 // Each case rebuilds a JS-reference fixture's input, runs the equivalent Lambda
 // command(s), and compares the result fingerprint to the JS oracle's output.
 // Every line should print `true`. A `false` marks a Lambda/JS divergence.
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_transaction
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_commands
-import lambda.editor.mod_md_schema
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.transaction
+import lambda.editor.core.source_pos
+import lambda.editor.core.commands
+import lambda.editor.schema.markdown
 
 fn next_state(s, tx) =>
   if (tx == null) { s }

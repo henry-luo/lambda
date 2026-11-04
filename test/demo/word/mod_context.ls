@@ -1,10 +1,10 @@
 // Focused-item actions reuse the ribbon's commands and source selection (D7.2.5).
 import dom
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
-import adapter: lambda.editor.mod_dom_adapter
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
+import adapter: lambda.editor.dom.adapter
 import model: .mod_model
 import insert: .mod_insert
 import review: .mod_review

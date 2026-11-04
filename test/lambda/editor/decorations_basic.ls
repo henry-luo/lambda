@@ -1,9 +1,9 @@
 // decorations_basic.ls — exercise the decoration set (Phase R5)
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_transaction
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_decorations
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.transaction
+import lambda.editor.core.source_pos
+import lambda.editor.core.decorations
 
 let s0 = deco_empty()
 "empty count:"; len(s0.items)

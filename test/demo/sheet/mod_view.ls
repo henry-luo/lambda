@@ -1,8 +1,13 @@
 import m: .mod_model
 import f: .mod_formula
-import ribbon: ~~.mod_ribbon
-import icons: ~~.word.mod_ribbon_icons
-import text_format: ~~.mod_text_format
+import ribbon: lambda.ui.workspace.ribbon
+import icons: lambda.ui.workspace.ribbon_icons
+import text_format: lambda.ui.workspace.text_format
+import workspace_theme: lambda.ui.workspace.tokens
+import workspace_dialog: lambda.ui.workspace.dialog
+
+let OFFICE_THEME = workspace_theme.variables({primary:"#217346",text:"#1d1d1f",text_secondary:"#6e6e73",
+    border:"#dce3dd",background:"#f5f7f5",surface:"#ffffff",font_family:"-apple-system, 'Helvetica Neue', Arial, sans-serif"})^
 
 pub fn button(id,label,graphic=null,pressed=false,disabled=false,cls="") => <button id:id,type:"button",class:"tool " ++ cls,
     'data-action':id,title:label,'aria-label':label,'aria-pressed':string(pressed),*:if (disabled) {disabled:""} else {},
@@ -116,21 +121,21 @@ fn resize_handle(st,axis,index) {
         'aria-orientation':if (axis=="column") "vertical" else "horizontal",
         'aria-valuemin':string(limits.min),'aria-valuemax':string(limits.max),'aria-valuenow':string(m.used_dimension(st,axis,index))>
 }
-pub fn dialog(st) => if (st.dialog=="") null else <div class:"dialog-backdrop",
-    <section id:"file-dialog",role:"dialog",'aria-modal':"true",'aria-labelledby':"dialog-title",
-        <h2 id:"dialog-title",{open:"Open workbook",save:"Save workbook",export:"Export CSV",rename:"Rename sheet",replace:"Unsaved changes"}[st.dialog]>
+pub fn dialog(st) any^ => if (st.dialog=="") null else workspace_dialog.modal(
+    {id:"file-dialog",labelled_by:"dialog-title",backdrop_class:"dialog-backdrop"},[
+        <h2 id:"dialog-title",{open:"Open workbook",save:"Save workbook",export:"Export CSV",rename:"Rename sheet",replace:"Unsaved changes"}[st.dialog]>,
         if (st.dialog=="replace") <p "Save your workbook before replacing it?"> else
             <label <span if (st.dialog=="rename") "Sheet name" else "File path">;
-                <input id:"file-path",value:if (st.dialog=="rename") m.current(st).title else st.dialog_path,'aria-label':if (st.dialog=="rename") "Sheet name" else "File path",placeholder:if (st.dialog=="export") "budget.csv" else "workbook.sheet.json">>;
-        <p class:"dialog-hint",if (st.dialog=="export") "Exports the active sheet’s calculated values as CSV." else if (st.dialog=="rename") "Give this worksheet a short, descriptive name." else if (st.dialog=="replace") "Your current edits have not been saved." else "Editable .sheet.json files preserve every sheet, formula and format.">
-        if (st.error!=null) <p class:"dialog-error",role:"alert",st.error> else null;
+                <input id:"file-path",value:if (st.dialog=="rename") m.current(st).title else st.dialog_path,'aria-label':if (st.dialog=="rename") "Sheet name" else "File path",placeholder:if (st.dialog=="export") "budget.csv" else "workbook.sheet.json">>,
+        <p class:"dialog-hint",if (st.dialog=="export") "Exports the active sheet’s calculated values as CSV." else if (st.dialog=="rename") "Give this worksheet a short, descriptive name." else if (st.dialog=="replace") "Your current edits have not been saved." else "Editable .sheet.json files preserve every sheet, formula and format.">,
+        if (st.error!=null) <p class:"dialog-error",role:"alert",st.error> else null,
         <div class:"dialog-actions",button("dialog-cancel","Cancel");
             if (st.dialog=="replace") button("dialog-discard","Discard changes") else null;
-            button("dialog-confirm",if (st.dialog=="replace") "Save first" else if (st.dialog=="open") "Open" else if (st.dialog=="rename") "Rename" else "Save",null,false,false,"primary")>>>
-pub fn workspace(st) {
+            button("dialog-confirm",if (st.dialog=="replace") "Save first" else if (st.dialog=="open") "Open" else if (st.dialog=="rename") "Rename" else "Save",null,false,false,"primary")>])^
+pub fn workspace(st) any^ {
     let dirty=st.book!=st.saved
     let stats=m.stats(st);
-    <body id:"sheet",'data-dirty':string(dirty),'data-cell':f.address(st.row,st.col),'data-sheets':string(len(st.book.sheets)),'data-tab':st.tab,
+    <body id:"sheet",class:"workspace-office",style:OFFICE_THEME,'data-dirty':string(dirty),'data-cell':f.address(st.row,st.col),'data-sheets':string(len(st.book.sheets)),'data-tab':st.tab,
         'data-selecting':string(st.selection_drag!=null),'data-resizing':if (st.resize_drag==null) "" else st.resize_drag.axis,
         <header class:"titlebar",
             <div class:"brand",<span class:"brand-mark",icons.icon("table",30)> <span "Sheet">>
@@ -158,5 +163,5 @@ pub fn workspace(st) {
             <div class:"status-right",<span id:"selection-stats","Average: " ++ formatted(stats.average,{}) ++ "    Count: " ++ string(stats.count) ++ "    Sum: " ++ formatted(stats.sum,{})>
                 <span class:"status-divider">;button("status-zoom-out","Zoom out","minus",false,false,"icon-only");
                 <span id:"zoom-label",string(round(st.zoom*100)) ++ "%">;button("status-zoom-in","Zoom in","plus",false,false,"icon-only")>>
-        dialog(st)>
+        dialog(st)^>
 }

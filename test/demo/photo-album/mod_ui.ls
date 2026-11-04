@@ -6,7 +6,7 @@ import CU: .mod_collage_ui
 import BU: .mod_book_ui
 import P: .mod_places
 
-import icons: ~~.mod_icons
+import icons: lambda.ui.workspace.icons
 pub let icon = icons.icon
 
 fn make(id, action, title, graphic) => <button id:id,type:"button",class:"pill secondary icon-only",'data-action':action,title:title,'aria-label':title,(icon(graphic, 18))>

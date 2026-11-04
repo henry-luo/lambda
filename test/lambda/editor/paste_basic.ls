@@ -1,10 +1,10 @@
 // paste_basic.ls — schema coercion for paste/drop fragments (Phase R5)
-import lambda.editor.mod_doc
-import lambda.editor.mod_md_schema
-import lambda.editor.mod_paste
-import lambda.editor.mod_commands
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_html_paste
+import lambda.editor.core.doc
+import lambda.editor.schema.markdown
+import lambda.editor.core.paste
+import lambda.editor.core.commands
+import lambda.editor.core.source_pos
+import lambda.editor.core.html_paste
 
 // ---------------------------------------------------------------------------
 // 1. Drop unknown tag entirely

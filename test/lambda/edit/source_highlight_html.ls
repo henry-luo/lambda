@@ -1,8 +1,8 @@
 // HTML source highlighting (vibe/radiant/Radiant_Design_Source_Editor.md
 // CED15v2, CED16v3, CED18): the tokenizer's lexical spans become runs, and a
 // window parse agrees with a full parse, with or without the restart cache.
-import buf: lambda.edit.source_buffer
-import syn: lambda.edit.source_highlight
+import buf: lambda.editor.surface.source_buffer
+import syn: lambda.editor.surface.source_highlight
 
 fn show(runs) => [for (r in runs or []) string(r.s) ++ "-" ++ string(r.e) ++ ":" ++ r.c]
 

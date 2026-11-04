@@ -1,7 +1,7 @@
 // S12.1.3: the tank and all editor operations are values, independent of the DOM.
 import camera: lambda.scene3d.camera
 import numeric: lambda.scene3d.transform
-import history: lambda.editor.mod_history
+import history: lambda.editor.core.history
 
 pub let catalog = [
     {kind:"tetra",name:"Neon tetra",category:"fish",color:"#3dd9e8",hint:"A flash of blue and red",half:[1.0,0.45,1.0],pick:[0.85,0.33,0.3]},

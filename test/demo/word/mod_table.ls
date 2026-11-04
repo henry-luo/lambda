@@ -1,14 +1,14 @@
 // table selections stay in source coordinates; chrome and the native caret are projections (D7.2.5).
 import dom
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import lambda.editor.mod_editor
-import commands: lambda.editor.mod_commands
-import format: lambda.editor.mod_inline_format
-import controller: lambda.edit.controller
-import html: lambda.edit.html
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import lambda.editor.model
+import commands: lambda.editor.core.commands
+import format: lambda.editor.core.inline_format
+import controller: lambda.editor.controller
+import html: lambda.editor.format.html
 import outcome: lambda.dom.edit_result
 import tree: lambda.dom.tree
 import colors: lambda.ui.core.component

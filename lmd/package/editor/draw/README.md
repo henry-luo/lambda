@@ -147,8 +147,8 @@ The initial editor supports one page and one editable layer, declarative
 polygon descriptors, plain multiline labels, and line/cubic custom edges.
 Callback registries, richer vertex content, persistent groups, obstacle
 avoidance, automatic graph layout, and mxGraph/draw.io XML interchange remain
-extensions. Arbitrary SVG source editing stays with `lambda.edit.svg` and
-`lambda.edit.drawing`; it retains its source-preserving contract.
+extensions. Arbitrary SVG source editing stays with `lambda.editor.format.svg` and
+`lambda.editor.surface.drawing`; it retains its source-preserving contract.
 
 ## Verification
 

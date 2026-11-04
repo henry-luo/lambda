@@ -1,6 +1,6 @@
 // S9.1.2 / S12.1.3: tone-curve drafts are plain data until an effect command applies them.
 import model: .model
-import sequence: lambda.editor.mod_doc
+import sequence: lambda.editor.core.doc
 import img: lambda.image
 
 pub let channels = ["rgb","r","g","b"]

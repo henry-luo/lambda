@@ -1,6 +1,6 @@
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let doc = node('doc',[node('p',[text("Keep this paragraph")]),node('p',[])])
 let editor = edit_open(doc,editor_schemas.html5_subset,text_selection(pos([],0),pos([],0)))

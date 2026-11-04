@@ -1,8 +1,8 @@
 // DOM ↔ source-position bridge (Radiant integration, step 1)
-import lambda.editor.mod_doc
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_dom_bridge
-import lambda.editor.mod_md_schema
+import lambda.editor.core.doc
+import lambda.editor.core.source_pos
+import lambda.editor.dom.bridge
+import lambda.editor.schema.markdown
 
 let p1 = node('paragraph', [text("Hello, "), text("world.")])
 let p2 = node('paragraph', [text("Second line.")])

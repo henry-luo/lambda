@@ -1,0 +1,25 @@
+{
+  "name": "Workspace font picker instances use independent IDs and state",
+  "html": "test/ui/workspace_font_instances.ls",
+  "viewport": {"width": 900, "height": 500},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#first-family-trigger"}, "attribute": "aria-controls", "equals": "first-font-list"},
+    {"type": "assert_attribute", "target": {"selector": "#second-family-trigger"}, "attribute": "aria-controls", "equals": "second-font-list"},
+    {"type": "click", "target": {"selector": "#first-family-trigger"}},
+    {"type": "assert_focus", "target": {"selector": "#first-font-search"}},
+    {"type": "assert_attribute", "target": {"selector": "#first-font-picker"}, "attribute": "data-open", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#second-font-picker"}, "attribute": "data-open", "equals": "false"},
+    {"type": "type", "target": {"selector": "#first-font-search"}, "text": "Arial", "clear": true},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_value", "target": {"selector": "#first-family"}, "equals": "Arial"},
+    {"type": "assert_value", "target": {"selector": "#second-family"}, "equals": "Georgia"},
+    {"type": "click", "target": {"selector": "#second-family-trigger"}},
+    {"type": "assert_focus", "target": {"selector": "#second-font-search"}},
+    {"type": "assert_attribute", "target": {"selector": "#first-font-picker"}, "attribute": "data-open", "equals": "false"},
+    {"type": "assert_attribute", "target": {"selector": "#second-font-picker"}, "attribute": "data-open", "equals": "true"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_focus", "target": {"selector": "#second-family-trigger"}},
+    {"type": "assert_value", "target": {"selector": "#first-family"}, "equals": "Arial"},
+    {"type": "assert_value", "target": {"selector": "#second-family"}, "equals": "Georgia"}
+  ]
+}

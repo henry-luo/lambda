@@ -1,7 +1,7 @@
 // Stage-4 connector routing (mod_router).
-import lambda.editor.mod_doc
-import lambda.editor.mod_geom
-import lambda.editor.mod_router
+import lambda.editor.core.doc
+import lambda.editor.draw.geometry
+import lambda.editor.draw.routing
 
 let empty_doc = node_attrs('drawing', [], [])
 

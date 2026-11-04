@@ -1,12 +1,12 @@
 // Generated objects share image ownership, selection, and history (S1.4, D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_transaction
-import commands: lambda.editor.mod_commands
-import image: lambda.editor.mod_image
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.transaction
+import commands: lambda.editor.core.commands
+import image: lambda.editor.image
 import media: lambda.doc.media
-import inline_format: lambda.editor.mod_inline_format
-import geom: lambda.editor.draw.geometry
+import inline_format: lambda.editor.core.inline_format
+import dimensions: lambda.editor.graphics.dimensions
 
 pub fn settings(n,key,defaults=null) {
     let stored = parse(attrs_get(n.attrs,symbol(key)) or "null",'json') ^ { null }
@@ -14,9 +14,7 @@ pub fn settings(n,key,defaults=null) {
     if (not (stored is map)) null else if (defaults==null) stored else {*:defaults,*:stored}
 }
 pub fn source(graphic) string^ => media.data_uri(binary(format(graphic,'xml')^),"image/svg+xml")^
-pub fn dimensions_valid(p) any^ => geom.finite_number(p.width) and p.width>=16 and p.width<=650 and
-    geom.finite_number(p.height) and p.height>=16 and p.height<=2000 and
-    geom.finite_number(p.rotation) and p.rotation>=-180 and p.rotation<=180
+pub fn dimensions_valid(p) any^ => dimensions.valid(p,dimensions.office)^
 pub fn transform_style(n,angle=null,layout=null) {
     let rotation = if (angle==null) (float(attrs_get(n.attrs,'data-word-rotation')) ^ {0}) or 0 else angle
     let p = layout or settings(n,"data-word-layout")

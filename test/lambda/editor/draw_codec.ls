@@ -1,6 +1,6 @@
 import draw: lambda.editor.draw
 import model: lambda.editor.draw.model
-import step: lambda.editor.mod_step
+import step: lambda.editor.core.step
 let a = draw.vertex("a","rect",{x:80.0,y:100.0,width:120.0,height:80.0},{label:"A",data:{title:"Metadata",enabled:true}})^
 let st = draw.exec(draw.open_session(draw.new_document())^,{kind:'insert',objects:[a]})^;
 draw.decode(draw.encode(st.doc)^)^ == st.doc

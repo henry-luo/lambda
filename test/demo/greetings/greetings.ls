@@ -5,7 +5,7 @@
 import dom
 import radiant
 import resources: ~~.mod_resources
-import updates: ~~.mod_publish
+import updates: lambda.ui.core.publish
 import D: ~~.mod_document
 import A: .mod_art
 import T: .mod_templates

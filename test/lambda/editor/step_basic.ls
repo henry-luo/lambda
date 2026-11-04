@@ -1,6 +1,6 @@
 // Step constructors and basic apply (Phase R3)
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.step
 
 let d = node('doc', [
   node('paragraph', [text("Hello, world.")]),

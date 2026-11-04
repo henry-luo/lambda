@@ -2,7 +2,7 @@
 import dom
 import m: .mod_model
 import f: .mod_formula
-import capture: ~~.mod_splitter
+import capture: lambda.ui.core.splitter
 
 pub fn control(target) => dom.closest(target,"[data-sheet-resize]")
 fn port(owner) => dom.get_element_by_id(dom.root_node(owner),"grid-scroll")

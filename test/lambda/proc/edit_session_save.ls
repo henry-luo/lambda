@@ -2,9 +2,9 @@
 // external change or an existing Save As target stops the write until the
 // caller confirms, unusable targets are refused, and the saved checkpoint
 // moves only after a write succeeded.
-import md: lambda.edit.markdown
-import sess: lambda.edit.session
-import lambda.editor.mod_doc
+import md: lambda.editor.format.markdown
+import sess: lambda.editor.session
+import lambda.editor.core.doc
 
 pn reset(path, text) {
   let written: any^ = output(text, path, {format: 'text'})

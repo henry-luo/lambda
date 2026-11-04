@@ -1,10 +1,10 @@
 import model: ~~.mod_model
 import storage: ~~.mod_io
 import sample: ~~.mod_sample
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
 import media: lambda.doc.media
 
 let src = media.data_uri(input("test/ui/note/fixtures/clipboard.png",'binary')^,"image/png")^

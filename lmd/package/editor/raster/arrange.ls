@@ -1,7 +1,7 @@
 // S9.2.2: selected roots move once through the same checked snapshot history as other edits.
 import img: lambda.image
 import model: .model
-import alignment: lambda.editor.mod_alignment
+import alignment: lambda.editor.core.alignment
 
 pub fn run_command(st,command) any^ {
     let rows = model.unlocked_roots(st)^

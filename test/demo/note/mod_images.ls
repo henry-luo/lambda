@@ -1,8 +1,8 @@
 // Image chrome stays outside the source projection; dragging previews geometry until one model commit.
 import dom
-import controller: lambda.edit.controller
+import controller: lambda.editor.controller
 import model: .mod_model
-import image: lambda.editor.mod_image
+import image: lambda.editor.image
 
 pub pn image_element(editor,node,path=null) {
     return image.image_element(editor,controller.surface(node),path)

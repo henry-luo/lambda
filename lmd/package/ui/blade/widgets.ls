@@ -1,6 +1,6 @@
 import c: lambda.ui.core.component
 import interaction: lambda.ui.core.interaction
-import shared: lambda.ui.core.catalog
+import shared: lambda.ui.dtna.catalog
 import art: .art
 
 pub let kinds = ["panel","meter","item-slot","ability","rpg-icon"]

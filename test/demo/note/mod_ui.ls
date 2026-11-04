@@ -1,12 +1,14 @@
+import source_selection: lambda.editor.core.source_pos
 // Native controls and the shared model surface retain their own input policy.
 import dom
-import lambda.editor.mod_editor
+import lambda.editor.model
 import icons: lambda.ui.dtna.icons
 import controls: lambda.ui.controls
-import rich: lambda.edit.rich_text
+import rich: lambda.editor.surface.rich_text
 import model: .mod_model
 import images: .mod_images
-import context: ~~.mod_context_menu
+import context: lambda.ui.core.menu
+import workspace_dialog: lambda.ui.workspace.dialog
 
 pub fn icon(name) any^ => icons.render({name:name,width:19,height:19})^
 pub pn task_hit(st,evt) {
@@ -140,7 +142,7 @@ fn color_picker(st) => <div id:"color-picker",class:"popover color-popover",role
 
 fn context_menu(st) any^ {
     let n = model.current(st)
-    let selected = context.has_selection(st.editor.selection)
+    let selected = source_selection.has_selection(st.editor.selection)
     let disabled = n==null or n.deleted;
     context.frame("note-context-menu","notes",<div id:"note-context-menu",class:"popover context-popover",role:"menu",["aria-label"]:if (st.context.kind=="text") "Text actions" else "Note actions",
         style:"left:" ++ string(st.context.x) ++ "px;top:" ++ string(st.context.y) ++ "px",
@@ -208,18 +210,17 @@ on render(evt) {
     }
     return 'pass'
 }
-pub fn dialog(st) {
+pub fn dialog(st) any^ {
     let d = st.dialog;
-    if (d==null) null else apply(<note_dialog rendered:<div class:"dialog-layer",
-        <div class:"dialog-card",role:"dialog",["aria-modal"]:"true",["aria-label"]:d.title,
-            <div class:"dialog-icon",icon(if (d.kind=="folder") "folder-add" else "file-text")>
-            <h2 d.title><p d.message or "">
+    if (d==null) null else apply(<note_dialog rendered:workspace_dialog.modal(
+        {id:"note-dialog",label:d.title,backdrop_class:"dialog-layer",class:"dialog-card"},[
+            <div class:"dialog-icon",icon(if (d.kind=="folder") "folder-add" else "file-text")>,
+            <h2 d.title>,<p d.message or "">,
             if (contains(["folder","save","open"],d.kind)) apply(<control.input id:"dialog-value",label:if (d.kind=="folder") "Folder name" else "Notebook path",
-                value:d.value or "",placeholder:if (d.kind=="folder") "Folder name" else "path/to/Notebook.note.json",on_change:{action:"dialog.value"}>) else null;
-            if (d.error!="" and not (d.error is null)) <p class:"dialog-error",role:"alert",d.error> else null;
+                value:d.value or "",placeholder:if (d.kind=="folder") "Folder name" else "path/to/Notebook.note.json",on_change:{action:"dialog.value"}>) else null,
+            if (d.error!="" and not (d.error is null)) <p class:"dialog-error",role:"alert",d.error> else null,
             <div class:"dialog-buttons",button("dialog-cancel","dialog.cancel","Cancel",null,{},false,false,"dialog-button");
                 if (d.kind=="unsaved") button("dialog-discard","dialog.discard","Don't Save",null,{},false,false,"dialog-button") else null;
                 button("dialog-confirm","dialog.confirm",d.confirm or "Save",null,{},false,false,"dialog-button primary")>
-        >
-    >>)
+        ])^>)
 }

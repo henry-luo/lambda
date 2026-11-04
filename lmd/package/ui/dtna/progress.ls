@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import icons: .icons
 import collection: lambda.ui.core.collection
@@ -49,7 +50,7 @@ pub fn descriptor(props) element^ {
         let success = if (props.success == null) true else validate_success(props.success)^,
         // reject callback failures before apply can embed an error in presentation content.
         let rounded = completed_steps(props,count,clamp_percent(c.option(props,"percent",0)))^,
-        c.node('progress',props,null,["type","percent","show_info","status","size","stroke_width","stroke_linecap",
+        descriptor.node('progress',props,null,["type","percent","show_info","status","size","stroke_width","stroke_linecap",
             "stroke_color","rail_color","success","gap_degree","gap_placement","steps","dimension","format","rounding"])^
     )
 }

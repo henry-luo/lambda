@@ -1,8 +1,8 @@
 import views: ~~.mod_view
 import model: ~~.mod_model
 import page: ~~.mod_page
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let base = model.initial()
 let selected = edit_set_selection(base,text_selection(pos([0,0],1),pos([0,0],4)))

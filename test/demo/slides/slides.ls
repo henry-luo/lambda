@@ -4,18 +4,21 @@ import slide: lambda.slide
 import slide_html: lambda.slide.html
 import pptx_view: lambda.doc.pptx.view
 import resources: ~~.mod_resources
+import ribbon_style: lambda.ui.workspace.ribbon_style
 import m: .mod_model
 import v: .mod_view
 import app: .mod_app
-import menus: ~~.mod_context_menu
+import menus: lambda.ui.core.menu
+import focus: lambda.ui.core.focus
+import interaction: lambda.ui.core.interaction
 import ins: .mod_insert
 import insert_data: .mod_insert_data
-import splitter: ~~.mod_splitter
+import splitter: lambda.ui.core.splitter
 import inline_text: .mod_inline
 import slide_drag: .mod_slide_drag
-import spelling: lambda.edit.spelling
-import font_picker: ~~.word.mod_font_picker
-import ribbon_overflow: ~~.mod_ribbon_overflow
+import spelling: lambda.editor.spelling
+import font_picker: lambda.ui.workspace.font_picker
+import ribbon_overflow: lambda.ui.workspace.ribbon_overflow
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let DEFAULT_DECK = input(url_resolve(BASE,"northstar.slides"),'slides')^
@@ -407,7 +410,7 @@ on keydown(evt) {
         return font_picker.trigger_key(owner,id,evt,dom.has_attribute(font_trigger,"disabled"))
     }
     let key = lower(evt.key)
-    let modifier = evt.metaKey or evt.ctrlKey
+    let modifier = interaction.primary(evt)
     if ((session.slide_click==true)^) { session = {*:session,slide_click:false} }
     if ((session.slide_drag!=null)^) {
         if (key=="escape") { session = app.finish_slide_drag(owner,session,true) }
@@ -429,22 +432,19 @@ on keydown(evt) {
             return 'prevent-default'
         }
         if (key == "tab") {
-            let controls = dom.query_selector_all(app.node(owner,"insert-dialog"),"input,select,textarea,button")
-            let found = [for (i,control in controls where dom.same_node(control,evt.target)) i]
-            let index = if (len(found)>0) found[0] else 0;
-            dom.focus_set(controls[(index+(if (evt.shiftKey) len(controls)^-1 else 1))%len(controls)^],false)
-            return 'prevent-default'
+            return if (focus.trap(app.node(owner,"insert-dialog"),evt)^) 'prevent-default' else 'pass'
         }
         return 'pass'
     }
     if ((session.menu != null and session.menu != "")^) {
-        if (key == "escape" or key == "tab") {
+        let menu_key = menus.key_action(string(evt.key))^
+        if (menu_key == 'dismiss') {
             let trigger = session.menu
             session = app.publish(owner,{*:session,menu:""})
             app.restore_menu_focus(owner,session,trigger)^
             return if (key == "escape") 'prevent-default' else 'pass'
         }
-        if (dom.closest(evt.target,"#home-menu") != null and evt.key in ["ArrowUp","ArrowDown","Home","End"]) {
+        if (dom.closest(evt.target,"#home-menu") != null and menu_key == 'navigate') {
             menus.navigate(evt.target,"home-menu",evt.key)^
             return 'prevent-default'
         }
@@ -592,7 +592,7 @@ on load(evt) {
     return 'handled'
 }
 <html lang:"en",<head <meta charset:"UTF-8"><title "Slides — create and present">
-    <base href:BASE><style slide_html.css ++ spelling.css ++ font_picker.css ++ pptx_view.css><link rel:"stylesheet",href:url_resolve(BASE,"../ribbon.css")><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
+    <base href:BASE><style slide_html.css ++ spelling.css ++ font_picker.css ++ pptx_view.css ++ ribbon_style.css><link rel:"stylesheet",href:url_resolve(BASE,"slides.css")>>
     apply(<slides_document rendered:<body apply(<slide_editor rendered:v.shell(apply(<editor_show>),inline_text.widget())>);
         font_picker.widget("slides-editor")>>)
 >

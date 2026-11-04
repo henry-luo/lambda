@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import dom
 import c: lambda.ui.core.component
 import collection: lambda.ui.core.collection
@@ -14,7 +15,7 @@ pub fn choice(kind, props) element^ {
     else if (kind == 'segmented' and props.name != null and not (props.name is string)) raise c.fail(kind,"name must be a string")
     else if (c.has(props,'value') and not any([for (item in ((collection.enabled(props.items)) ^ { [] })) item.key == props.value])) raise c.fail(kind,"value must identify an enabled item")
     else if (c.has(props,'default_value') and not any([for (item in ((collection.enabled(props.items)) ^ { [] })) item.key == props.default_value])) raise c.fail(kind,"default_value must identify an enabled item")
-    else c.node(kind, props, null, ["items", "value", "default_value", "orientation", "disabled",*(if (kind == 'tabs') ["keep_mounted"] else if (kind == 'segmented') ["size","block","shape","name"] else [])])^
+    else descriptor.node(kind, props, null, ["items", "value", "default_value", "orientation", "disabled",*(if (kind == 'tabs') ["keep_mounted"] else if (kind == 'segmented') ["size","block","shape","name"] else [])])^
 }
 fn selected(node, current) any^ => c.option(c.props(node), "value", current)
 fn choice_id(node, index) => c.props(node).id ++ "-item-" ++ string(index)
@@ -98,7 +99,7 @@ pub fn pagination(props) element^ {
         let simple = if (props.simple is map) (c.properties(props.simple,["read_only"],"pagination.simple")^,
             c.boolean_props(props.simple,["read_only"],"pagination.simple")^) else true,
         let summary = pagination_summary(props,min(collection.page_count(total,size),current),size)^,
-        c.node('pagination',props,null,["total","page_size","default_page_size","current","default_current","disabled","size",
+        descriptor.node('pagination',props,null,["total","page_size","default_page_size","current","default_current","disabled","size",
             "show_size_changer","show_quick_jumper","page_size_options","locale","simple","show_total","hide_on_single_page"])^
     )
 }
@@ -205,7 +206,7 @@ on keydown(evt) {
 }
 
 pub fn steps(props) element^ {
-    let node = c.node('steps',props,null,["items","current","default_current","direction","responsive","clickable","disabled","size","status"])^
+    let node = descriptor.node('steps',props,null,["items","current","default_current","direction","responsive","clickable","disabled","size","status"])^
     let items = c.option(props,"items",[])
     let flags = c.boolean_props(props,["clickable","responsive"],"steps")^
     let current = c.option(props,"current",c.option(props,"default_current",0));

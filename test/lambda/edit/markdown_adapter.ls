@@ -1,9 +1,9 @@
 // lambda.edit Markdown adapter (vibe/radiant/Radiant_Design_Edit_Mode.md §5, §8):
 // import onto the editor model, export back through the Markdown formatter,
 // and the round-trip gate the loader and Save both apply.
-import md: lambda.edit.markdown
-import lambda.edit.model
-import lambda.editor.mod_doc
+import md: lambda.editor.format.markdown
+import lambda.editor.format.model
+import lambda.editor.core.doc
 
 let source = "---
 title: Adapter sample

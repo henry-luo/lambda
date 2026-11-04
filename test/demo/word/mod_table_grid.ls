@@ -1,8 +1,8 @@
 // visual coordinates include spans; source paths still own every cell (D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import commands: lambda.editor.mod_commands
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import commands: lambda.editor.core.commands
 
 pub fn rows(doc,path) any^ => [for (entry in ((descendants(node_at(doc,path),path)) ^ { [] }) where ((entry.node.tag=='tr' and
     commands.ancestor_tag(doc,entry.path,'table')==path) ^ { false })) {*:entry,owner:entry.path,group:parent_path(entry.path)}]

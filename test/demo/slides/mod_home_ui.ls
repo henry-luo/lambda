@@ -1,9 +1,9 @@
 // D7.2.5: Word's ribbon contours, typography, presets and group layout are shared.
-import ribbon: ~~.mod_ribbon
-import icons: ~~.word.mod_ribbon_icons
-import text_format: ~~.mod_text_format
-import presets: ~~.mod_shape_presets
-import font_picker: ~~.word.mod_font_picker
+import ribbon: lambda.ui.workspace.ribbon
+import icons: lambda.ui.workspace.ribbon_icons
+import text_format: lambda.ui.workspace.text_format
+import presets: lambda.ui.workspace.shape_presets
+import font_picker: lambda.ui.workspace.font_picker
 
 fn tool(id,label,graphic,cls="",action=null) any^ => ribbon.tool(id,label,graphic,cls,action)
 fn menu(id,label,graphic,cls="") any^ => ribbon.menu(id,label,graphic,cls,id in ["font-color","text-highlight","shape-fill","shape-outline"])

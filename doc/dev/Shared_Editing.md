@@ -1,11 +1,11 @@
 # Shared editor coordination and control bindings
 
-Verified against the tree: 2026-10-23.
+> **Last verified against tree:** 2026-11-04
 
-`lambda.edit.controller` coordinates a model editor with its native surface.
+`lambda.editor.controller` coordinates a model editor with its native surface.
 `lambda.ui.controls` provides style-neutral native controls with declarative
 change actions. The Word demo and the general edit shell use the controller;
-the style-neutral, dtna, bold, and wired controls share synchronization policy.
+the style-neutral, workspace, dtna, bold, and wired controls share synchronization policy.
 
 Template state remains the application-owned source of truth. Projection is
 pure, and handlers assign the next state (**S12.1.3**, **S1.4**). Editing policy
@@ -14,7 +14,7 @@ uses the existing Lambda editor model and DOM mechanisms (**D7.2.5**).
 ## Editor controller
 
 ```lambda
-import controller: lambda.edit.controller
+import controller: lambda.editor.controller
 ```
 
 | Operation | Colour | Behavior |

@@ -1,8 +1,8 @@
 // lambda.edit source highlighting (vibe/radiant/Radiant_Design_Source_Editor.md
 // CED14v2, CED15, CED16v2): parser spans become per-line color runs, an edit
 // maps runs provisionally, and the restart cache realigns after chunk rebuilds.
-import buf: lambda.edit.source_buffer
-import hl: lambda.edit.source_highlight
+import buf: lambda.editor.surface.source_buffer
+import hl: lambda.editor.surface.source_highlight
 
 let md = "---\ntitle: T\n---\n# Title *here*\n\nSome **bold** and `code` with a [link](http://x.y).\n\n```js\nlet x = 1;\n```\n\n- item **b**\n- [ ] task\n\n> quote\n\n| a | b |\n|---|---|\n\n[ref]: http://r.s\n"
 let b = buf.from_text(md)

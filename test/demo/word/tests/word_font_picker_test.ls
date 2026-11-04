@@ -1,4 +1,4 @@
-import picker: ~~.mod_font_picker
+import picker: lambda.ui.workspace.font_picker
 let fonts = [{value:"Arial",label:"Arial",key:"arial"},{value:"Georgia",label:"Georgia",key:"georgia"},
     {value:"思源宋体",label:"思源宋体",key:"思源宋体"}];
 [

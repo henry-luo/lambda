@@ -1,8 +1,8 @@
 // Mark preserves symbol tags and exact whitespace inside the JSON notebook.
 // Reads parse data only; the shared rich surface admits no imported handlers.
-import lambda.editor.mod_doc
-import html: lambda.edit.html
-import session: lambda.edit.session
+import lambda.editor.core.doc
+import html: lambda.editor.format.html
+import session: lambda.editor.session
 import model: .mod_model
 import component: lambda.ui.core.component
 

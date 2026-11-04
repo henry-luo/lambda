@@ -1,14 +1,14 @@
 // S1.4 / S12.1.3: document edits are values; the native shell owns interaction.
-import doc: lambda.editor.mod_doc
-import step: lambda.editor.mod_step
-import tx: lambda.editor.mod_transaction
-import history: lambda.editor.mod_history
+import doc: lambda.editor.core.doc
+import step: lambda.editor.core.step
+import tx: lambda.editor.core.transaction
+import history: lambda.editor.core.history
 import commands: lambda.editor.draw.commands
 import geom: lambda.editor.draw.geometry
 import router: lambda.editor.draw.routing
 import shapes: .shapes
 import paths: .path
-import alignment: lambda.editor.mod_alignment
+import alignment: lambda.editor.core.alignment
 
 pub let width = 1120.0
 pub let height = 760.0

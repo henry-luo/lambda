@@ -1,5 +1,5 @@
 import picker: ~~.mod_file_picker
-import browser: ~~.~~.finder.mod_model
+import browser: lambda.ui.workspace.file_browser
 import storage: ~~.mod_io
 
 let folder = browser.absolute("test/demo/word/tests",sys.proc.self.cwd#)

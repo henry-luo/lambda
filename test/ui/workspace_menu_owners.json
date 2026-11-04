@@ -1,0 +1,20 @@
+{
+  "name": "Shared menus clamp to their owner and navigate independently",
+  "html": "test/ui/workspace_menu_owners.ls",
+  "viewport": {"width": 900, "height": 500},
+  "events": [
+    {"type": "assert_script", "js": "var h=document.getElementById('menu-host').getBoundingClientRect(),m=document.getElementById('menu-one').getBoundingClientRect();m.left>=h.left+7&&m.top>=h.top+7"},
+    {"type": "click", "target": {"selector": "#first-item"}},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "assert_focus", "target": {"selector": "#last-item"}},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "assert_focus", "target": {"selector": "#first-item"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "assert_focus", "target": {"selector": "#last-item"}},
+    {"type": "click", "target": {"selector": "#other-first"}},
+    {"type": "key_press", "key": "ArrowUp"},
+    {"type": "assert_focus", "target": {"selector": "#other-last"}},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_focus", "target": {"selector": "#other-first"}}
+  ]
+}

@@ -1,6 +1,7 @@
 // Collages (vibe/Lambda_Demo_Photo_Album.md §3.3): a plain-data model, pure template layouts and
 // edit operations (S1.4, S12.1.3). Canvas units are export pixels at the aspect's base size.
 import L: .mod_library
+import shared_history: lambda.editor.core.history
 
 pub let MIN_PHOTOS = 2
 pub let MAX_PHOTOS = 30
@@ -372,13 +373,12 @@ pub fn apply_template(m, key) => if (not has(TEMPLATES, key)) m
     else (let k = find(TEMPLATES, key).look, {*:m, template:key, background:k.background, font:k.font,
         gutter:k.gutter, radius:k.radius, border:k.border, slots:[for (s in m.slots) {*:s, free:null}]})
 
-// history: the models before (past) and after (future) the current one; at most 50 undo steps
-pub fn history() => {past:[], future:[]}
-pub fn record(h, before) => {past:[*slice(h.past, max(0, len(h.past) - 49), len(h.past)), before], future:[]}
-pub fn undo(h, current) any^ => if (len(h.past) == 0) null
-    else {model:h.past[last], history:{past:slice(h.past, 0, len(h.past) - 1), future:[current, *h.future]}}
-pub fn redo(h, current) any^ => if (len(h.future) == 0) null
-    else {model:h.future[0], history:{past:[*h.past, current], future:slice(h.future, 1, len(h.future))}}
+// adapt shared snapshot results to the collage model's existing contract.
+pub let history = shared_history.snapshot_new
+pub fn record(h, before) => shared_history.snapshot_record(h,before,50)
+fn model_step(step) any^ => if (step == null) null else {model:step.value,history:step.history}
+pub fn undo(h, current) any^ => model_step(shared_history.snapshot_undo(h,current))
+pub fn redo(h, current) any^ => model_step(shared_history.snapshot_redo(h,current))
 
 // ---------------------------------------------------------------- credits
 

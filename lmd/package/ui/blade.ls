@@ -3,7 +3,7 @@ import c: lambda.ui.core.component
 import shell: lambda.ui.core.presentation
 import base: lambda.ui.dtna
 import catalog: .blade.catalog
-import shared: lambda.ui.core.catalog
+import shared: lambda.ui.dtna.catalog
 import theme: .blade.tokens
 import styles: .blade.style
 import presentation: .blade.presentation

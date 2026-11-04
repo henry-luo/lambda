@@ -1,14 +1,15 @@
+import source_selection: lambda.editor.core.source_pos
 // S12.1.3 / D7.2.5: event handlers select model commands and shared UA policy.
 import dom
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
-import controller: lambda.edit.controller
-import session: lambda.edit.session
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
+import controller: lambda.editor.controller
+import session: lambda.editor.session
 import model: .mod_model
 import sample: .mod_sample
 import storage: .mod_io
-import context: ~~.mod_context_menu
+import context: lambda.ui.core.menu
 
 pub fn initial() => {*:model.initial(sample.notebook()),menu:"",context:null,picker_value:"",picker_error:"",
     last_color:model.default_colors.color,last_highlight:model.default_colors.highlight}
@@ -18,7 +19,7 @@ pub pn open_context(st,evt,x=null,y=null) {
     let surface = dom.closest(evt.target,"#edit-surface,#image-tools")
     if (row==null and surface==null) { return st }
     // a context-menu hit names a pointer position, not a replacement for the existing text range.
-    let has_range = context.has_selection(st.editor.selection)
+    let has_range = source_selection.has_selection(st.editor.selection)
     let next = if (row==null) (if (has_range) st else adopt(st,evt))
         else command(st,"note.select",{id:dom.get_attribute(row,"data-note")},evt.target)
     return {*:next,menu:"context",context:{kind:if (row==null) "text" else "note",

@@ -1,4 +1,4 @@
-:root { --accent:#217346; --accent-soft:#e1eee6; --bg:#f5f7f5; --line:#dce3dd; --hover:#edf3ee;
+.workspace-office { --accent:var(--lambda-app-primary,#217346); --accent-soft:#e1eee6; --bg:var(--lambda-app-background,#f5f7f5); --line:var(--lambda-app-border,#dce3dd); --hover:#edf3ee;
   --selection:#2563eb; --selection-fill:#60a5fa4d; --selection-heading:#dbeafe;
   --cell-pad-y:4px; --grid-line-width:1px; }
 .brand { color:#217346; }

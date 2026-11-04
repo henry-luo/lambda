@@ -1,4 +1,4 @@
-# Radiant Edit Mode — `lambda edit` and the `lambda.edit` Package
+# Radiant Edit Mode — `lambda edit` and the `lambda.editor` Family
 
 **Date:** 2026-09-25  
 **Status:** Proposal, implemented for Phases 1–3 (2026-09-26) in
@@ -29,6 +29,13 @@ does not revise a formal ruling or introduce a new editing-ledger series.
 Unsettled product choices are recorded in §10; proposal wording is not a
 claim that the capability already exists.
 
+**Package organization update, 2026-11-04:** the CLI application and its
+reusable format, surface and session helpers now belong to the
+`lambda.editor` family (D7.2.4v4, D7.2.6). The original `lambda.edit` /
+`lambda.editor` namespace split is superseded; the application and model
+layers remain distinct. Migration and verification are tracked in
+[Package Structure](../impl/Lambda_Impl_Package_Structure.md).
+
 ## 1. User experience and command boundary
 
 `lambda view doc` opens a document in browser/view mode. `lambda edit doc`
@@ -48,7 +55,7 @@ installed command name.
 | Concern | `lambda view` | Proposed `lambda edit` |
 |---|---|---|
 | Main purpose | Browse and interact with the document | Author and save the document |
-| Loading | Existing view loaders and document transforms | An edit template selected from `lambda.edit` |
+| Loading | Existing view loaders and document transforms | An edit template selected from `lambda.editor.app` |
 | Application toolbar | Existing viewer behavior | Persistent top toolbar, specialized by document type |
 | Input | Existing browsing, forms, and page-owned editors | Active rich-text or drawing surface |
 | Persistence | Existing page behavior | Save / Save As, dirty state, and unsaved-change handling |
@@ -97,15 +104,15 @@ remains the last resort, for a document whose round trip still fails.
 
 ## 3. Ownership and reuse
 
-The new `lambda.edit` package owns the editing application: shell, templates,
-format adapters, toolbar presentation, document-session state, and save
-coordination. It composes the existing editing packages.
+The `lambda.editor.app` entry owns application composition: shell, templates,
+toolbar presentation and save coordination. Reusable format adapters,
+surfaces and document-session operations are sibling editor modules.
 
 | Layer | Responsibility |
 |---|---|
 | Lambda CLI / Radiant shell | Select application mode, open the window, host the retained runtime, route close requests and platform input |
-| `lambda.edit` | Choose the format template, import/export documents, render the toolbar and surface, manage the file session |
-| `lambda.editor` | Source-model schema, commands, Steps/Transactions, source selection, model undo/redo, reusable drawing logic |
+| `lambda.editor.app`, `format`, `surface` and `session` | Choose the format template, import/export documents, render the toolbar and surface, manage the file session |
+| `lambda.editor.core`, `schema`, `dom` and `draw` | Source-model schema, commands, Steps/Transactions, source selection, model undo/redo, reusable drawing logic |
 | `lambda.dom` behavior package | Shared editing descriptors, requests/actions/results, and the existing UA editing backend |
 | Native `radiant-dom` and Radiant | DOM mechanisms, input gate, Selection/Range, IME/clipboard transport, geometry, layout, paint, and lifecycle |
 
@@ -117,7 +124,7 @@ command switches in every toolbar.
 ```mermaid
 flowchart TD
     A[lambda edit file] --> B[Mode-aware document loader]
-    B --> C[lambda.edit format adapter]
+    B --> C[lambda.editor format adapter]
     C --> D[Retained source model and edit session]
     D --> E[Lambda edit templates: toolbar and surface]
     E --> F[Radiant DOM, layout, and rendering]
@@ -137,25 +144,24 @@ existing backend. This follows the implemented split in
 
 ### Package organization
 
-D7.2.4 maps shipped `lambda.*` packages to `<lambda-home>/package/`. The
-proposed source organization is therefore:
+D7.2.4v4 maps shipped `lambda.*` packages to `<lambda-home>/package/`. The
+source organization is:
 
 ```text
-lmd/package/edit/
-    edit.ls          package entry and format descriptor registry
-    shell.ls         shared edit template and document-session UI
-    toolbar.ls       shared toolbar rendering and command presentation
-    markdown.ls      Markdown import/export and rich-text profile
-    html.ls          HTML import/export and rich-text profile
-    rich_text.ls     shared rich-text rendering and surface integration
-    svg.ls           SVG import/export, rendering, and drawing profile
-    drawing.ls       drawing tools, selection overlay, and gesture control
+lmd/package/editor/
+    app.ls           package entry and format descriptor registry
+    app/             application shell, toolbar and file dialogs
+    format/          Markdown, HTML and SVG adapters and shared model helpers
+    surface/         rich text, source and drawing integration
+    session.ls      document-session state and save coordination
+    core/            model, commands, transactions and history
+    schema/          format and drawing-aware schemas
+    dom/             model editing adapter and selection bridge
 ```
 
-For example, `lambda.edit.markdown` names `lmd/package/edit/markdown.ls`.
-These names describe the proposed package surface; the directory does not
-exist yet. Generic editor behavior belongs in `lambda.editor` or the shared
-DOM protocol, even when first needed by one of these templates.
+For example, `lambda.editor.format.markdown` names
+`lmd/package/editor/format/markdown.ls`. Generic editor behavior belongs in
+the appropriate `lambda.editor` layer or shared DOM protocol.
 
 Each format contributes a descriptor with the following conceptual contract.
 Exact export names and record types will be specified during implementation.
@@ -178,7 +184,7 @@ to retain source metadata and instantiate an interactive edit session.
 
 1. Resolve the input file and retain its canonical identity, original base
    URL, format, and file version used for overwrite checks.
-2. Load the shipped `lambda.edit` entry through ordinary package/public-export
+2. Load the shipped `lambda.editor.app` entry through ordinary package/public-export
    resolution (D7.2.1–D7.2.3). Pass the source path and options as values.
 3. In an effectful initialization step, read the source and select its format
    adapter. Parse once; validate import and preservation coverage before
@@ -279,7 +285,7 @@ is not a lossless importer for arbitrary SVG. Reuse its geometry and
 transaction helpers where their contracts fit. Adapt attribute/child edits
 to existing Steps instead of converting every input into generic `<shape>`
 records and rebuilding SVG from a reduced model. Third-party SVG editor
-compatibility remains a separate capability, not a dependency of `lambda.edit`.
+compatibility remains a separate capability, not a dependency of `lambda.editor.app`.
 
 Initial interaction includes:
 
@@ -394,7 +400,7 @@ These are product milestones. A detailed implementation plan belongs under
 
 | Phase | Deliverable | Acceptance boundary |
 |---|---|---|
-| 1 — Shell and Markdown | `edit` dispatch, `lambda.edit` templates, top toolbar, Markdown rich text, save lifecycle | Open an existing Markdown file, edit via typing and toolbar, undo/redo, save, reopen, and recover the edited structure |
+| 1 — Shell and Markdown | `edit` dispatch, `lambda.editor.app` templates, top toolbar, Markdown rich text, save lifecycle | Open an existing Markdown file, edit via typing and toolbar, undo/redo, save, reopen, and recover the edited structure |
 | 2 — HTML | Shared rich-text surface with HTML adapter and retained envelope | Edit supported body content while preserving head/resources/unknown content; shell excluded from output; view-mode regression checks pass |
 | 3 — SVG | Inline SVG authoring template and basic drawing tools | Create/select/move/resize/style objects, cancel/undo gestures, save/reopen SVG with namespaces, references, and untouched nodes intact |
 | 4 — Broader authoring | More Markdown/HTML features and advanced SVG tools | Each capability adds explicit import/edit/export and interaction coverage |
@@ -458,3 +464,9 @@ The following observations were checked against the working tree on
 The separate [Edit History proposal](Radiant_Design_Edit_History.md) remains
 unratified. This proposal reuses current model history and does not depend on
 that document's proposed replacement of form-control history.
+
+## Appendix S — Superseded package organization
+
+| Superseded | Replaced by |
+|---|---|
+| ~~The `lambda.edit` family owns the application, format adapters and reusable surfaces beside a separate `lambda.editor` model family.~~ | `lambda.editor.app`, `format`, `surface`, `session`, `core`, `schema` and `dom` retain those separate responsibilities under one family (§3–§4; D7.2.4v4, D7.2.6; package-structure implementation 2026-11-04). |

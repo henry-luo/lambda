@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import responsive: lambda.ui.core.responsive
 
@@ -38,13 +39,13 @@ pub fn row(props, child) element^ {
         let y = validate_gap(gap[1])^,
         let align = responsive.validate(c.option(props,"align","top"),valid_align,"row.align")^,
         let justify = responsive.validate(c.option(props,"justify","start"),valid_justify,"row.justify")^,
-        c.node('row',props,child,["gutter","align","justify","wrap"])^
+        descriptor.node('row',props,child,["gutter","align","justify","wrap"])^
     )
 }
 pub fn col(props, child) element^ {
     let base = validate_column(map([for (key,value in props where ((contains(column_fields,string(key))) ^ { false })) (key,value)]))^
     let sizes = [for (bp in breakpoints where ((c.has(props,bp.key)) ^ { false })) validate_column(column_values(props[bp.key]))^];
-    c.node('col',props,child,[*column_fields,*[for (bp in breakpoints) bp.key]])^
+    descriptor.node('col',props,child,[*column_fields,*[for (bp in breakpoints) bp.key]])^
 }
 fn percent(value) => string(value * 100.0 / 24) ++ "%"
 fn column_property(field, value) any^ => if (field == "flex") flex_value(value) else if (field == "order") string(value)
@@ -101,12 +102,12 @@ pub fn spacing(kind, props, child) element^ {
         raise c.fail(kind,"invalid direction or alignment")
     else if (kind == 'flex' and c.has(props,"flex") and not valid_flex(props.flex)) raise c.fail(kind,"invalid flex value")
     // preserve slot boundaries before element content merges adjacent text (S2.6.4).
-    else c.node(kind,props,if (kind == 'space') [for (slot in c.children(child) where slot != null) <dtna_space_slot value:slot>] else child,
+    else descriptor.node(kind,props,if (kind == 'space') [for (slot in c.children(child) where slot != null) <dtna_space_slot value:slot>] else child,
         ["direction","gap","align","justify","wrap",*(if (kind == 'space') ["separator"] else ["flex"])])^
 }
 pub fn compact(kind, props, child) element^ {
     if (not c.enum_valid(props.direction,["horizontal","vertical"])^) raise c.fail(kind,"invalid direction")
-    else c.node(kind,props,child,["direction","block","size","disabled"])^
+    else descriptor.node(kind,props,child,["direction","block","size","disabled"])^
 }
 fn spacing_style(props) any^ {
     let gap = props.gap
@@ -128,7 +129,7 @@ pub fn divider(props, child) element^ {
     if (not c.enum_valid(props.direction,["horizontal","vertical"])^ or not c.enum_valid(props.placement,["start","center","end"])^)
         raise c.fail("divider","invalid direction or placement")
     else if (c.text(props.direction) == "vertical" and child != null) raise c.fail("divider","vertical dividers cannot have labels")
-    else c.node('divider',props,child,["direction","placement","dashed","plain"])^
+    else descriptor.node('divider',props,child,["direction","placement","dashed","plain"])^
 }
 fn divider_view(node) {
     let labelled = len(content(node)) > 0;

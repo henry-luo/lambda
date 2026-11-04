@@ -1,9 +1,9 @@
 // edit_mount is a procedure: given a DOM node it binds the model to a native
 // edit surface, an effect a function may not have (S12.1.1v2). A string
 // surface binds nothing, but the call still needs a pn context.
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 pn main() {
     let d0 = node('doc', [node('paragraph', [text("Hello")])])

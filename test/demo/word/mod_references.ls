@@ -1,11 +1,11 @@
 // Source records and rendered fields share one undoable document transaction (D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import commands: lambda.editor.mod_commands
-import inline_format: lambda.editor.mod_inline_format
-import html: lambda.edit.html
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import commands: lambda.editor.core.commands
+import inline_format: lambda.editor.core.inline_format
+import html: lambda.editor.format.html
 import cp: lambda.doc.latex.citeproc.citeproc
 import data: lambda.doc.latex.citeproc.data
 import people: lambda.doc.latex.packages.bib_names

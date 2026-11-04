@@ -1,16 +1,16 @@
 // WordCraft Session / CommandSpec port over Lambda's source-model editor.
 // S1.4, S12.1.3, D7.2.5: immutable model state owns edits; Radiant owns geometry.
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import lambda.editor.mod_editor
-import commands: lambda.editor.mod_commands
-import decorations: lambda.editor.mod_decorations
-import html: lambda.edit.html
-import rendering: lambda.edit.model
-import inline_format: lambda.editor.mod_inline_format
-import image: lambda.editor.mod_image
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import lambda.editor.model
+import commands: lambda.editor.core.commands
+import decorations: lambda.editor.core.decorations
+import html: lambda.editor.format.html
+import rendering: lambda.editor.format.model
+import inline_format: lambda.editor.core.inline_format
+import image: lambda.editor.image
 import document: .mod_document
 import page: .mod_page
 import columns: .mod_columns

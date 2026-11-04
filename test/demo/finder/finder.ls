@@ -5,8 +5,8 @@ import model: .mod_model
 import files: .mod_io
 import ui: .mod_ui
 import thumbs: .mod_thumbnails
-import updates: ~~.mod_publish
-import splitter: ~~.mod_splitter
+import updates: lambda.ui.core.publish
+import splitter: lambda.ui.core.splitter
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CWD = sys.proc.self.cwd#

@@ -1,17 +1,13 @@
 // Helpers for the demos whose documents are plain values (Greetings' card,
 // Dreamhome's home): an undo history of whole snapshots and file names.
 
-// ---- history ------------------------------------------------------------------
-// every edit records the value it replaces, so one undo steps back once
+import shared_history: lambda.editor.core.history
 
-let HISTORY_LIMIT = 60
-pub fn history() => {past: [], future: []}
-pub fn record(h, before) => (let past = [*h.past, before],
-    {past: if (len(past) > HISTORY_LIMIT) slice(past, 1, len(past)) else past, future: []})
-pub fn undo_step(h, current) any^ => if (len(h.past) == 0) null
-    else {value: h.past[len(h.past) - 1], history: {past: slice(h.past, 0, len(h.past) - 1), future: [current, *h.future]}}
-pub fn redo_step(h, current) any^ => if (len(h.future) == 0) null
-    else {value: h.future[0], history: {past: [*h.past, current], future: slice(h.future, 1, len(h.future))}}
+// keep the demo's history bound while sharing the snapshot stack policy.
+pub let history = shared_history.snapshot_new
+pub fn record(h, before) => shared_history.snapshot_record(h,before,60)
+pub let undo_step = shared_history.snapshot_undo
+pub let redo_step = shared_history.snapshot_redo
 
 // ---- files ----------------------------------------------------------------------
 

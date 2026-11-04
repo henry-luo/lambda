@@ -6,7 +6,7 @@ import art: .mod_artwork
 import scene: .mod_scene
 import present: .mod_present
 import raster: .mod_raster
-import menus: ~~.mod_context_menu
+import menus: lambda.ui.core.menu
 import keyboard: lambda.dom.keyboard
 
 let BASE = url_resolve(resources.entry_uri()^,".")

@@ -12,10 +12,10 @@
 // shape constructors. Lambda is pure functional, so the constructors here take an
 // explicit `id` argument — the tool/caller allocates ids deterministically.
 
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
 import lambda.editor.draw.geometry
 
 // ---------------------------------------------------------------------------

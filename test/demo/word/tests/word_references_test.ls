@@ -2,11 +2,11 @@ import model: ~~.mod_model
 import refs: ~~.mod_references
 import files: ~~.mod_io
 import context: ~~.mod_context
-import commands: lambda.editor.mod_commands
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import commands: lambda.editor.core.commands
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let base = model.open_editor(node('doc',[node('p',[text("Before after")])]))
 let book = {*:refs.defaults,author:"Lovelace, Ada",title:"Notes on the analytical engine",year:"1843",publisher:"Taylor",city:"London"}

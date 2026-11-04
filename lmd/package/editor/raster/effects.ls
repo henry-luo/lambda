@@ -1,7 +1,7 @@
 // S9.1.3: enabled and disabled effects retain checked parameters; baking is explicit.
 import img: lambda.image
 import model: .model
-import sequence: lambda.editor.mod_doc
+import sequence: lambda.editor.core.doc
 pub let controls = [
     {key:"exposure",label:"Exposure",value:0},{key:"brightness",label:"Brightness",value:0},
     {key:"contrast",label:"Contrast",value:1},{key:"saturation",label:"Saturation",value:1},

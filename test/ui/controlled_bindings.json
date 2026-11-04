@@ -29,6 +29,7 @@
     {"type":"assert_value","target":{"selector":"#ant-field"},"equals":"program"},
     {"type":"assert_value","target":{"selector":"#bold-field"},"equals":"program"},
     {"type":"assert_value","target":{"selector":"#wired-field"},"equals":"program"},
+    {"type":"assert_value","target":{"selector":"#workspace-field"},"equals":"program"},
     {"type":"assert_value","target":{"selector":"#notes"},"equals":"other"},
     {"type":"assert_value","target":{"selector":"#choice"},"equals":"20"},
     {"type":"assert_checked","target":{"selector":"#enabled"},"checked":true},
@@ -64,6 +65,9 @@
     {"type":"select_option","target":{"selector":"#choice"},"value":"1.5"},
     {"type":"assert_text","target":{"selector":"#type"},"equals":"float"},
     {"type":"assert_value","target":{"selector":"#choice"},"equals":"20"},
-    {"type":"assert_text","target":{"selector":"#requests"},"equals":"10"}
+    {"type":"assert_text","target":{"selector":"#requests"},"equals":"10"},
+    {"type":"type","target":{"selector":"#workspace-field"},"text":"W","clear":false},
+    {"type":"assert_value","target":{"selector":"#workspace-field"},"equals":"program"},
+    {"type":"assert_text","target":{"selector":"#requests"},"equals":"11"}
   ]
 }

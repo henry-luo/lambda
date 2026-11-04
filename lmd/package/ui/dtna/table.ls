@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import dom
 import c: lambda.ui.core.component
 import collection: lambda.ui.core.collection
@@ -28,7 +29,7 @@ fn validate_filters(columns, filters) bool^ {
     )
 }
 pub fn table(props) element^ {
-    let node = c.node('table',props,null,["rows","columns","row_key","sort","default_sort","filters","default_filters","current","default_current",
+    let node = descriptor.node('table',props,null,["rows","columns","row_key","sort","default_sort","filters","default_filters","current","default_current",
         "page_size","pagination","selection","selected_keys","default_selected_keys","expanded_keys","default_expanded_keys","caption","summary","empty_text","bordered","size","loading","disabled"])^
     let identity = collection.require_id(props,"table")^
     let flags = c.boolean_props(props,["pagination","bordered"],"table")^

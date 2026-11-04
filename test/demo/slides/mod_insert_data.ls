@@ -1,10 +1,10 @@
 // D7.2.5: Insert dialogs retain typed settings and use existing Word catalogs.
-import charts: ~~.word.mod_chart
-import smartart: ~~.word.mod_smartart
-import wordart: ~~.word.mod_wordart
-import shapes: ~~.word.mod_shapes
-import tables: ~~.word.mod_table_design
-import equation_catalog: ~~.word.mod_equation_catalog
+import charts: lambda.editor.graphics.chart
+import smartart: lambda.editor.graphics.diagram
+import wordart: lambda.editor.graphics.wordart
+import shapes: lambda.editor.graphics.shapes
+import tables: lambda.editor.table.design
+import equation_catalog: lambda.editor.math.catalog
 import symbol_sets: ~~.mod_symbols
 
 fn field(id,label,kind="text",options=[]) => {id:id,label:label,kind:kind,options:options}

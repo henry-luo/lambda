@@ -25,7 +25,7 @@ import csl: .citeproc.adapter
 import csl_aliases: .citeproc.aliases
 import hyperref: .packages.hyperref
 import amsmath: .packages.amsmath
-import paths: lambda.edit.session
+import paths: lambda.editor.session
 import util: .util
 import language_profile: .packages.language
 import tikz: .packages.tikz

@@ -1,6 +1,6 @@
 // Navigation reads source structure; pane choices never enter document history (D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.core.source_pos
 import dom
 import history: lambda.dom.edit_history
 import model: .mod_model

@@ -1,7 +1,7 @@
 // Thread metadata and text marks travel with the immutable document (S1.4, D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_transaction
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.transaction
 
 pub fn comments(doc) => parse((attrs_get(doc.attrs,'data-word-comments') ^ { null }) or "[]",'json') ^ { [] }
 pub fn next_id(doc) => "c" ++ string(((attrs_get(doc.attrs,'data-word-comment-seq') ^ { null }) or 0)+1)

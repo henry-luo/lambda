@@ -1,7 +1,7 @@
 // Core word-processing sample and styles, adapted from WordCraft's sample.rs.
 // Copyright (c) 2026 ArtCraft Team and the WordCraft contributors; see LICENSE-MIT.
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.step
 import design: .mod_table_design
 
 pub let styles = [

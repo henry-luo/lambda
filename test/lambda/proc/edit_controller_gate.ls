@@ -1,7 +1,7 @@
-import controller: lambda.edit.controller
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import controller: lambda.editor.controller
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 pn main() {
     let editor = edit_open(node('doc',[node('paragraph',[text("Hello")])]),editor_schemas.markdown,

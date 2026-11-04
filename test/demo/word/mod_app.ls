@@ -1,12 +1,13 @@
 // One controller serves child-widget events and root keyboard handlers.
 // emit() targets ancestors, so root handlers call this controller directly.
 import dom
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_editor
-import session: lambda.edit.session
-import fields: lambda.edit.files
+import interaction: lambda.ui.core.interaction
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.model
+import session: lambda.editor.session
+import fields: lambda.editor.app.files
 import document: .mod_document
 import model: .mod_model
 import storage: .mod_io
@@ -20,7 +21,7 @@ import stories: .mod_stories
 import graphics: .mod_graphics
 import changes: .mod_changes
 import transform: .mod_transform
-import controller: lambda.edit.controller
+import controller: lambda.editor.controller
 import tables: .mod_table
 import table_design: .mod_table_design
 import table_layout: .mod_table_layout
@@ -30,17 +31,17 @@ import navigation: .mod_navigation
 import ruler: .mod_ruler
 import references: .mod_references
 import object_layout: .mod_object_layout
-import image: lambda.editor.mod_image
+import image: lambda.editor.image
 import groups: .mod_group
 import shape_format: .mod_shape_format
 import equation: .mod_equation
 import equation_edit: .mod_equation_edit
-import equation_catalog: .mod_equation_catalog
+import equation_catalog: lambda.editor.math.catalog
 import home: .mod_home
 import math_edit: .mod_math_edit
 import lookup: .mod_lookup
-import spelling: lambda.edit.spelling
-import font_picker: .mod_font_picker
+import spelling: lambda.editor.spelling
+import font_picker: lambda.ui.workspace.font_picker
 import autosave: .mod_autosave
 
 pub let default_settings = {show_ribbon_group_labels:false}
@@ -102,7 +103,7 @@ pn illustration_values(node,kind,current) {
 }
 pub let focus_document = controller.focus
 pub let is_control = controller.is_control
-pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
+pub let primary = interaction.primary
 pub fn hide_toolbar(st) => {*:st,mini_hidden:true}
 pub pn refresh_toolbar(st,node) {
     ruler.refresh(node)

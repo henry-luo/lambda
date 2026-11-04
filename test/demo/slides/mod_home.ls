@@ -1,10 +1,11 @@
+import typography: lambda.doc.typography
 // S1.4 / D7.2.5: Home adapts shared formatting rules to authored slide values.
 import m: .mod_model
 import c: lambda.slide.common
-import css: lambda.editor.mod_inline_format
-import text_format: ~~.mod_text_format
-import shape_presets: ~~.mod_shape_presets
-import alignment: lambda.editor.mod_alignment
+import css: lambda.editor.core.inline_format
+import text_format: lambda.ui.workspace.text_format
+import shape_presets: lambda.ui.workspace.shape_presets
+import alignment: lambda.editor.core.alignment
 import ins: .mod_insert
 
 let character_keys = ["font-family","font-weight","font-style","text-decoration","letter-spacing","background-color","line-height"]
@@ -79,7 +80,7 @@ pub fn highlight_color(node) => if (not (node is element)) null else [for (child
         else if (child is element) highlight_color(child) else null where ((color != null) ^ { false })) color][0]
 
 fn case_children(children,mode,initial) => reduce([{children:[],state:initial},*children],(acc,child) => {
-    let out = if (child is string) text_format.case_text(child,mode,acc.state) else null
+    let out = if (child is string) typography.case_text(child,mode,acc.state) else null
     let nested = if (child is element and m.rebuildable(child)) case_children(content(child),mode,
         if (name(child) in ['li','p']) {word:true,sentence:true} else acc.state) else null;
     {children:[*acc.children,if (out != null) out.text else if (nested != null) m.rebuild(child,map(child),nested.children) else child],
@@ -213,7 +214,7 @@ pub fn command(st,action:string) any^ {
     else if (obj.tag != 'text') { st }
     else if (action in ["bold","italic","underline","strike","superscript","subscript"] or starts_with(action,"align-")) { emphasis(st,action)^ }
     else if (action == "clear-format") { clear(st)^ }
-    else if (action == "grow-font" or action == "shrink-font") { m.properties(st,{font_size:text_format.font_step(obj.font_size,action == "grow-font")})^ }
+    else if (action == "grow-font" or action == "shrink-font") { m.properties(st,{font_size:typography.font_step(obj.font_size,action == "grow-font")})^ }
     else if (action in ["bullets","numbering"] or kind in ["bullets","numbering"]) { set_list(st,kind,arg)^ }
     else if (action == "indent" or action == "outdent") { indent(st,action == "indent")^ }
     else if (kind == "case") { change_case(st,arg)^ }

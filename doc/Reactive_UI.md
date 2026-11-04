@@ -115,7 +115,7 @@ on delete_item(evt) {
 For native controls with application-owned values, `lambda.ui.controls` provides
 `value`/`checked` props and declarative `on_change` actions. The package synchronizes
 live control state after projection while preserving accepted text selections and
-IME preedit. Custom model editors can reuse `lambda.edit.controller` for surface
+IME preedit. Custom model editors can reuse `lambda.editor.controller` for surface
 binding, document-selection adoption, input routing, replacement, and completion.
 See [Shared editor coordination and control bindings](dev/Shared_Editing.md)
 for the API and examples (**S12.1.3**, **D7.2.5**).

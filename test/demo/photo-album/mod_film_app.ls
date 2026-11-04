@@ -4,7 +4,7 @@
 // and extrapolates it on frame timestamps while playing, so replays are deterministic.
 // State: {film, deck, sound, token, drag, frame}; `ctx` is {lib, dir, dir_url}.
 import dom
-import updates: ~~.mod_publish
+import updates: lambda.ui.core.publish
 import F: .mod_film
 import S: .mod_score
 

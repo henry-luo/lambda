@@ -1,5 +1,5 @@
 // Document icons share the ribbon's outline artwork; emojis remain Unicode text.
-import icons: ~~.mod_icons
+import icons: lambda.ui.workspace.icons
 import objects: .mod_objects
 import colors: lambda.ui.core.component
 

@@ -3,7 +3,7 @@
 import c: .common
 import compiler: .normalize
 import live: .live
-import paths: lambda.edit.session
+import paths: lambda.editor.session
 
 // presentation attributes double as presenter defaults; the deck ID names the player
 fn presenter_options(deck, options) {

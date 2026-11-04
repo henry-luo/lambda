@@ -1,6 +1,6 @@
 # Lambda Packages
 
-Lambda ships a set of **packages**: libraries written in Lambda Script itself, distributed as source with the runtime and imported under the reserved `lambda.*` namespace (D7.2.4v3). Some are libraries you call from your own scripts: charts, graph layout and diagram rendering, math and LaTeX typesetting, PDF rendering and OpenAPI tools. Others are parts of the engine that happen to be written in Lambda: the `lambda edit` application, its editor model, and the browser behaviour behind HTML forms, links and editing in Radiant. This page lists them all, explains how their import paths resolve, and documents the public API of each library.
+Lambda ships a set of **packages**: libraries written in Lambda Script itself, distributed as source with the runtime and imported under the reserved `lambda.*` namespace (D7.2.4v4). Some are libraries you call from your own scripts: charts, graph layout and diagram rendering, math and LaTeX typesetting, PDF rendering and OpenAPI tools. Others are parts of the engine that happen to be written in Lambda: the `lambda edit` application, its editor model, and the browser behaviour behind HTML forms, links and editing in Radiant. This page lists them all, explains how their import paths resolve, and documents the public API of each library.
 
 > **Related Documentation**:
 > - [Lambda Modules](Lambda_Modules.md) — `import` syntax, `pub` exports and module resolution
@@ -59,6 +59,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `archive` | `lambda.archive` | Phase 1 (pages, renderings, search, media and gallery engines, job service) | Archives what a link points to — a page with its resources, a video or audio stream with subtitles, a gallery, a file — into a searchable library of ZIP snapshots with readable HTML, Markdown, PDF and thumbnails; all in Lambda, no external tools; see [§23](#23-archive--web-archiving) | `lambda demo archive` |
 | `doc.readability` | `lambda.doc.readability` | Library; passes Mozilla's 130 test pages | Port of Mozilla Readability.js 0.6.0: a page's main article, title, byline, excerpt and site metadata, and the `readerable` check | None; import from a Lambda script |
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
+| `ui.workspace` | `lambda.ui.workspace` | Experimental, initial desktop subset | Desktop controls, scoped tokens, toolbars, panes and status surfaces; see [Workspace UI](Lambda_UI_Workspace.md) | `test/lambda/ui_workspace.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
 | `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
 | `ui.clay` | `lambda.ui.clay` | Experimental, broad native theme | Claymorphism surfaces and 59 components/subcomponents sharing the Ant-inspired behavior layer; see [clay UI](Lambda_UI_Clay.md) | `lambda view test/ui/clay_gallery.ls` |
@@ -78,6 +79,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `procart.environment` / `procart.herb` | `lambda.procart.environment`, `lambda.procart.herb` | Library | Global solar/weather data, responsive flowers, reeds and rooted wind; see [§26](#26-procart--procedural-art) | Procart → Meadow |
 | `procart.surface` | `lambda.procart.surface` | Library | Reusable seeded surface patterns, role bindings, leaf/branch UVs and object-space texture atlases; see [§26](#26-procart--procedural-art) | Procart → Form studies → Grain, bark & veins |
 | `color` | `lambda.color` | Library | Shared hex/RGB/RGBA parsing, HSV conversion and byte-quantized RGB hex formatting; see [§28](#28-color--pure-color-utilities) | Used by slides, UI palettes and procedural art |
+| `io.path` | `lambda.io.path` | Library | Pure lexical path operations, including resolution and caller-supplied home expansion | Finder and Word document opening |
 | `music` | `lambda.music` | Experimental notation and MIDI profile | Native MusicXML/MXL, SVG sheet music, SMF import/export and SoundFont playback; see [MusicXML and MIDI](Lambda_Music.md) | `lambda view test/music/_player.ls` |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
@@ -91,10 +93,10 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, a deck clock with host control, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
 | `doc` | `lambda.doc.doc_viewer` | Engine internal | The document viewer and project browser, with its startup splash and icon font | Bare `lambda view`; `lambda view` on `doc_viewer.html` adds the startup splash |
-| `edit` | `lambda.edit.edit` | Engine internal | The document-authoring application | `lambda edit` |
+| `editor.app` | `lambda.editor.app` | Engine internal | The document-authoring application | `lambda edit` |
 | `editor.draw` | `lambda.editor.draw`, `lambda.editor.draw.view` | Library, initial native profile | Programmable vertices/edges, ports, custom paths, topology, shared transactions, archives, SVG and retained canvases | `lambda demo draw`; see [drawing API](../lmd/package/editor/draw/README.md) |
 | `editor.raster` | `lambda.editor.raster`, `lambda.editor.raster.view` | Library, initial layered profile | Raster layer/group commands, masks, translation, shared history and retained canvas presentation | `lambda demo photos`; see [raster API](../lmd/package/editor/raster/README.md) |
-| `editor` | `lambda.editor.mod_editor` | Engine internal | The editing model: documents, selections, transactions, history | `lambda edit`, through `edit` |
+| `editor` | `lambda.editor.model` | Engine internal | The editing model: documents, selections, transactions, history | `lambda edit`, through `editor.app` |
 | `dom` | `lambda.dom.dom` | Engine internal | Browser behaviour for HTML: form controls, links, focus, `<details>`, editing | `lambda view` on interactive pages |
 
 The engine packages are importable like any other, but their API follows the engine and is not stable; this page describes them only briefly (§10).
@@ -103,7 +105,8 @@ The engine packages are importable like any other, but their API follows the eng
 
 ## 2. Importing a Package
 
-A package is a directory of modules. You import one module by its full dotted path, usually with an alias:
+Each `.ls` script is a package; directories group related packages (D7.2.1).
+Import a script by its full dotted path, usually with an alias:
 
 ```lambda
 import chart: lambda.chart.chart
@@ -124,12 +127,13 @@ r.nodes |> ~.id          // ["a", "b"]
 
 ### 2.1 How paths resolve
 
-The `lambda.*` root is reserved for everything Lambda ships (D7.2.4v3). Shipped package paths map onto the `package/` directory of the Lambda home:
+The `lambda.*` root is reserved for everything Lambda ships (D7.2.4v4). Shipped package paths map onto the `package/` directory of the Lambda home:
 
 | Import path | Loads |
 |-------------|-------|
 | `lambda.<package>.<module>` | `<LAMBDA_HOME>/package/<package>/<module>.ls` |
 | `lambda.ui.dtna` | `<LAMBDA_HOME>/package/ui/dtna.ls` (explicit public module) |
+| `lambda.ui.workspace` | `<LAMBDA_HOME>/package/ui/workspace.ls` (explicit desktop UI module) |
 | `lambda.ui.bold` | `<LAMBDA_HOME>/package/ui/bold.ls` (explicit public module) |
 | `lambda.ui.wired` | `<LAMBDA_HOME>/package/ui/wired.ls` (explicit public module) |
 | `lambda.ui.clay` | `<LAMBDA_HOME>/package/ui/clay.ls` (explicit public module) |
@@ -144,11 +148,11 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4v3). Shipped 
 | `lambda.sys.<name>` | A system function, reachable even when a script shadows its name (S17.2.1, S17.2.2) |
 
 - **Name an existing module.** There is no implicit directory index, so `import chart: lambda.chart` fails with E217; write `lambda.chart.chart`. `lambda.slide` has an explicit `package/slide.ls` entry file.
-- **`lambda.doc.*` groups document packages and the bundled viewer.** Math, PDF and LaTeX live in `package/doc/{math,pdf,latex}/`, matching their `lambda.doc.*` imports (D7.2.4v3). The viewer and its resources live in `package/doc/`. `lambda.math` remains the built-in math module.
+- **`lambda.doc.*` groups document packages and the bundled viewer.** Math, PDF and LaTeX live in `package/doc/{math,pdf,latex}/`, matching their `lambda.doc.*` imports (D7.2.4v4). The viewer and its resources live in `package/doc/`. `lambda.math` remains the built-in math module.
 - **An alias is a binding name**, so it can be neither a keyword nor `lambda` itself (S16.10.1v2). Choose another alias for the `edit` package:
 
 ```lambda error=E100
-import edit: lambda.edit.edit
+import edit: lambda.editor.app
 ```
 
 - **Packages are compiled from source.** A module is compiled the first time a process imports it and is then shared by every script that imports it; compiled code is only a local cache (D7.2.3).
@@ -190,7 +194,7 @@ stats.mean(xs)                  // 6
 stats.spread(xs)                // 7
 ```
 
-Keep your packages next to the scripts that use them. The `lambda.*` namespace is reserved for what Lambda ships (D7.2.4v3), and there is no package manager, registry or search path for third-party packages: share a package by sharing its source files. See [Lambda_Modules.md](Lambda_Modules.md) for the full import rules.
+Keep your packages next to the scripts that use them. The `lambda.*` namespace is reserved for what Lambda ships (D7.2.4v4), and there is no package manager, registry or search path for third-party packages: share a package by sharing its source files. See [Lambda_Modules.md](Lambda_Modules.md) for the full import rules.
 
 ---
 
@@ -621,7 +625,7 @@ Chart entry points return value errors on invalid data or options, while the
 direct wordcloud APIs below raise errors (S7.4.1–S7.4.2).
 
 `lambda.chart.wordcloud` lays out weighted words and renders an SVG element.
-It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4v3).
+It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4v4).
 Each input record has a nonempty, single-line `text`, a finite positive
 `weight` (`int`, `i64` or `float`), and an optional `color` string. Phrases and
 Unicode text are supported. Records can also override `font_size`,
@@ -711,7 +715,7 @@ The viewable gallery at `test/demo/wordcloud.ls` compares four configurations:
 
 `lambda.chart.timeline` presents historical events as chronological cards, a
 time axis, or an active story. It uses the ordinary source-package and view
-mechanisms (**D7.2.1–D7.2.4v3/D7.2.6, S2.4.3v3/S12.1.3**).
+mechanisms (**D7.2.1–D7.2.4v4/D7.2.6, S2.4.3v3/S12.1.3**).
 Implementation is in progress against the
 [timeline proposal](../vibe/Lambda_Pkg_Chart_Timeline.md); the
 [acceptance inventory](../test/timeline/reference_inventory.json) records open
@@ -983,7 +987,7 @@ contains(format(el, 'html'), "<text") // true
 importing Radiant. Runtime `format(ast, 'math')`, the `math-latex`, `math-ascii`
 and `math-mathml` targets, procedural `output` and CLI conversion all use this
 package. Native IO retains generic XML serialization; math traversal and
-conversion live entirely in Lambda (**D7.1.1**, **D7.2.4v3**, **D7.2.8**).
+conversion live entirely in Lambda (**D7.1.1**, **D7.2.4v4**, **D7.2.8**).
 
 The font-independent `lambda.doc.math.mathml` module exposes the same conversion
 and parsing APIs without importing Radiant. Runtime
@@ -1026,13 +1030,13 @@ have been removed; use `lambda.doc.math.math`.
 
 The latex package renders a parsed LaTeX document as HTML. Parse with `latex.parse_file(path)` or `latex.parse_source(text, base)`. Every LaTeX parse first runs Lambda's TeX expansion engine (**D7.2.7v2**): document macros, `.sty`/`.cls` files beside the document, bundled programming packages such as `etoolbox`, `xkeyval` and expl3, and Lambda's own bindings for `physics`, the `mathtools` macros, `xspace`, `csvsimple`, `unicode-math`'s alphabets and the configuration macros of `tocloft`, `authblk`, `titling`, `minitoc`, `glossaries`, `nomencl` and `acronym` run as TeX, while Radiant keeps layout. A bare `input(path, 'latex')` also expands, but without the package's adapter registry, so parse through the package when you render. The package covers the `article`, `book` and `report` document classes and profiles of the common others (KOMA-Script, memoir, the AMS classes, IEEEtran, llncs, elsarticle, revtex, acmart, `letter` and `exam`), sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
 
-Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4v3**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D7.2.7v2**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
+Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4v4**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D7.2.7v2**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
 
 The bounded `biblatex` profile reads multiple local `.bib` resources, supports ten common entry types, six built-in citation/bibliography styles, source-order citation commands, `\nocite`, filtered and scoped `\printbibliography`, and English/German/French strings. It handles common BibTeX strings and inheritance, creates internal citation links, and reports missing or unsupported requests with source locations (**D7.1.2v2, S12.4.1, S7.4.1–S7.4.4**). `backend=biber` selects this local profile; no Biber process or arbitrary style file is run. See [Phase 2 behavior and boundaries](../vibe/latex/Lambda_Design_BibTeX_CSL.md#21-the-built-in-biblatex-and-natbib-profile).
 
-A document that declares `\usepackage[style=apa]{biblatex}`, `style=ieee`, or `\usepackage[authordate]{biblatex-chicago}` (or its default notes style) is formatted by the matching bundled CSL style automatically. The `csl-style-alias` diagnostic names the CSL style used, and biblatex options or style customizations that CSL cannot follow are reported rather than applied. An experimental CSL processor is also available directly through `render_result(ast, {base_uri: ".", citeproc: {style: "apa", locale: "en-US"}})`. It is implemented entirely in Lambda script within `lambda.doc.latex` (**D7.2.1–D7.2.4v3, S1.8, S12.4.1v2**). It accepts local BibTeX/BibLaTeX or CSL JSON resources, evaluates custom CSL XML, and bundles `ieee`, `apa`, `chicago-author-date`, and `chicago-fullnote-bibliography` styles plus English/German/French locales. It preserves citation links, scoped prints, and note-style footnotes. CSL mode rejects conflicting legacy style/sorting options and reports unsupported constructs. Locale collation and complete CSL conformance remain outstanding. See the [CSL API, resource options and coverage](../lmd/package/doc/latex/citeproc/README.md).
+A document that declares `\usepackage[style=apa]{biblatex}`, `style=ieee`, or `\usepackage[authordate]{biblatex-chicago}` (or its default notes style) is formatted by the matching bundled CSL style automatically. The `csl-style-alias` diagnostic names the CSL style used, and biblatex options or style customizations that CSL cannot follow are reported rather than applied. An experimental CSL processor is also available directly through `render_result(ast, {base_uri: ".", citeproc: {style: "apa", locale: "en-US"}})`. It is implemented entirely in Lambda script within `lambda.doc.latex` (**D7.2.1–D7.2.4v4, S1.8, S12.4.1v2**). It accepts local BibTeX/BibLaTeX or CSL JSON resources, evaluates custom CSL XML, and bundles `ieee`, `apa`, `chicago-author-date`, and `chicago-fullnote-bibliography` styles plus English/German/French locales. It preserves citation links, scoped prints, and note-style footnotes. CSL mode rejects conflicting legacy style/sorting options and reports unsupported constructs. Locale collation and complete CSL conformance remain outstanding. See the [CSL API, resource options and coverage](../lmd/package/doc/latex/citeproc/README.md).
 
-For PDF export, `hyperref` links and anchors become link annotations and destinations, and its title, author, subject and keywords become PDF Info metadata. `geometry` supplies fixed `@page` paper size and margins for a one-page export; automatic page breaking still requires the separate paged path. `graphicx` trim/clip uses the same supported CSS `clip-path` shapes in SVG and PDF. These remain Lambda-script package policies under **D7.2.1–D7.2.4v3**; unsupported options and commands follow **S7.4.1–S7.4.4** diagnostics.
+For PDF export, `hyperref` links and anchors become link annotations and destinations, and its title, author, subject and keywords become PDF Info metadata. `geometry` supplies fixed `@page` paper size and margins for a one-page export; automatic page breaking still requires the separate paged path. `graphicx` trim/clip uses the same supported CSS `clip-path` shapes in SVG and PDF. These remain Lambda-script package policies under **D7.2.1–D7.2.4v4**; unsupported options and commands follow **S7.4.1–S7.4.4** diagnostics.
 
 Phase III adds bounded theorem/proof, table, language, TikZ/PGFPlots, `natbib`, `caption`/`subcaption`, English `cleveref`, and unhighlighted `listings` profiles. Raw code and document-local `filecontents` bibliographies are preserved. `hyperref` headings and plain-text `\pdfbookmark` titles become hierarchical PDF outlines. `render_result.assets` records image/bibliography paths, origin, availability and source offsets; availability checks local existence, not successful decoding or remote fetching. See the [sample compatibility report](../test/latex/samples/COMPATIBILITY.md).
 
@@ -1248,11 +1252,18 @@ These packages implement parts of the engine in Lambda. They load automatically 
 
 ### 10.1 `edit` — the `lambda edit` application
 
-`lambda.edit.edit` is the document-authoring application behind `lambda edit` (see [Lambda_CLI.md](Lambda_CLI.md)). The CLI passes it a local path, and `open_document(path, options)` does the rest: it picks a format by suffix (`format_for_path(path)`, over `formats`: Markdown `.md`/`.markdown`, HTML `.html`/`.htm`, SVG `.svg`), reads and imports the file, refuses a document it could not write back without loss, and builds the editing page with its toolbar and rich-text or drawing surface. The format adapters are `lambda.edit.markdown`, `lambda.edit.html` and `lambda.edit.svg`; saving and reloading live in `lambda.edit.session`.
+`lambda.editor.app` is the document-authoring application behind `lambda edit` (see [Lambda_CLI.md](Lambda_CLI.md)). The CLI passes it a local path, and `open_document(path, options)` does the rest: it picks a format by suffix (`format_for_path(path)`, over `formats`: Markdown `.md`/`.markdown`, HTML `.html`/`.htm`, SVG `.svg`), reads and imports the file, refuses a document it could not write back without loss, and builds the editing page with its toolbar and rich-text or drawing surface. The format adapters are `lambda.editor.format.markdown`, `lambda.editor.format.html` and `lambda.editor.format.svg`; saving and reloading live in `lambda.editor.session`.
 
 ### 10.2 `editor` — the editing model
 
-`lambda.editor.*` is the rich-text editing model: documents as plain node trees (`mod_doc`), schemas for Markdown, strict CommonMark, an HTML subset and drawings (`mod_md_schema`, `mod_doc_schema`, `mod_drawing_schema`), invertible steps and transactions (`mod_step`, `mod_transaction`), undo history (`mod_history`), editing commands (`mod_commands`), paste handling, decorations and collaboration primitives (`mod_collab`). `lambda.editor.mod_editor` is the facade: `edit_open(doc, schema, selection)` creates an editor value, `edit_exec(editor, command)` applies a command built by an `edit_cmd_*` constructor such as `edit_cmd_insert_text(text)` or `edit_cmd_history_undo()`, and `edit_mount` binds the editor to a Radiant surface. Its modules are usually imported without an alias (`import lambda.editor.mod_editor`). The `edit` package uses it for every format it opens.
+`lambda.editor.*` provides the editing model: documents (`core.doc`), schemas (`schema.markdown`, `schema.document`, `draw.schema`), invertible steps and transactions (`core.step`, `core.transaction`), history (`core.history`), commands, paste handling, decorations and collaboration. `lambda.editor.model` is the model facade: `edit_open(doc, schema, selection)` creates an editor value, `edit_exec(editor, command)` applies an `edit_cmd_*` command, and `edit_mount` binds the model to a Radiant surface. Import it with `import lambda.editor.model`. The CLI application uses this model for the formats it opens.
+
+Shared desktop editors also use `lambda.editor.table.design` for table style
+choices and cell appearance; `lambda.editor.math.render` for equation artwork;
+and `lambda.editor.graphics.{chart,shapes,diagram,wordart}` for graphic
+construction. Validators take explicit bounds, with the existing office
+profile available from `lambda.editor.graphics.dimensions`. Application code
+owns its document transactions and object placement.
 
 ### 10.2.1 `editor.draw` — vertices and edges
 
@@ -1264,7 +1275,7 @@ line/cubic paths, loops and parallel edges, plus version-4 archives with legacy
 v1–v3 reading. `lambda.editor.draw.view.surface(document, {id, width, height})`
 provides an independent retained canvas. The Draw demo reuses the package while
 keeping its application shell and reading existing v1–v3 files. Package ownership follows
-**D7.2.4v3**, with pure model edits and procedural presentation under
+**D7.2.4v4**, with pure model edits and procedural presentation under
 **S1.4, S12.1.3**. See the [API and support boundary](../lmd/package/editor/draw/README.md).
 
 ### 10.2.2 `editor.raster` — layered raster editing
@@ -1276,7 +1287,7 @@ adjustments and undo/redo.
 `layers`, `lookup`, `commands` and `command_state` support independent inspectors.
 `lambda.editor.raster.interaction` groups pointer previews into one transaction;
 the optional `.view` module presents copied pixels in a retained native canvas.
-Package placement follows **D7.2.4v3**, snapshots follow **S9.1.2 / S9.2.2**, and
+Package placement follows **D7.2.4v4**, snapshots follow **S9.1.2 / S9.2.2**, and
 procedural presentation follows **S12.1.3 / D4.5.2**.
 
 The [Photos demo](../test/demo/photos/README.md) supplies the workspace and file
@@ -1350,13 +1361,13 @@ the demo index, and named demos use `lambda demo <name>`; see the
 The viewer browses the current working directory and loads documents on selection. Its
 Seti icon font and license ship in `package/doc/icons/`, and its bundled math fonts
 come from `package/doc/math/fonts/`. These application resources belong to the shipped
-`lambda.doc` package (D7.2.4v3); UI event fixtures remain under `test/ui/`.
+`lambda.doc` package (D7.2.4v4); UI event fixtures remain under `test/ui/`.
 
 ---
 
 ## 11. `map` — Geographic Maps
 
-`lambda.map` is an explicit public package entry under D7.2.4v3. It produces a
+`lambda.map` is an explicit public package entry under D7.2.4v4. It produces a
 native Radiant `<geomap>` viewport. The initial implementation accepts inline,
 typed GeoJSON and a bounded subset of MapLibre Style Specification version 8:
 ordered `background`, `fill`, `line` and `circle` layers with hex/transparent
@@ -1555,6 +1566,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 |---------|-------|
 | `chart` | `test/lambda/chart/` |
 | `ui.dtna` | `test/lambda/ui_dtna/`; native UI fixtures in `test/ui/dtna/` (`make test-ui-dtna`) |
+| `ui.workspace` | `test/lambda/ui_workspace.ls`; native controlled-input integration in `test/ui/controlled_bindings.json` |
 | `ui.bold` | `test/lambda/ui_bold/`; native controls in `test/ui/bold/` and `test/ui/bold_gallery.json` (`make test-ui-bold`) |
 | `ui.wired` | `test/lambda/ui_wired/`; native controls/geometry in `test/ui/wired/` and `test/ui/wired_gallery.json` (`make test-ui-wired`) |
 | `ui.clay` | `test/lambda/ui_clay/`; native controls/collections/scopes in `test/ui/clay/` and the two galleries (`make test-ui-clay`) |
@@ -1583,7 +1595,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 
 ## 14. `eps` — EPS Rendering
 
-The EPS package lives under the document namespace (**D7.2.4v3**). A C+ parser
+The EPS package lives under the document namespace (**D7.2.4v4**). A C+ parser
 reads the EPS envelope and scans source objects; Lambda Script executes the
 PostScript machine and emits portable SVG. The initial profile supports vector
 paths, colors, strokes, transforms, clipping, procedures, common stack/control
@@ -1804,14 +1816,14 @@ content is listed above the preview; Word pagination is outside this profile.
 
 Open the original sample directly with
 `./lambda.exe view test/input/docbook/showcase.xml`. The XML viewer recognizes
-DocBook namespaces and uses the package's HTML/CSS presentation (D7.2.4v3);
+DocBook namespaces and uses the package's HTML/CSS presentation (D7.2.4v4);
 the document browser keeps the original XML in its Source tab.
 The usual extension is `.xml`; the namespace
 `http://docbook.org/ns/docbook` identifies DocBook. The current direct-view
 roots are `article`, `book`, `set`, `part`, and `reference`.
 
 `lambda.doc.docbook` is an initial native Lambda port of the official DocBook
-xslTNG 2.8.5 HTML/CSS transformation (D7.2.4v3). Java and XSLT are used only to
+xslTNG 2.8.5 HTML/CSS transformation (D7.2.4v4). Java and XSLT are used only to
 regenerate reference fixtures; package execution has no Java dependency.
 
 ```lambda
@@ -1898,7 +1910,7 @@ gate; expected bodies are refreshed separately using the pinned processor.
 `lambda.doc.wiki` serializes Mark Doc to MediaWiki, DokuWiki, TikiWiki, TWiki,
 Vimwiki, XWiki 2.1, ZimWiki, Creole 1.0, Jira, and Confluence wiki markup.
 A shared Lambda Script traversal uses declarative syntax profiles; native code
-routes calls and owns package invocation (D7.1.1, D7.2.4v3).
+routes calls and owns package invocation (D7.1.1, D7.2.4v4).
 
 ```lambda
 import wiki: lambda.doc.wiki
@@ -1943,7 +1955,7 @@ and the [working design](../vibe/input/Input_Wiki.md).
 
 `lambda.doc.misc` writes Mark Doc as **AsciiDoc**, **troff/man**, or **Typst**,
 and serializes email/contact/calendar maps as **EML**, **vCard**, or
-**iCalendar**. All six writers are Lambda Script source modules (D7.2.4v3).
+**iCalendar**. All six writers are Lambda Script source modules (D7.2.4v4).
 
 ```lambda
 import writers: lambda.doc.misc
@@ -2073,7 +2085,7 @@ offers a virtual changed-file list and unified surface, hunk navigation, search,
 selection/copy, lazy file loading and refresh. `to_html` exports every loaded
 file and row. Binary, mode, rename, symlink, submodule and conflict changes keep
 their own metadata and summaries. Repository access is procedural; parsing and
-presentation are pure (S12.1.1v3/S12.1.3, D7.2.4v3/D7.2.6).
+presentation are pure (S12.1.1v3/S12.1.3, D7.2.4v4/D7.2.6).
 
 ```lambda no-run
 import diff: lambda.doc.diff
@@ -2085,7 +2097,7 @@ See [Git and patch review](Lambda_Diff.md) for the API, options, model and limit
 
 ## 21. doc.readability — Article extraction
 
-`lambda.doc.readability` finds the main article of a web page, as Firefox Reader View does: it is a port of Mozilla Readability.js 0.6.0 that passes all 130 of Mozilla's test pages. `parse` takes an HTML string or a parsed document and returns the article as an element (`content`) and as HTML (`html`), with its `title`, `byline`, `excerpt`, `site_name`, `published_time`, `lang`, `dir`, `text` and `length`, or `null` when the page has no content. `readerable` is Readability's quick check that a page is worth parsing. Both are pure; `read` loads a file first (D7.2.4v3/D7.2.6).
+`lambda.doc.readability` finds the main article of a web page, as Firefox Reader View does: it is a port of Mozilla Readability.js 0.6.0 that passes all 130 of Mozilla's test pages. `parse` takes an HTML string or a parsed document and returns the article as an element (`content`) and as HTML (`html`), with its `title`, `byline`, `excerpt`, `site_name`, `published_time`, `lang`, `dir`, `text` and `length`, or `null` when the page has no content. `readerable` is Readability's quick check that a page is worth parsing. Both are pure; `read` loads a file first (D7.2.4v4/D7.2.6).
 
 ```lambda no-run
 import rd: lambda.doc.readability

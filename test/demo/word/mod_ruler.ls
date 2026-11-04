@@ -5,8 +5,8 @@ import columns: .mod_columns
 import model: .mod_model
 import stories: .mod_stories
 import navigation: .mod_navigation
-import controller: lambda.edit.controller
-import lambda.editor.mod_doc
+import controller: lambda.editor.controller
+import lambda.editor.core.doc
 
 let sides = [{id:"left",opposite:"right",axis:"width",vertical:false,sign:1},
     {id:"right",opposite:"left",axis:"width",vertical:false,sign: -1},

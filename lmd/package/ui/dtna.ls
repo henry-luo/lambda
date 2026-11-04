@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 // Shipped facade (D7.2.4); imported views retain their defining module.
 import c: lambda.ui.core.component
 import native: lambda.ui.core.contract
@@ -34,7 +35,7 @@ fn component(kind, props, child, allowed = []) element^ {
         else if (contains(['checkbox','radio','switch'],kind)) ["size","disabled"]
         else if (contains(['alert','tag','progress','form-item','result'],kind)) ["status"]
         else if (kind == 'config-provider') ["disabled"] else []
-    let descriptor = c.node(kind,props,child,[*allowed,*styled])^
+    let descriptor = descriptor.node(kind,props,child,[*allowed,*styled])^
     let valid = contract.validate(kind,props)^;
     descriptor
 }

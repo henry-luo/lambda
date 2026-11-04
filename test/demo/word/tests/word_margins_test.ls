@@ -4,9 +4,9 @@ import files: ~~.mod_io
 import ruler: ~~.mod_ruler
 import columns: ~~.mod_columns
 import stories: ~~.mod_stories
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let doc = node('doc',[node('p',[text("First sheet")]),
     node_attrs('p',[{name:'data-word-page-break',value:"true"}],[text("Second sheet")]),

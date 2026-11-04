@@ -1,9 +1,9 @@
 import spelling: lambda.doc.spelling
 import front: lambda.doc.spelling.front_coded
 import document: lambda.doc.spelling.document
-import async: lambda.edit.spelling
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+import async: lambda.editor.spelling
+import lambda.editor.core.doc
+import lambda.editor.core.step
 
 pn main() {
     let dictionary = front.from_bytes(binary("Lambda|NASA|a|café|can't|cat;s|dog;s|hello|is|spelling|test|the|this|word\n"))^

@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import dom
 import c: lambda.ui.core.component
 import progress: .progress
@@ -12,7 +13,7 @@ pub fn descriptor(props, child) element^ {
     if (not c.finite(delay) or delay < 0) raise c.fail('spin',"delay must be finite nonnegative milliseconds")
     else if (c.has(props,"percent") and props.percent != 'auto' and not c.finite(props.percent))
         raise c.fail('spin',"percent must be finite or auto")
-    else c.node('spin',props,child,properties)^
+    else descriptor.node('spin',props,child,properties)^
 }
 fn settings(props) => {spinning:c.option(props,"spinning",true),delay:c.option(props,"delay",0),automatic:props.percent == 'auto'}
 fn percentage(props, clock) => if (props.percent == 'auto') clock.progress else max(0,min(100,c.option(props,"percent",0)))

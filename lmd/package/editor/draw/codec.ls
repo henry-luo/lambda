@@ -1,8 +1,8 @@
 // v1-v3 remain the demo profile; v4 preserves normalized, serializable drawing data.
 import core: .core
 import model: .model
-import doc: lambda.editor.mod_doc
-import step: lambda.editor.mod_step
+import doc: lambda.editor.core.doc
+import step: lambda.editor.core.step
 fn restore_ports(ports) => [for (p in ports) if (p.direction == null) p else {*:p,direction:if (p.direction is symbol) p.direction else symbol(p.direction)}]
 fn restore_attr(a) any^ => if (contains(["kind","routing"],a.name)) if (a.value is symbol) a.value else symbol(a.value)
     else if (a.name == "ports") restore_ports(a.value)

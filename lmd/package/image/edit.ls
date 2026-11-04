@@ -1,5 +1,5 @@
 // Image sessions reuse the editor's snapshot transaction history (S9.1.2).
-import history: lambda.editor.mod_history
+import history: lambda.editor.core.history
 import img: lambda.image
 
 pub fn session(image) map => {doc: image, original: image, hist: history.history_new()}

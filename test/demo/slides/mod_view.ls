@@ -7,8 +7,8 @@ import home: .mod_home_ui
 import insert_ui: .mod_insert_ui
 import transitions_ui: .mod_transitions_ui
 import animations_ui: .mod_animations_ui
-import spelling: lambda.edit.spelling
-import ribbon_ui: ~~.mod_ribbon
+import spelling: lambda.editor.spelling
+import ribbon_ui: lambda.ui.workspace.ribbon
 
 pub fn button(action,label,cls="") => <button id:action,type:"button",class:cls,'data-action':action,label>
 fn select(id,label,items,property="") => <label class:"field",<span label><select id:id,'data-property':property,

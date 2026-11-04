@@ -1,6 +1,6 @@
 import model: ~~.mod_model
 import shapes: ~~.mod_shapes
-import geom: lambda.editor.mod_geom
+import geom: lambda.editor.draw.geometry
 let st = model.initial()
 len(model.kinds) == 12
 all([for (kind in model.kinds) model.valid_node(model.make_shape("x",kind,0,0,"Label"),["x"])])

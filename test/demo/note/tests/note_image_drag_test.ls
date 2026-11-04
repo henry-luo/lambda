@@ -1,8 +1,8 @@
 import model: ~~.mod_model
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
 
 let picture = node_attrs('img',[{name:'src',value:"picture.png"},{name:'alt',value:"Picture"},
     {name:'width',value:128},{name:'height',value:80}],[])

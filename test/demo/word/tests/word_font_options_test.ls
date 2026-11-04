@@ -1,8 +1,8 @@
 import ui: ~~.mod_ui
 import model: ~~.mod_model
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 ui.font_options(["Verdana","Arial","Arial"],"Georgia") ==
     [{value:"Arial",label:"Arial"},{value:"Georgia",label:"Georgia"},{value:"Verdana",label:"Verdana"}]

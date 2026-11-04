@@ -8,7 +8,7 @@
 import dom
 import san: lambda.mail.sanitize
 import prov: lambda.mail.providers
-import icons: ~~.mod_icons
+import icons: lambda.ui.workspace.icons
 import model: .mod_model
 
 fn button(id, cls, action, value, label, extra) => <button id:id, type:"button", class:cls, 'data-action':action,

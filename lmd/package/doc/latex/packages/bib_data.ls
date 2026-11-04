@@ -1,6 +1,6 @@
 // Local BibTeX data parsing and provenance for the Lambda-script biblatex profile.
 import util: ~~.util
-import paths: lambda.edit.session
+import paths: lambda.editor.session
 
 pub let ENTRY_TYPES = ["article", "book", "inbook", "incollection",
     "inproceedings", "thesis", "report", "online", "misc", "unpublished"]

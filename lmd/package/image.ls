@@ -1,4 +1,4 @@
-import sequence: .editor.mod_doc
+import sequence: lambda.editor.core.doc
 
 // D7.2.4v3 / S9.1.2: Raster storage is native; document composition stays in Lambda values.
 pub fn blank(options) element^ => lambda.sys.image_raster(null, options)^

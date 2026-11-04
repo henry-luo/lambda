@@ -1,8 +1,8 @@
 // An equation's source draft is UI state; only a validated transaction changes its atom (S12.1.3, D7.2.5).
 import dom
-import image: lambda.editor.mod_image
+import image: lambda.editor.image
 import equation: .mod_equation
-import catalog: .mod_equation_catalog
+import catalog: lambda.editor.math.catalog
 
 pub fn active(st) any^ => st.equation_edit!=null and st.equation_edit.path==image.selected(st.editor).path and
     st.equation_edit.revision==st.editor.model_revision and equation.settings(image.selected(st.editor).node)!=null

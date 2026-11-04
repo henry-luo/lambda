@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import collection: lambda.ui.core.collection
 import icons: .icons
@@ -23,20 +24,20 @@ pub fn card(props, child) element^ {
     else if (props.active_tab != null and props.default_active_tab != null) raise c.fail("card","active_tab and default_active_tab are mutually exclusive")
     else (
         let selected = if (props.tab_list == null) null else card_tabs(props)^,
-        c.node('card',props,child,["extra","actions","cover","bordered","hoverable","loading","size","type","head_style","body_style","tab_list","active_tab","default_active_tab"])^
+        descriptor.node('card',props,child,["extra","actions","cover","bordered","hoverable","loading","size","type","head_style","body_style","tab_list","active_tab","default_active_tab"])^
     )
 }
 pub fn card_part(kind, props, child) element^ {
     let flags = c.boolean_props(props,["hoverable"],kind)^;
-    c.node(kind,props,child,if (kind == 'card-meta') ["avatar","description"] else ["hoverable"])^
+    descriptor.node(kind,props,child,if (kind == 'card-meta') ["avatar","description"] else ["hoverable"])^
 }
 pub fn empty(props, child) element^ {
     let messages = locale.resolve(c.option(props,"locale","en-US"))^;
     if (props.image_height != null and (not c.finite(props.image_height) or props.image_height < 0)) raise c.fail("empty","image_height must be nonnegative")
     else if (props.image != null and not (props.image is string or props.image is symbol or props.image is element or props.image is bool)) raise c.fail("empty","image must be a preset, URL, element or false")
-    else c.node('empty',props,child,["description","image","image_height","locale"])^
+    else descriptor.node('empty',props,child,["description","image","image_height","locale"])^
 }
-pub fn result(props, child) element^ => c.node('result',props,child,["status","description","subtitle","icon","extra"])^
+pub fn result(props, child) element^ => descriptor.node('result',props,child,["status","description","subtitle","icon","extra"])^
 fn card_tabs(p) element^ => navigation.choice('tabs',{
         id:p.id ++ "-tabs",items:p.tab_list,
         *:(if (c.has(p,"active_tab")) {value:p.active_tab} else if (c.has(p,"default_active_tab")) {default_value:p.default_active_tab} else {})})^

@@ -161,7 +161,7 @@ Changes stay in memory until saved. Closing the window does not autosave.
 
 `mod_model.ls` owns immutable documents and pure transitions (**S1.4**),
 reusing `lambda.editor.draw.geometry` for picking and paths, and
-`lambda.editor.mod_history` for snapshot undo/redo. `mod_artwork.ls` builds
+`lambda.editor.core.history` for snapshot undo/redo. `mod_artwork.ls` builds
 the starter from ordinary objects. `mod_scene.ls` produces pure HTML/SVG;
 `mod_present.ls` updates retained groups and controls. `sketch.ls` owns pointer,
 keyboard, DOM and file effects (**S12.1.3 / D7.4.6**). `mod_raster.ls` reuses

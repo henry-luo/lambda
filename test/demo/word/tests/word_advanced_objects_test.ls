@@ -4,8 +4,8 @@ import stories: ~~.mod_stories
 import equation: ~~.mod_equation
 import art: ~~.mod_wordart
 import files: ~~.mod_io
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.step
 
 let editor = model.open_editor(node('doc',[node('p',[text("Body")])]))
 let p = {*:stories.defaults,header:"Studio",footer:"Page {PAGE} of {NUMPAGES}"}

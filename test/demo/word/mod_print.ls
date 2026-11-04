@@ -1,7 +1,7 @@
 // Print settings are per-print overrides on a copy of the document; the document's own page setup never changes.
 // Lambda has no OS printer API, so the only destination is Save as PDF through the regular PDF export.
 import dom
-import lambda.editor.mod_step
+import lambda.editor.core.step
 import page: .mod_page
 import stories: .mod_stories
 

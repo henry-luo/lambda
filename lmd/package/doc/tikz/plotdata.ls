@@ -2,7 +2,7 @@
 // coordinates and explicit error offsets. Files load only beside the document.
 import opts: .options
 import util: lambda.doc.latex.util
-import paths: lambda.edit.session
+import paths: lambda.editor.session
 
 let TABLE_KEYS = ["x", "y", "x index", "y index", "col sep", "row sep", "header",
     "x error", "y error", "x error index", "y error index"]

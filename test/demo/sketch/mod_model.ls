@@ -1,6 +1,6 @@
 // immutable illustration values (S1.4); previews share the editor's snapshot history.
 import geom: lambda.editor.draw.geometry
-import history: lambda.editor.mod_history
+import history: lambda.editor.core.history
 import raster: .mod_raster
 
 pub let TOOLS = [

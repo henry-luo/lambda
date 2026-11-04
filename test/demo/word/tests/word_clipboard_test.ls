@@ -2,14 +2,14 @@ import model: ~~.mod_model
 import shapes: ~~.mod_shapes
 import art: ~~.mod_wordart
 import equation: ~~.mod_equation
-import controller: lambda.edit.controller
+import controller: lambda.editor.controller
 import outcome: lambda.dom.edit_result
-import image: lambda.editor.mod_image
+import image: lambda.editor.image
 import media: lambda.doc.media
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
 
 let empty = model.open_editor(node('doc',[node('p',[])]))
 let src = media.data_uri(input("test/ui/note/fixtures/clipboard.png",'binary')^,"image/png")^

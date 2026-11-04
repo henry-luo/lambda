@@ -15,8 +15,8 @@
 //
 // Focused port of the parts of maxGraph's mxEdgeStyle needed for the Stage-4 MVP.
 
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.step
 import lambda.editor.draw.geometry
 
 // ---------------------------------------------------------------------------

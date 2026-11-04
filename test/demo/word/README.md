@@ -99,7 +99,7 @@ in the app (**S12.1.3**, **D7.2.5**).
 
 The interface follows photo-album's white panels, cool gray sidebar, blue
 accents, rounded controls, and system typography. Both demos use the shared
-outline SVG icons in `../mod_icons.ls`. Word's `mod_ribbon_icons.ls` adds bright
+outline SVG icons in `lambda.ui.workspace.icons`. `lambda.ui.workspace.ribbon_icons` adds bright
 blue document, violet creative, teal data, and amber review accents, with saturated
 fine contours and matching tinted fills. Equation controls share the same palette.
 The ribbons share command sizes, group captions, and selection states. When
@@ -506,7 +506,7 @@ policy in Lambda packages, with Radiant providing the native mechanisms.
 
 | WordCraft source | Lambda implementation |
 | --- | --- |
-| `crates/doc/src/lib.rs`, `para.rs`, `props.rs` | `lambda.editor.mod_doc` nodes, text leaves, and marks; `mod_model.ls` adds selected-range CSS formatting |
+| `crates/doc/src/lib.rs`, `para.rs`, `props.rs` | `lambda.editor.core.doc` nodes, text leaves, and marks; `mod_model.ls` adds selected-range CSS formatting |
 | `crates/engine/src/lib.rs` (`CommandSpec`, `Registry`) | `mod_model.ls` command registry, retaining corresponding upstream IDs |
 | `crates/engine/src/session.rs` (`Session::run`, history) | `mod_app.ls` controller plus `lambda.editor` transaction/history facade |
 | `crates/engine/src/cmd/{format,para,text,table,edit}.rs` | Existing editor commands plus range formatting, paragraph attributes, style application, and cross-run replacement |
@@ -519,7 +519,7 @@ policy in Lambda packages, with Radiant providing the native mechanisms.
 | Word's Home tab (beyond WordCraft) | `mod_home_ui.ls` ribbon groups and menus; `mod_home.ls` change case, Format Painter marks, paragraph borders, list styles, and sorting |
 | In-place equation editing (beyond WordCraft) | `mod_math_field.ls` LaTeX row/item tree, caret slots, edits and slot geometry; `mod_math_edit.ls` click, key, caret drawing and ribbon insertion |
 | `crates/engine/src/sample.rs` | Adapted studio handbook in `mod_document.ls` |
-| `crates/{docx,formats,pdf}` and `engine/src/io.rs` | Existing Lambda format adapters, conflict-aware `lambda.edit.session`, and Radiant PDF export through `mod_io.ls` |
+| `crates/{docx,formats,pdf}` and `engine/src/io.rs` | Existing Lambda format adapters, conflict-aware `lambda.editor.session`, and Radiant PDF export through `mod_io.ls` |
 
 Character formatting splits only the selected portions of boundary leaves.
 Their selection positions are remapped explicitly, including backwards ranges;
@@ -567,14 +567,14 @@ The parent projects the document before passing its rendered body to the gesture
 controller, so preview redraws retain source bindings (**S12.1.3**, **D7.2.5**).
 The workspace forwards its non-bubbling selection notifications to the document
 controller so ribbon bindings continue to follow the caret.
-Moves reuse `lambda.editor.mod_image` transactions and the drop-caret measurement
+Moves reuse `lambda.editor.image` transactions and the drop-caret measurement
 shared with Notes. The gesture owns pointer capture until release and commits
 the captured source path, keeping selection and undo independent of the hover target.
 Angles are stored with a CSS image transform, shared by the canvas and exported
 HTML/PDF; rotating a shape no longer shrinks its artwork to fit a fixed viewport.
 
 Selected pictures and generated objects supply their clipboard payload from the
-model through `lambda.edit.controller` (**D7.2.5**). Copy preserves history and
+model through `lambda.editor.controller` (**D7.2.5**). Copy preserves history and
 selection; Cut captures the same payload before deleting the atom. Native
 transport receives image bytes, HTML, and alternative text. Rich paste retains
 the image attributes declared by Word's schema, including editable object
@@ -596,7 +596,7 @@ receive a projected zero-width space so their node-position carets have a line
 box; this placeholder is absent from saved documents.
 
 Surface binding, selection ownership, document replacement, native action routing,
-and selection completion use `lambda.edit.controller`, shared with the general
+and selection completion use `lambda.editor.controller`, shared with the general
 editor shell. Ribbon selectors and search fields use `lambda.ui.controls` with
 declarative change actions; Word supplies command IDs and state updates. Live
 control synchronization, typed option values, caret preservation, and IME handling

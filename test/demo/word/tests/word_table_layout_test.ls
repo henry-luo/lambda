@@ -3,10 +3,10 @@ import layout: ~~.mod_table_layout
 import tables: ~~.mod_table
 import grid: ~~.mod_table_grid
 import files: ~~.mod_io
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 fn row(values,header=false) => node('tr',[for (v in values) node(if (header) 'th' else 'td',[text(v)])])
 let table = node_attrs('table',[{name:'id',value:"original"}],[

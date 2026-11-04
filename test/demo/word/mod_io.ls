@@ -1,12 +1,12 @@
 // Lossless editable snapshots reuse lambda.edit's atomic/conflict-aware saves.
 // Imported office documents are semantic copies; they never overwrite their source.
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import inline_format: lambda.editor.mod_inline_format
-import html: lambda.edit.html
-import markdown: lambda.edit.markdown
-import helpers: lambda.edit.model
-import session: lambda.edit.session
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import inline_format: lambda.editor.core.inline_format
+import html: lambda.editor.format.html
+import markdown: lambda.editor.format.markdown
+import helpers: lambda.editor.format.model
+import session: lambda.editor.session
 import docx: lambda.doc.docx
 import docx_style: lambda.doc.docx.export_style
 import media: lambda.doc.media

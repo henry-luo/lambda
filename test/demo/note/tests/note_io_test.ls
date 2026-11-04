@@ -1,10 +1,10 @@
 import storage: ~~.mod_io
 import model: ~~.mod_model
 import sample: ~~.mod_sample
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let book = sample.notebook()
 let encoded = storage.encode(book)

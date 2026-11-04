@@ -3,8 +3,8 @@ import app: ~~.~~.mod_app
 import files: ~~.~~.mod_io
 import model: ~~.~~.mod_model
 import document: ~~.~~.mod_document
-import session: lambda.edit.session
-import lambda.editor.mod_doc
+import session: lambda.editor.session
+import lambda.editor.core.doc
 
 pn main() {
     let root = "temp/word-autosave-" ++ uuid()^

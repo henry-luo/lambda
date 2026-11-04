@@ -2,7 +2,8 @@
 import slide: lambda.slide
 import c: lambda.slide.common
 import factory: lambda.ui.core.element
-import css: lambda.editor.mod_inline_format
+import css: lambda.editor.core.inline_format
+import shared_history: lambda.editor.core.history
 
 let tags = {
     text:(a,b) => <text *:a,*b>, shape:(a,b) => <shape *:a,*b>,
@@ -86,17 +87,16 @@ pub fn initial(deck=null,base="") any^ {
 }
 fn snapshot(st) => {doc:st.doc,index:st.index,selected:st.selected,base:st.base,path:st.path,import_warnings:st.import_warnings}
 pub fn commit_doc(st,doc,index=null,selected=null) any^ {
-    let plan = if (doc == st.doc) st.plan else slide.compile(doc)^;
+    let plan = if (doc == st.doc) st.plan else slide.compile(doc)^
+    let hist = if (doc == st.doc) {past:st.undo,future:st.redo} else shared_history.snapshot_record({past:st.undo,future:st.redo},snapshot(st),80);
     {*:st,doc:doc,plan:plan,index:if (index == null) st.index else index,
-        selected:if (selected == null) st.selected else selected,error:"",redo:if (doc == st.doc) st.redo else [],
-        undo:if (doc == st.doc) st.undo else [*slice(st.undo,max(0,len(st.undo)-79)),snapshot(st)]}
+        selected:if (selected == null) st.selected else selected,error:"",redo:hist.future,undo:hist.past}
 }
 pub fn history(st,forward=false) any^ {
-    let stack = if (forward) st.redo else st.undo
-    let entry = stack[last];
-    if (entry == null) st else {*:st,*:entry,plan:slide.compile(entry.doc)^,editing:null,drag:null,error:"",
-        undo:if (forward) [*st.undo,snapshot(st)] else slice(st.undo,0,len(st.undo)-1),
-        redo:if (forward) slice(st.redo,0,len(st.redo)-1) else [*st.redo,snapshot(st)]}
+    let hist = {past:st.undo,future:st.redo}
+    let step = if (forward) shared_history.snapshot_redo(hist,snapshot(st),false,false)^ else shared_history.snapshot_undo(hist,snapshot(st),false,false)^;
+    if (step == null) st else {*:st,*:step.value,plan:slide.compile(step.value.doc)^,editing:null,drag:null,error:"",
+        undo:step.history.past,redo:step.history.future}
 }
 pub fn select_slide(st,index) => {*:st,index:max(0,min(len(st.plan.slides)-1,index)),selected:"",error:""}
 // Editing a composed slide detaches that slide from its master; other slides keep inheritance.

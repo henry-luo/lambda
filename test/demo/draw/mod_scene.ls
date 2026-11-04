@@ -1,7 +1,7 @@
 import dom
 import model: .mod_model
-import geom: lambda.editor.mod_geom
-import router: lambda.editor.mod_router
+import geom: lambda.editor.draw.geometry
+import router: lambda.editor.draw.routing
 import shapes: .mod_shapes
 import paint: .mod_paint
 

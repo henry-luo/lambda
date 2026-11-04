@@ -1,21 +1,9 @@
 import model: .mod_model
+import file_info: lambda.io.file_info
 import uri: lambda.doc.uri
 import media: lambda.doc.media
 
-// S12.4.1v3: capture metadata now; views never re-read live Path properties.
-fn entry_info(p,path,locator=null) {
-    let dir = p.is_dir
-    let ext = lower(p.extension or "");
-    {name:p.name,path:path,dir:dir,extension:ext,size:p.size or 0,
-        modified_raw:p.modified,
-        modified:if (p.modified == null) "" else format(p.modified,"YYYY-MM-DD HH:mm"),kind:model.kind(ext,dir),
-        *:(if (locator == null) {} else {source:p,locator:locator,readonly:true})}
-}
-pub fn read_folder(path) array^ {
-    let paths = input(path,'dir')^;
-    if (not (paths is array)) raise error("Choose a filesystem folder. Archive contents are read-only.")
-    else [for (p in paths) entry_info(p,p.path)]
-}
+pub fn read_folder(path) array^ => file_info.read_folder(path,"Choose a filesystem folder. Archive contents are read-only.")^
 fn known_entry(st,path) => [for (e in [*(st.entries or []),
     *[for (c in st.columns or []) *c.entries],st.container] where e != null and e.path == path) e][0]
 fn archive_member(node,members,index=0) element^ {
@@ -44,12 +32,12 @@ pub fn read_location(path,st=null) map^ {
             {path:locator.outer,root:root,entry:{*:physical,archive:true,kind:"Archive"}})
         let node = archive_member(cache.root,locator.members)^
         let container = if (len(locator.members)==0) {*:cache.entry,locator:locator}
-            else entry_info(node,target,locator)
+            else file_info.entry(node,target,locator)
         let folder = if (node.is_dir or len(locator.members)==0) node
             else if (model.archive(container)) input(node,'zip')^ else raise error("Choose a folder or ZIP archive.");
         // UI keys are labels only: native member reads always use their captured fs nodes (S14.3.1v3).
         {path:target,container:container,archive_cache:cache,
-            entries:[for (p in content(folder)^) entry_info(p,model.child_path(target,p.name),
+            entries:[for (p in content(folder)^) file_info.entry(p,model.child_path(target,p.name),
                 {outer:locator.outer,members:[*locator.members,p.name]})]}
     }
 }

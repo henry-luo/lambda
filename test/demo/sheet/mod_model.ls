@@ -1,5 +1,6 @@
 // S12.1.3: workbook commands are pure; handlers own publication and I/O.
 import f: .mod_formula
+import shared_history: lambda.editor.core.history
 pub fn empty_sheet(title="Sheet1") => {title:title,rows:60,cols:20,cells:[]}
 pub fn blank() => {format:"lambda-sheet",version:1,title:"Untitled workbook",sheets:[empty_sheet()]}
 pub fn current(st) => st.book.sheets[st.sheet]
@@ -40,8 +41,10 @@ pub fn select(st,row,col,extend=false) {
     let c = max(0,min(current(st).cols-1,col));
     {*:st,row:r,col:c,anchor:if (extend) st.anchor else {row:r,col:c},editing:false,draft:"",status:"Ready"}
 }
-pub fn change(st,book,status="Ready") => if (book==st.book) {*:st,editing:false} else
-    {*:st,book:book,undo:take([st.book,*st.undo],100),redo:[],editing:false,status:status}
+pub fn change(st,book,status="Ready") => if (book==st.book) {*:st,editing:false} else {
+    let hist = shared_history.snapshot_record({past:st.undo,future:st.redo},st.book,100,true);
+    {*:st,book:book,undo:hist.past,redo:hist.future,editing:false,status:status}
+}
 fn replace_sheet(st,sheet,status="Ready") => change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) sheet else s]},status)
 pub fn set_cells(st,cells,status="Ready") => replace_sheet(st,{*:current(st),cells:cells},status)
 fn patch_cell(sheet,row,col,raw,style=null) => [for (cell in sheet.cells where cell.row!=row or cell.col!=col) cell,
@@ -59,15 +62,15 @@ pub fn format_cells(st,key,value) {
     set_cells(st,[*[for (c in current(st).cells where ((not selected(st,c.row,c.col)) ^ { false })) c],*cells],"Formatting updated")
 }
 pub fn history(st,redo=false) any^ {
-    let stack = if (redo) st.redo else st.undo
-    if (len(stack)==0) st else {
-        let sheet=min(st.sheet,len(stack[0].sheets)-1)
-        let rows=stack[0].sheets[sheet].rows
-        let cols=stack[0].sheets[sheet].cols;
-        {*:st,book:stack[0],sheet:sheet,row:min(st.row,rows-1),col:min(st.col,cols-1),
+    let hist = {past:st.undo,future:st.redo}
+    let step = if (redo) shared_history.snapshot_redo(hist,st.book,true,true)^ else shared_history.snapshot_undo(hist,st.book,true,true)^
+    if (step==null) st else {
+        let sheet=min(st.sheet,len(step.value.sheets)-1)
+        let rows=step.value.sheets[sheet].rows
+        let cols=step.value.sheets[sheet].cols;
+        {*:st,book:step.value,sheet:sheet,row:min(st.row,rows-1),col:min(st.col,cols-1),
             anchor:{row:min(st.anchor.row,rows-1),col:min(st.anchor.col,cols-1)},editing:false,
-            undo:if (redo) [st.book,*st.undo] else slice(st.undo,1),
-            redo:if (redo) slice(st.redo,1) else [st.book,*st.redo],status:if (redo) "Redone" else "Undone"}
+            undo:step.history.past,redo:step.history.future,status:if (redo) "Redone" else "Undone"}
     }
 }
 pub fn add_sheet(st) {

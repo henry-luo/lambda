@@ -1,5 +1,5 @@
 // Markdown emoji policy: vibe/input/Input_Markdown.md; Input-owned nodes follow D7.1.5.
-import markdown: lambda.edit.markdown
+import markdown: lambda.editor.format.markdown
 
 let catalog = input("lib/emoji_shortcodes_data.json", 'json')^
 let aliases = [*[for (alias at catalog.unicode) alias], *[for (alias at catalog.images) alias]]

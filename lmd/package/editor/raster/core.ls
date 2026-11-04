@@ -1,7 +1,7 @@
 // S1.4 / S9.2.2: commands publish checked replacements and reuse shared snapshot history.
 import img: lambda.image
-import history: lambda.editor.mod_history
-import sequence: lambda.editor.mod_doc
+import history: lambda.editor.core.history
+import sequence: lambda.editor.core.doc
 import model: .model
 import registry: .commands
 import selection: .selection

@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import responsive: lambda.ui.core.responsive
 
@@ -12,12 +13,12 @@ pub fn badge(props, child) element^ {
         raise c.fail("badge","overflow_count must be nonnegative")
     else if (props.count is number and (not c.finite(props.count) or props.count < 0))
         raise c.fail("badge","count must be finite and nonnegative")
-    else c.node('badge',props,child,["count","overflow_count","dot","show_zero","offset","color","status","text","size"])^
+    else descriptor.node('badge',props,child,["count","overflow_count","dot","show_zero","offset","color","status","text","size"])^
 }
 pub fn ribbon(props, child) element^ {
     let color = c.validate_colors(props,["color"],"badge-ribbon")^;
     if (not c.enum_valid(props.placement,["start","end"])^) raise c.fail("badge-ribbon","invalid placement")
-    else c.node('badge-ribbon',props,child,["text","color","placement"])^
+    else descriptor.node('badge-ribbon',props,child,["text","color","placement"])^
 }
 fn badge_view(node) {
     let p = c.props(node)
@@ -46,7 +47,7 @@ pub fn descriptions(props) element^ {
     else if (not c.enum_valid(props.layout,["horizontal","vertical"])^) raise c.fail("descriptions","invalid layout")
     else (
         let items = [for (item in props.items) validate_description_item(item)^],
-        c.node('descriptions',props,null,["items","column","layout","bordered","colon","extra","size"])^
+        descriptor.node('descriptions',props,null,["items","column","layout","bordered","colon","extra","size"])^
     )
 }
 fn validate_description_item(item) bool^ {

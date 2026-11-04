@@ -1,5 +1,4 @@
 import c: .component
-import engine: lambda.ui.dtna.tokens
 
 // source themes share token validation and inheritance, while owning their palettes.
 pub fn resolve(defaults, overrides, lengths, zero_lengths, family) map^ {
@@ -17,19 +16,6 @@ pub fn variables(values, lengths, family) string => join([for (key,value in valu
     "--" ++ family ++ "-" ++ replace(string(key),"_","-") ++ ":" ++ string(value) ++
     (if (contains(lengths,string(key))) "px" else "") ++ ";"],"")
 
-fn engine_values(values, extra) map => map([for (key,value in values where ((not contains(extra,c.text(key))) ^ { false })) (key,value)])
-pub fn skin_resolve(defaults, overrides, lengths, zero_lengths, extra, family) map^ {
-    let values = resolve(defaults,overrides,lengths,zero_lengths,family)^
-    let derived = engine.resolve(engine_values(values,extra)) ^ {raise error(replace(^.message,"dtna:",family ++ ":"))};
-    {*:derived,*:values}
-}
-pub fn skin_variables(defaults, overrides, lengths, zero_lengths, extra, family, scoped = false) string^ {
-    let values = skin_resolve(defaults,overrides,lengths,zero_lengths,extra,family)^
-    let aliases = if (scoped) engine.scoped_variables(engine_values(overrides,extra))^
-        else engine.variables(map([for (key,value in defaults where ((not contains(extra,c.text(key))) ^ { false })) (key,values[key])]))^
-    let decoration = map([for (key,value in (if (scoped) overrides else values) where ((contains(extra,c.text(key))) ^ { false })) (key,value)]);
-    replace(aliases,"--dtna-","--" ++ family ++ "-") ++ variables(decoration,lengths,family) ++ aliases
-}
 pub fn direction(props, owner, family) bool^ {
     if (not c.enum_valid(props.direction,["ltr","rtl"])^) raise c.fail(owner,"invalid direction",family) else true
 }

@@ -1,9 +1,9 @@
 import files: ~~.mod_io
 import document: ~~.mod_document
 import model: ~~.mod_model
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let sample = document.sample()
 let snapshot = files.archive(sample,"Studio")
