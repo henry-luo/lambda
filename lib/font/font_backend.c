@@ -78,6 +78,7 @@ bool font_backend_create(FontHandle* handle, const uint8_t* data, size_t len,
 void font_backend_destroy(FontHandle* handle) {
     if (!handle) return;
 #ifdef __APPLE__
+    font_platform_clear_shaped_lines(handle);
     if (handle->ct_font_ref) {
         font_platform_destroy_ct_font(handle->ct_font_ref);
         handle->ct_font_ref = NULL;
@@ -110,6 +111,7 @@ bool font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref) {
     FontTables* tables = font_platform_selected_tables(measured, handle->ctx->pool);
     if (!tables) { font_platform_destroy_ct_font(measured); return false; }
     void* raster = font_platform_retain_ct_font(measured);
+    font_platform_clear_shaped_lines(handle);
     if (handle->ct_font_ref) font_platform_destroy_ct_font(handle->ct_font_ref);
     if (handle->ct_raster_ref) font_platform_destroy_ct_font(handle->ct_raster_ref);
     handle->ct_font_ref = measured;

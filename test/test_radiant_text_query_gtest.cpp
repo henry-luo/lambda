@@ -189,6 +189,50 @@ TEST(FontTextMeasurement, TextMeasurementsOwnKeysAndInvalidateWhenFontResourcesC
     font_context_destroy(ctx);
 }
 
+#ifdef __APPLE__
+TEST(FontTextMeasurement, FaceShapesOwnTextAndFollowRangesDirectionsAndSelectedFonts) {
+    FontContext* ctx = font_context_create(nullptr);
+    ASSERT_NE(ctx, nullptr);
+    FontStyleDesc style = {};
+    style.size_px = 16.0f;
+    style.weight = FONT_WEIGHT_NORMAL;
+    FontHandle* face = font_load_from_file(ctx,
+        "test/lambda/math/fonts/NotoSansMath-Regular.ttf", &style);
+    FontHandle* replacement = font_load_from_file(ctx, "test/layout/data/font/Ahem.ttf", &style);
+    ASSERT_NE(face, nullptr);
+    ASSERT_NE(replacement, nullptr);
+    char text[] = "iiiiWW";
+    auto expect_shape = [&](FontHandle* reference) {
+        float width = font_measure_text(reference, text, 6).width;
+        float prefix = font_measure_text(reference, text, 3).width;
+        for (FontTextDirection direction : {FONT_TEXT_LTR, FONT_TEXT_RTL}) {
+            FontFaceTextRequest request = {text, 6, direction, true, 0, 6};
+            FontFaceTextMetrics metrics = {};
+            ASSERT_TRUE(font_visit_face_text(face, &request, nullptr, nullptr, &metrics));
+            EXPECT_NEAR(metrics.advance, width, 0.01f);
+            EXPECT_NEAR(metrics.range_start, direction == FONT_TEXT_LTR ? 0.0f : width, 0.01f);
+            EXPECT_NEAR(metrics.range_end, direction == FONT_TEXT_LTR ? width : 0.0f, 0.01f);
+            // changing only the queried source range must retain the original complete shape.
+            request.range_end = 3;
+            ASSERT_TRUE(font_visit_face_text(face, &request, nullptr, nullptr, &metrics));
+            EXPECT_NEAR(metrics.range_end, direction == FONT_TEXT_LTR ? prefix : width - prefix, 0.01f);
+        }
+    };
+    expect_shape(face);
+    text[0] = 'W';
+    expect_shape(face);
+    text[0] = 'i';
+    expect_shape(face);
+    ctx->resource_generation++;
+    expect_shape(face);
+    ASSERT_TRUE(font_backend_use_ct_font(face, replacement->ct_raster_ref));
+    expect_shape(replacement);
+    font_handle_release(replacement);
+    font_handle_release(face);
+    font_context_destroy(ctx);
+}
+#endif
+
 TEST(LayoutAnonymousText, BorrowsTheResolvedFontBeforeIntrinsicMeasurement) {
     LayoutContext layout = {};
     ViewBlock container = {};

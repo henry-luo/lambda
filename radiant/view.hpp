@@ -101,6 +101,8 @@ float background_position_keyword(CssEnum keyword, bool horizontal);
 
 const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
+// immutable built-in defaults share one owner across layout and motion queries.
+const CssValue* css_property_initial_value(CssPropertyCode id, Pool* fallback);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
 String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
