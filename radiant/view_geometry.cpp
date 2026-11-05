@@ -1,6 +1,7 @@
 #include "view.hpp"
 
 #include "../lib/tagged.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 
 bool view_is_top_level_viewport(ViewBlock* block) {
     DomDocument* doc = block ? block->doc : nullptr;
@@ -185,6 +186,18 @@ bool view_geometry_dom_is_descendant(const DomNode* node, const DomNode* ancesto
         if (current == ancestor) return true;
     }
     return false;
+}
+
+bool view_tree_contains_view(DomNode* root, View* view) {
+    if (!root || !view) return false;
+    if (root == view) return true;
+    if (!root->is_element()) return false;
+    DomDocument* doc = root->as_element()->doc;
+    // validate potentially retired targets before dereferencing their parent links (D5.5.1).
+    if (dom_node_registry_owns(doc, view))
+        return view_geometry_dom_is_descendant(view, root);
+    // legacy/synthetic nodes need the address-only search; their parent may be unavailable.
+    return dom_subtree_contains_node(root, view);
 }
 
 DomNode* view_geometry_dom_common_ancestor(DomNode* first, DomNode* second) {

@@ -1,4 +1,4 @@
-// in-process Lambda text queries, retained layout and frame delivery checks.
+// in-process Radiant document, layout, controls, media and frame integration checks.
 #include <gtest/gtest.h>
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
@@ -20,6 +20,7 @@
 #include "../radiant/css_resolved_style.hpp"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_core.h"
@@ -232,6 +233,201 @@ TEST(FontTextMeasurement, FaceShapesOwnTextAndFollowRangesDirectionsAndSelectedF
     font_handle_release(replacement);
     font_handle_release(face);
     font_context_destroy(ctx);
+}
+
+class FontShapedLineCacheTest : public ::testing::Test {
+protected:
+    FontContext* ctx = nullptr;
+    FontHandle* face = nullptr;
+    FontHandle* replacement = nullptr;
+    float narrow = 0.0f, wide = 0.0f;
+
+    void SetUp() override {
+        ctx = font_context_create(nullptr);
+        ASSERT_NE(ctx, nullptr);
+        FontStyleDesc style = {};
+        style.size_px = 16.0f;
+        style.weight = FONT_WEIGHT_NORMAL;
+        face = font_load_from_file(ctx, "test/lambda/math/fonts/NotoSansMath-Regular.ttf", &style);
+        replacement = font_load_from_file(ctx, "test/layout/data/font/Ahem.ttf", &style);
+        ASSERT_NE(face, nullptr);
+        ASSERT_NE(replacement, nullptr);
+        narrow = font_measure_text(face, "i", 1).width;
+        wide = font_measure_text(face, "W", 1).width;
+        font_platform_clear_shaped_lines(face);
+        ctx->shaped_line_requests = ctx->shaped_line_hits = 0;
+    }
+
+    void TearDown() override {
+        font_handle_release(replacement);
+        font_handle_release(face);
+        font_context_destroy(ctx);
+    }
+
+    TextExtents measure(const char* text, int length, int start, void* selected = nullptr) {
+        TextExtents range = {};
+        bool measured = selected
+            ? font_platform_measure_text_range(face, selected, text, length, start, 1, 0.0f, &range)
+            : font_measure_text_range(face, text, length, start, 1, &range);
+        EXPECT_TRUE(measured);
+        EXPECT_EQ(range.glyph_count, 1);
+        return range;
+    }
+
+    void expect_counts(uint64_t requests, uint64_t hits) {
+        EXPECT_EQ(ctx->shaped_line_requests, requests);
+        EXPECT_EQ(ctx->shaped_line_hits, hits);
+    }
+};
+
+TEST_F(FontShapedLineCacheTest, RepeatedRangesReuseCompleteShortAndLongLines) {
+    char text[1024];
+    memset(text, 'i', sizeof(text));
+    for (int length : {6, 1024}) {
+        SCOPED_TRACE(length);
+        uint64_t requests = ctx->shaped_line_requests, hits = ctx->shaped_line_hits;
+        for (int start : {0, length / 2, length - 1}) {
+            EXPECT_NEAR(measure(text, length, start).width, narrow, 0.001f);
+        }
+        expect_counts(requests + 3, hits + 2);
+        // full measurement uses the same shape as contextual ranges, independent of queried offsets.
+        TextExtents complete = font_platform_measure_text(face, face->ct_raster_ref, text, length, 0.0f);
+        EXPECT_EQ(complete.glyph_count, length);
+        EXPECT_NEAR(complete.width, narrow * length, 0.2f);
+        expect_counts(requests + 4, hits + 3);
+    }
+}
+
+TEST_F(FontShapedLineCacheTest, OwnedKeysSurviveMutationAndLongSlotReplacement) {
+    char text[1024], original[1024];
+    memset(text, 'i', sizeof(text));
+    memcpy(original, text, sizeof(text));
+    EXPECT_NEAR(measure(text, sizeof(text), 512).width, narrow, 0.001f);
+    text[512] = 'W';
+    // mutating the caller's buffer must not change the cached key or its complete shape.
+    EXPECT_NEAR(measure(original, sizeof(original), 512).width, narrow, 0.001f);
+    expect_counts(2, 1);
+    EXPECT_NEAR(measure(text, sizeof(text), 512).width, wide, 0.001f);
+    EXPECT_NEAR(measure(original, sizeof(original), 512).width, narrow, 0.001f);
+    expect_counts(4, 1);
+}
+
+TEST_F(FontShapedLineCacheTest, SelectedFontsResourceChangesAndClearInvalidate) {
+    char text[1024];
+    memset(text, 'i', sizeof(text));
+    auto width = [&](void* selected) { return measure(text, sizeof(text), 512, selected).width; };
+    EXPECT_NEAR(width(face->ct_raster_ref), narrow, 0.001f);
+    EXPECT_NEAR(width(face->ct_raster_ref), narrow, 0.001f);
+    expect_counts(2, 1);
+    // the same native face owner can measure with a different selected platform font.
+    EXPECT_NEAR(width(replacement->ct_raster_ref), 16.0f, 0.001f);
+    EXPECT_NEAR(width(face->ct_raster_ref), narrow, 0.001f);
+    expect_counts(4, 1);
+    ctx->resource_generation++;
+    EXPECT_NEAR(width(face->ct_raster_ref), narrow, 0.001f);
+    EXPECT_NEAR(width(face->ct_raster_ref), narrow, 0.001f);
+    expect_counts(6, 2);
+    ASSERT_TRUE(font_backend_use_ct_font(face, replacement->ct_raster_ref));
+    EXPECT_EQ(face->shaped_lines, nullptr);
+    EXPECT_NEAR(width(face->ct_raster_ref), 16.0f, 0.001f);
+    expect_counts(7, 2);
+    font_platform_clear_shaped_lines(face);
+    EXPECT_EQ(face->shaped_lines, nullptr);
+    EXPECT_NEAR(width(face->ct_raster_ref), 16.0f, 0.001f);
+    expect_counts(8, 2);
+}
+
+TEST_F(FontShapedLineCacheTest, TextWalkReusesBoundariesAndRestoresNestedAndChangedSources) {
+    UiContext ui = {};
+    ui.font_ctx = lam::up(ctx);
+    FontProp font = FONT_PROP_DEFAULT;
+    font.font_handle = lam::counted(face);
+    font.font_size = 16.0f;
+    LayoutContext layout = {};
+    layout.ui_context = lam::up(&ui);
+    layout.font = {lam::up(&font), 16.0f};
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    scratch_init(&layout.scratch, arena);
+    unsigned char text[1024];
+    memset(text, 'i', sizeof(text));
+    auto width = [&](const unsigned char* source, size_t length, size_t offset) {
+        float value = 0.0f;
+        EXPECT_TRUE(layout_measure_inline_text_context(&layout, nullptr, source + offset,
+            1, false, &value, source, source + length));
+        return value;
+    };
+    {
+        LayoutTextShapingScope outer(&layout, nullptr, text, text + sizeof(text));
+        EXPECT_NEAR(width(text, sizeof(text), 1), narrow, 0.001f);
+        EXPECT_NEAR(width(text, sizeof(text), 512), narrow, 0.001f);
+        EXPECT_EQ(outer.requests, 2u);
+        EXPECT_EQ(outer.hits, 1u);
+        const unsigned char nested[] = "WWWW";
+        {
+            LayoutTextShapingScope inner(&layout, nullptr, nested, nested + 4);
+            EXPECT_NEAR(width(nested, 4, 1), wide, 0.001f);
+            EXPECT_EQ(inner.hits, 0u);
+        }
+        EXPECT_EQ(layout.text_shaping.get(), &outer);
+        // boundary reuse retains source context, while measurements still use the selected live font.
+        font.font_handle = lam::counted(replacement);
+        EXPECT_NEAR(width(text, sizeof(text), 513), 16.0f, 0.001f);
+        font.font_handle = lam::counted(face);
+        EXPECT_NEAR(width(text, sizeof(text), 514), narrow, 0.001f);
+        EXPECT_EQ(outer.hits, 3u);
+    }
+    EXPECT_EQ(layout.text_shaping.get(), nullptr);
+    // an editor may reuse this address for different bytes on its next text walk.
+    memset(text, 'W', sizeof(text));
+    {
+        LayoutTextShapingScope changed(&layout, nullptr, text, text + sizeof(text));
+        EXPECT_NEAR(width(text, sizeof(text), 512), wide, 0.001f);
+        EXPECT_EQ(changed.hits, 0u);
+    }
+    const unsigned char words[] = "iiii WWWW";
+    {
+        LayoutTextShapingScope separated(&layout, nullptr, words, words + 9);
+        EXPECT_NEAR(width(words, 9, 1), narrow, 0.001f);
+        EXPECT_NEAR(width(words, 9, 2), narrow, 0.001f);
+        EXPECT_NEAR(width(words, 9, 6), wide, 0.001f);
+        EXPECT_NEAR(width(words, 9, 7), wide, 0.001f);
+        EXPECT_EQ(separated.requests, 4u);
+        EXPECT_EQ(separated.hits, 2u);
+    }
+    const unsigned char invalid[] = "ii\xffii";
+    {
+        LayoutTextShapingScope failed(&layout, nullptr, invalid, invalid + 5);
+        for (unsigned attempt = 0; attempt < 2; attempt++) {
+            bool following = true;
+            float value = 0.0f;
+            EXPECT_FALSE(layout_measure_inline_text_context(&layout, nullptr, invalid + 2,
+                1, false, &value, invalid, invalid + 5, &following));
+            EXPECT_FALSE(following);
+        }
+        EXPECT_EQ(failed.hits, 1u);
+    }
+    scratch_release(&layout.scratch);
+    arena_destroy(arena);
+}
+
+TEST_F(FontShapedLineCacheTest, DirectionsAndWidthFeaturesKeepSeparateShapes) {
+    FontFaceTextRequest request = {"iiiiWW", 6, FONT_TEXT_LTR, true, 0, 6};
+    FontFaceTextMetrics metrics = {};
+    ASSERT_TRUE(font_visit_face_text(face, &request, nullptr, nullptr, &metrics));
+    EXPECT_NEAR(metrics.range_start, 0.0f, 0.001f);
+    request.range_end = 3;
+    ASSERT_TRUE(font_visit_face_text(face, &request, nullptr, nullptr, &metrics));
+    EXPECT_NEAR(metrics.range_end, narrow * 3, 0.001f);
+    expect_counts(2, 1);
+    request.direction = FONT_TEXT_RTL;
+    ASSERT_TRUE(font_visit_face_text(face, &request, nullptr, nullptr, &metrics));
+    EXPECT_NEAR(metrics.range_start, metrics.advance, 0.001f);
+    expect_counts(3, 1);
+    request.width_feature = FONT_TAG('h', 'w', 'i', 'd');
+    ASSERT_TRUE(font_visit_face_text(face, &request, nullptr, nullptr, &metrics));
+    ASSERT_TRUE(font_visit_face_text(face, &request, nullptr, nullptr, &metrics));
+    expect_counts(5, 2);
 }
 #endif
 
@@ -477,7 +673,7 @@ TEST(TextJustification, ClusteredScriptGapsRespectGraphemeBoundaries) {
     EXPECT_FALSE(text_justify_character_gap(&context, 0x179F));
 }
 
-class RadiantTextQuery : public ::testing::Test {
+class RadiantDocumentTest : public ::testing::Test {
 protected:
     UiContext ui{};
     DomDocument* document = nullptr;
@@ -716,7 +912,29 @@ protected:
     }
 };
 
-TEST_F(RadiantTextQuery, ActiveAncestryCommitsOneCascadePerTransition) {
+TEST_F(RadiantDocumentTest, TreeMembershipPreservesSubtreesDetachedAndUnregisteredTargets) {
+    DomElement* root = load_script_source(
+        "<div id=result><span id=member>member</span></div><div id=other>other</div>");
+    ASSERT_NE(root, nullptr);
+    DomElement* member = dom_find_element_by_id(document->root, "member");
+    DomElement* other = dom_find_element_by_id(document->root, "other");
+    ASSERT_NE(member, nullptr);
+    ASSERT_NE(other, nullptr);
+    ASSERT_TRUE(dom_node_registry_owns(document, member));
+    EXPECT_TRUE(view_tree_contains_view(document->root, member));
+    EXPECT_TRUE(view_tree_contains_view(root, member));
+    EXPECT_TRUE(view_tree_contains_view(member, member));
+    EXPECT_FALSE(view_tree_contains_view(other, member));
+    View unregistered = {};
+    EXPECT_FALSE(view_tree_contains_view(document->root, &unregistered));
+    ASSERT_TRUE(root->remove_child(member));
+    EXPECT_TRUE(dom_node_registry_owns(document, member));
+    EXPECT_FALSE(view_tree_contains_view(document->root, member));
+    EXPECT_FALSE(view_tree_contains_view(root, member));
+    EXPECT_TRUE(view_tree_contains_view(member, member));
+}
+
+TEST_F(RadiantDocumentTest, ActiveAncestryCommitsOneCascadePerTransition) {
     DomElement* result = load_script_source(
         "<!doctype html><style>*{padding:0;border:0} #outer:active{padding-left:11px} "
         "#result{width:40px;height:10px} #result:active{width:80px}</style>"
@@ -751,7 +969,7 @@ TEST_F(RadiantTextQuery, ActiveAncestryCommitsOneCascadePerTransition) {
     }
 }
 
-TEST_F(RadiantTextQuery, InteractionColorsRepaintLeafAncestorsAndInheritedCurrentColor) {
+TEST_F(RadiantDocumentTest, InteractionColorsRepaintLeafAncestorsAndInheritedCurrentColor) {
     DomElement* result = load_script_source(
         "<!doctype html><style>body{margin:0} #outer{padding:4px;"
         "background:rgb(200,201,202);color:rgb(20,30,40)}"
@@ -800,7 +1018,7 @@ TEST_F(RadiantTextQuery, InteractionColorsRepaintLeafAncestorsAndInheritedCurren
     }
 }
 
-TEST_F(RadiantTextQuery, UnstyledMetadataPreservesGeometryAndCssDependenciesReflow) {
+TEST_F(RadiantDocumentTest, UnstyledMetadataPreservesGeometryAndCssDependenciesReflow) {
     DomElement* result = load_script_source(
         "<!doctype html><style id=theme>#result{width:40px;height:20px}"
         "[data-sized] #result{width:80px}</style><link id=sheet><div id=outer><div id=result></div></div>");
@@ -833,14 +1051,14 @@ TEST_F(RadiantTextQuery, UnstyledMetadataPreservesGeometryAndCssDependenciesRefl
     }
 }
 
-TEST_F(RadiantTextQuery, AttrValuesKeepMetadataStyleInvalidation) {
+TEST_F(RadiantDocumentTest, AttrValuesKeepMetadataStyleInvalidation) {
     DomElement* result = load_script_source(
         "<!doctype html><style>#result::before{content:attr(data-label)}</style><div id=result></div>");
     ASSERT_NE(result, nullptr);
     EXPECT_FALSE(dom_set_non_style_metadata(result, "data-label", "changed"));
 }
 
-TEST_F(RadiantTextQuery, HiddenComputedDimensionsSurviveCleanMetadataWrites) {
+TEST_F(RadiantDocumentTest, HiddenComputedDimensionsSurviveCleanMetadataWrites) {
     DomElement* result = load_script_source(
         "<!doctype html><style>#result{display:none;width:52px;height:24px}</style><button id=result></button>");
     ASSERT_NE(result, nullptr);
@@ -881,7 +1099,7 @@ TEST(CounterFormatting, JapaneseInformalAndCjkDecimal) {
     EXPECT_STREQ(counter_style_suffix(CSS_VALUE_DECIMAL), ". ");
 }
 
-TEST_F(RadiantTextQuery, JapaneseListMarkersRetainStyleAndRenumberAfterStartChanges) {
+TEST_F(RadiantDocumentTest, JapaneseListMarkersRetainStyleAndRenumberAfterStartChanges) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>ol{list-style-type:japanese-informal}"
@@ -910,7 +1128,7 @@ TEST_F(RadiantTextQuery, JapaneseListMarkersRetainStyleAndRenumberAfterStartChan
     EXPECT_STREQ(second->pseudo->marker->marker_prop()->text_content.get(), "百、");
 }
 
-TEST_F(RadiantTextQuery, NestedSearchControlsUseTextareaRowsAndLineHeight) {
+TEST_F(RadiantDocumentTest, NestedSearchControlsUseTextareaRowsAndLineHeight) {
     ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
     ui.viewport_width = 480;
     ui.viewport_height = 360;
@@ -930,7 +1148,7 @@ TEST_F(RadiantTextQuery, NestedSearchControlsUseTextareaRowsAndLineHeight) {
     }
 }
 
-TEST_F(RadiantTextQuery, BorderRadiusShorthandInheritsThroughSearchWrappers) {
+TEST_F(RadiantDocumentTest, BorderRadiusShorthandInheritsThroughSearchWrappers) {
     ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
     layout_html_doc(&ui, document, false);
     for (const char* id : {"single", "row", "actions"}) {
@@ -947,7 +1165,7 @@ TEST_F(RadiantTextQuery, BorderRadiusShorthandInheritsThroughSearchWrappers) {
     }
 }
 
-TEST_F(RadiantTextQuery, SearchActionCentersItselfAndItsFlowLabel) {
+TEST_F(RadiantDocumentTest, SearchActionCentersItselfAndItsFlowLabel) {
     ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
     layout_html_doc(&ui, document, false);
     DomElement* row = dom_find_element_by_id(document->root->as_element(), "button-row");
@@ -974,7 +1192,7 @@ TEST_F(RadiantTextQuery, SearchActionCentersItselfAndItsFlowLabel) {
     EXPECT_FLOAT_EQ(label_y - button_y, 8.0f);
 }
 
-TEST_F(RadiantTextQuery, SearchTextareaCaretUsesItsOwnVerticalPadding) {
+TEST_F(RadiantDocumentTest, SearchTextareaCaretUsesItsOwnVerticalPadding) {
     ASSERT_NE(load("test/html/layout_search_control_intrinsics.html"), nullptr);
     layout_html_doc(&ui, document, false);
     DomElement* input = dom_find_element_by_id(document->root->as_element(), "single-input");
@@ -987,7 +1205,7 @@ TEST_F(RadiantTextQuery, SearchTextareaCaretUsesItsOwnVerticalPadding) {
     EXPECT_FLOAT_EQ(content.height, input->height - 22.0f);
 }
 
-TEST_F(RadiantTextQuery, PreferredInlineKeywordsResolveBeforeVerticalColumnWrapping) {
+TEST_F(RadiantDocumentTest, PreferredInlineKeywordsResolveBeforeVerticalColumnWrapping) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (const char* parent_mode : {"horizontal-tb", "vertical-rl"})
     for (const char* position : {"static", "absolute"}) for (bool decorated : {false, true}) {
@@ -1033,7 +1251,7 @@ TEST_F(RadiantTextQuery, PreferredInlineKeywordsResolveBeforeVerticalColumnWrapp
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicInlineKeywordsRetainFontLimitsAndInsetAvailability) {
+TEST_F(RadiantDocumentTest, IntrinsicInlineKeywordsRetainFontLimitsAndInsetAvailability) {
     for (const char* mode : {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (const char* position : {"static", "absolute"}) for (bool atomic : {false, true}) {
         SCOPED_TRACE(mode);
@@ -1087,7 +1305,7 @@ TEST_F(RadiantTextQuery, IntrinsicInlineKeywordsRetainFontLimitsAndInsetAvailabi
     }
 }
 
-TEST_F(RadiantTextQuery, EmergencyBreaksKeepUnbrokenLatinShapingAtMaxContent) {
+TEST_F(RadiantDocumentTest, EmergencyBreaksKeepUnbrokenLatinShapingAtMaxContent) {
     auto inline_advance = [](ViewText* text) {
         float advance = 0.0f;
         // fallback faces can split an unbroken line into several source ranges.
@@ -1142,7 +1360,7 @@ TEST_F(RadiantTextQuery, EmergencyBreaksKeepUnbrokenLatinShapingAtMaxContent) {
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalAutoInlineSizesUseFitContentAndDefiniteOrViewportSpace) {
+TEST_F(RadiantDocumentTest, OrthogonalAutoInlineSizesUseFitContentAndDefiniteOrViewportSpace) {
     const struct { const char* mode; const char* parent_height; const char* text; float width, height; } cases[] = {
         {"vertical-lr", "auto", "short", 30, 50},
         {"vertical-lr", "auto", "unbreakable", 30, 250},
@@ -1200,7 +1418,7 @@ TEST_F(RadiantTextQuery, OrthogonalAutoInlineSizesUseFitContentAndDefiniteOrView
     }
 }
 
-TEST_F(RadiantTextQuery, ContainmentUsedSizesKeepOrthogonalFallbackSpaceIndefinite) {
+TEST_F(RadiantDocumentTest, ContainmentUsedSizesKeepOrthogonalFallbackSpaceIndefinite) {
     unsigned states = 0;
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
     for (bool rtl : {false, true}) for (const char* containment : {"size", "layout size"}) {
@@ -1246,7 +1464,7 @@ TEST_F(RadiantTextQuery, ContainmentUsedSizesKeepOrthogonalFallbackSpaceIndefini
     RecordProperty("retained_states", states);
 }
 
-TEST_F(RadiantTextQuery, OrthogonalFallbackUsesContainingLimitsAndNearestScrollport) {
+TEST_F(RadiantDocumentTest, OrthogonalFallbackUsesContainingLimitsAndNearestScrollport) {
     // scrollport rows follow CSS Writing Modes 3 §7.3.1; Chromium's explicit
     // height controls verify their columns independently of its fallback gap.
     const struct {
@@ -1288,7 +1506,7 @@ TEST_F(RadiantTextQuery, OrthogonalFallbackUsesContainingLimitsAndNearestScrollp
     }
 }
 
-TEST_F(RadiantTextQuery, HorizontalOrthogonalFitContentUsesTheParentsBlockAxis) {
+TEST_F(RadiantDocumentTest, HorizontalOrthogonalFitContentUsesTheParentsBlockAxis) {
     const struct { const char* mode; const char* parent_width; const char* text; float x, width, height; } cases[] = {
         {"vertical-lr", "auto", "short", 0, 50, 30},
         {"vertical-lr", "auto", "unbreakable", 0, 490, 30},
@@ -1336,7 +1554,7 @@ TEST_F(RadiantTextQuery, HorizontalOrthogonalFitContentUsesTheParentsBlockAxis) 
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalSiblingCursorConsumesOrthogonalBlocksOnce) {
+TEST_F(RadiantDocumentTest, VerticalSiblingCursorConsumesOrthogonalBlocksOnce) {
     for (const char* mode : {"vertical-lr", "vertical-rl"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -1359,7 +1577,7 @@ TEST_F(RadiantTextQuery, VerticalSiblingCursorConsumesOrthogonalBlocksOnce) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAutoInlineSizeKeepsPhysicalDecorationsAndBodyConstraints) {
+TEST_F(RadiantDocumentTest, VerticalAutoInlineSizeKeepsPhysicalDecorationsAndBodyConstraints) {
     const struct { const char* css; float width, narrow_width, height, top, left, right; } cases[] = {
         {"", 60, 80, 180, 0, 0, 0},
         {"border-top:20px solid;border-bottom:20px solid", 80, 140, 180, 0, 0, 0},
@@ -1405,7 +1623,7 @@ TEST_F(RadiantTextQuery, VerticalAutoInlineSizeKeepsPhysicalDecorationsAndBodyCo
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAutoBlockSizeRetainsMinMaxAndBoxEdges) {
+TEST_F(RadiantDocumentTest, VerticalAutoBlockSizeRetainsMinMaxAndBoxEdges) {
     struct State {
         bool visible;
         const char* child_width;
@@ -1483,7 +1701,7 @@ TEST_F(RadiantTextQuery, VerticalAutoBlockSizeRetainsMinMaxAndBoxEdges) {
     }
 }
 
-TEST_F(RadiantTextQuery, NormalVerticalBlocksUseContainingInlineMarginsAndDirection) {
+TEST_F(RadiantDocumentTest, NormalVerticalBlocksUseContainingInlineMarginsAndDirection) {
     struct State { const char* top; const char* bottom; float height; const char* alignment; };
     const State states[] = {
         {"7px", "11px", 30, "normal"}, {"-9px", "13px", 30, "normal"},
@@ -1570,7 +1788,7 @@ TEST_F(RadiantTextQuery, NormalVerticalBlocksUseContainingInlineMarginsAndDirect
     }
 }
 
-TEST_F(RadiantTextQuery, AtomicWrapCommitsLineMembershipAfterChoosingItsLine) {
+TEST_F(RadiantDocumentTest, AtomicWrapCommitsLineMembershipAfterChoosingItsLine) {
     for (unsigned kind = 0; kind < 3; kind++) for (bool prefix : {false, true}) {
         StrBuf* source = radiant_test_atomic_fixture(kind, prefix, "horizontal-tb", false,
             radiant_test_atomic_states[0]);
@@ -1623,7 +1841,7 @@ TEST_F(RadiantTextQuery, AtomicWrapCommitsLineMembershipAfterChoosingItsLine) {
     }
 }
 
-TEST_F(RadiantTextQuery, ParallelBlocksRetainTheirInlineMarginBudgetAndSiblingOffsets) {
+TEST_F(RadiantDocumentTest, ParallelBlocksRetainTheirInlineMarginBudgetAndSiblingOffsets) {
     for (bool unequal : {false, true}) {
         StrBuf* source = strbuf_new();
         strbuf_append_format(source,
@@ -1719,7 +1937,7 @@ TEST_F(RadiantTextQuery, ParallelBlocksRetainTheirInlineMarginBudgetAndSiblingOf
     }
 }
 
-TEST_F(RadiantTextQuery, AutomaticInlineRegionsRebuildTheirSharedFloatContext) {
+TEST_F(RadiantDocumentTest, AutomaticInlineRegionsRebuildTheirSharedFloatContext) {
     for (bool nested : {false, true}) {
         StrBuf* source = strbuf_new();
         strbuf_append_format(source,
@@ -1769,7 +1987,7 @@ TEST_F(RadiantTextQuery, AutomaticInlineRegionsRebuildTheirSharedFloatContext) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAutomaticInlineExtentPrecedesBlockPlacement) {
+TEST_F(RadiantDocumentTest, VerticalAutomaticInlineExtentPrecedesBlockPlacement) {
     struct State { const char* minimum; const char* maximum; float extent; };
     const State states[] = {{"0px", "none", 58}, {"120px", "none", 120},
         {"0px", "25px", 25}, {"0px", "none", 58}};
@@ -1808,7 +2026,7 @@ TEST_F(RadiantTextQuery, VerticalAutomaticInlineExtentPrecedesBlockPlacement) {
     }
 }
 
-TEST_F(RadiantTextQuery, ColumnProgressionPreservesResolvedInlineMargins) {
+TEST_F(RadiantDocumentTest, ColumnProgressionPreservesResolvedInlineMargins) {
     for (const char* direction : {"ltr", "rtl"}) for (bool decorated : {false, true}) {
         SCOPED_TRACE(direction);
         SCOPED_TRACE(decorated);
@@ -1851,7 +2069,7 @@ TEST_F(RadiantTextQuery, ColumnProgressionPreservesResolvedInlineMargins) {
     }
 }
 
-TEST_F(RadiantTextQuery, BlockFlowUsesChildBoxRatherThanDescendantOverflow) {
+TEST_F(RadiantDocumentTest, BlockFlowUsesChildBoxRatherThanDescendantOverflow) {
     struct State { const char* used; float block_size; const char* content; float content_size; };
     const State states[] = {{"40px", 40, "90px", 90}, {"70px", 70, "30px", 30},
         {"40px", 40, "110px", 110}, {"auto", -1, "90px", 90}, {"40px", 40, "90px", 90}};
@@ -1932,7 +2150,7 @@ TEST_F(RadiantTextQuery, BlockFlowUsesChildBoxRatherThanDescendantOverflow) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAtomicOverflowParticipatesThroughLineBaselines) {
+TEST_F(RadiantDocumentTest, VerticalAtomicOverflowParticipatesThroughLineBaselines) {
     struct State { const char* width_css; float width; const char* line_height_css; float line_height; };
     const State states[] = {{"10px", 10, "13px", 13}, {"10px", 10, "14px", 14},
         {"100px", 100, "14px", 14}, {"100px", 100, "13px", 13}, {"10px", 10, "13px", 13}};
@@ -1982,7 +2200,7 @@ TEST_F(RadiantTextQuery, VerticalAtomicOverflowParticipatesThroughLineBaselines)
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAtomicAutoInlineSizePreservesItsMinContentOverflow) {
+TEST_F(RadiantDocumentTest, VerticalAtomicAutoInlineSizePreservesItsMinContentOverflow) {
     for (const char* mode : {"vertical-lr", "vertical-rl"}) {
         for (const char* parent_display : {"block", "inline-block"}) {
             for (const char* atomic_css : {"display:inline-block", "float:left", "display:block"}) {
@@ -2008,7 +2226,7 @@ TEST_F(RadiantTextQuery, VerticalAtomicAutoInlineSizePreservesItsMinContentOverf
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalPercentageInlineSizesUseDefiniteOrFallbackSpace) {
+TEST_F(RadiantDocumentTest, OrthogonalPercentageInlineSizesUseDefiniteOrFallbackSpace) {
     const struct { const char* name; const char* parent; const char* outer;
         float initial_basis, fallback; bool scrollport; } cases[] = {
         {"auto", "", "", -1, -1, false},
@@ -2081,7 +2299,7 @@ TEST_F(RadiantTextQuery, OrthogonalPercentageInlineSizesUseDefiniteOrFallbackSpa
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalRootPublicationPreservesZeroBoxesAndPhysicalDecorations) {
+TEST_F(RadiantDocumentTest, VerticalRootPublicationPreservesZeroBoxesAndPhysicalDecorations) {
     for (const char* mode : {"vertical-lr", "vertical-rl"})
     for (bool definite : {false, true}) for (bool decorated : {false, true})
     for (const char* content : {"", "<p id=child>A</p>", "\n <p id=child>A</p>\n"}) {
@@ -2132,7 +2350,7 @@ TEST_F(RadiantTextQuery, VerticalRootPublicationPreservesZeroBoxesAndPhysicalDec
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAutoInlineConstraintsPrecedeDirectTextWrapping) {
+TEST_F(RadiantDocumentTest, VerticalAutoInlineConstraintsPrecedeDirectTextWrapping) {
     const struct { const char* css; float minimum, maximum; bool percent; } limits[] = {
         {"", -1, -1, false}, {"min-height:160px", 160, -1, false},
         {"max-height:60px", -1, 60, false}, {"min-height:300px", 300, -1, false},
@@ -2194,7 +2412,7 @@ TEST_F(RadiantTextQuery, VerticalAutoInlineConstraintsPrecedeDirectTextWrapping)
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicQueriesRestoreCallerSizingContext) {
+TEST_F(RadiantDocumentTest, IntrinsicQueriesRestoreCallerSizingContext) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{direction:rtl}#result{display:inline-block}"
@@ -2236,7 +2454,7 @@ TEST_F(RadiantTextQuery, IntrinsicQueriesRestoreCallerSizingContext) {
     }
 }
 
-TEST_F(RadiantTextQuery, QuirksPercentageHeightsSkipAutomaticBlockWrappers) {
+TEST_F(RadiantDocumentTest, QuirksPercentageHeightsSkipAutomaticBlockWrappers) {
     for (unsigned depth : {0u, 1u, 2u}) {
         SCOPED_TRACE(depth);
         StrBuf* source = strbuf_new();
@@ -2264,7 +2482,7 @@ TEST_F(RadiantTextQuery, QuirksPercentageHeightsSkipAutomaticBlockWrappers) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalColumnSpannersUseFullInlineSpaceBeforeWrapping) {
+TEST_F(RadiantDocumentTest, VerticalColumnSpannersUseFullInlineSpaceBeforeWrapping) {
     for (const char* mode : {"vertical-lr", "vertical-rl"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -2293,7 +2511,7 @@ TEST_F(RadiantTextQuery, VerticalColumnSpannersUseFullInlineSpaceBeforeWrapping)
     }
 }
 
-TEST_F(RadiantTextQuery, EmptyVerticalColumnsRetainTheirInlineGapStructure) {
+TEST_F(RadiantDocumentTest, EmptyVerticalColumnsRetainTheirInlineGapStructure) {
     for (const char* mode : {"vertical-lr", "vertical-rl"}) for (unsigned count : {2u, 3u}) {
         SCOPED_TRACE(mode);
         SCOPED_TRACE(count);
@@ -2318,7 +2536,7 @@ TEST_F(RadiantTextQuery, EmptyVerticalColumnsRetainTheirInlineGapStructure) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalColumnInlineBoundsIncludeAllFragments) {
+TEST_F(RadiantDocumentTest, VerticalColumnInlineBoundsIncludeAllFragments) {
     for (const char* mode : {"vertical-lr", "vertical-rl"}) for (const char* direction : {"ltr", "rtl"}) {
         SCOPED_TRACE(mode);
         SCOPED_TRACE(direction);
@@ -2340,7 +2558,7 @@ TEST_F(RadiantTextQuery, VerticalColumnInlineBoundsIncludeAllFragments) {
     }
 }
 
-TEST_F(RadiantTextQuery, InlineTextAlignmentKeepsItsOwnLeadingAndDominantBaseline) {
+TEST_F(RadiantDocumentTest, InlineTextAlignmentKeepsItsOwnLeadingAndDominantBaseline) {
     // same embedded Ahem control is independently measured by Chromium; CSS 2.2
     // aligns inline line-height boxes, and Writing Modes 3 maps their line-over edge.
     const struct { const char* align; float horizontal, vertical; } cases[] = {
@@ -2385,7 +2603,7 @@ TEST_F(RadiantTextQuery, InlineTextAlignmentKeepsItsOwnLeadingAndDominantBaselin
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalLineBoxesKeepInlineContextAcrossForcedBreaks) {
+TEST_F(RadiantDocumentTest, VerticalLineBoxesKeepInlineContextAcrossForcedBreaks) {
     // independent browser ranges include numeric/fixed/normal leading and unequal columns.
     const struct { const char* leading; const char* late; float width, rl_first, rl_last, lr_first, lr_last; } states[] = {
         {"3", "inherit", 360, 300, 120, 120, 300},
@@ -2440,7 +2658,7 @@ TEST_F(RadiantTextQuery, VerticalLineBoxesKeepInlineContextAcrossForcedBreaks) {
     }
 }
 
-TEST_F(RadiantTextQuery, EmptyVerticalAtomsExportTheirMarginBoxCentralBaseline) {
+TEST_F(RadiantDocumentTest, EmptyVerticalAtomsExportTheirMarginBoxCentralBaseline) {
     // nonsquare atoms distinguish the inline measure from the baseline's transverse extent.
     for (const char* mode : {"vertical-rl", "vertical-lr"}) for (bool margins : {false, true})
         for (const char* tag : {"span", "canvas"}) {
@@ -2475,7 +2693,7 @@ TEST_F(RadiantTextQuery, EmptyVerticalAtomsExportTheirMarginBoxCentralBaseline) 
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalSourceBaselineOriginsIncludePaddingOnce) {
+TEST_F(RadiantDocumentTest, VerticalSourceBaselineOriginsIncludePaddingOnce) {
     const char* blocks = "<div id=source><div id=first class=cell><i></i></div>"
         "<div id=last class=cell><i></i></div></div>";
     const char* rows = "<table id=source><tr id=first class=cell><td><i></i></td></tr>"
@@ -2538,7 +2756,7 @@ TEST_F(RadiantTextQuery, VerticalSourceBaselineOriginsIncludePaddingOnce) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalContentBaselineExtentsUseTheTransverseAxis) {
+TEST_F(RadiantDocumentTest, VerticalContentBaselineExtentsUseTheTransverseAxis) {
     for (const char* mode : {"vertical-rl", "vertical-lr"}) for (bool control : {false, true}) {
         SCOPED_TRACE(mode);
         SCOPED_TRACE(control);
@@ -2567,7 +2785,7 @@ TEST_F(RadiantTextQuery, VerticalContentBaselineExtentsUseTheTransverseAxis) {
     }
 }
 
-TEST_F(RadiantTextQuery, QuirksInlineLinesExcludeTheBlockRootStrut) {
+TEST_F(RadiantDocumentTest, QuirksInlineLinesExcludeTheBlockRootStrut) {
     for (bool standards : {false, true}) {
         SCOPED_TRACE(standards);
         StrBuf* source = strbuf_new();
@@ -2593,7 +2811,7 @@ TEST_F(RadiantTextQuery, QuirksInlineLinesExcludeTheBlockRootStrut) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAutoInlineExtentIncludesTextBeforeAnOrthogonalAtom) {
+TEST_F(RadiantDocumentTest, VerticalAutoInlineExtentIncludesTextBeforeAnOrthogonalAtom) {
     for (const char* mode : {"vertical-lr", "sideways-rl"}) for (const char* direction : {"ltr", "rtl"}) {
         SCOPED_TRACE(mode);
         SCOPED_TRACE(direction);
@@ -2619,7 +2837,7 @@ TEST_F(RadiantTextQuery, VerticalAutoInlineExtentIncludesTextBeforeAnOrthogonalA
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalIntrinsicBaselinesIncludeFractionalFontLeading) {
+TEST_F(RadiantDocumentTest, OrthogonalIntrinsicBaselinesIncludeFractionalFontLeading) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -2652,7 +2870,7 @@ TEST_F(RadiantTextQuery, OrthogonalIntrinsicBaselinesIncludeFractionalFontLeadin
     }
 }
 
-TEST_F(RadiantTextQuery, PositionedVerticalLinesUseTheirOwnBaselinePolicy) {
+TEST_F(RadiantDocumentTest, PositionedVerticalLinesUseTheirOwnBaselinePolicy) {
     for (const char* mode : {"vertical-rl", "vertical-lr"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -2679,7 +2897,7 @@ TEST_F(RadiantTextQuery, PositionedVerticalLinesUseTheirOwnBaselinePolicy) {
     }
 }
 
-TEST_F(RadiantTextQuery, WrappedVerticalAtomsRetainTheirSourceLineGeometry) {
+TEST_F(RadiantDocumentTest, WrappedVerticalAtomsRetainTheirSourceLineGeometry) {
     for (const char* mode : {"vertical-rl", "vertical-lr"})
         for (bool definite : {false, true}) for (float cross : {20.0f, 60.0f}) {
         SCOPED_TRACE(mode);
@@ -2728,7 +2946,7 @@ TEST_F(RadiantTextQuery, WrappedVerticalAtomsRetainTheirSourceLineGeometry) {
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalFitContentUsesAtomicInlineContributions) {
+TEST_F(RadiantDocumentTest, OrthogonalFitContentUsesAtomicInlineContributions) {
     for (const char* mode : {"vertical-rl", "vertical-lr"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -2780,7 +2998,7 @@ TEST_F(RadiantTextQuery, OrthogonalFitContentUsesAtomicInlineContributions) {
     }
 }
 
-TEST_F(RadiantTextQuery, AspectRatioDeterminesOrthogonalAutoInlineSize) {
+TEST_F(RadiantDocumentTest, AspectRatioDeterminesOrthogonalAutoInlineSize) {
     for (const char* mode : {"vertical-rl", "vertical-lr"})
         for (bool border_box : {false, true}) for (const char* text : {"", "X X X", "XXXXX"}) {
         SCOPED_TRACE(mode);
@@ -2813,7 +3031,7 @@ TEST_F(RadiantTextQuery, AspectRatioDeterminesOrthogonalAutoInlineSize) {
     }
 }
 
-TEST_F(RadiantTextQuery, GridTracksUseContainerAxesForReplacedContributions) {
+TEST_F(RadiantDocumentTest, GridTracksUseContainerAxesForReplacedContributions) {
     struct State { const char* available; const char* natural_width; float inline_size; float width; };
     const State states[] = {{"150px", "200", 150.0f, 200.0f}, {"250px", "200", 250.0f, 200.0f},
         {"250px", "120", 250.0f, 120.0f}, {"150px", "120", 150.0f, 120.0f},
@@ -2883,7 +3101,7 @@ TEST_F(RadiantTextQuery, GridTracksUseContainerAxesForReplacedContributions) {
     }
 }
 
-TEST_F(RadiantTextQuery, GridAreasAndSelfAlignmentFollowLogicalAxes) {
+TEST_F(RadiantDocumentTest, GridAreasAndSelfAlignmentFollowLogicalAxes) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr"})
         for (bool rtl : {false, true}) {
         SCOPED_TRACE(mode);
@@ -2948,7 +3166,7 @@ TEST_F(RadiantTextQuery, GridAreasAndSelfAlignmentFollowLogicalAxes) {
     }
 }
 
-TEST_F(RadiantTextQuery, GridAutomaticRatioBlockSizeRetainsItsContentMinimum) {
+TEST_F(RadiantDocumentTest, GridAutomaticRatioBlockSizeRetainsItsContentMinimum) {
     for (bool capped : {false, true}) for (bool auto_minimum : {true, false})
         for (bool scrolls : {false, true}) {
         SCOPED_TRACE(capped);
@@ -2982,7 +3200,7 @@ TEST_F(RadiantTextQuery, GridAutomaticRatioBlockSizeRetainsItsContentMinimum) {
     }
 }
 
-TEST_F(RadiantTextQuery, GridReplacedBlockContributionsApplyIntrinsicMinMax) {
+TEST_F(RadiantDocumentTest, GridReplacedBlockContributionsApplyIntrinsicMinMax) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0}#result{display:grid;width:max-content}"
@@ -3005,7 +3223,7 @@ TEST_F(RadiantTextQuery, GridReplacedBlockContributionsApplyIntrinsicMinMax) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalFlexAutomaticBlockExtentRetainsConstraintsAndRestoration) {
+TEST_F(RadiantDocumentTest, VerticalFlexAutomaticBlockExtentRetainsConstraintsAndRestoration) {
     const struct State {
         const char* inline_size; const char* block_size; const char* minimum; const char* maximum;
         float width; float height; bool empty = false; bool switch_mode = false;
@@ -3081,7 +3299,7 @@ TEST_F(RadiantTextQuery, VerticalFlexAutomaticBlockExtentRetainsConstraintsAndRe
     }
 }
 
-TEST_F(RadiantTextQuery, NestedVerticalFlexKeepsTheParentsAssignedPhysicalWidth) {
+TEST_F(RadiantDocumentTest, NestedVerticalFlexKeepsTheParentsAssignedPhysicalWidth) {
     for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl","sideways-lr","sideways-rl"})
     for (const char* direction : {"row","column","row-reverse","column-reverse"}) {
         SCOPED_TRACE(mode);
@@ -3107,7 +3325,7 @@ TEST_F(RadiantTextQuery, NestedVerticalFlexKeepsTheParentsAssignedPhysicalWidth)
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalFlexBlockContentsRetainPhysicalContributions) {
+TEST_F(RadiantDocumentTest, OrthogonalFlexBlockContentsRetainPhysicalContributions) {
     struct State { const char* available; const char* width; const char* height; float child_width; float child_height; };
     const State states[] = {{"280px", "40px", "30px", 40.0f, 30.0f},
         {"360px", "40px", "30px", 40.0f, 30.0f}, {"360px", "25px", "45px", 25.0f, 45.0f},
@@ -3193,7 +3411,7 @@ TEST_F(RadiantTextQuery, OrthogonalFlexBlockContentsRetainPhysicalContributions)
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalFlowPreservesFlexAndGridAssignedWidths) {
+TEST_F(RadiantDocumentTest, OrthogonalFlowPreservesFlexAndGridAssignedWidths) {
     for (bool grid : {false, true}) {
         SCOPED_TRACE(grid);
         StrBuf* source = strbuf_new();
@@ -3243,7 +3461,7 @@ TEST_F(RadiantTextQuery, OrthogonalFlowPreservesFlexAndGridAssignedWidths) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalFlexButtonLabelsUseCanonicalCentering) {
+TEST_F(RadiantDocumentTest, VerticalFlexButtonLabelsUseCanonicalCentering) {
     for (const char* mode : {"vertical-rl", "vertical-lr"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -3282,7 +3500,7 @@ TEST_F(RadiantTextQuery, VerticalFlexButtonLabelsUseCanonicalCentering) {
     }
 }
 
-TEST_F(RadiantTextQuery, DominantTextEdgesAlignWithOrthogonalAtomicBoxes) {
+TEST_F(RadiantDocumentTest, DominantTextEdgesAlignWithOrthogonalAtomicBoxes) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr"}) {
         SCOPED_TRACE(mode);
         bool vertical = strcmp(mode, "horizontal-tb") != 0;
@@ -3320,7 +3538,7 @@ TEST_F(RadiantTextQuery, DominantTextEdgesAlignWithOrthogonalAtomicBoxes) {
     }
 }
 
-TEST_F(RadiantTextQuery, CheckableControlsPreserveTheirBaselineType) {
+TEST_F(RadiantDocumentTest, CheckableControlsPreserveTheirBaselineType) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr"})
         for (const char* type : {"checkbox", "radio"}) for (bool margins : {false, true}) {
         SCOPED_TRACE(mode);
@@ -3363,7 +3581,7 @@ TEST_F(RadiantTextQuery, CheckableControlsPreserveTheirBaselineType) {
     }
 }
 
-TEST_F(RadiantTextQuery, AnInlineMovedAsAWholeHasOneRenderedLine) {
+TEST_F(RadiantDocumentTest, AnInlineMovedAsAWholeHasOneRenderedLine) {
     for (bool atomic : {false, true}) {
         SCOPED_TRACE(atomic);
         StrBuf* source = strbuf_new();
@@ -3393,7 +3611,7 @@ TEST_F(RadiantTextQuery, AnInlineMovedAsAWholeHasOneRenderedLine) {
     }
 }
 
-TEST_F(RadiantTextQuery, InsideVerticalMarkersContributeTheirDominantBaseline) {
+TEST_F(RadiantDocumentTest, InsideVerticalMarkersContributeTheirDominantBaseline) {
     for (const char* mode : {"vertical-rl", "vertical-lr"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -3416,7 +3634,7 @@ TEST_F(RadiantTextQuery, InsideVerticalMarkersContributeTheirDominantBaseline) {
     }
 }
 
-TEST_F(RadiantTextQuery, InsideMarkerFragmentsKeepTheirRenderedLineIdentity) {
+TEST_F(RadiantDocumentTest, InsideMarkerFragmentsKeepTheirRenderedLineIdentity) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -3439,7 +3657,7 @@ TEST_F(RadiantTextQuery, InsideMarkerFragmentsKeepTheirRenderedLineIdentity) {
     }
 }
 
-TEST_F(RadiantTextQuery, DecoratedInlineLineIdentityFollowsItsSeparator) {
+TEST_F(RadiantDocumentTest, DecoratedInlineLineIdentityFollowsItsSeparator) {
     for (const char* policy : {"slice", "clone"}) for (bool inside : {false, true}) {
         SCOPED_TRACE(policy);
         SCOPED_TRACE(inside);
@@ -3470,7 +3688,7 @@ TEST_F(RadiantTextQuery, DecoratedInlineLineIdentityFollowsItsSeparator) {
     }
 }
 
-TEST_F(RadiantTextQuery, InlineFragmentLineIdentityIgnoresAtomicOverflow) {
+TEST_F(RadiantDocumentTest, InlineFragmentLineIdentityIgnoresAtomicOverflow) {
     for (bool forced : {false, true}) {
         SCOPED_TRACE(forced);
         StrBuf* source = strbuf_new();
@@ -3500,7 +3718,7 @@ TEST_F(RadiantTextQuery, InlineFragmentLineIdentityIgnoresAtomicOverflow) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAtomicAlignmentKeepsItsInlineAdvance) {
+TEST_F(RadiantDocumentTest, VerticalAtomicAlignmentKeepsItsInlineAdvance) {
     for (const char* mode : {"vertical-rl", "vertical-lr"}) for (bool definite : {false, true}) for (bool gaps : {false, true})
         for (const char* orientation : {"mixed", "sideways"}) {
         SCOPED_TRACE(mode);
@@ -3537,7 +3755,7 @@ TEST_F(RadiantTextQuery, VerticalAtomicAlignmentKeepsItsInlineAdvance) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalTextareaSourcesAlignWithTheirEditableLines) {
+TEST_F(RadiantDocumentTest, VerticalTextareaSourcesAlignWithTheirEditableLines) {
     for (const char* mode : {"vertical-rl", "vertical-lr"}) for (unsigned lines : {1u, 2u, 4u}) {
         SCOPED_TRACE(mode);
         SCOPED_TRACE(lines);
@@ -3589,7 +3807,7 @@ TEST_F(RadiantTextQuery, VerticalTextareaSourcesAlignWithTheirEditableLines) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalIntrinsicWidthsPreserveZeroLeading) {
+TEST_F(RadiantDocumentTest, VerticalIntrinsicWidthsPreserveZeroLeading) {
     for (const char* mode : {"vertical-lr", "vertical-rl"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -3616,7 +3834,7 @@ TEST_F(RadiantTextQuery, VerticalIntrinsicWidthsPreserveZeroLeading) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalMulticolUsesLogicalIntrinsicAxesAndBalancedExtents) {
+TEST_F(RadiantDocumentTest, VerticalMulticolUsesLogicalIntrinsicAxesAndBalancedExtents) {
     const struct { const char* id; float width, height; } items[] = {
         {"c0", 20, 30}, {"c1", 40, 50}, {"c2", 30, 20}, {"c3", 10, 40}
     };
@@ -3657,7 +3875,7 @@ TEST_F(RadiantTextQuery, VerticalMulticolUsesLogicalIntrinsicAxesAndBalancedExte
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalLineEdgesAlignPhysicalMarginBoxes) {
+TEST_F(RadiantDocumentTest, VerticalLineEdgesAlignPhysicalMarginBoxes) {
     for (const char* mode : {"vertical-lr", "vertical-rl"})
     for (bool over : {false, true}) {
         SCOPED_TRACE(mode);
@@ -3688,7 +3906,7 @@ TEST_F(RadiantTextQuery, VerticalLineEdgesAlignPhysicalMarginBoxes) {
     }
 }
 
-TEST_F(RadiantTextQuery, PositionedEndInsetsUseTheFinalPhysicalBoxAfterVerticalFlow) {
+TEST_F(RadiantDocumentTest, PositionedEndInsetsUseTheFinalPhysicalBoxAfterVerticalFlow) {
     const struct { const char* css; bool automatic, border_box; float decorations, margin_start, margin_end; } cases[] = {
         {"", true, false, 0, 0, 0},
         {"border:2px solid;padding:3px 5px 4px;margin:7px 9px 11px 13px", true, false, 11, 7, 11},
@@ -3753,7 +3971,7 @@ TEST_F(RadiantTextQuery, PositionedEndInsetsUseTheFinalPhysicalBoxAfterVerticalF
     }
 }
 
-TEST_F(RadiantTextQuery, SizeContainedContributionsKeepOwnConstraints) {
+TEST_F(RadiantDocumentTest, SizeContainedContributionsKeepOwnConstraints) {
     const struct {
         const char* width;
         const char* minimum;
@@ -3831,7 +4049,7 @@ TEST_F(RadiantTextQuery, SizeContainedContributionsKeepOwnConstraints) {
     }
 }
 
-TEST_F(RadiantTextQuery, ResolvedLayoutDisplayPreservesTheLiveComputedDisplayQuery) {
+TEST_F(RadiantDocumentTest, ResolvedLayoutDisplayPreservesTheLiveComputedDisplayQuery) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>#result{display:block}</style><button id=result>label</button>");
@@ -3846,7 +4064,7 @@ TEST_F(RadiantTextQuery, ResolvedLayoutDisplayPreservesTheLiveComputedDisplayQue
     EXPECT_EQ(resolve_display_value(result).outer, CSS_VALUE_NONE);
 }
 
-TEST_F(RadiantTextQuery, GlyphOrientationQueriesFollowInheritedEditsAndReparenting) {
+TEST_F(RadiantDocumentTest, GlyphOrientationQueriesFollowInheritedEditsAndReparenting) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>#vertical{writing-mode:vertical-rl;text-orientation:upright}"
@@ -3877,7 +4095,7 @@ TEST_F(RadiantTextQuery, GlyphOrientationQueriesFollowInheritedEditsAndReparenti
     EXPECT_EQ(layout_text_glyph_orientation(&query, 'A'), TEXT_GLYPH_SIDEWAYS_CCW);
 }
 
-TEST_F(RadiantTextQuery, FontUnitsUseInheritedOrientationAndHorizontalSidewaysMetrics) {
+TEST_F(RadiantDocumentTest, FontUnitsUseInheritedOrientationAndHorizontalSidewaysMetrics) {
     const struct { const char* css; const char* orientation; bool inherits; } cases[] = {
         {"", "upright", true}, {"text-orientation:inherit", "upright", true},
         {"text-orientation:unset", "upright", true}, {"text-orientation:initial", "mixed", false},
@@ -3923,7 +4141,7 @@ TEST_F(RadiantTextQuery, FontUnitsUseInheritedOrientationAndHorizontalSidewaysMe
     }
 }
 
-TEST_F(RadiantTextQuery, UprightUsedDirectionPreservesComputedInheritance) {
+TEST_F(RadiantDocumentTest, UprightUsedDirectionPreservesComputedInheritance) {
     const struct { const char* css; bool inherits; bool upright; } cases[] = {
         {"", true, true}, {"text-orientation:inherit", true, true},
         {"text-orientation:unset", true, true}, {"text-orientation:upright", false, true},
@@ -3989,7 +4207,7 @@ TEST_F(RadiantTextQuery, UprightUsedDirectionPreservesComputedInheritance) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalGlyphFramesFollowRetainedOrientationFontAndSizeChanges) {
+TEST_F(RadiantDocumentTest, VerticalGlyphFramesFollowRetainedOrientationFontAndSizeChanges) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -4059,7 +4277,7 @@ TEST_F(RadiantTextQuery, VerticalGlyphFramesFollowRetainedOrientationFontAndSize
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalBidiPaintAndPartialRangesSharePhysicalInlinePositions) {
+TEST_F(RadiantDocumentTest, VerticalBidiPaintAndPartialRangesSharePhysicalInlinePositions) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0}#result{display:flow-root;font:20px/1 Arial;"
@@ -4139,7 +4357,7 @@ TEST_F(RadiantTextQuery, VerticalBidiPaintAndPartialRangesSharePhysicalInlinePos
     }
 }
 
-TEST_F(RadiantTextQuery, BidiCollapsedLineSuffixDoesNotMoveAdjacentInlineContent) {
+TEST_F(RadiantDocumentTest, BidiCollapsedLineSuffixDoesNotMoveAdjacentInlineContent) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -4159,7 +4377,7 @@ TEST_F(RadiantTextQuery, BidiCollapsedLineSuffixDoesNotMoveAdjacentInlineContent
     }
 }
 
-TEST_F(RadiantTextQuery, BidiSuppressedSuffixPreservesInteriorSpaceAdvance) {
+TEST_F(RadiantDocumentTest, BidiSuppressedSuffixPreservesInteriorSpaceAdvance) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -4178,7 +4396,7 @@ TEST_F(RadiantTextQuery, BidiSuppressedSuffixPreservesInteriorSpaceAdvance) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalCursivePaintKeepsThePublishedDirectionalRunExtent) {
+TEST_F(RadiantDocumentTest, VerticalCursivePaintKeepsThePublishedDirectionalRunExtent) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0}#result{display:flow-root;font:32px/1 Arial;"
@@ -4222,7 +4440,7 @@ TEST_F(RadiantTextQuery, VerticalCursivePaintKeepsThePublishedDirectionalRunExte
     }
 }
 
-TEST_F(RadiantTextQuery, UprightCursiveUnitsKeepTheirOwnVerticalAdvances) {
+TEST_F(RadiantDocumentTest, UprightCursiveUnitsKeepTheirOwnVerticalAdvances) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0;padding:20px}#result{display:flow-root;writing-mode:vertical-lr;"
@@ -4260,7 +4478,7 @@ TEST_F(RadiantTextQuery, UprightCursiveUnitsKeepTheirOwnVerticalAdvances) {
     EXPECT_NEAR(capture.next, text->rect->y + text->rect->height, 0.01f);
 }
 
-TEST_F(RadiantTextQuery, VerticalRangesExpandUnitsAndMapCaseExpansionAndCollapsedSpaces) {
+TEST_F(RadiantDocumentTest, VerticalRangesExpandUnitsAndMapCaseExpansionAndCollapsedSpaces) {
     struct Selection { uint32_t start, end; float first, count; };
     const struct { const char* text; const char* transform; const char* whitespace;
         Selection selections[4]; } cases[] = {
@@ -4315,7 +4533,7 @@ TEST_F(RadiantTextQuery, VerticalRangesExpandUnitsAndMapCaseExpansionAndCollapse
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalSurrogateSelectionsIncludeTheWholePaintedUnit) {
+TEST_F(RadiantDocumentTest, VerticalSurrogateSelectionsIncludeTheWholePaintedUnit) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0}#result{display:flow-root;font:24px/1 Arial;"
@@ -4360,7 +4578,7 @@ TEST_F(RadiantTextQuery, VerticalSurrogateSelectionsIncludeTheWholePaintedUnit) 
     dom_range_release(range);
 }
 
-TEST_F(RadiantTextQuery, UprightBidiUsesStrongLtrClassesAcrossInlineScopes) {
+TEST_F(RadiantDocumentTest, UprightBidiUsesStrongLtrClassesAcrossInlineScopes) {
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"}) {
         for (const char* direction : {"ltr", "rtl"}) for (bool inline_scope : {false, true}) {
             for (const char* bidi : {"normal", "embed", "bidi-override", "isolate", "isolate-override", "plaintext"}) {
@@ -4410,7 +4628,7 @@ TEST_F(RadiantTextQuery, UprightBidiUsesStrongLtrClassesAcrossInlineScopes) {
     }
 }
 
-TEST_F(RadiantTextQuery, PrincipalVerticalAutoInlineSizeReachesFlexAndGridBeforeChildren) {
+TEST_F(RadiantDocumentTest, PrincipalVerticalAutoInlineSizeReachesFlexAndGridBeforeChildren) {
     for (const char* mode : {"vertical-lr", "vertical-rl"}) for (const char* direction : {"ltr", "rtl"}) {
         for (const char* display : {"block", "flow-root", "flex", "grid"}) {
             SCOPED_TRACE(mode);
@@ -4444,7 +4662,7 @@ TEST_F(RadiantTextQuery, PrincipalVerticalAutoInlineSizeReachesFlexAndGridBefore
     }
 }
 
-TEST_F(RadiantTextQuery, UprightTableTracksPreserveComputedDirectionAndUseLtrOrder) {
+TEST_F(RadiantDocumentTest, UprightTableTracksPreserveComputedDirectionAndUseLtrOrder) {
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"}) {
         for (const char* direction : {"ltr", "rtl"}) {
             SCOPED_TRACE(mode);
@@ -4488,7 +4706,7 @@ static const char* const atomic_inline_pair_markup[] = {
     "<span id=first></span><span id=second></span>"
 };
 
-TEST_F(RadiantTextQuery, AtomicInlineBidiOrderAndAlignmentPreserveRelativeOffsets) {
+TEST_F(RadiantDocumentTest, AtomicInlineBidiOrderAndAlignmentPreserveRelativeOffsets) {
     for (const char* content : atomic_inline_pair_markup) for (bool rtl : {false, true}) {
         for (const char* align : {"start", "left", "center"}) for (bool prefix : {false, true}) {
             for (bool percent : {false, true}) for (bool first_relative : {false, true})
@@ -4555,7 +4773,7 @@ TEST_F(RadiantTextQuery, AtomicInlineBidiOrderAndAlignmentPreserveRelativeOffset
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAtomicBidiUsesPhysicalInlineAdvancesAndRelativeOffsets) {
+TEST_F(RadiantDocumentTest, VerticalAtomicBidiUsesPhysicalInlineAdvancesAndRelativeOffsets) {
     for (const char* mode : {"vertical-lr", "vertical-rl"}) for (bool rtl : {false, true}) {
         for (const char* align : {"start", "left", "center"}) {
             for (const char* content : atomic_inline_pair_markup)
@@ -4613,7 +4831,7 @@ TEST_F(RadiantTextQuery, VerticalAtomicBidiUsesPhysicalInlineAdvancesAndRelative
     }
 }
 
-TEST_F(RadiantTextQuery, RootRelativeWebFontsMatchTheirDirectFileSources) {
+TEST_F(RadiantDocumentTest, RootRelativeWebFontsMatchTheirDirectFileSources) {
     const struct { const char* source; const char* file; const char* format; const char* text; } cases[] = {
         {"/fonts/Ahem.ttf", "ref/wpt/fonts/Ahem.ttf", "truetype", "XXXX"},
         {"file:///fonts/Ahem.ttf", "ref/wpt/fonts/Ahem.ttf", "truetype", "XXXX"},
@@ -4652,7 +4870,7 @@ TEST_F(RadiantTextQuery, RootRelativeWebFontsMatchTheirDirectFileSources) {
     }
 }
 
-TEST_F(RadiantTextQuery, ParagraphStartAlignmentUsesEachContainersDirection) {
+TEST_F(RadiantDocumentTest, ParagraphStartAlignmentUsesEachContainersDirection) {
     const char* cases[] = {
         "<div id=result>X</div>",
         "<div id=result style=display:inline-block>X</div>",
@@ -4697,7 +4915,7 @@ TEST_F(RadiantTextQuery, ParagraphStartAlignmentUsesEachContainersDirection) {
     }
 }
 
-TEST_F(RadiantTextQuery, FlexItemParagraphDirectionSurvivesWrappingAndSiblingLayout) {
+TEST_F(RadiantDocumentTest, FlexItemParagraphDirectionSurvivesWrappingAndSiblingLayout) {
     ASSERT_NE(load_script_source(R"HTML(<!doctype html><style>
         @font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}
         body{margin:0;display:flex}
@@ -4713,7 +4931,7 @@ TEST_F(RadiantTextQuery, FlexItemParagraphDirectionSurvivesWrappingAndSiblingLay
     expect_box("result", 200, 20, 20, 20);
 }
 
-TEST_F(RadiantTextQuery, InlineStaticPositionsUseLogicalLineAxesAndDirectionalMarginEdges) {
+TEST_F(RadiantDocumentTest, InlineStaticPositionsUseLogicalLineAxesAndDirectionalMarginEdges) {
     // independently measured with unequal physical dimensions in Chromium.
     const struct { const char* mode; const char* direction; float width, height, x, y, margin_x, margin_y; } flows[] = {
         {"horizontal-tb", "ltr", 80, 120, 40, 20, 43, 27},
@@ -4753,7 +4971,7 @@ TEST_F(RadiantTextQuery, InlineStaticPositionsUseLogicalLineAxesAndDirectionalMa
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalStaticAnchorsPreserveOriginsAlignmentAndContainingBlocks) {
+TEST_F(RadiantDocumentTest, VerticalStaticAnchorsPreserveOriginsAlignmentAndContainingBlocks) {
     const struct { const char* mode; const char* direction; const char* variant; float x, y; } cases[] = {
         {"vertical-lr", "ltr", "padding", 33, 45},
         {"vertical-lr", "ltr", "inline-cb", 20, 40},
@@ -4835,7 +5053,7 @@ TEST_F(RadiantTextQuery, VerticalStaticAnchorsPreserveOriginsAlignmentAndContain
     }
 }
 
-TEST_F(RadiantTextQuery, StaticBlockAnchorsFollowTheirOriginalFormattingContext) {
+TEST_F(RadiantDocumentTest, StaticBlockAnchorsFollowTheirOriginalFormattingContext) {
     struct Size { const char* mode; const char* width; const char* height; float w; float h; };
     const Size sizes[] = {{"inherit", "20px", "15px", 20, 15},
         {"horizontal-tb", "37px", "23px", 37, 23}, {"inherit", "20px", "15px", 20, 15}};
@@ -4891,7 +5109,7 @@ TEST_F(RadiantTextQuery, StaticBlockAnchorsFollowTheirOriginalFormattingContext)
     }
 }
 
-TEST_F(RadiantTextQuery, HtmlPrincipalWritingModeChangesUsedRootFlowAndPreservesComputedMapping) {
+TEST_F(RadiantDocumentTest, HtmlPrincipalWritingModeChangesUsedRootFlowAndPreservesComputedMapping) {
     ASSERT_NE(load_script_source(R"HTML(<!doctype html><style>
         html { writing-mode:vertical-rl }
         body { writing-mode:horizontal-tb; margin:0; font:20px/1 monospace }
@@ -4922,7 +5140,7 @@ TEST_F(RadiantTextQuery, HtmlPrincipalWritingModeChangesUsedRootFlowAndPreserves
     EXPECT_EQ(layout_block_writing_mode(root), WM_VERTICAL_RL);
 }
 
-TEST_F(RadiantTextQuery, VerticalRootGeneratedBlocksParticipateInNormalFlow) {
+TEST_F(RadiantDocumentTest, VerticalRootGeneratedBlocksParticipateInNormalFlow) {
     const struct { const char* classes; bool before, after; float child_width; float lr_width, rl_width, lr_body, rl_body; } states[] = {
         {"", true, true, 40, 104, 110, 30, 34},
         {"hide-before", false, true, 40, 79, 83, 5, 34},
@@ -4995,7 +5213,7 @@ TEST_F(RadiantTextQuery, VerticalRootGeneratedBlocksParticipateInNormalFlow) {
     }
 }
 
-TEST_F(RadiantTextQuery, HtmlPrincipalModeRespectsContainmentAndBodyVisibility) {
+TEST_F(RadiantDocumentTest, HtmlPrincipalModeRespectsContainmentAndBodyVisibility) {
     const struct { const char* root; const char* body; CssEnum computed; WritingMode root_mode, body_mode; } flows[] = {
         {"horizontal-tb", "vertical-lr", CSS_VALUE_HORIZONTAL_TB, WM_HORIZONTAL_TB, WM_VERTICAL_LR},
         {"horizontal-tb", "vertical-rl", CSS_VALUE_HORIZONTAL_TB, WM_HORIZONTAL_TB, WM_VERTICAL_RL},
@@ -5050,7 +5268,7 @@ TEST_F(RadiantTextQuery, HtmlPrincipalModeRespectsContainmentAndBodyVisibility) 
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalBlockMarginsCollapseAcrossNonemptyAncestorChains) {
+TEST_F(RadiantDocumentTest, VerticalBlockMarginsCollapseAcrossNonemptyAncestorChains) {
     const struct { const char* mode; bool vertical; bool reverse; } flows[] = {
         {"horizontal-tb", false, false}, {"vertical-lr", true, false}, {"vertical-rl", true, true}
     };
@@ -5102,7 +5320,7 @@ TEST_F(RadiantTextQuery, VerticalBlockMarginsCollapseAcrossNonemptyAncestorChain
     }
 }
 
-TEST_F(RadiantTextQuery, EmptyVerticalBlocksPreserveTransitiveMarginAdjacency) {
+TEST_F(RadiantDocumentTest, EmptyVerticalBlocksPreserveTransitiveMarginAdjacency) {
     // CSS 2.2 §8.3.1: the empty border edge and following content use different adjoining sets.
     const struct {
         const char* css;
@@ -5159,7 +5377,7 @@ TEST_F(RadiantTextQuery, EmptyVerticalBlocksPreserveTransitiveMarginAdjacency) {
     }
 }
 
-TEST_F(RadiantTextQuery, SiblingVerticalFloatWrappersShareUsedBfcCoordinates) {
+TEST_F(RadiantDocumentTest, SiblingVerticalFloatWrappersShareUsedBfcCoordinates) {
     const struct {
         float earlier_inline, earlier_block, host_inline, follow_inline;
         bool isolated;
@@ -5242,7 +5460,7 @@ TEST_F(RadiantTextQuery, SiblingVerticalFloatWrappersShareUsedBfcCoordinates) {
     }
 }
 
-TEST_F(RadiantTextQuery, EmptyChildMarginsRespectParentMinimumAndEdges) {
+TEST_F(RadiantDocumentTest, EmptyChildMarginsRespectParentMinimumAndEdges) {
     const struct {
         const char* css;
         float parent_size, first_start, last_start, after_start, host_size;
@@ -5288,7 +5506,7 @@ TEST_F(RadiantTextQuery, EmptyChildMarginsRespectParentMinimumAndEdges) {
     }
 }
 
-TEST_F(RadiantTextQuery, HtmlUaSpacingFollowsComputedFlowFontAndAuthorOverrides) {
+TEST_F(RadiantDocumentTest, HtmlUaSpacingFollowsComputedFlowFontAndAuthorOverrides) {
     const struct { const char* mode; const char* direction; bool vertical; bool rtl; } flows[] = {
         {"horizontal-tb", "ltr", false, false}, {"horizontal-tb", "rtl", false, true},
         {"vertical-lr", "ltr", true, false}, {"vertical-lr", "rtl", true, true},
@@ -5389,7 +5607,7 @@ TEST_F(RadiantTextQuery, HtmlUaSpacingFollowsComputedFlowFontAndAuthorOverrides)
     }
 }
 
-TEST_F(RadiantTextQuery, DataUrlDocumentsDecodeTheirBodyAndSelectHtmlOrXhtmlByMime) {
+TEST_F(RadiantDocumentTest, DataUrlDocumentsDecodeTheirBodyAndSelectHtmlOrXhtmlByMime) {
     const struct { const char* url; bool xhtml; } cases[] = {
         {"data:text/html,%3Cdiv%20id='result'%20data-value='a%2Bb%26amp%3Bc'%3Etext%3C/div%3E#fragment", false},
         {"data:text/html;base64,PGRpdiBpZD0icmVzdWx0IiBkYXRhLXZhbHVlPSJhK2ImYW1wO2MiPnRleHQ8L2Rpdj4=", false},
@@ -5409,7 +5627,7 @@ TEST_F(RadiantTextQuery, DataUrlDocumentsDecodeTheirBodyAndSelectHtmlOrXhtmlByMi
     EXPECT_EQ(load("data:,%3Cdiv%20id='result'%3Enot%20HTML%3C/div%3E"), nullptr);
 }
 
-TEST_F(RadiantTextQuery, CrossDocumentNavigationFinishesMicrotasksWithoutDrainingOldTimers) {
+TEST_F(RadiantDocumentTest, CrossDocumentNavigationFinishesMicrotasksWithoutDrainingOldTimers) {
     DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
         var result=document.getElementById('result');
         setTimeout(function(){result.setAttribute('data-timer','yes')},0);
@@ -5425,7 +5643,7 @@ TEST_F(RadiantTextQuery, CrossDocumentNavigationFinishesMicrotasksWithoutDrainin
     EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
 }
 
-TEST_F(RadiantTextQuery, UnicodeEmailPatternSurvivesDirectMatcherResourceLimit) {
+TEST_F(RadiantDocumentTest, UnicodeEmailPatternSurvivesDirectMatcherResourceLimit) {
     DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
         var email = /[\p{L}\p{M}\p{N}._%+'-]{1,64}(?:[@\uFF20\uFE6B]|%40)[\p{L}\p{M}\p{N}.\u3002\uFF0E\uFF61-]{1,255}[.\u3002\uFF0E\uFF61][\p{L}\p{M}][\p{L}\p{M}\p{N}-]{1,62}/giu;
         var samples = ['henry@example.com', 'hénry＠例子．公司', 'a﹫b｡com', 'not-an-email'];
@@ -5439,7 +5657,7 @@ TEST_F(RadiantTextQuery, UnicodeEmailPatternSurvivesDirectMatcherResourceLimit) 
     EXPECT_STREQ(result->get_attribute("data-flags"), "giu");
 }
 
-TEST_F(RadiantTextQuery, FragmentNavigationRetainsCurrentDocumentTimers) {
+TEST_F(RadiantDocumentTest, FragmentNavigationRetainsCurrentDocumentTimers) {
     DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
         setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
         location.replace('#result');
@@ -5448,7 +5666,7 @@ TEST_F(RadiantTextQuery, FragmentNavigationRetainsCurrentDocumentTimers) {
     EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
 }
 
-TEST_F(RadiantTextQuery, NavigationClassificationUsesTheCompletedMicrotaskCheckpoint) {
+TEST_F(RadiantDocumentTest, NavigationClassificationUsesTheCompletedMicrotaskCheckpoint) {
     DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
         setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
         location.replace('next.html');
@@ -5458,7 +5676,7 @@ TEST_F(RadiantTextQuery, NavigationClassificationUsesTheCompletedMicrotaskCheckp
     EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
 }
 
-TEST_F(RadiantTextQuery, InlineSizeQueriesSettleGeneratedBlockExtent) {
+TEST_F(RadiantDocumentTest, InlineSizeQueriesSettleGeneratedBlockExtent) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body { margin:0 }
         #container { container-type:inline-size; width:120px }
@@ -5474,7 +5692,7 @@ TEST_F(RadiantTextQuery, InlineSizeQueriesSettleGeneratedBlockExtent) {
     }
 }
 
-TEST_F(RadiantTextQuery, CachedSvgDeliveryUsesItsOwnerBeforePublicationAndAcrossDocuments) {
+TEST_F(RadiantDocumentTest, CachedSvgDeliveryUsesItsOwnerBeforePublicationAndAcrossDocuments) {
     ASSERT_NE(load_script_source("<div id='result'><img id='image'></div>"), nullptr);
     DomElement* image = dom_find_element_by_id(document->root->as_element(), "image");
     ASSERT_NE(image, nullptr);
@@ -5510,7 +5728,7 @@ TEST_F(RadiantTextQuery, CachedSvgDeliveryUsesItsOwnerBeforePublicationAndAcross
     file_delete(path);
 }
 
-TEST_F(RadiantTextQuery, DetachedFontDiscoveryDeliversCachedFacesAfterTheHostBinds) {
+TEST_F(RadiantDocumentTest, DetachedFontDiscoveryDeliversCachedFacesAfterTheHostBinds) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         @font-face { font-family:DetachedFixture; src:url(https://example.test/detached.ttf) }
         #result { font-family:DetachedFixture }
@@ -5551,7 +5769,7 @@ TEST_F(RadiantTextQuery, DetachedFontDiscoveryDeliversCachedFacesAfterTheHostBin
     EXPECT_EQ(document->resource_manager->ui_context, &ui);
 }
 
-TEST_F(RadiantTextQuery, FetchPreloadRetainsBytesWithoutImageDecodingOrScriptExecution) {
+TEST_F(RadiantDocumentTest, FetchPreloadRetainsBytesWithoutImageDecodingOrScriptExecution) {
     ASSERT_NE(load_script_source(R"HTML(<link rel="preload" as="fetch"
         href="https://example.test/preload.js"><div id="result"></div>)HTML"), nullptr);
     EnhancedFileCache* cache = enhanced_cache_create("temp/raw_preload_cache", 1024 * 1024, 10);
@@ -5581,7 +5799,7 @@ TEST_F(RadiantTextQuery, FetchPreloadRetainsBytesWithoutImageDecodingOrScriptExe
     EXPECT_EQ(result->get_attribute("data-executed"), nullptr);
 }
 
-TEST_F(RadiantTextQuery, NestedMicrotaskNavigationDefersDiscardedDocumentTimers) {
+TEST_F(RadiantDocumentTest, NestedMicrotaskNavigationDefersDiscardedDocumentTimers) {
     DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
         var result=document.getElementById('result');
         setTimeout(function(){result.setAttribute('data-timer','ran')},0);
@@ -5602,7 +5820,7 @@ TEST_F(RadiantTextQuery, NestedMicrotaskNavigationDefersDiscardedDocumentTimers)
     EXPECT_NE(strstr(document->pending_navigation_url, "next.html"), nullptr);
 }
 
-TEST_F(RadiantTextQuery, AbsoluteSameDocumentNavigationRetainsTimers) {
+TEST_F(RadiantDocumentTest, AbsoluteSameDocumentNavigationRetainsTimers) {
     DomElement* result = load_script_source(R"HTML(<div id="result"></div><script>
         setTimeout(function(){document.getElementById('result').setAttribute('data-timer','yes')},0);
         location.replace(location.href.split('#')[0]+'#result');
@@ -5611,7 +5829,7 @@ TEST_F(RadiantTextQuery, AbsoluteSameDocumentNavigationRetainsTimers) {
     EXPECT_STREQ(result->get_attribute("data-timer"), "yes");
 }
 
-TEST_F(RadiantTextQuery, InlineSizeQueryReevaluatesRealWidthChangesAndRepublishesOnce) {
+TEST_F(RadiantDocumentTest, InlineSizeQueryReevaluatesRealWidthChangesAndRepublishesOnce) {
     DomElement* result = load_script_source(R"HTML(<style>
         body { margin:0 }
         #container { container-type:inline-size; width:120px }
@@ -5640,7 +5858,7 @@ TEST_F(RadiantTextQuery, InlineSizeQueryReevaluatesRealWidthChangesAndRepublishe
     }
 }
 
-TEST_F(RadiantTextQuery, ContainerSettlementKeepsCommittedGeometryWithFixedPseudoDescendants) {
+TEST_F(RadiantDocumentTest, ContainerSettlementKeepsCommittedGeometryWithFixedPseudoDescendants) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body { margin:0; font:16px Arial }
         #row { display:flex; width:120px; align-items:flex-start; min-height:100vh }
@@ -5670,7 +5888,7 @@ TEST_F(RadiantTextQuery, ContainerSettlementKeepsCommittedGeometryWithFixedPseud
     expect_box("result", 0, 0, 0, 10);
 }
 
-TEST_F(RadiantTextQuery, IncrementalContainerReflowKeepsUnchangedSiblingStyles) {
+TEST_F(RadiantDocumentTest, IncrementalContainerReflowKeepsUnchangedSiblingStyles) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source, R"HTML(<style>body{margin:0}
         #container{container-type:inline-size;width:300px}
@@ -5693,7 +5911,7 @@ TEST_F(RadiantTextQuery, IncrementalContainerReflowKeepsUnchangedSiblingStyles) 
     EXPECT_LT(g_style_resolve_full, 10);
 }
 
-TEST_F(RadiantTextQuery, PseudoFontsOwnInheritedTextShadowsAcrossRetainedReset) {
+TEST_F(RadiantDocumentTest, PseudoFontsOwnInheritedTextShadowsAcrossRetainedReset) {
     DomElement* result = load_script_source(R"HTML(<style>
         #result{text-shadow:1px 2px 3px red,4px 5px 6px blue}
         #result::before{content:'before'}#result::after{content:'after'}
@@ -5721,7 +5939,7 @@ TEST_F(RadiantTextQuery, PseudoFontsOwnInheritedTextShadowsAcrossRetainedReset) 
     }
 }
 
-TEST_F(RadiantTextQuery, PreparedStylesKeepInheritedFontsAndRebindControlPercentages) {
+TEST_F(RadiantDocumentTest, PreparedStylesKeepInheritedFontsAndRebindControlPercentages) {
     ASSERT_NE(load("test/html/layout_prepared_context.html"), nullptr);
     DomElement* code = dom_find_element_by_id(document->root->as_element(), "code");
     DomElement* control = dom_find_element_by_id(document->root->as_element(), "control");
@@ -5758,7 +5976,7 @@ TEST_F(RadiantTextQuery, PreparedStylesKeepInheritedFontsAndRebindControlPercent
     }
 }
 
-TEST_F(RadiantTextQuery, SharedPublicationCommitsForeignFrameWritesWithoutParentLayout) {
+TEST_F(RadiantDocumentTest, SharedPublicationCommitsForeignFrameWritesWithoutParentLayout) {
     ASSERT_NE(load("test/html/layout_shared_iframe_publication.html"), nullptr);
     layout_html_doc(&ui, document, false);
     DomElement* frame = dom_find_element_by_id(document->root->as_element(), "frame");
@@ -5788,7 +6006,7 @@ TEST_F(RadiantTextQuery, SharedPublicationCommitsForeignFrameWritesWithoutParent
     EXPECT_EQ(embedded->view_tree->document_layout_count, child_passes);
 }
 
-TEST_F(RadiantTextQuery, RebuiltSourceRangesIgnoreAnonymousTableGroups) {
+TEST_F(RadiantDocumentTest, RebuiltSourceRangesIgnoreAnonymousTableGroups) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         #table{display:table}#row{display:table-row}#cell{display:table-cell}
         </style><div id="result"><div id="table"><div id="row"><div id="cell">text</div></div></div></div>)HTML"), nullptr);
@@ -5814,7 +6032,7 @@ TEST_F(RadiantTextQuery, RebuiltSourceRangesIgnoreAnonymousTableGroups) {
     EXPECT_EQ(view_state_corresponding_node(cell, table, next_table, true), next_cell);
 }
 
-TEST_F(RadiantTextQuery, ScrollRequestsReuseValidatedFlowAndHonorViewportChanges) {
+TEST_F(RadiantDocumentTest, ScrollRequestsReuseValidatedFlowAndHonorViewportChanges) {
     DomElement* result = load_script_source(R"HTML(<style>
         body{margin:0}#scrollport{width:160px;height:64px;overflow:auto}
         #start{height:16px}#spacer{height:384px}#result{height:16px}
@@ -5849,7 +6067,7 @@ TEST_F(RadiantTextQuery, ScrollRequestsReuseValidatedFlowAndHonorViewportChanges
     expect_box("result", 0, 48, 160, 16);
 }
 
-TEST_F(RadiantTextQuery, HorizontalViewportRangeUsesFinalRootSizeAndRestoresAfterReflow) {
+TEST_F(RadiantDocumentTest, HorizontalViewportRangeUsesFinalRootSizeAndRestoresAfterReflow) {
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"}) {
         SCOPED_TRACE(mode);
         bool vertical = strcmp(mode, "horizontal-tb") != 0;
@@ -5912,7 +6130,7 @@ TEST_F(RadiantTextQuery, HorizontalViewportRangeUsesFinalRootSizeAndRestoresAfte
     }
 }
 
-TEST_F(RadiantTextQuery, HorizontalRootMarginsUsePrincipalDirectionThroughRetainedChanges) {
+TEST_F(RadiantDocumentTest, HorizontalRootMarginsUsePrincipalDirectionThroughRetainedChanges) {
     // CSS2 §10.3.3 used boxes, independently checked in Chromium at 320×200.
     const struct {
         const char* width; const char* minimum; const char* maximum; const char* margin;
@@ -5983,7 +6201,7 @@ TEST_F(RadiantTextQuery, HorizontalRootMarginsUsePrincipalDirectionThroughRetain
     }
 }
 
-TEST_F(RadiantTextQuery, PrincipalDirectionControlsRootPlacementAndViewportRangeWithoutChangingComputedCss) {
+TEST_F(RadiantDocumentTest, PrincipalDirectionControlsRootPlacementAndViewportRangeWithoutChangingComputedCss) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source, "<!doctype html><style>html{width:400px}body{margin:0;height:20px}</style><body id=result></body>");
     DomElement* body = layout_script_source(source);
@@ -6024,7 +6242,7 @@ TEST_F(RadiantTextQuery, PrincipalDirectionControlsRootPlacementAndViewportRange
     }
 }
 
-TEST_F(RadiantTextQuery, PositionedPercentageMathUsesActualContainingBlockThroughRetainedChanges) {
+TEST_F(RadiantDocumentTest, PositionedPercentageMathUsesActualContainingBlockThroughRetainedChanges) {
     const char* contexts[] = {"initial", "root", "body", "root-transform", "body-transform"};
     const char* sizes[] = {"50%", "calc(50% + 10px)", "min(60%, 190px)", "clamp(40px, 50%, 240px)"};
     for (bool table : {false, true}) for (bool fixed : {false, true}) {
@@ -6098,7 +6316,7 @@ TEST_F(RadiantTextQuery, PositionedPercentageMathUsesActualContainingBlockThroug
     }
 }
 
-TEST_F(RadiantTextQuery, DeferredPositionedStylePreservesFlexSiblingGeometryAndBackground) {
+TEST_F(RadiantDocumentTest, DeferredPositionedStylePreservesFlexSiblingGeometryAndBackground) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0}#result{position:relative;display:flex;width:600px}"
@@ -6127,7 +6345,7 @@ TEST_F(RadiantTextQuery, DeferredPositionedStylePreservesFlexSiblingGeometryAndB
     }
 }
 
-TEST_F(RadiantTextQuery, RootScrollbarPaintAndHitsUseViewportEdges) {
+TEST_F(RadiantDocumentTest, RootScrollbarPaintAndHitsUseViewportEdges) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>html{width:480px;background:white}body{margin:0}"
@@ -6166,7 +6384,7 @@ TEST_F(RadiantTextQuery, RootScrollbarPaintAndHitsUseViewportEdges) {
     }
 }
 
-TEST_F(RadiantTextQuery, SharedPublicationPreservesScriptGeometryAndInvalidatesInputs) {
+TEST_F(RadiantDocumentTest, SharedPublicationPreservesScriptGeometryAndInvalidatesInputs) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
     ASSERT_NE(document->view_tree, nullptr);
@@ -6221,7 +6439,7 @@ TEST_F(RadiantTextQuery, SharedPublicationPreservesScriptGeometryAndInvalidatesI
     EXPECT_EQ(tree->document_layout_count, 6u);
 }
 
-TEST_F(RadiantTextQuery, RecascadeRetainsEqualInputsAndExpiresAuthoredAndInheritedChanges) {
+TEST_F(RadiantDocumentTest, RecascadeRetainsEqualInputsAndExpiresAuthoredAndInheritedChanges) {
     ASSERT_NE(load("test/html/layout_recascade_reuse.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -6265,7 +6483,7 @@ TEST_F(RadiantTextQuery, RecascadeRetainsEqualInputsAndExpiresAuthoredAndInherit
     EXPECT_FLOAT_EQ(target->width, 210.0f);
 }
 
-TEST_F(RadiantTextQuery, SharedPublicationRegeneratesTableListAndPseudoStructure) {
+TEST_F(RadiantDocumentTest, SharedPublicationRegeneratesTableListAndPseudoStructure) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
     auto find = [&](const char* id) { return dom_find_element_by_id(result, id); };
@@ -6316,7 +6534,7 @@ TEST_F(RadiantTextQuery, SharedPublicationRegeneratesTableListAndPseudoStructure
     EXPECT_EQ(find("item-a")->pseudo->marker->parent, find("item-a"));
 }
 
-TEST_F(RadiantTextQuery, HiddenPositionedPopupDoesNotPaintRetainedDecoration) {
+TEST_F(RadiantDocumentTest, HiddenPositionedPopupDoesNotPaintRetainedDecoration) {
     DomElement* result = load("test/html/layout_hidden_popup.html", true);
     ASSERT_NE(result, nullptr);
     DomElement* popup = dom_find_element_by_id(result, "popup");
@@ -6347,7 +6565,7 @@ TEST_F(RadiantTextQuery, HiddenPositionedPopupDoesNotPaintRetainedDecoration) {
     }
 }
 
-TEST_F(RadiantTextQuery, SharedPublicationInvalidatesNewFontResources) {
+TEST_F(RadiantDocumentTest, SharedPublicationInvalidatesNewFontResources) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
     DomElement* box = dom_find_element_by_id(result, "text");
@@ -6373,7 +6591,7 @@ TEST_F(RadiantTextQuery, SharedPublicationInvalidatesNewFontResources) {
     EXPECT_EQ(document->view_tree->document_layout_count, count + 1);
 }
 
-TEST_F(RadiantTextQuery, SharedPublicationNormalizesMergedRunsAndScriptScroll) {
+TEST_F(RadiantDocumentTest, SharedPublicationNormalizesMergedRunsAndScriptScroll) {
     DomElement* result = load("test/html/layout_shared_publication_mutations.html", true);
     ASSERT_NE(result, nullptr);
     ASSERT_TRUE(layout_update_document(&ui, document));
@@ -6412,7 +6630,7 @@ TEST_F(RadiantTextQuery, SharedPublicationNormalizesMergedRunsAndScriptScroll) {
     EXPECT_FLOAT_EQ(find("control")->width, 144.0f);
 }
 
-TEST_F(RadiantTextQuery, ComputedSizesRemainSeparateFromInlineAndAtomicFlow) {
+TEST_F(RadiantDocumentTest, ComputedSizesRemainSeparateFromInlineAndAtomicFlow) {
     ASSERT_NE(load("test/html/layout_computed_box_roles.html"), nullptr);
     process_document_font_faces(&ui, document);
     ui.viewport_width = 320;
@@ -6471,7 +6689,7 @@ struct FlexFlowTestContext {
     }
 };
 
-TEST_F(RadiantTextQuery, DocumentWrittenMarkupRunsScriptsAtTheirInsertionPoint) {
+TEST_F(RadiantDocumentTest, DocumentWrittenMarkupRunsScriptsAtTheirInsertionPoint) {
     DomElement* result = load("test/html/document_write_scripts.html");
     ASSERT_NE(result, nullptr);
     EXPECT_STREQ(result->first_child->as_text()->text,
@@ -6492,7 +6710,7 @@ TEST_F(RadiantTextQuery, DocumentWrittenMarkupRunsScriptsAtTheirInsertionPoint) 
     EXPECT_STREQ(result->get_attribute("data-inert"), "undefined");
 }
 
-TEST_F(RadiantTextQuery, FlexBasisLengthPercentagesResolveAgainstCurrentMainSize) {
+TEST_F(RadiantDocumentTest, FlexBasisLengthPercentagesResolveAgainstCurrentMainSize) {
     ASSERT_NE(load("test/html/flex_basis_length_percentage.html"), nullptr);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root->as_element(), id); };
     for (float width : {1000.0f, 800.0f, 1334.0f, 1640.0f}) {
@@ -6524,7 +6742,7 @@ TEST_F(RadiantTextQuery, FlexBasisLengthPercentagesResolveAgainstCurrentMainSize
     }
 }
 
-TEST_F(RadiantTextQuery, CompletedFlexTextFlowSurvivesStretchAndInvalidatesConstraints) {
+TEST_F(RadiantDocumentTest, CompletedFlexTextFlowSurvivesStretchAndInvalidatesConstraints) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
     ui.viewport_width = 320;
@@ -6615,7 +6833,7 @@ TEST_F(RadiantTextQuery, CompletedFlexTextFlowSurvivesStretchAndInvalidatesConst
 
 }
 
-TEST_F(RadiantTextQuery, OwnedFlowRestoresEmptyAndUnplacedTextFragments) {
+TEST_F(RadiantDocumentTest, OwnedFlowRestoresEmptyAndUnplacedTextFragments) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -6690,7 +6908,7 @@ static uint64_t retained_subtree_geometry(DomElement* root) {
     return digest.hash;
 }
 
-TEST_F(RadiantTextQuery, CompletedFlexReplayRetainsContentInNextCleanPass) {
+TEST_F(RadiantDocumentTest, CompletedFlexReplayRetainsContentInNextCleanPass) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
     ui.viewport_width = 320;
@@ -6725,7 +6943,7 @@ TEST_F(RadiantTextQuery, CompletedFlexReplayRetainsContentInNextCleanPass) {
     document->incremental_layout = false;
 }
 
-TEST_F(RadiantTextQuery, CachedIntrinsicWidthPreservesCommittedFlexContent) {
+TEST_F(RadiantDocumentTest, CachedIntrinsicWidthPreservesCommittedFlexContent) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -6764,7 +6982,7 @@ TEST_F(RadiantTextQuery, CachedIntrinsicWidthPreservesCommittedFlexContent) {
     EXPECT_EQ(flow.layout.run_mode, radiant::RunMode::PerformLayout);
 }
 
-TEST_F(RadiantTextQuery, ScalarControlSizingPreservesContainingFlexContent) {
+TEST_F(RadiantDocumentTest, ScalarControlSizingPreservesContainingFlexContent) {
     DomElement* item = load_script_source(R"HTML(<style>
         body { margin:0; font:20px Arial }
         .row { display:flex; width:200px }
@@ -6830,7 +7048,7 @@ TEST_F(RadiantTextQuery, ScalarControlSizingPreservesContainingFlexContent) {
     }
 }
 
-TEST_F(RadiantTextQuery, RetainedFlexIgnoresHiddenControlAdaptersAndRefreshesShownContent) {
+TEST_F(RadiantDocumentTest, RetainedFlexIgnoresHiddenControlAdaptersAndRefreshesShownContent) {
     DomElement* item = load_script_source(R"HTML(<style>
         body { margin:0; font:20px Arial }
         .row { display:flex; width:200px }
@@ -6862,7 +7080,7 @@ TEST_F(RadiantTextQuery, RetainedFlexIgnoresHiddenControlAdaptersAndRefreshesSho
     EXPECT_EQ(retained_subtree_geometry(item), geometry);
 }
 
-TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
+TEST_F(RadiantDocumentTest, UnchangedStyleProbePreservesCommittedFlexContent) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -6889,7 +7107,7 @@ TEST_F(RadiantTextQuery, UnchangedStyleProbePreservesCommittedFlexContent) {
     EXPECT_FLOAT_EQ(item->font->font_size, 24.0f);
 }
 
-TEST_F(RadiantTextQuery, ReusedComputedStylePublishesItsCommittedContainingContext) {
+TEST_F(RadiantDocumentTest, ReusedComputedStylePublishesItsCommittedContainingContext) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -6912,7 +7130,7 @@ TEST_F(RadiantTextQuery, ReusedComputedStylePublishesItsCommittedContainingConte
     }
 }
 
-TEST_F(RadiantTextQuery, ComputedStyleKeepsAuthoredAncestryAcrossTableRepair) {
+TEST_F(RadiantDocumentTest, ComputedStyleKeepsAuthoredAncestryAcrossTableRepair) {
     DomElement* table = load_script_source(R"HTML(<style>
         body { margin:0; font:20px Arial }
         #result { display:table; border-collapse:collapse }
@@ -6945,7 +7163,7 @@ TEST_F(RadiantTextQuery, ComputedStyleKeepsAuthoredAncestryAcrossTableRepair) {
 }
 
 #if defined(__APPLE__) && !defined(LAMBDA_NO_GUI)
-TEST_F(RadiantTextQuery, NativeResizeRetainsCompletedFrameUntilRepaint) {
+TEST_F(RadiantDocumentTest, NativeResizeRetainsCompletedFrameUntilRepaint) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0;background:#204060}</style><div id=result></div>");
@@ -7041,7 +7259,7 @@ TEST_F(RadiantTextQuery, NativeResizeRetainsCompletedFrameUntilRepaint) {
 }
 #endif
 
-TEST_F(RadiantTextQuery, ReplacedIntrinsicWidthsExcludeGraphicDescendants) {
+TEST_F(RadiantDocumentTest, ReplacedIntrinsicWidthsExcludeGraphicDescendants) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0}#host{display:inline-flex}"
@@ -7075,7 +7293,7 @@ TEST_F(RadiantTextQuery, ReplacedIntrinsicWidthsExcludeGraphicDescendants) {
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicWidthRetainsCleanInputsAcrossIncrementalPasses) {
+TEST_F(RadiantDocumentTest, IntrinsicWidthRetainsCleanInputsAcrossIncrementalPasses) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -7129,7 +7347,7 @@ TEST_F(RadiantTextQuery, IntrinsicWidthRetainsCleanInputsAcrossIncrementalPasses
     expect_miss();
 }
 
-TEST_F(RadiantTextQuery, IntrinsicWidthKeepsResourceAndOrderedEffectsPassLocal) {
+TEST_F(RadiantDocumentTest, IntrinsicWidthKeepsResourceAndOrderedEffectsPassLocal) {
     ASSERT_NE(load("test/html/layout_flex_retained_effects.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -7150,7 +7368,7 @@ TEST_F(RadiantTextQuery, IntrinsicWidthKeepsResourceAndOrderedEffectsPassLocal) 
     }
 }
 
-TEST_F(RadiantTextQuery, AncestorReplayExpiresDescendantLiveAssociation) {
+TEST_F(RadiantDocumentTest, AncestorReplayExpiresDescendantLiveAssociation) {
     ASSERT_NE(load("test/html/layout_flex_completed_text.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -7177,7 +7395,7 @@ TEST_F(RadiantTextQuery, AncestorReplayExpiresDescendantLiveAssociation) {
     radiant::layout_flow_result_release(document->view_tree->prop_pool, ancestor);
 }
 
-TEST_F(RadiantTextQuery, CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOrderedEffects) {
+TEST_F(RadiantDocumentTest, CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOrderedEffects) {
     ASSERT_NE(load("test/html/layout_flex_retained_effects.html"), nullptr);
     process_document_font_faces(&ui, document);
     ui.viewport_width = 320.0f; ui.viewport_height = 240.0f;
@@ -7236,7 +7454,7 @@ TEST_F(RadiantTextQuery, CommonFlexSubtreesRestoreFragmentsWithoutRepeatingOrder
     }
 }
 
-TEST_F(RadiantTextQuery, NestedFlexNaturalFlowPrecedesStretchAndValidatesBlockConstraint) {
+TEST_F(RadiantDocumentTest, NestedFlexNaturalFlowPrecedesStretchAndValidatesBlockConstraint) {
     ASSERT_NE(load("test/html/layout_flex_natural_nested.html"), nullptr);
     process_document_font_faces(&ui, document);
     ui.viewport_width = 320.0f;
@@ -7292,7 +7510,7 @@ TEST_F(RadiantTextQuery, NestedFlexNaturalFlowPrecedesStretchAndValidatesBlockCo
     EXPECT_FLOAT_EQ(find("column")->height, 80.0f);
 }
 
-TEST_F(RadiantTextQuery, ColumnContributionPreservesPublishedChildGeometry) {
+TEST_F(RadiantDocumentTest, ColumnContributionPreservesPublishedChildGeometry) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
     DomElement* column = dom_find_element_by_id(result, "probe-toc");
@@ -7311,7 +7529,7 @@ TEST_F(RadiantTextQuery, ColumnContributionPreservesPublishedChildGeometry) {
     EXPECT_EQ(text->rect, fragments);
 }
 
-TEST_F(RadiantTextQuery, CompletedFlexContentEnlargesProvisionalAncestorHeight) {
+TEST_F(RadiantDocumentTest, CompletedFlexContentEnlargesProvisionalAncestorHeight) {
     ASSERT_NE(load("test/html/layout_flex_parent_constraints.html"), nullptr);
     process_document_font_faces(&ui, document);
     ui.viewport_width = 320.0f;
@@ -7344,7 +7562,7 @@ TEST_F(RadiantTextQuery, CompletedFlexContentEnlargesProvisionalAncestorHeight) 
     EXPECT_FLOAT_EQ(find("auto-footer")->y - find("auto-article")->y, 80.0f);
 }
 
-TEST_F(RadiantTextQuery, FlexShellReservesDescendantHeightConstraintsForItsFooter) {
+TEST_F(RadiantDocumentTest, FlexShellReservesDescendantHeightConstraintsForItsFooter) {
     ASSERT_NE(load("test/html/flex_shell_descendant_constraints.html"), nullptr);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root->as_element(), id); };
     auto child = [&](const char* shell, const char* suffix) {
@@ -7369,7 +7587,7 @@ TEST_F(RadiantTextQuery, FlexShellReservesDescendantHeightConstraintsForItsFoote
     EXPECT_FLOAT_EQ(find("min-footer")->y, 180.0f);
 }
 
-TEST_F(RadiantTextQuery, ScalarSizeCacheExpiresWithoutDiscardingComputedStyle) {
+TEST_F(RadiantDocumentTest, ScalarSizeCacheExpiresWithoutDiscardingComputedStyle) {
     DomElement* result = load("test/html/layout_shared_publication.html", true);
     ASSERT_NE(result, nullptr);
     FlexFlowTestContext flow(&ui, document, result);
@@ -7388,7 +7606,7 @@ TEST_F(RadiantTextQuery, ScalarSizeCacheExpiresWithoutDiscardingComputedStyle) {
     EXPECT_EQ(result->layout_cache->resolved_style, computed);
 }
 
-TEST_F(RadiantTextQuery, CompletedFlexSubtreeFlowSharesBlocksAndInvalidatesDescendants) {
+TEST_F(RadiantDocumentTest, CompletedFlexSubtreeFlowSharesBlocksAndInvalidatesDescendants) {
     ASSERT_NE(load("test/html/layout_flex_completed_subtrees.html"), nullptr);
     process_document_font_faces(&ui, document);
     ui.viewport_width = 320;
@@ -7495,7 +7713,7 @@ TEST_F(RadiantTextQuery, CompletedFlexSubtreeFlowSharesBlocksAndInvalidatesDesce
     EXPECT_FLOAT_EQ(atomic_child->y, child_y);
 }
 
-TEST_F(RadiantTextQuery, LegacyReplacedAlignmentUsesTheParentBaselineAndAuthorCascade) {
+TEST_F(RadiantDocumentTest, LegacyReplacedAlignmentUsesTheParentBaselineAndAuthorCascade) {
     ASSERT_NE(load("test/html/layout_legacy_replaced_alignment.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Sample {
@@ -7615,7 +7833,7 @@ TEST_F(RadiantTextQuery, LegacyReplacedAlignmentUsesTheParentBaselineAndAuthorCa
     }
 }
 
-TEST_F(RadiantTextQuery, NormalPunctuationBreaksShareInlineAndIntrinsicPolicy) {
+TEST_F(RadiantDocumentTest, NormalPunctuationBreaksShareInlineAndIntrinsicPolicy) {
     ASSERT_NE(load("test/html/layout_ascii_opening_breaks.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Sample { const char* id; float y, width, height; } samples[] = {
@@ -7649,7 +7867,7 @@ TEST_F(RadiantTextQuery, NormalPunctuationBreaksShareInlineAndIntrinsicPolicy) {
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicMinimaRetainInlineWordEdges) {
+TEST_F(RadiantDocumentTest, IntrinsicMinimaRetainInlineWordEdges) {
     ASSERT_NE(load("test/html/layout_inline_minimum_context.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Sample { const char* id; float width, height; } samples[] = {
@@ -7678,7 +7896,7 @@ TEST_F(RadiantTextQuery, IntrinsicMinimaRetainInlineWordEdges) {
     }
 }
 
-TEST_F(RadiantTextQuery, ClosingPunctuationRetainsAdjacentInlineContext) {
+TEST_F(RadiantDocumentTest, ClosingPunctuationRetainsAdjacentInlineContext) {
     ASSERT_NE(load("test/html/layout_closing_punctuation_context.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Sample { const char* id; float x, y, width, height; size_t pieces; } samples[] = {
@@ -7714,7 +7932,7 @@ TEST_F(RadiantTextQuery, ClosingPunctuationRetainsAdjacentInlineContext) {
     }
 }
 
-TEST_F(RadiantTextQuery, CjkInlineSeamsUseTheSameBreaksAsContinuousText) {
+TEST_F(RadiantDocumentTest, CjkInlineSeamsUseTheSameBreaksAsContinuousText) {
     ASSERT_NE(load("test/html/layout_cjk_inline_boundaries.html"), nullptr);
     struct Row { const char* id; const char* group; } rows[] = {
         {"punct", nullptr}, {"closed", nullptr}, {"opening", nullptr}, {"latin-before", nullptr},
@@ -7768,7 +7986,7 @@ TEST_F(RadiantTextQuery, CjkInlineSeamsUseTheSameBreaksAsContinuousText) {
     }
 }
 
-TEST_F(RadiantTextQuery, BaseReplacementPreservesTheLoadersUrlCarrier) {
+TEST_F(RadiantDocumentTest, BaseReplacementPreservesTheLoadersUrlCarrier) {
     Url* base = get_current_dir();
     ASSERT_NE(base, nullptr);
     Url* source = url_parse_path_or_url("test/html/layout_base_url_lifetime.html", base);
@@ -7792,7 +8010,7 @@ TEST_F(RadiantTextQuery, BaseReplacementPreservesTheLoadersUrlCarrier) {
     expect_box("result", 0, 0, 40, 20);
 }
 
-TEST_F(RadiantTextQuery, ResponsiveImageMinimaRetainBoxAndAuthoredFloors) {
+TEST_F(RadiantDocumentTest, ResponsiveImageMinimaRetainBoxAndAuthoredFloors) {
     ASSERT_NE(load("test/html/layout_responsive_image_minimum.html"), nullptr);
     struct Sample { const char* id; const char* image; float width, image_width, height; } samples[] = {
         {"direct", "direct-image", 40, 40, 12.5f},
@@ -7824,7 +8042,7 @@ TEST_F(RadiantTextQuery, ResponsiveImageMinimaRetainBoxAndAuthoredFloors) {
     }
 }
 
-TEST_F(RadiantTextQuery, ParagraphBidiScopesSurviveSoftWrapsAndRetainedReflow) {
+TEST_F(RadiantDocumentTest, ParagraphBidiScopesSurviveSoftWrapsAndRetainedReflow) {
     for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (bool rtl : {false,true}) for (const RadiantTestBidiScope& scope : radiant_test_bidi_scopes)
     for (unsigned shape : {0u,1u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,14u}) {
@@ -7935,7 +8153,7 @@ TEST_F(RadiantTextQuery, ParagraphBidiScopesSurviveSoftWrapsAndRetainedReflow) {
     }
 }
 
-TEST_F(RadiantTextQuery, SlicedInlineDecorationsBelongToTrueSourceEdges) {
+TEST_F(RadiantDocumentTest, SlicedInlineDecorationsBelongToTrueSourceEdges) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false,true}) for (bool explicit_slice : {false,true})
     for (const RadiantTestSliceEdges& edge : radiant_test_slice_edges) {
@@ -7978,7 +8196,7 @@ TEST_F(RadiantTextQuery, SlicedInlineDecorationsBelongToTrueSourceEdges) {
     }
 }
 
-TEST_F(RadiantTextQuery, RetainedForcedBreaksKeepTheirVisualLineEnd) {
+TEST_F(RadiantDocumentTest, RetainedForcedBreaksKeepTheirVisualLineEnd) {
     for (bool rtl : {false,true}) {
         SCOPED_TRACE(rtl);
         StrBuf* source = strbuf_new();
@@ -8007,7 +8225,7 @@ TEST_F(RadiantTextQuery, RetainedForcedBreaksKeepTheirVisualLineEnd) {
     }
 }
 
-TEST_F(RadiantTextQuery, SlicedInlineSourceEdgesStayOffLinesBeforePendingTails) {
+TEST_F(RadiantDocumentTest, SlicedInlineSourceEdgesStayOffLinesBeforePendingTails) {
     const char* tails[] = {
         "", " \n ", "<b style='display:none'>XXXX</b>",
         "<b style='position:absolute;left:0;top:0'>XXXX</b>",
@@ -8042,7 +8260,7 @@ TEST_F(RadiantTextQuery, SlicedInlineSourceEdgesStayOffLinesBeforePendingTails) 
     }
 }
 
-TEST_F(RadiantTextQuery, WrappedInlineBoxesContributeLineHeightOnlyWhereTheyParticipate) {
+TEST_F(RadiantDocumentTest, WrappedInlineBoxesContributeLineHeightOnlyWhereTheyParticipate) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false,true}) for (bool nested : {false,true}) for (bool decorated : {false,true}) {
         SCOPED_TRACE(mode);
@@ -8093,7 +8311,7 @@ TEST_F(RadiantTextQuery, WrappedInlineBoxesContributeLineHeightOnlyWhereTheyPart
     }
 }
 
-TEST_F(RadiantTextQuery, InlineBoxFragmentsSurviveWhitespaceAndRespectIndependentFlows) {
+TEST_F(RadiantDocumentTest, InlineBoxFragmentsSurviveWhitespaceAndRespectIndependentFlows) {
     const struct Case { const char* content; const char* style; float height; const char* rules = ""; } cases[] = {
         {"XXXX <span class=high>XXXX</span>","",80},
         {"XXXX<span class=high> XXXX</span>","",120},
@@ -8135,7 +8353,7 @@ TEST_F(RadiantTextQuery, InlineBoxFragmentsSurviveWhitespaceAndRespectIndependen
     }
 }
 
-TEST_F(RadiantTextQuery, WhiteSpaceAdmissionPreservesCascadeAndSubstitutionTiming) {
+TEST_F(RadiantDocumentTest, WhiteSpaceAdmissionPreservesCascadeAndSubstitutionTiming) {
     const struct Case { const char* style; const char* computed; float width, height; } cases[] = {
         {"white-space:pre", "pre", 60, 40},
         {"white-space:pre-lines", "normal", 120, 20},
@@ -8180,7 +8398,7 @@ TEST_F(RadiantTextQuery, WhiteSpaceAdmissionPreservesCascadeAndSubstitutionTimin
     }
 }
 
-TEST_F(RadiantTextQuery, InheritedDeclarationFilteringRetainsAncestorsResetsAndNewProperties) {
+TEST_F(RadiantDocumentTest, InheritedDeclarationFilteringRetainsAncestorsResetsAndNewProperties) {
     DomElement* body = load("test/html/layout_inherited_declaration_filter.html");
     ASSERT_NE(body, nullptr);
     bool reflow = false;
@@ -8210,7 +8428,7 @@ TEST_F(RadiantTextQuery, InheritedDeclarationFilteringRetainsAncestorsResetsAndN
     check(CSS_VALUE_PRE, 0.0f);
 }
 
-TEST_F(RadiantTextQuery, IntrinsicBoxVariablesUseTheMeasuredOwnerAndResolvedSides) {
+TEST_F(RadiantDocumentTest, IntrinsicBoxVariablesUseTheMeasuredOwnerAndResolvedSides) {
     ASSERT_NE(load("test/html/layout_intrinsic_box_variables.html"), nullptr);
     struct Sample { const char* id; float width, left; } samples[] = {
         {"row-zero", 80, 0}, {"row-length", 104, 12}, {"cell-override", 94, 7},
@@ -8237,7 +8455,7 @@ TEST_F(RadiantTextQuery, IntrinsicBoxVariablesUseTheMeasuredOwnerAndResolvedSide
     }
 }
 
-TEST_F(RadiantTextQuery, TableBackgroundsUseSourcePositioningAndCellCoverage) {
+TEST_F(RadiantDocumentTest, TableBackgroundsUseSourcePositioningAndCellCoverage) {
     ASSERT_NE(load("test/html/layout_table_background_layers.html"), nullptr);
     ui.viewport_width = 1200; ui.viewport_height = 800;
     layout_html_doc(&ui, document, false);
@@ -8326,7 +8544,7 @@ TEST_F(RadiantTextQuery, TableBackgroundsUseSourcePositioningAndCellCoverage) {
     }
 }
 
-TEST_F(RadiantTextQuery, TransformedTextControlsKeepHitAndPaintOnTheSelectedLine) {
+TEST_F(RadiantDocumentTest, TransformedTextControlsKeepHitAndPaintOnTheSelectedLine) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body{margin:0;background:white}.scaled{position:absolute;left:40px;top:30px;
         transform-origin:0 0;transform:scale(.6) rotate(8deg)}
@@ -8420,7 +8638,7 @@ TEST_F(RadiantTextQuery, TransformedTextControlsKeepHitAndPaintOnTheSelectedLine
     }
 }
 
-TEST_F(RadiantTextQuery, TextareaRevealsEditingCaretAndClipsScrolledContents) {
+TEST_F(RadiantDocumentTest, TextareaRevealsEditingCaretAndClipsScrolledContents) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body{margin:0;background:white}textarea{position:absolute;left:20px;top:20px;
         box-sizing:border-box;width:180px;height:60px;border:2px solid #999;padding:4px;
@@ -8484,7 +8702,7 @@ TEST_F(RadiantTextQuery, TextareaRevealsEditingCaretAndClipsScrolledContents) {
     }
 }
 
-TEST_F(RadiantTextQuery, CollapsedTableBordersRetainDashDotDoubleAndColor) {
+TEST_F(RadiantDocumentTest, CollapsedTableBordersRetainDashDotDoubleAndColor) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body{margin:0;background:white}table{border-collapse:collapse;margin:12px 20px}
         td{width:120px;height:30px;padding:0;border:6px solid #2864ad}
@@ -8528,7 +8746,7 @@ TEST_F(RadiantTextQuery, CollapsedTableBordersRetainDashDotDoubleAndColor) {
     }
 }
 
-TEST_F(RadiantTextQuery, MaxHeightAutoContainersClipTheirOverflowAfterSizing) {
+TEST_F(RadiantDocumentTest, MaxHeightAutoContainersClipTheirOverflowAfterSizing) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body{margin:0;background:white}.box{width:120px;max-height:100px;overflow:auto;margin-bottom:20px}
         .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:5px}
@@ -8566,7 +8784,7 @@ TEST_F(RadiantTextQuery, MaxHeightAutoContainersClipTheirOverflowAfterSizing) {
     EXPECT_FALSE(fits->scroll()->has_vt_scroll);
 }
 
-TEST_F(RadiantTextQuery, ZoomedListBulletsShareTextTransformsAndScrollClipping) {
+TEST_F(RadiantDocumentTest, ZoomedListBulletsShareTextTransformsAndScrollClipping) {
     ASSERT_NE(load_script_source(R"HTML(<style>
         body{margin:0;background:white;font:16px/24px Arial}
         #port{position:absolute;left:20px;top:60px;width:200px;height:120px;overflow:auto}
@@ -8604,7 +8822,7 @@ TEST_F(RadiantTextQuery, ZoomedListBulletsShareTextTransformsAndScrollClipping) 
     }
 }
 
-TEST_F(RadiantTextQuery, AutoGridHeightUsesItsFinalRowsAfterWidthChanges) {
+TEST_F(RadiantDocumentTest, AutoGridHeightUsesItsFinalRowsAfterWidthChanges) {
     ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
     DomElement* grid = dom_find_element_by_id(document->root->as_element(), "grid");
     ASSERT_NE(grid, nullptr);
@@ -8621,7 +8839,7 @@ TEST_F(RadiantTextQuery, AutoGridHeightUsesItsFinalRowsAfterWidthChanges) {
     }
 }
 
-TEST_F(RadiantTextQuery, FilenameGlyphsKeepTheirInheritedPointerCursor) {
+TEST_F(RadiantDocumentTest, FilenameGlyphsKeepTheirInheritedPointerCursor) {
     ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
     layout_html_doc(&ui, document, false);
     struct CursorCase { const char* id; CssEnum cursor; };
@@ -8649,7 +8867,7 @@ TEST_F(RadiantTextQuery, FilenameGlyphsKeepTheirInheritedPointerCursor) {
     }
 }
 
-TEST_F(RadiantTextQuery, ComputedGapLonghandsProjectTheirWinningShorthand) {
+TEST_F(RadiantDocumentTest, ComputedGapLonghandsProjectTheirWinningShorthand) {
     ASSERT_NE(load("test/html/layout_grid_auto_content_extent.html"), nullptr);
     layout_html_doc(&ui, document, false);
     struct GapCase { const char* id; const char* row; const char* column; };
@@ -8666,7 +8884,7 @@ TEST_F(RadiantTextQuery, ComputedGapLonghandsProjectTheirWinningShorthand) {
     }
 }
 
-TEST_F(RadiantTextQuery, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
+TEST_F(RadiantDocumentTest, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
     ASSERT_NE(load("test/html/layout_preserved_whitespace.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -8692,7 +8910,7 @@ TEST_F(RadiantTextQuery, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
     }
 }
 
-TEST_F(RadiantTextQuery, NativeWordBoundariesAlsoSizeIntrinsicRuns) {
+TEST_F(RadiantDocumentTest, NativeWordBoundariesAlsoSizeIntrinsicRuns) {
 #ifdef __APPLE__
     ASSERT_NE(load("test/html/layout_native_line_boundaries.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -8718,7 +8936,7 @@ TEST_F(RadiantTextQuery, NativeWordBoundariesAlsoSizeIntrinsicRuns) {
 #endif
 }
 
-TEST_F(RadiantTextQuery, FixedColumnRowsCountGuttersInTheirPhysicalPitch) {
+TEST_F(RadiantDocumentTest, FixedColumnRowsCountGuttersInTheirPhysicalPitch) {
     ASSERT_NE(load("test/html/layout_multicol_rows.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -8734,7 +8952,7 @@ TEST_F(RadiantTextQuery, FixedColumnRowsCountGuttersInTheirPhysicalPitch) {
     }
 }
 
-TEST_F(RadiantTextQuery, BalancedColumnSetsKeepRowTracksAndPartialContinuations) {
+TEST_F(RadiantDocumentTest, BalancedColumnSetsKeepRowTracksAndPartialContinuations) {
     ASSERT_NE(load("test/html/layout_multicol_balanced_rows.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 400;
@@ -8768,7 +8986,7 @@ TEST_F(RadiantTextQuery, BalancedColumnSetsKeepRowTracksAndPartialContinuations)
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalBreakEdgesFollowTheParagraphDirection) {
+TEST_F(RadiantDocumentTest, VerticalBreakEdgesFollowTheParagraphDirection) {
     ASSERT_NE(load("test/html/layout_multicol_rtl_break_edge.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -8785,7 +9003,7 @@ TEST_F(RadiantTextQuery, VerticalBreakEdgesFollowTheParagraphDirection) {
     EXPECT_FLOAT_EQ(view_geometry_node_viewport_origin_resolved(nested_end, nullptr, nullptr).y, 40.0f);
 }
 
-TEST_F(RadiantTextQuery, SpannersResolveAuthoredWidthsAgainstTheFullContainer) {
+TEST_F(RadiantDocumentTest, SpannersResolveAuthoredWidthsAgainstTheFullContainer) {
     ASSERT_NE(load("test/html/layout_multicol_spanner_width.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -8801,7 +9019,7 @@ TEST_F(RadiantTextQuery, SpannersResolveAuthoredWidthsAgainstTheFullContainer) {
     }
 }
 
-TEST_F(RadiantTextQuery, ForcedEmptyLinesAndOverflowColumnsRetainTheirFlow) {
+TEST_F(RadiantDocumentTest, ForcedEmptyLinesAndOverflowColumnsRetainTheirFlow) {
     ASSERT_NE(load("test/html/layout_multicol_forced_lines.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 400;
@@ -8818,7 +9036,7 @@ TEST_F(RadiantTextQuery, ForcedEmptyLinesAndOverflowColumnsRetainTheirFlow) {
     EXPECT_FLOAT_EQ(third->y, 0.0f);
 }
 
-TEST_F(RadiantTextQuery, EmphasisLineExtentDoesNotDependOnClipping) {
+TEST_F(RadiantDocumentTest, EmphasisLineExtentDoesNotDependOnClipping) {
     ASSERT_NE(load("test/html/layout_emphasis_line_extent.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -8835,7 +9053,7 @@ TEST_F(RadiantTextQuery, EmphasisLineExtentDoesNotDependOnClipping) {
     }
 }
 
-TEST_F(RadiantTextQuery, AbsoluteParallelFlowsUseColumnsWithoutFragmentingTheirContainingBlock) {
+TEST_F(RadiantDocumentTest, AbsoluteParallelFlowsUseColumnsWithoutFragmentingTheirContainingBlock) {
     ASSERT_NE(load("test/html/layout_multicol_parallel_flows.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 500;
@@ -8857,7 +9075,7 @@ TEST_F(RadiantTextQuery, AbsoluteParallelFlowsUseColumnsWithoutFragmentingTheirC
     }
 }
 
-TEST_F(RadiantTextQuery, NestedColumnsBalanceTheFinalContentSetEvenWithBlankHeightFragments) {
+TEST_F(RadiantDocumentTest, NestedColumnsBalanceTheFinalContentSetEvenWithBlankHeightFragments) {
     ASSERT_NE(load("test/html/layout_nested_final_column_set.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 500;
@@ -8880,7 +9098,7 @@ TEST_F(RadiantTextQuery, NestedColumnsBalanceTheFinalContentSetEvenWithBlankHeig
     }
 }
 
-TEST_F(RadiantTextQuery, ClusterShapingRetainsTrackingInLayoutAndIntrinsicSizing) {
+TEST_F(RadiantDocumentTest, ClusterShapingRetainsTrackingInLayoutAndIntrinsicSizing) {
 #ifdef __APPLE__
     ASSERT_NE(load("test/html/layout_cluster_tracking.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -8904,7 +9122,7 @@ TEST_F(RadiantTextQuery, ClusterShapingRetainsTrackingInLayoutAndIntrinsicSizing
 #endif
 }
 
-TEST_F(RadiantTextQuery, TypographicUnitsKeepRequiredContextInsideATextNode) {
+TEST_F(RadiantDocumentTest, TypographicUnitsKeepRequiredContextInsideATextNode) {
 #ifdef __APPLE__
     ASSERT_NE(load("test/html/layout_contextual_typographic_units.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
@@ -8940,7 +9158,7 @@ TEST_F(RadiantTextQuery, TypographicUnitsKeepRequiredContextInsideATextNode) {
 #endif
 }
 
-TEST_F(RadiantTextQuery, ResolvedZeroSpacingSurvivesFontCompletion) {
+TEST_F(RadiantDocumentTest, ResolvedZeroSpacingSurvivesFontCompletion) {
     ASSERT_NE(load("test/html/layout_zero_spacing_inheritance.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -8960,7 +9178,7 @@ TEST_F(RadiantTextQuery, ResolvedZeroSpacingSurvivesFontCompletion) {
     EXPECT_FLOAT_EQ(intrinsic->width, 60.0f);
 }
 
-TEST_F(RadiantTextQuery, NormalLeadingUsesTheSelectedFaceForIdeographs) {
+TEST_F(RadiantDocumentTest, NormalLeadingUsesTheSelectedFaceForIdeographs) {
     ASSERT_NE(load("test/html/layout_selected_face_leading.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -8974,7 +9192,7 @@ TEST_F(RadiantTextQuery, NormalLeadingUsesTheSelectedFaceForIdeographs) {
     }
 }
 
-TEST_F(RadiantTextQuery, SmallFallbackMetricDifferencesStillExpandNormalLeading) {
+TEST_F(RadiantDocumentTest, SmallFallbackMetricDifferencesStillExpandNormalLeading) {
 #ifdef __APPLE__
     ASSERT_NE(load("test/html/layout_small_fallback_leading.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -8993,7 +9211,7 @@ TEST_F(RadiantTextQuery, SmallFallbackMetricDifferencesStillExpandNormalLeading)
 #endif
 }
 
-TEST_F(RadiantTextQuery, AnywhereScopeCanBreakBeforeAFollowingNormalWord) {
+TEST_F(RadiantDocumentTest, AnywhereScopeCanBreakBeforeAFollowingNormalWord) {
     ASSERT_NE(load("test/html/layout_emergency_inline_boundary.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -9033,7 +9251,7 @@ TEST_F(RadiantTextQuery, AnywhereScopeCanBreakBeforeAFollowingNormalWord) {
     EXPECT_FLOAT_EQ(nowrap->height, 20.0f);
 }
 
-TEST_F(RadiantTextQuery, FragmentedAbsoluteFlowRetainsSourceAndFixedAnchors) {
+TEST_F(RadiantDocumentTest, FragmentedAbsoluteFlowRetainsSourceAndFixedAnchors) {
     ASSERT_NE(load("test/html/layout_fragmented_absolute_flow.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 300;
@@ -9069,7 +9287,7 @@ TEST_F(RadiantTextQuery, FragmentedAbsoluteFlowRetainsSourceAndFixedAnchors) {
     EXPECT_FLOAT_EQ(inner->height, 0.0f);
 }
 
-TEST_F(RadiantTextQuery, EmergencyMinContentRetainsWholeShapedClusters) {
+TEST_F(RadiantDocumentTest, EmergencyMinContentRetainsWholeShapedClusters) {
 #ifdef __APPLE__
     ASSERT_NE(load("test/html/layout_cluster_min_content.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -9091,7 +9309,7 @@ TEST_F(RadiantTextQuery, EmergencyMinContentRetainsWholeShapedClusters) {
 #endif
 }
 
-TEST_F(RadiantTextQuery, NarrowSpaceSynthesisUsesTheSelectedFacesSpaceMetric) {
+TEST_F(RadiantDocumentTest, NarrowSpaceSynthesisUsesTheSelectedFacesSpaceMetric) {
     ASSERT_NE(load("test/html/layout_narrow_space_metrics.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -9108,7 +9326,7 @@ TEST_F(RadiantTextQuery, NarrowSpaceSynthesisUsesTheSelectedFacesSpaceMetric) {
     EXPECT_FLOAT_EQ(pair->width, 50.0f);
 }
 
-TEST_F(RadiantTextQuery, ColumnSpanningRequiresAnInFlowBlockLevelBox) {
+TEST_F(RadiantDocumentTest, ColumnSpanningRequiresAnInFlowBlockLevelBox) {
     ASSERT_NE(load("test/html/layout_multicol_spanner_eligibility.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -9125,7 +9343,7 @@ TEST_F(RadiantTextQuery, ColumnSpanningRequiresAnInFlowBlockLevelBox) {
     EXPECT_FLOAT_EQ(block->height, 25.0f);
 }
 
-TEST_F(RadiantTextQuery, InlineBoundariesDoNotCreateMinContentBreaksBeforePunctuation) {
+TEST_F(RadiantDocumentTest, InlineBoundariesDoNotCreateMinContentBreaksBeforePunctuation) {
     ASSERT_NE(load("test/html/layout_inline_min_content_boundaries.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -9142,7 +9360,7 @@ TEST_F(RadiantTextQuery, InlineBoundariesDoNotCreateMinContentBreaksBeforePunctu
     }
 }
 
-TEST_F(RadiantTextQuery, EmojiCompositionUsesFontAdvancesWithoutSplittingClusters) {
+TEST_F(RadiantDocumentTest, EmojiCompositionUsesFontAdvancesWithoutSplittingClusters) {
 #ifdef __APPLE__
     ASSERT_NE(load("test/html/layout_emoji_cluster_advances.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -9173,7 +9391,7 @@ TEST_F(RadiantTextQuery, EmojiCompositionUsesFontAdvancesWithoutSplittingCluster
 #endif
 }
 
-TEST_F(RadiantTextQuery, FloatsUseLineAndBlockAxesAcrossWritingModes) {
+TEST_F(RadiantDocumentTest, FloatsUseLineAndBlockAxesAcrossWritingModes) {
     struct State { const char* inline_size; float available; bool negative; bool fixed; };
     const State states[] = {{"150px", 150, false, false}, {"110px", 110, false, false},
         {"110px", 110, true, false}, {"150px", 150, false, true}, {"150px", 150, false, false}};
@@ -9248,7 +9466,7 @@ TEST_F(RadiantTextQuery, FloatsUseLineAndBlockAxesAcrossWritingModes) {
     }
 }
 
-TEST_F(RadiantTextQuery, FloatsRetainTheOccupiedLinesMinimumBlockPosition) {
+TEST_F(RadiantDocumentTest, FloatsRetainTheOccupiedLinesMinimumBlockPosition) {
     for (bool leading_text : {false, true}) {
         StrBuf* source = strbuf_new();
         strbuf_append_format(source,
@@ -9333,7 +9551,7 @@ TEST_F(RadiantTextQuery, FloatsRetainTheOccupiedLinesMinimumBlockPosition) {
     }
 }
 
-TEST_F(RadiantTextQuery, ClearanceSurvivesVerticalPublicationAndRetainedReflow) {
+TEST_F(RadiantDocumentTest, ClearanceSurvivesVerticalPublicationAndRetainedReflow) {
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
     for (bool floated : {false, true}) for (bool margins : {false, true}) {
         SCOPED_TRACE(mode);
@@ -9386,7 +9604,7 @@ TEST_F(RadiantTextQuery, ClearanceSurvivesVerticalPublicationAndRetainedReflow) 
     }
 }
 
-TEST_F(RadiantTextQuery, FlowRootsAvoidFloatMarginBoxesOnTheirContainingAxes) {
+TEST_F(RadiantDocumentTest, FlowRootsAvoidFloatMarginBoxesOnTheirContainingAxes) {
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
     for (const char* direction : {"ltr", "rtl"}) for (const char* side : {"left", "right"})
     for (const char* kind : {"parallel", "orthogonal", "replaced"}) for (bool decorated : {false, true}) {
@@ -9463,7 +9681,7 @@ TEST_F(RadiantTextQuery, FlowRootsAvoidFloatMarginBoxesOnTheirContainingAxes) {
     }
 }
 
-TEST_F(RadiantTextQuery, SplitInlineFlowRootAvoidanceIncludesItsFragmentOrigin) {
+TEST_F(RadiantDocumentTest, SplitInlineFlowRootAvoidanceIncludesItsFragmentOrigin) {
     for (const char* direction : {"ltr", "rtl"}) for (const char* side : {"left", "right"})
     for (float padding : {0.0f, 17.0f, 39.0f}) {
         SCOPED_TRACE(direction);
@@ -9502,7 +9720,7 @@ TEST_F(RadiantTextQuery, SplitInlineFlowRootAvoidanceIncludesItsFragmentOrigin) 
     }
 }
 
-TEST_F(RadiantTextQuery, DifferentSidewaysValuesEstablishIndependentFloatContexts) {
+TEST_F(RadiantDocumentTest, DifferentSidewaysValuesEstablishIndependentFloatContexts) {
     const struct { const char* parent; const char* child; bool reverse_line; } cases[] = {
         {"vertical-lr", "sideways-lr", false}, {"sideways-lr", "vertical-lr", true},
         {"vertical-rl", "sideways-rl", false}, {"sideways-rl", "vertical-rl", false}};
@@ -9533,7 +9751,7 @@ TEST_F(RadiantTextQuery, DifferentSidewaysValuesEstablishIndependentFloatContext
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalRootBodyShortcutPreservesContainedFloatExtent) {
+TEST_F(RadiantDocumentTest, VerticalRootBodyShortcutPreservesContainedFloatExtent) {
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
     for (float margin : {0.0f, 8.0f}) {
         SCOPED_TRACE(mode);
@@ -9559,7 +9777,7 @@ TEST_F(RadiantTextQuery, VerticalRootBodyShortcutPreservesContainedFloatExtent) 
     }
 }
 
-TEST_F(RadiantTextQuery, ZeroInlineSizeCannotFitACrossingFloatExclusionInterval) {
+TEST_F(RadiantDocumentTest, ZeroInlineSizeCannotFitACrossingFloatExclusionInterval) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0}#result{width:400px}"
@@ -9582,7 +9800,7 @@ TEST_F(RadiantTextQuery, ZeroInlineSizeCannotFitACrossingFloatExclusionInterval)
     }
 }
 
-TEST_F(RadiantTextQuery, StretchFloatAvoidanceConsumesLeadingMarginsOnce) {
+TEST_F(RadiantDocumentTest, StretchFloatAvoidanceConsumesLeadingMarginsOnce) {
     for (bool replaced : {false, true}) for (bool rtl : {false, true})
     for (const char* size : {"width:stretch", "width:0;min-width:stretch", "width:1000px;max-width:stretch"}) {
         SCOPED_TRACE(replaced);
@@ -9614,7 +9832,7 @@ TEST_F(RadiantTextQuery, StretchFloatAvoidanceConsumesLeadingMarginsOnce) {
     }
 }
 
-TEST_F(RadiantTextQuery, ClearanceAndFloatAvoidanceShareFinalInlineSpace) {
+TEST_F(RadiantDocumentTest, ClearanceAndFloatAvoidanceShareFinalInlineSpace) {
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl", "sideways-lr", "sideways-rl"})
     for (const char* direction : {"ltr", "rtl"}) for (const char* side : {"left", "right"})
     for (const char* variant : {"fixed", "margins", "auto", "wide", "replaced"}) {
@@ -9673,7 +9891,7 @@ TEST_F(RadiantTextQuery, ClearanceAndFloatAvoidanceShareFinalInlineSpace) {
     }
 }
 
-TEST_F(RadiantTextQuery, ClearanceResolvesAutomaticInlineSpaceBeforeTextWrapping) {
+TEST_F(RadiantDocumentTest, ClearanceResolvesAutomaticInlineSpaceBeforeTextWrapping) {
     for (bool rtl : {false, true}) {
         SCOPED_TRACE(rtl);
         StrBuf* source = strbuf_new();
@@ -9703,7 +9921,7 @@ TEST_F(RadiantTextQuery, ClearanceResolvesAutomaticInlineSpaceBeforeTextWrapping
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAutomaticInlineExtentIgnoresBlockMargins) {
+TEST_F(RadiantDocumentTest, VerticalAutomaticInlineExtentIgnoresBlockMargins) {
     const struct State { float font; float width; float height; bool switch_mode; } states[] = {
         {20,20,20,false}, {20,17,31,false}, {32,17,31,false}, {20,20,20,true}, {20,20,20,false}};
     for (const char* initial_mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
@@ -9770,7 +9988,7 @@ TEST_F(RadiantTextQuery, VerticalAutomaticInlineExtentIgnoresBlockMargins) {
     }
 }
 
-TEST_F(RadiantTextQuery, CombinedDigitsKeepOneEmAutomaticInlineExtent) {
+TEST_F(RadiantDocumentTest, CombinedDigitsKeepOneEmAutomaticInlineExtent) {
     for (const char* mode : {"vertical-lr","vertical-rl"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -9801,7 +10019,7 @@ TEST_F(RadiantTextQuery, CombinedDigitsKeepOneEmAutomaticInlineExtent) {
 }
 
 #ifdef __APPLE__
-TEST_F(RadiantTextQuery, SelectedFaceWidthFeaturesShapeBeforePositionsAndPreserveTheBaseFace) {
+TEST_F(RadiantDocumentTest, SelectedFaceWidthFeaturesShapeBeforePositionsAndPreserveTheBaseFace) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:WidthProbe;"
@@ -9868,7 +10086,7 @@ TEST_F(RadiantTextQuery, SelectedFaceWidthFeaturesShapeBeforePositionsAndPreserv
 }
 #endif
 
-TEST_F(RadiantTextQuery, CombinedTextGlyphsUseOneHorizontalCompositionFrame) {
+TEST_F(RadiantDocumentTest, CombinedTextGlyphsUseOneHorizontalCompositionFrame) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -9954,7 +10172,7 @@ TEST_F(RadiantTextQuery, CombinedTextGlyphsUseOneHorizontalCompositionFrame) {
     }
 }
 
-TEST_F(RadiantTextQuery, CombinedTextWrapsAsOneUnitAndIgnoresItsPreservedBreak) {
+TEST_F(RadiantDocumentTest, CombinedTextWrapsAsOneUnitAndIgnoresItsPreservedBreak) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -9982,7 +10200,7 @@ TEST_F(RadiantTextQuery, CombinedTextWrapsAsOneUnitAndIgnoresItsPreservedBreak) 
     }
 }
 
-TEST_F(RadiantTextQuery, CombinedTextUsesTheCascadeAndTheContainingTypographicMode) {
+TEST_F(RadiantDocumentTest, CombinedTextUsesTheCascadeAndTheContainingTypographicMode) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -10026,7 +10244,7 @@ TEST_F(RadiantTextQuery, CombinedTextUsesTheCascadeAndTheContainingTypographicMo
     }
 }
 
-TEST_F(RadiantTextQuery, WhitespaceOnlyCompositionRetainsItsEmSquareAtLineEdges) {
+TEST_F(RadiantDocumentTest, WhitespaceOnlyCompositionRetainsItsEmSquareAtLineEdges) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -10059,7 +10277,7 @@ TEST_F(RadiantTextQuery, WhitespaceOnlyCompositionRetainsItsEmSquareAtLineEdges)
     }
 }
 
-TEST_F(RadiantTextQuery, CombinedTextKeepsItsOwnBidiParagraphAndExplicitOverride) {
+TEST_F(RadiantDocumentTest, CombinedTextKeepsItsOwnBidiParagraphAndExplicitOverride) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -10110,7 +10328,7 @@ TEST_F(RadiantTextQuery, CombinedTextKeepsItsOwnBidiParagraphAndExplicitOverride
     }
 }
 
-TEST_F(RadiantTextQuery, CombinedWhitespaceInNestedInlineBlocksKeepsItsUnit) {
+TEST_F(RadiantDocumentTest, CombinedWhitespaceInNestedInlineBlocksKeepsItsUnit) {
     load("test/layout/data/wpt-css-writing-modes/css-writing-modes/tcy-white-space-processing-003.html");
     ASSERT_NE(document, nullptr);
     ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
@@ -10131,7 +10349,7 @@ TEST_F(RadiantTextQuery, CombinedWhitespaceInNestedInlineBlocksKeepsItsUnit) {
     }
 }
 
-TEST_F(RadiantTextQuery, CombinedTextSuppliesItsSquareToVerticalInlineBlockIntrinsicSizing) {
+TEST_F(RadiantDocumentTest, CombinedTextSuppliesItsSquareToVerticalInlineBlockIntrinsicSizing) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -10150,7 +10368,7 @@ TEST_F(RadiantTextQuery, CombinedTextSuppliesItsSquareToVerticalInlineBlockIntri
     EXPECT_FLOAT_EQ(host->height,280.0f);
 }
 
-TEST_F(RadiantTextQuery, SpaceLookaheadMeasuresTheCombinedUnitInsteadOfItsGlyphs) {
+TEST_F(RadiantDocumentTest, SpaceLookaheadMeasuresTheCombinedUnitInsteadOfItsGlyphs) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -10170,7 +10388,7 @@ TEST_F(RadiantTextQuery, SpaceLookaheadMeasuresTheCombinedUnitInsteadOfItsGlyphs
     }
 }
 
-TEST_F(RadiantTextQuery, InternalIdeographicSpaceDoesNotHangBeforeNestedAtomic) {
+TEST_F(RadiantDocumentTest, InternalIdeographicSpaceDoesNotHangBeforeNestedAtomic) {
     for (const char* mode : {"horizontal-tb","vertical-lr","vertical-rl"}) {
         SCOPED_TRACE(mode);
         StrBuf* source = strbuf_new();
@@ -10197,7 +10415,7 @@ TEST_F(RadiantTextQuery, InternalIdeographicSpaceDoesNotHangBeforeNestedAtomic) 
     }
 }
 
-TEST_F(RadiantTextQuery, FloatClearanceRetainsTheFirstFormattedLine) {
+TEST_F(RadiantDocumentTest, FloatClearanceRetainsTheFirstFormattedLine) {
     ASSERT_NE(load("test/html/layout_float_first_line.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10228,7 +10446,7 @@ TEST_F(RadiantTextQuery, FloatClearanceRetainsTheFirstFormattedLine) {
     }
 }
 
-TEST_F(RadiantTextQuery, SegmentBreakContextCrossesOnlyNonAtomicInlineBoundaries) {
+TEST_F(RadiantDocumentTest, SegmentBreakContextCrossesOnlyNonAtomicInlineBoundaries) {
     ASSERT_NE(load("test/html/layout_segment_break_context.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10262,7 +10480,7 @@ TEST_F(RadiantTextQuery, SegmentBreakContextCrossesOnlyNonAtomicInlineBoundaries
     }
 }
 
-TEST_F(RadiantTextQuery, PreservedSpacesHangConditionallyBeforeForcedBreaks) {
+TEST_F(RadiantDocumentTest, PreservedSpacesHangConditionallyBeforeForcedBreaks) {
     ASSERT_NE(load("test/html/layout_conditional_hanging.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10291,7 +10509,7 @@ TEST_F(RadiantTextQuery, PreservedSpacesHangConditionallyBeforeForcedBreaks) {
     }
 }
 
-TEST_F(RadiantTextQuery, EqualHeightShiftedDescendantsRetainTheirAncestorsBaseline) {
+TEST_F(RadiantDocumentTest, EqualHeightShiftedDescendantsRetainTheirAncestorsBaseline) {
     ASSERT_NE(load("test/html/layout_nested_baseline_boxes.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10320,7 +10538,7 @@ TEST_F(RadiantTextQuery, EqualHeightShiftedDescendantsRetainTheirAncestorsBaseli
     }
 }
 
-TEST_F(RadiantTextQuery, HyphensNoneKeepsConditionalCharactersUnbreakable) {
+TEST_F(RadiantDocumentTest, HyphensNoneKeepsConditionalCharactersUnbreakable) {
     ASSERT_NE(load("test/html/layout_hyphens_none.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10344,7 +10562,7 @@ TEST_F(RadiantTextQuery, HyphensNoneKeepsConditionalCharactersUnbreakable) {
     }
 }
 
-TEST_F(RadiantTextQuery, ConditionalBreaksRetainFittingMarksAndContinuationPoints) {
+TEST_F(RadiantDocumentTest, ConditionalBreaksRetainFittingMarksAndContinuationPoints) {
     ASSERT_NE(load("test/html/layout_hyphens_none.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10369,7 +10587,7 @@ TEST_F(RadiantTextQuery, ConditionalBreaksRetainFittingMarksAndContinuationPoint
     }
 }
 
-TEST_F(RadiantTextQuery, OversizedFloatsCannotUseSpaceOutsideTheirContainingBlock) {
+TEST_F(RadiantDocumentTest, OversizedFloatsCannotUseSpaceOutsideTheirContainingBlock) {
     ASSERT_NE(load("test/html/layout_oversized_floats.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10389,7 +10607,7 @@ TEST_F(RadiantTextQuery, OversizedFloatsCannotUseSpaceOutsideTheirContainingBloc
     }
 }
 
-TEST_F(RadiantTextQuery, ZeroFontSizePreservesBreaksAndLengthTabStops) {
+TEST_F(RadiantDocumentTest, ZeroFontSizePreservesBreaksAndLengthTabStops) {
     ASSERT_NE(load("test/html/layout_zero_font_controls.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10408,7 +10626,7 @@ TEST_F(RadiantTextQuery, ZeroFontSizePreservesBreaksAndLengthTabStops) {
     }
 }
 
-TEST_F(RadiantTextQuery, TablesMeasurePreservedLinesAndInlineContinuations) {
+TEST_F(RadiantDocumentTest, TablesMeasurePreservedLinesAndInlineContinuations) {
     ASSERT_NE(load("test/html/layout_table_preserved_lines.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10437,7 +10655,7 @@ TEST_F(RadiantTextQuery, TablesMeasurePreservedLinesAndInlineContinuations) {
     }
 }
 
-TEST_F(RadiantTextQuery, InlineShapingPreservesJoiningAndRequiredBoundaries) {
+TEST_F(RadiantDocumentTest, InlineShapingPreservesJoiningAndRequiredBoundaries) {
     ASSERT_NE(load("test/html/layout_inline_shaping.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -10510,7 +10728,7 @@ TEST_F(RadiantTextQuery, InlineShapingPreservesJoiningAndRequiredBoundaries) {
         font_measure_text(last->font->font_handle, "i", 1).width, 0.02f);
 }
 
-TEST_F(RadiantTextQuery, VerticalAutomaticInlineSizeUsesFinalExtentForAlignment) {
+TEST_F(RadiantDocumentTest, VerticalAutomaticInlineSizeUsesFinalExtentForAlignment) {
     ASSERT_NE(load("test/html/layout_vertical_auto_alignment.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 500;
@@ -10531,7 +10749,7 @@ TEST_F(RadiantTextQuery, VerticalAutomaticInlineSizeUsesFinalExtentForAlignment)
     EXPECT_NEAR(latin->first_child->as_text()->rect->y, 4.0f, 0.1f);
 }
 
-TEST_F(RadiantTextQuery, IntrinsicIndentAppliesOnlyToTheFirstUnbreakableSegment) {
+TEST_F(RadiantDocumentTest, IntrinsicIndentAppliesOnlyToTheFirstUnbreakableSegment) {
     ASSERT_NE(load("test/html/layout_first_segment_indent.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -10570,7 +10788,7 @@ TEST_F(RadiantTextQuery, IntrinsicIndentAppliesOnlyToTheFirstUnbreakableSegment)
     }
 }
 
-TEST_F(RadiantTextQuery, TerminalSoftHyphensRetainTheirSourceStyleAndCompletedLine) {
+TEST_F(RadiantDocumentTest, TerminalSoftHyphensRetainTheirSourceStyleAndCompletedLine) {
     ASSERT_NE(load("test/html/layout_terminal_soft_hyphen_style.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -10604,7 +10822,7 @@ TEST_F(RadiantTextQuery, TerminalSoftHyphensRetainTheirSourceStyleAndCompletedLi
     }
 }
 
-TEST_F(RadiantTextQuery, AxisRollbackExcludesSameLayerShorthands) {
+TEST_F(RadiantDocumentTest, AxisRollbackExcludesSameLayerShorthands) {
     ASSERT_NE(load("test/html/layout_overflow_component_rollback.html"), nullptr);
     layout_html_doc(&ui, document, false);
     DomElement* overflow = dom_find_element_by_id(document->root->as_element(), "overflow");
@@ -10616,7 +10834,7 @@ TEST_F(RadiantTextQuery, AxisRollbackExcludesSameLayerShorthands) {
     EXPECT_EQ(overscroll->scroll()->overscroll_y, CSS_VALUE_NONE);
 }
 
-TEST_F(RadiantTextQuery, ExplicitTableHeightDistributesTheGridBudgetAcrossRetainedRows) {
+TEST_F(RadiantDocumentTest, ExplicitTableHeightDistributesTheGridBudgetAcrossRetainedRows) {
     const struct { float top, bottom, pad_top, pad_bottom, spacing, height, minimum;
                   unsigned hints; const char* caption; } states[] = {
         {0, 0, 0, 0, 0, 240, 0, 2, "none"},
@@ -10724,7 +10942,7 @@ TEST_F(RadiantTextQuery, ExplicitTableHeightDistributesTheGridBudgetAcrossRetain
     }
 }
 
-TEST_F(RadiantTextQuery, HtmlTableAlignmentRetainsRowInheritanceAndCellOverrides) {
+TEST_F(RadiantDocumentTest, HtmlTableAlignmentRetainsRowInheritanceAndCellOverrides) {
     const struct { const char* table; const char* group; const char* row; const char* cell;
                   CssEnum expected; const char* group_hint = ""; const char* row_hint = "";
                   const char* cell_hint = ""; } states[] = {
@@ -10803,7 +11021,7 @@ TEST_F(RadiantTextQuery, HtmlTableAlignmentRetainsRowInheritanceAndCellOverrides
     }
 }
 
-TEST_F(RadiantTextQuery, ParallelTableCaptionsUseWrapperInlineSpaceAndOwnBlockFlow) {
+TEST_F(RadiantDocumentTest, ParallelTableCaptionsUseWrapperInlineSpaceAndOwnBlockFlow) {
     const struct { const char* side; bool decorated; bool horizontal; bool long_text;
                   float inline_size = -1.0f; } states[] = {
         {"top", false, false, false}, {"bottom", true, false, true},
@@ -10901,7 +11119,7 @@ TEST_F(RadiantTextQuery, ParallelTableCaptionsUseWrapperInlineSpaceAndOwnBlockFl
     }
 }
 
-TEST_F(RadiantTextQuery, TableCellInlineAlignmentConsumesItsAssignedLineRegion) {
+TEST_F(RadiantDocumentTest, TableCellInlineAlignmentConsumesItsAssignedLineRegion) {
     for (bool words : {false, true}) {
         StrBuf* source = strbuf_new();
         strbuf_append_format(source,
@@ -10978,7 +11196,7 @@ TEST_F(RadiantTextQuery, TableCellInlineAlignmentConsumesItsAssignedLineRegion) 
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalTracksMeasureWrappingBeforeFinalRowAssignment) {
+TEST_F(RadiantDocumentTest, OrthogonalTracksMeasureWrappingBeforeFinalRowAssignment) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
@@ -11051,7 +11269,7 @@ TEST_F(RadiantTextQuery, OrthogonalTracksMeasureWrappingBeforeFinalRowAssignment
     dom_range_release(range);
 }
 
-TEST_F(RadiantTextQuery, AutomaticOrthogonalTracksMeasureLineBlockExtents) {
+TEST_F(RadiantDocumentTest, AutomaticOrthogonalTracksMeasureLineBlockExtents) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
@@ -11091,7 +11309,7 @@ TEST_F(RadiantTextQuery, AutomaticOrthogonalTracksMeasureLineBlockExtents) {
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalCellAlignmentUsesItsContentBlockAxisAfterPublication) {
+TEST_F(RadiantDocumentTest, OrthogonalCellAlignmentUsesItsContentBlockAxisAfterPublication) {
     for (bool block_content : {false, true}) {
         StrBuf* source = strbuf_new();
         strbuf_append_format(source,
@@ -11171,7 +11389,7 @@ TEST_F(RadiantTextQuery, OrthogonalCellAlignmentUsesItsContentBlockAxisAfterPubl
     }
 }
 
-TEST_F(RadiantTextQuery, DefiniteTableInlineSizeSubtractsDecorationOnItsGridAxis) {
+TEST_F(RadiantDocumentTest, DefiniteTableInlineSizeSubtractsDecorationOnItsGridAxis) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0}td{padding:0;border:0;inline-size:40px;block-size:30px}</style>"
@@ -11222,7 +11440,7 @@ TEST_F(RadiantTextQuery, DefiniteTableInlineSizeSubtractsDecorationOnItsGridAxis
     }
 }
 
-TEST_F(RadiantTextQuery, AutomaticTableDecorationKeepsPhysicalEdgesAcrossBoxSizing) {
+TEST_F(RadiantDocumentTest, AutomaticTableDecorationKeepsPhysicalEdgesAcrossBoxSizing) {
     const struct { const char* tag; const char* row; const char* cell; bool anonymous; } kinds[] = {
         {"table", "tr", "td", false}, {"div", "div", "span", false}, {"div", "div", "span", true}
     };
@@ -11305,7 +11523,7 @@ TEST_F(RadiantTextQuery, AutomaticTableDecorationKeepsPhysicalEdgesAcrossBoxSizi
     }
 }
 
-TEST_F(RadiantTextQuery, TableInlineSizeDoesNotBecomeRowBlockSize) {
+TEST_F(RadiantDocumentTest, TableInlineSizeDoesNotBecomeRowBlockSize) {
     const struct { const char* value; float extent; } states[] = {
         {"120px", 120}, {"160px", 160}, {"auto", 40},
         {"calc(60px + 60px)", 120}, {"auto", 40}
@@ -11345,7 +11563,7 @@ TEST_F(RadiantTextQuery, TableInlineSizeDoesNotBecomeRowBlockSize) {
     }
 }
 
-TEST_F(RadiantTextQuery, TableCellPaddingConsumesItsOwnInlineAxis) {
+TEST_F(RadiantDocumentTest, TableCellPaddingConsumesItsOwnInlineAxis) {
     const struct { const char* value; float top, right, bottom, left; } states[] = {
         {"0", 0, 0, 0, 0}, {"0 0 0 20px", 0, 0, 0, 20},
         {"0 20px 0 0", 0, 20, 0, 0}, {"20px 0 0", 20, 0, 0, 0},
@@ -11401,7 +11619,7 @@ TEST_F(RadiantTextQuery, TableCellPaddingConsumesItsOwnInlineAxis) {
     }
 }
 
-TEST_F(RadiantTextQuery, CollapsedTablePaddingDoesNotChangePublishedGrid) {
+TEST_F(RadiantDocumentTest, CollapsedTablePaddingDoesNotChangePublishedGrid) {
     const struct { const char* padding; const char* sizing; } states[] = {
         {"0", "content-box"}, {"7px 11px 13px 17px", "content-box"},
         {"3px", "border-box"}, {"7px 11px 13px 17px", "border-box"}, {"0", "content-box"}
@@ -11453,7 +11671,7 @@ TEST_F(RadiantTextQuery, CollapsedTablePaddingDoesNotChangePublishedGrid) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalBlockSequenceBaselinesUsePublishedChildOffsets) {
+TEST_F(RadiantDocumentTest, VerticalBlockSequenceBaselinesUsePublishedChildOffsets) {
     const struct { const char* source; bool decorated; float last_size; bool horizontal; } states[] = {
         {"auto", false, 60, false}, {"first", true, 100, false},
         {"last", true, 60, false}, {"auto", true, 100, false},
@@ -11515,7 +11733,7 @@ TEST_F(RadiantTextQuery, VerticalBlockSequenceBaselinesUsePublishedChildOffsets)
     }
 }
 
-TEST_F(RadiantTextQuery, HorizontalCellFlowSurvivesVerticalTablePublicationAndReflow) {
+TEST_F(RadiantDocumentTest, HorizontalCellFlowSurvivesVerticalTablePublicationAndReflow) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (const char* align : {"top", "middle", "bottom"}) for (bool rtl : {false, true})
     for (bool blocks : {false, true}) for (bool decorated : {false, true}) {
@@ -11592,7 +11810,7 @@ TEST_F(RadiantTextQuery, HorizontalCellFlowSurvivesVerticalTablePublicationAndRe
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalCellsUseSharedRowWidthsAndTableInlineProgression) {
+TEST_F(RadiantDocumentTest, OrthogonalCellsUseSharedRowWidthsAndTableInlineProgression) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool table_rtl : {false, true}) for (bool cell_rtl : {false, true})
     for (const char* align : {"top", "middle", "bottom"}) for (bool decorated : {false, true}) {
@@ -11649,7 +11867,7 @@ TEST_F(RadiantTextQuery, OrthogonalCellsUseSharedRowWidthsAndTableInlineProgress
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalTableContentRetainsOwnBlockFlowAndInlineSize) {
+TEST_F(RadiantDocumentTest, OrthogonalTableContentRetainsOwnBlockFlowAndInlineSize) {
     const char* modes[] = {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"};
     const struct { const char* tag; const char* display; const char* before; const char* after;
                   bool middle; bool center; } kinds[] = {
@@ -11744,7 +11962,7 @@ TEST_F(RadiantTextQuery, OrthogonalTableContentRetainsOwnBlockFlowAndInlineSize)
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalAutoInlinePublicationUsesTheMeasuredBorderBox) {
+TEST_F(RadiantDocumentTest, VerticalAutoInlinePublicationUsesTheMeasuredBorderBox) {
     const char* modes[] = {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"};
     for (const char* mode : modes) for (bool rtl : {false, true})
     for (bool nested : {false, true}) for (bool decorated : {false, true}) {
@@ -11806,7 +12024,7 @@ TEST_F(RadiantTextQuery, VerticalAutoInlinePublicationUsesTheMeasuredBorderBox) 
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicShrinkQueriesDiscardResolvedPercentageMargins) {
+TEST_F(RadiantDocumentTest, IntrinsicShrinkQueriesDiscardResolvedPercentageMargins) {
     for (const char* formatting : {"position:absolute", "display:inline-block"}) {
         SCOPED_TRACE(formatting);
         StrBuf* source = strbuf_new();
@@ -11841,7 +12059,7 @@ TEST_F(RadiantTextQuery, IntrinsicShrinkQueriesDiscardResolvedPercentageMargins)
     }
 }
 
-TEST_F(RadiantTextQuery, MulticolInlineFragmentsShareThePublishedSurrogateDirection) {
+TEST_F(RadiantDocumentTest, MulticolInlineFragmentsShareThePublishedSurrogateDirection) {
     const char* modes[] = {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"};
     for (const char* mode : modes) for (const char* position : {"relative", "absolute"}) {
         SCOPED_TRACE(mode);
@@ -11893,7 +12111,7 @@ TEST_F(RadiantTextQuery, MulticolInlineFragmentsShareThePublishedSurrogateDirect
     }
 }
 
-TEST_F(RadiantTextQuery, TableTracksKeepComputedFontUnitsSeparateFromDescendantFlowAxes) {
+TEST_F(RadiantDocumentTest, TableTracksKeepComputedFontUnitsSeparateFromDescendantFlowAxes) {
     const struct { const char* name; CssEnum computed; } modes[] = {
         {"vertical-rl", CSS_VALUE_VERTICAL_RL}, {"sideways-lr", CSS_VALUE_SIDEWAYS_LR},
         {"horizontal-tb", CSS_VALUE_HORIZONTAL_TB}, {"vertical-lr", CSS_VALUE_VERTICAL_LR}
@@ -11934,7 +12152,7 @@ TEST_F(RadiantTextQuery, TableTracksKeepComputedFontUnitsSeparateFromDescendantF
     }
 }
 
-TEST_F(RadiantTextQuery, TableCellLengthsUseTheDeclaringFontAndOrientation) {
+TEST_F(RadiantDocumentTest, TableCellLengthsUseTheDeclaringFontAndOrientation) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>body{margin:0;font:12px/1 serif}"
@@ -11979,7 +12197,7 @@ TEST_F(RadiantTextQuery, TableCellLengthsUseTheDeclaringFontAndOrientation) {
     }
 }
 
-TEST_F(RadiantTextQuery, TableAndRowLengthsDoNotBorrowDescendantFonts) {
+TEST_F(RadiantDocumentTest, TableAndRowLengthsDoNotBorrowDescendantFonts) {
     for (bool row_constraint : {false, true}) {
         SCOPED_TRACE(row_constraint);
         StrBuf* source = strbuf_new();
@@ -12008,7 +12226,7 @@ TEST_F(RadiantTextQuery, TableAndRowLengthsDoNotBorrowDescendantFonts) {
     }
 }
 
-TEST_F(RadiantTextQuery, FixedTableColumnLengthsKeepTheirOwnerAndPercentageBasis) {
+TEST_F(RadiantDocumentTest, FixedTableColumnLengthsKeepTheirOwnerAndPercentageBasis) {
     for (bool group : {false, true}) {
         SCOPED_TRACE(group);
         StrBuf* source = strbuf_new();
@@ -12044,7 +12262,7 @@ TEST_F(RadiantTextQuery, FixedTableColumnLengthsKeepTheirOwnerAndPercentageBasis
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalTableAutoSizesPackMeasuredWordsAndTrimLineEdgeSpaces) {
+TEST_F(RadiantDocumentTest, VerticalTableAutoSizesPackMeasuredWordsAndTrimLineEdgeSpaces) {
     const char* modes[] = {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"};
     const struct { const char* text; const char* white_space; float height, lines; } cases[] = {
         {"XX XX XX", "normal", 40, 3},
@@ -12132,7 +12350,7 @@ static StrBuf* fixed_column_hint_controls(size_t span) {
     return source;
 }
 
-TEST_F(RadiantTextQuery, FixedTableColumnsConsumeHtmlDimensionHintsLikeCssConstraints) {
+TEST_F(RadiantDocumentTest, FixedTableColumnsConsumeHtmlDimensionHintsLikeCssConstraints) {
     ASSERT_NE(layout_script_source(fixed_column_hint_controls(1)), nullptr);
     DomElement* hint = dom_find_element_by_id(document->root, "hint");
     DomElement* css = dom_find_element_by_id(document->root, "css");
@@ -12168,7 +12386,7 @@ TEST_F(RadiantTextQuery, FixedTableColumnsConsumeHtmlDimensionHintsLikeCssConstr
     }
 }
 
-TEST_F(RadiantTextQuery, FixedColumnHintsRespectCascadeSpansAndFirstRowPriority) {
+TEST_F(RadiantDocumentTest, FixedColumnHintsRespectCascadeSpansAndFirstRowPriority) {
     for (size_t span : {1u, 2u}) {
         SCOPED_TRACE(span);
         ASSERT_NE(layout_script_source(fixed_column_hint_controls(span)), nullptr);
@@ -12261,7 +12479,7 @@ TEST_F(RadiantTextQuery, FixedColumnHintsRespectCascadeSpansAndFirstRowPriority)
     }
 }
 
-TEST_F(RadiantTextQuery, RelativeInsetsRetainPhysicalMovementAndStaticFlowAcrossWritingModes) {
+TEST_F(RadiantDocumentTest, RelativeInsetsRetainPhysicalMovementAndStaticFlowAcrossWritingModes) {
     const struct { const char* name; float ltr_x, ltr_y, rtl_x, rtl_y; } modes[] = {
         {"horizontal-tb", 17, 13, -23, 13}, {"vertical-lr", 17, 13, 17, -19},
         {"vertical-rl", -23, 13, -23, -19}, {"sideways-lr", 17, -19, 17, 13},
@@ -12339,7 +12557,7 @@ TEST_F(RadiantTextQuery, RelativeInsetsRetainPhysicalMovementAndStaticFlowAcross
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicBlockWidthsResolveMarginsAfterSizingAndRetainedFontChanges) {
+TEST_F(RadiantDocumentTest, IntrinsicBlockWidthsResolveMarginsAfterSizingAndRetainedFontChanges) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -12415,7 +12633,7 @@ TEST_F(RadiantTextQuery, IntrinsicBlockWidthsResolveMarginsAfterSizingAndRetaine
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicMarginPlacementKeepsFloatOriginsAndClearanceAcrossReflow) {
+TEST_F(RadiantDocumentTest, IntrinsicMarginPlacementKeepsFloatOriginsAndClearanceAcrossReflow) {
     for (bool isolated : {false, true}) {
         StrBuf* source = strbuf_new();
         strbuf_append_format(source,
@@ -12450,7 +12668,7 @@ TEST_F(RadiantTextQuery, IntrinsicMarginPlacementKeepsFloatOriginsAndClearanceAc
     }
 }
 
-TEST_F(RadiantTextQuery, PositionedImageSizesRetainBoxEdgesAcrossResourceAndStyleChanges) {
+TEST_F(RadiantDocumentTest, PositionedImageSizesRetainBoxEdgesAcrossResourceAndStyleChanges) {
     const char* loaded = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='32'%3E%3Crect width='64' height='32' fill='green'/%3E%3C/svg%3E";
     const struct { bool loaded, decorated, resized; unsigned auto_axis; bool zero = false; } states[] = {
         {false, false, false, 0}, {false, true, false, 0}, {true, true, false, 0},
@@ -12525,7 +12743,7 @@ TEST_F(RadiantTextQuery, PositionedImageSizesRetainBoxEdgesAcrossResourceAndStyl
     }
 }
 
-TEST_F(RadiantTextQuery, PositionedImageIntrinsicBlockKeywordsUseNaturalRatioAndAutoMargins) {
+TEST_F(RadiantDocumentTest, PositionedImageIntrinsicBlockKeywordsUseNaturalRatioAndAutoMargins) {
     for (const char* mode : {"horizontal-tb", "vertical-lr", "vertical-rl"})
     for (bool ratio_only : {false, true}) for (bool border_box : {false, true}) {
         StrBuf* source = strbuf_new();
@@ -12557,7 +12775,7 @@ TEST_F(RadiantTextQuery, PositionedImageIntrinsicBlockKeywordsUseNaturalRatioAnd
     }
 }
 
-TEST_F(RadiantTextQuery, BrokenImageAlternativesKeepTextBaselinesInsideExplicitBoxes) {
+TEST_F(RadiantDocumentTest, BrokenImageAlternativesKeepTextBaselinesInsideExplicitBoxes) {
     ASSERT_NE(load("test/html/layout_broken_image_baseline.html"), nullptr);
     layout_html_doc(&ui, document, false);
     const struct { const char* id; float link_y; float image_height; } cases[] = {
@@ -12585,7 +12803,7 @@ TEST_F(RadiantTextQuery, BrokenImageAlternativesKeepTextBaselinesInsideExplicitB
     }
 }
 
-TEST_F(RadiantTextQuery, CssBidiScopesMatchTheirUnicodeControlSequences) {
+TEST_F(RadiantDocumentTest, CssBidiScopesMatchTheirUnicodeControlSequences) {
     const struct { const char* mode; const char* direction; const char* open; const char* close; const char* text; } cases[] = {
         {"normal", "rtl", "", "", "ABCD"},
         {"embed", "ltr", u8"\u202a", u8"\u202c", "ABCD"},
@@ -12623,7 +12841,7 @@ TEST_F(RadiantTextQuery, CssBidiScopesMatchTheirUnicodeControlSequences) {
     }
 }
 
-TEST_F(RadiantTextQuery, CssBidiRootAndNestedScopesPreserveAtomicAndTextOrder) {
+TEST_F(RadiantDocumentTest, CssBidiRootAndNestedScopesPreserveAtomicAndTextOrder) {
     for (const char* direction : {"ltr", "rtl"}) {
         for (bool atomic : {false, true}) {
             SCOPED_TRACE(direction);
@@ -12663,7 +12881,7 @@ TEST_F(RadiantTextQuery, CssBidiRootAndNestedScopesPreserveAtomicAndTextOrder) {
     }
 }
 
-TEST_F(RadiantTextQuery, PlaintextParagraphDirectionSurvivesSoftWrapsAndResetsAtForcedBreaks) {
+TEST_F(RadiantDocumentTest, PlaintextParagraphDirectionSurvivesSoftWrapsAndResetsAtForcedBreaks) {
     const struct { const char* first; const char* second; const char* direction; } cases[] = {
         {u8"אאאאאאאא", "MMMMM", "rtl"},
         {"MMMMM", u8"אאאאאאאא", "ltr"},
@@ -12716,7 +12934,7 @@ TEST_F(RadiantTextQuery, PlaintextParagraphDirectionSurvivesSoftWrapsAndResetsAt
     }
 }
 
-TEST_F(RadiantTextQuery, PlaintextP2SkipsIsolatesAndAtomicInlineContents) {
+TEST_F(RadiantDocumentTest, PlaintextP2SkipsIsolatesAndAtomicInlineContents) {
     const struct { const char* leading; const char* target; const char* trailing; const char* direction; } cases[] = {
         {"", "12345 67890", u8"<span style='unicode-bidi:isolate;direction:rtl'>אאאא</span>", "ltr"},
         {"", "12345 67890", u8"<bdi>אאאא</bdi>", "ltr"},
@@ -12750,7 +12968,7 @@ TEST_F(RadiantTextQuery, PlaintextP2SkipsIsolatesAndAtomicInlineContents) {
     }
 }
 
-TEST_F(RadiantTextQuery, ResolvedBidiRunsReachRasterAndVectorPaintAcrossReflow) {
+TEST_F(RadiantDocumentTest, ResolvedBidiRunsReachRasterAndVectorPaintAcrossReflow) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -12792,7 +13010,7 @@ TEST_F(RadiantTextQuery, ResolvedBidiRunsReachRasterAndVectorPaintAcrossReflow) 
     }
 }
 
-TEST_F(RadiantTextQuery, BidiPaintKeepsGraphemesAndFollowingDirectionalRuns) {
+TEST_F(RadiantDocumentTest, BidiPaintKeepsGraphemesAndFollowingDirectionalRuns) {
     const struct { const char* mode; const char* text; const char* visual[3]; size_t count; } cases[] = {
         {"bidi-override", u8"áB🤹‍♀️C", {u8"C🤹‍♀️Bá", nullptr, nullptr}, 1},
         {"normal", u8"AאבB", {"A", u8"בא", "B"}, 3}
@@ -12834,7 +13052,7 @@ TEST_F(RadiantTextQuery, BidiPaintKeepsGraphemesAndFollowingDirectionalRuns) {
     }
 }
 
-TEST_F(RadiantTextQuery, BidiFormattingAcrossInlineBoundariesPreservesEveryPaintRun) {
+TEST_F(RadiantDocumentTest, BidiFormattingAcrossInlineBoundariesPreservesEveryPaintRun) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -12919,7 +13137,7 @@ TEST_F(RadiantTextQuery, BidiFormattingAcrossInlineBoundariesPreservesEveryPaint
     }
 }
 
-TEST_F(RadiantTextQuery, BidiPaintClippingMatchesTheEquivalentVisualOrder) {
+TEST_F(RadiantDocumentTest, BidiPaintClippingMatchesTheEquivalentVisualOrder) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -12961,7 +13179,7 @@ TEST_F(RadiantTextQuery, BidiPaintClippingMatchesTheEquivalentVisualOrder) {
     }
 }
 
-TEST_F(RadiantTextQuery, OwnedFlowSnapshotsOwnTheirBidiPaintRuns) {
+TEST_F(RadiantDocumentTest, OwnedFlowSnapshotsOwnTheirBidiPaintRuns) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}"
@@ -12997,7 +13215,7 @@ TEST_F(RadiantTextQuery, OwnedFlowSnapshotsOwnTheirBidiPaintRuns) {
     EXPECT_STREQ(run.text.get(), "DCBA");
 }
 
-TEST_F(RadiantTextQuery, LtrIsolatesKeepLeadingNeutralsBeforeLatinRunsInRtlBlocks) {
+TEST_F(RadiantDocumentTest, LtrIsolatesKeepLeadingNeutralsBeforeLatinRunsInRtlBlocks) {
     ASSERT_NE(load("test/html/layout_bidi_ltr_neutral_isolate.html"), nullptr);
     layout_html_doc(&ui, document, false);
     for (const char* id : {"html", "css"}) {
@@ -13027,7 +13245,7 @@ TEST_F(RadiantTextQuery, LtrIsolatesKeepLeadingNeutralsBeforeLatinRunsInRtlBlock
     }
 }
 
-TEST_F(RadiantTextQuery, IsolatesReorderSplitRunsAndTransparentEmptyBoundaries) {
+TEST_F(RadiantDocumentTest, IsolatesReorderSplitRunsAndTransparentEmptyBoundaries) {
     ASSERT_NE(load("test/html/layout_bidi_isolate_boundaries.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -13056,7 +13274,7 @@ TEST_F(RadiantTextQuery, IsolatesReorderSplitRunsAndTransparentEmptyBoundaries) 
     EXPECT_NEAR(nested->x, 8.671875f, 0.1f);
 }
 
-TEST_F(RadiantTextQuery, DomCarriageReturnsKeepSpaceGeometryAndPaint) {
+TEST_F(RadiantDocumentTest, DomCarriageReturnsKeepSpaceGeometryAndPaint) {
     ASSERT_NE(load("test/html/layout_carriage_return_spacing.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) {
@@ -13145,7 +13363,7 @@ TEST_F(RadiantTextQuery, DomCarriageReturnsKeepSpaceGeometryAndPaint) {
     }
 }
 
-TEST_F(RadiantTextQuery, NoWrapSeparatorsKeepTheirAdjacentWordsTogether) {
+TEST_F(RadiantDocumentTest, NoWrapSeparatorsKeepTheirAdjacentWordsTogether) {
     ASSERT_NE(load("test/html/layout_nowrap_separator_lookahead.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) {
@@ -13215,7 +13433,7 @@ TEST_F(RadiantTextQuery, NoWrapSeparatorsKeepTheirAdjacentWordsTogether) {
     }
 }
 
-TEST_F(RadiantTextQuery, LookaheadUsesTheFollowingTextOwnersFont) {
+TEST_F(RadiantDocumentTest, LookaheadUsesTheFollowingTextOwnersFont) {
     ASSERT_NE(load("test/html/layout_lookahead_text_owner_font.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) {
@@ -13271,7 +13489,7 @@ TEST_F(RadiantTextQuery, LookaheadUsesTheFollowingTextOwnersFont) {
 
 #ifdef __APPLE__
 #ifdef __APPLE__
-TEST_F(RadiantTextQuery, CombiningClustersKeepInkAcrossTransformsAndRetainedPaint) {
+TEST_F(RadiantDocumentTest, CombiningClustersKeepInkAcrossTransformsAndRetainedPaint) {
     DomElement* root = load("test/html/layout_combining_cluster_paint.html");
     ASSERT_NE(root, nullptr);
     DomElement* changed = dom_find_element_by_id(document->root->as_element(), "normal-acute");
@@ -13351,7 +13569,7 @@ TEST_F(RadiantTextQuery, CombiningClustersKeepInkAcrossTransformsAndRetainedPain
 }
 #endif
 
-TEST_F(RadiantTextQuery, FloatPaintPhasesPreserveBackgroundsInlineInkAndHitOrder) {
+TEST_F(RadiantDocumentTest, FloatPaintPhasesPreserveBackgroundsInlineInkAndHitOrder) {
     ASSERT_NE(load("test/html/layout_float_paint_order.html"), nullptr);
     auto find = [&](const char* id) {
         return dom_find_element_by_id(document->root->as_element(), id);
@@ -13424,7 +13642,7 @@ TEST_F(RadiantTextQuery, FloatPaintPhasesPreserveBackgroundsInlineInkAndHitOrder
     }
 }
 
-TEST_F(RadiantTextQuery, SystemColorFontTrackingDoesNotChangeCssAdvances) {
+TEST_F(RadiantDocumentTest, SystemColorFontTrackingDoesNotChangeCssAdvances) {
     ASSERT_NE(load("test/html/layout_system_color_font_tracking.html"), nullptr);
     auto find = [&](const char* id) {
         return dom_find_element_by_id(document->root->as_element(), id);
@@ -13498,7 +13716,7 @@ TEST_F(RadiantTextQuery, SystemColorFontTrackingDoesNotChangeCssAdvances) {
 }
 #endif
 
-TEST_F(RadiantTextQuery, SpaceCreatedWrapsUseTheirSourceInlinePolicy) {
+TEST_F(RadiantDocumentTest, SpaceCreatedWrapsUseTheirSourceInlinePolicy) {
     ASSERT_NE(load("test/html/layout_carriage_return_spacing.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) {
@@ -13529,7 +13747,7 @@ TEST_F(RadiantTextQuery, SpaceCreatedWrapsUseTheirSourceInlinePolicy) {
     }
 }
 
-TEST_F(RadiantTextQuery, BidiRangesRetainShapedAdvancesAcrossPreservedBreaks) {
+TEST_F(RadiantDocumentTest, BidiRangesRetainShapedAdvancesAcrossPreservedBreaks) {
     ASSERT_NE(load("test/html/layout_bidi_advance_ranges.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto box = [&](const char* id) {
@@ -13582,7 +13800,7 @@ TEST_F(RadiantTextQuery, BidiRangesRetainShapedAdvancesAcrossPreservedBreaks) {
     }
 }
 
-TEST_F(RadiantTextQuery, PreservedTabsKeepAdvanceBoundsWithFallbackBidiGlyphs) {
+TEST_F(RadiantDocumentTest, PreservedTabsKeepAdvanceBoundsWithFallbackBidiGlyphs) {
     ASSERT_NE(load("test/html/layout_bidi_preserved_tabs.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     layout_html_doc(&ui, document, false);
@@ -13600,7 +13818,7 @@ TEST_F(RadiantTextQuery, PreservedTabsKeepAdvanceBoundsWithFallbackBidiGlyphs) {
     }
 }
 
-TEST_F(RadiantTextQuery, UnicodeSeparatorsKeepTheirPrecedingLetterUnits) {
+TEST_F(RadiantDocumentTest, UnicodeSeparatorsKeepTheirPrecedingLetterUnits) {
     ASSERT_NE(load("test/html/layout_unicode_separator_boundaries.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -13630,7 +13848,7 @@ TEST_F(RadiantTextQuery, UnicodeSeparatorsKeepTheirPrecedingLetterUnits) {
     EXPECT_TRUE(layout_text_allows_letter_break(0x3042, 0x202F, CSS_VALUE_ANYWHERE, false, false));
 }
 
-TEST_F(RadiantTextQuery, SpaceOnlyInlinesRetainTheLineThatAcceptedTheirSeparator) {
+TEST_F(RadiantDocumentTest, SpaceOnlyInlinesRetainTheLineThatAcceptedTheirSeparator) {
     ASSERT_NE(load("test/html/layout_collapsed_space_inline_line.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -13661,7 +13879,7 @@ TEST_F(RadiantTextQuery, SpaceOnlyInlinesRetainTheLineThatAcceptedTheirSeparator
     EXPECT_TRUE(ordinary->has_collapsed_line_fragment_union());
 }
 
-TEST_F(RadiantTextQuery, InlineStaticPositionsUseSignedIndentAndResolvedBidiCursor) {
+TEST_F(RadiantDocumentTest, InlineStaticPositionsUseSignedIndentAndResolvedBidiCursor) {
     ASSERT_NE(load("test/html/layout_static_inline_bidi_cursor.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -13691,7 +13909,7 @@ TEST_F(RadiantTextQuery, InlineStaticPositionsUseSignedIndentAndResolvedBidiCurs
     EXPECT_FLOAT_EQ(text->rect->width, 10.0f);
 }
 
-TEST_F(RadiantTextQuery, NestedForcedBreaksConsumeWholeInnerColumns) {
+TEST_F(RadiantDocumentTest, NestedForcedBreaksConsumeWholeInnerColumns) {
     ASSERT_NE(load("test/html/layout_nested_forced_columns.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -13758,7 +13976,7 @@ TEST_F(RadiantTextQuery, NestedForcedBreaksConsumeWholeInnerColumns) {
     paint_list_destroy(&paint);
 }
 
-TEST_F(RadiantTextQuery, AlternativeImagePaintUsesSelectedStyleAndImageRole) {
+TEST_F(RadiantDocumentTest, AlternativeImagePaintUsesSelectedStyleAndImageRole) {
     for (const auto& recipe : radiant_test_alternative_paint_cases) {
         SCOPED_TRACE(recipe.mode);
         DomElement* host = layout_script_source(radiant_test_alt_image_fixture(recipe.mode, recipe.rtl,
@@ -13822,7 +14040,7 @@ TEST_F(RadiantTextQuery, AlternativeImagePaintUsesSelectedStyleAndImageRole) {
     }
 }
 
-TEST_F(RadiantTextQuery, UnloadedImageAltTextMutationKeepsLayoutAndSemanticPaintTogether) {
+TEST_F(RadiantDocumentTest, UnloadedImageAltTextMutationKeepsLayoutAndSemanticPaintTogether) {
     auto glyph_run = [](const PaintList& paint) -> const PaintGlyphRun* {
         for (size_t index = 0; index < paint.size(); index++)
             if (paint[index].op == PAINT_GLYPH_RUN) return &paint[index].glyph_run;
@@ -13923,7 +14141,7 @@ TEST_F(RadiantTextQuery, UnloadedImageAltTextMutationKeepsLayoutAndSemanticPaint
     RecordProperty("retained_states", states);
 }
 
-TEST_F(RadiantTextQuery, InlineWrapModeTransitionsRetainActualCharacterBoundaries) {
+TEST_F(RadiantDocumentTest, InlineWrapModeTransitionsRetainActualCharacterBoundaries) {
     unsigned states = 0;
     constexpr size_t recipe_count = sizeof(radiant_test_inline_boundary_recipes) /
         sizeof(radiant_test_inline_boundary_recipes[0]);
@@ -13995,7 +14213,7 @@ TEST_F(RadiantTextQuery, InlineWrapModeTransitionsRetainActualCharacterBoundarie
     RecordProperty("retained_states", states);
 }
 
-TEST_F(RadiantTextQuery, VerticalOverflowFlagsRefreshAcrossContentOnlyReflow) {
+TEST_F(RadiantDocumentTest, VerticalOverflowFlagsRefreshAcrossContentOnlyReflow) {
     for (unsigned kind : {1u, 2u})
     for (const char* mode : {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false, true}) for (const char* overflow : {"visible", "hidden", "auto"}) {
@@ -14032,7 +14250,7 @@ TEST_F(RadiantTextQuery, VerticalOverflowFlagsRefreshAcrossContentOnlyReflow) {
     }
 }
 
-TEST_F(RadiantTextQuery, VerticalOverflowPublishesPhysicalExtentsAndRestoresFittingContent) {
+TEST_F(RadiantDocumentTest, VerticalOverflowPublishesPhysicalExtentsAndRestoresFittingContent) {
     for (unsigned kind : {0u, 1u, 2u})
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false, true}) for (const char* overflow : {"visible", "hidden", "clip", "auto"})
@@ -14090,7 +14308,7 @@ TEST_F(RadiantTextQuery, VerticalOverflowPublishesPhysicalExtentsAndRestoresFitt
     }
 }
 
-TEST_F(RadiantTextQuery, FlowChildBaselineEligibilitySurvivesRetainedParentShifts) {
+TEST_F(RadiantDocumentTest, FlowChildBaselineEligibilitySurvivesRetainedParentShifts) {
     bool observed_shift_reuse = false;
     for (const char* mode : {"vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false, true}) {
@@ -14122,7 +14340,7 @@ TEST_F(RadiantTextQuery, FlowChildBaselineEligibilitySurvivesRetainedParentShift
     RecordProperty("retained_shift_observed", observed_shift_reuse ? 1 : 0);
 }
 
-TEST_F(RadiantTextQuery, FlowChildrenExportOnlyCompatibleFirstAndLastBaselineSets) {
+TEST_F(RadiantDocumentTest, FlowChildrenExportOnlyCompatibleFirstAndLastBaselineSets) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false, true}) for (const char* overflow : {"visible", "hidden"})
     for (unsigned own_line : {0u, 1u, 2u}) {
@@ -14174,7 +14392,7 @@ TEST_F(RadiantTextQuery, FlowChildrenExportOnlyCompatibleFirstAndLastBaselineSet
     }
 }
 
-TEST_F(RadiantTextQuery, BoxlessTextOrientationRetainsItsStyleOwnerAndRestoresFollowingText) {
+TEST_F(RadiantDocumentTest, BoxlessTextOrientationRetainsItsStyleOwnerAndRestoresFollowingText) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false, true}) for (const char* orientation : {"upright", "mixed", "sideways"})
     for (unsigned depth : {1u, 2u}) {
@@ -14239,7 +14457,7 @@ TEST_F(RadiantTextQuery, BoxlessTextOrientationRetainsItsStyleOwnerAndRestoresFo
     }
 }
 
-TEST_F(RadiantTextQuery, AlternativeImageMetricsProjectOntoLogicalAxes) {
+TEST_F(RadiantDocumentTest, AlternativeImageMetricsProjectOntoLogicalAxes) {
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false, true}) for (const char* display : {"inline", "inline-block", "block"})
     for (bool missing : {false, true}) {
@@ -14287,7 +14505,7 @@ TEST_F(RadiantTextQuery, AlternativeImageMetricsProjectOntoLogicalAxes) {
     }
 }
 
-TEST_F(RadiantTextQuery, FailedImagesWithEmptyAlternativesHaveZeroNaturalSize) {
+TEST_F(RadiantDocumentTest, FailedImagesWithEmptyAlternativesHaveZeroNaturalSize) {
     ASSERT_NE(load("test/html/layout_empty_image_alternative.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -14305,7 +14523,7 @@ TEST_F(RadiantTextQuery, FailedImagesWithEmptyAlternativesHaveZeroNaturalSize) {
     }
 }
 
-TEST_F(RadiantTextQuery, AligningASplitInlinePreservesItsBlockSiblingAndFragmentUnion) {
+TEST_F(RadiantDocumentTest, AligningASplitInlinePreservesItsBlockSiblingAndFragmentUnion) {
     ASSERT_NE(load("test/html/layout_split_inline_alignment.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 300;
@@ -14328,7 +14546,7 @@ TEST_F(RadiantTextQuery, AligningASplitInlinePreservesItsBlockSiblingAndFragment
     }
 }
 
-TEST_F(RadiantTextQuery, CollapsedTableEdgesUseLogicalGridAxesAndPhysicalSides) {
+TEST_F(RadiantDocumentTest, CollapsedTableEdgesUseLogicalGridAxesAndPhysicalSides) {
     const struct {
         const char* mode;
         bool vertical;
@@ -14402,7 +14620,7 @@ TEST_F(RadiantTextQuery, CollapsedTableEdgesUseLogicalGridAxesAndPhysicalSides) 
     }
 }
 
-TEST_F(RadiantTextQuery, CollapsedTableSpansGroupsAndOuterEdgesRetainGridGeometry) {
+TEST_F(RadiantDocumentTest, CollapsedTableSpansGroupsAndOuterEdgesRetainGridGeometry) {
     const struct {
         const char* name;
         const char* css;
@@ -14462,7 +14680,7 @@ TEST_F(RadiantTextQuery, CollapsedTableSpansGroupsAndOuterEdgesRetainGridGeometr
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicTablesShareCollapsedBorderGeometry) {
+TEST_F(RadiantDocumentTest, IntrinsicTablesShareCollapsedBorderGeometry) {
     ASSERT_NE(load("test/html/layout_table_intrinsic_collapsed_borders.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Sample { const char* id; float width; } samples[] = {
@@ -14507,7 +14725,7 @@ TEST_F(RadiantTextQuery, IntrinsicTablesShareCollapsedBorderGeometry) {
     }
 }
 
-TEST_F(RadiantTextQuery, TableRowsConsumeCollapsedBlockMarginsOnce) {
+TEST_F(RadiantDocumentTest, TableRowsConsumeCollapsedBlockMarginsOnce) {
     ASSERT_NE(load("test/html/layout_table_collapsed_margin_extents.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Sample { const char* id; float height; } samples[] = {
@@ -14564,7 +14782,7 @@ TEST_F(RadiantTextQuery, TableRowsConsumeCollapsedBlockMarginsOnce) {
     }
 }
 
-TEST_F(RadiantTextQuery, TableCellsMeasurePositionedInlineBoxesAndTheirRootStruts) {
+TEST_F(RadiantDocumentTest, TableCellsMeasurePositionedInlineBoxesAndTheirRootStruts) {
     ASSERT_NE(load("test/html/layout_table_inline_extents.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -14611,7 +14829,7 @@ TEST_F(RadiantTextQuery, TableCellsMeasurePositionedInlineBoxesAndTheirRootStrut
     }
 }
 
-TEST_F(RadiantTextQuery, TableCellAbsoluteChildrenUseFinalRowHeight) {
+TEST_F(RadiantDocumentTest, TableCellAbsoluteChildrenUseFinalRowHeight) {
     ASSERT_NE(load("test/html/layout_table_absolute_corner.html"), nullptr);
     ui.viewport_width = ui.window_width = 600;
     ui.viewport_height = ui.window_height = 400;
@@ -14643,7 +14861,7 @@ TEST_F(RadiantTextQuery, TableCellAbsoluteChildrenUseFinalRowHeight) {
     }
 }
 
-TEST_F(RadiantTextQuery, IntrinsicGridRowsRespectForcedBreaksWithoutSoftWrapping) {
+TEST_F(RadiantDocumentTest, IntrinsicGridRowsRespectForcedBreaksWithoutSoftWrapping) {
     ASSERT_NE(load("test/html/layout_intrinsic_text_wrap.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -14667,7 +14885,7 @@ TEST_F(RadiantTextQuery, IntrinsicGridRowsRespectForcedBreaksWithoutSoftWrapping
     }
 }
 
-TEST_F(RadiantTextQuery, BalancedForcedBreakGroupsMatchIndependentParagraphs) {
+TEST_F(RadiantDocumentTest, BalancedForcedBreakGroupsMatchIndependentParagraphs) {
     ASSERT_NE(load("test/html/layout_balance_paragraphs.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -14770,7 +14988,7 @@ TEST_F(RadiantTextQuery, BalancedForcedBreakGroupsMatchIndependentParagraphs) {
     }
 }
 
-TEST_F(RadiantTextQuery, AnonymousGridTextParticipatesInTracksAndRetainedLayout) {
+TEST_F(RadiantDocumentTest, AnonymousGridTextParticipatesInTracksAndRetainedLayout) {
     ASSERT_NE(load("test/html/layout_grid_anonymous_text.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -14841,7 +15059,7 @@ TEST_F(RadiantTextQuery, AnonymousGridTextParticipatesInTracksAndRetainedLayout)
     }
 }
 
-TEST_F(RadiantTextQuery, FontSpacingRetainsComputedLengthsAndInheritedPercentages) {
+TEST_F(RadiantDocumentTest, FontSpacingRetainsComputedLengthsAndInheritedPercentages) {
     ASSERT_NE(load("test/html/layout_font_spacing.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -14867,7 +15085,7 @@ TEST_F(RadiantTextQuery, FontSpacingRetainsComputedLengthsAndInheritedPercentage
     }
 }
 
-TEST_F(RadiantTextQuery, ImagePercentagesUseAutomaticContainingBlocksUsedWidth) {
+TEST_F(RadiantDocumentTest, ImagePercentagesUseAutomaticContainingBlocksUsedWidth) {
     ASSERT_NE(load("test/html/layout_percentage_image_basis.html"), nullptr);
     ui.viewport_width = ui.window_width = 600;
     ui.viewport_height = ui.window_height = 500;
@@ -14883,7 +15101,7 @@ TEST_F(RadiantTextQuery, ImagePercentagesUseAutomaticContainingBlocksUsedWidth) 
     }
 }
 
-TEST_F(RadiantTextQuery, WinningFontFamilyDeterminesTheMonospaceMediumAdjustment) {
+TEST_F(RadiantDocumentTest, WinningFontFamilyDeterminesTheMonospaceMediumAdjustment) {
     ASSERT_NE(load("test/html/layout_monospace_cascade.html"), nullptr);
     ui.viewport_width = ui.window_width = 600;
     ui.viewport_height = ui.window_height = 300;
@@ -14902,7 +15120,7 @@ TEST_F(RadiantTextQuery, WinningFontFamilyDeterminesTheMonospaceMediumAdjustment
     }
 }
 
-TEST_F(RadiantTextQuery, ZeroColumnWidthIsSpecifiedAndUsesTheMinimumPreferredWidth) {
+TEST_F(RadiantDocumentTest, ZeroColumnWidthIsSpecifiedAndUsesTheMinimumPreferredWidth) {
     ASSERT_NE(load("test/html/layout_zero_column_width.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -14928,7 +15146,7 @@ TEST_F(RadiantTextQuery, ZeroColumnWidthIsSpecifiedAndUsesTheMinimumPreferredWid
     EXPECT_FALSE(is_multicol_container(lam::view_as_block(automatic)));
 }
 
-TEST_F(RadiantTextQuery, IntrinsicWhitespaceCollapsesAtDirectAndNestedForcedBreaks) {
+TEST_F(RadiantDocumentTest, IntrinsicWhitespaceCollapsesAtDirectAndNestedForcedBreaks) {
     ASSERT_NE(load("test/html/layout_intrinsic_forced_break.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 200;
@@ -14953,7 +15171,7 @@ TEST_F(RadiantTextQuery, IntrinsicWhitespaceCollapsesAtDirectAndNestedForcedBrea
     EXPECT_FLOAT_EQ(direct_break->y, 0.0f);
 }
 
-TEST_F(RadiantTextQuery, ColumnGroupsUseTheirOwnUnbreakableLineConstraints) {
+TEST_F(RadiantDocumentTest, ColumnGroupsUseTheirOwnUnbreakableLineConstraints) {
     ASSERT_NE(load("test/html/layout_balance_group_constraints.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -14977,7 +15195,7 @@ TEST_F(RadiantTextQuery, ColumnGroupsUseTheirOwnUnbreakableLineConstraints) {
     }
 }
 
-TEST_F(RadiantTextQuery, UnboundedAutoColumnsSizeFromForcedRunsWithoutBalancing) {
+TEST_F(RadiantDocumentTest, UnboundedAutoColumnsSizeFromForcedRunsWithoutBalancing) {
     ASSERT_NE(load("test/html/layout_auto_forced_column_runs.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -15006,7 +15224,7 @@ TEST_F(RadiantTextQuery, UnboundedAutoColumnsSizeFromForcedRunsWithoutBalancing)
     }
 }
 
-TEST_F(RadiantTextQuery, InlinePreflightUsesItsOwnersWrappingPolicy) {
+TEST_F(RadiantDocumentTest, InlinePreflightUsesItsOwnersWrappingPolicy) {
     ASSERT_NE(load("test/html/layout_inline_policy_preflight.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -15031,7 +15249,7 @@ TEST_F(RadiantTextQuery, InlinePreflightUsesItsOwnersWrappingPolicy) {
     }
 }
 
-TEST_F(RadiantTextQuery, InlineBoundsRefreshRetainsItsOwnTextFontBox) {
+TEST_F(RadiantDocumentTest, InlineBoundsRefreshRetainsItsOwnTextFontBox) {
     ASSERT_NE(load("test/html/layout_own_inline_font_box.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 300;
@@ -15068,7 +15286,7 @@ TEST_F(RadiantTextQuery, InlineBoundsRefreshRetainsItsOwnTextFontBox) {
     EXPECT_FLOAT_EQ(vertical->height, 112.0f);
 }
 
-TEST_F(RadiantTextQuery, AutomaticHyphenationKeepsPunctuationAndOverflowingSyllables) {
+TEST_F(RadiantDocumentTest, AutomaticHyphenationKeepsPunctuationAndOverflowingSyllables) {
     ASSERT_NE(load("test/html/layout_hyphen_word_boundaries.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 600;
@@ -15121,7 +15339,7 @@ TEST_F(RadiantTextQuery, AutomaticHyphenationKeepsPunctuationAndOverflowingSylla
     EXPECT_EQ(replay_fragments, 4);
 }
 
-TEST_F(RadiantTextQuery, HyphenationCharacterLimitsInheritAndKeepComputedAuto) {
+TEST_F(RadiantDocumentTest, HyphenationCharacterLimitsInheritAndKeepComputedAuto) {
     ASSERT_NE(load("test/html/layout_hyphenate_limits.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 1000;
@@ -15154,7 +15372,7 @@ TEST_F(RadiantTextQuery, HyphenationCharacterLimitsInheritAndKeepComputedAuto) {
     EXPECT_EQ(layout_hyphenation_character_count("example", 7), 7u);
 }
 
-TEST_F(RadiantTextQuery, HyphenatedSyllablesClearFloatsWithTheirGeneratedMarks) {
+TEST_F(RadiantDocumentTest, HyphenatedSyllablesClearFloatsWithTheirGeneratedMarks) {
     ASSERT_NE(load("test/html/layout_hyphen_float_clearance.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -15208,7 +15426,7 @@ TEST_F(RadiantTextQuery, HyphenatedSyllablesClearFloatsWithTheirGeneratedMarks) 
     }
 }
 
-TEST_F(RadiantTextQuery, HyphenatedPaintKeepsContinuationGlyphsOnTheirOwnLine) {
+TEST_F(RadiantDocumentTest, HyphenatedPaintKeepsContinuationGlyphsOnTheirOwnLine) {
     ASSERT_NE(load("test/html/layout_hyphen_float_clearance.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -15251,7 +15469,7 @@ TEST_F(RadiantTextQuery, HyphenatedPaintKeepsContinuationGlyphsOnTheirOwnLine) {
     }
 }
 
-TEST_F(RadiantTextQuery, CjkHyphensKeepTheirPrecedingUnitExceptInLooseMode) {
+TEST_F(RadiantDocumentTest, CjkHyphensKeepTheirPrecedingUnitExceptInLooseMode) {
     ASSERT_NE(load("test/html/layout_cjk_hyphen_boundaries.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -15290,7 +15508,7 @@ TEST_F(RadiantTextQuery, CjkHyphensKeepTheirPrecedingUnitExceptInLooseMode) {
     EXPECT_FLOAT_EQ(loose->width, 16.0f);
 }
 
-TEST_F(RadiantTextQuery, HyphenLookaheadUsesOnlyFittingBreakOpportunities) {
+TEST_F(RadiantDocumentTest, HyphenLookaheadUsesOnlyFittingBreakOpportunities) {
     ASSERT_NE(load("test/html/layout_hyphen_lookahead_fit.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Sample { const char* id; float height, head_top, tail_top; } samples[] = {
@@ -15354,7 +15572,7 @@ TEST_F(RadiantTextQuery, HyphenLookaheadUsesOnlyFittingBreakOpportunities) {
     }
 }
 
-TEST_F(RadiantTextQuery, HyphenationLookaheadRetainsOutOfFlowAndEmptyInlineAnchors) {
+TEST_F(RadiantDocumentTest, HyphenationLookaheadRetainsOutOfFlowAndEmptyInlineAnchors) {
     ASSERT_NE(load("test/html/layout_hyphen_out_of_flow.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -15414,7 +15632,7 @@ TEST_F(RadiantTextQuery, HyphenationLookaheadRetainsOutOfFlowAndEmptyInlineAncho
     }
 }
 
-TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPaint) {
+TEST_F(RadiantDocumentTest, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPaint) {
     ASSERT_NE(load("test/html/layout_punctuation_space_metric.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -15474,7 +15692,7 @@ TEST_F(RadiantTextQuery, PunctuationSpaceUsesTheSelectedPeriodAcrossLayoutAndPai
     EXPECT_STREQ(content.get(), "x…");
 }
 
-TEST_F(RadiantTextQuery, RubyAnnotationFloatsKeepContainingBfcClearanceAndAutoHeight) {
+TEST_F(RadiantDocumentTest, RubyAnnotationFloatsKeepContainingBfcClearanceAndAutoHeight) {
     ASSERT_NE(load("test/html/layout_ruby_annotation_float_owner.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { DomElement* row; DomElement* clear; DomText* source; DomNode* parent;
@@ -15525,7 +15743,7 @@ TEST_F(RadiantTextQuery, RubyAnnotationFloatsKeepContainingBfcClearanceAndAutoHe
     }
 }
 
-TEST_F(RadiantTextQuery, RubyAnnotationIntrinsicProbesPreserveLiveFloatListsAndSelectedFlow) {
+TEST_F(RadiantDocumentTest, RubyAnnotationIntrinsicProbesPreserveLiveFloatListsAndSelectedFlow) {
     ASSERT_NE(load("test/html/layout_ruby_annotation_float_owner.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -15576,7 +15794,7 @@ TEST_F(RadiantTextQuery, RubyAnnotationIntrinsicProbesPreserveLiveFloatListsAndS
     }
 }
 
-TEST_F(RadiantTextQuery, RubyColumnsPreserveTheSourceOriginBesideInternalFloats) {
+TEST_F(RadiantDocumentTest, RubyColumnsPreserveTheSourceOriginBesideInternalFloats) {
     ASSERT_NE(load("test/html/layout_ruby_internal_float_origin.html"), nullptr);
     process_document_font_faces(&ui, document);
     const char* ids[] = {"p0-direct-short", "p0-direct-long", "p0-nested-short", "p0-nested-long",
@@ -15645,7 +15863,7 @@ TEST_F(RadiantTextQuery, RubyColumnsPreserveTheSourceOriginBesideInternalFloats)
     }
 }
 
-TEST_F(RadiantTextQuery, RubyWholeSegmentsRetainNewFloatExclusions) {
+TEST_F(RadiantDocumentTest, RubyWholeSegmentsRetainNewFloatExclusions) {
     ASSERT_NE(load("test/html/layout_ruby_internal_float_origin.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -15676,7 +15894,7 @@ TEST_F(RadiantTextQuery, RubyWholeSegmentsRetainNewFloatExclusions) {
     }
 }
 
-TEST_F(RadiantTextQuery, RubyFirstLinePositionChangesAcrossOneFragmentedSource) {
+TEST_F(RadiantDocumentTest, RubyFirstLinePositionChangesAcrossOneFragmentedSource) {
     ASSERT_NE(load("test/html/layout_ruby_first_line_position.html"), nullptr);
     process_document_font_faces(&ui, document);
     DomElement* row = dom_find_element_by_id(document->root, "fragmented");
@@ -15714,7 +15932,7 @@ TEST_F(RadiantTextQuery, RubyFirstLinePositionChangesAcrossOneFragmentedSource) 
     }
 }
 
-TEST_F(RadiantTextQuery, RubyFirstLinePositionFollowsSelectedLineInheritanceAndMetrics) {
+TEST_F(RadiantDocumentTest, RubyFirstLinePositionFollowsSelectedLineInheritanceAndMetrics) {
     ASSERT_NE(load("test/html/layout_ruby_first_line_position.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -15792,7 +16010,7 @@ TEST_F(RadiantTextQuery, RubyFirstLinePositionFollowsSelectedLineInheritanceAndM
     }
 }
 
-TEST_F(RadiantTextQuery, RubyLineSidesFollowLineOverWithoutReversingBlockProgression) {
+TEST_F(RadiantDocumentTest, RubyLineSidesFollowLineOverWithoutReversingBlockProgression) {
     ASSERT_NE(load("test/html/layout_ruby_line_sides.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -15883,7 +16101,7 @@ TEST_F(RadiantTextQuery, RubyLineSidesFollowLineOverWithoutReversingBlockProgres
     }
 }
 
-TEST_F(RadiantTextQuery, RubyInlineMarginsContributeToColumnsWithoutEnteringBorderBoxes) {
+TEST_F(RadiantDocumentTest, RubyInlineMarginsContributeToColumnsWithoutEnteringBorderBoxes) {
     ASSERT_NE(load("test/html/layout_ruby_inline_margins.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -15961,7 +16179,7 @@ TEST_F(RadiantTextQuery, RubyInlineMarginsContributeToColumnsWithoutEnteringBord
     }
 }
 
-TEST_F(RadiantTextQuery, RubyAnnotationMarginsSeparateLevelsAndReserveRepeatedLineSpace) {
+TEST_F(RadiantDocumentTest, RubyAnnotationMarginsSeparateLevelsAndReserveRepeatedLineSpace) {
     ASSERT_NE(load("test/html/layout_ruby_annotation_margins.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -16024,7 +16242,7 @@ TEST_F(RadiantTextQuery, RubyAnnotationMarginsSeparateLevelsAndReserveRepeatedLi
     }
 }
 
-TEST_F(RadiantTextQuery, RubyRelativeOffsetsSurviveColumnAndLinePlacement) {
+TEST_F(RadiantDocumentTest, RubyRelativeOffsetsSurviveColumnAndLinePlacement) {
     ASSERT_NE(load("test/html/layout_ruby_relative_offsets.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -16137,7 +16355,7 @@ TEST_F(RadiantTextQuery, RubyRelativeOffsetsSurviveColumnAndLinePlacement) {
     EXPECT_FLOAT_EQ(restored_x, ruby_x);
 }
 
-TEST_F(RadiantTextQuery, RubyFloatBandsUseCompleteHeightBeforeChoosingSourceLines) {
+TEST_F(RadiantDocumentTest, RubyFloatBandsUseCompleteHeightBeforeChoosingSourceLines) {
     ASSERT_NE(load("test/html/layout_ruby_float_band.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -16230,7 +16448,7 @@ TEST_F(RadiantTextQuery, RubyFloatBandsUseCompleteHeightBeforeChoosingSourceLine
     }
 }
 
-TEST_F(RadiantTextQuery, RubyAndIsolateSpacesFollowCompletedLineBoundaries) {
+TEST_F(RadiantDocumentTest, RubyAndIsolateSpacesFollowCompletedLineBoundaries) {
     ASSERT_NE(load("test/html/layout_ruby_trailing_space.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -16313,7 +16531,7 @@ TEST_F(RadiantTextQuery, RubyAndIsolateSpacesFollowCompletedLineBoundaries) {
     }
 }
 
-TEST_F(RadiantTextQuery, TerminalSpacesCollapseBeforeEmptyInlineDecorations) {
+TEST_F(RadiantDocumentTest, TerminalSpacesCollapseBeforeEmptyInlineDecorations) {
     ASSERT_NE(load("test/html/layout_terminal_space_decoration.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 300;
@@ -16344,7 +16562,7 @@ TEST_F(RadiantTextQuery, TerminalSpacesCollapseBeforeEmptyInlineDecorations) {
     EXPECT_FLOAT_EQ(annotation->height, 5.0f);
 }
 
-TEST_F(RadiantTextQuery, RubyAnnotationsUseExistingLeadingWithoutTheirOwnLineHeight) {
+TEST_F(RadiantDocumentTest, RubyAnnotationsUseExistingLeadingWithoutTheirOwnLineHeight) {
     ASSERT_NE(load("test/html/layout_ruby_annotation_leading.html"), nullptr);
     process_document_font_faces(&ui, document);
     const char* ids[] = {
@@ -16393,7 +16611,7 @@ TEST_F(RadiantTextQuery, RubyAnnotationsUseExistingLeadingWithoutTheirOwnLineHei
     }
 }
 
-TEST_F(RadiantTextQuery, RubyLeadingUsesAvailableBlockStartSpace) {
+TEST_F(RadiantDocumentTest, RubyLeadingUsesAvailableBlockStartSpace) {
     ASSERT_NE(load("test/html/layout_ruby_line_spacing.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -16468,7 +16686,7 @@ TEST_F(RadiantTextQuery, RubyLeadingUsesAvailableBlockStartSpace) {
     }
 }
 
-TEST_F(RadiantTextQuery, RubyDisplayFixupRecursesThroughInlineBoxesAndStopsAtFormattingContexts) {
+TEST_F(RadiantDocumentTest, RubyDisplayFixupRecursesThroughInlineBoxesAndStopsAtFormattingContexts) {
     ASSERT_NE(load("test/html/layout_ruby_display_fixup.html"), nullptr);
     struct Case { const char* id; CssEnum outer; CssEnum inner; bool list_item; } cases[] = {
         {"direct-block", CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT, false},
@@ -16516,7 +16734,7 @@ TEST_F(RadiantTextQuery, RubyDisplayFixupRecursesThroughInlineBoxesAndStopsAtFor
     EXPECT_EQ(resolve_display_value(recursive).inner, CSS_VALUE_FLOW_ROOT);
 }
 
-TEST_F(RadiantTextQuery, RubyFormattingFollowsComputedRolesAcrossRetainedDisplayChanges) {
+TEST_F(RadiantDocumentTest, RubyFormattingFollowsComputedRolesAcrossRetainedDisplayChanges) {
     ASSERT_NE(load("test/html/layout_ruby_computed_roles.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) {
@@ -16545,7 +16763,7 @@ TEST_F(RadiantTextQuery, RubyFormattingFollowsComputedRolesAcrossRetainedDisplay
     EXPECT_FLOAT_EQ(ruby->width, 40.0f);
 }
 
-TEST_F(RadiantTextQuery, RubyColumnsPairSegmentsLevelsAndAnonymousSpanningContent) {
+TEST_F(RadiantDocumentTest, RubyColumnsPairSegmentsLevelsAndAnonymousSpanningContent) {
     ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct RubyCase { const char* id; float width; } rubies[] = {
@@ -16641,7 +16859,7 @@ TEST_F(RadiantTextQuery, RubyColumnsPairSegmentsLevelsAndAnonymousSpanningConten
     EXPECT_FLOAT_EQ(measure_physical_widths(pairs).max_content, 70.0f);
 }
 
-TEST_F(RadiantTextQuery, RubyParallelTextFragmentsPreserveSourceAndMatchExplicitSplits) {
+TEST_F(RadiantDocumentTest, RubyParallelTextFragmentsPreserveSourceAndMatchExplicitSplits) {
     ASSERT_NE(load("test/html/layout_ruby_parallel_fragments.html"), nullptr);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
     DomElement* group = find("group");
@@ -16728,7 +16946,7 @@ TEST_F(RadiantTextQuery, RubyParallelTextFragmentsPreserveSourceAndMatchExplicit
     }
 }
 
-TEST_F(RadiantTextQuery, RubyParallelTextFragmentsRepeatAcrossLinesAndTrimSeparators) {
+TEST_F(RadiantDocumentTest, RubyParallelTextFragmentsRepeatAcrossLinesAndTrimSeparators) {
     ASSERT_NE(load("test/html/layout_ruby_parallel_fragments.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -16776,7 +16994,7 @@ TEST_F(RadiantTextQuery, RubyParallelTextFragmentsRepeatAcrossLinesAndTrimSepara
     }
 }
 
-TEST_F(RadiantTextQuery, RubyTextRunsFollowCommonOwnerWrappingAndRetainSources) {
+TEST_F(RadiantDocumentTest, RubyTextRunsFollowCommonOwnerWrappingAndRetainSources) {
     ASSERT_NE(load("test/html/layout_ruby_text_runs.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -16899,7 +17117,7 @@ TEST_F(RadiantTextQuery, RubyTextRunsFollowCommonOwnerWrappingAndRetainSources) 
     }
 }
 
-TEST_F(RadiantTextQuery, RubyIntrinsicWrappingResolvesInheritedPropertiesIndependently) {
+TEST_F(RadiantDocumentTest, RubyIntrinsicWrappingResolvesInheritedPropertiesIndependently) {
     ASSERT_NE(load("test/html/layout_ruby_text_runs.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui,document,false);
@@ -16922,7 +17140,7 @@ TEST_F(RadiantTextQuery, RubyIntrinsicWrappingResolvesInheritedPropertiesIndepen
     }
 }
 
-TEST_F(RadiantTextQuery, RubyRunSeparatorsKeepTheirSourceAndFontAcrossFragments) {
+TEST_F(RadiantDocumentTest, RubyRunSeparatorsKeepTheirSourceAndFontAcrossFragments) {
     ASSERT_NE(load("test/html/layout_ruby_run_spaces.html"),nullptr);
     process_document_font_faces(&ui,document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root,id); };
@@ -16976,7 +17194,7 @@ TEST_F(RadiantTextQuery, RubyRunSeparatorsKeepTheirSourceAndFontAcrossFragments)
     }
 }
 
-TEST_F(RadiantTextQuery, RubyMixedSegmentsPreservePairedFragmentsAndNeighborColumns) {
+TEST_F(RadiantDocumentTest, RubyMixedSegmentsPreservePairedFragmentsAndNeighborColumns) {
     ASSERT_NE(load("test/html/layout_ruby_mixed_segments.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -17070,7 +17288,7 @@ TEST_F(RadiantTextQuery, RubyMixedSegmentsPreservePairedFragmentsAndNeighborColu
     }
 }
 
-TEST_F(RadiantTextQuery, RubyAtomicContentKeepsIndependentCoordinatesInBothDirections) {
+TEST_F(RadiantDocumentTest, RubyAtomicContentKeepsIndependentCoordinatesInBothDirections) {
     ASSERT_NE(load("test/html/layout_ruby_atomic_coordinates.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -17152,7 +17370,7 @@ TEST_F(RadiantTextQuery, RubyAtomicContentKeepsIndependentCoordinatesInBothDirec
     }
 }
 
-TEST_F(RadiantTextQuery, RubyAnnotationUaLeadingYieldsToAuthorInheritanceAndResets) {
+TEST_F(RadiantDocumentTest, RubyAnnotationUaLeadingYieldsToAuthorInheritanceAndResets) {
     ASSERT_NE(load("test/html/layout_ruby_atomic_coordinates.html"), nullptr);
     process_document_font_faces(&ui, document);
     DomElement* reading = dom_find_element_by_id(document->root, "ua-reading");
@@ -17185,7 +17403,7 @@ TEST_F(RadiantTextQuery, RubyAnnotationUaLeadingYieldsToAuthorInheritanceAndRese
     }
 }
 
-TEST_F(RadiantTextQuery, RubyColumnsKeepPairedSourcesAcrossSharedLevelFragments) {
+TEST_F(RadiantDocumentTest, RubyColumnsKeepPairedSourcesAcrossSharedLevelFragments) {
     ASSERT_NE(load("test/html/layout_ruby_column_fragments.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -17261,7 +17479,7 @@ TEST_F(RadiantTextQuery, RubyColumnsKeepPairedSourcesAcrossSharedLevelFragments)
     }
 }
 
-TEST_F(RadiantTextQuery, RubySharedColumnLevelsKeepCommonBaselinesAcrossUnequalFonts) {
+TEST_F(RadiantDocumentTest, RubySharedColumnLevelsKeepCommonBaselinesAcrossUnequalFonts) {
     ASSERT_NE(load("test/html/layout_ruby_column_fragments.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -17339,7 +17557,7 @@ TEST_F(RadiantTextQuery, RubySharedColumnLevelsKeepCommonBaselinesAcrossUnequalF
     check();
 }
 
-TEST_F(RadiantTextQuery, RubyMixedAtomicUnitsKeepParallelTextAndLocalWrapping) {
+TEST_F(RadiantDocumentTest, RubyMixedAtomicUnitsKeepParallelTextAndLocalWrapping) {
     ASSERT_NE(load("test/html/layout_ruby_mixed_atomic.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -17403,7 +17621,7 @@ TEST_F(RadiantTextQuery, RubyMixedAtomicUnitsKeepParallelTextAndLocalWrapping) {
     }
 }
 
-TEST_F(RadiantTextQuery, RubyColumnProjectionKeepsCompletedParallelLinesTogether) {
+TEST_F(RadiantDocumentTest, RubyColumnProjectionKeepsCompletedParallelLinesTogether) {
     ASSERT_NE(load("test/html/layout_ruby_multicol_fragments.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id) { return dom_find_element_by_id(document->root, id); };
@@ -17490,7 +17708,7 @@ TEST_F(RadiantTextQuery, RubyColumnProjectionKeepsCompletedParallelLinesTogether
     }
 }
 
-TEST_F(RadiantTextQuery, RubyColumnAllocationsSurviveZeroAreaContentBounds) {
+TEST_F(RadiantDocumentTest, RubyColumnAllocationsSurviveZeroAreaContentBounds) {
     ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; const char* reading; const char* suffix; float width; } cases[] = {
@@ -17543,7 +17761,7 @@ TEST_F(RadiantTextQuery, RubyColumnAllocationsSurviveZeroAreaContentBounds) {
     }
 }
 
-TEST_F(RadiantTextQuery, RubyZeroSizeExplicitBasesRetainTheirBlockAxisEnvelope) {
+TEST_F(RadiantDocumentTest, RubyZeroSizeExplicitBasesRetainTheirBlockAxisEnvelope) {
     ASSERT_NE(load("test/html/layout_ruby_zero_base_envelope.html"), nullptr);
     process_document_font_faces(&ui, document);
     auto find = [&](const char* id, const char* suffix) {
@@ -17603,7 +17821,7 @@ TEST_F(RadiantTextQuery, RubyZeroSizeExplicitBasesRetainTheirBlockAxisEnvelope) 
     }
 }
 
-TEST_F(RadiantTextQuery, RubyIsolationIsComputedAndInheritedAcrossDisplayChanges) {
+TEST_F(RadiantDocumentTest, RubyIsolationIsComputedAndInheritedAcrossDisplayChanges) {
     ASSERT_NE(load("test/html/layout_ruby_isolation.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; CssEnum value; } cases[] = {
@@ -17645,7 +17863,7 @@ TEST_F(RadiantTextQuery, RubyIsolationIsComputedAndInheritedAcrossDisplayChanges
     EXPECT_EQ(inherited->block()->unicode_bidi, CSS_VALUE_ISOLATE);
 }
 
-TEST_F(RadiantTextQuery, RubyIntrinsicMinimumKeepsUnbrokenBaseWordsTogether) {
+TEST_F(RadiantDocumentTest, RubyIntrinsicMinimumKeepsUnbrokenBaseWordsTogether) {
     ASSERT_NE(load("test/html/layout_ruby_columns.html"), nullptr);
     process_document_font_faces(&ui, document);
     layout_html_doc(&ui, document, false);
@@ -17660,7 +17878,7 @@ TEST_F(RadiantTextQuery, RubyIntrinsicMinimumKeepsUnbrokenBaseWordsTogether) {
     }
 }
 
-TEST_F(RadiantTextQuery, RubyAndIsolateBoundsIncludeJustifiedDescendantAdvances) {
+TEST_F(RadiantDocumentTest, RubyAndIsolateBoundsIncludeJustifiedDescendantAdvances) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
@@ -17692,7 +17910,7 @@ TEST_F(RadiantTextQuery, RubyAndIsolateBoundsIncludeJustifiedDescendantAdvances)
     }
 }
 
-TEST_F(RadiantTextQuery, LeadingCollapsedSpacesAfterEmptyInlinesDoNotCreateWraps) {
+TEST_F(RadiantDocumentTest, LeadingCollapsedSpacesAfterEmptyInlinesDoNotCreateWraps) {
     StrBuf* source = strbuf_new();
     strbuf_append_str(source,
         "<!doctype html><style>@font-face{font-family:Ahem;src:url('../../test/layout/data/font/Ahem.ttf')}"
@@ -17723,7 +17941,7 @@ TEST_F(RadiantTextQuery, LeadingCollapsedSpacesAfterEmptyInlinesDoNotCreateWraps
     }
 }
 
-TEST_F(RadiantTextQuery, RubyHiddenAnnotationsRetainPairingWithoutContributingSize) {
+TEST_F(RadiantDocumentTest, RubyHiddenAnnotationsRetainPairingWithoutContributingSize) {
     ASSERT_NE(load("test/html/layout_ruby_hiding.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; float width; } cases[] = {
@@ -17827,7 +18045,7 @@ TEST_F(RadiantTextQuery, RubyHiddenAnnotationsRetainPairingWithoutContributingSi
     dom_range_release(range);
 }
 
-TEST_F(RadiantTextQuery, RubyAnnotationForcedBreaksBecomeSegmentBreaksWithoutChangingSource) {
+TEST_F(RadiantDocumentTest, RubyAnnotationForcedBreaksBecomeSegmentBreaksWithoutChangingSource) {
     ASSERT_NE(load("test/html/layout_ruby_break_normalization.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; float width; } cases[] = {
@@ -17928,7 +18146,7 @@ TEST_F(RadiantTextQuery, RubyAnnotationForcedBreaksBecomeSegmentBreaksWithoutCha
     }
 }
 
-TEST_F(RadiantTextQuery, AtomicOnlyInlineBoxesRetainTheirOwnFontContentArea) {
+TEST_F(RadiantDocumentTest, AtomicOnlyInlineBoxesRetainTheirOwnFontContentArea) {
     ASSERT_NE(load("test/html/layout_ruby_inline_font_box.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; float height; } cases[] = {
@@ -18013,7 +18231,7 @@ TEST_F(RadiantTextQuery, AtomicOnlyInlineBoxesRetainTheirOwnFontContentArea) {
     }
 }
 
-TEST_F(RadiantTextQuery, NestedRubyContainersIncludeParticipatingAnnotationLevels) {
+TEST_F(RadiantDocumentTest, NestedRubyContainersIncludeParticipatingAnnotationLevels) {
     ASSERT_NE(load("test/html/layout_ruby_nested_envelopes.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; bool inner_under; bool outer_under; } cases[] = {
@@ -18121,7 +18339,7 @@ TEST_F(RadiantTextQuery, NestedRubyContainersIncludeParticipatingAnnotationLevel
     }
 }
 
-TEST_F(RadiantTextQuery, NonInlineRubyRetainsItsBlockBoxAndFormatsPairedContent) {
+TEST_F(RadiantDocumentTest, NonInlineRubyRetainsItsBlockBoxAndFormatsPairedContent) {
     ASSERT_NE(load("test/html/layout_ruby_non_inline.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; float x, height; } cases[] = {
@@ -18229,7 +18447,7 @@ TEST_F(RadiantTextQuery, NonInlineRubyRetainsItsBlockBoxAndFormatsPairedContent)
     }
 }
 
-TEST_F(RadiantTextQuery, IsolatedInlineMarginsKeepBorderBoxesAndFollowingTextAdvances) {
+TEST_F(RadiantDocumentTest, IsolatedInlineMarginsKeepBorderBoxesAndFollowingTextAdvances) {
     ASSERT_NE(load("test/html/layout_bidi_isolated_margins.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; float x, content_x, following_x; bool box; float glyph_offset; } cases[] = {
@@ -18291,7 +18509,7 @@ TEST_F(RadiantTextQuery, IsolatedInlineMarginsKeepBorderBoxesAndFollowingTextAdv
     }
 }
 
-TEST_F(RadiantTextQuery, BaseOnlyRubyPreservesInlineFragmentsAndLeadingBreakUnits) {
+TEST_F(RadiantDocumentTest, BaseOnlyRubyPreservesInlineFragmentsAndLeadingBreakUnits) {
     ASSERT_NE(load("test/html/layout_ruby_base_fragments.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case { const char* id; const char* control; DomText* source = nullptr; } cases[] = {
@@ -18342,7 +18560,7 @@ TEST_F(RadiantTextQuery, BaseOnlyRubyPreservesInlineFragmentsAndLeadingBreakUnit
     }
 }
 
-TEST_F(RadiantTextQuery, RubyUnbrokenParallelUnitsConstrainOnlyTheirOwnInlineFlow) {
+TEST_F(RadiantDocumentTest, RubyUnbrokenParallelUnitsConstrainOnlyTheirOwnInlineFlow) {
     ASSERT_NE(load("test/html/layout_ruby_unbroken_units.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case {
@@ -18441,7 +18659,7 @@ TEST_F(RadiantTextQuery, RubyUnbrokenParallelUnitsConstrainOnlyTheirOwnInlineFlo
     }
 }
 
-TEST_F(RadiantTextQuery, RubyUnbrokenSegmentsUseTheirPairedWidthsAndChosenLines) {
+TEST_F(RadiantDocumentTest, RubyUnbrokenSegmentsUseTheirPairedWidthsAndChosenLines) {
     ASSERT_NE(load("test/html/layout_ruby_segment_lines.html"), nullptr);
     process_document_font_faces(&ui, document);
     struct Case {
@@ -18529,7 +18747,7 @@ TEST_F(RadiantTextQuery, RubyUnbrokenSegmentsUseTheirPairedWidthsAndChosenLines)
     }
 }
 
-TEST_F(RadiantTextQuery, RubyParallelKeepSuppressesSoftWbrWithoutChangingComputedWrapping) {
+TEST_F(RadiantDocumentTest, RubyParallelKeepSuppressesSoftWbrWithoutChangingComputedWrapping) {
     ASSERT_NE(load("test/html/layout_ruby_segment_lines.html"), nullptr);
     process_document_font_faces(&ui, document);
     for (bool retained : {false, true}) {
@@ -18568,7 +18786,7 @@ TEST_F(RadiantTextQuery, RubyParallelKeepSuppressesSoftWbrWithoutChangingCompute
     }
 }
 
-TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {
+TEST_F(RadiantDocumentTest, TextPreflightUsesItsActiveFloatContext) {
     ASSERT_NE(load("test/html/layout_float_line_context.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 600;
@@ -18608,7 +18826,7 @@ TEST_F(RadiantTextQuery, TextPreflightUsesItsActiveFloatContext) {
     EXPECT_FLOAT_EQ(inside->rect->next->x, 0.0f);
 }
 
-TEST_F(RadiantTextQuery, MixedSpaceStylesRetainTheirHangingPolicy) {
+TEST_F(RadiantDocumentTest, MixedSpaceStylesRetainTheirHangingPolicy) {
     ASSERT_NE(load("test/html/layout_mixed_hanging_spaces.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 1000;
@@ -18668,7 +18886,7 @@ TEST_F(RadiantTextQuery, MixedSpaceStylesRetainTheirHangingPolicy) {
     dom_range_release(range);
 }
 
-TEST_F(RadiantTextQuery, RtlAtomicReorderingPreservesThePhysicalLineOrigin) {
+TEST_F(RadiantDocumentTest, RtlAtomicReorderingPreservesThePhysicalLineOrigin) {
     ASSERT_NE(load("test/html/layout_bidi_atomic_origin.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -18689,7 +18907,7 @@ TEST_F(RadiantTextQuery, RtlAtomicReorderingPreservesThePhysicalLineOrigin) {
     }
 }
 
-TEST_F(RadiantTextQuery, OneColumnAutoHeightIncludesItsVisibleInFlowOverflow) {
+TEST_F(RadiantDocumentTest, OneColumnAutoHeightIncludesItsVisibleInFlowOverflow) {
     ASSERT_NE(load("test/html/layout_single_column_overflow.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 600;
@@ -18711,7 +18929,7 @@ TEST_F(RadiantTextQuery, OneColumnAutoHeightIncludesItsVisibleInFlowOverflow) {
     }
 }
 
-TEST_F(RadiantTextQuery, BalancedColumnsKeepSingleLineItemsWholeBeforeSpanners) {
+TEST_F(RadiantDocumentTest, BalancedColumnsKeepSingleLineItemsWholeBeforeSpanners) {
     ASSERT_NE(load("test/html/layout_multicol_line_floor.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 240;
@@ -18739,7 +18957,7 @@ TEST_F(RadiantTextQuery, BalancedColumnsKeepSingleLineItemsWholeBeforeSpanners) 
     }
 }
 
-TEST_F(RadiantTextQuery, InterCharacterJustificationUsesTypographicUnits) {
+TEST_F(RadiantDocumentTest, InterCharacterJustificationUsesTypographicUnits) {
     ASSERT_NE(load("test/html/layout_inter_character_justify.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 400;
@@ -18771,7 +18989,7 @@ TEST_F(RadiantTextQuery, InterCharacterJustificationUsesTypographicUnits) {
     EXPECT_TRUE(text_justify_character_gap(&cursive, 0x0645, CSS_VALUE_INTER_CHARACTER));
 }
 
-TEST_F(RadiantTextQuery, NestedBlockColumnsConsumeOuterCapacityOncePerSet) {
+TEST_F(RadiantDocumentTest, NestedBlockColumnsConsumeOuterCapacityOncePerSet) {
     ASSERT_NE(load("test/html/layout_nested_block_column_slots.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 600;
@@ -18791,7 +19009,7 @@ TEST_F(RadiantTextQuery, NestedBlockColumnsConsumeOuterCapacityOncePerSet) {
     }
 }
 
-TEST_F(RadiantTextQuery, AutoHeightWrappersKeepMonolithicOverflowSeparateFromFlow) {
+TEST_F(RadiantDocumentTest, AutoHeightWrappersKeepMonolithicOverflowSeparateFromFlow) {
     ASSERT_NE(load("test/html/layout_monolithic_wrapper_fragments.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 1800;
@@ -18820,7 +19038,7 @@ TEST_F(RadiantTextQuery, AutoHeightWrappersKeepMonolithicOverflowSeparateFromFlo
     }
 }
 
-TEST_F(RadiantTextQuery, NestedVerticalColumnsShareLogicalSlotsAndPublishPhysicalPieces) {
+TEST_F(RadiantDocumentTest, NestedVerticalColumnsShareLogicalSlotsAndPublishPhysicalPieces) {
     ASSERT_NE(load("test/html/layout_vertical_nested_column_slots.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -18866,7 +19084,7 @@ TEST_F(RadiantTextQuery, NestedVerticalColumnsShareLogicalSlotsAndPublishPhysica
     }
 }
 
-TEST_F(RadiantTextQuery, RelativeColumnInsetsMovePiecesWithoutMovingFollowingFlow) {
+TEST_F(RadiantDocumentTest, RelativeColumnInsetsMovePiecesWithoutMovingFollowingFlow) {
     ASSERT_NE(load("test/html/layout_multicol_relative_offsets.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -18897,7 +19115,7 @@ TEST_F(RadiantTextQuery, RelativeColumnInsetsMovePiecesWithoutMovingFollowingFlo
     expect_box("percentage-tail", 330.0f, 240.0f, 100.0f, 10.0f);
 }
 
-TEST_F(RadiantTextQuery, ClearedFloatRowsDoNotAddTheirIntrinsicWidthsTogether) {
+TEST_F(RadiantDocumentTest, ClearedFloatRowsDoNotAddTheirIntrinsicWidthsTogether) {
     ASSERT_NE(load("test/html/layout_float_clear_intrinsic.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -18921,7 +19139,7 @@ TEST_F(RadiantTextQuery, ClearedFloatRowsDoNotAddTheirIntrinsicWidthsTogether) {
     EXPECT_FLOAT_EQ(max_y, 66.0f);
 }
 
-TEST_F(RadiantTextQuery, OutOfFlowBlockificationRetainsInlineSeparators) {
+TEST_F(RadiantDocumentTest, OutOfFlowBlockificationRetainsInlineSeparators) {
     ASSERT_NE(load("test/html/layout_oof_inline_separators.html"), nullptr);
     layout_html_doc(&ui, document, false);
     struct Case { const char* lead; const char* tail; float gap; } cases[] = {
@@ -18953,7 +19171,7 @@ TEST_F(RadiantTextQuery, OutOfFlowBlockificationRetainsInlineSeparators) {
     EXPECT_FLOAT_EQ(tail->y - lead->y, 34.0f);
 }
 
-TEST_F(RadiantTextQuery, NestedInlineColumnsFitTheRemainingOuterSpace) {
+TEST_F(RadiantDocumentTest, NestedInlineColumnsFitTheRemainingOuterSpace) {
     ASSERT_NE(load("test/html/layout_nested_inline_remaining_columns.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -18981,7 +19199,7 @@ TEST_F(RadiantTextQuery, NestedInlineColumnsFitTheRemainingOuterSpace) {
         expect_box(entry.id, entry.x, entry.y, entry.width, entry.height);
 }
 
-TEST_F(RadiantTextQuery, SpannersCloseThePrecedingColumnFloatContext) {
+TEST_F(RadiantDocumentTest, SpannersCloseThePrecedingColumnFloatContext) {
     ASSERT_NE(load("test/html/layout_single_column_spanner_floats.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -19002,7 +19220,7 @@ TEST_F(RadiantTextQuery, SpannersCloseThePrecedingColumnFloatContext) {
     expect_box("later-float", 0.0f, 569.0f, 30.0f, 40.0f);
 }
 
-TEST_F(RadiantTextQuery, ZeroUsedFlexWidthsStayDefinite) {
+TEST_F(RadiantDocumentTest, ZeroUsedFlexWidthsStayDefinite) {
     ASSERT_NE(load("test/html/layout_zero_width_flex_lines.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -19018,7 +19236,7 @@ TEST_F(RadiantTextQuery, ZeroUsedFlexWidthsStayDefinite) {
         expect_box(entry.id, 0.0f, entry.y, entry.width, entry.height);
 }
 
-TEST_F(RadiantTextQuery, QuotationFontStyleUsesInheritanceAndAuthorRules) {
+TEST_F(RadiantDocumentTest, QuotationFontStyleUsesInheritanceAndAuthorRules) {
     ASSERT_NE(load("test/html/layout_q_font_inheritance.html"), nullptr);
     layout_html_doc(&ui, document, false);
     struct Case { const char* id; CssEnum style; } cases[] = {
@@ -19034,7 +19252,7 @@ TEST_F(RadiantTextQuery, QuotationFontStyleUsesInheritanceAndAuthorRules) {
     }
 }
 
-TEST_F(RadiantTextQuery, AvoidFloorsRespectDefiniteCapacityAndPrincipalMinimums) {
+TEST_F(RadiantDocumentTest, AvoidFloorsRespectDefiniteCapacityAndPrincipalMinimums) {
     ASSERT_NE(load("test/html/layout_avoid_fragmentainer_limits.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 1200;
@@ -19069,7 +19287,7 @@ TEST_F(RadiantTextQuery, AvoidFloorsRespectDefiniteCapacityAndPrincipalMinimums)
     expect_fragments("large-minimum-leaf", nested_content, 3);
 }
 
-TEST_F(RadiantTextQuery, NestedContinuousFlowUsesBalancedRowCapacities) {
+TEST_F(RadiantDocumentTest, NestedContinuousFlowUsesBalancedRowCapacities) {
     ASSERT_NE(load("test/html/layout_nested_balanced_rows.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -19111,7 +19329,7 @@ TEST_F(RadiantTextQuery, NestedContinuousFlowUsesBalancedRowCapacities) {
     expect_fragments("ordinary-leaf", outer, 4);
 }
 
-TEST_F(RadiantTextQuery, NestedAvoidBoxesUseFittingFragmentSlots) {
+TEST_F(RadiantDocumentTest, NestedAvoidBoxesUseFittingFragmentSlots) {
     ASSERT_NE(load("test/html/layout_nested_avoid_slots.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 1200;
@@ -19148,7 +19366,7 @@ TEST_F(RadiantTextQuery, NestedAvoidBoxesUseFittingFragmentSlots) {
     }
 }
 
-TEST_F(RadiantTextQuery, MulticolBaselinesUseCompletedLineFragments) {
+TEST_F(RadiantDocumentTest, MulticolBaselinesUseCompletedLineFragments) {
     ASSERT_NE(load("test/html/layout_multicol_fragment_baselines.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -19184,7 +19402,7 @@ TEST_F(RadiantTextQuery, MulticolBaselinesUseCompletedLineFragments) {
         expect_box(entry.id, entry.x, entry.y, entry.width, entry.height);
 }
 
-TEST_F(RadiantTextQuery, PhantomInlineCursorsFollowTheirColumnFragments) {
+TEST_F(RadiantDocumentTest, PhantomInlineCursorsFollowTheirColumnFragments) {
     ASSERT_NE(load("test/html/layout_multicol_phantom_static.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 1200;
@@ -19207,7 +19425,7 @@ TEST_F(RadiantTextQuery, PhantomInlineCursorsFollowTheirColumnFragments) {
     expect_box("ordinary", 0.0f, 940.0f, 320.0f, 40.0f);
 }
 
-TEST_F(RadiantTextQuery, StaticPositionsStopAtTheirInlineContainingBlock) {
+TEST_F(RadiantDocumentTest, StaticPositionsStopAtTheirInlineContainingBlock) {
     ASSERT_NE(load("test/html/layout_inline_containing_block_static.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -19226,7 +19444,7 @@ TEST_F(RadiantTextQuery, StaticPositionsStopAtTheirInlineContainingBlock) {
     }
 }
 
-TEST_F(RadiantTextQuery, AnonymousTableRolesOverrideMissingHTMLTagIdentity) {
+TEST_F(RadiantDocumentTest, AnonymousTableRolesOverrideMissingHTMLTagIdentity) {
     ASSERT_NE(load("test/html/layout_anonymous_table_intrinsic.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
     ui.viewport_height = ui.window_height = 200;
@@ -19244,7 +19462,7 @@ TEST_F(RadiantTextQuery, AnonymousTableRolesOverrideMissingHTMLTagIdentity) {
     }
 }
 
-TEST_F(RadiantTextQuery, MixedColumnFlowRetainsAtomicInlineLines) {
+TEST_F(RadiantDocumentTest, MixedColumnFlowRetainsAtomicInlineLines) {
     ASSERT_NE(load("test/html/layout_mixed_atomic_columns.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -19273,7 +19491,7 @@ TEST_F(RadiantTextQuery, MixedColumnFlowRetainsAtomicInlineLines) {
     expect_box("nested-last", 100.0f, 560.0f, 30.0f, 25.0f);
 }
 
-TEST_F(RadiantTextQuery, GridSpanningItemsRetainTheirMonolithicFirstLine) {
+TEST_F(RadiantDocumentTest, GridSpanningItemsRetainTheirMonolithicFirstLine) {
     ASSERT_NE(load("test/html/layout_grid_single_line_fragments.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -19302,7 +19520,7 @@ TEST_F(RadiantTextQuery, GridSpanningItemsRetainTheirMonolithicFirstLine) {
     }
 }
 
-TEST_F(RadiantTextQuery, SlicedInlineDecorationsFollowSourceEdgeFragments) {
+TEST_F(RadiantDocumentTest, SlicedInlineDecorationsFollowSourceEdgeFragments) {
     ASSERT_NE(load("test/html/layout_inline_slice_edges.html"), nullptr);
     ui.viewport_width = ui.window_width = 1200;
     ui.viewport_height = ui.window_height = 800;
@@ -19342,7 +19560,7 @@ TEST_F(RadiantTextQuery, SlicedInlineDecorationsFollowSourceEdgeFragments) {
 // A query without faces is the common chart case. Its cache key used to be
 // rejected, so every call built a new font context and rescanned every font
 // directory; all face-less queries in one evaluation now share one context.
-TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
+TEST_F(RadiantDocumentTest, FacelessQueriesReuseOneCachedFontContext) {
     uint64_t builds_before = radiant_query_font_build_count();
     DomElement* result = load("test/lambda/ui/_measure_text_cache.ls");
     ASSERT_NE(result, nullptr);
@@ -19355,9 +19573,9 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
     EXPECT_LE(radiant_query_font_build_count() - builds_before, 1u);
 }
 
-class RadiantFormControls : public RadiantTextQuery {};
+class RadiantFormControls : public RadiantDocumentTest {};
 
-TEST_F(RadiantTextQuery, PositionedInlineFitUsesTheCenteredStaticRectangleBudget) {
+TEST_F(RadiantDocumentTest, PositionedInlineFitUsesTheCenteredStaticRectangleBudget) {
     const struct State { float height, top, slot; } states[] = {{200,10,40},{200,70,40},{120,70,40},{200,10,40}};
     for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (bool rtl : {false,true}) for (unsigned kind = 0; kind < 3; kind++)
@@ -19394,7 +19612,7 @@ TEST_F(RadiantTextQuery, PositionedInlineFitUsesTheCenteredStaticRectangleBudget
     }
 }
 
-TEST_F(RadiantTextQuery, PositionedOrthogonalInlineFitPrecedesColumnMeasurementAndPlacement) {
+TEST_F(RadiantDocumentTest, PositionedOrthogonalInlineFitPrecedesColumnMeasurementAndPlacement) {
     const struct State { float font, width, height; } states[] = {{20,400,300},{30,400,300},{20,240,100},{20,400,300}};
     for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (bool rtl : {false,true}) for (bool border_box : {false,true})
@@ -19431,7 +19649,7 @@ TEST_F(RadiantTextQuery, PositionedOrthogonalInlineFitPrecedesColumnMeasurementA
     }
 }
 
-TEST_F(RadiantTextQuery, LogicalInsetPairsRetainIndependentSidesAcrossCascadeMutations) {
+TEST_F(RadiantDocumentTest, LogicalInsetPairsRetainIndependentSidesAcrossCascadeMutations) {
     unsigned states = 0;
     for (const char* mode : {"horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"})
     for (bool rtl : {false, true}) for (bool border_box : {false, true})
@@ -19479,7 +19697,7 @@ TEST_F(RadiantTextQuery, LogicalInsetPairsRetainIndependentSidesAcrossCascadeMut
     RecordProperty("retained_states", states);
 }
 
-TEST_F(RadiantTextQuery, FlexAxisPlacementFollowsLogicalStartsAcrossRetainedReflow) {
+TEST_F(RadiantDocumentTest, FlexAxisPlacementFollowsLogicalStartsAcrossRetainedReflow) {
     for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (const char* flow : {"row","row-reverse","column","column-reverse"})
     for (bool rtl : {false,true}) for (unsigned spacing : {0u,1u,2u}) {
@@ -19517,7 +19735,7 @@ TEST_F(RadiantTextQuery, FlexAxisPlacementFollowsLogicalStartsAcrossRetainedRefl
     }
 }
 
-TEST_F(RadiantTextQuery, NestedOrthogonalIntrinsicWidthsUseCompleteLineBlockExtents) {
+TEST_F(RadiantDocumentTest, NestedOrthogonalIntrinsicWidthsUseCompleteLineBlockExtents) {
     const struct State { float font, leading; } states[] = {{20,20},{20,30},{30,24},{20,20}};
     for (const char* outer_mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (const char* inner_mode : {"horizontal-tb","vertical-rl","vertical-lr"})
@@ -19562,7 +19780,7 @@ TEST_F(RadiantTextQuery, NestedOrthogonalIntrinsicWidthsUseCompleteLineBlockExte
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalSoftLineMeasuresPrecedePhysicalColumnsAndFloatPlacement) {
+TEST_F(RadiantDocumentTest, OrthogonalSoftLineMeasuresPrecedePhysicalColumnsAndFloatPlacement) {
     const struct State { float font, leading; } states[] = {{20,20},{20,30},{30,24},{20,20}};
     for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (bool rtl : {false,true}) for (bool hidden : {false,true})
@@ -19610,7 +19828,7 @@ TEST_F(RadiantTextQuery, OrthogonalSoftLineMeasuresPrecedePhysicalColumnsAndFloa
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalPercentageMarginsReachTheFinalBlockContribution) {
+TEST_F(RadiantDocumentTest, OrthogonalPercentageMarginsReachTheFinalBlockContribution) {
     for (const char* mode : {"vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
     for (bool logical : {false,true}) for (bool math : {false,true})
     for (bool inline_block : {false,true}) {
@@ -19650,7 +19868,7 @@ TEST_F(RadiantTextQuery, OrthogonalPercentageMarginsReachTheFinalBlockContributi
     }
 }
 
-TEST_F(RadiantTextQuery, OrthogonalPercentagePaddingFollowsTheFinalContainingInlineSize) {
+TEST_F(RadiantDocumentTest, OrthogonalPercentagePaddingFollowsTheFinalContainingInlineSize) {
     const struct State { float width, leaf, inline_size; } states[] = {
         {400,100,-1},{200,100,-1},{360,70,160},{240,0,-1},{400,100,-1}};
     for (const char* mode : {"horizontal-tb","vertical-rl","vertical-lr","sideways-rl","sideways-lr"})
@@ -19718,7 +19936,7 @@ TEST_F(RadiantTextQuery, OrthogonalPercentagePaddingFollowsTheFinalContainingInl
     }
 }
 
-TEST_F(RadiantTextQuery, ShrinkToFitPercentagePaddingKeepsCyclicAndUsedBasesSeparate) {
+TEST_F(RadiantDocumentTest, ShrinkToFitPercentagePaddingKeepsCyclicAndUsedBasesSeparate) {
     const struct State { const char* width; bool content; } states[] = {
         {"auto",false},{"auto",true},{"80px",true},{"120px",true},
         {"80px",false},{"auto",false},{"auto",true},{"auto",false}};
@@ -20716,7 +20934,7 @@ TEST_F(RadiantFormControls, NativeIntrinsicAxesFollowWritingModeAndRetainedPhysi
     }
 }
 
-TEST_F(RadiantTextQuery, RetainedSvgStylesMatchFreshCascadeAfterInheritedAndLocalChanges) {
+TEST_F(RadiantDocumentTest, RetainedSvgStylesMatchFreshCascadeAfterInheritedAndLocalChanges) {
     DomElement* svg = load_script_source(R"HTML(<style>
         #parent { color:rgb(10,20,30); --paint:rgb(30,40,50); font-size:18px }
         #result { width:40px; height:30px; fill:var(--paint); stroke:currentColor }
@@ -20893,7 +21111,7 @@ TEST_F(RadiantFormControls, RetainedStyleResetPreservesOpenSelectUntilControlRel
     EXPECT_TRUE(radiant_state_validate_interaction(state, nullptr));
 }
 
-class RadiantTextLayout : public RadiantTextQuery {
+class RadiantTextLayout : public RadiantDocumentTest {
 protected:
     void expect_snapshot_capture(const char* path, float final_width) {
         DomElement* box = load(path, true);
@@ -20980,7 +21198,7 @@ TEST_F(RadiantTextLayout, PhotoDtnaButtonHasThemeLeadingAndCenteredText) {
     }
 }
 
-class RadiantFrameDelivery : public RadiantTextQuery {};
+class RadiantFrameDelivery : public RadiantDocumentTest {};
 
 TEST_F(RadiantTextLayout, GraphLayoutConnectsAutomaticallyAcrossDocumentsAndReflow) {
     ASSERT_NE(load("test/html/automatic_graph_layout.html"), nullptr);

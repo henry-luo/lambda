@@ -118,9 +118,10 @@ Verification: a differential run of every UI fixture with replay on and off, wit
 ### 4.3 Document integration runner (2026-11-04)
 
 Renamed `test_radiant_text_query_gtest` to `test_radiant_document_gtest`, displayed
-as **Radiant Document Integration Tests**, to reflect its text/layout, controls,
+as **Radiant Document Tests**, to reflect its text/layout, controls,
 frame, audio and fullscreen coverage. Build configuration, documentation and CSS
-qualification references use the new name.
+qualification references use the new name. The shared fixture is
+`RadiantDocumentTest`; baseline filters use that identity.
 
 Production tuning retains each logical-axis mapping in the component-source
 cache instead of rebuilding it at orthogonal boundaries, allocates native CSS
@@ -139,6 +140,42 @@ The required Radiant baseline passed with **9,197 passed, 303 partial, zero
 failed and two skipped**. Under the original parallel scheduling history, this
 runner passed in **46.41 s wall**; that contention measurement is separate from the
 standalone target. Evidence: `temp/radiant-document-tuning/report.md`.
+
+### 4.4 Slow UI replay continuation (2026-11-05)
+
+The release replay profiles exposed three shared costs:
+
+- Contextual text measurement scanned and copied the entire surrounding word
+  for every grapheme. A `LayoutTextShapingScope` now retains local word boundaries
+  for one immutable layout/intrinsic-text walk and restores nested callers.
+  It borrows source bytes only during that walk (**D5.5.1 / D5.1.4**), stores no
+  font or measured advance, and keeps the existing cross-inline shaping path.
+- Native select labels computed min-content break opportunities when their
+  callers needed only the unwrapped width. A max-content entry into the shared
+  intrinsic-text walker skips that unused work.
+- View membership repeatedly searched the entire DOM. Registry-owned targets
+  now use their ancestor chain; unknown targets retain the address-only search
+  so a potentially retired pointer is not dereferenced (**D5.5.1**).
+
+Regressions cover nested text walks, source-address reuse, font changes, separate
+words, multilingual/spacing width equivalence, and live/detached/synthetic view
+membership. All replay events, assertions and forced-GC settings are retained.
+Release A/B evidence and the required aggregate results are recorded under
+`temp/radiant-slow-ten/report.md`. Two alternating serial runs per pinned release
+host put IME at **4.946 → 2.712 s** median wall and **5.258 → 2.601 s** CPU.
+Card editing improved **5.1%** in wall time; other UI changes are small, with
+selection/caret slightly slower and math unchanged. No several-seconds target
+is claimed for the remaining **8.4 s** slide, **11.7 s** Scene3D navigation or
+**9.3 s** module matrix.
+
+The complete document runner passed **536/536**, and state store **31/31**.
+The full core runner retains seven failures reproduced with pre-continuation
+source. An initial native audio crash passed alone and on two complete retries;
+its cause remains unresolved. The required Radiant baseline passed with **7,894
+passed, 303 partial, 14 skipped and zero failures / 8,211 total**, in **179.001 s**.
+Its parallel original-case latencies remain **7.6–25.7 s**, so the latency target
+remains open under aggregate load. UI passed **324/324**, View **280 + 1 skipped**,
+and the curated document selection **196/196**. Layout integer-cast lint passed.
 
 ## 5. What remains heavy
 

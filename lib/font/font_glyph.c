@@ -1068,7 +1068,7 @@ bool font_measure_text_range(FontHandle* handle, const char* text, int byte_len,
 #ifdef __APPLE__
     const FontMetrics* metrics = font_get_metrics(handle);
     float height = metrics ? metrics->ascender - metrics->descender : 0.0f;
-    return font_platform_measure_text_range(font_measurement_ct_font(handle), text,
+    return font_platform_measure_text_range(handle, font_measurement_ct_font(handle), text,
         byte_len, range_start, range_length, height, extents);
 #else
     return false;
@@ -1088,7 +1088,7 @@ static TextExtents font_measure_text_uncached(FontHandle* handle, const char* te
 #ifdef __APPLE__
     void* ct_font_ref = font_measurement_ct_font(handle);
     if (ct_font_ref) {
-        TextExtents shaped = font_platform_measure_text(ct_font_ref, text, byte_len, ext.height);
+        TextExtents shaped = font_platform_measure_text(handle, ct_font_ref, text, byte_len, ext.height);
         if (shaped.glyph_count > 0 || shaped.width > 0.0f) {
             return shaped;
         }

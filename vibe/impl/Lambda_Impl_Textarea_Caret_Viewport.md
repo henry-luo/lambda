@@ -37,7 +37,7 @@ not revise that geometry.
 
 ## Verification
 
-- `RadiantTextQuery.TextareaRevealsEditingCaretAndClipsScrolledContents` passes
+- `RadiantDocumentTest.TextareaRevealsEditingCaretAndClipsScrolledContents` passes
   at 1× and 2×. It checks visible caret pixels after navigation and value edits,
   scrolling back to the first line, a new final blank line, and zero caret/text
   pixels outside the content viewport. An active collapsed pointer gesture
