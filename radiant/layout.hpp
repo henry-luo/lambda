@@ -430,6 +430,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum overflow_wrap = CSS_VALUE_NORMAL,
                                                    CssEnum word_break = CSS_VALUE_NORMAL,
                                                    CssEnum line_break = CSS_VALUE_AUTO);
+float measure_text_max_content_width(LayoutContext* lycon, const char* text, size_t length);
 CssEnum get_inherited_text_enum(LayoutContext* lycon, CssPropertyCode property,
     CssEnum BlockProp::*member, CssEnum fallback, DomNode* node = nullptr);
 float layout_broken_image_fallback_inline_size(LayoutContext* lycon, ViewBlock* block,
@@ -4026,6 +4027,7 @@ typedef struct LayoutContext {
     lam::Up<radiant::CssResolvedStyle> css_style_recording;
     // the root of the outermost intrinsic query (LayoutMeasurementRootScope)
     lam::Up<DomElement> measurement_root;
+    lam::Up<struct LayoutTextShapingScope> text_shaping; // borrowed immutable text-walk context
     // a completed natural-size query precedes the root's final flex stretch.
     lam::Up<ViewBlock> natural_flex_height_root;
     // source-order generation is a separate stage; measurement/flow consume its immutable output.

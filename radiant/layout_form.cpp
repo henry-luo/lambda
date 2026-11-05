@@ -625,9 +625,7 @@ float layout_select_option_text_width(LayoutContext* lycon, DomElement* select) 
         }
         const char* label = child->as_element()->get_attribute("label");
         if (!label || !*label) continue;
-        TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-            lycon, label, strlen(label));
-        float label_width = widths.max_content;
+        float label_width = measure_text_max_content_width(lycon, label, strlen(label));
         if (label_width > max_text_width) max_text_width = label_width;
     }
     return max_text_width;
@@ -677,10 +675,9 @@ static float layout_select_option_text_intrinsic_width(LayoutContext* lycon,
     if (const char* override = dom_option_label_override(option))
         strbuf_append_str(label, override);
     else dom_option_text_normalized(option, label);
-    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-        lycon, label->str, label->length);
+    float width = measure_text_max_content_width(lycon, label->str, label->length);
     strbuf_free(label);
-    return widths.max_content;
+    return width;
 }
 
 static float layout_select_multiple_summary_width(LayoutContext* lycon,
@@ -689,9 +686,7 @@ static float layout_select_multiple_summary_width(LayoutContext* lycon,
     if (!summary) return 0.0f;
     strbuf_append_int(summary, selected_count);
     strbuf_append_str(summary, " selected");
-    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-        lycon, summary->str, summary->length);
-    float width = widths.max_content;
+    float width = measure_text_max_content_width(lycon, summary->str, summary->length);
     strbuf_free(summary);
     return width;
 }

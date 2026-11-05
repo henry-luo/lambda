@@ -290,6 +290,7 @@ try {
             assert.ok(!byName.has(name));
         }
         const cases = require('./radiant_baseline_cases.json');
+        const fullOnlyCases = require('./radiant_full_only_cases.json');
         for (const [name, selected] of Object.entries(cases)) {
             assert.ok(full.has(name) && byName.has(name), name);
             assert.equal(new Set(selected).size, selected.length);
@@ -298,9 +299,23 @@ try {
                 [...full.get(name).runnerArgs, '--gtest_filter=' + selected.join(':')]);
         }
         for (const [name, item] of full) {
-            if (!byName.has(name) || cases[name]) continue;
+            if (!byName.has(name) || cases[name] || fullOnlyCases[name]) continue;
             assert.deepEqual(byName.get(name), item, name);
         }
+    });
+    check('Original Three.js demo fixtures run only in the full Radiant gate', () => {
+        const reduced = JSON.parse(invoke(['--target=radiant', '--category=baseline', '--radiant-baseline', '--list']).stdout);
+        const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
+        const reducedView = reduced.find(t => t.baseName === view.baseName);
+        const excluded = require('./radiant_full_only_cases.json')[view.baseName];
+        const definitions = fs.readFileSync(path.join(ROOT, 'test/scene3d/cases.inc'), 'utf8');
+        const fixtureCases = [...definitions.matchAll(/^\{"([^"]+)", "test\/demo\/scene3d\/(?:three-gallery|observatory)\.html"/gm)]
+            .map(match => 'Scene3dTest.' + match[1]);
+        assert.deepEqual([...excluded].sort(), fixtureCases.sort());
+        assert.ok(excluded.length > 0);
+        assert.deepEqual(reducedView.runnerArgs,
+            view.runnerArgs.map(arg => arg + ':' + excluded.join(':')));
+        assert.ok(!view.runnerArgs.some(arg => excluded.some(name => arg.includes(name))));
     });
     check('Reduced Radiant case lists reject missing cases', () => {
         const { child, summary } = runSelected(['test_paged_media_gtest'], 'pass', ['--radiant-baseline']);

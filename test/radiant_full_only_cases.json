@@ -1,0 +1,8 @@
+{
+  "test_radiant_view_gtest": [
+    "Scene3dTest.PinnedUnmodifiedThreeRendererAndAddonProduceRealPixels",
+    "Scene3dTest.ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels",
+    "Scene3dTest.OrbitControlsRealInputCaptureCancellationAndRaycastAtCssDensity",
+    "Scene3dTest.RichThreeSceneRecoversDuringCrossfadeWithBoundedResources"
+  ]
+}

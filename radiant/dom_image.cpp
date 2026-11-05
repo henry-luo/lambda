@@ -78,6 +78,12 @@ extern "C" bool dom_engine_set_image_source(DomElement* element,const char* name
     source->pending = nullptr; mem_free(source->pending_url); source->pending_url = nullptr;
     source->surface={};if(element->embed) element->embed->img=nullptr;
     auto* ui=(UiContext*)element->doc->js.host_ui_context;if(!ui) return false;
+    // A live cache miss queues the transfer; a warm image completes immediately.
+    ImageSurface* image=load_document_image(element->doc,ui,name);
+    if(image) {
+        source->surface=image->self;if(element->embed) element->embed->img=lam::up(image);
+        return true;
+    }
     if (element->doc->resource_manager && document_dependency_admits(element->doc, name)) {
         Url* absolute = parse_url(element->doc->url, name);
         if (absolute && radiant_url_is_http(absolute)) {
@@ -93,10 +99,7 @@ extern "C" bool dom_engine_set_image_source(DomElement* element,const char* name
         }
         if (absolute) url_destroy(absolute);
     }
-    ImageSurface* image=load_document_image(element->doc,ui,name);
-    if(!image) return false;
-    source->surface=image->self;if(element->embed) element->embed->img=lam::up(image);
-    return true;
+    return false;
 }
 extern "C" bool dom_engine_image_natural_size(DomElement* element,int* width,int* height) {
     if(width) *width=0;if(height) *height=0;

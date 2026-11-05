@@ -1327,6 +1327,29 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     return mp;
 }
 
+// all match consumers share window selection and transient-regex ownership.
+struct PatternMatchWindow {
+    re2::RE2* re;
+    bool must_release;
+    int64_t first, count;
+    PatternMatchWindow(TypePattern* pattern, const char* str, size_t len,
+            int64_t limit, bool ignore_case) : re(NULL), must_release(false), first(0), count(0) {
+        if (!pattern || !str) return;
+        re = pattern_get_unanchored_options(pattern, ignore_case, &must_release);
+        if (re) lam::re2_glue_select_match_window(pattern_count_matches_with_re(re, str, len),
+            limit, &first, &count);
+    }
+    ~PatternMatchWindow() { if (must_release) lam::re2_glue_release(re); }
+    PatternMatchWindow(const PatternMatchWindow&) = delete;
+    PatternMatchWindow& operator=(const PatternMatchWindow&) = delete;
+};
+
+int64_t pattern_find_count_options(TypePattern* pattern, const char* str, size_t len,
+        int64_t limit, bool ignore_case) {
+    PatternMatchWindow window(pattern, str, len, limit, ignore_case);
+    return window.count;
+}
+
 List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len,
                                int64_t limit, bool ignore_case) {
     List* result = list();  // find() constructs an array (S2.5.7)
@@ -1334,19 +1357,11 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
     // an empty subject is searched too: `find("", \(d*))` has one empty match
-    if (!pattern || !str) return rooted_result.get();
-
-    bool must_release = false;
-    re2::RE2* re = pattern_get_unanchored_options(pattern, ignore_case, &must_release);
+    PatternMatchWindow window(pattern, str, len, limit, ignore_case);
+    re2::RE2* re = window.re;
     if (!re) return rooted_result.get();
-
-    int64_t total = pattern_count_matches_with_re(re, str, len);
-    int64_t first = 0, selected_count = 0;
-    lam::re2_glue_select_match_window(total, limit, &first, &selected_count);
-    if (selected_count == 0) {
-        if (must_release) lam::re2_glue_release(re);
-        return rooted_result.get();
-    }
+    int64_t first = window.first, selected_count = window.count;
+    if (selected_count == 0) return rooted_result.get();
 
     re2::StringPiece input(str, len);
     re2::StringPiece match;
@@ -1384,7 +1399,6 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
         if (pushed >= selected_count) break;
     }
 
-    if (must_release) lam::re2_glue_release(re);
     return rooted_result.get();
 }
 
@@ -1398,17 +1412,11 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
                                     int64_t limit, bool ignore_case) {
     if (!pattern || !str) return nullptr;
 
-    bool must_release = false;
-    re2::RE2* re = pattern_get_unanchored_options(pattern, ignore_case, &must_release);
+    PatternMatchWindow window(pattern, str, str_len, limit, ignore_case);
+    re2::RE2* re = window.re;
     if (!re) return nullptr;
-
-    int64_t total = pattern_count_matches_with_re(re, str, str_len);
-    int64_t first = 0, selected_count = 0;
-    lam::re2_glue_select_match_window(total, limit, &first, &selected_count);
-    if (selected_count == 0) {
-        if (must_release) lam::re2_glue_release(re);
-        return make_heap_string(str, str_len);
-    }
+    int64_t first = window.first, selected_count = window.count;
+    if (selected_count == 0) return make_heap_string(str, str_len);
 
     StrBuf* out = strbuf_new_cap(str_len + 1);
     re2::StringPiece input(str, str_len);
@@ -1439,7 +1447,6 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
 
     String* result = make_heap_string(out->str, out->length);
     strbuf_free(out);
-    if (must_release) lam::re2_glue_release(re);
     return result;
 }
 

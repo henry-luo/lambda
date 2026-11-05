@@ -730,6 +730,9 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
         if (info->fn == SYSFUNC_LEN && ((successful_arg && successful_arg->type_id == LMD_TYPE_STRING) || mvp_array_contract(successful_arg)))
             return lambda_type_accepts_error(arg_contract)
                 ? lambda_type_union_normalized(m->tp->pool, &TYPE_INT, &TYPE_ERROR) : &TYPE_INT;
+        if (info->fn == SYSFUNC_LEN)
+            return call->propagate ? &TYPE_INT :
+                lambda_type_union_normalized(m->tp->pool, &TYPE_INT, &TYPE_ERROR);
         if (mvp_native_math(info, arg)) return &TYPE_FLOAT;
         if ((info->fn == SYSFUNC_FLOAT || info->fn == SYSFUNC_INT) &&
                 (arg == LMD_TYPE_FLOAT || arg == LMD_TYPE_INT))
@@ -2588,6 +2591,8 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                     if (native_cast || native_int_math || native_length || native_ord || string_identity)
                         collects = reenters = false;
                     fails = mvp_value_contract(m, node)->type_id == LMD_TYPE_ANY;
+                    if (info->fn == SYSFUNC_LEN)
+                        fails |= lambda_type_accepts_error(mvp_value_contract(m, node));
                     fails |= call->propagate && call->propagated_error_type &&
                         lambda_type_accepts_error(call->propagated_error_type);
                 }

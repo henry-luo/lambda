@@ -3,7 +3,9 @@
 #include "radiant.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "platform.hpp"
 #include "../lambda/network/network_resource_manager.h"
+#include "../lambda/network/network_downloader.h"
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/font_resource_faces.h"
@@ -132,6 +134,37 @@ int radiant_init_network_support(DomDocument* doc,
 
     log_debug("network: network support initialized successfully");
     return 0;
+}
+
+void radiant_network_wake_platform(void* user_data) {
+    (void)user_data;
+    radiant_platform_post_empty_event();
+}
+
+static void live_image_complete(NetworkResource* resource, void* user_data) {
+    (void)user_data;
+    DomDocument* doc = resource && resource->manager ? resource->manager->document : nullptr;
+    // Reflow the live tree instead of retaining an element that may be replaced while fetching.
+    if (doc && doc->root) resource_manager_schedule_reflow(resource->manager, doc->root);
+}
+
+void radiant_request_live_image(DomDocument* doc, UiContext* ui, const char* source) {
+    if (!doc || !ui || !ui->async_script_navigation || ui->document != doc ||
+        !radiant_url_is_http(source) || !document_dependency_admits(doc, source)) return;
+    if (!doc->resource_manager) {
+        network_downloader_init_shared();
+        if (radiant_init_network_support(doc, nullptr, nullptr) != 0) return;
+    }
+    resource_manager_set_ui_context(doc->resource_manager, ui);
+    if (!ui->headless) {
+        resource_manager_set_wake_callback(doc->resource_manager, radiant_network_wake_platform, nullptr);
+    }
+    NetworkResource* resource = resource_manager_load(doc->resource_manager,
+        source, RESOURCE_IMAGE, PRIORITY_NORMAL, nullptr);
+    // Existing element/font callbacks already arrange their own layout updates.
+    if (resource && !resource->owner_element && !resource->on_complete && !resource->processed) {
+        resource->on_complete = live_image_complete;
+    }
 }
 
 // Helper to query selector all matching elements

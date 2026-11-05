@@ -9742,7 +9742,12 @@ Item fn_replace4(Item str_item, Item old_item, Item new_item, Item options_item)
     return fn_replace_impl(str_item, old_item, new_item, options);
 }
 
-static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions options) {
+static Item find_empty_result(bool count_only) {
+    return count_only ? Item{.item = i2it(0)} : Item{.array = array()};
+}
+
+static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions options,
+        bool count_only = false) {
     TypeId source_type = get_type_id(source_item);
     TypeId pattern_type = get_type_id(pattern_item);
 
@@ -9753,7 +9758,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     }
 
     // find() constructs an array (S2.5.7): `[]` for a null source or no match
-    if (source_type == LMD_TYPE_NULL) return {.array = array()};
+    if (source_type == LMD_TYPE_NULL) return find_empty_result(count_only);
 
     if (!is_text_type_id(source_type)) {
         log_debug("fn_find: first argument must be a string or symbol");
@@ -9777,9 +9782,11 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
             }
             if ((options.has_limit && options.limit == 0) ||
                 (options.has_last && options.last == 0)) {
-                return {.array = array()};
+                return find_empty_result(count_only);
             }
             int64_t pattern_limit = options_legacy_pattern_limit(options);
+            if (count_only) return {.item = i2it(pattern_find_count_options(pattern,
+                str_chars, str_len, pattern_limit, options.ignore_case))};
             List* r = pattern_find_all_options(pattern, str_chars, str_len, pattern_limit, options.ignore_case);
             return {.array = r};
         }
@@ -9790,19 +9797,26 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         log_debug("fn_find: second argument must be a string, symbol, or pattern");
         return ItemError;
     }
-    if (str_len == 0) return {.array = array()};
+    if (str_len == 0) return find_empty_result(count_only);
 
     const char* needle = pattern_item.get_chars();
     uint32_t needle_len = pattern_item.get_len();
 
-    List* result = list();
-    RootFrame roots(2);
-    Rooted<List*> rooted_result(roots, result);
-    Rooted<Map*> rooted_match(roots, (Map*)NULL);
-    if (!needle || needle_len == 0) return {.array = rooted_result.get()};
+    if (!needle || needle_len == 0) return find_empty_result(count_only);
 
     // S17.7.1: case-insensitive literal text folds as a pattern does, in RE2
     if (options.ignore_case) {
+        // literal folding keeps its existing checked search; the pattern and
+        // byte-literal paths below can count without constructing match records.
+        if (count_only) {
+            RootFrame roots(1);
+            Rooted<Item> found(roots, ItemNull);
+            found.set(fn_find_impl(source_item, pattern_item, options));
+            return fn_len_checked(found.get());
+        }
+        List* result = list();
+        RootFrame roots(1);
+        Rooted<List*> rooted_result(roots, result);
         if ((options.has_limit && options.limit == 0) ||
             (options.has_last && options.last == 0)) return {.array = rooted_result.get()};
         List* found = literal_find_all_ignore_case(str_chars, str_len, needle, needle_len,
@@ -9814,6 +9828,11 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     int64_t first = 0, selected_count = 0;
     // Limit selects the visible match window; replacement uses the same helper.
     select_match_window(total, options, &first, &selected_count);
+    if (count_only) return {.item = i2it(selected_count)};
+    List* result = list();
+    RootFrame roots(2);
+    Rooted<List*> rooted_result(roots, result);
+    Rooted<Map*> rooted_match(roots, (Map*)NULL);
     if (selected_count == 0) return {.array = rooted_result.get()};
 
     int64_t ordinal = 0;
@@ -9860,6 +9879,21 @@ Item fn_find3(Item source_item, Item pattern_item, Item options_item) {
     FindReplaceOptions options;
     if (!parse_find_replace_options(options_item, &options)) return ItemError;
     return fn_find_impl(source_item, pattern_item, options);
+}
+
+// a sole len consumer observes the same match window and errors, without
+// allocating the discarded array/maps (S2.5.7v4, S7.9.3, S17.7.1).
+Item fn_len_find2(Item source_item, Item pattern_item) {
+    GUARD_ERROR2(source_item, pattern_item);
+    FindReplaceOptions options = {0, 0, false, false, false};
+    return fn_find_impl(source_item, pattern_item, options, true);
+}
+
+Item fn_len_find3(Item source_item, Item pattern_item, Item options_item) {
+    GUARD_ERROR3(source_item, pattern_item, options_item);
+    FindReplaceOptions options;
+    if (!parse_find_replace_options(options_item, &options)) return ItemError;
+    return fn_find_impl(source_item, pattern_item, options, true);
 }
 
 // normalize with 1 arg (defaults to NFC)
@@ -11235,18 +11269,7 @@ Item fn_mutable_value(Item value) {
 }
 
 bool cow_item_is_container(Item value) {
-    switch (get_type_id(value)) {
-    case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP:
-    case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_VMAP:
-    case LMD_TYPE_VARRAY:
-    case LMD_TYPE_VELMT:
-        return true;
-    default:
-        return false;
-    }
+    return cow_type_is_container(get_type_id(value));
 }
 
 static Container* cow_item_container(Item value) {
@@ -11366,7 +11389,7 @@ static bool cow_profile_truthy(const char* value) {
         strcmp(value, "no") != 0;
 }
 
-static bool cow_profile_enabled(void) {
+bool cow_profile_enabled(void) {
 #ifdef LAMBDA_NO_FILE_IO
     return false;
 #else
@@ -11832,6 +11855,12 @@ Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item k
         current = fn_index(current, link == 0 ? key1 : key2);
     }
     return value;
+}
+
+// the direct-parent case cannot index, allocate or reenter; retain the same
+// sharing policy while exposing that narrower call effect (D5.4.4, D6.3.2).
+Item cow_bind_rmw_root(Item root, Item value) {
+    return cow_bind_rmw_handle(root, value, 0, ItemNull, ItemNull);
 }
 
 static Item cow_shape_child(ShapeEntry* entry, void* data) {

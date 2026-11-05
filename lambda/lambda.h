@@ -3515,6 +3515,8 @@ extern "C" {
     Item fn_replace4(Item str, Item old_str, Item new_str, Item options);
     Item fn_find2(Item source, Item pattern);
     Item fn_find3(Item source, Item pattern, Item options);
+    Item fn_len_find2(Item source, Item pattern);
+    Item fn_len_find3(Item source, Item pattern, Item options);
 
     Type* base_type(TypeId type_id);
     Type* const_type(int64_t type_index);
@@ -3686,7 +3688,17 @@ extern "C" {
     Item map_literal_put(Item owner, Item key, Item value);
     Item map_literal_spread(Item owner, Item source);
     Element* elmt_literal_begin(struct TypeElmt* type);
+    // one COW-kind policy for runtime capture and direct MIR (D5.4.1).
+    static inline bool cow_type_is_container(TypeId type) {
+        switch (type) {
+        case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_MAP:
+        case LMD_TYPE_ELEMENT: case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
+        case LMD_TYPE_VELMT: return true;
+        default: return false;
+        }
+    }
     bool cow_item_is_container(Item value);
+    bool cow_profile_enabled(void);
     Item cow_mark_shared(Item value);
     Item cow_mark_shared_profiled(Item value);
     Item array_num_set_cow_idx(Item owner, int64_t index, Item value);
@@ -3694,8 +3706,9 @@ extern "C" {
     Item cow_capture_value(Item value);
     Item cow_capture_value_profiled(Item value);
     Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item key2);  // CW34
+    Item cow_bind_rmw_root(Item root, Item value);
     // S9.3.1 insertion capture is unconditional; the helper remains the
-    // shared runtime entry point for marking captured values.
+    // runtime and direct MIR share the container-kind policy above.
     // Capture every field of a freshly built shaped literal (S9.3.1).
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);

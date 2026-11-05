@@ -2,6 +2,7 @@
   valid: true,
   local_models: 1,
   remote_models: 2,
+  local_thumbnails: true,
   pinned_https: true,
   deployed_muscle: true,
   vertices: 11382,

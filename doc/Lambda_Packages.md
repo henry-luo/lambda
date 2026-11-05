@@ -68,6 +68,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
 | `scene3d` | `lambda.scene3d` | Native macOS profile | Declarative meshes, cameras, PBR materials, procedural/HDR environments, shadows, asset loading and animation, GLSL shader materials and GPU simulations; see [§27](#27-scene3d--native-3d-scenes) | `lambda view` / `render` on a script; `lambda demo dreamhome` |
 | `scene3d.runtime` | `lambda.scene3d.runtime` | Initial native coordinator | Live scene play/pause, bounded fixed stepping, authored-state seek/reset, time scale and runtime snapshots; see [runtime controls](#live-runtime-controls) | Event handlers in `lambda view` |
+| `scene3d.viewer` | `lambda.scene3d.viewer` | Native macOS profile | Retained pointer, keyboard and toolbar camera controls over a Scene3D DOM node (**D9.5.6**) | Lambda Scene3D demo views |
 | `scene3d.outdoor` | `lambda.scene3d.outdoor` | Native macOS profile | Fog, thin-foliage lighting, shared lit wind and physical ripple-water helpers; see [Outdoor Scene3D](Lambda_Scene3d_Outdoor.md) | `lambda view test/demo/scene3d/outdoors.ls` |
 | `scene3d.effects` | `lambda.scene3d.effects` | Native macOS profile | Five animated GLSL image effects, raster/SVG textures and generated SVG sources; see the [effects guide](Lambda_Scene3d_Effects.md) | `lambda demo scene3d` → Make waves |
 | `scene3d.motion` | `lambda.scene3d.motion`, `lambda.scene3d.motion.humanoid` | Experimental character profile | FBX and BVH characters in one `<character>` schema: humanoid roles, retargeting, clip operations, mannequins and controller playback in `<scene3d>`; see [§22](#22-scene3dmotion--character-animation) | `input(path, {type: 'character'})`; `lambda view` on a script |
@@ -3168,6 +3169,30 @@ native builder as live delivery. Native records and queued values own their
 copies after private worlds/clip pools are destroyed or source descriptions
 change. `animation_event_replay` advertises this authored replay capability;
 logical graph or command-history replay is a separate later package feature.
+
+### Retained camera controls
+
+Import `lambda.scene3d.viewer` to add a retained Lambda view around a Scene3D
+element. The viewer updates the live DOM camera through the `radiant-dom` host
+boundary (**D9.5.6**); its event handlers and camera procedures are procedural
+(**S12.1.1v3**).
+
+| Function or procedure | Behavior |
+|---|---|
+| `source(scene, lens, initial = null, labels = {}, chrome = true)` | Build a retained viewer source from a scene and prepared camera. Set `initial` to restore a live pose and `chrome` to false to omit the standard toolbar and help. |
+| `interactive(scene, lens, initial = null, labels = {}, chrome = true)` | Apply the viewer source directly. |
+| `controls(labels = {})` | Build the standard orbit, zoom and reset toolbar for use with a viewer. |
+| `snapshot(owner, id, fallback)` | Read the live camera with the given DOM id into a prepared camera, using `fallback` for other fields. |
+| `set_camera(owner, id, next)`, `command(owner, id, action)` | Update the retained camera or issue an orbit, zoom, reset, preset-view or interaction-mode command. |
+
+Dragging orbits; Shift-drag or pan mode pans; the wheel zooms. Arrow keys
+orbit, `+` and `-` zoom, and `R` resets. Set `pan_arrows` in `labels` to pan
+with unshifted arrow keys. The options `min_distance`, `max_distance`,
+`min_polar` and `max_polar` constrain camera movement; `after` inserts custom
+elements after the scene, and the remaining label fields customize the toolbar
+and help. Retain `source` in a binding when a parent view regenerates its
+content, and use `snapshot` before replacing a scene descriptor to preserve the
+live pose.
 
 ### Live runtime controls
 

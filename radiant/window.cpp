@@ -305,10 +305,6 @@ static void view_wake_platform(void* user_data) {
     radiant_platform_post_empty_event();
 }
 
-static void network_wake_platform(void* user_data) {
-    view_wake_platform(user_data);
-}
-
 static void view_cleanup_js_batch_state(void) {
     if (!script_runner_js_batch_cleanup_unsafe()) {
         js_event_loop_shutdown();
@@ -1632,6 +1628,7 @@ static const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
 // The desktop loop below waits on the platform; a display-link host calls this
 // from its own run loop instead.
 double radiant_window_tick(RadiantWindowLoop* loop) {
+    EventSimProfileTurn profile(loop->sim_ctx);
     double currentTime = radiant_frame_clock_now(loop->frame_clock);
     bool frame_driven = false;
 
@@ -2154,7 +2151,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 resource_manager_set_ui_context(doc->resource_manager, &ui_context);
                 if (!headless && doc->resource_manager) {
                     resource_manager_set_wake_callback(doc->resource_manager,
-                                                       network_wake_platform, NULL);
+                                                       radiant_network_wake_platform, NULL);
                 }
                 log_notice("view: shared network support ready for HTTP document");
             }
@@ -2298,6 +2295,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (sim_ctx && sim_ctx->is_running) {
             double current_time = 0.0;
             while (sim_ctx->is_running && !ui_context.render_failed) {
+                EventSimProfileTurn profile(sim_ctx);
+                // Headless replays must publish network completions just like window ticks.
+                if (ui_context.document && ui_context.document->resource_manager) {
+                    resource_manager_flush_layout_updates(ui_context.document->resource_manager);
+                }
                 SimEvent* next_ev = (sim_ctx->current_index >= 0 &&
                     sim_ctx->current_index < sim_ctx->events->length)
                     ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index]
@@ -2328,6 +2330,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                     // so do Lambda tasks whose IO, child processes or thread-pool jobs keep the loop alive.
                     uv_loop_t* task_loop = lambda_uv_loop();
                     if (radiant_async_document_loads_pending(&ui_context) ||
+                        (ui_context.document && ui_context.document->resource_manager &&
+                         !resource_manager_is_fully_loaded(ui_context.document->resource_manager)) ||
                         dom_document_has_pending_work(ui_context.document) ||
                         radiant_speech_wall_clock_pending(ui_context.document) ||
                         radiant_video_events_pending(ui_context.document ? ui_context.document->state : nullptr) ||

@@ -2,6 +2,7 @@
 #include "layout_ruby.hpp"
 #include "layout_table.hpp"
 #include "css_resolved_style.hpp"
+#include "layout_text_context.hpp"
 
 namespace radiant { static bool intrinsic_height_cacheable(LayoutContext*, DomElement*); }
 
@@ -1701,17 +1702,20 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                                                            CssEnum word_break,
                                                            CssEnum line_break,
                                                            IntrinsicTextLinePacking* packing = nullptr,
-                                                           IntrinsicTextBreakObserver* observer = nullptr) {
+                                                           IntrinsicTextBreakObserver* observer = nullptr,
+                                                           bool measure_minimum = true) {
     bool break_anywhere = overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE;
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD);
     bool break_all = (word_break == CSS_VALUE_BREAK_ALL);
     bool cjk_breaks = (word_break != CSS_VALUE_KEEP_ALL);
     TextIntrinsicWidths result = {0, 0};
-    LayoutTextBreaks native_breaks(text, length, !break_anywhere && !break_all);
+    LayoutTextBreaks native_breaks(text, length, measure_minimum && !break_anywhere && !break_all);
 
     if (!text || length == 0) {
         return result;
     }
+    LayoutTextShapingScope shaping(lycon, nullptr, (const unsigned char*)text,
+        (const unsigned char*)text + length);
     // CSS Text 3 §5.4: break-word permits emergency unit breaks without reducing min-content.
     const unsigned char* text_end = (const unsigned char*)text + length;
     const unsigned char* first_unit_end = break_word
@@ -1741,6 +1745,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
     };
     auto record_segment = [&](size_t source_end, bool at_break = true,
                               float end_adjustment = 0.0f, float next_adjustment = 0.0f) {
+        if (!measure_minimum) return;
         if (observer) observer->record(segment_start, source_end, total_width + end_adjustment,
             total_width + next_adjustment, first_adjustment, at_break);
         segment_start = source_end;
@@ -1774,7 +1779,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 if (i >= trailing_space_start) trailing_advance += 4.0f;
             } else {
                 append_advance(11.0f);  // use the same font fallback width.
-                if (layout_text_break_opportunity(ch, ch,
+                if (measure_minimum && layout_text_break_opportunity(ch, ch,
                         (const unsigned char*)text + i + 1,
                         (const unsigned char*)text + length, native_breaks, i + 1,
                         break_anywhere, break_all, cjk_breaks, line_break)) {
@@ -1880,7 +1885,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     prev_is_zwj_base = false;
                     is_word_start = false;
                     i += shaped_script_bytes;
-                    if (layout_text_break_opportunity(shaped_script_first, shaped_script_last,
+                    if (measure_minimum && layout_text_break_opportunity(shaped_script_first, shaped_script_last,
                             &str[i], str + length, native_breaks, i,
                             break_anywhere, break_all, cjk_breaks, line_break)) {
                         record_segment(i);
@@ -1917,7 +1922,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     i += cluster_bytes;
                     // emergency wrapping adds boundaries between clusters,
                     // so min-content must retain each whole shaped cluster.
-                    if (layout_text_break_opportunity(cluster_first, cluster_last,
+                    if (measure_minimum && layout_text_break_opportunity(cluster_first, cluster_last,
                             &str[i], str + length, native_breaks, i,
                             break_anywhere, break_all, cjk_breaks, line_break)) {
                         record_segment(i);
@@ -1952,7 +1957,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 prev_is_zwj_base = false;
                 is_word_start = false;
                 i += shaped_bytes;
-                if (layout_text_break_opportunity(shaped_first_cp, shaped_last_cp,
+                if (measure_minimum && layout_text_break_opportunity(shaped_first_cp, shaped_last_cp,
                         &str[i], str + length, native_breaks, i,
                         break_anywhere, break_all, cjk_breaks, line_break)) {
                     // a shaped Latin run can end at a native CJK boundary;
@@ -2064,7 +2069,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         prev_text_autospace_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
 
-        if (layout_text_break_opportunity(codepoint, codepoint,
+        if (measure_minimum && layout_text_break_opportunity(codepoint, codepoint,
                 &str[i], str + length, native_breaks, i,
                 break_anywhere, break_all, cjk_breaks, line_break)) {
             record_segment(i);
@@ -2098,6 +2103,13 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         text_transform, font_variant, white_space, overflow_wrap, word_break, line_break);
     intrinsic_text_apply_no_wrap(&widths, white_space);
     return widths;
+}
+
+float measure_text_max_content_width(LayoutContext* lycon, const char* text, size_t length) {
+    // native labels need their unwrapped advance, without computing unused break opportunities.
+    return measure_text_intrinsic_segments(lycon, text, length, CSS_VALUE_NONE,
+        CSS_VALUE_NONE, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+        CSS_VALUE_AUTO, nullptr, nullptr, false).max_content;
 }
 
 IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,

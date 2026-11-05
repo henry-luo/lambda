@@ -18,4 +18,4 @@ ui.page("bounce",scene,{
     labels:["BALLS IN THE AIR","HIGHEST CENTRE","TRANSLATIONAL ENERGY"],
     note:"Restitution e: blue 0.00 · green 0.35 · amber 0.60 · coral 0.80 · violet 0.95. The same scene produces the live motion and the sampled traces.",
     chart:figure,chart_note:"A deterministic six-second batch run, sampled every four ticks. Each curve uses positions returned by the native physics engine."
-})
+})^

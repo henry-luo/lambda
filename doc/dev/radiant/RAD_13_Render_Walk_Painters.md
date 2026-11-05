@@ -83,7 +83,7 @@ All collections exclude `RDT_VIEW_NONE` records before classifying their retaine
 styles. Signed traversal also stops at a hidden ancestor. A `display:none` record
 can retain border/shadow properties and old dimensions in the selected view's
 storage (D5.1.4); these records cannot contribute stacking paint or hit layers.
-`RadiantTextQuery.HiddenPositionedPopupDoesNotPaintRetainedDecoration` and
+`RadiantDocumentTest.HiddenPositionedPopupDoesNotPaintRetainedDecoration` and
 `test/ui/slide_menu_dismiss.json` cover closing and reopening styled popups.
 
 Zero-level descendant lifting remains partial. Absolute/fixed children follow in-flow step-8 boxes rather than interleaving with them by tree order. Negative positioned inline spans and complete isolation/flex/grid context rules remain outside the signed block-layer path. The shared helper preserves source order for equal z-index entries. `event.cpp` consumes its lists in reverse, testing negative layers after flow children and before the context's own background. `test/ui/{negative,positive}_stacking.{html,json}` and the corresponding `RenderOutputParity` cases cover paragraph anchors, nested zero contexts, ancestor clips, containing-block offsets, hit order and PNG/SVG/PDF parity.

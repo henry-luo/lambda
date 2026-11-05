@@ -454,7 +454,7 @@ struct EventSimContext {
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
     double input_turn_ms;        // virtual latency per input primitive; zero uses explicit waits only
     double event_interval_ms;    // delay between commands; zero supports exact-time rendering checks
-    bool profile_events;         // opt-in release-build wall timings, indexed like the fixture events
+    bool profile_events;         // opt-in wall timings, indexed like the fixture events
     double* event_durations_ms;
     bool initial_render;        // export fixtures may assert vector paint before the first raster pass
     double current_time;         // deterministic host clock in seconds
@@ -518,6 +518,17 @@ void event_sim_free(EventSimContext* ctx);
 // Returns true if simulation is still running
 // uicon is cast to UiContext* internally
 bool event_sim_update(EventSimContext* ctx, void* uicon, struct RadiantWindow* window, double current_time);
+
+// includes host pumping/retirement and every retry turn in its original fixture step.
+struct EventSimProfileTurn {
+    EventSimContext* context = nullptr;
+    int index = 0;
+    uint64_t started = 0;
+    explicit EventSimProfileTurn(EventSimContext* context);
+    ~EventSimProfileTurn();
+    EventSimProfileTurn(const EventSimProfileTurn&) = delete;
+    EventSimProfileTurn& operator=(const EventSimProfileTurn&) = delete;
+};
 
 // Headless hosts use these to wait on the JS loop until the next assertion
 // attempt, while waking early when an actual timer or task becomes ready.

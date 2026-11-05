@@ -17474,7 +17474,7 @@ TEST(FontMetricTest, SystemColorGlyphAdvancesExcludeAutomaticTracking) {
         EXPECT_TRUE(font_platform_has_color_glyphs(font));
         // independent Chromium captures establish advances, including bitmap optical sizing.
         EXPECT_NEAR(font_platform_get_glyph_advance(font, 0x1F600), entry.advance, 0.01f);
-        TextExtents run = font_platform_measure_text(font, "😀", 4, 0.0f);
+        TextExtents run = font_platform_measure_text(nullptr, font, "😀", 4, 0.0f);
         EXPECT_NEAR(run.width, entry.advance, 0.01f);
         font_platform_destroy_ct_font(font);
     }

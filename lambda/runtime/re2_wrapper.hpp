@@ -126,6 +126,8 @@ TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int
 List* pattern_find_all(TypePattern* pattern, const char* str, size_t len);
 List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len,
                                int64_t limit, bool ignore_case);
+int64_t pattern_find_count_options(TypePattern* pattern, const char* str, size_t len,
+                                   int64_t limit, bool ignore_case);
 
 /**
  * Replace matches of pattern in string, stepping as ECMAScript replaceAll does

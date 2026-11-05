@@ -8,12 +8,17 @@
     {"type": "assert_attribute", "target": {"selector": "#owner"}, "attribute": "data-same", "equals": "true"},
     {"type": "click", "target": {"selector": "#noop"}},
     {"type": "assert_attribute", "target": {"selector": "#owner"}, "attribute": "data-same", "equals": "true"},
+    {"type": "script", "js": "window.heldInput=document.getElementById('kept');heldInput.value='native edit'"},
     {"type": "click", "target": {"selector": "#change"}},
     {"type": "assert_text", "target": {"selector": "#value"}, "equals": "1"},
+    {"type": "assert_script", "js": "heldInput===document.getElementById('kept') && heldInput.value==='native edit'"},
+    {"type": "assert_rect", "target": {"selector": "#row"}, "width": 150, "height": 40},
     {"type": "click", "target": {"selector": "#noop"}},
     {"type": "assert_attribute", "target": {"selector": "#owner"}, "attribute": "data-same", "equals": "true"},
     {"type": "assert_attribute", "target": {"selector": "#owner"}, "attribute": "data-kept", "equals": "yes"},
     {"type": "click", "target": {"selector": "#change"}},
-    {"type": "assert_text", "target": {"selector": "#value"}, "equals": "2"}
+    {"type": "assert_text", "target": {"selector": "#value"}, "equals": "2"},
+    {"type": "assert_script", "js": "heldInput===document.getElementById('kept') && heldInput.value==='native edit'"},
+    {"type": "assert_rect", "target": {"selector": "#row"}, "width": 100, "height": 30}
   ]
 }
