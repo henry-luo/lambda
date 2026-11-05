@@ -3095,6 +3095,22 @@ static float intrinsic_resolved_height_limit_or(LayoutContext* lycon,
                    : layout_explicit_max_axis_or(view, false, -1.0f);
 }
 
+static float intrinsic_child_height_with_minimum(LayoutContext* lycon,
+        DomElement* element, float height, float containing_width) {
+    ViewBlock* view = lam::view_as_block(element);
+    // a content query omits the child's own minimum; its outer contribution
+    // must include that floor before a parent sizes or wraps its flex lines.
+    float minimum = intrinsic_resolved_height_limit_or(lycon, element, view, true);
+    if (minimum >= 0.0f) {
+        if (!intrinsic_view_uses_border_box(view, element)) {
+            minimum += layout_intrinsic_padding_border_axis(
+                lycon, element, false, containing_width);
+        }
+        height = fmaxf(height, minimum);
+    }
+    return height;
+}
+
 CssEnum get_element_text_transform(DomElement* element) {
     // Walk up the DOM tree to find inherited text-transform value.
     // During intrinsic sizing, the view tree hasn't been created yet,
@@ -7812,6 +7828,7 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
 
             // Get child's intrinsic width
             DomElement* child_elem = child->as_element();
+            if (layout_element_is_display_none(child_elem)) continue;
             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
             float child_width = child_sizes.max_content;
             ViewBlock* child_view = lam::view_as_block(child_elem);
@@ -7825,6 +7842,8 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
             }
             LayoutContainingBlockScope child_cb_scope(lycon, LAYOUT_AXIS_X, width);
             float child_height = calculate_max_content_height(lycon, child, width);
+            child_height = intrinsic_child_height_with_minimum(
+                lycon, child_elem, child_height, width);
 
             // Check if we need to wrap to a new line
             float width_with_gap = first_on_line ? child_width : (flex_column_gap + child_width);
@@ -7969,20 +7988,9 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                         layout_uses_border_box(child_block));
                 }
             }
-            // descendant minimums contribute to the parent's height even before the
-            // child's used box exists; its own intrinsic content query omits that floor.
             if (child->is_element()) {
-                DomElement* child_element = child->as_element();
-                ViewBlock* child_view = lam::view_as_block(child_element);
-                float minimum = intrinsic_resolved_height_limit_or(
-                    lycon, child_element, child_view, true);
-                if (minimum >= 0.0f) {
-                    if (!intrinsic_view_uses_border_box(child_view, child_element)) {
-                        minimum += layout_intrinsic_padding_border_axis(
-                            lycon, child_element, false, content_w);
-                    }
-                    child_height = fmaxf(child_height, minimum);
-                }
+                child_height = intrinsic_child_height_with_minimum(
+                    lycon, child->as_element(), child_height, content_w);
             }
 
             // Resolve child's vertical margins for height estimation

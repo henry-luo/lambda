@@ -1,15 +1,15 @@
 /* The mail demo: three panes in the manner of macOS Mail. The list's row
    height matches ROW_HEIGHT in mod_model.ls, which windows the rows. */
-:root {
-  --ink: #1d1d1f;
+.workspace-shell {
+  --ink: var(--lambda-app-text);
   --ink-2: #3c3c43;
-  --muted: #86868b;
-  --line: #e3e3e6;
+  --muted: var(--lambda-app-text-secondary);
+  --line: var(--lambda-app-border);
   --hairline: #ececef;
   --rail: #ebebee;
   --rail-hover: rgba(0, 0, 0, 0.05);
   --rail-current: rgba(0, 0, 0, 0.09);
-  --accent: #0a6cdc;
+  --accent: var(--lambda-app-primary);
   --accent-ink: #ffffff;
   --unread: #0a84ff;
   --flag: #ff9500;
@@ -17,7 +17,7 @@
   --toolbar: 52px;
 }
 html, body { margin: 0; height: 100%; }
-body { font: 13px -apple-system, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); background: #fff; }
+body { font: 13px var(--lambda-app-font-family); color: var(--ink); background: #fff; }
 button { font: inherit; color: inherit; }
 .app-icon { display: block; flex: none; }
 /* one bounded row: the list scrolls inside it instead of growing the grid */

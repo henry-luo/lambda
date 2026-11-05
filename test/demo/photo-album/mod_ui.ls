@@ -116,7 +116,7 @@ pub fn tree(lib, command) => <div id:"album",class:"album",'data-mode':"library"
             'data-album':a.key,<span a.title>;<small string(a.count)>>]>;
         <p class:"sidebar-credit","Photos: Wikimedia Commons featured pictures, credited in each photo's info.">>;
     <section class:"workspace",
-        <header class:"toolbar",
+        <header class:"toolbar workspace-chrome",
             <div class:"heading",<h1 id:"title","Library">;<p id:"status",role:"status","">>;
             <label class:"search",(icon("search", 16));<input id:"search",type:"search",placeholder:"Search titles, places, cameras, years",'aria-label':"Search photos">>;
             // the creations other than the slideshow are icon buttons, so the heading keeps its room

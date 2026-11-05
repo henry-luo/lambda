@@ -7,12 +7,14 @@ html, body { margin: 0; height: 100%; }
 #head { min-height: 64px; background: #eee; }
 #bar { display: flex; flex-wrap: wrap; gap: 20px; padding: 18px; background: #ddf; }
 #bar div { width: 300px; height: 50px; background: #99c; }
+#bar .minimum { height: auto; min-height: 50px; }
+#bar .hidden { display: none; min-height: 500px; }
 #body { flex: 1; min-height: 0; background: #fcc; }
 #foot { min-height: 52px; background: #ccc; }
 </style></head>
 <body><div id="app">
   <div id="head"></div>
-  <div id="bar"><div></div><div></div><div></div><div></div><div></div><div></div></div>
+  <div id="bar"><div></div><div></div><div></div><div class="minimum"></div><div class="minimum"></div><div class="minimum"></div><div class="hidden"></div></div>
   <div id="body"></div>
   <div id="foot"></div>
 </div></body></html>

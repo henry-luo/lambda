@@ -644,3 +644,59 @@ package-relative resource facility. Resolve required runtime-contract gaps
 through the existing formal/working design process. Cosmetic long-tail
 differences and extra app migrations remain visible follow-up work after
 the shared contracts and named consumers pass.
+
+## Follow-up: desktop demo adoption (2026-11-05)
+
+- Scope: Mail, Note, Finder, Photo Album, Book, Archive, Draw, Chat and Sketch use
+  workspace shell tokens and shared chrome focus styling; retain application
+  layouts, accents, editor content and document-owned commands (D9.3.4,
+  D10.2.1; S12.1.3v2).
+- Reuse the core dialog focus policy for Chat, Draw and Sketch. Finder keeps its
+  operation-specific focus order while its cached hidden input remains present.
+- Acceptance: each demo renders with its workspace shell and scoped chrome;
+  application navigation, editing, dialogs and saved content continue to work.
+  Verify focused UI suites and package boundaries; record any pre-existing
+  failures rather than adjusting fixtures to conceal them.
+- Checkpoint: implemented. Each app supplies workspace shell tokens, marks its
+  chrome for the shared keyboard focus style, and keeps its own layout and
+  accent. Book's ebook reader remains independently styled. Book and Chat
+  reuse workspace glyphs; Chat, Draw and Sketch share core dialog focus.
+- Verification: workspace isolation/focus fixture 9/9; 14 focused Note,
+  Finder, Photo Album, Book and Draw replays and five Sketch replays pass.
+  A wider 56-fixture Note/Photo Album/Book/Draw/Sketch run passed 54; Draw's
+  scrolling geometry was restored by retaining its font as a token override
+  and then passed 22/22. Book's page-options fixture fails one footer-position
+  assertion (41/42) with the same 772px result when the original Book files
+  are replayed separately on the current binary. Archive's complete replay
+  passed 24/24, Chat's messaging and dialog replays passed 15/15 and 7/7,
+  and Mail's complete replay passed 58/58 under the interpreter. On the
+  current auto-tier binary, Mail's replay aborts in `_save_index_2719` with
+  an unavailable MIR representation transition; the original Mail files
+  reproduce the same abort. Package boundaries and documentation checks pass.
+
+### Follow-up: repair Book and Mail replay failures (2026-11-05)
+
+- Book: the flex line-height query resolved inherited `normal` with the
+  declaring ancestor's font. Smaller reader labels gained 4px after the
+  enclosing settings panel had been measured. Resolve that keyword using
+  the target's font; lengths and percentages retain their declaring owner.
+  Adjacent wrapped-row coverage exposed omitted child minimum heights; reuse
+  the existing minimum-contribution calculation in that branch too.
+- Mail: an imported procedure's untyped parameter can be the implicit tail
+  of a native `string^` return. Content lowering requested a pointer carrier
+  before return admission and aborted. All implicit native tails now use the
+  same declared-return admission helper (S11.4.2v3, D2.3.4–D2.3.5, D7.4.3).
+- Acceptance: unchanged Book page-options replay and Mail complete replay on
+  AUTO/JIT, plus focused regressions for inherited line heights, wrapped child
+  minimums and native return admission on interpreter/AUTO/JIT.
+- Checkpoint: complete. Book page-options passes 42/42; Mail passes 58/58 on
+  AUTO and JIT. Six neighboring UI fixtures pass. Four native return fixtures
+  pass on all three tiers, including synchronous AUTO promotion. The final
+  focused run also passes Book and both layout regressions; the latter are
+  now in `test/radiant_baseline_cases.json`.
+- Qualification: Lambda baseline ran 8,772 cases; all nine sandbox failures
+  (four HTTP listeners, four concurrency socket fixtures and media playback)
+  pass host-access retries. Input baseline passes 2,112/2,112; MIR emission
+  passes 285/285 and MIR GC passes 355/355. Radiant baseline exits successfully
+  with 7,888 passes, 303 recorded partials, 14 skips and no failures. Integer
+  cast lint and diff checks pass. Evidence: `temp/demo_replay_fixes/`.

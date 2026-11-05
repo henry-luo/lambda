@@ -24,6 +24,7 @@
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/concurrency.h"
+#include "../lambda/runtime/activation.h"
 #include "network_integration.h"
 
 void fontface_cleanup(UiContext* uicon);
@@ -537,6 +538,16 @@ static bool document_cleanup_owners(DomDocument* doc, DocumentCleanupOwners* own
         log_error("free_document: Lambda and JS runtimes have different EvalContexts; document retained");
         return false;
     }
+    // The current owner cannot release the roots or stack executing this close.
+    if ((owners->timer && owners->timer->execution_depth) ||
+            (owners->state && owners->state->execution_depth)
+#ifndef LAMBDA_NO_TASKS
+            || ((owners->timer || owners->state) && activation_current())
+#endif
+            ) {
+        log_error("free_document: document evaluator is active; document retained");
+        return false;
+    }
     return true;
 }
 
@@ -723,25 +734,33 @@ bool ui_context_release_loader_runtime(UiContext* uicon) {
 
 // the window shell owns the top-level document and releases it here; other
 // holders of `document` only borrow it
-void UiContext::destroy_document() {
+bool UiContext::destroy_document() {
+    // An outer destruction still owns the document until its resource walk ends.
+    if (document && (document->destroying || !free_document_profiled(document, nullptr))) return false;
+    document = nullptr;
     paged_view = nullptr;
     paged_scroll_x = paged_scroll_y = 0.0f;
-    if (document) {
-        free_document(document);
-        document = nullptr;
-    }
+    return true;
 }
 
 void UiContext::destroy() {
     log_debug("cleaning up UI context");
 
+    // Keep the window's dependent owners intact when preflight already refuses.
+    if (document && !document_runtime_cleanup_ready(document)) {
+        log_error("ui-context: document not ready; remaining teardown stopped");
+        return;
+    }
     // destroy all webviews before tearing down the window
     if (webview_mgr) {
         webview_manager_destroy(webview_mgr);
         webview_mgr = nullptr;
     }
 
-    destroy_document();
+    if (!destroy_document()) {
+        log_error("ui-context: document retained; remaining teardown stopped");
+        return;
+    }
     // its documents borrowed the loader runtime, so it goes after them
     if (!ui_context_release_loader_runtime(this)) {
         log_error("ui-context: loader runtime retained; remaining teardown stopped");

@@ -1,17 +1,19 @@
 // Books views: a sidebar of sections and collections, the Home shelves, cover
 // grids, and the reader, which is lambda.doc.ebook's own reader element.
 import ebook: lambda.doc.ebook
+import icons: lambda.ui.workspace.icons
+import workspace_shell: lambda.ui.workspace.shell
+
+let THEME = workspace_shell.variables({primary:"#e8730c",text:"#1d1d1f",text_secondary:"#6e6e73",border:"#e3e1dd",background:"#ffffff"})^
 import lb: .mod_library
 
 let ICONS = {home: "M3 11l9-7 9 7 M5 10v10h5v-6h4v6h5V10",
     books: "M4 4h4v16H4z M10 4h4v16h-4z M15.6 5.2l3.9-1 3.9 15.4-3.9 1z",
-    reading: "M2 5.5c3.2-1.3 6.5-1 10 1.2 3.5-2.2 6.8-2.5 10-1.2v13.2c-3.2-1.3-6.5-1-10 1.2-3.5-2.2-6.8-2.5-10-1.2z M12 6.7v13.2",
-    unread: "M6 3h12v18l-6-4-6 4z",
-    collection: "M5 4h14 M4 7.5h16 M3 11h18v9H3z",
-    search: "M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
-    back: "M15 5l-7 7 7 7"}
+    collection: "M5 4h14 M4 7.5h16 M3 11h18v9H3z"}
+let SHARED_ICONS = {reading:"book",unread:"bookmark",search:"search",back:"prev"}
 fn icon(name) => <svg class:"icon", viewBox:"0 0 24 24", fill:"none", stroke:"currentColor", 'stroke-width':"1.7",
-    'stroke-linecap':"round", 'stroke-linejoin':"round", 'aria-hidden':"true", <path d:ICONS[name]>>
+    'stroke-linecap':"round", 'stroke-linejoin':"round", 'aria-hidden':"true",
+    if (SHARED_ICONS[name] != null) icons.glyph(SHARED_ICONS[name]) else <path d:ICONS[name]>>
 
 fn count_label(n) => string(n) ++ (if (n == 1) " book" else " books")
 
@@ -101,7 +103,7 @@ fn nav_item(lib, st, key, icon_name) => (let n = len(shelf(lib, st, key)),
         *:(if (st.section == key and trim(st.query) == "") {'aria-current':"page"} else {}),
         (icon(icon_name)); <span class:"nav-label", section_title(key)>; <span class:"nav-count", string(n)>>)
 
-fn sidebar(lib, st) => <aside class:"sidebar",
+fn sidebar(lib, st) => <aside class:"sidebar workspace-chrome",
     <label class:"search", (icon("search"));
         <input id:"search", class:"search-input", type:"search", placeholder:"Search", value:st.query, 'aria-label':"Search books">>
     <nav class:"nav", 'aria-label':"Library",
@@ -118,4 +120,4 @@ fn reading(lib, st) => (let e = lb.find(lib, st.open),
         (ebook.reader(e.book, {saved: st.saved}) ^ { <p class:"read-error", "This book cannot be opened."> })>)
 
 pub fn page(lib, st) => if (st.open != null) reading(lib, st)
-    else <body class:"books", (sidebar(lib, st)); <main class:"shelf", (content(lib, st))>>
+    else <body class:"books workspace-shell",style:THEME, (sidebar(lib, st)); <main class:"shelf", (content(lib, st))>>

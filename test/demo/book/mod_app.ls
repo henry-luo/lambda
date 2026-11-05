@@ -1,6 +1,7 @@
 // The Books window: library state, its event handlers, and the document both
 // the demo and its UI fixture open (the fixture keeps no reading state).
 import dom
+import workspace_shell: lambda.ui.workspace.shell
 import reader: lambda.doc.ebook.reader
 import lb: .mod_library
 import ui: .mod_ui
@@ -68,5 +69,5 @@ on keydown(evt) {
 // base is the demo folder; persist: false neither reads nor saves reading state
 pub fn document(base, persist) any^ => (let css = input(url_resolve(base, "book.css"), 'text')^,
     <html lang:"en",
-        <head <meta charset:"UTF-8"><title "Books — Lambda"><style (reader.stylesheet ++ css)>>
+        <head <meta charset:"UTF-8"><title "Books — Lambda"><style (workspace_shell.css ++ reader.stylesheet ++ css)>>
         apply(<books_app library:lb.load_all(base), persist:persist>)>)

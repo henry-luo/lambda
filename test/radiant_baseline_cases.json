@@ -487,6 +487,8 @@
     "UIAutomation/UIAutomationTest.RunTest/dtna_regenerated_focus",
     "UIAutomation/UIAutomationTest.RunTest/ebook_chrome",
     "UIAutomation/UIAutomationTest.RunTest/ebook_paged",
+    "UIAutomation/UIAutomationTest.RunTest/flex_column_wrapping_row_height",
+    "UIAutomation/UIAutomationTest.RunTest/flex_inherited_normal_line_height",
     "UIAutomation/UIAutomationTest.RunTest/flex_wrap_nested_flex_reflow",
     "UIAutomation/UIAutomationTest.RunTest/hover_border_color_paint",
     "UIAutomation/UIAutomationTest.RunTest/iframe_lambda_nested",

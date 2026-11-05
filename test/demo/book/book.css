@@ -1,9 +1,9 @@
 html, body { margin: 0; height: 100%; }
 body.books {
-    --ink: #1d1d1f; --muted: #6e6e73; --line: #e3e1dd; --side: #f4f2ef; --hover: #e9e6e1;
-    --accent: #e8730c; --accent-soft: #fbe8d6; --paper: #ffffff; --card: #f8f6f2;
+    --ink: var(--lambda-app-text); --muted: var(--lambda-app-text-secondary); --line: var(--lambda-app-border); --side: #f4f2ef; --hover: #e9e6e1;
+    --accent: var(--lambda-app-primary); --accent-soft: #fbe8d6; --paper: #ffffff; --card: #f8f6f2;
     display: flex; height: 100vh; overflow: hidden; background: var(--paper); color: var(--ink);
-    font: 13px -apple-system, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+    font: 13px var(--lambda-app-font-family);
 }
 .books *, .books-reading * { box-sizing: border-box; }
 .books button { font: inherit; color: inherit; border: 0; background: transparent; cursor: pointer; text-align: left; }

@@ -33,6 +33,17 @@ Mark an authored-content subtree with `class:"workspace-document"` to keep
 workspace, office, ribbon and font-picker selectors from matching its elements.
 Word applies this boundary to its editing and preview surfaces.
 
+Existing applications that own their native document can use
+`lambda.ui.workspace.shell` without changing their event or state ownership.
+Put `shell.variables(overrides)` in the shell's inline `style`, add the
+`workspace-shell` class, and include `shell.css` in the document stylesheet.
+Mark toolbars or other application chrome with `workspace-chrome` to give
+their controls the shared keyboard focus treatment. Content under
+`workspace-document` keeps its own focus styles. Mail, Note, Finder, Photo
+Album, Book, Archive, Draw, Sketch and Chat use this integration with their
+own accents and application layouts (D9.3.4, D10.2.1; S12.1.3v2). Book's
+separately owned ebook reader keeps its own document and styles.
+
 Menu and splitter behavior is available through `lambda.ui.core.menu` and
 `lambda.ui.core.splitter`. `lambda.ui.core.focus.trap(dialog, event)` cycles
 through the dialog's eligible focus targets in native Tab order, including
@@ -43,6 +54,7 @@ an Escape dismissal request, returning `handled`, `dismiss` or `pass`.
 `labelled_by` instead of `label` when its heading supplies the name. Optional
 `class` and `backdrop_class` let an app style its panel and backdrop. Sheet and
 Note use this composition with their own dialog commands and focus lifecycle.
+Chat, Draw and Sketch also use the core focus policy for their native dialogs.
 Existing office demos share ribbon layout and icons
 through `lambda.ui.workspace.ribbon`, `.ribbon_overflow`, `.ribbon_icons` and
 `.icons`. The office chrome stylesheet in `lambda.ui.workspace.office` is
@@ -69,7 +81,9 @@ picker. `lambda.ui.workspace.file_icons` provides their common artwork.
 The package's model checks are in `test/lambda/ui_workspace.ls`; native
 controlled-input integration and independent workspace instances are covered
 by `test/ui/controlled_bindings.json`, `test/ui/workspace_instances.json` and
-`test/ui/workspace_font_instances.json`. File-browser state is checked in
+`test/ui/workspace_font_instances.json`. `test/ui/workspace_shell.json` checks
+independent shell tokens, keyboard focus, and authored-content isolation.
+File-browser state is checked in
 `test/lambda/ui_workspace_files.ls`. Dialog and menu ownership checks live
 in `test/ui/workspace_dialog_focus.json` and `test/ui/workspace_menu_owners.json`.
 `make check-ui-boundaries` checks the neutral and workspace import closures;

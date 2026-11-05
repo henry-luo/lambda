@@ -7,6 +7,7 @@
 // passwords and refresh tokens stay in the Keychain. Sign-in with Google or
 // Microsoft uses the app registration in the profile's oauth.mark (README).
 import dom
+import workspace_shell: lambda.ui.workspace.shell
 import store: lambda.mail.store
 import prov: lambda.mail.providers
 import compose: lambda.mail.compose
@@ -21,7 +22,8 @@ import signin: .mod_signin
 import demo: .mod_demo
 
 let BASE = url_resolve(resources.entry_uri()^, "./")
-let CSS = input(url_resolve(BASE, "mail.css"), 'text')^
+let CSS = workspace_shell.css ++ input(url_resolve(BASE, "mail.css"), 'text')^
+let THEME = workspace_shell.variables({primary:"#0a6cdc",text:"#1d1d1f",text_secondary:"#86868b",border:"#e3e3e6",background:"#ffffff"})^
 let CWD = sys.proc.self.cwd#
 let HOME = sys.proc.self.env.HOME#
 let ROOT_SETTING = sys.proc.self.env.MAIL_DEMO_ROOT#
@@ -259,7 +261,7 @@ pn form_input(evt, st) {
 // ---- the window ----
 
 view <mail_app> state st: model.initial(), tasks: {}, shown: null {
-    <body ui.page(st, shown)>
+    <body class:"workspace-shell",style:THEME,ui.page(st, shown)>
 }
 
 on load(evt) {
