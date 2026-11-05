@@ -89,6 +89,7 @@ struct Pool;
 struct Arena;
 struct EventSimRenderCommand;
 struct EventSimRenderState;
+struct DomDocument;
 
 // Event simulation command types
 enum SimEventType {
@@ -468,6 +469,7 @@ struct EventSimContext {
     // Phase 5b: navigation history stack
     void* nav_history[16];       // stack of DomDocument* for navigate_back
     int nav_history_depth;       // current depth in nav_history
+    ArrayList* navigation_documents; // owns navigation pages, including pages left by navigate_back
     // Phase 5f: iframe frame stack
     void* original_document;     // main document (DomDocument*) before any switch_frame
     void* frame_stack[8];        // stack of DomDocument* for nested switch_frame
@@ -511,8 +513,8 @@ void event_sim_set_replay_assert_state(bool assert_state);
 // fixture. The host process owns the argument string; the context copies it.
 void event_sim_set_result_path(const char* result_path);
 
-// Free simulation context
-void event_sim_free(EventSimContext* ctx);
+// release navigation pages except the document whose ownership returns to the host.
+void event_sim_free(EventSimContext* ctx, DomDocument* retained_document = nullptr);
 
 // Process next event if ready
 // Returns true if simulation is still running

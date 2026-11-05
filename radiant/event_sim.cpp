@@ -2486,9 +2486,19 @@ EventSimContext* event_sim_load_replay_log(const char* jsonl_file) {
     return ctx;
 }
 
-void event_sim_free(EventSimContext* ctx) {
+void event_sim_free(EventSimContext* ctx, DomDocument* retained_document) {
     if (!ctx) return;
     event_sim_render_free(ctx);
+
+    if (ctx->navigation_documents) {
+        // history pages keep runtimes and satellite workers alive; retire them
+        // before the host releases their cached AST storage (D8.3.4 / D8.5.1).
+        for (int i = ctx->navigation_documents->length - 1; i >= 0; i--) {
+            DomDocument* doc = (DomDocument*)ctx->navigation_documents->data[i];
+            if (doc != retained_document) free_document(doc);
+        }
+        arraylist_free(ctx->navigation_documents);
+    }
 
     if (ctx->events) {
         for (int i = 0; i < ctx->events->length; i++) {
@@ -5711,6 +5721,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             if (!new_doc) {
                 log_error("event_sim: navigate FAIL - could not load '%s'", ev->navigate_url);
+                ctx->fail_count++;
+                break;
+            }
+            if (!ctx->navigation_documents) ctx->navigation_documents = arraylist_new(4);
+            DomDocument* original = ctx->original_document
+                ? (DomDocument*)ctx->original_document : uicon->document.get();
+            if (!ctx->navigation_documents ||
+                    (ctx->navigation_documents->length == 0 && original &&
+                        !arraylist_append(ctx->navigation_documents, original)) ||
+                    !arraylist_append(ctx->navigation_documents, new_doc)) {
+                free_document(new_doc);
+                log_error("event_sim: navigate FAIL - could not retain navigation pages");
                 ctx->fail_count++;
                 break;
             }

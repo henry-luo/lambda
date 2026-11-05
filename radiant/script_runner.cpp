@@ -3062,10 +3062,15 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
 // Cleanup
 // ============================================================================
 
-extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
-    if (!dom_doc) return;
+static Runtime* script_runner_cleanup_js_state_impl(DomDocument* dom_doc, bool defer_runtime) {
+    if (!dom_doc) return nullptr;
 
     Runtime* runtime = dom_doc->js.runtime;
+    // An outer document retirement owns this runtime until its resource walk ends.
+    if (!defer_runtime && runtime && runtime->document_retirement_pins) {
+        log_error("script-runner: document runtime is pinned for retirement");
+        return nullptr;
+    }
     if (runtime && runtime != dom_doc->lambda_runtime) {
         // native callback roots must unregister before their evaluator and code retire (D6.3.3).
         dom_document_release_runtime_resources(dom_doc,
@@ -3085,7 +3090,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         dom_doc->js.preamble_state = nullptr;
         dom_doc->js.mir_ctx = nullptr;
     }
-    if (!runtime) return;
+    if (!runtime) return nullptr;
 
     // detach the borrowed document before either owner can tear down the runtime.
     dom_doc->js.runtime = nullptr;
@@ -3096,13 +3101,24 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (runtime == dom_doc->lambda_runtime) {
         // the generated tree and its custom layouts retain this owner until
         // DomDocument::destroy; releasing the JS alias must not free it twice.
-        return;
+        return nullptr;
     }
     dom_lifecycle_release_backing_roots(dom_doc);
     // The outer cleanup owns this runtime until document teardown returns.
-    if (runtime->cleanup_in_progress) return;
+    if (runtime->cleanup_in_progress) return nullptr;
+    // A retiring window keeps the runtime alive through its document resource walk.
+    if (defer_runtime) return runtime;
     runtime_cleanup(runtime);
     mem_free(runtime);
 
     log_debug("script_runner_cleanup_js_state: cleaned up JS state");
+    return nullptr;
+}
+
+extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
+    (void)script_runner_cleanup_js_state_impl(dom_doc, false);
+}
+
+extern "C" Runtime* script_runner_defer_js_state_cleanup(DomDocument* dom_doc) {
+    return script_runner_cleanup_js_state_impl(dom_doc, true);
 }

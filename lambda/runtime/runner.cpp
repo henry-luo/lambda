@@ -3790,7 +3790,7 @@ static bool runtime_document_preflight(Runtime* runtime) {
     return false;
 }
 
-static bool runtime_join_document_tasks(Runtime* runtime) {
+static bool runtime_join_document_tasks(Runtime* runtime, bool wait_for_tasks = true) {
 #ifndef LAMBDA_NO_TASKS
     LambdaScheduler* scheduler = runtime_scheduler(runtime);
     // A guard also pins a heapless runtime's scheduler and evaluator.
@@ -3804,10 +3804,12 @@ static bool runtime_join_document_tasks(Runtime* runtime) {
         if (!owner || !eval_context_init(owner) || !runtime_context_bind_retained(runtime, owner) ||
                 (js_runtime_state_for(owner) && !js_runtime_state_init(owner))) return false;
         owner->scheduler = scheduler;
-        return lambda_scheduler_join_document_tasks(scheduler);
+        return wait_for_tasks ? lambda_scheduler_join_document_tasks(scheduler) :
+            lambda_scheduler_document_tasks_progress(scheduler) == LAMBDA_DOCUMENT_JOIN_DONE;
     }
 #else
     (void)runtime;
+    (void)wait_for_tasks;
 #endif
     return true;
 }
@@ -3831,18 +3833,66 @@ static void runtime_release_tasks_and_resources(Runtime* runtime, EvalContext* o
     runtime_resource_table_clear(runtime_resource_table_context(owner));
 }
 
+bool runtime_document_retirement_pin(Runtime* runtime) {
+    if (!runtime || !runtime->eval_context || runtime->eval_context != context ||
+            runtime->cleanup_in_progress || runtime->cleanup_incomplete ||
+            runtime->document_retirement_pins == UINT32_MAX) return false;
+    runtime->document_retirement_pins++;
+    return true;
+}
+
+bool runtime_document_retirement_unpin(Runtime* runtime) {
+    if (!runtime || !runtime->eval_context || runtime->eval_context != context ||
+            runtime->cleanup_in_progress || runtime->cleanup_incomplete ||
+            !runtime->document_retirement_pins) return false;
+    runtime->document_retirement_pins--;
+    return true;
+}
+
+bool runtime_borrow_acquire(Runtime* runtime) {
+    if (!runtime || !runtime->eval_context || runtime->eval_context != context ||
+            runtime->cleanup_destructive || runtime->cleanup_incomplete ||
+            runtime->native_borrows == UINT32_MAX) return false;
+    runtime->native_borrows++;
+    return true;
+}
+
+bool runtime_borrow_release(Runtime* runtime) {
+    if (!runtime || !runtime->eval_context || runtime->eval_context != context ||
+            runtime->cleanup_destructive || runtime->cleanup_incomplete || !runtime->native_borrows)
+        return false;
+    runtime->native_borrows--;
+    return true;
+}
+
+struct RuntimeCleanupAttempt {
+    Runtime* runtime;
+    bool destructive;
+    bool complete;
+    ~RuntimeCleanupAttempt() {
+        runtime->cleanup_in_progress = false;
+        runtime->cleanup_destructive = false;
+        if (destructive && !complete) runtime->cleanup_incomplete = true;
+    }
+};
+
 void runtime_reset_heap(Runtime* runtime) {
     if (!runtime) return;
-    if (runtime->cleanup_in_progress || runtime->cleanup_incomplete) {
-        log_error("runtime-document-join: heap reset refused during runtime cleanup");
+    if (runtime->cleanup_in_progress || runtime->cleanup_incomplete || runtime->document_retirement_pins ||
+            runtime->native_borrows) {
+        log_error("runtime-document-join: heap reset refused during runtime retirement");
         return;
     }
+    runtime->cleanup_in_progress = true;
+    RuntimeCleanupAttempt attempt = {runtime, false, false};
     if (!runtime_document_preflight(runtime)) return;
     // S13.3.1v2: cleanup must run while the document and its resources live.
     if (!runtime_join_document_tasks(runtime)) {
         log_error("runtime-document-join: heap reset refused; document tasks were not joined");
         return;
     }
+    // Masked task cleanup can create a native borrower while the join runs.
+    if (runtime->native_borrows) return;
     // A satellite still lowering the finished script reads types and names
     // this reset frees; retire and await it first, as runtime_cleanup does.
     // test-batch resets the heap before it frees the scripts, and a worker
@@ -3852,10 +3902,14 @@ void runtime_reset_heap(Runtime* runtime) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
         if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
+        if (runtime->native_borrows) return;
         cleanup_context->result = ItemNull;
         cleanup_context->scheduler = runtime_scheduler(runtime);
         if (js_runtime_state_for(cleanup_context) &&
                 !js_runtime_state_init(cleanup_context)) return;
+        if (runtime->native_borrows) return;
+        runtime->cleanup_destructive = true;
+        attempt.destructive = true;
         // Diagnostics can own allocations from the retiring heap. Clear
         // them before teardown so the next batch never frees a stale
         // context-owned error while setting up its fresh heap.
@@ -3934,6 +3988,7 @@ void runtime_reset_heap(Runtime* runtime) {
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
     }
+    attempt.complete = true;
 }
 
 void runtime_request_satellite_cancel(Runtime* runtime) {
@@ -3953,29 +4008,26 @@ static void runtime_quiesce_satellite_workers(Runtime* runtime) {
     }
 }
 
-struct RuntimeCleanupAttempt {
-    Runtime* runtime;
-    bool destructive;
-    bool complete;
-    ~RuntimeCleanupAttempt() {
-        runtime->cleanup_in_progress = false;
-        if (destructive && !complete) runtime->cleanup_incomplete = true;
-    }
-};
-
-RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime) {
+static RuntimeCleanupResult runtime_try_cleanup_impl(Runtime* runtime, bool retirement_owner,
+                                                     bool wait_for_tasks) {
     if (!runtime) return RUNTIME_CLEANUP_COMPLETE;
     if (runtime->cleanup_incomplete) return RUNTIME_CLEANUP_INCOMPLETE;
     if (runtime->cleanup_in_progress) return RUNTIME_CLEANUP_RETRY;
+    if (runtime->native_borrows) return RUNTIME_CLEANUP_RETRY;
+    if (retirement_owner) {
+        if (runtime->document_retirement_pins != 1 || !runtime->eval_context ||
+                runtime->eval_context != context) return RUNTIME_CLEANUP_RETRY;
+    } else if (runtime->document_retirement_pins) return RUNTIME_CLEANUP_RETRY;
     runtime->cleanup_in_progress = true;
     RuntimeCleanupAttempt attempt = {runtime, false, false};
     // Refuse before retiring native owners if their document is not ready to close.
     if (!runtime_document_preflight(runtime)) return RUNTIME_CLEANUP_RETRY;
     // S13.3.1v2: document cleanup precedes editor, template and resource teardown.
-    if (!runtime_join_document_tasks(runtime)) {
+    if (!runtime_join_document_tasks(runtime, wait_for_tasks)) {
         log_error("runtime-document-join: cleanup refused; document tasks were not joined");
         return RUNTIME_CLEANUP_RETRY;
     }
+    if (runtime->native_borrows) return RUNTIME_CLEANUP_RETRY;
     runtime_quiesce_satellite_workers(runtime);
     // Document/transaction capsules retire with their owning heap after tasks
     // join; do not reset the currently active peer (D6.4.2-D6.4.4).
@@ -3995,10 +4047,13 @@ RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime) {
 #ifndef LAMBDA_NO_TASKS
     // Heapless schedulers still need the shutdown gate before close callbacks run.
     if (!runtime_heap(runtime) && runtime_scheduler(runtime) &&
-            !lambda_scheduler_join_document_tasks(runtime_scheduler(runtime)))
+            !(wait_for_tasks ? lambda_scheduler_join_document_tasks(runtime_scheduler(runtime)) :
+                lambda_scheduler_document_tasks_progress(runtime_scheduler(runtime)) == LAMBDA_DOCUMENT_JOIN_DONE))
         return RUNTIME_CLEANUP_RETRY;
 #endif
     // Refusals above leave native owners attached; later failures must not be retried.
+    if (runtime->native_borrows) return RUNTIME_CLEANUP_RETRY;
+    runtime->cleanup_destructive = true;
     attempt.destructive = true;
     if (cleanup_owner && cleanup_owner->cwd) {
         url_destroy(cleanup_owner->cwd);
@@ -4151,6 +4206,22 @@ RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime) {
     runtime_free_all_scripts(runtime);
     attempt.complete = true;
     return RUNTIME_CLEANUP_COMPLETE;
+}
+
+RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime) {
+    return runtime_try_cleanup_impl(runtime, false, true);
+}
+
+RuntimeCleanupResult runtime_try_cleanup_nonblocking(Runtime* runtime) {
+    return runtime_try_cleanup_impl(runtime, false, false);
+}
+
+RuntimeCleanupResult runtime_try_cleanup_retirement_pinned(Runtime* runtime) {
+    return runtime_try_cleanup_impl(runtime, true, true);
+}
+
+RuntimeCleanupResult runtime_try_cleanup_retirement_pinned_nonblocking(Runtime* runtime) {
+    return runtime_try_cleanup_impl(runtime, true, false);
 }
 
 void runtime_cleanup(Runtime* runtime) {

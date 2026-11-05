@@ -34,6 +34,8 @@
 #include "../lambda/mir/mir.h"
 #include "../lambda/mir/mir-gen.h"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/dom/dom.h"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/validator/validator.hpp"
 #include "../lib/mem_factory.h"
@@ -45,8 +47,13 @@
 #include "../lib/url.h"
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
+#include "../radiant/view.hpp"
+#include "../radiant/radiant.hpp"
+#include "../radiant/render.hpp"
+#include "../radiant/window_host.hpp"
 
 extern __thread EvalContext* context;
+extern UiContext ui_context;
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_gc_destroy(void* object, void* data);
@@ -1280,6 +1287,51 @@ static Function* document_test_procedure(EvalContext* owner, fn_ptr entry) {
     return fn;
 }
 
+static Item document_lifetime_guard_noop(Context*) { return ItemNull; }
+
+TEST_F(LambdaConcurrencyRuntime, DocumentLifetimeGuardClosesAdmissionAcrossSchedulers) {
+    int document = 0;
+    document_join_owner = &document;
+    lambda_set_document_probe(document_join_current);
+    RootFrame roots(2);
+    Function* fn = document_test_procedure(&eval, (fn_ptr)document_lifetime_guard_noop);
+    ASSERT_NE(fn, nullptr);
+    Rooted<Item> procedure(roots, (Item){.function = fn});
+    LambdaScheduler* second = lambda_scheduler_create(3);
+    ASSERT_NE(second, nullptr);
+    memtrack_fault_inject(0);
+    LambdaDocumentLifetimeGuard* failed = lambda_document_lifetime_guard_begin(&document);
+    memtrack_fault_clear();
+    EXPECT_EQ(failed, nullptr);
+    LambdaDocumentLifetimeGuard* guard = lambda_document_lifetime_guard_begin(&document);
+    ASSERT_NE(guard, nullptr);
+    EXPECT_EQ(lambda_document_lifetime_guard_begin(&document), nullptr);
+    struct GuardThreadProbe { LambdaDocumentLifetimeGuard* guard; bool current; bool ended; } thread_probe = {
+        guard, true, true
+    };
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, [](void* data) {
+        GuardThreadProbe* probe = (GuardThreadProbe*)data;
+        probe->current = lambda_document_lifetime_guard_is_current(probe->guard);
+        probe->ended = lambda_document_lifetime_guard_end(probe->guard);
+    }, &thread_probe), 0);
+    ASSERT_EQ(uv_thread_join(&thread), 0);
+    EXPECT_FALSE(thread_probe.current);
+    EXPECT_FALSE(thread_probe.ended);
+    EXPECT_TRUE(lambda_document_lifetime_guard_is_current(guard));
+    EXPECT_TRUE(item_is_error(lambda_task_start_document(procedure.get(), NULL)));
+    eval.scheduler = second;
+    EXPECT_TRUE(item_is_error(lambda_task_start_document(procedure.get(), NULL)));
+    EXPECT_TRUE(lambda_document_lifetime_guard_end(guard));
+    Rooted<Item> admitted(roots, lambda_task_start_document(procedure.get(), NULL));
+    EXPECT_TRUE(lambda_task_handle_is(admitted.get()));
+    EXPECT_EQ(lambda_document_tasks_release(&document), 1);
+    eval.scheduler = scheduler;
+    lambda_scheduler_destroy(second);
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+}
+
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 struct RuntimeDocumentJoinProbe {
     LambdaTask* parent;
@@ -1716,8 +1768,11 @@ TEST_F(LambdaConcurrencyRuntime, GuardedDocumentJoinRetriesAfterActiveAndReentra
     EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &cleanup_probe));
     EXPECT_FALSE(lambda_task_cancel_requested(lambda_task_from_handle(parent.get())));
     ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &cleanup_probe));
+    LambdaDocumentLifetimeGuard* lifetime = lambda_document_lifetime_guard_begin(&cleanup_probe);
+    ASSERT_NE(lifetime, nullptr);
     {
         RuntimeExecutionScope active(&eval);
+        EXPECT_EQ(lambda_document_tasks_release(&cleanup_probe), -1);
         EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &cleanup_probe));
         EXPECT_TRUE(lambda_task_cancel_requested(lambda_task_from_handle(parent.get())));
         EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, &cleanup_probe));
@@ -1744,6 +1799,7 @@ TEST_F(LambdaConcurrencyRuntime, GuardedDocumentJoinRetriesAfterActiveAndReentra
     EXPECT_FALSE(lambda_task_cancel_requested(lambda_task_from_handle(foreign.get())));
     EXPECT_TRUE(item_is_error(lambda_task_start_document(parent_proc.get(), NULL)));
     EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &cleanup_probe));
+    EXPECT_TRUE(lambda_document_lifetime_guard_end(lifetime));
     EXPECT_EQ(lambda_document_tasks_cancel(scheduler, &foreign_document), 1);
     EXPECT_EQ(lambda_scheduler_run_ready(scheduler), 1);
     EXPECT_EQ(foreign_probe.foreign_finished, 1);
@@ -1757,19 +1813,29 @@ TEST_F(LambdaConcurrencyRuntime, GuardedDocumentJoinRetriesAfterActiveAndReentra
 
 struct GuardedDocumentStallProbe { bool parked; bool finished; };
 static GuardedDocumentStallProbe* guarded_document_stall_probe;
+static GuardedDocumentStallProbe* guarded_document_stall_other_probe;
+static LambdaTask* guarded_document_stall_other_task;
+static RdbSqliteFileSession* guarded_document_stall_session;
+static bool* guarded_document_stall_session_live;
 
 static Item guarded_document_stall_task(Context*) {
     LambdaTask* task = lambda_task_running();
+    GuardedDocumentStallProbe* probe = task == guarded_document_stall_other_task
+        ? guarded_document_stall_other_probe : guarded_document_stall_probe;
     (void)lambda_task_suspend(task);
     lambda_task_set_cleanup_masked(task, true);
-    guarded_document_stall_probe->parked = true;
+    probe->parked = true;
+    if (probe == guarded_document_stall_probe && guarded_document_stall_session && guarded_document_stall_session_live)
+        *guarded_document_stall_session_live &= rdb_sqlite_file_session_current(guarded_document_stall_session);
     Item result = lambda_task_suspend(task);
-    guarded_document_stall_probe->finished = true;
+    if (probe == guarded_document_stall_probe && guarded_document_stall_session && guarded_document_stall_session_live)
+        *guarded_document_stall_session_live &= rdb_sqlite_file_session_current(guarded_document_stall_session);
+    probe->finished = true;
     lambda_task_set_cleanup_masked(task, false);
     return result;
 }
 
-TEST_F(LambdaConcurrencyRuntime, GuardedDocumentJoinRetainsStalledCleanup) {
+TEST_F(LambdaConcurrencyRuntime, SchedulerShutdownProgressDoesNotPollUnrelatedTimer) {
     GuardedDocumentStallProbe probe = {};
     guarded_document_stall_probe = &probe;
     document_join_owner = &probe;
@@ -1782,21 +1848,446 @@ TEST_F(LambdaConcurrencyRuntime, GuardedDocumentJoinRetainsStalledCleanup) {
     LambdaTask* task = lambda_task_from_handle(handle.get());
     ASSERT_NE(task, nullptr);
     ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
-    ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &probe));
-    // With no referenced loop handles, masked cleanup has no source of progress.
-    ASSERT_EQ(uv_loop_alive(lambda_uv_loop()), 0);
-    EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &probe));
+    bool timer_fired = false;
+    uv_timer_t timer = {};
+    ASSERT_EQ(uv_timer_init(lambda_uv_loop(), &timer), 0);
+    timer.data = &timer_fired;
+    ASSERT_EQ(uv_timer_start(&timer, [](uv_timer_t* handle) {
+        *(bool*)handle->data = true;
+        uv_close((uv_handle_t*)handle, NULL);
+    }, 100, 0), 0);
+    EXPECT_EQ(lambda_scheduler_document_tasks_progress(scheduler), LAMBDA_DOCUMENT_JOIN_ADVANCED);
     EXPECT_TRUE(probe.parked);
-    EXPECT_FALSE(probe.finished);
-    EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, &probe));
+    EXPECT_FALSE(timer_fired);
+    EXPECT_EQ(lambda_scheduler_document_tasks_progress(scheduler), LAMBDA_DOCUMENT_JOIN_WAITING);
+    EXPECT_FALSE(timer_fired);
     EXPECT_TRUE(item_is_error(lambda_task_start_document(procedure.get(), NULL)));
     lambda_task_resume(task);
-    EXPECT_TRUE(lambda_document_tasks_join_guarded(scheduler, &probe));
+    EXPECT_EQ(lambda_scheduler_document_tasks_progress(scheduler), LAMBDA_DOCUMENT_JOIN_DONE);
     EXPECT_TRUE(probe.finished);
-    EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &probe));
+    EXPECT_FALSE(timer_fired);
+    uv_timer_stop(&timer);
+    uv_close((uv_handle_t*)&timer, NULL);
+    lambda_uv_run_loop(lambda_uv_loop(), UV_RUN_NOWAIT);
     lambda_set_document_probe(NULL);
     document_join_owner = NULL;
     guarded_document_stall_probe = NULL;
+}
+
+struct RuntimeCleanupExportTaskProbe {
+    Runtime* runtime;
+    bool began;
+    bool deferred;
+};
+
+static RuntimeCleanupExportTaskProbe* runtime_cleanup_export_task_probe;
+
+static Item runtime_cleanup_export_task(Context*) {
+    LambdaTask* task = lambda_task_running();
+    (void)lambda_task_suspend(task);
+    lambda_task_set_cleanup_masked(task, true);
+    RuntimeCleanupExportTaskProbe* probe = runtime_cleanup_export_task_probe;
+    RenderExportSession session = {};
+    probe->began = render_export_session_begin_source(&session, "<html></html>", 80, 60, false);
+    if (probe->began) {
+        // This is the same evaluator a synchronous package layout can borrow.
+        session.document->loader_runtime = lam::up(probe->runtime);
+        probe->deferred = !render_export_session_finish(&session);
+    }
+    lambda_task_set_cleanup_masked(task, false);
+    return ItemNull;
+}
+
+TEST(LambdaDocumentTasks, MaskedCleanupExportRetainsRuntimeUntilRetry) {
+    ASSERT_EXIT({
+        for (int reset = 0; reset < 2; reset++) {
+            Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+            if (!runtime) _Exit(2);
+            runtime_init(runtime);
+            EvalContext* owner = runtime_get_eval_context(runtime);
+            if (!owner || !eval_context_transfer_thread(owner) ||
+                item_is_error(js_interp_execute_source(runtime, "null;", 5,
+                    "runtime-cleanup-export.js", NULL))) _Exit(3);
+            LambdaScheduler* scheduler = runtime_scheduler(runtime);
+            if (!scheduler) {
+                scheduler = lambda_scheduler_create(3);
+                runtime_set_scheduler(runtime, scheduler);
+            }
+            if (!scheduler) _Exit(4);
+            RuntimeCleanupExportTaskProbe probe = {};
+            probe.runtime = runtime;
+            runtime_cleanup_export_task_probe = &probe;
+            document_join_owner = &probe;
+            lambda_set_document_probe(document_join_current);
+            {
+                RootFrame roots(2);
+                Function* fn = document_test_procedure(owner, (fn_ptr)runtime_cleanup_export_task);
+                if (!fn) _Exit(5);
+                Rooted<Item> procedure(roots, (Item){.function = fn});
+                Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+                if (!lambda_task_handle_is(handle.get()) || lambda_scheduler_run_ready(scheduler) != 1) _Exit(6);
+            }
+            Heap* heap = runtime_heap(runtime);
+            if (reset) runtime_reset_heap(runtime);
+            else if (runtime_try_cleanup(runtime) != RUNTIME_CLEANUP_RETRY) _Exit(7);
+            if (!probe.began || !probe.deferred || runtime->native_borrows != 1 ||
+                runtime->cleanup_in_progress || runtime->cleanup_incomplete || runtime_heap(runtime) != heap ||
+                render_export_pending_count() != 1) _Exit(8);
+            if (!render_export_retire_pending() || render_export_pending_count() || runtime->native_borrows ||
+                runtime_try_cleanup(runtime) != RUNTIME_CLEANUP_COMPLETE) _Exit(9);
+            mem_free(runtime);
+            runtime_cleanup_export_task_probe = NULL;
+            document_join_owner = NULL;
+            lambda_set_document_probe(NULL);
+        }
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(LambdaConcurrencyRuntime, GuardedDocumentJoinRetainsStalledCleanup) {
+    for (int guarded = 0; guarded < 2; guarded++) {
+        GuardedDocumentStallProbe probe = {};
+        guarded_document_stall_probe = &probe;
+        document_join_owner = &probe;
+        lambda_set_document_probe(document_join_current);
+        RootFrame roots(2);
+        Function* fn = document_test_procedure(&eval, (fn_ptr)guarded_document_stall_task);
+        ASSERT_NE(fn, nullptr);
+        Rooted<Item> procedure(roots, (Item){.function = fn});
+        Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+        LambdaTask* task = lambda_task_from_handle(handle.get());
+        ASSERT_NE(task, nullptr);
+        ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+        if (guarded) ASSERT_TRUE(lambda_document_retirement_guard_begin(scheduler, &probe));
+        // With no referenced loop handles, masked cleanup has no source of progress.
+        ASSERT_EQ(uv_loop_alive(lambda_uv_loop()), 0);
+        if (guarded) EXPECT_FALSE(lambda_document_tasks_join_guarded(scheduler, &probe));
+        else ASSERT_EQ(lambda_document_tasks_release(&probe), -1);
+        EXPECT_TRUE(probe.parked);
+        EXPECT_FALSE(probe.finished);
+        EXPECT_FALSE(lambda_document_tasks_detach_joined(scheduler, &probe));
+        EXPECT_TRUE(item_is_error(lambda_task_start_document(procedure.get(), NULL)));
+        lambda_task_resume(task);
+        if (guarded) EXPECT_TRUE(lambda_document_tasks_join_guarded(scheduler, &probe));
+        else EXPECT_EQ(lambda_document_tasks_release(&probe), 1);
+        EXPECT_TRUE(probe.finished);
+        if (guarded) EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &probe));
+        lambda_set_document_probe(NULL);
+        document_join_owner = NULL;
+        guarded_document_stall_probe = NULL;
+    }
+}
+
+struct WindowRetirementResource : DomDocumentResourceData {
+    UiContext* ui;
+    Runtime* script;
+    Runtime* loader;
+    EvalContext* loader_owner;
+    RdbSqliteFileSession* session;
+    Pool* session_pool;
+    bool* checked;
+    void* other_document;
+    bool* held_guard;
+};
+
+struct WindowRetirementReentry {
+    UiContext* ui;
+    DomDocument* document;
+    bool called;
+    bool remove_loader;
+};
+
+static void window_retirement_reenter(uv_timer_t* timer) {
+    WindowRetirementReentry* probe = (WindowRetirementReentry*)timer->data;
+    probe->called = true;
+    // A second close must not free the owner while the first join is driving the loop.
+    if (free_document_profiled(probe->document, nullptr) || probe->ui->destroy_document()) _Exit(13);
+    if (dom_retain_owned_document(probe->document)) _Exit(30);
+    Runtime* js_runtime = probe->document->js.runtime;
+    if (js_runtime) {
+        script_runner_cleanup_js_state(probe->document);
+        if (probe->document->js.runtime != js_runtime) _Exit(29);
+    }
+    if (probe->remove_loader) probe->document->loader_runtime = nullptr;
+    uv_close((uv_handle_t*)timer, NULL);
+}
+
+static void window_retirement_during_uv_run(uv_timer_t* timer) {
+    WindowRetirementReentry* probe = (WindowRetirementReentry*)timer->data;
+    probe->called = true;
+    if (!context || !context->scheduler ||
+        lambda_document_tasks_release(probe->document) != -1 ||
+        lambda_scheduler_join_document_tasks(context->scheduler)) _Exit(39);
+    if (probe->ui->destroy_document()) _Exit(35);
+    uv_close((uv_handle_t*)timer, NULL);
+}
+
+static void window_retirement_resource_destroy(DomDocumentResourceData* data) {
+    WindowRetirementResource* resource = (WindowRetirementResource*)data;
+    EvalContext* previous = context;
+    bool retained = runtime_try_cleanup(resource->script) == RUNTIME_CLEANUP_RETRY &&
+        runtime_try_cleanup(resource->loader) == RUNTIME_CLEANUP_RETRY &&
+        !resource->ui->destroy_document();
+    bool rejected = false;
+    if (eval_context_transfer_thread(resource->loader_owner)) {
+        retained = retained && rdb_sqlite_file_session_current(resource->session);
+        {
+            RootFrame roots(1);
+            Function* fn = document_test_procedure(resource->loader_owner, (fn_ptr)document_lifetime_guard_noop);
+            Rooted<Item> procedure(roots, (Item){.function = fn});
+            rejected = fn && item_is_error(lambda_task_start_document(procedure.get(), NULL));
+        }
+        int close_status = rdb_sqlite_file_session_close(resource->session);
+        pool_destroy(resource->session_pool);
+        if (resource->other_document) {
+            *resource->held_guard = lambda_document_retirement_guard_begin(
+                runtime_scheduler(resource->loader), resource->other_document);
+        }
+        bool restored = eval_context_transfer_thread(previous);
+        retained = retained && close_status == RDB_OK && restored;
+    } else retained = false;
+    *resource->checked = retained && rejected;
+    mem_free(resource);
+}
+
+enum WindowRetirementMode { WINDOW_RETIRE_DIRECT, WINDOW_RETIRE_EXPORT, WINDOW_RETIRE_HOST };
+
+static void window_retirement_unrelated_timer(uv_timer_t* timer) {
+    bool* fired = (bool*)timer->data;
+    *fired = true;
+    uv_close((uv_handle_t*)timer, NULL);
+}
+
+static void exercise_stalled_window_document(bool distinct_loader, bool retry_runtime_cleanup,
+        bool change_owner, WindowRetirementMode mode = WINDOW_RETIRE_DIRECT) {
+    bool export_handoff = mode == WINDOW_RETIRE_EXPORT;
+    bool host_handoff = mode == WINDOW_RETIRE_HOST;
+    UiContext ui_storage = {};
+    UiContext* ui = &ui_storage;
+    RenderExportSession export_session = {};
+    if (export_handoff) {
+        if (!distinct_loader || !render_export_session_begin_source(&export_session,
+                "<html></html>", 80, 60, false)) _Exit(40);
+        ui = export_session.ui_context;
+        if (!ui || !ui->destroy_document()) _Exit(41);
+        export_session.document = nullptr;
+    } else if (host_handoff) {
+        if (!distinct_loader || !radiant_window_host_begin(nullptr) ||
+                ui_context_init(&ui_context, true, 1.0f) != 0) _Exit(43);
+        ui = &ui_context;
+    }
+    Runtime* loader = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+    Runtime* script = distinct_loader
+        ? (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL) : loader;
+    if (!script || !loader) _Exit(2);
+    runtime_init(loader);
+    if (distinct_loader) runtime_init(script);
+    EvalContext* script_owner = runtime_get_eval_context(script);
+    EvalContext* loader_owner = runtime_get_eval_context(loader);
+    if (distinct_loader && (!script_owner || !eval_context_transfer_thread(script_owner) ||
+            item_is_error(js_interp_execute_source(script, "null;", 5,
+                "stalled-window-script.js", NULL)))) _Exit(21);
+    if (!script_owner || !loader_owner || !eval_context_transfer_thread(loader_owner) ||
+        item_is_error(js_interp_execute_source(loader, "null;", 5,
+            "stalled-window-document.js", NULL))) _Exit(3);
+    LambdaScheduler* scheduler = runtime_scheduler(loader);
+    if (!scheduler) {
+        scheduler = lambda_scheduler_create(3);
+        runtime_set_scheduler(loader, scheduler);
+    }
+    Pool* pool = pool_create();
+    Input* input = pool ? Input::create(pool) : nullptr;
+    DomDocument* document = input ? dom_document_create(input) : nullptr;
+    if (!scheduler || !document) _Exit(4);
+    if (host_handoff) radiant_window_host_loop_started();
+    dom_document_finalize_loader_pool(document, pool);
+    const char* path = distinct_loader ? "temp/window-retirement-loader.db" : "temp/window-retirement-single.db";
+    remove(path);
+    Pool* session_pool = pool_create();
+    RdbSqliteTxn* seed = session_pool ? rdb_sqlite_tx_begin(session_pool, path) : nullptr;
+    const char* sql = "CREATE TABLE sample(value INTEGER)";
+    if (!seed || rdb_sqlite_tx_execute(seed, sql, strlen(sql), NULL, 0, NULL, NULL) != RDB_OK ||
+        rdb_sqlite_tx_finish(seed, false) != RDB_OK) _Exit(19);
+    RdbSqliteFileSession* session = rdb_sqlite_file_session_open(session_pool, path);
+    if (!session) _Exit(20);
+    if (distinct_loader) {
+        document->lambda_runtime = script;
+        document->owns_script_runtime = true;
+    } else document->js.runtime = loader;
+    script->dom_doc = document;
+    loader->dom_doc = document;
+    ui->document = lam::up(document);
+    if (export_handoff) export_session.document = lam::up(document);
+    if (distinct_loader) {
+        document->loader_runtime = lam::up(loader);
+        ui->loader_runtime = lam::own(loader);
+    }
+    bool resource_checked = false;
+    bool held_guard = false;
+    int other_document = 0;
+    WindowRetirementResource* resource = (WindowRetirementResource*)mem_calloc(
+        1, sizeof(WindowRetirementResource), MEM_CAT_LAYOUT);
+    if (!resource) _Exit(11);
+    resource->ui = ui;
+    resource->script = script;
+    resource->loader = loader;
+    resource->loader_owner = loader_owner;
+    resource->session = session;
+    resource->session_pool = session_pool;
+    resource->checked = &resource_checked;
+    resource->other_document = retry_runtime_cleanup ? &other_document : nullptr;
+    resource->held_guard = &held_guard;
+    if (!dom_document_add_resource(document, resource, window_retirement_resource_destroy)) _Exit(12);
+    GuardedDocumentStallProbe probe = {};
+    GuardedDocumentStallProbe other_probe = {};
+    bool session_live = true;
+    guarded_document_stall_probe = &probe;
+    guarded_document_stall_session = session;
+    guarded_document_stall_session_live = &session_live;
+    document_join_owner = document;
+    lambda_set_document_probe(document_join_current);
+    WindowRetirementReentry outer = {ui, document, false, false};
+    uv_timer_t outer_timer = {};
+    if (uv_timer_init(lambda_uv_loop(), &outer_timer) != 0) _Exit(36);
+    outer_timer.data = &outer;
+    if (uv_timer_start(&outer_timer, window_retirement_during_uv_run, 0, 0) != 0) _Exit(37);
+    lambda_uv_run_loop(lambda_uv_loop(), UV_RUN_NOWAIT);
+    if (!outer.called || ui->document.get() != document) _Exit(38);
+    WindowRetirementReentry reentry = {ui, document, false, change_owner};
+    uv_timer_t timer = {};
+    if (uv_timer_init(lambda_uv_loop(), &timer) != 0) _Exit(14);
+    timer.data = &reentry;
+    if (uv_timer_start(&timer, window_retirement_reenter, 0, 0) != 0) _Exit(15);
+    if (distinct_loader) {
+        if (!eval_context_transfer_thread(script_owner)) _Exit(22);
+        LambdaScheduler* script_scheduler = runtime_scheduler(script);
+        if (!script_scheduler) {
+            script_scheduler = lambda_scheduler_create(3);
+            runtime_set_scheduler(script, script_scheduler);
+        }
+        RootFrame roots(2);
+        Function* fn = document_test_procedure(script_owner, (fn_ptr)guarded_document_stall_task);
+        if (!fn || !script_scheduler) _Exit(23);
+        Rooted<Item> procedure(roots, (Item){.function = fn});
+        Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+        guarded_document_stall_other_task = lambda_task_from_handle(handle.get());
+        guarded_document_stall_other_probe = &other_probe;
+        if (!guarded_document_stall_other_task || lambda_scheduler_run_ready(script_scheduler) != 1) _Exit(24);
+    }
+    if (!eval_context_transfer_thread(loader_owner)) _Exit(25);
+    LambdaTask* task = nullptr;
+    {
+        RootFrame roots(2);
+        Function* fn = document_test_procedure(loader_owner, (fn_ptr)guarded_document_stall_task);
+        if (!fn) _Exit(5);
+        Rooted<Item> procedure(roots, (Item){.function = fn});
+        Rooted<Item> handle(roots, lambda_task_start_document(procedure.get(), NULL));
+        task = lambda_task_from_handle(handle.get());
+        if (!task || lambda_scheduler_run_ready(scheduler) != 1) _Exit(6);
+    }
+    // Allocation failure cannot detach the document or begin its resource walk.
+    memtrack_fault_inject(0);
+    bool closed = ui->destroy_document();
+    memtrack_fault_clear();
+    if (closed || ui->document.get() != document || document->destroying || resource_checked) _Exit(16);
+    memtrack_fault_inject(1);
+    closed = ui->destroy_document();
+    memtrack_fault_clear();
+    if (closed || ui->document.get() != document || ui->document_retirement || resource_checked) _Exit(31);
+    if (distinct_loader) {
+        // A refused second pin must preserve the first pin and the admission barrier.
+        loader->cleanup_in_progress = true;
+        closed = ui->destroy_document();
+        loader->cleanup_in_progress = false;
+        if (closed || !ui->document_retirement || ui->document.get() != document ||
+            runtime_try_cleanup(script) != RUNTIME_CLEANUP_RETRY) _Exit(17);
+        {
+            RootFrame roots(1);
+            Function* fn = document_test_procedure(loader_owner, (fn_ptr)document_lifetime_guard_noop);
+            Rooted<Item> procedure(roots, (Item){.function = fn});
+            if (!fn || !item_is_error(lambda_task_start_document(procedure.get(), NULL))) _Exit(18);
+        }
+    }
+    if (ui->destroy_document() || ui->document.get() != document || document->destroying ||
+        (distinct_loader && ui->loader_runtime.get() != loader) || probe.finished || !reentry.called) _Exit(7);
+    if (change_owner) {
+        if (ui->destroy_document() || !ui->document_retirement || document->loader_runtime) _Exit(34);
+        document->loader_runtime = lam::up(loader);
+    }
+    if (export_handoff || host_handoff) {
+        bool timer_fired = false;
+        uv_timer_t unrelated = {};
+        if (uv_timer_init(lambda_uv_loop(), &unrelated) != 0) _Exit(44);
+        unrelated.data = &timer_fired;
+        if (uv_timer_start(&unrelated, window_retirement_unrelated_timer, 100, 0) != 0) _Exit(45);
+        bool finished = export_handoff ? render_export_session_finish(&export_session) :
+            radiant_window_host_finish(nullptr, nullptr, nullptr, nullptr, false, true);
+        if (finished || timer_fired || (export_handoff &&
+                (render_export_pending_count() != 1 || export_session.owned_ui_context)) ||
+                (host_handoff && !radiant_window_host_pending())) _Exit(42);
+        bool retried = export_handoff ? render_export_retire_pending() : radiant_window_host_retry();
+        if (retried || timer_fired) _Exit(46);
+        uv_timer_stop(&unrelated);
+        uv_close((uv_handle_t*)&unrelated, NULL);
+    }
+    if (distinct_loader) {
+        if (!other_probe.parked || other_probe.finished || !probe.parked ||
+            !eval_context_transfer_thread(script_owner)) _Exit(26);
+        lambda_task_resume(guarded_document_stall_other_task);
+        bool completed = export_handoff ? render_export_retire_pending() :
+            host_handoff ? radiant_window_host_retry() : ui->destroy_document();
+        if (completed || ui->document.get() != document || !other_probe.finished ||
+            !probe.parked || probe.finished) _Exit(27);
+    } else if (!probe.parked) _Exit(28);
+    if (!eval_context_transfer_thread(loader_owner)) _Exit(8);
+    lambda_task_resume(task);
+    bool completed = export_handoff ? render_export_retire_pending() :
+        host_handoff ? radiant_window_host_retry() : ui->destroy_document();
+    for (int attempt = 0; !completed && attempt < 8 && (export_handoff || host_handoff); attempt++)
+        completed = export_handoff ? render_export_retire_pending() : radiant_window_host_retry();
+    if ((!export_handoff && ui->document) || (export_handoff && render_export_pending_count()) ||
+            (host_handoff && radiant_window_host_pending()) ||
+            !probe.finished || !session_live || !resource_checked) _Exit(9);
+    if (retry_runtime_cleanup) {
+        if (completed || !held_guard || !ui->document_retirement || !pool_calloc(pool, 8) ||
+            runtime_try_cleanup(loader) != RUNTIME_CLEANUP_RETRY ||
+            !eval_context_transfer_thread(loader_owner) ||
+            !lambda_document_retirement_guard_end(scheduler, &other_document) || !ui->destroy_document()) _Exit(32);
+    } else if (!completed) _Exit(33);
+    if (distinct_loader && !export_handoff && !host_handoff && !ui_context_release_loader_runtime(ui)) _Exit(10);
+    lambda_set_document_probe(NULL);
+    document_join_owner = NULL;
+    guarded_document_stall_probe = NULL;
+    guarded_document_stall_other_probe = NULL;
+    guarded_document_stall_other_task = NULL;
+    guarded_document_stall_session = NULL;
+    guarded_document_stall_session_live = NULL;
+    remove(path);
+    _Exit(0);
+}
+
+TEST(LambdaDocumentTasks, WindowRetainsDocumentUntilStalledCleanupFinishes) {
+    ASSERT_EXIT(exercise_stalled_window_document(false, false, false), ::testing::ExitedWithCode(0), "");
+}
+
+TEST(LambdaDocumentTasks, WindowJoinsDistinctLoaderBeforeDestroyingDocument) {
+    ASSERT_EXIT(exercise_stalled_window_document(true, false, false), ::testing::ExitedWithCode(0), "");
+}
+
+TEST(LambdaDocumentTasks, ExportHandoffRetainsSqliteUntilBothSchedulersJoin) {
+    ASSERT_EXIT(exercise_stalled_window_document(true, false, false, WINDOW_RETIRE_EXPORT), ::testing::ExitedWithCode(0), "");
+}
+
+TEST(LambdaDocumentTasks, WindowHostRetainsSqliteWithoutWaitingOnUnrelatedTimer) {
+    ASSERT_EXIT(exercise_stalled_window_document(true, false, false, WINDOW_RETIRE_HOST), ::testing::ExitedWithCode(0), "");
+}
+
+TEST(LambdaDocumentTasks, WindowRetainsDestroyedDocumentResourcesUntilRuntimeRetry) {
+    ASSERT_EXIT(exercise_stalled_window_document(false, true, false), ::testing::ExitedWithCode(0), "");
+}
+
+TEST(LambdaDocumentTasks, WindowRetainsOwnersWhenLoaderChangesDuringJoin) {
+    ASSERT_EXIT(exercise_stalled_window_document(true, false, true), ::testing::ExitedWithCode(0), "");
 }
 
 TEST(LambdaDocumentTasks, GuardedJoinRejectsSchedulerWithoutEvaluator) {
@@ -1853,10 +2344,52 @@ TEST(LambdaDocumentTasks, RetirementGuardRetainsHeaplessRuntime) {
     runtime_reset_heap(&runtime);
     EXPECT_TRUE(lambda_document_retirement_guard_begin(scheduler, &document));
     EXPECT_TRUE(lambda_document_retirement_guard_end(scheduler, &document));
+    ASSERT_TRUE(runtime_document_retirement_pin(&runtime));
+    ASSERT_TRUE(runtime_document_retirement_pin(&runtime));
+    EXPECT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_RETRY);
+    EXPECT_EQ(runtime_try_cleanup_retirement_pinned(&runtime), RUNTIME_CLEANUP_RETRY);
+    runtime_reset_heap(&runtime);
+    EXPECT_EQ(runtime_scheduler(&runtime), scheduler);
+    EXPECT_EQ(close_probe.closed, 0);
+    EXPECT_TRUE(runtime_document_retirement_unpin(&runtime));
+    EXPECT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_RETRY);
+    EXPECT_TRUE(runtime_document_retirement_unpin(&runtime));
+    EXPECT_FALSE(runtime_document_retirement_unpin(&runtime));
     EXPECT_EQ(runtime_try_cleanup(&runtime), RUNTIME_CLEANUP_COMPLETE);
     EXPECT_EQ(runtime_scheduler(&runtime), nullptr);
     EXPECT_EQ(close_probe.closed, 1);
     EXPECT_TRUE(close_probe.guard_rejected);
+}
+
+TEST(LambdaDocumentTasks, PinnedRuntimeCleanupKeepsOtherOwnersPinned) {
+    Runtime runtimes[2] = {};
+    for (Runtime& runtime : runtimes) runtime_init(&runtime);
+    EvalContext* owners[] = {runtime_get_eval_context(&runtimes[0]), runtime_get_eval_context(&runtimes[1])};
+    ASSERT_NE(owners[0], nullptr);
+    ASSERT_NE(owners[1], nullptr);
+    for (int i = 0; i < 2; i++) {
+        ASSERT_TRUE(eval_context_transfer_thread(owners[i]));
+        ASSERT_TRUE(runtime_document_retirement_pin(&runtimes[i]));
+    }
+    ASSERT_TRUE(eval_context_transfer_thread(owners[0]));
+    struct PinCleanupProbe { Runtime* first; Runtime* second; bool safe; } probe = {
+        &runtimes[0], &runtimes[1], false
+    };
+    RuntimeResourceTable* table = runtime_resource_table_context_ensure(owners[0]);
+    ASSERT_NE(table, nullptr);
+    static const RuntimeResourceDescriptor marker = {
+        RUNTIME_RESOURCE_TIMER, RUNTIME_RESOURCE_GROUP_NONE, "retirement-pin-probe"
+    };
+    ASSERT_NE(runtime_resource_table_add_native_owned(table, nullptr, &marker, [](void* data) {
+        PinCleanupProbe* probe = (PinCleanupProbe*)data;
+        probe->safe = !runtime_document_retirement_unpin(probe->first) &&
+            runtime_try_cleanup(probe->second) == RUNTIME_CLEANUP_RETRY;
+    }, &probe), 0u);
+    EXPECT_EQ(runtime_try_cleanup_retirement_pinned(&runtimes[0]), RUNTIME_CLEANUP_COMPLETE);
+    EXPECT_TRUE(probe.safe);
+    ASSERT_TRUE(eval_context_transfer_thread(owners[1]));
+    EXPECT_TRUE(runtime_document_retirement_unpin(&runtimes[1]));
+    EXPECT_EQ(runtime_try_cleanup(&runtimes[1]), RUNTIME_CLEANUP_COMPLETE);
 }
 
 static Item document_retire_transfer(Context* owner) {

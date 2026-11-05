@@ -197,6 +197,14 @@ static void observer_release_target(JsObserverTarget* target) {
     memset(target, 0, sizeof(*target));
 }
 
+static void observer_remove_target(JsObserverState* observer, int index) {
+    observer_release_target(&observer->targets[index]);
+    for (int i = index; i + 1 < observer->target_count; i++)
+        observer->targets[i] = observer->targets[i + 1];
+    observer->target_count--;
+    memset(&observer->targets[observer->target_count], 0, sizeof(JsObserverTarget));
+}
+
 static void observer_release_transient_roots(JsObserverTarget* target) {
     if (!target) return;
     for (int i = 0; i < target->transient_root_count; i++) {
@@ -429,12 +437,7 @@ static Item js_observer_unobserve(Item target_item) {
     if (!observer || !node) return make_js_undefined();
     for (int i = 0; i < observer->target_count; i++) {
         if (observer->targets[i].node != node) continue;
-        observer_release_target(&observer->targets[i]);
-        for (int j = i; j + 1 < observer->target_count; j++) {
-            observer->targets[j] = observer->targets[j + 1];
-        }
-        observer->target_count--;
-        memset(&observer->targets[observer->target_count], 0, sizeof(JsObserverTarget));
+        observer_remove_target(observer, i);
         break;
     }
     return make_js_undefined();
@@ -992,6 +995,24 @@ static Item js_geometry_observer_initial_sample(void) {
     observer_sample_geometry();
     state->geometry_sampling = false;
     return make_js_undefined();
+}
+
+extern "C" void dom_observers_release_document(DomDocument* document) {
+    if (!document || !js_active_runtime_state || !context_capsule(context, CONTEXT_CAPSULE_DOM_OBSERVER)) return;
+    for (int i = 0; i < observer_count; i++) {
+        JsObserverState* observer = observers[i];
+        if (!observer) continue;
+        for (int j = 0; j < observer->target_count;) {
+            if (observer->targets[j].owner_doc == document) observer_remove_target(observer, j);
+            else j++;
+        }
+        if (observer->root && observer->root->doc == document) {
+            if (observer->root_ref.address)
+                dom_node_unpin(document, observer->root_ref, DOM_NODE_PIN_OBSERVER);
+            observer->root = nullptr;
+            observer->root_ref = {};
+        }
+    }
 }
 
 extern "C" void dom_observers_reset(void) {

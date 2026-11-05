@@ -1,5 +1,8 @@
 # Lambda MIR MVP: typed execution implementation
 
+The next milestone is planned in [language parity and untyped execution](Lambda_Impl_MIR_MVP_Language_Parity_and_Untyped.md).
+This record retains the tuning wrap-up captured before commit `bdded83e2`.
+
 2026-11-05. Implements and tunes
 [the MIR MVP proposal](../Lambda_Design_MIR_MVP.md), following the
 [JS MVP-Lmd approach](../jube/JS_MVP_Lmd.md). **Experimental; the performance
