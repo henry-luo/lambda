@@ -114,8 +114,8 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 | `test-all-baseline` | Run ALL baseline test suites. **Must pass 100%.** |
 | `test-lambda-baseline` | Run Lambda engine baseline tests only. **Must pass 100%.** |
 | `test-input-baseline` | Run input parser baselines: HTML5 WPT, CommonMark, YAML, ASCII Math, LaTeX Math. |
-| `test-radiant-baseline` | Build and run the reduced Radiant baseline with one console/JSON report. Paged media, document/text queries and UI automation use the explicit cases in `test/radiant_baseline_cases.json`; the runner checks that every selected case runs. UI automation includes all view fixtures and a representative subset of DOM fixtures in the same runner. EPUB persistence and native GeoMap run in the full gate. Other native, layout, snapshot and render checks retain their full baseline coverage. Native and script pools share a worker budget; layout and snapshots use isolated scratch directories. `RADIANT_TEST_CONFIG=release_native` selects optimized native runners after `make build-release-compile`; the default is `debug_native`. |
-| `test-radiant-full` | Build and run the former complete Radiant baseline inventory, including EPUB persistence, native GeoMap, and all cases in the three reduced executables, including every DOM and view fixture in the combined UI run. This does not add the separate extended-category suites. |
+| `test-radiant-baseline` | Build and run the reduced Radiant baseline with one console/JSON report. Paged media, document/text queries and UI automation use the explicit cases in `test/radiant_baseline_cases.json`; the runner checks that every selected case runs. UI automation includes all view fixtures and a representative subset of DOM fixtures in the same runner. EPUB persistence, native GeoMap and the original Three.js demo-page renderer cases run in the full gate. Other native, layout, snapshot and render checks retain their full baseline coverage. Native and script pools share a worker budget; layout and snapshots use isolated scratch directories. `RADIANT_TEST_CONFIG=release_native` selects optimized native runners after `make build-release-compile`; the default is `debug_native`. |
+| `test-radiant-full` | Build and run the former complete Radiant baseline inventory, including EPUB persistence, native GeoMap, the original Three.js demo-page renderer cases, and all cases in the three reduced executables, including every DOM and view fixture in the combined UI run. This does not add the separate extended-category suites. |
 | `run-radiant-baseline`, `run-radiant-full` | Run the corresponding selection without rebuilding. `ARGS` accepts shared runner options; `--list` prints the inventory. |
 | `test-pdf-render` | Build the PDF visual/export runner and run its cases through eight CPU-capped workers with isolated scratch directories. Cases run in balanced batches of at most 16; `LAMBDA_PDF_TEST_BATCH_SIZE=1` restores process isolation per case. POSIX batches reuse a persistent render process; `LAMBDA_PDF_BATCH=0` selects ordinary render commands. Build the host first. `LAMBDA_PDF_TEST_JOBS` sets the case-worker limit; `PDF_TEST_CONFIG=release_native` selects the optimized runner after `make build-release-compile`. Supplying `ARGS` runs GTest directly for focused debugging. This executable belongs to `input / baseline`, independently of the Radiant baseline. |
 | `test-radiant-online` | Build the standard release package and standalone online launcher; load real URLs with ABI-matched bundled modules and check shutdown allocations with `MEMTRACK_MODE=STATS` by default (D5.2.4). |
@@ -127,7 +127,9 @@ The three reduced native runners keep explicit, reviewable case names in
 flow, text and font geometry, input and events, styles, media, ownership and
 lifetime, plus representative application flows. Add or replace names when
 coverage changes, including the full view fixture list; a missing or renamed case fails the baseline instead of
-silently reducing it. The full gate runs all cases in those runners.
+silently reducing it. The full gate runs all cases in those runners. The view
+cases reserved for the full gate are listed in `test/radiant_full_only_cases.json`;
+the native Lambda Scene3D demo cases remain in the baseline.
 
 ### Specific Test Suites
 

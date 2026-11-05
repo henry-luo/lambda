@@ -442,9 +442,24 @@ function filterTests(tests) {
         // Keep the full inventory as the source of truth; the fast gate selects
         // named cases so new tests cannot silently change its coverage or cost.
         const cases = require('./radiant_baseline_cases.json');
+        const fullOnlyCases = require('./radiant_full_only_cases.json');
         const fullOnly = new Set(['test_map_gtest', 'test_epub_reader_state']);
         result = result.filter(t => t.suite !== 'radiant' || !fullOnly.has(t.baseName));
         result = result.map(t => {
+            const excluded = t.suite === 'radiant' && fullOnlyCases[t.baseName];
+            if (excluded) {
+                if (!excluded.length || new Set(excluded).size !== excluded.length || cases[t.baseName]) {
+                    throw new Error(`invalid Radiant full-only case list: ${t.baseName}`);
+                }
+                // Preserve the full suite's existing positive and negative filters.
+                const args = [...t.runnerArgs];
+                const index = args.findIndex(arg => arg.startsWith('--gtest_filter='));
+                const filter = index < 0 ? '*' : args[index].slice('--gtest_filter='.length);
+                const suffix = filter.includes('-') ? ':' : '-';
+                const restricted = `--gtest_filter=${filter}${suffix}${excluded.join(':')}`;
+                if (index < 0) args.push(restricted); else args[index] = restricted;
+                return { ...t, runnerArgs: args };
+            }
             if (t.suite !== 'radiant' || !cases[t.baseName]) return t;
             const selected = cases[t.baseName];
             if (!selected.length || new Set(selected).size !== selected.length) {

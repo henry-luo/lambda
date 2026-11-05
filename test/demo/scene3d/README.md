@@ -56,7 +56,8 @@ camera and pointer capture in the Lambda view (**D9.5.6**).
 
 The original `three-gallery.html` and `observatory.html` remain independent
 Three.js/WebGL renderer fixtures. Their pinned library, addons, license and
-source hashes are under `vendor/three/`.
+source hashes are under `vendor/three/`. Their renderer cases run in
+`make test-radiant-full`; the Lambda demos remain covered by the Radiant baseline.
 
 `ringworld.ls` uses the native `lambda.scene3d` package from Phase I.
 It starts with a spinning storm-banded planet and three orbiting moons, sampled
