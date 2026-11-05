@@ -1,0 +1,201 @@
+{
+  "name": "NativeObservatoryControlsAndPlayback",
+  "viewport": {
+    "width": 848,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-ready",
+      "equals": "true"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#observatory",
+      "width": 800,
+      "height": 500,
+      "rgba": [
+        [
+          60,
+          255
+        ],
+        [
+          50,
+          255
+        ],
+        [
+          30,
+          255
+        ]
+      ],
+      "count": {
+        "min": 3000
+      }
+    },
+    {
+      "type": "mouse_down",
+      "x": 542,
+      "y": 398
+    },
+    {
+      "type": "mouse_up",
+      "x": 542,
+      "y": 398
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-selection",
+      "equals": "Satellite 1"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.cameraBefore=document.getElementById('observatory-camera').getAttribute('position')"
+    },
+    {
+      "type": "mouse_down",
+      "x": 350,
+      "y": 300
+    },
+    {
+      "type": "mouse_move",
+      "x": 410,
+      "y": 320
+    },
+    {
+      "type": "mouse_up",
+      "x": 410,
+      "y": 320
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('observatory-camera').getAttribute('position')!==cameraBefore"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#observatory",
+      "width": 800,
+      "height": 500,
+      "name": "before-play"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "animation",
+      "target": "#observatory",
+      "clip": "orbits",
+      "name": "paused"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 1
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#observatory",
+      "clip": "orbits",
+      "fields": {
+        "time": {
+          "baseline": "paused",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#play"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 1
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#observatory",
+      "clip": "orbits",
+      "fields": {
+        "time": {
+          "min": 0.9
+        }
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#observatory",
+      "width": 800,
+      "height": 500,
+      "reference": "before-play",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#play"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#play"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "animation",
+      "target": "#observatory",
+      "clip": "orbits",
+      "name": "paused-again"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 1
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#observatory",
+      "clip": "orbits",
+      "fields": {
+        "time": {
+          "baseline": "paused-again",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "collect_gc",
+      "count": 2
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/scene3d/native-observatory.png"
+    }
+  ]
+}

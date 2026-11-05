@@ -32,8 +32,8 @@ material presets.
 | [Marble sorter](physics/README.md) | `physics/sorter.ls` | A kinematic paddle and three sensor gates |
 | [Bounce lab](physics/README.md) | `physics/bounce.ls` | Restitution and measured trajectory charts |
 | Ringworld | `ringworld.ls` | A procedural planet, rings, moons, and an automatic camera tour |
-| Crystal garden | `three-gallery.html` | Instanced crystals, textures, lighting, and transparency |
-| Kinetic observatory | `observatory.html` | Materials, shadows, satellites, and camera interaction |
+| Crystal garden | `three-gallery.ls` | Instanced crystals, checkerboard, lighting, and transparency |
+| Kinetic observatory | `observatory.ls` | Materials, shadows, satellites, and camera interaction |
 | Shared animation | `shared-animation.html` | Native skinning/morphing and SVG timelines |
 | Cube pets | `motion/pets.ls` | Kenney's CC0 Cube Pets switching clips together through motion controllers |
 | Animated robot | `motion/robot.ls` | Quaternius' CC0 robot walking, running, dancing and gesturing through a motion controller |
@@ -48,15 +48,15 @@ are never committed. Fetch them with
 `./lambda.exe view test/demo/scene3d/motion/mixamo.ls`; without the files it
 shows how to fetch them.
 
-`three-gallery.html` runs the official, unmodified Three.js 0.186.1
-`WebGLRenderer` in LambdaJS. It shows 49 instanced crystals, Lambert lighting,
-a repeating data texture, a torus and a transparent halo. Its `ImprovedNoise`
-addon exercises a real ESM import through the document's `three` import map.
-Drag to orbit, use Pan or Shift-drag to move, and scroll to zoom. The camera
-toolbar also provides orbit, tilt, zoom, and Reset view. Focus the canvas for
-arrow-key panning, Shift-arrow tilting, `+` / `-` zoom, and `R` reset. Camera
-changes redraw the garden on demand through the unmodified OrbitControls addon.
-The pinned library, addons, license and source hashes live under `vendor/three/`.
+`three-gallery.ls` constructs 49 native instanced crystals, a vertex-colored
+checkerboard, a torus and a transparent halo. Drag to orbit, use Pan or
+Shift-drag to move, and scroll to zoom. The toolbar and keyboard also offer
+orbit, pan, tilt, zoom and Reset view. `lambda.scene3d.viewer` keeps the live
+camera and pointer capture in the Lambda view (**D9.5.6**).
+
+The original `three-gallery.html` and `observatory.html` remain independent
+Three.js/WebGL renderer fixtures. Their pinned library, addons, license and
+source hashes are under `vendor/three/`.
 
 `ringworld.ls` uses the native `lambda.scene3d` package from Phase I.
 It starts with a spinning storm-banded planet and three orbiting moons, sampled
@@ -65,8 +65,7 @@ Restart control that timeline independently of the camera. Drag to orbit,
 Shift-drag or select Pan to move, and scroll to zoom. The toolbar also offers
 orbit, tilt, zoom, Top / Side presets and Reset view. Focus the scene for arrow
 key panning, Shift-arrow orbiting, `+` / `-` zoom, `R` reset and Space playback.
-`ringworld.js` reuses unmodified OrbitControls for camera input; rendering stays
-on the native scene path. Camera distance, tilt and pan have bounded limits.
+The shared Lambda viewer handles camera input. Camera distance and tilt have bounded limits.
 Auto Play runs a repeating 24-second camera tour with orbit, pan, tilt and zoom,
 starting from the current view. Stop Auto Play holds the view; dragging, scrolling,
 camera keys or a camera toolbar button also stop the tour for manual control.
@@ -76,13 +75,14 @@ All demo resources are local to this directory; viewing needs no network.
 For PNG output with the full native host:
 
 ```sh
-LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe render test/demo/scene3d/three-gallery.html \
+LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe render test/demo/scene3d/three-gallery.ls \
   -o temp/three-gallery.png -vw 848 -vh 650
 ```
 
-Ordinary headless mode returns `null` from `getContext('webgl2')`.
 The explicit GLFW option enables graphics for automated full-host captures;
-the separate headless-C executable excludes graphics (D9.2.1).
+the separate headless-C executable excludes graphics (D9.2.1). The independent
+WebGL fixtures also require a graphics host: ordinary headless mode returns
+`null` from `getContext('webgl2')`.
 
 `reference/three-gallery-chromium.png` is the original independent
 Chromium/SwiftShader reference, also used for its tile preview. Its manifest
@@ -91,12 +91,11 @@ and shader hashes. Capture a fresh browser reference before comparing the
 current page, whose breadcrumbs change the canvas position.
 See [the WebGL test guide](../../webgl/README.md) for reproduction.
 
-`observatory.html` is the Phase III interactive demo: metallic rings and satellites,
-PNG normal/JPEG albedo maps, RoomEnvironment/PMREM illumination, moving PCF
-shadows and EffectComposer RenderPass/FXAA/OutputPass. Drag to orbit, scroll to
-zoom, click a satellite or use Play / pause. Radiant uses the first-party
-`NativeAnimationMixer` binding adapter and shared SVG/native evaluator; a browser
-uses the pinned upstream Three.js mixer. Addons remain unmodified.
+`observatory.ls` uses native Scene3D for metallic rings, satellites, a PNG
+normal map, JPEG stone, room-environment illumination, moving shadows and
+FXAA. Drag to orbit, scroll to zoom, click a satellite or use Play / Pause.
+Lambda projects satellite centers through the active camera for selection;
+the native scene clock controls playback (**S12.1.1v3 / D9.5.6**).
 
 `shared-animation.html` combines native GPU skinning and relative morph targets
 with SVG/SMIL. Separate buttons pause/play/seek each timeline. Native deformation

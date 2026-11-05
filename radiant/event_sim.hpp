@@ -519,6 +519,17 @@ void event_sim_free(EventSimContext* ctx);
 // uicon is cast to UiContext* internally
 bool event_sim_update(EventSimContext* ctx, void* uicon, struct RadiantWindow* window, double current_time);
 
+// includes host pumping/retirement and every retry turn in its original fixture step.
+struct EventSimProfileTurn {
+    EventSimContext* context = nullptr;
+    int index = 0;
+    uint64_t started = 0;
+    explicit EventSimProfileTurn(EventSimContext* context);
+    ~EventSimProfileTurn();
+    EventSimProfileTurn(const EventSimProfileTurn&) = delete;
+    EventSimProfileTurn& operator=(const EventSimProfileTurn&) = delete;
+};
+
 // Headless hosts use these to wait on the JS loop until the next assertion
 // attempt, while waking early when an actual timer or task becomes ready.
 bool event_sim_assertion_retry_pending(EventSimContext* ctx);

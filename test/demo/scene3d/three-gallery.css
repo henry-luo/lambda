@@ -1,0 +1,8 @@
+body { margin: 0; background: #080f22; color: #e7edff; font-family: sans-serif; }
+header { padding: 0 0 16px; } h1 { font-size: 28px; margin: 0 0 8px; }
+p { margin: 0 0 16px; color: #9aaed4; } canvas, scene3d { display: block; width: 100%; max-width: 800px; height: auto; margin: 0; touch-action: none; }
+.garden-controls { display: flex; flex-wrap: wrap; gap: 8px; max-width: 800px; margin-top: 16px; }
+.garden-controls button[aria-pressed="true"] { background: #244a51; border-color: #74ded3; color: #b9fff0; }
+#garden:focus-visible { outline: 2px solid #74ded3; outline-offset: 3px; }
+#garden-help { margin: 12px 0 0; font-size: 12px; line-height: 1.6; max-width: 800px; }
+footer { padding: 16px 0; font-size: 13px; color: #90a3c8; }

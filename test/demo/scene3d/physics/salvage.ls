@@ -10,4 +10,4 @@ ui.page("salvage",scenes.salvage(),{
       {id:"gravity-off",label:"Zero gravity",request:{operation:"apply",commands:[{type:"gravity",value:[0.0,0.0,0.0]}]}}],
     labels:["COMPOUND BODIES","AVERAGE SPIN","TRANSLATIONAL ENERGY"],
     note:"Dumbbells, L shapes and crosses each move as one compound body. The larger dumbbell end is denser; the connecting rods also contribute mass."
-})
+})^

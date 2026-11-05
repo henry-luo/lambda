@@ -15,6 +15,7 @@
 #include <uv.h>
 #include "../radiant/speech.hpp"
 #include "../radiant/event.hpp"
+#include "../radiant/event_sim.hpp"
 #include "../radiant/network_integration.h"
 #include "../radiant/resource_loaders.h"
 #include "../radiant/css_resolved_style.hpp"
@@ -50,6 +51,55 @@ ArrayList* build_view_stack(EventContext* context, View* target);
 void fire_events(EventContext* context, ArrayList* stack);
 void update_hover_state(EventContext* context, View* target);
 void update_active_state(EventContext* context, View* target, bool is_active);
+
+TEST(EventSimTiming, RetryAndHostTurnsAccumulateBeforeFinalResultIsWritten) {
+    EventSimContext sim = {};
+    ArrayList events = {};
+    events.length = 2;
+    sim.events = &events;
+    sim.is_running = true;
+    double durations[2] = {};
+    sim.event_durations_ms = durations;
+    {
+        EventSimProfileTurn disabled(&sim);
+        EXPECT_EQ(disabled.context, nullptr);
+    }
+    sim.profile_events = true;
+    {
+        EventSimProfileTurn retry(&sim);
+        retry.started -= 10000000; // account for host work without sleeping in the test.
+    }
+    EXPECT_GE(durations[0], 10.0);
+    {
+        EventSimProfileTurn completed(&sim);
+        completed.started -= 20000000;
+        sim.current_index = 1;
+    }
+    EXPECT_GE(durations[0], 30.0);
+    EXPECT_EQ(durations[1], 0.0);
+    const char* path = "temp/event_sim_turn_profile_result.json";
+    sim.result_path = const_cast<char*>(path);
+    {
+        EventSimProfileTurn final(&sim);
+        final.started -= 40000000;
+        sim.current_index = 2;
+        sim.is_running = false;
+    }
+    EXPECT_GE(durations[1], 40.0);
+    char* result = read_text_file(path);
+    ASSERT_NE(result, nullptr);
+    const char* timings = strstr(result, "\"timings_ms\":[");
+    ASSERT_NE(timings, nullptr);
+    double first = 0.0, last = 0.0;
+    ASSERT_EQ(sscanf(timings, "\"timings_ms\":[%lf,%lf]", &first, &last), 2);
+    EXPECT_NEAR(first, durations[0], 0.000001);
+    EXPECT_NEAR(last, durations[1], 0.000001);
+    mem_free(result);
+    remove(path);
+    sim.is_running = true;
+    EventSimProfileTurn exhausted(&sim);
+    EXPECT_EQ(exhausted.context, nullptr);
+}
 
 
 #ifdef __APPLE__
@@ -933,6 +983,58 @@ TEST_F(RadiantDocumentTest, TreeMembershipPreservesSubtreesDetachedAndUnregister
     EXPECT_FALSE(view_tree_contains_view(root, member));
     EXPECT_TRUE(view_tree_contains_view(member, member));
 }
+
+TEST_F(RadiantDocumentTest, CursorMetadataInheritsWithoutLayoutAndMixedGeometryStillReflows) {
+    DomElement* root = load_script_source(
+        "<style>#result{width:100px;height:30px}"
+        "#result[data-pointer=drag],#result[data-pointer=drag] *{cursor:crosshair}"
+        "#result[data-size=wide]{width:150px}#override{cursor:pointer!important}</style>"
+        "<div id=result><span id=child>child</span><span id=override>override</span></div>");
+    ASSERT_NE(root, nullptr);
+    ASSERT_NE(radiant_document_ensure_state(document, "cursor-metadata-test"), nullptr);
+    layout_html_doc(&ui, document, false);
+    radiant_reconcile_dom_mutations(&ui, document);
+    ASSERT_EQ(document->js.mutation_count, 0);
+    // the manual initial flow consumed the loader's reflow request.
+    doc_state_clear_reflow(document->state);
+    reflow_clear(document->state);
+    DomElement* child = dom_find_element_by_id(document->root, "child");
+    DomElement* override = dom_find_element_by_id(document->root, "override");
+    ASSERT_NE(child, nullptr);
+    ASSERT_NE(override, nullptr);
+    uint64_t layouts = document->view_tree->document_layout_count;
+    ASSERT_TRUE(root->set_attribute("data-pointer", "drag"));
+    radiant_notify_template_attribute(root, "data-pointer", nullptr);
+    ASSERT_EQ(document->js.mutation_record_count, 1);
+    ASSERT_EQ(document->js.mutation_records[0].presentation_property, CSS_PROPERTY_CURSOR);
+    SCOPED_TRACE(::testing::Message() << "before=" << document->js.reflow_pending_before_batch
+        << " scheduled=" << document->state->reflow_scheduler.pending
+        << " sheets=" << document->js.inline_stylesheet_mutation_count
+        << " connected=" << document->js.mutation_records[0].was_connected
+        << " direction=" << document->js.mutation_records[0].direction_sensitive);
+    radiant_reconcile_dom_mutations(&ui, document);
+    EXPECT_STREQ(document->reconcile.reason, "cursor-only");
+    EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+    EXPECT_EQ(root->inl()->cursor, CSS_VALUE_CROSSHAIR);
+    EXPECT_EQ(child->inl()->cursor, CSS_VALUE_CROSSHAIR);
+    EXPECT_EQ(override->inl()->cursor, CSS_VALUE_POINTER);
+    EXPECT_FLOAT_EQ(root->width, 100.0f);
+    const char* old = root->get_attribute("data-pointer");
+    ASSERT_TRUE(root->remove_attribute("data-pointer"));
+    radiant_notify_template_attribute(root, "data-pointer", old);
+    radiant_reconcile_dom_mutations(&ui, document);
+    EXPECT_EQ(document->view_tree->document_layout_count, layouts);
+    EXPECT_EQ(child->inl()->cursor, CSS_VALUE_AUTO);
+    ASSERT_TRUE(root->set_attribute("data-pointer", "drag"));
+    radiant_notify_template_attribute(root, "data-pointer", nullptr);
+    ASSERT_TRUE(root->set_attribute("data-size", "wide"));
+    radiant_notify_template_attribute(root, "data-size", nullptr);
+    radiant_reconcile_dom_mutations(&ui, document);
+    EXPECT_GT(document->view_tree->document_layout_count, layouts);
+    EXPECT_FLOAT_EQ(root->width, 150.0f);
+    EXPECT_EQ(child->inl()->cursor, CSS_VALUE_CROSSHAIR);
+}
+
 
 TEST_F(RadiantDocumentTest, ActiveAncestryCommitsOneCascadePerTransition) {
     DomElement* result = load_script_source(

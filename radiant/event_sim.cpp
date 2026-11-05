@@ -6130,6 +6130,23 @@ static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
     }
 }
 
+EventSimProfileTurn::EventSimProfileTurn(EventSimContext* ctx) {
+    if (!ctx || !ctx->profile_events || !ctx->is_running || !ctx->events ||
+        ctx->current_index < 0 || ctx->current_index >= ctx->events->length) return;
+    if (!ctx->event_durations_ms) ctx->event_durations_ms = (double*)arena_calloc(
+        ctx->event_arena, ctx->events->length * sizeof(double));
+    if (!ctx->event_durations_ms) return;
+    context = ctx;
+    index = ctx->current_index;
+    started = time_now_ns();
+}
+
+EventSimProfileTurn::~EventSimProfileTurn() {
+    if (!context) return;
+    context->event_durations_ms[index] += time_elapsed_ms_f(started, time_now_ns());
+    if (!context->is_running && context->current_index > index) event_sim_print_results(context);
+}
+
 bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, RadiantWindow* window, double current_time) {
     UiContext* uicon = (UiContext*)uicon_ptr;
     if (!ctx || !ctx->is_running) return false;
@@ -6146,15 +6163,8 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, RadiantWindow* wind
 
     // Process current event (with auto-wait retry for assertions)
     SimEvent* ev = (SimEvent*)ctx->events->data[ctx->current_index];
-    uint64_t profile_start = ctx->profile_events ? time_now_ns() : 0;
     if (!process_sim_event_with_retry(ctx, ev, uicon, window)) {
         return true;
-    }
-    if (ctx->profile_events) {
-        if (!ctx->event_durations_ms) ctx->event_durations_ms = (double*)arena_calloc(
-            ctx->event_arena, ctx->events->length * sizeof(double));
-        if (ctx->event_durations_ms) ctx->event_durations_ms[ctx->current_index] =
-            time_elapsed_ms_f(profile_start, time_now_ns());
     }
     if (ctx->replay_assert_state && ev->type == SIM_EVENT_REPLAY_INPUT) {
         event_sim_assert_schema(ctx, uicon, "replay_input");
@@ -6178,7 +6188,7 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, RadiantWindow* wind
             uicon->document = lam::up((DomDocument*)ctx->original_document);
             ctx->frame_stack_depth = 0;
         }
-        event_sim_print_results(ctx);
+        if (!ctx->profile_events) event_sim_print_results(ctx);
         return false;
     }
 

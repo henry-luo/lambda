@@ -177,6 +177,62 @@ Its parallel original-case latencies remain **7.6–25.7 s**, so the latency tar
 remains open under aggregate load. UI passed **324/324**, View **280 + 1 skipped**,
 and the curated document selection **196/196**. Layout integer-cast lint passed.
 
+### 4.5 Per-step latency continuation (2026-11-05)
+
+The acceptance criterion is now **500 ms per UI step**, including assertion
+retries and host work. The previous profiler measured only the successful
+assertion attempt. Timing now accumulates each complete host turn into its
+original step, including asynchronous document loading and retirement, and
+writes the final result after the final turn finishes. A native regression
+checks retry accumulation, step attribution and final JSON publication.
+
+The sheet's selection metadata changes only `cursor`, but ordinary attribute
+invalidation reset and laid out the entire grid on each press/release. Template
+attribute writes now prove that every CSS dependency changes only cursor before
+admitting a commit without layout. It preserves ordinary attribute/observer
+records, recascades styles, and resolves inherited cursors in parent-first order.
+Mixed geometry writes and uncertain dependencies use ordinary layout. A native
+regression checks inheritance, `!important`, attribute removal, the actual
+document-layout counter, and the mixed-width fallback.
+
+String class changes also retain equal descendants and their native input state
+(**D5.5.3**). Attribute changes and template replacements share the existing
+reset/recascade preparation and one final layout. The extended
+`lambda_equal_render` fixture checks input identity/value and changed class
+geometry; its control failed both new checks, and the candidate passes all 12.
+Retained properties keep their existing view/document ownership
+(**D5.5.1 / D5.1.4**).
+
+Two serial runs per pinned **release_native** host, in control/candidate/
+candidate/control order with **one worker**, preserve all 721 original fixture
+events and all GC/backend settings. All eight named UI fixtures have observed
+step maxima below 500 ms. Sheet selection's maximum fell **695.220 → 423.859 ms**
+and median whole-fixture wall time **4.618 → 3.754 s**. Sheet editor's maximum
+fell **352.780 → 237.868 ms**. Other fixtures show small timing changes; their
+overall runtimes have not materially improved. The module test passes its full
+AST/MIR/AUTO positive/negative matrix; each assertion step takes about **0.01 ms**,
+while its six cold hosts still take **9.408 s** in total.
+
+**The complete latency target remains open.** Scene3D has four navigation steps
+over budget in each candidate run; its maximum is **2,545.285 ms**, versus
+**2,561.627 ms** in the control. Diagnostic sampling and JS phase logs identify
+module evaluation and synchronous MIR function promotion/code generation;
+384 function compilations total about 4.95 s across the replay. No JS policy,
+backend, vendor code, fixture workload or GC setting was changed. Parallel
+aggregate timings are separate from these serial observations. Evidence and
+remaining targets: `temp/radiant-slow-ten/step-report.md` and `step-budget.json`.
+
+The complete native document runner passes **538/538**, state store **31/31**,
+and layout integer-cast lint passes. The required Radiant baseline records
+**7,900 passed, 303 partial, 14 skipped and one failure / 8,218 total**, in
+**173.903 s**. UI passes **326/326**, View **280 + 1 skipped**, and the curated
+document selection **198/198**. The failure,
+`DomDocumentOwnership.WindowRetainsDocumentWhileItsLoaderRuns`, also fails in
+a separately rebuilt pre-tuning production-source control with the same exit
+status 4. Cleanup preflight in unchanged `ui_context.cpp` overlooks a document
+whose only evaluator is `loader_runtime`. The aggregate gate therefore remains
+red. Candidate sources were restored and hash-verified after that control.
+
 ## 5. What remains heavy
 
 - `view/radiant_view_math_intensive_scroll` (~21 s):

@@ -9,15 +9,15 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready"
+      "js": "(()=>{if(!globalThis.phWorld){const x=new XMLHttpRequest();x.open('GET','../../../scene3d/_physics_probe.js',false);x.send();(0,eval)(x.responseText)}return phWorld() && phWorld().getAttribute('data-ready')==='true';})()"
     },
     {
       "type": "script",
-      "js": "physicsDemo.restart()"
+      "js": "phRequest({operation:\"reset\"})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 0 && physicsDemo.state.bodies.length === 10"
+      "js": "phState().tick === 0 && phState().bodies.length === 10"
     },
     {
       "type": "snapshot_surface",
@@ -29,19 +29,19 @@
     },
     {
       "type": "script",
-      "js": "physicsDemo.action('pulse',false)"
+      "js": "phAction('pulse',false)"
     },
     {
       "type": "assert_script",
-      "js": "Math.hypot(...physicsDemo.state.bodies[1].angular_velocity) > 0.4"
+      "js": "Math.hypot(...phState().bodies[1].angular_velocity) > 0.4"
     },
     {
       "type": "script",
-      "js": "physicsDemo.request({operation:'step',ticks:360})"
+      "js": "phRequest({operation:'step',ticks:360})"
     },
     {
       "type": "assert_script",
-      "js": "Math.abs(physicsDemo.state.bodies[1].quaternion[3] - 1) > 0.0001"
+      "js": "Math.abs(phState().bodies[1].quaternion[3] - 1) > 0.0001"
     },
     {
       "type": "assert_surface",
@@ -56,15 +56,15 @@
     },
     {
       "type": "script",
-      "js": "physicsDemo.beforeGravity = physicsDemo.state.bodies[1].position[1]; physicsDemo.action('gravity-on',false)"
+      "js": "globalThis.beforeGravity = phState().bodies[1].position[1]; phAction('gravity-on',false)"
     },
     {
       "type": "script",
-      "js": "physicsDemo.request({operation:'step',ticks:120})"
+      "js": "phRequest({operation:'step',ticks:120})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.bodies[1].position[1] < physicsDemo.beforeGravity"
+      "js": "phState().bodies[1].position[1] < globalThis.beforeGravity"
     },
     {
       "type": "click",
@@ -74,7 +74,7 @@
     },
     {
       "type": "script",
-      "js": "physicsDemo.request({operation:'step',ticks:2})"
+      "js": "phRequest({operation:'step',ticks:2})"
     },
     {
       "type": "click",
@@ -84,15 +84,15 @@
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 482"
+      "js": "phState().tick === 482"
     },
     {
       "type": "script",
-      "js": "physicsDemo.restart()"
+      "js": "phRequest({operation:\"reset\"})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 0"
+      "js": "phState().tick === 0"
     }
   ]
 }

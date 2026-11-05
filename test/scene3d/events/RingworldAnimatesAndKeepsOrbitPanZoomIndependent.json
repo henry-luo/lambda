@@ -23,7 +23,7 @@
       "source": "document",
       "target": "#scene",
       "fields": {
-        "shared_runtime": 1
+        "shared_runtime": 0
       }
     },
     {
@@ -67,7 +67,7 @@
     },
     {
       "type": "script",
-      "js": "document.getElementById('play').click()"
+      "js": "globalThis.rPose=()=>({position:JSON.parse(document.getElementById('main').getAttribute('position')),target:JSON.parse(document.getElementById('main').getAttribute('target'))});\nglobalThis.rDist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);\nglobalThis.rPolar=()=>{const p=rPose(),d=rDist(p.position,p.target);return Math.acos((p.position[1]-p.target[1])/d)};\nglobalThis.rTheta=()=>{const p=rPose();return Math.atan2(p.position[0]-p.target[0],p.position[2]-p.target[2])};\nglobalThis.rClick=id=>document.getElementById(id).click();rClick('play')"
     },
     {
       "type": "animation_tick",
@@ -84,7 +84,7 @@
     },
     {
       "type": "script",
-      "js": "ringworld.autoplay(true);globalThis.cameraBefore=ringworld.camera.position.clone()"
+      "js": "rClick('auto-play');globalThis.cameraBefore=rPose().position"
     },
     {
       "type": "mouse_down",
@@ -103,7 +103,7 @@
     },
     {
       "type": "script",
-      "js": "if(ringworld.camera.position.distanceTo(cameraBefore)<.1)throw new Error('native scene drag did not orbit')"
+      "js": "if(rDist(rPose().position,cameraBefore)<.1)throw new Error('native scene drag did not orbit')"
     },
     {
       "type": "script",
@@ -115,7 +115,7 @@
     },
     {
       "type": "script",
-      "js": "ringworld.autoplay(true);globalThis.keyTargetBefore=ringworld.controls.target.clone();globalThis.tiltBefore=ringworld.controls.getPolarAngle()"
+      "js": "rClick('auto-play');globalThis.keyTargetBefore=rPose().target;globalThis.tiltBefore=rPolar()"
     },
     {
       "type": "key_press",
@@ -129,11 +129,11 @@
     },
     {
       "type": "script",
-      "js": "\n        if(ringworld.controls.target.distanceTo(keyTargetBefore)<.001)throw new Error('arrow key did not pan');\n        if(Math.abs(ringworld.controls.getPolarAngle()-tiltBefore)<.001)throw new Error('shift-arrow did not tilt');\n        if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('camera key did not stop auto play');\n    "
+      "js": "if(rDist(rPose().target,keyTargetBefore)<.001)throw new Error('arrow key did not pan');if(Math.abs(rPolar()-tiltBefore)<.001)throw new Error('shift-arrow did not tilt');if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('camera key did not stop auto play')"
     },
     {
       "type": "script",
-      "js": "document.getElementById('pan-mode').click();globalThis.targetBefore=ringworld.controls.target.clone()"
+      "js": "rClick('pan-mode');globalThis.targetBefore=rPose().target"
     },
     {
       "type": "mouse_down",
@@ -152,7 +152,7 @@
     },
     {
       "type": "script",
-      "js": "if(ringworld.controls.target.distanceTo(targetBefore)<.1)throw new Error('pan mode did not move the target')"
+      "js": "if(rDist(rPose().target,targetBefore)<.1)throw new Error('pan mode did not move the target')"
     },
     {
       "type": "scene3d",
@@ -176,7 +176,7 @@
     },
     {
       "type": "script",
-      "js": "ringworld.autoplay(true);globalThis.zoomBefore=ringworld.camera.position.distanceTo(ringworld.controls.target)"
+      "js": "rClick('auto-play');globalThis.zoomBefore=rDist(rPose().position,rPose().target)"
     },
     {
       "type": "scroll",
@@ -186,7 +186,7 @@
     },
     {
       "type": "script",
-      "js": "\n        if(Math.abs(ringworld.camera.position.distanceTo(ringworld.controls.target)-zoomBefore)<.01)throw new Error('wheel did not zoom');\n        if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('wheel did not stop auto play');\n        document.getElementById('tilt-up').click();document.getElementById('orbit-right').click();\n        document.getElementById('zoom-in').click();document.getElementById('zoom-out').click();\n        document.getElementById('top').click();\n        if(ringworld.controls.getPolarAngle()>.17)throw new Error('top preset');\n        document.getElementById('side').click();\n        if(Math.abs(ringworld.controls.getPolarAngle()-Math.PI/2)>1e-6)throw new Error('side preset');\n        for(let i=0;i<50;i++)ringworld.zoom(.5);\n        if(Math.abs(ringworld.controls.getDistance()-7)>1e-6)throw new Error('minimum zoom');\n        for(let i=0;i<50;i++)ringworld.zoom(2);\n        if(Math.abs(ringworld.controls.getDistance()-38)>1e-6)throw new Error('maximum zoom');\n        ringworld.orbit(0,-100);\n        if(ringworld.controls.getPolarAngle()<.0799)throw new Error('tilt limit');\n        document.getElementById('reset').click();\n        if(ringworld.camera.position.distanceTo({x:7.5,y:4.8,z:11})>1e-6||ringworld.controls.target.length()>1e-6)\n            throw new Error('reset camera and pan');\n        document.getElementById('rewind').click();\n    "
+      "js": "if(Math.abs(rDist(rPose().position,rPose().target)-zoomBefore)<.01)throw new Error('wheel did not zoom');\nif(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('wheel did not stop auto play');\nrClick('tilt-up');rClick('orbit-right');rClick('zoom-in');rClick('zoom-out');rClick('top');\nif(rPolar()>.17)throw new Error('top preset');rClick('side');\nif(Math.abs(rPolar()-Math.PI/2)>1e-6)throw new Error('side preset');\nfor(let i=0;i<50;i++)rClick('zoom-in');if(Math.abs(rDist(rPose().position,rPose().target)-7)>1e-6)throw new Error('minimum zoom');\nfor(let i=0;i<50;i++)rClick('zoom-out');if(Math.abs(rDist(rPose().position,rPose().target)-38)>1e-6)throw new Error('maximum zoom');\nfor(let i=0;i<50;i++)rClick('tilt-up');if(rPolar()<.0799)throw new Error('tilt limit');\nrClick('reset');if(rDist(rPose().position,[7.5,4.8,11])>1e-6||rDist(rPose().target,[0,0,0])>1e-6)throw new Error('reset camera and pan');rClick('rewind');"
     },
     {
       "type": "assert_render_stats",
