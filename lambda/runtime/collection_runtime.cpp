@@ -120,7 +120,7 @@ bool array_reserve_append_slots(Array* array, int64_t append_count) {
         doubled > required_capacity ? doubled : required_capacity, nullptr);
 }
 
-// D2.6.6v2: a JS array's companion property map now lives in the array's OWN
+// D3.1.1: a JS array's companion property map now lives in the array's OWN
 // attribute face — one tagged Item in an 8-byte buffer marked by
 // ArrayPropsShape — instead of a reserved slot at the top of the elements
 // buffer. The companion is still a real object (a sparse array's is a
@@ -172,7 +172,7 @@ bool array_widen_inferred_pointer_lane(Array* array) {
     }
     // An inferred pointer lane is a representation choice, not a source
     // contract. Box its words in place before an open incompatible append so
-    // erasing inference cannot change the result (D3.3.1v2, D3.3.3v3).
+    // erasing inference cannot change the result (D4.3.1, D4.3.3).
     for (int64_t index = 0; index < array->length; index++) {
         array->items[index] = array_native_lane_read(array, index);
     }
@@ -181,7 +181,7 @@ bool array_widen_inferred_pointer_lane(Array* array) {
 }
 
 // Store one value as one item: the tail shared by the sequence and verbatim
-// appends (D2.6.5v3). A native lane stores in place or widens first; every
+// appends (D3.3.1). A native lane stores in place or widens first; every
 // other store goes through array_set, which rehomes 64-bit scalars into the
 // array's own tail.
 static void array_append_one(Array* arr, Item item) {
@@ -219,7 +219,7 @@ void array_push(Array* arr, Item item) {
         list_push((List*)arr, item);
         return;
     }
-    // The sequence append (D2.6.5v3): a list spreads wherever it lands as an
+    // The sequence append (D3.3.1): a list spreads wherever it lands as an
     // item (S2.5.1v2); the item-position marker of an empty list producer
     // contributes nothing (S2.5.5v2). Everything else is stored verbatim.
     // Both tests precede the native-lane store, which would otherwise keep a
@@ -238,7 +238,7 @@ void array_push(Array* arr, Item item) {
                 // A source may carry a native lane, where `items[]` holds raw
                 // payloads rather than tagged Items -- `split()` returns such a
                 // list. Reading the slot directly reinterprets a `String*` as an
-                // Item and yields null (D2.6.5).
+                // Item and yields null (D3.3.1).
                 Item element = array_item_read((Array*)nested, i);
                 cow_capture_value(element);  // S9.3.1: a spliced item is captured
                 array_push(arr, element);
@@ -308,7 +308,7 @@ Item pn_push_cow(Item owner, Item value) {
     // parameter had admitted `u` (LR12-27).
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
-    // Detach before clearing the certificate to preserve aliases (D3.3.3v3).
+    // Detach before clearing the certificate to preserve aliases (D4.3.3).
     lambda_array_clear_rep_cert(replacement);
     return pn_push(replacement, value);
 }
@@ -317,7 +317,7 @@ Item pn_push_cow(Item owner, Item value) {
 // (array_num_push_open). MIR reaches this entry only after its append-builder
 // proof has closed every writer to a total int producer, so it skips that
 // decision. Preserve COW before growth, then store with the native lane's own
-// admission check (D3.2.1, D3.3.1, S9.2.2).
+// admission check (D4.2.1, D4.3.1, S9.2.2).
 Item lambda_array_int_push_inferred_cow(Item owner, Item value) {
     if (get_type_id(owner) != LMD_TYPE_ARRAY_NUM ||
             (get_type_id(value) != LMD_TYPE_INT &&
@@ -400,7 +400,7 @@ Item pn_splice_cow(Item owner, Item start_item, Item count_item) {
     return pn_splice(replacement, start_item, count_item);
 }
 
-// The verbatim collection append (D2.6.5v4) stores one value without
+// The verbatim collection append (D3.3.1) stores one value without
 // splicing, dropping or merging. Element destinations still normalize content.
 // Positional structures use it:
 // argument and rest lists, zip pairs, group/join/order keys and rows, path
@@ -531,7 +531,7 @@ void list_push(List* list, Item item) {
         }
     }
 
-    // D4.5.2: UI element content lives in the untraced result arena, so every
+    // D5.5.2: UI element content lives in the untraced result arena, so every
     // non-string value not already there is copied in (strings were above).
     Arena* ui_content_arena = type_id != LMD_TYPE_STRING && list->type_id == LMD_TYPE_ELEMENT
         ? ui_collection_arena(list) : nullptr;

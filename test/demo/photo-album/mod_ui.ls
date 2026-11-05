@@ -6,7 +6,7 @@ import CU: .mod_collage_ui
 import BU: .mod_book_ui
 import P: .mod_places
 
-import icons: ~~.mod_icons
+import icons: lambda.ui.workspace.icons
 pub let icon = icons.icon
 
 fn make(id, action, title, graphic) => <button id:id,type:"button",class:"pill secondary icon-only",'data-action':action,title:title,'aria-label':title,(icon(graphic, 18))>
@@ -116,7 +116,7 @@ pub fn tree(lib, command) => <div id:"album",class:"album",'data-mode':"library"
             'data-album':a.key,<span a.title>;<small string(a.count)>>]>;
         <p class:"sidebar-credit","Photos: Wikimedia Commons featured pictures, credited in each photo's info.">>;
     <section class:"workspace",
-        <header class:"toolbar",
+        <header class:"toolbar workspace-chrome",
             <div class:"heading",<h1 id:"title","Library">;<p id:"status",role:"status","">>;
             <label class:"search",(icon("search", 16));<input id:"search",type:"search",placeholder:"Search titles, places, cameras, years",'aria-label':"Search photos">>;
             // the creations other than the slideshow are icon buttons, so the heading keeps its room

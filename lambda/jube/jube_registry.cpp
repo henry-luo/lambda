@@ -1013,7 +1013,7 @@ static Item jube_host_script_new_closure(JubeNativeFunctionSpec spec,
 }
 
 // A module's call back into script runs under the RA10 barrier: it may not
-// park the activation whose stack holds the module's frame (D7.4.2).
+// park the activation whose stack holds the module's frame (D9.5.2).
 static Item jube_host_call_function(Item function, Item this_value, Item* args,
         int arg_count) {
     activation_barrier_enter();
@@ -3386,7 +3386,7 @@ static int jube_load_manifest_path_internal(const char* manifest_path,
         jube_manifest_string(text, "version", module_version, sizeof(module_version)) &&
         jube_manifest_uint32(text, "base_abi_version", &base_abi) &&
         jube_manifest_uint32(text, "hosted_api_version", &hosted_api) &&
-        // a manifest negotiates the descriptor ABI and the host service API (D7.3.2)
+        // a manifest negotiates the descriptor ABI and the host service API (D9.4.2)
         base_abi == JUBE_ABI_VERSION && hosted_api == JUBE_HOST_API_VERSION;
     if (!valid) {
         log_error("JUBE_REG: manifest '%s' is malformed or incompatible", manifest_path);
@@ -3723,7 +3723,7 @@ static const RdbDriver* const* jube_module_rdb_drivers(const JubeModuleDef* modu
     return module->rdb_drivers;
 }
 
-/** D7.3.4: the descriptor's drivers must equal the manifest's `rdb:` provides */
+/** D9.4.4: the descriptor's drivers must equal the manifest's `rdb:` provides */
 static bool jube_rdb_module_matches_catalog(const JubeModuleDef* module) {
     int32_t count = 0;
     const RdbDriver* const* drivers = jube_module_rdb_drivers(module, &count);
@@ -3760,7 +3760,7 @@ const RdbDriver* jube_rdb_resolve_driver(const char* name) {
     if (!jube_rdb_module_matches_catalog(module)) {
         log_error("JUBE_RDB: module '%s' drivers do not match its manifest provides",
                   module->name);
-        // activation is transactional: a mismatched image is never kept (D7.3.2)
+        // activation is transactional: a mismatched image is never kept (D9.4.2)
         if (index >= transaction_start) jube_rollback_registered_modules(transaction_start);
         return NULL;
     }

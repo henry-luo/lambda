@@ -1,8 +1,8 @@
-// reads remain callable from fn, including after a host mutation (D7.4.6).
+// reads remain callable from fn, including after a host mutation (D7.1.1).
 import dom
 import radiant
-import controller: lambda.edit.controller
-import files: lambda.edit.files
+import controller: lambda.editor.controller
+import files: lambda.editor.app.files
 import interaction: lambda.ui.core.interaction
 import chart: lambda.chart.events
 import frames: lambda.map

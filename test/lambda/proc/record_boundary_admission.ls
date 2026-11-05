@@ -1,8 +1,8 @@
-// Record-contract boundaries (D3.2.4v4): an exact shape or an allowed null is
+// Record-contract boundaries (D4.2.5): an exact shape or an allowed null is
 // admitted inline; any other value takes the runtime check, which converts a
 // compatible map and rejects a mismatch. A tail map literal is built in its
 // record contract like `return {...}` and admits each field; an uncertified
-// `Node[]` is admitted through a one-level copy (D4.4.2).
+// `Node[]` is admitted through a one-level copy (D5.4.2).
 type Node = {kind: int, label: string, kids: Node[], next: Node?}
 let no_kids: Node[] = []
 

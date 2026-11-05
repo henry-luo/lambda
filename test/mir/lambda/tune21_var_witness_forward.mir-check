@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T21-2d / Tune31 T31-1: an inferred witness may reach a self-forwarding var raw entry, whose representation-agnostic COW setter preserves widening and boxed-wrapper fallback without promoting inference to a declared contract (D3.2.1, D3.3.3v3). LR07-28/D3.3.3v3 (2026-10-28): an inferred bool Array has no element tag to guard after unknown var stores. set_row therefore keeps fn_array_set on its boxed path, without inventing a bool[] contract; place retains the numeric taken-array witness.",
+  "description": "T21-2d / Tune31 T31-1: an inferred witness may reach a self-forwarding var raw entry, whose representation-agnostic COW setter preserves widening and boxed-wrapper fallback without promoting inference to a declared contract (D4.2.1, D4.3.3). LR07-28/D4.3.3 (2026-10-28): an inferred bool Array has no element tag to guard after unknown var stores. set_row therefore keeps fn_array_set on its boxed path, without inventing a bool[] contract; place retains the numeric taken-array witness.",
   "checks": [
     {
       "in_func": "_set_row_#",

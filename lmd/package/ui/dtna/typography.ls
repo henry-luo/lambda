@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 
 pub fn descriptor(kind, props, child) element^ {
@@ -7,7 +8,7 @@ pub fn descriptor(kind, props, child) element^ {
     else if (not c.enum_valid(props.type,["secondary","success","warning","danger"])^) raise c.fail(kind,"invalid text type")
     else if (kind == 'link' and (not all([for (key in ["href","target","rel"]) props[key] == null or props[key] is string]) or
         (props.download != null and not (props.download is string or props.download is bool)))) raise c.fail(kind,"link attributes must be strings; download may also be bool")
-    else c.node(kind,props,child,["strong","italic","underline","delete","code","mark","keyboard","disabled","type",
+    else descriptor.node(kind,props,child,["strong","italic","underline","delete","code","mark","keyboard","disabled","type",
         *(if (kind == 'title') ["level"] else if (kind == 'link') ["href","target","rel","download"] else [])])^
 }
 fn decorated(node) {

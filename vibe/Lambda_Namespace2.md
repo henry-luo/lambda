@@ -23,7 +23,7 @@ scope. Tags and qualified attributes store their local names and namespace
 identity, while declaration attributes retain their existing XML metadata form.
 The XML formatter restores QName spellings and declarations, including a
 subtree detached from its original ancestors. Copies own namespace descriptors
-in the destination Input (**D4.6.1v4**). DOM/SVG lexical QName queries adapt at
+in the destination Input (**D5.6.1**). DOM/SVG lexical QName queries adapt at
 the markup boundary; Lambda string-key reads continue to name global keys.
 
 The implementation follows the four LR03-40 reports. Schema/module namespace

@@ -1,4 +1,4 @@
-// Shipped source package (D7.2.4); pure conversion never acquires resources (S12.1.1v3).
+// Shipped source package (D9.3.4); pure conversion never acquires resources (S12.1.1v3).
 import c: .docbook.common
 import config: .docbook.options
 import model: .docbook.model

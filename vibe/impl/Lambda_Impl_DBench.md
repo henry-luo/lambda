@@ -2,9 +2,22 @@
 
 ## Current checkpoint
 
-Design IDs below refer to this worktree's pre-61.0.0 formal design, except
-central-IO ruling D11.1.2, which is D7.5.2 in this checkout. The proposal
-records the newer numbering used by the parent checkout.
+Historical checkpoint entries use the pre-61.0.0 formal-design numbering;
+the proposal and current follow-up milestones use the current numbering.
+
+Integration with remote master `d4ccb1ffa` preserves the shared workspace
+components, SQLite snapshot checks, and durable file publication alongside
+DBench's virtual grids and streaming exports. Streamed publication verifies
+the staged inode, its content and the destination after authorization callbacks;
+temporary spools do not request durable-file flags (D11.1.2). The
+integrated Lambda baseline passed 8,790 checks. File publication passed all
+148 tests, RDB passed 233 with 13 live-service cases skipped, and all 39
+focused DBench/Sheet UI replays passed. The Radiant baseline passed 7,715
+checks with 299 partial and 13 skipped, but its render suite timed out after
+240 seconds without output. The render suite then passed both independently
+and through the aggregate runner: 207 passed, four partial and one skipped.
+The focused Radiant no-int-cast lint passed. The aggregate timeout's cause
+remains unconfirmed.
 
 - **Goal:** Implement the [DBench proposal](../Lambda_Demo_DBench.md) in this
   worktree, including a two-axis virtual grid shared by Sheet and DBench, and
@@ -451,7 +464,7 @@ runtime-pool growth to allocation sites, accounting for frees, and separately
 attribute result-arena allocations to source values, content and attributes.
 Use opt-in temporary instrumentation and the existing 240-move release replay;
 do not recycle source storage until all escaping owners are accounted for
-(D4.5.2 and D5.3.3).
+(D5.5.2 and D6.3.3).
 
 ### P0 — live allocation attribution
 
@@ -460,8 +473,8 @@ runtime-pool growth before choosing a reclamation or reuse change. Sample only
 the document runtime's pool, track sampled frees as well as allocations, and
 compare snapshots across the measured scroll interval; report sampling and any
 untracked reallocations. Symbolize the allocation sites, reproduce the dominant
-owner with a focused fixture, and preserve its ownership contract (D4.1.4v5,
-D4.5.2, D5.3.3). The temporary probe must be removed after attribution. If the
+owner with a focused fixture, and preserve its ownership contract (D5.1.4,
+D5.5.2, D6.3.3). The temporary probe must be removed after attribution. If the
 remaining Input arena is a separate owner, measure it separately rather than
 ascribing its growth to the pool. Verification budget: one release replay for
 attribution, focused tests for any root-cause fix, and the affected baselines.
@@ -474,8 +487,8 @@ global shape. This is one instance of a general dynamic-JS-property problem.
 For packed, non-constructor ordinary JS properties, an incompatible type
 change now selects the existing `any` TypedItem lane, preserving the dynamic
 value contract and avoiding later rebuilds. Initial numeric writes keep the
-numeric lane and its compatible integer-to-float stores (D3.4.5, D3.2.4v5,
-D4.5.2). The temporary probes have been removed. In the instrumented
+numeric lane and its compatible integer-to-float stores (D3.4.5, D4.2.5,
+D5.5.2). The temporary probes have been removed. In the instrumented
 release-profile replay, the late-scroll runtime
 pool had 3.6 MB live versus 130.7 MB before; all 252 assertions passed. The
 Input arena was unchanged at 61.1 MB live at that sample, so its independent
@@ -504,7 +517,7 @@ reset activity. Attribute growth by caller and allocation size, and compare it
 with the arena's active-byte counter before selecting a change. Source elements,
 their attributes and text, render-map entries, DOM backing edges, shared results
 and script-escaped values have different lifetimes; no allocation may be reused
-until every owner has released it (D4.1.4v5, D4.5.2, D5.3.3). Remove the
+until every owner has released it (D5.1.4, D5.5.2, D6.3.3). Remove the
 temporary probe after measurement. Verification budget: one release profile,
 focused lifetime and routing tests for any fix, and affected baseline gates.
 

@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_text_context.hpp"
 #include "layout_ruby.hpp"
 #include "page_document.hpp"
 #include "hyphenation.hpp"
@@ -4274,6 +4275,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     unsigned char* str = text_start + first;
     unsigned char* text_end = text_start + last;
+    LayoutTextShapingScope shaping(lycon, text_node, text_start, text_end);
     // CSS Inline 3 §2.1: an empty range generates no inline box.
     if (str == text_end) {
         if (!append && !first && last == source_length) text_node->view_type = RDT_VIEW_NONE;

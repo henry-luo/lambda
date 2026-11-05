@@ -1,6 +1,6 @@
 # Radiant — Application Shell, Browsing & Document Loading
 
-> **Last verified against tree:** 2026-09-21
+> **Last verified against tree:** 2026-09-21; platform lifetime in §§2–3 refreshed 2026-11-04
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the outermost layer of Radiant when it runs as an interactive viewer or a headless renderer: the single global `UiContext` that owns the window, surface, fonts, current document, browsing session and webview manager; the `RadiantFrameClock`-paced main loop that pumps GLFW, libuv and the JS event loops on one UI thread; the browsing session that manages navigation and a bounded back/forward history; and — the largest part — the DOM-backed document-loading architecture, where every supported input format (HTML, SVG, image, XML, source text, PDF, `.ls`, LaTeX, Markdown+math, wiki) is normalized into a single `DomDocument` before layout and rendering are shared.
 >
@@ -33,7 +33,7 @@ The CLI entry points live in `lambda/main.cpp`: `strcmp(argv[1], "layout")` rout
 | Browsing & embedding | `BrowsingSession* browsing_session`, `WebViewManager* webview_mgr` | `webview_mgr` is `NULL` until the first `<webview>` element ([RAD_22](RAD_22_Media_Webview.md)). |
 | Instrumentation | `EventStateLog* event_log`, `StateDumpLog* state_dump_log`, `bool headless` | `headless` also gates clipboard to the in-process store. |
 
-`ui_context_init(UiContext*, bool headless)` (`ui_context.cpp:68`) zeroes the struct, seeds a 1200×800 viewport, sets the locale for Unicode input, then branches on `headless` ([§3](#3-window-lifecycle-and-headless-windowless-default)). Regardless of branch it creates the `FontContext` (after the window so `pixel_ratio` is known), sets the two default `FontProp`s, wires the fallback-font array, calls `rdt_engine_init(1)` and `timing_init_presets()`, shares the font context with the vector backend via `rdt_set_font_context`, and finally builds the surface through `ui_context_create_surface` (`ui_context.cpp:59`). Teardown mirrors this: `ui_context_cleanup` (`ui_context.cpp:293`) destroys the webview manager, calls `free_document`, releases fonts and the image cache, shuts down the render pool and ThorVG, destroys the surface, and only tears down GLFW when a window was actually created (calling `glfwTerminate` without a prior `glfwInit` is undefined).
+`ui_context_init(UiContext*, bool headless)` (`ui_context.cpp:68`) zeroes the struct, seeds a 1200×800 viewport, sets the locale for Unicode input, then branches on `headless` ([§3](#3-window-lifecycle-and-headless-windowless-default)). Regardless of branch it creates the `FontContext` (after the window so `pixel_ratio` is known), sets the two default `FontProp`s, wires the fallback-font array, calls `rdt_engine_init(1)` and `timing_init_presets()`, shares the font context with the vector backend via `rdt_set_font_context`, and finally builds the surface through `ui_context_create_surface` (`ui_context.cpp:59`). Teardown mirrors this: `ui_context_cleanup` (`ui_context.cpp:293`) destroys the webview manager, calls `free_document`, releases fonts and the image cache, shuts down the render pool and ThorVG, destroys the surface, and destroys its native window and cursor. The platform backend owns GLFW separately: its lazy `GlfwApplicationRuntime` initializes the application once and terminates it through RAII at process exit (**D4.5.1v4**, platform seam MB7). A `UiContext` never terminates the application runtime, including when its window creation fails.
 
 `free_document` (`ui_context.cpp:248`) is the per-document teardown: it cancels or abandons the document's JS timers (choosing `js_event_loop_abandon_document_timers` when the JS batch-cleanup guard tripped, [RAD_21](RAD_21_JS_Scripting_Integration.md)), cleans up retained JS state, destroys the `DocState`, frees DOM-owned embed image surfaces, destroys the view tree/pool ([RAD_01](RAD_01_View_and_DOM_Model.md)), and destroys the `Url` and the `DomDocument` arena.
 
@@ -41,14 +41,14 @@ The HTML loader, its `Input` and the CLI can retain the same URL carrier.
 Redirects and `<base>` overrides use `url_replace_contents` to move the new
 components into that carrier and release the previous components. DOM URL
 replacement shares this helper. Preserving the carrier lets the chosen owner
-detach and destroy it once at teardown (**D4.1.4v5 / D4.2.6**); a list of retired
+detach and destroy it once at teardown (**D5.1.4 / D5.2.5**); a list of retired
 carrier pointers cannot do that. HTTP error-page construction refreshes its
 borrowed href after replacement. `BaseReplacementPreservesTheLoadersUrlCarrier`
 checks the shared carrier and final geometry; the URL library test also checks
 relative resolution and self-replacement.
 
 Document resources that retain script values bind their `EvalContext` owner
-(**D5.3.3 / D5.4.1**). `script_runner_cleanup_js_state` retires standalone-JS
+(**D6.3.3 / D6.4.1**). `script_runner_cleanup_js_state` retires standalone-JS
 resources before destroying that evaluator: animation hosts disappear, while
 history/input retirement callbacks clear precisely rooted JS values and keep
 their native URLs and text. The same retirement detaches `StateStore`’s cached
@@ -63,13 +63,15 @@ script bootstrap it may use the active evaluator only when that runtime names
 the same document. Merely dispatching an event into a script-less iframe does
 not grant its native history ownership of the parent evaluator. Unbound native
 history keeps its initial URL and null state until the document acquires its own
-evaluator; it cannot retain roots into a different document (**D5.3.3**).
+evaluator; it cannot retain roots into a different document (**D6.3.3**).
 
 ---
 
 ## 3. Window lifecycle and headless-windowless default
 
-The headless branch of `ui_context_init` (`ui_context.cpp:76-113`) is the notable one: **it does not create even a hidden window by default.** The comment records why — on macOS, GLFW's hidden-window path can block in LaunchServices before the test runner reaches document loading, so headless automation runs entirely against the in-memory view tree with `uicon->window == NULL`, `pixel_ratio = 1.0`, and viewport fixed at 1200×800. Tests that genuinely need a parent window (native webview integration) opt back in with the environment variable `LAMBDA_HEADLESS_GLFW_WINDOW`, which takes the old path: `glfwInit` (suppressing the dock icon/menu bar via `GLFW_COCOA_MENUBAR` on macOS), `glfwCreateWindow` with `GLFW_VISIBLE=FALSE`, and a graceful fall back to `NULL` if creation fails.
+The headless branch of `ui_context_init` (`ui_context.cpp:76-113`) is the notable one: **it does not create even a hidden window by default.** The comment records why — on macOS, GLFW's hidden-window path can block in LaunchServices before the test runner reaches document loading, so headless automation runs entirely against the in-memory view tree with `uicon->window == NULL`, `pixel_ratio = 1.0`, and viewport fixed at 1200×800. Native graphics/webview hosts opt in with `LAMBDA_HEADLESS_GLFW_WINDOW` or call `ui_context_enable_native_graphics`. They use `radiant_platform_init(true)` and create an invisible native window; initialization fails explicitly if that host cannot be created. Later hosts share the initialized application runtime.
+
+GLFW 3.4 Cocoa initialization can enter `NSApplication.run` until its delegate receives `applicationDidFinishLaunching`. Repeatedly terminating GLFW between document hosts retires that delegate and can re-enter the launch wait after the one-time notification has already occurred. Keeping the application runtime alive removes that reinitialization path while each host still releases its own window. [GLFW initialization source](https://github.com/glfw/glfw/blob/3.4/src/cocoa_init.m#L597).
 
 The GUI branch (`ui_context.cpp:114-151`) forces the X11 platform on Linux (Wayland/XWayland visibility quirk), creates the window, calls `glfwShowWindow`+`glfwFocusWindow`, then reads the framebuffer size to compute `pixel_ratio = framebuffer_w / window_w`. It keeps `window_*` as physical pixels and `viewport_*` as the requested CSS pixels — the two never collapse, because layout runs in CSS pixels while the surface is physical. Platform IME shims (`radiant_ime_mac_attach`/`radiant_ime_win_attach`, `ui_context.cpp:154-155`) are installed in both branches and are no-ops where unsupported.
 
@@ -85,8 +87,8 @@ dispatch. The common key gate in `handle_event` also serves replay input.
 `dom.set_window_fullscreen(node, enabled)` queues a native request;
 `dom.window_fullscreen(node)` and `dom.window_fullscreen_enabled(node)` read
 published state. Connected nodes of the presented top-level document identify
-the window. The shared DOM catalog/provider path preserves **D7.5.3** and
-**D7.3.3**. Windowless execution reports unavailable (**D7.1.4v2**).
+the window. The shared DOM catalog/provider path preserves **D9.5.6** and
+**D9.4.3**. Windowless execution reports unavailable (**D9.2.1**).
 
 The controller in `window_fullscreen.cpp` coalesces requests, preserves normal
 bounds and maximization, and reconciles actual state after platform calls.
@@ -153,14 +155,14 @@ layout during script execution and retain that runtime beyond transient JS
 realm cleanup. `populate_layout_document` therefore owns only geometry/root
 publication; each loader attaches its runtime explicitly. Existing document
 teardown releases package paint roots and drains that runtime's compiler jobs
-before input/cache destruction (**D5.3.3 / D5.4.1 / D8.5.1v7**).
+before input/cache destruction (**D6.3.3 / D6.4.1 / D8.3.5**).
 
 Pending iframe/image load events register a document resource in their owning
 DOM runtime capsule. Document destruction cancels only its queued events and
 unpins their nodes while the registry is live; evaluator shutdown releases
 the same resources when it retires first. The callback uses its stored capsule
-without changing TLS, so a second document's queue remains intact (**D5.3.3 /
-D5.4.1**). This also covers one-shot rendering after a transient JS realm drops
+without changing TLS, so a second document's queue remains intact (**D6.3.3 /
+D6.4.1**). This also covers one-shot rendering after a transient JS realm drops
 its document alias but package paint roots keep the evaluator alive.
 
 - **HTML / HTTP / default** — `load_lambda_html_doc`. The richest path. It loads source (memory/file/HTTP), converts non-UTF-8 charset, parses with the HTML5 parser, creates the `DomDocument`, builds the DOM tree, extracts viewport and `<base href>`, collects external/inline/`@import` stylesheets in document order, applies inline `style=""`, then applies the initial CSS cascade **before** load-time scripts so CSSOM reads see cascaded values. After `execute_document_scripts`, any JS DOM/class/style or `<style>` mutation triggers stylesheet re-collection and a post-script recascade that preserves JS inline style writes; inline event handlers are compiled after script execution. The legacy scripts-before-cascade order is still available with `RADIANT_SCRIPT_BEFORE_CASCADE=1`. JS scripting is detailed in [RAD_21](RAD_21_JS_Scripting_Integration.md).
@@ -168,9 +170,9 @@ its document alias but package paint roots keep the evaluator alive.
 - **XML** — `load_xml_doc` (`cmd_layout.cpp:4869`). Parses with `ui_mode` for unified DOM allocation; **only** renders as styled content when the XML declares an `<?xml-stylesheet?>` directive, otherwise falls back to the source-text viewer (`cmd_layout.cpp:4921`). It finds the first real root (skipping PIs/comments), loads the referenced CSS, wraps the XML content in a synthetic `html > body`, builds Radiant DOM for the XML root under that body (preserving XML tag names as custom DOM tags for selector matching), and applies the cascade.
 - **Source text** (`.json`, `.yaml`, `.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`) — `load_text_doc` (`cmd_layout.cpp:3775`). Reads the file, HTML-escapes it, wraps it in a `<pre>` with inline monospace CSS, parses that generated HTML, builds the DOM, applies the inline stylesheet. This is intentionally a viewer, not a semantic renderer — YAML is shown as source, not converted to a tree.
 - **`.ls` Lambda script** — `load_lambda_script_doc`. Allocates a heap `Runtime`, creates a retained result `Input` with `ui_mode=true`, binds it as the runtime's UI result (`runtime_bind_ui_result_input`, so generated nodes allocate in its arena), runs the file with MIR, then interprets the result: a full `<html>` element is used directly; another element is wrapped in `html > body`; a scalar/text value is stringified into a `<div>`; an SVG element/string is wrapped as in-memory HTML; an HTML string is parsed. It builds the `DomDocument` from the retained input and stores `dom_doc->lambda_runtime` so the heap, JIT code, name pool, generated nodes and event-handler state stay live for an interactive script document.
-- **PDF / LaTeX / TikZ / graph** — `load_lambda_document_transform_doc` selects a `LambdaDocumentTransformConfig`, loads its actual shipped package file, parses the input using the configured type, then invokes the configured public export with a typed option map. PDF's package owns its default page cap; LaTeX and graph package entries own their view defaults. This follows the ordinary package/public-export boundary of **D7.2.1–D7.2.2**. A transform marked `stateless` runs on the window's **loader runtime** when a top-level load in a window or batch runs it (§6.2). The edit application, `.ls` pages, and loads outside a window keep a runtime of their own on `dom_doc->lambda_runtime`.
+- **PDF / LaTeX / TikZ / graph** — `load_lambda_document_transform_doc` selects a `LambdaDocumentTransformConfig`, loads its actual shipped package file, parses the input using the configured type, then invokes the configured public export with a typed option map. PDF's package owns its default page cap; LaTeX and graph package entries own their view defaults. This follows the ordinary package/public-export boundary of **D9.3.1–D9.3.2**. A transform marked `stateless` runs on the window's **loader runtime** when a top-level load in a window or batch runs it (§6.2). The edit application, `.ls` pages, and loads outside a window keep a runtime of their own on `dom_doc->lambda_runtime`.
 - **Markdown + math** (`.md`, `.markdown`) — `load_markdown_doc` parses Markdown with `InputParseOptions::embedded_math`: the markup parser attaches each formula's math AST (`ast` attribute, via `parse_math_direct_to_ast`, flavor-aware) and lists the `<math>` elements on `Input::embedded_math`. A document without math takes the plain path — no runtime, no package. Otherwise `lambda.doc.math.math.render_math` renders each listed AST with a typed display option, on the window's loader runtime (§6.2) or, outside a window, on one runtime started only then. Each `<math>` element takes the rendered element's content in place — no tree walk, no second parse, no parent bookkeeping. No Lambda source is constructed.
-- **HTML MathML** — namespace-qualified math roots with math inner display invoke `lambda.doc.math.mathml_layout` through retained custom layout during intrinsic/flow/flex layout. The package supplies measured SVG paint while semantic children and annotations remain in the DOM; HTML is not preconverted or reparsed. Static documents acquire an evaluator lazily, and nested renders share their active evaluator. Root CSS size/color and box decoration remain native; the supported math subset and CSS/accessibility limits are recorded in `vibe/Lambda_Pkg_Math.md` §11.6 (**D7.2.8**).
+- **HTML MathML** — namespace-qualified math roots with math inner display invoke `lambda.doc.math.mathml_layout` through retained custom layout during intrinsic/flow/flex layout. The package supplies measured SVG paint while semantic children and annotations remain in the DOM; HTML is not preconverted or reparsed. Static documents acquire an evaluator lazily, and nested renders share their active evaluator. Root CSS size/color and box decoration remain native; the supported math subset and CSS/accessibility limits are recorded in `vibe/Lambda_Pkg_Math.md` §11.6 (**D10.2.3**).
 - **Wiki** (`.wiki`) — `load_wiki_doc` (`cmd_layout.cpp:4432`). Parses via `input_from_source(..., "wiki")`, builds the DOM, loads `wiki.css`, applies the cascade. Simpler than HTML/Markdown: no scripts, no math pass.
 
 ### 6.1 Retained-generated-node invariants
@@ -214,7 +216,7 @@ A frame's scrollbars follow its document, as in browsers: `layout_iframe_viewpor
 
 Network resources are created in `view_doc_in_window_with_events_internal` only for HTTP/HTTPS documents (`window.cpp:1100`): `network_downloader_init_shared()` plus an `EnhancedFileCache` under `./temp/cache`, then `radiant_init_network_support(doc, NULL, file_cache)` wires the document's `resource_manager` and (in GUI mode) sets `network_wake_glfw` as the wake callback. Downloads run off-thread; completions are queued and drained on the UI thread each tick via `resource_manager_flush_layout_updates` ([§4](#4-the-main-loop-one-thread-pumping-three-event-sources)). Both the `BrowsingSession` and the document's resource manager *reference* these window-owned objects — a lifetime coupling flagged in [§8](#8-known-issues--future-improvements).
 
-**2026-10-21 scoped ownership correction (D4.5.1v4 / D4.5.2 / D5.4.1):**
+**2026-10-21 scoped ownership correction (D5.5.1 / D5.5.2 / D6.4.1):**
 detached iframe and worker loading can discover font bytes without a UI font
 owner. Discovery prefetches those bytes and attaches face callbacks after the
 host binds; embedded layout binds the manager before rediscovery and font

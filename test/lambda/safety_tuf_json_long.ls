@@ -1,4 +1,4 @@
-// D7.5.8, S12.1.2v3: flat wire length must not consume parser call depth.
+// D11.2.4, S12.1.2v3: flat wire length must not consume parser call depth.
 import json: lambda.security.tuf.json
 import meta: lambda.security.tuf.metadata
 let text = join([for (i in 1 to 5000) "a"], "")

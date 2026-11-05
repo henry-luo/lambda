@@ -2,7 +2,7 @@
 
 ## Input-processing milestone — 2026-10-29
 
-**D4.5.3v2 / D4.5.1v4**, with computation identity under **VR15**, govern
+**D5.5.3 / D5.5.1**, with computation identity under **VR15**, govern
 this follow-up. The target is 50% less native processing time across a fixed
 typing/formatting/Enter workload in blank and Studio documents; individual
 operation latencies are reported separately. Acceptance covers physical typing, selected-text
@@ -35,10 +35,10 @@ Root causes and implementation:
   Independent invocations sharing one result keep distinct placements. A clean
   map hint also avoids repeated scans by callbacks that changed no state; marking
   and importing maps invalidate that hint. These changes preserve the existing
-  context-owned storage and precise root ownership (**D5.3.3**).
+  context-owned storage and precise root ownership (**D6.3.3**).
 - Floating toolbar, context-menu and dialog visibility changed the body child
   count, making structural reconciliation replace the workspace. A persistent
-  overlay container bounds those replacements to popup content (**D7.2.5**).
+  overlay container bounds those replacements to popup content (**D10.2.1**).
   Normal block layout preserves fixed-position popup geometry; its out-of-flow
   children contribute no normal-flow height. Selection regressions check that
   the body, ribbon and editing stage survive toolbar visibility changes.
@@ -143,7 +143,7 @@ initialized value. Word render calculations live in a projection function so
 handler activation does not repeat them. Unchanged selection results do not
 assign state again.
 
-**D4.5.3 / D4.5.1v4** govern the native presentation boundary. Reconciliation
+**D5.5.3 / D5.5.1** govern the native presentation boundary. Reconciliation
 retains equal branches and advances their evaluator identities together. Changed
 elements form the replacement frontier. String metadata can update retained
 ancestors; style dependencies keep the ordinary cascade path. CSS-independent
@@ -168,7 +168,7 @@ removing steps.
 Structural selectors test their ancestor relation before an expensive nth-sibling
 scan. This prevents table banding rules from repeatedly scanning font options.
 The ruler avoids writing unchanged accessibility values on its geometry frames.
-**D7.2.5** keeps that application policy in Lambda.
+**D10.2.1** keeps that application policy in Lambda.
 Re-hitting the same retained hover target performs no pseudo-state transition or
 style refresh; resting the pointer on the ribbon must not invalidate it per key.
 
@@ -183,7 +183,7 @@ geometry. The interactive renderer and EventSim use that same checkpoint.
 Flow retains its normal style and constraint validation, including legacy
 controls without frozen computed-style records.
 
-**D4.5.3v2 / D4.5.1v4**, with computation identity under **VR15**, also govern
+**D5.5.3 / D5.5.1**, with computation identity under **VR15**, also govern
 the follow-up sizing work. Scalar width queries check their cache before opening
 a measurement scope; a hit neither snapshots the subtree nor invalidates its
 containing flex content. Native-control and replaced-size queries use the same
@@ -201,7 +201,7 @@ rules still govern text fragments and committed geometry.
 
 ## Further tuning — computed styles during typing
 
-**D4.5.3v2 / D4.5.1v4**, with **VR15**, govern this follow-up. The release
+**D5.5.3 / D5.5.1**, with **VR15**, govern this follow-up. The release
 profile attributes most keystroke work to repeated CSS and nested flex layout,
 including native buttons and SVG ribbon icons. Acceptance remains the physical
 typing and editing cases above, plus inherited/local button and SVG style
@@ -259,7 +259,7 @@ candidate's SHA-256 in `fast-binaries.json`.
 
 ## Follow-up: measurement probes and launch configuration
 
-**D4.5.3v2 / D4.5.1v4**, with computation identity under **VR15**, govern
+**D5.5.3 / D5.5.1**, with computation identity under **VR15**, govern
 reuse here. A measurement read can preserve committed fragments when its
 computed CSS inputs and the containing dimensions used by those inputs are
 unchanged. `dom_node_resolve_style` now establishes the direct flex item's

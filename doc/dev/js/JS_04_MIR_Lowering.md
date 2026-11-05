@@ -3,12 +3,12 @@
 > **Last verified against tree:** 2026-10-24 (constant-array lowering; other sections retain their original verification scope).
 >
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).**
-> **Authority:** S1.11, D8.1.3v25, D8.2.3, D8.4.1v2, D8.4.3v2 and D5.3/D5.4.
+> **Authority:** S1.11, D8.4.2, D8.2.3, D7.4.1, D7.4.3 and D6.3/D6.4.
 > **Primary sources:** `lambda/js/mvp-lmd/mvp_lmd_mir.cpp`, its `mvp_lmd_*` runtime files, and `lambda/runtime/mir_emitter_shared.hpp`.
 
 ## 1. Compiler boundary
 
-MVP-Lmd supplies the formal JavaScript MIR path (**D8.1.3v25**). The legacy LJS
+MVP-Lmd supplies the formal JavaScript MIR path (**D8.4.2**). The legacy LJS
 MIR emitter and its `JsMirTranspiler` state have been removed. Public execution
 selection and the retained frontend are described in
 [JS_01](JS_01_Compilation_Pipeline.md).
@@ -17,19 +17,19 @@ selection and the retained frontend are described in
 `MvpLmdProgram` owns unit analysis and code; `LmdCompiler` owns the current
 function's emission state. Its `MirEmitter` is shared with Lambda. Retained
 analysis selects representations and guards; emission consumes those facts
-(**D8.2.3**, **D8.4.1v2**).
+(**D8.2.3**, **D7.4.1**).
 
 ## 2. Values, operations and storage
 
 `LmdValue` carries a MIR register and its known representation/kinds. Proven
 scalar computations use native lanes. Unknown values and language boundaries
 use Lambda `Item`. Conversion and representation are distinct operations
-(**D2.4.1–D2.4.3**); source assignments can change a binding's kind.
+(**D2.3.4–D2.3.5**); source assignments can change a binding's kind.
 
 Expression, reference and statement lowering share ordinary Lambda arrays,
 maps, shapes and nominal records. Stable layouts permit direct field/element
 access; guards retain observable property behavior, coercion order and fallback
-for special storage. Shared shapes and JS policy follow **D2.6.6v3**, **D3.4.7**
+for special storage. Shared shapes and JS policy follow **D3.1.1**, **D3.4.7**
 and **S1.11**. The working design records the admission and optimization details:
 [JS MVP design](../../../vibe/jube/JS_MVP_Lmd.md).
 
@@ -39,10 +39,10 @@ inline-allocation budget bounds this choice; small literals retain inline stores
 wide flat arrays retain their bulk scalar copy. One native
 materializer creates fresh arrays, preserves holes and copies wide scalars
 into destination-owned storage. Parent arrays remain precisely rooted while
-children allocate (**D5.3/D5.4**). Expressions with evaluation effects retain
+children allocate (**D6.3/D6.4**). Expressions with evaluation effects retain
 ordinary ordered lowering.
 
-Array shrinking uses the shape's indexed-name summary (**D8.4.1v2**). Without
+Array shrinking uses the shape's indexed-name summary (**D7.4.1**). Without
 indexed descriptors, physical elements are configurable and the runtime can
 resize directly. Descriptor-bearing arrays retain descending deletion and
 the protected-index rollback required by `ArraySetLength`.
@@ -52,8 +52,8 @@ the protected-index rollback required by `ArraySetLength`.
 Known functions can use direct generated calls. Dynamic functions enter their
 stored capabilities; MVP, AST and native callables preserve their owning ABI.
 MVP closures reuse Lambda Function/environment ownership with mutable JS cells
-(**D6.2.2v2**). Scalar result homes and precise frame/root publication use the
-shared emitter (**D5.3/D5.4**).
+(**D7.2.2**). Scalar result homes and precise frame/root publication use the
+shared emitter (**D6.3/D6.4**).
 
 Shared `js_call_entry_compiled_light` / `js_call_entry_compiled_this` entries
 remain for interpreter definitions promoted to MVP. Their flags and owner
@@ -63,7 +63,7 @@ code-intern table no longer construct values.
 ## 4. Errors, completion and suspension
 
 Returned Item failures preserve the existing error/completion lane
-(**D8.4.3v2**). JS owns evaluation order, throws, catch/finally completion and
+(**D7.4.3**). JS owns evaluation order, throws, catch/finally completion and
 strict-reference behavior (**S1.11**). Precise ownership spans native callbacks,
 property operations and suspended activations.
 
@@ -76,7 +76,7 @@ bodies retain their own entry functions.
 
 `mvp_lmd_dynamic.cpp` adapts live bindings, globals, receivers, calls and foreign
 values to the retained AST interpreter. `eval` and Function-family bodies are
-interpreted (**D8.1.3v25**); ordinary formal MIR source does not fall back to LJS.
+interpreted (**D8.4.2**); ordinary formal MIR source does not fall back to LJS.
 
 TypeScript admission is a frontend option on the same compiler. Its unshadowed
 `type(value)` intrinsic calls the existing `ts_type_info` helper. The option adds

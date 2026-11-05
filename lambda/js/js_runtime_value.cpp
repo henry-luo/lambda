@@ -881,7 +881,7 @@ extern "C" int64_t js_is_nullish(Item value) {
 
 // js_typeof_is: returns 1 if typeof(value) matches the pooled type name.
 // Resolving the NameId here keeps generated MIR independent of compiler-pool
-// pointers while preserving the allocation-free typeof fast path (D5.4.3).
+// pointers while preserving the allocation-free typeof fast path (D6.4.3).
 
 // v23b / Tune8 §2.1: Comparison facade returning raw int64_t 0/1 for direct use
 // in MIR_BF/BT. Eliminates the box→unbox→branch cycle when a comparison is used
@@ -1299,7 +1299,7 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
         ? js_try_concat_percent_hex(left, right, cache_rooted) : ItemNull;
     if (percent_hex.item != ItemNull.item) return percent_hex;
     String* result = (String*)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
-    // D5.4.3: result allocation may collect both borrowed operands; reload
+    // D6.4.3: result allocation may collect both borrowed operands; reload
     // them from exact roots before copying their payloads.
     left = it2s(left_root.get());
     right = it2s(right_root.get());
@@ -1376,7 +1376,7 @@ extern "C" Item js_add(Item left, Item right) {
         Item right_string = js_to_string(right_root.get());
         if (item_is_error(right_string)) return right_string;
         right_string_root.set(right_string);
-        // D5.4.3: the first conversion result is otherwise a native local while
+        // D6.4.3: the first conversion result is otherwise a native local while
         // the second conversion allocates, which poisoned chained `+` output.
         // ToString can allocate twice before concatenation; keep both results
         // rooted because the second conversion may collect the first string.

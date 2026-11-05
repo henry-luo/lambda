@@ -17,7 +17,7 @@
 #include <math.h>
 #include <string.h>
 
-// D7.4.1v2/D7.4.4: wrappers carry identities; document resources own playback and copied tracks.
+// D9.5.1/D9.5.4: wrappers carry identities; document resources own playback and copied tracks.
 struct JsAnimationBinding {
     JsAnimationBinding* next;
     uint64_t id;

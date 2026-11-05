@@ -1,4 +1,4 @@
-// Tune31 T31-2 / D3.2.1-D3.3.1: a homogeneous append builder returns
+// Tune31 T31-2 / D4.2.1-D4.3.1: a homogeneous append builder returns
 // an int lane, and callers consume that lane without generic indexing.
 
 pn build_codes(text) {

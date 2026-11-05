@@ -11,8 +11,8 @@
   `vibe/Lambda_Design_Compiling_Dual_Func.md`, `vibe/Lambda_Design_Name_Identity.md`,
   `vibe/Lambda_Design_Type_Enforcement.md`
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1, S4.5.3;
-  `doc/Lambda_Formal_Design.md` D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1–D3.3.3, D4.4,
-  D5.2–D5.3, D8.3.2–D8.3.3, D8.4.1, D8.6.1–D8.6.3
+  `doc/Lambda_Formal_Design.md` D2.2.2, D2.3, D4.2.1–D4.2.3, D4.3.1–D4.3.3, D5.4,
+  D6.2–D6.3, D7.3.2–D7.3.3, D7.4.1, D8.6.1–D8.6.3
 
 ## 1. What Result24 says
 
@@ -76,7 +76,7 @@ top-of-stack leaf samples.
 
 Tune14's A1 elided admission at *identity* boundaries, and it worked where it reached
 (matmul's `boundary_admit` share collapsed). What remains are the boundaries A1's proof does
-not reach [S4.1, D2.4, D3.2.1]:
+not reach [S4.1, D2.3, D4.2.1]:
 
 - element reads feeding **comparisons and branch conditions** rather than declared
   assignments (`pnpoly`: `if (pnpoly(...))`, the cross-product sign tests; `fn_ne` boxed);
@@ -106,7 +106,7 @@ statically-bound `pn`/`fn` call with declared scalar params and return — still
 boxed ABI, paying `lambda_item_adopt_scalar_home`/`lambda_restore_number_frame_top` per call.
 That adopt/restore pair is visible everywhere: deltablue ~8% (164), cd ~10% (189), sha1 ~6%,
 splay, towers. This is the Result18 T-B lever and the dual-func DF9 direction
-[D3.3.1–D3.3.2, D8.3.3; DF9 entry-equivalence].
+[D4.3.1–D4.3.2, D7.3.3; DF9 entry-equivalence].
 
 The micro family (towers 74x, permute 58x, list 48x, bounce 33x, queens 30x — all
 typed-worse-than-untyped) is the same mechanism at small scale: every helper call round-trips
@@ -128,7 +128,7 @@ declared scalars through the boxed ABI plus F1 admission at each boundary.
 - `splay` (**~19% map + ~14% GC**): node records as maps (`set_fields`, `fn_map_set`,
   `map_field_to_item`), `gc_collect_with_root_region` 123, `pool_calloc`+`memset` ~11%.
 
-This family is Name-Identity W1/W2 plus fixed-shape lowering [D3.2.2, D8.3.2–D8.3.3;
+This family is Name-Identity W1/W2 plus fixed-shape lowering [D4.2.3, D7.3.2–D7.3.3;
 `vibe/Lambda_Design_Name_Identity.md`]. It owns the macro tail: deltablue 8.2x, splay 10.2x,
 gcbench 10.7x (gcbench's Tune14 profile showed the same `map_shape_field_to_item`/`fn_member`
 signature), and a share of cd 18.6x.
@@ -138,7 +138,7 @@ signature), and a share of cd 18.6x.
 `ensure_typed_array`/`ensure_sized_array` re-derive the array witness at every call boundary:
 nbody's top *named* leaf (42), deltablue **~14%** (293 in `ensure_sized_array` interiors),
 towers ~5% (89). A callee with a declared `float[]` param re-proves per call what the caller
-already proved — the witness should travel with the call [D3.3.1, D3.3.3].
+already proved — the witness should travel with the call [D4.3.1, D4.3.3].
 
 ### 2.5 F5 — Allocation and string residue
 
@@ -191,7 +191,7 @@ proof at compile time; the runtime never re-checks what the proof already establ
 
 ### B1 — Zero-per-element admission in proved regions (extends Tune14 A1)
 
-Extend the static identity proof to the consumers A1 missed [S4.1, D2.4, D3.2.1, D3.3.3]:
+Extend the static identity proof to the consumers A1 missed [S4.1, D2.3, D4.2.1, D4.3.3]:
 
 1. proved element reads feeding **comparisons, branch conditions, and boolean contexts**
    emit native compares — no `boundary_admit`, no boxed `fn_ne`/`fn_lt` (`pnpoly`, `cd`);
@@ -238,7 +238,7 @@ current per-call/per-function cost structure that F2 measures:
 1. **Inline the release-mode number-top restore**: emit a plain MIR store
    `context->side_number_top = base` instead of the `lambda_restore_number_frame_top`
    call; keep the checking/poisoning helper in debug builds. Removes one C call from every
-   function exit and every scalar-classed helper call site [D5.2–D5.3].
+   function exit and every scalar-classed helper call site [D6.2–D6.3].
 2. **Elide the number frame for functions that provably never touch it** (the pure-int
    case): the transpiler knows every site where it materializes a home or emits a
    scalar-classed call — if a body has none (all arithmetic native, no wide-scalar locals,
@@ -258,7 +258,7 @@ step):** whole-program per-callee analysis is already in place for self-recursio
 to any statically-bound `pn`/`fn` whose params and success return are declared scalars:
 callee gets a native-ABI entry (raw i64/double in, raw out), caller skips the entire home
 apparatus on the native edge; guard failure/dynamic call/error merge keeps the boxed entry
-[D3.3.1–D3.3.2, D8.3.3; DF8 callee-side check, DF9 entry-equivalence]. Include
+[D4.3.1–D4.3.2, D7.3.3; DF8 callee-side check, DF9 entry-equivalence]. Include
 **typed-array witness pass-through** (F4): a declared `float[]`/`int[]` param whose argument
 carries the caller's proved witness enters without `ensure_typed_array`/`ensure_sized_array`.
 B2.2 subsumes B2.1 on native edges; B2.1 keeps paying off on every edge B2.2 can't reach
@@ -284,7 +284,7 @@ For declared map/record types (`TState`, deltablue's constraint records, splay n
    proof is the declared contract (`towers`: `validate_against_*` must leave the sample);
 3. a `var`-bound uniquely-owned record **writes in place** — no `map_set_cow` copy, no
    `pool_calloc`/`memset` per write (C4 value semantics preserved: the elision requires the
-   static uniqueness the `var` binding already gives) [D3.2.2, D8.3.2–D8.3.3].
+   static uniqueness the `var` binding already gives) [D4.2.3, D7.3.2–D7.3.3].
 
 Targets: deltablue −40%, towers −50%, splay −30%, gcbench, json_gen, cd's record share.
 Acceptance: named-contract rejection tests unchanged; the F3 leaf family leaves all three
@@ -319,7 +319,7 @@ family — `js_map_get_fast(char*)`, `well_known_name_id` per access, numeric ke
 round-tripping through `snprintf`/`sscanf` — is still the top LJS item and still owns the
 tail (havlak 448x, cd 267x, hashmap 210x, sha1 197x). The integer/NameId fast path for
 dynamic numeric keys remains the highest-leverage LJS change and should be its own round
-(2026-09-09: LJS may NOT use ICs either — D8.4.1v2/LC1v2 now cover both lanes).
+(2026-09-09: LJS may NOT use ICs either — D7.4.1/LC1v2 now cover both lanes).
 
 ## 6. Gates and acceptance (house rules, unchanged)
 
@@ -331,7 +331,7 @@ dynamic numeric keys remains the highest-leverage LJS change and should be its o
   56-row population (three runs, workload-only `__TIMING__`, headline + matched geomeans).
 - The categorical bar stands: **an annotation may never make a row more than 5% slower** —
   B1+B2+B3 are collectively accountable for clearing the twelve-row ledger in §1.
-- Non-goals carried forward: no flex-int revival, no Lambda-script inline caches [D8.4.1],
+- Non-goals carried forward: no flex-int revival, no Lambda-script inline caches [D7.4.1],
   no vendored-dep edits [D1.6], no C2MIR-path changes (frozen, rule 14).
 
 Round target: typed/Node geo 1.68x → **≤1.3x**; typed/C2MIR 8.19x → **≤5x**; every
@@ -348,8 +348,8 @@ nbody,pnpoly,deltablue,cd}_prof.ls` (outer loop scaled only). Discount
 ## 8. Implementation and verification record (2026-08-07)
 
 Tune15's implementation slices are landed in the MIR-direct runtime. The implementation
-keeps the semantic and ownership boundaries required by S4.1.2, S4.5.3, D2.2.2, D3.2.2,
-D3.3.1–D3.3.3, D5.2–D5.3, and D8.3.2–D8.3.3; no C2MIR or vendor code was changed.
+keeps the semantic and ownership boundaries required by S4.1.2, S4.5.3, D2.2.2, D4.2.3,
+D4.3.1–D4.3.3, D6.2–D6.3, and D7.3.2–D7.3.3; no C2MIR or vendor code was changed.
 
 | Slice | State | Evidence |
 |---|---|---|

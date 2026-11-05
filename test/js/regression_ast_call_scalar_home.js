@@ -1,4 +1,4 @@
-// D5.3.4: a call's raw scalar payload must outlive its temporary Item roots.
+// D6.3.4: a call's raw scalar payload must outlive its temporary Item roots.
 function identity(value) { gc(); return value; }
 const tiny = Number.MIN_VALUE;
 const saved = identity(tiny);

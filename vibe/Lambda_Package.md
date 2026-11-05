@@ -5,6 +5,10 @@ Consolidated 2026-10-14 from `Lambda_Package (idea).md`, `Lambda_Package.md`
 and `Lambda_Package2.md`; implementation history and the retired C-text
 module linkage are omitted.
 
+**Organization review:** 2026-11-04. §11 records the requested shipped-file
+naming, desktop UI and editor organization. Implementation is staged in the
+linked plan; the organization does not revise the formal specifications.
+
 **Authority.** The formal specs win: `doc/Lambda_Formal_Semantics.md` (`S#`)
 and `doc/Lambda_Formal_Design.md` (`D#`). This document carries the design
 and its reasoning; where a point has no formal ruling it says so (§10).
@@ -13,19 +17,20 @@ and its reasoning; where a point has no formal ruling it says so (§10).
 
 | Section | Rulings |
 |---|---|
-| §1 Model | D7 terminology, D7.2.1, D8.2.1, D1.7 |
-| §2 Exports | S16.9.1, S9.1.7, D7.2.1, D7.2.2, D8.3.4v4, S12.3.7 |
+| §1 Model | D7 terminology, D9.3.1, D8.2.1, D1.7 |
+| §2 Exports | S16.9.1, S9.1.7, D9.3.1, D9.3.2, D7.3.4, S12.3.7 |
 | §3 Imports | S16.9.6, S16.10.1v3, S12.3.3v2 |
-| §4 Resolution | S16.9.8, D7.2.6, D7.2.4v3, D7.2.3 |
-| §5 The `lambda.*` namespace | D7.2.4v3, S17.2.1, S17.2.2, S16.10.1v3 |
-| §6 Instantiation | D7.2.1–D7.2.3, S7.7.6, D5.4.3, D8.5.1 |
+| §4 Resolution | S16.9.8, D9.3.5, D9.3.4, D9.3.3 |
+| §5 The `lambda.*` namespace | D9.3.4, S17.2.1, S17.2.2, S16.10.1v3 |
+| §6 Instantiation | D9.3.1–D9.3.3, S7.7.6, D6.4.3, D8.5.1 |
 | §7 Type identity | S2.1.4 |
-| §8 Cross-language packages | D8.2.1, D7.2.6, D7.1.6 |
+| §8 Cross-language packages | D8.2.1, D9.3.5, D9.2.2 |
+| §11 Package organization | D9.3.1, D9.3.3, D9.3.4, D10.2.1, D9.3.5, D9.5.6; S2.1.4, S9.1.7v2, S12.1.1v3, S12.1.3v2, S16.9.1 |
 
 **Scope.** Lambda script packages (`.ls` files): what they export, how
 imports bind and resolve, the shipped `lambda.*` tree, and package
-instantiation. Out of scope: build packaging (D7.1), Jube native modules
-(D7.3–D7.5), and the JS module system beyond its import boundary with
+instantiation. Out of scope: build packaging (D9.1), Jube native modules
+(D9.4–D11), and the JS module system beyond its import boundary with
 Lambda. User-facing reference: [`doc/Lambda_Modules.md`](../doc/Lambda_Modules.md);
 the shipped package catalogue: [`doc/Lambda_Packages.md`](../doc/Lambda_Packages.md).
 
@@ -37,12 +42,12 @@ the shipped package catalogue: [`doc/Lambda_Packages.md`](../doc/Lambda_Packages
 disambiguation matters; Jube/native DSOs are **modules** (D7 terminology).
 Every `.ls` file is a package — there is no separate package declaration.
 
-**A package is the compilation unit** (D7.2.1). Its language profile is a
+**A package is the compilation unit** (D9.3.1). Its language profile is a
 property of the unit (D8.2.1): mixed-language *programs* exist,
 mixed-language *packages* do not. Its bindings are immutable at module scope,
 and its instantiation is effectful even though its bindings are not.
 
-**Packages distribute as source** (D1.7, D7.2.3). Compiled artifacts are
+**Packages distribute as source** (D1.7, D9.3.3). Compiled artifacts are
 local derived caches keyed by build and content, never a format.
 
 **Design goals.**
@@ -77,11 +82,11 @@ private unless prefixed with `pub`:
 
 - Bare `pub x = 1` is not a declaration (S16.9.1); the repair is `pub let`.
 - **There is no `pub var`**, by non-composition: a package has no mutable
-  module-scope binding at all (S9.1.7, D7.2.1), so there is nothing mutable
+  module-scope binding at all (S9.1.7, D9.3.1), so there is nothing mutable
   to export. A `var` at module scope is E224.
 - **Exported functions have a boxed entry.** An import resolves to the boxed
   `_b` symbol of an exported function, so export makes the boxed entry
-  mandatory (D7.2.2, D8.3.4v4); private functions are free to exist only in
+  mandatory (D9.3.2, D7.3.4); private functions are free to exist only in
   their unboxed specialisations.
 - **A shadowing export travels only through the explicit import.** A
   package-level definition that shadows a system function exports like any
@@ -175,12 +180,12 @@ and `import m: math` (a short prefix of the importer's choosing).
 - `~~` steps form the leading run and nothing else (`import .~~.a`,
   `import ~~.a.~~.b` and a module-less `import ~~` are errors), so every
   relative package has exactly one spelling.
-- **One resolver serves every caller** (D7.2.6): AST import, dependency
+- **One resolver serves every caller** (D9.3.5): AST import, dependency
   prebuild, and the document-transform package loader all resolve the same
   path the same way. Lookup order for a name root: the built-in modules,
   the runtime-registered host modules, then `lambda.<package>` beneath
   `<lambda-home>/package/`.
-- **A relative path tries `.ls`, then `.js`** (D7.2.6). A directory is not a
+- **A relative path tries `.ls`, then `.js`** (D9.3.5). A directory is not a
   package.
 - A script with no file (REPL, stdin) resolves relative imports against the
   working directory.
@@ -202,7 +207,7 @@ Script-relative resolution buys:
    with internal imports can be moved or vendored whole.
 3. **Security** — the working directory cannot inject an unintended file.
 4. **In-place execution** — a checked-in script with relative imports runs
-   where it sits. (The flip side, D7.2.6: a harness that copies the script's
+   where it sits. (The flip side, D9.3.5: a harness that copies the script's
    text elsewhere breaks its imports.)
 
 ### 4.3 Why a bare name never falls back to a file
@@ -214,14 +219,14 @@ roots for packages means a file is *always* reached relative to its
 importer, and a future registry package can never be shadowed by a stray
 file — nor capture one. A root that no package claims is therefore an
 error (E216), never retried against the working directory or the Lambda
-home (D7.2.6).
+home (D9.3.5).
 
 ### 4.4 Canonical identity
 
 A package is identified by its **canonical file**, not by the path spelling
 that reached it: `import .utils.math` from `main.ls` and `import .math` from
 `utils/helper.ls` name the same package, and so does an import through a
-symlink (D7.2.3). Canonical identity is what makes "instantiated once"
+symlink (D9.3.3). Canonical identity is what makes "instantiated once"
 (§6) and cycle detection reliable — two spellings of one file can neither
 duplicate the package nor hide a cycle. Two *copies* of a file are two
 packages.
@@ -231,7 +236,7 @@ packages.
 `<lambda-home>` is the runtime's asset directory (`LAMBDA_HOME`). Shipped
 source maps beneath `<lambda-home>/package/`, preserving every component
 below `lambda`: document math, PDF and LaTeX use `lambda.doc.{math,pdf,latex}.*`
-and live in `package/doc/{math,pdf,latex}/` (D7.2.4v3). The source tree and import
+and live in `package/doc/{math,pdf,latex}/` (D9.3.4). The source tree and import
 namespace align without special mappings; `lambda.math` remains the separate
 built-in numerical module.
 
@@ -239,7 +244,7 @@ built-in numerical module.
 
 ## 5. The `lambda.*` namespace
 
-Ratified as S17.2.1/S17.2.2 and D7.2.4v3 (2026-08-27); source layout aligned by D7.2.4v3 (2026-10-15), closing SO37.
+Ratified as S17.2.1/S17.2.2 and D9.3.4 (2026-08-27); source layout aligned by D9.3.4 (2026-10-15), closing SO37.
 
 **The question.** S12.3.7 made system-function shadowing user-first, which
 left no way to reach a shadowed builtin. The direction was fixed when SO37
@@ -263,7 +268,7 @@ names arrive, not a parallel table (S17.2.1).
 `sys.func.*` and plain `lambda.*` were considered.
 
 - Plain `lambda.*` for the functions themselves was ruled out: that root is
-  already the package tree (`import lambda.editor.mod_doc`), so `lambda.len`
+  already the package tree (`import lambda.editor.core.doc`), so `lambda.len`
   would mix builtins with shipped packages, and a future `lambda.len.*`
   package would collide.
 - `sys.func.*` pre-pays for a collision the conventions avoid — adjacent
@@ -276,7 +281,7 @@ names arrive, not a parallel table (S17.2.1).
 **A path names exactly one thing.** Shortening the shipped math typesetting
 package to `lambda.math` collided with the built-in `math` module
 (`sqrt`/`pi`). The typesetting package moved to `lambda.doc.math`, leaving
-`lambda.math` for the built-in. Hence D7.2.4v3's rule: no path may be both a
+`lambda.math` for the built-in. Hence D9.3.4's rule: no path may be both a
 built-in module and a shipped package.
 
 **The root is reserved.** `lambda` may not name a binding (S16.10.1v3), so
@@ -299,8 +304,8 @@ shadowed and never need `lambda.sys.`.
   about to consume (D8.5.1).
 - **Once per process.** A package is compiled and instantiated once however
   many packages import it and by whatever spelling (§4.4); later importers
-  share the instance (D7.2.3). Package state lives in per-context slabs,
-  never at code-baked addresses (D5.4.3).
+  share the instance (D9.3.3). Package state lives in per-context slabs,
+  never at code-baked addresses (D6.4.3).
 - **In import order, before the importer's body.** Each imported package
   runs its top level in import-declaration order before any code of the
   importer that could read its names.
@@ -308,16 +313,16 @@ shadowed and never need `lambda.sys.`.
   input('config.json')^` reads the file when the package is instantiated.
   The values of a package's top-level content expressions are discarded;
   only the entry script's result (or its `main`) is the program's output.
-- **Initialization is a transaction barrier** (D7.2.2, S7.7.6). A failed
+- **Initialization is a transaction barrier** (D9.3.2, S7.7.6). A failed
   initializer aborts instantiation and the import fails; a package with
   half-established top-level state never becomes importable. Optionality is
   the package's own decision, made inside its initializer with a handler:
   `pub let config = input('config.json') ^ { {} }`.
 - **Cycles are errors.** A package that is re-entered while it is still
   loading is a circular import. Under eager instantiation a cycle could only
-  be served by exposing a half-initialized package, which D7.2.2 forbids.
+  be served by exposing a half-initialized package, which D9.3.2 forbids.
 - **Imported values are the instantiated values.** Module-scope bindings are
-  immutable (D7.2.1), so whether an importer holds a snapshot or a live
+  immutable (D9.3.1), so whether an importer holds a snapshot or a live
   view of a `pub let` is unobservable.
 - **One runtime, one value currency.** All packages of a program share one
   runtime context and heap; `Item` values pass between packages freely, with
@@ -351,7 +356,7 @@ Consequences:
 ## 8. Cross-language packages
 
 - **`.js` fallback.** `import .name` loads `name.js` when there is no
-  `name.ls` (D7.2.6). The JS file is its own compilation unit with its own
+  `name.ls` (D9.3.5). The JS file is its own compilation unit with its own
   language profile (D8.2.1): a program may mix languages, a package may not.
 - **JS → Lambda.** Exported JS functions become callable Lambda functions,
   and the JS module keeps its own state between calls. A Promise-returning
@@ -363,7 +368,7 @@ Consequences:
   each `pub pn` as a Promise-returning function; `pub let` values are not
   exported to JavaScript.
 - **Reduced hosts.** In a build without the JS runtime (`lambda-cli`,
-  D7.1.6), importing a `.js` file is an ordinary import error — nothing
+  D9.2.2), importing a `.js` file is an ordinary import error — nothing
   degrades silently.
 
 ---
@@ -415,7 +420,7 @@ pub import .constants: *
 
 *Benefit:* a facade package can present one import surface over several
 implementation packages. *Status:* today a package passes a name on only by
-rebinding it (`pub let sin = trig.sin`). D7.3.4 already anticipates *script
+rebinding it (`pub let sin = trig.sin`). D9.4.4 already anticipates *script
 re-export* as the way Jube modules expose each other's surfaces, so a
 re-export form would serve both. Depends on the selective-import spelling
 (§10.1).
@@ -424,7 +429,7 @@ re-export form would serve both. Depends on the selective-import spelling
 
 A directory with an `index.ls` imported as a package (`import .math` →
 `math/index.ls`). *Status:* a directory is not a package today; adopting
-this changes D7.2.6's lookup (`.ls`, then `.js`) and needs a precedence rule
+this changes D9.3.5's lookup (`.ls`, then `.js`) and needs a precedence rule
 against a sibling `math.ls`.
 
 ### 10.4 Optional import
@@ -433,7 +438,7 @@ against a sibling `math.ls`.
 dependencies. *Status:* today optionality lives inside the dependency's
 initializer (§6). An optional import would need to distinguish *missing*
 (→ `null`) from *failed to initialize* (still a transaction-barrier failure
-under D7.2.2), and to say what an unqualified `import?` binds.
+under D9.3.2), and to say what an unqualified `import?` binds.
 
 ### 10.5 Package metadata and project manifest
 
@@ -472,12 +477,169 @@ On E216/E217, suggest a near spelling when a similar file or package exists
 
 ---
 
+## 11. Package organization principles
+
+**Status and scope.** Source review and staged implementation dated 2026-11-04,
+covering shipped packages and reusable application code. The user requested
+filenames without `mod_` and a desktop `lambda.ui.workspace` built directly
+on core, with dtna as a reference, then directed implementation of this plan.
+The existing formal contracts cited here continue to govern; no formal ruling
+prescribes a visual-family dependency hierarchy. Findings,
+source mappings, alternatives, compatibility
+work and acceptance milestones live in
+[Lambda_Impl_Package_Structure](impl/Lambda_Impl_Package_Structure.md).
+Implementation progress belongs in that plan, not in this design section.
+
+### 11.1 One owner for each capability
+
+Organize code by responsibility and dependency direction. A demo composes
+packages; it should not serve as an undocumented library for another demo.
+Promote a capability together with its contract and resources, removing
+app-specific IDs, command assumptions and bootstrap paths. Search existing
+packages before extracting a new helper; extend the shared shape rather
+than introduce a parallel implementation.
+
+| Responsibility | Proposed owner |
+|---|---|
+| Theme-independent component/action contracts, focus/menu/overlay policy, gesture lifecycle, small DOM-publication adapters | `lambda.ui.core.*` |
+| Component appearance, tag vocabulary, tokens, icons and visual recipes | A UI family such as `lambda.ui.dtna.*` |
+| Desktop controls and tokens, compact ribbons, pane/tool/status composition | `lambda.ui.workspace.*`, built directly on core, alongside dtna |
+| Source models, editing transactions/history, format adapters, reusable editing surfaces and sessions | `lambda.editor.*`, with explicit internal layers |
+| Document/slide/mail/image/color/path semantics | Existing domain packages such as `lambda.doc.*`, `lambda.slide.*`, `lambda.mail.*`, `lambda.image.*`, `lambda.color`, `lambda.io.path` |
+| Application state, feature commands, file policy and presentation composition | The application |
+
+Core UI helpers must not import visual-family constructors or tokens.
+Model-only editor packages must not depend on application shells or native
+UI initialization. Shipped packages must not import test/demo code. A
+dependency required by several domains belongs at their common lower layer,
+or travels through an explicit value/function contract; copying it into
+each domain is not a boundary.
+
+### 11.2 Share behavior as well as markup
+
+Shared UI code should establish consistent ownership, command requests,
+keyboard navigation, focus restoration, disabled state, overlay dismissal
+and gesture commit/cancel behavior. Reuse the existing action-binding and
+DOM behavior protocols; do not grow an independent event bus or editing
+command switch in each widget. Menu, modal and native-control semantics
+remain distinct even when their mechanisms are shared.
+
+Keep user-agent editing policy in the Lambda DOM behavior package and
+native input/selection/clipboard/geometry mechanisms behind the declared
+waist (D10.2.1, D9.5.6). Moving demo helpers does not authorize a new
+native widget framework or changes to dispatch semantics. Extract with
+real consumers and executable acceptance cases; unrelated domain commands
+do not become generic UI policy merely because they are invoked by buttons.
+
+### 11.3 Desktop application UI directly on core
+
+**User direction, 2026-11-04:** `lambda.ui.workspace` is a desktop application
+UI family built directly on `lambda.ui.core`, alongside `lambda.ui.dtna`.
+Workspace owns desktop components, tag factories, contracts, tokens, icons
+and shell recipes. Dtna serves as a reference for component design and
+interaction coverage; workspace has no direct or transitive dependency on
+dtna components, styles or token derivation.
+
+Share behavior through core. When both families need the same control,
+focus, menu, overlay or gesture algorithm, extract that implementation into
+core rather than wrapping or copying a dtna component. Keep neutral
+mechanisms and value utilities reusable without either visual family.
+
+Design around compact toolbars/ribbons, resizable panes, inspectors,
+menus/context menus, dialogs, status bars and document/canvas work areas.
+Keyboard navigation, platform shortcut labels, active/inactive selection
+and editor focus preservation are desktop requirements. Use ordinary
+HTML/SVG presentation and the existing native mechanisms under D10.2.1 and
+D9.5.6. The initial component scope comes from Word, Sheet and Slides,
+followed by compatible Mail, Photo Album and Note chrome. Specialist
+media/canvas experiences and theme showcases may retain their visual identity.
+
+Use scoped semantic roles for typography, pane/tool surfaces, spacing,
+accent, selection, focus, disabled and destructive states. Workspace defines
+and validates its own tokens, using generic core token helpers and existing
+color utilities. App accents vary through configuration rather than copied CSS.
+Keep document text, slide themes, cell styles, photo pixels and export
+appearance separate from application chrome. Overlays use the configuration
+of their owner; no ambient provider or global theme facility is assumed.
+
+### 11.4 One editor family with explicit layers
+
+Reusable editing capabilities live in `lambda.editor.*`, while retaining the
+useful distinction between the
+editing library and the CLI application's shell:
+
+1. A pure model kernel and schemas: documents, positions, Steps,
+   Transactions, command/query logic and history.
+2. Format adapters and source envelopes: import/export, round-trip checks
+   and retained content.
+3. DOM/model integration, reusable surfaces and sessions: selection,
+   projection, composition, file lifecycle and shared editor controls.
+4. The application: format selection, toolbar/dialog composition and the
+   shell behind the unchanged `lambda edit` command.
+
+Use the existing shared history and model protocol before adding an
+abstraction. Rich-text, cell-draft, drawing and snapshot editors need not
+share a document schema to share history grouping or commit/cancel policy.
+The DOM behavior package remains a separate authority under D10.2.1; an
+editor namespace consolidation does not absorb it. The implementation plan
+records the `edit`/`editor` source mappings and the corresponding update to
+the edit mode design.
+
+### 11.5 Plain shipped filenames and explicit entry points
+
+**User direction, 2026-11-04:** canonical shipped package scripts use
+`snake_case.ls` without a `mod_` prefix. Directory context already identifies
+their domain; every `.ls` file is a package compilation unit (D9.3.1), and
+visibility comes from `pub` (S16.9.1), not the filename.
+
+Keep namespace and source layout aligned (D9.3.4). A namespace directory
+is not implicitly importable: public facades require actual sibling `.ls`
+files and explicit exports; index-file lookup remains an open design point
+(§10.3, D9.3.5). Preserve narrow leaf imports rather than loading every
+editor, format or UI component through one large facade.
+
+This naming direction is for shipped packages. Helpers inside golden-driven
+test directories keep their discovery prefixes unless the test contract
+changes separately. A migration must not turn an imported helper into an
+unintended test or omit a new test's expected result.
+
+### 11.6 Explicit state, effects and resources
+
+Package-level bindings remain immutable (D9.3.1, S9.1.7v2). App models,
+editing sessions, focus/overlay ownership and configuration travel as
+explicit values or belong to a template instance. Pure presentation and
+value transformations stay separate from procedural I/O and DOM publication
+(S12.1.1v3, S12.1.3v2). Reuse must not introduce hidden cross-window state.
+
+Pass document/resource bases into reusable packages and use existing path,
+URL and resource helpers. Entry-script argv discovery is application
+bootstrap policy. It is not a package-relative resource root, and moving it
+under `lambda.*` would not resolve §10.7. Keep assets with their owning
+package, preserve provenance and verify installed paths as well as checkout
+paths.
+
+### 11.7 Migrate contracts and consumers together
+
+Coordinate source moves with all imports, public exports, native loader
+strings, current reference docs, packaging inputs and tests. Temporary
+compatibility files may forward to canonical declarations for an explicit
+migration window; they must not copy type declarations, templates or
+implementations. One canonical file preserves load-once and nominal type
+identity (D9.3.3, S2.1.4).
+
+Judge completion by shared behavior in named consumers, dependency direction,
+resource portability and passing package/integration gates. Track public
+compatibility and removal milestones explicitly. Fewer filenames, fewer
+lines or more tests alone do not establish a better package structure.
+
+---
+
 ## Appendix A — Implementation notes
 
 - **Back end.** Packages compile through MIR Direct only (D8); the former
   C-text module structs and link-time pointer patching are gone.
 - **Resolver.** `lambda_resolve_import_module_path`
-  (`lambda/runtime/ast_build.hpp`) is D7.2.6's one resolver; `resolve_import`
+  (`lambda/runtime/ast_build.hpp`) is D9.3.5's one resolver; `resolve_import`
   reports E216 after the built-in and registered-module checks. Cycle
   detection is in `load_script` (`lambda/runtime/runner.cpp`).
 - **Regression fixtures.** `test/lambda/import_pub_types.ls` (type alias,
@@ -497,16 +659,17 @@ On E216/E217, suggest a near spelling when a similar file or package exists
 
 | Superseded | Replaced by |
 |---|---|
+| ~~`lambda.ui.workspace` as a preset composed from dtna components/tokens~~ | desktop UI family directly on `lambda.ui.core`, with dtna as a reference (§11.3; user direction, 2026-11-04). Desktop presentation and tokens have their own contract; reusable behavior belongs in core. |
 | ~~`import .mod as m` (namespace import)~~ | `import m: .mod` (§3.1) |
 | ~~bare `import a.b` resolving against the working directory~~ | bare roots are packages; E216 when unclaimed (S16.9.8) |
-| ~~relative imports resolving against the working directory~~ | resolved against the importing script's directory (D7.2.6) |
+| ~~relative imports resolving against the working directory~~ | resolved against the importing script's directory (D9.3.5) |
 | ~~`..parent.module`~~ | `~~.parent.module` (S16.9.8) |
 | ~~`import "./utils/x.ls"` quoted paths; `/` and `\` separators~~ | dotted paths only (S16.9.6) |
 | ~~`import 'chart'` symbol import of built-in modules~~ | `import lambda.chart`; a symbol tail is a markup namespace (§3.1) |
 | ~~`std.*` standard-library tree and a separate `std/prelude.ls`~~ | the `lambda.*` root and the `lambda.sys` prelude (§5) |
-| ~~`lambda.package.<name>`; math typesetting at `lambda.package.math`~~ | `lambda.<name>`; `lambda.doc.math` (D7.2.4v3) |
-| ~~`lambda.doc.math.*` mapped specially to `package/math/`~~ | source and resources moved to `package/doc/math/`, mirroring imports (D7.2.4v3, 2026-10-15) |
-| ~~`lambda.pdf.*` and `lambda.latex.*` under `package/{pdf,latex}/`~~ | `lambda.doc.pdf.*` and `lambda.doc.latex.*` under `package/doc/{pdf,latex}/` (D7.2.4v3, 2026-10-15) |
+| ~~`lambda.package.<name>`; math typesetting at `lambda.package.math`~~ | `lambda.<name>`; `lambda.doc.math` (D9.3.4) |
+| ~~`lambda.doc.math.*` mapped specially to `package/math/`~~ | source and resources moved to `package/doc/math/`, mirroring imports (D9.3.4, 2026-10-15) |
+| ~~`lambda.pdf.*` and `lambda.latex.*` under `package/{pdf,latex}/`~~ | `lambda.doc.pdf.*` and `lambda.doc.latex.*` under `package/doc/{pdf,latex}/` (D9.3.4, 2026-10-15) |
 | ~~`pub x = 1` bare export~~ | `pub let x = 1` (S16.9.1) |
 | ~~`pub string p = …` / `pub symbol p = …` pattern exports~~ | patterns are types: `pub type P = \(…)` (§2) |
 | ~~module-scope `let a^err = e` error destructuring~~ | retired language-wide (S7.6.5v2); handle with `e ^ { … }` (§6) |

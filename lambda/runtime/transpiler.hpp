@@ -17,7 +17,7 @@ typedef struct LambdaRegionBlock LambdaRegionBlock;
 // Runtime map admissions repeat the same candidate/contract shape pair across
 // recursive calls. The expected key may also be a union whose member carrier
 // was proven once. The entries are context-owned so a cache cannot leak a
-// relation between independent EvalContexts (D3.2.2).
+// relation between independent EvalContexts (D4.2.3).
 // Typed record arrays repeatedly cross the same nested map contracts in one
 // solver run. Keep this a power of two: runtime_map_contract_relation_cached
 // uses bounded hash probes rather than a linear full-table scan.
@@ -31,7 +31,7 @@ typedef struct LambdaMapContractCacheEntry {
 // Array representation proofs are immutable and heap-local.  Keeping their
 // interning table beside the map-relation cache gives every equivalent T[]
 // boundary in one EvalContext the same proof without retaining Type objects
-// after that context's pool is released (D3.3.3).
+// after that context's pool is released (D4.3.3).
 typedef struct LambdaArrayRepCertCacheEntry {
     Type* contract;
     ArrayRepCert* cert;
@@ -55,7 +55,7 @@ typedef struct Heap {
     // Identity of this heap incarnation, assigned once at heap_init from a
     // process-wide counter and never reused. Root registrations die with the
     // heap; a RootVector compares this to know its blocks must re-register
-    // (D5.4.2, JSCU12). The heap owns its epoch; no subsystem keeps a copy.
+    // (D6.4.2, JSCU12). The heap owns its epoch; no subsystem keeps a copy.
     uint64_t generation;
 } Heap;
 
@@ -134,7 +134,7 @@ struct Runtime {
     // consumed by the first CLI Script: no later host Script observes its declarations.
     bool js_terminal_script;
     double js_execution_ms; // generated-entry timing, excluding admission and setup
-    // D8.1.3v22 promotion policy, read from JS_EXEC_BACKEND /
+    // D8.4.5 promotion policy, read from JS_EXEC_BACKEND /
     // JS_FUNC_JIT_THRESHOLD / JS_LOOP_JIT_THRESHOLD once per runtime at first use rather
     // than from the environment on every interpreted call.
     bool js_promotion_policy_resolved;
@@ -147,7 +147,7 @@ struct Runtime {
     // but never execute or lower them to MIR.
     bool ast_prebuild_only;
 
-    // SCU14 (D5.4.1): the retained heap, name pool, type list and scheduler
+    // SCU14 (D6.4.1): the retained heap, name pool, type list and scheduler
     // are owned by the canonical EvalContext below and reached through the
     // runtime_heap()/runtime_name_pool()/runtime_type_list()/
     // runtime_scheduler() accessors. Runtime is a controller, not a second
@@ -156,12 +156,12 @@ struct Runtime {
     // Phase 5: unified DOM — a ui_mode runtime's elmt()/list_push()/elmt_fill()
     // allocate fat DomElement/DomText in the arena of the bound result Input
     // instead of the GC heap. UI content that is not already in that arena is
-    // deep-copied into it, never left pointing at the GC heap (D4.5.2).
+    // deep-copied into it, never left pointing at the GC heap (D5.5.2).
     bool ui_mode;
     Input* result_input;
 
     // Runtime-local load counters. InputManager owns process-wide artifact
-    // identity and lifetime under D8.5.1v2.
+    // identity and lifetime under D8.5.1.
     bool mir_cache_disabled;
     int script_load_hits;
     int script_load_misses;
@@ -178,6 +178,11 @@ struct Runtime {
     EvalContext* eval_context;
     bool js_runtime_used;
     bool no_task_drain;
+    uint32_t document_retirement_pins;
+    uint32_t native_borrows;
+    bool cleanup_in_progress;
+    bool cleanup_destructive;
+    bool cleanup_incomplete;
 };
 
 // Complete a guest MIR activation that either reused its caller's heap or
@@ -196,7 +201,7 @@ void lambda_home_init(void);    // call once at startup: host-path env overrides
 void* alloc_const(Transpiler* tp, size_t size);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 // Cached AST imports describe syntax only.  MIR callers name their symbols
-// with the current execution graph's dependency identity (D8.5.1v7).
+// with the current execution graph's dependency identity (D8.3.5).
 void write_fn_name_for_script_ex(StrBuf *strbuf, AstFuncNode* fn_node,
     const Script* import_script, const char* suffix);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
@@ -350,7 +355,7 @@ typedef struct InterpSatelliteImage {
     LambdaModuleLayout* module_layout;
     const AstFuncNode* target;
     void* target_entry;
-    // D8.1.1v14: a loop continuation's synthesized nodes, retired with the
+    // D8.3.2: a loop continuation's synthesized nodes, retired with the
     // image because the published Function names its definition
     Pool* continuation_pool;
     uint32_t member_count;
@@ -379,7 +384,7 @@ void interp_satellite_image_destroy(InterpSatelliteImage* image);
 
 // Detaches a Transpiler from a direct-import list. The Script-owned list stays
 // available until a replacement is adopted, so cache overlays resolve against
-// the current Runtime graph (D8.5.1v7).
+// the current Runtime graph (D8.3.5).
 void transpiler_clear_direct_imports(Transpiler* tp, const Script* script);
 
 // Transfers the Script-sized prefix of a finished Transpiler onto its Script.
@@ -417,7 +422,7 @@ void runtime_bind_ui_result_input(Runtime* runtime, Input* input);
 // one is bound.
 bool runtime_context_follow_ui_result(Runtime* runtime, EvalContext* ctx);
 // Each document such a runtime builds takes the UI attribute roots its build
-// published and releases them when it closes (D4.5.2 rooted exemption).
+// published and releases them when it closes (D5.5.2 rooted exemption).
 void* runtime_take_ui_attribute_roots(Runtime* runtime);
 void ui_attribute_roots_release(void* roots);
 // count active context-owned attribute roots without creating a root vector.
@@ -425,11 +430,30 @@ int64_t runtime_ui_attribute_root_count(EvalContext* owner);
 // Non-blocking close notification: satellite workers observe this before the
 // document/runtime owner starts its full teardown.
 void runtime_request_satellite_cancel(Runtime* runtime);
+typedef enum RuntimeCleanupResult {
+    RUNTIME_CLEANUP_COMPLETE,
+    RUNTIME_CLEANUP_RETRY,
+    RUNTIME_CLEANUP_INCOMPLETE,
+} RuntimeCleanupResult;
+// RETRY preserves the owner for a quiescent retry; INCOMPLETE means native
+// teardown already began and must not be retried or treated as completed.
+RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime);
+// Advance ready document cleanup without waiting for libuv.
+RuntimeCleanupResult runtime_try_cleanup_nonblocking(Runtime* runtime);
+// The sole bound retirement pin may close its runtime without opening a reentry gap.
+RuntimeCleanupResult runtime_try_cleanup_retirement_pinned(Runtime* runtime);
+RuntimeCleanupResult runtime_try_cleanup_retirement_pinned_nonblocking(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
+// The bound owner pins its runtime while a document is retiring.
+bool runtime_document_retirement_pin(Runtime* runtime);
+bool runtime_document_retirement_unpin(Runtime* runtime);
+// Native borrowers keep the bound evaluator and its heap alive until release.
+bool runtime_borrow_acquire(Runtime* runtime);
+bool runtime_borrow_release(Runtime* runtime);
 EvalContext* runtime_get_eval_context(Runtime* runtime);
 
-// SCU14 (D5.4.1): isolate resources live on the canonical EvalContext. Reads
+// SCU14 (D6.4.1): isolate resources live on the canonical EvalContext. Reads
 // never create the context; a write materializes it, because publishing a
 // resource is what makes a runtime an isolate.
 static inline Heap* runtime_heap(const Runtime* runtime) {
@@ -469,7 +493,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
 bool runtime_hold_js_module_mir_scope(Runtime* runtime,
                                       struct InputCacheScope* scope);
 // Code images name immutable logical units; these helpers bind them to the
-// receiving runtime's dense EvalContext slab table (D8.5.1v2).
+// receiving runtime's dense EvalContext slab table (D8.5.1).
 uint32_t script_compilation_unit_id(const Script* script);
 static inline uint32_t script_module_layout_id(const Script* script) {
     if (!script) return 0;

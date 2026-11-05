@@ -63,7 +63,7 @@ Options: `{mode: "edit"}` makes `edit` templates eligible; `{template: "name"}` 
 ### Event Handlers
 
 Reading model/state properties or calling a native DOM getter/query does not
-require a handler: these reads are `fn` (**D7.4.6**). Calls that change focus,
+require a handler: these reads are `fn` (**D7.1.1**). Calls that change focus,
 scroll, native editing state, or dispatch events are `pn` and belong in a
 handler (**S12.1.1v3**, **S12.1.3**). An explicitly `pn` package wrapper also
 requires procedural context, even if its body only reads properties.
@@ -115,10 +115,10 @@ on delete_item(evt) {
 For native controls with application-owned values, `lambda.ui.controls` provides
 `value`/`checked` props and declarative `on_change` actions. The package synchronizes
 live control state after projection while preserving accepted text selections and
-IME preedit. Custom model editors can reuse `lambda.edit.controller` for surface
+IME preedit. Custom model editors can reuse `lambda.editor.controller` for surface
 binding, document-selection adoption, input routing, replacement, and completion.
 See [Shared editor coordination and control bindings](dev/Shared_Editing.md)
-for the API and examples (**S12.1.3**, **D7.2.5**).
+for the API and examples (**S12.1.3**, **D10.2.1**).
 
 1. An input event is hit-tested to an element, which maps back to the template instance that rendered it, and that instance's handler runs.
 2. The handler changes state (`view`) or the model (`edit`); every change marks the affected template instances dirty.

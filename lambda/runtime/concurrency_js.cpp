@@ -159,7 +159,7 @@ static Item lambda_js_procedure_call(Item env_item, Item rest_args) {
     if (get_type_id(function_root.get()) != LMD_TYPE_FUNC) {
         return js_promise_reject(js_error_message("invalid Lambda procedure"));
     }
-    // D5.4.3: the captured Lambda Function is an Item edge, whereas env_item is
+    // D6.4.3: the captured Lambda Function is an Item edge, whereas env_item is
     // only an adapter ABI pointer. Root the function itself across list growth.
     List* args = list();
     int64_t count = get_type_id(args_root.get()) == LMD_TYPE_ARRAY
@@ -190,7 +190,7 @@ extern "C" Item lambda_js_wrap_procedure(
     RootFrame roots(2);
     Rooted<Item> function_root(roots, (Item){.function = function});
     Rooted<Item> wrapper_root(roots, ItemNull);
-    // D5.4.3: the raw closure environment has no tracing owner until the JS
+    // D6.4.3: the raw closure environment has no tracing owner until the JS
     // wrapper is attached, so retain the Lambda Function across both allocations.
     Item* env = js_alloc_env(1);
     if (!env) return ItemNull;

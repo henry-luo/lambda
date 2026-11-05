@@ -1,9 +1,9 @@
-// ordinary source theme facade; native ownership and view state stay in the shared engine (D7.2.4; D7.2.5).
+// ordinary source theme facade; native ownership and view state stay in the shared engine (D9.3.4; D10.2.1).
 import c: lambda.ui.core.component
 import shell: lambda.ui.core.presentation
 import base: lambda.ui.dtna
 import catalog: .clay.catalog
-import shared: lambda.ui.core.catalog
+import shared: lambda.ui.dtna.catalog
 import theme: .clay.tokens
 import styles: .clay.style
 import presentation: .clay.presentation

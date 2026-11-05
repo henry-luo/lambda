@@ -436,7 +436,7 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         if (shared_border) svg_lower_paint_list(ctx);
         if (has_radius && !shared_border) {
             char clip_id[64];
-            // retained IDs keep exported references independent of allocator addresses (D4.5.1v4).
+            // retained IDs keep exported references independent of allocator addresses (D5.5.1).
             str_fmt(clip_id, sizeof(clip_id), "border-clip-%u", static_cast<View*>(view)->id);
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content, "<defs><clipPath id=\"%s\"><path d=\"", clip_id);
@@ -1511,7 +1511,7 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
         return 1;
     }
     int result = render_export_session_to_svg(&session, svg_file);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -1526,6 +1526,6 @@ int render_document_transform_to_svg(const char* document_file,
         return 1;
     }
     int result = render_export_session_to_svg(&session, svg_file);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }

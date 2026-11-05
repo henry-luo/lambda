@@ -1,15 +1,15 @@
-// Object gestures retain a source path; previews never change history (D7.2.5).
+// Object gestures retain a source path; previews never change history (D10.2.1).
 import dom
-import lambda.editor.mod_doc
-import image: lambda.editor.mod_image
-import controller: lambda.edit.controller
+import lambda.editor.core.doc
+import image: lambda.editor.image
+import controller: lambda.editor.controller
 import transform: .mod_transform
 import objects: .mod_objects
 import object_layout: .mod_object_layout
 import page: .mod_page
 import tables: .mod_table
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
 
 pn selected_element(editor,node,path=null) { return image.image_element(editor,controller.surface(node),path) }
 pub pn hit(editor,node) {

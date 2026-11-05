@@ -1,4 +1,4 @@
-// The converter owns DOCX semantics; this module only presents its result (D7.2.4).
+// The converter owns DOCX semantics; this module only presents its result (D9.3.4).
 import docx: lambda.doc.docx
 import css: .css
 

@@ -630,7 +630,7 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
                         len = snprintf(buf, sizeof(buf), "Unhandled error. (%s)", inspected_text);
                     }
                     // both arguments allocate and evaluation order is
-                    // unspecified, so build and root them one at a time (D5.4.2)
+                    // unspecified, so build and root them one at a time (D6.4.2)
                     JubeScopedRoots err_roots(node_events_host, 3);
                     uint64_t* name_root = err_roots.slot(make_string_item("Error"));
                     if (!name_root) return ItemNull;

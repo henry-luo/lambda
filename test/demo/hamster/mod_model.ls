@@ -3,7 +3,7 @@ import sim: .mod_sim
 import items: .mod_items
 import camera: lambda.scene3d.camera
 import numeric: lambda.scene3d.transform
-import history: lambda.editor.mod_history
+import history: lambda.editor.core.history
 
 pub fn pet(st,id) => [for (h in st.pets where h.id == id) h][0]
 pub fn initial() => {modules:cage.starter(),saved:cage.starter(),pets:[

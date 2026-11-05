@@ -1,4 +1,4 @@
-// Package-owned single-block list policy (D7.2.5).  The native waist only
+// Package-owned single-block list policy (D10.2.1).  The native waist only
 // opens the generic transaction; this module supplies every list/container
 // choice and composes ordinary DOM node primitives.
 import dom
@@ -42,7 +42,7 @@ fn list_for_item(item) any^ {
 
 // Capture the successor before reparenting. The core move changes the live
 // sibling chain, so asking the marker for its successor after the move can
-// revisit the child and make the checked transaction roll back (D7.2.5).
+// revisit the child and make the checked transaction roll back (D10.2.1).
 pn move_children_from(child, destination) {
     if (child == null) true
     else {

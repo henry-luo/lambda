@@ -111,5 +111,5 @@ fn viewer(st, env, shown) {
 
 pub fn page(st, env, shown) => <main id:"archive", 'data-records':string(len(st.records)), 'data-jobs':string(len(st.jobs)),
     'data-loaded':string(st.loaded),
-    <header class:"bars", (add_bar(st)); (search_bar(st))>
+    <header class:"bars workspace-chrome", (add_bar(st)); (search_bar(st))>
     <div class:"columns", (rail(st)); (middle(st, env)); (viewer(st, env, shown))>>

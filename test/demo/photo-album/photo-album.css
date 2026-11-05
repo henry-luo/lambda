@@ -1,9 +1,10 @@
 /* Photo album demo: light library shell, dark viewer. */
 :root {
-  --bg: #f5f5f7; --panel: #ffffff; --sidebar: #eceef2; --ink: #1d1d1f; --muted: #6e6e73;
-  --line: #d9dbe1; --accent: #0a84ff; --accent-soft: #dcebff; --heart: #ff375f;
-  --font: -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --sidebar: #eceef2; --accent-soft: #dcebff; --heart: #ff375f;
 }
+body { --bg:var(--lambda-app-background); --panel:var(--lambda-app-surface); --ink:var(--lambda-app-text);
+  --muted:var(--lambda-app-text-secondary); --line:var(--lambda-app-border); --accent:var(--lambda-app-primary);
+  --font:var(--lambda-app-font-family); }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 13px; }
 button { font: inherit; color: inherit; }

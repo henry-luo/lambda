@@ -1,17 +1,22 @@
 import dom
 import resources: ~~.mod_resources
+import office_style: lambda.ui.workspace.office
+import ribbon_style: lambda.ui.workspace.ribbon_style
 import m: .mod_model
 import f: .mod_formula
 import app: .mod_app
 import v: .mod_view
-import overflow: ~~.mod_ribbon_overflow
+import overflow: lambda.ui.workspace.ribbon_overflow
 import selection: .mod_selection
 import sizing: .mod_resize
 import window: .mod_window
 import virtual: lambda.ui.core.virtual_grid
+import focus: lambda.ui.core.focus
+import interaction: lambda.ui.core.interaction
+import workspace_dialog: lambda.ui.workspace.dialog
 
 let BASE=url_resolve(resources.entry_uri()^,".")
-let CSS=input(url_resolve(BASE,"../office.css"),'text')^ ++ input(url_resolve(BASE,"../ribbon.css"),'text')^ ++ input(url_resolve(BASE,"sheet.css"),'text')^
+let CSS=office_style.document_css ++ office_style.css ++ ribbon_style.css ++ workspace_dialog.css ++ input(url_resolve(BASE,"sheet.css"),'text')^
 fn node(owner,id) => dom.get_element_by_id(dom.root_node(owner),id)
 let INITIAL=m.initial()^
 edit <sheet_app> () any^ state st:INITIAL {v.workspace(st)^}
@@ -217,19 +222,15 @@ on change(evt) {
 on keydown(evt) {
     let key=string(evt.key)
     let id=dom.get_attribute(evt.target,"id")
-    let primary=evt.ctrlKey==true or evt.metaKey==true
+    let primary=interaction.primary(evt)
     if ((st.resize_drag!=null)^) {
         if ((key=="Escape")^) { st=sizing.finish(evt.target,st,true) }
         return 'prevent-default'
     }
     if ((st.dialog!="")^) {
-        if ((key=="Tab")^) {
-            let controls=dom.query_selector_all(node(evt.target,"file-dialog"),"input,button")
-            let at=[for (i,control in controls where dom.focused(control)) i][0] or 0
-            dom.focus_set(controls[(at+(if (evt.shiftKey) len(controls)^-1 else 1))%len(controls)^],false)
-            return 'prevent-default'
-        }
-        if ((key=="Escape")^) { st={*:st,dialog:"",pending:null} }
+        let dialog_key = focus.dialog_key(node(evt.target,"file-dialog"),evt)^
+        if (dialog_key=='handled') { return 'prevent-default' }
+        if (dialog_key=='dismiss') { st={*:st,dialog:"",pending:null} }
         else if ((key=="Enter")^) { st=app.dispatch(st,"dialog-confirm",evt.target) }
         else { return 'pass' }
         app.focus(evt.target)^

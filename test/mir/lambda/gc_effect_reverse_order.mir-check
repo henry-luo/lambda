@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D5.3.1-D5.3.2: reversing declarations retains the rootless direct-call protocol when length is NO_GC.",
+  "description": "D6.3.1-D6.3.2: reversing declarations retains the rootless direct-call protocol when length is NO_GC.",
   "checks": [
     {
       "in_func": "_gc_order_reverse_caller_#",

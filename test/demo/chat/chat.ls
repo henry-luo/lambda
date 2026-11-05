@@ -5,9 +5,11 @@ import ui: .mod_ui
 import config: .mod_config
 import attachments: lambda.chat.attachment
 import files: .mod_files
-import tree: lambda.dom.tree
+import focus: lambda.ui.core.focus
+import workspace_shell: lambda.ui.workspace.shell
 import resources: ~~.mod_resources
-let CSS = input(url_resolve(resources.entry_uri()^, "chat.css"), 'text')^
+let CSS = workspace_shell.css ++ input(url_resolve(resources.entry_uri()^, "chat.css"), 'text')^
+let THEME = workspace_shell.variables({primary:"#139b76",text:"#263b34",background:"#f6f8f6",font_size:14})^
 let ROOT = config.root
 let REQUESTED_USER = config.setting("CHAT_DEMO_USER", chat.profiles[0].id)^
 let VALID_USER = chat.profile(REQUESTED_USER) != null
@@ -87,7 +89,7 @@ pn confirm_file(st, root) {
 }
 
 view <chat_app> state st: initial(), server: null, clients: {}, writers: {} {
-    <body ui.page(st)>
+    <body class:"workspace-shell",style:THEME,ui.page(st)>
 }
 on load(evt) {
     if (server != null or st.ready) { return 'pass' }
@@ -232,18 +234,13 @@ on change(evt) {
 }
 on keydown(evt) {
     if ((st.dialog != null)^) {
-        if (evt.key == "Escape") {
+        let key = focus.dialog_key(node(evt.target, "attachment-dialog"),evt)^
+        if (key == 'dismiss') {
             st = {*:st, dialog:null}
             dom.focus_set(node(evt.target, "draft")^, false)
             return 'prevent-default'
         }
-        if (evt.key == "Tab") {
-            let controls = dom.query_selector_all(node(evt.target, "attachment-dialog"), "button:not([disabled]),input")
-            let index = tree.index_in(controls, evt.target) or 0
-            let next = (index + (if (evt.shiftKey) -1 else 1) + len(controls)) % len(controls)
-            dom.focus_set(controls[next], false)
-            return 'prevent-default'
-        }
+        if (key == 'handled') { return 'prevent-default' }
         if (evt.key == "Enter" and dom.get_attribute(evt.target, "id") == "attachment-path") {
             st = confirm_file(st, evt.target); return 'prevent-default'
         }

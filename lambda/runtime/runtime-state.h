@@ -24,16 +24,16 @@ bool eval_context_init(EvalContext* owner);
 bool eval_context_matches(const EvalContext* owner);
 bool eval_context_shutdown(EvalContext* owner);
 void lambda_profile_shutdown(void);
-// a document boundary transfers ownership without replace-and-restore (D5.4.1).
+// a document boundary transfers ownership without replace-and-restore (D6.4.1).
 bool eval_context_transfer_thread(EvalContext* target);
 
-// Retained and fresh clients share owner and result-root publication (D8.1.3v10, D5.2.1v3).
+// Retained and fresh clients share owner and result-root publication (D8.4.1, D6.2.1).
 bool runtime_context_bind_retained(Runtime* runtime, EvalContext* owner);
 void runtime_context_publish_owners(Runtime* runtime, EvalContext* owner);
 Runtime* runtime_module_state_owner(EvalContext* owner, Runtime* fallback);
 Item runtime_publish_result(EvalContext* owner, Item result);
 
-// Restore execution metadata at nested runtime boundaries (D8.1.3v10).
+// Restore execution metadata at nested runtime boundaries (D8.4.1).
 class RuntimeCurrentFileScope {
 public:
     RuntimeCurrentFileScope(EvalContext* owner = context, const char* filename = NULL);
@@ -60,7 +60,7 @@ private:
     bool outermost_;
 };
 
-// Restore a caller's slab across imports and guest callbacks (D7.2.1).
+// Restore a caller's slab across imports and guest callbacks (D9.3.1).
 class RuntimeModuleStateScope {
 public:
     explicit RuntimeModuleStateScope(EvalContext* owner = context);
@@ -69,7 +69,7 @@ public:
     ~RuntimeModuleStateScope();
 
     bool activate(uint32_t module_id);
-    // A document-level unit may retain its newly active slab (D7.2.1).
+    // A document-level unit may retain its newly active slab (D9.3.1).
     void retain_active() { restore_previous_ = false; }
 
 private:
@@ -100,7 +100,7 @@ extern "C" {
 
 typedef struct LambdaConstPool LambdaConstPool;
 
-// D5.4.1: native I/O reads the canonical owner's run configuration.
+// D6.4.1: native I/O reads the canonical owner's run configuration.
 LAMBDA_RT_API bool lambda_dry_run_enabled(void);
 
 // Context-module state is established before a sealed MIR module is entered.

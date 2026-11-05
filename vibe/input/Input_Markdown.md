@@ -7,7 +7,7 @@ the required Markdown dialect; Appendix A records current implementation coverag
 embedded math, Mermaid diagrams, footnotes, bare URL autolinks, GitHub emoji
 shortcodes, and embedded HTML.
 
-**Formal-spec linkage:** [D7.1.5](../../doc/Lambda_Formal_Design.md#d71-build-packaging-and-layering)
+**Formal-spec linkage:** [D9.1.4](../../doc/Lambda_Formal_Design.md#d91-build-layering)
 governs Mark API ownership: input construction uses the io-owned `MarkBuilder`.
 No existing `S#` or `D#` ruling specifies the Markdown dialect itself. This working
 record captures the user-confirmed feature policy without changing a formal ruling.
@@ -292,7 +292,7 @@ bounded matching. The [emoji sample](../../test/input/markdown_emoji.md) and
   `parse_graph_mermaid()`, `to_html()`, and `from_mermaid()` provide the shared
   diagram pipeline.
 - [Native Markdown loader](../../radiant/cmd_layout.cpp) renders math and Mermaid
-  through one retained runtime, following **D5.4.1** for loader context binding.
+  through one retained runtime, following **D6.4.1** for loader context binding.
 - [Document viewer](../../lmd/package/doc/doc_viewer.ls) renders Mermaid fences
   and numbered notes. The [editor adapter](../../lmd/package/edit/markdown.ls)
   preserves definitions as source instead of importing the generated footer.

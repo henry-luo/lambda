@@ -4,7 +4,7 @@
 > **Role**: this is the **single source of truth for what Radiant does after an event is dispatched** — which UA default actions exist, where each half lives, and which are still missing. Every other doc that names a default action points here rather than restating it. Absorbs and replaces Appendix B of `vibe/Lambda_Design_DOM_State.md` (deleted there 2026-08-28).
 > **Scope**: default actions and activation behavior for HTML documents under Radiant — the pointer, keyboard, editing, focus, clipboard, drag, composition, form, and navigation families. Event *dispatch* mechanism is in scope only where a missing dispatch is what makes a default action unreachable.
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (the behavior-template architecture and the ES/ESO ledgers this doc extends), `vibe/Lambda_Design_DOM_Pkg.md` (layering and placement policy), `doc/dev/radiant/RAD_15_Events_Input.md`, `RAD_17_Interaction_State.md`, `RAD_19_Form_Controls.md`.
-> **Formal anchors**: S12.1.3 (reactive templates: body = pure `fn`, mutation only in `on` handlers), S12.2.2 (element mutation), S9.1.4 (state lives in view state), S7.6/S7.10 (error discharge and the sys-func contract), D4.5.1v3 (the Radiant memory seam).
+> **Formal anchors**: S12.1.3 (reactive templates: body = pure `fn`, mutation only in `on` handlers), S12.2.2 (element mutation), S9.1.4 (state lives in view state), S7.6/S7.10 (error discharge and the sys-func contract), D5.5.1 (the Radiant memory seam).
 > **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. **ES30** is minted in §2.4, **ES31** in §2.5, **ES32** in §2.8, **ES33** in §2.9, **ES34** in §2.10, and **ES35** in §2.11; ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. ESO70–ESO71 are minted in §6; **ES30's value-operation and pointer-capture extension is §2.6 (F20)**, which mints ESO72–ESO74, and **§2.7 is the selectedness consolidation (F21)**, which mints ESO75. New open issues start at **ESO76**.
 
 ---
@@ -92,7 +92,7 @@ Radiant-internal seams that no JS listener can observe. Each exists because the 
 Sequential `focuskey` and initial `focusinit` policy return the chosen DOM node
 through the behavior result. Native commits that choice through the shared
 focus transition, preserving the keyboard origin and delivering edit commit,
-`change`, `blur`/`focusout`, and `focus`/`focusin` as appropriate (D7.2.5).
+`change`, `blur`/`focusout`, and `focus`/`focusin` as appropriate (D10.2.1).
 The policy must not write focus before returning its choice, because doing so
 would hide the previous control from that transition.
 
@@ -203,7 +203,7 @@ of `target` to a browsing context. Native owns the navigation **execution**:
 URL/history commit, network or document loading, iframe replacement and
 layout, lifecycle event emission, canonical `:target` state, scroll geometry,
 and paint. This preserves S12.1.3's handler-owned decision while retaining
-native ownership of canonical state and native node validity at the D4.5.1v3
+native ownership of canonical state and native node validity at the D5.5.1
 memory seam.
 
 `navigation.ls` is reached by a `linkactivation` behavior-only hook only
@@ -336,7 +336,7 @@ programmatically focusable ancestor) receives mouse focus; whether a primary
 press starts, extends, word-selects, line-selects, or selects all; and the
 single/double/triple-click mapping. This follows S12.1.3: the decision is an
 `on`-handler default, not a native modifier/click-count table. S9.1.4 and
-D4.5.1v3 keep the live focus, selection, geometry, event ordering, and paint
+D5.5.1 keep the live focus, selection, geometry, event ordering, and paint
 state in Radiant.
 
 An uncancelled ordinary `mousedown` first reaches author listeners and any
@@ -370,7 +370,7 @@ scrollbar's geometry-reported `horizontalBefore` / `horizontalThumb` /
 `horizontalAfter` / vertical equivalents to page or drag operations. This is
 the same S12.1.3 `on`-handler ownership as keyboard scrolling: the package
 chooses a named operation and `dom.scroll_operation` is the one waist. S9.1.4
-and D4.5.1v3 retain the live offsets, range clamp, scroll-chain traversal,
+and D5.5.1 retain the live offsets, range clamp, scroll-chain traversal,
 pointer geometry, thumb conversion, state writes, event delivery, observers,
 and paint in Radiant.
 
@@ -404,7 +404,7 @@ cancelable `contextmenu` event remains the opening gate: author cancellation
 still suppresses it before `menu.open_for` chooses a target and enable mask.
 Native owns only overlay storage, popup geometry/paint, hit containment, and
 the physical row index. This follows S12.1.3: the behavior decision is an `on`
-handler; S9.1.4 and D4.5.1v3 retain the document-owned transient overlay state,
+handler; S9.1.4 and D5.5.1 retain the document-owned transient overlay state,
 renderer, and geometry in Radiant.
 
 `dom.keyboard_command` is deliberately the single edit/clipboard execution
@@ -443,7 +443,7 @@ appliers decline. It deliberately maps that callback only to
 and advances the caret, but the package performs no DOM text mutation. This is
 an explicit compatibility behavior, not a claim that static document text is
 editable. Under S12.1.3 the decision belongs to the body behavior handler;
-S9.1.4 and D4.5.1v3 retain the selection, caret projection, live geometry,
+S9.1.4 and D5.5.1 retain the selection, caret projection, live geometry,
 selection events, and paint in Radiant.
 
 Native still filters the platform callback at its existing event boundary: a
@@ -682,13 +682,13 @@ stage as trusted pointer input. Native retains label association, target
 resolution, canonical state storage, and form/link execution mechanics;
 `form.ls` owns checkbox/radio transitions, group exclusivity, `input`/`change`,
 submit/reset decisions, and popover policy through waist primitives (S12.1.3);
-native keeps canonical state at the S9.1.4/D4.5.1v3 seam.
+native keeps canonical state at the S9.1.4/D5.5.1 seam.
 
 There is no cross-realm checkedness diff or JS-specific activation policy.
 The behavior-only `clickpreactivate` hook performs HTML's legacy pre-activation
 and returns a package procedure capturing the original checkbox state or radio
 peer. Native dispatch precisely roots that completion through author listeners
-and invokes it with the cancellation result (**D5.3.3**, ES26). The package
+and invokes it with the cancellation result (**D6.3.3**, ES26). The package
 either restores its snapshot or emits input/change; the current click record
 marks activation handled so the normal UA tier cannot toggle a second time.
 Completion retains the normal behavior dispatch/emit context, keeping nested

@@ -1,7 +1,7 @@
 import m: ~~.~~.demo.slides.mod_model
 import h: ~~.~~.demo.slides.mod_home
-import shared: ~~.~~.demo.mod_text_format
-import css: lambda.editor.mod_inline_format
+import shared: lambda.doc.typography
+import css: lambda.editor.core.inline_format
 
 let base = {*:m.initial(),selected:"s1-o1",index:1}
 let sized = h.property(base,"font_size","28")^

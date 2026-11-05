@@ -100343,7 +100343,7 @@
         "name": "levenshtein",
         "historical_result53_untyped_over_js": 14.68,
         "lambda_source": "test/benchmark/kostya/levenshtein.ls",
-        "note": "Native producer/length/array/scalar paths eliminate most generic indexing/arithmetic and roots. min3 still takes possibly absent arguments through its boxed entry; no partial tuple is asserted fully admitted (D8.3.3). JS also uses typed arrays and a hoisted character read.",
+        "note": "Native producer/length/array/scalar paths eliminate most generic indexing/arithmetic and roots. min3 still takes possibly absent arguments through its boxed entry; no partial tuple is asserted fully admitted (D7.3.3). JS also uses typed arrays and a hoisted character read.",
         "observed": {
           "control": {
             "helper_calls": {

@@ -1,7 +1,7 @@
 # KaTeX resources
 
 `KaTeX_Main-Regular.woff2` supplies matching harpoon glyphs for reaction arrows
-in the bundled math profile (D7.2.4). It is copied without modification from
+in the bundled math profile (D9.3.4). It is copied without modification from
 [`ref/mathlive/css/fonts/KaTeX_Main-Regular.woff2`](https://github.com/arnog/mathlive/blob/8342e1cb75e7828ef7cb092ef42887858215e669/css/fonts/KaTeX_Main-Regular.woff2).
 
 - MathLive revision: `8342e1cb75e7828ef7cb092ef42887858215e669`.
@@ -33,4 +33,4 @@ Closed multiple integrals reuse the existing `KaTeX_Size1` / `KaTeX_Size2`
 double/triple integral glyphs and `KaTeX_Main`'s big circle. The bundled TeX
 overlay definition is `test/lambda/math/tex_bundled_integrals.tex`; it does not
 require another font. Math package Design Rule 2 prohibits adding fonts for
-math support (**D7.2.4 / D7.1.2v2**).
+math support (**D9.3.4 / D9.1.2**).

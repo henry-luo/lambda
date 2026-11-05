@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import dom
 import c: lambda.ui.core.component
 import interaction: lambda.ui.core.interaction
@@ -25,7 +26,7 @@ pub fn descriptor(props, child) element^ {
         else if (not c.enum_valid(props.icon_placement,["start","end"])^) raise c.fail('button',"icon_placement must be start or end")
         else if (any([for (field in ["href","target","rel","download"] where c.has(props,field)) not (props[field] is string)]))
             raise c.fail('button',"link attributes must be strings")
-        else c.node('button',props,child,properties)^
+        else descriptor.node('button',props,child,properties)^
     )
 }
 fn busy(props, clock) => (let config = settings(props), config.active and
@@ -59,7 +60,7 @@ fn presentation(node, clock) any^ {
     // public enums accept symbols; native HTML attributes require their text value.
     else <button *:attributes,type:c.text(c.option(p,"type","button")),*:c.boolean_attr("disabled",p.disabled),*content_parts(node,shown)>
 }
-// delayed loading uses the document frame queue, so removal invalidates pending delivery (D7.5.3).
+// delayed loading uses the document frame queue, so removal invalidates pending delivery (D9.5.6).
 pn advance(node, evt, previous) {
     let config = settings(c.props(node))
     let changed = config != previous.settings

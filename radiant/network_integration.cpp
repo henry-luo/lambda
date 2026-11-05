@@ -3,7 +3,9 @@
 #include "radiant.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "platform.hpp"
 #include "../lambda/network/network_resource_manager.h"
+#include "../lambda/network/network_downloader.h"
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/font_resource_faces.h"
@@ -132,6 +134,37 @@ int radiant_init_network_support(DomDocument* doc,
 
     log_debug("network: network support initialized successfully");
     return 0;
+}
+
+void radiant_network_wake_platform(void* user_data) {
+    (void)user_data;
+    radiant_platform_post_empty_event();
+}
+
+static void live_image_complete(NetworkResource* resource, void* user_data) {
+    (void)user_data;
+    DomDocument* doc = resource && resource->manager ? resource->manager->document : nullptr;
+    // Reflow the live tree instead of retaining an element that may be replaced while fetching.
+    if (doc && doc->root) resource_manager_schedule_reflow(resource->manager, doc->root);
+}
+
+void radiant_request_live_image(DomDocument* doc, UiContext* ui, const char* source) {
+    if (!doc || !ui || !ui->async_script_navigation || ui->document != doc ||
+        !radiant_url_is_http(source) || !document_dependency_admits(doc, source)) return;
+    if (!doc->resource_manager) {
+        network_downloader_init_shared();
+        if (radiant_init_network_support(doc, nullptr, nullptr) != 0) return;
+    }
+    resource_manager_set_ui_context(doc->resource_manager, ui);
+    if (!ui->headless) {
+        resource_manager_set_wake_callback(doc->resource_manager, radiant_network_wake_platform, nullptr);
+    }
+    NetworkResource* resource = resource_manager_load(doc->resource_manager,
+        source, RESOURCE_IMAGE, PRIORITY_NORMAL, nullptr);
+    // Existing element/font callbacks already arrange their own layout updates.
+    if (resource && !resource->owner_element && !resource->on_complete && !resource->processed) {
+        resource->on_complete = live_image_complete;
+    }
 }
 
 // Helper to query selector all matching elements
@@ -363,30 +396,36 @@ void radiant_prefetch_document_font_resources(DomDocument* doc) {
 
 typedef struct CssResourcePrefetchContext {
     DomDocument* doc;
+    const Url* base_url;
     int queued;
 } CssResourcePrefetchContext;
 
 static void prefetch_css_resource_url(CssValue* value, void* context) {
     CssResourcePrefetchContext* prefetch = (CssResourcePrefetchContext*)context;
     if (!prefetch || !prefetch->doc || !prefetch->doc->resource_manager ||
-        !value || !value->data.url || !radiant_url_is_http(value->data.url)) {
+        !value || !value->data.url || !*value->data.url || *value->data.url == '#') {
         return;
     }
-    if (resource_manager_prefetch(prefetch->doc->resource_manager, value->data.url,
-                                  PRIORITY_LOW)) {
+    // resolve the request without rewriting custom tokens, whose base belongs to their consumer.
+    Url* url = url_parse_with_base(value->data.url, prefetch->base_url);
+    if (radiant_url_is_http(url) && resource_manager_prefetch(
+            prefetch->doc->resource_manager, url_get_href(url), PRIORITY_LOW)) {
         prefetch->queued++;
     }
+    if (url) url_destroy(url);
 }
 
 void radiant_prefetch_document_stylesheet_resources(DomDocument* doc) {
     if (!doc || !doc->resource_manager || !doc->stylesheets) return;
 
-    CssResourcePrefetchContext context = {doc, 0};
+    CssResourcePrefetchContext context = {doc, nullptr, 0};
     for (int s = 0; s < doc->stylesheet_count; s++) {
         CssStylesheet* sheet = doc->stylesheets[s];
         if (!sheet) continue;
-        radiant_resolve_stylesheet_resource_urls(sheet);
+        Url* source = sheet->origin_url ? url_parse(sheet->origin_url) : nullptr;
+        context.base_url = source ? source : doc->url.get();
         radiant_for_each_stylesheet_resource_url(sheet, prefetch_css_resource_url, &context);
+        if (source) url_destroy(source);
     }
     if (context.queued > 0) {
         log_info("[PREFETCH] queued %d CSS declaration resources", context.queued);

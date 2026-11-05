@@ -21,15 +21,15 @@ match the existing release control `05e9ae4f3d95576d7ca4e007477b94b8d02dd84520a9
 
 ## 2. Contracts
 
-- **D1.3v3:** reuse untyped Lambda and shared JS algorithms first. Add explicit
+- **D1.3:** reuse untyped Lambda and shared JS algorithms first. Add explicit
   operation profiles where property/callable/error representations differ;
   never reinterpret incompatible callable records or copy an object graph.
-- **D8.1.3v24:** direct/indirect eval, Function-family constructors and dynamic
+- **D8.4.5:** direct/indirect eval, Function-family constructors and dynamic
   bodies remain in the retained AST interpreter. Complete live environment
   and host-entry integration; do not replay ordinary unsupported MVP scripts.
-- **D3.4.3v5–D3.4.8, D5.2–D5.3:** preserve shared shapes, scalar ownership,
+- **D3.4.3–D3.4.7, D6.2–D6.3:** preserve shared shapes, scalar ownership,
   precise roots and explicit completions through observable callbacks.
-- **D8.4.1v2:** preserve immutable generated code and guarded specialization;
+- **D7.4.1:** preserve immutable generated code and guarded specialization;
   no inline caches or universal `is_normal` flag.
 
 ## 3. Work packages
@@ -79,7 +79,7 @@ Shared entry points were announced before implementation:
 P2 extends the existing shared statement walker with a statement-position
 option. Lexical/class declarations require a statement list; Annex B permits
 ordinary function declarations only in eligible sloppy if/label positions.
-The same validator serves MVP and LJS (**D8.1.3v24**).
+The same validator serves MVP and LJS (**D8.4.5**).
 Shared binding checks also reject lexical/var collisions and async/generator
 duplicates; sloppy labelled ordinary functions retain their Annex B binding.
 Object shorthand requires an IdentifierReference.
@@ -166,11 +166,11 @@ Native sampling and the generated MIR identified two avoidable runtime costs:
 - `Object.values` re-interned idless field names even when no keys or callbacks
   were needed. Enumeration now uses the shared key classifier and canonical
   name metadata for ordering, materializing names only when consumed. Immutable
-  shape-owned spellings remain valid across callbacks (**D3.4.3v5**).
+  shape-owned spellings remain valid across callbacks (**D3.4.3**).
 - Literal `String.split` traversed the general RegExp protocol entry despite
   already having string operands and an absent limit. That case now enters
   the existing rooted Lambda split kernel directly. Observable conversion and
-  object protocol operations retain the general path (**D5.2–D5.3**).
+  object protocol operations retain the general path (**D6.2–D6.3**).
 
 Round10 eleven-pair repeats measured object growth **21.6% faster** than the
 entry build and three-way merge **+0.11%**, with its 95% interval crossing
@@ -233,7 +233,7 @@ lengths cannot determine the subject boundary for an ignore-case backreference.
 
 The shared early-error pass validates literals before execution, including
 unreachable literals. It uses the existing capture-name decoder and RegExp
-frontend; constructor patterns remain runtime checks (**D8.1.3v24**).
+frontend; constructor patterns remain runtime checks (**D8.4.5**).
 One new internal helper, `validate_unicode_property_escape`, shares braced-name
 validation between the class and non-class paths. It reuses existing generated
 property-name tables and admits properties of strings only for positive `/v`
@@ -250,7 +250,7 @@ including when subtraction removes every concrete string.
 The interpreter host operation profile now includes a RegExp-literal factory.
 MVP supplies its existing native constructor kernel, preserving realm identity
 without translating dynamic bodies to MIR or copying LJS exotic records
-(**D8.1.3v24**, **D1.3v3**). Direct/indirect eval and Function-created bodies
+(**D8.4.5**, **D1.3**). Direct/indirect eval and Function-created bodies
 retain AST execution. The optional shell host also exposes `print` through the
 existing rooted output handler.
 
@@ -331,7 +331,7 @@ has been applied to conceal the regression. Diagnostic samples/disassembly:
 ### Host and lifetime audit at round21
 
 The P5/P6 implementation must reuse sound shared storage and collector seams
-(**D1.3v3**, **D5.2–D5.3**), not infer completion from LJS's API presence:
+(**D1.3**, **D6.2–D6.3**), not infer completion from LJS's API presence:
 
 - LJS's Test262 agent currently executes callbacks synchronously. Its Atomics
   adapter contains synthetic spin-loop values and report-string substitutions.
@@ -365,7 +365,7 @@ older phase control and does not erase its outstanding performance gaps.
 WeakRef and FinalizationRegistry now share a native Lambda Map carrier with
 an ordinary shape/property face. `MAP_KIND_WEAK` selects its payload; there is
 no new TypeId or ordinary-container flag. Both JS front ends use the same
-validation, registration, dereference and unregister algorithms (**D1.3v3**).
+validation, registration, dereference and unregister algorithms (**D1.3**).
 
 The collector traces callbacks and holdings strongly, registers targets and
 unregister tokens as per-collection ephemerons, and records pending cleanup
@@ -374,7 +374,7 @@ targets in a job-scoped RootVector. An outer microtask checkpoint releases
 that set and invokes pending cleanup with rooted carriers and destination-owned
 scalar holdings. Nested synchronous calls cannot clear the set. Native records
 unlink on collection and detach before runtime destruction; batch reset drops
-the preceding realm's state (**D5.2–D5.3**).
+the preceding realm's state (**D6.2–D6.3**).
 
 Announced shared helpers: `js_weak_validate_input`,
 `js_weak_create_with_storage`, `js_weak_method_with_ops`,
@@ -385,7 +385,7 @@ not use these facilities allocate no weak lifetime state.
 ### P2/P5: Script declarations through the retained interpreter
 
 `$262.evalScript` now selects a Script role on the existing hosted AST executor
-(**D8.1.3v24**). Its GC-owned lexical environments persist across calls, retain
+(**D8.4.5**). Its GC-owned lexical environments persist across calls, retain
 TDZ/const rules and expose live bindings to subsequent interpreted and MVP
 code. Ordinary indirect eval still has private lexical declarations. Script
 var/function creation uses the required global-property attributes and checks
@@ -403,7 +403,7 @@ function value without rewriting existing property attributes.
 MVP's Atomics namespace uses the shared built-in catalog for method names,
 arity and descriptors. Its read/modify/write operations reuse the existing
 sequentially consistent native atomic kernel with `JsBufferViewOps` supplying
-frontend coercion/errors (**D1.3v3**). The new
+frontend coercion/errors (**D1.3**). The new
 `js_atomics_operation_with_ops`, `js_atomics_is_lock_free_with_ops` and
 `js_atomics_pause_with_ops` entries are shared adapters, not a second typed
 array representation. Programs with no observable Atomics namespace retain
@@ -412,7 +412,7 @@ their existing compiler path.
 The kernel roots arguments and adopts converted scalar results before later
 callbacks. It snapshots the initial length for index validation, then
 revalidates bounds and acquires the current buffer address after all
-coercions; a callback may detach, shrink or replace storage (**D5.2–D5.3**;
+coercions; a callback may detach, shrink or replace storage (**D6.2–D6.3**;
 ECMA-262 §25.4.3.4, RevalidateAtomicAccess). Atomic writes also enter the
 existing storage-write preparation path. Huge `isLockFree` arguments are
 compared without an overflowing native integer cast. These fixes apply to
@@ -424,10 +424,10 @@ to its legacy entry and are not used by the MVP adapter.
 `$262.createRealm` now retains a separate intrinsic/global owner in the existing
 MVP execution. Runtime slots use the execution's existing precise roots;
 callee entry, generator/async suspension and Promise jobs restore their owning
-realm (**D5.2–D5.3**, **D5.4.2–D5.4.4**). Internal native brands share canonical
+realm (**D6.2–D6.3**, **D6.4.2–D6.4.4**). Internal native brands share canonical
 private names within the execution; guest class-private names remain distinct.
 Eval and Function-family bodies still use the shared AST interpreter
-(**D8.1.3v24**).
+(**D8.4.5**).
 
 `mvp_lmd_function_realm` unwraps bound and proxy targets;
 `mvp_lmd_constructor_prototype` reuses intrinsic slots for the
@@ -445,18 +445,18 @@ freed-memory poisoning. An earlier realm pin passes all **13/13** frozen
 canonical hosted-realm cases. These are selected results, not a complete
 current-build recount. Cross-realm subclass admission now retains Lambda
 nominal ancestry for parents owned by the same execution
-(**D3.4.3v5–D3.4.8**); its latest validation is recorded separately below.
+(**D3.4.3–D3.4.7**); its latest validation is recorded separately below.
 
 ### P5: waiters and deadlines
 
 The shared `js_atomics_wait_with_ops` and
 `js_atomics_notify_with_ops` entries reuse typed-array validation, numeric
 conversion, waiter records, Promise settlement and the existing event loop
-(**D1.3v3**). This path uses actual monotonic deadlines and matches the backing
+(**D1.3**). This path uses actual monotonic deadlines and matches the backing
 store plus **byte offset**, including aliases with different element widths.
 Waiter-owned precise roots retain storage and timer handles; settlement clears
 those roots and cancels the timer. Reusing a completed native row must preserve
-FIFO waiter order (**D5.2–D5.3**).
+FIFO waiter order (**D6.2–D6.3**).
 
 MVP constructs the public result with its ordinary object shape and the active
 realm's Promise prototype. The legacy LJS agent simulation remains separate;

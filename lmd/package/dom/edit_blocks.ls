@@ -1,4 +1,4 @@
-// Package-owned block conversion policy (D7.2.5).  It selects legal target
+// Package-owned block conversion policy (D10.2.1).  It selects legal target
 // tags and composes generic node creation/move/remove steps inside one checked
 // transaction; native code never maps a command to a block tag.
 import dom
@@ -35,7 +35,7 @@ fn value_or_empty(value) {
 }
 
 // Capture the successor before reparenting. Live sibling links change during
-// a core move, so this remains stable for root-inline content (D7.2.5).
+// a core move, so this remains stable for root-inline content (D10.2.1).
 pn move_children_from(child, destination) {
     if (child == null) true
     else {
@@ -65,7 +65,7 @@ pn set_style_property(node, property, value) {
                   else dom.get_attribute(node, "style");
     let base = style_without_property(split(current, ";"), lower(property), 0);
     // CSSOM-style declarations serialize the property/value separator with a
-    // space, matching browser-visible `innerHTML` (D7.2.5).
+    // space, matching browser-visible `innerHTML` (D10.2.1).
     dom.set_attribute(node, "style", base ++ property ++ ": " ++ value ++ ";")^
     true
 }

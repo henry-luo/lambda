@@ -36,7 +36,7 @@
 //              (ESO96): row `same_node` publishes member `is_same_node`.
 //   js_name    JS spelling when it differs from camelCase(member); "" otherwise
 //
-// All three are metadata -- D7.4.4 already says member spellings are -- so the
+// All three are metadata -- D9.5.4 already says member spellings are -- so the
 // columns cost no ABI. The bind tables, not hand-written entries, are generated
 // from them.
 //
@@ -185,7 +185,7 @@ DOM_OP(CORE, tc_selection_start, textctl, 1, "fn(n: any) -> int", dom_engine_tc_
 DOM_OP(CORE, tc_selection_end, textctl, 1, "fn(n: any) -> int", dom_engine_tc_selection_end, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 // A document-scoped behavior handler receives its attachment element. This
 // capability read returns the actual editing target without making command
-// policy native (D7.2.5).
+// policy native (D10.2.1).
 DOM_OP(CORE, edit_target, editing, 2, "fn(receiver: any, invocation: int) -> any", dom_engine_edit_target, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, edit_node, editing, 2, "fn(host: any, invocation: int) -> any", dom_engine_edit_node, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, edit_start, editing, 2, "fn(host: any, invocation: int) -> int", dom_engine_edit_start, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
@@ -196,15 +196,15 @@ DOM_OP(CORE, edit_epoch, editing, 2, "fn(host: any, invocation: int) -> int", do
 DOM_OP(CORE, edit_begin_transaction, editing, 2, "pn(host: any, invocation: int) -> bool", dom_engine_edit_begin_transaction, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, edit_abort_transaction, editing, 2, "pn(host: any, invocation: int) -> bool", dom_engine_edit_abort_transaction, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // Generic retained deltas preserve DOM identity and selection at the editing
-// waist. The behavior package owns command grouping and history policy (D7.2.5).
+// waist. The behavior package owns command grouping and history policy (D10.2.1).
 DOM_OP(CORE, edit_retain_delta, editing, 2, "pn(host: any, invocation: int) -> int|null", dom_engine_edit_retain_delta, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, edit_replay_delta, editing, 4, "pn(host: any, invocation: int, delta: int, undo: bool) -> bool", dom_engine_edit_replay_delta, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, edit_release_delta, editing, 2, "pn(host: any, delta: int) -> bool", dom_engine_edit_release_delta, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // Clear focus and transient input state owned by one editing host without
-// choosing when a host enters or leaves editing mode (D7.2.5).
+// choosing when a host enters or leaves editing mode (D10.2.1).
 DOM_OP(CORE, clear_editing_focus, editing, 1, "pn(host: any) -> bool", dom_engine_clear_editing_focus, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // Opaque per-document behavior-package state. The engine roots this Item but
-// has no visibility into its session schema or editing policy (D7.2.5).
+// has no visibility into its session schema or editing policy (D10.2.1).
 DOM_OP(CORE, edit_sync_selection, editing, 2, "pn(host: any, invocation: int) -> bool", dom_engine_edit_sync_selection, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, edit_session, editing, 1, "fn(host: any) -> any", dom_engine_edit_session, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, set_edit_session, editing, 2, "pn(host: any, session: any) -> any", dom_engine_set_edit_session, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
@@ -485,7 +485,7 @@ DOM_OP(CORE, document_implementation, document, 0, "fn() -> any", dom_document_i
 DOM_OP(CORE, document_fonts, document, 0, "fn() -> any", dom_document_fonts_bridge, 0, "", none, "", "")
 DOM_OP(CORE, design_mode, document, 0, "fn() -> any", dom_document_design_mode_bridge, DOM_F_NEUTRAL, "", none, "", "")
 // The behavior package canonicalizes designMode values; this is only the
-// generic document Boolean storage mechanism (D7.2.5).
+// generic document Boolean storage mechanism (D10.2.1).
 DOM_OP(CORE, set_design_mode, document, 1, "pn(enabled: bool) -> bool", dom_document_set_design_mode_bridge, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, exec_command, editing, 2, "pn(command: string, value: any) -> any", dom_document_exec_command_bridge, DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, query_command, editing, 2, "fn(command: string, kind: string) -> any", dom_document_query_command_bridge, DOM_F_SNAPSHOT, "", none, "", "")
@@ -715,7 +715,7 @@ DOM_OP(CORE, rule_get_property_inherits, style, 1, "fn(rule: any) -> any", dom_c
 DOM_OP(CORE, rule_get_property_initial_value, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_initial_value, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, css_register_property, style, 1, "pn(definition: map) -> null", dom_core_css_register_property, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
-// receiver-specific CSSOM interfaces stay behind the Jube host catalog (D7.3.3).
+// receiver-specific CSSOM interfaces stay behind the Jube host catalog (D9.4.3).
 DOM_OP(CORE, rule_get_prototype, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_prototype, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_style_get_value, style, 2, "fn(d: any, prop: string) -> string", dom_cssom_rule_decl_get_value, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_style_get_priority, style, 2, "fn(d: any, prop: string) -> string", dom_cssom_rule_decl_get_priority, DOM_F_NEUTRAL, "", none, "", "")
@@ -808,7 +808,7 @@ DOM_OP(CORE, clipboard_write, input, 1, "pn(text: string) -> bool", dom_engine_c
 DOM_OP(CORE, close_dialog, forms, 2, "pn(n: any, value: any) -> null", dom_core_close_dialog, DOM_F_MUTATES, "", html_element, "", "close")
 
 // speech synthesis (Radiant_Design_Speech.md §4.1), appended to preserve catalog slots.
-// the voice list is a live host read (fn, §9 question 6); starting audio is gated by D7.5.4.
+// the voice list is a live host read (fn, §9 question 6); starting audio is gated by D11.3.1.
 DOM_OP(CORE, speech_voices, media, 0, "fn() -> array", dom_engine_speech_voices, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, speak, media, 3, "pn(n: any, utterance: any, options: any) -> int|null", dom_engine_speak, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, speech_command, media, 3, "pn(n: any, token: int, command: string) -> bool", dom_engine_speech_command, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
@@ -818,7 +818,7 @@ DOM_OP(CORE, audio_clock, media, 1, "fn(n: any) -> float", dom_engine_audio_cloc
 // live validation readers append a slot without moving existing module callbacks.
 DOM_RAW(validity_state_flag, forms, Item, (Item state, Item name), dom_validity_state_flag, DOM_F_NATIVE)
 
-// browser channels append without moving existing catalog ordinals (D7.4.4).
+// browser channels append without moving existing catalog ordinals (D9.5.4).
 DOM_OP(CORE, broadcast_name, messaging, 1, "fn(n: any) -> string", dom_broadcast_channel_name, DOM_F_NATIVE, "", none, "", "")
 DOM_OP(CORE, broadcast_handler, messaging, 2, "fn(n: any, error: bool) -> any", dom_broadcast_channel_handler, DOM_F_NATIVE, "", none, "", "")
 DOM_OP(CORE, broadcast_set_handler, messaging, 3, "pn(n: any, error: bool, value: any) -> null", dom_broadcast_channel_set_handler, DOM_F_NATIVE | DOM_F_MUTATES, "", none, "", "")
@@ -826,10 +826,10 @@ DOM_OP(CORE, broadcast_post, messaging, 2, "pn(n: any, value: any) -> null", dom
 DOM_OP(CORE, broadcast_close, messaging, 1, "pn(n: any) -> null", dom_broadcast_channel_close, DOM_F_NATIVE | DOM_F_MUTATES, "", none, "", "")
 DOM_RAW(broadcast_destroy, messaging, void, (void* channel), dom_broadcast_channel_destroy, DOM_F_NATIVE)
 
-// native font metadata appends without moving existing host catalog slots (D7.4.4).
+// native font metadata appends without moving existing host catalog slots (D9.5.4).
 DOM_OP(CORE, query_local_fonts, window, 1, "fn(options: any) -> [map]^", dom_engine_query_local_fonts, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_SNAPSHOT, "", none, "", "")
 
-// D7.5.10: explicit capture acquisition/control; append without moving published catalog slots.
+// D11.3.2: explicit capture acquisition/control; append without moving published catalog slots.
 DOM_OP(CORE, audio_capture, media, 2, "pn(n: any, request: map) -> map|null", dom_engine_audio_capture, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 // D7.5.3: expose coalescing through the DOM/Radiant boundary without changing ordinary requests.

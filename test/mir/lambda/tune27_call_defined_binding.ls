@@ -1,4 +1,4 @@
-// Tune27 T27-8 (§10.11, D8.3.2): an unannotated local defined only by calls
+// Tune27 T27-8 (§10.11, D7.3.2): an unannotated local defined only by calls
 // to a local function with an explicit `float[]` return. S7.6.3v3 propagation
 // keeps each rotation's success in m; deferred return errors leave the chain.
 // The proved array needs no repeated declaration/argument admission.

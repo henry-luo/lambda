@@ -17,7 +17,7 @@
 > [S10.5](../doc/Lambda_Formal_Semantics.md#s105-root-navigation), and
 > [S10.6.1](../doc/Lambda_Formal_Semantics.md#s106-concatenation).
 > Resolver ownership follows
-> [D5.4.1](../doc/Lambda_Formal_Design.md#d54-runtime-globals-and-evalcontext).
+> [D6.4.1](../doc/Lambda_Formal_Design.md#d64-context-and-globals).
 
 ## 1. Path model
 

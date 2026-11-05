@@ -1,10 +1,10 @@
 import model: ~~.mod_model
 import tables: ~~.mod_table
 import files: ~~.mod_io
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 fn cell(s,header=false) => node(if (header) 'th' else 'td',[text(s)])
 let doc = node('doc',[node('p',[text("Before")]),node('table',[

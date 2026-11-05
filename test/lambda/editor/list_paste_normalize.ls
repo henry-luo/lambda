@@ -2,11 +2,11 @@
 // a nested sublist is flattened into the parent list, each formerly-nested item
 // carried over with an `indent` level = its nesting depth. (flatten_nested_lists,
 // applied in cmd_paste_html.)
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_md_schema
-import lambda.editor.mod_commands
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.schema.markdown
+import lambda.editor.core.commands
 
 // 1. flatten_nested_lists directly (no schema coercion → exact attrs)
 let nested = [node('ul', [

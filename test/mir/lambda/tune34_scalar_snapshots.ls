@@ -1,4 +1,4 @@
-// S9.1.2/D5.3: activation-local payloads never escape or change caller values.
+// S9.1.2/D6.3: activation-local payloads never escape or change caller values.
 pn visit(row: int, marks, limit: int) {
     if (row == limit) { return 0 }
     marks[row] = row + 1

@@ -1,4 +1,4 @@
-// D1.3/D8.4.1v2: immutable literal recipes use an exact shape and raw slot
+// D1.3/D7.4.1: immutable literal recipes use an exact shape and raw slot
 // read; a type transition, deletion, or accessor definition takes NameId miss.
 function literalFields() {
   const point = { x: 7.5, label: "field" };

@@ -1,4 +1,4 @@
-// D7.2.4/S12.4.1v2: normalize immutable XML/ZIP snapshots into ordinary score values.
+// D9.3.4/S12.4.1v2: normalize immutable XML/ZIP snapshots into ordinary score values.
 import c: .common
 import t: .time
 import lyrics: .lyrics

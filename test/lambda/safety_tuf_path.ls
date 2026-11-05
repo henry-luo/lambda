@@ -1,4 +1,4 @@
-// D7.5.2, D7.5.8: signed role labels are opaque; native/URI paths are distinct.
+// D11.1.2, D11.2.4: signed role labels are opaque; native/URI paths are distinct.
 import uri: lambda.security.tuf.path
 import tuf: lambda.security.tuf
 import json: lambda.security.tuf.json

@@ -5,7 +5,7 @@
 **Follow-on schedule:** [Radiant SVG support enhancement plan](Radiant_Impl_SVG_Support.md)
 proposes bounded CSS transform/motion, component-transfer and geometry work.
 This file retains the original implementation inventory and qualification record.
-Parser admission is revised on 2026-10-18 under **D2.11.1–D2.11.2**; historical
+Parser admission is revised on 2026-10-18 under **D10.1.5–D10.1.5**; historical
 XML-profile namespace results below do not qualify the new external HTML profile.
 
 **Status:** P1–P12 implementation is complete within the listed inventory, including P12 access-key/wallclock timing, use-instance events and animation DOM operations (§7.16). Final macOS implementation, aggregate and export gates pass. Linux/Windows P13 runtime smoke remains open; the whole proposal is not complete. Broad SVG2/SMIL rows retain their explicit outside-inventory limits.
@@ -27,12 +27,12 @@ Lambda semantics or design ruling. Applicable formal requirements are:
 
 | Ruling | Requirement applied here |
 |---|---|
-| **D4.1.3** | “Input/format allocations are pool/arena-owned and outside GC rooting entirely.” Parsed external SVG retains its owning Input/pool; it is not treated as a GC object. |
-| **D4.2.2v2–D4.2.4** | Resources and allocator lifetimes belong to document contexts; published shared arenas/pools require retained ownership and exclusive reset. Deferred SVG commands cannot borrow expired render scratch. |
-| **D4.2.5v3** | Application allocations use `mem_*` or the owning Arena/Pool/GC API; no new direct libc allocation paths. |
-| **D4.2.6** | Document/pool cleanup owns decoded surfaces, references and other external resources. |
-| **D4.5.1v4** | Radiant is never GC'd; each scratch stack owns its arena. The seam contract is pin, gen-check, copy-as-value. DOM removal, asynchronous completion and retained paint must honor generation checks. |
-| **D1.5v2, D5.3.3** | Runtime-generated SVG and script callbacks crossing the seam use precise `RootFrame`/`Rooted`/persistent ownership; conservative stack scanning remains retired. |
+| **D5.1.3** | “Input/format allocations are pool/arena-owned and outside GC rooting entirely.” Parsed external SVG retains its owning Input/pool; it is not treated as a GC object. |
+| **D5.2.2–D5.2.3** | Resources and allocator lifetimes belong to document contexts; published shared arenas/pools require retained ownership and exclusive reset. Deferred SVG commands cannot borrow expired render scratch. |
+| **D5.2.4** | Application allocations use `mem_*` or the owning Arena/Pool/GC API; no new direct libc allocation paths. |
+| **D5.2.5** | Document/pool cleanup owns decoded surfaces, references and other external resources. |
+| **D5.5.1** | Radiant is never GC'd; each scratch stack owns its arena. The seam contract is pin, gen-check, copy-as-value. DOM removal, asynchronous completion and retained paint must honor generation checks. |
+| **D1.5, D6.3.3** | Runtime-generated SVG and script callbacks crossing the seam use precise `RootFrame`/`Rooted`/persistent ownership; conservative stack scanning remains retired. |
 
 These IDs refer to [Lambda Formal Design](../../doc/Lambda_Formal_Design.md).
 No current `S#`/`D#` ruling defines SVG painting or Radiant coordinate semantics.
@@ -157,7 +157,7 @@ effects: opacity, clips, masks and filters apply to rendered results.
 Extend the existing render context/subscene with an owned or retained style
 snapshot, viewport/font metrics, document base and resource-generation facts.
 The exact struct layout follows a call-site audit in P0. Persistent caches use
-document resources under D4.2/D4.5; per-walk resolution uses render scratch.
+document resources under D5.2/D5.5; per-walk resolution uses render scratch.
 Retained commands copy values or retain the owning document/pool, including
 all strings, paths, stops, surfaces and animation samples they later consume.
 
@@ -613,7 +613,7 @@ Do not infer performance from debug-build functional runs.
 DisplayList commands through the existing ThorVG adapter. No vendor source
 was edited. Viewport data remains float logical geometry (**RSC1/RSC6**);
 per-render tables retain their existing scratch lifetime, and no deferred
-payload borrows new temporary strings (**D4.2.2v2–D4.2.4**).
+payload borrows new temporary strings (**D5.2.2–D5.2.3**).
 
 | Retained regression | Before the fix | Chromium oracle | Result after the fix |
 |---|---|---|---|
@@ -680,7 +680,7 @@ matching specificity. Visibility retains geometry for visible descendants and
 text measurement. Stops resolve style/currentColor/percentage opacity.
 Document epochs invalidate host selectors and cross-root `<use>` resources;
 font descriptor/source and glyph-cache generations invalidate retained paint.
-These snapshots obey **D4.2.2v2–D4.2.4/D4.5.1v3**.
+These snapshots obey **D5.2.2–D5.2.3/D5.5.1**.
 
 `svg_cascade` passes **21/21** browser-derived pixels, including group font
 family/size/weight/slant and isolated external image styles. The real-click
@@ -714,7 +714,7 @@ Root/nested overflow is conditional; visible roots use direct recording because
 a viewport-sized raster layer cannot contain their ink. Opacity groups bound
 visible overflow by the ancestor paint clip. All dimensions remain float
 (**RSC1/RSC6**); per-walk decoding and copied layer keys retain the existing
-ownership rules (**D4.2.2v2–D4.2.4/D4.5.1v3**).
+ownership rules (**D5.2.2–D5.2.3/D5.5.1**).
 
 Chromium passes `svg_coordinates` **25/25** (including link click bubbling),
 `svg_context_units` **21/21** and `svg_overflow_dashes` **23/23**. Radiant passes
@@ -741,7 +741,7 @@ resource/style scope and uses the document cache and ready network resources.
 
 Deferred fallback images transfer ownership to PaintIR and copy pixels into
 DisplayList storage; document-cache images retain owner/generation references
-(**D4.2.2v2-D4.2.4, D4.5.1v3**). A later shared decode promotion refreshes earlier
+(**D5.2.2-D5.2.3, D5.5.1**). A later shared decode promotion refreshes earlier
 recordings before replay, and full-size decodes are not needlessly replaced.
 Raw raster placement uses independent axis scaling instead of ThorVG picture
 size fitting. File and data GIF animation updates image generation and invalidates
@@ -783,7 +783,7 @@ stroke and fill=none. Empty outline stubs cannot suppress this fallback. Emoji
 measurement and painting reuse the HTML emoji selector; retained color pixels
 are copied out of the font cache. Resource walks and geometry-only documents
 register their own copied font descriptors and release their temporary metadata
-(**D4.2.2v2-D4.2.4, D4.5.1v3**); secure SVG image mode permits embedded font bytes.
+(**D5.2.2-D5.2.3, D5.5.1**); secure SVG image mode permits embedded font bytes.
 Glyph paint shares inherited fill/stroke opacity and text/tspan compositing
 scopes. Underline/overline paint before glyphs, strike-through afterward;
 decoration geometry supports solid/dashed/dotted/double/wavy and shares the
@@ -825,8 +825,8 @@ remain outside this proposal.
 
 One walk-owned resource registry shares parsed external documents, isolated
 selectors/fonts, relative bases and cycle identity across paints/templates/use.
-It releases parsed Input/picture/font owners after recording (**D4.1.3,
-D4.2.2v2-D4.2.4, D4.2.6**); retained paint copies paths/stops/dashes/images rather
+It releases parsed Input/picture/font owners after recording (**D5.1.3,
+D5.2.2-D5.2.3, D5.2.5**); retained paint copies paths/stops/dashes/images rather
 than borrowing those owners. Recursive use context paint applies the source
 geometry box and source coordinate frame (**RSC1/RSC6**); absent context paints
 nothing. All text glyphs and decoration share the complete text geometry domain.
@@ -887,7 +887,7 @@ Decoded images explicitly carry straight alpha and renderer surfaces carry
 premultiplied alpha. ThorVG uploads convert an owned copy and include the alpha
 mode in the cache key. Generated effect images copy their pixels and metadata
 into deferred paint before the source owner is destroyed, honoring
-**D4.2.2v2–D4.2.4/D4.2.6**. Shared analytical contour tests restrict clipped pointer
+**D5.2.2–D5.2.3/D5.2.5**. Shared analytical contour tests restrict clipped pointer
 regions without turning masks into pointer exclusions (CSS Masking section 5).
 No ThorVG source was changed.
 
@@ -923,7 +923,7 @@ validation remain P13. P7's reviewed raster oracle corrections remain pending.
 ### 7.8 P9 — text-on-path implementation and focused validation
 
 SVG2 [§11.8.2–11.8.3](https://www.w3.org/TR/SVG2/text.html#TextPathElement)
-defines the reference geometry and placement used here. D4.2 ownership applies:
+defines the reference geometry and placement used here. D5.2 ownership applies:
 path metrics own their segments, text-layout scratch owns placement facts, and
 font/image owners outlive every retained paint command. RSC logical/physical
 coordinate separation is preserved in glyph outlines and image sampling.
@@ -977,7 +977,7 @@ rejected oracle corrections remain pending; this phase does not change them.
 
 **Checkpoint status: in progress; superseded by §7.14.** F1–F4 kernels had focused validation;
 coordinate/resource and aggregate audits were still open at this checkpoint. No formal SVG painting ruling changed. Document resource ownership,
-retained values and teardown follow **D4.2.2v2–D4.2.6/D4.5.1v3**; logical/physical
+retained values and teardown follow **D5.2.2–D5.2.5/D5.5.1**; logical/physical
 coordinates and density checks follow **RSC1/RSC6/RSC11–RSC12**.
 
 The common effect boundary now captures SourceGraphic for any renderable target,
@@ -1105,7 +1105,7 @@ traversal callback. Nested capture, backdrop replay, resampling, final color
 conversion and coverage composition share the graph's work counter. Compilation
 admits arena growth, tokens, node and merge storage through the memory coordinator;
 allocation failures are retried on a later acquisition rather than cached as a
-permanent semantic failure (D4.2.2v2–D4.2.6, D4.5.1v3).
+permanent semantic failure (D5.2.2–D5.2.5, D5.5.1).
 
 `p10-audit-accepted-raster-results.json` records **996/996 filter pixels** and
 **1,364/1,364 including clip/mask/effect boundary regressions**, across 1×/2× and
@@ -1133,7 +1133,7 @@ value as Lambda null. Never-rendered definitions remain referenceable; condition
 text spans use the same evaluator during glyph collection. Paint, bounds and
 pointer traversal select the same branch. Preferred languages are document-owned
 with platform discovery and a host setter that invalidates document generations
-(D4.2.2v2–D4.2.6); no fixed language or feature table substitutes for user settings.
+(D5.2.2–D5.2.5); no fixed language or feature table substitutes for user settings.
 
 `svg_switch` passes **16/16 pixels** at 1×/2× with both cache modes, and Chromium
 143 passes all 16 static assertions with explicit accept-language preferences.
@@ -1177,7 +1177,7 @@ invalidates their captured pixels without requiring a DOM attribute mutation.
 The acceptance work exposed three ownership/compositing defects. Replaced SVG
 roots now release their HTML descendants' external layout payloads. Form values
 survive temporary removal of pass-local form properties while their registered
-DOM control owner remains live (D4.5.1v3); the StateStore suite passes **10/10**
+DOM control owner remains live (D5.5.1); the StateStore suite passes **10/10**
 including the new detach regression. Opacity replay preserves premultiplied
 channels in transparent captures. SVG vector tests pass **44/44**, and existing
 switch/stroke/clip/text-path pointer fixtures still pass with both cache modes.
@@ -1260,7 +1260,7 @@ preserved. All eight native fixtures pass with both disabled and eager SVG
 layers at 1×/2×: **1,544/1,544** assertions. Vector units pass **46/46**, state
 units pass **10/10**, and the float-cast lint passes. Sample storage has a
 document-owned 64 MiB work limit and allocation failures do not publish a
-completed cache generation (D4.2.2v2–D4.2.6).
+completed cache generation (D5.2.2–D5.2.5).
 The clock-only layout fixture now passes **30/30** in Chromium and native UI.
 It covers animated outer SVG dimensions, `foreignObject` HTML reflow, input
 geometry and unchanged base attributes. Box reads occur after the sampled frame
@@ -1289,12 +1289,12 @@ Native now passes **17/17**, following [SMIL's frozen to-animation rule](https:/
 the underlying sandwich is sampled at the active end and its resulting value is
 retained across later samples and base mutations. Rewind and animation-definition
 changes invalidate that capture. Owned frozen strings have an 8 MiB document
-limit separate from the 64 MiB sample limit (D4.2.2v2–D4.2.6).
+limit separate from the 64 MiB sample limit (D5.2.2–D5.2.5).
 The image-clock fixture passes **18/18** in Chromium and native UI for HTML
 images, SVG images and CSS backgrounds, including frozen state and suppressed
 image scripts. Each picture duplicate owns its elapsed time; the parsed cache
 owner remains at zero. Image scheduler teardown cancels before releasing the
-surface (D4.2.6). Its `MEMTRACK_DEBUG` run ends with **zero live allocations**.
+surface (D5.2.5). Its `MEMTRACK_DEBUG` run ends with **zero live allocations**.
 The background shorthand now accepts the parser's canonical URL value through
 the existing background-image resolver, including the function form.
 
@@ -1318,7 +1318,7 @@ The 65,536-node/256-level sample traversal, 4,096 timelines, 65,536 controls,
 bounds. Limit exhaustion reports an error; failed samples do not publish a
 completed generation and a later smaller sample can recover. Owned state and
 image clocks register memory statistics; retired controls/timelines are pruned
-without discarding detached, pinned DOM state (D4.2/D4.5.1v3).
+without discarding detached, pinned DOM state (D5.2/D5.5.1).
 
 All fifteen native fixtures pass across disabled/eager SVG layers and 1×/2×:
 **2,600/2,600** assertions (`p12-after32-ui-matrix.json`). Vector units pass
@@ -1335,7 +1335,7 @@ The original Chromium running capture was **4/5** because it did not expose
 qualified-repeat assertions without depending on that missing public field.
 No complete animation support claim is made from these gates alone.
 Qualified attribute names, remaining value/timing audits, instance/cache scope
-coverage and deterministic exports remain required (D4.2.6/D4.5.1v3).
+coverage and deterministic exports remain required (D5.2.5/D5.5.1).
 
 
 The QName and type/default audit extends this gate to **18 fixtures and
@@ -1377,7 +1377,7 @@ The next export increment records the shared SVG renderer's final paint rather
 than retaining source styles or timing definitions. Representable operations
 can retain vector paths/gradients; unsupported pixel operations use the same
 transparent capture. Recording owners remain alive through synchronous
-lowering under **D4.2.2v2–D4.2.6**. This increment is still awaiting its build
+lowering under **D5.2.2–D5.2.5**. This increment is still awaiting its build
 and validation and is not counted as an accepted gate above.
 
 
@@ -1387,7 +1387,7 @@ records resolved geometry, CSS, sampled animation and referenced resources;
 SVG lowers representable paint to vector operations and embeds transparent PNG
 payloads for unsupported pixel operations. PDF retains its exact opaque path
 operations and uses shared transparent replay for the other subscenes. Paint
-clip paths retain a clone through deferred lowering (**D4.2.2v2/D4.2.6**).
+clip paths retain a clone through deferred lowering (**D5.2.2/D5.2.5**).
 The temporary source-DOM serializer and animation-value visitor were removed;
 exports have one final-paint source of truth.
 
@@ -1440,7 +1440,7 @@ DOM event dispatch now checks node kind before calling the element-only SMIL
 seam. Real text/comment/fragment event dispatch and the htmx cleanup paths cover
 the previously unchecked cast. The subtree pruning fixture now uses scroll
 state; detached live form values remain retained until DOM retirement. This
-follows **D4.5.1v4** ("pin, gen-check, copy-as-value"). Comment-backed Mark children
+follows **D5.5.1** ("pin, gen-check, copy-as-value"). Comment-backed Mark children
 also retain their DOM wrappers during relinking and explicitly unlink on removal,
 with both comment tag forms and DOCTYPE covered by a native regression.
 
@@ -1480,7 +1480,7 @@ recorded semantic tree and titles alongside the flattened image.
 
 Snapshot strings belong to the display-list arena; retained marker cloning uses
 the same copy helper. Consumers run before that owner expires, under
-**D4.2.2v2–D4.2.6/D4.5.1v4** ("pin, gen-check, copy-as-value"). New regressions
+**D5.2.2–D5.2.5/D5.5.1** ("pin, gen-check, copy-as-value"). New regressions
 cover nested/empty metadata groups, escaped values, copied-string lifetime,
 raster no-op behavior, outlined text and transparent fallback metadata.
 Private opacity/filter SourceGraphic captures copy their visited semantic
@@ -1603,8 +1603,8 @@ isolated resource document, program pins prevent reclamation during execution,
 mutation epochs retire old facts, and retained surfaces own output independently
 of source/scratch/program teardown. The existing numerical ownership test now
 reads the retained output after destroying those owners; the new font/viewport
-unit distinguishes both length bases. These seams follow **D4.2.2v2–D4.2.6 /
-D4.5.1v4** (pin, gen-check, copy-as-value). No formal ruling changed.
+unit distinguishes both length bases. These seams follow **D5.2.2–D5.2.5 /
+D5.5.1** (pin, gen-check, copy-as-value). No formal ruling changed.
 
 | Final gate | Result |
 |---|---|
@@ -1641,7 +1641,7 @@ the proposal's F1–F4 inventory and are explicitly unsupported in the matrix.
 clock/default/cache claims and corrects its discrete-to interpretation. Radiant
 owns timing, parsing and interpolation; ThorVG replays resolved paint. No vendor
 source or Lambda ruling changed. Ownership remains
-**D4.2.2v2–D4.2.6/D4.5.1v4**: **“pin, gen-check, copy-as-value.”**
+**D5.2.2–D5.2.5/D5.5.1**: **“pin, gen-check, copy-as-value.”**
 
 Clock-only filter edits previously reused programs keyed solely by DOM epoch.
 Programs now include effective animation generation while pinned old programs
@@ -1820,7 +1820,7 @@ This follows [SVG 2 §5.6.5](https://www.w3.org/TR/SVG2/struct.html#UseAnimation
 External source DOM/style/font contexts previously disappeared at the end of
 each paint walk. The host now retains their parsed picture owner and shares
 source controls across matching references. Generation-checked instance refs
-are released before the source document. **D4.2.6/D4.5.1v4** require the seam
+are released before the source document. **D5.2.5/D5.5.1** require the seam
 contract **“pin, gen-check, copy-as-value.”** Sample/frozen/control/instance-time,
 use/timeline and work budgets are shared by the entire host, including nested
 instances; cloning does not multiply the limits.
@@ -1836,9 +1836,9 @@ guard. A throwing detail conversion leaves the previous event intact; conversion
 finishes before initialization and its arguments remain rooted through JS calls.
 The reproduced 5/6 query fixture now passes 6/6 natively and in the independent
 UIEvent-based reference (`time-event-conversion-{repro,fixed,reference}.log`).
-Interface hooks follow **D7.4.4**, “Declared interfaces + record-owned
+Interface hooks follow **D9.5.4**, “Declared interfaces + record-owned
 hooks are the ONLY host-object protocol”; event/exception construction uses
-**D5.3.3** precise roots. No Lambda ruling or vendor source changed.
+**D6.3.3** precise roots. No Lambda ruling or vendor source changed.
 
 Five new fixtures cover queries/TimeEvent, access-key/wallclock, local use,
 external use and nested use. Native tests execute real pointer/key input at both

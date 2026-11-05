@@ -1017,7 +1017,7 @@ JS_BUILTIN_CONSTRUCTOR_TARGET(JS_BUILTIN_TARGET_CTOR_STRING, js_intrinsic_ctor_s
 JS_BUILTIN_CONSTRUCTOR_TARGET(JS_BUILTIN_TARGET_CTOR_NUMBER, js_intrinsic_ctor_number_call_body, js_intrinsic_ctor_number_construct_body, JS_BUILTIN_MIR_GENERIC)
 JS_BUILTIN_CONSTRUCTOR_TARGET(JS_BUILTIN_TARGET_CTOR_BOOLEAN, js_intrinsic_ctor_boolean_call_body, js_intrinsic_ctor_boolean_construct_body, JS_BUILTIN_MIR_GENERIC)
 // Symbol and BigInt expose [[Construct]] for IsConstructor/subclass checks, but
-// their construct entry rejects before converting arguments (D6.2.2v2).
+// their construct entry rejects before converting arguments (D7.2.2).
 JS_BUILTIN_CONSTRUCTOR_TARGET(JS_BUILTIN_TARGET_CTOR_SYMBOL, js_intrinsic_ctor_symbol_call_body, js_intrinsic_ctor_forbidden_construct_body, JS_BUILTIN_MIR_GENERIC)
 JS_BUILTIN_CONSTRUCTOR_TARGET(JS_BUILTIN_TARGET_CTOR_BIGINT, js_intrinsic_ctor_bigint_call_body, js_intrinsic_ctor_forbidden_construct_body, JS_BUILTIN_MIR_GENERIC)
 JS_BUILTIN_CONSTRUCTOR_TARGET(JS_BUILTIN_TARGET_CTOR_ERROR, js_intrinsic_ctor_error_call_body, js_intrinsic_ctor_error_construct_body, JS_BUILTIN_MIR_GENERIC)
@@ -1172,7 +1172,7 @@ JS_BUILTIN_GLOBAL(JS_BUILTIN_GLOBAL_FN_FETCH, "fetch", 5, JS_BUILTIN_GLOBAL_FUNC
 JS_BUILTIN_GLOBAL(JS_BUILTIN_GLOBAL_FN_GC, "gc", 2, JS_BUILTIN_GLOBAL_FUNCTION, 0, JS_BUILTIN_TARGET_GLOBAL_GC, 0, JS_BUILTIN_GLOBAL_INSTALL | JS_BUILTIN_GLOBAL_MIR_DIRECT | JS_BUILTIN_GLOBAL_CUSTOM_GC)
 JS_BUILTIN_GLOBAL(JS_BUILTIN_GLOBAL_FN_ATOB, "atob", 4, JS_BUILTIN_GLOBAL_FUNCTION, 0, JS_BUILTIN_TARGET_GLOBAL_ATOB, 1, JS_BUILTIN_GLOBAL_INSTALL | JS_BUILTIN_GLOBAL_MIR_DIRECT)
 JS_BUILTIN_GLOBAL(JS_BUILTIN_GLOBAL_FN_BTOA, "btoa", 4, JS_BUILTIN_GLOBAL_FUNCTION, 0, JS_BUILTIN_TARGET_GLOBAL_BTOA, 1, JS_BUILTIN_GLOBAL_INSTALL | JS_BUILTIN_GLOBAL_MIR_DIRECT)
-// The catalog is the sole publication source after D6.2.2v2 removed
+// The catalog is the sole publication source after D7.2.2 removed
 // name-selected property-miss synthesis; omitting INSTALL made `print`
 // unreachable even though its typed callable target existed.
 JS_BUILTIN_GLOBAL(JS_BUILTIN_GLOBAL_FN_PRINT, "print", 5, JS_BUILTIN_GLOBAL_FUNCTION, 0, JS_BUILTIN_TARGET_GLOBAL_PRINT, 1, JS_BUILTIN_GLOBAL_INSTALL | JS_BUILTIN_GLOBAL_MIR_DIRECT)

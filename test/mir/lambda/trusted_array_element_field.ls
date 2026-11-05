@@ -1,4 +1,4 @@
-// D3.3.3v3/S7.1.1v3: an admitted record-array element keeps its field layout;
+// D4.3.3/S7.1.1v3: an admitted record-array element keeps its field layout;
 // an invalid index still makes the following member read null.
 type Entry = {value: int, flag: bool, text: string}
 type Position = {index: int}

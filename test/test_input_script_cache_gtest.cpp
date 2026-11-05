@@ -306,7 +306,7 @@ TEST(InputScriptCacheTest, PrebuiltImportsPromoteThroughExecutionOverlay) {
     ASSERT_EQ(write_binary_file(leaf_path, leaf_source, sizeof(leaf_source) - 1), 0);
 
     // native subscript-key inference also visits this imported body; its leaf
-    // identity must resolve through live runtime overlays (D8.5.1v7).
+    // identity must resolve through live runtime overlays (D8.3.5).
     const char* lambda_exe = "./lambda.exe";
     const char* args[] = {lambda_exe, root_path, NULL};
     const ShellEnvEntry env[] = {

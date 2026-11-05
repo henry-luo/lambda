@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "S4.4.1 and D2.4.1-D2.4.3: canonical packed integer-sized parameters take an identity path after a tag, subtype, and reserved-bit check. Other Item carriers keep coerce_num_sized; int() decodes exact signed and unsigned payloads without fn_int.",
+  "description": "S4.4.1 and D2.3.4-D2.3.5: canonical packed integer-sized parameters take an identity path after a tag, subtype, and reserved-bit check. Other Item carriers keep coerce_num_sized; int() decodes exact signed and unsigned payloads without fn_int.",
   "checks": [
     {
       "in_func": "_accept_u32_#",

@@ -37,7 +37,7 @@ static bool audio_slot_notice(AudioSlot* slot, AudioPlayerNotice notice) {
 struct AudioOwnerHook { void* owner; AudioOwnerPoll poll; };
 struct DocumentAudio : DomDocumentResourceData {
     lam::ArrayList<AudioSlot> slots;
-    bool activated;               // D7.5.4 sticky activation; never cleared
+    bool activated;               // D11.3.1 sticky activation; never cleared
     AudioSubmixId submix;         // created with the first audible stream
     double last_tick_ms;          // offline output: frame clock at the previous tick
     double pending_frames;        // offline output: fractional frames not yet rendered
@@ -97,7 +97,7 @@ void radiant_audio_unbind_owner(DomDocument* doc, void* owner) {
 }
 
 static uint64_t audio_slot_add(DocumentAudio* audio, AudioSlot slot) {
-    // tokens never alias another document or a reused slot (D4.5.1v4).
+    // tokens never alias another document or a reused slot (D5.5.1).
     static pthread_mutex_t token_mutex = PTHREAD_MUTEX_INITIALIZER;
     static uint64_t next_token = 1;
     pthread_mutex_lock(&token_mutex);
@@ -189,7 +189,7 @@ uint64_t radiant_audio_provider_snapshot(DomDocument* doc, const AudioProviderOp
     return id;
 }
 
-// D7.5.4: judged by the document's own URL, so a network iframe in a local
+// D11.3.1: judged by the document's own URL, so a network iframe in a local
 // page needs its own activation; a host-built document without a URL is local.
 static bool audio_document_local(DomDocument* doc) {
     const Url* url = doc->url.get();
@@ -405,7 +405,7 @@ bool radiant_audio_graph_may_edit(DomDocument* doc, AudioGraphId graph) {
     auto* audio = document_audio(doc); if (!audio) return true;
     AudioGraphSnapshot snapshot;
     if (audio_submix_graph_snapshot(audio->submix, graph, &snapshot) && snapshot.active) return false;
-    // DSP tail state excludes dry provider inputs; gate those before staged controls publish (D7.5.4).
+    // DSP tail state excludes dry provider inputs; gate those before staged controls publish (D11.3.1).
     for (const auto& slot : audio->slots) if (audio_submix_graph_has_route(audio->submix, graph, slot.route)) {
         if (slot.midi) {
             auto info = midi_player_info(slot.midi);
@@ -465,7 +465,7 @@ bool radiant_audio_usage(DomDocument* doc, size_t* players, size_t* bytes) {
 }
 bool radiant_audio_play(DomDocument* doc, uint64_t token, float volume) {
     AudioSlot* slot = document_audio_slot(doc, token);
-    // muted playback needs no activation (D7.5.4).
+    // muted playback needs no activation (D11.3.1).
     if (!slot || !slot->audio || !isfinite(volume) || volume < 0 || volume > 1 ||
         (volume > 0 && !radiant_document_may_start_audio(doc))) return false;
     audio_slot_poll(slot);
@@ -525,7 +525,7 @@ bool radiant_midi_command(DomDocument* doc, uint64_t token, const char* command,
     AudioSlot* slot = document_audio_slot(doc, token);
     if (!slot || !slot->midi || !command || !isfinite(value)) return false;
     audio_slot_poll(slot);
-    // opening and preparing a session is output-free; playing it is audible (D7.5.4).
+    // opening and preparing a session is output-free; playing it is audible (D11.3.1).
     auto before = midi_player_info(slot->midi);
     if (((!strcmp(command, "play") && before.volume > 0) || (!strcmp(command, "volume") &&
         before.state == MIDI_PLAYING && value > 0 && value != before.volume)) && !radiant_document_may_start_audio(doc)) return false;

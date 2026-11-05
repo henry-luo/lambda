@@ -40,10 +40,10 @@ The first remote selection can take time to download, decode, and mount.
 A centered **Loading 3D specimen** popup shows the specimen name before work
 starts, for the main and comparison views. Its bar is indeterminate: the
 synchronous loader does not expose byte progress. Separate document frames
-paint the popup before HTTP/decode/mount work (**D7.5.3**); it closes when loading
+paint the popup before HTTP/decode/mount work (**D9.5.6**); it closes when loading
 finishes or an error is displayed. Changing the selection cancels a queued load.
-Failures display an error with **Retry model**. Remote specimens and their
-thumbnails need a network connection on first use. Camera changes reuse the
+Failures display an error with **Retry model**. Remote specimens need a network
+connection on first use; all specimen thumbnails are bundled locally. Camera changes reuse the
 selected model; switching between imported specimens replaces the viewport's model.
 
 Muscle uses the same textured Tripo GLB as the deployed browser gallery:
@@ -71,9 +71,9 @@ reaches its clearance distance, further zoom narrows the field of view;
 the camera stays outside the specimen. Comparison views use the same zoom.
 
 The application, event handlers, and frame callbacks are Lambda. The
-`lambda.scene3d` package describes retained geometry and materials (**D7.2.4**);
-handlers update DOM attributes (**S12.1.3**, **D4.5.1v4**). GLB decoding uses the
-native input layer and Input-owned values (**D4.1.3**). Runtime operation needs
+`lambda.scene3d` package describes retained geometry and materials (**D9.3.4**);
+handlers update DOM attributes (**S12.1.3**, **D5.5.1**). GLB decoding uses the
+native input layer and Input-owned values (**D5.1.3**). Runtime operation needs
 no React, Three.js, JavaScript application, or npm installation.
 
 Models are illustrative and not to scale; imported organelles cannot be picked individually.
@@ -104,8 +104,8 @@ From the repository root:
 ./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.CellScope*'
 ```
 
-Golden checks verify exactly one local model, the pinned White Blood Cell source and the
-deployed Muscle URL, the
+Golden checks verify that every specimen thumbnail is local and present, exactly one
+local model, the pinned White Blood Cell source and the deployed Muscle URL, the
 plant's actual mesh/texture data, quantized attributes and strict 250 KB buffer
 budget, the three remaining specimens, saved filtering, and expanded zoom. Native
 UI fixtures cover desktop, 1024px, and 390px layouts without downloading remote
@@ -125,4 +125,6 @@ To refresh the Plant thumbnail, replay `tests/cellscope_smoke.json` with the
 same flags and copy `temp/cellscope-plant.png` to `assets/plant.png`.
 The online fixture captures `temp/cellscope-remote-muscle.png` and
 `temp/cellscope-muscle-page.png` for `assets/muscle.png` and `preview.png`.
-The other remote-model previews remain web URLs.
+`assets/whiteBlood.png` preserves the upstream `cell-renders-transparent/white-blood.png`
+from the pinned GitHub revision, with SHA-256
+`80b0ec0e3a002667900804d0c1713709994e1d2981068fb81d63b046537f915e`.

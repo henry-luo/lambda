@@ -2,6 +2,7 @@
 #include "layout_ruby.hpp"
 #include "layout_table.hpp"
 #include "css_resolved_style.hpp"
+#include "layout_text_context.hpp"
 
 namespace radiant { static bool intrinsic_height_cacheable(LayoutContext*, DomElement*); }
 
@@ -786,7 +787,7 @@ static void get_intrinsic_box_side_widths_from_css(LayoutContext* lycon, DomElem
         horizontal ? (border ? CSS_PROPERTY_BORDER_RIGHT_WIDTH : CSS_PROPERTY_PADDING_RIGHT)
                    : (border ? CSS_PROPERTY_BORDER_BOTTOM_WIDTH : CSS_PROPERTY_PADDING_BOTTOM)};
     if (!border) {
-        // cell box probes may run with the table active; substitution belongs to the measured owner (D4.5.1v4).
+        // cell box probes may run with the table active; substitution belongs to the measured owner (D5.5.1).
         LayoutViewScope owner_scope(lycon);
         lycon->view = lam::up(static_cast<View*>(element));
         lycon->elmt = lam::up(element);
@@ -1701,17 +1702,20 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                                                            CssEnum word_break,
                                                            CssEnum line_break,
                                                            IntrinsicTextLinePacking* packing = nullptr,
-                                                           IntrinsicTextBreakObserver* observer = nullptr) {
+                                                           IntrinsicTextBreakObserver* observer = nullptr,
+                                                           bool measure_minimum = true) {
     bool break_anywhere = overflow_wrap == CSS_VALUE_ANYWHERE || line_break == CSS_VALUE_ANYWHERE;
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD);
     bool break_all = (word_break == CSS_VALUE_BREAK_ALL);
     bool cjk_breaks = (word_break != CSS_VALUE_KEEP_ALL);
     TextIntrinsicWidths result = {0, 0};
-    LayoutTextBreaks native_breaks(text, length, !break_anywhere && !break_all);
+    LayoutTextBreaks native_breaks(text, length, measure_minimum && !break_anywhere && !break_all);
 
     if (!text || length == 0) {
         return result;
     }
+    LayoutTextShapingScope shaping(lycon, nullptr, (const unsigned char*)text,
+        (const unsigned char*)text + length);
     // CSS Text 3 §5.4: break-word permits emergency unit breaks without reducing min-content.
     const unsigned char* text_end = (const unsigned char*)text + length;
     const unsigned char* first_unit_end = break_word
@@ -1741,6 +1745,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
     };
     auto record_segment = [&](size_t source_end, bool at_break = true,
                               float end_adjustment = 0.0f, float next_adjustment = 0.0f) {
+        if (!measure_minimum) return;
         if (observer) observer->record(segment_start, source_end, total_width + end_adjustment,
             total_width + next_adjustment, first_adjustment, at_break);
         segment_start = source_end;
@@ -1774,7 +1779,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 if (i >= trailing_space_start) trailing_advance += 4.0f;
             } else {
                 append_advance(11.0f);  // use the same font fallback width.
-                if (layout_text_break_opportunity(ch, ch,
+                if (measure_minimum && layout_text_break_opportunity(ch, ch,
                         (const unsigned char*)text + i + 1,
                         (const unsigned char*)text + length, native_breaks, i + 1,
                         break_anywhere, break_all, cjk_breaks, line_break)) {
@@ -1880,7 +1885,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     prev_is_zwj_base = false;
                     is_word_start = false;
                     i += shaped_script_bytes;
-                    if (layout_text_break_opportunity(shaped_script_first, shaped_script_last,
+                    if (measure_minimum && layout_text_break_opportunity(shaped_script_first, shaped_script_last,
                             &str[i], str + length, native_breaks, i,
                             break_anywhere, break_all, cjk_breaks, line_break)) {
                         record_segment(i);
@@ -1917,7 +1922,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                     i += cluster_bytes;
                     // emergency wrapping adds boundaries between clusters,
                     // so min-content must retain each whole shaped cluster.
-                    if (layout_text_break_opportunity(cluster_first, cluster_last,
+                    if (measure_minimum && layout_text_break_opportunity(cluster_first, cluster_last,
                             &str[i], str + length, native_breaks, i,
                             break_anywhere, break_all, cjk_breaks, line_break)) {
                         record_segment(i);
@@ -1952,7 +1957,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
                 prev_is_zwj_base = false;
                 is_word_start = false;
                 i += shaped_bytes;
-                if (layout_text_break_opportunity(shaped_first_cp, shaped_last_cp,
+                if (measure_minimum && layout_text_break_opportunity(shaped_first_cp, shaped_last_cp,
                         &str[i], str + length, native_breaks, i,
                         break_anywhere, break_all, cjk_breaks, line_break)) {
                     // a shaped Latin run can end at a native CJK boundary;
@@ -2064,7 +2069,7 @@ static TextIntrinsicWidths measure_text_intrinsic_segments(LayoutContext* lycon,
         prev_text_autospace_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
 
-        if (layout_text_break_opportunity(codepoint, codepoint,
+        if (measure_minimum && layout_text_break_opportunity(codepoint, codepoint,
                 &str[i], str + length, native_breaks, i,
                 break_anywhere, break_all, cjk_breaks, line_break)) {
             record_segment(i);
@@ -2098,6 +2103,13 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         text_transform, font_variant, white_space, overflow_wrap, word_break, line_break);
     intrinsic_text_apply_no_wrap(&widths, white_space);
     return widths;
+}
+
+float measure_text_max_content_width(LayoutContext* lycon, const char* text, size_t length) {
+    // native labels need their unwrapped advance, without computing unused break opportunities.
+    return measure_text_intrinsic_segments(lycon, text, length, CSS_VALUE_NONE,
+        CSS_VALUE_NONE, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+        CSS_VALUE_AUTO, nullptr, nullptr, false).max_content;
 }
 
 IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
@@ -3081,6 +3093,22 @@ static float intrinsic_resolved_height_limit_or(LayoutContext* lycon,
     }
     return minimum ? layout_explicit_min_axis_or(view, false, -1.0f)
                    : layout_explicit_max_axis_or(view, false, -1.0f);
+}
+
+static float intrinsic_child_height_with_minimum(LayoutContext* lycon,
+        DomElement* element, float height, float containing_width) {
+    ViewBlock* view = lam::view_as_block(element);
+    // a content query omits the child's own minimum; its outer contribution
+    // must include that floor before a parent sizes or wraps its flex lines.
+    float minimum = intrinsic_resolved_height_limit_or(lycon, element, view, true);
+    if (minimum >= 0.0f) {
+        if (!intrinsic_view_uses_border_box(view, element)) {
+            minimum += layout_intrinsic_padding_border_axis(
+                lycon, element, false, containing_width);
+        }
+        height = fmaxf(height, minimum);
+    }
+    return height;
 }
 
 CssEnum get_element_text_transform(DomElement* element) {
@@ -5565,7 +5593,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         intrinsic_element_has_explicit_box_decoration_break(element);
     bool explicit_box_decoration_run_sizing = false;
     bool vertical_block_sequence = intrinsic_is_vertical_block_sequence(element);
-    // intrinsic percentage-margin bases may differ from provisional used values (D4.5.1v4).
+    // intrinsic percentage-margin bases may differ from provisional used values (D5.5.1).
     radiant::LayoutMeasureScope vertical_margin_scope(vertical_block_sequence ? lycon : nullptr, element);
     IntrinsicSizes vertical_blocks = {};
     ViewBlock* previous_vertical_block = nullptr;
@@ -7021,7 +7049,7 @@ static bool intrinsic_measure_direct_inline_content(LayoutContext* lycon, ViewBl
             IntrinsicFontScope child_font_scope(lycon, lycon->font);
             LayoutViewScope child_view_scope(lycon);
             // style resolution resets the selected owner, so bind the child
-            // before materializing its contribution (D4.5.1v4).
+            // before materializing its contribution (D5.5.1).
             lycon->view = lam::up(static_cast<View*>(element));
             lycon->elmt = lam::up(child);
             // provisional inlines need their computed box role before CSS can
@@ -7096,7 +7124,7 @@ bool layout_measure_direct_inline_intrinsics(LayoutContext* lycon, ViewBlock* bl
                                               IntrinsicSizes* sizes) {
     if (!lycon || !block || !sizes || !block->is_element()) return false;
     if (intrinsic_measure_direct_text(lycon, block, sizes)) return true;
-    // D4.5.1v4 / D4.1.4v5: style-only descendant queries cannot publish
+    // D5.5.1 / D5.1.4: style-only descendant queries cannot publish
     // speculative geometry or replace the caller's active flow/font state.
     radiant::LayoutMeasureScope measure_scope(lycon, block, true);
     radiant::LayoutRunModeScope run_scope(lycon, radiant::RunMode::ComputeSize);
@@ -7800,6 +7828,7 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
 
             // Get child's intrinsic width
             DomElement* child_elem = child->as_element();
+            if (layout_element_is_display_none(child_elem)) continue;
             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
             float child_width = child_sizes.max_content;
             ViewBlock* child_view = lam::view_as_block(child_elem);
@@ -7813,6 +7842,8 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
             }
             LayoutContainingBlockScope child_cb_scope(lycon, LAYOUT_AXIS_X, width);
             float child_height = calculate_max_content_height(lycon, child, width);
+            child_height = intrinsic_child_height_with_minimum(
+                lycon, child_elem, child_height, width);
 
             // Check if we need to wrap to a new line
             float width_with_gap = first_on_line ? child_width : (flex_column_gap + child_width);
@@ -7957,20 +7988,9 @@ static float calculate_max_content_height_uncached(LayoutContext* lycon, DomNode
                         layout_uses_border_box(child_block));
                 }
             }
-            // descendant minimums contribute to the parent's height even before the
-            // child's used box exists; its own intrinsic content query omits that floor.
             if (child->is_element()) {
-                DomElement* child_element = child->as_element();
-                ViewBlock* child_view = lam::view_as_block(child_element);
-                float minimum = intrinsic_resolved_height_limit_or(
-                    lycon, child_element, child_view, true);
-                if (minimum >= 0.0f) {
-                    if (!intrinsic_view_uses_border_box(child_view, child_element)) {
-                        minimum += layout_intrinsic_padding_border_axis(
-                            lycon, child_element, false, content_w);
-                    }
-                    child_height = fmaxf(child_height, minimum);
-                }
+                child_height = intrinsic_child_height_with_minimum(
+                    lycon, child->as_element(), child_height, content_w);
             }
 
             // Resolve child's vertical margins for height estimation

@@ -1,12 +1,14 @@
-// native illustration demo. Views are pure; all DOM/file effects live in procedures (S12.1.3, D7.4.6).
+// native illustration demo. Views are pure; all DOM/file effects live in procedures (S12.1.3, D7.1.1).
 import dom
+import focus: lambda.ui.core.focus
+import workspace_shell: lambda.ui.workspace.shell
 import resources: ~~.mod_resources
 import m: .mod_model
 import art: .mod_artwork
 import scene: .mod_scene
 import present: .mod_present
 import raster: .mod_raster
-import menus: ~~.mod_context_menu
+import menus: lambda.ui.core.menu
 import keyboard: lambda.dom.keyboard
 
 let BASE = url_resolve(resources.entry_uri()^,".")
@@ -105,7 +107,7 @@ on sketch_activate(evt) {
 }
 on sketch_menu_ready(evt) {
     if ((evt.event_phase!=2 or session.context==null)^) { return 'pass' }
-    // placement and focus wait for the newly visible menu's committed layout (D7.4.6).
+    // placement and focus wait for the newly visible menu's committed layout (D7.1.1).
     menus.fit(evt.target,"sketch-context-menu","sketch")^
     menus.focus(evt.target,"sketch-context-menu")
     return 'handled'
@@ -247,11 +249,7 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if ((session.dialog!="")^) {
-        if (key=="tab") {
-            let order = ["file-path","file-cancel","file-confirm"]
-            let indexes = [for (i,id in order where id==dom.get_attribute(evt.target,"id")) i]
-            let at = if (len(indexes)>0) indexes[0] else 0
-            dom.focus_set(present.node(owner,order[(at+(if (evt.shiftKey) 2 else 1))%3])^,false)
+        if (key=="tab" and focus.trap(dom.query_selector(owner,"#file-dialog .file-dialog"),evt)^) {
             return 'prevent-default'
         }
         if (key=="enter") { session = publish(owner,session,dispatch(owner,session,"file-confirm")); return 'prevent-default' }
@@ -304,7 +302,7 @@ on load(evt) {
     if (owner!=null) dom.request_frame(owner,"sketch_activate")
     return 'handled'
 }
-<html lang:"en",<head <meta charset:"UTF-8"><title "Sketch — a little space for big ideas">
+<html lang:"en",<head <meta charset:"UTF-8"><title "Sketch — a little space for big ideas"><style workspace_shell.css>
     <link rel:"stylesheet",href:url_resolve(BASE,"sketch.css")>>
-    apply(<sketch_document rendered:<body apply(<sketch_session rendered:scene.tree()>)>>)
+    apply(<sketch_document rendered:<body class:"workspace-shell",style:workspace_shell.variables({primary:"#ae9dff",text:"#d4d5de",background:"#24262d",surface:"#2b2d35",border:"#3b3d45",font_size:12})^,apply(<sketch_session rendered:scene.tree()>)>>)
 >

@@ -16,7 +16,7 @@ the formal specifications.
 
 Spec linkage:
 
-- D7.1.2v2: "Raw context-free mechanisms stay lib"; resource acquisition stays
+- D9.1.2: "Raw context-free mechanisms stay lib"; resource acquisition stays
   in lambda-io. Byte codecs and shared utilities follow that boundary.
 - S7.4.4: "Rich diagnostics are mandatory at every checked-channel failure."
   Removing a codec capability must preserve an explicit, recoverable error.

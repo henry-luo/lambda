@@ -47,7 +47,7 @@ def convert(source, input_type, target, destination):
 def read_model(source, source_type, folder, label, ordered=False):
     destination = folder / (label + ".json")
     convert(source, source_type, "json", destination)
-    # D2.6.5v3: preserve duplicate map keys and their order in record comparisons.
+    # D3.3.1: preserve duplicate map keys and their order in record comparisons.
     hook = (lambda pairs: ("object", pairs)) if ordered else None
     return json.loads(destination.read_text(encoding="utf-8"), object_pairs_hook=hook)
 

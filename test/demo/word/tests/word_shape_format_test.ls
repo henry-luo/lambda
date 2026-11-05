@@ -5,12 +5,12 @@ import formatting: ~~.mod_shape_format
 import layout: ~~.mod_object_layout
 import files: ~~.mod_io
 import objects: ~~.mod_objects
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
-import image: lambda.editor.mod_image
-import controller: lambda.edit.controller
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
+import image: lambda.editor.image
+import controller: lambda.editor.controller
 import outcome: lambda.dom.edit_result
 
 let base = model.open_editor(node('doc',[node('p',[text("Keep all surrounding text.")])]))

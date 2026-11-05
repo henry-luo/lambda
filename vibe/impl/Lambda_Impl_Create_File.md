@@ -25,7 +25,7 @@ the caller must inspect the destination instead of blindly retrying. Unavailable
 platform primitives fail closed. This operation is immediate and external to
 any surrounding SQLite transaction (S12.4.4v4).
 
-Admitted I/O authority is required for every publication (D7.5.2, D7.5.6).
+Admitted I/O authority is required for every publication (D11.1.2, D11.2.2).
 The initial implementation rejects all bound security clients, because their
 current `write` callback cannot express exclusive creation; it must not fall
 back to ambient access. A later transport and broker extension must carry an

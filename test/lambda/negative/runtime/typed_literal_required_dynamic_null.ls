@@ -1,4 +1,4 @@
-// T29-2 (D3.2.6): a dynamic null reaching a required scalar field of a
+// T29-2 (D4.2.6): a dynamic null reaching a required scalar field of a
 // contract-constructed literal is rejected on every tier.
 type Cell = {k: int, name: string}
 

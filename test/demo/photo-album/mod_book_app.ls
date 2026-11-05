@@ -3,7 +3,7 @@
 // The turn is sampled here, not by a CSS transition: transitions do not cover transform yet.
 // Progress runs on frame timestamps (the document timeline), so replays are deterministic.
 import dom
-import updates: ~~.mod_publish
+import updates: lambda.ui.core.publish
 import L: .mod_library
 import B: .mod_book
 import BU: .mod_book_ui

@@ -905,7 +905,8 @@ static bool prepare_generated_subtree(LayoutContext* context, DomNode* node, uns
         LayoutCounterScope counters;
         if (!counters.enter(context, block, element, element->display)) complete = false;
         else {
-            if (!layout_element_is_replaced(element))
+            // buttons keep a CSS content box even though they own a native widget role.
+            if (!layout_element_is_css_replaced(element))
                 layout_materialize_pseudo_content(context, block, true, false);
             context->block.parent = lam::up(&saved.block);
             context->block.flow_box = lam::up(block);

@@ -34,16 +34,16 @@
 > Simplified Chinese first, Traditional as a converted profile.
 > **Whole-sentence conversion is out of scope** and left to a later proposal
 > (§11.3).
-> **Spec linkage:** D7.2.4v4 and D7.2.6 (the `lambda.ime.chinese` path and its
-> resolution); D7.2.1 and D7.2.3 (immutable package bindings, instantiated
+> **Spec linkage:** D9.3.4 and D9.3.5 (the `lambda.ime.chinese` path and its
+> resolution); D9.3.1 and D9.3.3 (immutable package bindings, instantiated
 > once: the dictionary is loaded explicitly, never at import, IME2); S12.1.1v3
 > (the pure `fn` engine and the `pn` shell, IME3); S12.1.3 (`on` handlers in
-> the DOM behavior package); D7.2.5 (input policy belongs to the shipped Lambda
-> DOM behavior package; Radiant owns composition transport, IME9); D7.5.3v2
+> the DOM behavior package); D10.2.1 (input policy belongs to the shipped Lambda
+> DOM behavior package; Radiant owns composition transport, IME9); D9.5.6
 > (Lambda reaches Radiant only through the `radiant-dom` module, IME-E1);
-> D7.1.2v2 (resource IO through `lambda-io`); S2.5.8 and S17.4.1 (code-point
+> D9.1.2 (resource IO through `lambda-io`); S2.5.8 and S17.4.1 (code-point
 > positions for the preedit caret); S11.4.2 (`T^` results); S17.8.1 (option
-> names checked at the call). D7.2.5 governs Radiant's DOM editing policy; the
+> names checked at the call). D10.2.1 governs Radiant's DOM editing policy; the
 > macOS input source has no Radiant or DOM dependency. No formal ruling changes.
 > **Authority:** package design. Decisions IME1–IME16, native enablers
 > IME-E1–IME-E3, open items IME-O1–IME-O10. The `IME` series is new; it is
@@ -235,10 +235,10 @@ terminal UI or a test harness is another host of the same engine.
 
 **IME2 — The dictionary is loaded explicitly.** `pn load(profile)` reads a
 pack and returns an immutable engine value. Importing the package loads no
-data: package bindings are immutable (D7.2.1, D7.2.3), and a multi-megabyte
+data: package bindings are immutable (D9.3.1, D9.3.3), and a multi-megabyte
 read is an effect that belongs to the caller's `pn`. A host loads once per
 owning document runtime and reuses the value across its controls; GC values
-do not cross runtime heaps (D5.4.1).
+do not cross runtime heaps (D6.4.1).
 
 **IME3 — The session is a value; the key reducer is pure.**
 `fn key(engine, session, evt)` returns `{session, actions}`. It is a `fn`
@@ -281,7 +281,7 @@ selections as an immutable overlay that boosts and adds entries. The engine
 value never changes. Persisting the overlay is the caller's explicit `pn`;
 the package performs no hidden writes to a home directory (as Spelling §5.2).
 
-**IME9 — Radiant integration through composition transport.** D7.2.5 puts
+**IME9 — Radiant integration through composition transport.** D10.2.1 puts
 input policy in the Lambda DOM behavior package and gives Radiant the
 composition transport. The adapter therefore turns engine actions into the
 same composition events the OS bridges produce, so `compositionstart`,
@@ -314,7 +314,7 @@ by the host with its other settings, never by the package (§5.7).
 calls `lambda.ime.chinese` directly through a retained Lambda runtime. Its
 InputMethodKit adapter translates platform events and applies reducer actions;
 it does not reimplement segmentation, ranking, paging, learning, or key policy.
-The Radiant adapter remains the in-engine host under D7.2.5 and IME9/IME10.
+The Radiant adapter remains the in-engine host under D10.2.1 and IME9/IME10.
 
 **IME15 — A dedicated macOS IME build profile** (USER, 2026-10-26). Derive
 `macos-ime` from the existing `cli` variant and keep only the Lambda runtime,
@@ -851,7 +851,7 @@ argument ES18 made for the composition session (`lmd/package/dom/ime.ls`
 header). How `lambda.dom` reaches the engine, by direct import or through a
 registered input method, is IME-O1 (resolved: direct import). The implementation
 is in `lambda.dom.ime`; its opaque engine/session value is rooted in the
-owning document runtime (D5.3.3/D5.4.1). `<body data-ime="chinese">` enables a
+owning document runtime (D6.3.3/D6.4.1). `<body data-ime="chinese">` enables a
 document, `off` overrides a window enable, and a missing attribute inherits
 `radiant.set_chinese_ime(owner, enabled)` (IME-O2). The host API and live
 settings operations are documented in `doc/Lambda_IME_Chinese.md`.
@@ -863,7 +863,7 @@ provisionally `dom.compose(target, phase, text, caret)` with phases `begin`,
 `update`, `commit` and `cancel` (the phases `event_sim` already uses), builds
 a `CompositionEvent` and routes it through `handle_event`, exactly as
 `SIM_EVENT_IME_COMPOSE` does. It is exported like `fn_radiant_set_ime_preedit`
-(`lambda/module/radiant/radiant_module.cpp:3631`), per D7.5.3v2. **The event is
+(`lambda/module/radiant/radiant_module.cpp:3631`), per D9.5.6. **The event is
 queued and dispatched after the current event returns**, never nested inside
 the `keydown` dispatch that requested it: a nested dispatch would re-enter the
 editing controller and the DOM behavior package mid-handler.
@@ -874,11 +874,11 @@ document-scoped, anchored below the caret rectangle from
 showing seven numbered options by default and a trailing mode/page indicator
 (USER, 2026-10-26). Labels retain the editor's family with a reduced size of
 85%, capped at 16 CSS pixels before zoom. Native font snapshots own their
-cached handles and refresh from the selected editor before use (D4.5.1v4).
+cached handles and refresh from the selected editor before use (D5.5.1).
 Measured strip widths wrap on narrow viewports. Down opens a scrollable grid
 of all returned candidates; Up on its first row collapses to the strip,
 preserving selection and preedit. Native layout reports its column count, while
-Lambda owns expansion, navigation and selection policy (D7.2.5). Lambda supplies the rows; a click
+Lambda owns expansion, navigation and selection policy (D10.2.1). Lambda supplies the rows; a click
 reaches the behavior package as an index, the ES34 pattern. It is not a DOM
 subtree, so author CSS, `MutationObserver` and selectors never see it.
 Exposing it to assistive technology is a later step.
@@ -899,7 +899,7 @@ suspends the native indicator and candidates without canceling composition.
 All presentation paths honor that suspension, including live configuration
 and focus. Dismissal restores a reducer frame snapshot, preserving the current
 mode, page and highlight; an ineligible editor or active OS composition keeps
-it hidden (D7.2.5, IME10). These are demo controls; the IME-O2 API
+it hidden (D10.2.1, IME10). These are demo controls; the IME-O2 API
 precedence and S17.8.1 settings contract remain unchanged.
 
 ### 8.4 Coexistence with OS input methods
@@ -918,9 +918,9 @@ side. A background `.app` creates an `IMKServer`; InputMethodKit creates an
 `IMKInputController` for each client input session. The native controller owns
 only platform transport and presentation. A retained Lambda runtime imports
 `lambda.ime.chinese` once, loads each selected profile explicitly (IME2,
-D7.2.4v4/D7.2.6), and invokes `session`, `key`, `configure`, and `with_user` on
+D9.3.4/D9.3.5), and invokes `session`, `key`, `configure`, and `with_user` on
 the existing engine (IME3/IME14, S12.1.1v3). The engine is cached per profile;
-each controller has its own precisely rooted session value (D5.3.3/D5.4.1).
+each controller has its own precisely rooted session value (D6.3.3/D6.4.1).
 Callbacks are serialized through that runtime, and controller close releases
 its root. No Lambda evaluator or dictionary is created for each keystroke.
 
@@ -963,7 +963,7 @@ JSON config, builds the native executable, then stages the `.app`. Generated
 Lua and Makefiles are never edited by hand.
 
 The variant keeps the CLI profile's Lambda parser, evaluator, GC, MIR Direct,
-package resolver and `lambda-io` resource path (D7.1.2v2). It keeps only the
+package resolver and `lambda-io` resource path (D9.1.2). It keeps only the
 JSON/binary/text input and JSON output support needed for pack and user-state
 files. It replaces `lambda/main.cpp` with `lambda/host/macos_ime/main.mm`, an
 InputMethodKit controller, and a narrow native-to-Lambda invocation bridge.
@@ -1000,7 +1000,7 @@ validated `zh-Hans` and `zh-Hant` packs with their manifests and notices under
 `LambdaChineseIME.app/Contents/Resources/lmd/`. The host sets `HOST_PATH_HOME`
 to that read-only `lmd` directory before runtime import, so ordinary
 `ime.load(profile)` and relative package imports work independent of the
-current working directory (D7.2.4v4/D7.2.6). It sets cache, scratch and log
+current working directory (D9.3.4/D9.3.5). It sets cache, scratch and log
 paths to per-user locations before runtime startup. Learned choices, fuzzy
 settings and personal word edits are saved atomically under
 `~/Library/Application Support/<bundle-id>/`; they never modify signed
@@ -1128,12 +1128,12 @@ does not qualify it. This proposal itself needs document checks only.
 ### 11.2 Engineering
 
 - **Per-key latency in the interpreter tier.** The reducer runs on every
-  keystroke; hot paths should promote to MIR JIT under D8.1.1v18's tiering.
+  keystroke; hot paths should promote to MIR JIT under D8.3.2's tiering.
   Measure both tiers; the release gate is the JIT tier on a release build.
 - **Load cost.** Indexing a few megabytes in Lambda is a measurable startup
   cost; the adapter loads in its owning document runtime on first eligible
   enable/focus and explicit profile/directory changes, never at import
-  (IME2, D5.4.1).
+  (IME2, D6.4.1).
 - **Re-entrant dispatch.** IME-E1 must queue its events (§8.3); a nested
   dispatch from inside `keydown` is the failure mode to test for.
 - **Two input methods at once.** Covered by IME10 and §8.4, and tested.
@@ -1150,7 +1150,7 @@ does not qualify it. This proposal itself needs document checks only.
   working-directory `lmd`, and MIR JIT must run under a signed, hardened
   background process. M5 sets explicit host paths and tests the installed
   release artifact before claiming startup or latency targets (IME16,
-  D7.2.4v4/D8.1.1v18).
+  D9.3.4/D8.3.2).
 
 ### 11.3 Whole-sentence conversion (future)
 

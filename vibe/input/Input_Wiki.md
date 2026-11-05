@@ -15,10 +15,10 @@ normalized Mark Doc structure as the existing wiki reader. Phase II implements
 all these wiki writers, including MediaWiki, as shipped Lambda Script packages.
 
 **Formal-spec linkage:** [S2.6.1v2 and S2.6.2–S2.6.5](../../doc/Lambda_Formal_Semantics.md)
-govern normalized element content. [D7.1.5](../../doc/Lambda_Formal_Design.md)
+govern normalized element content. [D9.1.4](../../doc/Lambda_Formal_Design.md)
 assigns parser construction to the io-owned MarkBuilder.
-[D7.1.1](../../doc/Lambda_Formal_Design.md) governs the native dispatch boundary;
-[D7.2.1–D7.2.4](../../doc/Lambda_Formal_Design.md) govern shipped script packages,
+[D9.1.1](../../doc/Lambda_Formal_Design.md) governs the native dispatch boundary;
+[D9.3.1–D9.3.4](../../doc/Lambda_Formal_Design.md) govern shipped script packages,
 their loading, caching, and namespace. No formal ruling defines wiki dialect
 coverage or richer task fields; this working design defines the task fields and
 does not change a formal ruling.
@@ -60,7 +60,7 @@ Each flavor parses into the same root and common vocabulary:
   retained in a **raw** node with the source flavor and original source, with a
   diagnostic. The reader does not execute macros, scripts, plugins, or includes.
 
-Every element is built through MarkBuilder (D7.1.5). All parser output obeys
+Every element is built through MarkBuilder (D9.1.4). All parser output obeys
 S2.6.1v2 and S2.6.2–S2.6.5: absent and empty content is dropped, lists spread
 only where the content model requires it, and adjacent strings merge. A source
 syntax difference must not create a wiki-specific root or bypass normalization.
@@ -271,8 +271,8 @@ those features render as they do in the original wiki.
 semantics belong to Lambda Script, including the replacement MediaWiki writer.
 Use a shipped **lambda.doc.wiki** facade, with shared traversal and text-building
 helpers and small dialect modules beneath it. The package belongs under
-**lmd/package/doc/** following D7.2.4, is distributed as source and cached
-under D7.2.3, and uses immutable module bindings under D7.2.1.
+**lmd/package/doc/** following D9.3.4, is distributed as source and cached
+under D9.3.3, and uses immutable module bindings under D9.3.1.
 
 The shared script code owns document traversal, list nesting, table structure,
 task-state handling, and diagnostics. Dialect modules own syntax, escaping,
@@ -282,7 +282,7 @@ into one copy per flavor. Creole gets its own syntax profile; Jira and
 Confluence share the Atlassian writer core with separate capability profiles.
 
 Formatting is a pure document-to-text transformation. File output stays at
-the existing resource IO boundary (D7.1.2v2). The script package should expose
+the existing resource IO boundary (D9.1.2). The script package should expose
 serialized text plus structured diagnostics for callers that need a conversion
 report; the ordinary format API returns its text or propagates an error under
 the selected loss policy.
@@ -314,7 +314,7 @@ and formatted file-output callers.
 
 C++ owns package invocation, caching, rooted argument/result transport, and
 ordinary error/diagnostic propagation. Wiki syntax and emission rules live in
-the script package. Under D7.1.1, runtime-owned dispatch invokes the package;
+the script package. Under D9.1.1, runtime-owned dispatch invokes the package;
 the lower io formatter library must not acquire an upward runtime dependency.
 Reuse the existing package-export invocation mechanism rather than synthesizing
 Lambda source for every document. A missing or failed package produces an
@@ -355,7 +355,7 @@ subset of a flavor.
 - Equivalent prose structures produce equivalent Mark Doc nodes across flavors.
 - Page tags use the existing metadata fields; binary tasks reuse the shared
   Markdown/Org representation, with richer task states preserved separately.
-- All output follows S2.6.1v2 and S2.6.2–S2.6.5 and is built under D7.1.5.
+- All output follows S2.6.1v2 and S2.6.2–S2.6.5 and is built under D9.1.4.
 - Dynamic or unsupported constructs remain inert, retain their source, and
   produce an actionable diagnostic.
 - Ambiguous file extensions do not change dialect selection.
@@ -419,7 +419,7 @@ documents selectors and **--loss error|allow**.
 
 - `lambda/input/markup/wiki.hpp` and `format/wiki_adapter.cpp` select ten
   explicit profiles. Shared `block/block_wiki.cpp` and `inline/inline_wiki.cpp`
-  build Input-owned Mark Doc with MarkBuilder (D7.1.5). MediaWiki tables now use
+  build Input-owned Mark Doc with MarkBuilder (D9.1.4). MediaWiki tables now use
   the same `thead`/`tbody` structure as the other readers. Content appends use
   the existing normalization path (S2.6.1v2, S2.6.2–S2.6.5).
 - The new input selectors are available through `input`, `parse`, CLI conversion,
@@ -433,11 +433,11 @@ documents selectors and **--loss error|allow**.
   and `format_file`. `wiki/profiles.ls` supplies syntax data,
   `wiki/writer.ls` owns traversal and escaping, and `wiki/tasks.ls` checks task
   invariants and chooses compatible markers. These are shipped source modules
-  under D7.2.4, rather than generated Lambda programs.
+  under D9.3.4, rather than generated Lambda programs.
 - `format(value, "wiki:creole")`, `format(value, {type:"wiki",flavor:"jira"})`,
   formatted `output`, and `lambda convert -t wiki:<flavor>` invoke the package.
-  Invocation stays in the runtime/CLI layer (D7.1.1); arguments and results use
-  precise roots (D5.3.3). The lower runtime-free `format_data` API explicitly
+  Invocation stays in the runtime/CLI layer (D9.1.1); arguments and results use
+  precise roots (D6.3.3). The lower runtime-free `format_data` API explicitly
   refuses wiki output; native hosts use the runtime API or package export.
 - `format_report` returns `{text, diagnostics}`. `format` defaults to
   `loss:"error"`; callers can choose `loss:"allow"` after inspecting diagnostics.

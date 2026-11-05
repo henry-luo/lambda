@@ -1,6 +1,6 @@
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let base = edit_open(node('doc',[node('paragraph',[text("")])]),editor_schemas.markdown,
     text_selection(pos([0,0],0),pos([0,0],0)))

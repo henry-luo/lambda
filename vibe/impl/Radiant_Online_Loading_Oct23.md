@@ -3,9 +3,9 @@
 Status: partial; overview/pricing watchdogs remain. Atlas currently passes
 with both candidate and qualified control on the current server response.
 
-Authority: **D8.1.3v35** (approved module loop handoff), **D8.2.4v2**
-(indexed dependency facts), **D8.4.1v2** (guarded operations without inline
-caches), **D5.3.3** (precise roots), and **D1.3v3** (profile-owned semantics).
+Authority: **D8.4.5** (approved module loop handoff), **D8.2.4**
+(indexed dependency facts), **D7.4.1** (guarded operations without inline
+caches), **D6.3.3** (precise roots), and **D1.3** (profile-owned semantics).
 The source baseline is merge `556a1dd8d`.
 
 The retained changes address three measured runtime costs and a root lifetime
@@ -66,7 +66,7 @@ including teardown); no page repair is claimed from the workload improvement
 alone. None has a native crash, outer timeout or tracked live allocation.
 
 The user approved checked contained synchronous declarations and switch
-statements at module hot entry on 2026-10-24 (**D8.1.3v36**). The experiment
+statements at module hot entry on 2026-10-24 (**D8.4.5**). The experiment
 checks all contained bodies, uses existing compiled closure ownership and
 selects transitive live module dependencies. Six focused closure/exclusion and
 loop-boundary tests pass normally and with forced GC/freed-memory poisoning.
@@ -83,7 +83,7 @@ but remains excluded for three untagged constant template literals. A scratch
 copy replacing only those with equivalent quoted strings makes it promote;
 this is an isolation probe, not a shipped source rewrite or original acceptance
 result. Constant-template admission was requested separately and approved as
-**D8.1.3v37** on 2026-10-24. Qualification of that scope is recorded below.
+**D8.4.5** on 2026-10-24. Qualification of that scope is recorded below.
 
 Exact unmodified page replays confirm overview/pricing watchdogs at the
 unchanged 120-second boundary (135.045/137.515 s total wall). Atlas passes with
@@ -92,7 +92,7 @@ server response, so no runtime repair is attributed to its pass. Every replay
 has zero tracked live allocations, no native crash and no outer timeout.
 Artifacts and the release comparisons are in
 `temp/radiant-online-oct24-nested/`. Worker isolates remain separate work under
-**D6.3.2**. Browser-matching site errors and origin/DNS/TLS failures remain
+**D7.5.2**. Browser-matching site errors and origin/DNS/TLS failures remain
 separately classified.
 
 The v37 experiment restores the approved contained declarations/switch and
@@ -112,7 +112,7 @@ Overview/pricing still hit the unchanged script watchdog; Atlas completes in
 
 Temporary generic AST work sampling identifies `next` (byte 94035) and
 `allocateCursor` (byte 86264) as substantial remaining AST work. They fit the
-already approved **D8.1.3v34** one-wrapper/module-only dependency boundary.
+already approved **D8.4.5** one-wrapper/module-only dependency boundary.
 That method proof and span adapter are restored for a combined experiment.
 Original method identity, strict receiver, home, live module cells and
 non-constructibility remain authoritative. Method bodies retain their original
@@ -150,7 +150,7 @@ module-loop checks pass. The active release SHA-256 remains
 
 ### Checked method defaults and arrows (2026-10-24)
 
-The user approved **D8.1.3v38**: checked identifier defaults and contained
+The user approved **D8.4.5**: checked identifier defaults and contained
 synchronous arrows in the existing module-method slice, applying the contained
 declaration/switch/constant-template proof. Every initializer/body and resolved
 binding is checked against the selected method subtree or live module slab;
@@ -226,7 +226,7 @@ is claimed for the two remaining watchdogs.
 The next measured source shape is the top-level module arrow `Wu` at UTF-8
 byte 103929 (80/954 sampled AST-evaluation intervals, not CPU time). Its simple
 parameters and expression body have no lexical-this/arguments/new.target/super
-observations or external captures. **D8.1.3v38** leaves ordinary-function
+observations or external captures. **D8.4.5** leaves ordinary-function
 admission unchanged, so the concrete module-arrow proposal was submitted for
 the user decision required by `doc/Doc_Convention.md` §2. Its scope/checks are in
 `temp/radiant-online-oct24-default-arrows/top-level-arrow-proposal.txt`.
@@ -237,7 +237,7 @@ performance, page outcomes and active release identity are collected in
 
 ### Checked top-level module arrows (2026-10-24)
 
-The user approved **D8.1.3v39**: synchronous top-level ES-module arrows with
+The user approved **D8.4.5**: synchronous top-level ES-module arrows with
 simple identifier parameters, no activation observations and the existing
 body/dependency proof over live module slots. The approved v37 constant-template
 proof is restored independently of ordinary nested-declaration/switch promotion,
@@ -267,7 +267,7 @@ The prior target classification was wrong: `Wu` has a module-level hoisted
 binding, but its arrow value is assigned inside a module initialization arrow.
 The canonical AST shows precisely one wrapper; generic admission tracing reports
 byte 103929, parentFunctionId 590, capture_count0, observations0 and the existing
-closure/enclosing-function rejection. Thus **D8.1.3v39** correctly excludes it.
+closure/enclosing-function rejection. Thus **D8.4.5** correctly excludes it.
 This is a structural policy boundary, not an AST environment transport failure.
 The trace implementation uses existing compiler-timing controls and records
 original source/ownership facts for any definition; it contains no site-specific
@@ -303,14 +303,14 @@ The latest overview download cache contains the captured original module body
 byte-for-byte, independently confirming the corrected `Wu` source classification
 against current page code. The checked one-wrapper standalone-arrow proposal is
 concrete in `temp/radiant-online-oct24-module-arrows/contained-module-arrow-proposal.txt`.
-It requires a new user decision under **D8.1.3v39** and `doc/Doc_Convention.md` §2;
+It requires a new user decision under **D8.4.5** and `doc/Doc_Convention.md` §2;
 no such admission is implemented. Full artifact summary:
 `temp/radiant-online-oct24-module-arrows/status-final.json`.
 
 
 ### Checked one-wrapper module arrows (2026-10-24)
 
-The user approved **D8.1.3v40**. The finite milestone admits the original `Wu`
+The user approved **D8.4.5**. The finite milestone admits the original `Wu`
 arrow inside its single synchronous module initialization wrapper, using the
 existing checked body and live module slab. Share the method wrapper structural
 check; retain zero external captures and activation observations, simple
@@ -393,11 +393,11 @@ and the three implementation/test source files match the native qualification
 snapshot. Full evidence: `temp/radiant-online-oct24-contained-arrows/status-final.json`.
 The read-only wrapper-body capture proposal is concrete in
 `temp/radiant-online-oct24-contained-arrows/captured-function-proposal.txt`.
-It changes **D8.1.3v40**'s explicit capture exclusion and needs the user decision
+It changes **D8.4.5**'s explicit capture exclusion and needs the user decision
 required by `doc/Doc_Convention.md` §2. No such bridge or admission is implemented.
 
 
-## Approved live capture reads — D8.1.3v41 (2026-10-24)
+## Approved live capture reads — D8.4.5 (2026-10-24)
 
 The user approved the bounded proposal in
 `temp/radiant-online-oct24-contained-arrows/captured-function-proposal.txt`.
@@ -419,7 +419,7 @@ thresholds stay unchanged. Artifacts live under
 Boundary review found that object methods use the same FUNC_EXPR node kind
 as ordinary function expressions. The shared one-wrapper proof now checks
 its property site and excludes method/getter/setter wrappers, preserving the
-approved D8.1.3v41 method-site boundary. An explicit returned-function case
+approved D8.4.5 method-site boundary. An explicit returned-function case
 pins the exclusion. Initial measurements are retained separately; the final
 candidate is rebuilt and its focused, performance and qualification checks
 are repeated after this correction.
@@ -436,7 +436,7 @@ Final page replays and aggregate gates remain pending.
 
 ### Live capture read milestone qualified
 
-D8.1.3v41's bounded read bridge is retained after complete qualification:
+D8.4.5's bounded read bridge is retained after complete qualification:
 249 native JS, 92 GC, 17 forced-GC/freed-poisoning checks, 121 optimization
 contracts and all 40,261 Test262 baseline cases (2,652 known skips, zero
 regressions). Radiant passes with 8,980 passing, 143 partial and two skipped
@@ -458,12 +458,12 @@ The isolated AST diagnostic leaves production source/build artifacts unchanged.
 It records the method-contained callback at 91846–91994 as substantial
 remaining work, with only immediate-method-body captures r/i/a/o/s/c and
 lexical this. Live writes and that receiver/method-site bridge exceed the
-approved D8.1.3v41 boundary. The proposal, subsequently approved as v42 below, is:
+approved D8.4.5 boundary. The proposal, subsequently approved as v42 below, is:
 `temp/radiant-online-oct24-capture-reads/method-callback-capture-proposal.txt`.
 The broader online sweep remains deferred while overview/pricing still fail.
 
 
-## Approved checked method callback bridge — D8.1.3v42
+## Approved checked method callback bridge — D8.4.5
 
 The user approved `method-callback-capture-proposal.txt` from the qualified v41
 artifact directory. The exact original arrow at 91846–91994 reads r/i and
@@ -494,9 +494,9 @@ tracked live bytes/count and no outer timeout. The page-loading objective
 remains incomplete.
 
 Per the proposal's acceptance criterion, the four engine/test source files and
-release/modules are restored to qualified D8.1.3v41. Host SHA256 remains
+release/modules are restored to qualified D8.4.5. Host SHA256 remains
 e65662d29bfa94a16fa94c810e25c384bf6555a3a812c0e8a8ccb96c2974e92e.
-The D8.1.3v42 permission remains approved, with its implementation deferred.
+The D8.4.5 permission remains approved, with its implementation deferred.
 No broad qualification ran for the rejected candidate; the byte-identical v41
 source/package retains its prior qualification and known PDF-only failure.
 After restoration, the rebuilt test executable passes all 249 native JS and

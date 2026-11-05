@@ -2,7 +2,7 @@
 
 This experimental CSL 1.0.2 processor is implemented in Lambda script. It interprets style XML and produces rich citation and bibliography elements through the existing LaTeX renderer. JavaScript, Pandoc, BibTeX and Biber are not runtime dependencies.
 
-The package and resource boundaries follow **D7.2.1–D7.2.4v3**, **D7.1.2v2** and **D7.5.2**. Style and reference markup are inert data (**S1.8**); the processing API receives captured values (**S12.1.1v2**, **S12.4.1v2**). Failures use errors or located diagnostics (**S7.4.1–S7.4.4**).
+The package and resource boundaries follow **D9.3.1–D9.3.4**, **D9.1.2** and **D11.1.2**. Style and reference markup are inert data (**S1.8**); the processing API receives captured values (**S12.1.1v2**, **S12.4.1v2**). Failures use errors or located diagnostics (**S7.4.1–S7.4.4**).
 
 ## Render a LaTeX document
 

@@ -1,12 +1,12 @@
 import dom
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import lambda.editor.mod_editor
-import image: lambda.editor.mod_image
-import controller: lambda.edit.controller
-import html: lambda.edit.html
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import lambda.editor.model
+import image: lambda.editor.image
+import controller: lambda.editor.controller
+import html: lambda.editor.format.html
 import geom: lambda.editor.draw.geometry
 import objects: .mod_objects
 import layout: .mod_object_layout

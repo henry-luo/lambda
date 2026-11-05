@@ -1,4 +1,4 @@
-// Source IO stays in Lambda; native handles own decoded bytes (D7.1.2v2).
+// Source IO stays in Lambda; native handles own decoded bytes (D9.1.2).
 import dom
 pub let MAX_VOICES = 32
 pub fn initial(generation) => {generation: generation, seen_id: -1, voices: []}

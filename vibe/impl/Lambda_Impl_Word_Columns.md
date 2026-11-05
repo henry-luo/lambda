@@ -1,8 +1,8 @@
 # Word demo: equal-width columns
 
 **Date:** 2026-10-23
-**Authority:** **S1.4**, **S12.1.3**, **D7.2.5** for document state and
-projection; **D2.10** for XML HTML input; **D4.5.1v4** for export editions.
+**Authority:** **S1.4**, **S12.1.3**, **D10.2.1** for document state and
+projection; **D10.1** for XML HTML input; **D5.5.1** for export editions.
 
 ## Delivered scope
 

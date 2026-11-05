@@ -19,6 +19,8 @@ pub fn spawn(x, z, heading) => {x: x, y: city.ground(x, z), z: z, heading: headi
 pub let IDLE = {throttle: 0.0, brake: 0.0, steer: 0.0, handbrake: false}
 
 pub fn forward_speed(car) => car.vx * sin(car.heading) + car.vz * cos(car.heading)
+// steering lock shrinks with speed
+pub fn steer_lock(speed) => SPEC.steer_max / (1.0 + abs(speed) / 15.0)
 pub fn speed(car) => sqrt(car.vx * car.vx + car.vz * car.vz)
 // R while rolling backwards, otherwise the engaged forward gear
 pub fn gear_label(car) any^ => if (forward_speed(car) < -0.3) "R" else if (speed(car) < 0.3 and car.rpm < SPEC.idle_rpm + 50.0) "N" else string(car.gear)
@@ -111,8 +113,8 @@ fn integrate(car, pedals, dt, boxes) any^ {
     // resistance slows the car toward rest but never reverses it
     let slowed = if (grounded) raw - u.clamp(lon.resist * dt, 0.0, abs(raw)) * (if (raw > 0.0) 1.0 else -1.0) else raw
     let vf2 = u.clamp(slowed, 0.0 - SPEC.reverse_max, SPEC.gears[4] + 2.0)
-    // steering lock shrinks with speed; the wheel recentres faster than it turns
-    let lock = SPEC.steer_max / (1.0 + abs(vf2) / 15.0)
+    // the wheel recentres faster than it turns
+    let lock = steer_lock(vf2)
     let goal = pedals.steer * lock
     let steer = u.approach(car.steer, goal, (if (abs(goal) < abs(car.steer)) SPEC.steer_return else SPEC.steer_rate) * dt)
     let yaw_raw = if (grounded) vf2 * math.tan(steer) / SPEC.wheelbase * (if (pedals.handbrake) 1.4 else 1.0) else 0.0

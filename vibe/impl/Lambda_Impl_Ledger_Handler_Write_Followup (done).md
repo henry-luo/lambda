@@ -36,7 +36,7 @@ boundary consumed it.
   route a rejected setter through the existing binding boundary at the cold
   call site. The runtime-dispatched int-store arms reuse the latter helper.
   Successful direct stores retain their existing hot paths.
-- Existing **D6.1.3v2** defect transport carries the completion through a native
+- Existing **D7.1.3** defect transport carries the completion through a native
   result without reinterpreting its bits as a number. This pass changes the
   originating store boundary, not caller policy for a discarded plain call.
 

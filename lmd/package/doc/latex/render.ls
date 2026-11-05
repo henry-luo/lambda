@@ -3760,7 +3760,7 @@ fn render_marginpar(el, info) {
     <span class: "latex-cmd-marginpar", for c in items { c }>
 }
 
-// D7.2.7: the TeX engine has already expanded every user macro, so an element
+// D10.2.2: the TeX engine has already expanded every user macro, so an element
 // reaching here is a command it passed through on purpose: a custom theorem
 // environment, or an unsupported command that the fallback reports.
 fn render_generic(el, info) any^ {

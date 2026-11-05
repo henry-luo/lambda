@@ -1,12 +1,12 @@
-// ruler gestures preview DOM geometry; only completed commands enter source history (D7.2.5).
+// ruler gestures preview DOM geometry; only completed commands enter source history (D10.2.1).
 import dom
 import page: .mod_page
 import columns: .mod_columns
 import model: .mod_model
 import stories: .mod_stories
 import navigation: .mod_navigation
-import controller: lambda.edit.controller
-import lambda.editor.mod_doc
+import controller: lambda.editor.controller
+import lambda.editor.core.doc
 
 let sides = [{id:"left",opposite:"right",axis:"width",vertical:false,sign:1},
     {id:"right",opposite:"left",axis:"width",vertical:false,sign: -1},

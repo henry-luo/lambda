@@ -129,10 +129,12 @@ TEST(TextIntrinsicWrap, BreakAllKeepsShapedMaxContentAdvance) {
     UiContext ui = {}; ui.font_ctx = lam::up(fonts);
     LayoutContext context = {}; context.ui_context = lam::up(&ui);
     context.font = {lam::up(&font), 20};
-    const char* cases[] = {"السلام", "لا", "office", "ÁB", "AVAV"};
+    const char* cases[] = {"السلام", "لا", "office", "ÁB", "AVAV",
+        "Sheet name: A-1", "Select an option", "中文选项", "👩‍👩‍👧‍👦"};
     for (const char* text : cases) {
         SCOPED_TRACE(text);
         TextIntrinsicWidths normal = measure_text_intrinsic_widths(&context, text, strlen(text));
+        EXPECT_NEAR(measure_text_max_content_width(&context, text, strlen(text)), normal.max_content, 0.01f);
         const CssEnum wrapping[] = {CSS_VALUE_NORMAL, CSS_VALUE_ANYWHERE, CSS_VALUE_BREAK_WORD};
         for (CssEnum wrap : wrapping) {
             TextIntrinsicWidths broken = measure_text_intrinsic_widths(&context, text, strlen(text),
@@ -140,6 +142,10 @@ TEST(TextIntrinsicWrap, BreakAllKeepsShapedMaxContentAdvance) {
             EXPECT_NEAR(broken.max_content, normal.max_content, 0.01f);
         }
     }
+    font.letter_spacing = 1.25f;
+    font.word_spacing = 3.0f;
+    EXPECT_NEAR(measure_text_max_content_width(&context, "AV office", 9),
+        measure_text_intrinsic_widths(&context, "AV office", 9).max_content, 0.01f);
     font_handle_release(handle);
     font_context_destroy(fonts);
 }
@@ -3619,7 +3625,7 @@ TEST(DomRetirementOwnerArenaTest, SharedUiSourceSurvivesMutationRetirementAndRed
     auto* source_type = (TypeElmt*)source.element->type;
     Target ns = {};
     TypeNominal nominal = {};
-    // D2.6.6v2 resolves nominal tags through their declared type name.
+    // D3.1.1 resolves nominal tags through their declared type name.
     nominal.type_name = source_type->name;
     source_type->ns = &ns;
     source_type->nominal = &nominal;

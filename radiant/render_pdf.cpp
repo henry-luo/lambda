@@ -19,7 +19,7 @@ static bool render_lambda_pdf(RenderExportSession* session, const char* filename
     if (!session || !filename || !session->document || !session->ui_context) return false;
     Runtime* runtime = context ? context->runtime : nullptr;
     if (!runtime) {
-        // the UI owns cached modules across batch jobs; no Items cross evaluator lifetimes (D5.4.1).
+        // the UI owns cached modules across batch jobs; no Items cross evaluator lifetimes (D6.4.1).
         if (context && context->execution_depth) return false;
         runtime = ui_context_loader_runtime(session->ui_context);
         if (!runtime) return false;
@@ -98,7 +98,7 @@ int render_html_to_pdf(const char* source, const char* filename, int width,
     RenderExportSession session = {};
     if (!render_export_session_begin(&session, source, width, height, 800, 1200, scale, true, paged, device_scale)) return 1;
     int status = render_export_session_to_pdf(&session, filename);
-    render_export_session_end(&session); return status;
+    render_export_session_finish(&session); return status;
 }
 
 int render_document_transform_to_pdf(const char* source, const LambdaDocumentTransformConfig* transform,
@@ -108,5 +108,5 @@ int render_document_transform_to_pdf(const char* source, const LambdaDocumentTra
     if (!render_export_session_begin_document_transform(&session, source, transform, options, count,
             width, height, 800, 1200, scale, device_scale, false, paged, true)) return 1;
     int status = render_export_session_to_pdf(&session, filename);
-    render_export_session_end(&session); return status;
+    render_export_session_finish(&session); return status;
 }

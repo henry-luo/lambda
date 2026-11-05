@@ -390,7 +390,7 @@ reviewed corpus manifest, stateful source producer, recorded structural
 mutator, explicit T0/eager-JIT/AUTO comparison, grammar.js/C-parser review,
 forced-GC/root-witness rows, and replayable artifacts. This older overview
 defers to `vibe/Lambda_Test_Fuzzy.md` for the authoritative campaign contract
-and commands (D1.10, D8.1.1v10, D8.1.2v3).
+and commands (D1.10, D8.3.3, D8.1.1).
 
 ### 7.2 Proposed Improvements
 

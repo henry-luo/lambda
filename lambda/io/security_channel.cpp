@@ -127,7 +127,7 @@ static void channel_stop(SecurityChannel* channel, int error) {
     ipc_stream_interrupt(channel->stream);
 }
 
-// Raw descriptor acquisition/transfer stays in lib (D7.5.2); this owner
+// Raw descriptor acquisition/transfer stays in lib (D11.1.2); this owner
 // poisons its protocol state on any mechanism failure.
 static bool channel_transfer(SecurityChannel* channel, void* bytes, uint32_t size,
         bool sending, uint64_t deadline, bool* eof) {

@@ -111,7 +111,7 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
 
 // a snapshot Map may already own a private TypeMap. Private ownership is
 // normally enough, but its shape is the reset blueprint while that exact
-// TypeMap is installed; detach before changing it (D6.2.2v2).
+// TypeMap is installed; detach before changing it (D7.2.2).
 JS_FORWARD_STATIC_RETURN(TypeMap*, js_typemap_clone_for_mutation, (Item obj),
     js_typemap_clone_for_mutation_ex,
     (obj, js_proto_snapshot_requires_typemap_detach(obj)))
@@ -564,7 +564,7 @@ extern "C" bool js_map_store_accessor(Map* map, String* key,
         type->length++;
         typemap_hash_insert_owned(type, entry, pool);
     }
-    // D3.4.8: retire the former data edge before publishing the virtual cell.
+    // D3.4.7: retire the former data edge before publishing the virtual cell.
     if (entry->byte_offset >= 0) {
         int size = shape_entry_storage_size(entry);
         if (map->data && size > 0 && entry->byte_offset + size <= map->data_cap)
@@ -733,7 +733,7 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     if (se) attrs |= se->flags;
     // Accessor pairs are mutable carriers outside the owning Map's data
     // image. Replacing the pair keeps an intrinsic snapshot's native accessor
-    // intact when defineProperty installs a test-local getter (D6.2.2v2).
+    // intact when defineProperty installs a test-local getter (D7.2.2).
     pair = js_alloc_accessor_pair(getter_root.get(), setter_root.get());
     if (!pair) return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
                                                "accessor pair allocation failed");
@@ -744,7 +744,7 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     }
     JS_ASSIGN_OR_RETURN(set_result, js_store_virtual_accessor_pair(
         obj_root.get(), name_root.get(), pair, attrs));
-    // D3.4.4v2: pooled string identity does not erase array-index shape facts.
+    // D3.4.4: pooled string identity does not erase array-index shape facts.
     // Missing this mark let dense stores bypass numeric accessors installed in
     // an Array companion map through the NameId branch.
     js_attr_mark_array_index_shape(obj, ns->chars, (int)ns->len);

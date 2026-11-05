@@ -111,7 +111,7 @@ def enrich(function: dict, frame: dict[str, int] | None) -> None:
     function.setdefault("safepoints", 0)
     function["insns"] = len(function["instructions"])
     function["calls"] = function["opcodes"]["call"]
-    # D8.4.3 emits an inline tag comparison; the retired helper poll is
+    # D7.4.3 emits an inline tag comparison; the retired helper poll is
     # structurally absent and no longer measures exception-check work.
     function["error_lane_tag_tests"] = sum(
         1 for instruction in function["instructions"]

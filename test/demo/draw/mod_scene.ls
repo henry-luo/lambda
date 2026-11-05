@@ -1,7 +1,7 @@
 import dom
 import model: .mod_model
-import geom: lambda.editor.mod_geom
-import router: lambda.editor.mod_router
+import geom: lambda.editor.draw.geometry
+import router: lambda.editor.draw.routing
 import shapes: .mod_shapes
 import paint: .mod_paint
 
@@ -55,12 +55,12 @@ fn arrow_options(key) => <div id:key ++ "-options",class:"arrow-options",'data-a
         'data-action':"arrow-set-" ++ key ++ "/" ++ kind,'data-arrow-value':kind,'aria-label':kind,title:kind,'aria-selected':"false",
         (paint.arrow_preview(kind,if (key == "start-arrow") "start" else "end","preview-" ++ key ++ "-" ++ kind))>]>
 pub fn tree() => <main id:"draw",'data-error':"",
-    <header class:"topbar",
+    <header class:"topbar workspace-chrome",
         <div class:"brand",<div class:"brand-mark",(icon("connect"))><h1 "Draw"><span class:"native-badge","LAMBDA">>
         <div class:"document-title",<strong "Untitled diagram"><span id:"save-state","All changes saved">>
         <div class:"file-actions",(button("open","Open","open"));(button("save","Save","save"));(button("export","Export SVG","export"))>
     >
-    <nav class:"toolbar",'aria-label':"Diagram tools",
+    <nav class:"toolbar workspace-chrome",'aria-label':"Diagram tools",
         <div class:"tool-group",(button("tool-select","Select (V)","tool-select","select"));(button("tool-marquee","Rectangle select (M)","tool-marquee","marquee"));(button("tool-connect","Connector (C): drag to draw a line","tool-connect","connect"));(button("tool-pan","Pan (H): move the canvas","tool-pan","pan"))>
         <span class:"divider">
         <div class:"tool-group",(button("undo","Undo","undo","undo"));(button("redo","Redo","redo","redo"))>

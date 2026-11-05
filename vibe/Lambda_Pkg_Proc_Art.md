@@ -7,7 +7,7 @@
 > **P10:** global environment data, solar lighting, responsive herbs, rooted native wind, and a larger meadow with a pond are implemented (2026-10-28); [design](Lambda_Design_Procart.md#12-p10--environment-and-a-living-meadow-pg15), [qualification](impl/Lambda_Impl_Procart_Environment.md).
 > **P11:** stand-alone animal morphology, admitted activity poses, shared skin/feather/scale patterns and reusable butterfly art support Eden's Plant/Animal builders; [PG16 design](Lambda_Design_Procart.md#13-p11--procedural-animal-specimens-and-markings-pg16).
 > **Scope:** a shipped script package for seeded procedural art: keyed randomness, noise, scalar fields, sampling, geometry, grids, L-systems, plant architecture, surface patterns, text grammars and terrain, plus stored profiles in PG11–PG16. Legacy Meadow botanical generators remain in the demo; P8's tree architecture and spatial turtle are package exports. Algorithms are written in Lambda first. A small set moves to native C under `lib/` only when a release-build measurement requires it (PG7).
-> **Spec linkage:** D7.2.4v4 (the `lambda.*` root; a path names exactly one thing; `lambda.math` is the built-in math module), S12.1.1v3 (`fn` is pure and deterministic and can never call `pn`), S10.2.1 / S10.2.4 (element-wise arithmetic and its promotion), S4.1.5 (machine ints wrap), D7.1.1 (static-library layering), D6.4.1–D6.4.2 (system-function ABI and registration checklist). This proposal changes no formal ruling.
+> **Spec linkage:** D9.3.4 (the `lambda.*` root; a path names exactly one thing; `lambda.math` is the built-in math module), S12.1.1v3 (`fn` is pure and deterministic and can never call `pn`), S10.2.1 / S10.2.4 (element-wise arithmetic and its promotion), S4.1.5 (machine ints wrap), D9.1.1 (static-library layering), D7.6.1–D7.6.2 (system-function ABI and registration checklist). This proposal changes no formal ruling.
 > **Authority:** package design ledger PG1–PG17, open items PG-O1–PG-O8. The user accepted semantic scene composition and the package rename to `lambda.procart` on 2026-10-28. PG11 documents Meadow, PG12 the general drawing grammar, PG13 plant architecture inspired by EZ-Tree and L-Py, PG14 reusable surface patterns and PG17 articulated avatar recipes. The existing PG IDs remain stable across the rename.
 
 ## 1. Purpose and scope
@@ -31,13 +31,13 @@ The package gives these a single home, adds the standard algorithm families, and
 
 ## 2. Package name (PG1)
 
-**Decided: `lambda.procart`** (USER, 2026-10-28), shipped at `lmd/package/procart.ls` with modules under `lmd/package/procart/` (**D7.2.4v4** maps `lambda.procart.<m>` to `package/procart/<m>.ls`). The name covers both the reusable generation algorithms and their composition into procedural artworks.
+**Decided: `lambda.procart`** (USER, 2026-10-28), shipped at `lmd/package/procart.ls` with modules under `lmd/package/procart/` (**D9.3.4** maps `lambda.procart.<m>` to `package/procart/<m>.ls`). The name covers both the reusable generation algorithms and their composition into procedural artworks.
 
 ~~The original package name was `lambda.procgen`, accepted on 2026-10-26 for the algorithm library.~~ The user renamed the package after accepting semantic scenes such as Meadow. Imports and package/test paths move together; there is no compatibility facade at the former package path. Native numeric kernels remain internal to `lib/procgen/` and retain their `math.*` entry points (PG7.4).
 
 | Candidate | Verdict | Reason |
 |---|---|---|
-| `lambda.math.proc` | Rejected | `lambda.math` is the built-in math module (D7.2.4v4). A shipped package beneath a built-in module's path blurs the "a path names exactly one thing" rule and would need a resolution exception. Also, *proc* already means **procedure** in Lambda (`pn`, `lambda.exe run`, "procedural script"), so `math.proc` reads as "math procedures". And most of the package is not math: text grammars, dungeons, mazes, L-systems. |
+| `lambda.math.proc` | Rejected | `lambda.math` is the built-in math module (D9.3.4). A shipped package beneath a built-in module's path blurs the "a path names exactly one thing" rule and would need a resolution exception. Also, *proc* already means **procedure** in Lambda (`pn`, `lambda.exe run`, "procedural script"), so `math.proc` reads as "math procedures". And most of the package is not math: text grammars, dungeons, mazes, L-systems. |
 | `lambda.gen` / `lambda.generate` | Rejected | Too generic: it reads as code generation or generators/iterators. |
 | `lambda.random` | Rejected | Names one module of the package (`rng`), not the package. |
 | `lambda.noise` | Rejected | Same problem: one module. |
@@ -52,7 +52,7 @@ Module names avoid colliding with existing package roots: the text-grammar modul
 
 Every public function is an `fn` (S12.1.1v3). Its output is a function of its seed key and parameters alone, so it never reads the clock, the environment or ambient randomness. The contract has two tiers:
 
-- **Exact tier.** The same inputs give bit-identical output on every platform, on both execution tiers (T0 interpreter and MIR JIT, D8.1.1v18), and in any native port (PG7). Exact-tier kernels use only integer operations and IEEE-754 basic operations (`+ − × ÷`, `sqrt`, `floor`, comparisons). All of these are correctly rounded, so they agree everywhere. Gradient directions, kernel weights and similar values are **tabulated constants**, never computed at run time with `sin`/`cos`/`exp`.
+- **Exact tier.** The same inputs give bit-identical output on every platform, on both execution tiers (T0 interpreter and MIR JIT, D8.3.2), and in any native port (PG7). Exact-tier kernels use only integer operations and IEEE-754 basic operations (`+ − × ÷`, `sqrt`, `floor`, comparisons). All of these are correctly rounded, so they agree everywhere. Gradient directions, kernel weights and similar values are **tabulated constants**, never computed at run time with `sin`/`cos`/`exp`.
 - **Tolerance tier.** Functions that genuinely need transcendental functions (normal and exponential deviates via `log`, turtles turning by a free angle via `sin`/`cos`, Lloyd relaxation centroids) are deterministic per platform and agree across platforms only to libm accuracy. Each such function says so in its doc comment and in the user guide.
 
 The exact tier is the default. The tolerance tier starts with exactly three members: `rng.normal` / `rng.exponential`, free-angle turtles in `procart.lsystem`, and Lloyd relaxation in `procart.geom` (USER, 2026-10-26, PG-O4). A new function joins it only with a stated reason, recorded here. *Why: generated content is often content-addressed. A world seed shared between users, a golden test, or a cached tile must reproduce. libm results are the usual source of cross-platform drift in noise libraries.*
@@ -88,7 +88,7 @@ The ad-hoc generators in §1 (`chart/network.ls` `randoms`, `photo-album` `rand`
 
 ### PG4 — Data out; rendering stays elsewhere
 
-Outputs are ordinary Lambda values: numbers, arrays, maps and elements. The package imports nothing from Radiant and performs no IO (D7.1.1, D7.1.2v2). A thin `procart.adapt` module constructs the data that other packages already accept: grayscale or colormapped pixel arrays for `lambda.image`, `grid`-kind data for `lambda.chart` heatmaps and contours, vertex/index arrays for `lambda.scene3d`, `<svg>` polyline elements. These constructors are pure. Rendering itself stays in those packages.
+Outputs are ordinary Lambda values: numbers, arrays, maps and elements. The package imports nothing from Radiant and performs no IO (D9.1.1, D9.1.2). A thin `procart.adapt` module constructs the data that other packages already accept: grayscale or colormapped pixel arrays for `lambda.image`, `grid`-kind data for `lambda.chart` heatmaps and contours, vertex/index arrays for `lambda.scene3d`, `<svg>` polyline elements. These constructors are pure. Rendering itself stays in those packages.
 
 ### PG5 — Shared data shapes
 
@@ -119,7 +119,7 @@ An algorithm moves to C under `lib/` only when **all** of the following hold:
 1. **Measured need.** A named benchmark (§7) on a **release build** (AGENTS rule 10) misses its stated budget by at least 5×. The fully vectorized Lambda formulation (PG5) and the MIR JIT tier have already been tried.
 2. **Kernel shape.** The hot part is a tight numeric loop over flat data, small (on the order of a few hundred lines of C), with no allocation-heavy structure. The port covers the kernel, not the API. Parameter handling, validation and options stay in Lambda.
 3. **Parity.** The native kernel reproduces the Lambda reference bit for bit for exact-tier functions (PG2), or within the stated tolerance otherwise. An exact-tier kernel therefore computes in `float64` throughout, and `f32` internals are allowed only for tolerance-tier functions (PG5; USER, 2026-10-26). A parity test runs both on the same inputs. The Lambda reference is never deleted: it remains the oracle and the fallback.
-4. **Layering and ABI.** The C code is context-free under `lib/procgen/`: no `Item`, no Lambda runtime headers (D7.1.1). It is exposed as pure **batch functions in the built-in `math` module** (e.g. `math.noise_field`, `math.erode`; USER, 2026-10-26, PG-O2), following the D6.4.1–D6.4.2 registration checklist. Batch-shaped means one call fills a whole field or runs a whole erosion pass, so the boundary cost is paid once. These are general numeric kernels, so `math` is their home and the prelude namespace stays clean. The package path `lambda.procart` cannot also be a built-in module (D7.2.4v4).
+4. **Layering and ABI.** The C code is context-free under `lib/procgen/`: no `Item`, no Lambda runtime headers (D9.1.1). It is exposed as pure **batch functions in the built-in `math` module** (e.g. `math.noise_field`, `math.erode`; USER, 2026-10-26, PG-O2), following the D7.6.1–D7.6.2 registration checklist. Batch-shaped means one call fills a whole field or runs a whole erosion pass, so the boundary cost is paid once. These are general numeric kernels, so `math` is their home and the prelude namespace stays clean. The package path `lambda.procart` cannot also be a built-in module (D9.3.4).
 5. **Fresh kernels, no vendored library.** Kernels are written fresh from the published algorithms, citing references (Appendix B). FastNoiseLite and the other libraries there are cited references only, never vendored (USER, 2026-10-26, PG-O3). The Lambda reference defines the output (PG2, PG7.3). A vendored kernel would make the reference chase that library's `float32` arithmetic and hashing details, and could not be changed in place to match the reference (AGENTS rule 16).
 
 The package API does not change when a kernel goes native: the module calls the system function when it is registered and falls back to the Lambda reference otherwise.
@@ -203,7 +203,7 @@ The resolver returns ordinary records `{id,kind,recipe,key,matrix,parameters}`. 
 
 **Terrain, rendering and replay.** Terrain defaults to `{width:33,height:25,octaves:3,island:0.35}` when the entire `terrain` map is absent; otherwise the supplied map is passed to `procart.terrain.heightmap`. These width/height values count samples; root width/depth measure the scene. Whole plants/stones use their object's terrain anchor, grass samples each blade base, and the winding path excludes grass.
 
-The pipeline is **stored semantic Mark → resolved objects → model parts/resources → existing Scene3D markup**. Groups, IDs, transforms, materials and mesh instancing reuse Scene3D contracts, while semantic tags and recipe definitions are resolved before renderer normalization. Camera, viewport and layer state belong to presentation (**S12.1.5v2 / D7.5.3v2**); visibility changes reuse the generated model. A seed change regenerates it. The page loads the Mark document separately from its implementation; a file editor/save dialog, external recipe resolver and baked archival output remain future work.
+The pipeline is **stored semantic Mark → resolved objects → model parts/resources → existing Scene3D markup**. Groups, IDs, transforms, materials and mesh instancing reuse Scene3D contracts, while semantic tags and recipe definitions are resolved before renderer normalization. Camera, viewport and layer state belong to presentation (**S12.1.5v2 / D9.5.6**); visibility changes reuse the generated model. A seed change regenerates it. The page loads the Mark document separately from its implementation; a file editor/save dialog, external recipe resolver and baked archival output remain future work.
 
 `meadow.version` pins the document profile; each recipe version pins its generator contract, including defaults, parameter meaning and random-key labels. Regeneration needs compatible code as well as the saved document. Numerical reproducibility follows PG2; versioning does not repair an execution-tier defect (**S1.6**). The known foliage JIT replay failure is recorded in the implementation record.
 
@@ -254,7 +254,7 @@ metadata and native 16,384-instance chunks without expanded per-organ part maps
 (**S12.1.1v3 / PG12.9**).
 
 The 2026-10-30 generation continuation uses pure seeded and geometry batches
-under **S1.6 / S4.1.5 / D6.4.1 / PG7**: `rng.derive_many`, `rng.units_for`,
+under **S1.6 / S4.1.5 / D7.6.1 / PG7**: `rng.derive_many`, `rng.units_for`,
 `scene.compact` and `chart.geometry.distances` retain their scalar oracles while
 calling the numeric kernels documented in [system functions](../doc/Lambda_Sys_Func.md#seeded-and-geometry-batches).
 `scene3d.transform.scatter` batches upright root placements; `.bounds` selects
@@ -313,7 +313,7 @@ distance and transported frames across LODs. Generic UV bindings reuse authored
 coordinates; object-space fields bake into padded triangle atlases. Unique jobs
 share PNG textures and respect `max_surface_pixels` and `max_vertices` before
 raster allocation. The adapter emits existing Scene3D standard materials and
-textures (**S12.1.1v3 / S12.1.5v2 / D7.5.3v2**); it adds no renderer vocabulary.
+textures (**S12.1.1v3 / S12.1.5v2 / D9.5.6**); it adds no renderer vocabulary.
 The fifth Form studies sample combines patterned stones, bark and leaves.
 Color patterns and scalar roughness/metalness are delivered; normal maps,
 displacement and attached geometry remain follow-ups. See the [P9 record](impl/Lambda_Impl_Procart_Surfaces.md).
@@ -326,7 +326,7 @@ defines one optional global `<environment>`, bounded geographic/solar/weather
 settings, pure solar and plant response samples, reusable `plant.herb@1` species,
 and rooted wind clips. Recipe keys and placement stay independent of condition
 changes (**S12.1.1v3 / PG2**). Presentation uses existing Scene3D lights, groups,
-materials and animation tracks (**S12.1.5v2 / D7.5.3v2**). The saved 28 × 20
+materials and animation tracks (**S12.1.5v2 / D9.5.6**). The saved 28 × 20
 Meadow adds lilies, daisies, poppies and reeds, a carved pond, and condition
 controls that preserve the camera. This is an illustrative living scene; climate
 and ecological simulation remain outside this phase.
@@ -356,6 +356,25 @@ and terrain-aware cast placement. Generation and playback retain
 **S12.1.1v3 / S12.1.5v2**; these are authored characters, without biological
 population rules. See [PG17](Lambda_Design_Procart.md#14-p12--articulated-character-recipes-pg17).
 
+### PG18 — In-place watercolor simulation (proposed, awaiting USER ruling)
+
+User direction, 2026-11-04: port the Washes engine (github.com/castavridis/washes-js,
+MIT) as a Procart demo, with the key algorithm in the package. `procart.watercolor`
+implements Curtis et al. (1997) as Washes does: water diffusion, flow-outward edge
+darkening, shallow-water velocity, semi-Lagrangian pigment advection, adsorption and
+desorption with granulation, evaporation and Kubelka-Munk glazing.
+
+This departs from PG6. The time step is a set of `pn` passes over a sheet borrowed
+as `var` (**S9.1.3v3**); pigments, paper, stroke trails and page models stay pure
+(**S12.1.1v3**). *Why:* on the debug build a pure vectorized pass was 4-8x slower
+than a JIT `pn` loop (Laplacian through subviews 3.1 ms against 0.8 ms for 68k
+cells) and allocated about 14 MB per step, which ruled out a live sheet. The sheet
+is one `float[]` of per-cell planes, because exclusivity is checked per `var` root.
+`math.exp` and `sqrt` put the step in the tolerance tier (PG2); runs replay exactly
+on one platform and tier. A pure reference (PG6) or a native `math` batch step
+(PG7) would need a measured release-build budget first. Record:
+[Procart README, Watercolor](../test/demo/procart/README.md#watercolor--paint-that-flows-pools-and-dries).
+
 ## 4. Module map
 
 | Module | Contents | Reuses | Tier | Native candidate |
@@ -376,6 +395,7 @@ population rules. See [PG17](Lambda_Design_Procart.md#14-p12--articulated-charac
 | `procart.herb` | Sunflower, day-flowering lily, daisy, poppy, cosmos and reed; shared organs, UVs and environment-driven poses | `environment`, `rng`, Scene3D | Tolerance poses; exact seeded topology | No |
 | `procart.avatar` | Versioned plush/robot/human/fairy/genie recipes, nested joints and six native pose clips | `rng`, Scene3D shapes/transforms | Tolerance geometry/poses; exact admission and identities | No |
 | `procart.surface` | Pattern admission, seeded fields, whole/role bindings, UV transforms and object-atlas baking | `rng`, `noise`, `lambda.color`, `lambda.image`, Scene3D | Tolerance patterns; exact admission and sharing | No |
+| `procart.watercolor` | Washes/Curtis watercolor: pigments and K/S conversion, paper, sheets, stamps, time steps, drying, Kubelka-Munk render (PG18, proposed) | `rng` | Tolerance (`exp`, `sqrt`); exact replay per platform and tier | Only if a release-build budget is missed (PG7) |
 | `procart.turtle3d` / `procart.apex` | Spatial frame, push/pop, yaw/pitch/roll, tapered forward steps, leaves and tropism; parametric bud development | `lsystem.derive`, Scene3D vectors | Tolerance geometry; exact rewriting | No |
 
 The facade `lambda.procart` re-exports the common entry points so that `import pg: lambda.procart` serves a quick script. Larger scripts import modules directly.

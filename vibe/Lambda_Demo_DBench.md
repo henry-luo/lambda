@@ -30,10 +30,6 @@ That section retains its own proposal/ratification status; reuse of its
 implementation does not ratify its outstanding decisions. No language or
 runtime ruling changes are made here.
 
-Design IDs above use the 61.0.0 numbering in the current formal specification.
-This worktree started before that renumbering, so its checked-out design spec
-still shows the previous IDs; `utils/formal_index.py --old` in the main checkout
-records the mapping.
 
 ## 1. Product direction
 

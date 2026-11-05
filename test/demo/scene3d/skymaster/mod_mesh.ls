@@ -30,8 +30,9 @@ pub fn merge(parts) {
 // the port side is the starboard side reflected in z, with its triangles rewound
 pub fn mirrored(m) => {p: [for (v in m.p) rig.mirror_point(v)], n: [for (v in m.n) rig.mirror_point(v)],
     i: [for (k in ((0 to (len(m.i) div 3 - 1)) ^ { [] })) *[m.i[3 * k], m.i[3 * k + 2], m.i[3 * k + 1]]]}
-pub fn geometry(id, m) element^ => s.geometry([for (v in m.p, x in v) x],
-    {id: id, normals: [for (v in m.n, x in v) x], indices: m.i})
+pub fn geometry(id, m, uvs = null) element^ => s.geometry([for (v in m.p, x in v) x],
+    {id: id, normals: [for (v in m.n, x in v) x], indices: m.i,
+     *:(if (uvs == null) {} else {uvs: uvs})})
 
 // a quad strip between two rings of k + 1 points, ring a at the start
 fn strip(base, k, next) => [for (j in 0 to (k - 1), let a = base + j, let b = base + next + j)

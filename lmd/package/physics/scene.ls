@@ -1,4 +1,4 @@
-// S12.1.1v3/D7.5.3v2: live document mutation crosses the Radiant host boundary.
+// S12.1.1v3/D9.5.6: live document mutation crosses the Radiant host boundary.
 import radiant
 
 pub pn play(node) { return radiant.physics(node, {operation: "play"}) }

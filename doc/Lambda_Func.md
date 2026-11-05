@@ -54,7 +54,7 @@ Reading a property does not require `pn`. The native DOM API keeps getters
 and queries as `fn`: `node.id`, `dom.get_attribute`, `dom.query_selector`,
 `dom.root_node`, and `dom.document_selection` can be used in a function.
 The DOM node being mutable does not change those operations' declared colour
-(**D7.4.6**). The rule enforced by **S12.1.1v3** is that an `fn` cannot call a
+(**D7.1.1**). The rule enforced by **S12.1.1v3** is that an `fn` cannot call a
 declared `pn`; it does not classify every DOM access as procedural.
 
 ```lambda

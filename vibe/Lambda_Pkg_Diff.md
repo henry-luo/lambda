@@ -6,11 +6,11 @@
 > **Scope:** a Git diff viewer and reusable patch-document package, written
 > primarily in Lambda Script and presented through Radiant. The first release
 > is read-only and uses a unified diff surface.
-> **Spec linkage:** D7.2.1/D7.2.3/D7.2.4/D7.2.6 (source packages and resolution),
-> S12.1.1v3/S12.1.3 and D6.1.1v2 (effects and reactive presentation), S2.5.8
+> **Spec linkage:** D9.3.1/D9.3.3/D9.3.4/D9.3.5 (source packages and resolution),
+> S12.1.1v3/S12.1.3 and D7.1.1 (effects and reactive presentation), S2.5.8
 > (text positions), S11.1.2v4 (lexical string patterns),
-> D7.5.2/D7.5.3 (IO and Radiant boundaries),
-> D4.5.1v4/D4.5.2/D5.3.3 (ownership and precise roots), D6.3.1 and
+> D11.1.2/D9.5.6 (IO and Radiant boundaries),
+> D5.5.1/D5.5.2/D6.3.3 (ownership and precise roots), D7.5.1 and
 > S13.1.1v2–S13.1.4 (scheduling and task capture).
 > **Authority:** package behavior and additive host mechanisms below are
 > proposals. They do not revise formal semantics or establish new language
@@ -33,7 +33,7 @@ Git computes repository differences. Lambda owns command planning, parsing,
 the diff model, review state, row construction, and presentation. Radiant owns
 ordinary DOM, layout, text, painting, input, and clipboard transport. This keeps
 the application reusable without introducing a native Git widget or a second
-renderer; the Lambda/Radiant boundary remains D7.5.3.
+renderer; the Lambda/Radiant boundary remains D9.5.6.
 
 ### 1.1 First release
 
@@ -68,7 +68,7 @@ introduce write or synchronization contracts beyond a read-only viewer.
 
 The public import is exactly **`lambda.doc.diff`**, backed by the explicit
 facade `lmd/package/doc/diff.ls`. Internal modules live beneath
-`lmd/package/doc/diff/`. This follows D7.2.4 and D7.2.6; it needs neither an
+`lmd/package/doc/diff/`. This follows D9.3.4 and D9.3.5; it needs neither an
 implicit directory index nor an import-resolver exception.
 
 The API separates snapshot operations from repository effects:
@@ -154,7 +154,7 @@ programming-language highlighting is not an existing capability to assume.
 Use `lambda.ui` components for the shell where suitable, while keeping row
 projection and review state independent of a particular UI style family.
 Module bindings remain immutable and document sessions own live state
-(D7.2.1). Multiple viewers must not share a mutable selected repository.
+(D9.3.1). Multiple viewers must not share a mutable selected repository.
 
 ## 4. Repository capture
 
@@ -222,8 +222,8 @@ The repository adapter needs a general process facility with:
 Reuse `lib/shell` and the existing runtime async substrate rather than creating
 a Git-specific subprocess implementation. The exported process API and its
 resource representation need a focused host-contract decision before coding.
-Keep IO behind D7.5.2 and scheduler ownership behind D6.3.1; if exposed through
-Jube, D7.4.2v2 also governs completion delivery. `start` alone does not turn a
+Keep IO behind D11.1.2 and scheduler ownership behind D7.5.1; if exposed through
+Jube, D9.5.2 also governs completion delivery. `start` alone does not turn a
 blocking native call into nonblocking work, and isolated-worker modes must not
 be assumed implemented merely because S13.1.3v2 specifies them.
 
@@ -371,7 +371,7 @@ complete document.
 ### 5.5 Grammar support gates
 
 The implementation resolves the three integration boundaries identified in the
-initial investigation (GM14; ownership follows D4.2.6/D5.3.3):
+initial investigation (GM14; ownership follows D5.2.5/D6.3.3):
 
 - **Input domain:** grammar `parse` accepts binary input. Byte token matchers
   lower the original pattern AST into the byte alphabet and use Latin-1 RE2
@@ -430,7 +430,7 @@ The surface is read-only: package handlers reject editing actions and do not
 use `contenteditable` merely to obtain a selection bridge. Verify that the
 existing bridge can bind a read-only surface; extend a generic binding
 mechanism if necessary. User-agent editing policy stays in its existing
-package under D7.2.5.
+package under D10.2.1.
 
 ### 6.3 Scale and follow-on projections
 
@@ -461,11 +461,11 @@ no live Lambda handlers; serialized HTML is a static artifact.
 Script values follow ordinary Lambda ownership and precise rooting. A native
 job copies the arguments and bytes it needs or retains script values under
 registered roots; it never relies on a caller's C stack surviving a suspension
-(D5.3.3). Background process work must not access the DOM or a foreign runtime
+(D6.3.3). Background process work must not access the DOM or a foreign runtime
 context. Completion installs values on the owning runtime's scheduler.
 
 Radiant's retained presentation copies data into document-owned storage or
-uses a registered root with the required lifetime (D4.5.1v4/D4.5.2). It must
+uses a registered root with the required lifetime (D5.5.1/D5.5.2). It must
 not retain unrooted pointers into a parsed diff's GC heap. Closing the document
 cancels jobs, prevents later completion delivery into the destroyed session,
 releases roots, and reaps processes before dependent native resources vanish.

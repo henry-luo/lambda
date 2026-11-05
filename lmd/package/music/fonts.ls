@@ -1,4 +1,4 @@
-// D7.1.2v2/D7.5.3: IO owns bytes; Radiant returns copied glyph geometry.
+// D9.1.2/D9.5.6: IO owns bytes; Radiant returns copied glyph geometry.
 import radiant
 import c: .common
 import symbols: .glyphs

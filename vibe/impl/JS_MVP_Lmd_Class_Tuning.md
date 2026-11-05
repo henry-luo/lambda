@@ -1,8 +1,8 @@
 # JS MVP class workload tuning
 
 2026-10-08. Implements [MVP §23](../jube/JS_MVP_Lmd.md#23-class-workload-tuning).
-Authority: **S1.11**, **D3.4.3v5–D3.4.5**, **D5.2–D5.3**,
-**D6.2.3v2–D6.2.4**. No language ruling changes.
+Authority: **S1.11**, **D3.4.3–D3.4.5**, **D6.2–D6.3**,
+**D7.2.3–D7.2.4**. No language ruling changes.
 
 ## Changes and limits
 

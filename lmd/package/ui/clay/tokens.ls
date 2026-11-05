@@ -1,5 +1,5 @@
 import c: lambda.ui.core.component
-import shared: lambda.ui.core.theme
+import shared: lambda.ui.dtna.skin
 
 pub let defaults = {
     primary:"#6b51db", success:"#287b63", warning:"#a56624", error:"#bd4561",

@@ -1,7 +1,7 @@
 // Protocol-only WPT harness for contenteditable acceptance. It deliberately
 // does not choose edit ranges, mutate a document, normalize nodes, repair a
 // Selection, or synthesize input/history outcomes; those are product behavior
-// owned by lambda.dom under D7.2.5.
+// owned by lambda.dom under D10.2.1.
 var _wpt_pass = 0;
 var _wpt_fail = 0;
 var _wpt_total = 0;

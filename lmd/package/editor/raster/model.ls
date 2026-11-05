@@ -1,7 +1,7 @@
-// S9.1.2 / D7.2.4v3: the shared image tree is authoritative; rows only resolve identities.
+// S9.1.2 / D9.3.4: the shared image tree is authoritative; rows only resolve identities.
 import img: lambda.image
-import sequence: lambda.editor.mod_doc
-import paths: lambda.editor.mod_source_pos
+import sequence: lambda.editor.core.doc
+import paths: lambda.editor.core.source_pos
 import geometry: lambda.editor.draw.geometry
 import common: lambda.slide.common
 import affine: lambda.chart.svg_transform

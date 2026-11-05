@@ -7,6 +7,8 @@
 #include "memtrack.h"
 #include "log.h"
 #include <stdlib.h>
+#include <limits.h>
+#include <stdatomic.h>
 
 static uv_loop_t *g_loop = NULL;
 static uv_prepare_t g_prepare;
@@ -16,13 +18,53 @@ static void (*g_task_drain)(void) = NULL;
 static int g_prepare_active = 0;
 static int g_check_active = 0;
 static bool g_host_owned = false;
+static THREAD_LOCAL unsigned g_shared_loop_depth = 0;
+static atomic_uint g_host_leases = 0;
+static atomic_bool g_loop_closing = false;
 
 void lambda_uv_set_host_owned(bool owned) {
     g_host_owned = owned;
 }
 
 bool lambda_uv_is_host_owned(void) {
-    return g_host_owned;
+    return g_host_owned || atomic_load(&g_host_leases) != 0;
+}
+
+bool lambda_uv_host_lease_acquire(void) {
+    if (atomic_load(&g_loop_closing)) return false;
+    unsigned leases = atomic_load(&g_host_leases);
+    do {
+        if (leases == UINT_MAX) return false;
+    } while (!atomic_compare_exchange_weak(&g_host_leases, &leases, leases + 1));
+    // Teardown may have started between the first check and the increment.
+    if (atomic_load(&g_loop_closing)) {
+        atomic_fetch_sub(&g_host_leases, 1);
+        return false;
+    }
+    return true;
+}
+
+bool lambda_uv_host_lease_release(void) {
+    unsigned leases = atomic_load(&g_host_leases);
+    do {
+        if (!leases) return false;
+    } while (!atomic_compare_exchange_weak(&g_host_leases, &leases, leases - 1));
+    return true;
+}
+
+bool lambda_uv_has_host_leases(void) {
+    return atomic_load(&g_host_leases) != 0;
+}
+
+static bool lambda_uv_begin_cleanup(void) {
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&g_loop_closing, &expected, true)) return false;
+    if (lambda_uv_has_host_leases()) {
+        atomic_store(&g_loop_closing, false);
+        log_error("uv_loop: cleanup refused while a host lease remains");
+        return false;
+    }
+    return true;
 }
 
 static void drain_task_checkpoint(void) {
@@ -54,6 +96,7 @@ uv_loop_t* lambda_uv_loop(void) {
 }
 
 int lambda_uv_init(void) {
+    if (atomic_load(&g_loop_closing)) return -1;
     if (g_loop) return 0; // already initialized
 
     g_loop = (uv_loop_t *)mem_alloc(sizeof(uv_loop_t), MEM_CAT_TEMP);
@@ -90,7 +133,20 @@ int lambda_uv_init(void) {
 
 int lambda_uv_run(void) {
     if (!g_loop) return -1;
-    return uv_run(g_loop, UV_RUN_DEFAULT);
+    return lambda_uv_run_loop(g_loop, UV_RUN_DEFAULT);
+}
+
+int lambda_uv_run_loop(uv_loop_t* loop, uv_run_mode mode) {
+    if (!loop) return -1;
+    bool shared = loop == g_loop;
+    if (shared) g_shared_loop_depth++;
+    int result = uv_run(loop, mode);
+    if (shared) g_shared_loop_depth--;
+    return result;
+}
+
+bool lambda_uv_is_running(void) {
+    return g_shared_loop_depth != 0;
 }
 
 void lambda_uv_stop(void) {
@@ -105,6 +161,11 @@ static void close_walk_cb(uv_handle_t *handle, void *arg) {
 
 void lambda_uv_cleanup(void) {
     if (!g_loop) return;
+    if (lambda_uv_is_running()) {
+        log_error("uv_loop: cleanup refused inside a shared-loop callback");
+        return;
+    }
+    if (!lambda_uv_begin_cleanup()) return;
 
     if (g_prepare_active) {
         uv_prepare_stop(&g_prepare);
@@ -117,19 +178,21 @@ void lambda_uv_cleanup(void) {
 
     // close all remaining handles
     uv_walk(g_loop, close_walk_cb, NULL);
-    uv_run(g_loop, UV_RUN_DEFAULT);
+    lambda_uv_run_loop(g_loop, UV_RUN_DEFAULT);
 
     uv_loop_close(g_loop);
     mem_free(g_loop);
     g_loop = NULL;
     g_microtask_drain = NULL;
     g_task_drain = NULL;
+    atomic_store(&g_loop_closing, false);
 
     log_debug("uv_loop: cleaned up");
 }
 
 void lambda_uv_abandon(void) {
     if (!g_loop) return;
+    if (!lambda_uv_begin_cleanup()) return;
 
     // A signal-aborted JS run can leave libuv queues half-mutated; walking or
     // closing handles would re-enter corrupted queue links during recovery.
@@ -139,6 +202,7 @@ void lambda_uv_abandon(void) {
     g_check_active = 0;
     g_microtask_drain = NULL;
     g_task_drain = NULL;
+    atomic_store(&g_loop_closing, false);
     log_error("uv_loop: abandoned unsafe loop without closing handles");
 }
 

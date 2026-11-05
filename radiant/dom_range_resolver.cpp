@@ -122,7 +122,9 @@ static bool resolve_text_boundary(DomText* text, int byte_off,
                                   View** out_view, int* out_byte,
                                   float* out_x, float* out_y,
                                   float* out_h) {
-    if (!text) return false;
+    // A retained selection can outlive its text view during reflow; the old
+    // rect alone does not mean that the node still has usable layout.
+    if (!text || text->view_type != RDT_VIEW_TEXT) return false;
     TextRect* r = view_geometry_text_rect_for_offset(text, byte_off);
     if (!r) return false;
 

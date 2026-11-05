@@ -71,6 +71,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/concurrency.h"
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/interp.hpp"
 #include "../lambda/js/js_interp.hpp"
@@ -939,10 +940,6 @@ static CssStylesheet* parse_and_collect_stylesheet(
     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, source_path);
     annotate_css_stylesheet_source_file(stylesheet, source_path);
     if (!stylesheet) return nullptr;
-    // Keep CSS declaration URLs in document-global form before loader-stage
-    // prefetching and later paint-time resource lookup.
-    radiant_resolve_stylesheet_resource_urls(stylesheet);
-
     if (!lam::pool_grow_array(pool, stylesheets, capacity, *count + 1, 4)) {
         // stylesheet arrays are dereferenced immediately after append; skip this sheet if the pool cannot grow.
         log_error("[CSS] Failed to grow stylesheet array to %d entries", *count + 1);
@@ -2960,7 +2957,7 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
             return nullptr;
         }
         log_info("[Layout] Detected %s file, using format loader", ext);
-        // Script document formats share the configured transform boundary (D7.2.4).
+        // Script document formats share the configured transform boundary (D9.3.4).
         // a saved diff exports all rows for layout/render and a virtual surface for review.
         LambdaDocumentTransformOption diff_surface = {"interactive", LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL,
             nullptr, interactive};
@@ -3303,7 +3300,7 @@ static Input* read_layout_input_file(Url* url, const char* filepath,
     return input;
 }
 
-// load-time layout may already own an evaluator; geometry publication must preserve it (D5.4.1).
+// load-time layout may already own an evaluator; geometry publication must preserve it (D6.4.1).
 static void populate_layout_document(DomDocument* doc, DomElement* root,
                                       Element* html_root, HtmlVersion version,
                                       Url* url) {
@@ -3529,13 +3526,15 @@ Runtime* layout_document_package_runtime(DomDocument* document, const char* pack
     if (!document) return nullptr;
     Runtime* runtime = dom_document_loader_runtime(document);
     if (runtime) {
-        // package paint roots and callbacks outlive JS realm teardown; the document retains their evaluator (D5.3.3).
+        // package paint roots and callbacks outlive JS realm teardown; the document retains their evaluator (D6.3.3).
         if (!document->loader_runtime && !document->lambda_runtime && runtime == document->js.runtime) {
             document->lambda_runtime = runtime;
             document->owns_script_runtime = true;
         }
         return runtime;
     }
+    // Do not attach a new evaluator after the retiring window fixed its owners.
+    if (document->destroying || lambda_document_lifetime_guard_active(document)) return nullptr;
     // A synchronous render inside Lambda shares its live evaluator; it cannot
     // transfer that thread to a second runtime while caller roots are active.
     if (context && context->execution_depth != 0) return context->runtime;
@@ -3544,7 +3543,7 @@ Runtime* layout_document_package_runtime(DomDocument* document, const char* pack
     if (!runtime) return nullptr;
     runtime_init(runtime);
     runtime->resource_policy = document->resource_policy;
-    // a second static document must acquire its evaluator before module initialization (D5.4.1).
+    // a second static document must acquire its evaluator before module initialization (D6.4.1).
     if (!radiant_eval_context_switch(runtime_get_eval_context(runtime))) {
         log_error("package-layout-runtime: failed to acquire evaluator for %s", package_module);
         release_layout_runtime(runtime);
@@ -3727,7 +3726,7 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
             runtime_init(render_runtime);
         }
         EvalContext* render_context = runtime_get_eval_context(render_runtime);
-        // D5.4.1: bind a loader only from a quiescent evaluator.
+        // D6.4.1: bind a loader only from a quiescent evaluator.
         bool render_bound = render_context && !(context && context->execution_depth != 0) &&
             radiant_eval_context_switch(render_context);
         runtime_bind_ui_result_input(render_runtime, input);
@@ -4206,7 +4205,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     g_lambda_document_load_diagnostic[0] = '\0';
     if (context && context->execution_depth != 0) {
         // A child document may take the thread only after its parent evaluator
-        // has returned; switching with live frames would violate D5.4.1.
+        // has returned; switching with live frames would violate D6.4.1.
         log_error("load_lambda_script_doc: evaluator still executing");
         return nullptr;
     }
@@ -4969,20 +4968,21 @@ void rebuild_lambda_doc(UiContext* uicon) {
 }
 
 // retain equal branches while advancing source identities for nested handlers and ranges.
-static bool render_metadata_attribute(const char* key, ItemReader value) {
-    return key && (strncmp(key, "data-", 5) == 0 || strncmp(key, "aria-", 5) == 0) &&
+static bool render_patchable_attribute(const char* key, ItemReader value) {
+    // class writes use normal mutation/style invalidation; equal descendants keep live control state.
+    return key && (strcmp(key, "class") == 0 || strncmp(key, "data-", 5) == 0 || strncmp(key, "aria-", 5) == 0) &&
         value.isString();
 }
 
-static bool render_metadata_only(ElementReader before, ElementReader after) {
+static bool render_attributes_patchable(ElementReader before, ElementReader after) {
     auto check = [](ElementReader from, ElementReader to) {
         auto attrs = from.attrs();
         const char* key; ItemReader value;
         while (attrs.next(&key, &value)) {
             ItemReader other = to.get_attr(key);
             if (to.has_attr(key) && fn_eq_strict(value.item(), other.item()) == BOOL_TRUE) continue;
-            if (!render_metadata_attribute(key, value) ||
-                (to.has_attr(key) && !render_metadata_attribute(key, other))) return false;
+            if (!render_patchable_attribute(key, value) ||
+                (to.has_attr(key) && !render_patchable_attribute(key, other))) return false;
         }
         return true;
     };
@@ -5034,7 +5034,7 @@ static bool collect_render_frontier(DomDocument* doc, const RetransformResult& c
         descend = a->ns == b->ns && strview_equal(&a->name, b->name.str) &&
             before.childCount() == after.childCount() &&
             native && !layout_is_svg_viewport(native->tag()) &&
-            render_metadata_only(before, after);
+            render_attributes_patchable(before, after);
     }
     if (descend) {
         // text or fragment changes keep their enclosing element as the replacement unit.
@@ -5080,20 +5080,15 @@ static void retain_render_branch(DomDocument* doc, const RenderRetainedBranch& b
         if (after.has_attr(key)) continue;
         const char* old = node->get_attribute(key);
         node->remove_attribute(key);
-        dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
+        radiant_notify_template_attribute(node, key, old);
     }
     attrs = after.attrs();
     while (attrs.next(&key, &value)) {
         if (before.has_attr(key) && fn_eq_strict(before.get_attr(key).item(), value.item()) == BOOL_TRUE) continue;
         const char* old = node->get_attribute(key);
-        if (!radiant_attribute_has_css_dependency(doc, node, key) &&
-            dom_element_set_non_style_metadata(node, key, value.cstring())) {
-            // non-style metadata remains observable without invalidating ancestor layout.
-            doc->mutation_epoch++;
-            dom_observers_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
-        } else {
+        if (!dom_set_non_style_metadata(node, key, value.cstring())) {
             node->set_attribute(key, value.cstring());
-            dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
+            radiant_notify_template_attribute(node, key, old);
         }
     }
     dom_rebind_render_element(doc, branch.previous.element, branch.current.element);
@@ -5112,6 +5107,9 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         log_error("rebuild_lambda_doc_incremental: no html_root in document");
         return;
     }
+
+    // finish earlier imperative writes before staging this template's attribute/splice batch.
+    if (doc->js.mutation_count > 0) radiant_reconcile_dom_mutations(uicon, doc);
 
     lam::ArrayList<RetransformResult> frontier(MEM_CAT_TEMP);
     lam::ArrayList<RenderRetainedBranch> retained(MEM_CAT_TEMP);
@@ -5135,12 +5133,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             return;
         }
     }
-
-    // Imperative DOM writes made earlier in this handler turn (e.g. set_inner_html
-    // after a nested dispatch re-rendered another view) are pending in the mutation
-    // ledger. The splice below cascades only the template subtrees, yet resets that
-    // ledger at the end, so commit those writes first or they never get their cascade.
-    if (doc->js.mutation_count > 0) radiant_reconcile_dom_mutations(uicon, doc);
 
     bool can_incremental = (doc->element_dom_map != nullptr) &&
                            (doc->root != nullptr) &&
@@ -5293,12 +5285,17 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         // each committed subtree owns its next frame; unrelated components stay idle.
         radiant_queue_template_render_events(doc, new_dom);
     }
-    if (stylesheet_changed) {
+    const char* mutation_reason = nullptr;
+    bool broad_mutation = doc->js.mutation_count > 0 &&
+        !radiant_prepare_dom_mutation_layout(doc, &mutation_reason);
+    // retained class writes and replaced children share one final style/layout commit (D5.5.3).
+    if (stylesheet_changed || broad_mutation) {
         // stylesheet selectors can affect siblings outside the replaced template subtree.
         style_epoch_mark_global_change(doc);
         view_geometry_walk_dom_tree(doc->root, clear_load_stylesheet_cascade_visitor, nullptr);
         layout_apply_css_stylesheets(doc, doc->root, doc->stylesheets, doc->stylesheet_count,
                                     doc->document_pool, css_engine);
+        if (broad_mutation && doc->view_tree) view_pool_reset_retained(doc->view_tree);
         set_layout_dirty_subtree(doc->root, true);
     }
     auto t_dom_css = time_now_ns();

@@ -5,7 +5,7 @@
 // The first-party recursive-descent parser drives a syntax sink that builds
 // the retained nodes as productions complete; a separate resolve pass then
 // binds names, assigns types, registers constants and types, and reports
-// diagnostics (D8.2.5v3). Both halves live in build_ast.cpp so the parser and
+// diagnostics (D8.2.5). Both halves live in build_ast.cpp so the parser and
 // the semantic layer never grow independent inference or diagnostics.
 
 #include "ast.hpp"

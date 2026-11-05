@@ -1,9 +1,9 @@
-// Finder owns filesystem snapshots, paths, ordering and selection (S12.1.3 / D7.2.5).
+// Finder owns filesystem snapshots, paths, ordering and selection (S12.1.3 / D10.2.1).
 import dom
-import tree: lambda.dom.tree
-import browser: ~~.finder.mod_model
-import filesystem: ~~.finder.mod_io
-import finder: ~~.finder.mod_ui
+import focus: lambda.ui.core.focus
+import browser: lambda.ui.workspace.file_browser
+import filesystem: lambda.io.file_info
+import icons: lambda.ui.workspace.file_icons
 import storage: .mod_io
 
 pub fn places() => [{id:"home",name:"Home",icon:"home",path:sys.home#},
@@ -72,19 +72,19 @@ pub fn command(d,action,params={}) any^ {
 
 fn tool(id,label,graphic,disabled=false,active=false) => <button id:"word-picker-" ++ id,type:"button",class:"picker-tool",
     'data-picker-action':id,'aria-label':label,title:label,'aria-pressed':string(active),
-    *:(if (disabled) {disabled:""} else {}),finder.icon(graphic)>
+    *:(if (disabled) {disabled:""} else {}),icons.icon(graphic)>
 fn contents(d) any^ {
     let entries = rows(d);
-    if (d.loading==true) <div id:"word-picker-loading",class:"picker-empty",role:"status",finder.icon("documents");
+    if (d.loading==true) <div id:"word-picker-loading",class:"picker-empty",role:"status",icons.icon("documents");
         <strong "Opening document…"><span d.path><span "You can cancel while the document is being imported.">>
-    else if (len(entries)==0) <div class:"picker-empty",finder.icon("search");<strong if (trim(d.browser.query)!="") "No matching files" else "This folder is empty">
+    else if (len(entries)==0) <div class:"picker-empty",icons.icon("search");<strong if (trim(d.browser.query)!="") "No matching files" else "This folder is empty">
         <span if (trim(d.browser.query)!="") "Try a different name." else "Choose another folder to find a document.">>
     else <div class:if (d.browser.mode=="icons") "picker-icons" else "picker-list",
         *[for (e in entries) <button type:"button",class:"picker-file",role:"option",tabindex:"-1",
             'data-picker-path':e.path,'data-dir':string(e.dir),'aria-selected':string(contains(d.browser.selected,e.path)),
             'aria-disabled':string(not selectable(e)),title:e.name,
             *:(if (not selectable(e)) {disabled:""} else {}),
-            finder.file_icon(e);<span class:"picker-name",e.name><span class:"picker-date",e.modified>
+            icons.file_icon(e);<span class:"picker-name",e.name><span class:"picker-date",e.modified>
             <span class:"picker-kind",if (e.dir) "Folder" else if (storage.supported_path(e.path)) "Document" else e.kind>
             <span class:"picker-size",if (e.dir) "—" else browser.size_label(e.size)>>]>
 }
@@ -92,10 +92,10 @@ fn tree(d) any^ => <div class:"edit-dialog-layer",
     <div class:"edit-dialog-backdrop">;
     <section id:"word-file-picker",class:"edit-dialog edit-dialog-open",role:"dialog",'aria-modal':"true",'aria-label':"Open document",
         'data-path':d.browser.path,'data-mode':d.browser.mode,'aria-busy':string(d.loading==true),
-        <aside class:"picker-sidebar",<div class:"picker-brand",finder.icon("documents");<strong "Open document">>
+        <aside class:"picker-sidebar",<div class:"picker-brand",icons.icon("documents");<strong "Open document">>
             <h2 "Favorites"><nav 'aria-label':"Favorite folders",*[for (p in places()) <button id:"word-picker-place-" ++ p.id,type:"button",
                 class:"picker-place",'data-picker-location':p.path,'aria-current':if (p.path==d.browser.path) "page" else "false",title:p.path,
-                finder.icon(p.icon);<span p.name>>]>
+                icons.icon(p.icon);<span p.name>>]>
             <div class:"picker-sidebar-note","On your computer">>
         <div class:"picker-workspace",
             <header class:"picker-toolbar",
@@ -104,8 +104,8 @@ fn tree(d) any^ => <div class:"edit-dialog-layer",
                     tool("up","Enclosing folder","up",d.browser.path=="/")>
                 <div class:"picker-view-switch",tool("icons","Icon view","icons",false,d.browser.mode=="icons")
                     tool("list","List view","list",false,d.browser.mode=="list")>
-                <div class:"picker-folder",finder.icon("folder");<strong browser.basename(d.browser.path)>>
-                <label class:"picker-search",finder.icon("search");<input id:"word-picker-search",type:"search",placeholder:"Search",value:d.browser.query,'aria-label':"Search this folder">>>
+                <div class:"picker-folder",icons.icon("folder");<strong browser.basename(d.browser.path)>>
+                <label class:"picker-search",icons.icon("search");<input id:"word-picker-search",type:"search",placeholder:"Search",value:d.browser.query,'aria-label':"Search this folder">>>
             <div class:"picker-location-bar",<nav class:"picker-crumbs",'aria-label':"Folder path",*[for (i,c in ((browser.crumbs(d.browser.path)) ^ { [] }))
                 <span (if (i>0) <span class:"picker-chevron","›"> else null);
                     <button type:"button",'data-picker-location':c.path,title:c.path,c.name>>]>
@@ -167,11 +167,7 @@ on keydown(evt) {
     if (evt.key=="Tab") {
         // keep focus in the modal while the document editor remains mounted behind it.
         let root = dom.get_element_by_id(dom.root_node(evt.target),"word-file-picker")
-        let controls = dom.query_selector_all(root,"button:not([disabled]):not([tabindex='-1']),input,select,[tabindex='0']")
-        let index = tree.index_in(controls,evt.target) or 0
-        let next = (index+(if (evt.shiftKey) -1 else 1)+len(controls))%len(controls)
-        dom.focus_set(controls[next],false)
-        return 'prevent-default'
+        return if (focus.trap(root,evt)^) 'prevent-default' else 'pass'
     }
     if (evt.key=="Escape") { send(evt,"cancel"); return 'prevent-default' }
     if (primary and evt.shiftKey and lower(evt.key)=="g") { send(evt,"go"); return 'prevent-default' }

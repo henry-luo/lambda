@@ -38,14 +38,14 @@ the target implicitly. General Node/DOM compatibility is separate work.
 
 | Concern | Authority and requirement |
 |---|---|
-| Guest semantics and reuse | **S1.11**, **D1.3v3**: ECMAScript observations over the existing Lambda/lib substrate; reuse before adding a semantic adapter |
-| Dynamic source | **D8.1.3v24**, clauses v20–v21: eval, Function-family constructors and applicable $262.evalScript execution use the retained AST interpreter, regardless of caller tier |
-| Representations | **D2.6.4**, **D2.6.9v3**, **D2.7.1**: shared arrays, nominal Maps and destination-owned scalar homes; no numeric GC cells |
-| Shape/name identity | **D3.4.3v5–D3.4.8**, **S8.2.2v5**, **D4.6.1v4**: immutable shared shapes and canonical UTF-8/lossless WTF-8 keys |
-| Inheritance and captures | **D2.6.10**, **D6.2.2v2–D6.2.3v2**: stable Lambda nominal ancestry and Function storage; JS captures mutable cells while Lambda captures retain their own semantics |
-| Ownership and completion | **D1.4v4**, **D5.2–D5.3**, **D5.4.1**: explicit completions, precise roots and one correctly owned evaluation context through reentry |
-| Suspension and modules | **D5.1.1v3**, **D7.3.1–D7.3.4**, **D8.1.3v24**: existing activations, event-loop owner and module registry, with JS-specific binding/evaluation semantics |
-| Optimization | **D8.2.1–D8.2.6**, **D8.4.1v2**: retained semantic facts guard shared physical operations; no universal is_normal flag or whole-unit replay |
+| Guest semantics and reuse | **S1.11**, **D1.3**: ECMAScript observations over the existing Lambda/lib substrate; reuse before adding a semantic adapter |
+| Dynamic source | **D8.4.5**, clauses v20–v21: eval, Function-family constructors and applicable $262.evalScript execution use the retained AST interpreter, regardless of caller tier |
+| Representations | **D2.6.2**, **D3.1.5**, **D2.6.1**: shared arrays, nominal Maps and destination-owned scalar homes; no numeric GC cells |
+| Shape/name identity | **D3.4.3–D3.4.7**, **S8.2.2v5**, **D5.6.1**: immutable shared shapes and canonical UTF-8/lossless WTF-8 keys |
+| Inheritance and captures | **D3.1.2**, **D7.2.2–D7.2.3**: stable Lambda nominal ancestry and Function storage; JS captures mutable cells while Lambda captures retain their own semantics |
+| Ownership and completion | **D1.4**, **D6.2–D6.3**, **D6.4.1**: explicit completions, precise roots and one correctly owned evaluation context through reentry |
+| Suspension and modules | **D6.1.1**, **D9.4.1–D9.4.4**, **D8.4.5**: existing activations, event-loop owner and module registry, with JS-specific binding/evaluation semantics |
+| Optimization | **D8.2.1–D8.2.6**, **D7.4.1**: retained semantic facts guard shared physical operations; no universal is_normal flag or whole-unit replay |
 
 This phase applies the existing dynamic-source ruling to MVP; it does not
 change a formal ruling. If implementation needs a different ruling, revise
@@ -311,7 +311,7 @@ Admission failures, crashes and timeouts cannot satisfy negative tests. The
 host separately verifies `$DONE`; a source-defined `setTimeout` cannot bypass
 completion. Capability/allocation failures are retained on the execution owner,
 so a `finally` return cannot turn an engine failure into a passing test; genuine
-JS throws retain normal completion precedence (**D1.4v4**).
+JS throws retain normal completion precedence (**D1.4**).
 `LAMBDA_TEST262_EXE` pins the child binary without changing the LJS
 default route or rewriting its baseline. An interrupted MVP worker retires
 after recording its failing case; unexecuted batch collateral remains visible.
@@ -321,11 +321,11 @@ SyntaxError/TypeError/URIError/AggregateError objects, `cause`, descriptors,
 generic `Error.prototype.toString`, native-error materialization at catch and
 preserved thrown identity. Construction uses ordinary prototype lookup and
 the existing iterator collector for AggregateError. Nominal ancestry stays
-separate from live JS prototype links (**D2.6.10**).
+separate from live JS prototype links (**D3.1.2**).
 
 String/Number/Boolean wrappers and BigInt/Symbol boxing use nominal Lambda Maps
 and private shape fields, with scalar adoption through existing destination
-homes (**D1.3v3**, **D2.7.1**). String indices describe UTF-16 code units and
+homes (**D1.3**, **D2.6.1**). String indices describe UTF-16 code units and
 are nonwritable/nonconfigurable; the same property kernel enforces their
 attributes. Explicit String/Number conversions retain their JS differences
 from implicit conversion. JSON unboxes wrappers after `toJSON`. Generic
@@ -341,7 +341,7 @@ numeric representation or parser was introduced.
 property-helper execution (`Function.prototype`, arguments), the rest of P1,
 and P2–P9. Eval/Function-family execution has **not** been implemented in MVP
 by this increment. Its required route remains the shared interpreter under
-**D8.1.3v24**; ordinary unsupported source still fails admission. No bridge
+**D8.4.5**; ordinary unsupported source still fails admission. No bridge
 reinterprets `MvpLmdCallable` as an LJS callable.
 
 Unbound `eval` and `Function` references now explicitly fail admission until
@@ -351,7 +351,7 @@ the newly exposed native Error/primitive constructors also fails with an
 explicit capability error until P4 can initialize both the derived nominal
 type and native payload. Direct native construction with an alternate
 `new.target` still observes its JS prototype. Ordinary class inheritance is
-unchanged (**D2.6.10**).
+unchanged (**D3.1.2**).
 
 ### 9.2 Reuse and helper audit
 
@@ -376,7 +376,7 @@ and full-LJS defaults are retained except the two shared BigInt bug fixes.
 Errors/wrapper families are allocated only for source that admits/observes
 them. Ordinary functions retain existing scalar/call/shape proofs; this does
 not add an `is_normal` flag or an interpreter branch to every call
-(**D8.4.1v2**). Rooting uses the shared precise owner model (**D5.2–D5.3**).
+(**D7.4.1**). Rooting uses the shared precise owner model (**D6.2–D6.3**).
 
 ### 9.3 Evidence and remaining gates
 
@@ -431,7 +431,7 @@ The existing `js_interp_execute_direct_eval_source` and indirect entry in
 `js_interp.hpp` already implement the dynamic-source policy. Their retained
 interpreter calls LJS property, conversion and call operations in
 `js_interp.cpp`; these operations cannot consume MVP records merely because
-both sides carry an `Item` (**D1.3v3**, **D8.1.3v24**).
+both sides carry an `Item` (**D1.3**, **D8.4.5**).
 
 `JsFunction` owns `invoke`, `construct`, `JsCallableCode`, an optional
 `JsAstBody` and `JsInterpEnv`. `MvpLmdCallable` instead retains its MVP program,
@@ -439,8 +439,8 @@ class recipe and shared `Function::closure_env`. Its compiler's
 `binding_cell`/`binding_item` use mutable one-element arrays for captures;
 uncaptured locals may remain MIR registers. `JsInterpEnv` describes contiguous
 durable slots through `GcEnvironmentStorage`. These are compatible lifetime
-building blocks, but not interchangeable record layouts (**D6.2.2v2**,
-**D6.2.3v2**, **D5.2–D5.3**).
+building blocks, but not interchangeable record layouts (**D7.2.2**,
+**D7.2.3**, **D6.2–D6.3**).
 
 P2/P3 must therefore materialize observable MIR bindings into the existing
 durable storage, link interpreter reads/writes to those live cells, and select
@@ -493,7 +493,7 @@ Their raw measurements remain in `navier-fix/` and `numeric-guard/`.
 
 The next repair should retain numeric value/region facts independently of
 intrinsic registration and place guards at a justified region boundary
-(**D8.2.1–D8.2.6**, **D8.4.1v2**). Keep observable object coercion and exceptional
+(**D8.2.1–D8.2.6**, **D7.4.1**). Keep observable object coercion and exceptional
 paths intact. Ordinary JSON's early return is restored when neither wrappers
 nor observable `toJSON` hooks are possible. The four jq workloads were not
 executed, and §31's earlier Raytrace3D gap remains a separate open item.
@@ -509,12 +509,12 @@ names/lengths, `@@hasInstance` and the shared restricted-property thrower.
 functions, methods, arrows and class constructors; bound/native/proxy
 callables use native-function syntax. Calling the dynamic constructor still
 reports an explicit capability failure. It does not compile dynamic source
-or disguise missing support as a catchable JS error (**D8.1.3v24**).
+or disguise missing support as a catchable JS error (**D8.4.5**).
 
 Mapped arguments reuse the same mutable one-element Array cells as MVP
-closures (**D6.2.3v2**). A nominal Map holds the indexed properties and a
+closures (**D7.2.3**). A nominal Map holds the indexed properties and a
 private shape field holds the cell table; shared Lambda tracing and scalar
-homes own both (**D2.6.10**, **D5.2–D5.3**). Only the last duplicate formal
+homes own both (**D3.1.2**, **D6.2–D6.3**). Only the last duplicate formal
 maps, and missing actual arguments do not map. Strict/non-simple functions
 receive unmapped arguments and the shared throwing `callee` accessor.
 Arguments inherit the ordinary object prototype and share
@@ -529,7 +529,7 @@ functions shadow outer explicit `arguments` bindings; arrows retain their
 lexical binding. Default-parameter closures retain a separate arguments binding
 when the body declares a same-named var, lexical or function binding. The
 existing frontend observation analysis controls allocation; functions without
-a recorded arguments use keep their existing call path (**D8.4.1v2**).
+a recorded arguments use keep their existing call path (**D7.4.1**).
 
 `Math.pow` reuses `mvp_lmd_number_pow`, including left-to-right conversion of
 its two operands. This allows the unmodified Test262 property helper to get
@@ -554,7 +554,7 @@ Normal own-property reads consult the existing program metadata before looking
 for an alias. Named writes reject non-index prefixes before entering the alias
 helper; indexed candidates still use the existing canonical-key parser.
 Accessor reads return before the library lookup. These guards introduce no
-new helper or representation flag (**D8.4.1v2**).
+new helper or representation flag (**D7.4.1**).
 
 ### 10.3 Evidence and remaining scope
 
@@ -690,10 +690,10 @@ against their own phase controls. Results3–9 are unchanged.
 Complete nested array/object binding and assignment patterns, elisions, rest,
 defaults, catch parameters and iteration heads. Preserve left-to-right target
 resolution, getter/default effects, IteratorClose and throwing-completion
-precedence (**S1.11**, **D5.2–D5.3**). Ordinary closed array swaps and Map-pair
+precedence (**S1.11**, **D6.2–D6.3**). Ordinary closed array swaps and Map-pair
 loops retain their existing lowering where iterator replacement is impossible
-(**D8.4.1v2**). This increment does not complete P2's global/with environments
-or the P3 interpreter boundary (**D8.1.3v24**).
+(**D7.4.1**). This increment does not complete P2's global/with environments
+or the P3 interpreter boundary (**D8.4.5**).
 
 Reuse and helper disclosure:
 
@@ -831,7 +831,7 @@ an actual Array guard, retaining general iterable initialization for strings
 and other values. Both branches create fresh captured bindings in the same
 place. Existing array/map type facts remove outer protocol and collection
 kind dispatch; the proven Array type also reaches the existing element reader.
-Reflection still invalidates these shortcuts (**D8.4.1v2**). No runtime helper
+Reflection still invalidates these shortcuts (**D7.4.1**). No runtime helper
 or container flag is added for this tuning.
 
 `candidate12` is the frozen release-profile result, executable SHA-256

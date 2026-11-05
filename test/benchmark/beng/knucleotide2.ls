@@ -35,7 +35,7 @@ fn extract_three(text: string) string^ {
 }
 
 // The supplied >THREE corpus is a closed A/C/G/T alphabet. Keep its one- and
-// two-mer counters in their final typed representations (D3.3.3v3), while
+// two-mer counters in their final typed representations (D4.3.3), while
 // longer requested sequences remain ordinary string scans.
 fn base_code(codepoint: int) int =>
     if (codepoint == 65) 0 else if (codepoint == 67) 1 else

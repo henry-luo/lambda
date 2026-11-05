@@ -1,9 +1,9 @@
-// Partial formatting preserves the selected source atom and its layout (S1.4, D7.2.5).
-import lambda.editor.mod_doc
-import image: lambda.editor.mod_image
+// Partial formatting preserves the selected source atom and its layout (S1.4, D10.2.1).
+import lambda.editor.core.doc
+import image: lambda.editor.image
 import shapes: .mod_shapes
 import art: .mod_wordart
-import presets: ~~.mod_shape_presets
+import presets: lambda.ui.workspace.shape_presets
 
 pub let styles = presets.styles
 pub let colors = presets.colors

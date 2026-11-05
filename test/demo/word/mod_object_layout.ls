@@ -1,12 +1,12 @@
-// Object layout is source-owned; native geometry only supplies the anchor frame (D7.2.5).
+// Object layout is source-owned; native geometry only supplies the anchor frame (D10.2.1).
 import dom
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import image: lambda.editor.mod_image
-import controller: lambda.edit.controller
-import inline_format: lambda.editor.mod_inline_format
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import image: lambda.editor.image
+import controller: lambda.editor.controller
+import inline_format: lambda.editor.core.inline_format
 import geom: lambda.editor.draw.geometry
 import objects: .mod_objects
 import page: .mod_page

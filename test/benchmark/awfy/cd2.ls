@@ -145,7 +145,7 @@ fn vec_size(v: array) int {
 
 // The original tree stored linked node values. Under COW every lookup is a
 // snapshot, so the mutable owner is an explicit key/value table instead
-// (D3.3.1v2). The CD workload needs ordered iteration only, not tree balancing.
+// (D4.3.1). The CD workload needs ordered iteration only, not tree balancing.
 
 fn rbt_new() RbtTable^ {
     let _admitted_keys_151: int[] = []

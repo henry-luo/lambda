@@ -1,4 +1,4 @@
-// D3.3.3v3: a declared pointer-lane array can be read through its certificate.
+// D4.3.3: a declared pointer-lane array can be read through its certificate.
 let letters: string[] = ["A", "B", "C"]
 
 fn pick(index: int) string? => letters[index]

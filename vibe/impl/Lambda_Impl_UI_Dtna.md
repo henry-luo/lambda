@@ -14,7 +14,7 @@ deferred by the user's scope decision.
 
 ## Contracts and ownership
 
-- **D7.2.4/D7.2.6:** `lambda.ui.dtna` resolves to the ordinary shipped
+- **D9.3.4/D9.3.5:** `lambda.ui.dtna` resolves to the ordinary shipped
   `lmd/package/ui/dtna.ls`. There is no resolver special case or native widget
   hierarchy. Shared utilities live in `ui/core/`; component recipes live in
   `ui/dtna/`.
@@ -27,11 +27,11 @@ deferred by the user's scope decision.
   rules provide disabled inheritance. Nonvisual provider context remains open.
 - **S10.1.1v3:** singleton text unions in template attribute predicates must
   match their branches; they must not become presence-only constraints.
-- **D8.1.1v18/D7.2.3:** package model/contract fixtures run once on the selected
+- **D8.3.2/D9.3.3:** package model/contract fixtures run once on the selected
   default backend through the discovered golden batch, reusing in-process
   imports. Native interaction and document-error teardown retain their separate
   forced `interp` and `jit` checks; package goldens do not certify handlers.
-- **D4.5.2/D5.3.3:** no package-owned native registry retains raw GC items.
+- **D5.5.2/D6.3.3:** no package-owned native registry retains raw GC items.
   Existing template and DOM lifetime mechanisms retain component sources.
 
 ## Regression runner tuning — 2026-10-21
@@ -39,13 +39,13 @@ deferred by the user's scope decision.
 The 27 package goldens remain in `test/lambda/ui_dtna/` and run through the
 ordinary discovered batch. The separate contract wrapper duplicated those
 same fixtures on the same backend, adding 27 cold CLI launches; it is removed.
-The batch retains the existing in-process import reuse (**D7.2.3/D8.5.1v7**).
+The batch retains the existing in-process import reuse (**D9.3.3/D8.3.5**).
 Other tier matrices are unchanged.
 
 `dtna_error_document.ls` now imports `lambda.ui.dtna.button` and calls its
 descriptor directly, the same constructor reached by the facade's `button()`.
 This preserves the unhandled validation error and its diagnostic-mirror lifetime
-(**D4.5.2/D5.3.3**) while avoiding the unrelated timeline/chart import graph.
+(**D5.5.2/D6.3.3**) while avoiding the unrelated timeline/chart import graph.
 The subprocess regression still checks load-rejection exit 1 on forced
 interpreter and JIT. No package implementation or runtime code changed.
 
@@ -135,13 +135,13 @@ all definition hashes and generated-asset hash are retained in the repository.
    destroyed GC heap when final context cleanup inspected it. Teardown now
    clears this diagnostic mirror while the heap is alive, as heap reset already
    does. A permanent subprocess regression requires the render command to exit
-   with load-rejection status 1 on both tiers (**D4.5.2/D5.3.3**).
+   with load-rejection status 1 on both tiers (**D5.5.2/D6.3.3**).
 6. **Named views lost all event handlers under forced MIR.** The function
    prepass named handlers from the authored view name while registration looked
    for the generated `_view_N_hM` name. Compilation now uses the generated name
    consistently; authored names continue to identify state. All four native
    fixtures are permanent forced-interpreter/forced-JIT checks in the focused
-   target (**D8.1.1v17**).
+   target (**D8.3.6**).
 
 Boolean HTML attributes must be absent when false: emitting a null-valued
 `disabled`/`checked` attribute still has presence semantics in the Lambda DOM.
@@ -185,7 +185,7 @@ Three engine regressions were reduced before fixing their causes:
    path now retains an Item for propagation/handlers, records its actual
    representation and roots that representation. `dtna_imported_outcomes`
    covers success, comparison and error handling across all three tiers
-   (**S7.6.1v4/S7.6.3v2; D2.4.1–D2.4.3; D8.1.1v17**).
+   (**S7.6.1v4/S7.6.3v2; D2.3.4–D2.3.5; D8.3.6**).
 3. **Shrink-to-fit alignment moved flex children twice.** Deferred inline-line
    alignment treated the direct text and the sort-arrow span in an inline-flex
    button as separate flow lines, moving the arrow over its label. The shared
@@ -343,7 +343,7 @@ release binary hash is recorded in the validation provenance.
 ## Foundation and navigation increment — 2026-10-10
 
 This increment implements outstanding M1 features without changing language
-contracts (**D7.2.4**, **S12.1.3**). Grid now supports validated spans,
+contracts (**D9.3.4**, **S12.1.3**). Grid now supports validated spans,
 offsets/order, zero-span hiding, two-axis gutters and breakpoint maps through
 `xxxl` (1920px). Viewport changes update the existing DOM. Space preserves
 original child slots, omits nulls and inserts optional separators; slot wrappers
@@ -386,7 +386,7 @@ descendant clicks and first-legend activation.
 `CCACHE_DIR="$PWD/temp/ccache" make test-ui-dtna ARGS='--jobs 1'` passes:
 **12 package GTests**, including ten golden scripts on all three tiers;
 **15 StateStore tests**; and **201 native assertions on each of interpreter
-and JIT**, across twelve fixtures (**D8.1.1v17**). New package goldens include
+and JIT**, across twelve fixtures (**D8.3.6**). New package goldens include
 twenty foundation contract cases; new layout/navigation fixtures add 59 native
 assertions. Catalog validation and Radiant dimension lint pass. Layout and
 navigation screenshots were visually inspected; these are native inspection
@@ -454,9 +454,9 @@ feature completion.
 
 ### Foundation/display continuation — 2026-10-10
 
-This increment follows **D7.2.4/D7.2.5** (ordinary package imports and general
+This increment follows **D9.3.4/D10.2.1** (ordinary package imports and general
 engine mechanisms), **S12.1.1v2–S12.1.3** (pure projections and procedural
-interaction) and **D8.1.1v17** (tier parity). The §11.1 identity, lifecycle,
+interaction) and **D8.3.6** (tier parity). The §11.1 identity, lifecycle,
 provider, overlay, async and native-accessibility proposals still await user
 consultation; none is ratified by these implementation changes.
 
@@ -549,7 +549,7 @@ handles that request, the frame synchronizes the native control with the
 latest prop. The native control remains the sole edit owner. Matching accepted
 text is left intact, preserving caret/selection and composition. Named radio
 peers restore from their projected committed checked props. This uses existing
-DOM/frame facilities (**D7.2.5; S12.1.1v2–S12.1.3**), without settling the pending
+DOM/frame facilities (**D10.2.1; S12.1.1v2–S12.1.3**), without settling the pending
 general identity/provider/async proposals. The 40-assertion native fixture
 covers accepted/rejected changes, typed Select values, radio arrows, Space,
 middle edits and IME commit/cancel.
@@ -626,7 +626,7 @@ contracts and features.
 
 `typography_tokens_increment/focused.log` records exit 0: 21 package GTests,
 16 StateStore tests and all 32 native fixtures on forced interpreter and JIT,
-with 438 assertions per tier (**D8.1.1v17**). Catalog validation, both reference
+with 438 assertions per tier (**D8.3.6**). Catalog validation, both reference
 comparison scripts and `git diff --check` also pass. The fresh full Radiant run
 in `typography_tokens_increment/radiant_baseline.log` completes with exit 2:
 4,553 checks, 4,200 passes, 350 recorded partials and three failures. Only the
@@ -662,7 +662,7 @@ cases passed before the Avatar increment; logs are in
 
 ### Repeated ordinary markup: DOM construction copy — 2026-10-11
 
-The user settled **UI-1** through **D4.5.3**: MarkBuilder deep-copies ordinary
+The user settled **UI-1** through **D5.5.3**: MarkBuilder deep-copies ordinary
 Elements and their content only at UI/view-mode DOM construction. Copying an
 already-owned value is necessary because lifetime ownership does not provide
 independent native parent/sibling links. Ordinary Lambda evaluation and its
@@ -679,7 +679,7 @@ handles retain their existing identity.
 Full document rebuilds now use the existing subtree-state and frame-owner
 migration helpers before replacing and retiring the old root. SVG geometry and
 filter scope read the live DOM backing rather than the evaluator's source value;
-native attribute mutations remain visible after DOM copying (**D4.5.3**).
+native attribute mutations remain visible after DOM copying (**D5.5.3**).
 
 When all output is equal, skipped rebuilds hand off their new evaluator keys
 to the existing DOM nodes and queue their render handlers so delayed components
@@ -731,7 +731,7 @@ The initial native failures traced to missing CSSOM corner accessors. The
 shared property table now serializes physical/logical corners and compressed
 elliptical shorthands. A computed corner snapshot retains percentages and
 length expressions independently of paint overlap constraints
-(**D4.5.1v4**); temporary serialization storage is freed after each query.
+(**D5.5.1**); temporary serialization storage is freed after each query.
 The standalone CSSOM fixture passes 22 assertions, and both new focused unit
 tests pass. The rebuilt CSS animation suite passes 96 tests; vector passes
 112 and StateStore passes 16. Logs are in `temp/ui_dtna/avatar_increment/`.
@@ -751,7 +751,7 @@ Tag now renders inline filled/outlined/solid variants, thirteen preset colors,
 semantic token colors, custom hex backgrounds, icons, links and disabled close
 controls. `checkable_tag` exposes boolean controlled/uncontrolled selection.
 Native buttons supply Enter/Space activation and inherited fieldset disabling
-(**D7.2.5**). A controlled `visible:true` owner can decline a close request;
+(**D10.2.1**). A controlled `visible:true` owner can decline a close request;
 custom notifications request changes without mutating application props
 (**S12.1.1v2–S12.1.3; S8.2.2v5**). No synchronous custom-event return contract
 is assumed. Non-hex custom filled/outlined colors are diagnosed, not ignored.
@@ -781,12 +781,12 @@ function symbols, tooltips as native titles, clearing, readonly/disabled state,
 RTL arrows and named form entries. Controlled values remain committed props;
 `ui_change` requests retain numeric values and hover previews are separate
 notifications (**S12.1.1v2–S12.1.3; S8.2.2v5**). Native buttons supply Enter/Space
-activation (**D7.2.5**). `keyboard:false` disables arrow adjustment while retaining
+activation (**D10.2.1**). `keyboard:false` disables arrow adjustment while retaining
 button activation, matching the pinned reference. Shared Tooltip integration,
 semantic parts, motion, native accessibility and full pixel coverage remain open.
 
 The golden passes 22 contracts on interpreter and JIT, and the native fixture
-passes 70 assertions per tier (**D8.1.1v17**). Twenty-two geometry/font oracles
+passes 70 assertions per tier (**D8.3.6**). Twenty-two geometry/font oracles
 and thirteen committed interactions agree with pinned AntD. The reference
 contains sixteen cases at this increment; readonly is translated to upstream
 disabled behavior. Reusing an authored immutable symbol still depends on the
@@ -797,7 +797,7 @@ Rate exposed general engine defects that are fixed at their shared sources:
 
 - Native hover synthesis now snapshots and pins ancestor paths, sends boundary
   events in ancestor order, and roots `relatedTarget` before event allocation
-  (**D4.5.2; D5.3.3**). Mouse enter/leave events have non-bubbling,
+  (**D5.5.2; D6.3.3**). Mouse enter/leave events have non-bubbling,
   non-cancelable, non-composed flags. A settled template rebuild re-hits the
   host viewport to restore the physical hover source; it does not invent a
   logical identity rule. The standalone boundary fixture passes six assertions
@@ -835,7 +835,7 @@ native/custom icons, title/message/description/action/child slots, custom native
 close controls and controlled/uncontrolled visibility. Explicit title presence
 wins over the compatibility message, including null (**S8.2.2v5**). Close requests
 carry `value:false`; a controlled owner may retain `visible:true`
-(**S12.1.1v2–S12.1.3**). Native buttons provide Enter/Space (**D7.2.5**).
+(**S12.1.1v2–S12.1.3**). Native buttons provide Enter/Space (**D10.2.1**).
 Validated `class_names`/`styles` maps address the seven upstream semantic parts.
 Close motion, after-close notification, full pixel correspondence and the
 separately gated M7 error boundary remain outstanding.
@@ -852,7 +852,7 @@ shares the corner-radius compression helper. A synchronous style mutation also
 exposed a stale `currentColor` read from the committed paint snapshot. Declaration
 serialization now resolves live color without consuming pending geometry;
 `color:currentColor` follows inheritance. Computed/paint separation remains
-**D4.5.1v4**. The new unit regression initializes the same property metadata as a
+**D5.5.1**. The new unit regression initializes the same property metadata as a
 loaded document; all 97 CSS animation/CSSOM tests pass. The standalone native
 fixture passes nine assertions, including inheritance and a handler-time read.
 
@@ -886,12 +886,12 @@ nested content, a fixed fullscreen mask, custom content/functions, manual/auto
 percentages and five semantic parts. Size affects the indicator alone. Pure
 projection reads explicit state (**S12.1.1v2–S12.1.3**); document-owned named
 frames implement delay, staged automatic progress, cancellation and removed-owner
-cleanup (**D7.5.3**). The fixture retains action models explicitly, consistent
+cleanup (**D9.5.6**). The fixture retains action models explicitly, consistent
 with the M0 prototype limit; it does not prove general keyed composition.
 Fullscreens block pointers and retain the reference's keyboard policy without
 inventing focus containment or dismissal. Native accessibility remains open.
 
-The golden passes 24 contracts on T0 and MIR Direct (**D8.1.1v17**), and the
+The golden passes 24 contracts on T0 and MIR Direct (**D8.3.6**), and the
 native fixture passes 41 assertions per tier. Ten initial geometry/style oracles
 and real delay/content/removal/fullscreen observations agree with the eighteenth
 pinned reference. Spin keyframes are paused at 0ms explicitly in the browser
@@ -907,7 +907,7 @@ stylesheet traversal paths and clear visitors now preserve generated boxes;
 layout rebinds their declarations from the originating element. Per-element
 CSSOM recascade also replaces pseudo trees so vanished selector branches cannot
 survive an ancestor class change. Existing retirement/borrow ownership keeps
-the committed snapshot alive until rebind (**D4.5.1v4**).
+the committed snapshot alive until rebind (**D5.5.1**).
 
 The property table now exposes inherited/live `pointer-events` through the
 shared declaration serializer. The independent HTML fixture passes ten
@@ -968,13 +968,13 @@ colors and scoped seed overrides without copied color algorithms.
 
 Loading accepts a boolean or `{delay,icon}`. Pure projection observes explicit
 state (**S12.1.1v2–S12.1.3**); document-owned named frames handle delay changes,
-cancellation and removed owners (**D7.5.3**). Activation remains available
+cancellation and removed owners (**D9.5.6**). Activation remains available
 during the delay, matching the pinned reference, and stops when loading is
 shown. Native `type` enums are serialized as text for both Button and Input;
 symbol-valued HTML attributes had bypassed native submit/reset/input dispatch.
 
 Button's native fixture passes all 64 assertions on T0 and MIR Direct
-(**D8.1.1v17**). The nineteenth pinned reference supplies 34 initial
+(**D8.3.6**). The nineteenth pinned reference supplies 34 initial
 geometry/style oracles, semantic-part observations and actual keyboard,
 loading, removal and form actions. All nine reference comparison scripts pass
 against the fresh capture. Full pixels, loading/wave motion, modern color and
@@ -1025,7 +1025,7 @@ content-box padding/borders and capping the automatic minimum by the maximum
 
 The reduced HTML fixture improves from 3/18 to **18/18 assertions**; the actual
 gallery improves from 0/2 to **2/2**, including a real checkbox click. Both pass
-on interpreter and MIR Direct (**D8.1.1v17**). Independent Chromium geometry
+on interpreter and MIR Direct (**D8.3.6**). Independent Chromium geometry
 agrees with all 18 reduced oracles. Gallery Select remains at x=75, width=120;
 the next label moves from x=140 to x=203, leaving the authored 8px gap.
 The rebuilt executable, dimension lint, catalog and whitespace checks pass.
@@ -1064,7 +1064,7 @@ vertical-writing/text-box-trim exclusions remain intact. No package CSS changes
 or new formal rulings are needed.
 
 The reduced HTML fixture passes **16/16 assertions** on interpreter and MIR
-Direct (**D8.1.1v17**), matching independent Chromium observations. It covers
+Direct (**D8.3.6**), matching independent Chromium observations. It covers
 flow/row/column layout, small/tall/stretched buttons, authored flex/grid alignment
 and resize relayout. The gallery PNG shows centered pagination labels. The
 debug executable, dimension lint, catalog and whitespace checks pass. Evidence
@@ -1112,7 +1112,7 @@ when the minimum is smaller. The existing 776-case sizing baseline passes.
 
 The reduced fixture passes **40/40 assertions**, matching Chromium, and the
 actual gallery passes **4/4 assertions** on interpreter and MIR Direct
-(**D8.1.1v17**), including resizing. Its description grid expands to 353.6px;
+(**D8.3.6**), including resizing. Its description grid expands to 353.6px;
 the first value receives its 48.9px text width, with the authored 16px space
 before the next label. Three existing intrinsic/grid ownership unit contracts,
 the debug build, dimension lint, catalog and whitespace checks pass. Evidence
@@ -1176,7 +1176,7 @@ Verification:
 
 - The gallery's entire serialized presentation is byte-identical to the saved
   pre-change result on forced interpreter and MIR Direct tiers
-  (**D8.1.1v17**).
+  (**D8.3.6**).
 - `dtna_elements.ls/.txt` covers retained logical source, page metadata/defaults,
   root tokens, multiple root children, nested button/checkbox/progress views and
   rejected page options, flat constructor equivalence, omitted properties and

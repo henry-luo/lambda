@@ -1,6 +1,6 @@
 // one descriptor table drives validation, enablement and human-readable history labels.
 import model: .model
-import history: lambda.editor.mod_history
+import history: lambda.editor.core.history
 
 pub let catalog = [
     {id:"view.configure",label:"View settings",fields:["rulers","grid","spacing","subdivisions","snap"],target:false},

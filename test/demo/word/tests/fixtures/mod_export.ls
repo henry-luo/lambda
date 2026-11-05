@@ -3,11 +3,11 @@ import model: ~~.~~.mod_model
 import files: ~~.~~.mod_io
 import equation: ~~.~~.mod_equation
 import shapes: ~~.~~.mod_shapes
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import image: lambda.editor.mod_image
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import image: lambda.editor.image
 
 fn equation_editor() any^ {
     let base = edit_set_selection(model.open_editor(node('doc',[node('p',[text("BeforeAfter")])])),

@@ -91,3 +91,21 @@ let nodes = walk(scene);
 {valid: s.validate(scene) ^ { false }, bodies: len([for (n in nodes where name(n)^ == 'rigid-body') n]),
  clips: [for (n in nodes where name(n)^ == 'animation-clip') n.id], commands: len(present.commands(st, st.camera.position)),
  looks: [for (l in sc.LOOK_ORDER) len(sc.look_edits(l, true))], next_look: [for (l in sc.LOOK_ORDER) sc.next_look(l)]}
+
+// ---- speed governor: lag holds the speed, deeper lag eases it down to a floor, a caught-up scene lifts it
+"governor";
+let DT = 1.0 / 60.0
+let eased = reduce([30.0, *[for (i in 1 to 60) i]], (cap, i) any^ => present.govern(cap, 0.8, 30.0, DT))
+let cruising = {*: lane, vx: 0.0, vz: 25.0}
+let pedals = {*: v.IDLE, throttle: 1.0};
+{free: present.govern(null, 0.05, 30.0, DT), held: present.govern(null, 0.3, 30.0, DT), ratchet: present.govern(30.0, 0.3, 20.0, DT),
+ floor: present.govern(null, 0.3, 3.0, DT), kept: present.govern(20.0, 0.1, 25.0, DT), eased: r2(eased),
+ lifting: present.govern(20.0, 0.05, 20.0, 0.5), lifted: present.govern(48.0, 0.05, 48.0, 0.5),
+ over: present.capped(pedals, 20.0, cruising), under: present.capped(pedals, 30.0, cruising) == pedals, open: present.capped(pedals, null, cruising) == pedals}
+
+// ---- rear indicators: the lamp on the side the wheels point toward blinks; at speed a smaller angle is a full turn
+"indicators";
+let steered = {*: lane, steer: 0.3};
+{left: present.signal(steered, 0.1), right: present.signal({*: steered, steer: -0.3}, 0.1), off_phase: present.signal(steered, 0.5),
+ straight: present.signal(lane, 0.1), at_speed: present.signal({*: lane, vz: 45.0, steer: 0.05}, 0.1),
+ drift: present.signal({*: lane, vz: 45.0, steer: 0.03}, 0.1)}

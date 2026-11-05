@@ -1,7 +1,7 @@
 // Keep the card mounted across studio redraws. Like the photo album, turn the two-sided
 // leaf through presentation transforms; changing clip paths would relayout every frame.
 import dom
-import updates: ~~.mod_publish
+import updates: lambda.ui.core.publish
 import A: .mod_art
 import P: .mod_popup
 import ui: .mod_ui

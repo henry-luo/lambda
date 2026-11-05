@@ -1,4 +1,3 @@
-import elements: lambda.ui.dtna.elements
 import presentation: .presentation
 import binding: .binding
 
@@ -48,11 +47,6 @@ pub fn properties(props, allowed: array, kind, attributes = false, family = "dtn
             not (attributes and (starts_with(string(key),"aria-") or starts_with(string(key),"data-")))) ^ { false })) string(key)],
         if (len(invalid) > 0) raise fail(kind,"unsupported prop " ++ invalid[0],family) else true
     )
-}
-pub fn node(kind, props, child, allowed = []) element^ {
-    let names = properties(props,[*common_props,*allowed],kind,true)^
-    let values = validate(kind,props)^;
-    elements.create(kind,props,children(child))
 }
 
 pub fn attrs(props) => map([for (key, value in props where ((contains(["id", "role", "tabindex"], string(key)) or (string(key) == "title" and value is string) or

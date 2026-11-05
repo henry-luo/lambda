@@ -12,8 +12,8 @@
 //
 // All operations are pure functional and never mutate.
 
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.step
 
 pub fn finite_number(v) => v is number and not (v is nan) and not (v is inf) and v != -inf
 

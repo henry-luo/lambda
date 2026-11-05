@@ -4,9 +4,9 @@ import files: ~~.mod_io
 import page: ~~.mod_page
 import ruler: ~~.mod_ruler
 import stories: ~~.mod_stories
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let doc = node('doc',[node('p',[text("Before and after")]),node('p',[text("Second paragraph")])])
 let selection = text_selection(pos([0,0],7),pos([0,0],7))

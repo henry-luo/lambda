@@ -2,7 +2,7 @@
 
 `import editor: lambda.editor.raster` exposes the value/command core used by
 the [Photos demo](../../../../test/demo/photos/README.md). The image tree is the
-shared `lambda.image` representation (**D7.2.4v3 / S9.1.2**); the editor owns
+shared `lambda.image` representation (**D9.3.4 / S9.1.2**); the editor owns
 targets, gestures and history policy, rather than a second pixel store.
 
 ```lambda
@@ -52,10 +52,10 @@ settings restart the exact stroke; completion still records its complete point
 sequence as one transaction. Selection coverage has undo history without dirtying
 document pixels. Panning has no image history. `mark_saved(session,snapshot)` tracks a content
 checkpoint independently of selection/camera state. History reuses
-`lambda.editor.mod_history`, including target restoration (**S9.2.2**).
+`lambda.editor.core.history`, including target restoration (**S9.2.2**).
 
 The optional `lambda.editor.raster.view` module copies rendered pixels into a
-retained native canvas and computes camera/target presentation (**D4.5.2**).
+retained native canvas and computes camera/target presentation (**D5.5.2**).
 `lambda.editor.raster.render.frame` reuses a preceding composite and recomposites
 the changed brush region. It falls back to full composition for stale caches,
 effects/styles or other gestures. These caches are derived preview data; exports
@@ -113,7 +113,7 @@ its existing resampling semantics and rejects a canvas-only anchor option.
 
 Storage uses shared `u8` tiles for region and paint edits; existing dense inputs
 are retained as shared backing until a touched tile detaches (**S9.2.2 /
-D4.1.4v5**). Layer affine transforms, eight blend modes, clipping chains and
+D5.1.4**). Layer affine transforms, eight blend modes, clipping chains and
 pass-through groups use the shared renderer. `layer.transform` accepts an absolute
 local `matrix` for one leaf, or relative `angle`/`scale_x`/`scale_y` around the
 combined bounds of selected roots. `delta` is an explicit document-space affine;
@@ -334,4 +334,4 @@ The optional view adapter recognizes `.raster-grid`, `.raster-ruler-x/y` and
 `.raster-navigator` (canvas plus `.raster-navigator-viewport`). Grid SVGs and
 line enumeration are bounded to the visible region. Navigator thumbnails reuse
 the retained composite and defer resizing/upload during live editing until
-release; camera gestures update only the viewport overlay (**D4.5.2**).
+release; camera gestures update only the viewport overlay (**D5.5.2**).

@@ -9,15 +9,15 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready"
+      "js": "(()=>{if(!globalThis.phWorld){const x=new XMLHttpRequest();x.open('GET','../../../scene3d/_physics_probe.js',false);x.send();(0,eval)(x.responseText)}return phWorld() && phWorld().getAttribute('data-ready')==='true';})()"
     },
     {
       "type": "script",
-      "js": "physicsDemo.restart()"
+      "js": "phRequest({operation:\"reset\"})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 0"
+      "js": "phState().tick === 0"
     },
     {
       "type": "click",
@@ -27,19 +27,19 @@
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.playing === true"
+      "js": "(phWorld().getAttribute('data-playing')==='true') === true"
     },
     {
       "type": "script",
-      "js": "physicsDemo.restart()"
+      "js": "phRequest({operation:\"reset\"})"
     },
     {
       "type": "script",
-      "js": "physicsDemo.action('launch',false)"
+      "js": "phAction('launch',false)"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 0 && physicsDemo.state.bodies[1].velocity[0] > 0"
+      "js": "phState().tick === 0 && phState().bodies[1].velocity[0] > 0"
     },
     {
       "type": "snapshot_surface",
@@ -51,7 +51,7 @@
     },
     {
       "type": "script",
-      "js": "physicsDemo.request({operation:'step',ticks:720})"
+      "js": "phRequest({operation:'step',ticks:720})"
     },
     {
       "type": "assert_script",
@@ -80,7 +80,7 @@
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 720"
+      "js": "phState().tick === 720"
     },
     {
       "type": "collect_gc",
@@ -88,11 +88,11 @@
     },
     {
       "type": "script",
-      "js": "physicsDemo.restart()"
+      "js": "phRequest({operation:\"reset\"})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 0 && document.getElementById('metric-primary').textContent === '0 / 32'"
+      "js": "phState().tick === 0 && document.getElementById('metric-primary').textContent === '0 / 32'"
     }
   ]
 }

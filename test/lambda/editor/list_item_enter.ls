@@ -1,10 +1,10 @@
 // Enter in a blank list item lifts/outdents it (Mac-Notes behaviour) instead of
 // creating another empty item. Mirrors the JS reference cmdEnterEmptyListItem.
 // (cmd_split_block routes an empty-list-item caret to the lift.)
-import lambda.editor.mod_doc
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_md_schema
-import lambda.editor.mod_commands
+import lambda.editor.core.doc
+import lambda.editor.core.source_pos
+import lambda.editor.schema.markdown
+import lambda.editor.core.commands
 
 fn st(d, sel) => {doc: d, selection: sel, schema: html5_subset_schema, stored_marks: null}
 fn st_md(d, sel) => {doc: d, selection: sel, schema: md_schema, stored_marks: null}

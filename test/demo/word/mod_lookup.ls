@@ -2,8 +2,8 @@
 // A document-owned task makes each request; its outcome returns to the window as
 // a word_lookup event, and only the latest request's outcome is shown.
 import dom
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
+import lambda.editor.core.doc
+import lambda.editor.model
 import model: .mod_model
 
 pub let dictionary_api = "https://api.dictionaryapi.dev/api/v2/entries/en/"

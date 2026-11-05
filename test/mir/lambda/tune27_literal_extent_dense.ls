@@ -1,4 +1,4 @@
-// Tune27 T27-9 / S7.1.3v2 / D3.3.3v3: a literal loop bound (`while (i < 4)`)
+// Tune27 T27-9 / S7.1.3v2 / D4.3.3: a literal loop bound (`while (i < 4)`)
 // is an extent; a nested counter declared inside the body joins the proof; a
 // finite loop's counter fact starting at zero proves it non-negative. Every
 // read below is a raw lane load on the dense arm and the body has no

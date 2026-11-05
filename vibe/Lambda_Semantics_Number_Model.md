@@ -294,7 +294,7 @@ Never returned: `number` (union), `f64`/`i64`/`u64` (aliases), tier names. Array
 
 ### 5.1 Inside LambdaJS: number ≡ `float`, uniformly
 
-JS number *is* binary64; the mapping is exact by construction (NaN, ±Infinity, −0 included). **Compact-int packing is removed from `js_make_number`** — with it go the integer fast path and the `-0` special case. JS Symbols are independently pointer-backed `LMD_TYPE_SYMBOL` Items, not a numeric exclusion from the number lane (D4.6.1v3). The obligation that "every JS-visible surface keys on value, never representation" — the discipline that produced the `v18p` −0 bug and the Stage-4C int-vs-float inference family — is dissolved rather than policed.
+JS number *is* binary64; the mapping is exact by construction (NaN, ±Infinity, −0 included). **Compact-int packing is removed from `js_make_number`** — with it go the integer fast path and the `-0` special case. JS Symbols are independently pointer-backed `LMD_TYPE_SYMBOL` Items, not a numeric exclusion from the number lane (D5.6.1). The obligation that "every JS-visible surface keys on value, never representation" — the discipline that produced the `v18p` −0 bug and the Stage-4C int-vs-float inference family — is dissolved rather than policed.
 
 **Perf plan, eyes open:** JS Number uses Lambda's canonical float encoding.
 Most doubles are self-tagged in the `Item`; out-of-band transient values use an
@@ -372,7 +372,7 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 
 | # | Item | Status | Violates |
 |---|---|---|---|
-| 1 | `js_make_number` compact-int packing + `-0` special case + Symbol-range guard | **Fixed in current tree:** `js_make_number` always emits the canonical `LMD_TYPE_FLOAT` representation; Symbols use the independent pointer-backed `LMD_TYPE_SYMBOL` carrier. | §5.1, D4.6.1v3 |
+| 1 | `js_make_number` compact-int packing + `-0` special case + Symbol-range guard | **Fixed in current tree:** `js_make_number` always emits the canonical `LMD_TYPE_FLOAT` representation; Symbols use the independent pointer-backed `LMD_TYPE_SYMBOL` carrier. | §5.1, D5.6.1 |
 | 2 | Dual double lane tags `ELEM_FLOAT`/`ELEM_FLOAT64`: the dead-but-armed **truncation landmine** in `print.cpp:23` (`read_compact_elem` FLOAT64 → `i2it`), the JS seam (`Float64Array` → `ELEM_FLOAT64` vs inference → `ELEM_FLOAT`), reductions routing FLOAT64 via the generic slow path (`lambda-eval-num.cpp:1385`), `validate_pattern.cpp:111` collapsing both to one leaf | **Fixed:** `ELEM_FLOAT64` is the single canonical double lane at `0x10`; `ELEM_FLOAT` is only a source-compatibility alias, the retired `0xC0` slot has size `0`, JS `Float64Array` and `[float]` inference produce the same lane, and the duplicate slow/dead branches are removed. | §3.5 |
 | 3 | A distinct static type object for the `f64` alias | **Fixed:** `f64` input canonicalizes directly to `float` literals/type refs; the duplicate static alias objects are removed. | §3.2 |
 | 4 | Any `type()` path reporting `"f64"` (the superseded draft direction) | **Fixed:** `type(1.0f64)` reports `float`; `f64` is a source alias only and has no separate runtime TypeId, as required by S2.1.1. | §4 |
@@ -463,3 +463,27 @@ The prior rule (§2.2 as of W1) made `n` serve two types by spelling: `1n`/`1e3n
 - **C — both `n` and `m` accepted for decimal.** Rejected on sight: two spellings for one type is review noise and settles nothing — it keeps A's trap and adds a synonym.
 
 Consequences: fractional/negative-exponent `n` spellings (`1.5n`, `1e-3n`) are **compile errors** whose message points at `m`; `n` requires an integer-valued spelling (no `.`, no negative exponent — the old lexical test survives as the *validity* rule for `n` rather than a *typing* rule); `m` accepts every numeric spelling. The lexical rule is thereby superseded, not deleted — it demoted from "picks the type" to "guards the suffix."
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.2.4 → D2.2.4
+
+**D2.2.4** `LMD_TYPE_DECIMAL` carries a `Decimal` wrapper with an
+explicit `DecimalKind storage_kind` (`FIXED`, `EXTENDED`, `BIGINT`) and
+an embedded `mpd_t dec_val`. `mpd_t` describes only the mathematical
+value; it never determines the Lambda tier or BigInt identity. Its flags
+remain exclusively libmpdec's numeric/allocation flags. Construction
+transfers an owned libmpdec header into the embedded field, marks that
+field `MPD_STATIC`, and releases the original header; destruction calls
+`mpd_del(&dec_val)`, releasing coefficient storage but never the wrapper.
+Thus source-level decimal tiers remain invisible while the BigInt carrier
+stays distinguishable without a new Item tag. [S4.6.1, S4.9.1]

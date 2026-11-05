@@ -1,4 +1,4 @@
-// D7.5.2, D7.5.8: inactive package decoding; no filesystem or install authority.
+// D11.1.2, D11.2.4: inactive package decoding; no filesystem or install authority.
 import meta: lambda.security.tuf.metadata
 
 pub fn limits() => {type: "zip", max_archive_bytes: 67108864, max_index_bytes: 8388608,
@@ -47,7 +47,7 @@ fn action(session) map^ {
 pub fn begin(bytes) map^ {
     if (not (bytes is binary)) raise meta.invalid("package bytes required")
     let archive = parse(bytes, limits())^
-    // D7.4.5v2: enumerate the archive's virtual child view through its iterator.
+    // D9.5.5: enumerate the archive's virtual child view through its iterator.
     var nodes = [for (node in content(archive)^) node], cursor = 0, total = 0, keys = []
     // Validate the complete namespace before decoding/emitting the first member.
     while (cursor < len(nodes)) {

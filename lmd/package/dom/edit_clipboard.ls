@@ -1,4 +1,4 @@
-// Clipboard policy belongs to the DOM behavior package (D7.2.5).  The native
+// Clipboard policy belongs to the DOM behavior package (D10.2.1).  The native
 // helpers only serialize the current Selection and write/read platform data.
 import dom
 import structure: lambda.dom.edit_structure

@@ -1,4 +1,4 @@
-// D4.4.4v4: a collecting call relocates the packed lane, but an immutable
+// D5.4.4: a collecting call relocates the packed lane, but an immutable
 // admitted array keeps its logical length (S9.1.2, S7.1.3v2).
 pn stable_length(values: int[], text: string) int {
     let before = len(values)

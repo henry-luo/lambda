@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.4.7, D8.1.3v25: one nominal class owns all 129 methods, 33 instance initializers, 17 static initializers and nine static blocks, without former fixed member caps.",
+  "description": "D3.4.7, D8.4.2: one nominal class owns all 129 methods, 33 instance initializers, 17 static initializers and nine static blocks, without former fixed member caps.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",

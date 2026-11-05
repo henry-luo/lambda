@@ -33,7 +33,7 @@
 #include "../lambda/dom/dom_observers.h"
 
 
-// D7.2.5: an edit has no ambient pending range or thread-local result channel.
+// D10.2.1: an edit has no ambient pending range or thread-local result channel.
 // The dispatcher owns one stack invocation, exposes only its id to the package,
 // and every waist primitive validates that explicit capability before acting.
 struct DomMutationTransaction;
@@ -85,7 +85,7 @@ static void editing_dom_invocation_note_mutation(DomEditInvocation* invocation) 
     editing_dom_transaction_note_owned_write(invocation);
 }
 
-// D7.2.5: generic mutation transaction -------------------------------------------------
+// D10.2.1: generic mutation transaction -------------------------------------------------
 //
 // The edit package supplies a capability and generic primitives supply DOM
 // mechanics.  A text replacement can therefore retain its inverse before the
@@ -115,14 +115,14 @@ typedef struct DomMutationSelectionSnapshot {
 // A structural edit can split, extract, move, or remove several existing
 // nodes before its final step fails.  Preserve the original node graph and
 // text backing before the first write so rollback restores identities rather
-// than rebuilding the host from serialized HTML (D7.2.5).
+// than rebuilding the host from serialized HTML (D10.2.1).
 typedef struct DomMutationNodeSnapshot {
     DomNode* node;
     DomNode* parent;
     String* text_string;
     // Attribute values are part of a structural DOM delta. Copy the ordinary
     // DOM names/values rather than serializing a host or reading package
-    // policy fields (D7.2.5).
+    // policy fields (D10.2.1).
     ArrayList* attributes;
 } DomMutationNodeSnapshot;
 
@@ -183,7 +183,7 @@ struct DomMutationTransaction {
     DomMutationSelectionSnapshot selection_snapshot;
     // The behavior package owns the value. Retaining this opaque root makes
     // session updates atomic with the generic DOM transaction without native
-    // code learning any history or command policy (D7.2.5, D5.3.3).
+    // code learning any history or command policy (D10.2.1, D6.3.3).
     uint64_t edit_session_root_before;
     bool edit_session_root_before_rooted;
     bool changed;
@@ -264,7 +264,7 @@ extern "C" bool dom_edit_transaction_defer_mutation(
     } else {
         // This notification came through an ordinary package-visible DOM
         // primitive while the transaction was active, so it is an owned write
-        // rather than a stale external edit (D7.2.5).
+        // rather than a stale external edit (D10.2.1).
         transaction->expected_epoch = dom_mutation_epoch(document);
     }
     return true;
@@ -938,7 +938,7 @@ static bool editing_dom_resolve_insert_boundary(DocState* state,
 
 // Range insertion links a node into sibling pointers only. Editing must also
 // update the backing Lambda Element, so route the detached text through the
-// shared Mark-aware DOM bridge (D5.3.3).
+// shared Mark-aware DOM bridge (D6.3.3).
 static bool editing_dom_insert_detached_text(DomElement* parent,
                                              DomNode* reference,
                                              DomText* text) {
@@ -1089,7 +1089,7 @@ DomEditInvocation* dom_edit_invocation_lookup(DocState* state,
     DomEditInvocation* invocation = dom_edit_invocation_lookup_document(state, id);
     // Capability operations that mutate or expose selection remain scoped to
     // the editable host or its descendants; document handlers use edit_target
-    // first to obtain that canonical receiver (D7.2.5).
+    // first to obtain that canonical receiver (D10.2.1).
     if (!invocation || invocation->host->doc != receiver->doc ||
         !view_geometry_dom_is_descendant(invocation->host, receiver, true)) {
         return nullptr;
@@ -1319,7 +1319,7 @@ static void editing_dom_select_mapped_text(DomEditInvocation* invocation,
     // A partial-range split retires the text wrapper the package initially
     // observed. Keep the explicit invocation capability mapped to its selected
     // replacement, so a follow-up generic attribute write decorates the new
-    // wrapper rather than a detached left sibling (D7.2.5).
+    // wrapper rather than a detached left sibling (D10.2.1).
     invocation->text = mapped_text;
     invocation->text_start = 0;
     invocation->text_end = end.offset;
@@ -1758,7 +1758,7 @@ static bool editing_dom_retained_snapshot_matches_tree(
 // A document epoch includes unrelated script activity (such as rendering a
 // command result elsewhere in the page). History instead validates the exact
 // identity-preserving host snapshot it will invert, so only divergent edits in
-// the retained host invalidate this delta (D7.2.5).
+// the retained host invalidate this delta (D10.2.1).
 static bool editing_dom_retained_snapshot_matches(DomElement* host,
                                                   const ArrayList* snapshots) {
     int index = 0;
@@ -2202,7 +2202,7 @@ extern "C" bool radiant_dom_exec_command(void* document_ptr, const char* command
     // An API command may configure document-scoped package state without a
     // Selection.  Start an invocation only when the live Selection resolves
     // to one editable host; otherwise the package receives <body> and decides
-    // support/enabled from its descriptor (D7.2.5).
+    // support/enabled from its descriptor (D10.2.1).
     DomElement* host = radiant_document_body_element(document);
     if (!host) return false;
 
@@ -2234,7 +2234,7 @@ extern "C" bool radiant_dom_exec_command(void* document_ptr, const char* command
     edit_result.set(raw_result);
     bool selection_committed = dom_edit_invocation_commit_selection(&invocation);
     bool changed = invocation.changed;
-    // D7.2.5: post-commit API event facts come from the structured package
+    // D10.2.1: post-commit API event facts come from the structured package
     // result. This bridge carries no command-name or inputType policy.
     bool emit_input = radiant_edit_result_bool(edit_result.get(), "api_input");
     char* input_type = radiant_edit_result_string_copy(edit_result.get(), "api_input_type");
@@ -2257,7 +2257,7 @@ extern "C" bool radiant_dom_exec_command(void* document_ptr, const char* command
     return claimed || changed || selection_committed;
 }
 
-// D7.2.5: legacy query methods only transport a context and command spelling.
+// D10.2.1: legacy query methods only transport a context and command spelling.
 // The package owns support, enabled, state, indeterminate, and value policy;
 // an absent selection still reaches it through <body> for queryCommandSupported.
 Item radiant_dom_query_command(void* document_ptr, const char* query_kind,

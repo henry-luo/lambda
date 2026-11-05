@@ -4,8 +4,8 @@ Status: implemented and verified, 2026-10-18. Authorized by the user's
 PDF-text proposal and instruction to implement it.
 
 Contracts: functional PDF construction and frozen output resources follow
-**S2.6.6v3 / D2.6.12v3**; native resource lifetimes and precise roots follow
-**D4.5.1v4 / D5.3.3**. The Lambda package owns PDF syntax; native helpers expose
+**S2.6.6v3 / D3.5.1**; native resource lifetimes and precise roots follow
+**D5.5.1 / D6.3.3**. The Lambda package owns PDF syntax; native helpers expose
 selected font programs, glyph identities and positions.
 
 ## Delivery
@@ -42,8 +42,8 @@ font programs with normalized outlines or color glyph images. Those programs
 are invoked through PDF text operators, rather than copied into page paths.
 Restricted embedding and unsupported native glyph programs report errors.
 Font snapshots are immutable; growing caches remain private and precisely
-rooted under **S2.6.6v3 / D2.6.12v3 / D5.3.3**. Document resources retain faces
-and isolated SVG font contexts until export finishes (**D4.5.1v4**).
+rooted under **S2.6.6v3 / D3.5.1 / D6.3.3**. Document resources retain faces
+and isolated SVG font contexts until export finishes (**D5.5.1**).
 
 Decorations, clips, paged text and solid-fill inline SVG text use this path.
 Simple opacity groups become transparency forms; their bounding boxes include

@@ -41,7 +41,7 @@ struct BroadcastRegistry {
     BroadcastChannel* last;
 };
 
-// an optional realm capsule keeps the evaluator ABI stable (D5.4.2).
+// an optional realm capsule keeps the evaluator ABI stable (D6.4.2).
 static constexpr uint32_t BROADCAST_OWNER = 0x42435354; // BCST
 static void broadcast_registry_destroy(void* data);
 static const ContextCapsuleOps broadcast_ops = {

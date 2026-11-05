@@ -3,6 +3,7 @@ import controls: lambda.ui.controls
 import ant: lambda.ui.dtna
 import bold: lambda.ui.bold
 import wired: lambda.ui.wired
+import workspace: lambda.ui.workspace
 
 view <control_fixture> () any^ state text:"seed", notes:"note", choice:10, enabled:false, radio:"a",
     requests:0, accepted:true, value_type:"", compositions:0 {
@@ -18,7 +19,8 @@ view <control_fixture> () any^ state text:"seed", notes:"note", choice:10, enabl
             apply(<control.radio id:"radio-b",name:"group",value:"b",checked:radio=="b",on_change:"radio","B">)>
         <div class:"row", apply(ant.input({id:"ant-field",value:text,on_change:"text"})^)
             apply(bold.input({id:"bold-field",value:text,on_change:"text"})^)
-            apply(wired.input({id:"wired-field",value:text,on_change:"text"})^)>
+            apply(wired.input({id:"wired-field",value:text,on_change:"text"})^)
+            apply(workspace.input({id:"workspace-field",value:text,on_change:"text"})^)>
         <button id:"programmatic","Change state"> <button id:"reject","Reject edits">
         <span id:"requests",string(requests)> <span id:"type",value_type> <span id:"compositions",string(compositions)>
     >

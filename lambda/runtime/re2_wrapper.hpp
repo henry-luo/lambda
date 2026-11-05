@@ -112,7 +112,7 @@ TypePattern* runtime_pattern_from_type(Type* type);
 
 // A runtime map shape for builtin results (find's {value, index}, io.grep's
 // records): the given fields in order. It lives in the execution pool and is
-// never registered in a module type list (D8.5.1v7). `names` must be static.
+// never registered in a module type list (D8.3.5). `names` must be static.
 TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int count);
 
 /**
@@ -126,6 +126,8 @@ TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int
 List* pattern_find_all(TypePattern* pattern, const char* str, size_t len);
 List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len,
                                int64_t limit, bool ignore_case);
+int64_t pattern_find_count_options(TypePattern* pattern, const char* str, size_t len,
+                                   int64_t limit, bool ignore_case);
 
 /**
  * Replace matches of pattern in string, stepping as ECMAScript replaceAll does

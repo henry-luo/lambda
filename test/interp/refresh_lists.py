@@ -25,7 +25,7 @@ SUBSET_HEADER = """# T0 interpreter — interpreted-script list (LAMBDA_EXEC_BAC
 # followed by `python3 test/interp/refresh_lists.py`, then reviewed and
 # committed. Every script here runs entirely under the AST interpreter
 # (fallback=0) and produces output byte-identical to the JIT tier, which is the
-# shared golden oracle (SI3 / D3.3.1's third leg).
+# shared golden oracle (SI3 / D4.3.1's third leg).
 #
 # format: <script>\t<direct|run>
 # `run` scripts are procedural and must be invoked as `lambda.exe run <script>`
@@ -37,7 +37,7 @@ EXCLUDED_HEADER = """# T0 interpreter — exclusion list (LAMBDA_EXEC_BACKEND=in
 #
 # Scripts whose pre-scan finds a construct the walker does not execute fail
 # before execution under explicit interp, counted as excluded with fallback=0
-# (D8.1.1v15). Only AUTO may choose whole-module MIR instead.
+# (D8.3.1). Only AUTO may choose whole-module MIR instead.
 #
 # This file, interp_p0_subset.txt, and interp_inconclusive.txt partition the
 # classified corpus; regenerate all three with this script.
@@ -47,7 +47,7 @@ EXCLUDED_HEADER = """# T0 interpreter — exclusion list (LAMBDA_EXEC_BACKEND=in
 #
 # `node:AST_NODE_PROC` is usually the task-backed boundary rather than the `pn`
 # spelling: suspension-capable bodies need a MIR satellite and are therefore
-# unsupported under the strict T0 pin (D8.1.1v15).
+# unsupported under the strict T0 pin (D8.3.1).
 #
 # format: <script>\tnode:<first unsupported kind>
 """

@@ -1,4 +1,4 @@
-// S12.1.1v3/D7.5.3v2: cached navigation belongs to the live document owner.
+// S12.1.1v3/D9.5.6: cached navigation belongs to the live document owner.
 import radiant
 
 pub fn bake_asset(id,sources,settings,options = {}) element => <'navigation-bake' id:id,version:1,*:options,sources:sources,settings:settings>

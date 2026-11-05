@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import dom
 import c: lambda.ui.core.component
 import collection: lambda.ui.core.collection
@@ -5,7 +6,7 @@ import interaction: lambda.ui.core.interaction
 import general: .general
 
 pub fn collapse(props) element^ {
-    let node = c.node('collapse',props,null,["items","active_keys","default_active_keys","accordion","disabled"])^
+    let node = descriptor.node('collapse',props,null,["items","active_keys","default_active_keys","accordion","disabled"])^
     let identity = collection.require_id(props,"collapse")^
     let items = collection.validate(props.items,"collapse")^
     let flags = c.boolean_props(props,["accordion"],"collapse")^

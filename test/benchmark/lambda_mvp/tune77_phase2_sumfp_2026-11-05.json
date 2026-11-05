@@ -1,0 +1,802 @@
+{
+  "schema": 2,
+  "date": "2026-11-04T17:24:46.002357+00:00",
+  "host": "macOS-26.3-arm64-arm-64bit",
+  "machine": "arm64",
+  "revision": "64be60daa1ef17c13801b355e7d61239a80acd1d",
+  "working_tree": "M Makefile\n M doc/Lambda_Packages.md\n M doc/Reactive_UI.md\n M doc/dev/Shared_Editing.md\n M lambda/runtime/ast-core.hpp\n M lambda/runtime/mir_bitwise.hpp\n M lambda/runtime/mir_container_access.hpp\n M lambda/runtime/mir_cow_analysis.hpp\n M lambda/runtime/mir_emitter_shared.hpp\n M lambda/runtime/mir_shape_candidates.hpp\n M lambda/runtime/mvp/mvp.hpp\n M lambda/runtime/mvp/mvp_internal.hpp\n M lambda/runtime/mvp/mvp_mir.cpp\n M lambda/runtime/mvp/mvp_plan.cpp\n M lambda/runtime/script_run.cpp\n M lambda/runtime/sys_func_registry.c\n M lambda/runtime/transpile-mir.cpp\n M lambda/runtime/type_contract.hpp\n M lmd/package/doc/docx/export_style.ls\n M lmd/package/doc/latex/latex.ls\n M lmd/package/doc/latex/packages/bib_data.ls\n M lmd/package/doc/latex/packages/graphicx.ls\n M lmd/package/doc/tikz/plotdata.ls\n D lmd/package/edit/controller.ls\n D lmd/package/edit/drawing.ls\n D lmd/package/edit/edit.ls\n D lmd/package/edit/files.ls\n D lmd/package/edit/html.ls\n D lmd/package/edit/markdown.ls\n D lmd/package/edit/model.ls\n D lmd/package/edit/rich_text.ls\n D lmd/package/edit/session.ls\n D lmd/package/edit/shell.ls\n D lmd/package/edit/source.ls\n D lmd/package/edit/source_buffer.ls\n D lmd/package/edit/source_highlight.ls\n D lmd/package/edit/spelling.ls\n D lmd/package/edit/svg.ls\n D lmd/package/edit/toolbar.ls\n D lmd/package/edit/view.ls\n M lmd/package/editor/draw/README.md\n M lmd/package/editor/draw/codec.ls\n M lmd/package/editor/draw/commands.ls\n M lmd/package/editor/draw/core.ls\n M lmd/package/editor/draw/geometry.ls\n M lmd/package/editor/draw/model.ls\n M lmd/package/editor/draw/routing.ls\n D lmd/package/editor/mod_alignment.ls\n D lmd/package/editor/mod_collab.ls\n D lmd/package/editor/mod_commands.ls\n D lmd/package/editor/mod_decorations.ls\n D lmd/package/editor/mod_doc.ls\n D lmd/package/editor/mod_doc_schema.ls\n D lmd/package/editor/mod_dom_adapter.ls\n D lmd/package/editor/mod_dom_bridge.ls\n D lmd/package/editor/mod_drawing_commands.ls\n D lmd/package/editor/mod_drawing_schema.ls\n D lmd/package/editor/mod_edit_registry.ls\n D lmd/package/editor/mod_edit_schema.ls\n D lmd/package/editor/mod_editor.ls\n D lmd/package/editor/mod_geom.ls\n D lmd/package/editor/mod_history.ls\n D lmd/package/editor/mod_html_paste.ls\n D lmd/package/editor/mod_image.ls\n D lmd/package/editor/mod_inline_format.ls\n D lmd/package/editor/mod_input_intent.ls\n D lmd/package/editor/mod_md_schema.ls\n D lmd/package/editor/mod_paste.ls\n D lmd/package/editor/mod_query.ls\n D lmd/package/editor/mod_router.ls\n D lmd/package/editor/mod_source_pos.ls\n D lmd/package/editor/mod_step.ls\n D lmd/package/editor/mod_transaction.ls\n M lmd/package/editor/raster.ls\n M lmd/package/editor/raster/README.md\n M lmd/package/editor/raster/arrange.ls\n M lmd/package/editor/raster/commands.ls\n M lmd/package/editor/raster/core.ls\n M lmd/package/editor/raster/effects.ls\n M lmd/package/editor/raster/model.ls\n M lmd/package/editor/raster/styles.ls\n M lmd/package/editor/raster/tone.ls\n M lmd/package/image.ls\n M lmd/package/image/edit.ls\n M lmd/package/slide/present.ls\n M lmd/package/ui/blade.ls\n M lmd/package/ui/blade/catalog.ls\n M lmd/package/ui/blade/tokens.ls\n M lmd/package/ui/blade/widgets.ls\n M lmd/package/ui/clay.ls\n M lmd/package/ui/clay/catalog.ls\n M lmd/package/ui/clay/tokens.ls\n D lmd/package/ui/core/catalog.ls\n M lmd/package/ui/core/component.ls\n M lmd/package/ui/core/theme.ls\n M lmd/package/ui/dtna.ls\n M lmd/package/ui/dtna/alert.ls\n M lmd/package/ui/dtna/avatar.ls\n M lmd/package/ui/dtna/button.ls\n M lmd/package/ui/dtna/collapse.ls\n M lmd/package/ui/dtna/display.ls\n M lmd/package/ui/dtna/icons.ls\n M lmd/package/ui/dtna/layout.ls\n M lmd/package/ui/dtna/navigation.ls\n M lmd/package/ui/dtna/progress.ls\n M lmd/package/ui/dtna/rate.ls\n M lmd/package/ui/dtna/skeleton.ls\n M lmd/package/ui/dtna/spin.ls\n M lmd/package/ui/dtna/statistic.ls\n M lmd/package/ui/dtna/surfaces.ls\n M lmd/package/ui/dtna/table.ls\n M lmd/package/ui/dtna/tag.ls\n M lmd/package/ui/dtna/timeline.ls\n M lmd/package/ui/dtna/tree.ls\n M lmd/package/ui/dtna/typography.ls\n M test/benchmark/lambda_mir_mvp.py\n M test/benchmark/test_lambda_mir_mvp.py\n M test/demo/aquarium/mod_model.ls\n M test/demo/draw/mod_scene.ls\n M test/demo/draw/tests/draw_selection.ls\n M test/demo/draw/tests/draw_styles.ls\n M test/demo/dreamhome/mod_ui.ls\n M test/demo/finder/benchmark.py\n M test/demo/finder/finder.ls\n M test/demo/finder/mod_thumbnails.ls\n M test/demo/greetings/greetings.ls\n M test/demo/greetings/mod_preview.ls\n M test/demo/greetings/mod_ui.ls\n M test/demo/hamster/mod_model.ls\n M test/demo/mail/mod_ui.ls\n D test/demo/mod_context_menu.ls\n M test/demo/mod_document.ls\n M test/demo/mod_icons.ls\n M test/demo/mod_publish.ls\n D test/demo/mod_ribbon.ls\n D test/demo/mod_ribbon_overflow.ls\n D test/demo/mod_shape_presets.ls\n M test/demo/mod_splitter.ls\n D test/demo/mod_text_format.ls\n M test/demo/note/mod_app.ls\n M test/demo/note/mod_images.ls\n M test/demo/note/mod_io.ls\n M test/demo/note/mod_model.ls\n M test/demo/note/mod_sample.ls\n M test/demo/note/mod_ui.ls\n M test/demo/note/note.ls\n M test/demo/note/tests/note_image_drag_test.ls\n M test/demo/note/tests/note_images_test.ls\n M test/demo/note/tests/note_io_test.ls\n M test/demo/note/tests/note_model_test.ls\n D test/demo/office.css\n M test/demo/photo-album/mod_book_app.ls\n M test/demo/photo-album/mod_collage.ls\n M test/demo/photo-album/mod_collage_app.ls\n M test/demo/photo-album/mod_film_app.ls\n M test/demo/photo-album/mod_ui.ls\n M test/demo/photo-album/photo-album.css\n M test/demo/photo-album/photo-album.ls\n M test/demo/photos/mod_scene.ls\n D test/demo/ribbon.css\n M test/demo/sheet/README.md\n M test/demo/sheet/mod_resize.ls\n M test/demo/sheet/mod_selection.ls\n M test/demo/sheet/mod_view.ls\n M test/demo/sheet/sheet.ls\n M test/demo/sketch/README.md\n M test/demo/sketch/mod_model.ls\n M test/demo/sketch/sketch.ls\n M test/demo/slides/mod_animations_ui.ls\n M test/demo/slides/mod_app.ls\n M test/demo/slides/mod_home.ls\n M test/demo/slides/mod_home_ui.ls\n M test/demo/slides/mod_inline.ls\n M test/demo/slides/mod_insert.ls\n M test/demo/slides/mod_insert_data.ls\n M test/demo/slides/mod_insert_ui.ls\n M test/demo/slides/mod_model.ls\n M test/demo/slides/mod_slide_drag.ls\n M test/demo/slides/mod_transitions_ui.ls\n M test/demo/slides/mod_view.ls\n M test/demo/slides/slides.ls\n M test/demo/word/README.md\n M test/demo/word/mod_app.ls\n M test/demo/word/mod_autosave.ls\n M test/demo/word/mod_changes.ls\n M test/demo/word/mod_columns.ls\n M test/demo/word/mod_context.ls\n M test/demo/word/mod_document.ls\n M test/demo/word/mod_equation.ls\n D test/demo/word/mod_equation_catalog.ls\n M test/demo/word/mod_equation_edit.ls\n M test/demo/word/mod_equation_ui.ls\n D test/demo/word/mod_font_picker.ls\n M test/demo/word/mod_group.ls\n M test/demo/word/mod_group_data.ls\n M test/demo/word/mod_handles.ls\n M test/demo/word/mod_home.ls\n M test/demo/word/mod_home_ui.ls\n M test/demo/word/mod_icon.ls\n M test/demo/word/mod_insert.ls\n M test/demo/word/mod_io.ls\n M test/demo/word/mod_lookup.ls\n M test/demo/word/mod_math_edit.ls\n M test/demo/word/mod_model.ls\n M test/demo/word/mod_navigation.ls\n M test/demo/word/mod_object_layout.ls\n M test/demo/word/mod_objects.ls\n M test/demo/word/mod_page.ls\n M test/demo/word/mod_print.ls\n M test/demo/word/mod_references.ls\n M test/demo/word/mod_review.ls\n D test/demo/word/mod_ribbon_icons.ls\n M test/demo/word/mod_ribbon_overflow.ls\n M test/demo/word/mod_ruler.ls\n M test/demo/word/mod_selection_toolbar.ls\n M test/demo/word/mod_shape_format.ls\n M test/demo/word/mod_shapes.ls\n M test/demo/word/mod_stories.ls\n M test/demo/word/mod_surface.ls\n M test/demo/word/mod_table.ls\n M test/demo/word/mod_table_design.ls\n M test/demo/word/mod_table_grid.ls\n M test/demo/word/mod_table_layout.ls\n M test/demo/word/mod_transform.ls\n M test/demo/word/mod_ui.ls\n M test/demo/word/tests/fixtures/mod_export.ls\n M test/demo/word/tests/proc/_columns_export.ls\n M test/demo/word/tests/proc/_equations_export.ls\n M test/demo/word/tests/proc/_margins_export.ls\n M test/demo/word/tests/proc/_object_layout_export.ls\n M test/demo/word/tests/proc/_shape_format_export.ls\n M test/demo/word/tests/proc/word_autosave_test.ls\n M test/demo/word/tests/proc/word_docx_export_test.ls\n M test/demo/word/tests/word_advanced_objects_test.ls\n M test/demo/word/tests/word_changes_test.ls\n M test/demo/word/tests/word_clipboard_test.ls\n M test/demo/word/tests/word_columns_test.ls\n M test/demo/word/tests/word_context_test.ls\n M test/demo/word/tests/word_equation_test.ls\n M test/demo/word/tests/word_features_test.ls\n M test/demo/word/tests/word_font_options_test.ls\n M test/demo/word/tests/word_font_picker_test.ls\n M test/demo/word/tests/word_home_test.ls\n M test/demo/word/tests/word_illustrations_test.ls\n M test/demo/word/tests/word_insert_test.ls\n M test/demo/word/tests/word_io_test.ls\n M test/demo/word/tests/word_lists_test.ls\n M test/demo/word/tests/word_lookup_test.ls\n M test/demo/word/tests/word_margins_test.ls\n M test/demo/word/tests/word_model_test.ls\n M test/demo/word/tests/word_navigation_test.ls\n M test/demo/word/tests/word_object_layout_test.ls\n M test/demo/word/tests/word_object_move_test.ls\n M test/demo/word/tests/word_paragraph_selection_test.ls\n M test/demo/word/tests/word_references_test.ls\n M test/demo/word/tests/word_review_layout_test.ls\n M test/demo/word/tests/word_ruler_edit_test.ls\n M test/demo/word/tests/word_selection_toolbar_test.ls\n M test/demo/word/tests/word_shape_format_test.ls\n M test/demo/word/tests/word_shapes_pages_test.ls\n M test/demo/word/tests/word_table_design_test.ls\n M test/demo/word/tests/word_table_layout_test.ls\n M test/demo/word/tests/word_table_selection_test.ls\n M test/demo/word/tests/word_transform_test.ls\n M test/demo/word/tests/word_view_modes_test.ls\n M test/demo/word/word.ls\n M test/lambda/edit/html_adapter.ls\n M test/lambda/edit/markdown_adapter.ls\n M test/lambda/edit/math_font_projection.ls\n M test/lambda/edit/session_paths.ls\n M test/lambda/edit/source_buffer.ls\n M test/lambda/edit/source_highlight.ls\n M test/lambda/edit/source_highlight_html.ls\n M test/lambda/edit/source_highlight_window.ls\n M test/lambda/edit/svg_drawing.ls\n M test/lambda/edit/view_only.ls\n M test/lambda/edit_controller.ls\n M test/lambda/editing/drawing_commands.ls\n M test/lambda/editing/drawing_geom.ls\n M test/lambda/editing/drawing_router.ls\n M test/lambda/editing/drawing_schema.ls\n M test/lambda/editor/collab_basic.ls\n M test/lambda/editor/commands_basic.ls\n M test/lambda/editor/decorations_basic.ls\n M test/lambda/editor/dom_adapter.ls\n M test/lambda/editor/dom_bridge_basic.ls\n M test/lambda/editor/draw_codec.ls\n M test/lambda/editor/draw_core.ls\n M test/lambda/editor/drawing_block_integration.ls\n M test/lambda/editor/editor_api_basic.ls\n M test/lambda/editor/input_intent_basic.ls\n M test/lambda/editor/list_autoformat.ls\n M test/lambda/editor/list_edit_fixes.ls\n M test/lambda/editor/list_item_enter.ls\n M test/lambda/editor/list_paste_normalize.ls\n M test/lambda/editor/multi_node_delete.ls\n M test/lambda/editor/multi_node_selection.ls\n M test/lambda/editor/oracle_poc.ls\n M test/lambda/editor/paste_basic.ls\n M test/lambda/editor/schema_basic.ls\n M test/lambda/editor/schema_validate.ls\n M test/lambda/editor/source_pos.ls\n M test/lambda/editor/source_selection.ls\n M test/lambda/editor/split_boundary_attrs.ls\n M test/lambda/editor/step_basic.ls\n M test/lambda/editor/step_invert_map.ls\n M test/lambda/editor/text_target.ls\n M test/lambda/editor/transaction_history.ls\n M test/lambda/editor/typing_history_boundaries.ls\n M test/lambda/input_markdown_edit.ls\n M test/lambda/input_markdown_emoji.ls\n M test/lambda/mvp/_mir_mvp_expansion_dependency.ls\n M test/lambda/mvp/mir_mvp_benchmark_expansion.ls\n M test/lambda/mvp/mir_mvp_benchmark_expansion.txt\n M test/lambda/proc/dom_read_colours.ls\n M test/lambda/proc/edit_controller_gate.ls\n M test/lambda/proc/edit_session_save.ls\n M test/lambda/proc/editor_api_mount.ls\n M test/lambda/proc/spelling_check.ls\n M test/lambda/proc/spelling_incremental.ls\n M test/lambda/slide/test_slide_home.ls\n M test/lambda/ui_dtna/dtna_imported_outcomes.ls\n M test/mir/lambda/null_item_comparison.mir-check\n M test/mir/lambda/tune18_any_null_item.mir-check\n M test/mir/lambda/tune21_u32_decl_lane.mir-check\n M test/mir/lambda/tune26_ndim_chained_store.mir-check\n M test/mir/lambda/tune32_phase2_records.mir-check\n M test/mir/lambda/u32_shift_width.ls\n M test/mir/lambda/u32_shift_width.mir-check\n M test/mir/lambda/u32_shift_width.txt\n M test/ui/controlled_bindings.json\n M test/ui/controlled_bindings.ls\n M test/ui/rte_prototype.ls\n M vibe/Lambda_Design_MIR_MVP.md\n M vibe/Lambda_Package.md\n M vibe/impl/Lambda_Impl_MIR_MVP.md\n M vibe/radiant/Radiant_Design_Edit_Mode.md\n?? doc/Lambda_UI_Workspace.md\n?? lmd/package/doc/typography.ls\n?? lmd/package/editor/app.ls\n?? lmd/package/editor/app/\n?? lmd/package/editor/controller.ls\n?? lmd/package/editor/core/\n?? lmd/package/editor/dom/\n?? lmd/package/editor/format/\n?? lmd/package/editor/image.ls\n?? lmd/package/editor/math/\n?? lmd/package/editor/model.ls\n?? lmd/package/editor/schema/\n?? lmd/package/editor/session.ls\n?? lmd/package/editor/spelling.ls\n?? lmd/package/editor/surface/\n?? lmd/package/ui/core/menu.ls\n?? lmd/package/ui/core/publish.ls\n?? lmd/package/ui/core/splitter.ls\n?? lmd/package/ui/dtna/catalog.ls\n?? lmd/package/ui/dtna/descriptor.ls\n?? lmd/package/ui/dtna/skin.ls\n?? lmd/package/ui/workspace.ls\n?? lmd/package/ui/workspace/\n?? test/benchmark/lambda_mvp/tune77_analysis_2026-11-04.json\n?? test/benchmark/lambda_mvp/tune77_full_2026-11-04.json\n?? test/benchmark/lambda_mvp/tune77_regression48_2026-11-04.json\n?? test/benchmark/lambda_mvp/tune77_start_2026-11-04.json\n?? test/benchmark/lambda_mvp/tune77_sumfp_2026-11-04.json\n?? test/benchmark/lambda_mvp/tune77_validation_2026-11-04.json\n?? test/lambda/editor/snapshot_history.ls\n?? test/lambda/editor/snapshot_history.txt\n?? test/lambda/mvp/mir_mvp_u32.ls\n?? test/lambda/mvp/mir_mvp_u32.txt\n?? test/lambda/ui_workspace.ls\n?? test/lambda/ui_workspace.txt\n?? test/ui/workspace_instances.json\n?? test/ui/workspace_instances.ls\n?? utils/check_ui_boundaries.py\n?? vibe/Lambda_Demo_DBench.md\n?? vibe/impl/Lambda_Impl_Package_Structure.md",
+  "release_confirmed": true,
+  "benchmark_root": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/benchmarks",
+  "c2mir_allowance_percent": 20.0,
+  "compiler_identity": {
+    "experiment_sources": {
+      "sha256": "9a1d0d27aeb9f6ff34059a8daccc5feddb6090772df27c7af24a6fbeb614ab2a",
+      "file_count": 42,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "bc731b4f694e4df3796ffc3ea6d30d7f716e28aad4d31a4091e357ec6cc87c10"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.cpp",
+          "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.hpp",
+          "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+        },
+        {
+          "path": "lambda/core/print.cpp",
+          "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+        },
+        {
+          "path": "lambda/core/print.h",
+          "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+        },
+        {
+          "path": "lambda/io/mark_builder.cpp",
+          "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+        },
+        {
+          "path": "lambda/io/mark_builder.hpp",
+          "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+        },
+        {
+          "path": "lambda/lambda-data.hpp",
+          "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+        },
+        {
+          "path": "lambda/lambda.h",
+          "sha256": "6a58ad32636e2a08c5e61816ea380ad33cab68c7ee57117475a93bbcc885793f"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+        },
+        {
+          "path": "lambda/runtime/ast-core.cpp",
+          "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+        },
+        {
+          "path": "lambda/runtime/ast-core.hpp",
+          "sha256": "49a4f9b15125ed095825fca841cc79c42928cee39cf317c5a502b59a7d6bfc56"
+        },
+        {
+          "path": "lambda/runtime/build_ast.cpp",
+          "sha256": "add4dca17d5c27b4067adcc180485887e657141706bb70a7ef09ad1bc7213966"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_heap.c",
+          "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.c",
+          "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.h",
+          "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+        },
+        {
+          "path": "lambda/runtime/heap_api.h",
+          "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+        },
+        {
+          "path": "lambda/runtime/lambda-data-runtime.cpp",
+          "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval-num.cpp",
+          "sha256": "b47a430b147b9fdbb2ceaa6fe10dd87a19fc58361052fbd1835518ad95749d33"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval.cpp",
+          "sha256": "bcd0a268e8509c778dd226305eece382e05e955ecd9efc5c276e7ff7b2fa0bbc"
+        },
+        {
+          "path": "lambda/runtime/lambda-mem.cpp",
+          "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+        },
+        {
+          "path": "lambda/runtime/lambda-root-frame.hpp",
+          "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+        },
+        {
+          "path": "lambda/runtime/lambda-vector.cpp",
+          "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "f510fa798f8840f74e3b0e62e1af7f68d59ad279e9dc8ff74c15fe17ee18afd6"
+        },
+        {
+          "path": "lambda/runtime/mir_container_access.hpp",
+          "sha256": "3f17edeadd9f852fcfa1f4ab0338bde3a042974bd66eef3c2c29dd0ac268aaa8"
+        },
+        {
+          "path": "lambda/runtime/mir_cow_analysis.hpp",
+          "sha256": "6a31c5c17569b9979c9a411c2afd43ede6f779ae2ac3af11f42b709bc9c0e995"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "48fb1633c0d6d98dd03b4cea2f7a1c01ead499f250d5e474490579ad3c51819c"
+        },
+        {
+          "path": "lambda/runtime/mir_function_value.hpp",
+          "sha256": "ad42b2abd4cb895f341c53da3334a113d0d5f727cc282254e54ba8d03c250bfd"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+        },
+        {
+          "path": "lambda/runtime/mir_path.hpp",
+          "sha256": "f874a8a3a5af6a50edeb9b4f83d0905e82afe5e1e3eddaaa4203e032dd55fbcd"
+        },
+        {
+          "path": "lambda/runtime/mir_shape_candidates.hpp",
+          "sha256": "234414e74ab11faf21f6b138a3399f7486ac3a04e5fc8d2dd95a00854bf2e529"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "643a24d028feab68b7e35270648a3f2e4e0a3d2c4d685563785dca67ab543a36"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "edbbde8f0b91c7cac399ea7cf59726a375f44db0fe0998b299b9cb1649ccc4d9"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "4e2d5436e3ba10f446fb3ad68550cce2f1f30a95d2515b70cde7ba0be230b09f"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "4c3a0c3d558dfeb197cc8ec110542d8b50356f5a6480aba885b5e13d85784ba9"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "16a0e807451f7b54f2a961938ff045bc020b9ba4f40eb7f31335bebb338ff629"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.c",
+          "sha256": "a9d1cfeae30cba81e138cafc94f8349bb72223b0c87d88e28124c9c5b9a9cc86"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.h",
+          "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "0b6bbb1272055885781d460d9fd2b48f654b2313976ac5e9fc6a19d7c54c6559"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "284b97335bc82446d17949f9f1f5ae56b6fe5ecbdc5e1255843373e10b6a40f7"
+        },
+        {
+          "path": "lib/math_checked.hpp",
+          "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+  },
+  "executables": {
+    "mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/captured_fields-release.exe",
+      "sha256": "ca0746fe673f1c78845144d45de6127e33a15ce9df534dd9ad7537762cd2e645"
+    },
+    "production": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/captured_fields-release.exe",
+      "sha256": "ca0746fe673f1c78845144d45de6127e33a15ce9df534dd9ad7537762cd2e645"
+    },
+    "c2mir": {
+      "path": "/Users/henryluo/Projects/lambda/lambda/mir/c2m",
+      "sha256": "8f4ae53199ee0654ec22c49994298bfb9a1bae02789113566edaacb73cfe3214"
+    },
+    "previous_mvp": {
+      "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/expand_all/stage24-release.exe",
+      "sha256": "c98251585039ceee4677c706e151768fe21fea3b5ade1e1510b67e77112b1fa7"
+    }
+  },
+  "timer_sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037",
+  "timer_sources": {
+    "sha256": "2499093d45e8e53e31704de91a05580760581b14660cabf24031f0e6dc49c81d",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_clock.h",
+        "sha256": "23cc0705fdef4a1b1543f87c6384b7c69cf23a9cf240bd1a0a8c3154c87166c0"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_kernel_timer.h",
+        "sha256": "50de29fc5dda6f869af737b79e4efc2383e90a4819b61b6a6eb6b467b4cf5059"
+      },
+      {
+        "path": "test/benchmark/c2mir/bench_timer_main.c",
+        "sha256": "34dd062aabf2553904af9274e2cd61759226deb8e5412e974496d8df95122037"
+      }
+    ]
+  },
+  "reference_helpers": {
+    "sha256": "8bab39b2d1ea69654997211ec32fb469668ca2da0c8b73ca4ec53785f3e38331",
+    "file_count": 3,
+    "files": [
+      {
+        "path": "test/benchmark/c2mir/bench_lcg.h",
+        "sha256": "7b28fdea98296e466bc3f44a3d2e102b31009a8a6e96a473bdbe9592b2871f31"
+      },
+      {
+        "path": "test/benchmark/c2mir/nbody_kernel.h",
+        "sha256": "c721dc702fb5972c6ce8b755661f746cf2065f3f778f41c392e37dbd5392a71e"
+      },
+      {
+        "path": "test/benchmark/c2mir/tree_benchmark.h",
+        "sha256": "92184c7785e97b45ac4e654b8d9ce088e37401e8c42a28b9f53e426a38695b13"
+      }
+    ]
+  },
+  "runner_sources": {
+    "sha256": "69b7f02e9e14a323d2a656ca3a75201481eba271e8a419db9eb2ae93c459c673",
+    "file_count": 4,
+    "files": [
+      {
+        "path": "test/benchmark/benchmark_provenance.py",
+        "sha256": "5e90a12ad8e8bec460d6e60ee384fb586f1fc43b669524f8f7ca96d0a1caa101"
+      },
+      {
+        "path": "test/benchmark/lambda_mir_mvp.py",
+        "sha256": "0cf1eacd8aec22729c2cbb5651fda1be945e4975c2c5d2cb1f3f77d947836d0f"
+      },
+      {
+        "path": "test/benchmark/run_c2mir_benchmarks.py",
+        "sha256": "fb28fa56d48e8dc1ae1cf10102c2d5c076c922425946130817d5507a3e4fe029"
+      },
+      {
+        "path": "test/benchmark/run_paired_benchmarks.py",
+        "sha256": "81080fdb6ed7f805b46eef3aadaa325ea906e3c229e9ac91219e79561c94af47"
+      }
+    ]
+  },
+  "timer_scope": "matched per-row execution boundaries; compilation excluded; see each row for timed output",
+  "runs": 30,
+  "warmups": 2,
+  "cases": [
+    {
+      "name": "r7rs/sumfp",
+      "lambda_sha256": "6282b901a111c63170bbeb0254458162ed8fa147be9c852ba65b675fa7296e8b",
+      "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded",
+      "c_sha256": "86b95b6620a28345342a0064b5253c8e42587dcacd15bd19578f8fa44eeca8d9",
+      "golden_sha256": "06b27e6ef792a99f830f0b6e47cbab72d16e0c5d7ca92f28ce39b120f258a043",
+      "golden_path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/benchmarks/r7rs/sumfp2.txt",
+      "c_golden_sha256": "06b27e6ef792a99f830f0b6e47cbab72d16e0c5d7ca92f28ce39b120f258a043",
+      "engine_unavailable": {
+        "c2mir": "not measured in the Lambda-only campaign"
+      },
+      "commands": {
+        "mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/captured_fields-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ],
+        "production": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/captured_fields-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ],
+        "previous_mvp": [
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/expand_all/stage24-release.exe",
+          "run",
+          "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/sumfp_batch_10000/sumfp.ls",
+          "--no-log"
+        ]
+      },
+      "samples_ms": {
+        "mvp": [
+          0.011,
+          0.011,
+          0.014,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.013,
+          0.00999999,
+          0.00999999,
+          0.016,
+          0.015,
+          0.013,
+          0.012,
+          0.011,
+          0.00999999,
+          0.012,
+          0.011,
+          0.00999999,
+          0.014,
+          0.011,
+          0.013,
+          0.011,
+          0.014,
+          0.011,
+          0.011,
+          0.012,
+          0.011,
+          0.013,
+          0.011
+        ],
+        "production": [
+          685.363,
+          749.984,
+          755.621,
+          669.249,
+          757.914,
+          757.936,
+          672.598,
+          752.988,
+          754.4,
+          674.152,
+          760.586,
+          744.83,
+          679.692,
+          760.295,
+          719.112,
+          720.434,
+          757.195,
+          702.253,
+          737.972,
+          758.599,
+          684.274,
+          753.192,
+          755.817,
+          671.483,
+          755.65,
+          757.975,
+          669.775,
+          759.648,
+          751.618,
+          679.539
+        ],
+        "c2mir": [],
+        "previous_mvp": [
+          0.011,
+          0.013,
+          0.011,
+          0.011,
+          0.014,
+          0.013,
+          0.00999999,
+          0.016,
+          0.012,
+          0.011,
+          0.012,
+          0.014,
+          0.011,
+          0.011,
+          0.013,
+          0.00999999,
+          0.011,
+          0.011,
+          0.011,
+          0.015,
+          0.00999999,
+          0.011,
+          0.015,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.011,
+          0.012,
+          0.00999999
+        ]
+      },
+      "median_ms": {
+        "mvp": 0.011,
+        "production": 750.801,
+        "c2mir": null,
+        "previous_mvp": 0.011
+      },
+      "execution_order": [
+        [
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "production",
+          "mvp",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "previous_mvp",
+          "production",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "production",
+          "previous_mvp",
+          "mvp"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "mvp",
+          "production",
+          "previous_mvp"
+        ],
+        [
+          "previous_mvp",
+          "mvp",
+          "production"
+        ],
+        [
+          "mvp",
+          "previous_mvp",
+          "production"
+        ]
+      ],
+      "engine_failures": {},
+      "discarded_rounds": [],
+      "mvp_over_c2mir": null,
+      "mvp_over_production": 1.4651019377970991e-05,
+      "timer_resolution_limited": {
+        "mvp": false,
+        "production": false,
+        "c2mir": true,
+        "previous_mvp": false
+      },
+      "uncertainty": {
+        "mvp_over_production": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.6049888890996448e-05,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 1.4557003903923774e-05,
+          "two_sided_upper_bound": 1.6260779541771232e-05
+        },
+        "mvp_over_c2mir": null,
+        "mvp_over_previous_mvp": {
+          "method": "paired_bootstrap_ratio_of_medians",
+          "confidence": 0.95,
+          "tail": "one_sided_upper",
+          "seed": 1101,
+          "resamples_requested": 10000,
+          "resamples_valid": 10000,
+          "upper_bound": 1.090909090909091,
+          "two_sided_confidence": 0.95,
+          "two_sided_lower_bound": 0.9166666666666666,
+          "two_sided_upper_bound": 1.090909090909091
+        }
+      },
+      "derived_workload": {
+        "count": 10000,
+        "lambda_sha256": "8c806f8cb909868ee8493828b52b07392ba647f58b23ca7712598b45b62e4842",
+        "c_sha256": "a89c77a0f9de7568750ada47d673d06c3acf9a766f31c50eafa9710143053049",
+        "lambda_source": "// R7RS Benchmark: sumfp (Typed version)\n// Sum of floats from 0.0 to 100000.0, repeated 1 time\n// Adapted from r7rs-benchmarks/src/sumfp.scm (scaled down for Lambda JIT)\n\nfn run(n: float) float {\n    var work_n: float = n\n\n    var s: float = 0.0\n    while (work_n >= 0.0) {\n        s = s + work_n\n        work_n = work_n - 1.0\n    }\n    return s\n}\n\nfn benchmark() float {\n    var result = run(100000.0)\n    return result\n}\n\npn main() {\n    let t0 = clock()\n    var total: float = 0.0\n    var i: int = 0\n    while (i < 10000) { total = total + benchmark(); i = i + 1 }\n    let elapsed = (clock() - t0) * 1000.0\n    if (abs(total - 5000050000.0 * 10000.0) < 1.0) { print(\"sumfp: PASS\\n\") }\n    else { print(\"sumfp: FAIL\\n\") }\n    print(\"__TIMING__:\" ++ elapsed ++ \"\\n\")\n}\n",
+        "c_source": "/* Native C2MIR port of r7rs/sumfp2.ls. */\nextern int printf(const char *, ...);\n#include \"/Users/henryluo/Projects/lambda/test/benchmark/c2mir/bench_kernel_timer.h\"\n\nstatic double run_sumfp(double n) {\n    double sum = 0.0;\n    while (n >= 0.0) {\n        sum += n;\n        n -= 1.0;\n    }\n    return sum;\n}\n\nint main(void) {\n    BENCH_KERNEL_BEGIN();\n    double total = 0.0;\n    long i;\n    for (i = 0; i < 10000; i++) total += run_sumfp(100000.0);\n    BENCH_KERNEL_END();\n    double diff = total - 5000050000.0 * 10000.0;\n    if (diff < 0.0) diff = -diff;\n    printf(diff < 1.0 ? \"sumfp: PASS\\n\" : \"sumfp: FAIL\\n\");\n    BENCH_KERNEL_REPORT();\n    return diff >= 1.0;\n}\n",
+        "timer_scope": "repeated original kernels plus loop and consumed-result accumulation; reporting excluded"
+      },
+      "mvp_over_previous": 1.0,
+      "previous_mvp_comparison": {
+        "statistically_faster": false,
+        "statistically_slower": false
+      },
+      "performance_gates": {
+        "faster_than_full_mir": true,
+        "within_c2mir_allowance": null,
+        "within_10_percent_of_c2mir": null
+      }
+    }
+  ],
+  "pause_for_jobs": true,
+  "observed_checkout_identity": {
+    "experiment_sources": {
+      "sha256": "9a1d0d27aeb9f6ff34059a8daccc5feddb6090772df27c7af24a6fbeb614ab2a",
+      "file_count": 42,
+      "files": [
+        {
+          "path": "build_lambda_config.json",
+          "sha256": "bc731b4f694e4df3796ffc3ea6d30d7f716e28aad4d31a4091e357ec6cc87c10"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.cpp",
+          "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+        },
+        {
+          "path": "lambda/core/lambda-decimal.hpp",
+          "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+        },
+        {
+          "path": "lambda/core/print.cpp",
+          "sha256": "3ba719432fb43a2ed445a08c4bde7edc8a0d682555e0c94750ab639d8004b8f1"
+        },
+        {
+          "path": "lambda/core/print.h",
+          "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+        },
+        {
+          "path": "lambda/io/mark_builder.cpp",
+          "sha256": "0417d1a22d44c5e1460ed0ab27033a60201c17fbbec8911da46b77c65006e59a"
+        },
+        {
+          "path": "lambda/io/mark_builder.hpp",
+          "sha256": "cda40292c222eaaffc7bda2b02420a4628bc6446493ada1db66eff6ca39c920f"
+        },
+        {
+          "path": "lambda/lambda-data.hpp",
+          "sha256": "21a8f310c913d2a67361efb9ef5d9d3f72383de2b714baedb08b04229b307e67"
+        },
+        {
+          "path": "lambda/lambda.h",
+          "sha256": "6a58ad32636e2a08c5e61816ea380ad33cab68c7ee57117475a93bbcc885793f"
+        },
+        {
+          "path": "lambda/mir/VENDOR.md",
+          "sha256": "bfe32e941064be6f24151b4f85b672e0a356397f19b95d5ae0f2a0661da83238"
+        },
+        {
+          "path": "lambda/runtime/ast-core.cpp",
+          "sha256": "37a02e853ba88317fc3c61807090e7e029116e519aaeafd84380ae00b3754402"
+        },
+        {
+          "path": "lambda/runtime/ast-core.hpp",
+          "sha256": "49a4f9b15125ed095825fca841cc79c42928cee39cf317c5a502b59a7d6bfc56"
+        },
+        {
+          "path": "lambda/runtime/build_ast.cpp",
+          "sha256": "add4dca17d5c27b4067adcc180485887e657141706bb70a7ef09ad1bc7213966"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_heap.c",
+          "sha256": "b6fdc65b795bae863140bef19d647bc96533b7087ef8967e004b5fea54957328"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.c",
+          "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+        },
+        {
+          "path": "lambda/runtime/gc/gc_object_zone.h",
+          "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+        },
+        {
+          "path": "lambda/runtime/heap_api.h",
+          "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+        },
+        {
+          "path": "lambda/runtime/lambda-data-runtime.cpp",
+          "sha256": "6a7df277d1f80e179107ed01bef42a3d6e330ef61171a32c4b19ca9cdf30ab4e"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval-num.cpp",
+          "sha256": "b47a430b147b9fdbb2ceaa6fe10dd87a19fc58361052fbd1835518ad95749d33"
+        },
+        {
+          "path": "lambda/runtime/lambda-eval.cpp",
+          "sha256": "bcd0a268e8509c778dd226305eece382e05e955ecd9efc5c276e7ff7b2fa0bbc"
+        },
+        {
+          "path": "lambda/runtime/lambda-mem.cpp",
+          "sha256": "c938f8eb73a75c3267047e4e6bd7408d755ede012e6fef514883b65cb238bf60"
+        },
+        {
+          "path": "lambda/runtime/lambda-root-frame.hpp",
+          "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+        },
+        {
+          "path": "lambda/runtime/lambda-vector.cpp",
+          "sha256": "29ce152c8530c1b40e42858a3414c0a4326760bfbbcaa0c8da78fa5d29a3b934"
+        },
+        {
+          "path": "lambda/runtime/mir_bitwise.hpp",
+          "sha256": "f510fa798f8840f74e3b0e62e1af7f68d59ad279e9dc8ff74c15fe17ee18afd6"
+        },
+        {
+          "path": "lambda/runtime/mir_container_access.hpp",
+          "sha256": "3f17edeadd9f852fcfa1f4ab0338bde3a042974bd66eef3c2c29dd0ac268aaa8"
+        },
+        {
+          "path": "lambda/runtime/mir_cow_analysis.hpp",
+          "sha256": "6a31c5c17569b9979c9a411c2afd43ede6f779ae2ac3af11f42b709bc9c0e995"
+        },
+        {
+          "path": "lambda/runtime/mir_emitter_shared.hpp",
+          "sha256": "48fb1633c0d6d98dd03b4cea2f7a1c01ead499f250d5e474490579ad3c51819c"
+        },
+        {
+          "path": "lambda/runtime/mir_function_value.hpp",
+          "sha256": "ad42b2abd4cb895f341c53da3334a113d0d5f727cc282254e54ba8d03c250bfd"
+        },
+        {
+          "path": "lambda/runtime/mir_loop_analysis.hpp",
+          "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+        },
+        {
+          "path": "lambda/runtime/mir_path.hpp",
+          "sha256": "f874a8a3a5af6a50edeb9b4f83d0905e82afe5e1e3eddaaa4203e032dd55fbcd"
+        },
+        {
+          "path": "lambda/runtime/mir_shape_candidates.hpp",
+          "sha256": "234414e74ab11faf21f6b138a3399f7486ac3a04e5fc8d2dd95a00854bf2e529"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp.hpp",
+          "sha256": "643a24d028feab68b7e35270648a3f2e4e0a3d2c4d685563785dca67ab543a36"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_internal.hpp",
+          "sha256": "edbbde8f0b91c7cac399ea7cf59726a375f44db0fe0998b299b9cb1649ccc4d9"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_mir.cpp",
+          "sha256": "4e2d5436e3ba10f446fb3ad68550cce2f1f30a95d2515b70cde7ba0be230b09f"
+        },
+        {
+          "path": "lambda/runtime/mvp/mvp_plan.cpp",
+          "sha256": "4c3a0c3d558dfeb197cc8ec110542d8b50356f5a6480aba885b5e13d85784ba9"
+        },
+        {
+          "path": "lambda/runtime/runner.cpp",
+          "sha256": "16a0e807451f7b54f2a961938ff045bc020b9ba4f40eb7f31335bebb338ff629"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.c",
+          "sha256": "a9d1cfeae30cba81e138cafc94f8349bb72223b0c87d88e28124c9c5b9a9cc86"
+        },
+        {
+          "path": "lambda/runtime/sys_func_registry.h",
+          "sha256": "ed3ee26b20e12d69b8f3924a26359a3482aca89e8c6517e230fac1ab1516108a"
+        },
+        {
+          "path": "lambda/runtime/transpile-mir.cpp",
+          "sha256": "0b6bbb1272055885781d460d9fd2b48f654b2313976ac5e9fc6a19d7c54c6559"
+        },
+        {
+          "path": "lambda/runtime/type_contract.cpp",
+          "sha256": "576f0cc2b9dfd8577a1a7207b5f81ca8175a98275258de5544d07010618cb7b0"
+        },
+        {
+          "path": "lambda/runtime/type_contract.hpp",
+          "sha256": "284b97335bc82446d17949f9f1f5ae56b6fe5ecbdc5e1255843373e10b6a40f7"
+        },
+        {
+          "path": "lib/math_checked.hpp",
+          "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+        }
+      ]
+    },
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+    "cpu_probe": "Apple M4"
+  },
+  "candidate_source_manifest": {
+    "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/captured_fields-source-manifest.json",
+    "sha256": "e6ce5a43eac9f4dadfd54d552ce9f95881c71cff6b9d83c03f7f3828d6c14817"
+  },
+  "geomean_mvp_over_production": 1.4651019377970983e-05,
+  "geomean_mvp_over_c2mir": null,
+  "geomean_mvp_over_previous_mvp": 1.0,
+  "qualification": "covered subset; coverage and per-row performance qualification are separate; matched workload boundaries, paired bootstrap per row; Lambda engines only; C2MIR unmeasured"
+}

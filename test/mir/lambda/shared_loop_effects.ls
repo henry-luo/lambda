@@ -1,4 +1,4 @@
-// D5.3/D8.4.3v2: the same scalar hoister serves Lambda's native loop.
+// D6.3/D7.4.3: the same scalar hoister serves Lambda's native loop.
 pn stable_abs(n: int, value: float) float {
     var total = 0.0
     var i = 0

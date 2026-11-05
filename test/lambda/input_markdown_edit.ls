@@ -1,4 +1,4 @@
-import markdown: lambda.edit.markdown
+import markdown: lambda.editor.format.markdown
 
 // Moving definitions to the generated footer must not drop their original source on save.
 let sources = [

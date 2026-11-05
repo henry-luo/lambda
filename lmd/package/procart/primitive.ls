@@ -70,6 +70,8 @@ pub fn merge(buffers) map {
     let ends=math.cumsum([for (b in buffers) len(b.positions) div 3]);
     {positions:[for (b in buffers) *b.positions],normals:[for (b in buffers) *b.normals],
      *:(if (len(buffers)>0 and all([for (b in buffers) b.uvs != null])) {uvs:[for (b in buffers) *b.uvs]} else {}),
+     // vertex colours survive like UVs, only when every part carries them
+     *:(if (len(buffers)>0 and all([for (b in buffers) b.colors != null])) {colors:[for (b in buffers) *b.colors]} else {}),
      indices:[for (i,b in buffers) for (index in b.indices) index+(if (i == 0) 0 else ends[i-1])]}
 }
 // a curved blade shares the same sampled surface between petals, feathers and fins.

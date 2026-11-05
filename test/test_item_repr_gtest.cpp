@@ -643,10 +643,10 @@ TEST_F(RuntimeShapeTransition, PackedAssignmentsRebuildWithoutMovingFixedSlots) 
                            3 * (int64_t)sizeof(void*));
     EXPECT_DOUBLE_EQ(shape_transition_read_field(map, late_flag).get_double(), 3.5);
     // runtime rebuilds must not publish execution-pool shapes into a cached
-    // compiler registry that outlives this execution (D8.5.1v7).
+    // compiler registry that outlives this execution (D8.3.5).
     EXPECT_EQ(input.type_list->length, source_type_count);
-    // D8.5.1v7: a runtime shape never joins the source's type list; a runtime
-    // tree node's type_index indexes the tree's own list (D3.4.3v5)
+    // D8.3.5: a runtime shape never joins the source's type list; a runtime
+    // tree node's type_index indexes the tree's own list (D3.4.3)
     EXPECT_FALSE(type_tree_owns(&input, (TypeMap*)map->type));
 }
 
@@ -886,7 +886,7 @@ TEST(ItemRepresentation, OwnedTailRelocationRebasesWideScalarItems) {
     js_list.length = 2;
     js_list.extra = 1;
     js_list.capacity = 4;
-    // D2.6.6v2: "has JS properties" is now the array's attribute face.
+    // D3.1.1: "has JS properties" is now the array's attribute face.
     Map props_map = {};
     props_map.type_id = LMD_TYPE_MAP;
     Item props_slot = {.map = &props_map};
@@ -947,8 +947,8 @@ TEST_F(RuntimeShapeTransition, ElementContentAndAttributesKeepSeparateStorage) {
     EXPECT_EQ(element->items[0].get_int64(), content_int64);
     EXPECT_EQ(element->items[1].get_double(), content_float);
     EXPECT_EQ(input.type_list->length, source_type_count);
-    // D8.5.1v7: a runtime shape never joins the source's type list; a retype
-    // target's type_index indexes the runtime tree's own list (D3.4.3v5)
+    // D8.3.5: a runtime shape never joins the source's type list; a retype
+    // target's type_index indexes the runtime tree's own list (D3.4.3)
     EXPECT_FALSE(type_tree_owns(&input, map_type));
 }
 
@@ -962,8 +962,8 @@ TEST_F(RuntimeShapeTransition, OpenFieldGrowthDoesNotExtendCompilerTypeList) {
         {.item = i2it(99)}).item, ItemNull.item);
     EXPECT_EQ(lambda_int_item_value(shape_transition_read_field(map, key)), 99);
     EXPECT_EQ(input.type_list->length, source_type_count);
-    // D8.5.1v7: a runtime shape never joins the source's type list; a runtime
-    // tree node's type_index indexes the tree's own list (D3.4.3v5)
+    // D8.3.5: a runtime shape never joins the source's type list; a runtime
+    // tree node's type_index indexes the tree's own list (D3.4.3)
     EXPECT_FALSE(type_tree_owns(&input, (TypeMap*)map->type));
 }
 

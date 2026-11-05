@@ -1603,7 +1603,7 @@ static long slow_threshold_for_test(const std::string& test_name) {
 static bool test262_should_use_ast_backend(const Test262Prepared& prepared) {
     if (g_mir_only || g_mvp_lmd) return false;
     if (g_ast_only) return true;
-    // async/module bodies now share the activation-backed interpreter (D5.1.1v3);
+    // async/module bodies now share the activation-backed interpreter (D6.1.1);
     // their wrappers do not require a separate whole-unit MIR compilation.
     if (g_mir_allowlist.find(prepared.test_name) != g_mir_allowlist.end()) return false;
     for (const auto& feature : prepared.features) {

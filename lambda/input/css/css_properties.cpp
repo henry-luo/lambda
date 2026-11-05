@@ -1602,7 +1602,7 @@ const CssValue* css_text_emphasis_shorthand_longhand(const CssValue* value,
         if (length == sizeof(parts) / sizeof(*parts)) return nullptr;
         parts[length++] = (CssValue*)part;
     }
-    // component wrappers belong to the receiving rule/read pool; source tokens stay borrowed (D4.5.1v4).
+    // component wrappers belong to the receiving rule/read pool; source tokens stay borrowed (D5.5.1).
     return length == 0 ? css_value_create_keyword(pool, "none")
         : length == 1 ? parts[0] : css_value_create_list(pool, parts, length);
 }

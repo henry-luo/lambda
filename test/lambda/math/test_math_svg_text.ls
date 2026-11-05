@@ -1,4 +1,4 @@
-// D7.2.9 / RAD07-L3: text keeps measured faces and bundled file references.
+// D10.2.4 / RAD07-L3: text keeps measured faces and bundled file references.
 import math: lambda.doc.math.math
 import font_files: lambda.doc.font
 

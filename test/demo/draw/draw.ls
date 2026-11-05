@@ -1,5 +1,7 @@
-// S12.1.3 / D4.5.1v4: retain the shell and pointer owner; publish SVG from values.
+// S12.1.3 / D5.5.1: retain the shell and pointer owner; publish SVG from values.
 import dom
+import focus: lambda.ui.core.focus
+import workspace_shell: lambda.ui.workspace.shell
 import resources: ~~.mod_resources
 import model: .mod_model
 import scene: .mod_scene
@@ -314,11 +316,7 @@ on keydown(evt) {
         return 'prevent-default'
     }
     if ((session.dialog != "")^) {
-        if (evt.key == "Tab") {
-            let order = ["file-path","file-cancel","file-confirm"]
-            let positions = [for (i,target in order where target == dom.get_attribute(evt.target,"id")) i]
-            let index = if (len(positions)>0) positions[0] else 0
-            dom.focus_set(dom.get_element_by_id(owner,order[(index+(if (evt.shiftKey) 2 else 1))%3]),false)
+        if (evt.key == "Tab" and focus.trap(dom.query_selector(owner,"#file-dialog .file-dialog"),evt)^) {
             return 'prevent-default'
         }
         return 'pass'
@@ -363,7 +361,7 @@ on load(evt) {
     if (owner != null) dom.request_frame(owner,"draw_activate")
     return 'handled'
 }
-<html lang:"en",<head <meta charset:"UTF-8"><title "Draw — ideas, connected">
+<html lang:"en",<head <meta charset:"UTF-8"><title "Draw — ideas, connected"><style workspace_shell.css>
     <link rel:"stylesheet",href:url_resolve(BASE,"draw.css")>>
-    apply(<draw_document rendered:<body apply(<draw_session rendered:scene.tree()>)>>)
+    apply(<draw_document rendered:<body class:"workspace-shell",style:workspace_shell.variables({primary:"#6d87f5",text:"#29354c",background:"#f5f6f8",font_family:"Arial, sans-serif"})^,apply(<draw_session rendered:scene.tree()>)>>)
 >

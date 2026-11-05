@@ -240,9 +240,9 @@ try {
     check('Radiant inventory includes every baseline phase', () => {
         const selected = new Set(inventory.map(t => t.baseName));
         for (const name of ['test_scene3d_unit_gtest', 'test_map_gtest', 'test_paged_media_gtest',
-            'test_ui_automation_gtest', 'test_radiant_view_ui_gtest', 'test_dom_ui_gtest',
+            'test_ui_automation_gtest',
             'test_page_load_gtest', 'test_radiant_view_gtest', 'test_layout_fuzzy_gtest',
-            'test_wpt_css_syntax_gtest', 'test_wpt_input_events_gtest',
+            'test_wpt_css_syntax_gtest',
             'test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_radiant_render_baseline']) {
             assert.ok(selected.has(name), name);
         }
@@ -252,6 +252,9 @@ try {
         assert.equal(paged.buildTarget, 'test_paged_media_gtest');
         assert.deepEqual(paged.runnerArgs, []);
         const extended = JSON.parse(invoke(['--target=extended', '--list']).stdout);
+        const radiantExtended = JSON.parse(invoke(['--target=radiant', '--category=extended', '--list']).stdout);
+        assert.ok(radiantExtended.some(t => t.baseName === 'test_wpt_input_events_gtest'));
+        assert.ok(require('../build_lambda_config.json').test.layout_baseline_suites.includes('wpt-input-events'));
         const core = extended.find(t => t.baseName === 'test_radiant_core_gtest');
         assert.ok(core);
         assert.equal(core.buildTarget, 'test_radiant_core_gtest');
@@ -261,7 +264,7 @@ try {
         assert.ok(inventory.every(t => t.suite === 'radiant' && t.category === 'baseline'));
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
         assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*:RadiantViewTest.Photo*'));
-        assert.equal(view.caseWorkers, 6);
+        assert.equal(view.caseWorkers, 7);
         assert.equal(view.exclusive, true);
         assert.equal(view.pinExecutables, true);
         assert.deepEqual(view.artifactDirs, ['radiant_view']);
@@ -272,11 +275,53 @@ try {
         assert.deepEqual(photo.runnerArgs, ['--gtest_filter=RadiantViewTest.Photo*']);
         const extendedUi = extended.find(t => t.baseName === 'test_ui_automation_extended_gtest');
         assert.deepEqual(extendedUi.runnerArgs, ['--suite', 'bold,editor,edit,hit-test,photos']);
-        for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_wpt_input_events_gtest']) {
+        for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot']) {
             const check = inventory.find(t => t.baseName === name);
             assert.equal(check.exclusive, false);
             assert.equal(check.workerSlots, name === 'test_radiant_page_snapshot' ? 2 : 3);
         }
+    });
+    check('Reduced Radiant inventory preserves the full gate and selects explicit cases', () => {
+        const reduced = JSON.parse(invoke(['--target=radiant', '--category=baseline', '--radiant-baseline', '--list']).stdout);
+        const byName = new Map(reduced.map(t => [t.baseName, t]));
+        const full = new Map(inventory.map(t => [t.baseName, t]));
+        for (const name of ['test_map_gtest', 'test_epub_reader_state']) {
+            assert.ok(full.has(name));
+            assert.ok(!byName.has(name));
+        }
+        const cases = require('./radiant_baseline_cases.json');
+        const fullOnlyCases = require('./radiant_full_only_cases.json');
+        for (const [name, selected] of Object.entries(cases)) {
+            assert.ok(full.has(name) && byName.has(name), name);
+            assert.equal(new Set(selected).size, selected.length);
+            assert.equal(byName.get(name).expectedCases, selected.length);
+            assert.deepEqual(byName.get(name).runnerArgs,
+                [...full.get(name).runnerArgs, '--gtest_filter=' + selected.join(':')]);
+        }
+        for (const [name, item] of full) {
+            if (!byName.has(name) || cases[name] || fullOnlyCases[name]) continue;
+            assert.deepEqual(byName.get(name), item, name);
+        }
+    });
+    check('Original Three.js demo fixtures run only in the full Radiant gate', () => {
+        const reduced = JSON.parse(invoke(['--target=radiant', '--category=baseline', '--radiant-baseline', '--list']).stdout);
+        const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
+        const reducedView = reduced.find(t => t.baseName === view.baseName);
+        const excluded = require('./radiant_full_only_cases.json')[view.baseName];
+        const definitions = fs.readFileSync(path.join(ROOT, 'test/scene3d/cases.inc'), 'utf8');
+        const fixtureCases = [...definitions.matchAll(/^\{"([^"]+)", "test\/demo\/scene3d\/(?:three-gallery|observatory)\.html"/gm)]
+            .map(match => 'Scene3dTest.' + match[1]);
+        assert.deepEqual([...excluded].sort(), fixtureCases.sort());
+        assert.ok(excluded.length > 0);
+        assert.deepEqual(reducedView.runnerArgs,
+            view.runnerArgs.map(arg => arg + ':' + excluded.join(':')));
+        assert.ok(!view.runnerArgs.some(arg => excluded.some(name => arg.includes(name))));
+    });
+    check('Reduced Radiant case lists reject missing cases', () => {
+        const { child, summary } = runSelected(['test_paged_media_gtest'], 'pass', ['--radiant-baseline']);
+        assert.notEqual(child.status, 0);
+        const count = require('./radiant_baseline_cases.json').test_paged_media_gtest.length;
+        assert.ok(summary.failed_test_names.some(name => name.includes(`expected ${count} selected cases, got 4`)));
     });
     check('View workers keep the discovered executables across a concurrent relink', () => {
         const viewer = path.join(fixture, 'relink-viewer.exe');
@@ -412,7 +457,7 @@ try {
     });
     for (const [runner, jobsEnv, workerArg] of [
         ['test_radiant_view_gtest', 'LAMBDA_RADIANT_VIEW_TEST_JOBS', '--radiant-case-worker'],
-        ['test_scene3d_unit_gtest', null, null],
+        ['test_scene3d_unit_gtest', 'LAMBDA_SCENE3D_TEST_JOBS', null],
     ]) for (const [limit, parallel] of [[2, true], [4, true], [4, false]]) {
         check(`${runner} case workers preserve inventory within ${limit} slots with ${parallel ? 'parallel' : 'sequential'} suites`, () => {
             const trace = path.join(fixture, `trace-${runner}-${limit}-${parallel}`);
@@ -427,7 +472,9 @@ try {
             const rows = fs.readdirSync(trace).map(file => JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')));
             assert.equal(rows.length, 4);
             assert.ok(rows.every(row => row.cap === '1' && (!workerArg || row.args.includes(workerArg))));
-            const events = rows.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
+            // batched cases share a PID; count processes against the worker limit.
+            const processes = [...new Map(rows.map(row => [row.pid, row])).values()];
+            const events = processes.flatMap(row => [{ time: row.start, delta: 1 }, { time: row.end, delta: -1 }])
                 .sort((a, b) => a.time - b.time || a.delta - b.delta);
             let active = 0, peak = 0;
             for (const event of events) { active += event.delta; peak = Math.max(peak, active); }
@@ -561,15 +608,14 @@ try {
         assert.equal(child.status, 1);
         assert.ok(summary.failed_test_names.some(t => t.includes('at least 25 passing tests')));
     });
-    check('UI runner aliases retain separate arguments and artifacts', () => {
-        const names = ['test_ui_automation_gtest', 'test_radiant_view_ui_gtest', 'test_dom_ui_gtest'];
+    check('UI automation runs the combined suites once', () => {
+        const names = ['test_ui_automation_gtest'];
         const { child, output, summary } = runSelected(names);
         assert.equal(child.status, 0, child.stderr);
-        assert.equal(summary.level2_c_tests.length, 3);
-        for (const [index, suite] of ['baseline,dtna,timeline,wired,clay,blade', 'view', 'dom'].entries()) {
-            const data = JSON.parse(fs.readFileSync(path.join(output, names[index] + '_results.json'), 'utf8'));
-            assert.equal(data.args[data.args.indexOf('--suite') + 1], suite);
-        }
+        assert.equal(summary.level2_c_tests.length, 1);
+        const data = JSON.parse(fs.readFileSync(path.join(output, names[0] + '_results.json'), 'utf8'));
+        assert.equal(data.args[data.args.indexOf('--suite') + 1], 'baseline,dtna,timeline,wired,clay,blade,view,dom');
+        assert.ok(!inventory.some(t => ['test_radiant_view_ui_gtest', 'test_dom_ui_gtest'].includes(t.baseName)));
     });
     for (const budget of [5, 12]) check(`Nested pools share ${budget} slots, backfill light suites, and leave exclusive checks alone`, () => {
         const trace = path.join(fixture, `trace-suites-${budget}`);
@@ -781,6 +827,37 @@ runCategories(tester, data.categories).then(records => process.stdout.write(JSON
             rows: [{}], baselines: {} });
         assert.equal(child.status, 1);
         assert.match(child.stderr, /inventory does not match/);
+    });
+    check('Input-events layout classification rejects missing or skipped required cases', () => {
+        const { classifyInputEvents } = require('./run_layout_baseline.js');
+        const row = (name, result) => ({ name: `Run/${name}`, result });
+        const data = { tests: 2, testsuites: [{ testsuite: [row('required', 'COMPLETED'),
+            row('known_failure', 'SKIPPED')] }] };
+        const output = { code: 0, signal: null };
+        assert.deepEqual(classifyInputEvents(data, ['required'], output),
+            { passed: 1, partial: 0, failed: 0, skipped: 1 });
+        assert.throws(() => classifyInputEvents(data, ['missing'], output), /inventory/);
+        assert.throws(() => classifyInputEvents(data, ['known_failure'], output), /inventory/);
+        assert.throws(() => classifyInputEvents(data, [], output), /inventory/);
+        assert.equal(classifyInputEvents(data, ['required'], { code: 1 }).failed, 1);
+    });
+    check('Input-events is routed through the layout baseline worker budget', () => {
+        const child = spawnSync(process.execPath, ['-e', `
+const { runCategories } = require('./test/run_layout_baseline.js');
+const tester = {
+    maxConcurrency: 3,
+    _categorySummaries: { visual: { total: 1, successful: 1, failed: 0, skipped: 0 } },
+    testCategories: async cats => { if (cats.join() !== 'visual') throw Error('bad categories'); return [{}]; },
+    loadBaseline: async () => null,
+};
+runCategories(tester, ['wpt-input-events', 'visual'], async jobs => {
+    if (jobs !== 3) throw Error('bad worker budget');
+    return { name: 'wpt-input-events', passed: 20, partial: 0, failed: 0, skipped: 12, duration_ms: 1 };
+}).then(rows => process.stdout.write(JSON.stringify(rows))).catch(e => { console.error(e); process.exitCode = 1; });
+`], { cwd: ROOT, encoding: 'utf8', timeout: 15000 });
+        assert.equal(child.status, 0, child.stderr);
+        assert.deepEqual(JSON.parse(child.stdout).map(row => [row.name, row.passed, row.skipped]),
+            [['wpt-input-events', 20, 12], ['visual', 1, 0]]);
     });
     check('Snapshot comparator owns the aggregate regression verdict', () => {
         const result = snapshot_result({ code: 1, signal: null },

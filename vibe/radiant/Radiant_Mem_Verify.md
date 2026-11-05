@@ -26,17 +26,17 @@ The formal design is authoritative. The relevant rulings and their application a
 
 | Ruling | Existing requirement | Application to this pilot |
 |---|---|---|
-| **D4.1.4v4** | Four allocation mechanisms; arena batch lifetime; pool individual lifetime; one writer with published readers. | Give scratch and pool allocations different lifetime predicates. Keep the pilot single-threaded; no concurrent mutation or render-worker theorem. |
-| **D4.2.1v3**, **D4.2.3** | `MemContext` owns allocators and tears them down in dependency order. | Factory/registration contracts must preserve owner and backing relationships, including scratch re-registration after clear. |
-| **D4.2.2v2** | Allocation pressure/reclamation precedes a possible `NULL` result. | Allocation failure remains a real branch. Review callbacks for effects and reentrancy before trusting an allocation contract. |
-| **D4.2.4** | Shared-owner lifetime and exclusive batch invalidation. | Reset requires recovered ownership of the invalidated region and its borrowers. An observed scope count alone is insufficient. |
-| **D4.2.5v2** | Tracking is diagnostic, not the ownership mechanism. | Do not derive a proof of liveness from memtrack registration or a clean leak report. |
-| **D4.5.1v3** | Radiant uses regions, pools, generation handles and RAII; seam contracts are pin, generation-check, copy-as-value. | Prove copying into the destination lifetime; explicitly exclude unsupported borrowed-resource families. |
-| **D5.3.3** | GC-facing native helpers use precise roots/handles. | Lambda/JS/GC crossings are outside this pilot. A later extension must model these contracts; it cannot introduce native-stack scanning. |
+| **D5.1.4** | Four allocation mechanisms; arena batch lifetime; pool individual lifetime; one writer with published readers. | Give scratch and pool allocations different lifetime predicates. Keep the pilot single-threaded; no concurrent mutation or render-worker theorem. |
+| **D5.2.1**, **D5.2.1** | `MemContext` owns allocators and tears them down in dependency order. | Factory/registration contracts must preserve owner and backing relationships, including scratch re-registration after clear. |
+| **D5.2.2** | Allocation pressure/reclamation precedes a possible `NULL` result. | Allocation failure remains a real branch. Review callbacks for effects and reentrancy before trusting an allocation contract. |
+| **D5.2.3** | Shared-owner lifetime and exclusive batch invalidation. | Reset requires recovered ownership of the invalidated region and its borrowers. An observed scope count alone is insufficient. |
+| **D5.2.4** | Tracking is diagnostic, not the ownership mechanism. | Do not derive a proof of liveness from memtrack registration or a clean leak report. |
+| **D5.5.1** | Radiant uses regions, pools, generation handles and RAII; seam contracts are pin, generation-check, copy-as-value. | Prove copying into the destination lifetime; explicitly exclude unsupported borrowed-resource families. |
+| **D6.3.3** | GC-facing native helpers use precise roots/handles. | Lambda/JS/GC crossings are outside this pilot. A later extension must model these contracts; it cannot introduce native-stack scanning. |
 
 References: [formal design](../../doc/Lambda_Formal_Design.md), [documentation convention](../../doc/Doc_Convention.md), [C+ convention](../../doc/dev/C_Plus_Convention.md).
 
-Several memory rulings carry implementation-status marks. In particular, the current `lib/arena.c` still contains `arena_free()` and free-list machinery, while D4.1.4v4 specifies the target batch-only arena policy. The pilot must record the implementation/conformance gap; it must neither assume the target migration has already happened nor turn the current implementation into a new ruling. Proving or migrating the allocator is outside this pilot. If a required fix needs a disputed ownership policy, stop that dependent phase for resolution under the documentation convention.
+Several memory rulings carry implementation-status marks. In particular, the current `lib/arena.c` still contains `arena_free()` and free-list machinery, while D5.1.4 specifies the target batch-only arena policy. The pilot must record the implementation/conformance gap; it must neither assume the target migration has already happened nor turn the current implementation into a new ruling. Proving or migrating the allocator is outside this pilot. If a required fix needs a disputed ownership policy, stop that dependent phase for resolution under the documentation convention.
 
 ### 3. Why VeriFast, and the compatibility gate
 
@@ -210,7 +210,7 @@ Any production source-list or sanitizer-profile change goes through `build_lambd
 4. Probe the actual header/declaration graph for the copy helpers, then `DisplayList`, then the reachable `ArrayList<DisplayItem>` operations. Include union fields, raw allocation, placement construction, destructors, offset-based payload access and required macros in the probe matrix.
 5. Attempt the real copy-helper body with a provisional, explicitly trusted allocator contract. Separate parse/type support failures from unsatisfied memory obligations. The existing null-allocation path is an expected proof failure, not an installation failure.
 6. Inventory the exact transitive calls needed by later phases. Freeze production entry points, supported opcodes, target configuration and the trusted dependency list in the manifest.
-7. Review allocator failure callbacks and the current arena implementation against the required contracts and D4.1.4v4/D4.2.4. Record conformance gaps without assuming proposed mechanisms are implemented.
+7. Review allocator failure callbacks and the current arena implementation against the required contracts and D5.1.4/D5.2.3. Record conformance gaps without assuming proposed mechanisms are implemented.
 
 **Deliverables:** reproducible compatibility report; pinned configuration; manifest skeleton; list of real blockers and candidate production module splits, if any.
 

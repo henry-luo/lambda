@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate for the host export allowlist (doc/Lambda_Formal_Design.md D7.3.6).
+"""Gate for the host export allowlist (doc/Lambda_Formal_Design.md D9.4.6).
 
 The host executable exports only lambda/jube/jube_host_exports.txt. Checks:
   1. the host exports every listed symbol. The linker silently skips a listed

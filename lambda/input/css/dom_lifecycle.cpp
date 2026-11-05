@@ -24,7 +24,7 @@ int dom_node_ref_identity_compare(DomNodeRef left, DomNodeRef right) {
 typedef struct DomNodeRecord {
     DomNode* address;
     Arena* primary_arena;
-    Pool* owned_string_pool;  // physical string owner survives document adoption (D4.5.1v4)
+    Pool* owned_string_pool;  // physical string owner survives document adoption (D5.5.1)
     uint32_t id;
     DomNodeType type;
     DomNodeLifeState state;
@@ -740,7 +740,7 @@ static size_t dom_retire_collect(DomDocument* doc) {
                 }
                 DomNodeRecord* blocked = nullptr;
                 if (dom_subtree_can_retire(doc, root, &blocked)) {
-                    // durable control/media state survives detachment, but must end before its weak node identity retires (D4.5.1v4).
+                    // durable control/media state survives detachment, but must end before its weak node identity retires (D5.5.1).
                     view_state_detach_subtree(doc->state, root);
                     if (doc->view_tree) {
                         view_tree_release_retired_subtree(doc->view_tree, root);
@@ -829,7 +829,7 @@ bool dom_retire_idle(uint64_t budget_us) {
             registry->sweep_requested = false;
             dom_retire_collect(registry->document);
         }
-        // Arena allocation and recycling stay on their owning thread (D4.1.4v4).
+        // Arena allocation and recycling stay on their owning thread (D5.1.4).
         // Yield between frees so coalescing a large retired page cannot block
         // the next input event until the entire page has been recycled.
         while (registry->pending_free && time_now_us() - start < budget_us) {

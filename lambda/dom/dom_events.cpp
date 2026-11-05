@@ -481,7 +481,7 @@ static void event_listener_release_roots(EventListener* listener) {
 static bool dom_event_is_document_target(Item target) {
     if (is_virtual_container_type_id(get_type_id(target)) &&
             virtual_host_type(target)) {
-        // D7.4.5v2: document identity follows carrier-neutral host metadata;
+        // D9.5.5: document identity follows carrier-neutral host metadata;
         // DOM Node-family wrappers are Velmt rather than VMap.
         const JubeTypeDef* type = jube_find_type_by_host_type(
             virtual_host_type(target));
@@ -1107,7 +1107,7 @@ static void nl_compact(NodeListeners* nl) {
 // representation varies, so keeping conversion outside this helper avoids
 // five copies of the same property write and its allocation ordering.
 static void event_set_value(Item event, const char* key, Item value) {
-    // D5.3.3: interning the property name can collect either argument.
+    // D6.3.3: interning the property name can collect either argument.
     RootFrame roots(3);
     Rooted<Item> event_root(roots,event), value_root(roots,value);
     Rooted<Item> key_root(roots,js_name_item(key));
@@ -1287,7 +1287,7 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     event_set_item(event, "srcElement", ItemNull);
     event_set_item(event, "currentTarget", ItemNull);
 
-    // D5.3.3: function allocation can collect an unrooted property-name Item.
+    // D6.3.3: function allocation can collect an unrooted property-name Item.
     init_key_root.set(make_string_item("initEvent"));
     init_function_root.set(dom_realm_new_function(js_event_init_event));
     dom_realm_set(event_root.get(), init_key_root.get(), init_function_root.get());
@@ -1546,7 +1546,7 @@ extern "C" Item js_ctor_focus_event_fn(Item type_arg, Item init_arg) {
 
 static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
         const char* class_name) {
-    // D5.3.3: each event property write may collect the init and event carriers.
+    // D6.3.3: each event property write may collect the init and event carriers.
     RootFrame roots(3);
     Rooted<Item> type_root(roots, type_arg);
     Rooted<Item> init_root(roots, init_arg);
@@ -1796,7 +1796,7 @@ static Item js_ctor_string_event(Item type_arg, Item init_arg, JsClass class_id,
         init_bool(init_root.get(), "cancelable", false),
         init_bool(init_root.get(), "composed", false), class_id));
     // Subclass property writes allocate after the Event initializer's root
-    // frame closes, so the partially built receiver needs its own precise root (D5.4.3).
+    // frame closes, so the partially built receiver needs its own precise root (D6.4.3).
     Item ev = event_root.get();
     event_set_str(ev, name_key, init_str(init_root.get(), name_key, ""));
     if (timing) {
@@ -1839,7 +1839,7 @@ Item js_ctor_content_visibility_auto_state_change_event(Item type_arg, Item init
     }
     event.set(js_create_event_init_with_class(fn_to_cstr(type.get()), values[0],
         values[1], values[2], JS_CLASS_CONTENT_VISIBILITY_AUTO_STATE_CHANGE_EVENT));
-    // D5.3.3: keep the receiver rooted while attaching its traced readonly payload.
+    // D6.3.3: keep the receiver rooted while attaching its traced readonly payload.
     if (!dom_event_host_set_payload(event.get(), Item{.item = b2it(values[3])}))
         return ItemError;
     return event.get();
@@ -1868,7 +1868,7 @@ void js_content_visibility_event_install_prototype(Item prototype) {
     dom_install_event_payload_getters(prototype, fields, 1, content_visibility_event_skipped);
 }
 
-// CSP's Event subclass owns a traced immutable payload like MessageEvent (D5.3.3).
+// CSP's Event subclass owns a traced immutable payload like MessageEvent (D6.3.3).
 static const char* const security_policy_event_fields[] = {
     "blockedURI", "columnNumber", "disposition", "documentURI", "effectiveDirective",
     "lineNumber", "originalPolicy", "referrer", "sample", "sourceFile", "statusCode", "violatedDirective"

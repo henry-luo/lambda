@@ -1,0 +1,4668 @@
+{
+  "candidate": {
+    "revision": "ed49f10eb37b884422d53145d96c0a55e86de499",
+    "binary_sha256": "7d48648ec773ff4d1347b94a75c836daa22803f6fdb27de284112aac9c935948",
+    "compiler_identity": {
+      "experiment_sources": {
+        "sha256": "20cbc6eade43a7a33e0ad017c196e2e25596e97fe4c14a862312c645c5960510",
+        "file_count": 44,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "4970c65abaed34e012b1c902080b8a019d13064065fe10a5d499410b698b1d9d"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "becaf6da8717fa4511cfcba161880c4acad9ea3c6ab825ed610d7ed534110018"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "f6ee47d751a8169c409ce8da8a1c7d5bd5965b4c803b19a7db6ea413b8775306"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "60cb18d86bbc4687b6e407688bc73aed37baa46de55589162f81ed977301f701"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "fb96ac48603d603ebb930c7ec921cb72e113b3633939b3bd137c5310005dfa8a"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "356f6e7562938e0520400f16deefba32cc867746ceee19cb2cc7903dfa5f978c"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "3968cad882aa085f80271e3a5980268c67447f2f630f5d53e111dce22539c695"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "3491082e8c698a9c0be330a7623bc396e82cb695ada98eeaeed4ced7113f0a2e"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "427d5f705b032182f713587c3c629fcc4549356483be03e752a28f8c8b6d63ea"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "35caa9ddedd6f8b5e669cd18461c299650d74e7f9f4482f3ee9764e5c7710704"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "e146ea9ed6a6898566dbf92aec8db40636ef6f1180dd7772112d7f66513865ea"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "1c826f7833e4497ca792bf757dcfb3d7ad65c72d16e0a31e49190901f503f612"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "aa8db1d6638930d99baf33ea3a30a88c1d11d3ea6b3d48e76979fdf4fd99dab8"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "d841e57a485812e9ea4a6d3e1095ce246a85f5ace7ec70fd55b59392379d716c"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "ed2e0490254fb433dfee048ac950d611af717bb5eed478a2669fa610df600b4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "09a54b77b26d3cb931ba159136dc16e69fdc4735359e1a79272d7bdab62681d6"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "9cf452ece6407cca9084370573ae900f1dc142b8c2bea0034cdbb4e23f231cfb"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "315775d9710598661c118c918efdb649bd701af5a8a41289fbc9496c02cc86c3"
+          },
+          {
+            "path": "lambda/runtime/mir_cow_analysis.hpp",
+            "sha256": "6a31c5c17569b9979c9a411c2afd43ede6f779ae2ac3af11f42b709bc9c0e995"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "89fc9f8e909829f4d6391aa7676bc424f883434e186edfa67b0e16a7c26472ae"
+          },
+          {
+            "path": "lambda/runtime/mir_function_value.hpp",
+            "sha256": "ad42b2abd4cb895f341c53da3334a113d0d5f727cc282254e54ba8d03c250bfd"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mir_path.hpp",
+            "sha256": "f4968e300247c35d690f7b9c70042bad2209d542b16e0ccda5bc0aae467ab8fe"
+          },
+          {
+            "path": "lambda/runtime/mir_shape_candidates.hpp",
+            "sha256": "16c0caf60e9f37d895051654883fd7b3a19e16da429ffba4c5c252b5604c756b"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "643a24d028feab68b7e35270648a3f2e4e0a3d2c4d685563785dca67ab543a36"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "edbbde8f0b91c7cac399ea7cf59726a375f44db0fe0998b299b9cb1649ccc4d9"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "8d50ea6ccf801100c57d3918cb3c13ec745ce94dc37d78c119490551874b17a5"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "1b6e521aeaa0bef439bcde2f3ea98617e45a5cfe6b0f56954e8f49b7d6c71f80"
+          },
+          {
+            "path": "lambda/runtime/re2_wrapper.cpp",
+            "sha256": "b253f6b1a3b6128d4bc99ff93306e4df9acb8b9934dac04b5ed3bde415e61e43"
+          },
+          {
+            "path": "lambda/runtime/re2_wrapper.hpp",
+            "sha256": "141a274ee1cb5ec38f881e67456cf48125b950aa2029da7dddd920598be76bf7"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "03b92be13da9151c7f29376577464de47e3896cfa23d866b0d7f766fdb8a2aa0"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "a8b6882012e4c942fd40005d9905085798358974cc02c43ac137555b56841ebd"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "34a17d694b2128addfa49d10e9320a43399ed06b3433870021c4e5cc8e61383d"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "d207a5f72bd64701148f174ae2ee0568679dfe8f822d20f4af9380a15924f37e"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "d2346fae7b7f390ad7d928841be677c629d24e16ad9ea092c893e8ad0a09ca20"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "4e42fe65c125e5708067f11406006c5ce00932f3aa977f3b20b683b1c86a4461"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    },
+    "snapshot": "temp/lambda_mir_mvp/tune77_phase3/guarded_admission-sources",
+    "build_configuration": "release_native O3 ThinLTO march=native; fresh private control objects",
+    "compile_commands_sha256": "423b49af4e50ee25cced6acac537f6dee70e06219b5dcbc01dc521d5d610b1c5",
+    "reused_matching_release_objects": "numeric_admission",
+    "changed_translation_units": [
+      "lambda/runtime/mir_container_access.hpp",
+      "lambda/runtime/mir_emitter_shared.hpp",
+      "lambda/runtime/mvp/mvp_mir.cpp"
+    ]
+  },
+  "debug_manifest": {
+    "revision": "ed49f10eb37b884422d53145d96c0a55e86de499",
+    "binary_sha256": "8a7b1428d04d27157c818ef4caa8bed837bb0c973e1c0313635802eb5cf7ee61",
+    "compiler_identity": {
+      "experiment_sources": {
+        "sha256": "20cbc6eade43a7a33e0ad017c196e2e25596e97fe4c14a862312c645c5960510",
+        "file_count": 44,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "4970c65abaed34e012b1c902080b8a019d13064065fe10a5d499410b698b1d9d"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "becaf6da8717fa4511cfcba161880c4acad9ea3c6ab825ed610d7ed534110018"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "f6ee47d751a8169c409ce8da8a1c7d5bd5965b4c803b19a7db6ea413b8775306"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "60cb18d86bbc4687b6e407688bc73aed37baa46de55589162f81ed977301f701"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "fb96ac48603d603ebb930c7ec921cb72e113b3633939b3bd137c5310005dfa8a"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "356f6e7562938e0520400f16deefba32cc867746ceee19cb2cc7903dfa5f978c"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "3968cad882aa085f80271e3a5980268c67447f2f630f5d53e111dce22539c695"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "3491082e8c698a9c0be330a7623bc396e82cb695ada98eeaeed4ced7113f0a2e"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "427d5f705b032182f713587c3c629fcc4549356483be03e752a28f8c8b6d63ea"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "35caa9ddedd6f8b5e669cd18461c299650d74e7f9f4482f3ee9764e5c7710704"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "e146ea9ed6a6898566dbf92aec8db40636ef6f1180dd7772112d7f66513865ea"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "1c826f7833e4497ca792bf757dcfb3d7ad65c72d16e0a31e49190901f503f612"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "aa8db1d6638930d99baf33ea3a30a88c1d11d3ea6b3d48e76979fdf4fd99dab8"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "d841e57a485812e9ea4a6d3e1095ce246a85f5ace7ec70fd55b59392379d716c"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "ed2e0490254fb433dfee048ac950d611af717bb5eed478a2669fa610df600b4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "09a54b77b26d3cb931ba159136dc16e69fdc4735359e1a79272d7bdab62681d6"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "9cf452ece6407cca9084370573ae900f1dc142b8c2bea0034cdbb4e23f231cfb"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "315775d9710598661c118c918efdb649bd701af5a8a41289fbc9496c02cc86c3"
+          },
+          {
+            "path": "lambda/runtime/mir_cow_analysis.hpp",
+            "sha256": "6a31c5c17569b9979c9a411c2afd43ede6f779ae2ac3af11f42b709bc9c0e995"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "89fc9f8e909829f4d6391aa7676bc424f883434e186edfa67b0e16a7c26472ae"
+          },
+          {
+            "path": "lambda/runtime/mir_function_value.hpp",
+            "sha256": "ad42b2abd4cb895f341c53da3334a113d0d5f727cc282254e54ba8d03c250bfd"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mir_path.hpp",
+            "sha256": "f4968e300247c35d690f7b9c70042bad2209d542b16e0ccda5bc0aae467ab8fe"
+          },
+          {
+            "path": "lambda/runtime/mir_shape_candidates.hpp",
+            "sha256": "16c0caf60e9f37d895051654883fd7b3a19e16da429ffba4c5c252b5604c756b"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "643a24d028feab68b7e35270648a3f2e4e0a3d2c4d685563785dca67ab543a36"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "edbbde8f0b91c7cac399ea7cf59726a375f44db0fe0998b299b9cb1649ccc4d9"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "8d50ea6ccf801100c57d3918cb3c13ec745ce94dc37d78c119490551874b17a5"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "1b6e521aeaa0bef439bcde2f3ea98617e45a5cfe6b0f56954e8f49b7d6c71f80"
+          },
+          {
+            "path": "lambda/runtime/re2_wrapper.cpp",
+            "sha256": "b253f6b1a3b6128d4bc99ff93306e4df9acb8b9934dac04b5ed3bde415e61e43"
+          },
+          {
+            "path": "lambda/runtime/re2_wrapper.hpp",
+            "sha256": "141a274ee1cb5ec38f881e67456cf48125b950aa2029da7dddd920598be76bf7"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "03b92be13da9151c7f29376577464de47e3896cfa23d866b0d7f766fdb8a2aa0"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "a8b6882012e4c942fd40005d9905085798358974cc02c43ac137555b56841ebd"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "34a17d694b2128addfa49d10e9320a43399ed06b3433870021c4e5cc8e61383d"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "d207a5f72bd64701148f174ae2ee0568679dfe8f822d20f4af9380a15924f37e"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "d2346fae7b7f390ad7d928841be677c629d24e16ad9ea092c893e8ad0a09ca20"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "4e42fe65c125e5708067f11406006c5ce00932f3aa977f3b20b683b1c86a4461"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    },
+    "snapshot": "temp/lambda_mir_mvp/tune77_phase3/guarded_admission_debug-sources",
+    "build_configuration": "debug validation O3 g0 assertions + JS profiling; fresh private objects",
+    "compile_commands_sha256": "423b49af4e50ee25cced6acac537f6dee70e06219b5dcbc01dc521d5d610b1c5",
+    "reused_matching_debug_objects": "numeric_admission_debug",
+    "changed_translation_units": [
+      "lambda/runtime/mir_container_access.hpp",
+      "lambda/runtime/mir_emitter_shared.hpp",
+      "lambda/runtime/mvp/mvp_mir.cpp"
+    ]
+  },
+  "fresh_control": {
+    "revision": "775c00d612736b0684ae25be6f7444b600b7c682",
+    "binary_sha256": "601f852480d402053a243581609f75020ac0689074d5e46f9a33cff2f7de708b",
+    "compiler_identity": {
+      "experiment_sources": {
+        "sha256": "86319c27292bddee2fdeb348d4330553bee8df2913c65f410b6493e0ecb68b10",
+        "file_count": 42,
+        "files": [
+          {
+            "path": "build_lambda_config.json",
+            "sha256": "4970c65abaed34e012b1c902080b8a019d13064065fe10a5d499410b698b1d9d"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.cpp",
+            "sha256": "0efab0f5123da21e1596d102c4c5fb930c7e661a5471447e0d60612769b15038"
+          },
+          {
+            "path": "lambda/core/lambda-decimal.hpp",
+            "sha256": "a80597e3b7889604023f68933cfb0bf3f7780ceca2c4de7a77b49d9460e80e35"
+          },
+          {
+            "path": "lambda/core/print.cpp",
+            "sha256": "becaf6da8717fa4511cfcba161880c4acad9ea3c6ab825ed610d7ed534110018"
+          },
+          {
+            "path": "lambda/core/print.h",
+            "sha256": "45b319679bca8fce7e493e7e76791baa6397268a02909c7dadbff6489c5bc2ea"
+          },
+          {
+            "path": "lambda/io/mark_builder.cpp",
+            "sha256": "f6ee47d751a8169c409ce8da8a1c7d5bd5965b4c803b19a7db6ea413b8775306"
+          },
+          {
+            "path": "lambda/io/mark_builder.hpp",
+            "sha256": "60cb18d86bbc4687b6e407688bc73aed37baa46de55589162f81ed977301f701"
+          },
+          {
+            "path": "lambda/lambda-data.hpp",
+            "sha256": "fb96ac48603d603ebb930c7ec921cb72e113b3633939b3bd137c5310005dfa8a"
+          },
+          {
+            "path": "lambda/lambda.h",
+            "sha256": "4e058b2bda0629658273e5de26e4b3c41246f2a19274d8b20d416fb76e9f7307"
+          },
+          {
+            "path": "lambda/mir/VENDOR.md",
+            "sha256": "3968cad882aa085f80271e3a5980268c67447f2f630f5d53e111dce22539c695"
+          },
+          {
+            "path": "lambda/runtime/ast-core.cpp",
+            "sha256": "3491082e8c698a9c0be330a7623bc396e82cb695ada98eeaeed4ced7113f0a2e"
+          },
+          {
+            "path": "lambda/runtime/ast-core.hpp",
+            "sha256": "427d5f705b032182f713587c3c629fcc4549356483be03e752a28f8c8b6d63ea"
+          },
+          {
+            "path": "lambda/runtime/build_ast.cpp",
+            "sha256": "35caa9ddedd6f8b5e669cd18461c299650d74e7f9f4482f3ee9764e5c7710704"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_heap.c",
+            "sha256": "e146ea9ed6a6898566dbf92aec8db40636ef6f1180dd7772112d7f66513865ea"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.c",
+            "sha256": "0915e34f2848bf4643dd9975ca51fe3810ce70fccb99ce7a3cfdb07c319160fa"
+          },
+          {
+            "path": "lambda/runtime/gc/gc_object_zone.h",
+            "sha256": "8c7c7b0da2180b6136cf6c8b6004a54efd7d4d931bb30973b10169846c3bd1a4"
+          },
+          {
+            "path": "lambda/runtime/heap_api.h",
+            "sha256": "b1172a20b6ea2c24ca877308d7f8e356931baea1b7ae3761eba840a095b83efc"
+          },
+          {
+            "path": "lambda/runtime/lambda-data-runtime.cpp",
+            "sha256": "1c826f7833e4497ca792bf757dcfb3d7ad65c72d16e0a31e49190901f503f612"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval-num.cpp",
+            "sha256": "aa8db1d6638930d99baf33ea3a30a88c1d11d3ea6b3d48e76979fdf4fd99dab8"
+          },
+          {
+            "path": "lambda/runtime/lambda-eval.cpp",
+            "sha256": "9db3310866ad725b6a4e1a6296ccd76ce27d2a2cb3ccf0cd9200307ab4f92f6a"
+          },
+          {
+            "path": "lambda/runtime/lambda-mem.cpp",
+            "sha256": "ed2e0490254fb433dfee048ac950d611af717bb5eed478a2669fa610df600b4e"
+          },
+          {
+            "path": "lambda/runtime/lambda-root-frame.hpp",
+            "sha256": "94b703d8b988ca872821ed67e203cb6def97330dc65af35bb140091e66b8bd09"
+          },
+          {
+            "path": "lambda/runtime/lambda-vector.cpp",
+            "sha256": "09a54b77b26d3cb931ba159136dc16e69fdc4735359e1a79272d7bdab62681d6"
+          },
+          {
+            "path": "lambda/runtime/mir_bitwise.hpp",
+            "sha256": "9cf452ece6407cca9084370573ae900f1dc142b8c2bea0034cdbb4e23f231cfb"
+          },
+          {
+            "path": "lambda/runtime/mir_container_access.hpp",
+            "sha256": "43b61c5b9f54944c2dcfec1f0d134e7988c4422376ce827af847c8a490396557"
+          },
+          {
+            "path": "lambda/runtime/mir_cow_analysis.hpp",
+            "sha256": "6a31c5c17569b9979c9a411c2afd43ede6f779ae2ac3af11f42b709bc9c0e995"
+          },
+          {
+            "path": "lambda/runtime/mir_emitter_shared.hpp",
+            "sha256": "507fb02630a0296ab55bc4d63186e1858043b4837a18825855e0129c3d6bb776"
+          },
+          {
+            "path": "lambda/runtime/mir_function_value.hpp",
+            "sha256": "ad42b2abd4cb895f341c53da3334a113d0d5f727cc282254e54ba8d03c250bfd"
+          },
+          {
+            "path": "lambda/runtime/mir_loop_analysis.hpp",
+            "sha256": "0a9d95d62533f75c75b2b360e78e86d05e6c97cfab9f967a8c092dff17b0d773"
+          },
+          {
+            "path": "lambda/runtime/mir_path.hpp",
+            "sha256": "e6106542434c6aef6d1bec5d9727e69296aa0d782350c7a7d8bf9631dc31febf"
+          },
+          {
+            "path": "lambda/runtime/mir_shape_candidates.hpp",
+            "sha256": "16c0caf60e9f37d895051654883fd7b3a19e16da429ffba4c5c252b5604c756b"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp.hpp",
+            "sha256": "643a24d028feab68b7e35270648a3f2e4e0a3d2c4d685563785dca67ab543a36"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_internal.hpp",
+            "sha256": "edbbde8f0b91c7cac399ea7cf59726a375f44db0fe0998b299b9cb1649ccc4d9"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_mir.cpp",
+            "sha256": "538ac7b50699c6cdbcea7f52f20e9f64025c922ba0279f81607a8c3692fce2ba"
+          },
+          {
+            "path": "lambda/runtime/mvp/mvp_plan.cpp",
+            "sha256": "f085aaea951285de0f70aa5d56e49e9afe8b3921cd556bfd5ab9647d81f09223"
+          },
+          {
+            "path": "lambda/runtime/runner.cpp",
+            "sha256": "03b92be13da9151c7f29376577464de47e3896cfa23d866b0d7f766fdb8a2aa0"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.c",
+            "sha256": "4b7fb9649542857be3b31f5867d80b4a75bf527feb03bf60df1ca74c71b751fa"
+          },
+          {
+            "path": "lambda/runtime/sys_func_registry.h",
+            "sha256": "34a17d694b2128addfa49d10e9320a43399ed06b3433870021c4e5cc8e61383d"
+          },
+          {
+            "path": "lambda/runtime/transpile-mir.cpp",
+            "sha256": "1748e20490ba4472ac19b4af24f3b5cfc584ec8a14c82e314f1146b2bbc05cc5"
+          },
+          {
+            "path": "lambda/runtime/type_contract.cpp",
+            "sha256": "d2346fae7b7f390ad7d928841be677c629d24e16ad9ea092c893e8ad0a09ca20"
+          },
+          {
+            "path": "lambda/runtime/type_contract.hpp",
+            "sha256": "4e42fe65c125e5708067f11406006c5ce00932f3aa977f3b20b683b1c86a4461"
+          },
+          {
+            "path": "lib/math_checked.hpp",
+            "sha256": "869f369e573ef95d0d5cc092f0e63162c5267d5b7306a9d3c4b40a418ac146e7"
+          }
+        ]
+      },
+      "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin25.3.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "cpu_probe": "sysctl: sysctl fmt -1 1024 1: Operation not permitted"
+    },
+    "snapshot": "temp/lambda_mir_mvp/tune77_phase3/control-sources",
+    "build_configuration": "release_native O3 ThinLTO march=native; fresh private control objects",
+    "compile_commands_sha256": "423b49af4e50ee25cced6acac537f6dee70e06219b5dcbc01dc521d5d610b1c5"
+  },
+  "all77_mvp_and_full_benchmark_outputs": "pass",
+  "fixture_checks": {
+    "runtime_total": 6658,
+    "runtime_passed": 6658,
+    "runtime_failed": 0,
+    "control_failure_headers": [
+      "test_allocating_vector_emission (__main__.LambdaMirMvpTests)",
+      "test_array_reduction_mir (__main__.LambdaMirMvpTests)",
+      "test_assignment_failure_names_binding (__main__.LambdaMirMvpTests)",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1', 'COW_EXEC_PROFILE': '1', 'COW_EXEC_PROFILE_OUT': '/Users/henryluo/Projects/lambda/temp/<scratch>/capture-profile.tsv'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1', 'COW_EXEC_PROFILE': '1', 'COW_EXEC_PROFILE_OUT': '/Users/henryluo/Projects/lambda/temp/<scratch>/capture-profile.tsv'}, fixture='mir_mvp_index_recurrence.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'}, fixture='mir_mvp_index_recurrence.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'}, fixture='mir_mvp_index_recurrence.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={}, fixture='mir_mvp_index_recurrence.ls')",
+      "test_benchmark_goldens (__main__.LambdaMirMvpTests) (suite='jetstream', name='navier_stokes', compiler='production')",
+      "test_benchmark_goldens (__main__.LambdaMirMvpTests) (suite='text', name='text_search', compiler='production')",
+      "test_guarded_float_body (__main__.LambdaMirMvpTests)",
+      "test_immutable_indirect_keys (__main__.LambdaMirMvpTests)",
+      "test_modular_array_update (__main__.LambdaMirMvpTests)",
+      "test_module_initialization (__main__.LambdaMirMvpTests)",
+      "test_native_string_array_read (__main__.LambdaMirMvpTests)",
+      "test_nullable_comparison_mir (__main__.LambdaMirMvpTests)",
+      "test_nullable_numeric_cast_emission (__main__.LambdaMirMvpTests)",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={})",
+      "test_power_two_divmod (__main__.LambdaMirMvpTests)",
+      "test_records_and_readonly_kernel_emission (__main__.LambdaMirMvpTests)",
+      "test_recursive_array_capture_effects (__main__.LambdaMirMvpTests)",
+      "test_reference_goldens (__main__.LambdaMirMvpTests) (suite='awfy', name='cd')",
+      "test_reference_goldens (__main__.LambdaMirMvpTests) (suite='awfy', name='havlak')",
+      "test_scalar_record_witness (__main__.LambdaMirMvpTests)",
+      "test_single_use_string_constructor (__main__.LambdaMirMvpTests)"
+    ],
+    "candidate_failure_headers": [
+      "test_allocating_vector_emission (__main__.LambdaMirMvpTests)",
+      "test_array_reduction_mir (__main__.LambdaMirMvpTests)",
+      "test_assignment_failure_names_binding (__main__.LambdaMirMvpTests)",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1', 'COW_EXEC_PROFILE': '1', 'COW_EXEC_PROFILE_OUT': '/Users/henryluo/Projects/lambda/temp/<scratch>/capture-profile.tsv'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_guarded_float_body (__main__.LambdaMirMvpTests)",
+      "test_immutable_indirect_keys (__main__.LambdaMirMvpTests)",
+      "test_modular_array_update (__main__.LambdaMirMvpTests)",
+      "test_module_initialization (__main__.LambdaMirMvpTests)",
+      "test_native_string_array_read (__main__.LambdaMirMvpTests)",
+      "test_nullable_comparison_mir (__main__.LambdaMirMvpTests)",
+      "test_nullable_numeric_cast_emission (__main__.LambdaMirMvpTests)",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_array_domains.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_borrow_kernel.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_float_arrays.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_fn_local.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_indirect_keys.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_modular_update.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_numeric_cast.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_predicate_branch.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_proven_domains.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_record_witness.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_records.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_region_loops.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_shift.ls', mode={})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'})",
+      "test_ownership_and_semantics (__main__.LambdaMirMvpTests) (source='mir_mvp_string_arrays.ls', mode={})",
+      "test_power_two_divmod (__main__.LambdaMirMvpTests)",
+      "test_records_and_readonly_kernel_emission (__main__.LambdaMirMvpTests)",
+      "test_reference_goldens (__main__.LambdaMirMvpTests) (suite='awfy', name='cd')",
+      "test_reference_goldens (__main__.LambdaMirMvpTests) (suite='awfy', name='havlak')",
+      "test_scalar_record_witness (__main__.LambdaMirMvpTests)",
+      "test_single_use_string_constructor (__main__.LambdaMirMvpTests)"
+    ],
+    "new": [],
+    "fixture_mvp": "all modes pass",
+    "fixture_full_known_failures": [
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1', 'COW_EXEC_PROFILE': '1', 'COW_EXEC_PROFILE_OUT': '/Users/henryluo/Projects/lambda/temp/<scratch>/capture-profile.tsv'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_EVERY': '1', 'LAMBDA_GC_POISON_FREED': '1'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={'LAMBDA_GC_FORCE_SEED': '1592594996', 'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'}, fixture='mir_mvp_benchmark_expansion.ls')",
+      "test_benchmark_expansion_semantics (__main__.LambdaMirMvpTests) (compiler='production', mode={}, fixture='mir_mvp_benchmark_expansion.ls')"
+    ],
+    "full_gap": "Pre-existing byte membership ABI loses direct Error payload. Both fresh control and candidate print false for not(error(first) in [1]); MVP prints first.",
+    "initial_invalid_test_pattern": "E204 corrected from d* to existing zero-width repetition syntax; golden unchanged."
+  },
+  "baseline": {
+    "runtime_total": 6658,
+    "runtime_passed": 6658,
+    "runtime_failed": 0,
+    "reused_unchanged_parser_results": 2112,
+    "combined_passed": 8770,
+    "reruns": [],
+    "summary_sha256": "7252b1392c2ac9b4f86f81bfc28ce9a3961657dcee458b2ea9414897b99c7742",
+    "provenance": {
+      "command": [
+        "node",
+        "test/test_run.js",
+        "--target=lambda",
+        "--category=baseline",
+        "--exclude-test=test_node_prelim_gtest",
+        "--exclude-test=test_lambda_concurrency_gtest",
+        "--parallel",
+        "--input-results=/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48_batch/baseline-artifacts/input_baseline_results.json"
+      ],
+      "returncode": 0,
+      "host_sha256": "8a7b1428d04d27157c818ef4caa8bed837bb0c973e1c0313635802eb5cf7ee61",
+      "host_manifest": "temp/lambda_mir_mvp/tune77_phase3/guarded_admission_debug-source-manifest.json",
+      "runtime_test_executables": [
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_binary_storage_gtest.exe",
+          "sha256": "7d42fbe6bbf632a45fdc1177c840784d78e48c706ef0044bb16ccddb0c2cabbf"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_compiler_pass_gtest.exe",
+          "sha256": "2294e1863bf9c3b2b583f836922271a297927f7bd38770102ce70e9c10ab46a7"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_input_script_cache_gtest.exe",
+          "sha256": "f3ea2d1948d2a8fe69b25817025860c56ef40599ce54b3d1ab24fff292fe1361"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_io_terminal_gtest.exe",
+          "sha256": "3bdab2d1345ba99986fd41c5b14758cf6bcc72b99835a703e2b1cc1dce790adf"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_item_repr_gtest.exe",
+          "sha256": "bf6f6003df451b37b17f94362a8157cb32bbacb900cfd7a249ef801ce7539467"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_bt_regex_gtest.exe",
+          "sha256": "bf61d9db5c4995c86626596dd72e078baa70b3d79edee9c2680bb3b5949dfbad"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_c_parser_gtest.exe",
+          "sha256": "e73b137877e00f9dc0002f1a4e357389a4b1c3e1070d610e609b233a40c498dd"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_coerce_gtest.exe",
+          "sha256": "7320fa29edfc8c2e881833f486a528821a888b0ee6cf1ed66e1b5aa00b2ece3e"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_gtest.exe",
+          "sha256": "992fb19256c47d6c27b4d3b66bd97065eaa1163f7bfb7408670089ba39054015"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_mir_emission_gtest.exe",
+          "sha256": "8991efd3a683ac0779d0cb4cc317ce92a38efebc35476b58146a3144eb85ce29"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_mvp_lmd_gtest.exe",
+          "sha256": "737cbc1a82501bc9cb69465dfa2984ee4b9e1e6ba1ec4234f2277ef5975e375e"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_opt_gtest.exe",
+          "sha256": "5f23827df54f879ca95667de1a2e8204557c91f10bcb0b74128c22fdd55c658a"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_regex_router_poc_gtest.exe",
+          "sha256": "794bfed8176d7a54633b6aa2093aabc4772ef060cecbf87bce12029f1eb2db96"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_script_gtest.exe",
+          "sha256": "80232152036635bf1f972f58dac680320553e75f74c2b0532cfbcef7a53f0a6a"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_js_test262_gtest.exe",
+          "sha256": "0a31ac105696e3e9dd04e5be5d5872dfde1b665e958aa45d5ddcc5418e39472a"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_gtest.exe",
+          "sha256": "7e39e6f56a861b2953570fc532ed6329e74d935359fd5e5506429ab038f8f8f5"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_opt_gtest.exe",
+          "sha256": "eeb125fd0c0e498d35ca1f9243f63610e2259ceb3f3f519a604b6334bf0eac9f"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_parser_poc_gtest.exe",
+          "sha256": "b7accf4d6e15c369eae268d566f200aeed647b7b8e0c432e3249cdeb9022b38c"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_proc_gtest.exe",
+          "sha256": "e6be39649c79efce854abdcc7b102dba7d9d75fa7ee83e363fad8e7ccaeb1070"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_repl_gtest.exe",
+          "sha256": "1bba6b71961e0861083afff673c9e69b9bf211280ec288eb1745a642efac5f21"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_runtime_gtest.exe",
+          "sha256": "b10ddae1bef2b917ea64d35530d7ac92eb53232406db81049f9abdc3fe4695e6"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_std_gtest.exe",
+          "sha256": "cfadaf34d0cfb2460c7b24a5bb7ffb91a653780d701195454ce5caceaae84505"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_lambda_typed.exe",
+          "sha256": "c4388a7cafd7888b44caa632992c57c4a06db91acaa68ea2a20357da525f2d17"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_mir_emission_gtest.exe",
+          "sha256": "5cf0274560bb4beaf63a7270f463e03967180acc2dc531e333e8b071fce06868"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_mir_gc_stress_gtest.exe",
+          "sha256": "25923326ed6a5da76a045b56155d370a66cca287ae73e27e57dcdd4e64b84186"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_mir_ratchet_gtest.exe",
+          "sha256": "93f1bb4acd2aaa24beebbe5c12160c27315034368d7681b00cb73c3578b237a3"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_scalar_compare_gtest.exe",
+          "sha256": "f5d45136a1b0ce77f34ffa5eccb080be0314d4aaf84b86232e32895abd4fa6df"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_security_runtime_gtest.exe",
+          "sha256": "8873157ce952d64bafa033b5c9122e9c5125e31c320cb26c4f9ed7c768b00045"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_serve_gtest.exe",
+          "sha256": "b792749329ebcd5fb5dcf17366a1ee44724010bc171b2b6b18541bb4bba080bd"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_ts_gtest.exe",
+          "sha256": "e107bb806750a4791e98f05842d87732b2302682e1fe9390d6e8f3914452f87f"
+        },
+        {
+          "path": "temp/lambda_mir_mvp/tune77_full/baseline-workspace/test/test_zip_gtest.exe",
+          "sha256": "a922e5c034ab4d378b92b6d00d812d1757ee9f24c928fdf2a9ca43495042feba"
+        }
+      ],
+      "input_results": {
+        "path": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune48_batch/baseline-artifacts/input_baseline_results.json",
+        "sha256": "2deee3e0c93881ce4ae1bc349e27e1d73a284355b0b6918876d5e31a0eacf9c5"
+      }
+    },
+    "superseded_runs": "ENOSPC interrupted earlier hosts; native_outcomes debug rejected missing production NO_GC audit entry, corrected in this host. No reruns needed for this final host."
+  },
+  "forced_gc_benchmark_cases": 18,
+  "diagnostic_profiles": {
+    "diagnostic_only": true,
+    "cases": [
+      {
+        "name": "awfy/cd",
+        "engines": {
+          "mvp": {
+            "returncode": 0,
+            "matches_golden": true,
+            "calls": [
+              {
+                "kind": "boxed",
+                "name": "main -> mvp_31_main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> cow_capture_value",
+                "count": "80400"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> cow_capture_value",
+                "count": "232195"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_29_cd -> cow_capture_value",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> fn_index",
+                "count": "40000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_27_simulate_frame -> lambda_stack_is_exhausted",
+                "count": "200"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_28_handle_new_frame -> mvp_25_find_intersection",
+                "count": "10764"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_rbt_new -> map_fill",
+                "count": "20200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_27_simulate_frame",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> lambda_map_set_checked",
+                "count": "93004"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> lambda_array_push_checked",
+                "count": "41120"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_28_handle_new_frame",
+                "count": "2880632"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_28_handle_new_frame -> mvp_21_v3d_new",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_31_main -> pn_clock",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_rbt_new -> lambda_stack_is_exhausted",
+                "count": "20200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_25_find_intersection",
+                "count": "10764"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_29_cd -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> map_fill",
+                "count": "200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_14_rbt_nd",
+                "count": "61120"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_18_rbt_successor",
+                "count": "61120"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_31_main",
+                "count": "10"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_22_voxel_hash_xy -> array_set_cow",
+                "count": "40000"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_25_find_intersection -> mvp_21_v3d_new",
+                "count": "4305"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_31_main -> fn_join",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_30_verify_result -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_24_recurse_draw",
+                "count": "3411007"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_25_find_intersection -> cow_capture_value",
+                "count": "4305"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_28_handle_new_frame -> mvp_8_vec_new",
+                "count": "600"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_29_cd -> lambda_fill_primitive_bits",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_15_rbt_put -> lambda_array_push_checked",
+                "count": "51984"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_11_vec_size",
+                "count": "41520"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_28_handle_new_frame -> mvp_12_rbt_new",
+                "count": "20200"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_27_simulate_frame",
+                "count": "220000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_21_v3d_new -> lambda_fill_primitive_bits",
+                "count": "24305"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_28_handle_new_frame -> mvp_17_rbt_first",
+                "count": "200"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_28_handle_new_frame -> mvp_10_vec_at",
+                "count": "104584"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_31_main -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_15_rbt_put -> array_set_cow",
+                "count": "96443"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_29_cd",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_4_get_old_or_new -> lambda_stack_is_exhausted",
+                "count": "20000"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_15_rbt_put",
+                "count": "705101"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> array_num_new",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> array_push",
+                "count": "870144"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_28_handle_new_frame -> mvp_16_rbt_get",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_4_get_old_or_new -> lambda_type_check",
+                "count": "19900"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> lambda_array_push_checked",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_29_cd -> map_fill",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_30_verify_result",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> lambda_stack_is_exhausted",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> map_alloc_for_type",
+                "count": "20200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_3_check_overlap",
+                "count": "234250"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_15_rbt_put -> lambda_stack_is_exhausted",
+                "count": "148427"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_14_rbt_nd -> lambda_stack_is_exhausted",
+                "count": "61120"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> cow_bind_rmw_root",
+                "count": "103768"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> array_plain",
+                "count": "435072"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_vec_new -> array_plain",
+                "count": "72885"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_24_recurse_draw -> mvp_15_rbt_put",
+                "count": "128427"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_28_handle_new_frame -> mvp_11_vec_size",
+                "count": "41520"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_4_get_old_or_new",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_10_vec_at -> lambda_stack_is_exhausted",
+                "count": "104584"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_27_simulate_frame -> sin",
+                "count": "10000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_15_rbt_put -> cow_bind_rmw_root",
+                "count": "296854"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_28_handle_new_frame -> mvp_18_rbt_successor",
+                "count": "61120"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_28_handle_new_frame -> mvp_22_voxel_hash_xy",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_18_rbt_successor -> lambda_stack_is_exhausted",
+                "count": "61120"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_10_vec_at",
+                "count": "104584"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> pn_push_cow",
+                "count": "93004"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_15_rbt_put",
+                "count": "148427"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_22_voxel_hash_xy",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> it2d",
+                "count": "80404"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_rbt_new -> cow_capture_value",
+                "count": "40400"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_25_find_intersection -> sqrt",
+                "count": "10764"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_27_simulate_frame -> lambda_type_check",
+                "count": "200"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_27_simulate_frame -> mvp_8_vec_new",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_15_rbt_put -> cow_capture_value",
+                "count": "49369"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> lambda_fill_primitive_bits",
+                "count": "200"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_29_cd",
+                "count": "607"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_31_main",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_16_rbt_get",
+                "count": "71884"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_28_handle_new_frame -> mvp_15_rbt_put",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_16_rbt_get -> cow_capture_value",
+                "count": "41176"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_29_cd -> mvp_8_vec_new",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> cow_bind_rmw_root",
+                "count": "40000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_23_is_in_voxel",
+                "count": "435072"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_27_simulate_frame -> array_push",
+                "count": "80000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_15_rbt_put -> pn_push_cow",
+                "count": "51984"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_31_main -> pn_print",
+                "count": "5"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_16_rbt_get -> lambda_stack_is_exhausted",
+                "count": "71884"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_12_rbt_new -> mvp_8_vec_new",
+                "count": "20200"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_23_is_in_voxel -> mvp_3_check_overlap",
+                "count": "234250"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_31_main -> mvp_29_cd",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_29_cd -> map_alloc_for_type",
+                "count": "1"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_28_handle_new_frame -> mvp_14_rbt_nd",
+                "count": "61120"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_27_simulate_frame -> cos",
+                "count": "10000"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_24_recurse_draw -> mvp_23_is_in_voxel",
+                "count": "435072"
+              },
+              {
+                "kind": "unknown",
+                "name": "mvp_31_main -> <unresolved-call>",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_24_recurse_draw",
+                "count": "435072"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> lambda_stack_is_exhausted",
+                "count": "435072"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_21_v3d_new",
+                "count": "24305"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_27_simulate_frame -> array_plain",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_24_recurse_draw -> array_set_cow",
+                "count": "10764"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_14_rbt_nd -> array_push",
+                "count": "122240"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_14_rbt_nd -> array_plain",
+                "count": "61120"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> lambda_map_set_checked",
+                "count": "20000"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_28_handle_new_frame -> mvp_24_recurse_draw",
+                "count": "20000"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_29_cd -> mvp_28_handle_new_frame",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_rbt_new -> map_alloc_for_type",
+                "count": "20200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_17_rbt_first",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_27_simulate_frame -> cow_capture_value",
+                "count": "20200"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_29_cd -> mvp_27_simulate_frame",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_rbt_new -> lambda_fill_primitive_bits",
+                "count": "20200"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_24_recurse_draw -> mvp_24_recurse_draw",
+                "count": "415072"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_28_handle_new_frame -> mvp_4_get_old_or_new",
+                "count": "20000"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_24_recurse_draw -> mvp_16_rbt_get",
+                "count": "51884"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_12_rbt_new",
+                "count": "20200"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_24_recurse_draw -> mvp_8_vec_new",
+                "count": "51884"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_17_rbt_first -> lambda_stack_is_exhausted",
+                "count": "200"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_12_rbt_new",
+                "count": "60600"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_28_handle_new_frame",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_28_handle_new_frame -> pn_push_cow",
+                "count": "40000"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_14_rbt_nd",
+                "count": "244480"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_25_find_intersection -> lambda_stack_is_exhausted",
+                "count": "10764"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_27_simulate_frame -> pn_push_cow",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_15_rbt_put -> lambda_map_set_checked",
+                "count": "200311"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_31_main -> mvp_30_verify_result",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_8_vec_new",
+                "count": "72885"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_22_voxel_hash_xy -> lambda_stack_is_exhausted",
+                "count": "20000"
+              },
+              {
+                "kind": "overflow",
+                "name": "-",
+                "count": "0"
+              }
+            ],
+            "cow_profile": "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\narray[num]\t155051\t40000\t113104\t54923296\narray\t252783\t120919\t191276\t64039528\nmap\t220511\t133004\t180311\t8654928\nvmap_snapshots\t0\nvmap_rejections\t0\nfn_mutable_value_calls\t0\nunion_admit_calls\t20100\nunion_map_rep_cache_hits\t0\nunion_map_rep_cache_misses\t0\nmap_admit_calls\t0\njs_realm_slot_reservations\t0\nmap_admit_relation_cache_hits\t0\nmap_admit_relation_cache_misses\t0\nmap_admit_exact_shape_hits\t0\nmap_admit_storage_compatible_hits\t0\nmap_admit_readonly_validations\t0\nmap_admit_reifications\t0\nmap_admit_deep_clone_calls\t0\nmap_admit_fields_visited\t0\nmap_admit_bytes_copied\t0\narray_checked_store_calls\t0\narray_checked_store_direct\t0\narray_checked_store_unique_inplace\t0\narray_checked_store_cow_detach\t0\narray_checked_store_rebuild\t0\narray_checked_store_full_clone\t0\narray_checked_store_bytes_copied\t0\nstring_append_calls\t2\nstring_append_pieces\t2\nstring_inplace_appends\t0\nstring_growth_copies\t2\nstring_copied_bytes\t37\nstring_freezes\t0\nstring_generic_joins\t2\n"
+          },
+          "production": {
+            "returncode": 0,
+            "matches_golden": true,
+            "calls": [
+              {
+                "kind": "root_reload",
+                "name": "_handle_new_frame_14432",
+                "count": "6099332"
+              },
+              {
+                "kind": "helper",
+                "name": "_simulate_frame_13950 -> array_push",
+                "count": "80000"
+              },
+              {
+                "kind": "root_store",
+                "name": "_vec_add_2990",
+                "count": "183768"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> cow_bind_var",
+                "count": "107207"
+              },
+              {
+                "kind": "root_store",
+                "name": "_rbt_get_4544",
+                "count": "133412"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_at_3067 -> lambda_stack_is_exhausted",
+                "count": "104584"
+              },
+              {
+                "kind": "raw",
+                "name": "_handle_new_frame_14432 -> _rbt_first_4709",
+                "count": "400"
+              },
+              {
+                "kind": "helper",
+                "name": "_voxel_hash_xy_6064 -> lambda_stack_is_exhausted",
+                "count": "20000"
+              },
+              {
+                "kind": "boxed",
+                "name": "_recurse_draw_8365 -> _rbt_put_4158",
+                "count": "180311"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_get_old_or_new_1595",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_recurse_draw_8365 -> fn_index",
+                "count": "830144"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> it2d",
+                "count": "404"
+              },
+              {
+                "kind": "helper",
+                "name": "_recurse_draw_8365 -> cow_bind_var",
+                "count": "1721816"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> cow_mark_shared",
+                "count": "184784"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> pn_push_cow",
+                "count": "226208"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_b_14432 -> cow_prepare_write",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_new_3650 -> lambda_array_empty_for_contract",
+                "count": "20401"
+              },
+              {
+                "kind": "boxed",
+                "name": "_cd_17435 -> _rbt_new_3650",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "_recurse_draw_8365 -> _vec_new_2952",
+                "count": "51884"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_add_2990 -> lambda_stack_is_exhausted",
+                "count": "91884"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_18259 -> pn_clock",
+                "count": "2"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_vec_at_3067",
+                "count": "104584"
+              },
+              {
+                "kind": "boxed",
+                "name": "main -> _main_b_18259",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_cd_17435 -> lambda_type_check_lazy",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rbt_find_node_3851",
+                "count": "292195"
+              },
+              {
+                "kind": "raw",
+                "name": "_is_in_voxel_6552 -> _safe_div_1076",
+                "count": "1310574"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> cow_mark_shared",
+                "count": "220311"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> lambda_map_set_checked_inplace",
+                "count": "113104"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_motion_new_13613",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> cow_bind_rmw_handle",
+                "count": "440622"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_nd_4070 -> array",
+                "count": "61120"
+              },
+              {
+                "kind": "raw",
+                "name": "_simulate_frame_13950 -> _vec_add_2990",
+                "count": "20000"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_handle_new_frame_b_14432",
+                "count": "200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_vec_size_3124",
+                "count": "41720"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_main_18259",
+                "count": "10"
+              },
+              {
+                "kind": "helper",
+                "name": "main -> cow_bind_var",
+                "count": "4"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rbt_new_3650",
+                "count": "20401"
+              },
+              {
+                "kind": "raw",
+                "name": "_recurse_draw_8365 -> _vec_add_2990",
+                "count": "51884"
+              },
+              {
+                "kind": "raw",
+                "name": "_rbt_put_4158 -> _rbt_find_node_3851",
+                "count": "220311"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _recurse_draw_8365",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_new_3650 -> cow_capture_value",
+                "count": "40802"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_voxel_hash_xy_6064",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_simulate_frame_13950 -> lambda_stack_is_exhausted",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_voxel_hash_xy_6064 -> fn_array_set",
+                "count": "40000"
+              },
+              {
+                "kind": "helper",
+                "name": "_simulate_frame_13950 -> cos",
+                "count": "10000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_is_in_voxel_6552",
+                "count": "435072"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _rbt_new_3650",
+                "count": "20400"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> lambda_stack_is_exhausted",
+                "count": "200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rbt_put_4158",
+                "count": "220311"
+              },
+              {
+                "kind": "raw",
+                "name": "_rbt_get_4544 -> _rbt_find_node_3851",
+                "count": "71884"
+              },
+              {
+                "kind": "helper",
+                "name": "_recurse_draw_8365 -> array_push_capture",
+                "count": "870144"
+              },
+              {
+                "kind": "helper",
+                "name": "_recurse_draw_8365 -> array_end",
+                "count": "435072"
+              },
+              {
+                "kind": "root_store",
+                "name": "_handle_new_frame_14432",
+                "count": "2345252"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rbt_nd_4070",
+                "count": "61120"
+              },
+              {
+                "kind": "root_store",
+                "name": "_cd_17435",
+                "count": "1404"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _rbt_get_4544",
+                "count": "20000"
+              },
+              {
+                "kind": "root_store",
+                "name": "_recurse_draw_8365",
+                "count": "6016396"
+              },
+              {
+                "kind": "raw",
+                "name": "_main_18259 -> _verify_result_17826",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> cow_capture_value",
+                "count": "220311"
+              },
+              {
+                "kind": "boxed",
+                "name": "_rbt_new_3650 -> _vec_new_2952",
+                "count": "20401"
+              },
+              {
+                "kind": "boxed",
+                "name": "_recurse_draw_8365 -> _recurse_draw_8365",
+                "count": "415072"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_handle_new_frame_14432",
+                "count": "200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_main_18259",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "main -> lambda_module_var_store",
+                "count": "17"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_cd_17435",
+                "count": "1401"
+              },
+              {
+                "kind": "helper",
+                "name": "_cd_17435 -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_rbt_get_4544",
+                "count": "71884"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_handle_new_frame_b_14432",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_simulate_frame_13950 -> sin",
+                "count": "10000"
+              },
+              {
+                "kind": "helper",
+                "name": "_motion_new_13613 -> heap_calloc_class",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_size_3124 -> fn_len_checked",
+                "count": "41720"
+              },
+              {
+                "kind": "boxed",
+                "name": "_main_b_18259 -> _main_18259",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_18259 -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_cd_17435 -> fn_add",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> array_num_new_uninit",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_recurse_draw_8365 -> lambda_stack_is_exhausted",
+                "count": "435072"
+              },
+              {
+                "kind": "helper",
+                "name": "_v3d_new_5861 -> lambda_stack_is_exhausted",
+                "count": "24305"
+              },
+              {
+                "kind": "root_store",
+                "name": "_main_18259",
+                "count": "11"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> fn_index",
+                "count": "107207"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _rbt_put_4158",
+                "count": "40000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_safe_div_1076",
+                "count": "1310574"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> lambda_type_check_lazy",
+                "count": "80000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rbt_first_4709",
+                "count": "400"
+              },
+              {
+                "kind": "helper",
+                "name": "_v3d_new_5861 -> lambda_type_check_lazy",
+                "count": "24305"
+              },
+              {
+                "kind": "helper",
+                "name": "_v3d_new_5861 -> array_num_new_uninit",
+                "count": "24305"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_find_node_3851 -> lambda_stack_is_exhausted",
+                "count": "292195"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_v2d_key_5592",
+                "count": "128427"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_find_intersection_10624",
+                "count": "10764"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_add_2990 -> pn_push_cow",
+                "count": "91884"
+              },
+              {
+                "kind": "boxed",
+                "name": "_main_18259 -> _cd_17435",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_get_4544 -> lambda_stack_is_exhausted",
+                "count": "71884"
+              },
+              {
+                "kind": "helper",
+                "name": "_simulate_frame_13950 -> array",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_successor_4816 -> lambda_stack_is_exhausted",
+                "count": "61120"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_add_2990 -> cow_mark_shared",
+                "count": "91884"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_cd_17435",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "_recurse_draw_8365 -> _rbt_get_4544",
+                "count": "51884"
+              },
+              {
+                "kind": "helper",
+                "name": "_simulate_frame_13950 -> array_end",
+                "count": "20000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_18259 -> pn_print",
+                "count": "5"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_nd_4070 -> array_push",
+                "count": "61120"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> item_at",
+                "count": "40000"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_new_3650 -> lambda_stack_is_exhausted",
+                "count": "20401"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_simulate_frame_13950",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_recurse_draw_8365 -> cow_prepare_write",
+                "count": "232195"
+              },
+              {
+                "kind": "boxed",
+                "name": "_cd_17435 -> _simulate_frame_13950",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_get_old_or_new_1595 -> lambda_stack_is_exhausted",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> member_set_cow",
+                "count": "107207"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _vec_at_3067",
+                "count": "104584"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_vec_add_2990",
+                "count": "91884"
+              },
+              {
+                "kind": "root_store",
+                "name": "_vec_size_3124",
+                "count": "41720"
+              },
+              {
+                "kind": "root_store",
+                "name": "_simulate_frame_13950",
+                "count": "160000"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _v3d_new_5861",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_new_3650 -> heap_calloc_class",
+                "count": "20401"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_new_2952 -> array",
+                "count": "72885"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_main_b_18259",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_recurse_draw_8365 -> array",
+                "count": "435072"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_b_14432 -> _handle_new_frame_14432",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> cow_bind_var",
+                "count": "281120"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_nd_4070 -> lambda_stack_is_exhausted",
+                "count": "61120"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_rbt_put_4158",
+                "count": "3096148"
+              },
+              {
+                "kind": "root_store",
+                "name": "_vec_at_3067",
+                "count": "209168"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _find_intersection_10624",
+                "count": "10764"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_18259 -> fn_join",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> fn_lt",
+                "count": "64584"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> fn_gt",
+                "count": "41120"
+              },
+              {
+                "kind": "root_store",
+                "name": "_rbt_put_4158",
+                "count": "3423666"
+              },
+              {
+                "kind": "root_store",
+                "name": "_get_old_or_new_1595",
+                "count": "59700"
+              },
+              {
+                "kind": "helper",
+                "name": "_recurse_draw_8365 -> cow_mark_shared",
+                "count": "232195"
+              },
+              {
+                "kind": "raw",
+                "name": "_recurse_draw_8365 -> _is_in_voxel_6552",
+                "count": "435072"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_nd_4070 -> item_at",
+                "count": "61120"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_at_3067 -> fn_index",
+                "count": "104584"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_vec_new_2952",
+                "count": "72885"
+              },
+              {
+                "kind": "boxed",
+                "name": "_cd_17435 -> _handle_new_frame_b_14432",
+                "count": "200"
+              },
+              {
+                "kind": "root_store",
+                "name": "_rbt_new_3650",
+                "count": "81604"
+              },
+              {
+                "kind": "raw",
+                "name": "_handle_new_frame_14432 -> _rbt_successor_4816",
+                "count": "61120"
+              },
+              {
+                "kind": "helper",
+                "name": "_verify_result_17826 -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _motion_new_13613",
+                "count": "20000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_verify_result_17826",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rbt_get_4544",
+                "count": "71884"
+              },
+              {
+                "kind": "raw",
+                "name": "_handle_new_frame_14432 -> _voxel_hash_xy_6064",
+                "count": "20000"
+              },
+              {
+                "kind": "helper",
+                "name": "_find_intersection_10624 -> sqrt",
+                "count": "10764"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_size_3124 -> lambda_stack_is_exhausted",
+                "count": "41720"
+              },
+              {
+                "kind": "root_store",
+                "name": "_voxel_hash_xy_6064",
+                "count": "140000"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_14432 -> fn_index",
+                "count": "221120"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_rbt_nd_4070",
+                "count": "427840"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_first_4709 -> lambda_stack_is_exhausted",
+                "count": "400"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_voxel_hash_xy_6064",
+                "count": "20000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_recurse_draw_8365",
+                "count": "435072"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _vec_new_2952",
+                "count": "400"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_simulate_frame_13950",
+                "count": "200000"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_new_3650 -> cow_bind_var",
+                "count": "20401"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_nd_4070 -> array_push_capture",
+                "count": "61120"
+              },
+              {
+                "kind": "helper",
+                "name": "_get_old_or_new_1595 -> lambda_type_check_lazy",
+                "count": "19900"
+              },
+              {
+                "kind": "boxed",
+                "name": "_simulate_frame_13950 -> _vec_new_2952",
+                "count": "200"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_get_4544 -> item_at",
+                "count": "30764"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _vec_size_3124",
+                "count": "41720"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_vec_add_2990",
+                "count": "91884"
+              },
+              {
+                "kind": "raw",
+                "name": "_recurse_draw_8365 -> _v2d_key_5592",
+                "count": "128427"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_find_node_3851 -> cow_bind_var",
+                "count": "292195"
+              },
+              {
+                "kind": "raw",
+                "name": "_handle_new_frame_14432 -> _vec_add_2990",
+                "count": "20000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rbt_successor_4816",
+                "count": "61120"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_recurse_draw_8365",
+                "count": "9374406"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_nd_4070 -> array_end",
+                "count": "61120"
+              },
+              {
+                "kind": "root_store",
+                "name": "_handle_new_frame_b_14432",
+                "count": "1000"
+              },
+              {
+                "kind": "helper",
+                "name": "_vec_add_2990 -> cow_capture_value",
+                "count": "91884"
+              },
+              {
+                "kind": "helper",
+                "name": "_rbt_put_4158 -> lambda_stack_is_exhausted",
+                "count": "220311"
+              },
+              {
+                "kind": "helper",
+                "name": "_handle_new_frame_b_14432 -> lambda_stack_is_exhausted",
+                "count": "200"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_rbt_new_3650",
+                "count": "61203"
+              },
+              {
+                "kind": "root_store",
+                "name": "_v3d_new_5861",
+                "count": "72915"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _rbt_nd_4070",
+                "count": "61120"
+              },
+              {
+                "kind": "boxed",
+                "name": "_find_intersection_10624 -> _v3d_new_5861",
+                "count": "4305"
+              },
+              {
+                "kind": "boxed",
+                "name": "_handle_new_frame_14432 -> _get_old_or_new_1595",
+                "count": "20000"
+              },
+              {
+                "kind": "root_store",
+                "name": "_rbt_nd_4070",
+                "count": "366720"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_v3d_new_5861",
+                "count": "24305"
+              },
+              {
+                "kind": "overflow",
+                "name": "-",
+                "count": "0"
+              }
+            ],
+            "cow_profile": "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\narray[num]\t150746\t0\t113104\t54923296\narray\t252783\t172803\t191276\t64039528\nmap\t220511\t200\t180311\t8654928\nvmap_snapshots\t0\nvmap_rejections\t0\nfn_mutable_value_calls\t0\nunion_admit_calls\t19901\nunion_map_rep_cache_hits\t0\nunion_map_rep_cache_misses\t0\nmap_admit_calls\t0\njs_realm_slot_reservations\t0\nmap_admit_relation_cache_hits\t0\nmap_admit_relation_cache_misses\t0\nmap_admit_exact_shape_hits\t0\nmap_admit_storage_compatible_hits\t0\nmap_admit_readonly_validations\t0\nmap_admit_reifications\t0\nmap_admit_deep_clone_calls\t0\nmap_admit_fields_visited\t0\nmap_admit_bytes_copied\t0\narray_checked_store_calls\t0\narray_checked_store_direct\t0\narray_checked_store_unique_inplace\t0\narray_checked_store_cow_detach\t0\narray_checked_store_rebuild\t0\narray_checked_store_full_clone\t0\narray_checked_store_bytes_copied\t0\nstring_append_calls\t2\nstring_append_pieces\t2\nstring_inplace_appends\t0\nstring_growth_copies\t2\nstring_copied_bytes\t37\nstring_freezes\t0\nstring_generic_joins\t2\n"
+          }
+        }
+      },
+      {
+        "name": "text/microdiff",
+        "engines": {
+          "mvp": {
+            "returncode": 0,
+            "matches_golden": true,
+            "calls": [
+              {
+                "kind": "root_reload",
+                "name": "mvp_12_main",
+                "count": "757804"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> array_push",
+                "count": "12"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_10_make_microdiff_snapshot -> map_alloc_for_type",
+                "count": "80"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> item_keys",
+                "count": "2048"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_6_diff_array",
+                "count": "336200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> symbol_key_list_free",
+                "count": "41000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> iter_len",
+                "count": "2048"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_10_make_microdiff_snapshot -> array_push",
+                "count": "88"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_9_rich_leaf -> lambda_stack_is_exhausted",
+                "count": "16"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_6_diff_array -> fn_join_consume_open_array",
+                "count": "24600"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_8_diff_value",
+                "count": "596550"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> fn_index",
+                "count": "53300"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_8_diff_value -> mvp_2_make_change",
+                "count": "16400"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_1_make_create",
+                "count": "6150"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> cow_capture_value",
+                "count": "68"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> fn_member_by_id",
+                "count": "40960"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_6_diff_array",
+                "count": "10250"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_2_make_change",
+                "count": "65600"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> fn_join_fresh_array_item",
+                "count": "53300"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_6_diff_array -> array_push",
+                "count": "4100"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_7_diff_map -> mvp_8_diff_value",
+                "count": "53300"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_6_diff_array -> mvp_0_make_remove",
+                "count": "2050"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_9_rich_leaf",
+                "count": "16"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> fn_at",
+                "count": "49200"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_2_make_change -> map_fill",
+                "count": "16400"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_8_diff_value -> mvp_6_diff_array",
+                "count": "10250"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> array_plain",
+                "count": "20500"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> iter_len",
+                "count": "41000"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_10_make_microdiff_snapshot -> mvp_9_rich_leaf",
+                "count": "16"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_7_diff_map",
+                "count": "5797400"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_make_remove -> lambda_stack_is_exhausted",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_6_diff_array -> array_plain",
+                "count": "14350"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_11_valid_snapshot_diffs -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> pn_clock",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_1_make_create -> map_fill",
+                "count": "2050"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_8_diff_value",
+                "count": "73800"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_6_diff_array -> cow_capture_value",
+                "count": "32800"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_11_valid_snapshot_diffs -> array_push",
+                "count": "14"
+              },
+              {
+                "kind": "unknown",
+                "name": "mvp_12_main -> <unresolved-call>",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_1_make_create -> cow_capture_value",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> array_plain",
+                "count": "45100"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> fn_len_checked",
+                "count": "43008"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_1_make_create",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_2_make_change -> map_alloc_for_type",
+                "count": "16400"
+              },
+              {
+                "kind": "boxed",
+                "name": "main -> mvp_12_main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> pn_print",
+                "count": "2"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_10_make_microdiff_snapshot",
+                "count": "1052"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> fn_is_nan",
+                "count": "12300"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> lambda_stack_is_exhausted",
+                "count": "73800"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_8_diff_value -> mvp_7_diff_map",
+                "count": "18450"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> lambda_stack_is_exhausted",
+                "count": "20500"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_make_remove -> map_alloc_for_type",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> iter_key_at",
+                "count": "106600"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> fn_at",
+                "count": "106600"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_make_remove -> map_fill",
+                "count": "2050"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_11_valid_snapshot_diffs -> mvp_7_diff_map",
+                "count": "2"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_6_diff_array -> mvp_8_diff_value",
+                "count": "20500"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_12_main -> mvp_11_valid_snapshot_diffs",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> cow_capture_value",
+                "count": "2049"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_11_valid_snapshot_diffs -> fn_member_by_id",
+                "count": "4"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> fn_string",
+                "count": "53300"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> array_plain",
+                "count": "2053"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_0_make_remove",
+                "count": "2050"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_0_make_remove",
+                "count": "6150"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> item_keys",
+                "count": "41000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> fn_join",
+                "count": "2"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_11_valid_snapshot_diffs",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_10_make_microdiff_snapshot -> cow_capture_value",
+                "count": "16"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_2_make_change -> lambda_stack_is_exhausted",
+                "count": "16400"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_10_make_microdiff_snapshot -> map_fill",
+                "count": "72"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_12_main -> mvp_7_diff_map",
+                "count": "2048"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_6_diff_array -> fn_join_fresh_array_item",
+                "count": "24600"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_10_make_microdiff_snapshot",
+                "count": "8"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> fn_join_consume_open_array",
+                "count": "53300"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_9_rich_leaf -> map_fill",
+                "count": "16"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_6_diff_array -> lambda_stack_is_exhausted",
+                "count": "10250"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_7_diff_map",
+                "count": "20500"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_9_rich_leaf -> map_alloc_for_type",
+                "count": "16"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_1_make_create -> map_alloc_for_type",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_11_valid_snapshot_diffs -> fn_eq_value",
+                "count": "4"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_11_valid_snapshot_diffs -> array_plain",
+                "count": "4"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> iter_val_at",
+                "count": "106600"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_6_diff_array -> mvp_1_make_create",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_7_diff_map -> cow_capture_value",
+                "count": "116890"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> fn_strcat_values",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> item_type_id",
+                "count": "207050"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> iter_key_at",
+                "count": "20480"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_11_valid_snapshot_diffs",
+                "count": "58"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_12_main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_10_make_microdiff_snapshot -> array_plain",
+                "count": "40"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_2_make_change",
+                "count": "16400"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_9_rich_leaf",
+                "count": "32"
+              },
+              {
+                "kind": "raw",
+                "name": "mvp_12_main -> mvp_10_make_microdiff_snapshot",
+                "count": "8"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_12_main -> symbol_key_list_free",
+                "count": "2048"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> fn_eq_value",
+                "count": "41000"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> fn_member_by_id",
+                "count": "16400"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_11_valid_snapshot_diffs -> fn_len_checked",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_10_make_microdiff_snapshot -> lambda_stack_is_exhausted",
+                "count": "8"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_8_diff_value -> array_push",
+                "count": "16400"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_1_make_create -> lambda_stack_is_exhausted",
+                "count": "2050"
+              },
+              {
+                "kind": "overflow",
+                "name": "-",
+                "count": "0"
+              }
+            ],
+            "cow_profile": "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\narray\t127129\t61500\t16400\t1180800\nmap\t96\t0\t0\t0\nvmap_snapshots\t0\nvmap_rejections\t0\nfn_mutable_value_calls\t0\nunion_admit_calls\t0\nunion_map_rep_cache_hits\t0\nunion_map_rep_cache_misses\t0\nmap_admit_calls\t0\njs_realm_slot_reservations\t0\nmap_admit_relation_cache_hits\t0\nmap_admit_relation_cache_misses\t0\nmap_admit_exact_shape_hits\t0\nmap_admit_storage_compatible_hits\t0\nmap_admit_readonly_validations\t0\nmap_admit_reifications\t0\nmap_admit_deep_clone_calls\t0\nmap_admit_fields_visited\t0\nmap_admit_bytes_copied\t0\narray_checked_store_calls\t0\narray_checked_store_direct\t0\narray_checked_store_unique_inplace\t0\narray_checked_store_cow_detach\t0\narray_checked_store_rebuild\t0\narray_checked_store_full_clone\t0\narray_checked_store_bytes_copied\t0\nstring_append_calls\t3\nstring_append_pieces\t4\nstring_inplace_appends\t0\nstring_growth_copies\t3\nstring_copied_bytes\t63\nstring_freezes\t0\nstring_generic_joins\t2\n"
+          },
+          "production": {
+            "returncode": 0,
+            "matches_golden": true,
+            "calls": [
+              {
+                "kind": "frame_entry",
+                "name": "_both_nan_923",
+                "count": "12300"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_create_267 -> map_alloc_for_type",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> fn_len_checked",
+                "count": "67650"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_change_362 -> cow_capture_value",
+                "count": "49200"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> fn_join_fresh_array_item",
+                "count": "24600"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> item_keys",
+                "count": "2048"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_2821 -> set_field_value",
+                "count": "32"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> fn_at",
+                "count": "106600"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_diff_map_1597",
+                "count": "20500"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> item_keys",
+                "count": "41000"
+              },
+              {
+                "kind": "root_store",
+                "name": "_rich_leaf_2821",
+                "count": "32"
+              },
+              {
+                "kind": "root_store",
+                "name": "_make_change_362",
+                "count": "65600"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> fn_join_consume_open_array",
+                "count": "24600"
+              },
+              {
+                "kind": "root_store",
+                "name": "_both_nan_923",
+                "count": "24600"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_microdiff_snapshot_2916 -> array_end",
+                "count": "40"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> array",
+                "count": "2053"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_diff_value_b_2158",
+                "count": "73800"
+              },
+              {
+                "kind": "helper",
+                "name": "_is_rich_leaf_494 -> lambda_stack_is_exhausted",
+                "count": "49200"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_is_rich_leaf_494",
+                "count": "49200"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> fn_index",
+                "count": "45056"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_main_4595",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> fn_index",
+                "count": "45100"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_change_362 -> set_field_value",
+                "count": "65600"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_value_2158 -> _diff_array_1009",
+                "count": "10250"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_value_2158 -> _make_change_362",
+                "count": "16400"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_diff_value_2158",
+                "count": "73800"
+              },
+              {
+                "kind": "raw",
+                "name": "_diff_value_2158 -> _is_rich_leaf_494",
+                "count": "41000"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_make_remove_161",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_remove_161 -> cow_capture_value",
+                "count": "4100"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_value_2158 -> fn_eq_value",
+                "count": "41000"
+              },
+              {
+                "kind": "root_store",
+                "name": "_make_create_267",
+                "count": "6150"
+              },
+              {
+                "kind": "boxed",
+                "name": "_valid_snapshot_diffs_4123 -> _diff_map_1597",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_change_362 -> map_alloc_for_type",
+                "count": "16400"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> array_end",
+                "count": "4100"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_value_2158 -> item_type_id",
+                "count": "157850"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> cow_mark_shared",
+                "count": "20500"
+              },
+              {
+                "kind": "root_store",
+                "name": "_valid_snapshot_diffs_4123",
+                "count": "76"
+              },
+              {
+                "kind": "raw",
+                "name": "_diff_value_2158 -> _both_nan_923",
+                "count": "12300"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_diff_array_1009",
+                "count": "10250"
+              },
+              {
+                "kind": "boxed",
+                "name": "_main_4595 -> _valid_snapshot_diffs_4123",
+                "count": "1"
+              },
+              {
+                "kind": "root_store",
+                "name": "_main_4595",
+                "count": "301093"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> iter_len",
+                "count": "2560"
+              },
+              {
+                "kind": "root_store",
+                "name": "_rich_leaf_equal_628",
+                "count": "45100"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> fn_virtual_content_check",
+                "count": "41000"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_value_2158 -> array_end",
+                "count": "16400"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_equal_628 -> fn_not_value",
+                "count": "8200"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> fn_index",
+                "count": "12"
+              },
+              {
+                "kind": "root_store",
+                "name": "_diff_array_1009",
+                "count": "299300"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> array_push",
+                "count": "12"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_value_2158 -> array",
+                "count": "45100"
+              },
+              {
+                "kind": "root_store",
+                "name": "_make_microdiff_snapshot_2916",
+                "count": "368"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> array",
+                "count": "4"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> fn_join_consume_open_array",
+                "count": "53300"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_valid_snapshot_diffs_4123",
+                "count": "76"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_microdiff_snapshot_2916 -> array",
+                "count": "40"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> fn_mod",
+                "count": "22528"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_equal_628 -> lambda_type_check_lazy",
+                "count": "4100"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_array_1009 -> _make_remove_161",
+                "count": "2050"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_make_microdiff_snapshot_2916",
+                "count": "1012"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_both_nan_923",
+                "count": "12300"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> iter_len",
+                "count": "41000"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_value_2158 -> _diff_map_1597",
+                "count": "18450"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> item_at",
+                "count": "4096"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rich_leaf_2821",
+                "count": "16"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_microdiff_snapshot_2916 -> map_alloc_for_type",
+                "count": "80"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_map_1597 -> _diff_value_b_2158",
+                "count": "53300"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_2821 -> map_alloc_for_type",
+                "count": "16"
+              },
+              {
+                "kind": "root_store",
+                "name": "_make_remove_161",
+                "count": "6150"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_microdiff_snapshot_2916 -> array_push",
+                "count": "88"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> fn_member_by_id",
+                "count": "40960"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_valid_snapshot_diffs_4123",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_make_microdiff_snapshot_2916",
+                "count": "8"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> fn_join_fresh_array_item",
+                "count": "53300"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_equal_628 -> fn_member_by_id",
+                "count": "16400"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_equal_628 -> lambda_stack_is_exhausted",
+                "count": "4100"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_value_2158 -> _rich_leaf_equal_628",
+                "count": "4100"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> array",
+                "count": "20500"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> fn_virtual_content_check",
+                "count": "2048"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_main_4595",
+                "count": "1356849"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_2821 -> cow_capture_value",
+                "count": "16"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_make_create_267",
+                "count": "6150"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_value_2158 -> array_push",
+                "count": "16400"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_array_1009 -> _diff_value_b_2158",
+                "count": "20500"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_rich_leaf_2821",
+                "count": "32"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_microdiff_snapshot_2916 -> set_field_value",
+                "count": "208"
+              },
+              {
+                "kind": "root_store",
+                "name": "_diff_map_1597",
+                "count": "963500"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> fn_len_checked",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> array",
+                "count": "14350"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_equal_628 -> fn_eq_value",
+                "count": "8200"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_diff_map_1597",
+                "count": "5481700"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> array_end",
+                "count": "2"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_diff_array_1009",
+                "count": "879450"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_both_nan_923 -> lambda_stack_is_exhausted",
+                "count": "12300"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_rich_leaf_equal_628",
+                "count": "4100"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> pn_print",
+                "count": "2"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "raw",
+                "name": "_rich_leaf_equal_628 -> _is_rich_leaf_494",
+                "count": "8200"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> lambda_type_check_lazy",
+                "count": "1"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_make_change_362",
+                "count": "65600"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> array_end",
+                "count": "5"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_remove_161 -> set_field_value",
+                "count": "6150"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> symbol_key_list_free",
+                "count": "41000"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_value_b_2158 -> _diff_value_2158",
+                "count": "73800"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_diff_value_2158",
+                "count": "377200"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_value_2158 -> lambda_stack_is_exhausted",
+                "count": "73800"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> fn_add",
+                "count": "43008"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> lambda_stack_is_exhausted",
+                "count": "20500"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_make_create_267",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> fn_member_by_id",
+                "count": "4"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> fn_index",
+                "count": "53300"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_remove_161 -> lambda_stack_is_exhausted",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> iter_key_at",
+                "count": "106600"
+              },
+              {
+                "kind": "helper",
+                "name": "_is_rich_leaf_494 -> item_type_id",
+                "count": "49200"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_remove_161 -> map_alloc_for_type",
+                "count": "2050"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> array_push",
+                "count": "4100"
+              },
+              {
+                "kind": "boxed",
+                "name": "_main_4595 -> _diff_map_1597",
+                "count": "2048"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_microdiff_snapshot_2916 -> cow_capture_value",
+                "count": "16"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> array_push",
+                "count": "14"
+              },
+              {
+                "kind": "boxed",
+                "name": "_main_b_4595 -> _main_4595",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_rich_leaf_2821 -> lambda_stack_is_exhausted",
+                "count": "16"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_microdiff_snapshot_2916 -> lambda_stack_is_exhausted",
+                "count": "8"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> iter_val_at",
+                "count": "106600"
+              },
+              {
+                "kind": "helper",
+                "name": "_valid_snapshot_diffs_4123 -> fn_eq_value",
+                "count": "2"
+              },
+              {
+                "kind": "boxed",
+                "name": "_diff_array_1009 -> _make_create_267",
+                "count": "2050"
+              },
+              {
+                "kind": "root_store",
+                "name": "_is_rich_leaf_494",
+                "count": "98400"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> fn_not_value",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "main -> _main_b_4595",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_both_nan_923 -> fn_is_nan",
+                "count": "12300"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_value_b_2158 -> lambda_stack_is_exhausted",
+                "count": "73800"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_main_b_4595",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> fn_join",
+                "count": "4"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_rich_leaf_equal_628",
+                "count": "69700"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> cow_mark_shared",
+                "count": "20500"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_make_change_362",
+                "count": "16400"
+              },
+              {
+                "kind": "root_store",
+                "name": "_diff_value_b_2158",
+                "count": "221400"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> symbol_key_list_free",
+                "count": "2048"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_map_1597 -> fn_string",
+                "count": "53300"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_make_remove_161",
+                "count": "6150"
+              },
+              {
+                "kind": "helper",
+                "name": "_diff_array_1009 -> lambda_stack_is_exhausted",
+                "count": "10250"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_create_267 -> lambda_stack_is_exhausted",
+                "count": "2050"
+              },
+              {
+                "kind": "boxed",
+                "name": "_make_microdiff_snapshot_2916 -> _rich_leaf_2821",
+                "count": "16"
+              },
+              {
+                "kind": "boxed",
+                "name": "_main_4595 -> _make_microdiff_snapshot_2916",
+                "count": "8"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> fn_len_checked",
+                "count": "43008"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_create_267 -> cow_capture_value",
+                "count": "4100"
+              },
+              {
+                "kind": "helper",
+                "name": "_is_rich_leaf_494 -> fn_at",
+                "count": "49200"
+              },
+              {
+                "kind": "root_store",
+                "name": "_diff_value_2158",
+                "count": "291100"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_change_362 -> lambda_stack_is_exhausted",
+                "count": "16400"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_4595 -> pn_clock",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "_make_create_267 -> set_field_value",
+                "count": "6150"
+              },
+              {
+                "kind": "overflow",
+                "name": "-",
+                "count": "0"
+              }
+            ],
+            "cow_profile": "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\narray\t36940\t61500\t16400\t1180800\nmap\t56\t0\t0\t0\nvmap_snapshots\t0\nvmap_rejections\t0\nfn_mutable_value_calls\t0\nunion_admit_calls\t4101\nunion_map_rep_cache_hits\t0\nunion_map_rep_cache_misses\t0\nmap_admit_calls\t0\njs_realm_slot_reservations\t0\nmap_admit_relation_cache_hits\t0\nmap_admit_relation_cache_misses\t0\nmap_admit_exact_shape_hits\t0\nmap_admit_storage_compatible_hits\t0\nmap_admit_readonly_validations\t0\nmap_admit_reifications\t0\nmap_admit_deep_clone_calls\t0\nmap_admit_fields_visited\t0\nmap_admit_bytes_copied\t0\narray_checked_store_calls\t0\narray_checked_store_direct\t0\narray_checked_store_unique_inplace\t0\narray_checked_store_cow_detach\t0\narray_checked_store_rebuild\t0\narray_checked_store_full_clone\t0\narray_checked_store_bytes_copied\t0\nstring_append_calls\t4\nstring_append_pieces\t4\nstring_inplace_appends\t0\nstring_growth_copies\t4\nstring_copied_bytes\t90\nstring_freezes\t0\nstring_generic_joins\t4\n"
+          }
+        }
+      },
+      {
+        "name": "beng/regexredux",
+        "engines": {
+          "mvp": {
+            "returncode": 0,
+            "matches_golden": true,
+            "calls": [
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> pn_print",
+                "count": "14"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> pn_clock",
+                "count": "2"
+              },
+              {
+                "kind": "unknown",
+                "name": "mvp_0_main -> <unresolved-call>",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> fn_len_s",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_0_main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> fn_strcat_values",
+                "count": "12"
+              },
+              {
+                "kind": "boxed",
+                "name": "main -> mvp_0_main",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> fn_join",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> fn_replace3",
+                "count": "13"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> cow_capture_value",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> map_alloc_for_type",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> fn_len",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> fn_len_checked",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> fn_input2",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_0_main -> fn_len_find3",
+                "count": "9"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_0_main",
+                "count": "153"
+              },
+              {
+                "kind": "overflow",
+                "name": "-",
+                "count": "0"
+              }
+            ],
+            "cow_profile": "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\nmap\t1\t0\t0\t0\nvmap_snapshots\t0\nvmap_rejections\t0\nfn_mutable_value_calls\t0\nunion_admit_calls\t0\nunion_map_rep_cache_hits\t0\nunion_map_rep_cache_misses\t0\nmap_admit_calls\t0\njs_realm_slot_reservations\t0\nmap_admit_relation_cache_hits\t0\nmap_admit_relation_cache_misses\t0\nmap_admit_exact_shape_hits\t0\nmap_admit_storage_compatible_hits\t0\nmap_admit_readonly_validations\t0\nmap_admit_reifications\t0\nmap_admit_deep_clone_calls\t0\nmap_admit_fields_visited\t0\nmap_admit_bytes_copied\t0\narray_checked_store_calls\t0\narray_checked_store_direct\t0\narray_checked_store_unique_inplace\t0\narray_checked_store_cow_detach\t0\narray_checked_store_rebuild\t0\narray_checked_store_full_clone\t0\narray_checked_store_bytes_copied\t0\nstring_append_calls\t14\nstring_append_pieces\t23\nstring_inplace_appends\t0\nstring_growth_copies\t14\nstring_copied_bytes\t298\nstring_freezes\t0\nstring_generic_joins\t2\n"
+          },
+          "production": {
+            "returncode": 0,
+            "matches_golden": true,
+            "calls": [
+              {
+                "kind": "root_store",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "main -> _main_b_1238",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> fn_join",
+                "count": "23"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> const_type_with_tl",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> fn_input2",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> fn_len_checked",
+                "count": "11"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> pn_print",
+                "count": "14"
+              },
+              {
+                "kind": "helper",
+                "name": "main -> const_type_with_tl",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_main_b_1238",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "main -> lambda_module_var_store",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> fn_find3",
+                "count": "9"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> map_alloc_for_type",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "main -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> const_pattern_with_tl",
+                "count": "9"
+              },
+              {
+                "kind": "boxed",
+                "name": "_main_b_1238 -> _main_1238",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_main_1238",
+                "count": "280"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> it2s",
+                "count": "13"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> fn_len_s",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> fn_replace3",
+                "count": "13"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "root_store",
+                "name": "_main_1238",
+                "count": "134"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> pn_clock",
+                "count": "2"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_main_1238",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_1238 -> set_field_value",
+                "count": "1"
+              },
+              {
+                "kind": "overflow",
+                "name": "-",
+                "count": "0"
+              }
+            ],
+            "cow_profile": "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\nvmap_snapshots\t0\nvmap_rejections\t0\nfn_mutable_value_calls\t0\nunion_admit_calls\t0\nunion_map_rep_cache_hits\t0\nunion_map_rep_cache_misses\t0\nmap_admit_calls\t0\njs_realm_slot_reservations\t0\nmap_admit_relation_cache_hits\t0\nmap_admit_relation_cache_misses\t0\nmap_admit_exact_shape_hits\t0\nmap_admit_storage_compatible_hits\t0\nmap_admit_readonly_validations\t0\nmap_admit_reifications\t0\nmap_admit_deep_clone_calls\t0\nmap_admit_fields_visited\t0\nmap_admit_bytes_copied\t0\narray_checked_store_calls\t0\narray_checked_store_direct\t0\narray_checked_store_unique_inplace\t0\narray_checked_store_cow_detach\t0\narray_checked_store_rebuild\t0\narray_checked_store_full_clone\t0\narray_checked_store_bytes_copied\t0\nstring_append_calls\t23\nstring_append_pieces\t23\nstring_inplace_appends\t0\nstring_growth_copies\t23\nstring_copied_bytes\t536\nstring_freezes\t0\nstring_generic_joins\t23\n"
+          }
+        }
+      },
+      {
+        "name": "awfy/permute",
+        "engines": {
+          "mvp": {
+            "returncode": 0,
+            "matches_golden": true,
+            "calls": [
+              {
+                "kind": "helper",
+                "name": "mvp_3_main -> pn_print",
+                "count": "2"
+              },
+              {
+                "kind": "root_reload",
+                "name": "mvp_3_main",
+                "count": "5"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_3_main -> map_alloc_for_type",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_3_main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_3_main -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_3_main -> lambda_fill_primitive_bits",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_1_permute -> lambda_stack_is_exhausted",
+                "count": "5923"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_1_permute -> mvp_1_permute",
+                "count": "5922"
+              },
+              {
+                "kind": "boxed",
+                "name": "mvp_3_main -> mvp_1_permute",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "main -> mvp_3_main",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "mvp_1_permute",
+                "count": "5923"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_3_main -> fn_join",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "mvp_3_main -> pn_clock",
+                "count": "2"
+              },
+              {
+                "kind": "unknown",
+                "name": "mvp_3_main -> <unresolved-call>",
+                "count": "1"
+              },
+              {
+                "kind": "overflow",
+                "name": "-",
+                "count": "0"
+              }
+            ],
+            "cow_profile": "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\nvmap_snapshots\t0\nvmap_rejections\t0\nfn_mutable_value_calls\t0\nunion_admit_calls\t0\nunion_map_rep_cache_hits\t0\nunion_map_rep_cache_misses\t0\nmap_admit_calls\t0\njs_realm_slot_reservations\t0\nmap_admit_relation_cache_hits\t0\nmap_admit_relation_cache_misses\t0\nmap_admit_exact_shape_hits\t0\nmap_admit_storage_compatible_hits\t0\nmap_admit_readonly_validations\t0\nmap_admit_reifications\t0\nmap_admit_deep_clone_calls\t0\nmap_admit_fields_visited\t0\nmap_admit_bytes_copied\t0\narray_checked_store_calls\t0\narray_checked_store_direct\t0\narray_checked_store_unique_inplace\t0\narray_checked_store_cow_detach\t0\narray_checked_store_rebuild\t0\narray_checked_store_full_clone\t0\narray_checked_store_bytes_copied\t0\nstring_append_calls\t2\nstring_append_pieces\t2\nstring_inplace_appends\t0\nstring_growth_copies\t2\nstring_copied_bytes\t33\nstring_freezes\t0\nstring_generic_joins\t2\n"
+          },
+          "production": {
+            "returncode": 0,
+            "matches_golden": true,
+            "calls": [
+              {
+                "kind": "root_store",
+                "name": "_benchmark_528",
+                "count": "6"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_main_657",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "_benchmark_528 -> _permute_194",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_657 -> pn_clock",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "main -> cow_bind_var",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "_permute_194 -> _permute_194",
+                "count": "8659"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_benchmark_528",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_benchmark_528 -> lambda_array_rep_cert_resolve",
+                "count": "1"
+              },
+              {
+                "kind": "boxed",
+                "name": "_main_b_657 -> _main_657",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_permute_194",
+                "count": "8660"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_657 -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_657 -> pn_print",
+                "count": "2"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_main_b_657",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "main",
+                "count": "1"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_permute_194",
+                "count": "18737"
+              },
+              {
+                "kind": "root_store",
+                "name": "_main_657",
+                "count": "7"
+              },
+              {
+                "kind": "root_store",
+                "name": "_permute_194",
+                "count": "48334"
+              },
+              {
+                "kind": "root_reload",
+                "name": "_benchmark_528",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_benchmark_528 -> heap_calloc_class",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_benchmark_528 -> lambda_stack_is_exhausted",
+                "count": "1"
+              },
+              {
+                "kind": "helper",
+                "name": "_permute_194 -> lambda_stack_is_exhausted",
+                "count": "8660"
+              },
+              {
+                "kind": "layout_items_reload",
+                "name": "_permute_194",
+                "count": "8659"
+              },
+              {
+                "kind": "helper",
+                "name": "_main_657 -> fn_join",
+                "count": "2"
+              },
+              {
+                "kind": "helper",
+                "name": "_benchmark_528 -> lambda_fill_for_contract_int_lane_resolved",
+                "count": "1"
+              },
+              {
+                "kind": "raw",
+                "name": "_main_657 -> _benchmark_528",
+                "count": "1"
+              },
+              {
+                "kind": "frame_entry",
+                "name": "_main_657",
+                "count": "1"
+              },
+              {
+                "kind": "layout_length_reload",
+                "name": "_permute_194",
+                "count": "8659"
+              },
+              {
+                "kind": "boxed",
+                "name": "main -> _main_b_657",
+                "count": "1"
+              },
+              {
+                "kind": "overflow",
+                "name": "-",
+                "count": "0"
+              }
+            ],
+            "cow_profile": "type\tshare_marks\tunique_mutations\tshared_copies\tcopied_bytes\nvmap_snapshots\t0\nvmap_rejections\t0\nfn_mutable_value_calls\t0\nunion_admit_calls\t0\nunion_map_rep_cache_hits\t0\nunion_map_rep_cache_misses\t0\nmap_admit_calls\t0\njs_realm_slot_reservations\t0\nmap_admit_relation_cache_hits\t0\nmap_admit_relation_cache_misses\t0\nmap_admit_exact_shape_hits\t0\nmap_admit_storage_compatible_hits\t0\nmap_admit_readonly_validations\t0\nmap_admit_reifications\t0\nmap_admit_deep_clone_calls\t0\nmap_admit_fields_visited\t0\nmap_admit_bytes_copied\t0\narray_checked_store_calls\t0\narray_checked_store_direct\t0\narray_checked_store_unique_inplace\t0\narray_checked_store_cow_detach\t0\narray_checked_store_rebuild\t0\narray_checked_store_full_clone\t0\narray_checked_store_bytes_copied\t0\nstring_append_calls\t2\nstring_append_pieces\t2\nstring_inplace_appends\t0\nstring_growth_copies\t2\nstring_copied_bytes\t33\nstring_freezes\t0\nstring_generic_joins\t2\n"
+          }
+        }
+      }
+    ]
+  },
+  "frozen_inputs": {
+    "files": 912,
+    "all_hashes_match": true,
+    "live": [
+      {
+        "live": "test/benchmark/beng/input/fasta_1000.txt",
+        "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/beng/input/fasta_1000.txt",
+        "sha256": "5c0db740b477346ad3ac079cdd14496f6f43ee9a4629cc2657ca604015bfd852",
+        "matches_frozen": true
+      },
+      {
+        "live": "test/benchmark/text/jq/fib.bf",
+        "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/jq/fib.bf",
+        "sha256": "752deee7b534b9528d87656c6d6fb45375ef5e3bfb81f460ae6397959e427dbb",
+        "matches_frozen": true
+      },
+      {
+        "live": "test/benchmark/text/jq/orders.json",
+        "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/jq/orders.json",
+        "sha256": "2cebbf8c4143c114fcff38b94169c68b72bcb15624e906d6d4df94e17782ddfe",
+        "matches_frozen": true
+      },
+      {
+        "live": "test/benchmark/text/prettier_ast.json",
+        "frozen": "temp/lambda_mir_mvp/tune77_full/benchmarks/text/prettier_ast.json",
+        "sha256": "8763a65fd667fc2d513860f42fffa39a51ce74650fcb83567e83e00cfd3b1cf1",
+        "matches_frozen": true
+      }
+    ]
+  },
+  "fixtures": [
+    {
+      "path": "test/lambda/mvp/mir_mvp_array_domains.ls",
+      "sha256": "44d1639dd6663d9e7e7479346119b8b2ce002cd842101ec61c11dd6a38802ca3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_array_domains.txt",
+      "sha256": "5a60fe6791adf4127f3ce8d8564acaef7e0ef91e4fd00418f636accfd2078bb3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_arrays.ls",
+      "sha256": "f6c617028643ca8b69cd812dfe4ed85ec2eb75728f294c5a356578a59313a3de"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_arrays.txt",
+      "sha256": "d3a6ed5a970352594a1bfb3907a7cc087ac06b7ccc334758c5abd356fce3299b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_batch_records.ls",
+      "sha256": "821a10c0d1f59b1b0ccb32577d3e90844116c50ef03e786556e445e1a9080415"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_batch_records.txt",
+      "sha256": "e4c8fb2cfaccc296bcfe7ac5f287e651afb8ca82ac5aa68f25c99d3f47118697"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_benchmark_expansion.ls",
+      "sha256": "cea24c6a583388c9e6d0629c2f9f974baf19522b44aea3638e7d1e31554b9943"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_benchmark_expansion.txt",
+      "sha256": "59a7af1cb0e7ab58e54bd146a497c9e4cb3ebe03e86bbf5accdf0229106cd83d"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_borrow_inline.ls",
+      "sha256": "f1f0c72e54491226cb430d809b2da82ddd1dfa445d7c006c1f31b4a02809da26"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_borrow_inline.txt",
+      "sha256": "08814709b9e1298445a1bb10f0a555bc5bf3d28745645ce4a5b4155eebfffb1a"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_borrow_kernel.ls",
+      "sha256": "7098d6f1188d17ff76cc3c1c5492dcff8da02c1e55a6ced9091232523713c37c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_borrow_kernel.txt",
+      "sha256": "47b269653c0190f07ba9fe08eb339e960db6c569fda1ab4984ce99f900b5cb91"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_comparisons.ls",
+      "sha256": "404d36e37f0d447ad584b366c8ee35bfad2277d99c3e397dbecf189ae5bbaecd"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_comparisons.txt",
+      "sha256": "8de6bd5520c0b9ab4ecde65b48562a4fcf377a7b75a6ab8b8c9e7d3642141d1f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_confined_arrays.ls",
+      "sha256": "a0449708abae57adb9c67b8dddf624132b42e22ef295aa14732567a3a0672b24"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_confined_arrays.txt",
+      "sha256": "20bc627ce5cee5f9f4df0a3d2a2d8b280e0f21ba94dffe7505aa4c394ca30745"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_constructor_boundary.ls",
+      "sha256": "0ad3f2e26df30e0f4bd4cff4a506b5d56e4ebf76bd78643a8d7c64e8caf885f3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_constructor_boundary.txt",
+      "sha256": "7e975b099ec8566a36a454b8e0f3704b88cc17449da6a0f21ec76cfb8254c017"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_consumers.ls",
+      "sha256": "1d61b757af2b8eb3480626de946adb8e0778ef338c8023bd1a90134c47f3d8fa"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_consumers.txt",
+      "sha256": "53f7098e5cbdf8d49c8a5c3835c95cd92e5d70ec615605437c2fb0f561dd9f1b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_copy_loops.ls",
+      "sha256": "6c1a7bb184a6c6d4036ecb98d4e97c666ab7c534103532d18dfd4d65a93ed9de"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_copy_loops.txt",
+      "sha256": "8c96f187024314d33d54339833e2554f61a4440cbbb8262e026400e1b4c87a7a"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_decimal_dispatch.ls",
+      "sha256": "4cf7692a48a678291bb61e73dfad73b06fec29d09ff301c55acbfe01b27f3f40"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_decimal_dispatch.txt",
+      "sha256": "cf5ddcc7de2482913493032a41e92a2d3ecfe3232c77e4a753c3ddd4bda6745f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_errors.ls",
+      "sha256": "6cacbe6cd4563a5e4691e077f178873034ccae10491e0629eec87c39dcaa7d15"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_errors.txt",
+      "sha256": "f48a4de5bd5ec0e2d30e51db15d1edd1361f6798dbab560ccc18113b3f3f243d"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_extended.ls",
+      "sha256": "8833b70e5b28a665bf9e7aa495d22c88da0658bdba932aabff0c692a06b6af7b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_extended.txt",
+      "sha256": "fe383cb54bb439ded9d65b74fb6ac4d4395da77f24694ac18a400a6b6fe04884"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_flags.ls",
+      "sha256": "f68bf92be7e1271d436492466fec78ce023708dfaf2443138c658c49d1a96f88"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_flags.txt",
+      "sha256": "bef7be161df1d13a8c1b6114a898a9c12b3e83d9215e3ae65961f25788bb476b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_float_arrays.ls",
+      "sha256": "f316ab154888460d8fe326c7cc7f4b7840dbecf663abf18d3a5c7dde40eff0df"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_float_arrays.txt",
+      "sha256": "1cd6bb5f25758bd0aa9a5ab806b4c7fe2869e1d14360a48bcbce5e67aef75e8f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_float_compare.ls",
+      "sha256": "cc3b1258829f6a18180ab831685f355c5d7f6724cdb92f9f0ff28a5acc3efea7"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_float_compare.txt",
+      "sha256": "b0bf5051e37c76a6a833560d15914dc64ecc2c310c43b3a3c472dab4bbcdf022"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_fn_local.ls",
+      "sha256": "5217262c3a3337245c7e16bab5f2c14599af228313b38dba9ba578a5b13f1162"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_fn_local.txt",
+      "sha256": "b1b049b9cd93bbf9d845d40de7d3d29fc56d9ab929d43d5d68a3b9a729510ba4"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_index_recurrence.ls",
+      "sha256": "69fb3ae4e1e12f57fca56924249fc47d3ee8f9ee73ee41215ed1ab1f0366aadb"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_index_recurrence.txt",
+      "sha256": "5ff2fa66da5c06602bf32d63dccc4f6dfa6119691fda5dc55ec6fbad13ceb988"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_indirect_keys.ls",
+      "sha256": "879c358b1596c53508bd1434d7302cd682ad9194e3b92d86b159e2cf9fb88982"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_indirect_keys.txt",
+      "sha256": "e9ce6699f25dcc26c87767daec7907550a9d91074daee3f3ca683ea8c14a0213"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_integer.ls",
+      "sha256": "49b3888f82fda86914fae752ecd5f093c954931164efd06cce85c6aa70b5697f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_integer.txt",
+      "sha256": "190be653bd5b2c0a9c535bb138f7e6aac70a7dbbc894c0bd4313e8c39f011aa2"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_iterations.ls",
+      "sha256": "f91800aca24a871c157db114086ed329a04c45fa3b0dd26b27b3eac5096f2282"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_iterations.txt",
+      "sha256": "571d618c7d9ff181b9ce1625dc8aa75adcbb513818da674202bcd518d1a4a67b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_kernel_loops.ls",
+      "sha256": "f26cdcf39114f5612ed48c735f06588a38db0fb10205bf1e471537b6ba1427a0"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_kernel_loops.txt",
+      "sha256": "6e4350ee44940038cabf9b5d44377d9fd04d744b44805d7dc1128a342f6db40d"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_membership_outcomes.ls",
+      "sha256": "c4ed07bdaafcd0a9484762adb4e4ced3941d03cf24844839b0e23552359b61fa"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_membership_outcomes.txt",
+      "sha256": "829d146ef30b04570c8d229e8f2e1b40d313aff6fac5c69f19f4ea2d4cb2950a"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_modular_update.ls",
+      "sha256": "3790f4887099362c730423e55aa10246312c51a04c5e91efd6c0c946ffc18897"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_modular_update.txt",
+      "sha256": "b6dc9ceca9bbfa0247e9a60bf0ccf4a53ef904b9c52a992a9609970285f580b3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_module_snapshots.ls",
+      "sha256": "59ae4e694e748d467e5cd1b6e0b4825fc0d973b3fe58c7d290b9e675703f1c2f"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_module_snapshots.txt",
+      "sha256": "aeca024a80c14a8452b129cd6899d76a656f7d0459c8b7ff0f70bbb9be79e697"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_native.ls",
+      "sha256": "ce683aa866c43af7dfd268163b000da24335fc4039107caa28a27678eccf59f2"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_native.txt",
+      "sha256": "2b188e8be91e22328680578a70587bc39f2f6479212f840ea94d290bb56c380e"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_numeric_cast.ls",
+      "sha256": "afd98052222cdaa8b353a81e4408a8b910e3bc6a6fc9d6a6a09b953accb93061"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_numeric_cast.txt",
+      "sha256": "1e10e8ef3e65b773d23bc212ce8733f80d5c289afad26dc02599848864ee6048"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_predicate_branch.ls",
+      "sha256": "d6d8885e0379714ac62aba0a67fbefc1df00d2e139c9bc063e8333fdc02a9e7b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_predicate_branch.txt",
+      "sha256": "b366c73f675a231f53d0f27281ebf9f1ede5db825e899d67ec1edbaf7d94646d"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_propagation.ls",
+      "sha256": "2a3b610e82027e236e3b4f2a2de1493d1132fe6ed571fc142e5bd9e2826c14ce"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_propagation.txt",
+      "sha256": "8ce904c970a22c07e4dc8dff63bc1f019d02a8654458536c349beb6bb66a0a6c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_proven_domains.ls",
+      "sha256": "d84cb91450dd2c201b24222fb4583b4c32a7abe0a741e75b491e6aef2dfafb70"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_proven_domains.txt",
+      "sha256": "bdca789a4bffd3651c40f98e05c54c4375d34ca186fa9fc6bcad12df30478194"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_record_witness.ls",
+      "sha256": "83f6fc6bf952b56e845f38ab7ca6d15901bffaef28c0d314118a7a736b604f4b"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_record_witness.txt",
+      "sha256": "9d50496825301aa28e256e2e1b678d80089cdf5f413f74b7fd2d3a5f9fece3e2"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_records.ls",
+      "sha256": "db84ebcd9ee8c45bc4c316a004598a4d4c4e6d3a1aa4c63e30d1babd197f6e85"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_records.txt",
+      "sha256": "585dccefbfc6ee4c52fc77907f23331aa83035878fa19e02d6af2be7ff167588"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_recursive_arrays.ls",
+      "sha256": "0714ccf1017ff41b64b8ac41bd7477246e032c47257920d1398b0136fe36cab4"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_recursive_arrays.txt",
+      "sha256": "5c8ff3ccfc1884a5d8b5b33a63fa3f5a8c0c8016c351bb91a951ea8d8fd33ae3"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_region_loops.ls",
+      "sha256": "7ad1df79c8c48d6bd22938de76f36475cf180bef0a0d1ef585b9074cdacd07ea"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_region_loops.txt",
+      "sha256": "ecd8599a42f541231fe3fa3561407fb71e5f998b517b8780b58a28c6dc3f7ab2"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_scalar_fallback.ls",
+      "sha256": "6b2dcdd8d24651d07548bc906c450772d194d991f69195479dd1781e730d37f9"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_scalar_fallback.txt",
+      "sha256": "7c11e1ff2439cb5e297e5a00d717b9cf5a01cb6c5aea78dcb2af91a21fddcc9c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_scalar_outcomes.ls",
+      "sha256": "6993f61b1a9b933760d32ebb6c03603a72b50d89a517dd46770fdd8ab49d7984"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_scalar_outcomes.txt",
+      "sha256": "9ba1fd9239a9fa6e57e88d57494006f1864bba9608faa286ed5b4fc8b061d395"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_shift.ls",
+      "sha256": "977fd7768cbbd6decd2896d0743d590138223ab588bc10d92fd6e1d5dadfcd30"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_shift.txt",
+      "sha256": "e06ab0f35785d3550542aa5cf2ac35b806bdaeaa9888901f02f33b0b5915852c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_snapshot_loop.ls",
+      "sha256": "272a6df3adbc7da91738deef774a8faa87739a578258aac6544c45a586140454"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_snapshot_loop.txt",
+      "sha256": "b175618ca9a61e5f304368598391afc9d1423dbcae69a588210566aa2ae1f8fd"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_arrays.ls",
+      "sha256": "002147526a3a48f95fef5d693b9a137524b4cb0f7a6cc8074e090689c13c24ce"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_arrays.txt",
+      "sha256": "b7a9a00c24275ae5dd84207c95afa5e4684d7e61827e930dd9352c19241584e6"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_forward.ls",
+      "sha256": "2d1d21f67ab35e628f9dee368db3e20ebe3d6be880bb9894748da34d3b1cd657"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_forward.txt",
+      "sha256": "e73eb6e04fc7a012fac82aa47f58e23fcc4d6a2a292c4ede0ed8dafe9fb98f75"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_outcomes.ls",
+      "sha256": "606a53c8a141d7b93e0f097755dda7f724d40a1ba9a8df605f1d1abf3e13a20c"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_string_outcomes.txt",
+      "sha256": "b6fd458251fd0ee867827f62c38c1072d1ff749129ba16fad52d0782330e2486"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_tuning.ls",
+      "sha256": "48387b5af0d4224583148af3eb66a83d837c06e23f876ec783693c96ca33c405"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_tuning.txt",
+      "sha256": "bcb4715cc28bd36047e31584116517bdd746ff53f4dc27a81bbadd4ba4603049"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_u32.ls",
+      "sha256": "3923b2a66bd0759acb4e4ec7cb02e4627f91a8c6423571bebdfb22f6fd49d28d"
+    },
+    {
+      "path": "test/lambda/mvp/mir_mvp_u32.txt",
+      "sha256": "0f8f3eb859a165bcb4474aa8b6a771ed82505a777de2d802accc23138bce1b84"
+    }
+  ],
+  "protocol": {
+    "candidate": "guarded_admission",
+    "primary_pairs": 30,
+    "warmups": 2,
+    "population": 77,
+    "full_control": "corrected Full in the same candidate executable",
+    "regression_control": "fresh control-release rebuilt from starting775c00d61 with all766 translation units",
+    "regression_population": 77,
+    "original48": "same30-pair rows selected from full77; not an independent run",
+    "sumfp": "matched10000-call supplement,30 pairs, same fresh starting reference",
+    "confirmations": [
+      "awfy/cd",
+      "text/microdiff",
+      "beng/regexredux",
+      "jetstream/navier_stokes",
+      "jetstream/hashmap",
+      "text/jq_records",
+      "beng/pidigits",
+      "awfy/permute",
+      "larceny/diviter"
+    ],
+    "confirmation_pairs": 50,
+    "historical_stage24": "Earlier incomplete runs retained. Not mixed with this source-matched regression qualification after upstream changes.",
+    "rule_change": "No threshold changes: one-sided95% upper MVP/Full ratio<1 for a clear win; two-sided95% lower MVP/previous ratio>1 flags regression.",
+    "before_final_primary_samples": true
+  },
+  "wrapup_stopped_campaigns": {
+    "unfinished_confirmations": {
+      "reason": "User requested wrap-up; preserve completed confirmations and stop unfinished campaign. No additional tuning or measurements launched.",
+      "completed_confirmations": [
+        "awfy/cd",
+        "text/microdiff",
+        "beng/regexredux",
+        "jetstream/navier_stokes",
+        "jetstream/hashmap"
+      ],
+      "stopped": [
+        {
+          "pid": 70358,
+          "ppid": 96448,
+          "command": "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python temp/lambda_mir_mvp/tune77_phase3/confirm_inline.py guarded_admission"
+        },
+        {
+          "pid": 87623,
+          "ppid": 70358,
+          "command": "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python test/benchmark/lambda_mir_mvp.py --release --lambda-only --exe /Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_phase3/guarded_admission-release.exe --source-manifest /Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_phase3/guarded_admission-source-manifest.json --benchmark-root /Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/benchmarks --previous-mvp /Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_phase3/control-release.exe --subset all --case text/jq_records --runs 50 --warmups 2 --pause-for-jobs --record-failures --output /Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_phase3/guarded_admission-confirm-text_jq_records.json"
+        },
+        {
+          "pid": 87904,
+          "ppid": 87623,
+          "command": "/Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_phase3/guarded_admission-release.exe run /Users/henryluo/Projects/lambda/temp/lambda_mir_mvp/tune77_full/benchmarks/text/jq_records2.ls --no-log"
+        }
+      ]
+    },
+    "queued_regression_followup": {
+      "reason": "User requested wrap-up; stopped queued, not-yet-started100-pair regression follow-up. Primary flags remain unresolved.",
+      "processes": [
+        {
+          "pid": 83871,
+          "ppid": 96448,
+          "command": "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python -B temp/lambda_mir_mvp/tune77_phase3/confirm_regression_flags.py guarded_admission"
+        }
+      ]
+    }
+  },
+  "constraints": "No data layout, vendor, benchmark workload/iterations/goldens or shared lambda.exe changes; Lambda baseline only."
+}

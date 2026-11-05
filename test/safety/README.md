@@ -1,6 +1,6 @@
 # App-safety qualification
 
-Authority: **D7.5.1–D7.5.2, D7.5.5–D7.5.8** in
+Authority: **D11.1.1–D11.1.2, D11.2.1–D11.2.4** in
 [formal design](../../doc/Lambda_Formal_Design.md). Delivery/status:
 [implementation plan](../../vibe/impl/Lambda_Impl_App_Safety.md).
 
@@ -44,7 +44,7 @@ focused forced-GC/poison and cache-disabled qualification recorded in the plan.
 See the [loading inventory](Loading_IO_Inventory.md) and
 [host component contracts](../../lambda/host/safety/README.md).
 
-The **D7.5.8** Lambda Script verifier is exercised by the `safety_signature`
+The **D11.2.4** Lambda Script verifier is exercised by the `safety_signature`
 and `safety_tuf*` goldens, including independent signed fixtures for all three
 supported signature schemes, root thresholds/rotation, expiry/rollback,
 checkpoint ordering and delegated lookup. See [fixture provenance](tuf/README.md)
@@ -67,7 +67,7 @@ the TLS fixture records exact encoded request bytes and reuses a signed
 traversal-shaped Unicode role from the protected cache after restart.
 It is a bound-client integration test; ordinary CLI launches remain unconfined.
 
-The **D7.5.8** [offline package decoder](../../lmd/package/security/Stage.md)
+The **D11.2.4** [offline package decoder](../../lmd/package/security/Stage.md)
 has a paired `safety_package_stage` golden and 53 owned archive/IPC controls in
 `python3 -O test/safety/test_package_stage.py`. The actual early-confined Lambda
 interpreter emits bounded member bytes and requires per-entry acknowledgements;
@@ -75,7 +75,7 @@ it has no file-write authority. [Fixture provenance](stage/README.md) distinguis
 this decoder component from the separate protected staging adapter and pending
 managed-image publication, activation and hardened deployment pipeline.
 
-`test_security_update_stage_gtest` now checks the native **D7.5.8** inactive
+`test_security_update_stage_gtest` now checks the native **D11.2.4** inactive
 staging adapter: independent worker-path/parent/collision gates, exact receipts,
 reservation invalidation, single-stage admission, live claims, bounded cleanup,
 interrupted initialization and corruption/substitution refusal. The 14 checks
@@ -107,7 +107,7 @@ part of this debug correctness gate.
 
 ## Host updater HTTPS transport
 
-Under **D7.5.2, D7.5.7–D7.5.8**, `test_security_update_pull_gtest` checks numeric
+Under **D11.1.2, D11.2.3–D11.2.4**, `test_security_update_pull_gtest` checks numeric
 IPv4/IPv6 special-use boundaries, exact origin/canonical URL admission and
 refusal before network initialization. `test_update_pull.py` owns a local TLS
 server, temporary CA/server certificates and pinned native executables under
@@ -145,7 +145,7 @@ Injected failures at each sync refuse publication and preserve the possibility
 of an unacknowledged created object; an exclusive retry never replaces it.
 macOS cases additionally reject dropping full-sync flags on child derivation and
 prove that a full-sync error after atomic publication returns committed-but-not-
-durable status, rather than success (**D7.5.2, D7.5.7**).
+durable status, rather than success (**D11.1.2, D11.2.3**).
 
 The test executable alone interposes `fsync`; ordinary calls still reach the
 real kernel. A positive atomic-publication control verifies the instrumentation.
@@ -156,7 +156,7 @@ ordering and error-path controls, not simulated physical power loss.
 
 ## Trusted private-storage management
 
-Under **D7.5.2, D7.5.5–D7.5.7, D7.5.9**, the admission suite covers read-only
+Under **D11.1.2, D11.2.1–D11.2.3, D11.2.5**, the admission suite covers read-only
 management inspection (including over-quota and abandoned-session state),
 live-session reset refusal, bounded persistent-data reset, stale and
 cross-principal intent rejection, alias preflight, corrupt-record refusal and
@@ -168,7 +168,7 @@ Quota cases cover saved limits across host restart/code revalidation, all three
 mounts, byte/entry accounting after reduction, a compliant shrinking replacement,
 live-session and stale-generation refusal, competing editors, generation
 exhaustion, data-reset preservation, corrupt/cross-principal/profile records and
-typed state-slot isolation (**D7.5.2, D7.5.7**). The console runner also verifies
+typed state-slot isolation (**D11.1.2, D11.2.3**). The console runner also verifies
 edits/default restoration, numeric validation, unchanged grant records and a
 separate live host's lease followed by process death. The signed supervisor
 matrix reuses one real admitted script/image: a lowered quota must refuse its
@@ -243,7 +243,7 @@ is not Linux mount/namespace confinement, and metadata revision checks are
 not universal atomic compare-and-replace against external writers.
 
 [grant_store](../../lambda/host/safety/grant_store.h) is a host-only component
-under **D7.5.7**. Its source is linked by the dedicated supervisor and store/
+under **D11.2.3**. Its source is linked by the dedicated supervisor and store/
 admission test executables; it is excluded from ordinary runtime/worker source
 lists. Default CLI integration and installed publisher qualification remain
 pending.
@@ -296,7 +296,7 @@ make build-safety-worker
 python3 test/safety/test_macos_worker.py
 ```
 
-The worker target is a T0-only runtime bootstrap under **D7.1.6 / D7.5.5**.
+The worker target is a T0-only runtime bootstrap under **D9.2.2 / D11.2.1**.
 The test builds a separate native-probe variant and the host's channel fixture,
 then signs both worker entrypoints without entitlements. The experimental
 native process policy is installed before runtime initialization. Neither worker
@@ -315,7 +315,7 @@ The control must succeed; the signed probe must deny all four and show zero
 unexpected inherited descriptors. The fixture tests never open real settings.
 Its automatic approval is a trusted **test fixture**, not production consent UI.
 
-Eight cases use the host-only ad-hoc admission core (**D7.5.5–D7.5.7**) rather
+Eight cases use the host-only ad-hoc admission core (**D11.2.1–D11.2.3**) rather
 than directly constructing a file broker. They use real fixture settings beneath
 the selected ancestor, test reads/writes against those protected settings, and
 receive the session only after source admission completes. Separate trusted host
@@ -349,7 +349,7 @@ streams, payload/request/byte budgets, missing channels, descriptor rejection
 and lost write replies. `test_security_runtime_gtest` checks that an unknown
 write outcome is returned as an owned error without an automatic retry for
 text, binary, JSON and ZIP in both tiers, including forced-GC qualification
-(**S7.4.5, D5.3.3**).
+(**S7.4.5, D6.3.3**).
 
 This is stronger M0/M2 component evidence than the earlier syscall-only probe,
 but `m2_complete` stays false. The separate supervisor runner below now covers
@@ -420,7 +420,7 @@ python3 test/safety/test_update_controls.py --no-build
 The native suite checks protected-state parsing/profile identity, independent
 host reservation and publication/disable ordering, preference retention,
 cadence/backoff/deadlines, manual/offline precedence, malformed endpoints and
-unchanged app file grants (**D7.5.7–D7.5.8**). The console runner uses an isolated
+unchanged app file grants (**D11.2.3–D11.2.4**). The console runner uses an isolated
 fixture home and separate host processes for every command; it tests package
 versus `--all` scope, restart persistence, pause/disable/restore, offline,
 malformed arguments, corrupt state and production signature/fixture-option
@@ -439,7 +439,7 @@ worker protocol remain unchanged.
 ## Response-publication revocation
 
 `./test/test_security_admission_gtest.exe --gtest_filter='SecurityDeliveryTest.*'`
-runs eight native integration cases under **D7.5.2 / D7.5.5–D7.5.7**. They exercise
+runs eight native integration cases under **D11.1.2 / D11.2.1–D11.2.3**. They exercise
 the real admission/store and guarded LSAF dispatcher: all six reply shapes after
 local revocation, saved-generation revocation, expiry before/during publication,
 confirmed writes, bad capture, malformed requests and a backpressured peer with
@@ -542,7 +542,7 @@ and namespace controls, not a complete power-loss or OS-malicious-worker matrix.
 Current data/cache/temp byte quotas are 64/32/16 MiB; entry quotas are
 1,024/1,024/512, with temp quota shared across up to 16 live sessions. Persistent
 data repair, quota UI and remaining M2 gates stay open
-(**D7.5.1–D7.5.2, D7.5.5–D7.5.7**).
+(**D11.1.1–D11.1.2, D11.2.1–D11.2.3**).
 
 An ad-hoc per-principal bundle re-signing spike was rejected after a same-ID
 copy with a valid actual-parent constraint read another container's fixture
@@ -556,4 +556,4 @@ launcher-selected directory. `HostDirectoryResolvesRelativeDataAndTaskPathsWitho
 executes relative data input, task reads and file output in both interpreter
 and MIR JIT, with an immutable context-owned directory and unchanged process CWD.
 The directory is lexical metadata; broker roots still determine authority
-(**D5.4.2–D5.4.4, D7.5.2, D7.5.5**).
+(**D6.4.2–D6.4.4, D11.1.2, D11.2.1**).

@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import icons: .icons
 import timeline: lambda.chart.timeline
@@ -16,7 +17,7 @@ pub fn descriptor(props) element^ {
         let valid = [for (item in items) validate_item(item)^],
         let core=timeline.validate(specification(props)),
         if (core is error) raise core else
-        c.node('timeline',props,null,["items","mode","orientation","reverse","pending","pending_icon","timeline_options"])^
+        descriptor.node('timeline',props,null,["items","mode","orientation","reverse","pending","pending_icon","timeline_options"])^
     )
 }
 fn validate_item(item) bool^ {

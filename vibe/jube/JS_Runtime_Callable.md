@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-11
 
-**Status**: IMPLEMENTED — formal ruling D6.2.2v2
+**Status**: IMPLEMENTED — formal ruling D7.2.2
 
 **Tree anchor**: master `88aa5556c8` plus the Tune4 implementation worktree;
 the reproducible C0 snapshot and C8 evidence are summarised in
@@ -15,7 +15,7 @@ the reproducible C0 snapshot and C8 evidence are summarised in
 
 Decisions introduced here use **JC#** ledger ids only where the formal design
 does not already rule the point. Existing formal rulings are cited first, per
-repository rule 17. The design is implemented; D6.2.2v2 was adopted in
+repository rule 17. The design is implemented; D7.2.2 was adopted in
 `doc/Lambda_Formal_Design.md` before the callable ABI landed.
 
 ---
@@ -56,14 +56,14 @@ The migration is not complete until all of these exits hold:
 | Activation state | The active `new.target` binding may remain context state while a body executes, but the `js_pending_new_target` / `js_has_pending_new_target` one-shot handoff is deleted. |
 | Native ABI | Native targets are held through typed function-pointer forms. `void* + param_count + cast at call time` is not the final native-call contract. |
 | Property semantics | A source method call observes `Get` followed by `Call`. Name/receiver-type lowering alone may not bypass a replacement, deletion, accessor, Proxy trap, or extracted function value. |
-| Ownership | Caller-donated scalar homes and precise argument roots remain intact under D5.2.1 and D5.3.3–D5.3.5. Ownership-qualified adapters all enter the same call/construct kernels. |
-| Errors | All fallible entries return the D8.4.3 merged `Item` error lane. No pending exception channel or per-call poll is reintroduced. |
+| Ownership | Caller-donated scalar homes and precise argument roots remain intact under D6.2.1 and D6.3.3–D6.3.5. Ownership-qualified adapters all enter the same call/construct kernels. |
+| Errors | All fallible entries return the D7.4.3 merged `Item` error lane. No pending exception channel or per-call poll is reintroduced. |
 | Retirement | `js_dispatch_builtin`, public method-name dispatch helpers, constructor-name dispatch, and the old pending-`new.target` protocol are removed rather than retained as fallbacks. |
 
 This is the next runtime mechanism after exceptions and names because those
 two migrations remove its two former excuses: entries can now return one
-in-band `Item` outcome (D8.4.3), and properties/catalog bindings can now use
-one NameId identity (D4.6 / RN1–RN16).
+in-band `Item` outcome (D7.4.3), and properties/catalog bindings can now use
+one NameId identity (D5.6 / RN1–RN16).
 
 ## 1. Current mechanism and root cause
 
@@ -89,7 +89,7 @@ between them: a function object does not fully describe how it executes.
 
 `JsFunction` already contains `JsCallEntry invoke`, and ordinary compiled
 functions are finalized onto a per-callee entry. This is the mechanism ruled
-by **D6.2.2**.
+by **D7.2.2**.
 
 Builtin creation bypasses that mechanism. `js_get_or_create_builtin` stores:
 
@@ -221,14 +221,14 @@ Libraries that intend a method call already evaluate the `call` property.
 
 | Formal ruling | Consequence here |
 |---|---|
-| **D4.6.1–D4.6.2** | Builtin property bindings resolve through the one NamePool/NameId authority. Runtime dispatch does not reclassify names. |
-| **D5.2.1–D5.2.2** | A call or construct entry receives/forwards the caller-donated scalar result home. A wrapper may not return a pointer into its own restored number extent. |
-| **D5.3.1–D5.3.5** | Arguments are caller-rooted borrows; native boundary adapters establish one exact rooted span where required. Callees do not invent conservative scans or permanent per-call roots. |
-| **D5.4.1–D5.4.4** | Callable objects and alias caches are context/realm-owned. Immutable catalog tables may be global; no context-dependent function object or IC address is baked into shared MIR. |
-| **D6.2.1** | A function value owns its executable entries and closure environment. A builtin is therefore a function value with entries, not an ID requiring external interpretation. |
-| **D6.2.2v2** | Dynamic calls and construction dispatch through distinct per-callee executable entries; `newTarget` is explicit. Ownership adapters funnel into those entries rather than becoming competing mechanisms. |
-| **D8.4.2** | `Item* + argc` remains the JavaScript dynamic boundary. Core Lambda direct-call ABI is not replaced by the JS convention. |
-| **D8.4.3** | Every fallible callable returns success or an ERROR-tagged `Item`; call/construct entries never set a pending exception flag. |
+| **D5.6.1–D5.6.2** | Builtin property bindings resolve through the one NamePool/NameId authority. Runtime dispatch does not reclassify names. |
+| **D6.2.1–D6.2.2** | A call or construct entry receives/forwards the caller-donated scalar result home. A wrapper may not return a pointer into its own restored number extent. |
+| **D6.3.1–D6.3.5** | Arguments are caller-rooted borrows; native boundary adapters establish one exact rooted span where required. Callees do not invent conservative scans or permanent per-call roots. |
+| **D6.4.1–D6.4.4** | Callable objects and alias caches are context/realm-owned. Immutable catalog tables may be global; no context-dependent function object or IC address is baked into shared MIR. |
+| **D7.2.1** | A function value owns its executable entries and closure environment. A builtin is therefore a function value with entries, not an ID requiring external interpretation. |
+| **D7.2.2** | Dynamic calls and construction dispatch through distinct per-callee executable entries; `newTarget` is explicit. Ownership adapters funnel into those entries rather than becoming competing mechanisms. |
+| **D7.4.2** | `Item* + argc` remains the JavaScript dynamic boundary. Core Lambda direct-call ABI is not replaced by the JS convention. |
+| **D7.4.3** | Every fallible callable returns success or an ERROR-tagged `Item`; call/construct entries never set a pending exception flag. |
 
 No S-layer behavior changes. This design corrects the implementation of
 ECMAScript `[[Call]]`, `[[Construct]]`, property access, bound functions, and
@@ -260,7 +260,7 @@ ECMAScript `[[Call]]`, `[[Construct]]`, property access, bound functions, and
 The existing `JsCallEntry` is the invocation-protocol entry. It owns facts
 such as argument rooting, stack-depth checks, active `this`, module/global
 switching, home-class installation, and scalar-home forwarding. Different
-function shapes may select different protocol entries under D6.2.2.
+function shapes may select different protocol entries under D7.2.2.
 
 Native semantic bodies should use explicit typed forms. Directional types:
 
@@ -338,8 +338,8 @@ entry exists.
 The following are not separate semantic mechanisms:
 
 - a native C caller that needs the kernel to root its argument span;
-- generated MIR whose fixed argument suffix is already rooted (D5.3.5);
-- a caller that donates an explicit scalar result home (D5.2.1); and
+- generated MIR whose fixed argument suffix is already rooted (D6.3.5);
+- a caller that donates an explicit scalar result home (D6.2.1); and
 - a legacy caller that requires the boundary to allocate a temporary result
   home and re-home before returning.
 
@@ -532,7 +532,7 @@ be the same function object even though they have two property keys.
 
 ### 7.2 NameId integration
 
-Under D4.6 and `JS_Runtime_Name.md`:
+Under D5.6 and `JS_Runtime_Name.md`:
 
 - a generated JS catalog property name carries its generated NameId;
 - an arbitrary catalog spelling is prelinked into the realm/static closure
@@ -550,7 +550,7 @@ creation. Writing or redefining `.name` changes only that property.
 
 The callable catalog must reference, not duplicate, the helper effect
 authority used by MIR lowering. A fallible native body has an `Item` result
-under D8.4.3. A raw scalar entry is allowed only where the existing catalog
+under D7.4.3. A raw scalar entry is allowed only where the existing catalog
 proves `PRESERVES`; builtin function values exposed to arbitrary JavaScript
 should normally use the boxed `Item` boundary.
 
@@ -576,7 +576,7 @@ The cache key is therefore not merely `builtin_id`. It is the declared realm
 identity key. Two bindings that happen to call the same C body do not become
 `===` accidentally.
 
-All cached Items are context-owned and precisely rooted under D5.4.2–D5.4.4.
+All cached Items are context-owned and precisely rooted under D6.4.2–D6.4.4.
 Immutable target descriptors and C entry pointers may remain process-global.
 Function objects, property maps, prototypes, and arbitrary NameIds may not.
 
@@ -717,7 +717,7 @@ merely because its handler owns an `apply` property.
 
 ### 10.1 Exception redesign — prerequisite satisfied
 
-JR3/D8.4.3 means native and compiled entries return one merged `Item`. Direct
+JR3/D7.4.3 means native and compiled entries return one merged `Item`. Direct
 builtin bodies therefore need no pending flag, poll, or wrapper-specific
 error protocol. Catalog effects only decide whether generated code may elide
 the ERROR-tag branch.
@@ -752,9 +752,9 @@ are invoked.
 
 ### 10.6 Feedback vectors — **RETIRED (JR8 withdrawn 2026-09-09)**
 
-> Banned by **D8.4.1v2**/LC1v2. A stable-callee speed-up, if it is ever
+> Banned by **D7.4.1**/LC1v2. A stable-callee speed-up, if it is ever
 > justified by measurement, must be a compile-time prediction guarded inline
-> with the observable `Get -> Call` (D6.2.2v2) on a miss — never a cached
+> with the observable `Get -> Call` (D7.2.2) on a miss — never a cached
 > callee slot. See `JS_Tune_History.md` §4.3 (T10-5).
 
 JR8 call slots cache exact function identity and, after a stable hit, may cache
@@ -780,7 +780,7 @@ accepted.
 
 ### C0 — Formal adoption, census, and fixtures
 
-1. Adopt D6.2.2v2 from §14, bump the formal-design version, and revise JR5 in
+1. Adopt D7.2.2 from §14, bump the formal-design version, and revise JR5 in
    `JS_Runtime_Redesign.md` in the same change. This landed in formal-design
    version 1.11.0.
 2. Freeze structural census scripts for:
@@ -989,7 +989,7 @@ At minimum, focused tests cover:
 - An intrinsic property call is not direct merely because its spelling and
   receiver type are known.
 - ERROR-tag propagation after call/construct remains a fused branch on the
-  returned Item under D8.4.3.
+  returned Item under D7.4.3.
 - Scalar result homes are forwarded through call and construct adapters.
 
 ### 12.5 Suite and performance gates
@@ -1043,13 +1043,13 @@ Performance gates:
 
 ## 14. Formal-spec adoption
 
-The direct-call portion was already required by D6.2.1–D6.2.2. Separate
-construct capability and explicit `newTarget` were adopted as D6.2.2v2 in
+The direct-call portion was already required by D7.2.1–D7.2.2. Separate
+construct capability and explicit `newTarget` were adopted as D7.2.2 in
 `doc/Lambda_Formal_Design.md` version 1.11.0 before C1 implementation began.
 
-### Adopted D6.2.2v2 — per-callee call and construct entries
+### Adopted D7.2.2 — per-callee call and construct entries
 
-> **D6.2.2v2** Dynamic calls dispatch through per-callee executable entries.
+> **D7.2.2** Dynamic calls dispatch through per-callee executable entries.
 > LambdaJS function values carry distinct `[[Call]]` and
 > `[[Construct]]` capabilities: call dispatch uses `fn->invoke`; construction
 > uses an explicit construct entry and passes `newTarget` as an operand, never
@@ -1067,13 +1067,13 @@ construct capability and explicit `newTarget` were adopted as D6.2.2v2 in
 
 This is an implementation-design revision, not a semantics revision. C0 must:
 
-1. replace D6.2.2 with D6.2.2v2;
+1. replace D7.2.2 with D7.2.2;
 2. bump the formal design document semver;
 3. revise JR5's “one call convention” wording to “one callable kernel with
    distinct Call/Construct capabilities”; and
 4. update the formal decision-record index to this document.
 
-D4.6, D5.2, D5.3, D5.4, D6.2.1, D8.4.2, and D8.4.3 remain unchanged.
+D5.6, D6.2, D6.3, D6.4, D7.2.1, D7.4.2, and D7.4.3 remain unchanged.
 
 ## 15. Rejected alternatives
 
@@ -1111,7 +1111,7 @@ across different property keys. Identity is a binding/realm decision (JC7).
 
 ### 15.6 Make each builtin a new TypeId or private object representation
 
-Rejected. Builtins are ordinary function values under D6.2.1. A JS-private
+Rejected. Builtins are ordinary function values under D7.2.1. A JS-private
 callable representation would repeat the mechanism this design removes and
 consume shared data-model complexity.
 
@@ -1175,7 +1175,7 @@ exotic metadata.
 
 ### 16.1 Implemented outcome
 
-Tune4 closes this criterion under **D6.2.2v2**. `JsFunction` carries distinct
+Tune4 closes this criterion under **D7.2.2**. `JsFunction` carries distinct
 `invoke` and optional `construct` protocol entries; typed target/factory
 families bind MIR, fixed-native, span-native, intrinsic, bound, Proxy, class,
 and host behavior at publication. The central builtin semantic dispatcher,

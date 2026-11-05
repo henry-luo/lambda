@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2/D8.4.2v2: unrelated eval preserves an unexposed local's complete integer-write proof. Remove its redundant integer round-trip check while retaining bounds, inherited getters, coercion and exception fallback. Fractional writes still require the round trip.",
+  "description": "D7.4.1/D7.4.2: unrelated eval preserves an unexposed local's complete integer-write proof. Remove its redundant integer round-trip check while retaining bounds, inherited getters, coercion and exception fallback. Fractional writes still require the round trip.",
   "checks": [
     {
       "in_func": "mvp_lmd_f2",

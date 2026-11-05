@@ -1,4 +1,4 @@
-// D5.3.4/D8.2.6: only total scalar calls with loop-invariant operands move.
+// D6.3.4/D8.2.6: only total scalar calls with loop-invariant operands move.
 pn local_while(n: int, value: float) float {
     let scale = value * 2.0
     var total = 0.0

@@ -36,9 +36,9 @@ accepted baseline.
 pairing, placement, whitespace, line breaking, and formatting properties.
 [CSS Display 3](https://www.w3.org/TR/css-display-3/) governs computed display,
 blockification, and inlinification. Existing Lambda contracts remain unchanged:
-**D2.10.1v2** for XHTML admission, **D4.1.4v5 / D4.5.1v4** for document and
-layout-scratch ownership, **D4.5.2** for retained value ownership, and
-**D5.3.3 / D5.4.1** for script roots and evaluator lifetime.
+**D10.1.4** for XHTML admission, **D5.1.4 / D5.5.1** for document and
+layout-scratch ownership, **D5.5.2** for retained value ownership, and
+**D6.3.3 / D6.4.1** for script roots and evaluator lifetime.
 
 ## Initial source findings
 
@@ -179,7 +179,7 @@ Follow the HTML Standard's
 `rb`/`rtc` generate all implied end tags when ruby is in scope; `rp`/`rt` do so
 except for `rtc`. Unexpected non-implied current nodes produce a parse error
 without an extra stack pop. All four tags share the insertion path and existing
-scope/closing helpers. XHTML admission remains governed by **D2.10.1v2** and
+scope/closing helpers. XHTML admission remains governed by **D10.1.4** and
 does not use these HTML recovery rules.
 
 Acceptance: omitted-end-tag sibling ordering, sequential annotation containers,
@@ -234,8 +234,8 @@ each column from all participating boxes; distribute spanning excess across
 its columns per §3.1.1. Retain the established base inline formatting context
 and separate annotation contexts. Reuse the existing view-tree shifting and
 inline bounding-box functions. Normalization lifetime is bounded by layout
-scratch (**D4.5.1v4**); retained paint/query data belongs to the selected view
-pool (**D4.1.4v5**).
+scratch (**D5.5.1**); retained paint/query data belongs to the selected view
+pool (**D5.1.4**).
 
 Acceptance: successive simple pairs, consecutive explicit base/annotation
 boxes, annotation-only and missing-annotation columns, two annotation levels,
@@ -364,7 +364,7 @@ untransformed source text content, ignoring element boundaries; retain the
 normalization model's source links and pairing. Layout, intrinsic measurement,
 paint and text queries must agree on the annotation's absent participation.
 Do not overwrite authored style or source text. Keep paired flags in the
-existing scratch scope and comparison buffers call-scoped (**D4.5.1v4**).
+existing scratch scope and comparison buffers call-scoped (**D5.5.1**).
 
 Acceptance: an identical reading with a larger annotation font contributes no
 size; changing the reading to different text and back reverses that effect;
@@ -401,7 +401,7 @@ save/reset it with the corresponding view geometry. The common visibility
 classifier applies it to paint, focus and hit queries without allowing a
 descendant's authored `visibility: visible` to restore a hidden reading.
 Rendered Range text excludes it while raw Range text retains the source.
-These remain selected-view outputs under **D4.1.4v5 / D4.5.1v4**.
+These remain selected-view outputs under **D5.1.4 / D5.5.1**.
 
 `RubyHiddenAnnotationsRetainPairingWithoutContributingSize` fails before the
 implementation: the identical-reading case measures/uses 110px rather than
@@ -485,7 +485,7 @@ Use one computed-role policy for layout, intrinsic measurement, bidi and text
 projection. Extend the existing collapsible-space ownership/trim path to a
 break-marker box rather than creating fake DOM text or a separate glyph path.
 Retain the source marker's used geometry in its existing view ownership domain
-and journal it with the corresponding view state (**D4.1.4v5 / D4.5.1v4**).
+and journal it with the corresponding view state (**D5.1.4 / D5.5.1**).
 
 Acceptance: direct/nested annotation BRs and preserved newlines; leading,
 repeated and trailing converted breaks; surrounding collapsed spaces;
@@ -518,7 +518,7 @@ computed `white-space`. Converted BRs retain their own source element/view and
 space advance. The existing trailing-space trim accepts that box as an owner;
 `Linebox::clear_trailing_space` clears both the advance and owner together.
 The existing view snapshot already journals the marker's geometry, while its
-line-context borrow remains pass-local (**D4.1.4v5 / D4.5.1v4**).
+line-context borrow remains pass-local (**D5.1.4 / D5.5.1**).
 
 Intrinsic collectors and the generic inline-run aggregation recognize converted
 BRs as separators. The shared normalizer takes explicit inline-edge context so
@@ -586,7 +586,7 @@ First qualify a native reproducer against Chromium for zero-height and taller
 atomic descendants, nested inline owners, inherited and differing fonts,
 zero/large annotation line-height, over/under placement and computed role
 changes. Reuse the existing inline font/strut/fragment helpers; preserve source
-identity and selected-view ownership (**D4.1.4v5 / D4.5.1v4**). Include zero
+identity and selected-view ownership (**D5.1.4 / D5.5.1**). Include zero
 font-size and hidden annotations as controls. Run focused checks during the
 edit loop, then raw Ruby, dimension/inventory/diff checks and the required
 Radiant milestone gate when stable. Broaden input qualification only if
@@ -668,7 +668,7 @@ Extend the shared normalized-box bounds using the existing bounded view walk,
 including participating nested Ruby boxes while stopping at independent
 formatting contexts and out-of-flow descendants. Preserve each source box's
 own font/content geometry and DOM identity; the container envelope is layout
-structure (**D4.1.4v5 / D4.5.1v4**). Do not add a separate nested-Ruby placement
+structure (**D5.1.4 / D5.5.1**). Do not add a separate nested-Ruby placement
 algorithm or a per-test offset.
 
 Acceptance: inner/outer over and under combinations, multiple nested levels,
@@ -686,7 +686,7 @@ boxes and direct base/annotation roots. The walk stops at independent formatting
 contexts and excludes out-of-flow/undisplayed content. Only the scratch bounds'
 block-axis envelope expands; source inline font boxes and horizontal column
 allocation do not change. No new retained payload or normalization path is
-introduced (**D4.1.4v5 / D4.5.1v4**).
+introduced (**D5.1.4 / D5.5.1**).
 
 `NestedRubyContainersIncludeParticipatingAnnotationLevels` reproduces same-side
 overlap before the fix and passes afterward. It covers all four inner/outer
@@ -749,7 +749,7 @@ original content, inheriting the non-inline container's formatting values.
 Reuse the existing Ruby model and formatter for that anonymous formatting role,
 while retaining the source block's width, margins, padding, border and used
 position. Keep its source DOM identity and the selected-view ownership rules
-(**D4.1.4v5 / D4.5.1v4**). Do not add a second column or annotation algorithm.
+(**D5.1.4 / D5.5.1**). Do not add a second column or annotation algorithm.
 
 Acceptance: a simple authored block Ruby, arbitrary-element Ruby, floated and
 positioned Ruby, blockified grid item, annotation-only content, paired bases,
@@ -783,7 +783,7 @@ producing a 136px minimum instead of the 76px natural border-box height.
 `layout_ruby_intrinsic_height` now measures with the same formatter. Existing
 `LayoutMeasureScope`, full flow capture/replay and a counter checkpoint preserve
 selected scalar geometry, text fragments, generated effects and caller state
-(**D4.1.4v5 / D4.5.1v4 / D4.5.2**). This is an exact flow measurement, without a
+(**D5.1.4 / D5.5.1 / D5.5.2**). This is an exact flow measurement, without a
 second font/column-height estimator. The ordinary intrinsic-height cache owns
 the scalar result.
 
@@ -850,7 +850,7 @@ isolated inline and Ruby controls after a text prefix, matching border boxes,
 base/glyph positions and following-text advances; decorated/margin first-item
 controls and retained changes. Use CSS Writing Modes §2 bidi isolation and
 CSS 2.1 §8.3 inline margin-box rules. Preserve source geometry ownership
-(**D4.1.4v5 / D4.5.1v4**), without Ruby-specific offsets or width inflation.
+(**D5.1.4 / D5.5.1**), without Ruby-specific offsets or width inflation.
 Verify focused bidi/Ruby controls, the raw Ruby suite and required Radiant
 baseline at the stable boundary. Full parallel Ruby wrapping remains open.
 
@@ -920,7 +920,7 @@ no annotation levels, there is no parallel column-sizing constraint: retain the
 ordinary base-level flow and its per-line cursors instead of realigning the
 multi-line union. Preserve normalization/discarding, computed roles, source
 identity and the common inline fragment/bidi machinery
-(**D4.1.4v5 / D4.5.1v4**). This is the degenerate Ruby formatting model, not a
+(**D5.1.4 / D5.5.1**). This is the degenerate Ruby formatting model, not a
 tag-name exception or an alternate column solver.
 
 Acceptance: base-only Ruby and ordinary isolated inline controls at constrained
@@ -1003,7 +1003,7 @@ Share normalized model measurement between intrinsic and used layout. When
 the parallel model has no internal opportunity, constrain soft breaks in its
 base flow without changing computed white-space/text-wrap or source boxes.
 Use an IFC-scoped, stack-borrowed constraint so independent formatting
-contexts retain their own wrap policy (**D4.1.4v5 / D4.5.1v4**). Preserve forced
+contexts retain their own wrap policy (**D5.1.4 / D5.5.1**). Preserve forced
 base breaks and the existing annotation-only segment-break normalization.
 The enclosing inline's leading fit must consume the same complete-unit width.
 
@@ -1108,7 +1108,7 @@ levels together, contribute its line metrics before line finalization, and
 align each reading with that unit's actual line. Reuse the existing column
 solver, spacing, nested-envelope and inline-fragment helpers rather than
 creating a second placement algorithm. Preserve borrowed model lifetimes and
-selected fragments (**D4.1.4v5 / D4.5.1v4**).
+selected fragments (**D5.1.4 / D5.5.1**).
 
 Boundary permission must distinguish ordinary minima from used emergency
 opportunities across source boxes and use the correct common style owner.
@@ -1146,7 +1146,7 @@ A stack-owned selected-model scope exposes only committed segments on the
 current line to line-final annotation alignment. Annotation fragments receive
 their base's outer line membership, stopping at independent formatting
 contexts. The scope unwinds before its scratch model is released, preserving
-**D4.1.4v5 / D4.5.1v4** ownership. Source DOM parents, text and box associations
+**D5.1.4 / D5.5.1** ownership. Source DOM parents, text and box associations
 remain unchanged across retained width changes.
 
 The intrinsic boundary helper is shared with used flow and resolves the common
@@ -1191,7 +1191,7 @@ A paired 30px column starts 5px inside the preceding space while consuming only
 content advance independently of ink bounds. Values live in `pass_arena`, are
 cleared by line reset, and follow current-line translation; they do not borrow
 the formatter's shorter-lived model. Existing `Linebox` save/restore preserves
-this line state (**D4.1.4v5 / D4.5.1v4**). The initial prefix check pins the
+this line state (**D5.1.4 / D5.5.1**). The initial prefix check pins the
 browser-observed 35px source origin in addition to comparing equivalent forms.
 
 The corrected native binary passes **456/456** text/query tests; dimension lint
@@ -1233,7 +1233,7 @@ using normal line-height and checks the annotation envelope and paint baseline
 in initial/retained flow. It fails before the repair with an 8px gap:
 `temp/ruby-m12-normal-block-before.log`. Existing Ahem/60px-leading cases
 retain their coverage. This uses completed fragment ownership rather than a
-fresh cursor (**D4.5.1v4**).
+fresh cursor (**D5.5.1**).
 
 ### M12 qualification and wrap-up
 
@@ -1287,7 +1287,7 @@ requires the readings to form an annotation-level inline formatting context;
 geometry. Finalize its selected roots with the shared vertical alignment path
 before measuring/placing columns. Base-line callbacks must continue to skip
 reading boxes belonging to their separate context. Reuse an explicit active
-level scope and retain selected-view/style ownership (**D4.5.1v4 / D4.1.4v5**).
+level scope and retain selected-view/style ownership (**D5.5.1 / D5.1.4**).
 
 Acceptance: inherited, zero and very large annotation leading; zero/tall atomic
 children, nested inline children, differing child fonts, computed-role readings,
@@ -1351,7 +1351,7 @@ used by its other exit paths. [CSS Ruby §3.1.1](https://drafts.csswg.org/css-ru
 sizes each column by its widest content, independent of its base's ink area.
 
 Reuse `layout_apply_ruby_column_geometry` at the missing exit, preserving the
-shared selected geometry contract (**D4.5.1v4 / D4.1.4v5**). Acceptance: explicit
+shared selected geometry contract (**D5.5.1 / D5.1.4**). Acceptance: explicit
 and anonymous zero-area bases, zero-area readings, explicit level containers,
 following text advance, ordinary zero-area controls, initial/retained reflow
 and live atomic-width changes. Check used and intrinsic widths and retain DOM
@@ -1416,8 +1416,8 @@ TextRects, and collect measured opportunities through the existing intrinsic
 scanner and normalizer. Reuse the column solver, placement, line metrics and
 selected-model callbacks. Shared helpers retain source indices, whitespace,
 clusters and text transformation; no copied/NUL-modified DOM source is used.
-Preserve selected snapshots and borrowed scope lifetimes (**D4.5.1v4 /
-D4.1.4v5**). The first formatter capability is one inline horizontal LTR segment
+Preserve selected snapshots and borrowed scope lifetimes (**D5.5.1 /
+D5.1.4**). The first formatter capability is one inline horizontal LTR segment
 with a direct text run in each single-column parallel box, collapsing whitespace
 and ordinary interior opportunities. Preserved whitespace, mixed/atomic or forced
 content, nested ruby/independent formatting contexts, source floats/positioned
@@ -1451,7 +1451,7 @@ on each rectangle rather than in a single whole-box column offset.
 A scalar selected-view flag on the Ruby root lets the final line callback rebuild
 and select the relevant line. Flow snapshots capture that flag, while prefix
 plans and borrowed source scopes remain in scratch/stack storage
-(**D4.5.1v4 / D4.1.4v5**).
+(**D5.5.1 / D5.1.4**).
 
 M15's inline plain-text milestone is implemented. The original
 `no-break-opportunity-at-end` case now matches the browser. Native controls cover
@@ -1511,7 +1511,7 @@ flow only the selected source intervals through the existing Ruby level-child
 hook. Reuse selected-line bounds, alignment, column placement and line metrics.
 Clear retained source views once before rebuilding selected fragments; never
 reparent DOM nodes or concatenate copied text for layout. Scratch plans and
-borrowed scopes preserve **D4.5.1v4 / D4.1.4v5**. CSS Ruby §3.4.2 permits an
+borrowed scopes preserve **D5.5.1 / D5.1.4**. CSS Ruby §3.4.2 permits an
 interior split only when every parallel box permits it, including seams between
 nowrap child spans whose common owner permits wrapping.
 
@@ -1593,7 +1593,7 @@ line is shifted down by the 25px reading height. Trace `ruby_contribute_line_met
 generic baseline alignment and line advancement. CSS Ruby §3.6 separates
 ordinary base alignment from additional spacing needed to keep repeated Ruby
 lines apart, and permits annotations outside their line box. Preserve selected
-view/style ownership and stack/scratch lifetimes (**D4.5.1v4 / D4.1.4v5**).
+view/style ownership and stack/scratch lifetimes (**D5.5.1 / D5.1.4**).
 
 Acceptance: minimal Ahem over/under Ruby lines with preceding text, three-line
 spacing, plain neighboring lines, ample leading, and initial/retained/live
@@ -1683,7 +1683,7 @@ Capture completed outer line boxes in a borrowed stack scope while the multicol
 formats its narrow first pass. Nested formatting contexts cannot append to the
 outer scope. Reuse source line membership and the generic selected-line shift
 to project all base/readings rectangles once. Keep this transient data out of
-retained views (**D4.5.1v4 / D4.1.4v5**). Share existing fragmentation/bounds
+retained views (**D5.5.1 / D5.1.4**). Share existing fragmentation/bounds
 helpers and computed Ruby role checks; do not introduce tag-specific traversal.
 
 Acceptance: original basic/basic-ref, multiple text runs on one line, a source
@@ -1760,7 +1760,7 @@ CSS Text §5/§5.5 requires Unicode opportunities across those source boundaries
 
 Repair the shared preflight with the existing Unicode seam helper and common
 source-owner policy. Do not add Ruby/tag-specific packing or change source DOM,
-selected-view ownership (**D4.1.4v5 / D4.5.1v4**) or browser references.
+selected-view ownership (**D5.1.4 / D5.5.1**) or browser references.
 Multi-segment parallel placement remains the next independent flow protocol.
 
 Acceptance: the original punctuation document; split ordinary and base-only
@@ -1881,7 +1881,7 @@ copy. Reuse base seam policy and linear cached break groups, including the
 first legal paired prefix and any forbidden following tail. CSS Ruby §3.4.1
 and §3.4.2 require paired levels and independent alignment of each fragment.
 Plans and normalized boxes remain scratch-owned; selected outputs and borrowed
-callbacks retain **D4.5.1v4 / D4.1.4v5**.
+callbacks retain **D5.5.1 / D5.1.4**.
 
 Acceptance: original short/long/short failure, unequal-width neighbor readings,
 ordinary Japanese seams and forbidden Latin seams/tails; initial/retained and
@@ -1954,7 +1954,7 @@ which consumer treats that edge as a finite origin. Reuse existing measurement
 and coordinate-frame services. Do not clamp the final coordinates or substitute
 fixture offsets. CSS Ruby §2.1.1 / §3.1 / §3.5 retain independent annotation
 contexts and paired columns. Scratch and selected-view ownership remain
-**D4.5.1v4 / D4.1.4v5**.
+**D5.5.1 / D5.1.4**.
 
 Acceptance: the imported reference and horizontal LTR/RTL ordinary, direct-text
 and inline-block base/reading controls; initial/retained and direction/width
@@ -1983,7 +1983,7 @@ intent of CSS Ruby Appendix A.1; its sample value `1` is informative. Explicit
 author leading, inheritance, font shorthand and resets still take precedence.
 `all:initial` now materializes initial normal leading so a descendant cannot
 fall through its parent to an older ancestor. No view-specific property copy
-or source mutation is introduced (**D4.5.1v4 / D4.1.4v5**).
+or source mutation is introduced (**D5.5.1 / D5.1.4**).
 
 The earlier forced-break regression's atomic reading now expects one 20px line
 of normal Ahem leading, replacing its previous 100px inherited paragraph line.
@@ -2050,7 +2050,7 @@ with multiple columns. Its fallback emits all base sources before annotation
 placement, allowing bases to wrap independently from their readings. Extend
 the existing formatter with scratch-owned per-column units, preserving the
 normalized model for intrinsic measurement and source parents/data under
-**D4.5.1v4 / D4.1.4v5**. CSS Ruby §3.4 requires paired levels to fragment
+**D5.5.1 / D5.1.4**. CSS Ruby §3.4 requires paired levels to fragment
 together; §3.4.1 retains the base text's real seam opportunities.
 
 Acceptance: complete non-spanning columns with text breaks or indivisible
@@ -2110,7 +2110,7 @@ shared by ordinary and coordinated flow. Only the current line's fragment
 rectangles participate; a wrapped smaller reading cannot inherit the preceding
 line's larger font metrics. Line cursors and break opportunities remain owned by
 the selected columns. The source links stay scratch-owned under
-**D4.5.1v4 / D4.1.4v5**. Evidence: `temp/ruby-m22/{shared-baseline-reproducer.log,
+**D5.5.1 / D5.1.4**. Evidence: `temp/ruby-m22/{shared-baseline-reproducer.log,
 shared-baseline-breakable-before.json,shared-baseline-breakable-candidate.json,
 qualification-run1.json}`.
 
@@ -2159,7 +2159,7 @@ P1 outcome: prepare whole and text units before source reset, then select and
 emit both through the existing coordinated loop and shared placement stages.
 Reuse the ordinary level walker and unbroken-unit predicate; do not add a third
 formatter or force the whole group onto a fresh line. Plans stay scratch-owned
-and source identities/parents/data remain under **D4.5.1v4 / D4.1.4v5**.
+and source identities/parents/data remain under **D5.5.1 / D5.1.4**.
 
 Acceptance covers atomic prefix/suffix bases and readings, independent internal
 atomic wrapping, a fitting ordinary prefix, paint and every character Range,
@@ -2237,7 +2237,7 @@ column solver and placement stages allocate the surviving content. The owner
 reports the actual consumed advance to the line formatter: a wider reading can
 absorb the removed base space without shortening the column. Old-line geometry,
 source identities/parents/data and atomic local frames retain their ownership
-(**D4.5.1v4 / D4.1.4v5**). No source re-emission or retained scratch pointer is
+(**D5.5.1 / D5.1.4**). No source re-emission or retained scratch pointer is
 introduced. This core covers horizontal LTR flow and undecorated internal Ruby
 levels; nested Ruby, decorated internal boxes and other axes retain their
 existing paths pending independent work.
@@ -2320,7 +2320,7 @@ smaller strut; a line reset and independent annotation IFC clear the band.
 Before emitting a complete Ruby run without an internal used/forced break,
 the formatter reuses the existing scoped height measurement. Its assigned BFC
 isolates float placement, the existing counter checkpoint rolls back generated
-effects, and selected fragments restore under **D4.5.1v4 / D4.1.4v5**. The shared
+effects, and selected fragments restore under **D5.5.1 / D5.1.4**. The shared
 float service updates the band and shifts already committed preceding content.
 The existing traversal can include enclosing non-atomic inlines, preserving
 atomic descendants' local frames. Existing boundary/lookahead and float-Y
@@ -2394,7 +2394,7 @@ repeated vertical alignment retains the already shifted X while rebuilding Y.
 The generic inline-bounds path reads those facts too, converting source-axis
 facts after vertical publication. Full flow results already copy PositionProp
 by value. Scalar measurement scopes now preserve both applied components beside
-the restored geometry (**D4.5.1v4 / D4.1.4v5**). No formal ruling changes.
+the restored geometry (**D5.5.1 / D5.1.4**). No formal ruling changes.
 
 The strict regression covers root/ancestor/annotation accumulation, an atomic
 reading and a relatively positioned atomic base, unaffected following siblings,
@@ -2463,7 +2463,7 @@ ruby-base/ruby-text roles, using the existing line-relative boundary-edge
 mapping. Column width and published source border boxes retain their existing
 owners; level stacking and line-leading contribution consume the corrected
 envelope. No tag exception, new storage, module API or formal ruling is added
-(**D4.5.1v4 / D4.1.4v5**, **D7.3.3–D7.3.4**).
+(**D5.5.1 / D5.1.4**, **D9.4.3–D9.4.4**).
 
 The strict regression checks two successive lines for over/under readings,
 plain and padding/border decorations, following atomic tails, source identity
@@ -2529,8 +2529,8 @@ contribution calculation. That calculation is extracted into a shared layout
 helper rather than copied; existing segment-edge and length-resolution helpers
 retain their owners. Ordinary callers keep their existing policy for an
 unsegmented minimum that already consumed used margins. No new persistent
-state, source reparenting or formal ruling is added (**D4.5.1v4 / D4.1.4v5**);
-the helper remains inside the layout module (**D7.3.3–D7.3.4**).
+state, source reparenting or formal ruling is added (**D5.5.1 / D5.1.4**);
+the helper remains inside the layout module (**D9.4.3–D9.4.4**).
 
 The strict regression covers left/right/asymmetric margins, padding/border
 controls, preferred min/max-content widths, a computed `ruby-text` span and
@@ -2598,8 +2598,8 @@ returned zero for every vertical context. Internal padding now uses the shared
 line-relative edge mapper, and the first line consumes that space from the
 corresponding semantic leading side. The existing external adjoining-margin
 protocol still uses physical Y; that separate vertical transfer remains open.
-No new persistent state or formal ruling is added (**D4.5.1v4 / D4.1.4v5**);
-the promoted helper stays inside the layout module (**D7.3.3–D7.3.4**).
+No new persistent state or formal ruling is added (**D5.5.1 / D5.1.4**);
+the promoted helper stays inside the layout module (**D9.4.3–D9.4.4**).
 
 The regression covers ordinary and top/bottom/all margins in all three writing
 modes, three repeated Ruby lines, internal block-start padding, source identity
@@ -2670,8 +2670,8 @@ Ruby initial placement, metric contribution and after-line alignment pass the
 explicit selected source line number. Existing segment membership and completed
 line callbacks already retain that fact, including source-text fragments; no
 new persistent style cache or source mutation is needed. The pseudo origin is
-borrowed only for the synchronous read (**D4.5.1v4 / D4.1.4v5**), and the shared
-API stays within the CSS/layout module (**D7.3.3–D7.3.4**).
+borrowed only for the synchronous read (**D5.5.1 / D5.1.4**), and the shared
+API stays within the CSS/layout module (**D9.4.3–D9.4.4**).
 
 Two regressions cover inherited position, color-only/local/ancestor overrides,
 inherit/initial/unset/invalid substitution, normal under with first-line over,
@@ -2739,8 +2739,8 @@ and selected line before source emission. If that same line gains a different
 float exclusion edge, column completion reads the already-flowed base origin;
 otherwise it retains the captured cursor, which includes decorations. Whole
 and selected segment completion share this protocol. The descriptor owns no
-retained pointer or allocation (**D4.5.1v4 / D4.1.4v5**); APIs and ownership
-placement stay private to layout (**D7.3.3–D7.3.4**).
+retained pointer or allocation (**D5.5.1 / D5.1.4**); APIs and ownership
+placement stay private to layout (**D9.4.3–D9.4.4**).
 
 An intermediate implementation unconditionally inferred the origin from base
 bounds. Raw qualification exposed block-Ruby decoration regressions; that
@@ -2821,8 +2821,8 @@ registration therefore updates the real owner; scope restoration keeps those
 updates while restoring the base line's cursor, font and metrics. No individual
 float fields are copied back and no persistent state or allocation is added.
 The synchronous parent borrow ends before the saved block's scope exits
-(**D4.5.1v4 / D4.1.4v5**); the repair stays private to layout
-(**D7.3.3–D7.3.4**).
+(**D5.5.1 / D5.1.4**); the repair stays private to layout
+(**D9.4.3–D9.4.4**).
 
 Two native regressions cover current/ancestor BFCs, empty/seeded lists, both
 float sides, retained width changes, reading removal and 100px/70px height
@@ -2887,8 +2887,8 @@ whether bounds exist independently of their dimensions. Level aggregation keeps
 an explicit zero-size box's point; one shared base-envelope query governs the
 fallback in initial placement and final alignment. Anonymous zero-content bases
 retain their inherited-font fallback. The change adds no source mutation,
-allocation, persistent payload or module API (**D4.5.1v4 / D4.1.4v5**,
-**D7.3.3–D7.3.4**).
+allocation, persistent payload or module API (**D5.5.1 / D5.1.4**,
+**D9.4.3–D9.4.4**).
 
 The focused fixture checks explicit empty/text/atomic bases, anonymous and
 missing bases, positive-font controls, over/under placement, initial/retained

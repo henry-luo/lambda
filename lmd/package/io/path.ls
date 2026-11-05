@@ -25,3 +25,9 @@ pub fn normal_path(path) any^ {
 }
 pub fn resolve_path(base_dir,path) any^ =>
     normal_path(if (starts_with(path,"/")) path else base_dir ++ "/" ++ path)
+
+// File browsers expand the caller's home directory before lexical normalization.
+pub fn absolute(path,base,home="/") any^ {
+    let expanded = if (path == "~") home else if (starts_with(path,"~/")) home ++ slice(path,1) else path;
+    normal_path(if (starts_with(expanded,"/")) expanded else "/" ++ base ++ "/" ++ expanded)^
+}

@@ -1,8 +1,8 @@
 import model: ~~.mod_model
 import document: ~~.mod_document
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let base = model.open_editor(node('doc',[node('p',[text("Hello world")])]))
 let selected = edit_set_selection(base,text_selection(pos([0,0],6),pos([0,0],11)))

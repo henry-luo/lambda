@@ -1,4 +1,4 @@
-// D5.3, S9.1.3: reused roots stay precise; later argument calls capture the old value.
+// D6.3, S9.1.3: reused roots stay precise; later argument calls capture the old value.
 pn consume(values: float[], count: int, bias: float) float^ {
     let scratch = [for (i in 1 to 30) [i, i + 1]]
     var total: float = bias + float(len(scratch))

@@ -25,7 +25,7 @@ typedef struct SecuritySupervisorReport {
     int cleanup_error;
 } SecuritySupervisorReport;
 
-// D7.5.1-2, D7.5.5-7. Trusted host assembles publisher, installation, catalog,
+// D11.1.1-2, D11.2.1-7. Trusted host assembles publisher, installation, catalog,
 // store and user-selected roots before invoking this. No parsing in the host.
 // Captured worker output is released only after all consent and teardown finish.
 bool security_supervisor_run(const SecuritySupervisorConfig* config, SecuritySupervisorReport* report);

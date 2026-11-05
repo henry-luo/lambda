@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import icons: .icons
 
@@ -18,13 +19,13 @@ pub fn descriptor(props, child) element^ {
             if (field == "avatar") ["size","shape"] else if (field == "title") ["width"] else ["width","rows"],field == "paragraph")^
         else if (props[field] is bool) true else raise c.fail("skeleton",field ++ " must be bool or an options map")];
     if (props.rows != null and (not (props.rows is int) or props.rows < 0 or props.rows > 1000)) raise c.fail("skeleton","rows must be an int from 0 to 1000")
-    else c.node('skeleton',props,child,["active","loading","round","avatar","paragraph","rows"])^
+    else descriptor.node('skeleton',props,child,["active","loading","round","avatar","paragraph","rows"])^
 }
 pub fn part(kind, props, child = null) element^ {
     let flags = c.boolean_props(props,["active","block"],kind)^
     let dimensions = validate_part(map([for (key,value in props where ((contains(["shape","width","height"],string(key))) ^ { false })) (key,value)]),kind)^;
     if (props.dimension != null and (not c.finite(props.dimension) or props.dimension <= 0)) raise c.fail(kind,"dimension must be positive")
-    else c.node(kind,props,child,["size","shape","width","height","dimension","active","block"])^
+    else descriptor.node(kind,props,child,["size","shape","width","height","dimension","active","block"])^
 }
 fn part_options(value) => if (value is map) value else {}
 fn scale(props, fallback) any^ => c.option(props,"dimension",if (props.size is number) props.size else

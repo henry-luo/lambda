@@ -1,4 +1,4 @@
-// lambda.doc.readability is an explicit source-package facade (D7.2.4v3/D7.2.6):
+// lambda.doc.readability is an explicit source-package facade (D9.3.4/D9.3.5):
 // a port of Mozilla Readability.js 0.6.0 (vibe/Lambda_Pkg_Readability.md).
 import article: .readability.article
 import reader: .readability.readerable

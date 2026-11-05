@@ -89,7 +89,7 @@ Radiant supports DOM mutation without rebuilding node identity — the backbone 
 
 `view_pool_reset_retained` is the mutation-safe reset: it releases and clears view-owned pointers on the existing tree, destroys the arena+pool, and re-inits them — but **keeps the DOM/view nodes themselves**. This is what lets `DocState`/`ViewState` weak references, which bind by the node's monotonic `id` (`dom_node.hpp:76`) rather than by pointer, survive a relayout. `view_pool_release_detached_subtree` handles a subtree that a mutation detached, so the final `view_pool_destroy` walk does not lose reachability to it.
 
-Dirty tracking is coarse-grained. A mutation marks the affected subtree `layout_dirty = true` and walks ancestors marking them dirty (the marking logic lives in `cmd_layout.cpp` around the incremental-layout entry; JS mutation clears it via `dom_js_clear_layout_dirty_recursive` in `event.cpp`). During an incremental block-flow layout, a clean child can reuse its recorded `layout_height_contribution` and shift its retained Y only when its width, margins, float context, inline context, positioning, and subtree style state are compatible with the current parent. Hidden elements, comments and collapsed whitespace do not introduce inline context; the eligibility check reuses `should_collapse_inter_element_whitespace`, the same helper as actual flow layout (**D1.3v3**). `test/ui/dom_mutation_collapsed_flow_reuse` and its native profile assertion verify retained reuse and the resulting sibling shift. Otherwise `layout_flow_node` recalculates the child. A freshly laid child records its contribution for the next pass. Measurement passes that must not perturb the retained layout (intrinsic-width measurement — [RAD_05](RAD_05_Intrinsic_Sizing.md), form intrinsic sizing) snapshot and restore per-node view state through the `layout_pass.cpp` snapshot type.
+Dirty tracking is coarse-grained. A mutation marks the affected subtree `layout_dirty = true` and walks ancestors marking them dirty (the marking logic lives in `cmd_layout.cpp` around the incremental-layout entry; JS mutation clears it via `dom_js_clear_layout_dirty_recursive` in `event.cpp`). During an incremental block-flow layout, a clean child can reuse its recorded `layout_height_contribution` and shift its retained Y only when its width, margins, float context, inline context, positioning, and subtree style state are compatible with the current parent. Hidden elements, comments and collapsed whitespace do not introduce inline context; the eligibility check reuses `should_collapse_inter_element_whitespace`, the same helper as actual flow layout (**D1.3**). `test/ui/dom_mutation_collapsed_flow_reuse` and its native profile assertion verify retained reuse and the resulting sibling shift. Otherwise `layout_flow_node` recalculates the child. A freshly laid child records its contribution for the next pass. Measurement passes that must not perturb the retained layout (intrinsic-width measurement — [RAD_05](RAD_05_Intrinsic_Sizing.md), form intrinsic sizing) snapshot and restore per-node view state through the `layout_pass.cpp` snapshot type.
 
 Flex items have their own retained path, `FlexRetainedPass` on `FlexItemProp` (`view.hpp`, helpers in `layout_flex_measurement.cpp`). Each committed pass records three memos for an item:
 - its `measure_flex_child_content` result;
@@ -123,7 +123,7 @@ child. DOM boundaries within that projection map to the container path at child
 offset zero, regardless of which side of the placeholder was hit. The source
 node's empty `content` identifies this case; authored zero-width text retains
 its ordinary leaf path and code-point offset. This keeps native projection separate
-from model editing policy (**D7.2.5**) and lets a caret leave and reenter empty
+from model editing policy (**D10.2.1**) and lets a caret leave and reenter empty
 paragraphs and list items without inventing a source child.
 
 Both directions require a recorded path; when an editor document is registered,
@@ -131,7 +131,7 @@ only that current document may own path `[]`. Plain template events retain their
 recorded coordinates when no editor root is active. An application or toolbar render entry without a path still
 participates in handler dispatch, but cannot supply editor coordinates. This
 keeps a native caret on an unmapped editor wrapper from becoming a document-root
-text edit after a toolbar redraw (**D7.2.5**). The bridge unit regressions and
+text edit after a toolbar redraw (**D10.2.1**). The bridge unit regressions and
 Word's `page_break_typing` replay cover this distinction. The model text command
 also declines a non-text target unless its schema allows inline insertion;
 structural containers retain their children.

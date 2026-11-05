@@ -21,13 +21,13 @@ continue to follow [Radiant 3D and WebGL Design](radiant/Radiant_Design_WebGL.md
 
 | Subject | Existing authority | Application |
 |---|---|---|
-| Package organization | **D7.2.1–D7.2.4, D7.2.6** | Ordinary source modules under `lmd/package/chart/`; no new import mechanism. |
+| Package organization | **D9.3.1–D9.3.4, D9.3.5** | Ordinary source modules under `lmd/package/chart/`; no new import mechanism. |
 | Pure computation | **S12.1.1v2** | Analysis and figure construction consume explicit inputs and return values. They do not advance a clock, write files, or acquire a GPU context. |
-| Interactive state | **S9.1.4, S12.1.3, D6.2.3v2** | Camera, selection, and playback state belong to each applied template; handlers own mutation. |
+| Interactive state | **S9.1.4, S12.1.3, D7.2.3** | Camera, selection, and playback state belong to each applied template; handlers own mutation. |
 | Ordering and diagnostics | **S6.2.2v3–S6.2.3, S7.4.1** | Stable identities and deterministic tie-breaking; invalid plot specifications return value errors. |
-| Native ownership | **D4.5.1v4, D4.5.2, D5.3.3** | Retained scene data is document-owned; native numerical helpers use precise roots across allocation. |
-| Host boundary | **D7.4.6, D7.5.3** | Reuse the established Radiant boundary for scene presentation and read-only projection/picking queries. |
-| Execution and deployment | **D8.1.1v18, D7.1.4v2** | Analysis agrees across T0, AUTO, and MIR Direct; headless profiles acquire no implicit graphics dependency. |
+| Native ownership | **D5.5.1, D5.5.2, D6.3.3** | Retained scene data is document-owned; native numerical helpers use precise roots across allocation. |
+| Host boundary | **D7.1.1, D9.5.6** | Reuse the established Radiant boundary for scene presentation and read-only projection/picking queries. |
+| Execution and deployment | **D8.3.2, D9.2.1** | Analysis agrees across T0, AUTO, and MIR Direct; headless profiles acquire no implicit graphics dependency. |
 
 These formal specifications remain authoritative. The proposal adds package
 contracts within them. Any implementation that needs a changed formal ruling
@@ -270,8 +270,8 @@ is explicitly a shape cue that alters the displayed colors.
 The 3D figure consists of a sized native `<scene3d>` plot viewport and aligned
 SVG guides/annotations inside one positioned wrapper. Geometry, camera, and
 material descriptions remain values. Radiant owns context acquisition,
-depth testing, resource upload, and image presentation under **D7.5.3** and
-**D4.5.1v4–D4.5.2**. The chart package does not implement a second rasterizer,
+depth testing, resource upload, and image presentation under **D9.5.6** and
+**D5.5.1–D5.5.2**. The chart package does not implement a second rasterizer,
 scene graph, shader service, or triangle-centroid painter's algorithm.
 
 One plot shares one depth buffer across its layers. Opaque surface occlusion
@@ -677,7 +677,7 @@ A build without native graphics can construct/validate scene descriptions and
 compute all analysis, but cannot render 3D pixels. Live presentation shows an
 explicit unavailable-renderer diagnostic; export returns failure. It must not
 produce a successful blank figure. Existing headless profile constraints remain
-in force (**D7.1.4v2**). Platform support is reported against actual scene-renderer
+in force (**D9.2.1**). Platform support is reported against actual scene-renderer
 validation, not inferred from successful package imports.
 
 ### 8.3 Accuracy and bounded work
@@ -712,7 +712,7 @@ record views where existing encoding machinery needs them.
 
 **Numerical kernels embedded in chart renderers.** Keep inspectable pure package
 contracts and reuse shared `math` primitives for expensive numerical work.
-New native kernels use Lambda/lib containers and precise rooting (**D5.3.3**);
+New native kernels use Lambda/lib containers and precise rooting (**D6.3.3**);
 no vendor modifications, conservative stack scanning, or retired compiler
 backend is part of this work.
 
@@ -787,7 +787,7 @@ Add package cases under `test/lambda/chart/`, each `.ls` with its matching `.txt
 golden. Reuse the existing chart UI and native scene test harnesses for visible
 behavior; share numerical helpers between tests instead of encoding expected
 values through the implementation under test. Run package parity in `interp`,
-`auto`, and `jit` per **D8.1.1v18**. Changes to Lambda or Radiant require their
+`auto`, and `jit` per **D8.3.2**. Changes to Lambda or Radiant require their
 respective baseline gates described in [test/README.md](../test/README.md).
 
 Performance evidence uses release builds only and separates preparation,

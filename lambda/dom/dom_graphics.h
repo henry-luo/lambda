@@ -6,7 +6,7 @@
 
 struct StrBuf;
 
-// Runtime-owned native graphics contracts (D7.1.3, D7.5.3). No script values
+// Runtime-owned native graphics contracts (D9.1.3, D9.5.6). No script values
 // or renderer pointers are retained here; providers own document resources.
 #define DOM_CANVAS_FONT_TEXT_MAX 512
 struct DomCanvasStateSnapshot {

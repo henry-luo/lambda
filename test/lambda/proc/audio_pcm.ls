@@ -1,4 +1,4 @@
-// D7.5.3: PCM ownership and exact Soundflow-compatible mono encoding.
+// D9.5.6: PCM ownership and exact Soundflow-compatible mono encoding.
 import pcm: lambda.audio.pcm
 import synth: ~~.~~.demo.soundflow.mod_synth
 pn main() {

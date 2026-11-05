@@ -18,9 +18,56 @@
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/lambda_alloca.h"
 
+typedef struct MirPropertyKeyEntry {
+    NameRef name;
+    NameId predefined_id;
+    // The module-wide key table outlives individual MIR functions, so the
+    // cached register must be qualified by its defining function.
+    MIR_func_t cached_func;
+    MIR_reg_t cached_reg;
+} MirPropertyKeyEntry;
+
+static inline uint32_t em_module_property_key_index(ArrayList** keys, Pool* pool, NameRef name) {
+    if (!keys || !name) return UINT32_MAX;
+    if (!(*keys)) (*keys) = arraylist_new(8);
+    if (!(*keys)) return UINT32_MAX;
+    for (int index = 0; index < (*keys)->length; index++) {
+        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(
+            (*keys), index);
+        if (entry && entry->name->len == name->len &&
+                memcmp(entry->name->chars, name->chars, name->len) == 0) {
+            return (uint32_t)index;
+        }
+    }
+    MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)pool_calloc(pool,
+        sizeof(MirPropertyKeyEntry));
+    if (!entry) return UINT32_MAX;
+    entry->name = name;
+    // AST identifiers can still be plain compiler-owned Strings. Preserve their
+    // spelling into the sealed image; only recover NameMeta after its pooled
+    // provenance is explicit.
+    entry->predefined_id = string_is_pooled(name) ? name_ref_id(name)
+        : well_known_name_id({name->chars, name->len});
+    if (!arraylist_append((*keys), entry)) return UINT32_MAX;
+    return (uint32_t)((*keys)->length - 1);
+}
+
 struct JsClassEntry;
 struct JubeTypeDef;
 struct NameEntry;
+
+static inline bool em_module_property_key_image_size(ArrayList* keys, uint32_t* size) {
+    uint64_t bytes = keys ? (uint64_t)keys->length * sizeof(PropertyKeySpec) : 0;
+    if (bytes > UINT32_MAX) return false;
+    for (int i = 0; keys && i < keys->length; i++) {
+        MirPropertyKeyEntry* entry = (MirPropertyKeyEntry*)arraylist_get(keys, i);
+        if (!entry || !entry->name) return false;
+        if (entry->predefined_id == NAME_ID_NONE) bytes += (uint64_t)entry->name->len + 1;
+        if (bytes > UINT32_MAX) return false;
+    }
+    *size = (uint32_t)bytes;
+    return true;
+}
 
 // Imported MIR calls share Core Lambda's user-operand ceiling. Keeping this
 // storage below LAMBDA_MAX_FUNCTION_ARGS silently rejected valid 9..16-arg
@@ -182,7 +229,7 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
         ? JIT_RETURN_MIR_RESULT : JIT_RETURN_NONE;
     // Only audited boxed-Item imports may return a transient number-home
     // pointer; UNKNOWN also covers ordinary containers, whose values must not
-    // be misclassified as scalar homes at later retaining calls (D5.4.3).
+    // be misclassified as scalar homes at later retaining calls (D6.4.3).
     entry->call.normal_result.scalar_class = jit_import_scalar_return_class(&entry->audit);
     entry->call.abi_arg_count = (uint16_t)nargs;
     entry->call.source_arg_count = (uint16_t)nargs;
@@ -316,7 +363,7 @@ struct MirValue {
     MIR_type_t mir_type;
     // full semantic contract. TypeId below is only the compact dispatch key;
     // nullable, constrained, and heterogeneous contracts remain here for
-    // representation-preserving conversions (D2.4.1–D2.4.3).
+    // representation-preserving conversions (D2.3.4–D2.3.5).
     Type* semantic_contract;
     // The boxed error join is retained; only its success already admits this contract.
     Type* admitted_success_contract;
@@ -331,7 +378,7 @@ struct MirValue {
 
 // A resolver is emitted only when a pending pair reaches a semantic or
 // ownership boundary.  Keeping the reason at the emitter makes the census
-// auditable without adding a runtime branch (D5.2.1v3, D5.2.2v3).
+// auditable without adding a runtime branch (D6.2.1, D6.2.2).
 enum MirPendingMaterializeReason {
     MIR_PENDING_REASON_REP_CONVERSION,
     MIR_PENDING_REASON_STORE,
@@ -444,12 +491,12 @@ struct MirFrameState {
     MIR_reg_t return_reg;
     // rv6 tail forwarding keeps the pair returned by a same-shape callee in
     // these registers until this frame's publication boundary. The pair is
-    // never written to a root slot or scalar home (D5.2.1v3).
+    // never written to a root slot or scalar home (D6.2.1).
     MIR_reg_t pending_return_item;
     MIR_reg_t pending_return_companion;
     // rv4.2 ownership is frame-local. Nested function emission suspends the
     // outer frame, so the live pair must be restored with that frame rather
-    // than leaking into the nested body (D5.2.1v3).
+    // than leaking into the nested body (D6.2.1).
     MIR_reg_t pending_live_item;
     MIR_reg_t pending_live_companion;
     MIR_reg_t error_return_reg;
@@ -459,7 +506,7 @@ struct MirFrameState {
     // Fixed suffix slots (for example JavaScript's prerooted argument span)
     // are appended after semantic root coloring. They are part of the
     // published physical range but are initialized by their owning lowering
-    // path before use (D5.3.1).
+    // path before use (D6.3.1).
     int fixed_root_slots;
     int gc_home_count;
     int fixed_number_slots;
@@ -546,7 +593,7 @@ struct MirEmitter {
     // RV4.2 mechanical guard: one unresolved shape-2 pair may be live in a
     // lowering sequence. The companion must be consumed or forwarded before
     // another call, safepoint, spill, or publication can overwrite its lane
-    // (D5.2.1v3, D5.2.2v3).
+    // (D6.2.1, D6.2.2).
     MIR_reg_t pending_live_item;
     MIR_reg_t pending_live_companion;
     uint32_t pending_materialize_counts[MIR_PENDING_REASON_COUNT];
@@ -784,7 +831,7 @@ static inline int em_root_binding_slot_for_reg(const MirEmitter* em,
 
 // A root home tracks its latest semantic register until the shared write-back
 // pass materializes it at collection boundaries. Frontends must not retain a
-// parallel register cache for that ownership relation (D5.3.4).
+// parallel register cache for that ownership relation (D6.3.4).
 static inline MIR_reg_t em_root_binding_reg_for_slot(const MirEmitter* em,
         int slot) {
     const MirFrameState* frame = em ? &em->frame : NULL;
@@ -1184,7 +1231,7 @@ static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
     em_emit_insn(em, label);
 }
 
-// Argument spans occupy the suffix after semantic-root coloring (D5.3.1).
+// Argument spans occupy the suffix after semantic-root coloring (D6.3.1).
 static inline MIR_reg_t em_deferred_root_span_base(MirEmitter* em,
         MIR_reg_t* base, MIR_insn_t* fixup) {
     if (*base) return *base;
@@ -1378,7 +1425,7 @@ static inline MIR_reg_t em_guard_container(MirEmitter* em, MIR_reg_t item,
     return pointer;
 }
 
-// an admitted immutable prefix preserves the declared offsets (D3.2.4v4).
+// an admitted immutable prefix preserves the declared offsets (D4.2.5).
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
@@ -1455,11 +1502,11 @@ static inline void em_store_frame_top(MirEmitter* em, MIR_reg_t runtime,
         // Record the actual restore use before prologue finalization; JS
         // lowering emits its epilogue before scalar-home coloring, so a
         // counter inferred only from the finalized slots can miss this
-        // watermark consumer (D5.2, D5.3).
+        // watermark consumer (D6.2, D6.3).
         em->frame.number_frame_required = true;
         // The emitter has already ordered scalar adoption before this reset;
         // keep the proven direct store in every build so MIR shape and
-        // safepoint accounting do not depend on NDEBUG (D5.2, D5.3).
+        // safepoint accounting do not depend on NDEBUG (D6.2, D6.3).
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
             MIR_new_mem_op(em->ctx, MIR_T_I64, (MIR_disp_t)context_offset,
                 runtime, 0, 1),
@@ -1740,7 +1787,7 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
     em_emit_label(em, l_call);
     MIR_reg_t adopted;
     if (mode == SCALAR_RETURN_F64 && target_home) {
-        // no safepoint separates the borrowed load from its destination-owned copy (D5.3).
+        // no safepoint separates the borrowed load from its destination-owned copy (D6.3).
         MIR_reg_t pointer = em_new_reg(em, "adopt_pointer", MIR_T_I64);
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
             MIR_new_reg_op(em->ctx, pointer), MIR_new_reg_op(em->ctx, item),
@@ -1886,7 +1933,7 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
         MIR_new_uint_op(em->ctx, ITEM_PENDING)));
     MIR_reg_t boxed;
     if (destination_home) {
-        // Transported scalar bits can land directly in a reusable caller home (D5.2.1v3).
+        // Transported scalar bits can land directly in a reusable caller home (D6.2.1).
         em_store_at(em, destination_home, 0, MIR_T_I64, companion);
         MIR_reg_t kind = em_new_reg(em, "pending_kind", MIR_T_I64);
         em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, kind),
@@ -1916,7 +1963,7 @@ static inline MIR_reg_t em_resolve_pending_pair(MirEmitter* em, MIR_reg_t item,
 
 // materialize a direct-call result at the first consumer/escape.  Keeping
 // this beside the pair resolver prevents callers from publishing a pending
-// Item through the spill tracker or root frame (D5.2.1v3, RV4.1).
+// Item through the spill tracker or root frame (D6.2.1, RV4.1).
 static inline MirValue em_materialize_pending_value(MirEmitter* em,
         MirValue value, MirPendingMaterializeReason reason) {
     if (!value.maybe_pending) return value;
@@ -1986,6 +2033,100 @@ static inline MirValue em_lower_value(MirEmitter* em, AstNode* node,
         abort();
     }
     return em_apply_value_demand(em, em->lower_value(em->call_owner, node, demand), demand);
+}
+
+// exact Item membership shared by scalar admission and native entry guards.
+static inline MIR_reg_t em_exact_item_type_test(MirEmitter* em,
+        MIR_reg_t item, TypeId type_id) {
+    if (type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t inline_bits = em_new_reg(em, "guard_float_bits", MIR_T_I64);
+        MIR_reg_t inline_float = em_new_reg(em, "guard_float_inline", MIR_T_I64);
+        MIR_reg_t tagged_float = em_new_reg(em, "guard_float_tagged", MIR_T_I64);
+        MIR_reg_t result = em_new_reg(em, "guard_float", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+            MIR_new_reg_op(em->ctx, inline_bits), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_NE,
+            MIR_new_reg_op(em->ctx, inline_float),
+            MIR_new_reg_op(em->ctx, inline_bits), MIR_new_int_op(em->ctx, 0)));
+        MIR_reg_t tag = em_new_reg(em, "guard_type_tag", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
+            MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 56)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, tagged_float), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+            MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, inline_float),
+            MIR_new_reg_op(em->ctx, tagged_float)));
+        return result;
+    }
+
+    switch (type_id) {
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_STRING:
+        break;
+    default: {
+        MIR_reg_t no_match = em_new_reg(em, "guard_unsupported", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_reg_op(em->ctx, no_match), MIR_new_int_op(em->ctx, 0)));
+        return no_match;
+    }
+    }
+
+    MIR_reg_t tag = em_new_reg(em, "guard_type_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
+        MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 56)));
+    MIR_reg_t result = em_new_reg(em, "guard_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, tag),
+        MIR_new_int_op(em->ctx, type_id)));
+    return result;
+}
+
+// slab buffers may grow in the REPL; only the context-owned state is stable.
+// Dynamic slot descriptors retain the runtime accessor's missing-slot result.
+static inline MIR_reg_t em_module_slot_item(MirEmitter* em, MIR_reg_t state,
+        MIR_op_t slot, bool checked) {
+    MIR_reg_t result = em_new_reg(em, "module_item", MIR_T_I64);
+    MIR_label_t done = checked ? em_new_label(em) : NULL;
+    if (checked) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, result),
+            MIR_new_uint_op(em->ctx, ITEM_NULL)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, done),
+            MIR_new_reg_op(em->ctx, state), MIR_new_int_op(em->ctx, 0)));
+    }
+    MIR_reg_t vars = em_load_at(em, state, offsetof(LambdaModuleState, vars), MIR_T_P, "module_vars");
+    if (checked) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, done),
+            MIR_new_reg_op(em->ctx, vars), MIR_new_int_op(em->ctx, 0)));
+        MIR_reg_t count = em_load_at(em, state, offsetof(LambdaModuleState, var_count), MIR_T_U32, "module_count");
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBGE, MIR_new_label_op(em->ctx, done),
+            slot, MIR_new_reg_op(em->ctx, count)));
+    }
+    MIR_reg_t address = 0;
+    MIR_disp_t offset = 0;
+    if (slot.mode == MIR_OP_UINT || slot.mode == MIR_OP_INT)
+        offset = (MIR_disp_t)(slot.mode == MIR_OP_UINT ? slot.u.u : slot.u.i) * sizeof(Item);
+    else {
+        address = em_new_reg(em, "module_slot", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MUL, MIR_new_reg_op(em->ctx, address),
+            slot, MIR_new_int_op(em->ctx, sizeof(Item))));
+    }
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, result),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, offset, vars, address, 1)));
+    if (done) em_emit_label(em, done);
+    return result;
+}
+
+static inline MIR_reg_t em_module_property_key_at(MirEmitter* em,
+        MIR_reg_t state, uint32_t index) {
+    // a published satellite may grow the table; reload it beside its use.
+    static_assert(sizeof(NameId) == 4, "inline key load reads NameId as u32");
+    MIR_reg_t keys = em_load_at(em, state, offsetof(LambdaModuleState, property_keys), MIR_T_P, "property_keys");
+    return em_load_at(em, keys, (MIR_disp_t)index * sizeof(NameId), MIR_T_U32, "static_name_id");
 }
 
 static inline MirValue em_load_module_slot(const MirModuleSlotProfile* profile,
@@ -2120,7 +2261,7 @@ static inline MIR_insn_t mir_new_call_with_target(MIR_context_t ctx,
     if (result) {
         ops[oi++] = MIR_new_reg_op(ctx, result);
     }
-    // internal shape-2 entries return their companion before the operands (D5.2.1v3).
+    // internal shape-2 entries return their companion before the operands (D6.2.1).
     if (companion) ops[oi++] = MIR_new_reg_op(ctx, companion);
     for (int i = 0; i < nargs; i++) {
         ops[oi++] = arg_ops[i];
@@ -2475,7 +2616,7 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
     // proved that the body has neither a scalar home nor fixed scratch
     // storage; the pure native lane then has no number extent to enter or
     // restore. Scalar homes are not represented by the plan's fixed-scratch
-    // count, but still require the caller's number watermark (D5.2, D5.3).
+    // count, but still require the caller's number watermark (D6.2, D6.3).
     // Scalar homes are colored after emission; the raw request count can be
     // consumed by the liveness pass, so use the finalized colored count when
     // deciding whether the saved number watermark must be materialized.
@@ -2564,7 +2705,7 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         // The watermark is published at the first reachable MAY_GC boundary,
         // after the frame's slots have been initialized and current roots
         // stored. Keeping it unchanged here makes an unentered frame invisible
-        // to the collector (D5.3.1, D8.6.3).
+        // to the collector (D6.3.1, D8.6.3).
     }
     // A frame with only number slots still has to publish its bumped top.
     if (number_top_reg) {
@@ -2894,7 +3035,7 @@ struct MirRootPredecessors {
     int* edges;
 };
 
-// share the same ascending predecessor order between root dataflows (D5.3.1).
+// share the same ascending predecessor order between root dataflows (D6.3.1).
 static inline MirRootPredecessors em_root_build_predecessors(
         const uint64_t* successors, int block_count, int successor_word_count) {
     MirRootPredecessors result = {};
@@ -3070,7 +3211,7 @@ static inline void em_compute_root_publication_frontier(
     // fixpoint). Once a path has published, a native RootFrame that outlives
     // its call (an item_keys key list) may sit above root_end, and an
     // unconditional store would rewind side_root_top beneath it so the next
-    // callee overwrote its slots (D5.3.3, LR07-46).
+    // callee overwrote its slots (D6.3.3, LR07-46).
     changed = true;
     while (changed) {
         changed = false;
@@ -3143,7 +3284,7 @@ static inline void em_root_reload_live_values_after_call(MirEmitter* em,
         if (!mir_gc_value_needs_root(candidates[ci].value_class, type)) continue;
         if (type != MIR_T_P) type = MIR_T_I64;
         // A MAY_GC call may move an Item and clobber an ABI argument register.
-        // The side-root slot is the canonical post-safepoint value (D5.3.1).
+        // The side-root slot is the canonical post-safepoint value (D6.3.1).
         MIR_insn_t reload = MIR_new_insn(em->ctx, MIR_MOV,
             MIR_new_reg_op(em->ctx, reg),
             MIR_new_mem_op(em->ctx, type,
@@ -3275,7 +3416,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         // JavaScript can have a fixed prerooted-argument suffix without any
         // semantic candidates. Its owner initializes that suffix in the
         // prologue, but it still needs a visible watermark before the first
-        // call that validates the borrowed span (D5.3.1).
+        // call that validates the borrowed span (D6.3.1).
         if (frame->fixed_root_slots > 0) {
             for (MIR_insn_t current = DLIST_HEAD(MIR_insn_t, em->func->insns);
                     current; current = DLIST_NEXT(MIR_insn_t, current)) {
@@ -4400,7 +4541,7 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
             }
         }
     }
-    // D5.2/D5.3.3: an Item scalar pointer stored in an owned environment can
+    // D6.2/D6.3.3: an Item scalar pointer stored in an owned environment can
     // remain live after its MIR register dies. Register-only liveness cannot
     // see closure aliases, so that home must remain dedicated until the
     // epilogue transfers the environment's scalar payloads to durable storage.
@@ -4975,7 +5116,7 @@ static inline MIR_reg_t em_call_terminal_with_args(MirEmitter* em,
                                                    MIR_op_t* arg_ops,
                                                    bool include_signature) {
     // A terminal edge still publishes pre-call roots and records the safepoint,
-    // but no successor can observe a compacted cached pointer (D5.2, D5.3).
+    // but no successor can observe a compacted cached pointer (D6.2, D6.3).
     return em_call_with_args_policy(em, fn_name, ret_type, nargs, arg_types,
         arg_ops, include_signature, false);
 }
@@ -5180,7 +5321,7 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         // rv6: keep the pair in registers until the first consumer. The raw
         // lanes are GC-safe while they remain live here; publication is deferred
         // to em_materialize_pending_value so a pending Item never reaches a
-        // root slot or spill (D5.2.1v3, RV4.1).
+        // root slot or spill (D6.2.1, RV4.1).
     } else if (em_variant_returns_slot(variant)) {
         // rv12 slot transport: load the companion now, but defer resolution
         // until the first consumer. A slot result is an escape boundary for a
@@ -5223,7 +5364,7 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     return call_result;
 }
 
-// Resolve a direct-call pair before ordinary completion, root, or destination use (D5.2.1v3).
+// Resolve a direct-call pair before ordinary completion, root, or destination use (D6.2.1).
 static inline MirValue em_finish_direct_call_normal(MirEmitter* em,
         MirCallResult call, MirPendingMaterializeReason reason) {
     return call.normal.maybe_pending
@@ -5248,11 +5389,12 @@ static inline MIR_reg_t em_call_1(MirEmitter* em, const char* fn_name,
 // non-band case (nan, inf, out of range) to the cold helper -- D2I is undefined
 // for those on some targets.
 static inline MIR_reg_t em_double_to_int_lane(MirEmitter* em, MIR_reg_t d_reg,
-        bool floor_before, bool include_signature) {
+        bool floor_before, bool include_signature, MIR_label_t range_miss = NULL) {
     MIR_reg_t result = em_new_reg(em, "double_int_lane", MIR_T_I64);
     MIR_reg_t lower = em_new_reg(em, "double_int_lower", MIR_T_I64);
     MIR_reg_t upper = em_new_reg(em, "double_int_upper", MIR_T_I64);
-    MIR_label_t slow = em_new_label(em), done = em_new_label(em);
+    MIR_label_t slow = range_miss ? range_miss : em_new_label(em);
+    MIR_label_t done = range_miss ? NULL : em_new_label(em);
     // ordered comparisons reject NaN too; D2I must never see poison or an
     // out-of-band value. Nonnegative truncation also implements floor (S4.2).
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DGE,
@@ -5267,6 +5409,9 @@ static inline MIR_reg_t em_double_to_int_lane(MirEmitter* em, MIR_reg_t d_reg,
         MIR_new_label_op(em->ctx, slow), MIR_new_reg_op(em->ctx, upper)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_D2I,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, d_reg)));
+    // admission owns rejection/poison handling; only the proven finite lane
+    // returns here when the caller supplies its boundary fallback.
+    if (range_miss) return result;
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, done)));
     em_emit_label(em, slow);
     if (floor_before) {
@@ -5301,6 +5446,39 @@ static inline MIR_reg_t em_call_2(MirEmitter* em, const char* fn_name,
     MIR_op_t ops[2] = {a1, a2};
     return em_call_with_args(em, fn_name, ret_type, 2, types, ops, include_signature);
 }
+
+// promoted from production's module prologue: a matching context-local hint
+// proves the logical owner without baking runtime state into a cached image.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static inline MIR_reg_t em_module_state_for_unit(MirEmitter* em, MIR_reg_t unit,
+        bool include_signature) {
+    MIR_reg_t state = em_new_reg(em, "module_state", MIR_T_P);
+    MIR_label_t slow = em_new_label(em), done = em_new_label(em);
+    MIR_reg_t active = em_load_at(em, em->frame.runtime,
+        offsetof(EvalContext, jit_current_module_state), MIR_T_P, "active_module");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, slow),
+        MIR_new_reg_op(em->ctx, active), MIR_new_int_op(em->ctx, 0)));
+    MIR_reg_t active_unit = em_load_at(em, active, offsetof(LambdaModuleState, module_layout_id),
+        MIR_T_U32, "active_module_unit");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, slow),
+        MIR_new_reg_op(em->ctx, active_unit), MIR_new_reg_op(em->ctx, unit)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, state),
+        MIR_new_reg_op(em->ctx, active)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, done)));
+    em_emit_label(em, slow);
+    MIR_reg_t resolved = em_call_2(em, "lambda_module_state_for_unit", MIR_T_P,
+        MIR_T_P, MIR_new_reg_op(em->ctx, em->frame.runtime),
+        MIR_T_I64, MIR_new_reg_op(em->ctx, unit), include_signature);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_mem_op(em->ctx, MIR_T_P, offsetof(EvalContext, jit_current_module_state),
+            em->frame.runtime, 0, 1), MIR_new_reg_op(em->ctx, resolved)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, state),
+        MIR_new_reg_op(em->ctx, resolved)));
+    em_emit_label(em, done);
+    return state;
+}
+#pragma clang diagnostic pop
 
 static inline MIR_reg_t em_call_3(MirEmitter* em, const char* fn_name,
                                   MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,

@@ -31,11 +31,11 @@ typedef enum ValueRep {
     // lambda's compact int carrier is an i64 register, but it is not a
     // machine integer: the lane reserves the i64 extremes for poison/null.
     // keeping it distinct prevents an INT64_MAX machine quantity from being
-    // reinterpreted as an int-lane sentinel (D2.4.2–D2.4.3).
+    // reinterpreted as an int-lane sentinel (D2.3.4–D2.3.5).
     VALUE_REP_INT_LANE,
     // compiler-only quantities never cross a Lambda semantic boundary through
     // em_require_rep(); they are named here so physical i64 values cannot be
-    // mistaken for Lambda values (D2.4.1–D2.4.3).
+    // mistaken for Lambda values (D2.3.4–D2.3.5).
     VALUE_REP_MACHINE_I64,
     VALUE_REP_MACHINE_U64,
     VALUE_REP_I64,
@@ -65,7 +65,7 @@ typedef enum FnErrorLane {
     FN_ERROR_LANE_CONTEXT_ITEM,
 } FnErrorLane;
 // Return-value convention v3 (RV1, `vibe/Lambda_Design_Compiling_Return_Value.md`,
-// formal spec D5.2.1v3 / D8.4.2v3). The shape is a pure function of the
+// formal spec D6.2.1 / D7.4.2). The shape is a pure function of the
 // declared signature (RV2) — never inferred per call site, never read back from
 // MIR state — and it is the ONE descriptor every emitter, wrapper, `fn->invoke`
 // entry, interpreter bridge and cached module reads (RV10).
@@ -99,7 +99,7 @@ static inline bool fn_return_shape_may_be_pending(FnReturnShape shape) {
     return shape == RETURN_SHAPE_ITEM_SCALAR;
 }
 // The retired v2 convention donated a caller home per lane. Only a hosted
-// guest ABI still requests one, and only for its value lane (D5.2.1v3), so
+// guest ABI still requests one, and only for its value lane (D6.2.1), so
 // the error-lane bit has no producer.
 enum {
     FN_RETURN_HOME_NORMAL = 1u << 0,

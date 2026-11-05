@@ -34,7 +34,7 @@
 #include "../../lib/url.h"
 
 // every walker entry installs MVP operations; native ABI callbacks restore the
-// caller's profile without selecting a separate interpreter (D8.1.3v43).
+// caller's profile without selecting a separate interpreter (D8.4.4).
 __thread const JsInterpHostOps* js_interp_host = NULL;
 JsInterpHostScope::JsInterpHostScope(const JsInterpHostOps* ops)
     : previous_(js_interp_host) { js_interp_host = ops; }
@@ -195,7 +195,7 @@ struct JsInterpFrame {
     // Function frames leave it null.
     uint64_t* completion_home = NULL;
     const JsAstNode* discarded_expression = NULL;
-    // D8.1.3v22: the back-edge counter of the handoff loop this activation is
+    // D8.4.5: the back-edge counter of the handoff loop this activation is
     // inside; nested loops count toward it. Null outside a handoff loop.
     uint32_t* handoff_backedges = NULL;
     JsInterpEnv* this_cell_env = NULL;
@@ -251,7 +251,7 @@ public:
     Item get(int index) const { return values_[index]; }
 };
 
-// D8.1.3v22 loop-head handoff (Lambda_Impl_JS_Interp_Tune.md E3): a loop that
+// D8.4.5 loop-head handoff (Lambda_Impl_JS_Interp_Tune.md E3): a loop that
 // is a direct statement of a function body counts its back-edges, nested loops
 // included, in the definition's promotion cell.
 struct JsInterpLoopHandoff {
@@ -293,7 +293,7 @@ struct JsInterpReference {
     // Its later PutValue must retain that original binding resolution.
     bool binding_uses_eval;
     // Linked eval code resolved this name through its caller's environments;
-    // GetValue and PutValue use the binding `lookup` found (D8.1.3v21).
+    // GetValue and PutValue use the binding `lookup` found (D8.4.3).
     bool by_name;
     JsInterpLookup lookup;
     // Destructuring evaluates computed target expressions before IteratorStep,
@@ -302,7 +302,7 @@ struct JsInterpReference {
 };
 
 // A parked environment belongs to its carrier's exact root segment. Global
-// registration kept abandoned generator/async cycles alive (D5.1.1v3).
+// registration kept abandoned generator/async cycles alive (D6.1.1).
 struct JsInterpEnvRoot {
     RootFrame roots;
     Rooted<JsInterpEnv*> rooted;
@@ -485,7 +485,7 @@ static bool js_interp_name_matches(const String* left, const String* right) {
 static JsInterpModuleBinding* js_interp_import_binding(JsScript* script,
         NameEntry* entry, String* local_name) {
     // direct scope records imports on declarations/specifiers; resolved locals
-    // must not rescan the module's import list on every read and write (D8.2.4v2).
+    // must not rescan the module's import list on every read and write (D8.2.4).
     if (entry && (!entry->node || (entry->node->node_type != AST_NODE_IMPORT &&
             entry->node->node_type != AST_NODE_IMPORT_SPECIFIER))) return NULL;
     for (JsInterpModuleBinding* binding = script ? script->interp_imports : NULL;
@@ -752,7 +752,7 @@ JsInterpEnv* js_interp_env_create(NameScope* scope, JsInterpEnv* outer) {
     int count = js_interp_scope_slot_count(scope);
     if (count < 0) return NULL;
     // Each durable slot owns a companion scalar payload, matching the common
-    // module/closure storage contract (D5.3).  A raw Item copy would retain a
+    // module/closure storage contract (D6.3).  A raw Item copy would retain a
     // caller's float home across a GC or async suspension.
     size_t words = count > 0 ? (size_t)count * 2 : 1;
     size_t size = offsetof(JsInterpEnv, slots) + words * sizeof(uint64_t);
@@ -1069,7 +1069,7 @@ enum JsInterpEvalVars : uint8_t {
     JS_INTERP_EVAL_VARS_PRIVATE,  // strict eval code
 };
 
-// D8.1.3v21: direct eval code of an interpreted caller, or a closure it
+// D8.4.3: direct eval code of an interpreted caller, or a closure it
 // created. Its free names resolve through the caller's live environments.
 static bool js_interp_script_is_linked_eval(const JsScript* script) {
     return script && script->eval_caller_script;
@@ -1467,7 +1467,7 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         Item stored = js_set_key_cstr(meta.get(), "url", url.get());
         return item_is_error(stored) ? stored : meta.get();
     }
-    // D8.1.3v21: linked eval code resolves by name through its caller's live
+    // D8.4.3: linked eval code resolves by name through its caller's live
     // environments. The record that answers also bounds the `with` probe.
     bool by_name = unresolved_name && js_interp_resolves_by_name(frame, entry);
     JsInterpLookup lookup = {};
@@ -1579,7 +1579,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     }
     String* name = entry ? entry->name : unresolved_name;
     Item key = js_interp_name_key(name);
-    // D8.1.3v21: linked eval code writes the caller binding its name finds.
+    // D8.4.3: linked eval code writes the caller binding its name finds.
     if (name && js_interp_resolves_by_name(frame, entry)) {
         Item failure = ItemNull;
         JsInterpLookup lookup = js_interp_lookup_name(frame, entry, name, &failure);
@@ -2223,7 +2223,7 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
         bool special_binding = js_interp_name_equals(identifier->name, "this") ||
             js_interp_name_equals(identifier->name, "new.target") ||
             js_interp_name_equals(identifier->name, "import.meta");
-        // D8.1.3v21: linked eval code resolves the name through its
+        // D8.4.3: linked eval code resolves the name through its
         // caller's live environments once, before the RHS runs.
         out_reference->by_name = !special_binding &&
             js_interp_resolves_by_name(frame, identifier->entry);
@@ -2450,7 +2450,7 @@ static bool js_interp_numeric_operand(JsInterpFrame* frame, JsAstNode* node,
     } else return false;
     if (item_is_error(operand)) return false;
     // a second literal can reuse transient number homes; own both operands
-    // locally until the callback-free comparison finishes (D5.3.3).
+    // locally until the callback-free comparison finishes (D6.3.3).
     *value = lambda_item_adopt_scalar_home(operand, scalar_home);
     return true;
 }
@@ -2670,7 +2670,7 @@ static Item js_interp_host_check_global_declarations(NameScope* scope, bool scri
     return make_js_undefined();
 }
 
-// Where a linked sloppy eval's var-scoped declarations bind (D8.1.3v21): the
+// Where a linked sloppy eval's var-scoped declarations bind (D8.4.3): the
 // caller's nearest function variable environment; beyond the linked records,
 // the realm.
 enum JsInterpLinkedVarsTarget : uint8_t {
@@ -2800,7 +2800,7 @@ static Item js_interp_linked_var_set(JsInterpFrame* frame,
     return value;
 }
 
-// EvalDeclarationInstantiation for linked direct eval code (D8.1.3v21). Its
+// EvalDeclarationInstantiation for linked direct eval code (D8.4.3). Its
 // lexical declarations — and a strict eval's vars — bind in the boundary
 // record. A sloppy eval's var-scoped declarations bind in its caller's variable
 // environment, where references find them by name; their boundary slots record
@@ -2889,7 +2889,7 @@ static bool js_interp_capture_origin(JsScript* script, const char* origin) {
     return script->dynamic_import_origin != NULL;
 }
 
-// Run linked direct eval code (D8.1.3v21). Its boundary record links to the
+// Run linked direct eval code (D8.4.3). Its boundary record links to the
 // caller frame's live environments. `this`, new.target and the home object are
 // the caller frame's own homes, so a SuperCall in the eval initializes the
 // caller's `this`, and closures the eval creates keep the caller's bindings.
@@ -2937,7 +2937,7 @@ static JsScript* js_interp_prepare_host_script(const JsInterpHostOps* ops,
         Item* failure, bool allow_new_target = false, bool allow_super_property = false,
         bool allow_super_call = false, bool initializer = false);
 
-// PerformEval for a direct eval from interpreted code (D8.1.3v21):
+// PerformEval for a direct eval from interpreted code (D8.4.3):
 // the eval code links to this frame's environments rather than a bridge.
 static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
     Item shortcut = ItemNull;
@@ -3082,7 +3082,7 @@ static bool js_interp_call_has_plain_arguments(JsCallNode* call, int* out_count)
 }
 
 // dense argument Arrays own movable backing storage; callbacks receive stable
-// exact roots with independent wide-number homes (D5.3.3-D5.3.4).
+// exact roots with independent wide-number homes (D6.3.3-D6.3.4).
 static Item js_interp_host_call_array(Item callee, Item receiver, Item arguments,
         Item new_target) {
     RootFrame roots(4);
@@ -3122,7 +3122,7 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         js_interp_identifier_is((JsAstNode*)call->function, "require") &&
         ((JsIdentifierNode*)call->function)->entry == NULL &&
         !js_with_depth_active() &&
-        // browser realms must resolve a missing loader as ReferenceError (D7.4.4).
+        // browser realms must resolve a missing loader as ReferenceError (D9.5.4).
         jube_global_profile_allows(JUBE_GLOBAL_NODE_ONLY) &&
         // A browser bundle can publish an AMD loader as window.require. Only
         // an unbound identifier is Lambda's implicit CommonJS require.
@@ -3316,7 +3316,7 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
                 arguments_root.get(), target);
     }
     // a wide result outlives this C frame; use the existing transient-number
-    // ownership boundary before returning its completion (D5.3.4).
+    // ownership boundary before returning its completion (D6.3.4).
     result = js_scalar_storage_read(result, false);
     JS_INTERP_CALL_RETURN(item_is_error(result) ? js_interp_throw(result)
         : js_interp_normal(result));
@@ -3559,7 +3559,7 @@ static JsInterpCompletion js_interp_write_pattern_assignment_target(
 // Resolve an assignment-pattern reference for one array-destructuring element.
 // The rest element and the ordinary element ran identical 18-line copies of
 // this; the shared shape has to stay a macro because every failure arm returns
-// out of the enclosing binder (D5.4.2 keeps the iterator rooted across it).
+// out of the enclosing binder (D6.4.2 keeps the iterator rooted across it).
 #define JS_INTERP_RESOLVE_ARRAY_BINDING_REFERENCE(target_node)                  \
     JsAstNode* reference_target = !initialize                                   \
         ? js_ast_pattern_reference_target(target_node) : NULL;                  \
@@ -4028,14 +4028,14 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
                 get_type_id(left.value) != LMD_TYPE_NULL &&
                 get_type_id(left.value) != LMD_TYPE_UNDEFINED) return left;
         // logical operators no longer need the discarded left value while
-        // the right operand allocates, calls getters, or throws (D5.3.3).
+        // the right operand allocates, calls getters, or throws (D6.3.3).
         if (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR ||
                 binary->op == OPERATOR_JS_NULLISH_COALESCE)
             return js_interp_eval(frame, (JsAstNode*)binary->right);
         TypeId left_type = get_type_id(left.value);
         if (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) {
             // a Number owns no GC object, but its transient scalar payload
-            // must survive arbitrary right-operand evaluation (D5.3.3).
+            // must survive arbitrary right-operand evaluation (D6.3.3).
             uint64_t left_home = 0;
             Item held_left = lambda_item_adopt_scalar_home(left.value, &left_home);
             JsInterpCompletion right = js_interp_eval(frame, (JsAstNode*)binary->right);
@@ -4975,7 +4975,7 @@ static JsInterpCompletion js_interp_exec_catch(JsInterpFrame* frame,
 
 static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) {
     assert(js_interp_host);
-    // D8.4.3v2: hosted AST callbacks must unwind the same explicit watchdog error.
+    // D7.4.3: hosted AST callbacks must unwind the same explicit watchdog error.
     Item interrupt_status = js_interp_host->interrupt_status();
     if (item_is_error(interrupt_status)) return js_interp_throw(interrupt_status);
     if (!node) return js_interp_normal(make_js_undefined());
@@ -5628,7 +5628,7 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         }
         JsIdentifierNode* identifier = (JsIdentifierNode*)node;
         NameEntry* entry = identifier->entry;
-        // D8.1.3v32: linked JS imports may have no NameEntry import marker.
+        // D8.4.5: linked JS imports may have no NameEntry import marker.
         if (scan->script->is_module && js_interp_import_binding(scan->script,
                 entry, identifier->name)) {
             js_interp_p2_reject(scan, "import binding");
@@ -5712,7 +5712,7 @@ static void js_interp_p2_scan_node(JsAstNode* node,
             js_interp_p2_reject(scan, "activation-sensitive nested function");
             return;
         }
-        // D8.1.3v38 keeps every contained activation inside the selected subtree.
+        // D8.4.5 keeps every contained activation inside the selected subtree.
         js_interp_p2_scan_parameters(definition, scan);
         js_interp_p2_scan_node((JsAstNode*)definition->body, scan);
         return;
@@ -5731,7 +5731,7 @@ static void js_interp_p2_scan_node(JsAstNode* node,
     case JS_AST_NODE_TEMPLATE_LITERAL: {
         auto* literal = (JsTemplateLiteralNode*)node;
         JsAstNode* quasi = literal->quasis;
-        // D8.1.3v37 admits only a cooked constant; interpolation and tagging
+        // D8.4.5 admits only a cooked constant; interpolation and tagging
         // retain their separate admission boundary and ordinary lowering.
         if (!scan->constant_templates || literal->expressions || !quasi ||
                 quasi->next || quasi->node_type != JS_AST_NODE_TEMPLATE_ELEMENT ||
@@ -5788,7 +5788,7 @@ static void js_interp_p2_scan_node(JsAstNode* node,
     }
 }
 
-// D8.1.3v22: a definition is compiled only on a hot hit; the defaults are
+// D8.4.5: a definition is compiled only on a hot hit; the defaults are
 // provisional until release profiling.
 #define JS_FUNC_JIT_THRESHOLD 5
 #define JS_LOOP_JIT_THRESHOLD 10000
@@ -5909,7 +5909,7 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     // object methods retain function-expression AST nodes but cannot be cloned as function source.
     if ((function->flags & JS_FUNC_FLAG_METHOD) && definition->node_type != AST_NODE_METHOD)
         return "method definition shape";
-    // D8.1.3v33 shares classic admission, while only the predicate proof grants
+    // D8.4.5 shares classic admission, while only the predicate proof grants
     // the light-call contract. Classify before entry even at threshold one.
     if (script->is_module) {
         if (!script->is_es_module)
@@ -5944,7 +5944,7 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
                 return "captured binding write";
         }
     }
-    // D8.1.3v40 permits one wrapper only when the arrow needs no activation bridge.
+    // D8.4.5 permits one wrapper only when the arrow needs no activation bridge.
     if (arrow) {
         if (!hot_entry || !script->is_es_module ||
                 js_interp_p2_has_class_ancestor(&script->ast_index, (AstNode*)definition) ||
@@ -6053,7 +6053,7 @@ bool js_interp_promote_function_if_hot(JsFunction* function) {
     return true;
 }
 
-// D8.1.3v22 loop-head handoff. A `while`, or a `for (init; test; update)`
+// D8.4.5 loop-head handoff. A `while`, or a `for (init; test; update)`
 // with a test, that is a direct statement of a function body may hand its
 // running activation to compiled code at the loop-head test. The compiled
 // continuation is a top-level function appended to the satellite clone's
@@ -6072,7 +6072,7 @@ static bool js_interp_loop_handoff_begin(JsInterpFrame* frame,
         return false;
     }
     JsFunction* function = frame->active_function;
-    // D8.1.3v35 admits checked ES-module functions, never synthetic CJS wrappers.
+    // D8.4.5 admits checked ES-module functions, never synthetic CJS wrappers.
     if (js_fn_ast_script(function)->is_module &&
             !js_fn_ast_script(function)->is_es_module) return false;
     AstFuncNode* definition = js_fn_ast_function(function);
@@ -6472,7 +6472,7 @@ static Item js_interp_initialize_function_parameters(JsInterpFrame* frame, JsFun
     int index = 0;
     JsAstNode* params = (JsAstNode*)js_fn_ast_function(function)->params;
     if (params) {
-        // D5.3.3: completed bindings own their values in the environment; this
+        // D6.3.3: completed bindings own their values in the environment; this
         // exact root slot only carries the next parameter through MAY_GC work.
         RootFrame parameter_roots(1);
         Rooted<Item> value_root(parameter_roots, make_js_undefined());
@@ -6657,7 +6657,7 @@ static bool js_interp_call_parameter_leaf(JsFunction* function, Item* args,
         return false;
     }
     // the call activation owns the arguments and callee across getters/callbacks.
-    // no local binding can mutate or escape; use the ordinary AST kernels (D5.3.3).
+    // no local binding can mutate or escape; use the ordinary AST kernels (D6.3.3).
     JsInterpFrame frame = {};
     frame.script = js_fn_ast_script(function);
     frame.env = js_fn_ast(function)->env;
@@ -6723,7 +6723,7 @@ static bool js_interp_call_planned(JsFunction* function, Item* args, int arg_cou
     Item value = completion.kind == JS_INTERP_NORMAL ? make_js_undefined() : completion.value;
     if (completion.kind != JS_INTERP_NORMAL && completion.kind != JS_INTERP_RETURN && completion.kind != JS_INTERP_THROW)
         value = js_throw_syntax_error(js_make_string("illegal control flow"));
-    // publish before activation-owned scalar homes and exact roots retire (D5.3.3).
+    // publish before activation-owned scalar homes and exact roots retire (D6.3.3).
     *result = js_retain_scalar(value);
     return true;
 }
@@ -6732,7 +6732,7 @@ static Item js_interp_call_function_impl(JsFunction* function, Item* args, int a
         Item* host_callee, Item* host_receiver, Item* host_target) {
     if (!js_interp_host || !function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
             !js_fn_ast_function(function) || !js_fn_ast_script(function)) return ItemError;
-    // D7.2.3/D8.5.1: queued callbacks execute with their defining script's
+    // D9.3.3/D8.5.1: queued callbacks execute with their defining script's
     // origin, so relative dynamic imports retain the enclosing module path.
     RuntimeCurrentFileScope current_file(context, js_interp_script_origin(js_fn_ast_script(function)));
     Item parameter_result = ItemNull;
@@ -6929,7 +6929,7 @@ static Item js_interp_start_async_function_impl(JsFunction* function, Item* args
     // Nothing references the frame carrier until js_async_start installs the
     // resume/reject reactions on its promise, and both calls below allocate.
     // On a bare local the carrier is collectable in that window, and the body
-    // then never runs (**D1.5**, **D5.3.2**).
+    // then never runs (**D1.5**, **D6.3.2**).
     frame_root.set(js_async_context_create_ast(function_root.get(),
         args_root.get(), this_root.get()));
     if (item_is_error(frame_root.get())) return frame_root.get();
@@ -7022,7 +7022,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
     int arg_count = (int)js_array_length(arguments_root.get());
     // GC compacts Array items while materializing arguments/defaults. Copy
-    // parameters into stable side-root homes before those safepoints (D5.3.3).
+    // parameters into stable side-root homes before those safepoints (D6.3.3).
     RootSpan argument_values((size_t)(arg_count > 0 ? arg_count : 1));
     if (!argument_values.valid()) return ItemError;
     Item* args = argument_values.items();
@@ -7241,7 +7241,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     bool reusing_context = false;
     if (!js_prepare_eval_context(runtime, true, &eval, &reusing_context)) return ItemError;
     (void)eval;
-    // direct module/agent entry shares the source entry's realm clock (D6.2.2v2).
+    // direct module/agent entry shares the source entry's realm clock (D7.2.2).
     (void)js_performance_time_origin_ms();
     if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
     // DOM wrapper construction interns runtime property names, so it must run
@@ -7361,7 +7361,7 @@ static JsScript* js_interp_prepare_script_mode_here(Runtime* runtime,
     if ((!runtime && !js_interp_host) || !source) return NULL;
     // Parse templates are independent from eval/module execution state. The
     // returned adapter has a fresh overlay for lexical bridges, module cells,
-    // and lazy function/class facts (D8.5.1v2).
+    // and lazy function/class facts (D8.5.1).
     JsScript* cached = NULL;
     InputScriptBuildScope cache_build = {};
     InputScriptBuildClaim claim = INPUT_SCRIPT_BUILD_BYPASS;

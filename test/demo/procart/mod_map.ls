@@ -33,7 +33,8 @@ pub fn world_map(world, show_rivers) element^ {
             'stroke-width':0.8, 'stroke-dasharray':"4 3", points:join([for (p in cell) string(p[0] * CELL) ++ "," ++ string(p[1] * CELL)], " ")>],
           *(if (show_rivers) [for (line in world.land.river_polylines)
             <polyline points:join([for (p in line) string(p[0] * CELL) ++ "," ++ string(p[1] * CELL)], " "), fill:"none", stroke:rgb(COLORS.river),
-                'stroke-width':river_width(max([for (p in line) either(flows[string(int(p[1]) * columns + int(p[0]))], 0)])),
+                // a point off every river segment has no drainage; `or` coalesces it to 0 (S3.3v3)
+                'stroke-width':river_width(max([for (p in line) flows[string(int(p[1]) * columns + int(p[0]))] or 0])),
                 'stroke-linecap':"round", 'stroke-linejoin':"round">] else []),
           *[for (t in world.towns) <g class:"town",
             <circle cx:t.x * CELL, cy:t.y * CELL, r:(if (t.capital) 6.5 else 4.5), fill:(if (t.capital) "#b91c1c" else "#fff7ed"),

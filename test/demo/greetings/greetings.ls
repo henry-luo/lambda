@@ -5,7 +5,7 @@
 import dom
 import radiant
 import resources: ~~.mod_resources
-import updates: ~~.mod_publish
+import updates: lambda.ui.core.publish
 import D: ~~.mod_document
 import A: .mod_art
 import T: .mod_templates
@@ -278,7 +278,7 @@ pn drag_element(root, d) {
     let page = dom.query_selector(root, "#canvas [data-page=\"" ++ d.key ++ "\"]")
     return {page: page, item: dom.query_selector(page, "[data-id=\"" ++ d.id ++ "\"]")}
 }
-// D4.5.1v4: a gesture previews on the dragged element alone and the card changes once,
+// D5.5.1: a gesture previews on the dragged element alone and the card changes once,
 // on release; re-rendering the studio on every move is too slow. A transform write is
 // a paint-only commit; a text-width drag must re-wrap, so it writes the width instead.
 pn publish_drag(root, d, it, guides) {

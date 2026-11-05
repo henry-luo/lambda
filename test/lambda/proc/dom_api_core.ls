@@ -28,7 +28,7 @@ pn main() {
     // set_node_value rewrites a text node in one mutation
     dom.set_node_value(note, "rewritten")
 
-    // D7.4.5v2: Lambda reads the same owner-backed child VArray as the DOM adapter.
+    // D9.5.5: Lambda reads the same owner-backed child VArray as the DOM adapter.
     let kids_before = dom.child_nodes(section)
     dom.remove(remark)
 

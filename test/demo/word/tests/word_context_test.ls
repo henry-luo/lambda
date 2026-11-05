@@ -3,10 +3,10 @@ import model: ~~.mod_model
 import shapes: ~~.mod_shapes
 import equation: ~~.mod_equation
 import art: ~~.mod_wordart
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 fn offers(editor,command,region=null) => contains([for (a in focused.describe(editor,region).actions) a.command],command)
 let doc = node('doc',[node('p',[text("Before")]),node('table',[

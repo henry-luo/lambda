@@ -197,12 +197,12 @@ V1 is about 35–60× slower than the same design in C. The remaining cost is sp
   GC tag. The collector traced it as raw numbers and freed the containers it
   held, which corrupted the VM's trees under forced collection.
   `convert_specialized_to_generic` and the new N-D widening now retag the
-  header (`heap_retag_container`) in the same step (D4.3.1), `54e4385de`.
+  header (`heap_retag_container`) in the same step (D5.3.1), `54e4385de`.
 - [LR03-37](<../Lambda_Issue_Ledger (fixed).md#lr03-37>): a kind-changing write
   to a typed record's `any` field rebuilt the shape into the never-reclaimed
   pool; it now stores in place (`2934a4ea8`).
 - [LR03-38](<../Lambda_Issue_Ledger (fixed).md#lr03-38>), user ruling: runtime-grown
-  plain maps share through a per-context transition tree (D3.4.3v4), and
+  plain maps share through a per-context transition tree (D3.4.3), and
   member writes and reads answer plain keys from the type's hash table
   (`2934a4ea8`, and the read side with LR07-44).
 - [LR07-44](<../Lambda_Issue_Ledger (fixed).md#lr07-44>): a record reified field by
@@ -480,7 +480,7 @@ loading the unmodified jqjs source (the 3,820-line file with its two `export`
 lines stripped), before any filter ran.
 
 **Root cause.** It is not specific to jqjs.
-- jqjs's top-level parser setup calls some functions often enough for D8.1.3
+- jqjs's top-level parser setup calls some functions often enough for D8.4.1
   promotion (`js_interp_promote_function_if_hot`) to compile them as P2
   satellites.
 - `js_mir_lower_function_satellite` refuses a definition whose body names a
@@ -665,7 +665,7 @@ explains the second value.
 - **jq values are native Lambda values.** A jq object is a Lambda map with
   computed string keys (`{*:m, [k]: v}`, **S16.8.9**; this is not a VMap). An
   array is a Lambda array. Copy-on-write follows Lambda's COW rules (**S9.2**
-  and D4.4). Whether a map with thousands of dynamic keys (`jq_mix` `kv`) and
+  and D5.4). Whether a map with thousands of dynamic keys (`jq_mix` `kv`) and
   repeated single-key updates stays linear is exactly what this row will show.
   If it doesn't, the cause is a runtime finding to fix, not something to code
   around (CLAUDE.md rule 1).

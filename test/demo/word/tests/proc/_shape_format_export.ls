@@ -2,8 +2,8 @@ import fixture: ~~.fixtures.mod_export
 import files: ~~.~~.mod_io
 import model: ~~.~~.mod_model
 import shapes: ~~.~~.mod_shapes
-import image: lambda.editor.mod_image
-import lambda.editor.mod_step
+import image: lambda.editor.image
+import lambda.editor.core.step
 
 pn main() {
     let data = fixture.load("shape-format","Shapes")^

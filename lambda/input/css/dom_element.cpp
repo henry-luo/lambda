@@ -103,6 +103,7 @@ DomElement* dom_parent_element(DomElement* element) {
 }
 
 static const char* dom_element_stored_attribute(DomElement* element, const char* key);
+static Item extract_element_attribute_item(Element* element, const char* name);
 
 static const char* dom_element_namespace_binding(DomElement* element, const char* prefix, size_t length) {
     if (!element) return nullptr;
@@ -196,6 +197,9 @@ NameId dom_element_html_tag(DomElement* element) {
 
 bool dom_element_is_html_tag(DomElement* element, NameId tag) {
     if (!element || !tag) return false;
+    // known markup already carries its local-name identity; reject unrelated
+    // tags without repeatedly probing private namespace attributes.
+    if (element->tag_id && element->tag_id != tag) return false;
     // the local name rejects nearly every element before the namespace walks
     // its ancestors; flat-tree and style predicates ask this per ancestor.
     const char* local = element->local_name();
@@ -813,6 +817,7 @@ static void dom_document_destroy_resource(lam::Own<DomDocumentResource>* link) {
 }
 
 void DomDocument::destroy() {
+    destroying = true;
     dom_retire_begin_destroy(this);
     mem_free(services.preferred_languages); services.preferred_languages = nullptr;
     lam::free_owned(services.pragma_language);
@@ -1102,7 +1107,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         if (native_element != &element->elmt) {
             element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
             if (doc->input && doc->input->ui_mode) {
-                // S12.1.3/D4.5.1v4: DOM writes and retirement cannot consume a retained pure value.
+                // S12.1.3/D5.5.1: DOM writes and retirement cannot consume a retained pure value.
                 Element* snapshot = &element->elmt;
                 if (!elmt_clone_type_for_mutation(snapshot, doc->input->pool, true)) return nullptr;
                 if (snapshot->data_cap > 0) {
@@ -1217,7 +1222,7 @@ DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* 
     return DomElement::create(doc, tag_name, native_element);
 }
 
-// fragment allocation belongs to the document node factory, independently of Range/layout (D7.1.3).
+// fragment allocation belongs to the document node factory, independently of Range/layout (D9.1.3).
 extern "C" DomElement* dom_document_fragment_create(DomDocument* doc) {
     if (!doc) return nullptr;
     return DomElement::create(doc, "#document-fragment", nullptr);
@@ -1273,7 +1278,7 @@ void dom_element_invalidate_custom_property_index(DomElement* element) {
     CssCustomPropertyIndex* index = element && element->ext
         ? element->ext->custom_property_index.get() : nullptr;
     if (!index) return;
-    // names and candidates borrow declaration storage; retire before recascade frees it (D4.5.1v4).
+    // names and candidates borrow declaration storage; retire before recascade frees it (D5.5.1).
     pool_free(element->storage_pool(), index->entries);
     pool_free(element->storage_pool(), index);
     element->ext->custom_property_index = nullptr;
@@ -1534,7 +1539,7 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_clear_custom_properties(element, CSS_CUSTOM_ALL);
     dom_element_invalidate_custom_property_index(element);
     style_epoch_selection_clear_element(element);
-    // retirement releases both the authored pool and its document resource registration (D4.5.1v4).
+    // retirement releases both the authored pool and its document resource registration (D5.5.1).
     if (element->ext && element->ext->inline_declarations)
         dom_document_release_resource(element->storage_owner(), element->ext->inline_declarations);
     if (element->ext) {
@@ -1572,12 +1577,19 @@ static const char* lowercase_attr_name(const char* name, char* buf, size_t buf_s
     return buf;
 }
 
+static void dom_element_invalidate_namespace_attributes(DomElement* element) {
+    if (!element || !element->ext) return;
+    element->ext->cached_namespace_uri = nullptr;
+    element->ext->cached_namespace_local_name = nullptr;
+}
+
 static void dom_element_clear_synthetic_attributes(DomElement* element) {
     if (!element || !element->ext || !element->doc ||
         !element->storage_pool()) {
         return;
     }
     DomElementExt* data = element->ext;
+    dom_element_invalidate_namespace_attributes(element);
     for (int i = 0; i < data->synthetic_attribute_count; i++) {
         pool_free(element->storage_pool(),
                   (void*)data->synthetic_attributes[i].name);
@@ -1610,6 +1622,7 @@ static bool dom_element_set_synthetic_attribute(DomElement* element,
     }
     DomElementExt* data = element->ensure_ext();
     if (!data) return false;
+    if (lower_name[0] == '_') dom_element_invalidate_namespace_attributes(element);
     int index = dom_element_find_synthetic_attribute(element, lower_name);
     if (index >= 0) {
         char* next_value = pool_strdup(element->storage_pool(), value);
@@ -1646,6 +1659,7 @@ static bool dom_element_remove_synthetic_attribute(DomElement* element,
         return false;
     }
     DomElementExt* data = element->ext;
+    if (lower_name[0] == '_') dom_element_invalidate_namespace_attributes(element);
     pool_free(element->storage_pool(),
               (void*)data->synthetic_attributes[index].name);
     pool_free(element->storage_pool(),
@@ -1670,6 +1684,7 @@ static void dom_element_attribute_did_set(DomElement* element,
                                           const char* lower_name,
                                           const char* value, bool same_value) {
     if (!element || !element->doc || !lower_name || !value) return;
+    if (lower_name[0] == '_') dom_element_invalidate_namespace_attributes(element);
     if (strcmp(lower_name, "id") == 0) {
         dom_element_release_cached_id(element);
         const char* id_attr = dom_element_attribute_value_ns(element, "", "id");
@@ -1706,6 +1721,7 @@ static void dom_element_attribute_did_set(DomElement* element,
 static void dom_element_attribute_did_remove(DomElement* element,
                                              const char* lower_name) {
     if (!element || !lower_name) return;
+    if (lower_name[0] == '_') dom_element_invalidate_namespace_attributes(element);
     if (strcmp(lower_name, "id") == 0) {
         dom_element_release_cached_id(element);
     } else if (strcmp(lower_name, "class") == 0) {
@@ -1725,7 +1741,7 @@ static void dom_element_attribute_did_remove(DomElement* element,
 // queried name only for HTML elements, so a name stored exactly as asked wins.
 static String* dom_attribute_value(DomDocument* doc, MarkBuilder* builder, const char* value);
 
-static const char* dom_element_stored_attribute(DomElement* element, const char* key) {
+static const char* dom_element_stored_attribute_uncached(DomElement* element, const char* key) {
     // recorded public attributes do not replace the private expanded-name metadata.
     if (!dom_attribute_is_internal(key) && element->ext && element->ext->attributes_are_recorded) {
         for (DomNamespacedAttribute* attr = element->ext->namespaced_attributes; attr; attr = attr->next)
@@ -1733,10 +1749,12 @@ static const char* dom_element_stored_attribute(DomElement* element, const char*
         return nullptr;
     }
     if (!element->is_synthetic()) {
-        ElementReader reader(dom_element_to_element(element));
-        const char* value = extract_element_attribute(dom_element_to_element(element), key, nullptr);
-        if (value) return value;
-        ItemReader scalar = reader.get_attr(key);
+        // strings and numeric attributes share one lexical-QName lookup;
+        // absent private namespace probes previously searched the shape twice.
+        Item item = extract_element_attribute_item(dom_element_to_element(element), key);
+        String* value = item.get_safe_string();
+        if (value) return value->chars;
+        ItemReader scalar(item.to_const());
         DomDocument* owner = element->storage_owner();
         if (scalar.isNumber() && scalar.getType() != LMD_TYPE_COMPLEX &&
                 owner) {
@@ -1751,6 +1769,24 @@ static const char* dom_element_stored_attribute(DomElement* element, const char*
     }
     int index = dom_element_find_synthetic_attribute(element, key);
     return index >= 0 ? element->ext->synthetic_attributes[index].value.get() : nullptr;
+}
+
+static const char* dom_element_stored_attribute(DomElement* element, const char* key) {
+    bool uri = key[0] == '_' && strcmp(key, "__lambda_ns_uri") == 0;
+    bool local = key[0] == '_' && strcmp(key, "__lambda_ns_local_name") == 0;
+    if (element->ext) {
+        const char* cached = uri ? element->ext->cached_namespace_uri.get()
+            : local ? element->ext->cached_namespace_local_name.get() : nullptr;
+        if (cached) return cached;
+    }
+    const char* value = dom_element_stored_attribute_uncached(element, key);
+    // expanded-name metadata is read per glyph/property; avoid repeating the
+    // backing shape and synthetic-attribute scans until that metadata is edited.
+    if (value && (uri || local)) {
+        DomElementExt* data = element->ensure_ext();
+        if (data) (uri ? data->cached_namespace_uri : data->cached_namespace_local_name) = lam::up(value);
+    }
+    return value;
 }
 
 static const char* dom_element_attr_key(DomElement* element, const char* name,
@@ -1780,7 +1816,7 @@ static bool dom_element_record_all_attributes(DomElement* element) {
     if (ext->attributes_are_recorded) return true;
     int count = 0;
     const char** names = element->attribute_names(&count);
-    // D4.5.1v4: the ordered list owns distinct expanded names; Mark mirrors only the first QName.
+    // D5.5.1: the ordered list owns distinct expanded names; Mark mirrors only the first QName.
     lam::Own<DomNamespacedAttribute> remainder = ext->namespaced_attributes;
     ext->namespaced_attributes = nullptr;
     lam::Own<DomNamespacedAttribute>* tail = &ext->namespaced_attributes;
@@ -1901,7 +1937,7 @@ void dom_attribute_node_detach(DomAttr* attribute) {
 }
 
 void dom_attribute_node_release_retired_storage(DomAttr* attribute) {
-    // values and names belong to the physical source pool even after adoption (D4.5.1v4).
+    // values and names belong to the physical source pool even after adoption (D5.5.1).
     const char* fields[] = {attribute->namespace_uri.get(), attribute->qualified_name.get(),
         attribute->local_name.get(), attribute->prefix.get(), attribute->value.get()};
     for (const char* field : fields) if (field) pool_free(attribute->storage_pool, (void*)field);
@@ -4591,12 +4627,16 @@ const char* dom_comment_get_content(DomComment* comment_node) {
  * Extract string attribute from Lambda Element
  * Returns attribute value or nullptr if not found
  */
-const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena) {
-    (void)arena;
-    if (!elem || !attr_name) return nullptr;
+static Item extract_element_attribute_item(Element* elem, const char* attr_name) {
+    if (!elem || !attr_name) return ItemNull;
     // XML stores (namespace, local); DOM and SVG ask with the lexical QName.
     const ShapeEntry* field = markup_attribute_field((TypeMap*)elem->type, attr_name);
-    Item value = field ? map_shape_field_to_item(elem->data, field) : ItemNull;
+    return field ? map_shape_field_to_item(elem->data, field) : ItemNull;
+}
+
+const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena) {
+    (void)arena;
+    Item value = extract_element_attribute_item(elem, attr_name);
     String* string_value = value.get_safe_string();
     return string_value ? string_value->chars : nullptr;
 }
@@ -4658,7 +4698,7 @@ void dom_rebind_equal_render_result(DomDocument* doc, Item previous, Item curren
     TypeId kind = get_type_id(previous);
     if (kind != get_type_id(current)) return;
     if (kind == LMD_TYPE_ELEMENT) {
-        // a no-op rerender still replaces evaluator identities (D4.5.3).
+        // a no-op rerender still replaces evaluator identities (D5.5.3).
         dom_rebind_render_element(doc, previous.element, current.element);
     } else if (kind != LMD_TYPE_ARRAY) {
         return;
@@ -4750,7 +4790,7 @@ static DomElement* build_dom_tree_with_parent(Element* elem, DomDocument* doc,
     bool copied_for_view = false;
     if (doc->input && doc->input->ui_mode &&
             !(doc->page_kind == DOM_PAGE_KIND_HTML && dom_element_has_embedded_storage(doc, elem))) {
-        // D4.5.3: copy at the DOM boundary, after evaluation/render-map recording,
+        // D5.5.3: copy at the DOM boundary, after evaluation/render-map recording,
         // so each occurrence owns its embedded links without changing Lambda values.
         MarkBuilder builder(doc->input);
         Item copied = builder.deep_copy_for_view({.element = elem});

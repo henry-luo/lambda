@@ -1,4 +1,4 @@
-// D4.4.4v4, S9.1.2: a closed kernel can reuse storage witnesses only while owners stay private.
+// D5.4.4, S9.1.2: a closed kernel can reuse storage witnesses only while owners stay private.
 pn add_four(var a: float[], step: float) {
     var i: int = 0
     while (i < 4) { a[i] = a[i] + step; i = i + 1 }

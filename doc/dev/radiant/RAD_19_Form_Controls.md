@@ -38,7 +38,7 @@ The struct groups its fields by concern:
 - **`::placeholder` style**: a resolved `FontProp*` plus color/opacity, so the placeholder pseudo-element paints with author styling.
 - **Flex/grid item props**: because a form control uses `FormControlProp` in the view's item-property union slot, its flex fields (`flex_grow/shrink/basis`) are duplicated here, and the original `GridItemProp*` is stashed in `grid_item` (`view.hpp`) after the union is switched to `FORM`.
 - **Text-control selection state** ([§4](#4-the-text-control-value-and-selection-idl)): `current_value` is a borrowed cache of `ViewState.data.form.current_value`, with cached byte/UTF-16 lengths; `selection_start`/`selection_end` (UTF-16), `selection_direction`, `tc_initialized`, plus the `selectionchange` coalescing link `tc_sc_next_pending`.
-- **Editing state**: the change-on-blur snapshot `value_at_focus` and undo history belong to `ViewState.data.form` (`event.hpp`, D4.5.2). The prop retains `custom_validity_msg`, an opaque borrowed undo-ring cache, auto-scroll (`scroll_x/y`), caret blink (`caret_blink_t`/`caret_on`), password reveal, and the IME preedit trio (`preedit_utf8`/`preedit_len`/`preedit_caret`, `view.hpp`).
+- **Editing state**: the change-on-blur snapshot `value_at_focus` and undo history belong to `ViewState.data.form` (`event.hpp`, D5.5.2). The prop retains `custom_validity_msg`, an opaque borrowed undo-ring cache, auto-scroll (`scroll_x/y`), caret blink (`caret_blink_t`/`caret_on`), password reveal, and the IME preedit trio (`preedit_utf8`/`preedit_len`/`preedit_caret`, `view.hpp`).
 
 ---
 
@@ -49,7 +49,7 @@ The struct groups its fields by concern:
 - `calc_text_input_size` (`layout_form.cpp:18`) starts from `FormDefaults::TEXT_*` (a Chrome-matched 153×21 border-box at 1× — `view.hpp`) but special-cases date/time/datetime-local/color inputs to fixed Chrome intrinsic widths (`layout_form.cpp:24-`); width scales by `size` characters.
 - `calc_textarea_size` (`layout_form.cpp:168`) uses `cols`×`rows` against the font advance (defaults 20×2, `view.hpp`).
 - `calc_button_size` (`layout_form.cpp:250`) measures the label (`form_button_label_text`, `layout_form.cpp:233`) plus `BUTTON_PADDING_*`, floored at `BUTTON_MIN_WIDTH`.
-- `calc_select_size` measures complete option labels with the control's selected font. `layout_select_combo_intrinsic_width` contributes snapped label width and native arrow space; the form producer adds actual logical CSS padding/border once. Native/primitive selected-value lines use the current font cell without normal leading; native appearance adds its distinct inner block padding, while primitive appearance omits that padding and arrow space. CSS box edges are retained. Nonempty option `label` attributes share a borrowed selector with painting; normalized text is the sizing fallback. Select UA defaults restore zero padding after author declarations or base-select appearance are removed. Flex consumes the central form measurement. The initial-webfont capture, baseline and grid contribution limits are recorded in [M45](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m45--primitive-select-intrinsic-sizing-uses-the-complete-label); selected storage remains **D4.5.1v4 / D4.1.4v5**.
+- `calc_select_size` measures complete option labels with the control's selected font. `layout_select_combo_intrinsic_width` contributes snapped label width and native arrow space; the form producer adds actual logical CSS padding/border once. Native/primitive selected-value lines use the current font cell without normal leading; native appearance adds its distinct inner block padding, while primitive appearance omits that padding and arrow space. CSS box edges are retained. Nonempty option `label` attributes share a borrowed selector with painting; normalized text is the sizing fallback. Select UA defaults restore zero padding after author declarations or base-select appearance are removed. Flex consumes the central form measurement. The initial-webfont capture, baseline and grid contribution limits are recorded in [M45](../../../vibe/impl/Radiant_Impl_Writing_Modes_WPT.md#m45--primitive-select-intrinsic-sizing-uses-the-complete-label); selected storage remains **D5.5.1 / D5.1.4**.
 - Checkbox/radio are fixed `CHECK_SIZE` squares (`layout_form.cpp:468`); range/image are set upstream in `resolve_htm_style`; hidden is zero-sized.
 
 After the switch, intrinsic **content-area** size is combined with actual CSS border/padding and box-sizing (`layout_form.cpp:497-550`), applying `given_width`/`given_height` and min/max clamps, and the final border-box is stamped onto `block->width`/`height`/`content_width`/`content_height`.
@@ -87,16 +87,16 @@ The undo store is a bounded ring, `struct EditHistory` (`event.hpp`), of `EditHi
 `te_focus_capture_value` copies the current value into retained form state on
 focus. The package's `editing.commit_change` compares `dom.value_at_focus` with
 the current value during `edit_commit`, before native dispatches `change` and
-`blur` (D7.2.5). A missing snapshot means no change. Same-identity regeneration
+`blur` (D10.2.1). A missing snapshot means no change. Same-identity regeneration
 retains the baseline together with the edited value; a changed authored default
-starts a fresh baseline when native restores focus (D4.5.2).
+starts a fresh baseline when native restores focus (D5.5.2).
 
 Focus event sequences retain node leases while callbacks run. Reactive subtree
 replacement rebases pending old/new targets through the same correspondence as
 form state, frames, pointer capture, and navigation. Thus a `change` handler that
 rebuilds its component still receives the following `blur`/`focusout` on the
 retained control identity; a genuinely removed target is not replaced by an
-unrelated control (D4.5.2/D7.2.5).
+unrelated control (D5.5.2/D10.2.1).
 
 ### 5.4 IME preedit composition
 
@@ -128,12 +128,12 @@ resolution, with UA highlight colors retained as fallbacks. An open option's
 transitions invalidate matching CSS rules. No second hover owner is added
 (**S12.1.5v2**). The source `dom/form.ls` commit procedure rejects disabled
 options and options in disabled groups before changing selectedness; direct
-programmatic setters retain their own contract (**S12.1.3**, **D7.2.4**).
+programmatic setters retain their own contract (**S12.1.3**, **D9.3.4**).
 
 **Retained select lifecycle amendment (2026-10-14).** A retained style reset
 releases only a form control's cached font handles. It preserves the live
 `FormControlProp`, its canonical StateStore bindings and open-popup ownership
-(**S12.1.5v2**, **D4.5.1v4**). The previous reset called full form teardown,
+(**S12.1.5v2**, **D5.5.1**). The previous reset called full form teardown,
 which immediately closed a newly opened select when hover/style invalidation
 refreshed its layout. Detached or retired controls still use full teardown and
 dismiss their popups. `RadiantFormControls` covers both lifetimes; the photo

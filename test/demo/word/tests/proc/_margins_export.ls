@@ -2,7 +2,7 @@ import model: ~~.~~.mod_model
 import page: ~~.~~.mod_page
 import files: ~~.~~.mod_io
 import stories: ~~.~~.mod_stories
-import lambda.editor.mod_doc
+import lambda.editor.core.doc
 
 pn main() {
     let doc = node('doc',[for (i in 1 to 3) node_attrs('p',if (i==1) [] else [{name:'data-word-page-break',value:"true"}],

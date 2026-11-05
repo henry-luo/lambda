@@ -68,14 +68,15 @@ million cells while those operations materialize their results. Formula source
 is limited to 512 characters and nested evaluation/dependencies to 64 levels.
 
 The shell reuses Word's theme, header, buttons and status styles from
-`../office.css`. Word loads that same stylesheet. Ribbon layout and controls use
-Slides' extracted `../ribbon.css`, the shared `../mod_ribbon.ls`, Word's ribbon
-icons, `../mod_text_format.ls` palettes and `../mod_ribbon_overflow.ls` resizing.
-Pointer capture and separator keyboard sizing reuse `../mod_splitter.ls`.
+`lambda.ui.workspace.office`. Word loads those same styles. Ribbon layout and controls use
+`lambda.ui.workspace.ribbon_style`, shared `lambda.ui.workspace.ribbon` and
+`lambda.ui.workspace.ribbon_icons`, `lambda.ui.workspace.text_format` palettes and
+`lambda.ui.workspace.ribbon_overflow` resizing. Pointer capture and separator
+keyboard sizing reuse `lambda.ui.core.splitter`.
 Slides also loads the extracted ribbon stylesheet. The app uses the shared entry
 resource resolver and demo catalog/preview infrastructure. Spreadsheet state and
 commands stay in Lambda, with pure rendering and handler-owned effects
-(**S12.1.3**, **D7.2.5**); procedure dispatch captures the successful result in its
+(**S12.1.3**, **D10.2.1**); procedure dispatch captures the successful result in its
 value arm (**S7.6.7v4**).
 
 Verification:

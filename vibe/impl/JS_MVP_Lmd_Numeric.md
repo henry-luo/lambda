@@ -5,7 +5,7 @@
 runtime acceptance pending.
 
 **Scope:** [JS_MVP_Lmd §15](../jube/JS_MVP_Lmd.md#15-numeric-libraries-and-wider-benchmark-coverage),
-**S1.11**, **D1.3v3**, **D2.2.5**, **D2.4.3**, **D2.6.1v3**, **D5.3**, **D8.2.6**.
+**S1.11**, **D1.3**, **D2.2.5**, **D2.3.5**, **D3.2.1**, **D6.3**, **D8.2.6**.
 No formal ruling changes.
 
 ## 1. Reuse decisions
@@ -51,7 +51,7 @@ entry points above. Allocation remains `MAY_GC`; scalar Math and key conversion
 are `NO_GC`. Allocation/error dependencies are the existing Lambda heap,
 precise-root, and error paths. Owned flat ArrayNum tracing, compaction, and
 destruction use shared container/data-zone handling, without full-JS hooks
-(**D5.3.2–D5.3.4**).
+(**D6.3.2–D6.3.4**).
 
 ## 3. Semantic boundaries
 
@@ -71,7 +71,7 @@ Aliases, dynamic Math member names, intrinsic mutation, object-to-primitive
 conversion, additional typed-array properties, and typed-array iteration stay
 outside this phase. Ordinary mixed arrays keep their representation.
 
-These are JS profile rules (**S1.11**, **D2.4.3**); algorithm references:
+These are JS profile rules (**S1.11**, **D2.3.5**); algorithm references:
 [TypedArray fill](https://tc39.es/ecma262/multipage/indexed-collections.html#sec-%typedarray%.prototype.fill),
 [canonical numeric indices](https://tc39.es/ecma262/multipage/abstract-operations.html#sec-canonicalnumericindexstring),
 and [ToIndex](https://tc39.es/ecma262/multipage/abstract-operations.html#sec-toindex).

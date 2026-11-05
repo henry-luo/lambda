@@ -76,7 +76,7 @@ static SecurityOperations security_defaults(const SecurityResourceSpec* spec) {
         case SECURITY_SCOPE_SHIPPED:
             return SECURITY_READ | SECURITY_METADATA | SECURITY_LOAD_SOURCE;
         case SECURITY_SCOPE_PROJECT:
-            // D7.5.5–D7.5.6: root reads/creation do not grant destructive mutations.
+            // D11.2.1–D11.2.2: root reads/creation do not grant destructive mutations.
             return SECURITY_READ | SECURITY_METADATA | SECURITY_ENUMERATE |
                 SECURITY_LOAD_SOURCE | SECURITY_CREATE;
         case SECURITY_SCOPE_PRIVATE:

@@ -2,7 +2,7 @@
 
 > **Last verified against tree:** 2026-08-30
 
-> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document describes the first-party JavaScript and TypeScript frontend: direct lexical recognition, typed AST construction, lexical-scope rebuilding, and early-error validation. LambdaJS uses no production Tree-sitter AST builder or CST adapter; vendored JS/TS grammars are test-only differential inputs. This boundary follows **D8.1.3v10**. The MIR consumer is [JS_04 — MIR Lowering](JS_04_MIR_Lowering.md), and the pipeline is [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md).
+> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document describes the first-party JavaScript and TypeScript frontend: direct lexical recognition, typed AST construction, lexical-scope rebuilding, and early-error validation. LambdaJS uses no production Tree-sitter AST builder or CST adapter; vendored JS/TS grammars are test-only differential inputs. This boundary follows **D8.4.1**. The MIR consumer is [JS_04 — MIR Lowering](JS_04_MIR_Lowering.md), and the pipeline is [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md).
 >
 > **Primary sources:** `lambda/js/parser/js_lexer.c`, `lambda/js/parser/js_parser.c`, `lambda/js/js_c_parser.cpp`, `lambda/js/js_c_ast_helpers.cpp`, `lambda/js/js_scope.cpp`, `lambda/js/js_early_errors.cpp`, `lambda/js/js_ast.hpp`, `lambda/js/js_print.cpp`, and `lambda/js/js_transpiler.hpp`.
 > **Audience:** engine developers. **Convention:** named symbols are authoritative; line references drift.
@@ -15,7 +15,7 @@
 
 Its reduction sink immediately creates the retained `JsAstNode` hierarchy and then rebuilds the direct scope graph, validates early errors, and publishes `AstIndex` facts. There is one AST pool (`MEM_ROLE_AST`) and one name pool for frontend-owned nodes and strings. On a syntax error, `JsParseError` carries the original-source span, expected-token bits, and message; no partial AST is published.
 
-The vendored JS/TS grammars remain available only to the independent parser-differential test. They cannot select, build, or execute an alternate LambdaJS AST path. This keeps one production compiler/runtime boundary while preserving an external acceptance oracle, as required by **D8.6.4v2**.
+The vendored JS/TS grammars remain available only to the independent parser-differential test. They cannot select, build, or execute an alternate LambdaJS AST path. This keeps one production compiler/runtime boundary while preserving an external acceptance oracle, as required by **D8.6.4**.
 
 ## 2. AST model
 
@@ -39,7 +39,7 @@ The validator covers assignment/update targets, reserved identifiers, destructur
 
 ## 5. Frontend-to-runtime handoff
 
-The interpreter and MIR entry points consume `js_transpiler_build_ast`, which returns the parser-published root. They do not invoke a fallback AST builder. Script import/export metadata is recorded by direct AST helpers and owned by `js_scope.cpp` with the script lifecycle. That placement satisfies **D2.4.1–D2.4.3**: shared structural ownership is centralized, while JavaScript semantic behavior remains profile-owned.
+The interpreter and MIR entry points consume `js_transpiler_build_ast`, which returns the parser-published root. They do not invoke a fallback AST builder. Script import/export metadata is recorded by direct AST helpers and owned by `js_scope.cpp` with the script lifecycle. That placement satisfies **D2.3.4–D2.3.5**: shared structural ownership is centralized, while JavaScript semantic behavior remains profile-owned.
 
 `js_print.cpp` is a debug-only AST inspection aid. It is not part of parsing, validation, or the execution contract.
 

@@ -1,4 +1,4 @@
-// D3.3.3v3/D5.3.3: equivalent full contracts share metadata only within an activation.
+// D4.3.3/D6.3.3: equivalent full contracts share metadata only within an activation.
 type Numbers = int[]
 
 pn repeated(count: int, first: bool) {

@@ -65,12 +65,15 @@ void clear_document_interaction_state_before_detach(DomDocument* doc);
 void radiant_cancel_async_document_loads(DomDocument* doc);
 bool radiant_commit_async_document_loads(UiContext* uicon);
 bool radiant_async_document_loads_pending(UiContext* uicon);
+bool radiant_poll_async_document_loads(UiContext* uicon);
 void radiant_drain_async_document_loads(UiContext* uicon);
 bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 bool radiant_set_input_capabilities(UiContext* uicon, const CssInputCapabilities* input);
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
+bool radiant_prepare_dom_mutation_layout(DomDocument* doc, const char** reason);
+void radiant_notify_template_attribute(DomElement* element, const char* name, const char* old_value);
 bool radiant_reconcile_pending_templates(UiContext* uicon, DomDocument* doc);
 bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name);
 void* radiant_document_element_from_point(DomDocument* doc, float x, float y);
@@ -676,14 +679,14 @@ typedef struct InputIntent {
     // legacy surface is not the WHATWG beforeinput vocabulary, so it gets its
     // own field rather than being folded into `type`.
     const char* command;
-    // D7.2.5: a synchronous contenteditable capability id.  It is zero for
+    // D10.2.1: a synchronous contenteditable capability id.  It is zero for
     // ordinary event traffic and is never inferred from document-global state.
     uint64_t edit_invocation_id;
     // Query kind is independent of the legacy command spelling.  The package
     // receives both so execution and queries read the same descriptor row.
     const char* edit_query_kind;
     // Captured editing-host mode. Plaintext-only is a package policy fact, not
-    // a native command branch (D7.2.5).
+    // a native command branch (D10.2.1).
     bool edit_plaintext_only;
     // ES34: the native context-menu overlay resolves only a physical row. The
     // package maps this stable item index to a command and owns dismissal.
@@ -854,7 +857,7 @@ typedef struct DomEditInvocation {
     uint64_t mutation_epoch;
     // Created lazily by the first generic mutation. A declined invocation
     // owns no transaction or allocation, while an applied one has one owner
-    // for its inverse journal until selection commit (D7.2.5).
+    // for its inverse journal until selection commit (D10.2.1).
     struct DomMutationTransaction* transaction;
     DomText* text;
     uint32_t text_start;
@@ -863,7 +866,7 @@ typedef struct DomEditInvocation {
     uint32_t caret_offset;
     // Capture the live Selection direction independently of the ordered Range
     // endpoints. Generic split/wrap/unwrap operations use it when they map a
-    // selected text run into replacement nodes (D7.2.5).
+    // selected text run into replacement nodes (D10.2.1).
     bool selection_was_backward;
     bool changed;
     bool selection_changed;
@@ -1125,7 +1128,7 @@ void      dom_selection_remove_all_ranges(DomSelection* s);
 // Boundary mutation (spec methods)
 bool dom_selection_collapse(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
 
-// D7.2.5: the package receives an explicit edit invocation.  These helpers
+// D10.2.1: the package receives an explicit edit invocation.  These helpers
 // are generic DOM/Selection mechanisms; none accepts a command or inputType.
 bool dom_edit_invocation_begin(DocState* state, DomElement* host,
                                DomBoundary start, DomBoundary end,
@@ -1140,14 +1143,14 @@ DomEditInvocation* dom_edit_invocation_lookup_document(DocState* state,
                                                         uint64_t id);
 // Opens the generic DOM transaction for a validated invocation. Package plans
 // may then compose core tree/attribute primitives without a command-shaped
-// native operation (D7.2.5).
+// native operation (D10.2.1).
 bool dom_edit_invocation_begin_transaction(DomEditInvocation* invocation);
 bool dom_edit_invocation_abort_transaction(DomEditInvocation* invocation);
 bool dom_edit_invocation_commit_selection(DomEditInvocation* invocation);
 // A retained DOM delta is a generic identity-preserving transaction snapshot.
 // The package owns grouping and stack policy; native code only assigns an
 // opaque document-local handle and replays it through the transaction waist
-// (D7.2.5, D5.3.3).
+// (D10.2.1, D6.3.3).
 uint64_t dom_edit_invocation_retain_delta(DomEditInvocation* invocation);
 bool dom_edit_invocation_replay_delta(DomEditInvocation* invocation,
                                       uint64_t delta_id, bool undo);
@@ -1156,7 +1159,7 @@ bool dom_edit_release_retained_delta(DocState* state, DomElement* host,
 void dom_edit_discard_retained_deltas(DocState* state);
 // The package session is an opaque document-owned value, but an edit
 // transaction must restore its previous root if a later DOM step fails
-// (D7.2.5, D5.3.3). This records only the root identity, never its schema.
+// (D10.2.1, D6.3.3). This records only the root identity, never its schema.
 bool dom_edit_transaction_snapshot_edit_session(DocState* state);
 bool dom_edit_invocation_replace_range_u16(DomEditInvocation* invocation,
                                            struct DomText* text,
@@ -1207,7 +1210,7 @@ bool radiant_keyboard_command_from_package(void* dom_node, const char* name);
 // F14.1: `document.execCommand` reaches the package's command set through here.
 bool radiant_dom_exec_command(void* document, const char* command,
                               const char* value);
-// D7.2.5: an API command result carries its event facts from the DOM package.
+// D10.2.1: an API command result carries its event facts from the DOM package.
 // This emits its post-commit `input` notification without re-entering a UA
 // default action or selecting a command/inputType in native code.
 bool radiant_dispatch_api_edit_input(struct DomDocument* document,
@@ -1265,7 +1268,7 @@ void dom_state_invalidate_all_range_layouts(DocState* state);
 // Call BEFORE removing `child` from its parent. Captures parent + index
 // internally and adjusts ranges/selection per the "removing steps".
 void dom_mutation_pre_remove(DocState* state, DomNode* child);
-// call after a one-for-one presentation swap; transfer ranges without a logical deletion (D4.5.3).
+// call after a one-for-one presentation swap; transfer ranges without a logical deletion (D5.5.3).
 void dom_reconcile_post_replace(DocState* state, DomNode* child, DomNode* replacement);
 
 // Call AFTER inserting a single `node` into `parent` (i.e. node->parent == parent
@@ -1305,7 +1308,7 @@ void dom_mutation_text_merge(DocState* state, DomText* prev,
 
 // Generic mutation transactions defer only the observable selection resync;
 // Range endpoints still track every individual DOM step for a correct commit
-// or journal rollback (D7.2.5).
+// or journal rollback (D10.2.1).
 bool dom_mutation_transaction_active(DocState* state);
 void dom_mutation_transaction_resync(DocState* state);
 
@@ -2730,12 +2733,12 @@ typedef struct EditingInteractionState {
     struct DomMutationTransaction* dom_mutation_transaction;
     // Generic retained transaction deltas are document-owned mechanism state.
     // Package history retains only their opaque ids and owns every grouping,
-    // invalidation, and pruning decision (D7.2.5).
+    // invalidation, and pruning decision (D10.2.1).
     struct DomRetainedMutation* dom_edit_retained_mutations;
     uint64_t next_dom_edit_retained_delta_id;
     // The behavior package owns this immutable session value. Native code only
-    // retains its exact GC root for the lifetime of this document (D7.2.5,
-    // D5.3.3); it must never inspect command, history, or typing-state fields.
+    // retains its exact GC root for the lifetime of this document (D10.2.1,
+    // D6.3.3); it must never inspect command, history, or typing-state fields.
     uint64_t dom_edit_session_root;
     bool dom_edit_session_rooted;
     ModelEditSurfaceBinding* model_edit_surfaces;
@@ -4867,7 +4870,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state);
 #endif // RADIANT_EVENT_CORE_ONLY
 
 
-// engine-owned dispatch entry points published through the DOM provider (D7.1.3).
+// engine-owned dispatch entry points published through the DOM provider (D9.1.3).
 extern "C" Item radiant_dispatch_synthetic_dom_event(Item target, Item event);
 extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event);
 extern "C" bool radiant_author_template_dispatch_begin(Item event);

@@ -1,9 +1,9 @@
 :root { --text-secondary: #596370; --text-muted: #697480; }
 * { box-sizing: border-box; }
-html, body { margin: 0; width: 100%; height: 100%; background: #f6f7f9; color: #303741; font-family: -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; font-size: 13px; }
+html, body { margin: 0; width: 100%; height: 100%; background: var(--lambda-app-background); color: var(--lambda-app-text); font-family: var(--lambda-app-font-family); font-size: var(--lambda-app-font-size); }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: transparent; }
-button:focus-visible, input:focus-visible, select:focus-visible, #files:focus-visible { outline: 2px solid #388de0; outline-offset: -2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, #files:focus-visible { outline: 2px solid var(--lambda-app-primary); outline-offset: -2px; }
 button:disabled { opacity: .28; cursor: default; }
 svg { flex-shrink: 0; vertical-align: middle; }
 #finder { display: flex; width: 100%; height: 100vh; min-height: 420px; overflow: hidden; user-select: none; }

@@ -1,4 +1,4 @@
-// JSI35 / D8.1.3v20: dynamic source executes in the AST interpreter.
+// JSI35 / D8.4.3: dynamic source executes in the AST interpreter.
 function t(label, fn) {
   try { console.log(label, fn()); } catch (e) { console.log(label, "THROWS", e.name); }
 }

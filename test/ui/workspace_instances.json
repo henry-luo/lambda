@@ -1,0 +1,146 @@
+{
+  "name": "Workspace instances keep controls and state independent",
+  "viewport": {
+    "width": 900,
+    "height": 500
+  },
+  "events": [
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#one-field"
+      },
+      "equals": "seed"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#two-field"
+      },
+      "equals": "seed"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#one-save"
+      },
+      "property": "background-color",
+      "equals": "rgb(16, 32, 48)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#two-save"
+      },
+      "property": "background-color",
+      "equals": "rgb(160, 64, 32)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#outside-workspace"
+      },
+      "property": "cursor",
+      "equals": "auto"
+    },
+    {
+      "type": "assert_style",
+      "target": {"selector": "#office-one"},
+      "property": "color",
+      "equals": "rgb(16, 32, 48)"
+    },
+    {
+      "type": "assert_style",
+      "target": {"selector": "#office-two"},
+      "property": "color",
+      "equals": "rgb(160, 64, 32)"
+    },
+    {
+      "type": "assert_style",
+      "target": {"selector": "#outside-ribbon"},
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_style",
+      "target": {"selector": "#inside-ribbon"},
+      "property": "display",
+      "equals": "flex"
+    },
+    {
+      "type": "assert_style",
+      "target": {"selector": "#document-tool"},
+      "property": "cursor",
+      "equals": "auto"
+    },
+    {
+      "type": "assert_style",
+      "target": {"selector": "#document-row"},
+      "property": "display",
+      "equals": "block"
+    },
+    {
+      "type": "assert_style",
+      "target": {"selector": "#document-picker"},
+      "property": "display",
+      "equals": "inline"
+    },
+    {
+      "type": "assert_style",
+      "target": {"selector": "#document-dialog"},
+      "property": "position",
+      "equals": "static"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#one-save"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#one-count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#two-count"
+      },
+      "equals": "0"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#one-field"
+      },
+      "text": "X",
+      "clear": false
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#one-field"
+      },
+      "equals": "seedX"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#two-field"
+      },
+      "equals": "seed"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": ".workspace-toolbar"
+      },
+      "attribute": "role",
+      "equals": "toolbar"
+    }
+  ],
+  "html": "test/ui/workspace_instances.ls"
+}

@@ -1,6 +1,6 @@
 // Word retains its ribbon lookup while sharing the collapse and menu geometry with Slides.
 import dom
-import overflow: ~~.mod_ribbon_overflow
+import overflow: lambda.ui.workspace.ribbon_overflow
 
 fn ribbon(node) => dom.query_selector(dom.root_node(node),".ribbon-groups")
 

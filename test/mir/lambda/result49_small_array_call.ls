@@ -1,4 +1,4 @@
-// S11.4.1v3, D5.2: a direct short float[] producer can stay in scalar lanes
+// S11.4.1v3, D6.2: a direct short float[] producer can stay in scalar lanes
 // only while the caller observes fixed elements; an absent read keeps the
 // ordinary checked return path.
 pn vector_mix(v0: float[], v1: float[]) float[] {

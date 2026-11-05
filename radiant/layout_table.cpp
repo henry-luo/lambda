@@ -3789,7 +3789,7 @@ static void inherit_anonymous_table_block_props(LayoutContext* lycon, DomElement
         anon->blk->direction = parent->blk->direction;
         anon->blk->text_transform = parent->blk->text_transform;
         anon->blk->line_height = parent->blk->line_height;
-        // D4.5.1v4: retained fixup boxes own leading independently of the source block.
+        // D5.5.1: retained fixup boxes own leading independently of the source block.
         radiant_compute_stored_line_height(lycon, anon);
         anon->blk->text_indent = parent->blk->text_indent;
         anon->blk->text_indent_percent = parent->blk->text_indent_percent;

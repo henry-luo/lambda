@@ -122,7 +122,7 @@ session sends a fifth of its sound to the document's Freeverb room on the audio 
 
 Music and Chinese narration start automatically when the demo first renders.
 Local documents opened with `view` or `demo` may start audible output from a `pn`
-handler under D7.5.4. The Lambda sound control starts the score at 0 and bumps `data-epoch`.
+handler under D11.3.1. The Lambda sound control starts the score at 0 and bumps `data-epoch`.
 [`cityscape.js`](cityscape.js) sees the change and does two things:
 - it rewinds the native clip through `RadiantAnimationHost`;
 - it toggles `.replay`, which swaps every caption's `animation-name` to a twin keyframe

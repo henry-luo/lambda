@@ -3,7 +3,7 @@
 **Date:** 2026-11-02. **Status:** original migration complete and qualified;
 master integration correctness qualified, with the AUTO timing caveat below.
 **Authority:** S12.1.2v3 (local control), S9.1.3v2 (value/inout parameters),
-S9.1.4v2 (captures), D6.1.2v2 (call colour), D8.1.1v18 (tier promotion).
+S9.1.4v2 (captures), D7.1.2 (call colour), D8.3.2 (tier promotion).
 **Workspace:** `temp/fn-local-worktree`, branch `codex/fn-local-state`.
 
 The benchmark corpus historically uses `pn` for pure algorithms because those
@@ -88,7 +88,7 @@ correctness failures regardless of timing.
   proofs across both colours for bodies ending in an unconditional `return`;
   retain dynamic fallthrough handling otherwise. The shared AST walk counts and
   checks every return, including handler arms, and skips nested callables
-  (D2.2.2, D5.2.1v5, D8.2.6). Focused release Fibonacci pairs return to parity;
+  (D2.2.2, D6.2.1, D8.2.6). Focused release Fibonacci pairs return to parity;
   the previous diagnostic matrix's 3–4x recursion regressions are preserved in
   `temp/fn_benchmark_migration/comparison_diagnostic1.json`.
 
@@ -99,7 +99,7 @@ correctness failures regardless of timing.
 - The carrier oracle recovered native strings for procedures but only numeric
   native results for functions. Recover the actual proven carrier for either
   colour; error joins and inferred boxed fallbacks remain boxed. This restores
-  string-concatenation fusion in untyped JSON generation (D2.4.1, D8.2.6).
+  string-concatenation fusion in untyped JSON generation (D2.3.4, D8.2.6).
   MIR/GC fixtures cover the optimized paths and an uncertain specialization
   caller that must still use the complete boxed fallback.
 

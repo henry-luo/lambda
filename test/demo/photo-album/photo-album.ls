@@ -1,9 +1,11 @@
 // Photo album demo: library browsing and viewer (vibe/Lambda_Demo_Photo_Album.md §3.1–3.2).
-// S12.1.3 / D4.5.1v4: the native shell is retained; handlers publish state into regions and
+// S12.1.3 / D5.5.1: the native shell is retained; handlers publish state into regions and
 // mount only the grid rows near the viewport, keyed by row index.
 import dom
 import resources: ~~.mod_resources
-import updates: ~~.mod_publish
+import updates: lambda.ui.core.publish
+import interaction: lambda.ui.core.interaction
+import workspace_shell: lambda.ui.workspace.shell
 import corpus: .mod_corpus
 import L: .mod_library
 import G: .mod_grid
@@ -1020,7 +1022,7 @@ on pointercancel(evt) {
 on keydown(evt) {
     let owner = owner_of(evt)
     let key = evt.key
-    let modifier = evt.metaKey or evt.ctrlKey
+    let modifier = interaction.primary(evt)
     if ((session.film != null)^) {
         let action = if (key == "Escape") "film-close" else if (key == " " or key == "k") "film-toggle" else if (lower(key) == "m") "film-sound" else ""
         if (action != "") { session = dispatch(owner, session, action, evt.time_stamp); return 'prevent-default' }
@@ -1121,6 +1123,8 @@ on load(evt) {
 }
 
 <html lang:"en",<head <meta charset:"UTF-8"><meta name:"viewport",content:"width=device-width, initial-scale=1">
-    <title "Photos — Lambda"><style slide_html.css><link rel:"stylesheet",href:url_resolve(BASE, "photo-album.css")>>
-    apply(<album_document rendered:<body apply(<album_session rendered:ui.tree(LIB, FETCH)>)>>)
+    <title "Photos — Lambda"><style (workspace_shell.css ++ slide_html.css)><link rel:"stylesheet",href:url_resolve(BASE, "photo-album.css")>>
+    apply(<album_document rendered:<body class:"workspace-shell",style:workspace_shell.variables({background:"#f5f5f7",surface:"#ffffff",
+        text:"#1d1d1f",text_secondary:"#6e6e73",border:"#d9dbe1",primary:"#0a84ff"})^,
+        apply(<album_session rendered:ui.tree(LIB, FETCH)>)>>)
 >

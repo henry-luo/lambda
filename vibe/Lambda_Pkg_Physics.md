@@ -14,11 +14,11 @@ stages have shipped.
 with the same engine usable for headless Lambda simulations. Genuine 2D
 dynamics, additional constraints and deformable bodies are later extensions.
 
-**Authority and spec linkage:** applies **D7.1.1–D7.1.3** (layering),
-**D7.2.4 / S17.2.1** (namespaces), **D6.4.1–D6.4.2** (system-function ABI),
+**Authority and spec linkage:** applies **D9.1.1–D9.1.3** (layering),
+**D9.3.4 / S17.2.1** (namespaces), **D7.6.1–D7.6.2** (system-function ABI),
 **S12.1.1v2 / S12.1.5v2** (effects and presentation ownership),
-**S12.4.1v2–S12.4.3** (resources), **D4.5.1v4 / D4.5.2 / D5.3.3**
-(native lifetime and rooting), and **D7.5.3** (Radiant host boundary).
+**S12.4.1v2–S12.4.3** (resources), **D5.5.1 / D5.5.2 / D6.3.3**
+(native lifetime and rooting), and **D9.5.6** (Radiant host boundary).
 These are in [Formal Design](../doc/Lambda_Formal_Design.md) and
 [Formal Semantics](../doc/Lambda_Formal_Semantics.md). This proposal changes
 no formal ruling. Detailed choices remain proposals until ratified; any
@@ -60,10 +60,10 @@ flowchart TD
 The core is a source module in the existing static-library layering, not a
 Jube DSO. Its public header exposes no `Item`, DOM, renderer, GL, interpreter
 or scheduler types. Both upper integrations call downward into it
-(**D7.1.1 / D7.1.3**). It performs no filesystem, network, window or clock I/O
-(**D7.1.2v2**). Lambda operations on a *live Radiant scene* still use the
+(**D9.1.1 / D9.1.3**). It performs no filesystem, network, window or clock I/O
+(**D9.1.2**). Lambda operations on a *live Radiant scene* still use the
 existing `radiant-dom` host boundary; the new system functions do not reach
-into Radiant (**D7.5.3**).
+into Radiant (**D9.5.6**).
 
 ## 2. Relationship to Rapier
 
@@ -328,7 +328,7 @@ replay requires it; it is not part of the first six-operation contract.
 ### 5.2 Lambda system functions
 
 Register a small system-function family under `lambda.sys.*` (**S17.2.1**).
-Reserve `lambda.physics` for the script package (**D7.2.4**), so the same path
+Reserve `lambda.physics` for the script package (**D9.3.4**), so the same path
 never denotes both a built-in module and a package.
 
 | Proposed system function | Colour and successful result |
@@ -352,13 +352,13 @@ and display-frame pacing options do not alter a batch run.
 
 The other operations observe or mutate a retained world and are procedures.
 Register signatures, error handling and GC/allocation effects identically for
-the interpreter and MIR Direct, with boxed results (**D6.4.1–D6.4.2**).
+the interpreter and MIR Direct, with boxed results (**D7.6.1–D7.6.2**).
 Empty selections/queries return typed empty collections; an ordinary query
 miss is an explicit absent result, while invalid geometry is an error.
 
 No new general-purpose pointer value or physics-specific language syntax is
 needed. Native worlds use checked resource identity and the existing host
-projection protocol (**D7.4.1v2 / D7.4.4**). The resource's declared type must
+projection protocol (**D9.5.1 / D9.5.4**). The resource's declared type must
 participate in block cleanup and legal return transfer (**S12.4.2**). Verify
 or complete that lifecycle integration before exposing `physics_open`;
 a GC finalizer alone does not satisfy **S12.4.3**.
@@ -394,7 +394,7 @@ Store the native world in document-owned scene state, independently of the
 disposable GPU projection. Resize, repaint, screenshot, camera orbit and GL
 context recovery preserve it. Removing/replacing the owning scene destroys
 its world. References check document/scene/world generations
-(**D4.5.1v4**).
+(**D5.5.1**).
 
 Classify authored changes rather than rebuilding the world for every DOM
 mutation: appearance-only changes preserve physics; an authored body pose
@@ -410,7 +410,7 @@ authored `position` attributes every tick.
 
 Native state contains copied scalars, geometry and stable IDs, not borrowed
 GC pointers. Any retained script metadata/callback uses registered precise
-roots (**D4.5.2 / D5.3.3**). A headless world belongs to its Lambda resource
+roots (**D5.5.2 / D6.3.3**). A headless world belongs to its Lambda resource
 scope; a scene world belongs to its document. These owners are never silently
 shared. Transfer between them uses immutable descriptions or explicit recorded
 state, not a raw pointer.
@@ -418,7 +418,7 @@ state, not a raw pointer.
 ### 6.3 Commands and events
 
 Expose a small Radiant host adapter for scene physics commands, reads and
-queries through `radiant-dom` (**D7.5.3**). It resolves a scene node to its
+queries through `radiant-dom` (**D9.5.6**). It resolves a scene node to its
 owned world and adds presentation commands such as play, pause, reset and
 single-step. These controls live above the clock-free C API. System functions
 continue to operate only on their own headless world resources.
@@ -493,7 +493,7 @@ simulation from starting during recorded playback.
 ## 9. The `lambda.physics` package
 
 Provide an explicit `lmd/package/physics.ls` entry and helper modules under
-`lmd/package/physics/`, following **D7.2.1–D7.2.4**. Package construction is
+`lmd/package/physics/`, following **D9.3.1–D9.3.4**. Package construction is
 pure; it creates ordinary scene elements and data.
 
 | Surface | Purpose |
@@ -594,9 +594,9 @@ Add no `std::` containers and no changes to third-party code. The engine's
 math layer must be independent of Radiant's float rendering types.
 
 The full host, runtime-only CLI and native headless profile can share the CPU
-engine through the existing lower library (**D7.1.4v2 / D7.1.6**). Availability
+engine through the existing lower library (**D9.2.1 / D9.2.2**). Availability
 must be explicit in reduced builds. Browser/WASM enablement requires its own
-profile admission and tests under **D7.1.7v6**; a C implementation alone is
+profile admission and tests under **D9.2.3**; a C implementation alone is
 not evidence that a shipping WASM build includes physics.
 
 ## Appendix B. Decision history

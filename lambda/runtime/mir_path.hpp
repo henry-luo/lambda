@@ -3,8 +3,25 @@
 #include "ast.hpp"
 #include "mir_emitter_shared.hpp"
 
+// the shared AST proves a store-back region; runtime ancestor sharing decides
+// whether its initial child can be borrowed or needs a snapshot (D5.4.4).
+static inline MIR_reg_t em_bind_rmw_handle(MirEmitter* em, MIR_reg_t owner,
+        MIR_reg_t child, int links, const MIR_reg_t* keys, bool specialize_root = false) {
+    // the deeper helper can materialize indexed ancestors; only a proven
+    // zero-link call selects the audited noncollecting entry.
+    if (links == 0 && specialize_root) return em_call_2(em, "cow_bind_rmw_root", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(em->ctx, child), true);
+    return em_call_5(em, "cow_bind_rmw_handle", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(em->ctx, child),
+        MIR_T_I64, MIR_new_int_op(em->ctx, links),
+        MIR_T_I64, MIR_new_reg_op(em->ctx, keys[0]),
+        MIR_T_I64, MIR_new_reg_op(em->ctx, keys[1]), true);
+}
+
 // static path syntax has no evaluated operands; both emitters use the same
-// constructors and the activation's owning pool (D2.4.3, D4.1.2).
+// constructors and the activation's owning pool (D2.3.5, D5.1.2).
 static inline MIR_reg_t em_literal_path(MirEmitter* em, AstPathNode* node) {
     MIR_reg_t pool = em_load_at(em, em->frame.runtime, offsetof(Context, pool), MIR_T_P, "path_pool");
     MIR_reg_t path = node->authority

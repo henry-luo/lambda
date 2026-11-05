@@ -21,8 +21,7 @@ pub fn needs_load(viewport,id) => models[id] != null and
 pub fn nodes(tree) any^ => [tree,*[for (child in ((content(tree)) ^ { [] })) *nodes(child)]]
 pub fn source(base,id) any^ => if (models[id].local == true) url_resolve(base,models[id].file)
     else if (models[id].url != null) models[id].url else REMOTE ++ "models/" ++ models[id].file
-pub fn thumbnail(id) => if (id == "whiteBlood") REMOTE ++ "cell-renders-transparent/white-blood.png"
-    else "assets/" ++ id ++ ".png"
+pub fn thumbnail(id) => "assets/" ++ id ++ ".png"
 
 pub fn load(base,id) element^ {
     let asset = models[id]

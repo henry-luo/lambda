@@ -1,9 +1,9 @@
-// Model-backend coverage for the common DOM editing protocol (D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
-import adapter: lambda.editor.mod_dom_adapter
-import model_registry: lambda.editor.mod_edit_registry
+// Model-backend coverage for the common DOM editing protocol (D10.2.1).
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
+import adapter: lambda.editor.dom.adapter
+import model_registry: lambda.editor.dom.registry
 
 fn platform_event(input_type, data, source_selection, target_ranges) => {
   input_type: input_type, origin: "platform", command: null,

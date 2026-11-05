@@ -1,0 +1,24 @@
+{
+  "name": "Dialog focus stays in its owner and skips ineligible controls",
+  "html": "test/ui/workspace_dialog_focus.ls",
+  "viewport": {"width": 900, "height": 500},
+  "events": [
+    {"type": "click", "target": {"selector": "#one-first"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#one-input"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#one-last"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#one-first"}},
+    {"type": "key_press", "key": "Tab", "mods_str": "shift"},
+    {"type": "assert_focus", "target": {"selector": "#one-last"}},
+    {"type": "click", "target": {"selector": "#two-first"}},
+    {"type": "key_press", "key": "Tab", "mods_str": "shift"},
+    {"type": "assert_focus", "target": {"selector": "#two-last"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#two-first"}},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_attribute", "target": {"selector": "#dialog-two"}, "attribute": "data-dismiss-requested", "equals": "true"},
+    {"type": "assert_script", "js": "!document.getElementById('dialog-one').hasAttribute('data-dismiss-requested')"}
+  ]
+}

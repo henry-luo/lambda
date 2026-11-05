@@ -14,10 +14,10 @@
 > routed through record dispatch and record-owned hooks.
 > **Predecessors**: [Lambda_Jube_DOM.md](./Lambda_Jube_DOM.md) (DOM1),
 > [Lambda_Jube_DOM2.md](./Lambda_Jube_DOM2.md) (DOM2).
-> **Spec anchors**: **D7.4.4** (single host-object protocol — this doc's charter ruling,
-> minted from D4k/D4j), D3.4.7 / D7.4.1–D7.4.3 (host-family metadata, single VMap/Jube bridge),
-> D6.2.2v2 (observable Get-then-`[[Call]]` for method calls), D5.4.3/D5.4.4 (no realm state
-> baked into shared MIR), D8 (compilation). LC1v2 / D8.4.1v2 ban inline caches in **both**
+> **Spec anchors**: **D9.5.4** (single host-object protocol — this doc's charter ruling,
+> minted from D4k/D4j), D3.4.7 / D9.5.1–D9.5.3 (host-family metadata, single VMap/Jube bridge),
+> D7.2.2 (observable Get-then-`[[Call]]` for method calls), D6.4.3/D6.4.4 (no realm state
+> baked into shared MIR), D8 (compilation). LC1v2 / D7.4.1 ban inline caches in **both**
 > lanes (LambdaJS included, since 2026-09-09) — DOM4 is *static resolution*, which is exactly
 > the sanctioned mechanism.
 
@@ -48,7 +48,7 @@
 ## 1. Concept
 
 > **Declared interfaces + record-owned hooks are the ONLY host-object protocol — one way
-> to be a host object, no fallback tier.** (Now formal: **D7.4.4**.) DOM4's two thrusts
+> to be a host object, no fallback tier.** (Now formal: **D9.5.4**.) DOM4's two thrusts
 > serve this single statement: *forward*, compile-time member ordinals make the declared
 > tables the fastest path as well as the only path (D4a–D4f); *backward*, the
 > `host_ops`/`legacy_ops` fallback tier and its key-materialization shim are deleted
@@ -123,7 +123,7 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
 - **D4d — Direct method calls are semantics-preserving and allowed.** For a
   compile-time-resolved `JUBE_MEMBER_METHOD`, `receiver.method(args)` may lower to
   `jube_member_call_by_ordinal(receiver, slot, ordinal, args, argc, &out)`, skipping the
-  cached-function-object read and the arity trampoline. Justification against D6.2.2v2
+  cached-function-object read and the arity trampoline. Justification against D7.2.2
   (observable Get then `[[Call]]`): declared members **cannot be shadowed** — instance
   writes to readonly members are swallowed ("no expando shadowing of projected members",
   jube_member_get resolves records *before* expando and prototype fallthrough, descriptors
@@ -151,20 +151,20 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   instance expandos can shadow members, and declared accessor descriptors live on
   their interface prototypes. The JS ordinal get/set/call entries return 0 for
   those records and continue through the observable Get/Call path required by
-  **D6.2.2v2**. Inherited methods reuse the declaring record; CSS grouping methods
+  **D7.2.2**. Inherited methods reuse the declaring record; CSS grouping methods
   also declare their required JS argument count independently of Lambda arity.
   Callers select the Lambda or JS surface explicitly; a derived JS capsule
   can exist while Lambda reads declared fields or obtains a bound method.
   Native object creation activates the registered type's owning module under
-  **D7.3.2**, including engine seams reached through `import dom` alone.
-  Lambda projection continues to use the declared record under **D7.4.1v2**.
+  **D9.4.2**, including engine seams reached through `import dom` alone.
+  Lambda projection continues to use the declared record under **D9.5.1**.
   JS Get/Set hooks retain the supplied receiver separately from the target, and
   metadata Set callbacks return the boolean/error completion; assignment callers
   retain the right-hand value and enforce their explicit strictness policy.
   Receiver writes reach a declared DefineOwn callback before raw carrier storage.
   Native-map indexed bounds use an optional length callback in the retired
   binding slot; a pointer-size assertion preserves its ABI. Descriptor, own-key,
-  membership and deletion operations share the same indexed count under **D7.3.3**.
+  membership and deletion operations share the same indexed count under **D9.4.3**.
   Native-only index adapters opt out of the JS indexed surface through type
   metadata; unmarked adapters preserve their existing contract. Getter-only
   WebIDL index definitions opt into a separate type capability, independently
@@ -180,18 +180,18 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   that JS surface. Unmarked bindings preserve their existing dispatch contract.
   Large declared interfaces use the library's growable member storage rather
   than a fixed parse limit, preserving declaration/binding validation under
-  **D7.3.2–D7.3.4**.
+  **D9.4.2–D9.4.4**.
   Captured Lambda methods store the receiver and tagged member ordinal in two
   traced Item slots. Compaction copies the declared slots exactly; native pointer
   tails cannot carry method records. Invocation resolves the ordinal through the
-  receiver's inherited record prefix under **D7.4.4** and D4a.
+  receiver's inherited record prefix under **D9.5.4** and D4a.
   Inline and computed declaration carriers inherit the common property record,
   while the existing object-prototype callback selects their public prototype;
   a shared prototype must not be its own inheritance seed. Record inheritance
-  does not make distinct native payload layouts interchangeable under **D7.4.1v2**.
+  does not make distinct native payload layouts interchangeable under **D9.5.1**.
   The document-aware weak cache traces each carrier's node owner and clears its
-  payload before document-pool retirement (**D4.5.1v4**, **D5.3.3**).
-  Arguments and lookup objects retain precise roots under **D5.3.3**. No Lambda semantic
+  payload before document-pool retirement (**D5.5.1**, **D6.3.3**).
+  Arguments and lookup objects retain precise roots under **D6.3.3**. No Lambda semantic
   ruling changes. The CSSOM implementation tracker records regression and baseline
   evidence; complete WebIDL reflection and cross-realm behavior remain open.
 
@@ -267,7 +267,7 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   fast path ships, the L1 (and future L3) MIR cache key must fold in a digest of the
   activated interface texts + module registration order. This is a correctness gate, not
   an optimization. (Realm note: slots and ordinals identify process-wide static registry
-  entries, like `builtin_id`s — they are not realm state, so D5.4.3/D5.4.4 realm-in-MIR
+  entries, like `builtin_id`s — they are not realm state, so D6.4.3/D6.4.4 realm-in-MIR
   concerns do not apply; the per-realm NameId indirection stays as-is for ordinary maps.)
 
 - **D4j — Key-carrier policy: Item at the ABI, one borrowed strview inside, integers as
@@ -345,7 +345,7 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
     handles; candidate: the Lambda/Mark
     projection of DOM nodes, where an element *is* the natural data shape.
   Orthogonality pin: declared interfaces / member records / ordinals are the
-  **named-member** protocol and apply identically to all three carriers (D7.4.4); the
+  **named-member** protocol and apply identically to all three carriers (D9.5.4); the
   carrier decides which **structural** faces exist virtually. **Scope (user ruling
   2026-08-13): direction only in DOM4.** The Lambda runtime is likely not ready for the
   new carriers; varray and velmt are future Jube work (their own stage). **DOM4 settled
@@ -356,7 +356,7 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   The proposed carrier ABI, runtime integration surface, and complete DOM migration
   inventory are refined as D4l.1–D4l.10 in
   [`Lambda_Design_Type_Virtual.md`](Lambda_Design_Type_Virtual.md). This was
-  direction-only at DOM4 closure; implementation now follows **D7.4.5v2**.
+  direction-only at DOM4 closure; implementation now follows **D9.5.5**.
 
 ## 3. Mechanism
 
@@ -594,7 +594,7 @@ bytes is unavoidable by construction) and the OQ4 CSS surface.
   non-computed site whose receiver the lattice couldn't type still has a compile-time
   name literal. LJS already ships baked names as integers (per-module name table +
   execution-time NameId, the named-IC `named_key_index` machinery, realm-correct per
-  D5.4.3/D5.4.4). Add `jube_member_get_by_name_id(receiver, name_id, chars, len, out)`
+  D6.4.3/D6.4.4). Add `jube_member_get_by_name_id(receiver, name_id, chars, len, out)`
   and key the member index on NameId with integer compare (byte-confirm only on
   collision). Kills the memcmp confirm and the `__proto__` byte check for the dominant
   share of generic-path traffic; full elimination for computed keys needs unique interned

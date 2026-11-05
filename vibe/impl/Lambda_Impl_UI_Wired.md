@@ -2,9 +2,9 @@
 
 **Status:** initial native subset, 2026-10-13.
 
-The package follows shipped source packaging (**D7.2.4**), logical element
+The package follows shipped source packaging (**D9.3.4**), logical element
 identity (**S2.4.3v3**), pure presentation/effectful handlers (**S12.1.3**), and
-native control ownership (**D7.2.5**, **S8.2.2v5**). It takes visual reference
+native control ownership (**D10.2.1**, **S8.2.2v5**). It takes visual reference
 from [Wired Elements](https://wiredjs.com/) without a browser web-component or
 RoughJS dependency. No semantics or design ruling changes are required.
 

@@ -15,10 +15,10 @@ population is 87 (70 standard plus 17 microbenchmarks); `jetstream/hashmap` is
 excluded. No mutable prototype links, `__proto__`, accessor execution, proxies,
 VMap plain objects, async execution, or general descriptors.
 
-Reuse Lambda kernels first (**D1.3v3**). Preserve nominal Map/shape compatibility
-(**D2.6.9v3**, **D3.4.3v5/D3.4.5**), scalar ownership and precise roots
-(**D5.2–D5.3**), Function and closure ABIs (**D6.2.2v2–D6.2.4**), explicit
-completions (**D1.4v4**), and guarded dispatch (**D8.4.1v2**). No full LambdaJS
+Reuse Lambda kernels first (**D1.3**). Preserve nominal Map/shape compatibility
+(**D3.1.5**, **D3.4.3/D3.4.5**), scalar ownership and precise roots
+(**D6.2–D6.3**), Function and closure ABIs (**D7.2.2–D7.2.4**), explicit
+completions (**D1.4**), and guarded dispatch (**D7.4.1**). No full LambdaJS
 runtime dependency, new value tag, conservative stack scan, or vendor edit.
 
 The frozen control is `temp/mvp_library/control.exe`, copied from §29 stage25,
@@ -95,31 +95,31 @@ Before coding, the user was informed of:
 - `map_shape_set_resolved`: shared Lambda packed-field mutation after the caller
   has resolved the current own field. MVP descriptor admission reuses that
   lookup; `map_shape_set` retains its existing ABI and delegates to the same
-  implementation (**D3.4.3v5**, **D3.4.5**).
+  implementation (**D3.4.3**, **D3.4.5**).
   Internal `map_shape_set_impl` selects lookup at compile time so both public
   entries validate once. Native disassembly exposed duplicated validation and
   an extra wrapper frame in the initial factoring. The admitted value TypeId
   is retained across lookup, avoiding a second tagged-value/container decode.
 - `map_shape_delete_resolved` reuses the descriptor lookup for physical deletion;
   internal `map_shape_delete_impl` shares validation and transition logic with
-  the original entry (**D3.4.3v5**, **D3.4.5**).
+  the original entry (**D3.4.3**, **D3.4.5**).
 - `map_shape_set_text` and `map_shape_delete_text` select canonical string lookup
   in those same templates when the caller proves ordinary string keys. MVP uses
   them only in closed units without Symbol exposure; identity-aware mutation
-  remains available for Symbol/private keys (**D3.4.3v5**, **D8.4.1v2**).
+  remains available for Symbol/private keys (**D3.4.3**, **D7.4.1**).
   Shape extension reuses one `NameMeta` read for hash, NameId and key kind.
   Shared monotone method-replacement analysis covers Arrays and Maps, including
   observed methods and destructuring targets. Reflective Object writers and
   escaped constructor aliases disable that proof; proven native Map calls keep
-  their original direct method path (**D8.4.1v2**).
+  their original direct method path (**D7.4.1**).
 - `mvp_lmd_array_method_value`, `mvp_lmd_to_primitive`: first-class array methods
   on the Function ABI and ordered object conversion. `js_ast_has_optional_chain`
   promotes the existing frontend query for both emitters.
 - `mvp_lmd_caught_value` and compiler `completion_cleanup`: existing Lambda
-  error carriers, JS payload identity, and finally routing (**D1.4v4**).
+  error carriers, JS payload identity, and finally routing (**D1.4**).
 - Generator creation/park/resume and iterator get/step/close adapters use
   shared `Activation`, carrier layout, and promoted GC lifecycle hooks. Under
-  **D5.1.1v3**, MIR bodies park in place; there is no new register-spill state
+  **D6.1.1**, MIR bodies park in place; there is no new register-spill state
   machine. Captures remain ordinary traced Lambda Functions.
 - `mvp_lmd_generator_call`, `generator_resume`, `mvp_lmd_generator_park`, and
   `mvp_lmd_generator_resume_kind` now use that shared activation path. The
@@ -127,11 +127,11 @@ Before coding, the user was informed of:
   `runtime/suspended_activation.*`; `mvp_lmd_function_forward` is promoted for
   generator entry and stores transient argument homes on the activation's
   number stack. Shared `Activation` copies its returned scalar into an owned
-  home before releasing its stack (**D5.2–D5.3**).
+  home before releasing its stack (**D6.2–D6.3**).
 - `typemap_hash_lookup_key` selects existing NameId lookup for identity keys
   and canonical UTF-8 lookup for strings. The shared Map fallback preserves
   NameId/kind/hash. `symbol_create` uses the existing Symbol/NamePool records;
-  no new type tag or parallel key table (**D3.4.3v5**, **D3.4.5**).
+  no new type tag or parallel key table (**D3.4.3**, **D3.4.5**).
 - `mvp_lmd_iterator_get`, `mvp_lmd_iterator_step`, and
   `mvp_lmd_iterator_close`, with internal sequence factories/property checks,
   use the promoted traced iterator carrier. Generator delegation preserves
@@ -144,19 +144,19 @@ Before coding, the user was informed of:
   Function environment owned by the nominal extension. `mvp_lmd_object_copy`
   shares own enumerable property traversal (including symbol keys) between
   `Object.assign` and object spread. No mutable prototype link is introduced
-  (**D3.4.3v5**, **D6.2.2v2**).
+  (**D3.4.3**, **D7.2.2**).
 - Compiler `collect_pattern_binding`/`bind_pattern` reuse shared binding-pattern
   traversal and property references for destructuring. Callable metadata also
   admits own properties on arrows/methods without a constructor prototype.
 - `collection_construct`/`collection_method` adapters share ordered-map
   storage for Map and Set. Existing sequence iterator helpers handle live
   collection cursors; `js_iterator_map_heap_destroy` releases abandoned cursor
-  leases, using the shared carrier and precise tracing (**D5.3**).
+  leases, using the shared carrier and precise tracing (**D6.3**).
 - Named public instance fields reuse `js_script_field_initializer_ensure` and
   ordinary closure construction. `mvp_lmd_class_initialize_instance` invokes
   those Functions per instance, before base constructor bodies or immediately
   after derived `super()`, and uses existing own-field storage. Default
-  constructors follow the same sequence (**D6.2.2v2–D6.2.4**).
+  constructors follow the same sequence (**D7.2.2–D7.2.4**).
 - `mvp_lmd_array_visit` shares native map/filter/forEach/some/reduce traversal
   for borrowed methods, including String/array-like receivers. Direct MIR
   callbacks retain their existing loops. Number conversion gains decimal-prefix
@@ -165,7 +165,7 @@ Before coding, the user was informed of:
   `mvp_lmd_parse_number` shares the scanner with the original one-argument
   coercion helper, and `mvp_lmd_number_to_radix_string` delegates decimal
   formatting to the original helper. Optional arguments stay out of ordinary
-  coercion call sites (**D8.4.1v2**).
+  coercion call sites (**D7.4.1**).
   `mvp_lmd_string_pad` composes shared repeat, UTF-16 range, and concatenation;
   suffix matching extends the existing search helper.
   Lowercase calls reuse `fn_lower`; the canonical hyphen workload supplies no
@@ -175,7 +175,7 @@ Before coding, the user was informed of:
   `mvp_lmd_array_method_value` now accepts a callee option and continues lookup
   through the fixed Object prototype. Native array `instanceof` reuses the
   program-owned prototype identity without changing Lambda array layout
-  (**D2.6.6v3**, **D3.4.3v5**).
+  (**D3.1.1**, **D3.4.3**).
 
 The final frozen release is `temp/mvp_library/round4m/candidate.exe`, SHA-256
 `5499bb795ecc8ea24aa49208d2b3852d5f9f44fc92c131e93cec87aa92a7e75d`.
@@ -211,7 +211,7 @@ Its quiet replacement, `confirm11-text-final-round4m`, is complete:
 Log pipeline is also slower than the control peer, with a 95% interval of
 **1.0050–1.0483** (`candidate-vs-peer.json`). Overlapping separate control
 intervals alone do not clear this signal. Its root cause is unresolved and
-strict performance acceptance remains open (**D8.4.1v2**). The rejected round4n
+strict performance acceptance remains open (**D7.4.1**). The rejected round4n
 catalog-grouping experiment is retained separately: MIR inspection shows that
 the workload's fixed-name String calls already use direct method tokens, so
 runtime catalog scans do not explain the slowdown. Source and CLI were restored
@@ -231,18 +231,18 @@ root registration is limited to actual iterator cleanup sites. Decimal string
 conversion bypasses validation of the optional radix, and ordinary writable
 fields share one combined descriptor guard. Key lookup reuses the cached
 canonical-name hash from `NameMeta`; unpooled strings retain byte hashing and
-Symbols retain identity lookup (**D3.4.3v5**). Focused validation and release
-A/B confirmation accompany these repairs (**D8.4.1v2**).
+Symbols retain identity lookup (**D3.4.3**). Focused validation and release
+A/B confirmation accompany these repairs (**D7.4.1**).
 The first dynamic string-coercion experiment was reverted after two boundary
 probes entered object conversion without the library's property-name pool.
 The adapter now takes an explicit `library_objects` option. Known primitive
 types retain direct lowering; dynamic values keep a string identity guard and
 share native conversion. Basic units reject general objects before accessing
-the optional name pool, while library units retain object hooks (**D8.4.1v2**).
+the optional name pool, while library units retain object hooks (**D7.4.1**).
 The option follows recursive array conversion and `ToPrimitive`; a nested
 unsupported object reports capability failure, and own array hooks still run.
 Named hook writes select the existing receiver-aware Function ABI for implicit
-native calls (**D6.2.2v2**, **D8.4.1v2**).
+native calls (**D7.2.2**, **D7.4.1**).
 
 Shared-kernel correctness fixes include preserved JSON lone-surrogate escapes,
 rooted argument snapshots with owned scalar homes, and an unaligned packed-field
@@ -255,7 +255,7 @@ The final 100-test gate passes normally in `final-lambda-baseline.log` and under
 forced GC/poisoning in `final-focused-forced.log`. Canonical jq admission exposed exponential
 speculative expansion of common class method names. Limit the candidate set
 and reserve a caller-wide AST expansion budget before recursive lowering;
-exhaustion uses the existing guarded call ABI (**D8.4.1v2**). A twelve-class
+exhaustion uses the existing guarded call ABI (**D7.4.1**). A twelve-class
 recursive method probe checks both results and generated MIR size. The new
 `math_call` adapter exposes the existing Math operation table as native Function
 values for dynamic lookup and spread, reusing its numeric kernels. An escaped
@@ -268,7 +268,7 @@ the four complete canonical jq workloads.
 
 The shared activation return home exposed a scheduler lifetime bug: Lambda
 destroyed the activation before adopting its wide result into task-owned
-storage. The scheduler now copies first (**D5.2–D5.3**). All three affected
+storage. The scheduler now copies first (**D6.2–D6.3**). All three affected
 `await` fixtures pass with the rebuilt CLI (`lambda-activation-fixed-cli.log`).
 The final aggregate rerun passes **6590/6591**, with only the reproduced §29
 `edit_view_only` failure (`final-lambda-baseline.log`). Test262 passes
@@ -301,7 +301,7 @@ Acceptance requires all eleven target contracts, focused normal/forced-GC
 checks, the shared Lambda and Test262 gates, and no confirmed prior-workload
 regression. §29 already has a reproduced `edit_view_only` Lambda baseline
 failure, unvalidated Windows clock behavior, and a pre-existing class-cache
-discrepancy under **D8.4.1v2**. Keep those limits distinct from new regressions.
+discrepancy under **D7.4.1**. Keep those limits distinct from new regressions.
 
 ## 5. Accessor admission boundary
 
@@ -330,13 +330,13 @@ acceptance evidence. Canonical workloads and checksums are unchanged.
 The only new local helper type is `MvpLmdRegExpInput`; its constructor,
 destructor and offset methods replace repeated preparation inside existing
 RegExp helpers. No new runtime ABI helper is introduced. Activation policy
-applies to both languages (**D1.3v3**, **D5.1.1v3**); the retained stack is idle,
+applies to both languages (**D1.3**, **D6.1.1**); the retained stack is idle,
 has no live root range and adds at most 3 MiB of resident pages. The RA13 warm
-window remains 16. No conservative stack scanning is introduced (**D5.2–D5.3**).
+window remains 16. No conservative stack scanning is introduced (**D6.2–D6.3**).
 Class fields still use Lambda Maps and immutable shape transitions
-(**D3.4.3v5**, **D3.4.5**). The previously recorded cache discrepancy remains
+(**D3.4.3**, **D3.4.5**). The previously recorded cache discrepancy remains
 separate; this work does not expand the per-site constructor cache population
-(**D8.4.1v2**).
+(**D7.4.1**).
 
 Focused probes cover numeric/object/Symbol key conversion order, integer versus
 floating/string equality, nested constructors that expose `this`, Unicode and

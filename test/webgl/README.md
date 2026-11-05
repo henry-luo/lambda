@@ -22,7 +22,7 @@ make test-scene3d
 `Scene3dTest.WebGlVectorPaintRefreshesSnapshotsAndPreservesRetainedPixels` also
 uses `api.html`: vector paint runs before raster setup, unchanged reads retain
 the surface, and eight redraws preserve leased old pixels while retiring their
-generation under **D4.5.1v4 / D4.1.4v5** in the [formal design](../../doc/Lambda_Formal_Design.md).
+generation under **D5.5.1 / D5.1.4** in the [formal design](../../doc/Lambda_Formal_Design.md).
 
 `CanvasWebGlExportTest.PixelsAlphaAndEffectsReachEveryOutput` generates independent
 red/blue PNG references and checks 96 Canvas pairs across PNG/SVG/PDF, alpha

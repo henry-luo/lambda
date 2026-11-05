@@ -2,12 +2,12 @@
 
 **Date:** 2026-10-18; tuning proposal added 2026-10-29
 
-**Authority:** **S1.11**, **D1.3v3**, **D2.2.5**, **D5.2–D5.3**, **D6.2.2v2**, **D8.1.3v43**, **D8.2.3–D8.2.4v2**, **D8.4.1v2**.
+**Authority:** **S1.11**, **D1.3**, **D2.2.5**, **D6.2–D6.3**, **D7.2.2**, **D8.4.4**, **D8.2.3–D8.2.4**, **D7.4.1**.
 
 **Status:** implementation and qualification complete.
 
 Ordinary AST/AUTO and dynamic source consume shared MVP runtime operations under
-**D8.1.3v43**. The convergence record below qualifies the final candidate;
+**D8.4.4**. The convergence record below qualifies the final candidate;
 earlier dated slices record the incremental work and its historical controls. The
 [Fasta repair](#fasta-value-only-iterator-repair--2026-10-30) at the end qualifies
 a later source revision; the full-population table retains its named earlier
@@ -15,7 +15,7 @@ candidate and is not recomputed from mixed revisions.
 
 ## Audit
 
-The retained walker shares MVP semantic operations under **D8.1.3v43**.
+The retained walker shares MVP semantic operations under **D8.4.4**.
 Execution policy distinguishes ordinary Scripts/modules from dynamic source;
 there is one JS realm/operation contract over shared Lambda storage.
 
@@ -30,7 +30,7 @@ there is one JS realm/operation contract over shared Lambda storage.
 
 Shared physical storage does not imply Lambda language operations:
 JavaScript coercion, equality, reference mutation, TDZ and completion semantics
-remain JavaScript's (**S1.11**, **D1.3v3**). The appropriate reuse boundary is
+remain JavaScript's (**S1.11**, **D1.3**). The appropriate reuse boundary is
 physical storage/ownership and shared frontend facts, with explicit JS semantic
 operations.
 
@@ -254,7 +254,7 @@ ordinary Script/module execution, as the migration boundary above records.
    when its values already have planned live slots. A value must remain rooted
    while evaluating another operand that can allocate or reenter JS. Only
    proven non-allocating primitive operations may bypass that work
-   (**D5.3.3**, **D8.2.4v2**).
+   (**D6.3.3**, **D8.2.4**).
 
 4. **Share fast numeric and indexed kernels.** Preserve the existing Number
    fast heads, adding destination-owned result paths only where profiling shows
@@ -265,13 +265,13 @@ ordinary Script/module execution, as the migration boundary above records.
    eligibility only with evidence and preserve holes, descriptors, prototypes,
    receiver semantics, detachment and coercion through the shared fallback.
    Static keys and immutable plan facts are allowed; mutable per-site shape,
-   callee or method caches are forbidden by **D8.4.1v2**.
+   callee or method caches are forbidden by **D7.4.1**.
 
 5. **Trim remaining walker/call work using profiles.** Move
    `js_interp_loop_needs_per_iteration_env`'s AST fact/capture scans from loop
    entry to the shared immutable plan. It currently scans once per loop entry,
    not every iteration. Extend safe activation/environment elision through
-   the normal invoke kernel (**D6.2.2v2**), then split cold suspension/eval state
+   the normal invoke kernel (**D7.2.2**), then split cold suspension/eval state
    from the frequently copied frame if measured. Reuse the existing tuning
    [J2/J4/J6/J7 plan](Lambda_Impl_JS_Interp_Tune.md); its historical profile
    percentages and speed projections are not measurements of this build.
@@ -304,8 +304,8 @@ the controlled baseline and profiles exist.
   `utils/js_runtime_helper_audit.py` to remove unused native profile helpers,
   including indirect callback/import roots. A `js_*` name alone is not evidence
   of legacy code: shared primitive algorithms remain live and should stay.
-- The former **D8.1.3v42** profile distinction is superseded by
-  **D8.1.3v43**, revised with this working record and the generated index.
+- The former **D8.4.5** profile distinction is superseded by
+  **D8.4.4**, revised with this working record and the generated index.
   The ordered slices above record the proposal; the convergence section below
   records its implementation and qualification. JavaScript semantics remain
   separate from Lambda-language coercion/mutation (**S1.11**).
@@ -314,7 +314,7 @@ the controlled baseline and profiles exist.
 
 This slice implements shared scalar dispatch, Number temporary handling and
 the J2 loop-environment fact. The larger realm, object/call, local-slot and
-activation-window migrations remain outstanding. **D8.1.3v42** continues to
+activation-window migrations remain outstanding. **D8.4.5** continues to
 describe two operation profiles; no normative semantics or tier-selection
 rule changes in this slice.
 
@@ -323,18 +323,18 @@ rule changes in this slice.
   assignment maps its operator once and uses that same dispatch. Existing
   arithmetic, comparison and bitwise kernels remain the implementation;
   MVP object coercion, BigInt handling and realm-specific errors stay ahead
-  of the shared primitive tail (**S1.11**, **D8.1.3v42**).
+  of the shared primitive tail (**S1.11**, **D8.4.5**).
 - `js_binary_number_pair` admits only INT/FLOAT Numbers and non-reentrant
   numeric operators. Both AST profiles use it. A Number left operand owns
   its scalar payload locally while the right operand evaluates; a successful
   Number pair avoids an expression root window. A non-Number operand or
-  reference operator retains the rooted semantic path (**D2.2.5**, **D5.3.3**).
+  reference operator retains the rooted semantic path (**D2.2.5**, **D6.3.3**).
 - `js_ast_publish_extension_facts` seals the per-iteration-environment decision
   on the loop's `NameScope`. The interpreter reads it instead of rescanning
   AST function/eval/capture facts on every loop entry. The existing capture
   algorithm is moved, not duplicated; cached AST instances retain the same
   immutable fact. AST cache ABI is 2 for both cache request paths
-  (**D8.2.4v2**, **D8.4.1v2**).
+  (**D8.2.4**, **D7.4.1**).
 
 The realm-entry investigation confirmed that `mvp_lmd_program.cpp` already
 contains MIR-free ownership infrastructure, but library planning/instantiation
@@ -414,7 +414,7 @@ physical initialization, module-controller ownership and execution retirement.
 MIR still computes source-dependent iterator/RegExp/process optimization facts;
 the runtime consumes those facts, while open AST realms use conservative defaults.
 The physical setup implementation is shared, rather than copied into an AST lane
-(**D8.1.3v42**, **D8.2.3–D8.2.4v2**).
+(**D8.4.5**, **D8.2.3–D8.2.4**).
 
 Three existing consumers use the new boundary:
 
@@ -432,7 +432,7 @@ of the compiler file. Native helpers and AST wrappers use shared materialization
 generated functions supply their source-derived name and constructor-layout facts
 from MIR. AST wrapper names continue to come from the retained interpreter's
 callable metadata. This removes the former `LAMBDA_NO_MIR` class/realm exclusions
-without adding another evaluator or changing tier selection (**D8.1.3v42**).
+without adding another evaluator or changing tier selection (**D8.4.5**).
 
 Cross-realm qualification exposed a native-catch boundary defect: generic MVP
 errors had no observable native Error shape, and the property-ownership probe
@@ -441,7 +441,7 @@ assumed every map-tagged carrier had a shape. Native catch now reuses
 constructor before exposing the Map lane; ownership probing also rejects
 unshaped carriers. The detached typed-array reproduction and its eight Test262
 cases are retained in the evidence directory. No Test262 runner, allowlist or
-baseline is changed (**S1.11**, **D5.3**).
+baseline is changed (**S1.11**, **D6.3**).
 
 Callable ingress now resolves an AST function's defining realm before deciding
 whether to wrap it. Native AST callbacks retain their native operation profile
@@ -451,12 +451,12 @@ functions still bypass wrapper selection without a realm scan. Native Error
 carriers capture their creating realm's prototype through the existing traced
 property storage. This preserves both native-parent callback errors and native
 host errors created in an MVP realm when a later caller checks `instanceof`
-(**D8.1.3v42**, **D6.2.2v2**).
+(**D8.4.5**, **D7.2.2**).
 
 Realm slots remain registered exact roots, and retained Script ownership destroys
 the heap before the nominal metadata and AST source it can reference
-(**D5.3**, **D5.4.1**). No conservative stack scanning or inline caches were added
-(**D8.4.1v2**). This does not revise the formal distinction between native and MVP
+(**D6.3**, **D6.4.1**). No conservative stack scanning or inline caches were added
+(**D7.4.1**). This does not revise the formal distinction between native and MVP
 operation profiles: normal AST literals/calls still use the native profile, while
 child-realm source uses the existing MVP-backed AST host contract.
 
@@ -538,10 +538,10 @@ publication or completion of ordinary AST operation-profile migration.
 The candidate routes ordinary AST and AUTO execution through the same
 `JsInterpHostOps` contract as MVP dynamic source. Script/module slabs and
 promotion remain execution policy; objects, arrays, properties, coercion,
-classes, iterators and invocation use MVP operations (**D8.1.3v43**, **S1.11**).
+classes, iterators and invocation use MVP operations (**D8.4.4**, **S1.11**).
 An execution-owned `JsScript::runtime_ops` restores the defining realm for
 native callbacks, modules, async/generator resumptions and AUTO satellites;
-cached AST images contain no runtime pointer (**D8.2.4v2**, **D8.5.1v7**).
+cached AST images contain no runtime pointer (**D8.2.4**, **D8.3.5**).
 
 Boundary repairs retain public class `new.target`, share Symbol allocation and
 native reflection identity, apply the defining realm's primitive boxing once
@@ -549,7 +549,7 @@ through the invoke kernel, preserve class-owned `name` elements, synchronize
 global data stores with module slabs, and delete primitive properties through
 the shared boxing/descriptor path. Ordinary calls reuse the existing activation
 and numeric indexed writes reuse MVP array/typed-array kernels. No mutable
-per-site callee or shape cache is introduced (**D6.2.2v2**, **D8.4.1v2**).
+per-site callee or shape cache is introduced (**D7.2.2**, **D7.4.1**).
 
 The first controlled release comparison is diagnostic, before the later call
 and indexed-write changes. Seven alternating pairs match output on all eight
@@ -579,7 +579,7 @@ for the final candidate.
   oversized plans retain live cells. AUTO loop handoff keeps its live-cell path.
   Planned temporaries borrow an exact activation root window, own scalar homes,
   and retain snapshots across RHS mutation, GC and coercion callbacks
-  (**D5.3.3**, **D8.2.4v2**).
+  (**D6.3.3**, **D8.2.4**).
 - Shared Number heads, indexed dense/typed-array operations, literal reuse and
   guarded string append remain eligible with MVP operations. Ordinary native
   AST calls reuse the invoke kernel's activation roots. Native constructor
@@ -602,7 +602,7 @@ for the final candidate.
 - Release profiles show binding lookup and call/root work in numeric workloads.
   They do not establish frame copying as a dominant cost. The proposal's
   conditional J4 cold-frame split is therefore not admitted; no speculative
-  frame rewrite or mutable per-site cache is added (**D8.4.1v2**).
+  frame rewrite or mutable per-site cache is added (**D7.4.1**).
 
 
 ### Final runtime qualification — 2026-10-30
@@ -676,7 +676,7 @@ The existing `js_has_own_property` already provides passive presence, exotic
 handling and virtual native metadata without constructing a guest descriptor.
 Reuse it for the boolean operation; keep proxy Has dispatch first and retain the
 prototype walk on a miss. Explicit descriptor requests keep the descriptor path
-(**D8.1.3v43**, **D6.2.2v2**).
+(**D8.4.4**, **D7.2.2**).
 
 `NativePresenceQueriesDoNotAllocateGuestDescriptors` fails before this repair
 and passes afterward. It queries an accessor without invoking its getter and
@@ -709,7 +709,7 @@ the parked caller activation. Delegate to the existing
 retires its numeric window and preserves the returned scalar. An optional
 import program retains the bridge's exact native integer conversion and
 callable identity service. This reuses one ownership kernel rather than adding
-a second restoration scheme (**D5.3.3**, **D6.2.2v2**, **D8.1.3v43**).
+a second restoration scheme (**D6.3.3**, **D7.2.2**, **D8.4.4**).
 
 `DelegatedCallsRetireArgumentHomes` exercises 40,000 zipped steps with fractional
 yields and signed-zero returns in AST and MIR. The reduced jq tree and the
@@ -731,7 +731,7 @@ Extract MVP's existing synchronous delegation loop into
 delegating body now drives the protocol on its own activation. The AST adapter
 translates its return/throw completion signals at that boundary; cached `next`,
 live abrupt-method lookup, result-object identity and precise roots retain the
-same shared protocol (**D5.3.3**, **D6.2.2v2**, **D8.1.3v43**). Remove the obsolete
+same shared protocol (**D6.3.3**, **D7.2.2**, **D8.4.4**). Remove the obsolete
 hosted branches from the external recursive driver.
 
 `NestedDelegationUsesTheDelegatingActivation` passes in AST and MIR and checks
@@ -749,7 +749,7 @@ Recognizing a return signal queried the throw marker first; creating that
 previously absent marker could collect the temporary return signal. Signal
 recognition now reads the existing realm slot without allocating. An absent
 marker cannot identify a signal of that kind. Creation still uses the rooted
-shared signal constructor (**D5.3.3**). The failing forced-GC result is retained
+shared signal constructor (**D6.3.3**). The failing forced-GC result is retained
 in `gc_delegate_missing_return_before.log`. All **15/15** forced-GC generator
 cases pass afterward (`gc_delegate_marker_after.log`), and the final runtime
 gates above include this ownership repair.
@@ -768,14 +768,14 @@ MVP receivers. Pass its existing `JsArrayOps` for length, HasProperty/Get,
 callability, errors and Call. Extract the common MVP callback adapter before its
 third use; arrays, collections and typed arrays now share it. Ordinary dense
 reads retain the shared storage admission and trace events, and every iteration
-revalidates after callbacks (**D8.1.3v43**, **D6.2.2v2**).
+revalidates after callbacks (**D8.4.4**, **D7.2.2**).
 
 Own the initial accumulator before observable length access. The
 `SharedReduceOwnsInitialValueBeforeObservableLength` regression supplies an
 unrooted native argument array, drops the external initial-value root, and
 collects in both length/index getters and the callback. Both reduce directions
 pass in AST and MIR with forced collection and freed-memory poisoning
-(**D5.3.3**).
+(**D6.3.3**).
 
 Intermediate seven-pair isolation against the preceding candidate recovered
 4.35% through property operations and about 5.34% with the callback operation
@@ -898,7 +898,7 @@ and binding work; its measured loss is not evidence for a cold-frame rewrite.
 copying as a dominant cost, so the proposal's conditional cold-state split is
 not implemented. The completed immutable local/temporary plans and invoke
 changes remain bounded by their precise-root and observation rules
-(**D5.3.3**, **D6.2.2v2**, **D8.1.3v43**, **D8.4.1v2**).
+(**D6.3.3**, **D7.2.2**, **D8.4.4**, **D7.4.1**).
 
 Inlined copies remain attributed to enclosing walker symbols; these samples
 do not prove that all copy cost is absent. Symbol-name categories are coarse
@@ -919,7 +919,7 @@ closure, gates, complete captures, profile provenance and document checks.
 ### Fasta value-only iterator repair — 2026-10-30
 
 **Status:** implemented and qualified for this regression. Authority:
-**D8.1.3v43**, **D6.2.2v2**, **D5.3.3**, **D8.4.1v2**.
+**D8.4.4**, **D7.2.2**, **D6.3.3**, **D7.4.1**.
 
 The preceding full-population Fasta ratio of 1.9604 belongs to its pinned
 `e3f61347` candidate. A fresh seven-pair replay reproduces **1.9722** against
@@ -1011,7 +1011,7 @@ and `final_audit.json`.
 
 ## Legacy interpreter retirement — 2026-10-30
 
-**Authority: D8.1.3v43, D6.2.2v2, D5.3.3.** This is removal of superseded
+**Authority: D8.4.4, D7.2.2, D6.3.3.** This is removal of superseded
 implementation paths under the existing shared-operation contract; no semantic
 or tier-selection ruling changes.
 

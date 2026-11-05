@@ -71,7 +71,7 @@ def expect_static_runtime_providers(module, platform_name: str) -> None:
             if f'"{provider}",' not in generated:
                 fail(f"{platform_name} runtime host omitted static provider {provider}")
         if option not in generated:
-            fail(f"{platform_name} runtime test host omitted the D7.3.6 export allowlist")
+            fail(f"{platform_name} runtime test host omitted the D9.4.6 export allowlist")
     for dependencies in (["lambda-data"], ["lambda-rt"]):
         static_host = generate_validation_host(module, platform_name, dependencies)
         if 'lambda_host_exports.' in static_host:
@@ -142,7 +142,7 @@ def expect_module_only_libraries(module) -> None:
 
 
 def expect_host_export_list(module) -> None:
-    # D7.3.6: a Jube-capable host exports only the allowlist, in its platform's
+    # D9.4.6: a Jube-capable host exports only the allowlist, in its platform's
     # linker format; a host without the Jube loader exports nothing.
     listed = module.read_host_export_list()
     if len(listed) != len(set(listed)):

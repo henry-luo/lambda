@@ -1,5 +1,5 @@
-// A group is one image atom with recoverable member sources and an embedded SVG (D7.2.5).
-import lambda.editor.mod_step
+// A group is one image atom with recoverable member sources and an embedded SVG (D10.2.1).
+import lambda.editor.core.step
 import objects: .mod_objects
 
 pub let key = 'data-word-group'

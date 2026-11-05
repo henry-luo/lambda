@@ -1,10 +1,11 @@
-// Table appearance is source metadata; CSS paints the same options on screen and in exports (S1.4, D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_transaction
-import format: lambda.editor.mod_inline_format
+// Table appearance is source metadata; CSS paints the same options on screen and in exports (S1.4, D10.2.1).
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.transaction
+import format: lambda.editor.core.inline_format
 import colors: lambda.ui.core.component
 import tables: .mod_table
+import design: lambda.editor.table.design
 
 pub let options = [
     {id:"header",label:"Header Row",attr:'data-word-header-row'},
@@ -14,17 +15,7 @@ pub let options = [
     {id:"last",label:"Last Column",attr:'data-word-last-column'},
     {id:"bandedColumns",label:"Banded Columns",attr:'data-word-banded-columns'}]
 pub let attributes = ['data-word-table-style',*[for (entry in options) entry.attr]]
-pub let styles = [
-    {id:"grid",label:"Simple grid",head:"#edf3f6",ink:"#294f70",band:"#f1f5f9",border:"#cbd5e1"},
-    {id:"soft",label:"Banded blue",head:"#dbeafe",ink:"#1e40af",band:"#eff6ff",border:"#bfdbfe"},
-    {id:"contrast",label:"Dark header",head:"#294f70",ink:"#ffffff",band:"#edf3f8",border:"#b8c9d9"},
-    {id:"plain",label:"Minimal lines",head:"#ffffff",ink:"#334155",band:"#f8fafc",border:"#cbd5e1",minimal:true},
-    {id:"blue",label:"Blue accent",head:"#2563eb",ink:"#ffffff",band:"#eff6ff",border:"#93c5fd"},
-    {id:"teal",label:"Teal accent",head:"#0f766e",ink:"#ffffff",band:"#f0fdfa",border:"#99d5ce"},
-    {id:"purple",label:"Purple accent",head:"#7c3aed",ink:"#ffffff",band:"#f5f3ff",border:"#c4b5fd"},
-    {id:"orange",label:"Orange accent",head:"#c2410c",ink:"#ffffff",band:"#fff7ed",border:"#fdba74"},
-    {id:"gold",label:"Gold accent",head:"#facc15",ink:"#713f12",band:"#fefce8",border:"#e9cf6a"},
-    {id:"rose",label:"Rose accent",head:"#be185d",ink:"#ffffff",band:"#fff1f2",border:"#f9a8d4"}]
+pub let styles = design.styles
 pub let pen = {style:"solid",width:0.75,color:"#64748b"}
 pub let palette = [{value:"none",label:"No Color"},{value:"#ffffff",label:"White"},{value:"#eff6ff",label:"Light blue"},
     {value:"#dbeafe",label:"Blue"},{value:"#f0fdfa",label:"Light teal"},{value:"#f5f3ff",label:"Light purple"},
@@ -32,7 +23,7 @@ pub let palette = [{value:"none",label:"No Color"},{value:"#ffffff",label:"White
     {value:"#e2e8f0",label:"Gray"},{value:"#64748b",label:"Gray ink"},{value:"#2563eb",label:"Accent blue"},{value:"#334155",label:"Slate"}]
 pub fn color_options(current,transparent=true) => [*[for (entry in palette where transparent or entry.value!="none") entry],
     *if (colors.hex_color(current) and not contains([for (entry in palette) entry.value],current)) [{value:current,label:current}] else []]
-pub fn style(id) => [for (entry in styles where entry.id==id) entry][0]
+pub let style = design.style
 pub fn settings(n) {
     let id = attrs_get(n.attrs,'data-word-table-style') or "grid"
     let first_row = [for (entry in descendants(n) where entry.node.tag=='tr') entry.node][0]
@@ -66,14 +57,7 @@ pub fn shade_transaction(editor,cells,p) map^ {
         format.css_set(format.css_set(attrs_get(node_at(tx.doc_after,cell.path).attrs,'style'),"background",null),
             "background-color",if (p.color=="none") null else p.color))))
 }
-pub fn cell_paint(p,row,col,rows,cols) {
-    let s = style(p.style) or styles[0]
-    let header = p.header and row==0
-    let emphasized = (p.total and row==rows-1) or (p.first and col==0) or (p.last and col==cols-1)
-    let band = (p.bandedRows and row%2==1) or (p.bandedColumns and col%2==1);
-    {fill:if (header) s.head else if (band or emphasized) s.band else "#ffffff",
-        color:if (header) s.ink else "#334155",weight:if (header or emphasized) 600 else 400,border:s.border}
-}
+pub let cell_paint = design.cell_paint
 pub fn thumbnail(p) => <svg xmlns:"http://www.w3.org/2000/svg",width:68,height:48,viewBox:"0 0 68 48",'aria-hidden':"true",
     *[for (r in 0 to 3) for (c in 0 to 3,let paint=cell_paint(p,r,c,4,4)) <g
         <rect x:2+c*16,y:2+r*11,width:16,height:11,fill:paint.fill,stroke:paint.border,'stroke-width':0.6>

@@ -12,6 +12,7 @@
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/template_registry.h"
+#include "../lambda/runtime/lambda-error.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
@@ -76,6 +77,16 @@ extern "C" bool heap_try_register_gc_root_range(uint64_t*, int) { return true; }
 extern "C" void heap_unregister_gc_root_range(uint64_t*) {}
 extern "C" bool heap_register_gc_root_range_for(Context*, uint64_t*, int) { return true; }
 extern "C" void heap_unregister_gc_root_range_for(Context*, uint64_t*) {}
+// security_context's path cache uses the same non-collecting fixture root hooks.
+extern "C" bool heap_register_gc_root_for(Context* owner, uint64_t* slot) {
+    return heap_register_gc_root_range_for(owner, slot, 1);
+}
+extern "C" void heap_unregister_gc_root_for(Context* owner, uint64_t* slot) {
+    heap_unregister_gc_root_range_for(owner, slot);
+}
+extern "C" void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
+    ADD_FAILURE() << "unexpected standalone runtime error " << (int)code << ": " << format;
+}
 
 TEST(SourcePosBridgeC, PathInitFreeIsSafe) {
     SourcePathC p;

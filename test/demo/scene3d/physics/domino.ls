@@ -11,4 +11,4 @@ ui.page("domino",scenes.domino(),{
          point:[scenes.domino_position(16)[0],1.58,scenes.domino_position(16)[2]]}]}}],
     labels:["TILES DOWN / 32","CONTACT STARTS","FASTEST TILE"],
     note:"Every tile is a separate rigid body. A point impulse tips the first tile; the remaining motion comes from collisions and gravity."
-})
+})^

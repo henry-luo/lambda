@@ -1,6 +1,6 @@
 // Original sample notebook; the first block of each note supplies its title.
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.step
 import model: .mod_model
 
 fn heading(words) => node('h1',[text(words)])

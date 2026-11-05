@@ -2532,7 +2532,7 @@
       ]
     },
     "lambda-wasm": {
-      "description": "D7.1.7v6 browser WASM embedding: synchronous AST evaluation and in-memory REPL; runtime separation in progress",
+      "description": "D9.2.3 browser WASM embedding: synchronous AST evaluation and in-memory REPL; runtime separation in progress",
       "output": "build/wasm/lambda-wasm.mjs",
       "build_dir": "temp/wasm-build",
       "source_files": [
@@ -2932,6 +2932,7 @@
   "test": {
     "output_dir": "test_output",
     "layout_baseline_suites": [
+      "wpt-input-events",
       "form",
       "wpt-css-box",
       "wpt-css-text",
@@ -4171,7 +4172,10 @@
           {
             "source": "test/test_scene3d_unit_gtest.cpp",
             "name": "Scene3D Native Unit Tests",
-            "case_workers": 2,
+            "case_workers": 4,
+            "case_workers_env": "LAMBDA_SCENE3D_TEST_JOBS",
+            "case_batch_size": 32,
+            "case_batch_size_env": "LAMBDA_SCENE3D_TEST_BATCH_SIZE",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -4243,11 +4247,11 @@
             "parallel": false
           },
           {
-            "source": "test/test_radiant_text_query_gtest.cpp",
+            "source": "test/test_radiant_document_gtest.cpp",
             "additional_sources": [
               "test/test_window_fullscreen_gtest.cpp"
             ],
-            "name": "Radiant Text Query Tests",
+            "name": "Radiant Document Tests",
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -4282,7 +4286,7 @@
                 "WebKit"
               ]
             },
-            "binary": "test_radiant_text_query_gtest.exe",
+            "binary": "test_radiant_document_gtest.exe",
             "icon": "\ud83c\udfa8"
           },
           {
@@ -4791,7 +4795,7 @@
           {
             "source": "test/wpt/test_wpt_input_events_gtest.cpp",
             "name": "WPT Input Events Tests",
-            "category": "baseline",
+            "category": "extended",
             "parallel": true,
             "worker_slots": 3,
             "worker_args": [
@@ -4848,44 +4852,8 @@
             "icon": "\ud83d\uddb1\ufe0f",
             "runner_args": [
               "--suite",
-              "baseline,dtna,timeline,wired,clay,blade"
+              "baseline,dtna,timeline,wired,clay,blade,view,dom"
             ]
-          },
-          {
-            "source": "test/test_ui_automation_gtest.cpp",
-            "name": "Radiant View UI Fixtures",
-            "worker_slots": 1,
-            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
-            "runner_only": true,
-            "runner_name": "test_radiant_view_ui_gtest",
-            "runner_args": [
-              "--suite",
-              "view"
-            ],
-            "binary": "test_ui_automation_gtest.exe",
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "icon": "\ud83d\uddb1\ufe0f"
-          },
-          {
-            "source": "test/test_ui_automation_gtest.cpp",
-            "name": "DOM UI Integration Tests",
-            "worker_slots": 2,
-            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
-            "runner_only": true,
-            "runner_name": "test_dom_ui_gtest",
-            "runner_args": [
-              "--suite",
-              "dom"
-            ],
-            "binary": "test_ui_automation_gtest.exe",
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "icon": "\ud83d\uddb1\ufe0f"
           },
           {
             "source": "test/test_page_load_gtest.cpp",
@@ -4916,7 +4884,7 @@
             "additional_sources": [
               "test/test_radiant_view_scene3d.cpp"
             ],
-            "case_workers": 6,
+            "case_workers": 7,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [
               "--radiant-case-worker"

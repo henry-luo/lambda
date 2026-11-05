@@ -13,6 +13,8 @@
 
 #include "../lib/tagged.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/concurrency.h"
+#include "../lambda/runtime/runtime-state.h"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/hash.h"
@@ -21,6 +23,7 @@
 #include "../lib/file.h"
 #include "../lib/str.h"
 #include "../lib/time_util.h"
+#include "../lib/uv_loop.h"
 #include <pthread.h>
 #include "../lambda/io/image_io.h"
 #include <stdio.h>
@@ -30,6 +33,18 @@
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_mutex_t g_render_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+
+struct RenderExportRetirement {
+    RenderExportSession session;
+    RenderExportRetirement* next;
+    pthread_t owner_thread;
+    bool loop_lease;
+    Runtime* borrowed_runtime;
+};
+
+// Export evaluators and their deferred owners stay on their original thread.
+static thread_local RenderExportRetirement* pending_export_retirements;
+static thread_local bool draining_export_retirements;
 
 bool render_paint_raster_resource(PaintList* destination, UiContext* ui, const RenderContext* source,
         void (*painter)(RasterRenderContext*, void*), void* data) {
@@ -455,6 +470,30 @@ static bool render_export_session_begin_internal(
         RenderExportDocumentLoader loader, void* request, UiContext* shared_ui = nullptr) {
     if (!session || !loader) return false;
     memset(session, 0, sizeof(*session));
+    if (!shared_ui) {
+        // Reserve the handoff before acquiring resources: close may run under OOM.
+        session->deferred_owner = lam::own((RenderExportRetirement*)mem_calloc(
+            1, sizeof(RenderExportRetirement), MEM_CAT_RENDER));
+        if (!session->deferred_owner) return false;
+        session->deferred_owner->owner_thread = pthread_self();
+        if (!lambda_uv_host_lease_acquire()) {
+            lam::free_owned(session->deferred_owner);
+            log_error("export-retirement: shared loop is closing");
+            return false;
+        }
+        session->deferred_owner->loop_lease = true;
+        // Package layout can borrow the current evaluator without attaching it to the DOM.
+        Runtime* caller = context ? context->runtime : nullptr;
+        if (caller) {
+            if (!runtime_borrow_acquire(caller)) {
+                lambda_uv_host_lease_release();
+                lam::free_owned(session->deferred_owner);
+                log_error("export-retirement: caller runtime cannot accept a native borrower");
+                return false;
+            }
+            session->deferred_owner->borrowed_runtime = caller;
+        }
+    }
 
     bool auto_width = viewport_width == 0;
     bool auto_height = viewport_height == 0;
@@ -485,12 +524,14 @@ static bool render_export_session_begin_internal(
     }
     if (!session->ui_context) {
         log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
+        render_export_session_finish(session);
         return false;
     }
     if (!shared_ui && ui_context_init(session->ui_context, true, session->device_scale) != 0) {
         log_error("[EXPORT_SESSION] Failed to initialize headless UI context");
         lam::free_owned(session->owned_ui_context);
         session->ui_context = nullptr;
+        render_export_session_finish(session);
         return false;
     }
     ui_context_set_device_scale(session->ui_context, session->device_scale, session->device_scale);
@@ -512,7 +553,7 @@ static bool render_export_session_begin_internal(
     session->base_url = lam::own(get_current_dir());
     if (!session->base_url) {
         log_error("[EXPORT_SESSION] Could not resolve the current directory");
-        render_export_session_end(session);
+        render_export_session_finish(session);
         return false;
     }
 
@@ -523,7 +564,7 @@ static bool render_export_session_begin_internal(
     }
     if (!session->document) {
         log_error("[EXPORT_SESSION] Could not load export document");
-        render_export_session_end(session);
+        render_export_session_finish(session);
         return false;
     }
 
@@ -531,7 +572,7 @@ static bool render_export_session_begin_internal(
     session->ui_context->document = session->document;
     // exports sample the same initial CSS animation timeline as headless layout.
     if (!radiant_document_ensure_state(session->document, "render_export_session")) {
-        render_export_session_end(session);
+        render_export_session_finish(session);
         return false;
     }
     if (session->document->services.cached_css_engine) {
@@ -557,7 +598,7 @@ static bool render_export_session_begin_internal(
             // Export errors are user output and remain visible when diagnostic logging is disabled.
             fputs("Error: paged layout: ", stderr); fputs(reason, stderr); fputc('\n', stderr);
             render_paged_origin_error(diagnostic);
-            render_export_session_end(session);
+            render_export_session_finish(session);
             return false;
         }
         return true;
@@ -574,7 +615,7 @@ static bool render_export_session_begin_internal(
         if (status != VIEW_MODEL_OK) {
             log_error("[EXPORT_PAGE_GEOMETRY] Could not resolve @page size and margins: status=%u",
                 (unsigned)status);
-            render_export_session_end(session);
+            render_export_session_finish(session);
             return false;
         }
         session->has_page_geometry = true;
@@ -662,19 +703,105 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
         render_export_load_transform_document, &request);
 }
 
-void render_export_session_end(RenderExportSession* session) {
-    if (!session) return;
+static bool render_export_session_end_mode(RenderExportSession* session, bool wait_for_tasks,
+                                           RenderExportRetirement* owner) {
+    if (!session) return true;
+    if (owner && !pthread_equal(owner->owner_thread, pthread_self())) {
+        log_error("export-retirement: close requested on a different owner thread");
+        return false;
+    }
+    // Destruction callbacks cannot transfer an owner that the outer close still uses.
+    if (session->closing) return false;
+    session->closing = true;
+    if (!session->ui_closed) {
+        if (session->owned_ui_context && !session->owned_ui_context->destroy(wait_for_tasks)) {
+            // A partially retired context still owns its document and base URL.
+            session->document = session->owned_ui_context->document;
+            session->paged_view = session->owned_ui_context->paged_view;
+            session->closing = false;
+            return false;
+        }
+        session->ui_closed = true;
+    }
+    if (owner && owner->borrowed_runtime) {
+        Runtime* runtime = owner->borrowed_runtime;
+        EvalContext* borrower = runtime_get_eval_context(runtime);
+        if (!borrower || !radiant_eval_context_switch(borrower) || !runtime_borrow_release(runtime)) {
+            session->closing = false;
+            return false;
+        }
+        owner->borrowed_runtime = nullptr;
+    }
     if (session->base_url) {
         url_destroy(session->base_url);
         session->base_url = nullptr;
     }
     if (session->owned_ui_context) {
-        ui_context_cleanup(session->owned_ui_context);
         lam::free_owned(session->owned_ui_context);
     }
+    bool loop_lease = session->deferred_owner && session->deferred_owner->loop_lease;
+    lam::free_owned(session->deferred_owner);
+    if (loop_lease && !lambda_uv_host_lease_release())
+        log_error("export-retirement: shared loop lease was lost");
     session->ui_context = nullptr;
     session->document = nullptr;
     session->paged_view = nullptr;
+    session->closing = false;
+    return true;
+}
+
+bool render_export_session_end(RenderExportSession* session) {
+    return render_export_session_end_mode(session, true,
+        session ? session->deferred_owner.get() : nullptr);
+}
+
+bool render_export_session_finish(RenderExportSession* session) {
+    if (session && session->closing) return false;
+    if (render_export_session_end_mode(session, false,
+            session ? session->deferred_owner.get() : nullptr)) return true;
+    RenderExportRetirement* owner = session->deferred_owner.get();
+    if (!owner) {
+        log_error("export-retirement: no reserved owner for refused cleanup");
+        return false;
+    }
+    if (!pthread_equal(owner->owner_thread, pthread_self())) return false;
+    // Transfer the shell as well as its URL; the caller's stack can now unwind.
+    owner->session = *session;
+    owner->session.deferred_owner = nullptr;
+    owner->next = pending_export_retirements;
+    pending_export_retirements = owner;
+    memset(session, 0, sizeof(*session));
+    log_warn("export-retirement: cleanup deferred to an owner-thread boundary");
+    return false;
+}
+
+size_t render_export_pending_count() {
+    size_t count = 0;
+    for (RenderExportRetirement* owner = pending_export_retirements; owner; owner = owner->next) count++;
+    return count;
+}
+
+bool render_export_retire_pending() {
+    // A callback may enqueue another retirement, but may not reenter this walk.
+    if (draining_export_retirements || lambda_uv_is_running() || activation_current() ||
+            (context && context->execution_depth)) return false;
+    draining_export_retirements = true;
+    RenderExportRetirement* owner = pending_export_retirements;
+    pending_export_retirements = nullptr;
+    while (owner) {
+        RenderExportRetirement* next = owner->next;
+        if (render_export_session_end_mode(&owner->session, false, owner)) {
+            if (owner->loop_lease && !lambda_uv_host_lease_release())
+                log_error("export-retirement: shared loop lease was lost");
+            mem_free(owner);
+        } else {
+            owner->next = pending_export_retirements;
+            pending_export_retirements = owner;
+        }
+        owner = next;
+    }
+    draining_export_retirements = false;
+    return pending_export_retirements == nullptr;
 }
 
 static const char* render_output_path_trace_target(RenderOutputKind kind) {
@@ -1106,7 +1233,7 @@ bool render_paged_window_compose(UiContext* ui) {
         if (tree) view_tree_secondary_release(doc, tree);
         return false;
     }
-    // publish after composition succeeds; the registry owns edition allocations (D4.5.1v4).
+    // publish after composition succeeds; the registry owns edition allocations (D5.5.1).
     if (ui->paged_view) view_tree_secondary_release(doc, ui->paged_view);
     ui->paged_view = lam::up(tree);
     render_paged_window_scroll(ui, ui->paged_scroll_x, ui->paged_scroll_y);
@@ -1166,7 +1293,7 @@ static ImageSurface* render_secondary_snapshot(ViewTree* tree, const ViewPageBox
     OffscreenRenderArenas arenas;
     if (!arenas.init("render.paged.snapshot", "render.paged.snapshot.list", "render.paged.snapshot.scratch")) return nullptr;
     PaintList paint = {}; paint_list_init(&paint, nullptr);
-    // SVG stops, dashes and captured metadata must survive recording through replay (D4.5.1v4).
+    // SVG stops, dashes and captured metadata must survive recording through replay (D5.5.1).
     DisplayList list = {}; dl_init(&list, arenas.list_arena);
     ImageSurface* surface = nullptr;
     RdtLogicalRect bounds = {};
@@ -2258,7 +2385,7 @@ static int render_output_paged_file(RenderOutputTarget* target,
         }
     }
     if (pool) mem_pool_destroy(pool);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return ok ? 0 : failed(error);
 }
 
@@ -2341,7 +2468,7 @@ int render_batch_export(UiContext* ui, const char* source, const char* filename,
             pdf ? 800 : 1200, pdf ? 1200 : 800, 1, device_scale, raster, pdf, false,
             render_export_load_html_document, &request, ui)) return 1;
     int result = render_export_session_to_target(&session, &target);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -2356,7 +2483,7 @@ int render_html_source_to_output_target(const char* html_source, RenderOutputTar
         800, 600, target->output_scale, target->device_scale, raster, target->kind == RENDER_OUTPUT_PDF,
         false, render_export_load_html_source, &request)) return 1;
     int result = render_export_session_to_target(&session, target);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 

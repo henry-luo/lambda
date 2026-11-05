@@ -1,5 +1,5 @@
 // RAD07-L3: generated math keeps fonts after authored HTML is sanitized.
-import lambda.edit.view
+import lambda.editor.format.view
 fn shown(items) any^ => format(items, 'html')^
 fn md_block(src) any^ => [for (c in ((content([for (c in ((content(parse(src, 'markdown')^)) ^ { [] }) where ((c is element and name(c) == 'body') ^ { false })) c][0])) ^ { [] }) where c is element) c][0]
 // Authored styles and a lookalike slot cannot replace the generated font resource.

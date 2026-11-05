@@ -182,7 +182,7 @@ bool view_tree_model_restore(ViewTree* tree, ViewModelCheckpoint* checkpoint) {
     }
     cursor = 0;
     while (hashmap_iter(checkpoint->created_states, &cursor, &item)) hashmap_delete(model->source_states, item);
-    // never reuse a discarded node ID within a layout generation (D4.5.1v4).
+    // never reuse a discarded node ID within a layout generation (D5.5.1).
     for (size_t i = checkpoint->node_id_count; i < model->node_id_count; i++) model->nodes.get()[i] = nullptr;
     for (size_t i = checkpoint->page_count; i < model->page_count; i++) model->pages.get()[i] = nullptr;
     model->node_count = checkpoint->node_count;
@@ -509,7 +509,7 @@ bool view_tree_set_grid_track_values(ViewTree* tree, DomNode* source,
     if (!text) return false;
     memcpy(text, rows, row_size);
     memcpy(text + row_size, columns, column_size);
-    // rollback and leased editions retain the prior arena payload until their generation retires (D4.5.1v4).
+    // rollback and leased editions retain the prior arena payload until their generation retires (D5.5.1).
     state->grid_used_rows = lam::up<const char>(text);
     state->grid_used_columns = lam::up<const char>(text + row_size);
     return true;

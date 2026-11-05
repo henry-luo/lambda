@@ -1,4 +1,4 @@
-// DOCX writing interprets data; names never become source (S1.8, D7.2.4v4).
+// DOCX writing interprets data; names never become source (S1.8, D9.3.4).
 import c: .common
 import xml: lambda.doc.xml
 pub let R = c.R

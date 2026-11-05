@@ -1,11 +1,12 @@
+import typography: lambda.doc.typography
 // Home ribbon formatting that the shared editor commands do not cover (Word Home tab).
 // Pure model helpers: mod_model selects the target blocks and applies the transactions.
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import format: lambda.editor.mod_inline_format
-import text_format: ~~.mod_text_format
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import format: lambda.editor.core.inline_format
+import text_format: lambda.ui.workspace.text_format
 import review: .mod_review
 
 pub let font_sizes = text_format.font_sizes
@@ -19,7 +20,7 @@ pub let shading_colors = text_format.shading_colors
 pub let defaults = text_format.defaults
 pub let cases = text_format.cases
 pub fn color_value(value) any^ => text_format.color_value(value)
-pub fn font_step(size,grow) any^ => text_format.font_step(size,grow)
+pub fn font_step(size,grow) any^ => typography.font_step(size,grow)
 
 fn case_pos(p,items) any^ {
     let item = [for (i in items where ((path_equal(i.path,p.path)) ^ { false })) i][0];
@@ -35,7 +36,7 @@ pub fn case_transaction(editor,mode) map^ {
         let items = reduce([{parent:null,state:null,items:[]},*entries],(acc,e)=>{
             let parent = parent_path(e.path)
             let start = if (acc.parent!=null and path_equal(acc.parent,parent)) acc.state else {word:true,sentence:true}
-            let out = text_format.case_text(slice(e.leaf.text,e.seg.from,e.seg.to),mode,start);
+            let out = typography.case_text(slice(e.leaf.text,e.seg.from,e.seg.to),mode,start);
             {parent:parent,state:{word:out.word,sentence:out.sentence},items:[*acc.items,{path:e.path,marks:e.leaf.marks,to:e.seg.to,
                 end:e.seg.from+len(out.text),old:e.leaf.text,text:slice(e.leaf.text,0,e.seg.from) ++ out.text ++ slice(e.leaf.text,e.seg.to)}]}
         }).items

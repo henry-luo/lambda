@@ -51,7 +51,7 @@ extern "C" bool ast_type_is_array_contract(Type* type) {
     return lambda_array_contract_info(type, &info);
 }
 
-// D4.4.4v4: an outcome/occurrence wrapper can retain a mutable member.
+// D5.4.4: an outcome/occurrence wrapper can retain a mutable member.
 // Unresolved binders stay conservative; scalar-only unions need no mark.
 static bool ast_type_may_be_container_inner(Type* type, int depth) {
     if (!type || depth > 32) return true;
@@ -1563,7 +1563,7 @@ AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id) {
 }
 
 
-// adopted values and fields must walk in the same order (D3.2.4v4)
+// adopted values and fields must walk in the same order (D4.2.5)
 extern "C" bool ast_map_literal_keys_follow_contract(AstMapNode* map_node,
         TypeMap* expected) {
     // a plain map cannot acquire nominal identity through layout adoption (S11.3.1v2)

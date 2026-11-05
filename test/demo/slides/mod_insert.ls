@@ -1,16 +1,17 @@
-// S1.4 / D7.2.5: retained Insert settings lower to ordinary authored slide objects.
+// S1.4 / D10.2.1: retained Insert settings lower to ordinary authored slide objects.
 import m: .mod_model
 import data: .mod_insert_data
 import c: lambda.slide.common
-import doc: lambda.editor.mod_doc
-import commands: lambda.editor.mod_commands
-import html: lambda.edit.html
-import charts: ~~.word.mod_chart
-import smartart: ~~.word.mod_smartart
-import wordart: ~~.word.mod_wordart
-import shapes: ~~.word.mod_shapes
-import equations: ~~.word.mod_equation
-import tables: ~~.word.mod_table_design
+import doc: lambda.editor.core.doc
+import commands: lambda.editor.core.commands
+import html: lambda.editor.format.html
+import charts: lambda.editor.graphics.chart
+import dimensions: lambda.editor.graphics.dimensions
+import smartart: lambda.editor.graphics.diagram
+import wordart: lambda.editor.graphics.wordart
+import shapes: lambda.editor.graphics.shapes
+import equations: lambda.editor.math.render
+import tables: lambda.editor.table.design
 
 pub fn settings(node) any^ {
     let saved = node.metadata.slide_insert;
@@ -127,21 +128,21 @@ pub fn build_object(st,kind,params) element^ {
         else <image x:st.plan.width*0.2,y:st.plan.height*0.18,width:st.plan.width*0.6,height:st.plan.height*0.6,
             src:src,fit:symbol(p.fit),*:authored(kind,p),class:"slides-insert-" ++ kind,marker(kind,[],false)>
     }
-    else if (kind == "chart") frame(st,kind,p,[svg(charts.graphic(p)^)],p.width,p.height)
+    else if (kind == "chart") frame(st,kind,p,[svg(charts.graphic(p,dimensions.office,"Slides")^)],p.width,p.height)
     else if (kind == "smartart") {
-        let checked = smartart.parameters(p)^;
+        let checked = smartart.parameters(p,dimensions.office,"Slides")^;
         frame(st,kind,p,[svg(smartart.graphic(checked))],p.width,p.height)
     }
     else if (kind == "wordart") {
-        let checked = wordart.parameters(p)^;
+        let checked = wordart.parameters(p,wordart.office_limits,"Slides")^;
         frame(st,kind,p,[svg(wordart.graphic(checked,p.graphic_id ++ "-"))],p.width,p.height)
     }
     else if (kind == "shape") {
-        let checked = shapes.parameters(p)^;
+        let checked = shapes.parameters(p,dimensions.office,"Slides")^;
         frame(st,kind,p,[svg(shapes.graphic(checked,p.graphic_id ++ "-"))],p.width,p.height)
     }
     else if (kind == "equation") {
-        let measured = equations.render(p)^;
+        let measured = equations.render(p,650,1000,"Slides")^;
         frame(st,kind,p,[svg(measured.element)],measured.width,measured.height)
     }
     else if (kind == "zoom") {

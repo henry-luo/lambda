@@ -13,18 +13,18 @@
 - **Supersession (2026-10-07):** the user's later instruction to remove the
   private-value JS MVP supersedes JLSR1's keep-it decision. The LOC baseline,
   estimates, and rulings below remain historical records of this proposal's
-  original scope; **D1.2v2–D1.5v2** are unchanged.
+  original scope; **D1.2–D1.5** are unchanged.
 - **Goal set by the user:** remove at least 10% of the JS runtime's LOC
   without a performance regression, preferring unification with and reuse of
   the Lambda runtime (AST builder, type inference, interpreter, MIR emission)
   and unification of similar JS code paths.
-- **Authority:** **D8.6.4v2** (what counts as LOC reduction; no credit for
+- **Authority:** **D8.6.4** (what counts as LOC reduction; no credit for
   moves out of `lambda/runtime` + `lambda/js`, formatting, or comment
-  stripping), **D8.1.3v12** (JS keeps its own parser, AST walker and
-  activation records), **D8.2.5v2** (`AstNode.type` is the effective-type
+  stripping), **D8.4.2** (JS keeps its own parser, AST walker and
+  activation records), **D8.2.5** (`AstNode.type` is the effective-type
   authority; `AstIndex::facts` is to be retired), **D8.2.1–D8.2.6** (shared
-  indexed compiler substrate), **D1.2v2–D1.5v2** and **D1.3v3** (the MVP guest
-  profile and what a guest must reuse), **D5.3.4**, **D6.2.2v2**. Working
+  indexed compiler substrate), **D1.2–D1.5** and **D1.3** (the MVP guest
+  profile and what a guest must reuse), **D6.3.4**, **D7.2.2**. Working
   designs: [`Lambda_Design_JS_Unified.md`](../Lambda_Design_JS_Unified.md)
   §1.2–§1.3 (phase-local LOC conservation, what counts as retirement), §3.4,
   §3.7–§3.9, §7 (rejected directions);
@@ -57,13 +57,13 @@
    builders and `require()` of each specifier fails today (§1.2). Only 21 of
    the 201 functions in the Node section of `js_runtime.cpp` are referenced
    from outside it. Deleting the unreachable closure is ordinary dead-code
-   removal and earns full D8.6.4v2 credit.
+   removal and earns full D8.6.4 credit.
 2. **Consolidation (JLS-1 … JLS-13, credited).** −4,450 / −6,190 / −8,460
    (low/mid/high). JLS-14 is withdrawn (JLSR4).
 3. **Node boundary move (§6, JLSR2).** Live Node code that is not part of the
    §1.2 floor moves to `lambda/module/node_*`: Buffer and the Node-only
    parts of process I/O. This counts for the user's metric but not for
-   D8.6.4v2 credit.
+   D8.6.4 credit.
 
 Together these reach 10% in the high case (−14,530, 10.5%). The mid case
 (−11,590, 8.3%) is about 2,300 lines short; §5 says where the remainder
@@ -73,7 +73,7 @@ comes from.
 three rounds that removed the cheap duplication (JLR −1,214; the P5/P6
 unified compiler boundary; the 2026-09-16 Node module split, which took the
 tree from 174,829 to 149,348). What remains duplicated is *mechanics inside
-semantically distinct walkers*, and D8.1.3v12 / JS_Unified §7.1–§7.2 rule
+semantically distinct walkers*, and D8.4.2 / JS_Unified §7.1–§7.2 rule
 out merging the walkers themselves. Value-level reuse is already high: JSON
 parse, date arithmetic, shortest-double formatting, base64 and the RE2 glue
 all call Lambda or `lib/` code today (§2.3).
@@ -91,14 +91,14 @@ inside those packages rather than in parallel with them.
 
 - **JLSR1 — MVP is out of scope.** `lambda/js/mvp/` is not part of the
   final release. It is neither deleted nor edited by this work, and it is
-  excluded from the metric. (Its D1.2v2–D1.5v2 status is unchanged.)
+  excluded from the metric. (Its D1.2–D1.5 status is unchanged.)
 - **JLSR2 — Node code may move to `lambda/module/`.** Node-specific
   implementation may leave `lambda/js` for the existing Node module source
   directories (`lambda/module/node_core/`, `node_fs/`, `node_net/`,
   `node_crypto/`, `node_zlib/`), or a new `lambda/module/node_<name>/`
   directory registered in `build_lambda_config.json` `node_modules`. Such a
   move counts toward the user's metric. It is recorded in its own ledger
-  column, because D8.6.4v2 gives a move no consolidation credit.
+  column, because D8.6.4 gives a move no consolidation credit.
 - **JLSR3 — the Node support floor stays (§1.2).** `lambda js` follows the
   Node runtime convention and the benchmark JS corpus depends on it. No
   move, deletion or consolidation may break that floor.
@@ -166,7 +166,7 @@ loader falls through to "Error opening file: domain".
 - **Baseline at `7a06981f8`:** 149,348 − 10,330 (mvp) = **139,018**.
   **10% target: 13,902 lines**, i.e. at most **125,116** after the work.
 - Report the same number before and after every batch.
-- **Credit rules (D8.6.4v2, JS_Unified §1.2–§1.3):** each batch has a
+- **Credit rules (D8.6.4, JS_Unified §1.2–§1.3):** each batch has a
   non-positive governed-scope delta; new common code is funded by deletion in
   the same batch; a ledger row names the retired symbols and the surviving
   authority and records removed / added / credited net. No credit for moves
@@ -213,7 +213,7 @@ before any LOC work, and recorded in Appendix B.
 | globals / object model (`js_globals.cpp`) | 1 | 18,086 | 431 functions; section census in §2.2 |
 | MIR lowering (`js_mir_*.cpp/.hpp`, `transpile_js_mir.cpp`) | 15 | 31,455 | 791 `jm_*` functions; 1,036 raw `MIR_new_*` sites vs 3,897 in `transpile-mir.cpp` |
 | MVP guest profile (`mvp/`) | 8 | 10,330 | private `MvpValue` ABI, debug-only CLI selector; **excluded from the metric and untouched** (JLSR1) |
-| AST interpreter (`js_interp.cpp`, `js_interp*.h*`) | 3 | 6,578 | 211 functions, 108 node cases; separate walker by D8.1.3v12 |
+| AST interpreter (`js_interp.cpp`, `js_interp*.h*`) | 3 | 6,578 | 211 functions, 108 node cases; separate walker by D8.4.2 |
 | front end (parser/, `js_c_parser.cpp`, `js_c_ast_helpers.*`, `js_direct_scope.cpp`, `js_scope.cpp`, `js_early_errors.cpp`, `js_ast*.{hpp,cpp}`, `js_module_ast_prebuild.cpp`, `js_emit_ast_dump.cpp`) | 13 | 13,150 | AST is already the core AST (typedefs onto `Ast*Node`, 8 JS-only kinds) |
 | value / property / function kernels (`js_runtime_value.cpp`, `js_props.*`, `js_property_attrs.*`, `js_object_meta.*`, `js_runtime_function.cpp`, `js_function.hpp`, `js_class.h`, `js_coerce.*`) | 12 | 8,570 | |
 | runtime state (`js_runtime_state.*`, `js_runtime_builtin_registry.cpp`, `js_builtin_catalog.*`, `js_runtime.h`, `js_runtime_internal.hpp`) | 7 | 7,283 | catalog: 1,168 rows (459 ids, 441 methods, 93 globals, 58 ctor targets) |
@@ -278,13 +278,13 @@ before any LOC work, and recorded in Appendix B.
 
 | direction | ruling | consequence for this proposal |
 |---|---|---|
-| Delete, shrink or refactor `lambda/js/mvp/` (10,330 lines) | JLSR1: not in the final release, excluded from this exercise; its D1.2v2–D1.5v2 status is unchanged | Not touched, not counted. JLS work must not edit `mvp/` sources even where they include `js_ast.hpp` or `ast-core.hpp`; if a shared header change breaks the MVP build, fix the shared side |
-| One semantic interpreter for Lambda and JS | JS_Unified §7.1; D8.1.3v12 | `js_interp.cpp` stays. Only the execution shell (P7 U-E) is shareable (JLS-3) |
-| One parser / CST | JS_Unified §7.2; D8.1.1v5 | `parser/js_parser.c` and the reduction protocol stay; JLS-4 only tables the sink |
+| Delete, shrink or refactor `lambda/js/mvp/` (10,330 lines) | JLSR1: not in the final release, excluded from this exercise; its D1.2–D1.5 status is unchanged | Not touched, not counted. JLS work must not edit `mvp/` sources even where they include `js_ast.hpp` or `ast-core.hpp`; if a shared header change breaks the MVP build, fix the shared side |
+| One semantic interpreter for Lambda and JS | JS_Unified §7.1; D8.4.2 | `js_interp.cpp` stays. Only the execution shell (P7 U-E) is shareable (JLS-3) |
+| One parser / CST | JS_Unified §7.2; D8.3.2 | `parser/js_parser.c` and the reduction protocol stay; JLS-4 only tables the sink |
 | A shared structural lowering driver over AST tags | P7 U-A withdrawn (§2.1a: shared tags do not share child layouts); Tune14 §3.4 says do not resurrect it | Nothing below proposes a tag-driven common lowering |
 | Removing test262 harness accelerators (872 debug-only natives, preamble/batch/snapshot machinery ≈ 650 lines) | JS_Unified §1.3: weakening the Test262 runner does not satisfy the gate | Not proposed |
-| Moving code to another directory for D8.6.4v2 credit | D8.6.4v2; JS_Unified §7.6 | Moves to `lambda/module/node_*` are allowed by JLSR2 and count for the user's metric, but are ledgered separately with zero consolidation credit (§6) |
-| Deleting comments/blank lines, reformatting | CLAUDE.md rule 19; D8.6.4v2 | Never |
+| Moving code to another directory for D8.6.4 credit | D8.6.4; JS_Unified §7.6 | Moves to `lambda/module/node_*` are allowed by JLSR2 and count for the user's metric, but are ledgered separately with zero consolidation credit (§6) |
+| Deleting comments/blank lines, reformatting | CLAUDE.md rule 19; D8.6.4 | Never |
 
 ---
 
@@ -357,7 +357,7 @@ compile-time only; gate MIR-identical + `utils/capture_ast_tune_timing.sh
 `js_c_parser.cpp` (2,101 lines) is the sink for the C parser's reduction
 protocol: `js_c_reduce` is a 942-NLOC, 61-case switch in which most cases are
 "take N children with arity check, call `build_js_X_from_children`". The
-protocol itself stays (D8.1.3v12; it has three consumers in `test/`).
+protocol itself stays (D8.4.2; it has three consumers in `test/`).
 `js_direct_scope.cpp` (893 lines) reconstructs the binding graph after
 parsing with 35 `direct_walk_*` functions, one per node family, although its
 own header comment and `js_ast.hpp` say a walker should keep only the cases
@@ -392,7 +392,7 @@ exactly this: "if both profiles need the same propagation mechanics, extract
 those mechanics and replace the corresponding existing core path in the same
 slice", while A.3 keeps the *joins and admission rules* language-owned
 (Number guard + F64 for JS; integer default, nullable contracts and exact
-call-edge policy for Lambda). D8.2.5v2 keeps facts on `AstNode.type` and the
+call-edge policy for Lambda). D8.2.5 keeps facts on `AstNode.type` and the
 declaring node.
 *Change:* one binding-fact propagation engine (worklist over the index's
 use/def edges, alias tracking, loop pre-scan walk, call-edge argument
@@ -631,7 +631,7 @@ regex detectors, or the test gates.
 
 ---
 
-## 6. Boundary track (JLSR2; counted for the metric, not credited under D8.6.4v2)
+## 6. Boundary track (JLSR2; counted for the metric, not credited under D8.6.4)
 
 Live Node code that is outside the §1.2 floor moves to `lambda/module/`.
 Node modules link with `-undefined dynamic_lookup` (macOS) /
@@ -704,7 +704,7 @@ test262 runner must not be weakened).
   MT7); `test_js_mir_emission_gtest` / `test_mir_ratchet_gtest` must pass with
   zero slack. Then compiler time: `./utils/capture_ast_tune_timing.sh --suite
   js --label <label>`, one warm-up, five runs, median must not rise (the
-  D8.6.4v2 protocol). A MIR-identical change cannot regress runtime.
+  D8.6.4 protocol). A MIR-identical change cannot regress runtime.
 - **Runtime-side packages (JLS-8 … JLS-13):** Tune14 §5.2 verbatim: at least
   11 alternating control/candidate pairs per package on the affected rows and
   representative controls, then the full 63-row JS corpus paired against the

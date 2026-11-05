@@ -1,0 +1,15 @@
+{
+  "name": "Flex items resolve their own first-line text indent without leaking it to siblings",
+  "html": "test/ui/css_flex_item_text_indent.html",
+  "viewport": {"width": 400, "height": 100},
+  "events": [
+    {"type": "assert_pixel", "target": {"selector": "#hidden", "offset_x": 8, "offset_y": 10},
+     "min_r": 0, "max_r": 0, "min_g": 0, "max_g": 0, "min_b": 255, "max_b": 255},
+    {"type": "assert_pixel", "target": {"selector": "#plain", "offset_x": 8, "offset_y": 10},
+     "min_r": 255, "max_r": 255, "min_g": 255, "max_g": 255, "min_b": 255, "max_b": 255},
+    {"type": "assert_pixel", "target": {"selector": "#positive", "offset_x": 8, "offset_y": 10},
+     "min_r": 0, "max_r": 0, "min_g": 0, "max_g": 0, "min_b": 255, "max_b": 255},
+    {"type": "assert_pixel", "target": {"selector": "#positive", "offset_x": 28, "offset_y": 10},
+     "min_r": 255, "max_r": 255, "min_g": 255, "max_g": 255, "min_b": 255, "max_b": 255}
+  ]
+}

@@ -1,4 +1,4 @@
-// D7.5.8: a pure verifier state machine. Only the trusted host executes actions.
+// D11.2.4: a pure verifier state machine. Only the trusted host executes actions.
 // An acknowledgement is supplied AFTER atomic durable publication; fetches are
 // public repository-relative names. A final verified artifact is not installed.
 import tuf: lambda.security.tuf

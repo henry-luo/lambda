@@ -4,7 +4,7 @@
 # helpers, intentionally-invalid files, and parser gaps, so it could not be a
 # trustworthy acceptance gate. `run_fuzz.py` now runs grammar.js as first cut,
 # the C parser as production implementation, and the reviewed-gap ratchet
-# under D8.1.2v3. `utils/lambda_parser_manifest.sh` remains available for a
+# under D8.1.1. `utils/lambda_parser_manifest.sh` remains available for a
 # manual bulk-audit artifact under ./temp/.
 set -euo pipefail
 

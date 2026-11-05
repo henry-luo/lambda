@@ -1405,7 +1405,7 @@ RADIANT_C_API Item fn_radiant_clear_editing_focus(Item node_item) {
     if (!state) return radiant_bool_item(false);
 
     // A mode transition may leave its synthetic host selected, but it must not
-    // retain that host as a future keyboard-input fallback (D7.2.5).
+    // retain that host as a future keyboard-input fallback (D10.2.1).
     if (focus_get(state) == (View*)elem) {
         focus_clear_preserve_selection(state);
     }
@@ -2294,7 +2294,7 @@ static DomEditInvocation* radiant_dom_edit_invocation(Item node_item,
 
 // The DOM behavior package keeps its own immutable editing session. This
 // bridge provides only a document-owned, precisely rooted value slot; native
-// code neither constructs nor reads the session's policy fields (D7.2.5).
+// code neither constructs nor reads the session's policy fields (D10.2.1).
 RADIANT_C_API Item fn_radiant_dom_edit_session(Item node_item) {
     DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_SESSION",
                                                 nullptr);
@@ -2313,7 +2313,7 @@ RADIANT_C_API Item fn_radiant_dom_set_edit_session(Item node_item,
     if (!roots.valid()) return ItemNull;
     // Session updates made while a package DOM transaction is open must roll
     // back with its ordinary DOM writes; the waist retains only this opaque
-    // root, never any package-owned policy fields (D7.2.5, D5.3.3).
+    // root, never any package-owned policy fields (D10.2.1, D6.3.3).
     if (!dom_edit_transaction_snapshot_edit_session(state)) return ItemNull;
     if (!state->editing.dom_edit_session_rooted) {
         state->editing.dom_edit_session_root = ItemNull.item;
@@ -2360,7 +2360,7 @@ RADIANT_C_API Item fn_radiant_audio_open(Item node_item, Item bytes) {
     return token ? radiant_int_item((int64_t)token) : ItemNull;
 }
 
-// D7.5.10: the procedural seam consumes copied requests; grants remain exclusively host-owned.
+// D11.3.2: the procedural seam consumes copied requests; grants remain exclusively host-owned.
 RADIANT_C_API Item fn_radiant_audio_capture(Item node_item, Item request_item) {
     DomDocument* doc = radiant_window_document_from_item(node_item, "AUDIO_CAPTURE");
     ItemReader request(request_item.to_const()); if (!doc || !request.isMap()) return ItemNull;
@@ -2647,7 +2647,7 @@ RADIANT_C_API Item fn_radiant_media_command(Item node, Item command, Item value)
     } else if (strcmp(action, "play") == 0) {
         if (value.item != ITEM_NULL && (!numeric || !isfinite(number) || number < 0)) return radiant_bool_item(false);
         media->play_error = 0;
-        // audible playback shares the document activation gate with other audio (D7.5.4).
+        // audible playback shares the document activation gate with other audio (D11.3.1).
         if (!media->muted && media->volume > 0.0f && !radiant_document_may_start_audio(elem->doc)) {
             media->play_error = 1;
             return radiant_bool_item(false);
@@ -2790,7 +2790,7 @@ RADIANT_C_API Item fn_radiant_dom_edit_node(Item node_item, Item token_item) {
 
 // Document-scoped behavior templates are attached to an ancestor such as
 // <body>. Recover the invocation's canonical host through the explicit token;
-// this is capability transport, not a command-policy lookup (D7.2.5).
+// this is capability transport, not a command-policy lookup (D10.2.1).
 RADIANT_C_API Item fn_radiant_dom_edit_target(Item node_item, Item token_item) {
     DomElement* receiver = nullptr;
     DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_TARGET",
@@ -2910,7 +2910,7 @@ RADIANT_C_API Item fn_radiant_dom_set_caret(Item node_item, Item token_item,
 
 // Open one generic transaction before a package plan composes ordinary DOM
 // tree/attribute steps. It validates only the opaque invocation capability;
-// no command or structural policy reaches the waist (D7.2.5).
+// no command or structural policy reaches the waist (D10.2.1).
 RADIANT_C_API Item fn_radiant_dom_edit_begin_transaction(Item node_item,
                                                          Item token_item) {
     DomEditInvocation* invocation = radiant_dom_edit_invocation(
@@ -2927,7 +2927,7 @@ RADIANT_C_API Item fn_radiant_dom_edit_abort_transaction(Item node_item,
 
 // Retained history is a generic DOM transaction snapshot. The bridge exposes
 // opaque document-local ids only; package code retains command and grouping
-// policy while the waist owns identity-preserving replay (D7.2.5, D5.3.3).
+// policy while the waist owns identity-preserving replay (D10.2.1, D6.3.3).
 RADIANT_C_API Item fn_radiant_edit_sync_selection(Item node, Item token) {
     DomEditInvocation* invocation = radiant_dom_edit_invocation(node, token, "EDIT_SYNC_SELECTION", nullptr);
     return radiant_bool_item(dom_edit_sync_selection(invocation));
@@ -3221,7 +3221,7 @@ RADIANT_C_API Item fn_radiant_clipboard_read() {
     char* text = nullptr;
     char* image = nullptr;
     clipboard_store_read_snapshot(&html, &text, &image);
-    // one owned platform snapshot; root the result across string allocations (D5.3.3).
+    // one owned platform snapshot; root the result across string allocations (D6.3.3).
     RootFrame roots(1);
     Rooted<Item> result(roots, radiant_obj_new());
     radiant_rooted_obj_set(result, "html", html ? radiant_string_item(html) : ItemNull);
@@ -3244,7 +3244,7 @@ RADIANT_C_API Item fn_radiant_clipboard_write(Item text) {
 
 // The package chooses whether a selection is copied, cut, or represented as
 // rich/plain text.  These capability-scoped helpers only serialize the live
-// DOM Selection and reach the platform clipboard mechanism (D7.2.5).
+// DOM Selection and reach the platform clipboard mechanism (D10.2.1).
 RADIANT_C_API Item fn_radiant_dom_edit_selection_text(Item node_item,
                                                       Item token_item) {
     DomEditInvocation* invocation = radiant_dom_edit_invocation(
@@ -3710,7 +3710,7 @@ RADIANT_C_API Item fn_radiant_set_range_from_point(Item node_item, Item x_item, 
 // document — the body, in practice, since that is where the session template
 // matches. Writing it is what suppresses nothing else: the placeholder rule and
 // the orphan cleanup are the template's policy, expressed through these.
-// D7.2.5: the session is opaque; only the Lambda adapter reads its policy fields.
+// D10.2.1: the session is opaque; only the Lambda adapter reads its policy fields.
 RADIANT_C_API Item fn_radiant_ime_session(Item node_item) {
     DocState* state = radiant_state_for_element(node_item, "IME_SESSION", nullptr);
     return state && state->input_method.session_rooted
@@ -4822,7 +4822,7 @@ static Item radiant_font_metrics_record(FontHandle* handle, const FontMetrics* m
     return result.get();
 }
 
-// D7.1.2v2: scripts acquire bytes and choose layout; the host returns image facts.
+// D9.1.2: scripts acquire bytes and choose layout; the host returns image facts.
 RADIANT_C_API Item fn_radiant_image_metrics(Item data_item) {
     if (get_type_id(data_item) != LMD_TYPE_BINARY) return ItemNull;
     Binary* data = data_item.get_binary();
@@ -4920,7 +4920,7 @@ RADIANT_C_API Item fn_radiant_font_metrics(Item style_item, Item faces_item) {
     return result.get();
 }
 
-// SVG measurements share the painter's layout and return only copied scalar facts (D4.2.2v2).
+// SVG measurements share the painter's layout and return only copied scalar facts (D5.2.2).
 RADIANT_C_API Item fn_radiant_measure_svg_text(Item html_item, Item width_item, Item height_item) {
     int width = 0, height = 0;
     if (get_type_id(html_item) != LMD_TYPE_STRING ||
@@ -5356,7 +5356,7 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_geomap_eval_layer(Item layer, Item feature, Item zoom)", (fn_ptr)fn_radiant_geomap_eval_layer},
     {"geomap_eval_features", "fn(layer: element, features: array, zoom: number) -> array|string", (fn_ptr)fn_radiant_geomap_eval_features, JUBE_FN_NONE,
      "Item fn_radiant_geomap_eval_features(Item layer, Item features, Item zoom)", (fn_ptr)fn_radiant_geomap_eval_features},
-    // committed geometry reads have the same colour as DOM getters (D7.4.6).
+    // committed geometry reads have the same colour as DOM getters (D7.1.1).
     {"local_point", "fn(node: any, x: number, y: number) -> array|null", (fn_ptr)fn_radiant_local_point, JUBE_FN_NONE,
      "Item fn_radiant_local_point(Item node, Item x, Item y)", (fn_ptr)fn_radiant_local_point},
     {"geomap_plan", "fn(model: element, width: number, height: number) -> any", (fn_ptr)fn_radiant_geomap_plan, JUBE_FN_NONE,
@@ -5456,7 +5456,7 @@ extern "C" void dom_webgl_register_static(void);
 extern "C" void radiant_animation_register_static(void);
 
 // Registration precedes module init: importing dom alone still needs native
-// providers, including on cold workers (D7.3.3–D7.3.4, D7.5.3).
+// providers, including on cold workers (D9.4.3–D9.4.4, D9.5.6).
 static const DomCanvasEngineOps radiant_canvas_operations = {
 #define RADIANT_CANVAS_ENTRY(result, name, parameters) radiant_canvas_##name,
     DOM_CANVAS_ENGINE_OPERATIONS(RADIANT_CANVAS_ENTRY)
@@ -5514,7 +5514,7 @@ static void radiant_host_prepare_children_mutation(void* element) {
     layout_unwrap_anonymous_table_fixups_for_dom_mutation((DomElement*)element);
 }
 
-// provider calls finish with the renderer's state/value owners before borrowed arguments expire (D4.5.1v4).
+// provider calls finish with the renderer's state/value owners before borrowed arguments expire (D5.5.1).
 static bool radiant_host_control_is_disabled(void* state, void* element) {
     return form_control_is_disabled((DocState*)state, (View*)element);
 }
@@ -5589,7 +5589,7 @@ static void* radiant_host_web_animation_create(DomElement* element, void* keyfra
 }
 
 static bool radiant_host_element_client_frame(DomNode* node, RdtMatrix* matrix, float* x, float* y) {
-    // snapshot the projected frame and its CSS-plane origin together at the engine owner (D7.1.3).
+    // snapshot the projected frame and its CSS-plane origin together at the engine owner (D9.1.3).
     if (!node || !matrix || !view_get_client_matrix(node, matrix)) return false;
     auto origin = view_geometry_block_viewport_origin(node);
     if (x) *x = origin.x;
@@ -5804,7 +5804,7 @@ extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
 
 extern "C" Item dom_engine_dispatch_event(Item node_item, Item type_item,
                                           Item bubbles_item, Item cancelable_item) {
-    // nested dispatch allocates before copying its name; retain the GC string (D5.3.3).
+    // nested dispatch allocates before copying its name; retain the GC string (D6.3.3).
     RootFrame roots(2);
     Rooted<Item> node_root(roots, node_item);
     Rooted<Item> type_root(roots, type_item);

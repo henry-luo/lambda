@@ -3,9 +3,9 @@ import files: ~~.~~.mod_io
 import model: ~~.~~.mod_model
 import groups: ~~.~~.mod_group_data
 import layout: ~~.~~.mod_object_layout
-import image: lambda.editor.mod_image
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import image: lambda.editor.image
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 pn main() {
     let data = fixture.load("object-layout","Layout")^

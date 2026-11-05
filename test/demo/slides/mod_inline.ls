@@ -1,14 +1,14 @@
-// S12.1.3 / D7.2.5: a retained Word-model editor keeps rich slide text and its source separate.
+// S12.1.3 / D10.2.1: a retained Word-model editor keeps rich slide text and its source separate.
 import dom
-import lambda.editor.mod_editor
-import lambda.editor.mod_doc
-import controller: lambda.edit.controller
-import html: lambda.edit.html
-import rendering: lambda.edit.model
-import surface: ~~.word.mod_surface
+import lambda.editor.model
+import lambda.editor.core.doc
+import controller: lambda.editor.controller
+import html: lambda.editor.format.html
+import rendering: lambda.editor.format.model
+import projection: lambda.editor.surface.projection
 import insert: .mod_insert
 import c: lambda.slide.common
-import spelling: lambda.edit.spelling
+import spelling: lambda.editor.spelling
 
 fn has_text(node) any^ => if (node is string) len(node)>0 else if (not (node is element) or
     name(node) in ['svg','math','canvas','audio','video','script','style']) false
@@ -25,6 +25,11 @@ pub pn place_caret(host,point,plain=false) {
     }
 }
 
+// slide text projects only its own formatting and never carries active HTML handlers.
+fn slide_attrs(attrs) => map([for (a in attrs where ((contains(['class','dir','lang','style','align','start','indent','colspan','rowspan',
+    'src','alt','width','height','href','title'],a.name)) ^ { false })) (string(a.name),string(a.value))])
+fn mark_attrs(attrs) => attrs
+
 fn children(n) any^ => rendering.surface_children(n,(child)=>apply(child,{template:"slide_inline_node"}))
 view slide_inline_node: map () any^ {
     if (~.kind=='node' and ~.tag=='doc') <div class:"slide-inline-document",*children(~)>
@@ -32,7 +37,7 @@ view slide_inline_node: map () any^ {
         <p class:"slide-inline-implied",*children(~)>
     else if (~.kind=='node' and ~.tag in ['raw_html','html_block'])
         <span contenteditable:"false",class:"slide-inline-atom",rendering.attr_get(~,'source')>
-    else surface.project(~,(child)=>apply(child,{template:"slide_inline_node"}),false,['class','dir','lang'],"slide-text-run")
+    else projection.project(~,(child)=>apply(child,{template:"slide_inline_node"}),slide_attrs,mark_attrs,"slide-text-run","word-link")
 }
 
 edit <slide_inline> state editor:edit_open(node('doc',[node('p',[text("")])]),html.schema,null), draft:null {

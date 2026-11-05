@@ -1,15 +1,15 @@
 import model: ~~.mod_model
 import equation: ~~.mod_equation
-import catalog: ~~.mod_equation_catalog
+import catalog: lambda.editor.math.catalog
 import authoring: ~~.mod_equation_edit
 import files: ~~.mod_io
 import layout: ~~.mod_object_layout
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
-import image: lambda.editor.mod_image
-import controller: lambda.edit.controller
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
+import image: lambda.editor.image
+import controller: lambda.editor.controller
 import outcome: lambda.dom.edit_result
 import mathdoc: lambda.doc.math.math
 

@@ -1,6 +1,6 @@
 // T19-A: REBINDING a declared scalar must use the same native lane boundary as
 // its declaration. `k = perm[i]` on a declared `int` only has to reject the
-// read's null arm (the read is `int?` under D2.5.3): one inline sentinel test
+// read's null arm (the read is `int?` under D2.4.3): one inline sentinel test
 // against INT_LANE_NULL that branches past the cold rejection. The declaration
 // site already had that fast boundary; the assignment site instead BOXED the
 // lane and called lambda_type_check on the straight-line path once per

@@ -4,7 +4,7 @@
 #include "../lambda-data.hpp"
 
 // dispatch keys borrow native targets; wrappers retain their existing traced
-// backing edges. Provider publication has process lifetime (D4.5.1v4, D7.1.3).
+// backing edges. Provider publication has process lifetime (D5.5.1, D9.1.3).
 typedef enum DomEventTargetKeyKind {
     DOM_EVENT_KEY_NONE = 0,
     DOM_EVENT_KEY_NODE,

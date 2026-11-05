@@ -11,15 +11,34 @@
 #include <limits.h>
 #include <string.h>
 
-static bool render_media_push_content_clip(RasterRenderContext* rdcon, const Rect* content_rect,
+Corner render_media_content_corners(ViewBlock* view, Rect content_rect, float scale) {
+    BorderProp* border = view && view->bound ? view->boundary()->border.get() : nullptr;
+    if (!border) return {};
+    resolve_border_radius_percentages(&border->radius, view->width, view->height);
+    if (!radiant_corner_has_radius(&border->radius)) return {};
+    BoxMetrics metrics = layout_box_metrics(view);
+    // replaced pixels follow the content edge, inset from the border's outer curve.
+    Corner radius = radiant_corner_inset_edges(&border->radius,
+        metrics.border.top + metrics.padding.top, metrics.border.right + metrics.padding.right,
+        metrics.border.bottom + metrics.padding.bottom, metrics.border.left + metrics.padding.left);
+    radius = radiant_corner_scaled(&radius, scale);
+    constrain_corner_radii(&radius, content_rect.width, content_rect.height);
+    return radius;
+}
+
+static bool render_media_push_content_clip(RasterRenderContext* rdcon, ViewBlock* view, const Rect* content_rect,
                                            const Rect* image_rect) {
-    if (!rdcon || !content_rect || !image_rect ||
-        view_geometry_rect_contains_rect(*content_rect, *image_rect, 0.01f)) {
-        return false;
+    if (!rdcon || !content_rect || !image_rect) return false;
+    Corner radius = render_media_content_corners(view, *content_rect, rdcon->raster_scale);
+    RdtPath* clip_path = radiant_corner_has_radius(&radius)
+        ? render_path_create_rounded_rect(*content_rect, &radius) : nullptr;
+    if (!clip_path) {
+        if (view_geometry_rect_contains_rect(*content_rect, *image_rect, 0.01f)) return false;
+        clip_path = rdt_path_new();
+        if (!clip_path) return false;
+        rdt_path_add_rect(clip_path, content_rect->x, content_rect->y,
+                          content_rect->width, content_rect->height, 0, 0);
     }
-    RdtPath* clip_path = rdt_path_new();
-    rdt_path_add_rect(clip_path, content_rect->x, content_rect->y,
-                      content_rect->width, content_rect->height, 0, 0);
     rc_push_clip(rdcon, clip_path, render_state_current_transform(rdcon));
     rdt_path_free(clip_path);
     return true;
@@ -210,15 +229,6 @@ bool render_media_paint_svg_image(PaintList* paint, ImageSurface* image, Rect re
     return true;
 }
 
-bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
-        const Rect* content_rect) {
-    if (!view || !view->embed || !content_rect) return false;
-    ImageSurface* image = view->embedp()->img;
-    return render_media_paint_svg_image(paint, image,
-        render_media_image_rect(view, image, *content_rect, 1.0f), content_rect,
-        ui_context_raster_scale(ui), ui ? ui->font_ctx.get() : nullptr, ui);
-}
-
 bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock* view,
                                      const Rect* content_rect, const FontBox* font, Color color) {
     ImageSurface* image = render_media_image_surface(view);
@@ -235,7 +245,6 @@ bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock
         content.release();
         return true;
     }
-    if (render_media_paint_svg_picture(paint, ui, view, content_rect)) return true;
     // Decode before the owned paint snapshot; effect replay cannot load a later borrow.
     PaintImageBox box = {};
     box.image = lam::up(image);
@@ -244,15 +253,16 @@ bool render_media_paint_image_content(PaintList* paint, UiContext* ui, ViewBlock
     box.image_rect = render_media_image_rect(view, image, *content_rect, 1.0f);
     box.raster_scale = ui_context_raster_scale(ui);
     box.opacity = 255;
-    return render_paint_image_box(paint, &box);
+    box.content_radius = render_media_content_corners(view, *content_rect, 1.0f);
+    return render_paint_image_box(paint, &box, ui);
 }
 
-bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
+static bool render_paint_image_box_content(PaintList* paint, const PaintImageBox* box, UiContext* ui) {
     if (!paint || !box || !box->image) return false;
     if (!box->overflow_visible && (box->content_rect.width <= 0.0f || box->content_rect.height <= 0.0f)) return true;
     if (box->image->format == IMAGE_FORMAT_SVG) {
         return render_media_paint_svg_image(paint, box->image, box->image_rect,
-            box->overflow_visible ? &box->image_rect : &box->content_rect, box->raster_scale, box->fonts, nullptr, box->opacity);
+            box->overflow_visible ? &box->image_rect : &box->content_rect, box->raster_scale, box->fonts, ui, box->opacity);
     }
     // retained/export consumers can receive a file image before raster paint requested its pixels.
     image_surface_ensure_decoded(box->image, box->image->width, box->image->height);
@@ -271,6 +281,19 @@ bool render_paint_image_box(PaintList* paint, const PaintImageBox* box) {
         box->image_rect.width, box->image_rect.height, box->opacity, nullptr);
     if (clip_content) paint_pop_clip(paint);
     return true;
+}
+
+bool render_paint_image_box(PaintList* paint, const PaintImageBox* box, UiContext* ui) {
+    if (!paint || !box) return false;
+    RdtPath* clip = radiant_corner_has_radius(&box->content_radius)
+        ? render_path_create_rounded_rect(box->content_rect, &box->content_radius) : nullptr;
+    if (clip) paint_push_clip(paint, clip, nullptr);
+    bool painted = render_paint_image_box_content(paint, box, ui);
+    if (clip) {
+        paint_pop_clip(paint);
+        rdt_path_free(clip);
+    }
+    return painted;
 }
 
 void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
@@ -300,7 +323,7 @@ void render_media_image_content(RasterRenderContext* rdcon, ViewBlock* view) {
         Bound image_clip = rdcon->has_transform
             ? rdcon->block.clip
             : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
-        bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
+        bool pushed_content_clip = render_media_push_content_clip(rdcon, view, &rect, &img_rect);
         if (img->format == IMAGE_FORMAT_SVG) {
             // reuse the bounded SVG layer cache instead of rebuilding an isolated document on every repaint
             bool drew_svg = render_svg_image_layer(rdcon, view, img, &img_rect);

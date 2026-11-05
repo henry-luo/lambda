@@ -519,7 +519,7 @@ TEST(LambdaTypedPathTests, ReopensBoxedTypedAdapterResultForNativeConsumer) {
 // stays in T0 and a JIT-only defect hides behind a T0 golden -- the nullable
 // float store that stored its null sentinel as an element was found only by
 // running every goldened fixture on every tier. These pin the rounds' fixtures
-// on interp, jit and auto (S9.1.2, S9.1.3, S7.1.3v2, D8.1.1v10).
+// on interp, jit and auto (S9.1.2, S9.1.3, S7.1.3v2, D8.3.3).
 struct TierParityFixture {
     const char* script;
     const char* expected;
@@ -573,12 +573,12 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/cow_place_mutator.ls", "test/lambda/proc/cow_place_mutator.txt", "AST_NODE_SYS_FUNC"},
     {"test/lambda/proc/cow_rmw_sibling_borrow.ls", "test/lambda/proc/cow_rmw_sibling_borrow.txt"},
     {"test/lambda/proc/cow_move_out_bind.ls", "test/lambda/proc/cow_move_out_bind.txt"},
-    // Tune28: D4.4.6 place-copy marks and CW36 branch store-backs
+    // Tune28: D5.4.5 place-copy marks and CW36 branch store-backs
     {"test/lambda/proc/cow_place_copy_place_written.ls",
      "test/lambda/proc/cow_place_copy_place_written.txt"},
     {"test/lambda/proc/cow_rmw_branch_store_back.ls",
      "test/lambda/proc/cow_rmw_branch_store_back.txt"},
-    // D3.2.4v4/D3.3.3v3: proof consumers retain checked mutation and lane parity.
+    // D4.2.5/D4.3.3: proof consumers retain checked mutation and lane parity.
     {"test/mir/lambda/persistent_record_consumers.ls", "test/mir/lambda/persistent_record_consumers.txt"},
     {"test/mir/lambda/persistent_array_consumers.ls", "test/mir/lambda/persistent_array_consumers.txt"},
     {"test/lambda/proc/tune27_nullable_lane_store.ls", "test/lambda/proc/tune27_nullable_lane_store.txt"},
@@ -586,7 +586,7 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/tune27_loop_accumulator.ls", "test/lambda/proc/tune27_loop_accumulator.txt"},
     {"test/lambda/proc/tune27_int_sentinel_arith.ls", "test/lambda/proc/tune27_int_sentinel_arith.txt"},
     {"test/lambda/proc/interp_typed_var_rebind.ls", "test/lambda/proc/interp_typed_var_rebind.txt"},
-    // S3.4 / D2.4.1: boxed equality errors stay boxed in boolean consumers.
+    // S3.4 / D2.3.4: boxed equality errors stay boxed in boolean consumers.
     {"test/mir/lambda/untyped_scalar_flow.ls", "test/mir/lambda/untyped_scalar_flow.txt"},
     {"test/mir/lambda/tune33_boxed_predicates.ls", "test/mir/lambda/tune33_boxed_predicates.txt"},
     {"test/mir/lambda/tune33_native_fact_flow.ls", "test/mir/lambda/tune33_native_fact_flow.txt"},
@@ -630,7 +630,7 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/type_counted_rank.ls", "test/lambda/type_counted_rank.txt"},
     {"test/lambda/proc/native_lane_consumers.ls",
      "test/lambda/proc/native_lane_consumers.txt"},
-    // D3.2.4v4: a reordered literal reifies into its contract's layout by
+    // D4.2.5: a reordered literal reifies into its contract's layout by
     // name. The JIT adopted the contract and filled it in source order, so
     // both tiers misread it, and only a compiling tier shows the first half.
     {"test/lambda/proc/map_contract_reordered_literal.ls",
@@ -650,7 +650,7 @@ static const TierParityFixture kTune27TierParity[] = {
     // read the cached leaf count, which only a compiling tier shows.
     {"test/lambda/proc/array_view_admission.ls",
      "test/lambda/proc/array_view_admission.txt"},
-    // S11.1.6v2/D2.5.1: `bool?`/`string?` call results and null pointer lanes
+    // S11.1.6v2/D2.4.1: `bool?`/`string?` call results and null pointer lanes
     // bound by `let`/`var`. The JIT stored a call's raw lane as an Item and
     // re-tagged a binding's ItemNull, which only a compiling tier shows.
     {"test/lambda/proc/nullable_lane_bindings.ls",
@@ -709,7 +709,7 @@ static const TierParityFixture kTune27TierParity[] = {
     // S1.6 (LR07-23..27): goldens that failed only on the JIT, found by running
     // every golden with LAMBDA_EXEC_BACKEND=jit. A method's `_b` wrapper re-boxed its
     // Item result (six segfaults), a widened bool array's slow read folded "x"
-    // to false (D3.3.1v2), a repeated literal key read its first entry, a
+    // to false (D4.3.1), a repeated literal key read its first entry, a
     // string-pattern `case` compared with `==`, and a direct store wrote a raw
     // int64 over an `i64?` field's TypedItem.
     {"test/lambda/object_method_receiver.ls", "test/lambda/object_method_receiver.txt"},
@@ -719,7 +719,7 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/proc_nullable_native_i64_map.ls",
      "test/lambda/proc/proc_nullable_native_i64_map.txt"},
     // S11.1.3 (LR03-18, LR03-14): a range type admits its members inside a
-    // union, map or array type and at a parameter, on every tier (D3.1.1v4).
+    // union, map or array type and at a parameter, on every tier (D4.1.1).
     {"test/lambda/range_type_membership.ls", "test/lambda/range_type_membership.txt"},
     // S11.4.10 (LR03-20): an object literal admits each field against its
     // declared contract; construction stored any value unchecked.
@@ -798,7 +798,7 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.4.1v3 (LR03-13): a call through a declared function-type contract
     // checks its result; the JIT had read a string as 0.
     {"test/lambda/contract_return_check.ls", "test/lambda/contract_return_check.txt"},
-    // D3.4.3v5 / D3.4.4v4: maps grow through the runtime tree from symbol
+    // D3.4.3 / D3.4.4: maps grow through the runtime tree from symbol
     // keys and from external parents (literal, parsed, contract, nominal,
     // retyped, element types); the parsed copy also pins LR12-39
     {"test/lambda/proc/map_symbol_key_tree.ls", "test/lambda/proc/map_symbol_key_tree.txt"},
@@ -819,7 +819,7 @@ static const TierParityFixture kTune27TierParity[] = {
     // with a real tail call elsewhere, the JIT's TCO turned it into a jump back
     // to the start and returned one item's value instead of the comprehension
     {"test/lambda/tail_call_in_comprehension.ls", "test/lambda/tail_call_in_comprehension.txt"},
-    // closures snapshot captures (D6.2.3): T0 read a module-level comprehension
+    // closures snapshot captures (D7.2.3): T0 read a module-level comprehension
     // variable's module slot (LR01-19), and set a let-list's function literal
     // apart as a declaration (LR01-20)
     {"test/lambda/closure_capture_comprehension.ls", "test/lambda/closure_capture_comprehension.txt"},
@@ -833,7 +833,7 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/ledger_tail_place_borrow.ls", "test/lambda/proc/ledger_tail_place_borrow.txt"},
     {"test/lambda/proc/ledger_place_insertion.ls", "test/lambda/proc/ledger_place_insertion.txt"},
     {"test/lambda/proc/ledger_parsed_element_index.ls", "test/lambda/proc/ledger_parsed_element_index.txt"},
-    // S1.6/S7.7.2-S7.7.6/D8.1.1v18: keep these ledger fixes on every tier.
+    // S1.6/S7.7.2-S7.7.6/D8.3.2: keep these ledger fixes on every tier.
     {"test/lambda/ledger_long_names.ls", "test/lambda/ledger_long_names.txt"},
     {"test/lambda/ledger_call_carriers.ls", "test/lambda/ledger_call_carriers.txt"},
     {"test/lambda/ledger_parameter_result_site.ls", "test/lambda/ledger_parameter_result_site.txt"},
@@ -972,7 +972,7 @@ TEST(LambdaTierParityTests, NumericRecurrenceProofsTerminateAcrossCarrierInferen
 // finishes, so a defect in how satellites are published appears only for some
 // timings. LAMBDA_SATELLITE_SYNC pins each hand-off to the promoting call, and
 // the two thresholds move that call. Both fixtures read properties through
-// several satellites whose key suffixes are placed at publication (D8.5.1v7).
+// several satellites whose key suffixes are placed at publication (D8.3.5).
 TEST(LambdaTierParityTests, SatellitePublicationKeepsPropertyKeys) {
     static const TierParityFixture fixtures[] = {
         {"test/lambda/satellite_property_keys.ls", "test/lambda/satellite_property_keys.txt"},
@@ -991,7 +991,7 @@ TEST(LambdaTierParityTests, SatellitePublicationKeepsPropertyKeys) {
     }
 }
 
-// D8.1.1v12: a published satellite lowers copied definitions, but recursive
+// D8.3.4: a published satellite lowers copied definitions, but recursive
 // calls resolve the source definition. Force publication at two call counts so
 // both functional and procedural self calls retain their tail-call identity.
 TEST(LambdaTierParityTests, SatellitePublicationKeepsTailCallIdentity) {
@@ -1007,7 +1007,7 @@ TEST(LambdaTierParityTests, SatellitePublicationKeepsTailCallIdentity) {
     }
 }
 
-// D8.1.1v18: a `for` statement hands its activation to compiled code at a head
+// D8.3.2: a `for` statement hands its activation to compiled code at a head
 // test and the continuation resumes the walk on T0's snapshot. Low loop
 // thresholds force every shape in the fixture to hand off mid-walk, and
 // synchronous publication makes the handoff point deterministic.
@@ -1022,7 +1022,7 @@ TEST(LambdaTierParityTests, ForStatementLoopHandoffResumesWalk) {
     }
 }
 
-// D8.1.1v18/S7.6.3v3: a module callee uses boxed dispatch in a satellite.
+// D8.3.2/S7.6.3v3: a module callee uses boxed dispatch in a satellite.
 TEST(LambdaTierParityTests, PropagatedLoopCallsKeepBoxedResults) {
     static const char* const thresholds[] = {"1", "5"};
     ScopedTestEnv sync("LAMBDA_SATELLITE_SYNC", "1");
@@ -1037,7 +1037,7 @@ TEST(LambdaTierParityTests, PropagatedLoopCallsKeepBoxedResults) {
     }
 }
 
-// LR07-46 (D5.3.3): a map filter loop re-stored its frame top beneath the key
+// LR07-46 (D6.3.3): a map filter loop re-stored its frame top beneath the key
 // list's RootFrame on the JIT only (a crash, or lost string members), while the
 // auto tier ran it in T0 and printed the golden.
 TEST(LambdaRootPublicationTests, MapKeyLoopAgreesOnEveryTier) {
@@ -1070,7 +1070,7 @@ TEST(LambdaTune31Tests, RecursiveArrayWitnessAgreesOnEveryTier) {
     }
 }
 
-// Tune31 Phase II F / D3.3.3v3: the raw witness is an implementation fact,
+// Tune31 Phase II F / D4.3.3: the raw witness is an implementation fact,
 // so the inferred parameter's output and snapshot semantics must agree across
 // interpreter, direct JIT, and automatic tier selection.
 TEST(LambdaTune31Tests, InferredFloatStoreAgreesOnEveryTier) {

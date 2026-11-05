@@ -1,4 +1,4 @@
-import ribbon: ~~.mod_ribbon
+import ribbon: lambda.ui.workspace.ribbon
 import catalog: lambda.slide.animation
 import model: .mod_animations
 import m: .mod_model

@@ -11,7 +11,7 @@ typedef struct Url Url;
 extern "C" {
 #endif
 
-// D5.4: the evaluation context owns its client binding. The host transport must
+// D6.4: the evaluation context owns its client binding. The host transport must
 // outlive the context; binding once never lends broker management to scripts.
 bool eval_context_bind_security_io(EvalContext* owner, const SecurityIOClient* client);
 const SecurityIOClient* eval_context_security_io(EvalContext* owner);

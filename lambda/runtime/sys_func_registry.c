@@ -278,7 +278,7 @@ static Item pipe_map_key(void* keys_ptr, int64_t index) {
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 
 // `int` lanes are ABI-compatible with int64_t but retain their semantic
-// carrier identity until this direct native call boundary (D2.4.1-D2.4.3).
+// carrier identity until this direct native call boundary (D2.3.4-D2.3.5).
 static const SysFuncArgDesc sysfunc_int_lane_args_1[] = {
     {VALUE_REP_INT_LANE},
 };
@@ -655,7 +655,7 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_AFFINE_WARP, "affine_warp", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_affine_warp", PROFILE_IMAGE_PROCESSING_FPTR(fn_affine_warp), NULL, NULL, false, 0},
 
-    // `bool` is only the success shape (D6.4.1): an error operand or a
+    // `bool` is only the success shape (D7.6.1): an error operand or a
     // non-sequence returns an ordinary error (S7.9.3, S7.10.4). Declaring
     // the effect types the call `bool | error`, which stays boxed (S7.8.1)
     // unless the builder proves the operand total
@@ -744,7 +744,7 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "fn_input2", PROFILE_FILE_IO_FPTR(fn_input2), NULL, NULL, false, 0},
 
-    // LR07-18: an error operand or a bad format returns an error (D6.4.1), so
+    // LR07-18: an error operand or a bad format returns an error (D7.6.1), so
     // a call types `string | error` and stays boxed (S7.8.1)
     {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_format1", FPTR(fn_format1), NULL, NULL, false, 0,
@@ -1365,7 +1365,7 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_fetch2", PROFILE_NETWORK_FPTR(pn_io_fetch2), NULL, NULL, false, 0, true},
 
-    // lambda.io.mail (D7.2.4v4): reached only through `import mail: lambda.io.mail`,
+    // lambda.io.mail (D9.3.4): reached only through `import mail: lambda.io.mail`,
     // whose members resolve to these io_mail_* rows; every call may park
     {SYSPROC_IO_MAIL_OPEN, "io_mail_open", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_mail_open", PROFILE_NETWORK_FPTR(pn_io_mail_open), NULL, NULL, false, 0, true},
@@ -1380,7 +1380,7 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_MAIL_SEND, "io_mail_send", 3, (Type*)&TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_mail_send", PROFILE_NETWORK_FPTR(pn_io_mail_send), NULL, NULL, false, 0, true},
 
-    // lambda.io.secret (D7.2.4v4): the OS secret store, reached only through
+    // lambda.io.secret (D9.3.4): the OS secret store, reached only through
     // `import secret: lambda.io.secret`; every call parks while the OS answers
     {SYSPROC_IO_SECRET_GET, "io_secret_get", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_secret_get", PROFILE_SECRET_FPTR(pn_io_secret_get), NULL, NULL, false, 0, true},
@@ -1400,6 +1400,8 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "pn_io_sqlite_clone", PROFILE_SQLITE_FPTR(pn_io_sqlite_clone), NULL, NULL, false, 0, false},
     {SYSPROC_IO_SQLITE_PREIMAGE, "io_sqlite_preimage", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_sqlite_preimage", PROFILE_SQLITE_FPTR(pn_io_sqlite_preimage), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_SQLITE_SNAPSHOT_DIGEST, "io_sqlite_snapshot_digest", 1, &TYPE_BINARY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_sqlite_snapshot_digest", PROFILE_SQLITE_FPTR(pn_io_sqlite_snapshot_digest), NULL, NULL, false, 0, false},
     {SYSPROC_IO_SQLITE_EXECUTE, "io_sqlite_execute", 2, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_sqlite_execute2", PROFILE_SQLITE_FPTR(pn_io_sqlite_execute2), NULL, NULL, false, 0, true},
     {SYSPROC_IO_SQLITE_EXECUTE, "io_sqlite_execute", 3, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
@@ -1441,14 +1443,14 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_RDB_EXPORT_ABORT, "io_rdb_export_abort", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_rdb_export_abort", PROFILE_SQLITE_FPTR(pn_io_rdb_export_abort), NULL, NULL, false, 0, false},
 
-    // lambda.io.loopback (D7.2.4v4): one browser request on 127.0.0.1, reached
+    // lambda.io.loopback (D9.3.4): one browser request on 127.0.0.1, reached
     // only through `import loopback: lambda.io.loopback`; accept parks the task
     {SYSPROC_IO_LOOPBACK_LISTEN, "io_loopback_listen", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_loopback_listen", PROFILE_NETWORK_FPTR(pn_io_loopback_listen), NULL, NULL, false, 0, true},
     {SYSPROC_IO_LOOPBACK_ACCEPT, "io_loopback_accept", 3, &TYPE_MAP, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_loopback_accept", PROFILE_NETWORK_FPTR(pn_io_loopback_accept), NULL, NULL, false, 0, true},
 
-    // task-aware WS/WSS IO, imported only as lambda.io.websocket (D7.2.4v4).
+    // task-aware WS/WSS IO, imported only as lambda.io.websocket (D9.3.4).
     {SYSPROC_IO_WEBSOCKET_OPEN, "io_websocket_open", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_websocket_open1", PROFILE_NETWORK_FPTR(pn_io_websocket_open1), NULL, NULL, false, 0, true},
     {SYSPROC_IO_WEBSOCKET_OPEN, "io_websocket_open", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
@@ -1716,7 +1718,7 @@ extern Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
 // (`math.sqrt` etc.). They allocate nothing, never re-enter generated code and
 // keep no argument, so a call to one is not an allocation point: marking them
 // MAY_GC made every call spill and reload the caller's roots and reload every
-// cached array data pointer (D4.3.1) -- 25 instructions around nbody's `sqrt`.
+// cached array data pointer (D5.3.1) -- 25 instructions around nbody's `sqrt`.
 // One list feeds both the import rows and the NO_GC audit below.
 #define JIT_LIBM_LEAVES(X) \
     X(sqrt) X(cbrt) X(hypot) X(exp) X(exp2) X(expm1) \
@@ -1937,7 +1939,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"v2it", FPTR(v2it)},
     // push_d only encodes an inline float or writes a number-stack home;
-    // side-stack growth cannot collect GC objects (D5.2.2v3, D5.3.2).
+    // side-stack growth cannot collect GC objects (D6.2.2, D6.3.2).
     {"push_d", FPTR(push_d),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -1998,6 +2000,13 @@ JitImport jit_runtime_imports[] = {
     {"fn_find3", FPTR(fn_find3),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    // fused length returns an inline count or the original Error Item.
+    {"fn_len_find2", FPTR(fn_len_find2),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_len_find3", FPTR(fn_len_find3),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"fn_replace3", FPTR(fn_replace),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
@@ -2007,8 +2016,9 @@ JitImport jit_runtime_imports[] = {
     {"fn_join2", FPTR(fn_join2),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    // split dispatches native arrays, text and RE2 patterns without guest callbacks.
     {"fn_split2", FPTR(fn_split),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"fn_trim", FPTR(fn_trim),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
@@ -2063,13 +2073,15 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"fn_slice3", FPTR(fn_slice3),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+     // slicing copies/views runtime data and never invokes a guest callback.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"pn_push", FPTR(pn_push),
+     // a certified element contract can invoke its nominal constraint.
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"pn_splice", FPTR(pn_splice),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
 
     // fn_fill's every return path is a container or an error Item — Array
@@ -2208,13 +2220,13 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    // D8.4.3: a NameId lookup has no Item carrier and preserves the error lane.
+    // D7.4.3: a NameId lookup has no Item carrier and preserves the error lane.
     {"lambda_active_module_name_id", FPTR(lambda_active_module_name_id),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED |
-      // D7.2.1 scopes nested module activation, while linked entries are
+      // D9.3.1 scopes nested module activation, while linked entries are
       // append-only. An existing index therefore identifies the same NameId
       // throughout a generated function's effect-bounded loop.
       JIT_IMPORT_LOOP_STABLE_SCALAR,
@@ -2359,7 +2371,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_open_begin", FPTR(fn_open_begin)},
     {"fn_open_end", FPTR(fn_open_end)},
     // String pointer equality only reads immutable bytes and calls memcmp;
-    // a generated success arm need not publish roots for it (D5.3.2).
+    // a generated success arm need not publish roots for it (D6.3.2).
     {"fn_str_eq_ptr", FPTR(fn_str_eq_ptr),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_GC_POINTER) |
@@ -2373,13 +2385,27 @@ JitImport jit_runtime_imports[] = {
     {"fn_not", FPTR(fn_not)},
     {"fn_and", FPTR(fn_and)},
     {"fn_or", FPTR(fn_or)},
-    {"fn_band_item", FPTR(fn_band_item)},
-    {"fn_bor_item", FPTR(fn_bor_item)},
-    {"fn_bxor_item", FPTR(fn_bxor_item)},
-    {"fn_bnot_item", FPTR(fn_bnot_item)},
-    {"fn_shl_item", FPTR(fn_shl_item)},
-    {"fn_shr_item", FPTR(fn_shr_item)},
-    {"fn_ushr_item", FPTR(fn_ushr_item)},
+    // numeric dispatch/boxing can allocate but never calls guest code;
+    // leave collection conservative while allowing bounded leaf expansion.
+#define JIT_NUMERIC_NO_REENTRY(name, result) \
+    {#name, FPTR(name), {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, result, 0}}
+    JIT_NUMERIC_NO_REENTRY(fn_band, JIT_VALUE_NON_GC_SCALAR),
+    JIT_NUMERIC_NO_REENTRY(fn_bor, JIT_VALUE_NON_GC_SCALAR),
+    JIT_NUMERIC_NO_REENTRY(fn_bxor, JIT_VALUE_NON_GC_SCALAR),
+    JIT_NUMERIC_NO_REENTRY(fn_bnot, JIT_VALUE_NON_GC_SCALAR),
+    JIT_NUMERIC_NO_REENTRY(fn_band_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_bor_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_bxor_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_bnot_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_shl_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_shr_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_ushr_item, JIT_VALUE_BOXED_ITEM),
+    JIT_NUMERIC_NO_REENTRY(fn_int, JIT_VALUE_UNKNOWN),
+    JIT_NUMERIC_NO_REENTRY(fn_float, JIT_VALUE_UNKNOWN),
+    // Unicode conversion reads scalar/text payloads and never calls guest code.
+    JIT_NUMERIC_NO_REENTRY(fn_chr, JIT_VALUE_UNKNOWN),
+    JIT_NUMERIC_NO_REENTRY(fn_ord, JIT_VALUE_UNKNOWN),
+#undef JIT_NUMERIC_NO_REENTRY
     {"op_and", FPTR(op_and)},
     {"op_or", FPTR(op_or)},
     {"fn_is", FPTR(fn_is)},
@@ -2512,7 +2538,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_index_set", FPTR(fn_index_set)},
     // Member reads never leave a wide payload above the caller's watermark:
     // int64/uint64 map fields come back as `l2it(field_ptr)` pointing at the
-    // map's own persistent storage (D5.2.2), native lanes box inline, and the
+    // map's own persistent storage (D6.2.2), native lanes box inline, and the
     // two metadata arms that used to call box_int64_value (path.size,
     // datetime.unix) now box inline as v5 `int`. Audited to skip the adopt
     // sequence entirely — this row alone is ~80% of the post-P2.6 helper
@@ -2604,7 +2630,7 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     // Binding now uses the same non-allocating share mark as insertion;
-    // the profiled arm only updates bounded diagnostic counters (D5.3.2).
+    // the profiled arm only updates bounded diagnostic counters (D6.3.2).
     {"cow_bind_var", FPTR(cow_bind_var),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
@@ -2614,6 +2640,10 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"cow_bind_rmw_handle", FPTR(cow_bind_rmw_handle)},
+    {"cow_bind_rmw_root", FPTR(cow_bind_rmw_root),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) | JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"cow_prepare_write", FPTR(cow_prepare_write)},
     {"cow_prepare_write_profiled", FPTR(cow_prepare_write_profiled)},
     {"lambda_array_scalar_snapshot", FPTR(lambda_array_scalar_snapshot),
@@ -2656,7 +2686,11 @@ JitImport jit_runtime_imports[] = {
     {"cow_place_leaf_keys", FPTR(cow_place_leaf_keys)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"lambda_array_int_push_inferred_cow", FPTR(lambda_array_int_push_inferred_cow)},
-    {"pn_push_cow", FPTR(pn_push_cow)},
+    // open growth clears its certificate before pushing, so it cannot invoke
+    // a certified element constraint; allocation remains conservative.
+    {"pn_push_cow", FPTR(pn_push_cow),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"pn_splice_cow", FPTR(pn_splice_cow)},
 
     // ========================================================================
@@ -3073,7 +3107,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_ARGS_BORROWED_AUDITED,
       JIT_EXCEPTION_MAY_SET, 0}},
     {"js_mark_method_func", FPTR(js_mark_method_func), JIT_IMPORT_VOID_PRESERVES},
-    // D5.3.3/D6.2.2v2: strict marking re-finalizes capabilities and may
+    // D6.3.3/D7.2.2: strict marking re-finalizes capabilities and may
     // allocate `.name`/`.length`; NO_GC would hide that safepoint from MIR.
     {"js_mark_strict_func", FPTR(js_mark_strict_func), JIT_IMPORT_VOID_PRESERVES},
     {"js_mark_derived_constructor_func", FPTR(js_mark_derived_constructor_func), JIT_IMPORT_VOID_PRESERVES},
@@ -4036,7 +4070,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // reads the rooted receiver's immutable view descriptor; detached or
         // resized storage changes length/data, never the element kind.
         "js_typed_array_element_type",
-        // D5.3.2: retired imports must leave this exact registry audit as well.
+        // D6.3.2: retired imports must leave this exact registry audit as well.
         "js_async_iterator_close_needs_await",
 #endif // LAMBDA_NO_JS
         JIT_LIBM_LEAVES(JIT_LIBM_AUDIT_NAME)
@@ -4081,6 +4115,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "cow_mark_shared", "cow_capture_value", "cow_bind_var",
         "cow_mark_shared_profiled", "cow_capture_value_profiled",
         "cow_bind_var_profiled",
+        // the constant-zero spine wrapper cannot reach fn_index or allocation.
+        "cow_bind_rmw_root",
         "lambda_exec_profile_note_call",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));

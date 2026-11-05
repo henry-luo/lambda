@@ -1,5 +1,5 @@
 // Live playback: every pluck opens its note's WAV as a native audio voice
-// (D7.5.4). Tones are synthesized on first use and kept; `warm` fills the
+// (D11.3.1). Tones are synthesized on first use and kept; `warm` fills the
 // cache a tone per frame so a new layout rarely waits on synthesis.
 import synth: .mod_synth
 import bank: lambda.audio.voices

@@ -1,4 +1,4 @@
-// D5.2.1v5: a later call cannot overwrite the scalar retained by an earlier let.
+// D6.2.1: a later call cannot overwrite the scalar retained by an earlier let.
 fn boxed(value: float) any { return value }
 fn snapshot() bool^ {
     var value: any = boxed(1e-310)

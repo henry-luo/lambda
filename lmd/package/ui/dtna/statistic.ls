@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import locale: .locale
 
@@ -31,7 +32,7 @@ pub fn descriptor(props) element^ {
         raise c.fail("statistic","separators must be strings")
     else if (props.formatter != null and not (props.formatter is fn)) raise c.fail("statistic","formatter must be a pure function")
     else if (props.value != null and not (props.value is number or props.value is string)) raise c.fail("statistic","value must be a number or string")
-    else c.node('statistic',props,null,["value","prefix","suffix","precision","group_separator","decimal_separator","formatter","loading","value_style","locale"])^
+    else descriptor.node('statistic',props,null,["value","prefix","suffix","precision","group_separator","decimal_separator","formatter","loading","value_style","locale"])^
 }
 fn formatted(props) any^ {
     let value = c.option(props,"value",0);

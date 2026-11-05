@@ -1,4 +1,4 @@
-// D4.5.2: exercise copied worker input and transient result arrays under forced GC.
+// D5.5.2: exercise copied worker input and transient result arrays under forced GC.
 import dom
 import radiant
 // retain downsampling and cache/ownership checks with a small source under forced GC.

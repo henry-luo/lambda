@@ -2,8 +2,8 @@
 import dom
 import m: .mod_model
 import c: lambda.slide.common
-import u: ~~.mod_publish
-import capture: ~~.mod_splitter
+import u: lambda.ui.core.publish
+import capture: lambda.ui.core.splitter
 
 fn node(owner,id) => dom.get_element_by_id(owner,id)
 pub fn thumbnail(owner,index) => dom.query_selector(node(owner,"thumbnails"),"[data-slide=\"" ++ string(index) ++ "\"]")

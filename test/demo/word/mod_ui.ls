@@ -1,9 +1,10 @@
+import source_selection: lambda.editor.core.source_pos
 // Thin WordCraft-style ribbon: every interactive item emits a command ID.
-import lambda.editor.mod_editor
-import lambda.editor.mod_step
+import lambda.editor.model
+import lambda.editor.core.step
 import model: .mod_model
 import document: .mod_document
-import files: lambda.edit.files
+import files: lambda.editor.app.files
 import picker: .mod_file_picker
 import page: .mod_page
 import columns: .mod_columns
@@ -21,9 +22,9 @@ import smartart: .mod_smartart
 import chartmodel: .mod_chart
 import changes: .mod_changes
 import controls: lambda.ui.controls
-import icons: ~~.mod_icons
-import ribbon_icons: .mod_ribbon_icons
-import context: ~~.mod_context_menu
+import icons: lambda.ui.workspace.icons
+import ribbon_icons: lambda.ui.workspace.ribbon_icons
+import context: lambda.ui.core.menu
 import focused: .mod_context
 import tables: .mod_table
 import table_design: .mod_table_design
@@ -41,9 +42,9 @@ import shape_format: .mod_shape_format
 import equation_ui: .mod_equation_ui
 import home: .mod_home
 import home_ui: .mod_home_ui
-import text_format: ~~.mod_text_format
-import font_picker: .mod_font_picker
-import ribbon: ~~.mod_ribbon
+import text_format: lambda.ui.workspace.text_format
+import font_picker: lambda.ui.workspace.font_picker
+import ribbon: lambda.ui.workspace.ribbon
 
 pub let icon = icons.icon
 pub fn font_options(families,current) any^ => text_format.font_options(families,current)
@@ -345,7 +346,7 @@ pub fn selection_pane(st) any^ => <aside id:"selection-pane",class:"selection-pa
                 if (e.layout.hidden) "eye_off" else "eye",{path:e.path},false,st.read_only,"icon-only")>];
         if (len(object_layout.entries(st.editor.doc))==0) <p class:"pane-hint","No objects in this document."> else null>>
 pub fn context_menu(st) any^ => if (st.context==null) null else if (st.context.menu!=null) editing_menu(st) else {
-    let selected = if (st.read_only) st.context.copy_text!="" else context.has_selection(st.editor.selection)
+    let selected = if (st.read_only) st.context.copy_text!="" else source_selection.has_selection(st.editor.selection)
     let disabled = st.read_only
     let item = focused.describe({*:st.editor,selection:st.context.item_selection or st.editor.selection},st.context.story);
     context.frame("word-context-menu","word",

@@ -16,9 +16,9 @@
 > [S10.5](../../doc/Lambda_Formal_Semantics.md#s105-root-navigation)
 >
 > **Normative implementation constraints:**
-> [D1.6](../../doc/Lambda_Formal_Design.md#d1-architecture),
-> [D4.6](../../doc/Lambda_Formal_Design.md#d46-name-identity), and
-> [D5.4](../../doc/Lambda_Formal_Design.md#d54-runtime-globals-and-evalcontext)
+> [D1.6](../../doc/Lambda_Formal_Design.md#d1-architecture-principles),
+> [D5.6](../../doc/Lambda_Formal_Design.md#d56-name-identity), and
+> [D6.4](../../doc/Lambda_Formal_Design.md#d64-context-and-globals)
 
 ## 1. Outcome and implementation boundary
 
@@ -129,7 +129,7 @@ of the following rather than changing grammar tokens in isolation.
 | `lambda/runtime/interp_plan.cpp`, `lambda/runtime/emit_ast_dump.cpp` | Know `AstParentNode`. | Migrate traversal/debug serialization to the new operation nodes. |
 | `lambda/io/target.cpp`, `lambda/input/input.cpp` | `path_to_os_path` can project file/relative paths directly; no file authority gate exists. | Resolve logical roots first, validate file authority, then project an explicit local provider path. |
 | `lambda/core/print.cpp` | Path output delegates to old spellings. | Emit only canonical new spellings. |
-| `lambda/lambda-data.hpp`, `lambda/runtime/runner.cpp` | `EvalContext` has no path resolver/navigation capsule. | Add immutable resolver state through the opaque context pattern required by **D5.4.2**. |
+| `lambda/lambda-data.hpp`, `lambda/runtime/runner.cpp` | `EvalContext` has no path resolver/navigation capsule. | Add immutable resolver state through the opaque context pattern required by **D6.4.2**. |
 | `lib/shell.h`, `lib/shell.c` | `shell_get_hostname()` already exposes the current hostname. | Reuse this helper through one authority service; do not add another `gethostname` implementation. |
 | `test/test_path_gtest.cpp`, `test/lambda/path.ls` | Cover old roots, providers, and OS projection. | Replace retired expectations and add syntax, algebra, authority, resolver, parity, and GC-stress coverage. |
 
@@ -187,10 +187,10 @@ the semantic rules are fixed:
   a key kind unsupported by the resolved container yields `null` on read and a
   hard raised error on write rather than a third retained key kind;
 - NameId is semantic identity inside its scope, in accordance with
-  **D4.6.1v2**; text is retained only where canonical printing, provider
+  **D5.6.1**; text is retained only where canonical printing, provider
   projection, or cross-context reconstruction requires it;
 - no arbitrary process-local NameId is baked into cached MIR, in accordance
-  with **D4.6.2v2** and **D5.4.3**.
+  with **D5.6.2** and **D6.4.3**.
 
 ### 3.2 Path root and authority representation
 
@@ -311,7 +311,7 @@ Printing a path, parsing the result, and printing again must be idempotent.
 ### 3.5 ResolverContext and pure qualification
 
 Add a path resolver as an immutable capsule owned by the canonical
-`EvalContext`, following **D5.4.1–D5.4.4**. Do not add mutable process-global
+`EvalContext`, following **D6.4.1–D6.4.4**. Do not add mutable process-global
 mounts and do not put a context pointer inside `Path` values.
 
 The capsule contains:
@@ -685,7 +685,7 @@ land the grammar as a façade over the old `/ == file` representation.
 - `file.other-host.a` remains constructible but is rejected as unsupported
   before OS-path projection.
 - No mutable process-global resolver state or repeated-execution lock is added
-  (**D5.4.4**).
+  (**D6.4.4**).
 
 ### Phase P3 — Change grammar and AST
 
@@ -750,7 +750,7 @@ land the grammar as a façade over the old `/ == file` representation.
   equal results for all static/algebra vectors.
 - No path operation is lowered as a string member named `parent` or `root`.
 - MIR Direct does not bake a resolver, hostname, NameId from another context,
-  or `Path` field offset (**D5.4.3**).
+  or `Path` field offset (**D6.4.3**).
 - C2MIR files are unchanged.
 
 ### Phase P5 — Route targets and I/O through qualification

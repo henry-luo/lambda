@@ -1,4 +1,4 @@
-// D7.2.5: Insert symbol sets shared by document and slide editors.
+// D10.2.1: Insert symbol sets shared by document and slide editors.
 pub let symbols = [
     {name:"Punctuation",chars:["©","®","™","§","¶","†","‡","•","…","—","–","«","»","“","”","’"]},
     {name:"Mathematics",chars:["±","×","÷","≠","≈","≤","≥","∞","√","∑","∏","∫","°","½","¼","¾"]},

@@ -1,4 +1,4 @@
-// Tune31 follow-on / D3.3.3v3: a repeated text algorithm may admit a fixed
+// Tune31 follow-on / D4.3.3: a repeated text algorithm may admit a fixed
 // string corpus once, then compare only the typed integer code lanes.
 
 pn count_equal_codes(left: int[], right: int[]) int {

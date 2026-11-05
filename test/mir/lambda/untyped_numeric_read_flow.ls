@@ -1,4 +1,4 @@
-// S7.1.1v3, D3.3.3v3: a producer hint never replaces the live array guard.
+// S7.1.1v3, D4.3.3: a producer hint never replaces the live array guard.
 pn probability_source(mode, var values) {
     values[0] = 0.25
     values[1] = 0.75

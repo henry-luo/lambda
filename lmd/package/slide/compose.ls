@@ -1,4 +1,4 @@
-// masters and named layouts lower to ordinary slides before cue compilation (D7.2.4).
+// masters and named layouts lower to ordinary slides before cue compilation (D9.3.4).
 import c: .common
 import theme: .theme
 import scene: .scene

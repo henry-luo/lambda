@@ -976,7 +976,7 @@ static bool scan_occurrence_count(Lexer* lx, StrView* op) {
 // chain (`int{3}*` still needs grouping), but the array constructor does, and
 // rank composes left to right (S11.1.1v3): `T[][]` is an array of arrays and
 // `int[2][3]` is three arrays of two. `T?[]` keeps its existing
-// nullable-element binding (D3.1.1v2), while `T[]?` is the nullable array.
+// nullable-element binding (D4.1.1), while `T[]?` is the nullable array.
 AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     if (lx->p >= lx->end) { return operand; }
     char c = *lx->p;
@@ -1606,7 +1606,7 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         AstBinaryNode* ast_node = (AstBinaryNode*)node;
         resolve_type_pattern(tp, ast_node->left);
         resolve_type_pattern(tp, ast_node->right);
-        // D3.1.1v4: a range type shares the LMD_TYPE_TYPE tag and is told apart
+        // D4.1.1: a range type shares the LMD_TYPE_TYPE tag and is told apart
         // by its kind; the range VALUE tag made it read as a range (LR03-18)
         TypeRange* range_type = (TypeRange*)alloc_type_kind(tp->pool, TYPE_KIND_RANGE,
             sizeof(TypeRange));

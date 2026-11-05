@@ -1,4 +1,4 @@
-// Shared pure text policy for form controls and model-edit fallbacks (D7.2.5).
+// Shared pure text policy for form controls and model-edit fallbacks (D10.2.1).
 
 fn is_word_char(c) {
     let o = ord(c);

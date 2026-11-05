@@ -18,8 +18,7 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context);
 static bool print_tree_callback(StyleNode* node, void* context);
 #endif
 static bool validate_tree_callback(StyleNode* node, void* context);
-static bool merge_tree_callback(StyleNode* node, void* context);
-static bool clone_tree_callback(StyleNode* node, void* context);
+static bool copy_tree_winner_callback(StyleNode* node, void* context);
 static bool wrapper_callback(AvlNode* avl_node, void* ctx);
 static int css_get_cascade_level(const CssDeclaration* decl);
 static void css_declaration_destroy_tree_copy(CssDeclaration* declaration, Pool* pool);
@@ -134,14 +133,10 @@ struct CollectSelectorsContext {
     size_t capacity;
 };
 
-struct MergeContext {
+struct TreeCopyContext {
     StyleTree* target;
-    int* merged_count;
-};
-
-struct CloneContext {
-    StyleTree* target;
-    int* cloned_count;
+    int* count;
+    bool failed;
 };
 
 struct CallbackWrapper {
@@ -834,6 +829,11 @@ CssDeclaration* style_node_resolve_cascade(StyleNode* node) {
 
 static bool style_node_apply_declaration(StyleNode* node, CssDeclaration* declaration, Pool* pool) {
     if (!node || !declaration) return false;
+    if (node->has_cached_winner) {
+        node->has_cached_winner = false;
+        node->computed_value = NULL;
+        node->needs_recompute = true;
+    }
 
     // Compare with current winning declaration
     if (node->winning_decl) {
@@ -915,6 +915,7 @@ void style_tree_destroy(StyleTree* style_tree) {
 
 void style_tree_clear(StyleTree* style_tree) {
     if (!style_tree) return;
+    style_tree->declaration_cache_valid = false;
 
     // This is a logical cascade reset, not an ownership teardown. Pooled
     // declarations can still be referenced by a reflowing pseudo view, so
@@ -930,6 +931,7 @@ void style_tree_clear(StyleTree* style_tree) {
 
 StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* declaration) {
     if (!style_tree || !declaration) return NULL;
+    style_tree->declaration_cache_valid = false;
 
     // Set source order
     declaration->source_order = style_tree->next_source_order++;
@@ -1039,37 +1041,62 @@ CssDeclaration* style_tree_get_property_declaration(StyleTree* tree, CssProperty
     return style_tree_get_component_declaration(tree, sources, count);
 }
 
-// a conservative filter rejects absent properties in immutable canonical trees;
-// collisions fall through to the full cascade, so no winner can be suppressed
-struct StyleDeclarationCache {
-    uint64_t present;
-};
+static CssDeclaration* style_tree_resolve_declaration(StyleTree* tree, StyleNode* node,
+    CssPropertyCode property, bool authored, CssDeclaration* fallback);
 
-void style_tree_init_declaration_cache(StyleTree* tree) {
-    if (!tree || tree->declaration_cache) return;
-    tree->declaration_cache = (StyleDeclarationCache*)pool_calloc(
-        tree->pool, sizeof(StyleDeclarationCache));
-    if (!tree->declaration_cache) return;
-    if (avl_tree_search(tree->tree, CSS_PROPERTY_ALL)) {
-        tree->declaration_cache->present = UINT64_MAX;
-        return;
-    }
-    for (int property = 1; property < CSS_PROPERTY_COUNT; property++) {
-        CssPropertyCode code = (CssPropertyCode)property;
-        CssPropertyCode shorthand = css_property_cascade_shorthand(code);
-        if (avl_tree_search(tree->tree, code) ||
-                (shorthand && avl_tree_search(tree->tree, shorthand))) {
-            tree->declaration_cache->present |= UINT64_C(1) << (property % 64);
-        }
-    }
+static CssDeclaration* style_tree_cache_node_winner(StyleTree* tree, StyleNode* node) {
+    CssDeclaration* winner = style_tree_resolve_declaration(tree, node, node->property_code, false, NULL);
+    node->cached_winner = winner;
+    node->has_cached_winner = true;
+    return winner;
 }
 
-static CssDeclaration* style_tree_lookup_declaration_uncached(StyleTree* style_tree,
-        CssPropertyCode property_code, bool authored, CssDeclaration* fallback = NULL) {
+// each source contributes its own property and any implicit shorthand members.
+// this static index avoids a registry-sized AVL scan when preparing a tree.
+struct StyleDeclarationPresence {
+    static constexpr size_t words = CSS_DECLARATION_PRESENCE_WORDS;
+    uint64_t members[CSS_PROPERTY_COUNT][words] = {};
+    StyleDeclarationPresence() {
+        for (int property = 1; property < CSS_PROPERTY_COUNT; property++) {
+            uint64_t bit = UINT64_C(1) << (property % 64);
+            size_t word = (size_t)property / 64 % words;
+            members[property][word] |= bit;
+            CssPropertyCode shorthand = css_property_cascade_shorthand((CssPropertyCode)property);
+            if (shorthand > 0 && shorthand < CSS_PROPERTY_COUNT) members[shorthand][word] |= bit;
+        }
+        for (size_t word = 0; word < words; word++) members[CSS_PROPERTY_ALL][word] = UINT64_MAX;
+    }
+};
+
+static bool style_tree_prepare_declaration_node(StyleNode* node, void* context) {
+    static const StyleDeclarationPresence index;
+    StyleTree* tree = (StyleTree*)context;
+    if (node->has_cached_winner) {
+        node->computed_value = NULL;
+        node->needs_recompute = true;
+    }
+    node->has_cached_winner = false;
+    if (node->property_code > 0 && node->property_code < CSS_PROPERTY_COUNT) {
+        for (size_t word = 0; word < StyleDeclarationPresence::words; word++)
+            tree->declaration_presence[word] |= index.members[node->property_code][word];
+    }
+    // canonical readers share an immutable epoch; fill every winner before publication.
+    if (tree->canonical_owner) style_tree_cache_node_winner(tree, node);
+    return true;
+}
+
+void style_tree_init_declaration_cache(StyleTree* tree) {
+    if (!tree || tree->declaration_cache_valid) return;
+    // tree-wide invalidation also expires winners affected by all or shorthands.
+    memset(tree->declaration_presence, 0, sizeof(tree->declaration_presence));
+    style_tree_foreach(tree, style_tree_prepare_declaration_node, tree);
+    tree->declaration_cache_valid = true;
+}
+
+static CssDeclaration* style_tree_resolve_declaration(StyleTree* style_tree, StyleNode* node,
+        CssPropertyCode property_code, bool authored, CssDeclaration* fallback) {
     if (!style_tree || !style_tree->tree) return fallback;
 
-    AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
-    StyleNode* node = avl_node ? (StyleNode*)avl_node->declaration : NULL;
     if (property_code == CSS_PROPERTY_ALL || property_code == CSS_PROPERTY_DIRECTION ||
         property_code == CSS_PROPERTY_UNICODE_BIDI || property_code == CSS_PROPERTY_CUSTOM ||
         property_code <= 0 || property_code >= CSS_PROPERTY_COUNT) {
@@ -1088,16 +1115,28 @@ static CssDeclaration* style_tree_lookup_declaration_uncached(StyleTree* style_t
         sizeof(sources) / sizeof(sources[0]), NULL, NULL, authored, fallback);
 }
 
+static CssDeclaration* style_tree_lookup_declaration_uncached(StyleTree* tree,
+        CssPropertyCode property, bool authored, CssDeclaration* fallback = NULL) {
+    AvlNode* entry = tree && tree->tree ? avl_tree_search(tree->tree, property) : NULL;
+    return style_tree_resolve_declaration(tree, entry ? (StyleNode*)entry->declaration : NULL,
+        property, authored, fallback);
+}
+
 static CssDeclaration* style_tree_lookup_declaration(StyleTree* tree,
         CssPropertyCode property, bool authored) {
-    if (!tree || !tree->canonical_owner || property <= 0 || property >= CSS_PROPERTY_COUNT) {
+    if (!tree || authored || property <= 0 || property >= CSS_PROPERTY_COUNT)
         return style_tree_lookup_declaration_uncached(tree, property, authored);
-    }
-    StyleDeclarationCache* cache = tree->declaration_cache;
-    if (!cache) return style_tree_lookup_declaration_uncached(tree, property, authored);
+    style_tree_init_declaration_cache(tree);
     uint64_t bit = UINT64_C(1) << ((size_t)property % 64);
-    if (!(cache->present & bit)) return NULL;
-    return style_tree_lookup_declaration_uncached(tree, property, authored);
+    // fold into two words so fewer unrelated declarations trigger absent-property AVL probes.
+    if (!(tree->declaration_presence[(size_t)property / 64 % CSS_DECLARATION_PRESENCE_WORDS] & bit)) return NULL;
+    AvlNode* entry = avl_tree_search(tree->tree, property);
+    StyleNode* node = entry ? (StyleNode*)entry->declaration : NULL;
+    if (node && node->has_cached_winner) return node->cached_winner;
+    // only owned trees fill winners lazily; their writers invalidate the whole tree.
+    // a cached miss already searched this property; resolve its other sources directly.
+    return node ? style_tree_cache_node_winner(tree, node)
+        : style_tree_resolve_declaration(tree, NULL, property, false, NULL);
 }
 
 CssDeclaration* style_tree_get_declaration(StyleTree* tree, CssPropertyCode property) {
@@ -1136,6 +1175,7 @@ void* style_tree_get_computed_value(StyleTree* style_tree,
 
 bool style_tree_remove_property(StyleTree* style_tree, CssPropertyCode property_code) {
     if (!style_tree) return false;
+    style_tree->declaration_cache_valid = false;
 
     AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
     if (!avl_node) return false;
@@ -1149,6 +1189,7 @@ bool style_tree_remove_property(StyleTree* style_tree, CssPropertyCode property_
 
 bool style_tree_remove_declaration(StyleTree* style_tree, CssDeclaration* declaration) {
     if (!style_tree || !declaration) return false;
+    style_tree->declaration_cache_valid = false;
 
     AvlNode* avl_node = avl_tree_search(style_tree->tree, declaration->property_code);
     if (!avl_node) return false;
@@ -1370,6 +1411,7 @@ int style_tree_apply_inheritance(StyleTree* child_tree, StyleTree* parent_tree) 
 
 void style_tree_invalidate_computed_values(StyleTree* style_tree) {
     if (!style_tree) return;
+    style_tree->declaration_cache_valid = false;
 
     style_tree->compute_version++;
 
@@ -1387,6 +1429,8 @@ void* style_node_compute_value(StyleNode* node, StyleTree* parent_tree) {
 
 void* style_node_get_computed_value(StyleNode* node, StyleTree* parent_tree) {
     if (!node) return NULL;
+    // legacy computed queries must neither read nor overwrite a cached winner.
+    if (node->has_cached_winner) return style_node_compute_value(node, parent_tree);
 
     // Check cache validity
     if (!node->needs_recompute && node->computed_value) {
@@ -1490,15 +1534,9 @@ void style_tree_get_statistics(StyleTree* style_tree, int* total_nodes,
 // Advanced Style Operations
 // ============================================================================
 
-// Lifetime contract (CSS value retention audit; Memory_Safety_Template.md §8.2,
-// retained CSS values): this is a SHALLOW clone. clone_tree_callback re-applies the source
-// node's CssDeclaration* (and therefore its CssValue*) into the cloned tree by
-// reference + refcount. Those declarations stay owned by SOURCE's pool, not by
-// target_pool. Refcounting does not protect across pools — pool free reclaims
-// memory regardless of ref_count. Therefore: the pool backing `source` must
-// outlive every tree cloned from it. To produce a self-contained clone whose
-// values live in target_pool, a deep CssValue copy would be required (none
-// exists yet). Currently only exercised by tests, where source outlives clone.
+// destination-owned declaration records preserve source order in the source tree.
+// borrowed values still require the source pool to outlive the copy; owned
+// payloads use the existing cascade-copy retention policy (D5.1.4).
 StyleTree* style_tree_clone(StyleTree* source, Pool* target_pool) {
     if (!source || !target_pool) return NULL;
 
@@ -1507,10 +1545,11 @@ StyleTree* style_tree_clone(StyleTree* source, Pool* target_pool) {
 
     // Create proper clone context
     int cloned_count = 0;
-    struct CloneContext clone_context = { cloned, &cloned_count };
+    struct TreeCopyContext clone_context = { cloned, &cloned_count, false };
 
     // Clone all declarations
-    style_tree_foreach(source, clone_tree_callback, &clone_context);
+    style_tree_foreach(source, copy_tree_winner_callback, &clone_context);
+    if (clone_context.failed) { style_tree_destroy_owned(cloned); return NULL; }
 
     return cloned;
 }
@@ -1688,7 +1727,6 @@ void style_tree_destroy_owned(StyleTree* style_tree) {
     assert(style_tree->canonical_owner == NULL);
     assert(style_tree->borrow_ref_count == 0);
     Pool* pool = style_tree->pool;
-    if (style_tree->declaration_cache) pool_free(pool, style_tree->declaration_cache);
     if (style_tree->tree) {
         style_tree_reclaim_branch(style_tree->tree->root, pool);
         pool_free(pool, style_tree->tree);
@@ -1717,33 +1755,27 @@ void style_tree_retire_borrow_source(StyleTree* style_tree) {
     }
 }
 
-struct CssDeclarationPresence { CssDeclarationSelection selection; bool found; };
-
-static bool style_tree_find_selected(StyleNode* node, void* context) {
-    CssDeclarationPresence* presence = (CssDeclarationPresence*)context;
-    // style_tree_foreach counts callback results but does not stop on false.
-    presence->found = presence->found ||
-        style_node_find_declaration(node, presence->selection) != NULL;
-    return !presence->found;
+static bool style_tree_has_selected(AvlNode* node, CssDeclarationSelection selection) {
+    // the generic foreach visits every node even after its callback returns false.
+    return node && (style_node_find_declaration((StyleNode*)node->declaration, selection) ||
+        style_tree_has_selected(node->left, selection) ||
+        style_tree_has_selected(node->right, selection));
 }
 
 bool style_tree_has_inline_declarations(StyleTree* style_tree) {
-    CssDeclarationPresence presence = {CSS_SELECT_INLINE, false};
-    if (style_tree) style_tree_foreach(style_tree, style_tree_find_selected, &presence);
-    return presence.found;
+    return style_tree && style_tree->tree &&
+        style_tree_has_selected(style_tree->tree->root, CSS_SELECT_INLINE);
 }
 
 bool style_tree_has_local_declarations(StyleTree* tree) {
-    CssDeclarationPresence presence = {CSS_SELECT_LOCAL, false};
-    if (tree) style_tree_foreach(tree, style_tree_find_selected, &presence);
-    return presence.found;
+    return tree && tree->tree && style_tree_has_selected(tree->tree->root, CSS_SELECT_LOCAL);
 }
 
 bool style_tree_is_empty(StyleTree* style_tree) {
     return !style_tree || !style_tree->tree || style_tree->tree->node_count == 0;
 }
 
-static bool declaration_winner_equal(const CssDeclaration* left,
+bool css_declaration_winner_equal(const CssDeclaration* left,
                                      const CssDeclaration* right) {
     if (left == right) return true;
     if (!left || !right || left->property_code != right->property_code ||
@@ -1764,7 +1796,7 @@ bool style_tree_winners_equal(StyleTree* left, StyleTree* right) {
     if (left == right) return true;
     if (!left || !right) return false;
     for (int property = CSS_PROPERTY_DISPLAY; property < CSS_PROPERTY_COUNT; property++) {
-        if (!declaration_winner_equal(
+        if (!css_declaration_winner_equal(
                 style_tree_get_declaration(left, (CssPropertyCode)property),
                 style_tree_get_declaration(right, (CssPropertyCode)property))) {
             return false;
@@ -1778,8 +1810,8 @@ int style_tree_merge(StyleTree* target, StyleTree* source) {
 
     int merged_count = 0;
 
-    struct MergeContext merge_context = { target, &merged_count };
-    style_tree_foreach(source, merge_tree_callback, &merge_context);
+    struct TreeCopyContext merge_context = { target, &merged_count, false };
+    style_tree_foreach(source, copy_tree_winner_callback, &merge_context);
 
     return merged_count;
 }
@@ -1856,7 +1888,7 @@ static bool collect_nodes_callback(AvlNode* avl_node, void* context) {
 static bool collect_computed_callback(AvlNode* avl_node, void* context) {
     StyleNode* node = (StyleNode*)avl_node->declaration;
     node->needs_recompute = true;
-    node->computed_value = NULL;
+    if (!node->has_cached_winner) node->computed_value = NULL;
     return true;
 }
 
@@ -1900,30 +1932,19 @@ static bool validate_tree_callback(StyleNode* node, void* context) {
     return true;
 }
 
-static bool merge_tree_callback(StyleNode* node, void* context) {
-    struct MergeContext* merge_ctx = (struct MergeContext*)context;
-
-    // Merge the winning declaration from source to target
-    if (node && node->winning_decl && merge_ctx->target) {
-        style_tree_apply_declaration(merge_ctx->target, node->winning_decl);
-        if (merge_ctx->merged_count) {
-            (*(merge_ctx->merged_count))++;
-        }
+static bool copy_tree_winner_callback(StyleNode* node, void* context) {
+    TreeCopyContext* copy = (TreeCopyContext*)context;
+    if (!node || !node->winning_decl || !copy->target || copy->failed) return false;
+    // applying a shared record rewrites source_order and invalidates the source's
+    // cached winners; keep declaration identity local to the destination tree.
+    CssDeclaration* declaration = css_declaration_clone_for_cascade_tree(
+        node->winning_decl, copy->target->pool);
+    if (!declaration || !style_tree_apply_declaration(copy->target, declaration)) {
+        if (declaration) css_declaration_destroy_tree_copy(declaration, copy->target->pool);
+        copy->failed = true;
+        return false;
     }
-
-    return true;
-}
-
-static bool clone_tree_callback(StyleNode* node, void* context) {
-    struct CloneContext* ctx = (struct CloneContext*)context;
-
-    // Clone the winning declaration if it exists
-    if (node && node->winning_decl && ctx->target) {
-        style_tree_apply_declaration(ctx->target, node->winning_decl);
-        if (ctx->cloned_count) {
-            (*(ctx->cloned_count))++;
-        }
-    }
+    if (copy->count) (*copy->count)++;
     return true;
 }
 

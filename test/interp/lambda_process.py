@@ -88,7 +88,7 @@ def run_lambda_process(executable: str, script: str, tier: Optional[str],
     """Runs one Lambda script in an isolated process group.
 
     A missing tier deliberately means AUTO. Callers that need eager MIR Direct
-    must pass ``jit`` rather than relying on the default (D8.1.1v10).
+    must pass ``jit`` rather than relying on the default (D8.3.3).
     """
     env: dict[str, Optional[str]] = dict(extra_env or {})
     if tier is None:

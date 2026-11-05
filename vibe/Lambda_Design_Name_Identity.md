@@ -66,8 +66,8 @@ Non-goals:
 | **NI14** | **Threading:** sections immutable-shared; registry, GOT, and dynamic pool are isolate-owned single-writer (no hot-path synchronization, per the Runtime_Globals invariant). The only locked operation is pool control-block bookkeeping (register/retain/release) — rare, load-time events. The generated global canonicals are process-shared; two isolates may pick different canonicals only for non-global spellings. This is harmless because dynamic NameRefs never cross isolates (JT: no shared JS objects). |
 | **NI15** | **The three key kinds share representation, not management.** STRING is interned by exact bytes; each ordinary `Symbol()` and private-name creation receives a fresh record; `Symbol.for` and well-known Symbols explicitly reuse their registry/singleton record. A Symbol's description and a private name's source spelling are diagnostic bytes only and never determine identity. |
 | **NI16** | **Global well-known pools are generated, never hand-maintained.** One Python data module is the source of truth; one Python generator emits three enum headers and three immutable pool-data files (§4). Generated enum values are compile-time NameId constants and are the comparison operand in native HTML/CSS/SVG, Input, formatter, and Radiant code. NameRef resolution is reserved for consumers whose ABI or semantics actually require a `String*`/PropertyKeyRef. |
-| **NI17** | **A STRING name's identity is its spelling (2026-10-06, S8.2.2v4 / D3.4.4v3).** NameIds are per pool (`pool_number << 16 \| ordinal`), so one spelling carries a different id in the compiler's pool, each parse `Input`'s pool and the runtime pool, and none at all for a `createString` or computed key. An id therefore proves equality but never difference: a comparison of STRING names falls back to kind, namespace, length and bytes when the ids differ or one is absent. Every read already did this; the transition trees' edges, `typemap_shape_entries_equal` and `map_existing_shape_entry` did not, which split one spelling into one shape per pool ([Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0). SYMBOL and PRIVATE kinds keep NI15's identity by record. |
-| **NI18** | **JavaScript keys in the one name space (2026-10-06, D3.4.4v4).** Under the host root namespace `js`: a property name is a global-namespace name; `Symbol.for(k)` is (`js.symbol.for`, `k`), every byte of `k`; a well-known symbol is (`js.symbol`, its name); `Symbol(d)` is (`js.symbol.unique.<n>`, `d`), one anonymous namespace per creation, so equal descriptions never make equal keys; `#x` is (`js.private.<class>`, `x`), one namespace per class declaration, and the brand check is namespace membership. The mapping is a reading of the records NI15 already keeps — registered and well-known records are interned per (kind, characters); unique and private records are fresh per creation — so `(name_id, key_kind)` is `(resolved namespace, characters)` and no representation changes. The transition trees admit identity keys by lifting the four `property_key_requires_identity` gates (Impl_Map_Transition_Coverage P0). Open: how such a key is spelled and printed from Lambda (`js.symbol.for.k`). |
+| **NI17** | **A STRING name's identity is its spelling (2026-10-06, S8.2.2v4 / D3.4.4).** NameIds are per pool (`pool_number << 16 \| ordinal`), so one spelling carries a different id in the compiler's pool, each parse `Input`'s pool and the runtime pool, and none at all for a `createString` or computed key. An id therefore proves equality but never difference: a comparison of STRING names falls back to kind, namespace, length and bytes when the ids differ or one is absent. Every read already did this; the transition trees' edges, `typemap_shape_entries_equal` and `map_existing_shape_entry` did not, which split one spelling into one shape per pool ([Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0). SYMBOL and PRIVATE kinds keep NI15's identity by record. |
+| **NI18** | **JavaScript keys in the one name space (2026-10-06, D3.4.4).** Under the host root namespace `js`: a property name is a global-namespace name; `Symbol.for(k)` is (`js.symbol.for`, `k`), every byte of `k`; a well-known symbol is (`js.symbol`, its name); `Symbol(d)` is (`js.symbol.unique.<n>`, `d`), one anonymous namespace per creation, so equal descriptions never make equal keys; `#x` is (`js.private.<class>`, `x`), one namespace per class declaration, and the brand check is namespace membership. The mapping is a reading of the records NI15 already keeps — registered and well-known records are interned per (kind, characters); unique and private records are fresh per creation — so `(name_id, key_kind)` is `(resolved namespace, characters)` and no representation changes. The transition trees admit identity keys by lifting the four `property_key_requires_identity` gates (Impl_Map_Transition_Coverage P0). Open: how such a key is spelled and printed from Lambda (`js.symbol.for.k`). |
 
 **Terminology note:** NameId is generated predefined identity ("which
 catalogued name this is") within one global-catalog version. SectionNameId is
@@ -477,7 +477,7 @@ use NameId; arbitrary Mark fields retain the byte-comparison seam.
 | `js_property_get` special names | ~dozens of length-guarded strncmp per access (js_runtime.cpp:4334–5590) | `key == js_wk.length`, where `js_wk` resolves generated NameIds once at runtime initialization |
 | String/Number/Array/Math method routing | name-string chains, ~45 branches (`js_string_method` js_runtime.cpp:22877); id path round-trips id→name→chain +alloc (js_runtime.cpp:10556) | `switch (builtin_id)` jump table end-to-end (W1) |
 | Dynamic `new ctor(...)` | ~60-arm name chain + `"bound "` strip (js_runtime.cpp:2216) | `fn->ctor_id` int dispatch (W2) |
-| Symbol keys | Symbol Item converted to user-spellable `__sym_N` String | a hosted JS Symbol stays a direct core `Symbol*` at observable boundaries; only storage resolves its temporary `NameId` to the established unique NamePool key, while `Symbol::chars[]` remains its spelling (D4.6.1v3) |
+| Symbol keys | Symbol Item converted to user-spellable `__sym_N` String | a hosted JS Symbol stays a direct core `Symbol*` at observable boundaries; only storage resolves its temporary `NameId` to the established unique NamePool key, while `Symbol::chars[]` remains its spelling (D5.6.1) |
 | Private keys | `__private_<class-index>_` spelling + prefix parsing/brand checks | runtime private environment supplies a unique PRIVATE PropertyKeyRef; repeated class evaluation receives fresh refs |
 | Array-index key classification | per-access numeric-string parse | NameMeta returns cached `array_index` or sentinel; TypedArray canonical-numeric classification stays separate |
 | HTML/SVG tag routing in Radiant | handwritten `HTM_TAG_*` enum plus duplicated tag-name table/hashmap | generated `MARKUP_NAME_*` stored in `DomElement::tag_id`; direct NameId compare |
@@ -604,7 +604,7 @@ Open issues (accepted or KIV):
 
 ### 7.4 Canonical string-key encoding — 2026-10-07
 
-**S8.2.2v5**, **D4.6.1v4** settle the shared Lambda/JS key boundary:
+**S8.2.2v5**, **D5.6.1** settle the shared Lambda/JS key boundary:
 canonical UTF-8 for scalar characters and lossless WTF-8 for lone hosted JS
 UTF-16 units. Adjacent valid surrogate pairs combine into scalar UTF-8;
 lone units remain distinct. This performs no NFC/NFKC normalization,
@@ -723,3 +723,75 @@ Where LJS routes by string comparison today (anchors verified 2026-07-28):
   (`lambda/js/js_runtime_state.cpp:768`), `js_dispatch_builtin` int switch
   (`js_runtime.cpp:10596`), compile-time Math lowering
   (`lambda/js/js_mir_expression_lowering.cpp:5879`).
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D3.4.4v4 → D3.4.4
+
+**D3.4.4*** ShapeEntry name identity follows S8.2.2v4: a name is
+identified by its resolved namespace and its normalized spelling. For a
+`STRING`-kind name, a name in the global namespace, `name_id` is a proof
+of equality, never of difference — equal non-`NONE` ids prove one
+spelling (a pool never gives one spelling two ids), while differing or
+absent ids are confirmed by key kind, namespace, length and bytes.
+`name_hash` is routing metadata only. **JavaScript keys join the same
+space under the host root namespace `js`**: a property name is a
+global-namespace name; `Symbol.for(k)` is `k` in `js.symbol.for`; a
+well-known symbol is its name in `js.symbol`; `Symbol(d)` is `d` in an
+anonymous namespace `js.symbol.unique.<n>` minted per creation; a private
+name `#x` is `x` in `js.private.<class>`, one per class declaration. Those
+namespaces are the records the runtime already keeps (NI15, NI18): a
+registered or well-known record is interned per (kind, characters) and so
+stands for (namespace, characters), and a unique or private record is
+fresh per creation and *is* its anonymous namespace. A `SYMBOL`- or
+`PRIVATE`-kind entry is therefore identified by `(name_id, key_kind)` —
+exactly (resolved namespace, characters) — and never by its description
+bytes, which are diagnostic. Shape copies, descriptor clones and
+transitions preserve `name_id`, `key_kind` and `ns` unchanged, and every
+key kind may take transition-tree edges. (Revised 2026-10-06, v4: v3 had
+placed JavaScript symbols outside the Lambda name space; v2 compared a
+non-`NONE` id exactly, which split one spelling across the compiler's,
+each parse `Input`'s and the runtime's name pools in the transition
+trees' edges.) [NI10, NI13, NI15, NI17, NI18]
+
+### ex-D4.6.1v4 → D5.6.1
+
+**D5.6.1** One semantic **property** identity is a `NameId`, never a
+`String*` address. `NameId = [pool16][ordinal16]`; `NAME_ID_NONE` is the
+id-less Input seam, and `SectionNameId = [slot16][offset16]` remains a
+location rather than identity. Generated ordinary names retain catalog
+IDs. The existing NamePool owns resolution; pointer equality is not a
+property, shape, transition, IC, Lambda textual-symbol, or private-name
+comparison. A hosted JS `Symbol` is the single explicit exception at the
+**value** layer: its pointer is JS value identity, while its `name_id`
+remains the property identity on the existing shape/transition route. It
+never becomes a Lambda `NameKey`, and its diagnostic spelling is never its
+property identity. Ordinary string keys enter NamePool, shape edges, and
+map lookup/mutation in the canonical UTF-8/lossless WTF-8 form of
+S8.2.2v5. Equal code-unit sequences share bytes; unequal NameIds or pool
+membership never prove unequal string keys across pools. No Unicode
+normalization or surrogate replacement participates in identity.
+Observable strings may be materialized at
+Proxy/reflection boundaries. [NI1–NI4, NI16, JSCU57]
+
+### ex-D4.6.2v2 → D5.6.2
+
+**D5.6.2** Evolve NamePool, don't replace it (first definer wins and
+parent-first lookup). One identity scope has a sealed static root and one
+owner-thread dynamic child: static segment numbers occupy the lower pool16
+half and dynamic segments the upper half. Static linking uses the existing
+`PropertyKeySpec` sealed image and per-context `NameId[]`; arbitrary dynamic
+IDs are never persisted or emitted as MIR immediates. Mark/Input document
+fields remain id-less unless they resolve through an explicitly retained
+schema/static parent. `eval`/REPL use the same module-table and NamePool
+pipeline; cross-context Input ownership is not inferred from numeric IDs.
+[NI6, NI7, NI10, NI12, NI13]

@@ -45,7 +45,7 @@ fn helper() => 42
 | `let`, `fn`, `pn`, `type` without `pub` | Private to the module |
 
 - `pub` modifies a declaration: `pub x = 1` is a syntax error whose message says to write `pub let`.
-- There is no `pub var`: a module has no mutable state (S9.1.7, D7.2.1), so `var` at module scope is error E224.
+- There is no `pub var`: a module has no mutable state (S9.1.7, D9.3.1), so `var` at module scope is error E224.
 - A module does not re-export what it imports. To pass a name on, bind it again: `pub let sq = square`.
 
 ## Importing a Module
@@ -103,9 +103,9 @@ The first token of an import path decides where it looks (S16.9.8): a **name** s
 |---|---|
 | `import .a.b` | `a/b.ls` beside the importing file (after following symlinks), else `a/b.js` |
 | `import ~~.a` | `../a.ls`, one directory up from the importing file; each further leading `~~.` goes up one more (`import ~~.~~.lib.util` is `../../lib/util.ls`) |
-| `import lambda.<package>.m` | `<LAMBDA_HOME>/package/<package>/m.ls` — a shipped package (D7.2.4v2) |
-| `import lambda.doc.<package>.m` | `<LAMBDA_HOME>/package/doc/<package>/m.ls` — includes `math`, `pdf`, and `latex` (D7.2.4v3) |
-| `import math`, `import io`, `import mcp` | Built-in modules; the corresponding `lambda.math`, `lambda.io`, `lambda.mcp` paths name the same modules (D7.2.4v3). MCP provides procedural `request(endpoint, method, params)` and `call_tool(endpoint, name, arguments)` HTTP exchanges; see the [MCP design and implementation status](../vibe/Lambda_IO_MCP.md). |
+| `import lambda.<package>.m` | `<LAMBDA_HOME>/package/<package>/m.ls` — a shipped package (D9.3.4) |
+| `import lambda.doc.<package>.m` | `<LAMBDA_HOME>/package/doc/<package>/m.ls` — includes `math`, `pdf`, and `latex` (D9.3.4) |
+| `import math`, `import io`, `import mcp` | Built-in modules; the corresponding `lambda.math`, `lambda.io`, `lambda.mcp` paths name the same modules (D9.3.4). MCP provides procedural `request(endpoint, method, params)` and `call_tool(endpoint, name, arguments)` HTTP exchanges; see the [MCP design and implementation status](../vibe/Lambda_IO_MCP.md). |
 | `import p: 'uri'` | A namespace prefix for markup, not a module ([Namespaces](Lambda_Syntax.md#namespaces)) |
 | `import a`, `import a.b` (any other name) | Error E216: bare names are reserved for packages, and there is no package `a`. The name never refers to a file in the working directory |
 | `import /.a` | Error: rooted import paths are reserved |
@@ -143,7 +143,7 @@ The functions of both modules are listed in [Lambda_Sys_Func.md](Lambda_Sys_Func
 
 ## Qualified System Names
 
-Everything Lambda ships lives under one reserved root, `lambda` (D7.2.4v2, S17.2.1). `lambda.sys.*` names the system functions, `lambda.math.*` and `lambda.io.*` the built-in modules. The qualified spelling reaches a built-in even where a local name shadows it:
+Everything Lambda ships lives under one reserved root, `lambda` (D9.3.4, S17.2.1). `lambda.sys.*` names the system functions, `lambda.math.*` and `lambda.io.*` the built-in modules. The qualified spelling reaches a built-in even where a local name shadows it:
 
 ```lambda
 let sum = 10;
@@ -172,9 +172,9 @@ format(math.render_inline(ast), 'html')
 
 ## Module Instantiation
 
-- **Once per file.** A module is compiled and instantiated once per process, however many times and by whatever relative spelling it is imported; imports through a symlink reach the same instance (D7.2.3). Two *copies* of a file are two modules, and their object types are different types.
+- **Once per file.** A module is compiled and instantiated once per process, however many times and by whatever relative spelling it is imported; imports through a symlink reach the same instance (D9.3.3). Two *copies* of a file are two modules, and their object types are different types.
 - **Top-level effects run at import time.** A module-level `let` is evaluated when the module is instantiated, so `pub let config = input('config.json')^` reads the file while the importer is being compiled. The values of the module's top-level expressions are discarded; only the entry script's `main` runs.
-- **A failed initializer stops the import.** If a module's top level raises — say `input()` cannot find its file — the importing script does not run, and the error is reported (D7.2.2). Handle the error in the module to make it optional: `pub let config = input('config.json') ^ { {} }`.
+- **A failed initializer stops the import.** If a module's top level raises — say `input()` cannot find its file — the importing script does not run, and the error is reported (D9.3.2). Handle the error in the module to make it optional: `pub let config = input('config.json') ^ { {} }`.
 - **Cycles are errors.** Two modules that import each other fail with *Circular import detected*, followed by error E217.
 - **An unknown package** is error E216, *no package 'tools' for import 'tools.util'*: a bare import root must name a package. Import your own files relatively (`.tools.util`, `~~.tools.util`).
 - **A missing module** is error E217, *failed to import Lambda module '.nosuch'*, naming the path it tried. A module that fails to compile is reported the same way, after its own errors.

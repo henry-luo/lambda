@@ -72,4 +72,4 @@ pause/resume, manual takeover, restart, and close through the same native view.
 `tetris_close.json` exercises sustained gravity, piece locking, restarts, and
 the window-close path. The regression runner bounds execution so a
 shutdown hang fails the test. Radiant releases obsolete rendering fragments
-after each frame under D4.5.1v4's arena ownership policy.
+after each frame under D5.5.1's arena ownership policy.

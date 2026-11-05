@@ -31,7 +31,6 @@ static void flex_apply_intrinsic_cross_size(ViewElement* item,
                                              FlexContainerLayout* flex_layout,
                                              bool preserve_wrapping_width,
                                              bool overwrite);
-static bool flex_apply_explicit_aspect_ratio(ViewElement* item);
 static float flex_form_intrinsic_size(ViewElement* item, FlexContainerLayout* flex_layout,
                                       bool horizontal);
 static void flex_set_axis_position(ViewElement* item, float position,
@@ -515,7 +514,7 @@ static float flex_item_main_border_size_from_cross_border_size(ViewElement* item
         true, true, ratio_uses_border_box);
 }
 
-static float flex_item_explicit_ratio_basis(ViewElement* item, bool main_is_horizontal) {
+float flex_item_explicit_ratio_basis(ViewElement* item, bool main_is_horizontal) {
     if (!item || !item->fi || item->fi->aspect_ratio <= 0.0f || !item->blk) return -1.0f;
 
     ViewBlock* block = lam::view_as_block(item);
@@ -529,6 +528,8 @@ static float flex_item_explicit_ratio_basis(ViewElement* item, bool main_is_hori
         cross_border_size = layout_css_size_to_border_box(
             item->bound, layout_box_sizing(block), css_size, cross.horizontal());
     }
+    // min/max constraints on the definite source axis precede ratio transfer.
+    cross_border_size = layout_apply_min_max_axis(block, cross_border_size, cross.horizontal(), true);
     float basis = flex_item_main_border_size_from_cross_border_size(
         item, cross_border_size, main_is_horizontal, item->fi->aspect_ratio);
     return basis;
@@ -817,10 +818,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     (!parent_is_row && (container->fi->flex_basis >= 0 ||
                                          container->fi->flex_grow > 0.0f))) {
                     height_assigned_by_parent = true;
-                } else if (!parent_is_row && container->fi->aspect_ratio > 0.0f &&
-                           container->blk &&
-                           container->block()->given_max_height >= 0.0f) {
-                    // Preserve that used size when the item is itself a flex container.
+                } else if (flex_item_explicit_ratio_basis(container, false) >= 0.0f) {
+                    // the parent's ratio-derived block size also constrains nested content.
                     height_assigned_by_parent = true;
                 } else if (parent_is_row) {
                     int parent_align_items = parent_block && parent_block->embed &&
@@ -1776,12 +1775,6 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             flex_apply_explicit_axis_size(item, true);
             flex_apply_explicit_axis_size(item, false);
         }
-        // Step 6a: Apply aspect-ratio when one dimension is set from an explicit CSS value
-        // (CSS width/height or resolved percentage).  Do NOT apply aspect-ratio here for
-        // determine_hypothetical_cross_sizes so that min/max constraints are respected.
-        if (has_flex_item_prop(item) && item->fi->aspect_ratio > 0 && item->blk) {
-            flex_apply_explicit_aspect_ratio(item);
-        }
         // set their size to the available cross-axis size ONLY when align-items: stretch.
         // This is critical for flex-wrap containers to wrap correctly.
         // NOTE: With align-items: center/start/end, items should use intrinsic size.
@@ -1861,29 +1854,6 @@ static float flex_explicit_main_size_basis(ViewElement* item,
     float basis = layout_css_size_to_border_box(
         item->bound, layout_box_sizing(block), explicit_size, horizontal);
     return basis;
-}
-
-static bool flex_apply_explicit_aspect_ratio(ViewElement* item) {
-    if (!item || !item->fi || item->fi->aspect_ratio <= 0.0f || !item->blk) return false;
-    LayoutAxisRefs width(item->block_mut(), true);
-    LayoutAxisRefs height(item->block_mut(), false);
-    LayoutAxisPair<LayoutAxisRefs*> refs = {&width, &height};
-    LayoutAxisPair<bool> explicit_size = {
-        *width.given >= 0.0f || !isnan(*width.given_percent),
-        *height.given >= 0.0f || !isnan(*height.given_percent)};
-    LayoutAxisPair<float> used_size = {item->width, item->height};
-    float ratio = item->fi->aspect_ratio;
-    for (LayoutAxis target : layout_axes()) {
-        LayoutAxis source = target == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
-        if (!explicit_size[source] || used_size[source] <= 0.0f || used_size[target] > 0.0f) {
-            continue;
-        }
-        used_size[target] = flex_item_main_border_size_from_cross_border_size(
-            item, used_size[source], target == LAYOUT_AXIS_X, ratio);
-        refs[target]->set_size(used_size[target]);
-        return true;
-    }
-    return false;
 }
 
 static float flex_item_non_auto_margin_size(ViewElement* item, LayoutAxis axis) {
@@ -3756,7 +3726,11 @@ static void flex_apply_intrinsic_cross_size(ViewElement* item,
     float intrinsic = selected.intrinsic()->max_content;
     if (intrinsic <= 0.0f) return;
 
-    if (!overwrite && selected.get_size() > 0.0f) return;
+    bool fit_inline_cross = selected.horizontal() && flex_layout->has_definite_cross_size &&
+        item->fi->aspect_ratio <= 0.0f;
+    // a cached max-content width is provisional until the available cross space is known.
+    // ratio-transferred sizes have already been resolved by the hypothetical cross-size pass.
+    if (!overwrite && selected.get_size() > 0.0f && !fit_inline_cross) return;
     if (selected.horizontal()) {
         ViewBlock* item_block = lam::view_as_block(item);
         FlexProp* item_flex = item_block && item_block->embed
@@ -3771,8 +3745,8 @@ static void flex_apply_intrinsic_cross_size(ViewElement* item,
             selected.set_size(flex_layout->cross_axis_size);
             return;
         }
-        intrinsic = layout_border_size_from_content_box(
-            lam::view_as_block(item), intrinsic, true);
+        intrinsic = fit_inline_cross ? flex_item_fit_content_border_size(item, flex_layout, true)
+            : layout_border_size_from_content_box(lam::view_as_block(item), intrinsic, true);
     }
     selected.set_size(intrinsic);
 }
@@ -3835,6 +3809,10 @@ static float flex_finalize_hypothetical_cross(ViewElement* item,
                                               float hypothetical_cross,
                                               float min_cross, float max_cross,
                                               bool has_explicit_cross) {
+    // an automatic column-item width is fit-content in the available cross space, not max-content.
+    if (cross_is_horizontal && !has_explicit_cross && flex_layout->has_definite_cross_size) {
+        hypothetical_cross = flex_item_fit_content_border_size(item, flex_layout, true);
+    }
     float stretch = flex_item_stretch_fit_border_size(
         item, flex_layout, cross_is_horizontal);
     if (stretch >= 0.0f) {

@@ -7,8 +7,8 @@ between explicit lines. Text, selection, composition decoration and the caret
 stay inside the field's content viewport. Verify ordinary and doubled display
 scale, new blank lines, navigation back to the beginning, and an offscreen caret
 during pointer selection. Keep this generic native-control geometry work below
-the application editing policy boundary in **D7.2.5**; retain recordings only
-while their content remains valid, consistent with **D4.5.3v2**.
+the application editing policy boundary in **D10.2.1**; retain recordings only
+while their content remains valid, consistent with **D5.5.3**.
 
 ## Cause and repair
 
@@ -37,7 +37,7 @@ not revise that geometry.
 
 ## Verification
 
-- `RadiantTextQuery.TextareaRevealsEditingCaretAndClipsScrolledContents` passes
+- `RadiantDocumentTest.TextareaRevealsEditingCaretAndClipsScrolledContents` passes
   at 1× and 2×. It checks visible caret pixels after navigation and value edits,
   scrolling back to the first line, a new final blank line, and zero caret/text
   pixels outside the content viewport. An active collapsed pointer gesture

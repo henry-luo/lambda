@@ -6,6 +6,7 @@
 // in temp/archive/ (ARCHIVE_DEMO_ROOT overrides it); a first run archives a
 // small local sample.
 import dom
+import workspace_shell: lambda.ui.workspace.shell
 import archive: lambda.archive
 import store: lambda.archive.store
 import resources: ~~.mod_resources
@@ -13,7 +14,8 @@ import model: .mod_model
 import ui: .mod_ui
 
 let BASE = url_resolve(resources.entry_uri()^, "./")
-let CSS = input(url_resolve(BASE, "archive.css"), 'text')^
+let CSS = workspace_shell.css ++ input(url_resolve(BASE, "archive.css"), 'text')^
+let THEME = workspace_shell.variables({primary:"#2d6cdf",text:"#1f2328",text_secondary:"#6a6f76",border:"#dedad3",background:"#f4f2ee",font_size:14})^
 let CONFIG = input(url_resolve(BASE, "archive.yaml"), 'yaml')^
 let CWD = sys.proc.self.cwd#
 let ROOT_SETTING = sys.proc.self.env.ARCHIVE_DEMO_ROOT#
@@ -63,7 +65,7 @@ pn searched(st, library, query) {
 }
 
 view <archive_app> state st: model.initial(), service: null, library: null, shown: null {
-    <body ui.page(st, ENV, shown)>
+    <body class:"workspace-shell",style:THEME,ui.page(st, ENV, shown)>
 }
 
 on load(evt) {

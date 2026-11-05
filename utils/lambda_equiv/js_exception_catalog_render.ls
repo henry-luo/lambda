@@ -1,4 +1,4 @@
-// Print the D8.4.3 census as the Python checker prints each row.
+// Print the D7.4.3 census as the Python checker prints each row.
 import .js_exception_catalog_core
 
 pn pad(value: string, width: int) {

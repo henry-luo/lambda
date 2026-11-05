@@ -1,9 +1,9 @@
 // lambda.edit session helpers (vibe/radiant/Radiant_Design_Edit_Mode.md §8):
 // Save As path resolution, the references a move to another folder would
 // break, and content-based dirty state.
-import sess: lambda.edit.session
-import lambda.edit.model
-import lambda.editor.mod_doc
+import sess: lambda.editor.session
+import lambda.editor.format.model
+import lambda.editor.core.doc
 
 "basename / dirname:";
 [sess.basename("/docs/notes/a.md"), sess.dirname("/docs/notes/a.md"), sess.dirname("/a.md"),

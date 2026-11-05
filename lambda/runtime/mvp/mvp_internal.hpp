@@ -67,6 +67,7 @@ struct MvpBinding {
     bool module_managed;
     bool iteration_binding;
     bool array_written;
+    bool coordinate_written;
     bool scalar_snapshot;
     bool array_accessed;
     ArrayRepCert* array_cert;
@@ -78,7 +79,8 @@ struct MvpBinding {
     bool readonly_literal;
     bool inferred_array;
     bool array_present;
-    bool record_written;
+    bool record_written, record_accessed;
+    bool string_buffer_owned;
 };
 
 struct LambdaMvpModule {
@@ -86,6 +88,8 @@ struct LambdaMvpModule {
     MIR_context_t ctx;
     MIR_module_t module;
     MIR_item_t consts;
+    MIR_item_t layout;
+    ArrayList* property_keys;
     HashMap* imports;
     MvpFunction* functions;
     uint32_t function_count;
@@ -129,6 +133,12 @@ struct MvpStringByte {
     MIR_reg_t byte;
 };
 
+struct MvpModuleLocation {
+    MvpModuleLocation* next;
+    MIR_item_t reference;
+    MIR_reg_t descriptor, state, slot;
+};
+
 struct MvpCompiler {
     LambdaMvpModule* module;
     MvpFunction* function;
@@ -137,10 +147,12 @@ struct MvpCompiler {
     MvpScope* scope;
     MvpInline* inlining;
     MvpErrorTarget* condition_failure;
+    AstNode* consuming_array_join;
     MIR_reg_t current_error;
     uint32_t inline_cost;
     MvpFloatConstant* float_constants;
     MvpStringByte* string_bytes;
+    MvpModuleLocation* module_locations;
     MIR_insn_t constant_cursor;
     MIR_label_t tail_entry;
     MIR_reg_t argument_span;
@@ -211,13 +223,22 @@ MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
 Type* mvp_binding_return_contract(LambdaMvpModule* module, NameEntry* entry);
 bool mvp_proc_has_final_return(AstFuncNode* function);
 AstNode* mvp_single_statement(AstNode* node);
+AstNode* mvp_function_result_expression(MvpFunction* function);
+bool mvp_prefers_packed_tensor(LambdaMvpModule* module, AstNode* literal);
 Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0, bool dense_arrays = false);
 MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_same_integer_expression(LambdaMvpModule* module, AstNode* left, AstNode* right, int depth = 0);
 MvpScaledInteger mvp_scaled_integer(LambdaMvpModule* module, AstNode* node, int depth = 0);
 Type* mvp_array_element(Type* contract);
 bool mvp_array_contract(Type* contract);
-ShapeEntry* mvp_member_field(LambdaMvpModule* module, AstFieldNode* node, TypeMap** shape = NULL);
+bool mvp_consuming_array_join(LambdaMvpModule* m, MvpBinding* binding, AstNode* value);
+bool mvp_binary_bitwise(SysFunc fn);
+bool mvp_needs_number_home(Type* contract);
+Type* mvp_scalar_success_contract(LambdaMvpModule* module, Type* contract);
+MvpBinding* mvp_null_condition(LambdaMvpModule* module, AstNode* condition,
+    Type** present, bool* null_when_true);
+ShapeEntry* mvp_member_field(LambdaMvpModule* module, AstFieldNode* node,
+    TypeMap** shape = NULL, bool success_only = false);
 Type* mvp_match_type(AstNode* pattern);
 bool mvp_boundary_proven(Type* source, Type* destination);
 bool mvp_parameter_borrowable(LambdaMvpModule* module, AstNamedNode* parameter, bool forwarding = true);
@@ -226,11 +247,14 @@ bool mvp_index_key(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_parameter_storage_stable(LambdaMvpModule* module, AstNamedNode* parameter);
 TypeMap* mvp_record_contract(Type* contract, bool scalar_only);
 Type* mvp_contextual_contract(LambdaMvpModule* module, AstNode* node);
+TypeMap* mvp_contextual_map_contract(LambdaMvpModule* module, AstNode* node);
+TypeMap* mvp_member_candidate(LambdaMvpModule* module, NameRef name);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
 AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);
+MvpBinding* mvp_place_root(LambdaMvpModule* module, AstNode* node);
 bool mvp_array_sum_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArraySumPlan* plan);
 bool mvp_array_copy_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayCopyPlan* plan);
 bool mvp_array_reverse_plan(LambdaMvpModule* module, AstLoopControlNode* loop, MvpArrayReversePlan* plan);

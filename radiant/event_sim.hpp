@@ -89,6 +89,7 @@ struct Pool;
 struct Arena;
 struct EventSimRenderCommand;
 struct EventSimRenderState;
+struct DomDocument;
 
 // Event simulation command types
 enum SimEventType {
@@ -454,7 +455,7 @@ struct EventSimContext {
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
     double input_turn_ms;        // virtual latency per input primitive; zero uses explicit waits only
     double event_interval_ms;    // delay between commands; zero supports exact-time rendering checks
-    bool profile_events;         // opt-in release-build wall timings, indexed like the fixture events
+    bool profile_events;         // opt-in wall timings, indexed like the fixture events
     double* event_durations_ms;
     bool initial_render;        // export fixtures may assert vector paint before the first raster pass
     double current_time;         // deterministic host clock in seconds
@@ -468,6 +469,7 @@ struct EventSimContext {
     // Phase 5b: navigation history stack
     void* nav_history[16];       // stack of DomDocument* for navigate_back
     int nav_history_depth;       // current depth in nav_history
+    ArrayList* navigation_documents; // owns navigation pages, including pages left by navigate_back
     // Phase 5f: iframe frame stack
     void* original_document;     // main document (DomDocument*) before any switch_frame
     void* frame_stack[8];        // stack of DomDocument* for nested switch_frame
@@ -511,13 +513,24 @@ void event_sim_set_replay_assert_state(bool assert_state);
 // fixture. The host process owns the argument string; the context copies it.
 void event_sim_set_result_path(const char* result_path);
 
-// Free simulation context
-void event_sim_free(EventSimContext* ctx);
+// release navigation pages except the document whose ownership returns to the host.
+void event_sim_free(EventSimContext* ctx, DomDocument* retained_document = nullptr);
 
 // Process next event if ready
 // Returns true if simulation is still running
 // uicon is cast to UiContext* internally
 bool event_sim_update(EventSimContext* ctx, void* uicon, struct RadiantWindow* window, double current_time);
+
+// includes host pumping/retirement and every retry turn in its original fixture step.
+struct EventSimProfileTurn {
+    EventSimContext* context = nullptr;
+    int index = 0;
+    uint64_t started = 0;
+    explicit EventSimProfileTurn(EventSimContext* context);
+    ~EventSimProfileTurn();
+    EventSimProfileTurn(const EventSimProfileTurn&) = delete;
+    EventSimProfileTurn& operator=(const EventSimProfileTurn&) = delete;
+};
 
 // Headless hosts use these to wait on the JS loop until the next assertion
 // attempt, while waking early when an actual timer or task becomes ready.

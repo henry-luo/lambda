@@ -1,4 +1,4 @@
-// S11.4.6v4/D3.2.4v5: an error arm preserves normal conversion and reification.
+// S11.4.6v4/D4.2.5: an error arm preserves normal conversion and reification.
 type Row = {count: int, label: string}
 type Failure = error
 fn opaque(value: any) any => value;

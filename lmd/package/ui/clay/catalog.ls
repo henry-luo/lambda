@@ -1,4 +1,4 @@
-import shared: lambda.ui.core.catalog
+import shared: lambda.ui.dtna.catalog
 
 let tags = {
     ["button"]:(p,k) => <clay.button *:p,*k>,

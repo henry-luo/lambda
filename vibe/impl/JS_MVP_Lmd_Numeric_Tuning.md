@@ -5,8 +5,8 @@
 semantic/GC acceptance pending.
 
 Scope: [MVP §16](../jube/JS_MVP_Lmd.md#16-numeric-facts-and-element-access-tuning).
-Authorities: **S1.11**, **D2.2.5**, **D2.4.3**, **D2.6.1v3**, **D5.3.4**,
-**D8.2.6**, **D8.4.1v2**. No formal ruling changes.
+Authorities: **S1.11**, **D2.2.5**, **D2.3.5**, **D3.2.1**, **D6.3.4**,
+**D8.2.6**, **D7.4.1**. No formal ruling changes.
 
 ## Reuse and helper inventory
 
@@ -16,7 +16,7 @@ continues to use Lambda's `em_numeric_storage_type`,
 `em_array_element_address`, `em_load_at`, and `em_store_at`. Scalar boxing uses
 the existing shared emitter and destination-owned homes. No new runtime
 imports, allocators, GC hooks, or full-JS dependencies are introduced.
-Lambda's nullable native lanes represent null (**D2.5**); JS undefined uses a
+Lambda's nullable native lanes represent null (**D2.4**); JS undefined uses a
 separate presence flag so a present NaN keeps its identity. Shared physical
 emitters explicitly leave nullable/JS admission to the frontend.
 

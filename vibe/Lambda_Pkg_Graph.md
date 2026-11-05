@@ -4,7 +4,7 @@
 
 **Scope:** Topology-oriented diagrams — node ranking or placement, recursive grouping, relationship routing, ports, markers, and overlap avoidance — from Mermaid, Graphviz DOT/GV, D2, Structurizr DSL, and authored Mark sources. This document replaces the former Stage 1–3 graph proposal and the separate Structurizr/C4 proposal (`Lambda_Pkg_Graph2.md`). Implementation phase plans, module inventories, parser LOC and binary-size ledgers, test-runner mechanics, and status reports are omitted.
 
-**Specification linkage:** [D7.5.3v2](../doc/Lambda_Formal_Design.md#d75-jube-modules-trust-and-io) covers the automatic Lambda↔Radiant layout connection (§7.2); [D5.3.3](../doc/Lambda_Formal_Design.md#d53-gc-rooting) covers the explicit rooting of generated paint (§7.2); [D7.2.4v4](../doc/Lambda_Formal_Design.md#d72-script-packages) covers the shipped `lambda.*` namespace and the graph/chart package split (§2); [S12.1.1v3](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) covers the purity of the layout export and every normalizer (§1); [S7.6.2v3/S7.6.3v2](../doc/Lambda_Formal_Semantics.md#s76-discharge-the-handler-and-postfix-) cover the postfix error handler used by the CLI bridge (§7.4). Graph-specific choices below are working design, not formal-spec rulings.
+**Specification linkage:** [D9.5.6](../doc/Lambda_Formal_Design.md#d111-trust-and-io) covers the automatic Lambda↔Radiant layout connection (§7.2); [D6.3.3](../doc/Lambda_Formal_Design.md#d63-gc-rooting) covers the explicit rooting of generated paint (§7.2); [D9.3.4](../doc/Lambda_Formal_Design.md#d93-script-packages) covers the shipped `lambda.*` namespace and the graph/chart package split (§2); [S12.1.1v3](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) covers the purity of the layout export and every normalizer (§1); [S7.6.2v3/S7.6.3v2](../doc/Lambda_Formal_Semantics.md#s76-discharge-the-handler-and-postfix-) cover the postfix error handler used by the CLI bridge (§7.4). Graph-specific choices below are working design, not formal-spec rulings.
 
 ## 1. Purpose and design principles
 
@@ -39,7 +39,7 @@ Mermaid source
   -> chart-oriented family -> canonical Mark Chart IR -> lambda.chart
 ```
 
-Chart-oriented families that `lambda.chart` does not yet support produce an `unsupported` result with a `mermaid.chart-family` diagnostic naming `lambda.chart` as the owner. The supported `sequenceDiagram` header enters the chart sequence adapter, which lays out participant columns, lifelines, messages, loop/alt/par blocks, notes, and activation bars without graph ranking or routing (D7.2.4v4).
+Chart-oriented families that `lambda.chart` does not yet support produce an `unsupported` result with a `mermaid.chart-family` diagnostic naming `lambda.chart` as the owner. The supported `sequenceDiagram` header enters the chart sequence adapter, which lays out participant columns, lifelines, messages, loop/alt/par blocks, notes, and activation bars without graph ranking or routing (D9.3.4).
 
 ### 2.2 Why C4 belongs in the graph package
 
@@ -262,13 +262,13 @@ Port attachment uses measured geometry: the Velmt adapter walks the already-laid
 
 ### 7.2 Automatic connection and lifetime
 
-Under **D7.5.3v2**, graph HTML carries `data-radiant-layout="lambda-graph"` and Radiant automatically invokes `lambda.graph.transform.layout` after measuring the children. This works for package rendering, native document loading, and serialized HTML opened in a fresh process. There is no public registration or `install()` API.
+Under **D9.5.6**, graph HTML carries `data-radiant-layout="lambda-graph"` and Radiant automatically invokes `lambda.graph.transform.layout` after measuring the children. This works for package rendering, native document loading, and serialized HTML opened in a fresh process. There is no public registration or `install()` API.
 
 The host resolves the export on the document's retained evaluator. A static HTML document acquires an evaluator lazily; a synchronous render from Lambda shares the caller's live evaluator; existing window-loader ownership is unchanged. Reflow reuses imported module state and compiled code. Module lifetime replaces the former separately rooted callback registry and per-heap cleanup slots, so two live graph documents cannot overwrite each other's callback.
 
-Generated SVG layers keep explicit roots on the owning heap and replace their previous layer set on reflow (**D5.3.3**). Closing one document never disconnects another document's layout or releases its paint. Relayout reuses canonical topology, resolved style data, measured Velmts, and the compiled callback; layout cache keys include layout-affecting source properties and measured child dimensions.
+Generated SVG layers keep explicit roots on the owning heap and replace their previous layer set on reflow (**D6.3.3**). Closing one document never disconnects another document's layout or releases its paint. Relayout reuses canonical topology, resolved style data, measured Velmts, and the compiled callback; layout cache keys include layout-affecting source properties and measured child dimensions.
 
-~~The original API required `graph_transform.install()` calling `radiant.register_layout("lambda-graph", callback)`.~~ Superseded by automatic package-export connection (D7.5.3v2, user ruling 2026-10-16).
+~~The original API required `graph_transform.install()` calling `radiant.register_layout("lambda-graph", callback)`.~~ Superseded by automatic package-export connection (D9.5.6, user ruling 2026-10-16).
 
 ### 7.3 Standalone HTML
 

@@ -11,6 +11,7 @@ struct CssRule;
 struct DomDocument;
 struct DomElement;
 struct CssSelectionStyle;
+struct StyleTree;
 
 typedef struct StyleEpochStats {
     uint64_t current_epoch_id;
@@ -65,6 +66,8 @@ bool style_epoch_ensure_owned(DomElement* element);
 void style_epoch_unbind_element(DomElement* element);
 void style_epoch_mark_global_change(DomDocument* doc);
 uint64_t style_epoch_current_id(DomDocument* doc);
+// stable within the document, even if a retired tree's address is reused
+uint64_t style_epoch_tree_id(const StyleTree* tree);
 void style_epoch_get_stats(DomDocument* doc, StyleEpochStats* out);
 
 // Selection styles share the document's CSS epoch lifetime and avoid a

@@ -12,4 +12,6 @@ pn main() {
     print(right(4294967295u32, 32)); print(" ")
     print(right(4294967295u32, 33)); print(" ")
     print(right(4294967295u32, 64)); print("\n")
+    print(left(1u32, 4294967296)); print(" ")
+    print(right(4294967295u32, 4294967296)); print("\n")
 }

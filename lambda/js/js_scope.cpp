@@ -97,7 +97,7 @@ static JsScript* js_common_ast_cache_clone(Runtime* runtime,
     instance->cache_scope = scope;
     instance->cache_owned_template = false;
     // The parser image names one process-wide logical unit; runtime_register
-    // below maps it to this Runtime's dense module slab (D8.5.1v2).
+    // below maps it to this Runtime's dense module slab (D8.5.1).
     instance->cache_compilation_unit_id = cached->cache_compilation_unit_id;
     instance->is_loading = false;
     instance->is_retired = false;
@@ -555,7 +555,7 @@ static void js_script_destroy_extension(Script* base_script) {
 
 JsScript* js_script_from_script(Script* script) {
     // import bridges share the JS language profile but own only a base Script.
-    // the extension's lifecycle hook identifies its actual retained layout (D5.4.3).
+    // the extension's lifecycle hook identifies its actual retained layout (D6.4.3).
     return script && script->destroy_extension == js_script_destroy_extension
         ? (JsScript*)script : NULL;
 }
@@ -633,7 +633,7 @@ void js_script_reset_heap(JsScript* script) {
         JsCallableCode* code = entry->code;
         if (code->compiled_body.item) heap_unregister_gc_root(&code->compiled_body.item);
         if (code->compiled_loop_body.item) heap_unregister_gc_root(&code->compiled_loop_body.item);
-        // retained definitions outlive the realm's heap and its compiled callables (D5.4).
+        // retained definitions outlive the realm's heap and its compiled callables (D6.4).
         code->compiled_body = {};
         code->compiled_loop_body = {};
         code->func_ptr = NULL;
@@ -700,7 +700,7 @@ JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
     code->has_non_simple_params = parameter_facts.has_non_simple_params;
     code->has_parameter_expressions = parameter_facts.has_parameter_expressions;
     // The canonical definition owns this static proof, avoiding repeated
-    // scope/fact walks for every closure activation (D8.2.4–D8.2.5v2).
+    // scope/fact walks for every closure activation (D8.2.4–D8.2.5).
     code->elides_function_environment = !parameter_facts.has_parameter_expressions &&
         js_callable_elides_function_environment(
         function, facts);

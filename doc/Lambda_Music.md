@@ -5,7 +5,7 @@ Lambda modules and bundled Bravura glyph outlines. This is an experimental
 notation and playback package. It also converts scores to MIDI, reads Standard
 MIDI Files, and plays them through a bundled SoundFont synthesizer.
 
-The explicit entry module follows D7.2.4/D7.2.6. Scores and layouts are
+The explicit entry module follows D9.3.4/D9.3.5. Scores and layouts are
 ordinary immutable values. All public operations raise errors (`T^`,
 S7.4.2); successful values retain recoverable warnings in `diagnostics`.
 Import checks musical structure; layout additionally validates beam/spanner
@@ -149,7 +149,7 @@ music.player(score, {layout:{width:760.0}})^
 
 Run `./lambda.exe view test/music/_player.ls` and press **Play**. The player
 opens the audio device only on that action: playback is a procedural effect
-(S12.1.1v3/D7.4.6), and starting sound is gated by D7.5.4.
+(S12.1.1v3/D7.1.1), and starting sound is gated by D11.3.1.
 Pause/resume, stop, position, speed, master volume, and part mute/solo share
 the audio sample clock. Speed choices apply before playback, while playing,
 and while paused; the status displays the synthesizer's current multiplier.
@@ -227,7 +227,7 @@ room: each session sends 0.2 of its sound to its document's reverb (Freeverb,
 medium room). `dom.midi_command(owner, token, "reverb", level)` sets the send
 from 0 (dry) to 1, and `dom.midi_info` reports it as `reverb`. SoundFont loading and device startup are synchronous
 control-thread work; the audio callback performs no file IO, GC, or DOM work
-(D4.5.2/D5.3.3).
+(D5.5.2/D6.3.3).
 
 Live output is verified on macOS/Core Audio. miniaudio includes Linux and
 Windows backends, but those platforms have not been built or device-tested

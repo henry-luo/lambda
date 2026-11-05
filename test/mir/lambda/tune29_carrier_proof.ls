@@ -1,4 +1,4 @@
-// T29-2 (D3.2.4v4, D3.2.6): a typed path store through a declared record and a
+// T29-2 (D4.2.5, D4.2.6): a typed path store through a declared record and a
 // certified record array proves each step once. The root binding is non-null
 // and carries its layout; a required array field is non-null; an element of a
 // certified array carries its record layout, so no step compares a shape

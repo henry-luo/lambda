@@ -1,4 +1,4 @@
-// S12.1.1v3 / D4.5.3v2: native visibility retains geometry and document-owned level history.
+// S12.1.1v3 / D5.5.3: native visibility retains geometry and document-owned level history.
 import dom
 import s: lambda.scene3d
 let levels=[s.group([s.mesh(s.plane([1.5,1.5,1.0]),s.material('basic',{color:"#ff0000"}))]),

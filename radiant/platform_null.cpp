@@ -1,5 +1,5 @@
 // platform_null.cpp — the null Radiant platform backend for builds without a GUI
-// (LAMBDA_NO_GUI: lambda-headless, D7.1.4v2). It replaces the former GLFW/GL
+// (LAMBDA_NO_GUI: lambda-headless, D9.2.1). It replaces the former GLFW/GL
 // stub file: the binary links neither GLFW nor OpenGL nor a native toolkit.
 //
 // Contract (platform.hpp): every call behaves as the desktop backend does
@@ -13,7 +13,6 @@
 #include <stddef.h>
 
 bool radiant_platform_init(bool) { return false; }
-void radiant_platform_terminate(void) {}
 double radiant_platform_time(void) { return 0.0; }
 void radiant_platform_poll_events(void) {}
 void radiant_platform_wait_events(double) {}

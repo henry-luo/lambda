@@ -2214,13 +2214,6 @@ EventSimContext* event_sim_load(const char* json_file) {
             return nullptr;
         }
         ctx->profile_events = root_map.get("profile_events").asBool();
-#ifndef NDEBUG
-        if (ctx->profile_events) {
-            log_error("event_sim: event measurements require a release build");
-            event_sim_free(ctx);
-            return nullptr;
-        }
-#endif
     }
 
     // Parse each event
@@ -2493,9 +2486,19 @@ EventSimContext* event_sim_load_replay_log(const char* jsonl_file) {
     return ctx;
 }
 
-void event_sim_free(EventSimContext* ctx) {
+void event_sim_free(EventSimContext* ctx, DomDocument* retained_document) {
     if (!ctx) return;
     event_sim_render_free(ctx);
+
+    if (ctx->navigation_documents) {
+        // history pages keep runtimes and satellite workers alive; retire them
+        // before the host releases their cached AST storage (D8.3.4 / D8.5.1).
+        for (int i = ctx->navigation_documents->length - 1; i >= 0; i--) {
+            DomDocument* doc = (DomDocument*)ctx->navigation_documents->data[i];
+            if (doc != retained_document) free_document(doc);
+        }
+        arraylist_free(ctx->navigation_documents);
+    }
 
     if (ctx->events) {
         for (int i = 0; i < ctx->events->length; i++) {
@@ -5721,6 +5724,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
+            if (!ctx->navigation_documents) ctx->navigation_documents = arraylist_new(4);
+            DomDocument* original = ctx->original_document
+                ? (DomDocument*)ctx->original_document : uicon->document.get();
+            if (!ctx->navigation_documents ||
+                    (ctx->navigation_documents->length == 0 && original &&
+                        !arraylist_append(ctx->navigation_documents, original)) ||
+                    !arraylist_append(ctx->navigation_documents, new_doc)) {
+                free_document(new_doc);
+                log_error("event_sim: navigate FAIL - could not retain navigation pages");
+                ctx->fail_count++;
+                break;
+            }
             // push current document onto navigation history
             if (uicon->document && ctx->nav_history_depth < 16) {
                 ctx->nav_history[ctx->nav_history_depth++] = uicon->document;
@@ -6130,6 +6145,23 @@ static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
     }
 }
 
+EventSimProfileTurn::EventSimProfileTurn(EventSimContext* ctx) {
+    if (!ctx || !ctx->profile_events || !ctx->is_running || !ctx->events ||
+        ctx->current_index < 0 || ctx->current_index >= ctx->events->length) return;
+    if (!ctx->event_durations_ms) ctx->event_durations_ms = (double*)arena_calloc(
+        ctx->event_arena, ctx->events->length * sizeof(double));
+    if (!ctx->event_durations_ms) return;
+    context = ctx;
+    index = ctx->current_index;
+    started = time_now_ns();
+}
+
+EventSimProfileTurn::~EventSimProfileTurn() {
+    if (!context) return;
+    context->event_durations_ms[index] += time_elapsed_ms_f(started, time_now_ns());
+    if (!context->is_running && context->current_index > index) event_sim_print_results(context);
+}
+
 bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, RadiantWindow* window, double current_time) {
     UiContext* uicon = (UiContext*)uicon_ptr;
     if (!ctx || !ctx->is_running) return false;
@@ -6146,15 +6178,8 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, RadiantWindow* wind
 
     // Process current event (with auto-wait retry for assertions)
     SimEvent* ev = (SimEvent*)ctx->events->data[ctx->current_index];
-    uint64_t profile_start = ctx->profile_events ? time_now_ns() : 0;
     if (!process_sim_event_with_retry(ctx, ev, uicon, window)) {
         return true;
-    }
-    if (ctx->profile_events) {
-        if (!ctx->event_durations_ms) ctx->event_durations_ms = (double*)arena_calloc(
-            ctx->event_arena, ctx->events->length * sizeof(double));
-        if (ctx->event_durations_ms) ctx->event_durations_ms[ctx->current_index] =
-            time_elapsed_ms_f(profile_start, time_now_ns());
     }
     if (ctx->replay_assert_state && ev->type == SIM_EVENT_REPLAY_INPUT) {
         event_sim_assert_schema(ctx, uicon, "replay_input");
@@ -6178,7 +6203,7 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, RadiantWindow* wind
             uicon->document = lam::up((DomDocument*)ctx->original_document);
             ctx->frame_stack_depth = 0;
         }
-        event_sim_print_results(ctx);
+        if (!ctx->profile_events) event_sim_print_results(ctx);
         return false;
     }
 

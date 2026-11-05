@@ -4,7 +4,7 @@ fn as_int(value: int?) any { return int(value) }
 fn from_float(value: float?) any { return int(value) }
 fn widen_optional(value: int?) any { return float(value) }
 fn same_float(value: float?) any { return float(value) }
-// literal contracts must retain the noncollecting numeric path too (D2.4.3).
+// literal contracts must retain the noncollecting numeric path too (D2.3.5).
 fn float_literals() float { return float(3) + float(2.5) }
 fn int_literals() int { return int(3) + int(2.75) }
 pn store_cast(var values: int[], value: int?) any { values[0] = int(value); return null }

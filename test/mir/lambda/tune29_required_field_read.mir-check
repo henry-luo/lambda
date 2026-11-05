@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T29-2 (D3.2.6): a required record field is read with no empty-slot arm and a member read through it has no receiver null test; an optional field and a nullable receiver keep their arms.",
+  "description": "T29-2 (D4.2.6): a required record field is read with no empty-slot arm and a member read through it has no receiver null test; an optional field and a nullable receiver keep their arms.",
   "checks": [
     {
       "in_func": "_read_required_#",

@@ -1,4 +1,4 @@
-// D2.4.1-D2.4.3: an already canonical packed sized int can cross its parameter
+// D2.3.4-D2.3.5: an already canonical packed sized int can cross its parameter
 // boundary unchanged; a different source type keeps the coercion fallback.
 pn accept_u32(x: u32) int { return int(x) }
 pn accept_i8(x: i8) int { return int(x) }

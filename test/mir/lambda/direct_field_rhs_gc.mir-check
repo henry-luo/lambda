@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.4.4v4 / D5.3.1: a direct packed-field write reloads its data zone after a collecting RHS, with the owner rooted across the call; bool stores use one byte.",
+  "description": "D5.4.4 / D6.3.1: a direct packed-field write reloads its data zone after a collecting RHS, with the owner rooted across the call; bool stores use one byte.",
   "checks": [
     {
       "in_func": "_update_#",

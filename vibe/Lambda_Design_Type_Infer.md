@@ -3,7 +3,7 @@
 - **Date:** 2026-08-18
 - **Status:** PROPOSAL (survey complete; decision ledger `TI1+`)
 - **Scope:** how static type inference should be structurally carried out over expressions in the Lambda front end (`lambda/runtime/build_ast.cpp`) and the LambdaJS front end (`lambda/js/build_js_ast.cpp` + `js_mir_function_collection_class_inference.cpp`), how the two unify, and the catalog of operations that currently degrade to `any`
-- **Formal authority:** `doc/Lambda_Formal_Design.md` D2.4.1, D2.5.3, D3.1.1v2, D3.2.1, D3.2.3, D3.3.1v2–D3.3.4, D8.3.3, D8.4.3; `doc/Lambda_Formal_Semantics.md` S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1; invariant SI3v2 (revised 2026-08-18 alongside this doc: a type-error-free script's result is never affected by inference; static rejection lands straightaway; strictness is per-surface — Lambda strict, LambdaJS warn-only)
+- **Formal authority:** `doc/Lambda_Formal_Design.md` D2.3.4, D2.4.3, D4.1.1, D4.2.1, D4.2.4, D4.3.1–D2.4.3, D7.3.3, D7.4.3; `doc/Lambda_Formal_Semantics.md` S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1; invariant SI3v2 (revised 2026-08-18 alongside this doc: a type-error-free script's result is never affected by inference; static rejection lands straightaway; strictness is per-surface — Lambda strict, LambdaJS warn-only)
 - **Related:** `vibe/Lambda_Design_Compiling_Lane.md` (ValueRep — representation side of the same coin), `vibe/impl/Lambda_Impl_Tune19.md` (T19-1..T19-7 — the perf evidence that motivates this doc), `vibe/Lambda_Design_Type_Enforcement.md` (TE-1..TE-18 — enforcement at boundaries), `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-3 ANY-downgrade)
 - **ID series:** `TI#` (type-inference decisions), `TIG#` (gap catalog entries)
 - **Implementation plan:** `vibe/impl/Lambda_Impl_Type_Infer.md` (IP0–IP7 over the decided-but-unbuilt items)
@@ -14,16 +14,16 @@ Inference produces two separable artifacts, and the codebase currently
 conflates neither cleanly nor consistently:
 
 1. **The static type** (`Type*` on each AST node) — the *semantic* answer
-   "what values can this expression produce". D2.4.1: the `Type*` graph is the
+   "what values can this expression produce". D2.3.4: the `Type*` graph is the
    semantic authority; a TypeId alone is never a contract.
 2. **The representation** (lane/carrier) — the *mechanical* answer "which
    machine carrier holds it". Owned by `ValueRep`
    (`vibe/Lambda_Design_Compiling_Lane.md`); always derived FROM the static
-   type plus flow proofs, never the other way around (D3.3.4).
+   type plus flow proofs, never the other way around (D2.4.3).
 
 This doc rules the first product. The standing constraints:
 
-- **D3.3.1v2 / SI3v2** (revised 2026-08-18 with this design) — a script
+- **D4.3.1 / SI3v2** (revised 2026-08-18 with this design) — a script
   with NO type error evaluates identically regardless of inference: erase
   every inferred type, run boxed, results identical. Inference IS
   statically observable — improved precision may reject a
@@ -31,16 +31,16 @@ This doc rules the first product. The standing constraints:
   warn-first transition; the sanctioned observable change is "runtime soft
   error with partial result" becoming "static error, no result").
   Strictness is per-surface per TI6: Lambda strict, LambdaJS warn-only.
-- **D3.2.3** — declared and inferred are separate recorded facts; inference
+- **D4.2.4** — declared and inferred are separate recorded facts; inference
   never overrides a declaration's *contract*, and an annotation never erases
   what inference *proved* (both facts persist side by side).
-- **D3.3.2v2** — body inference does not retype parameters; entry-shape and
+- **D4.3.2** — body inference does not retype parameters; entry-shape and
   body/result inference are separate products. (The former "inference never
   creates a `^` obligation" clause is retired: precise inference may
   surface a hidden error component and create a STATIC containment
   obligation; it never creates a runtime obligation or changes an accepted
   program's result.)
-- **D3.3.4 / D2.5.3** — the public inferred type is the full contract
+- **D2.4.3 / D2.4.3** — the public inferred type is the full contract
   (`a[i]` is `T?`); flow-sensitive proofs narrow privately.
 
 ## 1. Where inference lives today (survey result)
@@ -95,7 +95,7 @@ Ordered by measured cost (Tune19/Result32 evidence where available).
 
 | ID | Site | Current behavior | Should be |
 |---|---|---|---|
-| **TIG1** | Indexed read `a[i]`, `ARRAY`/`ARRAY_NUM` object (`build_ast.cpp:2604-2608`) | `ANY` ("transpiler will refine") | `elem(T)?` per D2.5.3 — the AST already knows `TypeArray.nested`; ANY here is why bounce's `int[]` compare lowers through double (T19-C) |
+| **TIG1** | Indexed read `a[i]`, `ARRAY`/`ARRAY_NUM` object (`build_ast.cpp:2604-2608`) | `ANY` ("transpiler will refine") | `elem(T)?` per D2.4.3 — the AST already knows `TypeArray.nested`; ANY here is why bounce's `int[]` compare lowers through double (T19-C) |
 | **TIG2** | Map/element field access, field type non-scalar (`:2643-2653`) | `ANY` unless field type is native-numeric/bool/string | the shape's recorded field `Type*` — chained access `a.b.c` dies at the first container field today |
 | **TIG3** | Field not found in shape / unshaped map | `ANY` | `any` is right for open maps, but a **closed** declared shape should make the miss a static E-diagnostic, not ANY |
 | **TIG4** | 160 of 228 sys-func registry rows (`sys_func_registry.c`) | `return_type = &TYPE_ANY`; `success_type` set on **zero** rows | precise `T` or `T \| error` (§4). Worst offenders: all of `math.*` (sqrt/sin/…, native lane already returns double!), `abs`, `min`/`max`/`sum`/`avg`, `upper`/`lower`/`trim`/`split`/`join`, `slice`/`reverse`/`sort`/`unique`, `parse`/`input`/`fetch`, `push`/`set`, matrix/image ops |
@@ -103,7 +103,7 @@ Ordered by measured cost (Tune19/Result32 evidence where available).
 | **TIG6** | Relational `< <= > >=` with any non-native-numeric operand (`:5348-5352`) | `ANY` — even `string < string` | `bool` for every comparable pair (string/string, dtime/dtime per `known_magnitude_comparable`); `bool \| error` for unproven mixed pairs |
 | **TIG7** | If-expr with differing non-diverging arms (`:5683-5684`) | `ANY` (union join deliberately deferred — E208 containment fallout documented in the comment) | normalized `T1 \| T2` (§5.2 staging: fix E208's error-visibility first) |
 | **TIG8** | Match expr with differing arm types (`:5800`) | `ANY` | normalized union of arm types (same join as TIG7) |
-| **TIG9** | Match/if arms: no scrutinee narrowing | arm body sees the unnarrowed scrutinee type | occurrence narrowing per D3.3.4: `match x { int => … }` binds `x:int` inside the arm; `if (x is T)` / `x != null` narrow in the then-branch (§5.1) |
+| **TIG9** | Match/if arms: no scrutinee narrowing | arm body sees the unnarrowed scrutinee type | occurrence narrowing per D2.4.3: `match x { int => … }` binds `x:int` inside the arm; `if (x is T)` / `x != null` narrow in the then-branch (§5.1) |
 | **TIG10** | For-loop over maps/elements/`any` source (`:8343`); key-only loops (`:8322`); symbol/all key filters (`:8356-8358`) | `ANY` | element type of the source contract where the shape knows it; `int \| symbol` for LOOP_KEY_ALL |
 | **TIG11** | List literals (`:5817`), content blocks (`:10581`) | `ANY` ("returns Item, not List") | the built `TypeList` — the node throws away the type it just constructed |
 | **TIG12** | Unary `+`/`-` on non-numeric-typed operand (`:4715`) | `ANY` | `number \| error`; on `T?` numeric, `T \| error` |
@@ -127,7 +127,7 @@ this order, over every expression:
 
 1. **Leaves.** Literals carry exact literal types (`is_literal` set);
    identifiers copy the binding's recorded type (declared if annotated,
-   else inferred — see TI4); parameters carry their contract (D3.2.3).
+   else inferred — see TI4); parameters carry their contract (D4.2.4).
 2. **Bottom-up propagation.** Each expression node computes its type from
    its children's types through an operator-indexed rule table — the S4.1
    numeric kernel for arithmetic, `bool` for comparisons, normalized unions
@@ -137,11 +137,11 @@ this order, over every expression:
    reserved for genuinely open inputs (untyped params, open maps, dynamic
    member names).
 3. **Absence and error are part of the type, not an excuse for ANY.**
-   Totality wraps: indexed read `T?` (D2.5.3), fallible op `T | error`
+   Totality wraps: indexed read `T?` (D2.4.3), fallible op `T | error`
    (S7.2.1). `lambda_type_nullable_normalized` / union normalization
    (S5.5.2) keep the graphs canonical.
 4. **Flow narrowing** (§5) — a private, per-branch refinement layer over
-   the public type (D3.3.4): `is`-tests, null-tests, match patterns.
+   the public type (D2.4.3): `is`-tests, null-tests, match patterns.
 5. **Cross-function propagation.** Closed-caller analysis (Tune18's landed
    witness machinery, generalized by Tune19 T19-4): when every non-escaped
    direct caller proves an argument type, the callee's *inferred* entry
@@ -204,7 +204,7 @@ fields become load-bearing and audited:
 
 ### 5.1 TI5 — flow narrowing in if/match (user rule 4)
 
-Occurrence typing as a **private refinement** (D3.3.4 wording: "flow-
+Occurrence typing as a **private refinement** (D2.4.3 wording: "flow-
 sensitive proofs may narrow privately but never change the public type"):
 
 - `if (x is T)` → `x : T` in the then-branch, `x : typeof(x) \ T` in the
@@ -213,10 +213,10 @@ sensitive proofs may narrow privately but never change the public type"):
   T19-2's `map?` tag-test fix expressed at the type level.
 - `match x { P1 => e1, … }` → inside each arm, `x` (when the scrutinee is
   a simple binding) narrows to the arm's pattern type; `match` and `is`
-  share one membership model (D3.2.1), so the narrowing rule is the same
+  share one membership model (D4.2.1), so the narrowing rule is the same
   `matches` relation read statically.
 - Narrowings die at the join point; the binding's public type is untouched
-  (D3.3.3's spirit: narrowing is scoped to the region that proved it).
+  (D4.3.3's spirit: narrowing is scoped to the region that proved it).
 - Implementation: a scope-stacked refinement map (binding → narrowed
   `Type*`) consulted by identifier lookup during Pass A; both engines use
   it (JS: `typeof x === "string"`, `x === null`, `instanceof` are the
@@ -226,7 +226,7 @@ sensitive proofs may narrow privately but never change the public type"):
 
 The `:5683` comment records why unions were held back: making error-capable
 branches visible to the E208 containment checker changed which programs
-compile (95 corpus failures). D3.3.1v2/SI3v2 sanction that change outright.
+compile (95 corpus failures). D4.3.1/SI3v2 sanction that change outright.
 Ruling (user decision 2026-08-18):
 
 - **No warn-first staging.** When a precision improvement (TIG5/6/7/8
@@ -268,11 +268,11 @@ unconditionally (`ast_node->type = annotation_type`); the init's inferred
 type survives only in `as->type`. Ruling:
 
 - **Incompatible** declared vs inferred (`subtype(inferred, declared)`
-  fails AND `subtype(declared, inferred)` fails, per the D3.2.1 static
+  fails AND `subtype(declared, inferred)` fails, per the D4.2.1 static
   relation): **compile-time error** — today's
   `check_declaration_static_boundary` already rejects the provable cases;
   it becomes uniformly strict for fully-known scalar pairs.
-- **Compatible:** the binding *records both facts* (D3.2.3 already
+- **Compatible:** the binding *records both facts* (D4.2.4 already
   requires the AST to keep `declared_type` and `as->type` separate) and
   its **effective type for downstream inference is the stricter (meet)**:
   `let a: number = 1` reads as `int` at use sites while the `number`
@@ -323,9 +323,9 @@ gap (Tune19 non-goal restated).
 
 ## 8. Non-goals
 
-- No change to the `a[i] : T?` public contract (D2.5.3) — TIG1 makes the
+- No change to the `a[i] : T?` public contract (D2.4.3) — TIG1 makes the
   element type precise *inside* the `?`, it does not remove totality.
-- No inline caches in either lane (LC1v2/D8.4.1v2); shape/class inference for JS
+- No inline caches in either lane (LC1v2/D7.4.1); shape/class inference for JS
   stays within D3.4.7's immutable JsClassMeta rules.
 - No new user-facing type syntax; this is inference precision, not surface.
 - No Hindley-Milner unification/generalization — propagation stays
@@ -335,7 +335,7 @@ gap (Tune19 non-goal restated).
 - `FnParamEvidence` is not deleted until P6 proves the structural pass
   covers its wins (pn-float-div, container-store witness) on the corpus.
 
-## 9. Appendix — evaluation-invariance audit (2026-08-18, for SI3v2/D3.3.1v2)
+## 9. Appendix — evaluation-invariance audit (2026-08-18, for SI3v2/D4.3.1)
 
 The ruling revision keeps one absolute constraint: *a script with no type
 error evaluates identically regardless of inference.* Audit of where
@@ -393,3 +393,37 @@ keep watching): havlak untyped wrong answer (boxed `_b` result fed to raw
 native entry → inf sentinel, v27 ledger — passes on v32), Tune18 §8 cd
 `any`-null tag-test over-proof, pn-param float-div int mis-inference, MIR
 declared-type carrier bugs (2026-07-29).
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D3.3.1v2 → D4.3.1
+
+**D4.3.1** **A type-error-free script's evaluation result is never
+affected by inference** (revised 2026-08-18; supersedes "inference is
+unobservable"). For any script with no type error, erasing every
+inferred type and running boxed must produce identical results; this is
+the standing invariant (semantics SI3v2), checked by the boxed-vs-JIT
+differential harness. Inference IS statically observable: improving
+precision may reject a previously-compiling script at compile time, and
+the rejection lands **straightaway** — no warn-first transition period.
+Strictness is per-surface (Type_Infer TI6): the Lambda lane is strict
+by default (static type errors reject with no result), with
+`--static-warning` as the explicit per-invocation relaxed mode — the
+same diagnostics report as warnings, compilation proceeds, and a
+diagnosed (unresolved or rejected) annotation is dropped to the
+inferred value type so representation never follows a failed contract
+(SI14); the LambdaJS lane is lenient by default (static type findings
+are diagnostics/warnings only; the script still runs and may produce a
+dynamic result containing error values).
+What remains absolute is the dynamic half: a script accepted under both
+the weaker and the stronger inference evaluates identically under both.
+[B7, TI6]

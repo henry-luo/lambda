@@ -1,7 +1,7 @@
-// D7.2.4v3: headless value facade; native mounting is an explicit view module.
+// D9.3.4: headless value facade; native mounting is an explicit view module.
 import core: .raster.core
 import model: .raster.model
-import history: .mod_history
+import history: lambda.editor.core.history
 import registry: .raster.commands
 pub fn new_document(options={}) any^ => core.new_document(options)^
 pub fn open_session(image) any^ => core.open_session(image)^

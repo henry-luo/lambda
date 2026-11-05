@@ -4,7 +4,7 @@
 **Status:** IN PROGRESS — Items 1–3 implemented and Items 5–6 partly, on
 branch `worktree-interp-tune2` (§12); Item 4 not started. Loop-head handoff,
 its threshold and the retirement of the first-entry trigger were ruled by the
-user on 2026-10-02 (§4) and are recorded as **D8.1.1v14** and AI23.
+user on 2026-10-02 (§4) and are recorded as **D8.3.2** and AI23.
 **Source baseline:** `c886322fd` (source reading and profile attribution);
 archived release executable `test/benchmark/exe/lambda-v50-a9489bc329`
 (timings). `interp.cpp` differs by 11 lines between the two.
@@ -13,10 +13,10 @@ and `interp_plan.cpp`, and the AUTO promotion edge that decides when a
 definition leaves it. The LambdaJS walker is out of scope for this round.
 
 **Formal authority:** [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)
-**D8.1.1v14** (tiering, asynchronous promotion *v12*, loop-head handoff
-*v14*), **D8.4.1v2** (no inline caches), **D8.2.4v2, D8.2.5v3** (fact
-placement, pass manager), **D5.3.3** (precise roots), **D6.2.2v2** (dynamic
-call dispatch), **D3.3.1v2** (result identity under type erasure), **DO25**
+**D8.3.2** (tiering, asynchronous promotion *v12*, loop-head handoff
+*v14*), **D7.4.1** (no inline caches), **D8.2.4, D8.2.5** (fact
+placement, pass manager), **D6.3.3** (precise roots), **D7.2.2** (dynamic
+call dispatch), **D4.3.1** (result identity under type erasure), **DO33**
 (interpreter-tier opens); [Lambda Formal Semantics](../../doc/Lambda_Formal_Semantics.md)
 **S1.6**, **S7.7.2**, **S9.1.2**.
 
@@ -27,7 +27,7 @@ the `var`-parameter home ABI); [interpreter implementation record](<Lambda_Impl_
 
 This is an informative implementation plan, not a ruling. Item numbers are
 work sequencing, not a design-ledger series. Open design questions are cited by
-their existing IDs (AIO6, AIO10, AIO13, DO25).
+their existing IDs (AIO6, AIO10, AIO13, DO33).
 
 ## 1. Summary
 
@@ -161,7 +161,7 @@ One Lambda call nests `eval_expr` → `eval_call` → `fn_call_into` →
 
 **F1 — First-entry promotion is defeated by asynchronous publication.**
 `interp_promote_function` computes `loop_first_entry` for a loop-bodied
-procedure and promotes at its first entry, as **D8.1.1v13** *(v7)* required.
+procedure and promotes at its first entry, as **D8.3.5** *(v7)* required.
 Its own comment names mandelbrot and matmul as the reason. Since `4f304cd83`
 (2026-09-22, *v12*) promotion enqueues the target and returns `false`, and
 `interp_satellite_publish_ready` adopts an image only at a later function
@@ -220,9 +220,9 @@ helpers total 2–13%. GC is under 2%. An existing integer loop fast path
 **Ruled by the user on 2026-10-02: option (b).** A T0 activation that is
 already running may transfer to compiled code at a loop-head test. This
 reversed the interpreter design's "no general OSR" non-goal (n2) and the
-**D8.1.1** *(v12)* clause "no active interpreter frame is replaced".
+**D8.3.1** *(v12)* clause "no active interpreter frame is replaced".
 
-The question arose because **D8.1.1v13** carried two statements that disagreed
+The question arose because **D8.3.5** carried two statements that disagreed
 for a once-called loop owner: *(v7)* "a procedure whose body owns a loop
 statement promotes at its **first** entry", and *(v12)* "the triggering call
 and every call before publication stay T0". The implementation follows *v12*,
@@ -244,8 +244,8 @@ All three points were ruled by the user on 2026-10-02:
 
 They are recorded, and not restated here, in:
 
-- [Formal Design](../../doc/Lambda_Formal_Design.md) 16.0.0: **D8.1.1v14**,
-  its Appendix A row (not implemented), and **DO25**, which now names AIO13
+- [Formal Design](../../doc/Lambda_Formal_Design.md) 16.0.0: **D8.3.2**,
+  its Appendix A row (not implemented), and **DO33**, which now names AIO13
   in place of AIO11.
 - [Interpreter design](../Lambda_Design_Ast_Interpreter.md) §5.1.1: AI23, the
   options and the reasoning; AI8v2; AIO13; superseded wording in its
@@ -468,7 +468,7 @@ Run-time guards at the handoff point, each a field compare:
 **1.2 Plan facts** (`interp_plan.cpp`, `ast-core.hpp`).
 
 - Assign each eligible loop a `handoff_ordinal` on its `AstLoopControlNode`;
-  ineligible loops get none. These are immutable AST facts (**D8.2.4v2**).
+  ineligible loops get none. These are immutable AST facts (**D8.2.4**).
 - Record, per eligible loop, the set of named slots declared on any path
   before the loop head. A slot in the set is loaded by the loop entry; the
   rest start as the body's own declarations leave them.
@@ -552,7 +552,7 @@ marking, per §4.4.
 - `LAMBDA_LOOP_JIT_THRESHOLD=1` with `LAMBDA_SATELLITE_SYNC=1` makes every eligible
   loop hand off at its second head test, deterministically. The whole
   `test_lambda_gtest` corpus runs in this mode as a differential against the
-  interpreter goldens. This is the gate for **S1.6** and **D3.3.1v2**.
+  interpreter goldens. This is the gate for **S1.6** and **D4.3.1**.
 - Focused tests: a container aliased before the loop and written inside it; a
   local whose value misses its inferred lane; `return`, `raise`, `break` and
   `continue` from nested loops after handoff; a `var` parameter written after
@@ -622,7 +622,7 @@ Covers F3.
 - In the frame-plan pass, classify each declarator, parameter and assignment
   target once: untyped; exact scalar tag; numeric lane; array contract; map
   contract; binder site; general. Store the result on the node that owns the
-  declaration, per **D8.2.4v2** and **D8.2.5v3**. Do not attach it to a shared
+  declaration, per **D8.2.4** and **D8.2.5**. Do not attach it to a shared
   `Type` singleton.
 - At bind time, the untyped class skips the boundary entirely. The exact
   scalar class admits on a tag compare and falls through to the existing
@@ -637,7 +637,7 @@ the type checker. The typed fixtures in §2.4 are no slower than their untyped
 pairs in T0. Admission failures produce the same errors as before.
 
 **Not in this item:** skipping a check because the initializer's static type
-already proves it. That is an inference-soundness claim under **D3.3.1v2** and
+already proves it. That is an inference-soundness claim under **D4.3.1** and
 would have to reuse the predicate MIR Direct uses for the same site. It is
 unverified here.
 
@@ -657,11 +657,11 @@ Covers F4. Extends the call-shape fact Round 1 added
   describes. It must keep the promotion count, the recursion-depth budget, the
   rejected-parameter rule and the return-contract check.
 - All other shapes keep `lambda_dynamic_call` as the single dispatch
-  authority (**D6.2.2v2**). No callee value, receiver or dispatch result is
-  cached (**D8.4.1v2**).
+  authority (**D7.2.2**). No callee value, receiver or dispatch result is
+  cached (**D7.4.1**).
 - Arguments evaluated into a not-yet-entered callee window must be rooted
   while later arguments run, and a nested call in an argument must not
-  overlap that window (**D5.3.3**). Round 1's planned argument span already
+  overlap that window (**D6.3.3**). Round 1's planned argument span already
   solves the same lifetime problem for the caller side.
 
 **Exit:** a planned simple direct call makes one pass over its parameters and
@@ -702,7 +702,7 @@ Covers F6.
   path writer. Promote a span-taking entry to the module header beside
   `cow_path_set`; do not copy its body.
 - The keys stay rooted in frame slots while the owner spine is detached
-  (**D5.3.3**).
+  (**D6.3.3**).
 
 **Exit:** a nested member assignment performs no heap allocation for its
 path. `richards2` and `deltablue2` output is unchanged, including under
@@ -720,7 +720,7 @@ helper on a miss.
 
 - **Bytecode or any second executable form** — AI22.
 - **Mutable per-site caches**, including shape or callee caches for member
-  access and calls — **D8.4.1v2**. Items 3–5 use immutable facts computed
+  access and calls — **D7.4.1**. Items 3–5 use immutable facts computed
   before execution and an inline guard with the shared kernel on a miss, which
   is the sanctioned form.
 - **An unboxed interpreter lane** — AI3.
@@ -966,7 +966,7 @@ Reprofiled after §12.2–12.3. Interpreter CPU against the §12.3 binary:
   check and root span, `interp_call` and frame setup together are 3–5%; a
   direct entry would need its own argument-rooting protocol for that.
 - Remaining large costs: member reads by name (`map_get_for_owner_keyed`,
-  ~10% of `richards2`, a runtime lookup that D8.4.1v2 keeps uncached) and
+  ~10% of `richards2`, a runtime lookup that D7.4.1 keeps uncached) and
   `eval_expr`'s own dispatch.
 
 ### 12.5 Open items: defects, census, release timings
@@ -1059,7 +1059,7 @@ Regression cases (g)–(i) are in `test/lambda/proc/interp_loop_handoff.ls`.
 2. A local's simple `TypeType` annotation is unwrapped before it becomes the
    live-in's contract (`pidigits2`'s `string` read as a type value).
 3. Pre-existing. The native `string` parameter lane is the raw pointer
-   (D2.4.1). The owned-concat path `s = s ++ x` unboxed it blindly and direct
+   (D2.3.4). The owned-concat path `s = s ++ x` unboxed it blindly and direct
    calls passed a boxed local through, so wrapper, literal-argument and
    function-value entries printed `<error>`.
 4. Pre-existing. The finite-loop plan accepted a `float` bound and range-checked
@@ -1136,7 +1136,7 @@ load spike. Image counts are over the 126 benchmark scripts.
 - **Reading.** The suite optimum is flat from 2,500 to 20,000, and 10,000
   sits on it, just above every measured crossover. It is the lowest value
   that wastes no time on loops below break-even. 20,000 would trade ~1% of
-  time for ~70% fewer unused images. That is a trade the D8.1.1v14 ruling did
+  time for ~70% fewer unused images. That is a trade the D8.3.2 ruling did
   not make, and this data does not force it. The default stays 10,000.
 
 **Found by the sweep: a definition's single loop image goes to its first hot
@@ -1144,7 +1144,7 @@ loop.** `larceny/array1`'s `benchmark` runs a 10,000-iteration fill loop and
 then a 1,000,100-iteration loop. At 10,000 the first loop queues the
 definition's continuation, bound to itself, and exits before the image is
 published. The second loop then runs entirely in T0, because the definition
-is already queued once (D8.1.1v14 ruling 1). At 20,000 the first loop never
+is already queued once (D8.3.2 ruling 1). At 20,000 the first loop never
 qualifies, and the run takes 9.6 ms instead of 131 ms. This is independent of
 the threshold value: any value equal to an early loop's trip count reproduces
 it. Remedies (re-queue when the bound loop has exited, or one image per loop

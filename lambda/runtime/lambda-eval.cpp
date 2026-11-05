@@ -925,7 +925,7 @@ Item fn_join_fresh_array_item(Item left, Item element) {
 // A proved tail accumulator owns its post-entry versions. Both sequence and
 // small-literal appends validate all source items before unsharing the left lane;
 // the latter avoids allocating a temporary Array (S9.1.2,
-// S10.6.1, D4.4.4v4).
+// S10.6.1, D5.4.4).
 static Item join_consume_cert_array(Item left, Item right, Item second,
         int literal_count) {
     if (get_type_id(left) != LMD_TYPE_ARRAY || item_is_list(left) ||
@@ -1903,7 +1903,7 @@ static inline bool is_valid_function(Function* fn) {
 typedef enum LambdaDynamicCallMode {
     LAMBDA_DYNAMIC_CALL_FUNCTION,
     LAMBDA_DYNAMIC_CALL_PROCEDURE,
-    // T21-3b (CW33, D8.1.1v6): a function-mode call whose caller has already
+    // T21-3b (CW33, D8.3.3): a function-mode call whose caller has already
     // published the borrowed `var` homes in Context::mir_var_homes, so a
     // signature with untyped `var` parameters is dispatchable -- the callee
     // (generated prologue or interp_call) consumes the cells and writes the
@@ -2115,7 +2115,7 @@ static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
         // T0 values retain the source entry until this one dispatch boundary.
         // Upgrade before selecting a C prototype: a published satellite uses
         // the ordinary generated boxed ABI, while a cold/pinned definition
-        // must keep the exact interpreter call path (D8.1.1v2 §5.3).
+        // must keep the exact interpreter call path (D8.3.1 §5.3).
         if (!interp_promote_function_if_hot(fn)) {
             // the borrowed mode's homes are consumed by the interpreted
             // prologue the way the generated prologue consumes them
@@ -2193,7 +2193,7 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
     for (int i = 0; i < actual; i++) {
         Item value = args->items[i];
         // list-owned numeric tails may move during the callback; scalar Items
-        // must borrow a stable home in the caller's number extent (D5.2.3).
+        // must borrow a stable home in the caller's number extent (D6.2.3).
         if (lambda_item_uses_scalar_home(value)) {
             uint64_t* home = lambda_side_number_alloc();
             if (!home) {
@@ -2581,7 +2581,7 @@ bool lambda_value_rep_proves_contract(Item value, Type* contract);
 
 // A binder below a container boundary must force the checked walk: a cached
 // array/map certificate proves the written bound but cannot publish this
-// invocation's Type* slot (S4.2.2, D3.3.3v3).
+// invocation's Type* slot (S4.2.2, D4.3.3).
 static bool runtime_contract_uses_binder(Type* type) {
     return lambda_type_contract_has_binder(type, true);
 }
@@ -2620,7 +2620,7 @@ bool lambda_type_matches(Item item, Type* expected) {
     TypeId actual_id = get_type_id(item);
     if (actual_id == LMD_TYPE_ERROR) return lambda_type_accepts_error(expected);
     // These contract tops share the compact TYPE_TYPE tag with first-class
-    // type values, but their pointer identity defines admission (D3.3.3v3).
+    // type values, but their pointer identity defines admission (D4.3.3).
     if (type_is_any_without_error(expected) && type_is_any_without_null(expected)) {
         return actual_id != LMD_TYPE_NULL;
     }
@@ -2926,7 +2926,7 @@ Bool lambda_value_type_is_exact(Item value, Type* expected) {
     if (expected->type_id == LMD_TYPE_MAP && expected != &TYPE_MAP) {
         // Named and nominal map values preserve their descriptor through
         // type(value), so identity of the authoritative instance shape is the
-        // exact semantic key (S2.1.1v3, D8.3.1v2).
+        // exact semantic key (S2.1.1v3, D7.3.1).
         return actual_id == LMD_TYPE_MAP &&
             lambda_attr_shape(actual_id, value.map) == (TypeMap*)expected
             ? BOOL_TRUE : BOOL_FALSE;
@@ -2976,7 +2976,7 @@ Bool fn_is(Item a, Item b) {
     }
     if (b_type_id != LMD_TYPE_TYPE) return fn_eq(a, b);
     {
-        // D2.6.6v2 phase 2: `object` is a TYPE with no tag of its own — it wears
+        // D3.1.1 phase 2: `object` is a TYPE with no tag of its own — it wears
         // a container tag purely to route through the switches below, so it MUST
         // be matched by pointer identity here, ahead of anything that compares
         // tags. Otherwise `{x: 1} is object` would answer true simply because
@@ -3122,7 +3122,7 @@ Bool fn_is(Item a, Item b) {
             return lambda_value_nominal(a_type_id,
                 (const void*)(uintptr_t)a.item) ? BOOL_TRUE : BOOL_FALSE;
         }
-        // compact container kinds have no shape to validate or report (D3.2.1).
+        // compact container kinds have no shape to validate or report (D4.2.1).
         if (type_b->type == &TYPE_MAP || type_b->type == &TYPE_ELMT) {
             return lambda_type_matches(a, type_b->type) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -3189,7 +3189,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityContext* eq
 
 static Bool equality_depth_failure(EqualityContext* equality) {
     if (equality->mode == EQUALITY_STRICT) return BOOL_FALSE;
-    // depth failures return their owned payload through the completion lane (D1.4v4).
+    // depth failures return their owned payload through the completion lane (D1.4).
     equality->error = runtime_error_itemf(ERR_RUNTIME_ERROR,
         "structural equality recursion too deep (> %d)", EQ_MAX_DEPTH);
     return BOOL_ERROR;
@@ -3782,7 +3782,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityContext* eq
         return numeric_items_equal_exact(a_item, b_item);
     }
     if (a_type_id != b_type_id) {
-        // S5.4.1 / D7.4.5v2: a virtual carrier does not change the map value family.
+        // S5.4.1 / D9.5.5: a virtual carrier does not change the map value family.
         if ((a_type_id == LMD_TYPE_MAP && b_type_id == LMD_TYPE_VMAP) ||
                 (a_type_id == LMD_TYPE_VMAP && b_type_id == LMD_TYPE_MAP)) {
             return virtual_map_eq(a_type_id == LMD_TYPE_VMAP ? a_item : b_item,
@@ -4423,7 +4423,7 @@ int total_cmp(Item a_item, Item b_item) {
             return (a_ptr > b_ptr) - (a_ptr < b_ptr);
         }
         if (a_tid == LMD_TYPE_VMAP || b_tid == LMD_TYPE_VMAP) {
-            // D2.6.6: the operand may be a map OR an element-shaped value, so
+            // D3.1.1: the operand may be a map OR an element-shaped value, so
             // the attribute shape must be reached by kind, never through `.map`.
             int64_t len_a = a_tid == LMD_TYPE_VMAP ? a_item.vmap->vtable->count(a_item.vmap->data)
                                                    : lambda_attr_shape(a_tid, a_item.map)->length;
@@ -4646,7 +4646,7 @@ static void query_push_match(Array* result, Item val, Item type_val) {
 
 static void query_collect(Item data, Item type_val, bool self_inclusive, Array* result, int depth);
 
-// D7.4.5v2: a host-backed carrier (VArray, Velmt, VMap) keeps its content behind
+// D9.5.5: a host-backed carrier (VArray, Velmt, VMap) keeps its content behind
 // a vtable, out of reach of the layout arms below. `for (x in e)` walks it
 // through the iteration helpers -- attribute values then children, a map's
 // values, an array's items -- and a type query walks what `for` walks
@@ -5051,7 +5051,7 @@ Bool fn_in(Item a_item, Item b_item) {
         }
         else if (b_type == LMD_TYPE_MAP) {
             // value membership: check if a matches any field value.
-            // D2.6.6: an object keeps its shape and buffer at Element's
+            // D3.1.1: an object keeps its shape and buffer at Element's
             // offsets, so both must be reached by kind, never through `.map`.
             TypeMap* map_type = lambda_attr_shape(b_type, b_item.map);
             void* map_data = lambda_attr_data(b_type, b_item.map);
@@ -5165,7 +5165,7 @@ Bool fn_at(Item a_item, Item b_item) {
         return BOOL_FALSE;
     }
     if (b_type == LMD_TYPE_MAP) {
-        // D2.6.6: an object keeps its shape at Element's offset, not Map's.
+        // D3.1.1: an object keeps its shape at Element's offset, not Map's.
         return shape_has_named_key(lambda_attr_shape(b_type, b_item.map), a_item)
             ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -5496,7 +5496,7 @@ Type* fn_type(Item item) {
     // narrower domain, the same convention that makes `type(1)` be `int`. Only
     // the surface answer moves -- the decoder still sees them as doubles.
     if (lambda_item_is_merged_poison(item.item)) resolved_type = LMD_TYPE_INT;
-    // D2.6.6v2 phase 2: a nominal value reports its DECLARED type, whatever its
+    // D3.1.1 phase 2: a nominal value reports its DECLARED type, whatever its
     // structural kind, so `name(type(p))` is still "Point". Checked before the
     // structural arms below, which would otherwise collapse it to map/element.
     if (lambda_value_nominal(storage_type, (const void*)(uintptr_t)item.item)) {
@@ -5602,7 +5602,7 @@ static Symbol* fn_name_from_type(Type* type) {
     if (const char* alias = type_alias_name(type)) {
         return fn_name_symbol_from_chars(alias, strlen(alias));
     }
-    // D2.6.6v2 phase 2: a nominal type answers with its declared name whatever
+    // D3.1.1 phase 2: a nominal type answers with its declared name whatever
     // its structural kind, so `name(type(p))` stays "Point" after the flip.
     if (TypeNominal* record = type_nominal_record(type)) {
         Symbol* nominal_name = fn_name_symbol_from_strview(record->type_name);
@@ -5644,7 +5644,7 @@ Symbol* fn_name(Item item) {
     case LMD_TYPE_ERROR:
         return nullptr;
     case LMD_TYPE_MAP: {
-        // D2.6.6v2 phase 2: a nominal MAP answers with its declared name; a
+        // D3.1.1 phase 2: a nominal MAP answers with its declared name; a
         // structural map still has none.
         if (lambda_value_nominal(type_id, item.map)) {
             return fn_name_from_type((Type*)item.map->type);
@@ -5658,7 +5658,7 @@ Symbol* fn_name(Item item) {
         return fn_name_from_type((Type*)elmt->type);
     }
     case LMD_TYPE_VELMT: {
-        // D7.4.5v2: read the virtual intrinsic tag, rooting both owner and result across symbol allocation.
+        // D9.5.5: read the virtual intrinsic tag, rooting both owner and result across symbol allocation.
         RootFrame roots(2);
         Rooted<Item> owner(roots, item);
         Item tag = ItemNull;
@@ -5962,7 +5962,7 @@ Item fn_input2(Item target_item, Item type) {
 
     // Pre-register exact schema fields before parsing so known Input names hit
     // the retained static/dynamic parent; parser-only misses stay id-less per
-    // D3.4.4v2 and D4.6.2v2.
+    // D3.4.4 and D5.6.2.
     if (schema_type && !input_schema_prepare_name_parent(schema_type,
             context->name_pool)) {
         Item failure = runtime_error_itemf(ERR_OUT_OF_MEMORY, "input: failed to prepare schema names");
@@ -5973,7 +5973,7 @@ Item fn_input2(Item target_item, Item type) {
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
 
     // A schema-backed input inherits the schema/runtime pool; a schemaless
-    // input keeps the existing id-less Input seam required by D4.6.2v2.
+    // input keeps the existing id-less Input seam required by D5.6.2.
     Input *input = input_from_target_with_io(target, type_str, flavor_str,
         schema_type ? context->name_pool : nullptr, eval_context_security_io(context));
     if (!input) {
@@ -6219,7 +6219,7 @@ Item fn_address_of(Item value) {
 }
 
 // PTH45v2: `a === b` is `&a != null and &a == &b`. In practice it is pointer
-// equality, which is sound because document nodes never move (D4.3.1), a
+// equality, which is sound because document nodes never move (D5.3.1), a
 // `commit` always creates new nodes, and local copies carry no identity. The
 // generation is part of the comparison because two nodes at one location across
 // a commit are different nodes — and the table entry is per node, so comparing
@@ -7043,7 +7043,7 @@ Item fn_parse_html_fragment1(Item str_item) {
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
 bool format_gltf_bytes(Item root_item, bool binary, struct StrBuf* out, const char** error);
 
-// D6.4.1: format returns an Item, so a failure is an error value, never text.
+// D7.6.1: format returns an Item, so a failure is an error value, never text.
 // It returned String*: an error operand became the text "<error>" on both
 // tiers, and a bad format argument's NULL read as error on T0 but null on the
 // JIT (LR07-18).
@@ -7094,7 +7094,7 @@ Item fn_format2(Item item, Item type) {
 
     TypeId type_id = get_type_id(type);
     // converting symbol options allocates: root the source and each option before
-    // converting the next, including the options map itself (D5.3.3).
+    // converting the next, including the options map itself (D6.3.3).
     RootFrame format_roots(5);
     Rooted<Item> source(format_roots, item);
     Rooted<String*> rooted_type(format_roots, nullptr);
@@ -7158,7 +7158,7 @@ Item fn_format2(Item item, Item type) {
     ScriptFormatRoute route = script_format_route(rooted_type.get() ? rooted_type.get()->chars : nullptr,
         rooted_flavor.get() ? rooted_flavor.get()->chars : nullptr);
     if (route.target) {
-        // Package evaluation can allocate; keep all arguments precisely rooted (D5.3.3).
+        // Package evaluation can allocate; keep all arguments precisely rooted (D6.3.3).
         String* target_string = heap_strcpy(route.target, strlen(route.target));
         script_target.set(Item{.item = s2it(target_string)});
         Item args[3] = {source.get(), script_target.get(),
@@ -7391,7 +7391,7 @@ Item fn_index_set(Item item, Item key, Item value) {
     if (item_type == LMD_TYPE_VMAP) {
         // VMap's established hash backend accepts arbitrary Item keys. Keep
         // that ABI while the new VArray/Velmt carriers enforce face-specific
-        // key domains (D7.4.5v2).
+        // key domains (D9.5.5).
         return vmap_set(item, key, value);
     }
 
@@ -7467,7 +7467,7 @@ Item fn_index_nd(Item item, int ndim, int64_t* indices) {
 // cannot resolve differently depending on which lane compiled the access.
 extern "C" const TypeMethod* lambda_object_find_method(const TypeObject* type,
         const char* key) {
-    // D2.6.6v2 phase 2: methods hang off the nominal RECORD, so the walk is the
+    // D3.1.1 phase 2: methods hang off the nominal RECORD, so the walk is the
     // record's base chain — the shape's own kind no longer participates.
     const TypeNominal* record = type_nominal_record((const Type*)type);
     for (const TypeNominal* t = record; t; t = t->base) {
@@ -7537,7 +7537,7 @@ extern "C" Item lambda_object_member(Item self, const char* key) {
 // the T0 interpreter and the C transpiler also use). The two used to carry
 // diverging copies — item_attr lacked path/extension/scheme/depth/mode and
 // fn_member lacked is_file and metadata auto-load — so the value of `p.extension`
-// depended on which lane compiled the access (tier mismatch, SI3v2/D3.3.1v2).
+// depended on which lane compiled the access (tier mismatch, SI3v2/D4.3.1).
 extern "C" bool path_is_property_name(const char* k) {
     if (!k) return false;
     static const char* const names[] = {
@@ -7830,7 +7830,7 @@ Item fn_member(Item item, Item key) {
     }
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: {
-        // D2.6.6v2 phase 2: a nominal container resolves its methods after its
+        // D3.1.1 phase 2: a nominal container resolves its methods after its
         // fields (S12.3.3v2); a structural one has no method tier. The kinds
         // share this prologue because they share the attribute face; they part
         // only at the fallback, where an element also answers `name` with its
@@ -7927,7 +7927,7 @@ extern "C" Item fn_member_by_id(Item item, NameId name_id) {
 }
 
 // The attribute half of a container's length, read through the shared Map face
-// (D2.6.6v2). `length` is the entry count only while every entry is a named
+// (D3.1.1). `length` is the entry count only while every entry is a named
 // field: a spread is one nameless link slot covering many, so those shapes
 // count through the same flattening walk iteration uses (S8.3.1).
 static inline int64_t map_attr_count(const Map* owner) {
@@ -8907,7 +8907,7 @@ static List* split_string_list(void) {
     if (lambda_type_lane_storage_desc(&TYPE_STRING, &lane)) {
         // Text split has a full inferred string[] result. Construct that
         // pointer carrier directly; an open incompatible mutation widens it,
-        // while an explicit boundary may certify it (D3.3.3v3, D3.3.4).
+        // while an explicit boundary may certify it (D4.3.3, D2.4.3).
         array_native_lane_configure((Array*)result, &lane);
     }
     return result;
@@ -9039,7 +9039,7 @@ Item fn_split(Item str_item, Item sep_item) {
     uint32_t sep_len = null_sep ? 0 : sep_item.get_len();
 
     // Segments are separate elements, so every append below uses array_push,
-    // which stores the item verbatim (D2.6.5). list_push would concatenate each
+    // which stores the item verbatim (D3.3.1). list_push would concatenate each
     // string onto the previous one under S16.7's content rules.
     List* result = split_string_list();
     rooted_result.set(result);
@@ -9364,7 +9364,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     bool is_ascii = sep_type == LMD_TYPE_NULL || text_item_is_ascii(sep_item);
     for (int64_t i = 0; i < count; i++) {
         // A native-lane source stores raw payloads in `items[]`, so read it
-        // through the lane accessor -- `split()` produces such a list (D2.6.5).
+        // through the lane accessor -- `split()` produces such a list (D3.3.1).
         Item item = array_item_read((Array*)source, i);
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
@@ -9403,7 +9403,7 @@ Item fn_join2(Item list_item, Item sep_item) {
             p += sep_len;
         }
         // A native-lane source stores raw payloads in `items[]`, so read it
-        // through the lane accessor -- `split()` produces such a list (D2.6.5).
+        // through the lane accessor -- `split()` produces such a list (D3.3.1).
         Item item = array_item_read((Array*)source, i);
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
@@ -9441,7 +9441,7 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
         return false;
     }
 
-    // D2.6.6: an object cannot be viewed as a Map* — its shape and buffer sit
+    // D3.1.1: an object cannot be viewed as a Map* — its shape and buffer sit
     // at Element's offsets — so the attribute face is reached by kind.
     TypeMap* options_shape = lambda_attr_shape(options_type, options_item.map);
     void* options_data = lambda_attr_data(options_type, options_item.map);
@@ -9742,7 +9742,12 @@ Item fn_replace4(Item str_item, Item old_item, Item new_item, Item options_item)
     return fn_replace_impl(str_item, old_item, new_item, options);
 }
 
-static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions options) {
+static Item find_empty_result(bool count_only) {
+    return count_only ? Item{.item = i2it(0)} : Item{.array = array()};
+}
+
+static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions options,
+        bool count_only = false) {
     TypeId source_type = get_type_id(source_item);
     TypeId pattern_type = get_type_id(pattern_item);
 
@@ -9753,7 +9758,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     }
 
     // find() constructs an array (S2.5.7): `[]` for a null source or no match
-    if (source_type == LMD_TYPE_NULL) return {.array = array()};
+    if (source_type == LMD_TYPE_NULL) return find_empty_result(count_only);
 
     if (!is_text_type_id(source_type)) {
         log_debug("fn_find: first argument must be a string or symbol");
@@ -9777,9 +9782,11 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
             }
             if ((options.has_limit && options.limit == 0) ||
                 (options.has_last && options.last == 0)) {
-                return {.array = array()};
+                return find_empty_result(count_only);
             }
             int64_t pattern_limit = options_legacy_pattern_limit(options);
+            if (count_only) return {.item = i2it(pattern_find_count_options(pattern,
+                str_chars, str_len, pattern_limit, options.ignore_case))};
             List* r = pattern_find_all_options(pattern, str_chars, str_len, pattern_limit, options.ignore_case);
             return {.array = r};
         }
@@ -9790,19 +9797,26 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         log_debug("fn_find: second argument must be a string, symbol, or pattern");
         return ItemError;
     }
-    if (str_len == 0) return {.array = array()};
+    if (str_len == 0) return find_empty_result(count_only);
 
     const char* needle = pattern_item.get_chars();
     uint32_t needle_len = pattern_item.get_len();
 
-    List* result = list();
-    RootFrame roots(2);
-    Rooted<List*> rooted_result(roots, result);
-    Rooted<Map*> rooted_match(roots, (Map*)NULL);
-    if (!needle || needle_len == 0) return {.array = rooted_result.get()};
+    if (!needle || needle_len == 0) return find_empty_result(count_only);
 
     // S17.7.1: case-insensitive literal text folds as a pattern does, in RE2
     if (options.ignore_case) {
+        // literal folding keeps its existing checked search; the pattern and
+        // byte-literal paths below can count without constructing match records.
+        if (count_only) {
+            RootFrame roots(1);
+            Rooted<Item> found(roots, ItemNull);
+            found.set(fn_find_impl(source_item, pattern_item, options));
+            return fn_len_checked(found.get());
+        }
+        List* result = list();
+        RootFrame roots(1);
+        Rooted<List*> rooted_result(roots, result);
         if ((options.has_limit && options.limit == 0) ||
             (options.has_last && options.last == 0)) return {.array = rooted_result.get()};
         List* found = literal_find_all_ignore_case(str_chars, str_len, needle, needle_len,
@@ -9814,6 +9828,11 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     int64_t first = 0, selected_count = 0;
     // Limit selects the visible match window; replacement uses the same helper.
     select_match_window(total, options, &first, &selected_count);
+    if (count_only) return {.item = i2it(selected_count)};
+    List* result = list();
+    RootFrame roots(2);
+    Rooted<List*> rooted_result(roots, result);
+    Rooted<Map*> rooted_match(roots, (Map*)NULL);
     if (selected_count == 0) return {.array = rooted_result.get()};
 
     int64_t ordinal = 0;
@@ -9860,6 +9879,21 @@ Item fn_find3(Item source_item, Item pattern_item, Item options_item) {
     FindReplaceOptions options;
     if (!parse_find_replace_options(options_item, &options)) return ItemError;
     return fn_find_impl(source_item, pattern_item, options);
+}
+
+// a sole len consumer observes the same match window and errors, without
+// allocating the discarded array/maps (S2.5.7v4, S7.9.3, S17.7.1).
+Item fn_len_find2(Item source_item, Item pattern_item) {
+    GUARD_ERROR2(source_item, pattern_item);
+    FindReplaceOptions options = {0, 0, false, false, false};
+    return fn_find_impl(source_item, pattern_item, options, true);
+}
+
+Item fn_len_find3(Item source_item, Item pattern_item, Item options_item) {
+    GUARD_ERROR3(source_item, pattern_item, options_item);
+    FindReplaceOptions options;
+    if (!parse_find_replace_options(options_item, &options)) return ItemError;
+    return fn_find_impl(source_item, pattern_item, options, true);
 }
 
 // normalize with 1 arg (defaults to NFC)
@@ -10310,7 +10344,7 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
 // The collector traces an object by its header tag, not by Container.type_id,
 // so an ArrayNum widened in place must be retagged in the same no-safepoint
 // step that installs its Items. Left tagged ArrayNum, it was traced as raw
-// numbers and the containers it now held were freed (D4.3.1).
+// numbers and the containers it now held were freed (D5.3.1).
 static void retag_widened_array_num(Array* arr) {
     if (arr->is_heap) {
         heap_retag_container((Container*)arr, LMD_TYPE_ARRAY_NUM, LMD_TYPE_ARRAY);
@@ -10323,7 +10357,7 @@ static void convert_specialized_to_generic(Array* arr) {
     TypeId old_type = arr->type_id;
     int64_t len = arr->length;
     // A native lane is the Array's specialized carrier: its slots are words
-    // of the declared layout (D3.2.6), decoded one by one like a compact lane.
+    // of the declared layout (D4.2.6), decoded one by one like a compact lane.
     bool native_lane = old_type == LMD_TYPE_ARRAY && array_has_native_lane(arr);
     if (old_type != LMD_TYPE_ARRAY_NUM && !native_lane) {
         // shouldn't happen — caller should only call for specialized types
@@ -10468,7 +10502,7 @@ static bool convert_ndim_to_generic_rows(Array* arr) {
 // S9.1.1: `push(b, v)` is `b' = b ++ [v]`. An open packed array (one with no
 // declared contract) keeps its lane when every appended item fits it exactly
 // and otherwise widens in place to a generic Array, as an index write does
-// (fn_array_set); array_push then spreads a list (D2.6.5v3). Refusing here left
+// (fn_array_set); array_push then spreads a list (D3.3.1). Refusing here left
 // `push` onto an unannotated number literal a silent no-op (LR12-27). A view or
 // an N-D array cannot grow, as splice refuses them.
 Item array_num_push_open(Item owner, Item value) {
@@ -10666,7 +10700,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     // A raw mutation may retain an exact proof only when its replacement
     // already proves the certified element contract. Recheck the carrier
     // after the store: open writes may still widen its physical layout
-    // (D3.3.3v3).
+    // (D4.3.3).
     ArrayRepCert* prior_cert = arr->rep_cert;
     bool preserve_cert = prior_cert && prior_cert->immediate_element &&
         lambda_value_rep_proves_contract(value, prior_cert->immediate_element);
@@ -10678,7 +10712,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         if (array_has_native_lane(arr)) {
             if (!array_native_lane_store(arr, index, value)) {
                 // open pointer lanes widen like ArrayNum; typed boundaries
-                // admitted their replacement before this raw setter (D3.3.3v3).
+                // admitted their replacement before this raw setter (D4.3.3).
                 RootFrame roots(2);
                 Rooted<Array*> rooted_arr(roots, arr);
                 Rooted<Item> rooted_value(roots, value);
@@ -10843,7 +10877,7 @@ bool map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:  {
         // this stores an admitted physical pointer, including virtual carriers
-        // (D7.4.5v2). Only absence changes encoding in the slot (D2.6.4v3).
+        // (D9.5.5). Only absence changes encoding in the slot (D2.6.2).
         *(Container**)field_ptr = value.item == ITEM_NULL ? NULL : value.container;
         break;
     }
@@ -11009,7 +11043,7 @@ static bool mutable_clone_needs_container_path(Item value) {
 }
 
 static void* mutable_clone_owner_data(Item owner) {
-    // D2.6.6v2: one attribute face, one accessor — no per-kind cast needed.
+    // D3.1.1: one attribute face, one accessor — no per-kind cast needed.
     return lambda_attr_data(get_type_id(owner), owner.container);
 }
 
@@ -11235,18 +11269,7 @@ Item fn_mutable_value(Item value) {
 }
 
 bool cow_item_is_container(Item value) {
-    switch (get_type_id(value)) {
-    case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP:
-    case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_VMAP:
-    case LMD_TYPE_VARRAY:
-    case LMD_TYPE_VELMT:
-        return true;
-    default:
-        return false;
-    }
+    return cow_type_is_container(get_type_id(value));
 }
 
 static Container* cow_item_container(Item value) {
@@ -11366,7 +11389,7 @@ static bool cow_profile_truthy(const char* value) {
         strcmp(value, "no") != 0;
 }
 
-static bool cow_profile_enabled(void) {
+bool cow_profile_enabled(void) {
 #ifdef LAMBDA_NO_FILE_IO
     return false;
 #else
@@ -11640,7 +11663,7 @@ typedef struct LambdaExecCallRow {
 
 // Compilation registers names once; diagnostic MIR increments only its fixed
 // row. No lookup, lock, or counter instruction exists in ordinary MIR
-// (D5.4.4). A saturated table has an explicit overflow row in the report.
+// (D6.4.4). A saturated table has an explicit overflow row in the report.
 static LambdaExecCallRow g_lambda_exec_calls[8192] = {};
 static uint64_t g_lambda_exec_call_overflow = 0;
 static int g_lambda_exec_profile_enabled = -1;
@@ -11834,6 +11857,12 @@ Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item k
     return value;
 }
 
+// the direct-parent case cannot index, allocate or reenter; retain the same
+// sharing policy while exposing that narrower call effect (D5.4.4, D6.3.2).
+Item cow_bind_rmw_root(Item root, Item value) {
+    return cow_bind_rmw_handle(root, value, 0, ItemNull, ItemNull);
+}
+
 static Item cow_shape_child(ShapeEntry* entry, void* data) {
     if (!entry->name) return {.map = map_shape_field_to_map(data, entry)};
     const LaneStorageDesc* storage = shape_entry_storage(entry);
@@ -11930,7 +11959,7 @@ static Item cow_clone_array_one_level(Array* source) {
             cow_mark_shared(array_native_lane_read(source, index));
         }
         copy->cow_state &= ~COW_STATE_SHARED;
-        // identical lanes and children retain the full layout proof (D3.3.3v3).
+        // identical lanes and children retain the full layout proof (D4.3.3).
         copy->rep_cert = source->rep_cert;
         return {.array = copy};
     }
@@ -11985,7 +12014,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
         copy_data = &dst->data;
         copy_cap = &dst->data_cap;
         source_cap = src->data_cap;
-        // D2.6.6: content is the object's own items — same one-level copy with
+        // D3.1.1: content is the object's own items — same one-level copy with
         // child marks the element branch does below. Without it the detached
         // copy would share the source's children, and a write through either
         // alias would be visible in both (S9.1.2).
@@ -12067,7 +12096,7 @@ static Item element_with_replacement_content(Item element, Item children,
         cow_capture_value(attributes.items()[index - 1]);
     }
     // Use the ordinary literal allocator/fill so UI storage and GC roots obey
-    // the same ownership boundary as authored elements (D4.5.2, D3.4.5).
+    // the same ownership boundary as authored elements (D5.5.2, D3.4.5).
     Element* copy = elmt_with_type(contract);
     if (!copy) return runtime_error_item(ERR_OUT_OF_MEMORY,
         "with_content: could not allocate the element", nullptr);
@@ -12179,7 +12208,7 @@ Item cow_prepare_write(Item old) {
     return replacement;
 }
 
-// S9.1.2/D5.3: the compiler proves this snapshot cannot escape its activation.
+// S9.1.2/D6.3: the compiler proves this snapshot cannot escape its activation.
 // Its GC-owned header is precisely rooted; compact int/bool payloads contain
 // no roots and can live in the caller's fixed scratch span. Other shapes keep
 // ordinary COW, including a share mark before the first write.
@@ -12235,7 +12264,7 @@ static MapContractRelation runtime_map_contract_relation_cached(
 
 static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
     // N? must admit the replacement against N's field before publishing it;
-    // checking only the post-state can corrupt a caller-owned lane (D3.2.4v4).
+    // checking only the post-state can corrupt a caller-owned lane (D4.2.5).
     expected = lambda_type_nonnull_map_contract(expected);
     // The open `map` annotation is the plain TYPE_MAP singleton, not a TypeMap:
     // it declares no fields, and reading it as one walked past the struct
@@ -12256,7 +12285,7 @@ static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
 // Resolve a declared map/array path before its write. This is deliberately
 // contract-only: the caller separately proves the current root's physical
 // layout, then validates the selected leaf before the raw COW walk publishes
-// it (D3.2.4v3).
+// it (D4.2.5).
 Type* lambda_map_path_contract_step(Type* current, Item key, bool* open_leaf) {
     *open_leaf = false;
     current = runtime_boundary_unwrap_type(current);
@@ -12271,7 +12300,7 @@ Type* lambda_map_path_contract_step(Type* current, Item key, bool* open_leaf) {
     // an open array constrains the carrier, not its descendants. A valid
     // indexed write below it cannot invalidate the declared outer record;
     // the COW walker still checks the entire path before the leaf store
-    // (D3.2.4v3, S7.1.3v2).
+    // (D4.2.5, S7.1.3v2).
     if (current->type_id == LMD_TYPE_ANY) {
         // an `any` step is open the same way: nothing below it is declared
         *open_leaf = true;
@@ -12349,7 +12378,7 @@ static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_c
         const Item* fixed_keys, Item value, Type* leaf_contract, const char* boundary,
         bool inplace) {
     // Admit only the incoming leaf. All other fields retain the root's
-    // established contract; COW relinks preserve its layouts (D3.2.4v3).
+    // established contract; COW relinks preserve its layouts (D4.2.5).
     if (lambda_value_rep_proves_contract(value, leaf_contract)) {
         return cow_path_set_impl(owner, path, fixed_count, fixed_keys, value, inplace);
     }
@@ -12368,16 +12397,16 @@ static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_c
         rooted_value.get(), inplace);
 }
 
-// D3.4.3v4: runtime-grown plain maps share their types through one transition
+// D3.4.3: runtime-grown plain maps share their types through one transition
 // tree per heap generation of a context. It is a capsule extension rather than
 // an EvalContext slot, so the context layout that separately built modules read
 // is unchanged.
 // Every runtime-grown map shares this one tree, so its budget sits far above an
-// Input's 1,024 map types; past it a map keeps a private type (D3.4.3v4).
+// Input's 1,024 map types; past it a map keeps a private type (D3.4.3).
 static const int RUNTIME_SHAPE_GRAPH_BUDGET = 65536;
 
 static void runtime_shape_tree_destroy(void* capsule) {
-    // D4.2.6: the Input's arena holds every tree node, so it goes as a whole.
+    // D5.2.5: the Input's arena holds every tree node, so it goes as a whole.
     // Destroying the tree's own pool runs the Input's registered cleanup
     // (input_pool_cleanup), which releases the document resources once.
     mem_pool_destroy(((Input*)capsule)->pool);
@@ -12416,7 +12445,7 @@ Input* runtime_shape_tree(void) {
         return NULL;
     }
     tree->shape_graph_budget = RUNTIME_SHAPE_GRAPH_BUDGET;
-    // D3.4.3v5: maps grow from literal, contract, nominal, parsed and private
+    // D3.4.3: maps grow from literal, contract, nominal, parsed and private
     // types too, through edges this tree keeps in its own table
     tree->keeps_external_edges = true;
     return tree;
@@ -12447,7 +12476,7 @@ static Input* shape_tree_for_container(Container* container) {
     return runtime_shape_tree();
 }
 
-// D3.4.3v5: an add follows (or mints) an edge of the runtime or document tree.
+// D3.4.3: an add follows (or mints) an edge of the runtime or document tree.
 // an empty plain map starts at the root; a node of the tree
 // follows its own edges; any other type -- a literal's, a contract's, a
 // nominal type's, a parsed document's or a private type -- is an external
@@ -12482,7 +12511,7 @@ static bool map_extend_via_shape_tree(Item map_item, Item key, Item value) {
     }
     TypeId value_type = get_type_id(value);
     bool is_element = container_type == LMD_TYPE_ELEMENT;
-    // D2.6.6v2: an element shares Map's attribute face (type, data, data_cap)
+    // D3.1.1: an element shares Map's attribute face (type, data, data_cap)
     Map* map = map_item.map;
     if (!map || value_type == LMD_TYPE_ERROR) return false;
     if (!is_element && container_type != LMD_TYPE_ARRAY_NUM && map->map_kind != MAP_KIND_PLAIN &&
@@ -12542,7 +12571,7 @@ static bool map_extend_via_shape_tree(Item map_item, Item key, Item value) {
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     if (map_extend_via_shape_tree(map_item, key, value)) return true;
     // S2.1.4 part 3: a nominal instance is OPEN — it may hold fields its type
-    // does not declare. Element-shaped values are admitted too: since D2.6.6v2
+    // does not declare. Element-shaped values are admitted too: since D3.1.1
     // every container shares Map's attribute face at the same offsets, so the
     // upcast below is valid and only the attribute face is touched (the content
     // items are left alone).
@@ -12618,7 +12647,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
         if (!entry) return false;
         *entry = *old;
         entry->chain_next = NULL;
-        entry->chain_index = 0;  // a private chain holds no tree positions (D3.4.3v3)
+        entry->chain_index = 0;  // a private chain holds no tree positions (D3.4.3)
         if (old->byte_offset >= 0) {
             // adding an open field must not move a verified declared prefix.
             entry->byte_offset = old->byte_offset;
@@ -12661,13 +12690,13 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     new_type->length = old_count + 1;
     new_type->byte_size = new_size;
     // execution-owned shapes are reached through their container, never the
-    // cached compiler type list or its concurrent satellite readers (D8.5.1v7).
+    // cached compiler type list or its concurrent satellite readers (D8.3.5).
     new_type->type_index = -1;
     // the copied chain above carries old_type's entries verbatim, spread slots included
     new_type->has_spread = old_type->has_spread;
     new_type->has_named_shape = old_type->has_named_shape;
     // the extended descriptor retains nominal identity and the unchanged
-    // verified declared prefix (D3.2.4v4, S2.1.4).
+    // verified declared prefix (D4.2.5, S2.1.4).
     new_type->is_trusted_contract = false;
     new_type->nominal = old_type->nominal;
     new_type->is_nominal = old_type->is_nominal;
@@ -12699,7 +12728,7 @@ static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* 
         }
     }
     // A declared field write preserves every other field's established proof;
-    // admit only the replacement, including T[] fields (D3.2.4v3/D3.3.3v3).
+    // admit only the replacement, including T[] fields (D4.2.5/D4.3.3).
     Type* proven_contract = runtime_boundary_unwrap_type(expected);
     ShapeEntry* proven_field = runtime_named_map_field(proven_contract, key);
     if (proven_field && lambda_map_rep_proves_contract(owner,
@@ -12801,7 +12830,7 @@ Item lambda_map_set_checked_inplace(Item owner, Item key, Item value, Type* expe
 // The contract-generic body of the nested checked setters. `contract` is the
 // unwrapped root contract: a record, or an array whose path steps through a
 // record (`bag[0].size = v` on `Box[]`, LR12-13). Every step resolves through
-// lambda_map_path_contract_step, which walks both kinds (D3.2.4v3).
+// lambda_map_path_contract_step, which walks both kinds (D4.2.5).
 static Item runtime_container_path_set_checked(Item owner, Item path, Item value,
         Type* contract, const char* boundary) {
     // Nested annotated writes validate the proposed root, not merely the final
@@ -12809,7 +12838,7 @@ static Item runtime_container_path_set_checked(Item owner, Item path, Item value
     // check cannot mutate the old root or a snapshot that still observes it.
     Type* leaf_contract = runtime_map_path_leaf_contract(contract, path);
     // a certified array root proves its element layouts as a record does its
-    // fields, so either kind takes the leaf-only admission (D3.2.4v4)
+    // fields, so either kind takes the leaf-only admission (D4.2.5)
     if (leaf_contract && lambda_value_rep_proves_contract(owner, contract)) {
         return runtime_map_path_write_proven(owner, path, 0, NULL, value,
             leaf_contract, boundary, false);
@@ -12908,7 +12937,7 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
 // of that resolution only the runtime can confirm. A proven root writes through
 // one rooted walk with no path array and no per-store contract walk; everything
 // else materializes the descriptor and takes the unchanged transactional path
-// (D3.2.4v3). `keys` is a caller span of any length up to LAMBDA_PATH_KEYS_MAX:
+// (D4.2.5). `keys` is a caller span of any length up to LAMBDA_PATH_KEYS_MAX:
 // the cap used to be three keys, and a deeper typed store (`a.l0[i][j][k].f`)
 // then built a heap path array on every write.
 Item lambda_container_path_set_checked_keys(Item owner, Item value, const Item* keys,
@@ -13009,14 +13038,14 @@ ArrayRepCert* lambda_array_rep_cert_resolve(Type* contract) {
 }
 
 static bool runtime_array_cert_proves_primitive_values(const ArrayRepCert* cert) {
-    // a scalar carrier alone cannot prove a literal element value (D3.3.3v3)
+    // a scalar carrier alone cannot prove a literal element value (D4.3.3)
     return cert && (cert->flags & ARRAY_REP_CERT_PRIMITIVE_VALUES);
 }
 
 // A packed primitive lane plus an owned exact-rank shape is an exact decoder
 // for its matching nested array contract. Keep certificate installation in
 // this shared runtime helper so compiler fast paths cannot publish a raw
-// ArrayNum to later borrowed-write boundaries (D3.3.3v3, S9.2.2).
+// ArrayNum to later borrowed-write boundaries (D4.3.3, S9.2.2).
 static bool runtime_array_admit_primitive_contract(Item value, Type* expected,
         Item* converted) {
     if (!lambda_array_contract_is_plain(expected)) return false;
@@ -13294,10 +13323,10 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     }
     // fn_array_set deliberately clears a proof for raw callers. Retain the
     // old exact certificate across this already-admitted write so hot typed
-    // loops do not allocate a replacement proof per element (D3.3.3).
+    // loops do not allocate a replacement proof per element (D4.3.3).
     ArrayRepCert* prior_cert = rooted_candidate.get().array->rep_cert;
     // COW preserves the admitted layout. A bounded scalar store cannot change
-    // its rank, count or lane, so retain that certificate (D3.3.3v3).
+    // its rank, count or lane, so retain that certificate (D4.3.3).
     if (candidate_type == LMD_TYPE_ARRAY_NUM && owner_representation_proven &&
             prior_cert && prior_cert == rooted_owner.get().array->rep_cert &&
             !rooted_candidate.get().array_num->is_ndim &&
@@ -13407,14 +13436,14 @@ static Item lambda_array_path_set_checked_impl(Item owner, Item path, Item value
         // An owned N-D ArrayNum stores nested primitive arrays as one flat
         // leaf lane. Walking through item_at() would allocate row views and
         // then try to relink one into that scalar buffer; write the admitted
-        // leaf at its full coordinate instead (D3.3.3v3, S7.1.3v2, S9.2.2).
+        // leaf at its full coordinate instead (D4.3.3, S7.1.3v2, S9.2.2).
         return lambda_array_set_nd_checked_impl(owner, (int)path_length, indices,
             value, expected, boundary, publish_in_place);
     }
 
     // A path that leaves the array spine for a record field has no
     // index-only walk below; the contract-generic setter resolves each step
-    // and validates the rebuilt root (LR12-13, D3.2.4v3).
+    // and validates the rebuilt root (LR12-13, D4.2.5).
     for (int64_t depth = 0; depth < path_length; depth++) {
         int64_t ignored = 0;
         if (!lambda_item_to_int64_exact(item_at(path, depth), &ignored)) {
@@ -13772,7 +13801,7 @@ Item map_set_cow(Item owner, Item key, Item value) {
     return replacement;
 }
 
-// D3.4.6/D4.4.4: retain canonical mutation and child capture while reusing a
+// D3.4.6/D5.4.4: retain canonical mutation and child capture while reusing a
 // resolved descriptor only when the prepared owner's exact shape still fits.
 Item map_set_cow_resolved(Item owner, NameId key_id, Item value,
         const TypeMap* shape, ShapeEntry* field) {
@@ -13879,7 +13908,7 @@ Item cow_path_index(Item owner, Item key) {
 
 // a place writer detaches the spine under an already prepared root. Builtins
 // mutate its installed leaf; inout calls retain a rooted home and reinstall
-// replacements afterward (D4.4.7). Plain container arguments may retain an
+// replacements afterward (D5.4.6). Plain container arguments may retain an
 // ancestor, so their home leaf is isolated before the callee starts.
 // both dynamic arrays and compiler-rooted key spans use this same walker.
 static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
@@ -13964,7 +13993,7 @@ Item cow_path_borrow_keys(Item owner, const Item* keys, int64_t count) {
 
 // Tune31 Phase III A1: a typed `var record.field` borrow can read its known
 // packed field directly. A changed carrier retains the fixed generic walk, so
-// the layout is still checked at the runtime boundary (D3.3.3v3, D4.4.4v4).
+// the layout is still checked at the runtime boundary (D4.3.3, D5.4.4).
 Item cow_path_borrow_typed_map_field(Item owner, TypeMap* expected_shape,
         ShapeEntry* expected_field, Item fallback_key) {
     if (get_type_id(owner) != LMD_TYPE_MAP || !owner.map ||
@@ -13992,7 +14021,7 @@ Item cow_path_borrow_typed_map_field(Item owner, TypeMap* expected_shape,
     if (rooted_child.get().item == pre_detach.item) return rooted_child.get();
 
     // `cow_prepare_write` may collect. Reload the rooted map and its data
-    // before storing the detached child (D4.4.4v4, D5.3.1-4).
+    // before storing the detached child (D5.4.4, D6.3.1-4).
     Map* live_owner = rooted_owner.get().map;
     if (!live_owner || live_owner->type != expected_shape || !live_owner->data ||
             !shape_entry_storage_fits_data(expected_field, live_owner->data_cap)) {
@@ -14211,7 +14240,7 @@ static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_
         ShapeEntry* changed_entry, Item new_value, int fixed_slot_count, ShapeEntry* removed_entry = NULL,
         const TypeMapRetypePlan* plan = NULL) {
     // a heap-owned payload can stay in place when every surviving field keeps its lane.
-    // validate the entire layout before the no-GC value/type commit (D3.4.5, D5.3).
+    // validate the entire layout before the no-GC value/type commit (D3.4.5, D6.3).
     if (container->is_heap && *data_slot && !fixed_slot_count &&
             new_type->byte_size <= *cap_slot) {
         ShapeEntry* replacement = plan ? plan->replacement : NULL;
@@ -14399,7 +14428,7 @@ static bool map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
 
     TypeMap* new_type = NULL;
     // rebuilt shapes belong to this execution pool, not the retained module's
-    // compiler registry; the container owns their direct reference (D8.5.1v7).
+    // compiler registry; the container owns their direct reference (D8.3.5).
 
     if (container_type_id == LMD_TYPE_ELEMENT) {
         TypeElmt* old_et = (TypeElmt*)old_map_type;
@@ -14507,7 +14536,7 @@ static inline bool map_shape_set_impl(Map* map, String* key, Item value, ShapeEn
     if (field->byte_offset >= 0 && field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
     if (preserve_storage && field->byte_offset >= 0) {
-        // JS Number writes and generic slots need no physical shape change (D3.4.3v5).
+        // JS Number writes and generic slots need no physical shape change (D3.4.3).
         void* destination = (char*)map->data + field->byte_offset;
         const LaneStorageDesc* storage = shape_entry_storage(field);
         if (storage->kind == LANE_STORAGE_TYPED_ITEM && storage->value_domain == LMD_TYPE_ANY)
@@ -14627,7 +14656,7 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
     return NULL;
 }
 
-// D3.2.4v4: admission into a named map contract reifies into the contract's
+// D4.2.5: admission into a named map contract reifies into the contract's
 // declared layout. Field admission converts each value where it lies, so a map
 // whose fields sit in another order (`{b: "s", a: 1}` for `{a: int, b: string}`)
 // kept its own offsets, and publishing the contract over them misaddressed every
@@ -14822,7 +14851,7 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
     Map* admitted = rooted_candidate.get().map;
     // The loop converts each field where it lies; fields written in another
     // order still sit at other offsets, so the contract's layout is reached
-    // only by moving them (D3.2.4v4).
+    // only by moving them (D4.2.5).
     TypeMap* reified = (TypeMap*)admitted->type;
     MapContractRelation final_relation = lambda_map_contract_relation(reified, expected_map);
     // the buffer's real size: a zero cap means the current type's byte size
@@ -14838,7 +14867,7 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
         // the canonical contract descriptor so later exact admissions remain
         // O(1) instead of validating this freshly converted root again. A root
         // that ends storage-compatible with no open extras adopts it too
-        // (D3.2.4v4): kept on its private copy, every typed write missed the
+        // (D4.2.5): kept on its private copy, every typed write missed the
         // direct store's shape guard and took the checked setter (LR07-44).
         admitted->data_cap = (int)data_size;
         admitted->type = expected_map;
@@ -14918,7 +14947,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
         // A range is array-like at the language boundary but has no mutable
         // element storage. Materialize it through the same recursive element
         // admission used for an open Array, then let the normal lane rebuild
-        // establish the target representation/certificate (D3.1.1v2).
+        // establish the target representation/certificate (D4.1.1).
         Range* range = value.range;
         if (!range || range->length < 0) return false;
         RootFrame roots(3);
@@ -14959,7 +14988,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
         // `items` buffer would flatten its rows during a later open write.
         // Re-enter through the normal Array path so the boxed result receives
         // the same in-place boundary certificate a `var any[]` callee needs
-        // to make checked writes through its caller-owned header (D3.3.3v3,
+        // to make checked writes through its caller-owned header (D4.3.3,
         // S9.2.2).
         RootFrame roots(1);
         Rooted<Item> rooted_value(roots, value);
@@ -15000,7 +15029,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
     LaneStorageDesc target_lane = {};
     // A lane is a carrier proof. A literal element contract selects one value
     // out of that carrier, so it keeps the per-element admission below rather
-    // than certifying the source in place (D3.3.3v3, D8.3.2).
+    // than certifying the source in place (D4.3.3, D7.3.2).
     bool target_has_native_lane = lambda_type_layout_proves_contract(element_type) &&
         lambda_type_array_lane_storage_desc(element_type, &target_lane) &&
         array_native_lane_supported(&target_lane);
@@ -15013,7 +15042,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
         // A matching producer-maintained lane is the same physical proof as
         // an ArrayNum element tag. The explicit crossing installs the full
         // contract certificate without cloning and rescanning every element
-        // (D3.3.3v3, D3.3.4).
+        // (D4.3.3, D2.4.3).
         lambda_array_install_rep_cert(value, cert);
         *converted = value;
         return true;
@@ -15025,7 +15054,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
         // same carrier so later reads do not copy and revalidate its graph.
         // Element conversions still take the transactional copy path below;
         // pointer lanes and compact ArrayNum lanes both need their physical
-        // rebuild, including empty numeric arrays (D3.3.3v3, S9.2.2).
+        // rebuild, including empty numeric arrays (D4.3.3, S9.2.2).
         RootFrame roots(2);
         Rooted<Item> rooted_value(roots, value);
         Rooted<Item> rooted_element(roots, ItemNull);
@@ -15048,7 +15077,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
             // under T, so the whole-array validator walk only repeats that
             // proof -- deeply, through every nested element graph. prettier_ast
             // rebuilt uncertified `Doc[]` accumulators per step and paid the
-            // walk each time (T27-1, D3.2.2 "on first crossing").
+            // walk each time (T27-1, D4.2.3 "on first crossing").
             if (!lambda_array_contract_is_plain(expected) &&
                     !lambda_type_matches(rooted_value.get(), expected)) {
                 return false;
@@ -15095,7 +15124,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
     }
 
     // The candidate only has to leave the source untouched while its elements
-    // are admitted and replaced, which a one-level COW copy does (D4.4.2): its
+    // are admitted and replaced, which a one-level COW copy does (D5.4.2): its
     // children are shared and marked, never rewritten here. fn_mutable_value
     // deep-cloned the whole element graph instead -- every admission of an
     // uncertified `Doc[]` copied the entire document subtree (prettier_ast2).
@@ -15186,7 +15215,7 @@ static MapContractRelation runtime_map_contract_relation_cached(
         const TypeMap* candidate, const TypeMap* expected) {
     if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
     // An exact trusted shape is already the answer; hashing it only repeats
-    // the proof every time a typed node crosses a boundary (D3.2.4v3).
+    // the proof every time a typed node crosses a boundary (D4.2.5).
     if (expected->is_trusted_contract &&
             (candidate == expected || candidate->verified_contract == expected))
         return MAP_CONTRACT_EXACT_TRUSTED;
@@ -15196,7 +15225,7 @@ static MapContractRelation runtime_map_contract_relation_cached(
     // Map admission is a hot nested-store operation. A full table scan made a
     // larger cache slower than a miss: a compact bounded probe keeps repeated
     // typed record paths O(1) while a round-robin fallback preserves progress
-    // under adversarial shape churn (D3.2.4v3).
+    // under adversarial shape churn (D4.2.5).
     uint32_t base = runtime_map_contract_cache_base(candidate, expected);
     for (uint32_t probe = 0; probe < 8; probe++) {
         LambdaMapContractCacheEntry* entry = &heap->map_contract_cache[
@@ -15232,7 +15261,7 @@ static MapContractRelation runtime_map_contract_relation_cached(
 // layout of one trusted arm, that shape is the admission proof; recursively
 // walking its fields would only re-establish an invariant maintained by every
 // map write.  Arms that need reification or contain an incompatible field stay
-// on the full validator path (D3.2.4v3, D8.3.2-D8.3.3).
+// on the full validator path (D4.2.5, D7.3.2-D7.3.3).
 static bool runtime_union_map_has_exact_rep(TypeMap* candidate, Type* expected,
         int depth = 0) {
     expected = runtime_boundary_unwrap_type(expected);
@@ -15365,7 +15394,7 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
             }
         }
         // Maintained shapes/certificates include contract and carrier facts;
-        // raw writes invalidate them before publishing (D3.3.4).
+        // raw writes invalidate them before publishing (D2.4.3).
         *converted = value;
         return true;
     }
@@ -15382,7 +15411,7 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
     LambdaNumericKind source_kind = lambda_numeric_kind_from_item(value);
     // S11.1.6v2: `T?` is `T | null`, so a nullable numeric contract admits a
     // non-null number exactly as its base does -- the base's boundary picks the
-    // representation, as the JIT's nullable F64 lane does (S11.4.5, D3.2.6).
+    // representation, as the JIT's nullable F64 lane does (S11.4.5, D4.2.6).
     // Membership alone kept `5` an int in a `float?` binding on T0 while the
     // JIT stored 5.0. This covers the two native nullable lanes, `int?` and
     // `float?`, whose MIR carriers re-represent; the sized and wide optionals
@@ -15435,7 +15464,7 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
     // shortcut below -- structurally admitted, never reified. A self-referential
     // record is necessarily optional (its recursion terminates on null), so the
     // whole graph kept the literal's packed layout while direct field reads
-    // addressed it with the contract's byte offsets (D3.2.4).
+    // addressed it with the contract's byte offsets (D4.2.5).
     Type* expected_map_contract = runtime_boundary_nonnull_map_arm(expected);
     if (get_type_id(value) == LMD_TYPE_MAP && expected_map_contract) {
         if (cow_profile_enabled()) g_cow_profile.map_admit_calls++;
@@ -15549,7 +15578,7 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     NameId operation_name_id = key_ref ? property_key_id(key_ref) : NAME_ID_NONE;
     bool js_active = js_realm_runtime_has_input();
     // a Lambda context may have a JS capsule before its Input exists; use
-    // the Lambda pool until that realm can own transitions (D5.4.1).
+    // the Lambda pool until that realm can own transitions (D6.4.1).
     TypeMap* transition = js_active ? js_typemap_transition_for_type(map_item, entry,
         operation_name_id, value_type) : NULL;
     if (transition) {
@@ -15688,7 +15717,7 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
     // A1: the hash table answers a plain Lambda string key, so a member write
     // no longer walks every field; building an n-key map was O(n²) on these
     // lookups alone (LR03-38). A hit is the field. A miss is final only on a
-    // tree node, whose table holds every field by construction (D3.4.3v4); a
+    // tree node, whose table holds every field by construction (D3.4.3); a
     // private type can gain entries its table never saw (elmt_put), so it
     // keeps the walk, as JS shapes and identity keys do.
     bool table_answers = !identity_key && !map_type->js_meta &&
@@ -15767,7 +15796,7 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
                 !map_type->is_shared_constructor_shape && !map_type->slot_entries &&
                 map_type->slot_count == 0 && !map_item.container->has_ctor_reserved &&
                 (map_type_id != LMD_TYPE_MAP || map_item.map->map_kind == MAP_KIND_PLAIN);
-            // D3.4.3v5/D3.4.5: Lambda shared shapes use the context's tree,
+            // D3.4.3/D3.4.5: Lambda shared shapes use the context's tree,
             // never the JS constructor path, which requires an active JS realm.
             if (plain_shape && field_type != LMD_TYPE_ANY &&
                     map_shared_ctor_shape_should_detach_for_type(map_type, field_type, value_type)) {
@@ -15785,7 +15814,7 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
             field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 
-            // D3.2.4v4: an `any` field is a TypedItem lane that every value
+            // D4.2.5: an `any` field is a TypedItem lane that every value
             // fits, so a write of another kind stores in place and the field
             // keeps its declared contract. Comparing the wrapper's TypeId with
             // the value's rebuilt the shape around the value's kind on every

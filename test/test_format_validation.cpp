@@ -35,7 +35,7 @@ protected:
     }
 
     void TearDown() override {
-        // the pool releases the Input it holds (D4.2.6)
+        // the pool releases the Input it holds (D5.2.5)
         if (validator) {
             schema_validator_destroy(validator);
         }

@@ -1,0 +1,20 @@
+{
+  "name": "Chat attachment dialog shares desktop keyboard focus",
+  "html": "test/demo/chat/chat.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"#chat"},"attribute":"data-online","equals":"true","assert_timeout":15000},
+    {"type":"click","target":{"selector":"#attach-file"}},
+    {"type":"assert_count","target":{"selector":"#attachment-dialog"},"count":1},
+    {"type":"click","target":{"selector":"#attachment-path"}},
+    {"type":"key_press","key":"Tab"},
+    {"type":"assert_focus","target":{"selector":"button[data-action=dialog-cancel]"}},
+    {"type":"key_press","key":"Tab"},
+    {"type":"assert_focus","target":{"selector":"#attachment-confirm"}},
+    {"type":"key_press","key":"Tab","mods_str":"shift"},
+    {"type":"assert_focus","target":{"selector":"button[data-action=dialog-cancel]"}},
+    {"type":"key_press","key":"Escape"},
+    {"type":"assert_count","target":{"selector":"#attachment-dialog"},"count":0},
+    {"type":"assert_focus","target":{"selector":"#draft"}}
+  ]
+}

@@ -1,4 +1,4 @@
-// Package-owned structural editing policy (D7.2.5).  Native code receives
+// Package-owned structural editing policy (D10.2.1).  Native code receives
 // only explicit containers/tags and performs generic Range and node mechanics.
 import dom
 import history: lambda.dom.edit_history
@@ -46,7 +46,7 @@ fn selection_offset(node, codepoint_offset) any^ {
 
 // Moving a selected node through ordinary DOM removal maps a live Range to its
 // old parent. Restore the package's captured endpoints after structural moves
-// so the next command still addresses the original content (D7.2.5).
+// so the next command still addresses the original content (D10.2.1).
 pub pn restore_selection(host, edit_context) {
     let selection = dom.document_selection(dom.owner_document(host));
     let start_node = edit_context.start_container;

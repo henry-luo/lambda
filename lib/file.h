@@ -144,8 +144,8 @@ bool file_anchor_read_all_named(FileAnchor* anchor, const char* relative, uint64
     MemCategory category, char** out_data, size_t* out_size, FileRevision* out_revision,
     char** out_path);
 // NULL expected means create-only; otherwise require the admitted revision.
-// Checks destination and staged-inode bindings before publication; not CAS
-// against external writers.
+// Rechecks parent, destination and staging bindings after host callbacks;
+// revision checks are not CAS against concurrent external writers.
 // 0 = durable, -1 = not committed, 1 = committed but directory sync failed.
 int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
     const void* content, size_t size, const FileRevision* expected);

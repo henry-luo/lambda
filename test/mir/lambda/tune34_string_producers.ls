@@ -1,4 +1,4 @@
-// D3.3.1/D8.3.3: concat width does not exhaust forwarding depth or erase misses.
+// D4.3.1/D7.3.3: concat width does not exhaust forwarding depth or erase misses.
 pn assemble(a, b, c, d, e, f, g, h) {
     return "[" ++ a ++ ":" ++ b ++ ":" ++ c ++ ":" ++ d ++ ":" ++
         e ++ ":" ++ f ++ ":" ++ g ++ ":" ++ h ++ "]"

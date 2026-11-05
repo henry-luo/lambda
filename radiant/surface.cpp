@@ -17,6 +17,7 @@
 #include "../lib/endian.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
 #include "../lambda/network/network_resource_manager.h"
+#include "network_integration.h"
 #include "../lambda/dom/dom_platform.h"
 
 #include <stdlib.h>
@@ -287,7 +288,7 @@ bool document_dependency_admits(const DomDocument* document, const char* source)
 }
 
 static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap>* cache,
-        UiContext* animation_ui, const char* img_url) {
+        UiContext* animation_ui, const char* img_url, bool live_request) {
     if (!document || !cache || !img_url) return nullptr;
     if (strncmp(img_url, "blob:", 5) == 0) {
         img_url = dom_blob_url_data_uri(document, img_url);
@@ -441,11 +442,20 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
     size_t downloaded_size = 0;
 
     if (is_http) {
+        const char* url_str = url_get_href(abs_url);
+        ImageEntry search_key = {.path = (char*)url_str, .image = NULL};
+        ImageEntry* entry = ImageMap::get(*cache, search_key);
+        if (entry) {
+            log_debug(entry->unavailable ? "Image unavailable from cache: %s"
+                                         : "Image loaded from cache: %s", url_str);
+            url_destroy(abs_url);
+            return entry->image;
+        }
+        if (live_request) radiant_request_live_image(document, animation_ui, url_str);
         // Network-managed documents cannot let layout/render perform blocking
         // HTTP fetches. Loader-stage CSS prefetches may already have completed;
         // consume those bytes without admitting a new synchronous transfer.
         if (document->resource_manager) {
-            const char* url_str = url_get_href(abs_url);
             downloaded_data.reset((unsigned char*)resource_manager_copy_ready_resource_content(
                 document->resource_manager, url_str, &downloaded_size));
             if (!downloaded_data || downloaded_size == 0) {
@@ -461,19 +471,10 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
             log_debug("[image] Consumed ready network image bytes: %s", url_str);
         } else {
             // Download the image from HTTP URL
-            const char* url_str = url_get_href(abs_url);
             file_path.reset(mem_strdup(url_str, MEM_CAT_RENDER));
             if (!file_path) {
                 url_destroy(abs_url);
                 return NULL;
-            }
-            ImageEntry search_key = {.path = file_path.get(), .image = NULL};
-            ImageEntry* entry = ImageMap::get(*cache, search_key);
-            if (entry) {
-                log_debug(entry->unavailable ? "Image unavailable from cache: %s"
-                                             : "Image loaded from cache: %s", file_path.get());
-                url_destroy(abs_url);
-                return entry->image;
             }
             log_debug("[image] Downloading image from URL: %s", url_str);
             downloaded_data.reset((unsigned char*)download_http_content(url_str, &downloaded_size, nullptr));
@@ -663,15 +664,16 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
 }
 
 ImageSurface* load_image(UiContext* uicon, const char* source) {
-    return uicon ? load_image_resource(uicon->document, &uicon->image_cache, uicon, source) : nullptr;
+    return uicon ? load_image_resource(uicon->document, &uicon->image_cache, uicon, source, true) : nullptr;
 }
 
 ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source) {
     if (!uicon || !document_dependency_admits(document, source)) return nullptr;
     // embedded and secondary layouts load against their document, even when the host shows another
+    bool live_request = uicon->document == document;
     DomDocument* previous = uicon->document;
     uicon->document = lam::up(document);
-    ImageSurface* image = load_image_resource(document, &uicon->image_cache, uicon, source);
+    ImageSurface* image = load_image_resource(document, &uicon->image_cache, uicon, source, live_request);
     uicon->document = lam::up(previous);
     return image;
 }
@@ -680,7 +682,7 @@ ImageSurface* load_document_image_resource(DomDocument* document, lam::Own<hashm
         const char* source) {
     // a selected generation owns its cache; admission precedes even a warm lookup.
     return document_dependency_admits(document, source)
-        ? load_image_resource(document, cache, nullptr, source) : nullptr;
+        ? load_image_resource(document, cache, nullptr, source, false) : nullptr;
 }
 
 bool image_entry_free(const void *item, void *udata) {

@@ -2,8 +2,8 @@
 // (vibe/radiant/Radiant_Design_Source_Editor.md CED16v2): the runs of every
 // line from a window parse equal the full parse's, with or without the
 // restart cache, and after an edit that opens a fence far above the window.
-import buf: lambda.edit.source_buffer
-import syn: lambda.edit.source_highlight
+import buf: lambda.editor.surface.source_buffer
+import syn: lambda.editor.surface.source_highlight
 
 // Constructs that cross blank lines (fences, HTML comments), front matter,
 // setext headings, tables and lists with indented continuation.

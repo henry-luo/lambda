@@ -43,7 +43,7 @@ fn successor(candidates, current, i, best, forward) any^ {
     }
 }
 
-fn next_candidate(candidates, forward) any^ {
+pub fn next_candidate(candidates, forward) any^ {
     let current = focused_candidate(candidates, 0);
     let after = if (current == null) null else successor(candidates, current, 0, null, forward);
     if (after != null) { after } else { extremum(candidates, 0, null, forward) }

@@ -1,11 +1,11 @@
-// layout commands edit source tables in one history entry (S12.1.3, D7.2.5).
+// layout commands edit source tables in one history entry (S12.1.3, D10.2.1).
 import dom
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import format: lambda.editor.mod_inline_format
-import controller: lambda.edit.controller
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import format: lambda.editor.core.inline_format
+import controller: lambda.editor.controller
 import tables: .mod_table
 import grid: .mod_table_grid
 import page: .mod_page

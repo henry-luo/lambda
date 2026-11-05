@@ -614,7 +614,7 @@ void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line)
         !tls_tracking_enabled) {
         // untracked calloc must be the raw C version: calloc's zeroed pages
         // arrive from the OS untouched, while malloc+memset dirties every
-        // page of a large allocation up front (D4.2.5). Only the tracked
+        // page of a large allocation up front (D5.2.4). Only the tracked
         // path below needs malloc+memset, because it prepends a header.
         if (memtrack_fault_should_fail()) {
             return NULL;

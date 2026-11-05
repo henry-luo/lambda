@@ -1,4 +1,4 @@
-// D8.4.3: a source throw already owns an ERROR Item, so catch routing must
+// D7.4.3: a source throw already owns an ERROR Item, so catch routing must
 // jump directly without materializing a redundant tag test.
 function directCaught() {
     try {

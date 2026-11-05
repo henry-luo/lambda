@@ -1,6 +1,6 @@
 // S13.3.1v2: a document-owned task parks on the converter process so import cannot block window events.
 import importer: ~~.mod_import
-import paths: ~~.finder.mod_model
+import paths: lambda.io.path
 
 pub fn document_argument(args,base=sys.proc.self.cwd#,home=sys.home#) any^ {
     let options = [for (i,arg in args where ((arg=="--doc" or starts_with(arg,"--doc=")) ^ { false })) i];

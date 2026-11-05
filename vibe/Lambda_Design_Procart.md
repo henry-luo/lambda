@@ -2,7 +2,7 @@
 
 > **Status:** Meadow, P7's drawing grammar/Form studies, P8's plant architecture/Tree studio, P9's reusable surface bindings and P10's environment-aware meadow are implemented (2026-10-28). P9 adds a fifth Form studies sample with stone, bark and leaf patterns. Editor tooling remains later work.
 > **Scope:** separately stored recipes and semantic objects compose a seeded landscape; the shared algorithm package is `lambda.procart` (renamed by the user on 2026-10-28).
-> **Spec linkage:** S2.6.1v2 (element content), S12.1.1v3 (pure generation), S12.1.5v2 (presentation ownership), S1.6 (execution representation is invisible), S11.4.6 (validator limits), D7.2.4v4 (package paths).
+> **Spec linkage:** S2.6.1v2 (element content), S12.1.1v3 (pure generation), S12.1.5v2 (presentation ownership), S1.6 (execution representation is invisible), S11.4.6 (validator limits), D9.3.4 (package paths).
 > **Ledger:** PG11 documents Meadow; PG12 covers drawing grammar and rule names; PG13 covers plants; PG14 covers reusable surfaces; PG15 covers environment and flowering species in the [procedural-art package](Lambda_Pkg_Proc_Art.md). No formal-spec ruling changes. [Prior art](Lambda_Pkg_Proc_Art.md#appendix-c-prior-art--procedural-scenes-and-art) is collected with the package design. Qualification: [Meadow](impl/Lambda_Impl_Procart_Meadow.md), [P7](impl/Lambda_Impl_Procart_Grammar.md), [P8](impl/Lambda_Impl_Procart_Plants.md), [P9](impl/Lambda_Impl_Procart_Surfaces.md), [P10](impl/Lambda_Impl_Procart_Environment.md).
 
 ## 1. Semantic scene vocabulary (PG11.1)
@@ -165,7 +165,7 @@ archival baked-model format is included in this milestone.
 The first implementation is a Procart application profile. Its resolver and
 model functions operate on values; the page owns input loading and viewer state
 (**S12.1.1v3**). Shared numeric algorithms remain in `lambda.procart` and native
-scene construction remains in `lambda.scene3d`, preserving **PG4 / D7.2.4v4**.
+scene construction remains in `lambda.scene3d`, preserving **PG4 / D9.3.4**.
 
 A future general document package should extract the demonstrated common shape,
 with caller-supplied registered generators. It should not depend on demo modules
@@ -533,14 +533,14 @@ The demo registry in `mod_grammar.ls` calls the existing Meadow specimen helpers
 so the package never imports a demo. Existing catalog consumers retain those
 generators. Scene3D sphere buffers, transforms and geometry validation are
 shared; the existing specimen viewer now uses the package mesh batcher
-(**PG9 / D7.2.4v4**). Color parsing/HSV helpers were extracted once to
+(**PG9 / D9.3.4**). Color parsing/HSV helpers were extracted once to
 `lambda.color` and reused by slides, UI tokens and procedural adjustments.
 
 Expansion emits geometry references, composed matrices, final colors/opacity
 and source identities. The adapter batches compatible instances into ordinary
 Scene3D `resources`, `geometry`, `material`, `group` and `mesh` elements. Camera,
 lighting and viewport settings remain a separate presentation input
-(**S12.1.5v2 / D7.5.3v2**). New Procart tags do not become native renderer tags.
+(**S12.1.5v2 / D9.5.6**). New Procart tags do not become native renderer tags.
 
 `scene.compact(model, resource_prefix)` bakes local organ transforms once into
 indexed triangle buffers, grouping by color/opacity, kind, role and surface.
@@ -553,7 +553,7 @@ vertex layouts or mixed UV presence reject instead of dropping attributes.
 Non-geometry resources retain their identities. Repeated composites can share
 these buffers and pass root matrices through the existing `scene.meshes` batcher,
 which retains its 16,384-instance admission split. Camera-dependent LOD selection
-and ecosystem population policy remain with the caller (**D7.2.4v4**).
+and ecosystem population policy remain with the caller (**D9.3.4**).
 
 `scene.instance_meshes(model, placements, options={})` lowers a compact prototype
 and `{id,matrix}` root placements directly, avoiding an expanded part map per organ
@@ -578,7 +578,7 @@ derivation and units remain public oracles (`derive_reference`, `units_reference
 JSON-valued paths and larger batches use the reference. Chart geometry similarly
 retains `distances_reference` alongside `distances`/`math.polygon_distances`.
 The runtime wrappers accept ordinary/packed arrays, root live inputs and outputs
-precisely (**D5.3.3**) and return owned typed numeric arrays (**D6.4.1–D6.4.2**).
+precisely (**D6.3.3**) and return owned typed numeric arrays (**D7.6.1–D7.6.2**).
 
 Free-angle rotations, sphere/cylinder tessellation and tube frames use
 trigonometric arithmetic. Their generated geometry joins PG2's tolerance tier
@@ -798,7 +798,7 @@ The user requested reusable patterns for stone, leaves and tree trunks on
 2026-10-28. A pattern describes appearance independently of geometry. Surface
 bindings select that pattern and its coordinate domain. They remain literal
 data, with pure expansion (**S12.1.1v3**), runtime admission (**S11.4.6**) and
-the existing Scene3D presentation boundary (**S12.1.5v2 / D7.5.3v2**).
+the existing Scene3D presentation boundary (**S12.1.5v2 / D9.5.6**).
 This is an additive extension of `<procart version:2>`; no language ruling changes.
 
 ```lambda
@@ -922,7 +922,7 @@ The Scene3D adapter batches by geometry, tint, opacity, kind, role **and surface
 Bound parts use standard materials; unbound parts keep Lambert materials.
 Textures are self-contained PNG data URIs produced by the existing image package.
 Native Scene3D continues to own lighting, cameras, texture upload and rendering.
-No renderer or vendor changes are required (**D7.2.4v4 / D7.5.3v2**).
+No renderer or vendor changes are required (**D9.3.4 / D9.5.6**).
 
 ### 11.5 Milestone and follow-up (PG14.5)
 
@@ -944,7 +944,7 @@ a P7 scene to store pattern resources and their bindings together.
 
 The user requested global environmental settings, responsive plants, a larger
 meadow and a pond on 2026-10-28. These package contracts extend PG11–PG14;
-**S12.1.1v3** still requires pure generation, and **S12.1.5v2 / D7.5.3v2** keep
+**S12.1.1v3** still requires pure generation, and **S12.1.5v2 / D9.5.6** keep
 live presentation and camera state with their explicit owners. No language
 semantics change.
 
@@ -1089,7 +1089,7 @@ pixels and cross-tier admission/pose fixtures qualify the core milestone; see
 User direction, 2026-10-28: editable plant/animal model builders in Eden, with
 the Scene3D butterfly demonstration as reference and authored frog skin / bird
 feather patterns. This profile follows **S12.1.1v3**, **S11.4.6** and
-**D7.2.4v4**; biological state and native playback remain outside pure generation.
+**D9.3.4**; biological state and native playback remain outside pure generation.
 
 ### PG16.1 — Stand-alone morphology
 
@@ -1164,7 +1164,7 @@ Terrain placement, every-wiki-taxon models and autonomous behavior are separate.
 plush, robot, human, fairy and genie forms. Eden owns named characters, its
 studio, saved casts and landscape placement. Generation is pure under
 **S12.1.1v3**; the ordinary Scene3D description owns presentation under
-**S12.1.5v2**, and the package path follows **D7.2.4v4**. These are domain APIs,
+**S12.1.5v2**, and the package path follows **D9.3.4**. These are domain APIs,
 not changes to Lambda semantics or P7's drawing grammar.
 
 **PG17.2 — Recipe.** A standalone `<avatar>` has `version:1`,

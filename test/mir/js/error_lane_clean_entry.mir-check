@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3v2: a clean formal entry has no error-tag observation before catch materialization; catch conversion has its own fallible boundary.",
+  "description": "D7.4.3: a clean formal entry has no error-tag observation before catch materialization; catch conversion has its own fallible boundary.",
   "checks": [
     {
       "in_func": "mvp_lmd_f1",

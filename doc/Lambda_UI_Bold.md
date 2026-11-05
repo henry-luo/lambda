@@ -4,7 +4,7 @@
 documents. Its appearance takes inspiration from
 [Neobrutalism](https://neobrutalism.com/): flat yellow and lavender accents,
 strong ink borders, hard offset shadows, bold typography and pressed buttons.
-The source entry point is `lmd/package/ui/bold.ls` (**D7.2.4**).
+The source entry point is `lmd/package/ui/bold.ls` (**D9.3.4**).
 
 ## Getting started
 
@@ -90,7 +90,7 @@ Page options are `title`, `locale`, `direction` (`ltr` or `rtl`) and `tokens`.
 Config Provider accepts `tokens`, `direction` and `disabled`; it renders a native
 fieldset. Nested providers emit supplied token overrides only, so other values
 inherit from the enclosing scope. Disabled fieldsets retain native legend
-exemptions (**D7.2.5**).
+exemptions (**D10.2.1**).
 
 ```lambda
 import ui: lambda.ui.bold
@@ -114,7 +114,7 @@ namespace. `ui.stylesheet()` returns the family CSS for custom document shells.
 
 Rendering is pure. Procedures handle effects (**S12.1.1v2–S12.1.3**), while the
 shipped DOM package owns native editing, validation, radio exclusivity and
-activation (**D7.2.5**). Native control behavior is shared with `dtna`.
+activation (**D10.2.1**). Native control behavior is shared with `dtna`.
 
 - Buttons emit `ui_action` with `{component:"button",id,action:'click',value:null}`.
 - Fields emit `ui_change` with `input`, `check` or `select` actions. Select and
@@ -139,7 +139,7 @@ reference site are not implemented.
 The four golden fixtures in `test/lambda/ui_bold/` cover tokens, constructors,
 diagnostics, direct elements, nesting and coexistence with `dtna`.
 `make test-ui-bold` runs them and the native fixtures on each execution tier
-(**D8.1.1v17**). The native control fixture currently exposes an existing
+(**D8.3.6**). The native control fixture currently exposes an existing
 [select-retention defect](../vibe/Lambda_Issue_Ledger.md#ui-2): an uncontrolled
 selection reverts when its parent presents again. The gallery also exposes
 [stale native overflow clipping](../vibe/Lambda_Issue_Ledger.md#ui-3) after flex

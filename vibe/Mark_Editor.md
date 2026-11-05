@@ -1,6 +1,6 @@
 # Lambda MarkEditor - Structural CRUD Support
 
-**Content contract (2026-10-02):** S2.6.5 and D2.6.5v4 apply to every
+**Content contract (2026-10-02):** S2.6.5 and D3.3.1 apply to every
 `elmt_*` child write in both edit modes. Insert, replacement, batch insertion
 and deletion rebuild through the owner-aware content append, so removing a
 separator merges its neighbouring strings. `array_insert`/`array_append` on

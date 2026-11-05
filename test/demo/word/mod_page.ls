@@ -1,7 +1,7 @@
-// Page settings belong to the document, so undo, snapshots, and PDF share them (D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_transaction
+// Page settings belong to the document, so undo, snapshots, and PDF share them (D10.2.1).
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.transaction
 
 pub let papers = [{id:"A4",width:210,height:297},{id:"Letter",width:215.9,height:279.4},{id:"A5",width:148,height:210}]
 pub let defaults = {paper:"A4",orientation:"portrait",top:17,right:19,bottom:19,left:19}

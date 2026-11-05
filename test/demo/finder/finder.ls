@@ -1,12 +1,13 @@
-// S12.1.3 / D4.5.1v4: keep the native shell and controls; update retained regions in handlers.
+// S12.1.3 / D5.5.1: keep the native shell and controls; update retained regions in handlers.
 import dom
+import workspace_shell: lambda.ui.workspace.shell
 import resources: ~~.mod_resources
 import model: .mod_model
 import files: .mod_io
 import ui: .mod_ui
 import thumbs: .mod_thumbnails
-import updates: ~~.mod_publish
-import splitter: ~~.mod_splitter
+import updates: lambda.ui.core.publish
+import splitter: lambda.ui.core.splitter
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CWD = sys.proc.self.cwd#
@@ -564,7 +565,7 @@ on keydown(evt) {
     return 'pass'
 }
 <html lang:"en",<head <meta charset:"UTF-8"><meta name:"viewport",content:"width=device-width, initial-scale=1">
-    <title "Finder — Lambda"><link rel:"stylesheet",href:url_resolve(BASE,"finder.css")>>
-    <body apply(<finder_session rendered:ui.tree(INITIAL,PLACES)>);
+    <title "Finder — Lambda"><style workspace_shell.css><link rel:"stylesheet",href:url_resolve(BASE,"finder.css")>>
+    <body class:"workspace-shell",style:workspace_shell.variables({primary:"#388de0",text:"#303741",background:"#f6f7f9"})^,apply(<finder_session rendered:ui.tree(INITIAL,PLACES)>);
         <script src:url_resolve(BASE,"finder.js")>>
 >

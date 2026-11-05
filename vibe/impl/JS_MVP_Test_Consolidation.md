@@ -1,7 +1,7 @@
 # MVP runtime test consolidation
 
 **Date:** 2026-10-19  
-**Authority:** **S1.11**, **D5.2–D5.3**, **D8.1.3v26**. No semantic or design ruling changes.  
+**Authority:** **S1.11**, **D6.2–D6.3**, **D8.4.3**. No semantic or design ruling changes.  
 **Scope:** overlapping feature smoke tests in `test/test_js_mvp_lmd_gtest.cpp`.
 
 The checkout contained **825** registered tests at the start, rather than the
@@ -25,9 +25,9 @@ MVP/MIR tests as the replacement evidence and changes no backend selection,
 Test262 runner, baseline, timeout or exclusion.
 
 The native suite continues to protect Lambda scalar homes and precise rooting
-(**D5.2–D5.3**), published ABI, public-entry lifetime, realm and module identity,
+(**D6.2–D6.3**), published ABI, public-entry lifetime, realm and module identity,
 host integration, MIR emission and dynamic-source execution profiles
-(**D8.1.3v26**). JavaScript's guest semantics remain distinct under **S1.11**.
+(**D8.4.3**). JavaScript's guest semantics remain distinct under **S1.11**.
 Similar sources executed through a public entry, a compiled function, hosted
 eval or a suspended interpreter activation are not assumed interchangeable.
 

@@ -1,4 +1,4 @@
-// Source packages share the lambda.doc namespace (D7.2.4).
+// Source packages share the lambda.doc namespace (D9.3.4).
 import c: .ebook.common
 import epub: .ebook.epub
 import chapters: .ebook.chapter

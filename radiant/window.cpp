@@ -5,7 +5,9 @@
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
 #include "../lib/tagged.hpp"
+#include "../lib/ownership.hpp"
 #include "../lib/host_paths.h"
 #include "../lib/mem_factory.h"
 #include "../lib/log.h"
@@ -21,6 +23,7 @@
 #include "event_sim.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
+#include "window_host.hpp"
 #include "devtools_adapter.hpp"
 #include "rdt_video.h"
 #include "speech.hpp"
@@ -42,6 +45,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/runtime-state.h"
+#include "../lambda/runtime/concurrency.h"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -55,23 +59,116 @@ extern UiContext ui_context;
 static void window_release_relative_mouse(UiContext* uicon);
 static RdtInputBatch window_input_batch = {};
 
-static void window_cleanup_load_failure(Pool* pool, Url* cwd, UiContext* uicon,
-                                        EnhancedFileCache* file_cache,
-                                        bool reset_virtual_clock) {
-    window_input_batch = {};
-    if (pool) pool_destroy(pool);
-    url_destroy(cwd);
-    if (uicon && uicon->browsing_session) {
-        session_destroy(uicon->browsing_session);
-        uicon->browsing_session = nullptr;
+struct WindowHostState {
+    pthread_t thread;
+    bool active, pending, closing, loop_started, log_memory, reset_virtual_clock;
+    bool document_closed, async_drained, loader_closed, ui_closed;
+    bool retirement_active, previous_retirement;
+    NetworkThreadPool* thread_pool;
+    EnhancedFileCache* file_cache;
+    Pool* load_pool;
+    Url* cwd;
+    bool has_options;
+    RenderPagedOptions options;
+    lam::Own<char> preview_pages, export_pages, import_pages;
+};
+
+// The viewer and its UiContext are process singletons; retain their outer owners too.
+static WindowHostState window_host = {};
+static pthread_mutex_t window_host_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void window_host_reset(WindowHostState* host) {
+    lam::free_owned(host->preview_pages);
+    lam::free_owned(host->export_pages);
+    lam::free_owned(host->import_pages);
+    if (host->retirement_active) dom_retire_set_deferred(host->previous_retirement);
+    memset(host, 0, sizeof(*host));
+}
+
+static bool window_host_copy_option(const char* source, lam::Own<char>& owner,
+                                    lam::Up<const char>& destination) {
+    if (!source) { destination = nullptr; return true; }
+    owner = lam::own(mem_strdup(source, MEM_CAT_LAYOUT));
+    if (!owner) return false;
+    destination = lam::up((const char*)owner.get());
+    return true;
+}
+
+bool radiant_window_host_begin(const RenderPagedOptions* options) {
+    pthread_mutex_lock(&window_host_lock);
+    bool active = window_host.active;
+    bool retry = active && window_host.pending && !window_host.closing &&
+        pthread_equal(window_host.thread, pthread_self());
+    if (active && !retry) { pthread_mutex_unlock(&window_host_lock); return false; }
+    // Copy first: a new request can borrow the pending host's own options.
+    WindowHostState prepared = {};
+    prepared.active = true;
+    prepared.thread = pthread_self();
+    if (options) {
+        prepared.has_options = true;
+        prepared.options = *options;
+        if (!window_host_copy_option(options->preview_pages, prepared.preview_pages,
+                                     prepared.options.preview_pages) ||
+            !window_host_copy_option(options->export_pages, prepared.export_pages,
+                                     prepared.options.export_pages) ||
+            !window_host_copy_option(options->import_pages, prepared.import_pages,
+                                     prepared.options.import_pages)) {
+            window_host_reset(&prepared);
+            pthread_mutex_unlock(&window_host_lock);
+            return false;
+        }
     }
-    if (file_cache) enhanced_cache_destroy(file_cache);
-    dom_set_ui_context(nullptr);
-    dom_set_host_driven_loop(false);
-    if (reset_virtual_clock) js_event_loop_set_virtual_clock(false, 0.0);
-    ui_context_cleanup(uicon);
-    lambda_uv_set_host_owned(false);
-    lambda_uv_cleanup();
+    pthread_mutex_unlock(&window_host_lock);
+    if (retry && !radiant_window_host_retry()) {
+        window_host_reset(&prepared);
+        return false;
+    }
+    pthread_mutex_lock(&window_host_lock);
+    if (window_host.active) {
+        pthread_mutex_unlock(&window_host_lock);
+        window_host_reset(&prepared);
+        return false;
+    }
+    prepared.previous_retirement = dom_retire_set_deferred(true);
+    prepared.retirement_active = true;
+    window_host = prepared;
+    pthread_mutex_unlock(&window_host_lock);
+    return true;
+}
+
+const RenderPagedOptions* radiant_window_host_options() {
+    pthread_mutex_lock(&window_host_lock);
+    const RenderPagedOptions* options = window_host.active && window_host.has_options
+        ? &window_host.options : nullptr;
+    pthread_mutex_unlock(&window_host_lock);
+    return options;
+}
+
+void radiant_window_host_loop_started() {
+    pthread_mutex_lock(&window_host_lock);
+    bool owner = window_host.active && pthread_equal(window_host.thread, pthread_self());
+    if (owner)
+        window_host.loop_started = true;
+    pthread_mutex_unlock(&window_host_lock);
+    if (owner) lambda_uv_set_host_owned(true);
+}
+
+bool radiant_window_host_pending() {
+    pthread_mutex_lock(&window_host_lock);
+    bool pending = window_host.active && window_host.pending;
+    pthread_mutex_unlock(&window_host_lock);
+    return pending;
+}
+
+static bool window_cleanup_load_failure(Pool* pool, Url* cwd, UiContext* uicon,
+                                        EnhancedFileCache* file_cache,
+                                        bool reset_virtual_clock);
+
+static void window_host_abandon_startup() {
+    pthread_mutex_lock(&window_host_lock);
+    if (window_host.active && !window_host.pending &&
+            pthread_equal(window_host.thread, pthread_self())) window_host_reset(&window_host);
+    pthread_mutex_unlock(&window_host_lock);
 }
 
 typedef enum RadiantJsLoopAction {
@@ -81,6 +178,9 @@ typedef enum RadiantJsLoopAction {
 
 static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction action,
                                           int wait_ms, double delta_ms, int frame_steps) {
+    // Exports started by a guest can retire only after its callback has unwound.
+    if ((!uicon || uicon->input_dispatch_depth == 0) && render_export_pending_count())
+        render_export_retire_pending();
     // Headless hosts have no platform event poll to service the native media event queue.
     rdt_video_pump_events();
     DomDocument* doc = uicon ? uicon->document : nullptr;
@@ -96,7 +196,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
             js_event_loop_pump_nowait();
         }
         uv_loop_t* loop = lambda_uv_loop();
-        if (loop) uv_run(loop, UV_RUN_NOWAIT);
+        if (loop) lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
         pumped = radiant_reconcile_pending_templates(uicon, doc) || pumped;
         bool navigation = radiant_commit_navigation_requests(uicon);
         return radiant_commit_async_document_loads(uicon) || navigation || pumped ||
@@ -154,7 +254,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     // Virtual timers may be idle while a native document worker finishes.
     // Poll libuv on every host turn; its completion only publishes a result.
     uv_loop_t* loop = lambda_uv_loop();
-    if (loop) uv_run(loop, UV_RUN_NOWAIT);
+    if (loop) lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
     pumped = radiant_reconcile_pending_templates(uicon, doc) || pumped;
     if (uicon) radiant_reconcile_dom_mutations(uicon, doc);
     state_end_batch(state);
@@ -163,7 +263,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     if (uicon && uicon->input_dispatch_depth == 0) input_method_drain(uicon, doc);
     bool navigated = false;
     if (doc->pending_navigation_url) {
-        // D5.4.1: location.assign() can load a new isolate only after the
+        // D6.4.1: location.assign() can load a new isolate only after the
         // callback returns and this host turn has closed its state batch.
         char* target = doc->pending_navigation_url;
         doc->pending_navigation_url = nullptr;
@@ -203,10 +303,6 @@ bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
 static void view_wake_platform(void* user_data) {
     (void)user_data;
     radiant_platform_post_empty_event();
-}
-
-static void network_wake_platform(void* user_data) {
-    view_wake_platform(user_data);
 }
 
 static void view_cleanup_js_batch_state(void) {
@@ -1262,7 +1358,7 @@ static int window_finish_event_sim(EventSimContext* sim_ctx) {
         ui_context.document = lam::up((DomDocument*)sim_ctx->original_document);
         sim_ctx->frame_stack_depth = 0;
     }
-    event_sim_free(sim_ctx);
+    event_sim_free(sim_ctx, ui_context.document);
     return fail_count;
 }
 
@@ -1295,17 +1391,56 @@ static double view_phase_elapsed_ms(uint64_t start_ns, uint64_t end_ns) {
     return time_elapsed_ms_f(start_ns, end_ns);
 }
 
-static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
-                                        EnhancedFileCache* file_cache,
-                                        bool log_memory, ViewPhaseTiming* timing) {
+static bool window_host_exports_retired() {
+    return render_export_retire_pending() && !lambda_uv_has_host_leases();
+}
+
+static bool window_host_retire(ViewPhaseTiming* timing) {
+    // A deferred export may still use the window's shared runtime services.
+    if (!window_host_exports_retired() || ui_context.input_dispatch_depth) {
+        log_debug("window-host: exports or input dispatch still active");
+        return false;
+    }
     window_input_batch = {};
-    radiant_devtools_destroy(ui_context.devtools);
-    ui_context.devtools = nullptr;
-    radiant_drain_async_document_loads(&ui_context);
     window_request_document_satellite_cancel();
     uint64_t phase_start = time_now_ns();
-    if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+    // Join document borrowers before releasing any host service they can use.
+    if (!window_host.document_closed) {
+        if (!ui_context.destroy_document(false)) {
+            log_debug("window-host: document retirement still pending");
+            return false;
+        }
+        window_host.document_closed = true;
+    }
     if (timing) timing->cleanup_network_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    if (!window_host.async_drained) {
+        radiant_devtools_destroy(ui_context.devtools);
+        ui_context.devtools = nullptr;
+        if (window_host.loop_started && !radiant_poll_async_document_loads(&ui_context)) {
+            uv_loop_t* loop = lambda_uv_loop();
+            if (loop) lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+            if (!radiant_poll_async_document_loads(&ui_context)) {
+                log_debug("window-host: asynchronous navigation still pending");
+                return false;
+            }
+        }
+        window_host.async_drained = true;
+    }
+    if (!window_host_exports_retired()) return false;
+    // The loader can run cancellation callbacks that create another deferred export.
+    if (!window_host.loader_closed) {
+        if (!ui_context_release_loader_runtime(&ui_context, false)) return false;
+        window_host.loader_closed = true;
+    }
+    if (!window_host_exports_retired()) return false;
+    phase_start = time_now_ns();
+    if (!window_host.ui_closed) {
+        if (!ui_context.destroy(false)) return false;
+        window_host.ui_closed = true;
+    }
+    if (!window_host_exports_retired()) return false;
+    if (timing) timing->cleanup_ui_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
 
     phase_start = time_now_ns();
     if (ui_context.browsing_session) {
@@ -1315,43 +1450,165 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
     if (timing) timing->cleanup_session_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
 
     phase_start = time_now_ns();
-    if (thread_pool) thread_pool_destroy(thread_pool);
+    if (window_host.thread_pool) thread_pool_destroy(window_host.thread_pool);
+    window_host.thread_pool = nullptr;
     if (timing) timing->cleanup_thread_pool_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
 
     phase_start = time_now_ns();
-    if (file_cache) enhanced_cache_destroy(file_cache);
+    if (window_host.file_cache) enhanced_cache_destroy(window_host.file_cache);
+    window_host.file_cache = nullptr;
     if (timing) timing->cleanup_cache_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
 
     phase_start = time_now_ns();
-    network_downloader_cleanup_shared();
+    if (window_host.loop_started) network_downloader_cleanup_shared();
     if (timing) timing->cleanup_shared_network_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
     view_close_event_log();
     view_close_state_dump();
     dom_set_ui_context(nullptr);
-    // ui_context is stack-backed; JS must drop the host loop reference before teardown.
     dom_set_host_driven_loop(false);
 
     phase_start = time_now_ns();
-    ui_context_cleanup(&ui_context);
-    if (timing) timing->cleanup_ui_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
-
-    // document cancellation resumes parked tasks; keep their JS realm/capsule
-    // ambient slots alive until ui_context_cleanup has joined them (S13.3.1v2).
-    phase_start = time_now_ns();
-    view_cleanup_js_batch_state();
+    if (window_host.loop_started) view_cleanup_js_batch_state();
     if (timing) timing->cleanup_js_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
 
     phase_start = time_now_ns();
-    view_cleanup_input_manager();
+    if (window_host.loop_started) view_cleanup_input_manager();
     if (timing) timing->cleanup_ui_ms += view_phase_elapsed_ms(phase_start, time_now_ns());
 
     phase_start = time_now_ns();
-    lambda_uv_set_host_owned(false);
-    lambda_uv_cleanup();
+    if (window_host.loop_started) {
+        lambda_uv_set_host_owned(false);
+        lambda_uv_cleanup();
+    }
     if (timing) timing->cleanup_uv_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
-    js_event_loop_set_virtual_clock(false, 0.0);
-    if (log_memory) log_mem_stage("after-cleanup");
-    // CLI teardown owns the logger so it can record the view completion result.
+    if (window_host.reset_virtual_clock) js_event_loop_set_virtual_clock(false, 0.0);
+    if (window_host.load_pool) pool_destroy(window_host.load_pool);
+    if (window_host.cwd) url_destroy(window_host.cwd);
+    window_host.load_pool = nullptr;
+    window_host.cwd = nullptr;
+    if (window_host.log_memory) log_mem_stage("after-cleanup");
+    ui_context.paged_options = nullptr;
+    return true;
+}
+
+static bool window_host_retry(ViewPhaseTiming* timing) {
+    pthread_mutex_lock(&window_host_lock);
+    if (!window_host.active || !window_host.pending || window_host.closing ||
+            !pthread_equal(window_host.thread, pthread_self())) {
+        pthread_mutex_unlock(&window_host_lock);
+        return false;
+    }
+    window_host.closing = true;
+    pthread_mutex_unlock(&window_host_lock);
+    bool closed = window_host_retire(timing);
+    pthread_mutex_lock(&window_host_lock);
+    if (closed) window_host_reset(&window_host);
+    else window_host.closing = false;
+    pthread_mutex_unlock(&window_host_lock);
+    if (!closed) log_error("window-host: cleanup retained for an owner-thread retry");
+    return closed;
+}
+
+bool radiant_window_host_retry() {
+    if (window_host_retry(nullptr)) return true;
+    pthread_mutex_lock(&window_host_lock);
+    bool owner = window_host.active && window_host.pending && !window_host.closing &&
+        pthread_equal(window_host.thread, pthread_self());
+    pthread_mutex_unlock(&window_host_lock);
+    // Give already-ready wakes one turn without waiting or reentering libuv.
+    if (!owner || lambda_uv_is_running() || activation_current() ||
+            (context && context->execution_depth) || ui_context.input_dispatch_depth) return false;
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop || !uv_loop_alive(loop)) return false;
+    lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+    return window_host_retry(nullptr);
+}
+
+bool radiant_window_host_process_shutdown_ready() {
+    if (lambda_uv_is_running() || activation_current() || (context && context->execution_depth))
+        return false;
+    pthread_mutex_lock(&window_host_lock);
+    bool active = window_host.active;
+    bool pending = window_host.pending;
+    pthread_mutex_unlock(&window_host_lock);
+    if (active && (!pending || !radiant_window_host_retry())) return false;
+    if (render_export_pending_count() && !render_export_retire_pending()) return false;
+    return !lambda_uv_has_host_leases();
+}
+
+static bool window_host_finish(NetworkThreadPool* thread_pool, EnhancedFileCache* file_cache,
+        Pool* load_pool, Url* cwd, bool log_memory, bool reset_virtual_clock, ViewPhaseTiming* timing) {
+    pthread_mutex_lock(&window_host_lock);
+    if (!window_host.active || window_host.pending || window_host.closing ||
+            !pthread_equal(window_host.thread, pthread_self())) {
+        pthread_mutex_unlock(&window_host_lock);
+        return false;
+    }
+    // Store outer owners before running callbacks or attempting an allocation.
+    window_host.pending = true;
+    window_host.thread_pool = thread_pool;
+    window_host.file_cache = file_cache;
+    window_host.load_pool = load_pool;
+    window_host.cwd = cwd;
+    window_host.log_memory = log_memory;
+    window_host.reset_virtual_clock = reset_virtual_clock;
+    pthread_mutex_unlock(&window_host_lock);
+    for (;;) {
+        uint64_t generation = lambda_scheduler_progress_generation();
+        if (window_host_retry(timing)) return true;
+        pthread_mutex_lock(&window_host_lock);
+        bool drain_loads = window_host.active && window_host.pending && !window_host.closing &&
+            window_host.document_closed && !window_host.async_drained && window_host.loop_started && lambda_uv_loop() &&
+            pthread_equal(window_host.thread, pthread_self());
+        if (drain_loads) window_host.closing = true;
+        pthread_mutex_unlock(&window_host_lock);
+        if (drain_loads) {
+            // The viewer cannot unwind while navigation workers still use host services.
+            radiant_drain_async_document_loads(&ui_context);
+            pthread_mutex_lock(&window_host_lock);
+            window_host.closing = false;
+            pthread_mutex_unlock(&window_host_lock);
+            continue;
+        }
+        // Give queued wakes one nonblocking turn before declaring the close stalled.
+        if (generation == lambda_scheduler_progress_generation()) {
+            uv_loop_t* loop = lambda_uv_loop();
+            if (!loop || lambda_uv_is_running() || activation_current() ||
+                    (context && context->execution_depth) || ui_context.input_dispatch_depth) return false;
+            lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
+            if (window_host_retry(timing)) return true;
+            if (generation == lambda_scheduler_progress_generation()) {
+                if (!ui_context_document_has_pending_native_work(&ui_context)) return false;
+                // Native requests borrow the document until their completion callback runs.
+                pthread_mutex_lock(&window_host_lock);
+                window_host.closing = true;
+                pthread_mutex_unlock(&window_host_lock);
+                lambda_uv_run_loop(loop, UV_RUN_ONCE);
+                pthread_mutex_lock(&window_host_lock);
+                window_host.closing = false;
+                pthread_mutex_unlock(&window_host_lock);
+            }
+        }
+    }
+}
+
+bool radiant_window_host_finish(NetworkThreadPool* thread_pool, EnhancedFileCache* file_cache,
+        Pool* load_pool, Url* cwd, bool log_memory, bool reset_virtual_clock) {
+    return window_host_finish(thread_pool, file_cache, load_pool, cwd,
+                              log_memory, reset_virtual_clock, nullptr);
+}
+
+static bool window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
+                                        EnhancedFileCache* file_cache,
+                                        bool log_memory, ViewPhaseTiming* timing,
+                                        Url* cwd = nullptr) {
+    return window_host_finish(thread_pool, file_cache, nullptr, cwd, log_memory, true, timing);
+}
+
+static bool window_cleanup_load_failure(Pool* pool, Url* cwd, UiContext* uicon,
+                                        EnhancedFileCache* file_cache, bool reset_virtual_clock) {
+    if (uicon != &ui_context) return false;
+    return window_host_finish(nullptr, file_cache, pool, cwd, false, reset_virtual_clock, nullptr);
 }
 
 static void window_write_memory_profile(DomDocument* doc, const char* input_file) {
@@ -1371,6 +1628,7 @@ static const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
 // The desktop loop below waits on the platform; a display-link host calls this
 // from its own run loop instead.
 double radiant_window_tick(RadiantWindowLoop* loop) {
+    EventSimProfileTurn profile(loop->sim_ctx);
     double currentTime = radiant_frame_clock_now(loop->frame_clock);
     bool frame_driven = false;
 
@@ -1611,10 +1869,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    bool fullscreen = false,
                                                    int inspector_fd = -1,
                                                    bool microphone_granted = false) {
-    struct DeferredRetirement {
-        bool previous = dom_retire_set_deferred(true);
-        ~DeferredRetirement() { dom_retire_set_deferred(previous); }
-    } deferred_retirement;
+    if (!radiant_window_host_begin(paged_options)) {
+        log_error("window-host: another window owns the host or its cleanup is pending");
+        return 1;
+    }
+    paged_options = radiant_window_host_options();
     log_init_wrapper();
     ViewPhaseTiming phase_timing = {};
     phase_timing.total_start_ns = time_now_ns();
@@ -1630,6 +1889,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         sim_ctx = replay_jsonl ? event_sim_load_replay_log(event_file) : event_sim_load(event_file);
         if (!sim_ctx) {
             log_error("Failed to load event file: %s", event_file);
+            window_host_abandon_startup();
             return 1;
         } else {
             log_info("Event simulation loaded: %d events", sim_ctx->events->length);
@@ -1638,6 +1898,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     float requested_device_scale = headless && sim_ctx ? sim_ctx->device_scale : 0.0f;
     if (ui_context_init(&ui_context, headless, requested_device_scale) != 0) {
         if (sim_ctx) event_sim_free(sim_ctx);
+        window_host_abandon_startup();
         return -1;
     }
     ui_context.event_log_enabled = enable_event_log;
@@ -1648,13 +1909,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     if (fullscreen && (!radiant_fullscreen_request(&ui_context.fullscreen, true))) {
         log_error("fullscreen: startup fullscreen is unavailable");
         if (sim_ctx) event_sim_free(sim_ctx);
-        ui_context_cleanup(&ui_context);
+        radiant_window_host_finish(nullptr, nullptr, nullptr, nullptr, false, false);
         return -1;
     }
     window_fullscreen_update(&ui_context, true);
     if (fullscreen && !ui_context.fullscreen.actual) {
         if (sim_ctx) event_sim_free(sim_ctx);
-        ui_context_cleanup(&ui_context);
+        radiant_window_host_finish(nullptr, nullptr, nullptr, nullptr, false, false);
         return -1;
     }
 
@@ -1668,12 +1929,12 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     RadiantWindow* window = ui_context.window;
     if (!headless && !window) {
         if (sim_ctx) event_sim_free(sim_ctx);
-        ui_context_cleanup(&ui_context);
+        radiant_window_host_finish(nullptr, nullptr, nullptr, nullptr, false, false);
         return -1;
     }
     // The viewer is the libuv lifetime owner while documents and their
     // nested Lambda evaluators come and go during navigation.
-    lambda_uv_set_host_owned(true);
+    radiant_window_host_loop_started();
 
     int width, height;
 
@@ -1864,8 +2125,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (paged_options && !doc->root) {
             fputs("view --paged: the document has no HTML layout source\n", stderr);
             if (sim_ctx) event_sim_free(sim_ctx);
-            url_destroy(cwd);
-            window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
+            window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr, cwd);
             return 1;
         }
         ui_context_sync_document_raster_scale(&ui_context, doc);
@@ -1891,7 +2151,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 resource_manager_set_ui_context(doc->resource_manager, &ui_context);
                 if (!headless && doc->resource_manager) {
                     resource_manager_set_wake_callback(doc->resource_manager,
-                                                       network_wake_platform, NULL);
+                                                       radiant_network_wake_platform, NULL);
                 }
                 log_notice("view: shared network support ready for HTTP document");
             }
@@ -1964,8 +2224,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             if (paged_options) {
                 if (!render_paged_window_compose(&ui_context)) {
                     if (sim_ctx) event_sim_free(sim_ctx);
-                    url_destroy(cwd);
-                    window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
+                    window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr, cwd);
                     return 1;
                 }
             } else {
@@ -2036,6 +2295,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (sim_ctx && sim_ctx->is_running) {
             double current_time = 0.0;
             while (sim_ctx->is_running && !ui_context.render_failed) {
+                EventSimProfileTurn profile(sim_ctx);
+                // Headless replays must publish network completions just like window ticks.
+                if (ui_context.document && ui_context.document->resource_manager) {
+                    resource_manager_flush_layout_updates(ui_context.document->resource_manager);
+                }
                 SimEvent* next_ev = (sim_ctx->current_index >= 0 &&
                     sim_ctx->current_index < sim_ctx->events->length)
                     ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index]
@@ -2066,6 +2330,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                     // so do Lambda tasks whose IO, child processes or thread-pool jobs keep the loop alive.
                     uv_loop_t* task_loop = lambda_uv_loop();
                     if (radiant_async_document_loads_pending(&ui_context) ||
+                        (ui_context.document && ui_context.document->resource_manager &&
+                         !resource_manager_is_fully_loaded(ui_context.document->resource_manager)) ||
                         dom_document_has_pending_work(ui_context.document) ||
                         radiant_speech_wall_clock_pending(ui_context.document) ||
                         radiant_video_events_pending(ui_context.document ? ui_context.document->state : nullptr) ||
@@ -2096,9 +2362,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         phase_timing.event_loop_ms = view_phase_elapsed_ms(event_loop_start, time_now_ns());
         log_info("End of headless document viewer");
         uint64_t cleanup_start = time_now_ns();
-        window_cleanup_view_runtime(thread_pool, file_cache, true, &phase_timing);
+        bool cleaned = window_cleanup_view_runtime(thread_pool, file_cache, true, &phase_timing);
         phase_timing.cleanup_ms = view_phase_elapsed_ms(cleanup_start, time_now_ns());
-        int exit_code = sim_fail_count > 0 || render_failed ? 1 : 0;
+        int exit_code = sim_fail_count > 0 || render_failed || !cleaned ? 1 : 0;
         window_write_phase_timing(&phase_timing, exit_code);
         return exit_code;
     }
@@ -2146,10 +2412,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     bool render_failed = ui_context.render_failed;
 
     log_info("End of document viewer");
-    window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
+    bool cleaned = window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
 
     // Return non-zero if simulation had failures
-    return sim_fail_count > 0 || render_failed ? 1 : 0;
+    return sim_fail_count > 0 || render_failed || !cleaned ? 1 : 0;
 }
 
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,

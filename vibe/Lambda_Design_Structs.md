@@ -10,10 +10,10 @@
 > revision (the contiguous `Shape` layout, parent §4.4/§4.7) is deliberately
 > out of scope and parked as SCUO1.
 >
-> **Spec linkage.** Item 1 implements **D2.6.1**, **D3.4.6** and
-> **D2.4.1**; item 2 implements **D2.4.1**, **D5.2.1v3** and vibe **RV10**;
-> item 3 implements **D5.4.1–D5.4.2** and vibe **RG0–RG2**; item 4 implements
-> **D1.9**; item 5 implements **D1.4v3** and **D6.4.1**. Guardrails that
+> **Spec linkage.** Item 1 implements **D3.2.1**, **D3.4.6** and
+> **D2.3.4**; item 2 implements **D2.3.4**, **D6.2.1** and vibe **RV10**;
+> item 3 implements **D6.4.1–D6.4.2** and vibe **RG0–RG2**; item 4 implements
+> **D1.9**; item 5 implements **D1.4** and **D7.6.1**. Guardrails that
 > must survive every item: **SCU2** (semantic type and physical
 > representation stay separate), **SCU4** (shared storage never erases
 > language meaning), **D3.4.1** (the `ShapeEntry` chain remains normative
@@ -32,11 +32,11 @@ tidier census; the rest are churn for churn's sake right now.
 
 | # | Item | Parent stage | Why it is first-tier | Formal ruling it implements |
 |---|------|--------------|----------------------|-----------------------------|
-| 1 | One total storage-descriptor resolver, stored on the shape | P3.1, P3.4 | Five runtime bugs in one month were the same defect: a consumer derived the physical lane from a `TypeId` instead of the full contract | D2.6.1, D3.4.6 |
-| 2 | One `FnAbiContract` for entry/return/companion facts | P1.4, §6.2 | The D8.1.1 satellite/auto-tier work in flight keeps re-deciding call transport per site; five authorities is how tier-mismatch bugs are born | D2.4.1, D5.2.1v3, RV10 |
-| 3 | `EvalContext` is the sole owner; `Runtime` stops mirroring | P6 | JS threading, Radiant page isolates and the scheduler all assume one owner per isolate resource; the bidirectional copy is a latent double-free | D5.4.1 |
+| 1 | One total storage-descriptor resolver, stored on the shape | P3.1, P3.4 | Five runtime bugs in one month were the same defect: a consumer derived the physical lane from a `TypeId` instead of the full contract | D3.2.1, D3.4.6 |
+| 2 | One `FnAbiContract` for entry/return/companion facts | P1.4, §6.2 | The D8.3.1 satellite/auto-tier work in flight keeps re-deciding call transport per site; five authorities is how tier-mismatch bugs are born | D2.3.4, D6.2.1, RV10 |
+| 3 | `EvalContext` is the sole owner; `Runtime` stops mirroring | P6 | JS threading, Radiant page isolates and the scheduler all assume one owner per isolate resource; the bidirectional copy is a latent double-free | D6.4.1 |
 | 4 | Parser working sets grow from the document | P2.3 | Three silent-truncation bugs and an 800 KB stack frame per parser; a day of work | D1.9 |
-| 5 | Retire `RetItem` | P1.2 | 41 wrapper twins and two dispatch branches to emulate a protocol the runtime already has | D1.4v3, D6.4.1 |
+| 5 | Retire `RetItem` | P1.2 | 41 wrapper twins and two dispatch branches to emulate a protocol the runtime already has | D1.4, D7.6.1 |
 
 Recommended landing order is **4, 5, 1, 2, 3**: the two cheap isolated
 items first so they are banked, then the bug-family killer, then the two
@@ -50,7 +50,7 @@ What is **not** here and why:
 - One `Item` typedef and `RecordStorage`/`SequenceStorage` (parent §5).
   Highest churn in the whole proposal, lowest bug yield. Deferred.
 - `MirTranspiler` / `VarEntry` / `NameEntry` splits (parent §9). They live
-  in the file the D8.1.1 tuning is editing daily; splitting now guarantees
+  in the file the D8.3.1 tuning is editing daily; splitting now guarantees
   merge conflicts and no bug is waiting on it. Instead the parent's P0.3
   ratchet applies from today: **no new fact field on `NameEntry`,
   `VarEntry` or `MirTranspiler` without naming its canonical owner in the
@@ -82,10 +82,10 @@ What is **not** here and why:
 
 ### 1.1 What the rulings already say
 
-D2.6.1: shapes carry an immutable `LaneStorageDesc` from **one shared
+D3.2.1: shapes carry an immutable `LaneStorageDesc` from **one shared
 descriptor resolver** for MIR, map layout, arrays and guests. D3.4.6: the
 descriptor is derived from the **full `Type*`**, and changing a field's
-*contract* re-derives layout. D2.4.1: the semantic contract (`Type*`) and
+*contract* re-derives layout. D2.3.4: the semantic contract (`Type*`) and
 the planned representation are separate authorities; the second is derived
 from the first, never recovered from a `TypeId` or a register class.
 
@@ -128,7 +128,7 @@ stored**. Concretely:
 
 The bug family this produced, all fixed individually in the last month:
 the GC any-lane field bug (2026-08-26, GC read the storage lane instead of
-the contract), the GC null-lane UAF (2026-09-07, D4.3.4: containers in
+the contract), the GC null-lane UAF (2026-09-07, D5.3.3: containers in
 null-typed shaped fields at unaligned offsets were never traced), the
 nullable-bool lane fix in T21-1, optional-map contract blindness (`N?`
 reports TYPE not MAP), and the MIR carrier-invariant violation for datetime
@@ -160,7 +160,7 @@ kind anywhere outside the resolver is a review reject.
 **SCU9 — The descriptor is stored on the shape field.** `ShapeEntry` gains
 one `LaneStorageDesc storage` (compact form, see SCUO2) filled at the moment
 `ShapeEntry::type` is set and never recomputed. Shape copies, transitions
-and pool interning copy it with the entry (D3.4.4v2 already requires the
+and pool interning copy it with the entry (D3.4.4 already requires the
 same for `name_id`). Readers, writers, the collector and MIR direct access
 consult `entry->storage`; none re-derives from `entry->type`. This is the
 sentence in D3.4.6 that says "shapes carry", made literal, and it is the
@@ -228,11 +228,11 @@ computes both from the resolver at `final()`.
 
 ### 2.1 What the rulings already say
 
-D5.2.1v3 fixes the four return shapes and the companion transport; RV2
+D6.2.1 fixes the four return shapes and the companion transport; RV2
 says the shape is a **pure function of the declared signature**, never
 inferred per call site; RV10 says there is **one convention descriptor,
-consumed everywhere**. D2.4.1 separates the semantic contract, the planned
-representation and the emitted `MirValue`. D6.4.1 fixes the sys-func
+consumed everywhere**. D2.3.4 separates the semantic contract, the planned
+representation and the emitted `MirValue`. D7.6.1 fixes the sys-func
 boundary at one boxed `Item`.
 
 ### 2.2 What the tree actually does
@@ -257,7 +257,7 @@ the shape *again* from `(lane_kind, scalar_mode)` — in the same file whose
 comments say deriving it twice is the havlak bug. `begin_function_epilogue`
 takes those two loose values as parameters rather than the plan.
 
-Why this is first-tier now rather than later: the D8.1.1v8/v9 satellite
+Why this is first-tier now rather than later: the D8.3.3/v9 satellite
 work lands per-callee entries (`_b` CW33 adapters, typed-var satellites,
 member entries through `find_func` rather than `jit_gen_func`). Every one
 of those is a call-transport decision. With five holders, each new entry
@@ -340,8 +340,8 @@ split (parent §6.3, P7) is not part of this item.
 
 ### 3.1 What the rulings already say
 
-D5.4.1: one canonical long-lived `EvalContext` per isolate, exactly one
-sanctioned TLS root, no save/bind/restore. D5.4.2: the JIT-visible
+D6.4.1: one canonical long-lived `EvalContext` per isolate, exactly one
+sanctioned TLS root, no save/bind/restore. D6.4.2: the JIT-visible
 `Context` prefix is frozen; state lives in lazily allocated capsules.
 Vibe RG1: `Runtime` is a controller.
 
@@ -390,7 +390,7 @@ and lives until `runtime_cleanup`.
 
 **SCU15 — One context per isolate means no bootstrap context.**
 `js_bootstrap_context` is retired. JS semantic state is already a capsule
-(`EvalContext::js_state`, D5.4.2); bootstrap runs in the isolate's own
+(`EvalContext::js_state`, D6.4.2); bootstrap runs in the isolate's own
 context with that capsule initialized on first use. The direct
 `runtime->name_pool = dynamic` rebinding in the JS require path becomes an
 operation on the context (`eval_context_rebind_name_pool` or an explicit
@@ -525,9 +525,9 @@ by a static assert so regressions fail to compile.
 
 ### 5.1 What the rulings already say
 
-D1.4v3: a fallible native function returns one merged `Item`, its success
-value or an ERROR-tagged Item carrying the `LambdaError*`. D6.4.1: public
-sys funcs return boxed `Item` at the runtime/JIT boundary. D5.2.3: a C
+D1.4: a fallible native function returns one merged `Item`, its success
+value or an ERROR-tagged Item carrying the `LambdaError*`. D7.6.1: public
+sys funcs return boxed `Item` at the runtime/JIT boundary. D6.2.3: a C
 helper or sys func owns no watermark, so it needs no return shape at all.
 
 ### 5.2 What the tree actually does
@@ -595,7 +595,7 @@ item 5 (RetItem)  ─┤  independent; land first, any order
                    │
 item 1 (resolver) ─┤  no spec change; touches shape/GC/MIR — own branch
 item 2 (ABI)      ─┤  no spec change; touches transpile-mir — own branch,
-                   │  rebase onto the current D8.1.1 satellite head
+                   │  rebase onto the current D8.3.1 satellite head
 item 3 (context)  ─┘  no spec change; touches JS/Radiant — own branch
 ```
 
@@ -647,7 +647,7 @@ they are the trap this kind of pass walks into.
   `JitCallMetadata.scalar_return_home_arg_index` and
   `JitCallMetadata.scalar_home_lane_mask` — a call site never donates a scalar
   home. All three were written and never read. `MirFunctionPlan`'s identically
-  named mask stays: a hosted guest FRAME does accept one (D5.2.1v3).
+  named mask stays: a hosted guest FRAME does accept one (D6.2.1).
 - `fn_call_boxed_0..8` (the nine context-less boxed trampolines) — superseded
   by the `_into` forms the JIT actually emits (`fn_call_boxed_%d_into`). They
   called `fp` with no `Context*` first argument, so they could not have invoked
@@ -700,7 +700,7 @@ merge itself was not bisected.
   revisit only if a second frozen-prefix consumer appears.
 - **SCUO4 — `MirTranspiler`/`VarEntry`/`NameEntry` ratchet.** From
   2026-09-07, no new fact field without a named canonical owner. The
-  split itself (parent §9.1/§9.3) waits for the D8.1.1 tuning to settle.
+  split itself (parent §9.1/§9.3) waits for the D8.3.1 tuning to settle.
 - **SCUO6 — `MarkEditor` shape rebuilds drop `T?` contracts.** A rebuild
   routes through `ShapeBuilder`, which projects each field to its `TypeId`
   before the pool interns it, so an `int?` field returns as `TYPE_TYPE`. This
@@ -733,7 +733,7 @@ merge itself was not bisected.
   once callers are converted, delete with the field.
 - **Item 4 allocators.** Use `lib/arraylist.h` and `lib/hashmap.h` backed
   by the `Input` pool (`InputAllocationContext`), not `memtrack`, so
-  teardown is owner-wide (D4.1.4v4).
+  teardown is owner-wide (D5.1.4).
 - **Item 5 order of commits.** (a) concurrency family + its tests; (b)
   everything else + registry rows + twin deletion + dispatch deletion;
   (c) header/shim deletion. (b) and (c) may be one commit.

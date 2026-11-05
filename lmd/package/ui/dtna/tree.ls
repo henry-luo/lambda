@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import dom
 import c: lambda.ui.core.component
 import collection: lambda.ui.core.collection
@@ -50,7 +51,7 @@ pub fn toggle_check(rows, keys, key, strict = false) any^ {
     if (row == null or not checkable(row)) current else checked_result(rows,raw,strict)
 }
 pub fn tree(props) element^ {
-    let node = c.node('tree',props,null,["items","expanded_keys","default_expanded_keys","selected_keys","default_selected_keys",
+    let node = descriptor.node('tree',props,null,["items","expanded_keys","default_expanded_keys","selected_keys","default_selected_keys",
         "checked_keys","default_checked_keys","checkable","check_strictly","multiple","disabled"])^
     let identity = collection.require_id(props,"tree")^
     let flags = c.boolean_props(props,["checkable","check_strictly","multiple"],"tree")^

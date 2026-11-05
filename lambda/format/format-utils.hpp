@@ -121,7 +121,7 @@ public:
             handlers.array_value(item, item.asArray());
         } else if (lambda_value_nominal(item.getType(),
                 (const void*)(uintptr_t)item.item().item)) {
-            // D2.6.6v2 phase 2: nominal-ness is a descriptor property now, so a
+            // D3.1.1 phase 2: nominal-ness is a descriptor property now, so a
             // nominal value reaches the object hook whatever its structural kind.
             handlers.object_value(item, (Object*)(uintptr_t)item.item().item);
         } else if (item.isMap()) {

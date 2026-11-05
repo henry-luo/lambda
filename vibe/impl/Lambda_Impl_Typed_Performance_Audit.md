@@ -4,7 +4,7 @@
 
 **Follow-up completed, 2026-10-04:** the release passes the complete **6,213/6,213** baseline. Two independent acceptance campaigns establish 24 annotation speedups and six practical-equivalence results within the declared 2% uncertainty tolerance. Direct comparisons against the previous erased release establish 29 speedups and one practical-equivalence result. §13 also corrects the earlier interpretation of MIR root counters: the old counter instrumentation introduced extra safepoints (§13.1). The uninstrumented timings remain valid.
 
-**Authority:** D8.1.1v15 (execution selection), D2.4.1–D2.4.3 (contract and representation), D3.2.4v4/D3.3.4 (record admission and full inferred contracts), D5.3.3 (precise roots), S7.7.2–S7.7.4 (boundary failures), S9.1.2–S9.1.3 (snapshots and borrows).
+**Authority:** D8.3.1 (execution selection), D2.3.4–D2.3.5 (contract and representation), D4.2.5/D2.4.3 (record admission and full inferred contracts), D6.3.3 (precise roots), S7.7.2–S7.7.4 (boundary failures), S9.1.2–S9.1.3 (snapshots and borrows).
 
 ## 1. Which results are current?
 
@@ -101,11 +101,11 @@ The relevant source is `lambda/runtime/transpile-mir.cpp`: `mir_numeric_comparis
 
 ## 5. Proposed tuning order
 
-1. **MIR: retain the same useful proofs for declared and inferred values.** Trace bounce/fannkuch's condition descriptors from bounds/finite/error facts through `MirValue`; reuse the existing planners so a proven in-bounds scalar comparison stays native. Preserve null, out-of-bounds and error behavior (S7.1.1v3, S7.7.2–S7.7.4, D2.4.1–D2.4.3). Removing `is_truthy` alone is insufficient if the operand still needs boxing. Add annotation-only controls around these loops before attributing every port difference to typing.
-2. **MIR: reuse admitted array and numeric-result facts at call boundaries.** Start with nqueens recursion and fasta's PRNG arithmetic. Reuse full-contract certificates across proven non-invalidating calls; select the native coercion path when the result descriptor proves it. Both generic error/null paths and required conversion semantics must remain. Use existing shared facts under D8.2.4v2/D8.2.5v3; do not introduce a second inference engine.
-3. **MIR: reduce root traffic after eliminating redundant helpers.** Recompute live roots around the remaining allocation/re-entry safepoints. Unboxed numeric temporaries need no Item root, but pointer carriers keep their owning boxed root. Verify with GC stress and existing precise-root accounting (D5.3.3); never delete roots based only on the benchmark or restore native-stack scanning.
-4. **T0: construct fresh typed record literals into their admitted destination layout.** Carry the declared destination through existing frame/binding plans and `eval_map`, avoiding an inferred map followed by reification when all fields can be admitted correctly at construction. Keep named-record identity, recursion, nullable fields, errors, and snapshot semantics (D3.2.4v4, S9.1.2–S9.1.3). Target gcbench, deriv, binarytrees first.
-5. **T0: make successful admission reusable.** Classify a boundary's complete contract once in its existing plan; share the existing admission/certificate helpers, avoid redundant array-plus-generic checks, and recognize exact bool scalars alongside the existing scalar cases. For Richards, prove when the existing storage-compatible record remains admitted instead of revalidating every crossing. Invalidate facts when a write can change the contract or representation (D3.3.4); this is not an inline cache (D8.4.1v2).
+1. **MIR: retain the same useful proofs for declared and inferred values.** Trace bounce/fannkuch's condition descriptors from bounds/finite/error facts through `MirValue`; reuse the existing planners so a proven in-bounds scalar comparison stays native. Preserve null, out-of-bounds and error behavior (S7.1.1v3, S7.7.2–S7.7.4, D2.3.4–D2.3.5). Removing `is_truthy` alone is insufficient if the operand still needs boxing. Add annotation-only controls around these loops before attributing every port difference to typing.
+2. **MIR: reuse admitted array and numeric-result facts at call boundaries.** Start with nqueens recursion and fasta's PRNG arithmetic. Reuse full-contract certificates across proven non-invalidating calls; select the native coercion path when the result descriptor proves it. Both generic error/null paths and required conversion semantics must remain. Use existing shared facts under D8.2.4/D8.2.5; do not introduce a second inference engine.
+3. **MIR: reduce root traffic after eliminating redundant helpers.** Recompute live roots around the remaining allocation/re-entry safepoints. Unboxed numeric temporaries need no Item root, but pointer carriers keep their owning boxed root. Verify with GC stress and existing precise-root accounting (D6.3.3); never delete roots based only on the benchmark or restore native-stack scanning.
+4. **T0: construct fresh typed record literals into their admitted destination layout.** Carry the declared destination through existing frame/binding plans and `eval_map`, avoiding an inferred map followed by reification when all fields can be admitted correctly at construction. Keep named-record identity, recursion, nullable fields, errors, and snapshot semantics (D4.2.5, S9.1.2–S9.1.3). Target gcbench, deriv, binarytrees first.
+5. **T0: make successful admission reusable.** Classify a boundary's complete contract once in its existing plan; share the existing admission/certificate helpers, avoid redundant array-plus-generic checks, and recognize exact bool scalars alongside the existing scalar cases. For Richards, prove when the existing storage-compatible record remains admitted instead of revalidating every crossing. Invalidate facts when a write can change the contract or representation (D2.4.3); this is not an inline cache (D7.4.1).
 6. **T0: preplan checked stores and nested paths.** Reuse resolved declared element/field contracts and static path segments, retaining the checked runtime setter for dynamic or incompatible cases. Unique admitted arrays should not rediscover their lane on each store. Target primes, sieve, quicksort, bounce. Keep the interpreter boxed as required by Ast_Interpreter AI3.
 
 A practical acceptance gate is equal golden outputs and zero forbidden fallback, then at least 15 alternating release pairs per targeted row. For very small rows, enlarge the timed workload with identical repetition on both ports; do not assert equality from one noisy median. Aim for no reproducible typed penalty beyond a small measured noise band, without weakening typed failure semantics. Include negative admission, nullable/out-of-bounds, snapshot/borrow, and forced-GC tests. Existing untyped optimizations must also satisfy those semantics; faster incorrect work is not the target.
@@ -114,7 +114,7 @@ A practical acceptance gate is equal golden outputs and zero forbidden fallback,
 
 The runner previously treated rejection identically for INTERP and AUTO, then entered whole-module MIR. Independently, its support scan admitted task-backed MIR satellites even under an explicit interpreter pin. Cached import AST activation had a third route to MIR.
 
-The fix enforces **D8.1.1v15** at each of these boundaries: explicit interp reports `E501` and increments `excluded`, with no execution/fallback; AUTO retains its fallback behavior. A cached support profile remains mode-independent, and strict execution separately validates indexed definitions before accepting it. Synchronous procedures conservatively marked task-capable keep their existing local proof. The formal design and Ast_Interpreter working ledger (AI24) record the user ruling.
+The fix enforces **D8.3.1** at each of these boundaries: explicit interp reports `E501` and increments `excluded`, with no execution/fallback; AUTO retains its fallback behavior. A cached support profile remains mode-independent, and strict execution separately validates indexed definitions before accepting it. Synchronous procedures conservatively marked task-capable keep their existing local proof. The formal design and Ast_Interpreter working ledger (AI24) record the user ruling.
 
 **At the strict-pin checkpoint, Queens was rejected before execution.** Its untyped `c + r` / `c - r + 7` store keys failed the scalar-index admission test. The subsequent interpreter support fix is recorded in §9.
 
@@ -150,7 +150,7 @@ All output pairs agree. Bounce, fasta, nqueens and fannkuch retain the direction
 
 The support scanner accepted a bare untyped binding as a store key, but its arithmetic-expression walk accepted only integer literals and proved integer range-loop variables. Consequently, `free_maxs[c + r] = v` rejected the whole untyped Queens script even though both operands independently had an executable interpreter path. The typed port passed because its key expression had an explicit integer type.
 
-`interp_checked_scalar_index_expr` now composes the existing binding, integer-type, and range-loop admission cases through `+`, `-`, and `*`. These expressions retain their boxed keys through the existing `member_set_cow` / checked typed-array / COW-path setters: no machine conversion or unchecked store is added. Runtime keys and values retain **S7.1.3v2** validation, snapshots retain **S9.1.2**, and only `var` borrows write through under **S9.1.3**. Mask dispatch, character-range exclusions, and the separate N-D coordinate gate remain. The strict pin still follows **D8.1.1v15**.
+`interp_checked_scalar_index_expr` now composes the existing binding, integer-type, and range-loop admission cases through `+`, `-`, and `*`. These expressions retain their boxed keys through the existing `member_set_cow` / checked typed-array / COW-path setters: no machine conversion or unchecked store is added. Runtime keys and values retain **S7.1.3v2** validation, snapshots retain **S9.1.2**, and only `var` borrows write through under **S9.1.3**. Mask dispatch, character-range exclusions, and the separate N-D coordinate gate remain. The strict pin still follows **D8.3.1**.
 
 Regression coverage runs both Queens ports under explicit interp, checks the validated-board golden, and requires `executed=1 fallback=0 excluded=0`. `proc_derived_untyped_index.ls` covers untyped and typed borrowed stores, nested paths, plain-parameter and binding snapshots, and rejected fractional/null/negative/out-of-bounds/vector keys and incompatible typed values against a shared golden under both pinned tiers.
 
@@ -177,7 +177,7 @@ Their descriptors include the operands' absence, and the comparison emitter
 publishes the same representation consumed by condition lowering. Missing
 numeric-array reads still yield null, including mixed int/float comparisons;
 no declaration is treated as a bounds proof (S6.1.2, S7.1.1v3,
-D2.4.1–D2.4.3). Integer `abs` uses the shared type-preserving native builtin
+D2.3.4–D2.3.5). Integer `abs` uses the shared type-preserving native builtin
 path, retaining the int53 boundary and null/infinity/NaN behavior (S4.1.2).
 
 The existing local float-tree guard also recognizes pure `float()` conversions
@@ -186,14 +186,14 @@ the original boxed conversion/error arm remains. `MirValue` records the complete
 successful-admission contract across that join. Unconverted nullable reads
 prevent publication of a non-null success proof. Fasta therefore avoids the
 conversion/division helpers and repeated successful scalar admission, without
-removing the negative-index or conversion failure arms (D8.2.4v2/D8.2.5v3,
+removing the negative-index or conversion failure arms (D8.2.4/D8.2.5,
 S7.7.2–S7.7.4).
 
 The full corpus caught a boxed/native mismatch in Navier-Stokes. A pure
 `float(i)` over a present numeric scalar does not introduce an error arm, so
 it retains the native join. Fallible conversions keep their boxed join;
 declarations now require the actual emitted carrier to match before selecting
-a native sentinel boundary, as assignments already do (D2.4.1–D2.4.3).
+a native sentinel boundary, as assignments already do (D2.3.4–D2.3.5).
 Coverage includes scalar conversion with a nullable read, mixed converted and
 unconverted reads at a declaration, and reassignment. Both Navier-Stokes ports
 pass after this correction; the failed checkpoint is retained under
@@ -203,7 +203,7 @@ The follow-up Towers check exposed the other half of that descriptor rule:
 an integer arithmetic initializer explicitly lowered as an `IntLane` must
 publish that carrier even when its default AST prediction describes a boxed
 result. The declaration now uses the requested emitted lane, retaining its
-cold null rejection (D2.4.1–D2.4.3, S7.7.2). A minimal nullable integer
+cold null rejection (D2.3.4–D2.3.5, S7.7.2). A minimal nullable integer
 arithmetic declaration covers both success and out-of-bounds failure; Towers
 passes on both pinned tiers. The failed checkpoint is retained under
 `temp/typed_tuning/before_int_carrier_fix/`.
@@ -212,14 +212,14 @@ Array call boundaries reuse maintained full contracts across compatible,
 non-invalidating edges. Mutable locals qualify only while their full proof
 survives; widened, environment, state, borrowed-parameter and guarded-element
 bindings retain their existing admission. Non-identical counted contracts still
-check lengths (D3.3.4).
+check lengths (D2.4.3).
 
 A fresh primitive `fill` can now construct its admitted destination through
 `lambda_fill_for_contract`, installing the exact array certificate before
 return. Declaration/return consumers own their failure; call consumers use the
 existing parameter-error join. The shared call descriptor predicts that join,
 so a boxed error cannot be mistaken for a native scalar return (S7.7.3,
-D2.4.1). Counted call-argument contracts keep ordinary admission to retain its
+D2.3.4). Counted call-argument contracts keep ordinary admission to retain its
 failure order. Zero, floating zero, negative, fractional and null counts retain
 `fill`'s exact-count behavior.
 
@@ -227,14 +227,14 @@ The fill helper interns its certificate before allocating the result. Immediate
 scalar arguments have no GC owner; non-immediate arguments use a precise rooted
 span, and allocating admission roots the filled result. Successful carrier
 checking/certificate installation cannot allocate. This removes the native
-root-frame overhead found in the first recursive nqueens pilot (D5.3.3).
+root-frame overhead found in the first recursive nqueens pilot (D6.3.3).
 A bare float literal proves its numeric lane but does not install a durable
 certificate, so its declaration still performs admission.
 
 The existing CFG liveness pass runs after helper elimination and recomputes root
 stores/reloads from the resulting MIR. There is no second liveness planner,
 conservative native-stack scan or benchmark-specific root deletion. Pointer
-carriers retain their boxed owner roots (D5.3.3).
+carriers retain their boxed owner roots (D6.3.3).
 
 ### 10.2 T0 destination construction and admission — proposals 4–5
 
@@ -244,7 +244,7 @@ evaluates and roots every original field first, then either fills that exact
 layout from existing field proofs or transactionally admits the staged values.
 Failure returns to the ordinary inferred-map boundary with its original
 diagnostic. The shared MIR/T0 adoption gates exclude reordered, computed,
-spread, binder-dependent and unsupported storage layouts (D3.2.4v4,
+spread, binder-dependent and unsupported storage layouts (D4.2.5,
 S7.7.1–S7.7.2). Named identity and recursive/null fields remain intact.
 
 Containment coverage also exposed an existing MIR issue: field admission could
@@ -259,7 +259,7 @@ They reuse the existing trusted shape/array certificate relation, include an
 exact-bool fast path, and avoid a second generic check after completed array
 admission. Binder-dependent contracts still use the invocation environment.
 The existing runtime representation-proof helper and binder walk are shared,
-not copied. No observed-value inline cache is introduced (D3.3.4, D8.4.1v2).
+not copied. No observed-value inline cache is introduced (D2.4.3, D7.4.1).
 Unsupported field layouts still reify; their existing count tests retain that
 requirement.
 
@@ -275,7 +275,7 @@ setter (S7.1.3v2, S9.1.2–S9.1.3).
 After COW preparation, a bounded scalar write into the same certified rank-one
 numeric carrier preserves its certificate directly: the admitted value cannot
 change its rank, count or lane. Views, static storage, list splices, bad indices
-and uncertified owners retain the full checked path (D3.3.3v3). Writes through
+and uncertified owners retain the full checked path (D4.3.3). Writes through
 `var` borrows and plain-binding snapshots retain their distinct ownership rules.
 
 ### 10.4 Correctness checkpoints
@@ -307,7 +307,7 @@ measurements are recorded below.
 Both executables are optimized releases from the same tree, with only this
 working diff separating the candidate from the untouched control. The host is
 Darwin arm64/macOS 26.3, on AC power. All timings use a pinned tier; no AUTO
-measurement enters this report (D8.1.1v15).
+measurement enters this report (D8.3.1).
 
 ### 11.1 Fifteen-pair targeted timing
 
@@ -436,7 +436,7 @@ The final release scan uses one warmup and five alternating pairs per port,
 with a 15-second process limit. All 63 MIR pairs launch; 61 have equal output.
 Pure T0 has 54 comparable pairs. Every accepted T0 diagnostic reports
 `executed=1 fallback=0 excluded=0` and no executed MIR frame entry. Both binary
-hashes remain stable in every campaign (D8.1.1v15).
+hashes remain stable in every campaign (D8.3.1).
 
 | Tier | Equal-output pairs | Typed slower | More than 5% slower | More than 10% slower | Geometric mean typed/untyped |
 |---|---:|---:|---:|---:|---:|
@@ -498,7 +498,7 @@ construction, not those semantics. The previously reported MIR root-reload
 gaps (fannkuch 312,042 versus 40,349; fasta 958,838 versus 812,848) include
 profiler-induced safepoints. They cannot justify a production root-traffic
 diagnosis. Repair the measurement first; retain precise ownership and live
-representation checks (D3.3.4, D5.3.3).
+representation checks (D2.4.3, D6.3.3).
 
 Further tuning should isolate those remaining checked kernels and boxed joins
 with annotation-only repeated workloads and native samples. Every new reduction
@@ -568,7 +568,7 @@ that compares production safepoints and root operations with profiling on/off,
 ignoring diagnostic calls themselves; include dense-loop markers as well as
 helper markers. Recollect executed root counts only after that test passes.
 This repairs measurement; it should not be credited as a speedup of ordinary
-unprofiled execution. Precise rooting remains required by D5.3.3.
+unprofiled execution. Precise rooting remains required by D6.3.3.
 
 ### 13.2 P1 — resolve array proof identity once
 
@@ -594,13 +594,13 @@ helper. Keep live carrier, rank and counted-axis validation; keep structural
 compatibility as the cold path. Avoid embedding heap-local certificates into
 an AST reused across contexts: persistent plans carry stable type metadata,
 with context-owned resolution/activation. This is shared contract metadata,
-not mutable dispatch feedback (D8.4.1v2).
+not mutable dispatch feedback (D7.4.1).
 
 Acceptance: equivalent declarations no longer trigger a structural type walk
 on every warm operation. Test named versus structural types, distinct contract
 spellings, context reuse, counted axes after resize, and representation-changing
 mutations. Certificate identity alone never authorizes a stale carrier
-(D3.3.3v3/D3.3.4). Primary targets: Queens, towers, nqueens and typed stores.
+(D4.3.3/D2.4.3). Primary targets: Queens, towers, nqueens and typed stores.
 
 ### 13.3 P2 — finish fusing typed numeric fill
 
@@ -629,7 +629,7 @@ its exact path, and the same-source untyped fill does not regress. Cover zero
 length, count overflow/allocation limits, exact integral and fractional counts,
 negative/null/error inputs, list splicing, numeric conversions and counted
 contracts. Any allocating path keeps non-immediate arguments and results
-precisely rooted; preserve boundary failure order (D5.3.3, S7.7.2–S7.7.4).
+precisely rooted; preserve boundary failure order (D6.3.3, S7.7.2–S7.7.4).
 
 ### 13.4 P3 — make an already-proved scalar store cheap
 
@@ -681,7 +681,7 @@ metadata and the shared field decoder (`map_shape_field_to_item` or its common
 kernel). On an exact compatible live shape, avoid repeated name hashing and
 field lookup; on a miss, call `fn_member`. Keep nullable receivers, named
 identity, symbol keys and packed field representations correct. Use compile-
-predicted guards, not observed-shape inline caches (D3.2.4v4, D8.4.1v2).
+predicted guards, not observed-shape inline caches (D4.2.5, D7.4.1).
 
 Acceptance: repeated construction no longer invokes general contract
 classification for statically proved fields, and known-field reads avoid name
@@ -703,7 +703,7 @@ proof through both array reads/stores and loop joins. Where it cannot, retain
 the checks. Preserve invalidation across resize, mutation and re-entry; an
 element annotation is not a bounds or non-error proof. Maintain the same
 native value descriptors for inferred and declared expressions using the
-existing MIR planners (D8.2.4v2–D8.2.6, D3.3.4).
+existing MIR planners (D8.2.4–D8.2.6, D2.4.3).
 
 For fasta, first isolate the explicit cast. Both ports still execute 23,796
 `fn_index` calls and 23,796 `fn_lt` calls in the profiled random-generation
@@ -713,7 +713,7 @@ read/comparison; do not attribute common work to annotations.
 
 After P0, measure production safepoints and roots again. Reduce boxing and
 root traffic only where eliminated helpers or proven native lanes justify it.
-Retain precise owners for pointers and null/OOB/error joins (D5.3.3,
+Retain precise owners for pointers and null/OOB/error joins (D6.3.3,
 S7.1.1v3, S7.7.2–S7.7.4). Acceptance requires annotation-only timing evidence,
 not simply fewer instructions in one MIR dump.
 
@@ -729,7 +729,7 @@ each shared-runtime change. No formal ruling changes are proposed.
   algorithms, inputs and borrowing. Include golden files with new scripts.
 - Require equal normalized outputs and pure-T0 eligibility, including both
   Queens ports. Exclusions/timeouts remain visible. Explicit interp cannot
-  fall back to JIT (D8.1.1v15); AUTO is outside the comparison.
+  fall back to JIT (D8.3.1); AUTO is outside the comparison.
 - Run at least 15 alternating pairs per target, preferably 21, in two
   independent release campaigns. Repeat small workloads identically until
   timed execution is roughly 100 ms–1 s; profile separately from timing.
@@ -761,40 +761,40 @@ denominators; these samples locate work, not exact savings promised by a patch.
 The second implementation preserves the §13 acceptance gate. Code completion
 alone does not demonstrate performance parity. Measurements below must use a
 release host with pinned MIR or strict interp, and compare equal normalized
-outputs; no AUTO timings enter the audit (D8.1.1v15).
+outputs; no AUTO timings enter the audit (D8.3.1).
 
 ### 14.1 Implemented work
 
 | Scope | Result |
 |---|---|
-| P0 | Diagnostic call markers now record their existing nonallocating, nonreentrant effects through the shared emitter. The new profiler parity regression compares output, static root slots, root stores, safepoints and MIR memory operations with profiling enabled and disabled. Unknown call effects remain conservative (D5.3.3). |
-| P1 | A heap-owned pointer-key table retains every contract spelling and resolves structurally equivalent spellings to one certificate. Warm boundaries use certificate identity and live carrier/count checks. Immutable AST plans retain Type metadata, with no heap-local certificate embedded in them (D3.3.3v3, D3.3.4, D8.4.1v2). Native sampling identified SipHash overhead on these trusted internal addresses; the table uses the existing pointer mixer through a parameterized shared hashmap helper. |
-| P2 | Generic and typed fill share one primitive construction kernel. The typed exact arm normalizes the count once, captures source scalar bits before allocation, constructs the promised lane and publishes its certificate. T0 destination plans reach this same arm. Certificates resolve primitive-value proof once. Zero/count-limit, incompatible, list, counted and literal-element cases retain checked admission (S7.7.2–S7.7.4, D5.3.3). |
-| P3 | Unique, writable ordinary numeric arrays take a bounded, nonallocating admitted scalar-store arm before helper-owned roots/candidate setup. T0's immutable primitive destination action avoids another contract lookup there. Detach, conversion, views, masks, N-D and list paths retain the existing rooted setter. Scalar declaration/assignment plans skip a boundary only when shared static proofs cover the producer and exclude defects (S9.1.2–S9.1.3, D3.3.3v3). |
-| P4 | Known record construction carries immutable per-field boundary actions. Known member reads guard the predicted live shape and use the shared packed-field decoder, falling back to ordinary lookup on a miss. T0 also plans numeric-index decoding from a declared array contract, with live lane/rank/view and bounds guards (D3.2.4v4, D8.4.1v2, S7.1.1v3). |
-| P5 | The existing finite/dense-loop planners now cover a shrinking two-index tail, retaining invalidation across mutation/reentry. Total explicitly contracted array producers can supply guarded result witnesses across erased locals, with rebind checks. OOB/null and defect joins keep their actual carriers; inferred float returns cannot erase absence (D8.2.4v2–D8.2.6, D2.8.2–D2.8.3). The runner includes a fasta cast/annotation factorial control. |
+| P0 | Diagnostic call markers now record their existing nonallocating, nonreentrant effects through the shared emitter. The new profiler parity regression compares output, static root slots, root stores, safepoints and MIR memory operations with profiling enabled and disabled. Unknown call effects remain conservative (D6.3.3). |
+| P1 | A heap-owned pointer-key table retains every contract spelling and resolves structurally equivalent spellings to one certificate. Warm boundaries use certificate identity and live carrier/count checks. Immutable AST plans retain Type metadata, with no heap-local certificate embedded in them (D4.3.3, D2.4.3, D7.4.1). Native sampling identified SipHash overhead on these trusted internal addresses; the table uses the existing pointer mixer through a parameterized shared hashmap helper. |
+| P2 | Generic and typed fill share one primitive construction kernel. The typed exact arm normalizes the count once, captures source scalar bits before allocation, constructs the promised lane and publishes its certificate. T0 destination plans reach this same arm. Certificates resolve primitive-value proof once. Zero/count-limit, incompatible, list, counted and literal-element cases retain checked admission (S7.7.2–S7.7.4, D6.3.3). |
+| P3 | Unique, writable ordinary numeric arrays take a bounded, nonallocating admitted scalar-store arm before helper-owned roots/candidate setup. T0's immutable primitive destination action avoids another contract lookup there. Detach, conversion, views, masks, N-D and list paths retain the existing rooted setter. Scalar declaration/assignment plans skip a boundary only when shared static proofs cover the producer and exclude defects (S9.1.2–S9.1.3, D4.3.3). |
+| P4 | Known record construction carries immutable per-field boundary actions. Known member reads guard the predicted live shape and use the shared packed-field decoder, falling back to ordinary lookup on a miss. T0 also plans numeric-index decoding from a declared array contract, with live lane/rank/view and bounds guards (D4.2.5, D7.4.1, S7.1.1v3). |
+| P5 | The existing finite/dense-loop planners now cover a shrinking two-index tail, retaining invalidation across mutation/reentry. Total explicitly contracted array producers can supply guarded result witnesses across erased locals, with rebind checks. OOB/null and defect joins keep their actual carriers; inferred float returns cannot erase absence (D8.2.4–D8.2.6, D2.5.2–D2.5.3). The runner includes a fasta cast/annotation factorial control. |
 
 The residual T0 nqueens penalty justified two additional scalar actions within
 this scope. Call entry tests whether an argument is an error before classifying
 its error contract. Inferred or declared int arithmetic uses the existing
 checked integer kernel after live Item-kind guards, with generic fallback for
 out-of-band results, poison, absence and errors. No copied arithmetic kernel
-or observed-value specialization was added (D3.3.2v2, D8.4.1v2).
+or observed-value specialization was added (D4.3.2, D7.4.1).
 
 The same-source MIR control exposed duplicate admission after an implicit
 untyped parameter's error guard. Once that guard excludes error, the remaining
 `any \\ error` boundary is identity; direct calls now retain the guard and omit
-the second runtime check (S11.4.3, D8.3.2). Typed fill also lacked import value
+the second runtime check (S11.4.3, D7.3.2). Typed fill also lacked import value
 classes: its metadata/site pointers are non-GC metadata and its result is always
 a container or defect, with no scalar home. Its registry rows now state those
-facts while retaining allocating, conservative fallbacks (D5.3.3).
+facts while retaining allocating, conservative fallbacks (D6.3.3).
 
 For a statically proved nonnullable, nondefecting int count and plain uncounted
 primitive numeric destination, MIR preserves the native count lane into the
 shared fill action. This removes count boxing and repeated numeric/contract
 classification. Negative counts and poison still use the original diagnostic
 path; certificate resolution stays in the owning execution context, and the
-primitive construction loop remains shared (D2.4.1, D3.3.3v3).
+primitive construction loop remains shared (D2.3.4, D4.3.3).
 
 The expanded annotation controls identified another P4 construction miss in
 prettier_ast: fresh two-field record arguments did not inherit a known callee's
@@ -808,14 +808,14 @@ back to ordinary admission at call entry (S7.7.2–S7.7.4). The diagnostic rerun
 has zero reifications, field visits or copied admission bytes and 49 MB peak
 RSS, with equal output and 405,560,741 interpreted nodes in both variants.
 These counters and memory figures locate the repair; paired release timing
-remains the acceptance gate (D3.2.4v4, D8.4.1v2).
+remains the acceptance gate (D4.2.5, D7.4.1).
 
 ### 14.2 Correctness findings and regression coverage
 
 Fill's intrinsic invalid-count/allocation-size error was missing from effect
 metadata. The registry and shared AST/MIR defect-origination classifier now
 record it. This intentionally preserves checked error joins that the old
-lowering could erase (D6.1.3, S7.7.2). Emission review of
+lowering could erase (D7.1.3, S7.7.2). Emission review of
 `tune4_typed_array_guard` found 67 additional module instructions; its instruction
 budget is 1301 rather than 1234. Guarded-load/store and root-frame budgets are
 unchanged. `gc_effect_forward_allocating` now expects the five live roots of its
@@ -824,7 +824,7 @@ checked caller join rather than the old one-root unchecked return.
 An arithmetic boundary regression exposed a second MIR proof defect: the
 float return-lane predicate accepted an int success type without rejecting its
 carried error. It now rejects defect-capable arithmetic joins before choosing
-a native return lane (D2.8.3). The regression covers the actual returned error,
+a native return lane (D2.5.3). The regression covers the actual returned error,
 not just an emission count.
 
 Adding immutable call metadata enlarged AstCallNode. Postfix propagation can
@@ -841,7 +841,7 @@ records rather than certifying both with the first branch's shape (S11.3.1v2).
 
 Aggregate user pipe calls now use the existing rooted dynamic-call dispatch
 with a virtual first argument, including borrowed homes and suspension handling
-(S10.1.2v4, D5.1.3). Shared argument proofs and T0 destination plans resolve
+(S10.1.2v4, D6.1.3). Shared argument proofs and T0 destination plans resolve
 that receiver to its actual parameter position. The ownership interval walk
 uses the same resolver for receivers and named arguments: ignoring either
 could misclassify a mutating borrow as a readonly observer and omit a snapshot's
@@ -892,7 +892,7 @@ candidate and are retained separately.
 Corrected executed counts in `argument_corrected_roots/result.json` compare
 the typed source with its annotation-erased twin, once per original workload.
 Every pair first passes output/static-root/safepoint parity with profiling off
-and on (P0, D5.3.3).
+and on (P0, D6.3.3).
 
 | Workload | Erased root stores | Typed root stores | Erased root reloads | Typed root reloads | Erased helper calls | Typed helper calls |
 |---|---:|---:|---:|---:|---:|---:|
@@ -997,11 +997,11 @@ The final lowering also addresses the two other sources of redundant work:
   unsigned bounds guard proves that a loaded element cannot be null; the
   signed predicate retains NaN exclusion. The existing fallback owns the
   absent-read result, and effectful/unproved operands remain on their original
-  path (S4.1.2, S7.1.1v3, D2.6.2–D2.6.3).
+  path (S4.1.2, S7.1.1v3, D3.2.2–D3.2.1).
 - Native integer stores now exclude only `INT_LANE_NULL`, using a 64-bit
-  `BEQ`. Infinity and NaN are valid integer storage lanes under D2.6.3; a
+  `BEQ`. Infinity and NaN are valid integer storage lanes under D3.2.1; a
   finite-range gate needlessly sent them through checked setters. The cold
-  setter still owns null rejection or nullable-array demotion (D2.6.2).
+  setter still owns null rejection or nullable-array demotion (D3.2.2).
 
 The pair fixture checks array-read values and branches as well as nullable
 parameters, including float branch conversion, and adds infinity/NaN stores,
@@ -1033,7 +1033,7 @@ An inferred `any` array still needs absence checks: an untyped mutation can
 copy an out-of-bounds null into a valid slot. The extended comparison fixture
 checks that operation, its old snapshot and the subsequent null comparison
 in both tiers (S6.1.2, S7.1.1v3, S9.1.2). A physical integer carrier alone
-does not establish a full null-free source contract (D3.3.4).
+does not establish a full null-free source contract (D2.4.3).
 
 The archived `proof_*` campaigns include annotation-only, same-source and
 actual previous-erased/new-typed comparisons. Their direct MIR nqueens row
@@ -1068,14 +1068,14 @@ qualifies each register by its MIR function, and initializes it at entry even
 when first use lies inside a conditional or loop. Resolution stays after argument
 evaluation, and negative or poisoned counts skip it. Async functions keep their
 existing path. The register dies with the activation: no heap pointer enters an
-AST plan, generated code, module cache cell or cross-context state (D3.3.3v3,
-D8.4.1v2).
+AST plan, generated code, module cache cell or cross-context state (D4.3.3,
+D7.4.1).
 
 The resolved native-fill helper shares the existing primitive kernel and complete
 cold admission; it receives the original contract and boundary for diagnostics.
 Its effect remains MAY_GC with conservative reentry, while metadata resolution is
 NO_GC/nonreentrant and returns a raw non-GC pointer. Precise Item ownership stays
-with the existing root paths (D5.3.3). The activation fixture covers conditional
+with the existing root paths (D6.3.3). The activation fixture covers conditional
 first use, equivalent aliases, repeated loop allocations, distinct primitive
 contracts, invalid counts, incompatible values and full output under forced GC.
 
@@ -1118,7 +1118,7 @@ fixes reduced the original 1.2184× regression, but did not eliminate it. This
 penalty remains visible independently of annotation ratios and corpus averages;
 actual old-erased/new-typed pairs are required before claiming parity against
 that reference. No inferred array is treated as null-free to remove required
-absence semantics (S6.1.2, D3.3.4).
+absence semantics (S6.1.2, D2.4.3).
 
 The existing strict-T0 Prettier ports also retain a visible difference:
 **1.1164 [1.1017, 1.1567]** typed/untyped over 15 pairs
@@ -1182,7 +1182,7 @@ their two acceptance campaigns: median at most one and 95% upper bound at
 most 1.02. 24 demonstrate speedups in both campaigns; 6 meet practical
 equivalence within the 2% measurement tolerance. No positive penalty is
 passed by a corpus mean. Strict T0 diagnostics show zero fallback and zero
-MIR satellite execution (D8.1.1v15).
+MIR satellite execution (D8.3.1).
 
 #### Previous erased release versus completion typed release
 

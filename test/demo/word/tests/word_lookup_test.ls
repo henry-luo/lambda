@@ -1,8 +1,8 @@
 import model: ~~.mod_model
 import lookup: ~~.mod_lookup
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 // request URLs
 [lookup.dictionary_url(" Hello "),lookup.translate_url("How are you?","zh-CN")]

@@ -158,7 +158,7 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         return 1;
     }
     int result = render_export_session_to_png(&session, png_file);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -174,7 +174,7 @@ int render_document_transform_to_png(const char* document_file,
         return 1;
     }
     int result = render_export_session_to_png(&session, png_file);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -208,7 +208,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
         return 1;
     }
     int result = render_export_session_to_jpeg(&session, jpeg_file, quality);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -224,7 +224,7 @@ int render_document_transform_to_jpeg(const char* document_file,
         return 1;
     }
     int result = render_export_session_to_jpeg(&session, jpeg_file, quality);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -316,9 +316,9 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 //   OK\t<html_file>
 //   FAIL\t<html_file>\t<reason>
 
-static void render_batch_cleanup_doc(UiContext* ui_context) {
+static bool render_batch_cleanup_doc(UiContext* ui_context) {
     // retire the document's JS realm before caches; ambient resets erase the live loader's Lambda slots.
-    ui_context->destroy_document();
+    if (!ui_context->destroy_document()) return false;
 
     font_context_reset_document_fonts(ui_context->font_ctx);
     font_context_reset_glyph_caches(ui_context->font_ctx);
@@ -326,6 +326,7 @@ static void render_batch_cleanup_doc(UiContext* ui_context) {
 
     image_cache_cleanup(ui_context);
     InputManager::reset_global_inputs();
+    return true;
 }
 
 static bool render_batch_single(
@@ -406,8 +407,8 @@ static bool render_batch_single(
     }
 
     bool success = !ui_context->render_failed;
-    render_batch_cleanup_doc(ui_context);
-    return success;
+    bool retired = render_batch_cleanup_doc(ui_context);
+    return success && retired;
 }
 
 static void render_batch_report(bool framed, bool ok, const char* source, const char* reason = nullptr) {
@@ -531,7 +532,7 @@ int cmd_render_batch(int argc, char** argv) {
         bool ok = export_formats
             ? render_batch_export(&ui_context, html_file, output_png, (float)vw, (float)vh, device_scale) == 0
             : render_batch_single(&ui_context, html_file, output_png, vw, vh, device_scale, cwd);
-        if (export_formats) render_batch_cleanup_doc(&ui_context);
+        if (export_formats && !render_batch_cleanup_doc(&ui_context)) ok = false;
         if (ok) {
             render_batch_report(export_formats, true, html_file);
             success_count++;
@@ -539,6 +540,8 @@ int cmd_render_batch(int argc, char** argv) {
             render_batch_report(export_formats, false, html_file, "render error");
             failure_count++;
         }
+        // A refused document still owns its caches and must not be replaced by the next job.
+        if (ui_context.document) break;
 
         if (rss_report) {
             struct rusage ru1;

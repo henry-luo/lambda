@@ -7,7 +7,7 @@
 > **Scope:** Read `.docx` files and convert their supported WordprocessingML
 > content into a semantic Lambda element tree, an HTML fragment, plain text,
 > and structured diagnostics; export supported HTML elements as new editable DOCX packages.
-> **Formal linkage:** D7.2.1 governs package/module behavior; D7.2.4v4 governs
+> **Formal linkage:** D9.3.1 governs package/module behavior; D9.3.4 governs
 > the shipped `lambda.*` namespace and document-package paths. This proposal
 > does not revise either ruling.
 
@@ -34,7 +34,7 @@ provide an HTML fragment, extracted text, metadata, and diagnostics.
 ```
 
 The import path is `lambda.doc.docx`, backed by
-`lmd/package/doc/docx.ls`, consistent with D7.2.4v4's document package layout.
+`lmd/package/doc/docx.ls`, consistent with D9.3.4's document package layout.
 The package has no native runtime dependency and adds no third-party runtime
 library.
 
@@ -228,7 +228,7 @@ before lowering. Full visual properties such as font metrics, exact spacing,
 columns, borders, and page-relative floating placement are not part of the
 semantic v1 contract. The supported paragraph-anchor subset uses CSS floats,
 distance/effect extents, and signed offsets for column-start square wrapping
-at a paragraph anchor (D7.2.4v4). Explicit no-wrap offsets use absolutely positioned
+at a paragraph anchor (D9.3.4). Explicit no-wrap offsets use absolutely positioned
 boxes anchored to their paragraph, with compact CSS layer ranks on either side
 of body text. The root owns their stacking context; empty anchor paragraphs
 retain their source line height. Shape properties and colors are validated data,
@@ -237,7 +237,7 @@ sides of an interior image still retain diagnostics.
 Footnote/endnote separator and continuation-separator definitions are metadata,
 not document notes. Annotation parts resolve IDs and relationships in their
 own part context; referenced content shares the paragraph/table/style lowering
-used by the main body (D7.2.4v4). Repeated references point to one annotation,
+used by the main body (D9.3.4). Repeated references point to one annotation,
 and source numeric IDs do not determine display numbering. Plain text retains
 reference markers and appends labelled annotation text after the body, grouped
 as footnotes, endnotes and comments. Significant source whitespace is retained.
@@ -316,7 +316,7 @@ main part from package relationships. Support paths and pre-opened ZIP trees.
 
 **Dependencies:** Existing `input(..., "zip")`, `input(..., "xml")`,
 `lambda/input/input-zip.cpp`, `lambda/input/input-xml.cpp`, and Lambda package
-resolution governed by D7.2.4v4.
+resolution governed by D9.3.4.
 
 **Acceptance:** Minimal valid documents load even with a nonstandard main-part
 path and optional parts absent. Corrupt ZIP, invalid required XML, missing
@@ -420,7 +420,7 @@ documentation convention.
 - [docx2html: DOCX model to HTML](https://github.com/lalalic/docx2html)
 - [ECMA-376, Office Open XML](https://ecma-international.org/publications-and-standards/standards/ecma-376/)
 - [Microsoft Learn: Structure of a WordprocessingML document](https://learn.microsoft.com/en-us/office/open-xml/word/structure-of-a-wordprocessingml-document)
-- Lambda package namespace and package module rules: D7.2.1 and D7.2.4v4 in
+- Lambda package namespace and package module rules: D9.3.1 and D9.3.4 in
   `doc/Lambda_Formal_Design.md`.
 - Existing package directory and import guide: `doc/Lambda_Packages.md`.
 - Existing ZIP and XML input implementations: `lambda/input/input-zip.cpp`
@@ -443,7 +443,7 @@ Native changes expose the existing strict XML parser as
 `{type:"xml", flavor:"document"}` and retain the source byte count through
 `parse()`, preventing significant-space loss, recovery of malformed XML, and
 NUL-prefix acceptance. A reproduced generic-element admission defect in the
-validator is repaired under D7.4.5v2, so captured ZIP elements satisfy `is
+validator is repaired under D9.5.5, so captured ZIP elements satisfy `is
 element`, unions, array element contracts and typed package calls. `name()`
 also reads a virtual element's intrinsic tag through the shared protocol,
 with precise roots for the owner and returned tag during symbol allocation.
@@ -471,7 +471,7 @@ encodings fail explicitly. Detailed validation results are recorded in
 procedural `save` publishes it atomically. `lambda convert -t docx` serializes
 that tree before releasing the transform runtime. The Word demo exposes `.docx`
 through Export while retaining `.word.json` for lossless editor snapshots.
-This follows D7.2.1, D7.2.4v4, D7.5.2 and S12.4.1v3; no ruling changes are needed.
+This follows D9.3.1, D9.3.4, D11.1.2 and S12.4.1v3; no ruling changes are needed.
 
 The finite profile covers prose formatting, headings, lists, tables/merged cells,
 safe links/bookmarks, raster pictures, page geometry and core metadata. Explicit

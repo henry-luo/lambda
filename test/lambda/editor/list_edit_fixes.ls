@@ -1,11 +1,11 @@
 // List editing: (1) Tab/Shift-Tab indent/outdent preserve the caret inside the
 // moved item; (2) Backspace at the start of the 2nd of two adjacent lists joins
 // them. Mirrors the JS reference (the live editor's behaviour).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_md_schema
-import lambda.editor.mod_commands
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.schema.markdown
+import lambda.editor.core.commands
 
 fn st(d, sel) => {doc: d, selection: sel, schema: html5_subset_schema, stored_marks: null}
 

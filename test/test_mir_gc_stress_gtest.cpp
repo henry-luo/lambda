@@ -68,7 +68,7 @@ static const char* kExtraLambdaScripts[] = {
     "test/lambda/physics/package.ls",
     "test/lambda/physics/queries.ls",
     // keep the full reflow/A4 matrix in the golden suite; stress its allocating
-    // score/font/SVG boundaries with a small score instead (D5.3.3).
+    // score/font/SVG boundaries with a small score instead (D6.3.3).
     "test/lambda/music/music_gc_roots.ls",
     "test/lambda/music/music_performance.ls",
     "test/lambda/music/music_midi.ls",
@@ -228,7 +228,7 @@ static void load_gc_policy() {
 
 static bool mode_applies(const StressScript& script, StressMode mode) {
     if (mode == REFERENCE) return true;
-    // D8.1.3 retires MIR interpretation for LambdaJS.
+    // D8.4.1 retires MIR interpretation for LambdaJS.
     if (script.language == mir_check::LANG_JS) return mode == JIT_FORCED || mode == RANDOM_FORCED;
     bool parity = script.parity_reason && !g_full_stress;
     return parity ? mode == INTERP_PARITY : mode != INTERP_PARITY;

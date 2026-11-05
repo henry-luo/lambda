@@ -1,6 +1,6 @@
 // script_run.cpp — tier-neutral entry points that run a Lambda script, a
 // package module or a document transform. T0 runs a planned script directly;
-// only the remaining whole-module branch needs MIR (D8.1.1v15), so a T0-only
+// only the remaining whole-module branch needs MIR (D8.3.1), so a T0-only
 // build (LAMBDA_NO_MIR, vibe/Lambda_Design_Mobile.md MB2) keeps this file.
 
 #include "transpiler.hpp"
@@ -24,7 +24,7 @@
 // ordinary Lambda recursion but not for the deliberately deep `ack2` corpus
 // row. Run the interpreter on a bounded worker stack so the existing recovery
 // boundary can report a language fault instead of receiving a raw guard-page
-// hit (D5.3.3, S7.4.3).
+// hit (D6.3.3, S7.4.3).
 struct InterpWorkerArgs {
     Runner* runner;
     bool run_main;
@@ -36,7 +36,7 @@ static Item interp_worker_run_script(void* opaque) {
     EvalContext* eval = args->runner->context;
     // The large-stack worker has independent JS TLS; bind the shared capsule
     // before an async bridge (for example toPromise) can allocate GC-owned JS
-    // values, preserving the owner/thread invariant (D5.3.3).
+    // values, preserving the owner/thread invariant (D6.3.3).
     bool js_state_initialized = !js_runtime_state_for(eval) ||
         js_runtime_state_init(eval);
     if (!js_state_initialized) {
@@ -184,7 +184,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
             // The JIT output path drains spawned tasks before its Runtime is
             // reused. T0 must do the same: a pending async satellite retains
             // its Script/AST pool, so batch heap/script teardown otherwise
-            // leaves the next worker with a dangling task callback (D5.4.3).
+            // leaves the next worker with a dangling task callback (D6.4.3).
             lambda_scheduler_drain(runner.context->scheduler);
         }
         preserve_context_last_error(result);
@@ -335,7 +335,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                     Item module_result = imp_script->main_func(runner.context);
                     imp_script->module_initialized = !item_is_error(module_result);
                     lambda_recovery_frame_end(module_frame);
-                    // D7.2.2: a module whose init ends in an ordinary error
+                    // D9.3.2: a module whose init ends in an ordinary error
                     // never becomes importable, so its importer does not run,
                     // as on T0 (interp_execute). The result used to be dropped
                     // and main ran against half-set module slots (LR07-17).
@@ -404,7 +404,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"pdf", "lambda.doc.pdf.pdf", "pdf_to_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"eps", "lambda.doc.eps.eps", "eps_to_svg", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
-    // the package parses its own source so the engine sees the adapter registry (D7.2.7)
+    // the package parses its own source so the engine sees the adapter registry (D10.2.2)
     {"latex", "lambda.doc.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"docx", "lambda.doc.docx.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     // imported decks retain the same player handlers as authored .slides presentations
@@ -419,9 +419,9 @@ static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     // the presenter keeps playback state and handlers, so it owns a runtime per document
     {"slides", "lambda.slide.present", "present", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, false},
-    // edit mode selects the application; lambda.edit's registry selects the
+    // edit mode selects the application; lambda.editor.app's registry selects the
     // format adapter and reads the source itself (Radiant_Design_Edit_Mode §4).
-    {"edit", "lambda.edit.edit", "open_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
+    {"edit", "lambda.editor.app", "open_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
 };
 
 const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(

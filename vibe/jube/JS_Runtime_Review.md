@@ -83,12 +83,12 @@ dispatch, and regex glue in one translation unit. Largest functions
 
 Three structural costs QuickJS avoids by *goal selection*, and LJS cannot:
 
-- **JIT versus interpreter (D8.1.1).** The 44.7k-line lowering side (type
+- **JIT versus interpreter (D8.3.1).** The 44.7k-line lowering side (type
   inference, IC emission, scalar-home coloring, safepoint planning, exception-
   poll tracking) is the price of native-code numeric performance; the bench
   suite (Tune7–Tune12 line) shows it paying off on compute kernels. QuickJS
   reads bytecode and pays interpreter dispatch on every operation, always.
-- **Precise GC versus refcounting (D5.2, D5.3).** **863**
+- **Precise GC versus refcounting (D6.2, D6.3).** **863**
   `RootFrame`/`Rooted` uses across `lambda/js` are ceremony QuickJS trades for
   refcount traffic on every value copy plus a cycle collector. Both are real
   costs; LJS's is louder in source, QuickJS's is invisible and paid at run
@@ -100,7 +100,7 @@ Three structural costs QuickJS avoids by *goal selection*, and LJS cannot:
   designed for JS alone. The premise is sound for this project — but §3.3
   shows where its implementation leaked.
 
-Also structurally fine: the helper-effect catalog (D7.4.3) and the S#/D# spec
+Also structurally fine: the helper-effect catalog (D9.5.3) and the S#/D# spec
 ledger have no QuickJS equivalent and are genuine engineering assets.
 
 ## 3. Accidental complexity — four findings
@@ -201,7 +201,7 @@ signaling would delete. This is simplification debt rather than a perf lever.
   the norm (`js_get_implicit_proto`'s chain contract, the promise epoch
   comment, scalar-home ownership notes). Enforced by rule 12, and it shows.
 - **The spec ledger** (S#/D# rulings, vibe decision docs) and the
-  **helper-effect catalog** (GC/exception effects per row, D7.4.3) give the
+  **helper-effect catalog** (GC/exception effects per row, D9.5.3) give the
   runtime a written constitution QuickJS lacks.
 - **Test/golden culture**: 327-test suite, js262 gate, GC-stress gate,
   deterministic batch (byte-identical counts across runs — measured).
@@ -304,8 +304,8 @@ Ordered by structural payoff; items 1–3 also subsume most of Tune1's targets.
    docs should name what the new mechanism *replaces* and gate landing on the
    deletion (the §3.2 pattern is process-caused, and process can prevent it).
 
-What **not** to change: the JIT (bench-justified; D8.1.1), precise rooting
-(rule 15; D5.3), the shared data model itself (the project's reason to
+What **not** to change: the JIT (bench-justified; D8.3.1), precise rooting
+(rule 15; D6.3), the shared data model itself (the project's reason to
 exist), and the catalog/ledger infrastructure — the goal is QuickJS's
 *uniformity*, not QuickJS's architecture.
 
@@ -331,7 +331,7 @@ exist), and the catalog/ledger infrastructure — the goal is QuickJS's
 
 1. Item 1 precondition: how cheap can a callable builtin object be under the
    shared data model — is a shared-shape function map with a C-pointer slot
-   acceptable, or does D6.2's closure representation need a lighter builtin
+   acceptable, or does D7.2's closure representation need a lighter builtin
    variant first?
 2. Item 2: do wrapper identities leak today (`obj === promiseLikeMap`
    observable anywhere), i.e. is the migration observable-behavior-neutral?
@@ -341,7 +341,7 @@ exist), and the catalog/ledger infrastructure — the goal is QuickJS's
 4. For §6 item 6: does the Lambda-side `T^E` / `ItemError` semantics (S-layer
    error model) already define the sentinel contract JS helpers would need,
    or would JS require a distinct sentinel to keep pending-exception JS
-   semantics separate per D7.4.3's "JS pending-exception behavior is not
+   semantics separate per D9.5.3's "JS pending-exception behavior is not
    reused as another guest's exception model"?
 5. What is the actual current test262 pass surface? A measured conformance
    number would anchor the "coverage subset" claim in §1 and size the risk of

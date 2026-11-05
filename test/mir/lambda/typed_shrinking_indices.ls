@@ -1,4 +1,4 @@
-// D3.3.4/S7.1.3v2: a shrinking two-index loop shares its entry extent proof.
+// D2.4.3/S7.1.3v2: a shrinking two-index loop shares its entry extent proof.
 pn reverse_span(var values: int[], lower: int, upper: int) int[]^ {
     var lo: int = lower
     var hi: int = upper

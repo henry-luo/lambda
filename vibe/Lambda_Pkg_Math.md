@@ -5,13 +5,13 @@
 > changes. MathML's first delivery stage was added on 2026-10-14 in §11.
 > Remaining gaps are recorded in §10 and §11.
 > **Scope:** static mathematical typesetting through `lambda.doc.math`.
-> **Formal linkage:** **D7.2.4v3 / D7.2.8 / D7.2.9** — package namespace, distribution, source-specific math policy and bundled font URLs;
-> **D7.1.1 / D7.1.2v2** — layering and resource acquisition;
-> **D7.4.6 / S12.1.1v2** — declared host-function effects;
-> **D4.2.3 / D4.5.2 / D5.4.2–D5.4.4** — context ownership and retention;
-> **D7.1.6** — hosts that exclude Radiant. This consolidation changes no formal
+> **Formal linkage:** **D9.3.4 / D10.2.3 / D10.2.4** — package namespace, distribution, source-specific math policy and bundled font URLs;
+> **D9.1.1 / D9.1.2** — layering and resource acquisition;
+> **D7.1.1 / S12.1.1v2** — declared host-function effects;
+> **D5.2.1 / D5.5.2 / D6.4.2–D6.4.4** — context ownership and retention;
+> **D9.2.2** — hosts that exclude Radiant. This consolidation changes no formal
 > language ruling. The original two rules were user-ratified on 2026-10-10;
-> the MathML scope and source-policy extension were accepted on 2026-10-14 (D7.2.8).
+> the MathML scope and source-policy extension were accepted on 2026-10-14 (D10.2.3).
 
 > **DESIGN RULE 1v2 — Source conformance before visual similarity.**
 >
@@ -64,7 +64,7 @@ corpus pass does not establish complete AsciiMath or serialization parity.
 
 ## 2. Architecture and ownership
 
-**D7.2.4v3** places document math at `lambda.doc.math`; `lambda.math` remains
+**D9.3.4** places document math at `lambda.doc.math`; `lambda.math` remains
 the built-in numerical module. The distributed source lives under
 `<lambda-home>/package/doc/math/`, currently `lmd/package/doc/math/` in this checkout.
 The public renderer is `lambda.doc.math.math`.
@@ -90,17 +90,17 @@ flowchart TD
 | Document/editor integration | Preserve authored source, choose inline/display presentation, and present failures or source fallbacks. |
 | Painter | Paint the supplied SVG and resolved fonts without redoing math layout. |
 
-This separation follows **D7.1.1 / D7.1.2v2**: math policy stays in Lambda;
+This separation follows **D9.1.1 / D9.1.2**: math policy stays in Lambda;
 native services supply facts and never fetch package resources on behalf of
 the renderer. Font-query results are copied values, not borrowed native
 font/document pointers. Context ownership and retained-input lifetimes follow
-**D4.2.3 / D4.5.2**. Host modules declare read queries as functions and effectful
-operations as procedures under **D7.4.6 / S12.1.1v2**; repeated reads require
+**D5.2.1 / D5.5.2**. Host modules declare read queries as functions and effectful
+operations as procedures under **D7.1.1 / S12.1.1v2**; repeated reads require
 a stable font context. A runtime-only host that excludes Radiant cannot supply
-these services (**D7.1.6**).
+these services (**D9.2.2**).
 
 Repeated queries may reuse a validated font snapshot within their owning
-evaluation context (**D5.4.2–D5.4.4**). Identity must include ordered resource
+evaluation context (**D6.4.2–D6.4.4**). Identity must include ordered resource
 bytes and style descriptors; a family name or GC address is insufficient.
 Invalid replacement data must not damage a valid snapshot. Fallback handles
 belong to their font context and must not cross independent contexts. A cache
@@ -485,7 +485,7 @@ authored encoding and baseline translations are font facts; reversing those
 translations preserves the original CMEX logical coordinates. TeX defines
 selection, dimensions, assembly and axis centering. Null delimiters retain
 their space and an axis-centered empty box. No font is added to the bundle
-(**D7.2.4v3 / D7.1.2v2**, Rule 2).
+(**D9.3.4 / D9.1.2**, Rule 2).
 
 All left, right and middle delimiters share the enclosing group's first-pass
 demand, which excludes the delimiters themselves. Under
@@ -588,8 +588,8 @@ script attachment and leader boundaries. Separate under-arrow cases cover
 the nonlinear clearance at 19 physical text sizes with matched scaled fonts.
 This does not certify hooks, maps-to,
 harpoons, paired reactions, other profiles or named-size combinations (§10).
-All constructions remain in the package layer (**D7.2.4v3**), and font/metric
-resources remain acquired through Lambda IO (**D7.1.2v2**).
+All constructions remain in the package layer (**D9.3.4**), and font/metric
+resources remain acquired through Lambda IO (**D9.1.2**).
 
 ## 7. Content and extension surface
 
@@ -630,9 +630,9 @@ geometry, with visible overflow for intentionally protruding ink. It carries
 useful text fallback, not MathML, speech, or a complete accessibility model.
 
 Ordinary encoded glyphs emit SVG text with the exact measured family, weight,
-style and size. Under **D7.2.9** (USER, 2026-10-21), their `@font-face` rules
+style and size. Under **D10.2.4** (USER, 2026-10-21), their `@font-face` rules
 reference the bundled font files by URL. Measurement still consumes IO-owned
-bytes under D7.1.2v2; serializing a formula does not base64-encode those bundled
+bytes under D9.1.2; serializing a formula does not base64-encode those bundled
 bytes again. Caller-supplied faces may provide a `src` URL alongside their
 measurement bytes; bytes-only custom faces retain their existing data URLs.
 Font-local unencoded variants and assembly pieces use outlines; rules and
@@ -886,7 +886,7 @@ shape, reduced raster diff, or green smoke count cannot close these items.
   math package. That corpus completes in the current baseline, but this does
   not establish the timeout's cause or resolution. Neither an all-green
   baseline nor complete UI verification is claimed here.
-- Bound platform-font fallback and standalone portability. Under D7.2.9, the
+- Bound platform-font fallback and standalone portability. Under D10.2.4, the
   corpus checks that bundled font URLs resolve to distributed font files;
   relocated exports still require those resources to remain available.
   Ordinary-font measurements also retain the host's shaping limitations.
@@ -909,8 +909,8 @@ prominent rules.
 
 **Status:** proposal accepted for implementation on 2026-10-14; delivery is
 incremental and the supported subset must be reported separately from the
-planned surface. **Authority:** D7.2.8; package and IO boundaries remain
-D7.2.4v3 / D7.1.1 / D7.1.2v2. This section revises Rule 1 as Rule 1v2:
+planned surface. **Authority:** D10.2.3; package and IO boundaries remain
+D9.3.4 / D9.1.1 / D9.1.2. This section revises Rule 1 as Rule 1v2:
 TeX remains governed by TeX; MathML gains its own source-specific policy.
 
 ### 11.1 Scope and representation
@@ -964,7 +964,7 @@ must explicitly select XML parsing, never the current LaTeX fallback.
 Runtime `format(ast, {type: 'math', flavor: 'mathml'})` and CLI conversion
 invoke the one package exporter above IO; the lower native formatter may
 serialize a MathML tree but must not import or execute a Lambda package.
-Exports must remain usable in hosts without Radiant (D7.1.6).
+Exports must remain usable in hosts without Radiant (D9.2.2).
 
 ### 11.3 Conversion and layout
 
@@ -1052,7 +1052,7 @@ the enclosing element/map/array construction.
 ### 11.6 Native MathML layout in Radiant
 
 The follow-up delivery on 2026-10-14 adds `mathml_layout.ls`, selected by
-`math.render_box` / `render_math` for MathML input (D7.2.8). It traverses the
+`math.render_box` / `render_math` for MathML input (D10.2.3). It traverses the
 MathML tree directly, using Core fraction, side-script, radical, under/over,
 operator and table policies. `geometry.ls` now shares the composition of
 fractions, scripts and radicals with TeX; each caller still supplies its own
@@ -1072,12 +1072,12 @@ Radiant recognizes namespace-qualified math roots with math inner display
 and invokes the package through its existing retained custom-layout/paint
 boundary. The generic callback supplies the live source element and computed
 font size, then retains the returned SVG using precise roots on the owning
-heap (D5.3.3). Static HTML initializes a package runtime lazily; nested renders
+heap (D6.3.3). Static HTML initializes a package runtime lazily; nested renders
 share their active evaluator. Root CSS box decoration, color and size stay
 with Radiant. Semantic MathML children are not flattened into flow, replaced,
 or reparsed, and annotations never enter painted text. Intrinsic queries,
 normal flow and flex use the same package measurement; retained paint shares
-one measurement per font size and layout measurement epoch (D4.5.1v4).
+one measurement per font size and layout measurement epoch (D5.5.1).
 
 This delivery covers the gallery's ten formulas, core token rows, fractions
 including zero bars and empty arguments, side scripts and movable limits,
@@ -1114,7 +1114,7 @@ The 2026-10-18 migration retires `lambda/format/format-math*.cpp` and their
 shared header. `lambda.doc.math.format` owns LaTeX and AsciiMath writers and
 delegates MathML conversion to `mathml`; `math` re-exports the public writers.
 This applies the existing package namespace and IO-layer rules rather than
-changing language semantics (**D7.1.1**, **D7.2.4v3**, **D7.2.8**).
+changing language semantics (**D9.1.1**, **D9.3.4**, **D10.2.3**).
 
 Runtime `format`, CLI `convert` and procedural `output` share the script-format
 route. Hosts without Radiant load only the font-independent writer modules.
@@ -1152,9 +1152,9 @@ with the sampled arrow case reporting syntax outside the JS MVP scope.
 `Math_Support.md` examples compile; the package-reference check retains five
 failures also reproduced from its unchanged HEAD examples. The runtime
 format adapter now roots symbol-to-string option conversions before the next
-allocation (**D5.3.3**). Runtime-only qualification also fills missing weak-map
+allocation (**D6.3.3**). Runtime-only qualification also fills missing weak-map
 lifecycle and excluded-module registration/activation boundary definitions;
-unavailable Jube registration/activation still fail (**D7.1.6**).
+unavailable Jube registration/activation still fail (**D9.2.2**).
 
 ## Appendix A. Brief implementation history
 
@@ -1171,7 +1171,7 @@ On 2026-10-12 the older math notes under `vibe/latex/` were retired into this do
 | Math3 and Math4, through 2026-06-18 | Expanded the formula corpus from 206 to 921 and exposed the limits of case-tuned constants. Rule 15/18 and full-precision composition replaced major fraction/script tables. Historical HTML parity reached about 825/921, a different metric from the current smoke gate. |
 | Math5 box convergence | Removed competing raw/render/strut extent channels as producers acquired real measured boxes. The useful invariant is one full-precision box; ~~MathLive DOM and CEIL@2 emission as authority~~ was superseded. |
 | 2026-10-08–2026-10-09 | Moved production geometry to actual font facts with optional MATH, existing CMU/KaTeX distribution and supplied-font support. Removed STIX and the legacy MathLive renderer/tables/styles. SVG text with embedded fonts replaced ordinary-glyph outline-only painting. |
-| 2026-10-21 | D7.2.9 replaces per-formula bundled-font embedding with file URLs. Glyph measurement retains byte snapshots; bytes-only custom faces retain their existing embedding. Snapshot audits compare all content and geometry with only font source URLs normalized. |
+| 2026-10-21 | D10.2.4 replaces per-formula bundled-font embedding with file URLs. Glyph measurement retains byte snapshots; bytes-only custom faces retain their existing embedding. Snapshot audits compare all content and geometry with only font source URLs normalized. |
 | 2026-10-09 | Added context-owned font snapshot reuse and corrected native SVG scrolling/hit-test cache lifetimes. Release comparisons retained output/target evidence; those host optimizations did not change math policy. |
 | 2026-10-09–2026-10-10 | Approved the CM TeX companion; audited scripts, fractions, spacing, accents, operators and delimiters against TeX. Added native PNG/pdfLaTeX comparison infrastructure and restored several missing command families. The later audit explicitly rejected successful rendering as sufficient conformance evidence. |
 | 2026-10-10 | Ratified TeX-first layout and no-new-font rules. Fixed CM symbol fallback, bracket annotation policy/geometry, vertical-arrow sizing, structural row separators and uppercase KaTeX logo handling. Removed the attempted STIX reintroduction and defined closed multiple integrals through existing-glyph TeX composition. Unsourced extension geometry remains listed in §10. |
@@ -1181,3 +1181,28 @@ On 2026-10-12 the older math notes under `vibe/latex/` were retired into this do
 | 2026-10-10 radical continuation | Replaced bundled whole-surd stretching with TeX's variant/extension and rule construction, restored default indexed-root kern/raise behavior, and selected finite CMEX hats/tildes. Preserved signed optional rule raises. Added shared independent DVI/rule geometry and native radical/accent checks, reusing the existing fonts and metric files. |
 | 2026-10-10 arrow continuation | Replaced six labelled-arrow and six over/under-arrow approximations with AMS/mathtools glyph-leader, style, label and alignment definitions. Preserved TeX's optional-argument and following-script behavior. Added independent leader-boundary geometry and native shaft-continuity checks without adding fonts or metrics. |
 | 2026-10-13 (LaTeX Phase V) | `maps_command`/`unmapped_commands` made unmapped commands reportable (M0). Package symbol tables, upright Greek, double-struck aliases and `\cal` (M2). M8: mathtools colon relations as single relation atoms, `\bm`/`\hm`, `\cancelto`, slanted fractions, the mathtools environments with starred-cases text columns, reported unknown environments, and the bounded mhchem profile (`mhchem.ls`). Then: the symbol fallback order puts KaTeX_Main before KaTeX_AMS, so `\cdot`, `\emptyset`, `\setminus`, `\models`, `\propto` and `\triangle` take their cmsy shapes (`\varnothing` keeps AMS by name); `\boldsymbol` bolds symbols, digits and operators from the bold upright face, `\mathbf` bolds digits, and `\bm` falls back to poor man's bold (§5.1). |
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D7.2.8 → D10.2.3
+
+**D10.2.3*** **Document math preserves its source notation's layout policy.**
+`lambda.doc.math` exports Presentation MathML and accepts MathML element
+trees alongside the existing TeX/AsciiMath AST. TeX-derived layout follows
+the supported TeX definitions; MathML-derived layout follows MathML Core.
+Both reuse font facts and baseline-relative box geometry, without converting
+MathML through TeX or borrowing TeX companion constants for MathML. Conversion
+policy belongs to the script package; XML syntax and serialization remain IO
+mechanisms, with package invocation above IO (D9.1.1, D9.1.2). Unsupported
+conversion/rendering features report errors; support is a documented subset,
+not a claim of complete MathML conformance. Namespace and content identity
+follow S5.4.3 and S2.6.1v2. [Lambda_Pkg_Math §11]

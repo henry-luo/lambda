@@ -1,4 +1,4 @@
-// D7.2.5 / S12.1.3: handlers call these effects; rendering only projects state.
+// D10.2.1 / S12.1.3: handlers call these effects; rendering only projects state.
 import dom
 import m: .mod_model
 import f: .mod_formula

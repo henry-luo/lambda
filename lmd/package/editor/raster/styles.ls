@@ -1,7 +1,7 @@
 // S9.1.3: styles evaluate after adjustments and source masks, before the layer affine.
 import img: lambda.image
 import model: .model
-import sequence: lambda.editor.mod_doc
+import sequence: lambda.editor.core.doc
 pub fn items(node) any^ => if (node == null) [] else [for (child in ((content(node)) ^ { [] }) where ((name(child) == 'style') ^ { false })) child]
 fn checked(options) any^ {
     let config = img.checked_options(options,["kind","color","radius","dx","dy","opacity","outset"])^

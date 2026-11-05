@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import responsive: lambda.ui.core.responsive
 
@@ -13,7 +14,7 @@ pub fn descriptor(props, child) element^ {
     else if (not c.enum_valid(props.shape,["circle","square"])^) raise c.fail("avatar","shape must be circle or square")
     else if (props.src != null and not (props.src is string or props.src is element)) raise c.fail("avatar","src must be a URL or element")
     else if (not all([for (field in ["alt","srcset"] where props[field] != null) props[field] is string])) raise c.fail("avatar","alt and srcset must be strings")
-    else c.node('avatar',props,child,["size","shape","dimension","src","srcset","icon","alt","draggable"])^
+    else descriptor.node('avatar',props,child,["size","shape","dimension","src","srcset","icon","alt","draggable"])^
 }
 fn dimensions(props) {
     let size = if (props.dimension != null) props.dimension else c.option(props,"size","middle")

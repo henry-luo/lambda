@@ -558,7 +558,7 @@ static StrBuf* build_expl3_image(const SecurityIOClient* io = nullptr) {
 
 int load_expl3_format(Engine* e) {
     if (e->opts.io) {
-        // D7.5.5 / D7.2.7v2: a process-global format is not proof that this
+        // D11.2.1 / D10.2.2: a process-global format is not proof that this
         // principal can read its bundled dependencies. Build privately until
         // format images carry a reauthorizable dependency manifest.
         StrBuf* image = build_expl3_image(e->opts.io);

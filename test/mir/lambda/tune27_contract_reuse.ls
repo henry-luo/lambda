@@ -1,5 +1,5 @@
 // Tune27 T27-8 / T27-9: a value that already carries a contract does not cross
-// it again (S11.4.1v3, D3.2.2, D3.2.4v3). Declared bindings and record fields
+// it again (S11.4.1v3, D4.2.3, D4.2.5). Declared bindings and record fields
 // prove their own contract through the optional wrapper; `null` proves `T?`;
 // a non-raising call proves its declared return; a float literal under a
 // float[] contract admits only its null-member arm; a constant index into a

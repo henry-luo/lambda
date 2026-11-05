@@ -1,10 +1,11 @@
 // One source path per applied model node; never parse the painted DOM back into state.
-// The shared factory table keeps tag choice separate from projection (D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+// The shared factory table keeps tag choice separate from projection (D10.2.1).
+import lambda.editor.core.doc
+import lambda.editor.core.step
 import page: .mod_page
 import columns: .mod_columns
-import rendering: lambda.edit.model
+import rendering: lambda.editor.format.model
+import projection: lambda.editor.surface.projection
 import insert: .mod_insert
 import stories: .mod_stories
 import graphics: .mod_graphics
@@ -12,24 +13,6 @@ import table_design: .mod_table_design
 import object_layout: .mod_object_layout
 import group_data: .mod_group_data
 
-let factories = {
-    p:(a,k)=><p *:a, *k>, h1:(a,k)=><h1 *:a, *k>, h2:(a,k)=><h2 *:a, *k>,
-    h3:(a,k)=><h3 *:a, *k>, h4:(a,k)=><h4 *:a, *k>, h5:(a,k)=><h5 *:a, *k>, h6:(a,k)=><h6 *:a, *k>,
-    ul:(a,k)=><ul *:a, *k>, ol:(a,k)=><ol *:a, *k>, li:(a,k)=><li *:a, *k>,
-    table:(a,k)=><table *:a, *k>, thead:(a,k)=><thead *:a, *k>, tbody:(a,k)=><tbody *:a, *k>, tfoot:(a,k)=><tfoot *:a, *k>,
-    tr:(a,k)=><tr *:a, *k>, th:(a,k)=><th *:a, *k>, td:(a,k)=><td *:a, *k>,
-    blockquote:(a,k)=><blockquote *:a, *k>, pre:(a,k)=><pre *:a, *k>, code:(a,k)=><code *:a, *k>,
-    span:(a,k)=><span *:a, *k>, strong:(a,k)=><strong *:a, *k>, b:(a,k)=><b *:a, *k>,
-    em:(a,k)=><em *:a, *k>, i:(a,k)=><i *:a, *k>, u:(a,k)=><u *:a, *k>,
-    del:(a,k)=><del *:a, *k>, s:(a,k)=><s *:a, *k>, sub:(a,k)=><sub *:a, *k>, sup:(a,k)=><sup *:a, *k>,
-    a:(a,k)=><span *:a,class:"word-link", title:a.title or a.href, *k>,
-    hr:(a,k)=><hr>, br:(a,k)=><br>, img:(a,k)=><img *:a>,
-    div:(a,k)=><div *:a, *k>
-}
-fn make(tag,attrs,kids) any^ {
-    let factory = factories[tag] or factories.div
-    factory(attrs,kids)
-}
 // Image resources remain visible; anchor targets become inert tooltips.
 // Imported event handlers never reach the live DOM.
 fn projected_attrs(attrs,preview=false,extra=[]) => {*:map([for (a in attrs where ((contains([*extra,'style','align','start','indent','colspan','rowspan','data-word-style',
@@ -38,18 +21,10 @@ fn projected_attrs(attrs,preview=false,extra=[]) => {*:map([for (a in attrs wher
     'data-word-change','data-word-change-kind','data-word-change-author'],a.name) or
     (not preview and a.name=='id' and (starts_with(string(a.value),insert.bookmark_prefix) or starts_with(string(a.value),"word-source-")))) ^ { false }))
     (string(a.name),string(a.value))])}
-fn wrap_marks(marks,i,child,preview=false,extra=[]) any^ => if (i >= len(marks)) child else {
-    let m = marks[i]
-    let projected = if (m.value is array) projected_attrs(m.value,preview,extra) else {}
-    let attrs = if (projected["data-word-change-kind"]=="delete") {*:projected,contenteditable:"false"} else projected
-    wrap_marks(marks,i+1,make(m.name,attrs,[child]),preview,extra)
-}
-pub fn project(n,child,preview=false,extra=[],text_class="word-text-run") any^ {
-    // one wrapper per leaf preserves source identity (S2.6.5) and lets read-only navigation resolve text ranges.
-    if (n.kind=='text') <span class:text_class,wrap_marks(n.marks,0,if (n.text=="") "\u200B" else n.text,preview,extra)>
-    else if (n.kind=='node') make(n.tag,projected_attrs(n.attrs,preview,extra),rendering.surface_children(n,child))
-    else ""
-}
+// tracked deletions are atomic in the Word editing surface.
+fn mark_attrs(attrs) => if (attrs["data-word-change-kind"]=="delete") {*:attrs,contenteditable:"false"} else attrs
+pub fn project(n,child,preview=false,extra=[],text_class="word-text-run") any^ =>
+    projection.project(n,child,(attrs)=>projected_attrs(attrs,preview,extra),mark_attrs,text_class,"word-link")
 // Thumbnails share document painting but never apply source nodes or duplicate bookmark IDs.
 fn preview_node(n) any^ => project(n,(child)any^ =>preview_node(child),true)
 fn column_body(doc,children,preview=false) any^ {
@@ -61,7 +36,7 @@ pub fn thumbnail(doc,children,width=156,page_no=1) {
     let g = page.geometry(doc)
     let scale = width/g.width;
     <span class:"page-thumbnail",["aria-hidden"]:"true",style:"width:" ++ string(width) ++ "px;height:" ++ string(g.height*scale) ++ "px",
-        <span class:"word-content page-thumbnail-content",style:"width:" ++ string(g.width) ++ "px;transform:scale(" ++ string(scale) ++ ")",
+        <span class:"word-content workspace-document page-thumbnail-content",style:"width:" ++ string(g.width) ++ "px;transform:scale(" ++ string(scale) ++ ")",
             <span class:"word-page",style:page.editor_style(doc,page_no),*column_body(doc,children,true)>>>
 }
 // A printed page shows one window of its section's flow, between measured page starts (see mod_print.breaks).
@@ -77,14 +52,14 @@ pub fn print_page(doc,entry,page_no,total,width,scale=1) {
             stories.story(doc,"header",page_no,total);
             <div class:"print-window",style:"top:" ++ string(g.top) ++ "px;left:" ++ string(g.left) ++ "px;width:" ++
                 string(g.width-g.left-g.right) ++ "px;height:" ++ string(height) ++ "px",
-                <div class:"word-content print-flow",style:"top:" ++ string(-entry.top*scale) ++ "px;width:" ++
+                <div class:"word-content workspace-document print-flow",style:"top:" ++ string(-entry.top*scale) ++ "px;width:" ++
                     string((g.width-g.left-g.right)/scale) ++ "px;transform:scale(" ++ string(scale) ++ ")",*column_body(doc,entry.children,true)>>
             stories.story(doc,"footer",page_no,total)>>
 }
 pub fn print_measure(doc,scale=1) {
     let g = page.geometry(doc);
     <div class:"print-measure",["aria-hidden"]:"true",*[for (children in page.sheets(doc))
-        <div class:"word-content print-measure-sheet",style:"width:" ++ string((g.width-g.left-g.right)/scale) ++ "px",*column_body(doc,children,true)>]>
+        <div class:"word-content workspace-document print-measure-sheet",style:"width:" ++ string((g.width-g.left-g.right)/scale) ++ "px",*column_body(doc,children,true)>]>
 }
 // one sheet of paper: its pages centered in a grid of cells (mod_print.layout); the preview and the PDF share it.
 pub fn print_sheet(doc,sheet,layout,total,width,scale=1) {
@@ -123,7 +98,7 @@ view word_document: map () any^ {
     else project(~,(child)=>apply(child))
 }
 pub fn surface(editor,zoom,read_only=false,layout="print") =>
-    <div id:"edit-surface", class:"word-content", contenteditable:if (read_only) "false" else "true", tabindex:"0",
+    <div id:"edit-surface", class:"word-content workspace-document", contenteditable:if (read_only) "false" else "true", tabindex:"0",
         ["aria-label"]:"Document", ["aria-multiline"]:"true", role:"textbox",
         // reflow before applying the same document scale used by object handles and Print Layout.
         style:"transform:scale(" ++ string(zoom) ++ "); transform-origin:top left; width:" ++

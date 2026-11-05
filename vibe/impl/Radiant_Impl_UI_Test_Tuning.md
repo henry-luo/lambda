@@ -75,7 +75,7 @@ Tried and reverted: a thread-local last-range cache in front of the GC page inde
 
 After this round the 127 heavy fixtures run alone in 248 s (393 s at the start, −37%). By family: doc −39%, dtna −42%, timeline −61%, superlambda −41%, tetris −40%, chart −34%.
 
-Unit test for the font-key fix: `test_radiant_text_query_gtest` (commit ee56c3536). It fails with 24 context builds against the old key and passes with at most 1.
+Unit test for the font-key fix: `test_radiant_document_gtest` (commit ee56c3536). It fails with 24 context builds against the old key and passes with at most 1.
 
 ### 4.2 Doc tree round (2026-10-13)
 
@@ -115,6 +115,124 @@ Verification: a differential run of every UI fixture with replay on and off, wit
 - UI gate: 720/720. Extended suites: 69 of 302 fail, the same count as 2026-10-12 master.
 - Layout baseline: every suite passes except `markdown` `md_nuxt-readme` (100% → 99.3% elements). That regression reproduces with all of this round's full-layout changes disabled, so it comes from code outside this round.
 
+### 4.3 Document integration runner (2026-11-04)
+
+Renamed `test_radiant_text_query_gtest` to `test_radiant_document_gtest`, displayed
+as **Radiant Document Tests**, to reflect its text/layout, controls,
+frame, audio and fullscreen coverage. Build configuration, documentation and CSS
+qualification references use the new name. The shared fixture is
+`RadiantDocumentTest`; baseline filters use that identity.
+
+Production tuning retains each logical-axis mapping in the component-source
+cache instead of rebuilding it at orthogonal boundaries, allocates native CSS
+query scratch only when needed, and caches short macOS Unicode line-break maps
+with owned text bytes and locale invalidation. Each boundary query owns a copy
+of its map, preserving nested-query lifetime (**D4.1.4v5 / D4.5.1v4**).
+
+The user specified the **standalone debug** run as the 30-second acceptance
+gate. Three alternating runs of pinned binaries, with unchanged `debug_native`
+flags, passed all 530 cases each: original **25.74 / 25.99 / 26.89 s**, final
+**20.94 / 19.38 / 19.48 s**. Median wall time fell **25.0%**, to **19.48 s**.
+All original cases and assertions remain; the existing Unicode-boundary case
+also checks reused source storage and retained maps.
+
+The required Radiant baseline passed with **9,197 passed, 303 partial, zero
+failed and two skipped**. Under the original parallel scheduling history, this
+runner passed in **46.41 s wall**; that contention measurement is separate from the
+standalone target. Evidence: `temp/radiant-document-tuning/report.md`.
+
+### 4.4 Slow UI replay continuation (2026-11-05)
+
+The release replay profiles exposed three shared costs:
+
+- Contextual text measurement scanned and copied the entire surrounding word
+  for every grapheme. A `LayoutTextShapingScope` now retains local word boundaries
+  for one immutable layout/intrinsic-text walk and restores nested callers.
+  It borrows source bytes only during that walk (**D5.5.1 / D5.1.4**), stores no
+  font or measured advance, and keeps the existing cross-inline shaping path.
+- Native select labels computed min-content break opportunities when their
+  callers needed only the unwrapped width. A max-content entry into the shared
+  intrinsic-text walker skips that unused work.
+- View membership repeatedly searched the entire DOM. Registry-owned targets
+  now use their ancestor chain; unknown targets retain the address-only search
+  so a potentially retired pointer is not dereferenced (**D5.5.1**).
+
+Regressions cover nested text walks, source-address reuse, font changes, separate
+words, multilingual/spacing width equivalence, and live/detached/synthetic view
+membership. All replay events, assertions and forced-GC settings are retained.
+Release A/B evidence and the required aggregate results are recorded under
+`temp/radiant-slow-ten/report.md`. Two alternating serial runs per pinned release
+host put IME at **4.946 → 2.712 s** median wall and **5.258 → 2.601 s** CPU.
+Card editing improved **5.1%** in wall time; other UI changes are small, with
+selection/caret slightly slower and math unchanged. No several-seconds target
+is claimed for the remaining **8.4 s** slide, **11.7 s** Scene3D navigation or
+**9.3 s** module matrix.
+
+The complete document runner passed **536/536**, and state store **31/31**.
+The full core runner retains seven failures reproduced with pre-continuation
+source. An initial native audio crash passed alone and on two complete retries;
+its cause remains unresolved. The required Radiant baseline passed with **7,894
+passed, 303 partial, 14 skipped and zero failures / 8,211 total**, in **179.001 s**.
+Its parallel original-case latencies remain **7.6–25.7 s**, so the latency target
+remains open under aggregate load. UI passed **324/324**, View **280 + 1 skipped**,
+and the curated document selection **196/196**. Layout integer-cast lint passed.
+
+### 4.5 Per-step latency continuation (2026-11-05)
+
+The acceptance criterion is now **500 ms per UI step**, including assertion
+retries and host work. The previous profiler measured only the successful
+assertion attempt. Timing now accumulates each complete host turn into its
+original step, including asynchronous document loading and retirement, and
+writes the final result after the final turn finishes. A native regression
+checks retry accumulation, step attribution and final JSON publication.
+
+The sheet's selection metadata changes only `cursor`, but ordinary attribute
+invalidation reset and laid out the entire grid on each press/release. Template
+attribute writes now prove that every CSS dependency changes only cursor before
+admitting a commit without layout. It preserves ordinary attribute/observer
+records, recascades styles, and resolves inherited cursors in parent-first order.
+Mixed geometry writes and uncertain dependencies use ordinary layout. A native
+regression checks inheritance, `!important`, attribute removal, the actual
+document-layout counter, and the mixed-width fallback.
+
+String class changes also retain equal descendants and their native input state
+(**D5.5.3**). Attribute changes and template replacements share the existing
+reset/recascade preparation and one final layout. The extended
+`lambda_equal_render` fixture checks input identity/value and changed class
+geometry; its control failed both new checks, and the candidate passes all 12.
+Retained properties keep their existing view/document ownership
+(**D5.5.1 / D5.1.4**).
+
+Two serial runs per pinned **release_native** host, in control/candidate/
+candidate/control order with **one worker**, preserve all 721 original fixture
+events and all GC/backend settings. All eight named UI fixtures have observed
+step maxima below 500 ms. Sheet selection's maximum fell **695.220 → 423.859 ms**
+and median whole-fixture wall time **4.618 → 3.754 s**. Sheet editor's maximum
+fell **352.780 → 237.868 ms**. Other fixtures show small timing changes; their
+overall runtimes have not materially improved. The module test passes its full
+AST/MIR/AUTO positive/negative matrix; each assertion step takes about **0.01 ms**,
+while its six cold hosts still take **9.408 s** in total.
+
+**The complete latency target remains open.** Scene3D has four navigation steps
+over budget in each candidate run; its maximum is **2,545.285 ms**, versus
+**2,561.627 ms** in the control. Diagnostic sampling and JS phase logs identify
+module evaluation and synchronous MIR function promotion/code generation;
+384 function compilations total about 4.95 s across the replay. No JS policy,
+backend, vendor code, fixture workload or GC setting was changed. Parallel
+aggregate timings are separate from these serial observations. Evidence and
+remaining targets: `temp/radiant-slow-ten/step-report.md` and `step-budget.json`.
+
+The complete native document runner passes **538/538**, state store **31/31**,
+and layout integer-cast lint passes. The required Radiant baseline records
+**7,900 passed, 303 partial, 14 skipped and one failure / 8,218 total**, in
+**173.903 s**. UI passes **326/326**, View **280 + 1 skipped**, and the curated
+document selection **198/198**. The failure,
+`DomDocumentOwnership.WindowRetainsDocumentWhileItsLoaderRuns`, also fails in
+a separately rebuilt pre-tuning production-source control with the same exit
+status 4. Cleanup preflight in unchanged `ui_context.cpp` overlooks a document
+whose only evaluator is `loader_runtime`. The aggregate gate therefore remains
+red. Candidate sources were restored and hash-verified after that control.
+
 ## 5. What remains heavy
 
 - `view/radiant_view_math_intensive_scroll` (~21 s):
@@ -125,7 +243,7 @@ Verification: a differential run of every UI fixture with replay on and off, wit
   - Further gains need an old generation with write barriers.
 - Doc fixtures:
   - Pane clicks replay the file panel (§4.2). A file selection still re-renders the whole tree, because the selection highlight is app state; moving it into the rows would let a selection re-render only the two affected rows.
-  - The incremental rebuild still deep-copies every re-render into fresh DOM, so a re-rendered subtree is always fully restyled and relaid. That copy is an implementation choice, not a ruling: **D4.5.3v2** governs only DOM construction from Lambda scripts and embraces retention downstream. [Lambda_Proposal_DOM_Reconciliation](../Lambda_Proposal_DOM_Reconciliation.md) designs keeping and patching existing occurrences; its condition for reuse (Q2) and phasing (Q4) await review.
+  - The incremental rebuild still deep-copies every re-render into fresh DOM, so a re-rendered subtree is always fully restyled and relaid. That copy is an implementation choice, not a ruling: **D5.5.3** governs only DOM construction from Lambda scripts and embraces retention downstream. [Lambda_Proposal_DOM_Reconciliation](../Lambda_Proposal_DOM_Reconciliation.md) designs keeping and patching existing occurrences; its condition for reuse (Q2) and phasing (Q4) await review.
   - `test/ui/doc_editor.ls` is an 86% fork of the shipped `lmd/package/doc/doc_viewer.ls`. Retiring it is the owner's decision.
 - dtna `rate_modes` and `button_modes` (6–7 s): not profiled yet.
 

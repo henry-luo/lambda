@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import interaction: lambda.ui.core.interaction
 import icons: .icons
@@ -13,7 +14,7 @@ pub fn descriptor(props, child) element^ {
     else if ((c.has(props,"status") and props.status == null) or (c.has(props,"variant") and props.variant == null))
         raise c.fail('alert',"status and variant must name a supported choice")
     else if (props.close_label != null and not (props.close_label is string)) raise c.fail('alert',"close_label must be a string")
-    else c.node('alert',props,child,properties)^
+    else descriptor.node('alert',props,child,properties)^
 }
 fn closable(props) any^ => c.option(props,"closable",props.close_icon != null and props.close_icon != false)
 fn status(props) string^ => c.text(c.option(props,"status",if (props.banner) 'warning' else 'info'))^

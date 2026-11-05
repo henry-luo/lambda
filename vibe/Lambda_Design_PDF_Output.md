@@ -11,7 +11,7 @@
 > cases are deferred to phase 2. Map support is authorized, including nested
 > dictionary/array values. Finite floats use shortest round-trip digits;
 > decimals remain deferred (USER, 2026-10-02). The raw/dictionary subset and
-> virtual-list mechanism are recorded in S2.6.6v2/D2.6.12v2; SO48/DO32 retain
+> virtual-list mechanism are recorded in S2.6.6v2/D3.5.1; SO48/DO32 retain
 > the remaining mappings and API issues.
 > **Export direction selected 2026-10-14 (USER):** keep shared native tree
 > walking, invoke Lambda callbacks with schema-backed views and traversal
@@ -20,15 +20,15 @@
 > consumes no general PaintCmd stream and requires no tree-link fields in
 > Lambda. See the [phase 2 plan](impl/Lambda_Impl_PDF_Output_Phase2.md).
 > **Implementation increment, 2026-10-15:** fixed/native binary schemas
-> (S11.5 / D3.5) and experimental continuous-page Lambda output are available
+> (S11.5 / D4.4) and experimental continuous-page Lambda output are available
 > through `lambda.doc.pdf.output`; solid boxes, glyph outlines, images with alpha,
 > transforms and clips are implemented. Full migration gates remain open in
 > the phase 2 progress record.
 > **Scope:** PDF export, the view projection it needs, and a reusable file
 > content builder. PDF input and CSS layout remain separate subsystems.
 > **Spec linkage:** S2.2.2v2/S2.2.4, S2.6.1v2–S2.6.5, S12.1.1v3,
-> S16.7.1, S2.6.6v2; D2.6.5v4/D2.6.6v3/D2.6.12v2, D7.4.4/D7.4.5v2,
-> D5.3.3–D5.3.4, D5.4.1, D8.2.6.
+> S16.7.1, S2.6.6v2; D3.3.1/D3.1.1/D3.5.1, D9.5.4/D9.5.5,
+> D6.3.3–D6.3.4, D6.4.1, D8.2.6.
 
 ## 1. Proposed outcome
 
@@ -133,10 +133,10 @@ in §5.3; the draft must not infer that contract from buffer storage alone.
 The production file dispatch retains `render_html_to_pdf()` and its document
 transform counterpart as native session/save adapters. They lend the committed
 view to `lambda.doc.pdf.output.render_view`, which generates a completed PDF file
-functionally (S2.6.6v3, D2.6.12v3, D8.2.6v2). `radiant_pdf_walk.cpp` invokes
+functionally (S2.6.6v3, D3.5.1, D8.2.6). `radiant_pdf_walk.cpp` invokes
 Lambda callbacks through the shared walker and ordered page visitor. Native
 helpers return bounded geometry or owned image/alpha resources; PaintCmd is
-not a Lambda document ABI (D7.4.4, D7.4.5v2).
+not a Lambda document ABI (D9.5.4, D9.5.5).
 
 `render_pdf.cpp` now contains no PDF operator/object writer. The retired
 `lib/pdf_writer.c` and its HPDF-compatible API/header have been removed after
@@ -166,8 +166,8 @@ the final atomic save; rendered content is not silently omitted.
 
 ### 4.1 Reuse the carrier and declare the export interface
 
-**D7.4.5v2** already establishes `Velmt` as the virtual carrier for
-element-shaped host data. **D7.4.4** requires declared interfaces and
+**D9.5.5** already establishes `Velmt` as the virtual carrier for
+element-shaped host data. **D9.5.4** requires declared interfaces and
 record-owned hooks. Extend that infrastructure with an export view interface;
 do not introduce a second container taxonomy or expose native addresses as
 Lambda values.
@@ -218,10 +218,10 @@ PDF drawing operators directly. A single node-entry callback is insufficient
 to represent all painting phases.
 
 The native adapter uses the declared host interfaces and the existing runtime
-callback path (**D7.4.4 / D5.4.1**), with precise argument/result ownership
-(**D5.3.3–D5.3.4**). Callbacks are synchronous and cannot suspend beneath a
-native barrier (**D7.4.2v2**). Output forwarding across this callback boundary
-must carry the destination explicitly under **D2.6.12v2**, preserve
+callback path (**D9.5.4 / D6.4.1**), with precise argument/result ownership
+(**D6.3.3–D6.3.4**). Callbacks are synchronous and cannot suspend beneath a
+native barrier (**D9.5.2**). Output forwarding across this callback boundary
+must carry the destination explicitly under **D3.5.1**, preserve
 **S12.1.1v3**, and return errors without emitting the rest of a failed document.
 Exact callback signatures and the producer ABI remain implementation work.
 
@@ -251,7 +251,7 @@ export itself must report invalidation as failure, not silently emit a
 truncated tree.
 
 Use precise `RootFrame`/`Rooted` ownership for retained Lambda values and
-trace callbacks for retained Item edges, following **D5.3.3–D5.3.4**. A GC
+trace callbacks for retained Item edges, following **D6.3.3–D6.3.4**. A GC
 root for a wrapper alone does not keep a separate native arena alive: the
 session must own or pin that lifetime explicitly.
 
@@ -265,7 +265,7 @@ logical sequences where glyph identity alone is ambiguous.
 
 Radiant supplies selected faces and final placement through its shared glyph
 visitor. Lambda writes font dictionaries, widths, Unicode maps, text operators
-and streams under **S2.6.6v3 / D2.6.12v3**. Complete static TrueType faces are
+and streams under **S2.6.6v3 / D3.5.1**. Complete static TrueType faces are
 embedded, with collection faces rebuilt as standalone SFNT programs.
 CFF/OpenType uses the matching font type and PDF 1.6. Native, variable and
 color/bitmap formats use generated Type 3 font programs: glyph descriptions
@@ -274,7 +274,7 @@ Type 3 resources use 256-code banks and are shared across pages.
 
 Font snapshots own their bytes. Isolated SVG font contexts remain owned until
 export retirement; retained handles release before their contexts
-(**D4.5.1v4 / D5.3.3**). Embedding permissions are checked before preparing
+(**D5.5.1 / D6.3.3**). Embedding permissions are checked before preparing
 font programs. Subsetting is a later size optimization.
 
 Simple opacity groups are PDF transparency forms containing text. Raster-only
@@ -295,7 +295,7 @@ value wrapper, each value is a PDF object. The format encoder must carry this
 context explicitly rather than use content normalization recursively.
 
 The current subset implements map contributions and physical map/array object
-values under **S2.6.6v2/D2.6.12v2**. The table also describes future direct
+values under **S2.6.6v2/D3.5.1**. The table also describes future direct
 scalar/array contributions, virtual source containers, and explicit wrappers;
 those remain SO48. Ordinary lists still spread at the file boundary.
 
@@ -322,7 +322,7 @@ The choice of which Lambda kind maps to each form is this proposal's design.
 
 An array stays an array, consistent with **S2.5.1v2/S2.6.3**. Typed numeric
 arrays and admitted virtual arrays use the same mapping; admitted virtual
-maps use the map mapping under **D7.4.5v2**. Range materialization must be
+maps use the map mapping under **D9.5.5**. Range materialization must be
 explicit in phase 1 to avoid accidentally expanding an unbounded value.
 
 Example mappings, showing the object encoding without surrounding
@@ -427,7 +427,7 @@ existing builders while selecting a byte destination for file content. A
 common builder interface. This does not require making every current method
 of the Input-owned `MarkBuilder` virtual or duplicating its allocation code.
 
-For the authorized map MVP, **D2.6.12v2** places the object encoder inside
+For the authorized map MVP, **D3.5.1** places the object encoder inside
 `PDFBuilder`, with document construction in Lambda. It reads existing map
 fields and array slabs and appends their encoding directly, without a complete
 serialized object string or fragment array. Whether the full migration moves
@@ -472,14 +472,14 @@ exact C/C++ interface remain implementation choices.
 
 No output state is stored in EvalContext, TLS, or InputAllocationContext.
 The receiver passed to `list_push` identifies the destination completely.
-This follows **D2.6.5v4**, where append discipline belongs to the destination,
-and preserves **D5.4.1**. Ordinary nested arrays and elements use their own
+This follows **D3.3.1**, where append discipline belongs to the destination,
+and preserves **D6.4.1**. Ordinary nested arrays and elements use their own
 normal receivers. Nested PDF files have distinct receivers and builders;
 there is no parent context to restore.
 
 The word *virtual* here describes construction storage. It does not create
 another Lambda list kind, change `is_spreadable`, or automatically implement
-the readable host-container protocol of **D7.4.5v2**. Publication of a retained
+the readable host-container protocol of **D9.5.5**. Publication of a retained
 file value still needs the contract in §5.3.
 
 For example, this is a proposed source fragment, not a complete PDF:
@@ -569,7 +569,7 @@ Both evaluators must select the extended allocation and support the finish
 protocol. Existing ordinary element construction remains unchanged.
 
 Root the receiver and input Item across allocating encoder calls under
-**D5.3.3–D5.3.4**. Copy each borrowed byte span before its owner can expire;
+**D6.3.3–D6.3.4**. Copy each borrowed byte span before its owner can expire;
 retained Items need precise tracing. The extra pointer does not automatically
 establish ownership: specify who owns and releases the builder and buffer
 on success, failure, or abandonment. Emitting a value neither frees a live
@@ -582,8 +582,8 @@ implement a readable virtual list. Representation details are in Appendix B.
 
 ### 5.5 Producer functions must receive the destination
 
-**USER, 2026-10-15 — functional generation (S2.6.6v3, D2.6.12v3,
-D8.2.6v2).** The PDF pipeline, including source snapshots, private print
+**USER, 2026-10-15 — functional generation (S2.6.6v3, D3.5.1,
+D8.2.6).** The PDF pipeline, including source snapshots, private print
 layout, callbacks, resource conversion, measurement and document construction,
 uses `fn`. Loading a source never executes its scripts or mutates a caller's
 live document. `lambda.doc.pdf.output.render(source, options)` and the facade's
@@ -610,7 +610,7 @@ list already constructed by `pdf_output()` before that call returns. The
 same applies to a large serialized string constructed inside a producer.
 
 Pass the virtual destination explicitly through internal lowering for
-output-demanded evaluation, under **D8.2.6v2**. An eligible producer uses
+output-demanded evaluation, under **D8.2.6**. An eligible producer uses
 that receiver for result contributions through blocks, branches,
 for-expressions, and nested producer calls. A specialized emission entry may
 take a hidden `List*` destination; ordinary calls retain their value-returning
@@ -666,7 +666,7 @@ if evaluation continues past a point where an error should have propagated.
 Nested files own separate receivers. Propagated errors, early exits,
 cancellation, and native recovery must release construction-owned resources;
 C++ destructors alone are insufficient across recovery that bypasses them
-(**D5.3.6v2**). No output-frame restoration is needed. Phase 1 stays synchronous;
+(**D6.3.6**). No output-frame restoration is needed. Phase 1 stays synchronous;
 no builder is implicitly inherited by another task.
 
 ### 5.6 What the virtual list resolves and what remains
@@ -676,7 +676,7 @@ append dispatch without changing context state. Future builders can reuse
 the extension and dispatch interface. These remaining contracts are deferred under **SO48/DO32**, as requested on
 2026-10-02; they do not block the raw-fragment/dictionary MVP:
 
-1. **Producer propagation coverage.** D8.2.6v2 settles explicit demand and
+1. **Producer propagation coverage.** D8.2.6 settles explicit demand and
    completion. Extend eligible call shapes while preserving type boundaries;
    generic calls may still append already-produced values.
 2. **Completed file value.** Settle indexing, iteration, equality, copying,
@@ -687,18 +687,18 @@ the extension and dispatch interface. These remaining contracts are deferred und
 3. **Ownership and failure.** Define extended allocation, flag layout,
    tracing/destruction, checked append failure, finish-once behavior, and
    native recovery across task/fault boundaries. Checked appends and expression
-   checkpoints/rewind are now ruled in D2.6.12v3.
+   checkpoints/rewind are now ruled in D3.5.1.
 4. **PDF encoding boundary and accounting.** The map MVP uses native object
-   encoding under D2.6.12v2; choose the full package migration boundary and
+   encoding under D3.5.1; choose the full package migration boundary and
    remaining mappings separately. Byte-offset/stream-length rules remain
    necessary. The shared counting destination is implemented under
-   D2.6.12v3; a future single-pass offset API must be explicitly
+   D3.5.1; a future single-pass offset API must be explicitly
    tied to a destination and preserve the pure/procedural boundary.
 
 ## 6. PDF construction in Lambda
 
 Extend `lmd/package/doc/pdf/` with output modules and export an entry through its
-existing package facade, following **D7.2.4v3**. Keep shared coordinate/color
+existing package facade, following **D9.3.4**. Keep shared coordinate/color
 helpers where their contracts match; input interpretation and output
 serialization have different responsibilities.
 
@@ -845,12 +845,12 @@ claimed by this proposal. Keep temporary artifacts under `./temp/`.
 | S2.5.1v2 and S2.6.1v2–S2.6.5 | Keep lists spreading and arrays structured; apply content normalization only at content boundaries, not inside object slots; settle observation/update behavior. |
 | S16.7.1 and S16.9.3 | Activate only the explicit PDF file constructor; preserve script-top-level semantics and the attribute/content boundary comma. |
 | S12.1.1v3 | Preserve the boundary between value construction and external I/O, including measurement eligibility. |
-| D2.6.5v4 and D2.6.6v3 | Document the extended List destination and representation flag; preserve the shared container prefix and content/sequence/slot distinction. |
-| D7.4.4 and D7.4.5v2 | Reuse the declared host interface and structural virtual carriers. |
-| D5.3.3–D5.3.4 and D8.2.6 | Document ownership/rooting and content-destination lowering without weakening semantic equivalence. |
-| D5.4.1 and D5.3.6v2 | Leave context state unchanged; preserve precise recovery and ensure construction-owned resources are released on all exits. |
+| D3.3.1 and D3.1.1 | Document the extended List destination and representation flag; preserve the shared container prefix and content/sequence/slot distinction. |
+| D9.5.4 and D9.5.5 | Reuse the declared host interface and structural virtual carriers. |
+| D6.3.3–D6.3.4 and D8.2.6 | Document ownership/rooting and content-destination lowering without weakening semantic equivalence. |
+| D6.4.1 and D6.3.6 | Leave context state unchanged; preserve precise recovery and ensure construction-owned resources are released on all exits. |
 
-The authorized MVP subset is recorded as **S2.6.6v2/D2.6.12v2**. **SO48/DO32**
+The authorized MVP subset is recorded as **S2.6.6v2/D3.5.1**. **SO48/DO32**
 keep the remaining decisions open. Direct scalar/array contributions, decimal
 encoding, virtual sources, retained-content contracts, producer-forwarding ABI,
 and Radiant migration remain deferred. Future rulings must update the formal and working records
@@ -890,7 +890,7 @@ finish. Readable publication and the other SO48/DO32 contracts remain open.
 - **Element allocation.** There is no separately allocated content-list
   object in an ordinary Element: `Element : List` carries the content fields
   directly, and both evaluators append through `(List*)element`
-  (**D2.6.6v3**). The PDF file therefore needs an Element extension, inheriting
+  (**D3.1.1**). The PDF file therefore needs an Element extension, inheriting
   the List prefix and adding the builder pointer. Use the actual extended
   subtype in the downcast; sharing a prefix does not make unrelated C++
   subclasses interchangeable. A plain List must never be read beyond its
@@ -962,7 +962,7 @@ lookup and output-frame installation/restoration. Producer destination
 propagation, resource cleanup, and expression rollback remain necessary;
 they now operate on explicit construction-owned destinations.
 
-Superseded for the map MVP on 2026-10-02 by **D2.6.12v2**; the full package
+Superseded for the map MVP on 2026-10-02 by **D3.5.1**; the full package
 migration boundary remains DO32:
 
 ~~The recommendation is that PDFBuilder handles byte storage and invokes a
@@ -979,5 +979,37 @@ object numbers, so page selection and viewport clipping cannot create dangling
 references. URI links and resolved internal links retain annotations. Explicit
 PDF outline attributes still require valid emitted destinations and remain
 errors when unresolved. Functional generation and final saving retain
-S2.6.6v3, D2.6.12v3 and D8.2.6v2; this changes the presentation package’s link
+S2.6.6v3, D3.5.1 and D8.2.6; this changes the presentation package’s link
 policy, not element/file content semantics.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D2.6.12v3 → D3.5.1
+
+**D3.5.1*** **Virtual output lists carry their builder.** A PDF file's
+content destination extends the existing List prefix (through Element)
+with a builder pointer. Its `is_virtual` representation flag dispatches
+content append to that builder instead of an Item array; it is independent
+of the `is_spreadable` kind bit. Normal lists keep their existing storage.
+A common builder interface admits future destinations. No output context
+or allocator context is installed or changed. Finish and ownership follow
+the extended destination. The PDFBuilder's MVP object encoder reads borrowed
+map/array storage and writes bytes directly, retaining no source Item edges;
+document construction stays in Lambda. Emitting and counting destinations
+share the same encoder; counting retains byte lengths without output bytes.
+Pure result-demand lowering passes a rooted destination explicitly through
+eligible calls and control flow. Checked appends return a separate completion
+status; handlers checkpoint and rewind their operand's bytes and failure
+state. Nested file constructors own separate destinations. Completed files
+compose as bytes and support an owned `binary(file)` snapshot (S2.6.6v3).
+General retained-child observation/mutation remains DO32/SO48.
+[PDF_Output §5.4–§5.6]

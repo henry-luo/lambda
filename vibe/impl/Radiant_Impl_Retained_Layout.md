@@ -5,13 +5,13 @@
 retain earlier checkpoint history; the integrated outcome supersedes their pending lists.
 **Design:** [CSS Cascade §3.47](../radiant/Radiant_CSS_Cascade.md#347-resolve-and-lay-out-once-for-unchanged-inputs),
 [View Reuse VR15](../radiant/Radiant_Design_View_Reuse.md#vr15--computation-identity-follows-inputs-and-values-not-execution).  
-**Ownership:** D4.5.1v4 / D4.1.4v5 / D4.5.2; no formal ruling changes.
+**Ownership:** D5.5.1 / D5.1.4 / D5.5.2; no formal ruling changes.
 
 ## Milestones
 
 ### Integrated completion session
 
-**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: complete the remaining
+**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2**: complete the remaining
 continuous-document retained-layout work in one session. Keep the existing
 qualified changes and use focused checks while implementing; run the required
 aggregate gates, full LLVM comparison and paired release timing after integration.
@@ -153,7 +153,7 @@ Implemented and qualified for eligible horizontal selected-view boxes.
   and stretch do not replace definite intrinsic contributions with used limits.
   Replaced-element height policy remains on its existing path.
 
-Pool ownership remains **D4.5.1v4 / D4.1.4v5 / D4.5.2**. Secondary views,
+Pool ownership remains **D5.5.1 / D5.1.4 / D5.5.2**. Secondary views,
 form/SVG roles and unsupported effects retain their adapters; table and HTML
 replaced roles now retain typed computed/used sizing, including HTML dimension hints.
 Vertical flow still stores assigned inline constraints in mutable props; migrate
@@ -209,7 +209,7 @@ height at max-content width. Height validity must be explicit so a subsequent
 column query upgrades the entry instead of interpreting zero as a measurement.
 At the assigned row-flex width, start sharing completed flow with final layout
 for horizontal, auto-height items with one ordinary text child. Keep lines and baselines in their
-selected-view storage (**D4.5.1v4 / D4.1.4v5 / D4.5.2**), and invalidate that
+selected-view storage (**D5.5.1 / D5.1.4 / D5.5.2**), and invalidate that
 result on another trial layout or changed constraints/inputs. Complex flow and
 percentage-dependent descendants remain on the existing path until their
 complete query/result contract is migrated.
@@ -316,7 +316,7 @@ distinct queries, then milestone 4's retained mutation and shared publication.
 horizontal block/inline descendants. Reuse the existing context-independence
 predicate; validate every descendant's computed inputs and reject ordered
 generated effects, dependent lengths, resources and other formatting contexts.
-The selected view still owns one live result (**D4.5.1v4 / D4.1.4v5 / D4.5.2**);
+The selected view still owns one live result (**D5.5.1 / D5.1.4 / D5.5.2**);
 independent fragment storage for A→B→A queries remains a subsequent milestone.
 
 Acceptance: nested inline wrapping and block stacking share their completed
@@ -348,7 +348,7 @@ The new text-mutation regression exposed a pre-existing cycle in
 `dom_text_set_content`: Mark child relinking preserved the old text wrapper
 beside the new wrapper; the subsequent identity repair made its sibling link
 point to itself. Character edits now reuse `dom_text_replace_backed_string`
-and document-owned payloads, preserving node links (**D4.5.1v4 / D4.5.2**).
+and document-owned payloads, preserving node links (**D5.5.1 / D5.5.2**).
 Text and style changes share ancestor intrinsic-input invalidation; text edits
 mark containing geometry dirty without forcing CSS resolution. Initial/retained
 native coverage checks wrapping, margin collapse, final stretch, descendant
@@ -417,7 +417,7 @@ fragment queries or make scalar probes preserve used boundary state.
 
 **VR15:** one continuous-document checkpoint validates published geometry for
 CSSOM reads, task checkpoints and presentation. The selected ViewTree owns the
-snapshot (**D4.5.1v4 / D4.1.4v5 / D4.5.2**). Loader root publication must not
+snapshot (**D5.5.1 / D5.1.4 / D5.5.2**). Loader root publication must not
 discard an already current script-produced tree. A real reset restores authored
 table runs and first-letter source text before resetting their generated props;
 list/pseudo boxes must be regenerated rather than inheriting reset used state.
@@ -533,7 +533,7 @@ inline width, before final cross-axis stretch. A natural-size query owns an
 explicit root constraint; horizontal flex growth and provisional cross stretch
 cannot turn that root's estimated height into a fixed input. Preserve the normal
 final constraint policy, including cyclic percentages and definite stretch.
-Selected-view results keep their existing ownership (**D4.5.1v4 / D4.5.2**).
+Selected-view results keep their existing ownership (**D5.5.1 / D5.5.2**).
 
 The minimal reproducer has two 20px line boxes containing 10px glyphs. Chromium
 gives its column and row 40px; the scalar estimate leaves both at 20px while
@@ -582,7 +582,7 @@ binary/input/source provenance: `geometry-report.json`, `manifest.json` and
 
 **VR15:** isolate the first disagreement between a flex item's natural height
 query and its completed content, then repair the owning stage. Preserve selected
-view ownership (**D4.5.1v4 / D4.5.2**). The owning stage is final flex-content
+view ownership (**D5.5.1 / D5.5.2**). The owning stage is final flex-content
 reconciliation: provisional scalar heights were becoming final parent constraints
 despite completed descendant flow. Query widths, returned heights and enclosing
 flex stages isolate the disagreement, reproduced in a small native fixture.
@@ -740,7 +740,7 @@ measurement of the current binary.
 
 ## Online Notion/Kafka follow-up (2026-10-21)
 
-**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**. Finite acceptance:
+**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2**. Finite acceptance:
 Notion completes a fresh headless load; Kafka follows its redirect without
 running discarded-document background work; container-query changes, script
 microtasks, same-document timers and shape-owner retirement retain their
@@ -766,9 +766,9 @@ microtask changing the pending target is observed before classification.
 
 The remaining index is real page JavaScript. It exposed almost a billion
 linear shape-edge visits; Input-owned root indexing reduces those visits while
-preserving identity, budgets and teardown (**D3.4.3v5 / D3.4.4v4 / D4.2.6**).
+preserving identity, budgets and teardown (**D3.4.3 / D3.4.4 / D5.2.5**).
 RegExp protocol flag reads also use the existing unboxed descriptor helper
-instead of allocating guest descriptor objects (**D6.2.2v2**). Neither change
+instead of allocating guest descriptor objects (**D7.2.2**). Neither change
 removes or delays the final document's search-index task.
 
 An intermediate release (`descriptor-fixed.exe`) completes Notion in 9.049 s
@@ -835,7 +835,7 @@ after `3d9d230c4a311c7c4c1c04e7594bc40f9dcb8a13001c24e2d5610f71648f0335`.
 
 ## Session regression coverage (2026-10-21)
 
-**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**: retain the earlier
+**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2**: retain the earlier
 milestone regressions and add cross-operation tests for the remaining gaps.
 Work bounds use cache/computation/layout counters, not wall-clock thresholds.
 These are deterministic local fixtures; online timing remains separate evidence.
@@ -848,9 +848,9 @@ These are deterministic local fixtures; online timing remains separate evidence.
 | Shared update/publication and Notion convergence | Existing foreign-frame, font, table/list and mutation tests; new `InlineSizeQueryReevaluatesRealWidthChangesAndRepublishesOnce` crosses the query threshold four times, checks generated geometry and ensures repeated reads do not lay out again. |
 | Container constant fast path and owner-relative values | Existing axis/writing-mode and absolute/em cases; new `ContainerRelativeMathUsesOwnerMetricsAndInvalidatesItsCachedResult` checks rem/viewport math against deliberately different fallback metrics, height-independent hits and owner-generation invalidation. |
 | Kafka redirect task settlement | Existing synchronous/microtask, fragment-only and cross-document→fragment cases; new nested-microtask fragment→cross-document and absolute same-document cases preserve the final checkpoint and correct timer policy. |
-| Root shape index (**D3.4.3v5 / D3.4.4v4 / D4.2.6**) | Existing type/spelling/budget and owner-retirement cases; new collision/identity test distinguishes naturally colliding FNV spellings, Symbols and private names; negative-lookup test checks later publication after budget recovery. |
-| Shared Unicode cursor (**D5.3.3 / D5.3.5 / D5.4**) | Existing compiled-call/GC/runtime-reset and UTF-16 range cases; new eviction test interleaves six sources across the four-entry cache and collection, and mutable-buffer test verifies changed bytes never reuse immutable offsets/lengths. |
-| Unboxed RegExp descriptor reads (**D6.2.2v2**) | New `JsOpt.RegexFlagsDescriptorReadsPreserveAccessorsDataAndAbruptCompletion` covers inherited accessor receivers, data descriptors, thrown getters and undefined getters under AST and MIR. |
+| Root shape index (**D3.4.3 / D3.4.4 / D5.2.5**) | Existing type/spelling/budget and owner-retirement cases; new collision/identity test distinguishes naturally colliding FNV spellings, Symbols and private names; negative-lookup test checks later publication after budget recovery. |
+| Shared Unicode cursor (**D6.3.3 / D6.3.5 / D6.4**) | Existing compiled-call/GC/runtime-reset and UTF-16 range cases; new eviction test interleaves six sources across the four-entry cache and collection, and mutable-buffer test verifies changed bytes never reuse immutable offsets/lengths. |
+| Unboxed RegExp descriptor reads (**D7.2.2**) | New `JsOpt.RegexFlagsDescriptorReadsPreserveAccessorsDataAndAbruptCompletion` covers inherited accessor receivers, data descriptors, thrown getters and undefined getters under AST and MIR. |
 | Native build-profile isolation | `utils/test_premake_generator.py` builds and executes debug→release→debug→release consumers, preserving utility/image/archive outputs and checking wrapper/linker paths. |
 
 The renamed `test_radiant_core_gtest` remains the registered native runner;
@@ -867,8 +867,8 @@ are not rerun or presented as fresh measurements.
 
 ## Online sweep repairs (2026-10-21)
 
-**VR15**, ownership **D4.5.1v4 / D4.1.4v5 / D4.5.2**, evaluator boundary
-**D5.4.1**, native interfaces **D7.4.4**. Acceptance: complete the 1,161-URL
+**VR15**, ownership **D5.5.1 / D5.1.4 / D5.5.2**, evaluator boundary
+**D6.4.1**, native interfaces **D9.5.4**. Acceptance: complete the 1,161-URL
 inventory, repair reproduced engine failures, replay affected URLs with a release
 host and run the owning regression gates. HTTP and authored-script failures stay
 visible; URLs and timeouts are unchanged.
@@ -901,7 +901,7 @@ visible; URLs and timeouts are unchanged.
   ignored by tree construction per the [HTML rule](https://html.spec.whatwg.org/multipage/parsing.html#parse-error-end-tag-with-attributes).
   The online detector also catches decoder, container, font-owner and allocator
   errors when the viewer exits zero.
-- **RegExp compilation (D1.3 / D1.4v3):** valid Unicode email patterns exceeding
+- **RegExp compilation (D1.3 / D1.4):** valid Unicode email patterns exceeding
   RE2's program budget use the existing spec matcher. The raw-pattern retry
   previously hid that resource limit behind an unrelated syntax error.
 
@@ -932,7 +932,7 @@ benchmarks. Logs, metrics, frozen binaries/modules and provenance are under
 
 ## Remaining online failures (2026-10-22)
 
-**D4.5.1v4 / D4.1.4v5 / D4.5.2**, **VR15**. First milestone: remove repeated
+**D5.5.1 / D5.1.4 / D5.5.2**, **VR15**. First milestone: remove repeated
 linear custom-property scans observed in Todoist's forced flex measurements.
 Keep declaration ordering, rollback, animation exclusion and declaration-site
 inheritance unchanged. A lazily built, document-owned sorted name index borrows
@@ -948,7 +948,7 @@ with a release host, then run the Radiant baseline at the milestone boundary.
 Keep the 49-page inventory and strict runtime diagnostics intact. Independent
 web API, transport and authored-content failures remain separate work.
 
-**D7.4.4 / D6.2.2v2 / D5.4.1 / D5.3.3**. Next milestone: implement
+**D9.5.4 / D7.2.2 / D6.4.1 / D6.3.3**. Next milestone: implement
 `ParentNode.replaceChildren()` for Element, DocumentFragment and Document through
 the shared DOM operation table. Reuse argument conversion, adoption and backing
 edits; publish one observer record with retained added/removed snapshots.
@@ -966,7 +966,7 @@ conversion failures, observer snapshots, declaring-interface brands and distinct
 method identity; AST/MIR with forced GC; affected page replays and the owning
 Radiant/Lambda/Jube gates. Timings and final outcomes follow verification.
 
-**D1.3 / D7.1.2v2 / D5.3.3**. URL module identities now bypass native
+**D1.3 / D9.1.2 / D6.3.3**. URL module identities now bypass native
 filesystem normalization. Collapsing `https://` to `https:/` made registry
 lookups miss and repeat `realpath`/`getcwd`/`stat`; different URL paths also
 aliased one descriptor. Export publication first checks the actual exported
@@ -975,7 +975,7 @@ alias/reexport updates and rooting their namespace/value. The URL identity
 regression fails before and passes after. Visitors clears its script watchdog
 in strict release replays (60.370s; 83.806s under concurrent build load).
 
-**D1.3 / D6.2.2v2 / D7.4.4**. Optional-call completions carry short-circuit
+**D1.3 / D7.2.2 / D9.5.4**. Optional-call completions carry short-circuit
 state through subsequent calls and member receivers. Grouped expressions end
 the chain using the existing AST source-span boundary, shared with MIR and
 early-error checks; arguments/computed keys stay skipped only within the chain.
@@ -993,7 +993,7 @@ descriptor cases. Native interpreter checks pass 216/216; HTML parser checks
 pass 71/71. Slite home/customers and Proven blog/features now pass strict online
 replays with zero retained allocations. Final aggregate qualification is pending.
 
-**D8.2.4v2 / D4.6.1v4**. A fresh Visitors release profile after the URL repair
+**D8.2.4 / D5.6.1**. A fresh Visitors release profile after the URL repair
 places 500/669 main-thread samples in linear lexical-name lookup. The existing
 NameScope index now hashes spelling, reusing cached ordinary NameMeta hashes,
 and supports two queries over one table: exact identity for compiler bindings,
@@ -1003,7 +1003,7 @@ allocate nothing. A native wide-scope regression covers both query modes,
 foreign-pool hits/misses and duplicate spelling. Native interpreter checks pass
 217/217; release page replays and final runtime gates follow this optimization.
 
-**D4.5.1v4 / D4.1.4v5**, **VR15**. Intrinsic width memoization retains completed
+**D5.5.1 / D5.1.4**, **VR15**. Intrinsic width memoization retains completed
 constraint tuples within the measurement generation, rather than only the last
 query in each percentage/content basis. Nested flex measurement alternates
 constraints; replacing A with B makes A → B → A traverse the same subtree again.
@@ -1018,7 +1018,7 @@ results; authored changes and generation changes miss; cleanup retires history.
 The regression fails on the single-entry implementation. A release Todoist
 replay must establish page impact separately from this cache regression.
 
-**D4.5.1v4**, **VR15**. Todoist's mutation trace also identifies a broad
+**D5.5.1**, **VR15**. Todoist's mutation trace also identifies a broad
 `:dir()` invalidation on every attribute edit. The journal now records whether
 an attribute can affect HTML directionality: `dir`, control value/type, slot
 assignment and namespace changes; unknown attribute identities stay conservative.
@@ -1032,7 +1032,7 @@ child edits, and actual RTL selector updates after dir, text, control value and
 nested auto-direction child changes. Cache-debug output records fallback reasons
 before layout, so release profiling can distinguish invalidation from sizing.
 
-**D4.5.1v4**, **VR15**. Todoist also has a global
+**D5.5.1**, **VR15**. Todoist also has a global
 `body:has(.experiment-target-flash)` selector. Child-list dependency checks now
 inspect the changed subtree for simple positive tag/class/id arguments before
 escalating to the anchor's ancestors. Reuse the shared stable-compound matcher
@@ -1045,7 +1045,7 @@ change, and positional matches changed by an unrelated sibling. All 16 UI
 assertions pass; Todoist's strict release replay determines the page outcome.
 
 **VR15 parser prerequisite**, with published-node ownership under
-**D4.5.1v4**. Scripting-enabled body `noscript` content must be raw text before
+**D5.5.1**. Scripting-enabled body `noscript` content must be raw text before
 DOM construction and resource discovery. Hiding its layout boxes still leaves
 incorrect image nodes and fetches. Retain the fragment context separately from
 the synthetic root so `noscript.innerHTML` also tokenizes as raw text; its closing

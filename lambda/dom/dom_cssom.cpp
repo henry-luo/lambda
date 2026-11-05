@@ -171,7 +171,7 @@ static void cssom_wrapper_attribute_owner(CssomWrapperEntry* entry, DomElement* 
         entry->attribute_owner_ref = {};
     }
     if (owner && dom_node_pin(owner->doc, dom_node_ref(owner), DOM_NODE_PIN_WRAPPER)) {
-        // an Attr wrapper retains its owner without creating a strong GC cache cycle (D4.5.1v4).
+        // an Attr wrapper retains its owner without creating a strong GC cache cycle (D5.5.1).
         entry->attribute_owner_document = owner->doc;
         entry->attribute_owner_ref = dom_node_ref(owner);
     }
@@ -1731,7 +1731,7 @@ static bool cssom_decl_expand_members(CssRule* rule, CssPropertyCode member) {
         for (size_t j = 0; j < length; j++) {
             CssDeclaration* copy = (CssDeclaration*)pool_calloc(rule->pool, sizeof(CssDeclaration));
             if (!copy) return false;
-            // inline commit owns these projections; rule records retain their pool (D4.5.1v4).
+            // inline commit owns these projections; rule records retain their pool (D5.5.1).
             *copy = *source;
             copy->property_code = selected[j];
             copy->name_id = css_property_name_id(copy->property_code);
@@ -1896,7 +1896,7 @@ struct CssomDeclarationView {
         rule = &inline_rule;
     }
     Pool* serialization_pool() {
-        // read projections retire with the view instead of accumulating in the stylesheet (D4.5.1v4).
+        // read projections retire with the view instead of accumulating in the stylesheet (D5.5.1).
         if (!scratch) scratch = pool_create();
         return scratch;
     }
@@ -2106,7 +2106,7 @@ extern "C" bool dom_cssom_set_inline_property(void* element, const char* propert
 }
 
 static Item cssom_decl_set(Item receiver, Item property, Item value, Item priority, bool named) {
-    // D5.3.3: conversions can allocate or call author code before native storage is unwrapped.
+    // D6.3.3: conversions can allocate or call author code before native storage is unwrapped.
     RootFrame roots(4);
     Rooted<Item> receiver_root(roots, receiver), property_root(roots, property),
         value_root(roots, value), priority_root(roots, priority);
@@ -2544,7 +2544,7 @@ extern "C" Item dom_css_register_property_operation(Item definition) {
     RootFrame roots(5);
     Rooted<Item> definition_root(roots, definition), value_root(roots, ItemNull);
     Rooted<Item> name_root(roots, ItemNull), syntax_root(roots, ItemNull), initial_root(roots, ItemNull);
-    // Web IDL dictionary members convert in name order; accessors may allocate or reenter registration (D5.3.3).
+    // Web IDL dictionary members convert in name order; accessors may allocate or reenter registration (D6.3.3).
     JS_ASSIGN_OR_RETURN(inherits_value, js_get_name_key(definition_root.get(), "inherits"));
     value_root.set(inherits_value);
     if (get_type_id(value_root.get()) == LMD_TYPE_UNDEFINED)

@@ -9,11 +9,11 @@ interoperability and the browser document WebSocket API.
 
 ## 1. Contracts and boundaries
 
-Use the existing procedural IO module contract **D7.2.4v4** for
+Use the existing procedural IO module contract **D9.3.4** for
 `import ws: lambda.io.websocket`. Every operation is a `pn`
-(**S12.1.1v3**); socket waits park a task (**S13.1.2v2**, **D6.3.1**).
+(**S12.1.1v3**); socket waits park a task (**S13.1.2v2**, **D7.5.1**).
 Document-owned tasks drive the UI (**S13.3.1v2**). Native records retain
-values through precise roots (**D5.3.3**); native worker jobs hold no Items.
+values through precise roots (**D6.3.3**); native worker jobs hold no Items.
 This extends the IO catalogue within existing language semantics and keeps
 `io.fetch` as request/response IO. No formal ruling changes are required.
 
@@ -160,7 +160,7 @@ scalar-rooting residue recorded below.
 - **Remaining baseline failure:** `test/lambda/proc/mir_mvp_roots.ls` prints
   `false` for the retained boxed subnormal value after overwriting its source
   variable under interpreter/AUTO; JIT prints the expected `true`. This is
-  a scalar ownership case (**D5.2.1v3**, **D5.3.4**) outside the chat path.
+  a scalar ownership case (**D6.2.1**, **D6.3.4**) outside the chat path.
   No scalar code or golden was changed to conceal it. The full baseline is
   therefore **not green**; this change does not claim otherwise.
 - Evidence: `temp/chat-tiers.log`, `temp/chat-protocol-tests.log`, native UI
@@ -178,8 +178,8 @@ is made.
 
 The user's compatibility requirement makes browser interoperability an
 acceptance gate, rather than an inference from the demo's native round-trip.
-The native API remains procedural under **D7.2.4v4**, with socket suspension
-under **S13.1.2v2** and precise ownership under **D5.3.3**.
+The native API remains procedural under **D9.3.4**, with socket suspension
+under **S13.1.2v2** and precise ownership under **D6.3.3**.
 
 This milestone follows [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455.html)
 and the connection/closing requirements of the
@@ -200,7 +200,7 @@ The WHATWG JavaScript interface (`WebSocket`, events, `readyState`,
 `bufferedAmount`, `binaryType`) is explicitly included by the user, alongside
 wire compatibility. It is installed in browser document realms; the inert
 Radiant preamble stub is removed. Core JS globals remain subject to
-**D7.3.1**; native host calls obey **D7.4.2v2**.
+**D9.4.1**; native host calls obey **D9.5.2**.
 
 Implementation: the native task transport handles both Lambda procedures
 and the browser API. A browser constructor returns in CONNECTING; native
@@ -212,7 +212,7 @@ current binaryType at message dispatch; outgoing views snapshot their exact
 byte range. CloseEvent stores readonly payload in the existing event carrier.
 The wrapper traces native state and listeners through a private record;
 document retirement cancels tasks. No conservative-stack roots are added
-(**D5.3.3**). Cookie selection and upgrade Set-Cookie storage use the browser
+(**D6.3.3**). Cookie selection and upgrade Set-Cookie storage use the browser
 profile jar, including HttpOnly cookies on requests.
 
 Qualification gates:
@@ -251,7 +251,7 @@ do not claim complete browser security-policy or full WPT conformance.
 - The focused cookie request-scope unit passes, including HttpOnly exclusion
   from document.cookie, secure transport, domain and path restrictions.
   Existing BroadcastChannel GC ownership checks pass after the shared listener
-  notification change (**D5.3.3**).
+  notification change (**D6.3.3**).
 - Desktop demo replay: 29 events, 15 assertions passed; mobile replay:
   11 events, 7 assertions passed.
 - `make test-lambda-baseline`: **8,516/8,517** pass (2,112 input and
@@ -280,7 +280,7 @@ pointing both windows at one service without changing profile ownership would
 also make them replace each other's sessions.
 
 The standalone `test/demo/chat/server.ls` owns one `lambda.chat.serve` procedure
-and its listener (**D7.2.4v4**). `CHAT_DEMO_PORT` selects a port, defaulting to
+and its listener (**D9.3.4**). `CHAT_DEMO_PORT` selects a port, defaulting to
 zero for a free port; the server publishes its endpoint to stdout and
 `CHAT_DEMO_ROOT/endpoint.txt`. It remains alive when a client window closes.
 
@@ -325,7 +325,7 @@ argument parsing unchanged. App helpers use relative module paths
 
 The launcher validates profile IDs against `lambda.chat.profiles` before IO,
 starts one server task and waits for its listening message. It then starts
-one process task per requested identity using `io.exec` (**D7.2.4v4**,
+one process task per requested identity using `io.exec` (**D9.3.4**,
 **S13.1.1v3**). Each client receives the endpoint, its identity and an initial
 peer through per-process environment overrides; no shell command strings are
 constructed. Viewer option arguments support a `{user}` expansion so each
@@ -365,7 +365,7 @@ reuses Finder's filesystem/path snapshots; files are DEFLATE ZIPs before
 transmission; clipboard raster images default to WebP quality 80 with an
 aspect-preserving 1600px bound. Users preview/remove attachments before Send,
 can disable image compression, and explicitly save received bytes. This uses
-existing codecs and clipboard snapshots (**D7.2.4v4**, **D7.2.5**, **D7.4.6**);
+existing codecs and clipboard snapshots (**D9.3.4**, **D10.2.1**, **D7.1.1**);
 acquisition/publication stay procedural (**S12.1.1v3**).
 
 The service validates names, MIME/bytes, bounded ZIP expansion and image

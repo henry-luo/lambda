@@ -1,4 +1,4 @@
-// lambda.io.websocket (D7.2.4v4): task-owned RFC 6455 connections. curl owns
+// lambda.io.websocket (D9.3.4): task-owned RFC 6455 connections. curl owns
 // client TCP/TLS setup; socket readiness parks tasks, never the UI or a worker.
 #include "io_file_search.hpp"
 #include "io_resource.hpp"
@@ -99,7 +99,7 @@ static void ws_invalidate(WebSocket* s) {
         s->close_timer = NULL;
     }
     if (s->close_waiter) lambda_task_resume(s->close_waiter);
-    // invalidate the rooted carrier before releasing native state (D5.3.3).
+    // invalidate the rooted carrier before releasing native state (D6.3.3).
     if (get_type_id(s->handle) == LMD_TYPE_VMAP && s->handle.vmap) { s->handle.vmap->data = NULL; s->handle.vmap->host_data = NULL; }
     if (s->rooted) heap_unregister_gc_root(&s->handle.item);
     s->rooted = false;

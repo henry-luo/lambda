@@ -10,10 +10,10 @@ attribution below distinguishes observed paths from causes that still need
 profiling.
 
 Authority: **D1.3** (one runtime, profile-owned semantics), **D1.5** (precise GC),
-**D2.4.1–D2.4.3** (explicit representation), **D3.3.2v2** (inference does not
+**D2.3.4–D2.3.5** (explicit representation), **D4.3.2** (inference does not
 create source contracts), **D8.2.4–D8.2.6** (indexed analysis and shared lowering),
-**D8.3.1–D8.3.4** (function planning), **D8.4.1v2** (compile-predicted guards,
-no inline caches), and **D8.4.3v2** (explicit completions).
+**D7.3.1–D7.3.4** (function planning), **D7.4.1** (compile-predicted guards,
+no inline caches), and **D7.4.3** (explicit completions).
 
 ## Measurement interpretation
 
@@ -180,8 +180,8 @@ The remaining gap is concrete:
 Extract the existing candidate propagation and physical slot operations for
 both clients. JS supplies its descriptor/prototype/exotic admission checks and
 its fallback; Lambda supplies its own mutation/COW policy. Preserve runtime
-shape checks: a candidate is not a proof. **D8.4.1v2**, **D8.2.4–D8.2.6**,
-**D3.3.2v2** govern this work. Target `havlak`, `cd`, `nbody`, `splay`, and tree
+shape checks: a candidate is not a proof. **D7.4.1**, **D8.2.4–D8.2.6**,
+**D4.3.2** govern this work. Target `havlak`, `cd`, `nbody`, `splay`, and tree
 traversal. Do not reintroduce mutable per-site caches.
 
 Sources: [JS lowering](../../lambda/js/js_mir_expression_lowering.cpp),
@@ -202,7 +202,7 @@ instead of converting it to a double and rediscovering integrality. Preserve
 JS holes, inherited indices, accessors, strict-store failures, typed-array
 detachment/resizing and coercion behavior on misses. Hoist a proof only across
 operations that cannot invalidate it. A JS array's inferred numeric contents
-are not a Lambda declared-array certificate (**D3.3.3v3**, **D2.4.3**).
+are not a Lambda declared-array certificate (**D4.3.3**, **D2.3.5**).
 
 This targets `fft`, `fannkuch`, `array1`, `matmul`, `quicksort`, and
 `text_search`. The last consumes 114.13 seconds, **47.0% of the sum of JS row
@@ -226,14 +226,14 @@ with JS's error policy, then use proven native or direct boxed entries for
 eligible recursive calls. Retain binding stability, argument evaluation order,
 guard failure, precise roots and ordinary error propagation. Arbitrary methods
 still require observable Get-before-Call; an inferred receiver class cannot
-select a method by spelling (**D6.2.2v2**, **D8.3.2–D8.3.4**).
+select a method by spelling (**D7.2.2**, **D7.3.2–D7.3.4**).
 
 A related simplification is unusually concrete: JS native paths still emit
 `js_native_throw_publish` / `js_native_throw_take`, which write and clear
 `async_await.native_throw_lane`. This is an extra pending-error protocol beside
 the shared completion machinery. Migrate it to the existing planned
 normal/error companion result, including the boxed wrapper. That aligns with
-**D1.4v3**, **D5.2.1v3**, and **D8.4.3v2** while removing adapters and polls.
+**D1.4**, **D6.2.1**, and **D7.4.3** while removing adapters and polls.
 Do not merely delete them; they currently preserve thrown errors.
 
 Sources: [direct-call selection](../../lambda/js/js_mir_function_collection_class_inference.cpp),
@@ -260,14 +260,14 @@ another intermediate representation or restart AST unification.
 
 Share below semantic admission, as **D1.3** requires. For example, Lambda's
 zero is truthy (**S3.1**), JS's numeric zero is falsy; Lambda captures are
-immutable snapshots (**S9.1.4**, **D6.2.3v2**), JS captures lexical bindings by
+immutable snapshots (**S9.1.4**, **D7.2.3**), JS captures lexical bindings by
 reference. These cannot be unified by routing JS through Lambda's operators or
-closure semantics. Representation conversion is not coercion (**D2.4.3**).
+closure semantics. Representation conversion is not coercion (**D2.3.5**).
 
 Rooting improvements should use the existing helper effect/ownership catalog
 and emitter liveness, rather than a blanket removal of root stores or scalar
 adoption. JS helpers can return module-owned scalar homes; the formal
-**D5.2.3** implementation note records a failed global removal. Prove individual
+**D6.2.3** implementation note records a failed global removal. Prove individual
 ownership contracts, then let both frontends benefit from the same optimization.
 
 ## Suggested acceptance sequence

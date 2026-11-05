@@ -1,6 +1,6 @@
 // Schema lookup and child-role classification (Phase R1)
-import lambda.editor.mod_md_schema
-import lambda.editor.mod_edit_schema
+import lambda.editor.schema.markdown
+import lambda.editor.schema.core
 
 // 1. Schema entry lookup by tag symbol
 let sch = md_schema

@@ -2,10 +2,10 @@ import nav: ~~.mod_navigation
 import model: ~~.mod_model
 import page: ~~.mod_page
 import surface: ~~.mod_surface
-import lambda.editor.mod_doc
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_editor
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.source_pos
+import lambda.editor.model
+import lambda.editor.core.step
 
 let doc = node('doc',[node('h1',[text("Opening")]),node('p',[text("First page")]),
     node_attrs('p',[{name:'data-word-page-break',value:"true"}],[]),

@@ -1,7 +1,7 @@
 import model: ~~.mod_model
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let doc = node('doc',[node('p',[text("First"),text_marked(" paragraph",['strong'])]),
     node('p',[text("Second paragraph")])])

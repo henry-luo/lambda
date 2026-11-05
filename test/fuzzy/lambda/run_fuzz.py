@@ -3,7 +3,7 @@
 
 The runner keeps expected-valid seed verification separate from arbitrary
 mutations. A handled error is a useful result for arbitrary input, but never a
-pass for a declared valid seed (D1.9, D1.10, D8.1.1v10).
+pass for a declared valid seed (D1.9, D1.10, D8.3.3).
 """
 
 from __future__ import annotations

@@ -10,10 +10,10 @@ reproducible typed/untyped execution-time inversions in Result54. Preserve the
 canonical benchmark sources and both execution tiers.
 
 **Authority:** S11.4.1v3 (annotations are contracts), S11.4.10 (verification
-remains valid while unchanged), D2.4 (producer-owned representations),
-D3.3.1v2–D3.3.4 (inference and full contracts), D3.4.5–D3.4.6 (physical
-layout), D8.3.1v2–D8.3.4v4 (complete specialization proofs and callee admission),
-S9.1.2–S9.1.3 (snapshots and `var` sharing), D5.3.1–D5.3.4 (precise roots).
+remains valid while unchanged), D2.3 (producer-owned representations),
+D4.3.1–D2.4.3 (inference and full contracts), D3.4.5–D3.4.6 (physical
+layout), D7.3.1–D7.3.4 (complete specialization proofs and callee admission),
+S9.1.2–S9.1.3 (snapshots and `var` sharing), D6.3.1–D6.3.4 (precise roots).
 No semantic ruling change is proposed.
 
 ## 1. Evidence and priority
@@ -94,7 +94,7 @@ The additional root traffic is associated with the fallible/possibly
 allocating call path. A later step can expose a guarded no-allocation kernel
 when caller bounds and admission proofs justify it; first remove the local
 representation round trips. Root slots may only disappear when effect and
-liveness analysis prove that they are unnecessary (D5.3).
+liveness analysis prove that they are unnecessary (D6.3).
 
 **Implementation sites:** `mir_emit_bool_equality`, `em_require_rep`, native
 call result/condition lowering, `mir_solve_may_defect`, and the existing dense
@@ -159,7 +159,7 @@ Carry exact `SplayNode?`, float-key and transported `var` home proofs through
 recursive field reads, local rebindings and store-back. Use the existing
 proved direct edge when the **whole** signature is admitted; preserve the
 boxed boundary for unknown callers. Do not introduce partial specialization
-or a third unguarded route into a native body (D8.3.1v2–D8.3.4v4).
+or a third unguarded route into a native body (D7.3.1–D7.3.4).
 
 Then investigate whether the caller's prepared-owner proof can survive the
 adapter so a second preparation is avoided. Snapshot creation or aliasing
@@ -466,12 +466,12 @@ Implementation under qualification:
 - Borrowed record parameters retain the Item carrier and CW33 home while
   sibling scalars may take native lanes. The complete signature still crosses
   checked admission; snapshot/detach and rebind publication are unchanged
-  (S9.1.2-S9.1.3, D8.3.2-D8.3.3).
+  (S9.1.2-S9.1.3, D7.3.2-D7.3.3).
 - Typed-array arguments may reuse an admitted local's precise home when later
   arguments are supplied identifier reads without borrowed positions. Calls,
   defaults and later borrows retain independent snapshot homes. An admitted
   array Item is already its raw header pointer; masking made another alias and
-  the call callback homed an already owned register again (D5.3.4, D2.4.1).
+  the call callback homed an already owned register again (D6.3.4, D2.3.4).
 - COW child walks inspect the stored physical descriptor and skip scalar lanes.
   Dynamic slots and container pointers retain their full decoder and sharing
   marks, preserving one-level snapshots (D3.4.6, S9.1.2).

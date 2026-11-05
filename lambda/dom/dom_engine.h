@@ -100,6 +100,8 @@ bool dom_engine_element_css_boxes(DomElement* element, DomCssBoxSizes* sizes);
 // committed layout coordinates only; absence leaves zero outputs and never forces layout.
 bool dom_engine_element_viewport_origin(DomElement* element, float* x, float* y);
 bool dom_engine_attribute_has_relational_css_dependency(DomDocument* document, const char* name);
+bool dom_engine_attribute_has_css_dependency(DomDocument* document, DomElement* element, const char* name);
+void dom_engine_publish_metadata_change(DomDocument* document);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 
 // selected native pointer stream: 0/1 success, -1 inactive ID, -2 detached target.

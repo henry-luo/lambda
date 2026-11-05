@@ -25,6 +25,7 @@ let parallelExecution = true;
 let inputResultsFile = '';
 let listTests = false;
 let listBuildTargets = false;
+let radiantBaseline = false;
 
 function addSelectedTests(target, value) {
     if (!value) return;
@@ -53,6 +54,7 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--raw')              rawOutput = true;
     else if (arg === '--sequential')       parallelExecution = false;
     else if (arg === '--parallel')         parallelExecution = true;
+    else if (arg === '--radiant-baseline') radiantBaseline = true;
     else if (arg === '--list')             listTests = true;
     else if (arg === '--list-build-targets') listBuildTargets = true;
     else if (arg === '-h' || arg === '--help') {
@@ -65,6 +67,7 @@ for (let i = 0; i < args.length; i++) {
   --raw                Show raw test output without formatting
   --sequential         Run tests sequentially (default: parallel)
   --parallel           Run tests in parallel (default)
+  --radiant-baseline   Use the reduced Radiant baseline selection
   --list               Print the selected test inventory as JSON without running it
   --list-build-targets  Print unique native build targets for the selection
   --help               Show this help message
@@ -435,6 +438,37 @@ function filterTests(tests) {
     if (excludeTests.size) result = result.filter(t => !excludeTests.has(t.baseName));
     if (includeTests.size) result = result.filter(t => includeTests.has(t.baseName));
     if (targetCategory) result = result.filter(t => t.category === targetCategory);
+    if (radiantBaseline) {
+        // Keep the full inventory as the source of truth; the fast gate selects
+        // named cases so new tests cannot silently change its coverage or cost.
+        const cases = require('./radiant_baseline_cases.json');
+        const fullOnlyCases = require('./radiant_full_only_cases.json');
+        const fullOnly = new Set(['test_map_gtest', 'test_epub_reader_state']);
+        result = result.filter(t => t.suite !== 'radiant' || !fullOnly.has(t.baseName));
+        result = result.map(t => {
+            const excluded = t.suite === 'radiant' && fullOnlyCases[t.baseName];
+            if (excluded) {
+                if (!excluded.length || new Set(excluded).size !== excluded.length || cases[t.baseName]) {
+                    throw new Error(`invalid Radiant full-only case list: ${t.baseName}`);
+                }
+                // Preserve the full suite's existing positive and negative filters.
+                const args = [...t.runnerArgs];
+                const index = args.findIndex(arg => arg.startsWith('--gtest_filter='));
+                const filter = index < 0 ? '*' : args[index].slice('--gtest_filter='.length);
+                const suffix = filter.includes('-') ? ':' : '-';
+                const restricted = `--gtest_filter=${filter}${suffix}${excluded.join(':')}`;
+                if (index < 0) args.push(restricted); else args[index] = restricted;
+                return { ...t, runnerArgs: args };
+            }
+            if (t.suite !== 'radiant' || !cases[t.baseName]) return t;
+            const selected = cases[t.baseName];
+            if (!selected.length || new Set(selected).size !== selected.length) {
+                throw new Error(`invalid Radiant baseline case list: ${t.baseName}`);
+            }
+            return { ...t, runnerArgs: [...t.runnerArgs, `--gtest_filter=${selected.join(':')}`],
+                expectedCases: selected.length };
+        });
+    }
     return result;
 }
 
@@ -815,6 +849,9 @@ function runTest(testInfo) {
                 errors.push(signal ? `terminated by ${signal}` : `exited with code ${code}`);
             }
             if (!timedOut && result.total === 0) errors.push('runner returned no tests');
+            if (!timedOut && testInfo.expectedCases && result.total !== testInfo.expectedCases) {
+                errors.push(`expected ${testInfo.expectedCases} selected cases, got ${result.total}`);
+            }
             if (!timedOut && result.passed < testInfo.minimumPassed) {
                 errors.push(`expected at least ${testInfo.minimumPassed} passing tests, got ${result.passed}`);
             }

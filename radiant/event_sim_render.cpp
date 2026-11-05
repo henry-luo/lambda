@@ -79,7 +79,7 @@ bool event_sim_render_parse(MapReader& arguments, SimEvent* event) {
         !arguments.get("js").cstring()) return false;
     auto* command = (EventSimRenderCommand*)mem_calloc(1, sizeof(EventSimRenderCommand), MEM_CAT_LAYOUT);
     if (!command) return false;
-    // copy fixture arguments: navigation may retire the Input that parsed them (D4.5.1v4).
+    // copy fixture arguments: navigation may retire the Input that parsed them (D5.5.1).
     Pool* pool = pool_create();
     Item value = {.item = (uint64_t)arguments.container()};
     String* json = format_json(pool, value);
@@ -186,7 +186,7 @@ static bool evaluate(UiContext* ui, const char* source, bool assertion) {
     void* host = runtime->dom_ui_context;
     runtime->dom_doc = ui->document;
     runtime->dom_ui_context = ui;
-    // the evaluated code and its return value remain precise roots across eval safepoints (D5.3.3).
+    // the evaluated code and its return value remain precise roots across eval safepoints (D6.3.3).
     RootFrame roots(2);
     Rooted<Item> code(roots, make_string_item(source)), result(roots, ItemNull);
     result.set(js_builtin_eval(code.get()));

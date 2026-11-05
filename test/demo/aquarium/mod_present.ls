@@ -1,4 +1,4 @@
-// D4.5.1v4 / S12.1.3: retain geometry and native controls across frame updates.
+// D5.5.1 / S12.1.3: retain geometry and native controls across frame updates.
 import dom
 import scene_dom: lambda.scene3d.dom
 import model: .mod_model

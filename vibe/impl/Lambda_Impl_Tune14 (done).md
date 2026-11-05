@@ -9,7 +9,7 @@
   `vibe/Lambda_Result15_Bottlenecks.md`, `vibe/impl/Lambda_Impl_Tune9_GC (done).md`,
   `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/Lambda_Design_Name_Identity.md`
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S1.4–S1.6, S4.1, S4.5.3, S11.4;
-  `doc/Lambda_Formal_Design.md` D2.2–D2.6, D3.2–D3.3, D4.4, D5.2–D5.3, D8.3–D8.4, D8.6
+  `doc/Lambda_Formal_Design.md` D2.2–D3, D4.2–D4.3, D5.4, D6.2–D6.3, D7.3–D7.4, D8.6
 
 ## 1. What Result23 says
 
@@ -46,7 +46,7 @@ borrowed-`var c: float[]` parameter. The cost is above them:
 `int`/`float` local or parameter boundary calls the runtime admission helper instead of being
 elided as an identity admission at emission time. This is the R22-4 gap (Tune13 P1 items 5/7)
 still live: the proof exists dynamically but is not carried statically to the boundary
-[S4.1, D2.4, D3.2.1, D3.3.1].
+[S4.1, D2.3, D4.2.1, D4.3.1].
 
 `crypto_sha12` shows the same signature plus two more: `fn_ushr_item` (**boxed unsigned
 shift** — hot addresses 0x9d0278/0x9d0424 resolve inside it), boxed `fn_int` conversions, and
@@ -61,7 +61,7 @@ should be computed once at emission, not per element.
 `levenshtein2` is not a string-track row at all: the DP inner loop runs fully boxed —
 `item_at` 269, `fn_index` 213, `fn_add` 168, `boundary_admit` 139, `type_check` 62. The
 `prev`/`curr`/`tmp` **array-rotation rebinding** defeats the declared witness (narrowing dies
-with the binding, D3.3.3), so every element access takes the generic path.
+with the binding, D4.3.3), so every element access takes the generic path.
 
 ### 2.2 MIR typed: fib-class per-call machinery measured at ~45%
 
@@ -132,7 +132,7 @@ This is Result15's #2–#4 confirmed still live and now dominant: the property-a
 string-keyed end to end. Integer/interned-ID keys through `js_map_get_fast`, cached
 `well_known_name_id` results at the access site, and integer fast paths for numeric keys are
 the LJS round. *(Stale as of 2026-09-09: the no-IC rule is no longer
-Lambda-script-only — D8.4.1v2/LC1v2 extend it to LambdaJS.)*
+Lambda-script-only — D7.4.1/LC1v2 extend it to LambdaJS.)*
 
 ### 2.6 Corrections to rev 1's unmeasured claims
 
@@ -160,7 +160,7 @@ Carry the exact result contract and `ValueRep` of guarded element reads, native 
 arithmetic, and audited builtins through AST inference and lowering so that identity
 declaration/assignment/parameter/return boundaries emit **no**
 `lambda_numeric_boundary_admit`/`lambda_type_check` call — only a required carrier conversion
-when representations differ [S4.1, D2.4.1, D3.2.1, D3.3.1]. Include:
+when representations differ [S4.1, D2.3.4, D4.2.1, D4.3.1]. Include:
 
 1. the guarded-load result (`float` from a proved `float[]` lane) feeding a declared local or
    accumulation (`matmul`, `pnpoly`, `spectralnorm`, `nbody`);
@@ -171,7 +171,7 @@ when representations differ [S4.1, D2.4.1, D3.2.1, D3.3.1]. Include:
 4. let a declared witness survive **same-contract rebinding** (the `prev`/`curr`/`tmp`
    rotation in `levenshtein`): rebinding to a value carrying the identical occurrence contract
    re-establishes the witness instead of dropping to generic `fn_index`/`item_at`
-   [D2.6, D3.3.3].
+   [D3, D4.3.3].
 
 Acceptance: matmul typed ≤ untyped; sha1 and levenshtein −30% or better; `boundary_admit`
 disappears from the four samples' hot leaves; typed/nullable rejection controls and forced-GC
@@ -181,7 +181,7 @@ sweeps green [D8.6.3].
 
 Keep a per-class pointer to the current fresh slab (or a fresh list), updated on fill, sweep,
 and new-slab prepend, so allocation never walks full slabs. Strictly an allocator-internal
-change: no lifetime, ownership, or layout semantics move [D4.4]. Measured ceiling: ~64% of
+change: no lifetime, ownership, or layout semantics move [D5.4]. Measured ceiling: ~64% of
 `base64`; expect gains on every allocation-heavy row (binarytrees, paraffins, list, gcbench,
 splay, json_gen). Acceptance: base64 −50% or better; the +240/252 leaf vanishes; full
 forced-GC/poison suite green.
@@ -190,8 +190,8 @@ forced-GC/poison suite green.
 
 Unchanged design from Tune13 §5 items 8–9: whole-function exit-carrier analysis; raw recursive
 results feed native arithmetic; guard failure/dynamic call/error merge keeps the Item path
-[D3.3.1–D3.3.2, S11.4.2, D8.3.3]. Include the scalar-home adopt/restore pair and the TLS
-context access in the reduction scope, per §2.2's measurement [D5.2–D5.3]. Targets:
+[D4.3.1–D4.3.2, S11.4.2, D7.3.3]. Include the scalar-home adopt/restore pair and the TLS
+context access in the reduction scope, per §2.2's measurement [D6.2–D6.3]. Targets:
 fib/tak/cpstak/towers/permute/queens/bounce/list. Acceptance: ≥25% on fib (measured headroom
 is ~45%); `fn_add` leaves the fib sample; `ack` does not regress.
 
@@ -200,7 +200,7 @@ is ~45%); `fn_add` leaves the fib sample; `ack` does not regress.
 Extend Tune13's stable-binding boundary elision to the declared map/record contracts that
 `towers` re-walks through the deep validator (~18%), and land `ShapeEntry.name_id` comparisons
 so `map_shape_field_to_item`/`fn_member` stop strcmp-ing field names (`gcbench`, `deltablue`
-MIR side) — this is Name-Identity W1/W2 [D3.2.2, D8.3.2–D8.3.3;
+MIR side) — this is Name-Identity W1/W2 [D4.2.3, D7.3.2–D7.3.3;
 `vibe/Lambda_Design_Name_Identity.md`]. Acceptance: towers −25%; validator functions leave its
 sample; named-contract rejection tests unchanged.
 
@@ -220,7 +220,7 @@ precise roots preserved [S1.4–S1.6].
    interned NameId variant instead of `char const*`.
 2. **Stop probing `well_known_name_id` per access**: resolve the name once at the access site
    (compile-time for static names, per-shape lookup otherwise). *(Superseded 2026-09-09:
-   LC1v2/D8.4.1v2 now ban inline caches in LambdaJS too; the JS answer is a compile-predicted
+   LC1v2/D7.4.1 now ban inline caches in LambdaJS too; the JS answer is a compile-predicted
    shape guard, not a cache — `vibe/jube/JS_Tune_History.md` §4.3 T10-2.)*
 3. **No hot-path `name_pool_create_strview`**: transient lookups must not intern.
 
@@ -271,7 +271,7 @@ thread's tree, and treat `__ulock_wait` on the main thread as an artifact.
   retained only with its measured win on the fixed 56-row population (three runs,
   workload-only `__TIMING__`, headline + fixed matched geomeans).
 - Non-goals carried from Tune13 §8: no flex-int revival, no second direct-addressing path, no
-  Lambda-script inline caches [D8.4.1], no vendored-dep edits [D1.6] — note A2 is in
+  Lambda-script inline caches [D7.4.1], no vendored-dep edits [D1.6] — note A2 is in
   `lambda/runtime/gc/`, Lambda's own code, not vendored MIR.
 
 ## 7. Implementation closeout (2026-08-06)
@@ -279,17 +279,17 @@ thread's tree, and treat `__ulock_wait` on the main thread as an artifact.
 The implementation slices are landed in the current tree. The proposal sections above remain
 the measured rationale and acceptance targets; this section records what was actually retained,
 including targets that were not met by the measured workload. No semantic relaxation was used:
-the optimization boundaries preserve S4.1's representation contract, D2.4's carrier rules,
-D3.2.1's checked-boundary invariant, and D8.6.3's forced-GC requirement.
+the optimization boundaries preserve S4.1's representation contract, D2.3's carrier rules,
+D4.2.1's checked-boundary invariant, and D8.6.3's forced-GC requirement.
 
 ### 7.1 MIR and allocator slices
 
 | Slice | Landed implementation | Evidence and disposition |
 |---|---|---|
-| A1 | Native boundary identity proofs; typed-array lane descriptors are hoisted into checked stores; U32 bitwise/USHR lowering stays on the native lane; direct same-contract aliases preserve the Levenshtein witness. | Release 3-run medians: matmul 18.6→18.0 ms, base64 105→69.6 ms, Levenshtein 27.8→21.3 ms, crypto-sha1 235→215 ms (untyped→typed). `tune13_array_lane.mir-check`, `typed_array_guard.mir-check`, the nullable/rejection controls, and the MIR ratchet pass. The original −30% Levenshtein and −50% base64 stretch targets are not claimed; the code is retained for the measured wins and the safe fallback paths. [S4.1, S4.5.3, D2.2.2, D2.4, D3.2.1] |
-| A2 | `gc_object_zone` now keeps one fresh-slab cursor per size class, eliminating the full-slab-chain walk while preserving free-list, sweep, and zeroing behavior. | The allocator ownership suite passes 67/67, and forced-GC/poison runs pass for `levenshtein2`, `bounce2`, and `towers2`. The base64 row improves 33.7% on the matched release sample; the −50% target is not overstated. [D4.4] |
-| A3 | Recursive native-success analysis carries proven int/float results through arithmetic and keeps error/guard joins on the boxed Item path. Mutable accumulator bindings are excluded from the immutable witness so the native ABI cannot be applied to an unsafe return. | `fib2`, `tak2`, `cpstak2`, `nqueens2`, `bounce2`, `towers2`, `levenshtein2`, `crypto_sha12`, `base642`, `matmul2`, `pnpoly2`, `spectralnorm2`, and `gcbench2` all produce their expected PASS/DONE results. Current medians include fib 6.09→1.95 ms, tak 0.590→0.202 ms, and cpstak 1.21→0.415 ms. [D3.3.1, D3.3.2, D8.3.3] |
-| A4 | Existing stable-contract map/record access and fixed-shape field paths were verified and retained; no duplicate validator or second direct-addressing path was added. The current `towers2` MIR contains no `validate_against_*`, `fn_member`, or `map_shape_field_to_item` path. | The typed towers row remains slower because its remaining cost is the typed-array boundary path, not map-contract revalidation; the proposed −25% target is therefore recorded as unmet rather than hidden. [D3.2.2, D8.3.2–D8.3.3] |
+| A1 | Native boundary identity proofs; typed-array lane descriptors are hoisted into checked stores; U32 bitwise/USHR lowering stays on the native lane; direct same-contract aliases preserve the Levenshtein witness. | Release 3-run medians: matmul 18.6→18.0 ms, base64 105→69.6 ms, Levenshtein 27.8→21.3 ms, crypto-sha1 235→215 ms (untyped→typed). `tune13_array_lane.mir-check`, `typed_array_guard.mir-check`, the nullable/rejection controls, and the MIR ratchet pass. The original −30% Levenshtein and −50% base64 stretch targets are not claimed; the code is retained for the measured wins and the safe fallback paths. [S4.1, S4.5.3, D2.2.2, D2.3, D4.2.1] |
+| A2 | `gc_object_zone` now keeps one fresh-slab cursor per size class, eliminating the full-slab-chain walk while preserving free-list, sweep, and zeroing behavior. | The allocator ownership suite passes 67/67, and forced-GC/poison runs pass for `levenshtein2`, `bounce2`, and `towers2`. The base64 row improves 33.7% on the matched release sample; the −50% target is not overstated. [D5.4] |
+| A3 | Recursive native-success analysis carries proven int/float results through arithmetic and keeps error/guard joins on the boxed Item path. Mutable accumulator bindings are excluded from the immutable witness so the native ABI cannot be applied to an unsafe return. | `fib2`, `tak2`, `cpstak2`, `nqueens2`, `bounce2`, `towers2`, `levenshtein2`, `crypto_sha12`, `base642`, `matmul2`, `pnpoly2`, `spectralnorm2`, and `gcbench2` all produce their expected PASS/DONE results. Current medians include fib 6.09→1.95 ms, tak 0.590→0.202 ms, and cpstak 1.21→0.415 ms. [D4.3.1, D4.3.2, D7.3.3] |
+| A4 | Existing stable-contract map/record access and fixed-shape field paths were verified and retained; no duplicate validator or second direct-addressing path was added. The current `towers2` MIR contains no `validate_against_*`, `fn_member`, or `map_shape_field_to_item` path. | The typed towers row remains slower because its remaining cost is the typed-array boundary path, not map-contract revalidation; the proposed −25% target is therefore recorded as unmet rather than hidden. [D4.2.3, D7.3.2–D7.3.3] |
 
 ### 7.2 LambdaJS identity slice
 
@@ -298,13 +298,13 @@ L1's safe static-name slice is landed. MIR member loads and stores now carry the
 `well_known_name_id` probing and transient name construction. Ordinary pooled names without a
 stable catalog identity deliberately fall back to canonical named lookup: the `dom_module_props`
 regression demonstrated that treating cross-pool spelling as pointer identity changes expando
-deletion semantics. This preserves D2.6's key-identity distinction and S4.1's semantic boundary.
+deletion semantics. This preserves D3's key-identity distinction and S4.1's semantic boundary.
 
 The existing numeric array-index path remains the J2 direct index path; L1 does not broaden that
 identity proof to arbitrary dynamic strings, Symbols, DOM host properties, or proxies. The static
 controls and the full JavaScript suite pass, and the pinned Test262 gate remains unchanged. The
 broader historical L1 target (−40% hashmap/CD and removal of every dynamic numeric/string leaf)
-is not claimed from this static-key slice alone. [D8.4.1, D8.6.3]
+is not claimed from this static-key slice alone. [D7.4.1, D8.6.3]
 
 ### 7.3 Verification record
 
@@ -320,4 +320,4 @@ is not claimed from this static-key slice alone. [D8.4.1, D8.6.3]
 The conditional A5 string-builder track and L2/L3 LambdaJS tracks were not entered: the current
 post-A2 evidence does not justify changing string ownership or boxed-slot representation, and
 those changes would exceed the measured Tune14 scope without a new attribution gate. [S1.4–S1.6,
-D4.4, D8.6.3]
+D5.4, D8.6.3]

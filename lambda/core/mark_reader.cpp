@@ -534,7 +534,7 @@ ElementReader::ElementReader(const Element* element)
     // TypeObject::type_name while an element's lives in TypeElmt::name — the
     // one place the two kinds still differ, so the tag is resolved once here.
     if (element_type_) {
-        // D2.6.6v2 phase 2: a nominal element's tag is its declared type name,
+        // D3.1.1 phase 2: a nominal element's tag is its declared type name,
         // read from the record; a structural element uses its own tag.
         TypeNominal* record = type_nominal_record((const Type*)element->type);
         tag_ = record ? record->type_name : element_type_->name;

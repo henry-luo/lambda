@@ -65,7 +65,7 @@ branded-type hacks.
 2. **Flow-sensitive narrowing.** TS's control-flow analysis (discriminated
    unions, `typeof`/`in` guards, assertion functions, exhaustiveness via
    `never`) is arguably its best feature. Lambda's is also SO9-unowned —
-   `if (x is string)` does not statically retype `x` in the branch, and D3.3.3
+   `if (x is string)` does not statically retype `x` in the branch, and D4.3.3
    deliberately limits even container element-type narrowing to a single
    binding's scope. TS's narrowing is deeper and more ergonomic.
 3. **Type-level computation**: conditional types, mapped types, `keyof`,

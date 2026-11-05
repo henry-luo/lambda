@@ -2,7 +2,7 @@
 // The editor state is {model, history, source, selected, scale, drag}; `ctx` is {lib, dir, dir_url}.
 import dom
 import radiant
-import updates: ~~.mod_publish
+import updates: lambda.ui.core.publish
 import L: .mod_library
 import C: .mod_collage
 import CU: .mod_collage_ui

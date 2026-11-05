@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import c: lambda.ui.core.component
 import tokens: .tokens
 
@@ -25,7 +26,7 @@ pub fn validate(props) bool^ {
 }
 pub fn descriptor(props) element^ {
     let valid = validate(props)^;
-    c.node('icon',props,null,["name","width","height","theme","rotate","spin","primary_color","secondary_color"])^
+    descriptor.node('icon',props,null,["name","width","height","theme","rotate","spin","primary_color","secondary_color"])^
 }
 fn attributes(values, props) any^ => map([for (key,value in values)
     (key,if (value == "__dtna_primary__") c.option(props,"primary_color","var(--dtna-primary)")

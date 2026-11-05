@@ -383,7 +383,7 @@ let css = "html,body{margin:0;background:#050607;color:#eef0f2;" ++
 // ---------------------------------------------------------------- soundtrack
 
 // an original score composed in _score.ls, played with the music package's bundled SoundFont.
-// local demos may start audible output from the render handler (D7.5.4).
+// local demos may start audible output from the render handler (D11.3.1).
 let soundtrack = score.performance()
 let soundfont = sys.lambda.home# ++ "/package/music/soundfonts/TimGM6mb.sf2"
 let sound_button = <button id: "sound", class: "sound", type: "button",

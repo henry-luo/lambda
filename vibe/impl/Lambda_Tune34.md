@@ -15,9 +15,9 @@ plan because their recorded U/JS ratio is at least 2.0. Two ratios have material
 timed-work mismatches and must be recaptured before claiming a JS advantage.
 
 **Authority:** S4.1.1–S4.1.5, S4.2, S9.1.2–S9.1.3;
-D2.4.1–D2.4.3, D3.3.1v2–D3.3.4, D3.4.5–D3.4.6,
-D4.3.1–D4.3.3, D4.4.1–D4.4.6, D5.3.1–D5.3.4, D8.3.1v2–D8.3.4v4,
-D8.4.1v2. This plan proposes no change to language semantics.
+D2.3.4–D2.3.5, D4.3.1–D2.4.3, D3.4.5–D3.4.6,
+D5.3.1–D5.3.2, D5.4.1–D5.4.5, D6.3.1–D6.3.4, D7.3.1–D7.3.4,
+D7.4.1. This plan proposes no change to language semantics.
 
 ## 1. Evidence and corrections to the comparison
 
@@ -151,7 +151,7 @@ The ownership-site breakdown attributes 511,476 copies to `splay_node`,
 store-back ordering explain why simply eliminating name lookup did not remove
 the expensive update path. The next mechanisms are carried place/layout facts,
 native field consumers, descriptor-based writes, and proven owner transfers
-under D4.4.4v4–D4.4.6. The amount removable remains to be demonstrated on
+under D5.4.4–D5.4.5. The amount removable remains to be demonstrated on
 aligned timing. Splay's 4.77× ratio is not a valid target for this work.
 
 ### 2.3 SHA-1: array absence and machine-word result facts break the chain
@@ -234,7 +234,7 @@ originate from `fill(m + 1, 0)` and exchange roles through `tmp`. Inside
 provable presence if equal lengths and owner identity survive the loop join.
 The current direct counter/length and fixed-array proofs do not establish
 that complete relation for native `min3` admission. All arguments must be
-admitted together (D8.3.3).
+admitted together (D7.3.3).
 
 [JS](../../test/benchmark/kostya/levenshtein.js) additionally uses Int32Array,
 an inline minimum expression, and hoists `s1.charCodeAt(i-1)`. Lambda prints
@@ -255,7 +255,7 @@ elimination pass is unlikely to explain much here.
 finite-range proof can use native conversion and, for nonnegative finite
 values, combine floor and truncating conversion. **Clamp comparisons alone
 do not prove finiteness:** NaN can pass both comparisons. Derive finite inputs
-or retain a guard and the existing poison/error path (S4.2, D2.4).
+or retain a guard and the existing poison/error path (S4.2, D2.3).
 
 The JS port also uses reference swaps and `lin_solve2`; Lambda copies array
 contents and calls separate solvers. Removing these passes requires whole-region
@@ -329,15 +329,15 @@ another family of independent AST heuristics.
    Retain interval/congruence facts for halving and bitwise index construction.
 2. Record semantic domain, physical carrier, null/error possibilities and
    proof dependencies separately. An integer carrier for an integral float
-   must still reconstruct a float at observable boundaries (D2.4).
+   must still reconstruct a float at observable boundaries (D2.3).
 3. Propagate finite scalar and array-result facts through bounded call-graph
    summaries; use a terminating fixed point with conservative widening for
    recursion. Carry only facts justified for the exact call shape.
 4. Invalidate on rebinding, relevant writes, widening, escape or unknown calls;
    intersect facts at joins. An element lane remains binding-local and does
-   not become a permanent declared certificate (D3.3.3v3).
+   not become a permanent declared certificate (D4.3.3).
 5. Feed the complete admitted tuple to existing raw entries or bounded
-   inlining. Retain boxed fallback and D8.3.3's two proof-producing paths;
+   inlining. Retain boxed fallback and D7.3.3's two proof-producing paths;
    do not introduce an unguarded third entry or speculative public contract.
 
 **Pilots:** Levenshtein, SHA-1, FFT; secondary coverage from text search and
@@ -413,19 +413,19 @@ Reuse `cow_prepare_write`, `array_num_set_cow_idx`, `map_set_cow`,
 1. Detect ownership permutations of local arrays, where every temporary's
    last use is accounted for and no snapshot escapes. Levenshtein's
    `tmp/prev/curr` cycle is a pilot. Omit unnecessary share marks at their
-   origin; do not clear the monotonic shared bit opportunistically (D4.4.1).
+   origin; do not clear the monotonic shared bit opportunistically (D5.4.1).
 2. Carry place identity, layout and uniqueness through valid handle regions,
-   invalidating them at D4.4.4v4 events. Use the existing runtime spine test
+   invalidating them at D5.4.4 events. Use the existing runtime spine test
    and complete COW fallback; reload data-zone pointers after allocating calls.
 3. Let exact descriptor proofs reach native field consumers and stores,
    avoiding Item projection/re-admission where the full contract allows it.
    Recursive optional children still need presence/layout checks. Use bounded
-   immutable variants, not inline caches (D8.4.1v2).
+   immutable variants, not inline caches (D7.4.1).
 4. Extend dead-owner/escape analysis to plain parameters and small scalar
    aggregates. For nonescaping snapshots with bounded size, investigate
    activation-local scalar storage, retaining logical copies and the ordinary
    materialization path on escape. Never use native-stack conservative GC
-   scanning; rootable payloads require precise homes (D5.3).
+   scanning; rootable payloads require precise homes (D6.3).
 
 **Pilots:** Levenshtein, Puzzle and aligned Splay; controls include retained
 snapshots, nested handles and recursive trees. **Mechanism gate:** remove
@@ -518,19 +518,19 @@ Navier migration remains a shared input to both binaries (§1.3).
 
 | Mechanism | Proof and fallback | Intended pilots |
 |---|---|---|
-| Native float-to-int conversion and `int(floor(x))` composition | Ordered finite int53 bounds precede D2I; nonnegative truncation implements floor. Negative, nonfinite and out-of-band values retain floor and the canonical converter (S4.2, D2.4.1–D2.4.3). | Navier, numeric conversion consumers |
-| Complete local owner permutations | A bounded cycle of up to eight local ArrayNum owners accounts for every scratch use. Owner metadata and precise roots move with the values; observed/captured scratch values retain ordinary binding/COW behavior. No shared bit is cleared (S9.1.2, D4.4.1, D5.3.1). | Levenshtein |
-| Dense inferred-array read/write tuples | Complete index and producer proofs establish lane-preserving writes under live length/layout/uniqueness guards. A new write-loop guard must admit a previously boxed scalar call; raw swap loops retain their existing lowering. Guard misses retain the boxed loop. Read-only loops reuse their existing proof; inferred lanes acquire no permanent T[] certificate (D3.3.3v3, D8.3.3). | Levenshtein |
-| Bounded concat producer facts | Flattening a concat's bounded leaf set does not consume the alias/call recursion budget once per left-associated join. Existing consumer profitability and existing concat emitters remain authoritative (D8.3.3, D8.4.1v2). | JSON, Prettier control |
-| Complete dynamic compact-int bitwise admission | Both original Items are admitted before decoding. Only finite int53 results reach canonical lane boxing; wider raw words retain runtime saturation, avoiding collisions with lane sentinels. Sized domains, poison, unsupported counts, null and errors retain the original helpers (S4.1, D2.4). | SHA-1 |
-| Erased numeric-array read admission | Existing physical element/layout/bounds guards can return a boxed int Item from an inferred ArrayNum whose element summary was erased. The runtime miss retains `fn_index`; no public array contract is asserted (D3.3.3v3). | SHA-1 |
-| Mixed numeric local recurrences | A terminating proof with eight active bindings and a 96-node budget checks initializers and all writes, rejecting borrow/capture/unknown-domain dependencies. Int/float member tags remain observable; proven float-domain arithmetic and numeric ordering decode their operands directly (D2.4.1–D2.4.3). | FFT |
-| Exact numeric-position reads | Stable local numeric-array roots and pure numeric keys retain their semantic types. A finite conversion plus exact round trip admits a machine position; fractions, NaN, infinities and invalid positions read absent. Effectful receivers/keys and foreign carriers keep the original ordered read (S8.2.4v3, S7.1.1v3, D8.3.3). | FFT |
+| Native float-to-int conversion and `int(floor(x))` composition | Ordered finite int53 bounds precede D2I; nonnegative truncation implements floor. Negative, nonfinite and out-of-band values retain floor and the canonical converter (S4.2, D2.3.4–D2.3.5). | Navier, numeric conversion consumers |
+| Complete local owner permutations | A bounded cycle of up to eight local ArrayNum owners accounts for every scratch use. Owner metadata and precise roots move with the values; observed/captured scratch values retain ordinary binding/COW behavior. No shared bit is cleared (S9.1.2, D5.4.1, D6.3.1). | Levenshtein |
+| Dense inferred-array read/write tuples | Complete index and producer proofs establish lane-preserving writes under live length/layout/uniqueness guards. A new write-loop guard must admit a previously boxed scalar call; raw swap loops retain their existing lowering. Guard misses retain the boxed loop. Read-only loops reuse their existing proof; inferred lanes acquire no permanent T[] certificate (D4.3.3, D7.3.3). | Levenshtein |
+| Bounded concat producer facts | Flattening a concat's bounded leaf set does not consume the alias/call recursion budget once per left-associated join. Existing consumer profitability and existing concat emitters remain authoritative (D7.3.3, D7.4.1). | JSON, Prettier control |
+| Complete dynamic compact-int bitwise admission | Both original Items are admitted before decoding. Only finite int53 results reach canonical lane boxing; wider raw words retain runtime saturation, avoiding collisions with lane sentinels. Sized domains, poison, unsupported counts, null and errors retain the original helpers (S4.1, D2.3). | SHA-1 |
+| Erased numeric-array read admission | Existing physical element/layout/bounds guards can return a boxed int Item from an inferred ArrayNum whose element summary was erased. The runtime miss retains `fn_index`; no public array contract is asserted (D4.3.3). | SHA-1 |
+| Mixed numeric local recurrences | A terminating proof with eight active bindings and a 96-node budget checks initializers and all writes, rejecting borrow/capture/unknown-domain dependencies. Int/float member tags remain observable; proven float-domain arithmetic and numeric ordering decode their operands directly (D2.3.4–D2.3.5). | FFT |
+| Exact numeric-position reads | Stable local numeric-array roots and pure numeric keys retain their semantic types. A finite conversion plus exact round trip admits a machine position; fractions, NaN, infinities and invalid positions read absent. Effectful receivers/keys and foreign carriers keep the original ordered read (S8.2.4v3, S7.1.1v3, D7.3.3). | FFT |
 | Exclusive equality dispatch | Bounded runs of distinct finite integer equalities use an unchanged local. Rebinding, capture, borrow and unsupported producer shapes retain the independent branches. Existing optional-int producer facts admit boxed ordinal keys without changing their null/error behavior (D2.2.2, S5.1, S9.1.3). | Brainfuck |
-| Shared small-container allocation | Runtime `heap_calloc` routes small containers through the existing zeroed `heap_calloc_class` path used by MIR maps and LambdaJS. Large objects and non-container layouts retain their ordinary allocator. Precise roots, stable object addresses, COW state and payload copying remain authoritative (D4.1.1v2, D5.3, S9.1.2). | Puzzle, Splay, Havlak, merge and constructor-heavy peers |
-| Precise bump-slot recycling | Swept bump slots return to shared size-class lists. Every allocation path preserves the storage-owner flag and zeroes reused payloads; requested-byte accounting matches sweep. Exact slot recognition and root lifetimes are unchanged (D4.1.1v2, D5.3). Repeated collection bursts retain the initial block/cursor. | All constructor-heavy workloads |
-| Live-only data compaction after sweep | DFS reachability and ephemeron/weak processing finish first. Allocation-free finalizers run while source zones are intact; dead headers leave the list before survivor buffer fixups, and marks clear afterward. Failed mark-stack growth abandons collection before heap mutation (D4.3.1, D4.3.3, D5.3). | Constructor-heavy peers |
-| Inlined shared slot construction | Generic and known-class allocation entries use one source helper with inline construction. Zeroing, header ownership and large-object fallbacks remain; generic allocations avoid a delegating class-allocator call (D4.3.2v2). | Small-string and constructor-heavy workloads |
+| Shared small-container allocation | Runtime `heap_calloc` routes small containers through the existing zeroed `heap_calloc_class` path used by MIR maps and LambdaJS. Large objects and non-container layouts retain their ordinary allocator. Precise roots, stable object addresses, COW state and payload copying remain authoritative (D5.1.1, D6.3, S9.1.2). | Puzzle, Splay, Havlak, merge and constructor-heavy peers |
+| Precise bump-slot recycling | Swept bump slots return to shared size-class lists. Every allocation path preserves the storage-owner flag and zeroes reused payloads; requested-byte accounting matches sweep. Exact slot recognition and root lifetimes are unchanged (D5.1.1, D6.3). Repeated collection bursts retain the initial block/cursor. | All constructor-heavy workloads |
+| Live-only data compaction after sweep | DFS reachability and ephemeron/weak processing finish first. Allocation-free finalizers run while source zones are intact; dead headers leave the list before survivor buffer fixups, and marks clear afterward. Failed mark-stack growth abandons collection before heap mutation (D5.3.1, D5.3.2, D6.3). | Constructor-heavy peers |
+| Inlined shared slot construction | Generic and known-class allocation entries use one source helper with inline construction. Zeroing, header ownership and large-object fallbacks remain; generic allocations avoid a delegating class-allocator call (D5.3.1). | Small-string and constructor-heavy workloads |
 
 The MIR fixtures `tune34_*` cover numeric conversion edges, bitwise domains,
 mixed numeric reflection and fractional halving, exact/fractional indices,
@@ -564,7 +564,7 @@ call does not eliminate the root traffic attributable to recursive mutation
 and COW boundaries. A smaller descriptor-call count alone did not satisfy
 the runtime/code-growth review. Future native field consumers need complete
 layout/domain admission and useful consumers; this attempt establishes no
-safe deletion of Splay's snapshot copies (D3.4.6, D4.4.4v4, D8.4.1v2).
+safe deletion of Splay's snapshot copies (D3.4.6, D5.4.4, D7.4.1).
 
 ### 5.3 Workload and output audit
 
@@ -627,7 +627,7 @@ Final-source checks:
 The baseline retains the control-reproduced `crypto_key` and phase-six PDF
 failures (object 9, byte 760; both interpreter and JIT). The two new C++
 allocator tests are outside the default baseline. They verify exact bump homes,
-live precise roots and zeroed large-object fallback (D4.1.1v2, D5.3).
+live precise roots and zeroed large-object fallback (D5.1.1, D6.3).
 
 The additional aggregate concurrency executable is **red**: the existing
 Jube ordinal-parity case fails, followed by a context/cache crash. An isolated
@@ -803,7 +803,7 @@ Ordinary small runtime container construction now reuses the existing
 `heap_calloc_class` path already used by MIR maps and LambdaJS. The same
 zeroed size-class allocator, exact slot bitmap, precise roots and ordinary
 large-object fallback apply. The implementation preserves required snapshots
-and payload copies (S9.1.2, D4.1.1v2, D5.3). This is a shared runtime change;
+and payload copies (S9.1.2, D5.1.1, D6.3). This is a shared runtime change;
 it does not scalarize arrays or change their public element domain.
 
 The first combined allocator candidate `f42e92a1…40675` was also rejected:
@@ -821,8 +821,8 @@ and matching native sections identify dead-header pointer chasing in
 compaction. A retained breadth-first worklist fixed Havlak but was rejected
 after seven-pair Splay ratios 1.0524/1.0641. The final collector retains DFS
 marking, completes ephemeron and weak processing, then finalizes/sweeps dead
-headers while both source zones are intact (D4.3.3). Compaction visits only
-the survivor list and clears marks afterward (D4.3.1). Failed stack growth
+headers while both source zones are intact (D5.3.2). Compaction visits only
+the survivor list and clears marks afterward (D5.3.1). Failed stack growth
 abandons collection before weak clearing, buffer movement or sweep. The
 finalizer-order and failure paths have explicit regression coverage. This
 is a shared collector mechanism, not a row-specific bypass.
@@ -874,31 +874,31 @@ The previous §5 evidence remains a separate frozen snapshot.
 - **Finite-success array ranges and remainder masking:** a bounded induction
   checks a private `fill` producer and every store, rejecting aliases, rebinding,
   borrowing and escape. Only the div/mod consumer uses these content ranges,
-  after its existing absence/poison/divisor checks (S4.1, S6.1.2, D8.3.3).
+  after its existing absence/poison/divisor checks (S4.1, S6.1.2, D7.3.3).
 - **Invariant string reads:** pair comparisons reuse a pointer-free scalar
   containing the exact selected UTF-8 bytes and their length. Zero denotes an
   absent character, separately from an embedded NUL. Both receiver and all key
   dependencies must remain stable over condition and body; Unicode/OOB paths
-  retain exact character equality (S7.1.1v3, D5.3).
+  retain exact character equality (S7.1.1v3, D6.3).
 - **Record consumers and stores:** ordered comparisons can consume a guarded
   float TypedItem directly. Guards cover the exact shape and live descriptor,
   accessor/constructor state and actual tag. Marked-root member writes carry a
   linked NameId and descriptor hint into the canonical COW setter; the prepared
   owner's shape must match before it reuses that descriptor. Error propagation,
   type changes and child capture retain the canonical implementation
-  (D3.4.6, D4.4.4v4, S7.9.3, S9.3.1).
+  (D3.4.6, D5.4.4, S7.9.3, S9.3.1).
 - **Recursive scalar snapshots:** proven nonescaping native formals use a
   GC-owned, precisely rooted ArrayNum header with compact int/bool data copied
   into a bounded activation span. Only scalar index/length observations and
   same-formal recursive transfers qualify. Public boxed entries, views, wider
   lanes, aliases, escapes and oversized payloads retain ordinary COW. A
   recursive-transfer profitability gate preserves the existing lazy first-write
-  policy for nonrecursive activations (S9.1.2–S9.1.3, D4.4.1, D5.3).
+  policy for nonrecursive activations (S9.1.2–S9.1.3, D5.4.1, D6.3).
 - **Mixed numeric recurrences:** complete int|float tuples retain native
   arithmetic while choosing the logical result member at runtime: int+int keeps
   saturation and poison; a float member selects double arithmetic. This uses
   the shared physical decoder and preserves reflection and odd/fractional
-  halving (S4.1–S4.2, D2.4.1–D2.4.3).
+  halving (S4.1–S4.2, D2.3.4–D2.3.5).
 
 Canonical sources are unchanged. General proof budgets remain bounded; no
 benchmark name or workload constant selects an optimization. Final paired
@@ -912,7 +912,7 @@ bug: a failed native argument guard entered a body without the plain-parameter
 snapshot setup, and its unchecked setter mutated the caller. The frozen control
 reproduces the defect; the interpreter preserves the caller. The shared entry
 setup now gives boxed fallbacks their source-declared contract and ordinary COW
-metadata/prologue (S9.1.2, D8.3.3). The new scalar-snapshot fixture asserts both
+metadata/prologue (S9.1.2, D7.3.3). The new scalar-snapshot fixture asserts both
 the returned slice and unchanged caller; its emission check requires the COW
 setter in the boxed fallback. It is not changed to accept the control defect.
 
@@ -921,7 +921,7 @@ activation. Its runtime guard accepts only compact rank-one int/bool payloads
 that fit. The proof requires scalar integer indexing/length uses and recursive
 transfer at the same formal, with no rebind, capture, alias or other escape.
 The header remains a GC-owned precise root, and the scratch contains no roots
-(D5.3). Nonrecursive parameters retain lazy first-write COW. Wide, float, view,
+(D6.3). Nonrecursive parameters retain lazy first-write COW. Wide, float, view,
 attributed and oversized values keep the canonical fallback. Logical copies
 remain necessary; removing ordinary COW payload allocations is not zero copying.
 
@@ -934,7 +934,7 @@ five-argument body. Towers executes 8,191 ordinary map stores. The shared
 setter body is now required to inline into both entry points, allowing the
 ordinary entry to eliminate descriptor arguments/branches without duplicating
 source. Rejected captures are retained separately; fresh qualification uses
-the revised release, with no budget/golden relaxation (D8.3.3, D3.4.6).
+the revised release, with no budget/golden relaxation (D7.3.3, D3.4.6).
 
 ### 6.2 Fresh release qualification
 
@@ -983,7 +983,7 @@ qualification above remains attached to its archived binary and timings.
 - `crypto_key`: the baseline build omitted the separately built `node-crypto`
   DSO and loaded an older image without `CryptoKey`. Add that module to
   `build-lambda-baseline` prerequisites, preserving module isolation
-  (**D7.3.4**). The fixture passes under both AST and MIR after rebuilding it.
+  (**D9.4.4**). The fixture passes under both AST and MIR after rebuilding it.
 - PDF offsets/image streams: the phase 6 reference contained shadow colors
   unpremultiplied twice. The direct shadow compositor still had the same
   representation bug; it now preserves the destination's alpha representation.

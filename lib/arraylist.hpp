@@ -55,7 +55,7 @@ public:
         }
     }
 
-    // Element storage from an ownership-tree node's pool (D4.1.5): the list is
+    // Element storage from an ownership-tree node's pool (D5.1.5): the list is
     // torn down with that node, and its growth is attributed to it.
     explicit ArrayList(Pool* pool, size_t initial_capacity = 16)
         : data_(nullptr), count_(0), capacity_(0), category_(MEM_CAT_CONTAINER), pool_(pool) {

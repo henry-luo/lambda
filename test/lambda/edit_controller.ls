@@ -1,7 +1,7 @@
-import controller: lambda.edit.controller
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import controller: lambda.editor.controller
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let doc = node('doc',[node('paragraph',[text("Hello")])])
 let start = text_selection(pos([0,0],0),pos([0,0],0))

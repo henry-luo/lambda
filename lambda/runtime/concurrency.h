@@ -14,6 +14,7 @@ extern "C" {
 typedef struct LambdaScheduler LambdaScheduler;
 typedef struct LambdaTask LambdaTask;
 typedef struct LambdaTaskScope LambdaTaskScope;
+typedef struct LambdaDocumentLifetimeGuard LambdaDocumentLifetimeGuard;
 typedef void (*LambdaTaskCompletionFn)(LambdaTask* task, Item result, void* data);
 typedef void (*LambdaTaskObserverDestroyFn)(void* data);
 typedef void (*LambdaTaskAttachmentReleaseFn)(void* data);
@@ -38,8 +39,13 @@ LambdaScheduler* lambda_scheduler_create(int mailbox_capacity);
 void lambda_scheduler_destroy(LambdaScheduler* scheduler);
 int lambda_scheduler_run_one(LambdaScheduler* scheduler);
 int lambda_scheduler_run_ready(LambdaScheduler* scheduler);
+// Owner-thread generation of completed scheduler turns, for quiescent host shutdown.
+uint64_t lambda_scheduler_progress_generation(void);
 int lambda_scheduler_drain(LambdaScheduler* scheduler);
 int lambda_scheduler_live_count(const LambdaScheduler* scheduler);
+// Owner-thread runtime shutdown: cancel and join document tasks before state
+// teardown. Refuses reentry, active document guards or an undrivable owner.
+bool lambda_scheduler_join_document_tasks(LambdaScheduler* scheduler);
 // JSCU25: a parked JS async activation registers weakly with the attached
 // scheduler. It counts as live while it waits and leaves when it settles or
 // its carrier is collected; it keeps a drain going only while the loop could
@@ -96,9 +102,45 @@ Item lambda_task_start_function(Item function, List* args);
 Item lambda_task_start_function_scoped(Item function, List* args, bool escapes);
 // S13.3.1v2 `start(..., {owner: 'document'})`: the UI layer installs the probe
 // naming the running document, and releases a document's tasks when it is
-// discarded (cancel, then join, bounded)
+// discarded (cancel, then join; stalled and reentrant cleanup can remain incomplete)
 Item lambda_task_start_document(Item function, List* args);
 void lambda_set_document_probe(void* (*probe)(void));
+// Owner-thread admission spans every scheduler used by this document. The
+// host retains the guard until native destruction, including across retries.
+LambdaDocumentLifetimeGuard* lambda_document_lifetime_guard_begin(void* document);
+bool lambda_document_lifetime_guard_active(void* document);
+bool lambda_document_lifetime_guard_is_current(LambdaDocumentLifetimeGuard* guard);
+bool lambda_document_lifetime_guard_end(LambdaDocumentLifetimeGuard* guard);
+typedef enum LambdaDocumentJoinProgress {
+    LAMBDA_DOCUMENT_JOIN_ERROR = -1,
+    LAMBDA_DOCUMENT_JOIN_DONE = 0,
+    LAMBDA_DOCUMENT_JOIN_WAITING = 1,
+    LAMBDA_DOCUMENT_JOIN_ADVANCED = 2,
+} LambdaDocumentJoinProgress;
+// Drive one scheduler without polling the shared loop; the host interleaves
+// owners while keeping the document-wide admission guard alive.
+LambdaDocumentJoinProgress lambda_document_tasks_progress(LambdaScheduler* scheduler,
+    void* document, LambdaDocumentLifetimeGuard* guard);
+bool lambda_document_tasks_have_pending_native_work(LambdaScheduler* scheduler, void* document);
+// Close scheduler-wide document admission and advance ready cleanup without polling libuv.
+LambdaDocumentJoinProgress lambda_scheduler_document_tasks_progress(LambdaScheduler* scheduler);
+// Owner-thread phases for deferred document destruction. The guard rejects new
+// external starts even with no tasks and remains until explicitly ended after
+// detach and native destruction; begin is idempotent for one document owner.
+// The guard does not own the document or scheduler.
+// Cancellation returns the live count (or -1 for an invalid owner); detach
+// succeeds only after all descendants finish. The host retains the document and
+// scheduler throughout; existing tasks can create masked-cleanup descendants.
+bool lambda_document_retirement_guard_begin(LambdaScheduler* scheduler, void* document);
+bool lambda_document_retirement_guard_end(LambdaScheduler* scheduler, void* document);
+bool lambda_scheduler_has_document_retirement_guards(const LambdaScheduler* scheduler);
+int lambda_document_tasks_cancel(LambdaScheduler* scheduler, void* document);
+bool lambda_document_tasks_detach_joined(LambdaScheduler* scheduler, void* document);
+// Requires an existing retirement guard. Cancels and joins at a quiescent
+// boundary; false retains both task ownership and the guard for a later retry.
+// Success detaches finished tasks, but the host must still end the guard.
+bool lambda_document_tasks_join_guarded(LambdaScheduler* scheduler, void* document);
+// Returns -1 without detaching when the document's tasks cannot yet join.
 int lambda_document_tasks_release(void* document);
 LambdaTaskScope* lambda_task_scope_enter(void);
 LambdaTaskScope* lambda_task_scope_current(void);

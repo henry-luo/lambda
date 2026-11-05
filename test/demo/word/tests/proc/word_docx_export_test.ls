@@ -2,10 +2,10 @@ import files: ~~.~~.mod_io
 import document: ~~.~~.mod_document
 import page: ~~.~~.mod_page
 import docx: lambda.doc.docx
-import lambda.editor.mod_doc
-import lambda.editor.mod_transaction
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.transaction
+import lambda.editor.core.source_pos
+import lambda.editor.core.step
 pn main() {
     let doc = document.sample()
     let result = files.export_document(doc,"Exported studio","temp/docx-export/word.docx")^

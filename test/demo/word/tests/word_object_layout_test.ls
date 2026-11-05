@@ -3,14 +3,14 @@ import layout: ~~.mod_object_layout
 import shapes: ~~.mod_shapes
 import transform: ~~.mod_transform
 import files: ~~.mod_io
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
-import image: lambda.editor.mod_image
-import css: lambda.editor.mod_inline_format
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
+import image: lambda.editor.image
+import css: lambda.editor.core.inline_format
 import groups: ~~.mod_group_data
-import controller: lambda.edit.controller
+import controller: lambda.editor.controller
 import outcome: lambda.dom.edit_result
 
 let base = model.open_editor(node('doc',[node('p',[text("Keep the paragraph and all its text.")])]))

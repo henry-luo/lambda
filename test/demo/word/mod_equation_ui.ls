@@ -1,12 +1,12 @@
 // Equation chrome uses the shared Word controls; thumbnails use the document's math renderer.
-import lambda.editor.mod_step
-import image: lambda.editor.mod_image
+import lambda.editor.core.step
+import image: lambda.editor.image
 import lambda.ui.controls
 import equation: .mod_equation
 import authoring: .mod_equation_edit
-import catalog: .mod_equation_catalog
+import catalog: lambda.editor.math.catalog
 import objects: .mod_objects
-import ribbon_icons: .mod_ribbon_icons
+import ribbon_icons: lambda.ui.workspace.ribbon_icons
 
 fn structure_icon(s) {
     let p = ribbon_icons.palettes.violet;

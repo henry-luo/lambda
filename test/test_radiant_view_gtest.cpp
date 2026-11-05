@@ -7,6 +7,7 @@
 #include <errno.h>
 #include "../lib/log.h"
 #include "../lib/ownership.hpp"
+#include "../lib/str.h"
 
 #include "../radiant/script_timeout.hpp"
 #include "test_radiant_view_helpers.hpp"
@@ -155,6 +156,7 @@ struct RadiantViewHttpResource {
     const char* request; const char* type; const char* body; size_t size;
     const char* headers = "";
     int status = 200;
+    int delay_ms = 0;
 };
 
 static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageServer* server,
@@ -231,17 +233,20 @@ static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageSer
             const char* type = is_image_request ? "image/avif" : "text/html";
             const char* response_headers = "";
             int status = 200;
+            int delay_ms = 0;
             if (resources) {
                 body = "missing fixture resource"; body_size = strlen(body); type = "text/plain";
                 for (size_t i = 0; i < resource_count; i++) if (strstr(request, resources[i].request)) {
                     body = resources[i].body; body_size = resources[i].size; type = resources[i].type;
-                    response_headers = resources[i].headers; status = resources[i].status; break;
+                    response_headers = resources[i].headers; status = resources[i].status;
+                    delay_ms = resources[i].delay_ms; break;
                 }
             }
             if (audit_path) {
                 FILE* audit = fopen(audit_path, "ab");
                 if (audit) { fwrite(request, 1, request_size > 0 ? (size_t)request_size : 0, audit); fclose(audit); }
             }
+            if (delay_ms > 0) usleep((useconds_t)delay_ms * 1000);
             char header[256];
             int header_size = snprintf(header, sizeof(header),
                 "HTTP/1.1 %d Fixture\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
@@ -645,7 +650,7 @@ static void test_radiant_view_check_http_language(size_t selected, bool gc_stres
     strbuf_free(event_source);
     const ShellEnvEntry env[] = {
         {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"},
-        // D5.3.3: stress native handoffs separately from the complete header matrix.
+        // D6.3.3: stress native handoffs separately from the complete header matrix.
         {"LAMBDA_GC_FORCE_EVERY", gc_stress ? "1" : nullptr},
         {"LAMBDA_GC_POISON_FREED", gc_stress ? "1" : nullptr}, {nullptr, nullptr},
     };
@@ -921,6 +926,124 @@ TEST(RadiantViewTest, LoadsXhtmlFeatureGallery) {
     EXPECT_NE(strstr(output, "Assertions: 9 passed, 0 failed"), nullptr) << output;
     EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
     shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, LoadsRelativeStylesheetImagesThroughCustomProperties) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    const char* page = "<!doctype html><link rel='stylesheet' href='/styles/main.css'>"
+        "<div id='hero'></div><div id='icon'></div><script>"
+        "window.addEventListener('load',function(){document.body.setAttribute('data-loaded','yes');});"
+        "</script>";
+    const char* css = ":root{--hero:url(hero.svg)}body{margin:0}"
+        "#hero{width:160px;height:80px;background:var(--hero)}"
+        "@media(min-width:100px){#icon{width:20px;height:20px;background:url(icon.svg)}}";
+    const char* blue = "<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80'>"
+        "<path fill='#0049d7' d='M0 0H160V80H0Z'/></svg>";
+    const char* red = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>"
+        "<path fill='red' d='M0 0H20V20H0Z'/></svg>";
+    const RadiantViewHttpResource resources[] = {
+        {"GET /page ", "text/html", page, strlen(page)},
+        {"GET /styles/main.css ", "text/css", css, strlen(css)},
+        {"GET /styles/hero.svg ", "image/svg+xml", blue, strlen(blue)},
+        {"GET /styles/icon.svg ", "image/svg+xml", red, strlen(red)},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0])));
+    RadiantViewServerScope server_scope = {server.pid};
+    const char* events = "temp/css_network_background_events.json";
+    write_text_file(events, "{\"viewport\":{\"width\":200,\"height\":120},\"events\":["
+        "{\"type\":\"assert_pixel\",\"target\":{\"selector\":\"#hero\",\"offset_x\":10,\"offset_y\":10},"
+        "\"min_r\":0,\"max_r\":0,\"min_g\":73,\"max_g\":73,\"min_b\":215,\"max_b\":215},"
+        "{\"type\":\"assert_pixel\",\"target\":{\"selector\":\"#icon\",\"offset_x\":10,\"offset_y\":10},"
+        "\"min_r\":255,\"max_r\":255,\"min_g\":0,\"max_g\":0,\"min_b\":0,\"max_b\":0},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"body\"},"
+        "\"attribute\":\"data-loaded\",\"equals\":\"yes\"}]}");
+    char url[128];
+    str_fmt(url, sizeof(url), "http://127.0.0.1:%d/page", server.port);
+    const ShellEnvEntry env[] = {{"LAMBDA_LOG_LEVEL", "NOTICE"}, {nullptr, nullptr}};
+    ShellResult result = test_radiant_view_run_logged_headless(url, events, env);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Assertions: 3 passed, 0 failed"), nullptr) << output;
+    shell_result_free(&result);
+#endif
+}
+
+TEST(RadiantViewTest, LocalNavigationPublishesDelayedRemoteImageWithoutBlocking) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    const char* image = "<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'>"
+        "<rect width='40' height='40' fill='#0049d7'/></svg>";
+    const RadiantViewHttpResource resources[] = {
+        {"GET /slow.svg ", "image/svg+xml", image, strlen(image), "", 200, 1200},
+        {"GET /background.svg ", "image/svg+xml", image, strlen(image), "", 200, 200},
+        {"GET /dynamic.svg ", "image/svg+xml", image, strlen(image), "", 200, 700},
+        {"GET /cancel.svg ", "image/svg+xml", image, strlen(image), "", 200, 1200},
+    };
+    RadiantViewImageServer server = {};
+    const char* audit = "temp/async_local_image_requests.txt";
+    remove(audit);
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0]), audit));
+    RadiantViewServerScope server_scope = {server.pid};
+    const char* index = "temp/async_local_image_index.html";
+    const char* page = "temp/async_local_image_page.html";
+    const char* events = "temp/async_local_image_events.json";
+    const char* index_source = "<!doctype html><a id='go' href='async_local_image_page.html'>go</a>";
+    char page_source[512];
+    ASSERT_GT(snprintf(page_source, sizeof(page_source),
+        "<!doctype html><style>body{margin:0}</style><body data-base='http://127.0.0.1:%d/'>"
+        "<a id='back' href='async_local_image_index.html'>back</a><br>"
+        "<img id='asset' width='40' height='40' src='http://127.0.0.1:%d/slow.svg'>"
+        "<div id='background' style='width:40px;height:40px;background:url(http://127.0.0.1:%d/background.svg)'></div>",
+        server.port, server.port, server.port), 0);
+    const char* event_source = "{\"viewport\":{\"width\":200,\"height\":100},"
+        "\"input_turn_ms\":0,\"event_interval_ms\":0,\"events\":["
+        "{\"type\":\"click\",\"target\":{\"selector\":\"#go\"}},"
+        "{\"type\":\"assert_script\",\"js\":\"document.querySelector('#asset') && "
+        "document.querySelector('#asset').naturalWidth === 0\"},"
+        "{\"type\":\"assert_pixel\",\"target\":{\"selector\":\"#asset\",\"offset_x\":20,\"offset_y\":20},"
+        "\"min_r\":0,\"max_r\":0,\"min_g\":73,\"max_g\":73,\"min_b\":215,\"max_b\":215,"
+        "\"assert_timeout\":5000,\"assert_interval\":50},"
+        "{\"type\":\"assert_pixel\",\"target\":{\"selector\":\"#background\",\"offset_x\":20,\"offset_y\":20},"
+        "\"min_r\":0,\"max_r\":0,\"min_g\":73,\"max_g\":73,\"min_b\":215,\"max_b\":215,"
+        "\"assert_timeout\":5000,\"assert_interval\":50},"
+        "{\"type\":\"script\",\"js\":\"window.probe=new Image();probe.id='dynamic';"
+        "probe.onload=function(){document.body.setAttribute('data-loaded','yes')};"
+        "probe.onerror=function(){document.body.setAttribute('data-loaded','error')};"
+        "probe.src=document.body.getAttribute('data-base')+'dynamic.svg';document.body.appendChild(probe)\"},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"body\"},\"attribute\":\"data-loaded\","
+        "\"equals\":\"yes\",\"assert_timeout\":5000,\"assert_interval\":50},"
+        "{\"type\":\"assert_script\",\"js\":\"document.querySelector('#dynamic').naturalWidth===40\"},"
+        "{\"type\":\"script\",\"js\":\"window.cancelled=new Image();"
+        "cancelled.src=document.body.getAttribute('data-base')+'cancel.svg'\"},"
+        "{\"type\":\"click\",\"target\":{\"selector\":\"#back\"}},"
+        "{\"type\":\"assert_script\",\"js\":\"!!document.querySelector('#go')\"},"
+        "{\"type\":\"click\",\"target\":{\"selector\":\"#go\"}},"
+        "{\"type\":\"assert_script\",\"js\":\"document.querySelector('#asset') && "
+        "document.querySelector('#asset').naturalWidth === 40\"}]}";
+    ASSERT_EQ(write_binary_file(index, index_source, strlen(index_source)), 0);
+    ASSERT_EQ(write_binary_file(page, page_source, strlen(page_source)), 0);
+    ASSERT_EQ(write_binary_file(events, event_source, strlen(event_source)), 0);
+    const ShellEnvEntry env[] = {{"LAMBDA_LOG_LEVEL", "NOTICE"}, {nullptr, nullptr}};
+    ShellResult result = test_radiant_view_run_logged_headless(index, events, env, nullptr,
+        nullptr, 15000, g_radiant_view_executable);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Assertions: 9 passed, 0 failed"), nullptr) << output;
+    shell_result_free(&result);
+    lam::Temp<char> requests(read_text_file(audit));
+    ASSERT_NE(requests.get(), nullptr);
+    const char* first_request = strstr(requests.get(), "GET /slow.svg ");
+    ASSERT_NE(first_request, nullptr);
+    EXPECT_EQ(strstr(first_request + 1, "GET /slow.svg "), nullptr);
+#endif
 }
 
 TEST(RadiantViewTest, ResourceTimingBuffersTrackFetchAndXhrAcrossGc) {
@@ -2231,7 +2354,7 @@ TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
 }
 
 TEST(RadiantViewTest, WordDocumentsOpenAsDocumentPreviews) {
-    // D7.2.4: the DOCX package supplies the preview through ordinary view dispatch.
+    // D9.3.4: the DOCX package supplies the preview through ordinary view dispatch.
     ShellResult result = test_radiant_view_run_logged_headless(
         "test/input/zip/office.docx", "test/ui/doc_viewer_docx_archive.json", nullptr);
     EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
@@ -3253,7 +3376,7 @@ TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
     ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
     ASSERT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
-    // D4.1.1v2: descriptor type changes must not move a runtime Map payload
+    // D5.1.1: descriptor type changes must not move a runtime Map payload
     // from the GC data zone back through the pool allocator on later appends.
     EXPECT_EQ(nullptr, shell_result.stdout_buf
         ? strstr(shell_result.stdout_buf, "pool_free: pointer") : nullptr);
@@ -3291,8 +3414,21 @@ TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
         timing_path, "\"document_context_live_bytes\":"));
 }
 
+TEST(RadiantViewTest, InitialScriptFocusSurvivesGeometryInitialization) {
+    const char* output = "temp/initial-script-focus.json";
+    const char* args[] = {"./lambda.exe", "layout",
+        "test/html/js_initial_script_focus.html", "--view-output", output, "--no-log", NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    EXPECT_TRUE(test_radiant_view_file_contains(output, "initial-focus-ok"));
+    EXPECT_FALSE(test_radiant_view_file_contains(output, "initial-focus-lost"));
+}
+
 TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
-    // D4.5.2: a UI-mode script result lives in the document's untraced arena.
+    // D5.5.2: a UI-mode script result lives in the document's untraced arena.
     // A runtime symbol, a non-spreadable array or a group element left there
     // as a GC pointer is collected, and its memory reused, before the DOM build
     // reads it; forced, poisoning collection makes that deterministic.
@@ -3364,7 +3500,7 @@ TEST(RadiantViewTest, DoomCssConsumersAndNativeEffectsSurviveForcedGcAndClose) {
 }
 
 TEST(RadiantViewTest, PromotedDocumentTransformUsesCallerStackLimit) {
-    // D5.3.6v2: package initialization retires its large-stack worker before
+    // D6.3.6: package initialization retires its large-stack worker before
     // the native loader invokes a retained export on the caller's stack.
     const ShellEnvEntry env[] = {
         {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
@@ -3462,7 +3598,7 @@ static void test_radiant_view_expect_canvas_frames(const char* output) {
 }
 
 TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
-    // D4.5.2 / D5.3.3: one replay checks retained pixels, repaint-only frames and clean close.
+    // D5.5.2 / D6.3.3: one replay checks retained pixels, repaint-only frames and clean close.
     constexpr size_t base_count = sizeof(RADIANT_IMAGE_GC_ENV) / sizeof(RADIANT_IMAGE_GC_ENV[0]);
     ShellEnvEntry env[base_count + 1];
     memcpy(env, RADIANT_IMAGE_GC_ENV, sizeof(RADIANT_IMAGE_GC_ENV));
@@ -3941,6 +4077,23 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
     if (!list_only) {
+        if (case_worker) {
+            // each case owns one CPU slot; nested raster/vector pools would oversubscribe it.
+            const ShellEnvEntry render_defaults[] = {
+                {"RADIANT_RENDER_THREADS", "1"}, {"RADIANT_VECTOR_THREADS", "0"},
+            };
+            for (const auto& setting : render_defaults) if (!getenv(setting.key)) {
+#ifdef _WIN32
+                int result = _putenv_s(setting.key, setting.value);
+#else
+                int result = setenv(setting.key, setting.value, 0);
+#endif
+                if (result != 0) {
+                    log_error("radiant_view_render_budget: cannot set %s", setting.key);
+                    return 1;
+                }
+            }
+        }
         g_radiant_view_root = file_getcwd();
         const char* executable = getenv("RADIANT_TEST_EXECUTABLE");
         g_radiant_view_executable = file_realpath(executable ? executable : "./lambda.exe");

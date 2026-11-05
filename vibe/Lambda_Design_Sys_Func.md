@@ -578,7 +578,7 @@ The first scientific batch adds `math.erf`, `erfc`, `fft`, `ifft`, `rfft`,
 contracts and examples are in [Lambda_Sys_Func.md](../doc/Lambda_Sys_Func.md#error-functions).
 These are pure native numerical primitives; chart assembly, spectral
 estimators, integration policies, physical constants, and units remain
-separate package concerns (S12.1.1v2, D6.4.1).
+separate package concerns (S12.1.1v2, D7.6.1).
 
 ### Contracts and representation
 
@@ -590,10 +590,10 @@ separate package concerns (S12.1.1v2, D6.4.1).
   lengths, and singular/rank-deficient solve domains produce errors. Whole
   null operands propagate absence, with errors taking precedence. Fourier
   arithmetic itself may overflow to IEEE infinities/NaNs.
-- **D6.4.1, D6.4.2:** each function uses a boxed `Item` boundary and registered
+- **D7.6.1, D7.6.2:** each function uses a boxed `Item` boundary and registered
   successful result shape. The new SysFunc IDs are appended. The two libm
   scalar leaves also enter the shared native-call/GC-effect audit list.
-- **D5.3.3:** sequence readers root their source and current row across boxing;
+- **D6.3.3:** sequence readers root their source and current row across boxing;
   output builders root the complex array across allocations. Algorithm
   scratch buffers contain only native numbers, never unrooted Lambda values.
 - **S13.4.1:** QR inner products and norms use fixed balanced reduction trees.
@@ -640,4 +640,4 @@ their goldens cover an independent direct DFT oracle, arbitrary transform
 lengths, real round trips, residuals, pivoting, views, multiple right-hand
 sides, empty/error/null distinctions, exact degeneracy, cancellation, extreme
 exponents, and libm native/boxed paths. Run them under both interpreter and
-JIT, including forced GC and freed-memory poisoning (D8.1.1, D5.3.3).
+JIT, including forced GC and freed-memory poisoning (D8.3.1, D6.3.3).

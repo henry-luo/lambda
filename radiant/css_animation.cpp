@@ -627,7 +627,7 @@ static void css_animation_refresh_priority(CssAnimState* state) {
 }
 
 static bool capture_underlying_value(DomElement* element, CssPropertyCode property,
-                                     CssAnimatedProp* out);
+                                     CssAnimatedProp* out, const bool* svg = nullptr);
 
 
 static FilterFunction filter_identity(FilterFunctionType type) {
@@ -724,7 +724,7 @@ static bool css_animation_compute_property(CssAnimState* state, LayoutContext* l
         if (inherit && capture_underlying_value(dom_parent_element(state->element),
                 property->property_code, &inherited)) {
             computed->value = inherited.value;
-            // computed transform caches own copies, never a parent's mutable view-pool chain (D4.5.1v4).
+            // computed transform caches own copies, never a parent's mutable view-pool chain (D5.5.1).
             if (property->value_type == ANIM_VAL_TRANSFORM)
                 computed->value.transform = radiant::clone_transform_list(
                     state->pool, inherited.value.transform);
@@ -1322,13 +1322,13 @@ static CssAnimationColorSlot css_animation_color_slot(DomElement* element,
 }
 
 static bool capture_underlying_value(DomElement* element, CssPropertyCode property,
-                                     CssAnimatedProp* out) {
+                                     CssAnimatedProp* out, const bool* svg) {
     if (!element || !out) return false;
     out->property_code = property;
     out->value_type = property_value_type(property);
     out->composite = CSS_ANIM_COMPOSITE_REPLACE;
-    if (dom_element_is_svg(element) && css_property_is_svg_presentation(property) &&
-        out->value_type != ANIM_VAL_NONE) {
+    if (css_property_is_svg_presentation(property) && out->value_type != ANIM_VAL_NONE &&
+        (svg ? *svg : dom_element_is_svg(element))) {
         // SVG attributes and inherited paints are the base; sampled CSS never feeds back into it.
         SvgAnimationBaseQuery base;
         const CssProperty* metadata = css_property_get_by_code(property);
@@ -1952,7 +1952,7 @@ void css_animation_tick(AnimationInstance* anim, float t) {
                 state->filter_applied = true;
             }
             if (result.value_type == ANIM_VAL_TRANSFORM) {
-                // D4.5.1v4: replace the live borrow before reclaiming the preceding sample.
+                // D5.5.1: replace the live borrow before reclaiming the preceding sample.
                 int slot = animation_transform_slot(property);
                 radiant::destroy_transform_list(state->pool, state->sampled_transform[slot]);
                 state->sampled_transform[slot] = lam::own(result.value.transform);
@@ -2112,7 +2112,7 @@ static void capture_animation_underlying(CssAnimState* state) {
                 captured.value.filter = state->underlying_filter;
             }
             if (captured.value_type == ANIM_VAL_TRANSFORM) {
-                // D4.5.1v4: snapshots cannot borrow a relayout-owned function list.
+                // D5.5.1: snapshots cannot borrow a relayout-owned function list.
                 TransformFunction* copy = radiant::clone_transform_list(
                     state->pool, captured.value.transform);
                 if (captured.value.transform && !copy) continue;
@@ -2762,12 +2762,13 @@ static bool css_transition_read_used_value(DomElement* element,
                                            CssPropertyCode prop_id,
                                            CssAnimValueType* out_type,
                                            float* out_f, Color* out_color,
-                                           float* out_ratio, bool sampled = false) {
+                                           float* out_ratio, bool sampled = false,
+                                           const bool* svg = nullptr) {
     CssAnimatedProp used = {};
     const CssAnimatedProp* current = sampled
         ? css_animation_current_presentation(element, prop_id, false) : nullptr;
     if (current) used = *current;
-    else if (!capture_underlying_value(element, prop_id, &used)) return false;
+    else if (!capture_underlying_value(element, prop_id, &used, svg)) return false;
     switch (used.value_type) {
         case ANIM_VAL_LENGTH:
             if (used.value.length.keyword != CSS_VALUE__UNDEF) return false;
@@ -3165,6 +3166,13 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
     if (!scratch.pool) return;
     CssTransitionList list;
     css_transition_resolve_config(element, scratch.pool, &list);
+    const CssValue* property = css_value_comma_at(list.values[0], 0);
+    bool all = css_value_comma_count(list.values[0]) == 1 && property &&
+        property->type == CSS_VALUE_TYPE_KEYWORD && property->data.keyword == CSS_VALUE_ALL;
+    CssTransitionProp all_timing = {};
+    bool all_covered = all && css_transition_select_config(&list, CSS_PROPERTY_UNKNOWN, &all_timing);
+    // a snapshot reads one element without mutation; namespace and a lone `all` timing stay constant.
+    bool svg = dom_element_is_svg(element);
 
     // Lazily allocate the persistent per-element transition state (survives the
     // view-pool relayout because it lives in the doc pool, not the view pool).
@@ -3192,7 +3200,7 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
         CssAnimValueType read_vt; float new_f = 0.0f; float new_ratio = 0.0f;
         Color new_c; new_c.c = 0;
         if (!css_transition_read_used_value(element, prop_id, &read_vt,
-                                            &new_f, &new_c, &new_ratio)) {
+                                            &new_f, &new_c, &new_ratio, false, &svg)) {
             continue; // used value not determinable this pass — skip
         }
 
@@ -3200,8 +3208,8 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
         if (!track) continue;
 
         // compare with the active target before sampling overwrites the new cascade.
-        CssTransitionProp timing = {};
-        bool covered = css_transition_select_config(&list, prop_id, &timing);
+        CssTransitionProp timing = all_timing;
+        bool covered = all ? all_covered : css_transition_select_config(&list, prop_id, &timing);
         AnimationInstance* running = css_transition_find_running(scheduler, element, prop_id);
         if (running && !covered) {
             animation_scheduler_cancel(scheduler, running);

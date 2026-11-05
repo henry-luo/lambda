@@ -44,10 +44,10 @@ implementation:
 
 | Formal ruling | Application here |
 |---|---|
-| **D7.2.1**, **D7.2.3** | Ship ordinary Lambda source modules with explicit exports and existing import caching. |
-| **D7.2.4v3** | Place the new document package under `lambda.doc.eps.*`, resolving to `lmd/package/doc/eps/`. Reuse existing `lambda.doc.pdf.*` modules at their current paths. |
-| **D4.1.1v2**, **D4.1.2**, **D4.1.3** | Parsed source and objects belong to the Input arena/pool; runtime state has a separate lifetime. |
-| **D1.5v2**, **D5.1.1v3** | Any native runtime bridge retaining GC Items uses precise roots; the native stack is not a GC root source. |
+| **D9.3.1**, **D9.3.3** | Ship ordinary Lambda source modules with explicit exports and existing import caching. |
+| **D9.3.4** | Place the new document package under `lambda.doc.eps.*`, resolving to `lmd/package/doc/eps/`. Reuse existing `lambda.doc.pdf.*` modules at their current paths. |
+| **D5.1.1**, **D5.1.2**, **D5.1.3** | Parsed source and objects belong to the Input arena/pool; runtime state has a separate lifetime. |
+| **D1.5**, **D6.1.1** | Any native runtime bridge retaining GC Items uses precise roots; the native stack is not a GC root source. |
 | **S1.4**, **S12.2.1** | Represent PostScript object sharing explicitly inside the guest machine; do not assume Lambda values alias. |
 | **S12.1.1v2**, **S12.1.2** | A `var`/`while` execution driver is a `pn`; pure helpers are `fn`. An `fn` cannot call that driver. |
 | **S7.4.2**, **S7.4.4**, **S7.5.1** | Public conversion failures use an explicit `^` channel with structured diagnostics and immediate propagation/handling. |
@@ -463,10 +463,10 @@ scans, composite copies, binding and codec work as well as opcode dispatch.
 Every loop backedge and source-procedure callback checks the common budget.
 
 Parsed source and structural objects retain Input ownership
-(**D4.1.1v2/D4.1.3**). The runtime machine stores values and explicit guest IDs,
+(**D5.1.1/D5.1.3**). The runtime machine stores values and explicit guest IDs,
 never raw native pointers into expired parser scratch buffers. Native bridge
 results follow existing Item ownership/return conventions. Precisely root GC
-Items retained across allocating runtime calls (**D1.5v2**, **D5.1.1v3**); do
+Items retained across allocating runtime calls (**D1.5**, **D6.1.1**); do
 not add roots for Input-arena storage or revive conservative stack scanning.
 
 Keep all implementation in Lambda-owned sources, use C++17 and the `lib/`
@@ -591,7 +591,7 @@ in both formal and working design documents before implementation.
 
 The native parser and demand scanner live under `lambda/input/`; `ps_scan`,
 `ps_read` and `ps_png` are thin runtime bridges using an Input owner
-(**D4.1.3**). Literal-string parsing, bounded ASCIIHex/ASCII85/RunLength decoding,
+(**D5.1.3**). Literal-string parsing, bounded ASCIIHex/ASCII85/RunLength decoding,
 PNG/data-URI encoding and SVG path/text painting are shared with PDF.
 The script package implements explicit object IDs, procedure/control-flow
 frames, local `save`/`restore`, and ordered vector draws, including clips,

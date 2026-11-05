@@ -9,23 +9,21 @@ These rules MUST be followed. Violations are considered errors.
 
 1. **NEVER hard code or work around**. Fix code only when have found the root cause. It's ok to leave existing code as failed.
 2. **NEVER write files to `/tmp`**. Use `./temp/` dir for ALL temporary files.
+3. Follow C++17 standard. 
 3. **NEVER use `std::string`, `std::vector`, `std::map`**, or any other `std::` types. Use `./lib` equivalents (`Str`, `ArrayList`, `HashMap`, etc.).
-4. **NEVER use `printf`/`fprintf`/`std::cout`** for debugging. Use `log_debug()`, `log_info()`, `log_error()` from `lib/log.h`.
-5. **NEVER manually edit `parser.c`**. Grammar regeneration is automatic from `grammar.js` via `make generate-grammar`.
+4. **NEVER use `printf`/`fprintf`/`std::cout`** for debugging. Use `log_debug()`, `log_info()`, `log_error()` from `lib/log.h`. Start each log line with a distinct prefix/phrase for easy searching.
 6. **NEVER modify `log.conf`**.
 7. **NEVER manually edit `.lua` build files**. Edit `build_lambda_config.json`, then run `make`.
 8. After adding a new Lambda unit test script `*.ls`, ALWAYS add the corresponding expected result `*.txt` file.
-9. Follow C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
 10. **NEVER use debug build for performance testing**. Use release build (`make release`).
-11. **In `radiant/` layout code, NEVER use `int` for position/dimension variables**. All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make lint ARGS='--rule ^no-int-cast-radiant$'` to verify (or `make lint` for the full sweep).
 12. Concisely comment any non-trivial code change. Do not add generic narration.
 13. **NEVER duplicate code.** Grep for an existing helper before writing one. At the 3rd near-identical variant (type/kind/case), extract the shared shape first. To reuse another file's `static`, promote it to the module header — never copy it.
-14. **The legacy C2MIR path is REMOVED.** MIR Direct (`transpile-mir.cpp`) is the only back end. 
 15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
-16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), the Tree-sitter runtime (`lambda/tree-sitter/`) and its vendored language grammars (`lambda/tree-sitter-{bash,javascript,python,ruby}/`), ThorVG, RE2 (`lib/re2/`), curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern. **`lambda/tree-sitter-lambda/` is NOT vendored** — it is Lambda's own grammar. **`lambda/tree-sitter-typescript/` is a Lambda-maintained fork** of the upstream grammar (copied 2026-04-01, tuned since): edit it like Lambda's own grammars.
+16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), the Tree-sitter runtime (`lambda/tree-sitter/`) and its vendored language grammars (`lambda/tree-sitter-{bash,javascript,python,ruby}/`), ThorVG, RE2 (`lib/re2/`), curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern. 
 17. **Cite rulings by formal-spec ID.** `doc/Lambda_Formal_Semantics.md` (`S#`) and `doc/Lambda_Formal_Design.md` (`D#`) are the single sources of truth. In chat/discussion and in every new or updated design/impl doc, quote the `S#`/`D#` point when one covers the topic; only when none exists, quote the vibe design-doc ledger ID (e.g. TE-16, K13, CW9). When a semantics or design ruling changes, update BOTH the `./doc` formal spec (revise the ruling in place: `v2` suffix + doc semver bump) and the relevant `./vibe` working design doc. Documentation tiers, authority order, and style conventions: `doc/Doc_Convention.md`.
 18. **When js262/Test262 tests fail, crash, or time out, NEVER modify `test_js_test262_gtest` to mask the issue.** Investigate and fix the root cause or instability in the JS runtime.
 19. When asked to reduce LOC, **NEVER ever remove blank/comment lines, or reformat the code to reduce LOC**. Simplify the code itself.
+20.  **In `radiant/` layout code, NEVER use `int` for position/dimension variables**. All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make lint ARGS='--rule ^no-int-cast-radiant$'` to verify (or `make lint` for the full sweep).
 
 | DON'T | DO |
 |-------|-----|
@@ -33,15 +31,13 @@ These rules MUST be followed. Violations are considered errors.
 | `std::string s = "hello"` | Use `Str` from `lib/str.h` |
 | `printf("debug: %d", x)` | `log_debug("debug: %d", x)` |
 | `std::vector<int> v` | Use `ArrayList` from `lib/arraylist.h` |
-| Edit `parser.c` manually | Edit `grammar.js` then `make generate-grammar` |
 | Edit `premake5.mac.lua` manually | Edit `build_lambda_config.json` then `make` |
 | `int width = (int)block->width` | `float width = block->width` |
 | Copy a `static` helper into another file | Promote it to the module header, then call it |
 | Add a 3rd/4th copy of a per-type/kind/case block | Extract a parameterized helper or table first |
 | Cite only a vibe ledger ID when an `S#`/`D#` ruling exists | Quote `S#`/`D#` first; vibe IDs only for uncovered points |
-| Reintroduce a C-text back end (`transpile.cpp`) | Evolve only MIR Direct (`transpile-mir.cpp`) |
 | Edit `lambda/mir/`, `lib/re2/`, `lambda/tree-sitter/`, a vendored `tree-sitter-<lang>/`, ThorVG, or any vendored dep | Fix it on the Lambda side; if it must be upstream, ask first, then record it under `patches/` |
-| Treat `lambda/tree-sitter-{lambda,typescript}/` as vendored | They are Lambda-owned: edit `grammar.js` / the scanner, never the generated `src/parser.c` — the Makefile regenerates it (`make generate-grammar`, `make generate-grammar-typescript`) |
+
 
 ## Project Overview
 
@@ -78,7 +74,7 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 - **Parser**: Direct C lexer/parser (`lambda/runtime/parser/lambda_lexer.c`, `lambda_parser.c`); Tree-sitter grammar is retained only for the isolated `lambda-cst` verifier
 - **AST Builder**: `lambda/runtime/build_ast.cpp` - constructs typed AST from parser reductions
 - **Transpiler**: `lambda/runtime/transpile-mir.cpp` - MIR Direct JIT, the only back end (the C-text transpiler is removed, see rule 14)
-- **Execution**: tiered per D8.1.1 — `lambda/runtime/interp.cpp` is the T0 AST-walking interpreter; hot definitions promote to MIR JIT (`lambda/runtime/mir.c`)
+- **Execution**: tiered per D8.3.1 — `lambda/runtime/interp.cpp` is the T0 AST-walking interpreter; hot definitions promote to MIR JIT (`lambda/runtime/mir.c`)
 - **Runtime builtins**: `lambda/runtime/lambda-eval.cpp` - the C-ABI `fn_*` library that interpreted and JIT'd code call into (not an evaluator)
 - **Type System**: `lambda/lambda-data.hpp` - 20+ built-in types with inference
 
@@ -130,14 +126,16 @@ investigations without a plan. Follow [Doc Convention §5.1](doc/Doc_Convention.
 ```bash
 make build-test               # Build all test executables
 make test                     # Every suite except jube and the online view test (make test-all runs everything)
-make test-lambda-baseline     # Lambda core functionalities (must pass 100%, when changes maked to Lambda engine)
-make test-radiant-baseline    # Radiant core functionalities (must pass 100%, when changes maked to Radiant engine)
+make test-lambda-baseline     # Full Lambda baseline suite; run at major milestones or session end
+make test-radiant-baseline    # Full Radiant baseline suite; run at major milestones or session end
 ```
+**Test cadence:** Avoid running the full Lambda or Radiant baseline suites after every incremental change. Run them at major milestones or at the end of a work session. For incremental changes, run focused unit tests related to the changed code.
+
 **Test data**: run `./setup-test.sh` once per checkout — it links `test/<corpus>` to the sibling `../lambda-test` repo and fetches the pinned WPT into `ref/wpt`; suites using those corpora fail without it. All make targets: `make help` and [`doc/dev/Make_Guide.md`](doc/dev/Make_Guide.md).
 
 **Test map**: [`test/README.md`](test/README.md) — which gate covers which source area, every harness with its fixture dirs and golden convention, and single-test commands. Every `.ls` in a golden-driven test directory needs its golden; name helper, module and playground scripts `_*` or `mod_*`.
 
-**Radiant workflow (required reading)**: read [`radiant/README.md`](radiant/README.md) before Radiant development. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation and run required aggregate gates at milestone boundaries; repeat broad checks only for relevant new changes, failures or unresolved concerns. Batch related fixes before expensive qualification, keep unrelated debt in the backlog, and record completion by behavior rather than growing test counts. Documentation-only changes need document checks, not engine builds or regression suites.
+**Radiant workflow (required reading)**: read [`radiant/README.md`](radiant/README.md) before Radiant development. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation; run aggregate baseline gates at major milestones or at the end of a work session, and use focused tests for incremental changes. Batch related fixes before expensive qualification, keep unrelated debt in the backlog, and record completion by behavior rather than growing test counts. Documentation-only changes need document checks, not engine builds or regression suites.
 
 **Broad HTML/CSS priorities**: finish the highest-impact features used by common pages before less important features or detailed conformance residue. Rank work by user impact, usage frequency, dependency value and effort. Define a useful core milestone for each feature, finish it, and move on with remaining limitations recorded honestly as partial support. Keep rare combinations, exhaustive reflection and minor isolated fidelity differences in the long-tail backlog unless they block the selected milestone or expose a serious shared defect. Do not let an effectively unbounded standards tail prevent delivery of the important features.
 
@@ -189,8 +187,8 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 
 ## Lambda Language Documentation
 - `doc/Lambda_Formal_Semantics.md` — **Normative semantics specification (ADR)** — core principles, value domain, truthiness, numerics, equality, total order, absence/errors, mutability, operators, metaprogramming; the semantic authority when docs or implementation disagree (decision records in `vibe/Lambda_Semantics_Formal*.md`)
-- `doc/Lambda_Formal_Design.md` — **Normative design/implementation specification** — D-numbered rulings D1–D8 (architecture, data representation, type & shape, memory, stacks/rooting, functions, modules/Jube, compilation) with impl footnotes and open issues `DO#`; the design authority when design docs or implementation disagree
-- `doc/Lambda_Formal_Index.md` — **Generated ruling index** for both formal specs (ID → spec line → title); `python3 utils/formal_index.py D7.3.6` prints one ruling in full. Regenerate with `make formal-index` whenever a spec changes
+- `doc/Lambda_Formal_Design.md` — **Normative design specification** — principle-first D-numbered rulings D1–D11 (architecture, value representation, containers & shapes, types, memory, execution state, functions & calls, compilation & tiers, build/modules/packages, documents, security) in ASD-STE100 style, with status (Appendix A) and open issues `DO#`; the design authority when design docs or implementation disagree.  Implementation history is in `vibe/impl/Lambda_Impl_Formal_Design_History.md`
+- `doc/Lambda_Formal_Index.md` — **Generated ruling index** for both formal specs (ID → spec line → title); `python3 utils/formal_index.py D9.4.6` prints one ruling in full. Regenerate with `make formal-index` whenever a spec changes
 - `doc/Doc_Convention.md` — **Documentation convention** — the document tiers, authority order (Formal specs → vibe → grammar.js; ask the user on missing rulings or conflicts), formal-spec structure and distillation discipline, vibe/impl/ledger conventions, doc/dev verified-against headers
 - `doc/Lambda_Reference.md` — Language overview and quick reference
 - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)

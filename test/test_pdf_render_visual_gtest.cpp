@@ -6356,6 +6356,41 @@ static bool write_image_rendering_source_png(const char* path) {
     return write_png_rgba(path, IMAGE_RENDERING_SOURCE_PIXELS, 2, 2);
 }
 
+TEST(RenderOutputParity, ReplacedImageCornersClipAcrossOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const struct { int x, y; uint8_t r, g, b; } points[] = {
+        {2, 2, 255, 255, 255}, {20, 40, 255, 0, 0},
+        {102, 2, 255, 255, 255}, {120, 40, 255, 0, 0},
+        {214, 14, 255, 255, 255}, {232, 52, 255, 0, 0}, {250, 2, 0, 255, 0}
+    };
+    const struct { const char* name; const char* format; const char* options; } outputs[] = {
+        {"png", "png", ""}, {"svg", "svg", ""}, {"pdf", "pdf", ""}, {"paged", "pdf", " --paged"}
+    };
+    for (int density : {1, 2}) for (const auto& output : outputs) {
+        const char* format = output.format;
+        SCOPED_TRACE(output.name);
+        SCOPED_TRACE(density);
+        char artifact[PATH_MAX], png[PATH_MAX], options[64];
+        str_fmt(artifact, sizeof(artifact), "temp/render_output_parity/image_corners_%dx_%s.%s", density, output.name, format);
+        str_fmt(png, sizeof(png), "%s.png", artifact);
+        str_fmt(options, sizeof(options), "-vw 400 -vh 180 --pixel-ratio %d%s", density, output.options);
+        ASSERT_TRUE(render_document_fixture("test/ui/css_replaced_image_radius.html", artifact, options));
+        if (!strcmp(format, "png")) str_copy(png, sizeof(png), artifact, strlen(artifact));
+        else ASSERT_TRUE(!strcmp(format, "pdf")
+            ? rasterize_fixture_pdf(artifact, png, (float)density)
+            : rasterize_fixture_svg(artifact, png, (float)density));
+        ImageData image = {};
+        ASSERT_TRUE(load_png_rgba(png, &image));
+        // physical page dimensions use 72 PDF points per 96 CSS pixels.
+        float scale = density * (!strcmp(format, "pdf") ? 72.0f / 96.0f : 1.0f);
+        for (const auto& point : points) {
+            // sample interiors so backend edge antialiasing cannot hide an omitted curve.
+            expect_preview_pixel(image, (int)(point.x * scale), (int)(point.y * scale), point.r, point.g, point.b);
+        }
+        image_free(image.pixels);
+    }
+}
+
 TEST(RenderOutputParity, ImageRenderingCrispEdgesUsesSourcePixels) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
@@ -11382,7 +11417,7 @@ TEST(RenderOutputParity, ExternalSvgImagesShareHtmlNamesAndResourceOwners) {
         ASSERT_TRUE(render_document_fixture(html, pdf)); ASSERT_TRUE(rasterize_fixture_pdf(pdf, pdf_pngs[i]));
         ASSERT_TRUE(render_document_fixture(html, svg)); ASSERT_TRUE(render_document_fixture(svg, svg_pngs[i]));
     }
-    // html foreign content recognizes canonical XLink names; literal XML aliases remain unknown (D2.11.2).
+    // html foreign content recognizes canonical XLink names; literal XML aliases remain unknown (D10.1.5).
     // the same three-color reference verifies image, external use and paint-server ownership across outputs.
     for (size_t i = 0; i < 2; i++) {
         expect_pngs_exactly_equal(pngs[2], pngs[i]); expect_pngs_exactly_equal(pdf_pngs[2], pdf_pngs[i]);

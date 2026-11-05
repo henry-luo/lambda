@@ -1274,7 +1274,7 @@ TEST_F(HtmlParserTest, WhitespacePreservation) {
 
 
 TEST_F(HtmlParserTest, ExternalSvgSharesHtmlForeignContentModel) {
-    // compare the complete subtree, including recovery and HTML integration points (D2.11.2).
+    // compare the complete subtree, including recovery and HTML integration points (D10.1.5).
     const char* sources[] = {
         "<SVG viewbox='0 0 40 20'><lineargradient id='paint'><stop offset=0/></lineargradient>"
         "<rect width=40 height=20 fill=red FILL=blue/></SVG>",

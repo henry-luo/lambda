@@ -1,4 +1,4 @@
-// Source policies supply offsets; TeX and MathML share the resulting geometry (D7.2.8).
+// Source policies supply offsets; TeX and MathML share the resulting geometry (D10.2.3).
 import bx: .svg_box
 
 pub fn fraction(numer, denom, width, num_x, up, down, axis, thickness) any^ =>

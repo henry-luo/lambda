@@ -1,6 +1,6 @@
 # Proposal: Split Lambda into Two Build Configurations
 
-Historical proposal: hosted languages were removed on 2026-10-07 (D7.4.3
+Historical proposal: hosted languages were removed on 2026-10-07 (D9.5.3
 implementation status). The remaining Python/Bash serve backends and Python
 web bridges were removed on 2026-10-18 under
 [WS1](Module_Web_Server.md#current-scope--ws1-2026-10-18-user). Current build and

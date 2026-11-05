@@ -1,4 +1,4 @@
-// Immutable, per-render font facts. Resource reads stay in Lambda IO (D7.1.2v2).
+// Immutable, per-render font facts. Resource reads stay in Lambda IO (D9.1.2).
 import radiant
 import sym: .symbols
 import alphabet: .alphabet
@@ -207,7 +207,7 @@ pub fn character(profile, ch, style, literal = false) map | error {
     let actual = alphabet.effective_style(ch, style)
     let styled = style_facts(profile,actual)
     let ordinary = lookup(profile, styled or profile.facts, ord(ch))
-    // D7.2.8 keeps TeX's boldsymbol face selection in the TeX profile.
+    // D10.2.3 keeps TeX's boldsymbol face selection in the TeX profile.
     let bold = if (not profile.core and not literal and style == "bolditalic") bold_symbol(profile, ch) else null
     // Text punctuation must follow its text face, not the base math face's unchanged codepoint.
     if (bold != null) bold

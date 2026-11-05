@@ -197,6 +197,14 @@ static void observer_release_target(JsObserverTarget* target) {
     memset(target, 0, sizeof(*target));
 }
 
+static void observer_remove_target(JsObserverState* observer, int index) {
+    observer_release_target(&observer->targets[index]);
+    for (int i = index; i + 1 < observer->target_count; i++)
+        observer->targets[i] = observer->targets[i + 1];
+    observer->target_count--;
+    memset(&observer->targets[observer->target_count], 0, sizeof(JsObserverTarget));
+}
+
 static void observer_release_transient_roots(JsObserverTarget* target) {
     if (!target) return;
     for (int i = 0; i < target->transient_root_count; i++) {
@@ -429,12 +437,7 @@ static Item js_observer_unobserve(Item target_item) {
     if (!observer || !node) return make_js_undefined();
     for (int i = 0; i < observer->target_count; i++) {
         if (observer->targets[i].node != node) continue;
-        observer_release_target(&observer->targets[i]);
-        for (int j = i; j + 1 < observer->target_count; j++) {
-            observer->targets[j] = observer->targets[j + 1];
-        }
-        observer->target_count--;
-        memset(&observer->targets[observer->target_count], 0, sizeof(JsObserverTarget));
+        observer_remove_target(observer, i);
         break;
     }
     return make_js_undefined();
@@ -482,7 +485,7 @@ static Item js_observer_deliver(void) {
         if (js_array_length(records_root.get()) <= 0) continue;
         // Replacing the observer-owned pending slot removes its last ordinary
         // edge to the delivery array, so retain it explicitly across the
-        // allocating replacement and callback boundary (D5.1.1v2).
+        // allocating replacement and callback boundary (D6.1.1).
         observer_replace_pending(observer);
         Item args[2] = {records_root.get(), object_root.get()};
         dom_realm_call(callback_root.get(), make_js_undefined(), args, 2);
@@ -532,7 +535,7 @@ static void observer_install_interface_members(Item prototype) {
     Rooted<Item> prototype_root(roots, prototype);
     if (!roots.valid()) return;
     // shared prototype methods validate their receiver's native observer kind
-    // rather than trusting a forged prototype or mutable string tag (D6.2.2v2).
+    // rather than trusting a forged prototype or mutable string tag (D7.2.2).
     dom_realm_install_method(prototype_root.get(), "disconnect", js_observer_disconnect<Kind>);
     if (Kind == JS_OBSERVER_MUTATION) {
         dom_realm_install_method(prototype_root.get(), "observe", js_mutation_observer_observe);
@@ -568,7 +571,7 @@ JS_FORWARD_ITEM(dom_resize_observer_new, (Item callback), js_observer_new,
 
 extern "C" Item dom_intersection_observer_new(Item callback, Item options) {
     // option getters may return unpublished values; retain them through
-    // later allocations, and use interned field keys across GC (D5.3.5).
+    // later allocations, and use interned field keys across GC (D6.3.5).
     JS_ROOTS(roots, options_root, options, root_root, ItemNull,
         margin_root, ItemNull, thresholds_root, ItemNull);
     JsObserverState* observer = nullptr;
@@ -745,7 +748,7 @@ extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
                                             added, removed);
                 break;
             }
-            // every record field survives later allocations before the pending array owns it (D5.3.3).
+            // every record field survives later allocations before the pending array owns it (D6.3.3).
             RootFrame roots(7);
             Rooted<Item> record(roots, js_new_object());
             Rooted<Item> added(roots, js_array_new(0));
@@ -992,6 +995,24 @@ static Item js_geometry_observer_initial_sample(void) {
     observer_sample_geometry();
     state->geometry_sampling = false;
     return make_js_undefined();
+}
+
+extern "C" void dom_observers_release_document(DomDocument* document) {
+    if (!document || !js_active_runtime_state || !context_capsule(context, CONTEXT_CAPSULE_DOM_OBSERVER)) return;
+    for (int i = 0; i < observer_count; i++) {
+        JsObserverState* observer = observers[i];
+        if (!observer) continue;
+        for (int j = 0; j < observer->target_count;) {
+            if (observer->targets[j].owner_doc == document) observer_remove_target(observer, j);
+            else j++;
+        }
+        if (observer->root && observer->root->doc == document) {
+            if (observer->root_ref.address)
+                dom_node_unpin(document, observer->root_ref, DOM_NODE_PIN_OBSERVER);
+            observer->root = nullptr;
+            observer->root_ref = {};
+        }
+    }
 }
 
 extern "C" void dom_observers_reset(void) {

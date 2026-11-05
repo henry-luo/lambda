@@ -1,8 +1,8 @@
-// S12.1.3 / D7.2.5: geometry previews are transient; one completed gesture authors one change.
+// S12.1.3 / D10.2.1: geometry previews are transient; one completed gesture authors one change.
 import dom
 import m: .mod_model
 import f: .mod_formula
-import capture: ~~.mod_splitter
+import capture: lambda.ui.core.splitter
 
 pub fn control(target) => dom.closest(target,"[data-sheet-resize]")
 fn port(owner) => dom.get_element_by_id(dom.root_node(owner),"grid-scroll")

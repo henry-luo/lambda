@@ -1,8 +1,8 @@
-// Object gestures and dialogs share model transactions and source metadata (S1.4, D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_transaction
-import image: lambda.editor.mod_image
+// Object gestures and dialogs share model transactions and source metadata (S1.4, D10.2.1).
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.transaction
+import image: lambda.editor.image
 import geom: lambda.editor.draw.geometry
 import objects: .mod_objects
 import graphics: .mod_graphics

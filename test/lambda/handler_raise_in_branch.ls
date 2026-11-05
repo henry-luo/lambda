@@ -1,6 +1,6 @@
 // A handler whose error arm raises sits inside an if branch: the arm runs only
 // on the error path, so the branch's value must survive on the normal path
-// (D8.3.4). MIR Direct had let the arm's `raise` mark the whole branch as
+// (D7.3.4). MIR Direct had let the arm's `raise` mark the whole branch as
 // returned, and the if-join then discarded the handled value.
 fn checked(x) int^ => if (x < 0) raise error("negative " ++ string(x)) else x
 fn wrap(v) map => {v: v}

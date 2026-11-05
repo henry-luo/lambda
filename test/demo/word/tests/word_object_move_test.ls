@@ -3,11 +3,11 @@ import files: ~~.mod_io
 import shapes: ~~.mod_shapes
 import art: ~~.mod_wordart
 import transform: ~~.mod_transform
-import image: lambda.editor.mod_image
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import image: lambda.editor.image
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let empty = model.open_editor(node('doc',[node('p',[text("")])]))
 let picture = model.execute(empty,"insert.picture",{src:"data:image/svg+xml;base64,PHN2Zy8+",alt:"Picture",width:160,height:100,rotation:30})^

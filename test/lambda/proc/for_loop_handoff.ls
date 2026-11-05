@@ -1,4 +1,4 @@
-// D8.1.1v18: a `for` statement that is a direct statement of a `pn` body hands
+// D8.3.2: a `for` statement that is a direct statement of a `pn` body hands
 // the activation to compiled code at a head test, resuming its walk on the
 // T0 snapshot at the next position. Each shape below runs once per call; the
 // tier-parity gtest lowers LAMBDA_LOOP_JIT_THRESHOLD so every loop hands off

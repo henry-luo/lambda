@@ -1,0 +1,6 @@
+error[E242]: duplicate explicit key 'a' in literal
+error[E242]: duplicate explicit key 'a' in literal
+error[E242]: duplicate explicit key 'a' in literal
+error[E242]: duplicate explicit key '😀' in literal
+error[E242]: duplicate explicit key 'a' in literal
+error[E242]: duplicate explicit key 'a' in literal

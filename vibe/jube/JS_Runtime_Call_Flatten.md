@@ -20,14 +20,14 @@ call site does *before* dispatch (property `Get`, argument evaluation, frame
 slots — see `doc/dev/js/JS_03_Value_Model.md` §7), native/direct call
 lowering, inlining, TCO, and per-site specialization of property access.
 
-**Formal anchors**: D6.2.2v2 (per-callee `invoke`/`construct` capabilities;
+**Formal anchors**: D7.2.2 (per-callee `invoke`/`construct` capabilities;
 `Item* + argc` is the JS dynamic boundary; rooted spans and scalar homes are
-ownership-qualified adapters, not dispatch mechanisms), D8.4.2v2 (direct
+ownership-qualified adapters, not dispatch mechanisms), D7.4.2 (direct
 calls pass individual operands; `Item* + argc` is dynamic-boundary only),
-D5.2.1v3 (companion-lane returns; C-reachable wrappers use
-`Context::mir_companion_slot`), D5.3.1/D5.3.3 (safepoint-current root
-slots; native helpers root on the same side-root stack), D8.4.1v2 (no inline
-caches; specialization = inline guard + shared kernel on miss), D8.4.3v2
+D6.2.1 (companion-lane returns; C-reachable wrappers use
+`Context::mir_companion_slot`), D6.3.1/D6.3.3 (safepoint-current root
+slots; native helpers root on the same side-root stack), D7.4.1 (no inline
+caches; specialization = inline guard + shared kernel on miss), D7.4.3
 (explicit completions, no frame skipped), CLAUDE rule 15 (precise rooting
 only).
 
@@ -89,7 +89,7 @@ The chain is also the source of three standing problems:
 
 ### 2.1 Hops 1–3: adapters that are already free, but still hops
 
-D6.2.2v2 says caller-donated scalar homes and precise rooted spans are
+D7.2.2 says caller-donated scalar homes and precise rooted spans are
 *ownership-qualified adapters to the same entries*. The implementation
 honors that (all three are tail jumps, 0 bytes), but the adapters are
 separate symbols with separate forwards (`JS_FORWARD_LOCAL_RETURN`,
@@ -130,7 +130,7 @@ MIR can consume a span directly: a generated function that takes
 `mov` per parameter, resolved at **compile time per function** — the
 "spreading" that the arity switch does at run time per call. That single
 move retires hops 7, 8 and 9 and both arity caps, and it is consistent with
-D8.4.2v2: register operands remain the *direct-call* ABI (`_body`), and the
+D7.4.2: register operands remain the *direct-call* ABI (`_body`), and the
 span entry *is* the `Item* + argc` dynamic boundary, now implemented in
 generated code rather than in 66 C++ template instantiations.
 
@@ -139,12 +139,12 @@ generated code rather than in 66 C++ template instantiations.
 | Prior | Kept / reversed | Why |
 |---|---|---|
 | JC1, JC2, JC4, JC8 | kept | entries fixed at finalization; two capabilities; adapters chosen once; Get-then-Call |
-| D6.2.2v2 `Item* + argc` boundary | kept | the span entry is that boundary |
-| D8.4.2v2 register-operand direct calls | kept | `_body` unchanged; direct sites unchanged |
-| D5.2.1v3 companion slot for C-reachable entries | kept | the span entry stores lane 2 into `Context::mir_companion_slot` exactly as the public wrapper does today |
+| D7.2.2 `Item* + argc` boundary | kept | the span entry is that boundary |
+| D7.4.2 register-operand direct calls | kept | `_body` unchanged; direct sites unchanged |
+| D6.2.1 companion slot for C-reachable entries | kept | the span entry stores lane 2 into `Context::mir_companion_slot` exactly as the public wrapper does today |
 | DC1 `fn->invoke` per-callee entry | kept | still the capability pointer; still bound vs ordinary |
 | DC2 entry template family | **stays retired** | measured slower; one kernel (JC19) |
-| DC6 monomorphic call-target cells | **retired by D8.4.1v2** | mutable per-site cache; replaced by JC18's inline guard + shared kernel |
+| DC6 monomorphic call-target cells | **retired by D7.4.1** | mutable per-site cache; replaced by JC18's inline guard + shared kernel |
 | Tune7 C2.3 "fully pre-rooted entry" (never implemented) | subsumed | JC17 — the span is rooted once, by the kernel invariant |
 | Tune7 C4.2/C4.3 exact-arity thunks (never implemented) | subsumed | JC15 — adaptation is generated per function; no thunk family |
 
@@ -183,9 +183,9 @@ ordinary case becomes 3 hops with no trampoline at all.
 | **JC13** | **One kernel symbol.** `js_call(fn, this, args, argc, result_home, args_prerooted)` is the sole exported dynamic-call entry and the sole semantic authority for `[[Call]]`. Its first step is the callee-type split (Lambda `Function` → `fn_call_into`; Proxy → `apply` trap; non-callable → TypeError; `JsFunction` → `fn->invoke`). For an ordinary `JsFunction`, `fn->invoke` **is** the kernel body, so the split falls through without a call. `js_call_function`, `_into`, and `_prerooted_args_into` become inline forwards that only fix the two ownership operands; `js_call_value`, `js_call_entry_generic`, `js_call_function_impl_mode`, `js_invoke_fn_with_source`, and `js_invoke_fn_raw_or_async` cease to exist as separate functions. (The construct kernel keeps the same shape: `js_construct_value` → `fn->construct` → the same kernel body with `new_target` set.) |
 | **JC14** | **One body entry per callable, one signature.** `JsCallableCode` gains `JsBodyEntry body_entry` with the signature `Item (Context* ctx, Item callee, Item this, Item* args, int64 argc, uint64_t* result_home)`. Compiled functions store their MIR-emitted **span entry** `<f>_span`; AST-interpreted functions store `js_interp_call_function` (signature-adapted once); native functions store their already-selected `JsNativeCode::call` adapter (signature gains the leading `Context*`; the typed factories set it once — JC4). The kernel invokes `code->body_entry` **once, unconditionally**: no body-kind, native-policy, ABI, env, or arity switch at call time. `js_invoke_fn_raw`, `js_invoke_mir_context_by_count`, `js_invoke_public_by_count`, `js_invoke_*_wrapper_impl`, `JS_MIR_CALL_ARITIES_0_15/0_32`, `JS_MIR_CONTEXT_CALL_MAX_ARITY`, the `MIR_CONTEXT_ABI`/`MIR_PUBLIC_ABI` flag tests, and the hosted-callback `lambda_hosted_item_invoke_by_count` path at this boundary are retired. |
 | **JC15** | **Argument adaptation is generated, per function, in the span entry.** For formal `i`: `p_i = (i < argc) ? args[i] : undefined` — two instructions, emitted only for formals that can be missing. A rest formal packs `args[k..argc)` via `js_pack_args_span` (existing). Extra actuals are ignored by the body and remain visible to `arguments` through the activation record's source span, which the kernel still publishes (`js_pending_call_args/argc`). `JsCallAdapterSpan`, `js_invoke_needs_adapter`, and the C pad/rest loops are retired. |
-| **JC16** | **The register-operand public wrapper `<f>` is retired.** The span entry is the only C-reachable compiled entry; `<f>_body` remains the only direct-call target (D8.4.2v2). The span entry is `MIR_ENTRY_CHECKED` (side-stack overflow guard) like the wrapper it replaces, and stores lane 2 into `Context::mir_companion_slot` before returning lane 1 (D5.2.1v3) — the kernel resolves it with `lambda_item_resolve_pending_slot` exactly as hop 8 does today. `JsCallableCode::func_ptr` continues to name the span entry for the existing `func_ptr → JsFunction*` cache and debug tooling. |
+| **JC16** | **The register-operand public wrapper `<f>` is retired.** The span entry is the only C-reachable compiled entry; `<f>_body` remains the only direct-call target (D7.4.2). The span entry is `MIR_ENTRY_CHECKED` (side-stack overflow guard) like the wrapper it replaces, and stores lane 2 into `Context::mir_companion_slot` before returning lane 1 (D6.2.1) — the kernel resolves it with `lambda_item_resolve_pending_slot` exactly as hop 8 does today. `JsCallableCode::func_ptr` continues to name the span entry for the existing `func_ptr → JsFunction*` cache and debug tooling. |
 | **JC17** | **Root once.** The kernel owns exactly one owned-span `RootSpan` (allocated only when `!args_prerooted`) and one activation `RootFrame`; after the kernel marks the span prerooted, **no inner layer re-roots it**. The span entry publishes **no parameter root slots**: parameters live in the prerooted span for the entry's whole extent, and the body publishes its own slots on entry as it does today. The kernel's `RootFrame(9)` shrinks to the distinct homes it actually needs (callee, `this`, `new.target`, generator proto, private home class, super-`this` only on the derived-constructor branch). Forced-GC sweeps (`LAMBDA_GC_FORCE_EVERY=1`) gate every step; no conservative scanning (rule 15). |
-| **JC18** | **Stage-2 site lowering (measured, optional).** A JIT dynamic call site may emit `type == FUNC && js_layout(fn) ? call [fn->invoke] : call js_call` — a compile-predicted specialization with an inline guard and the shared kernel on the miss, which D8.4.1v2 sanctions because the guard is immutable and there is no per-site state. This removes the `js_call` trampoline for ordinary calls (3 hops, no jump). It is taken only if a release A/B on call-dense rows shows the trampoline's `br` is visible after JC13–JC17. DC6-style callee cells remain retired. |
+| **JC18** | **Stage-2 site lowering (measured, optional).** A JIT dynamic call site may emit `type == FUNC && js_layout(fn) ? call [fn->invoke] : call js_call` — a compile-predicted specialization with an inline guard and the shared kernel on the miss, which D7.4.1 sanctions because the guard is immutable and there is no per-site state. This removes the `js_call` trampoline for ordinary calls (3 hops, no jump). It is taken only if a release A/B on call-dense rows shows the trampoline's `br` is visible after JC13–JC17. DC6-style callee cells remain retired. |
 | **JC19** | **One authority, no entry family.** Per-shape entry templates (DC2) stay retired. Shape variation (arrow, strict, generator, async, derived ctor, `with`, foreign module/realm, eval-initializer, vm-source) is expressed as flag branches inside the single kernel; the span entry is *generated per function from its formals*, never templated per shape. Adding call-protocol state means editing one kernel and, if the callee must see it, one emitter — the "requires an entry-template review" contract from DC2 collapses to "requires a kernel review". |
 
 ### 3.3 What the kernel keeps (unchanged semantics)
@@ -193,7 +193,7 @@ ordinary case becomes 3 hops with no trampoline at all.
 Depth guard and its RangeError; callee/`this` rooting; `JsCallActivationScope`
 (`this`, `new.target`, generator proto, private home class, callee, super-`this`,
 `arguments` source span, source text, strictness); sloppy-`this` coercion for
-non-arrow non-native callees; `new.target` scoping (D6.2.2v2/JC3); module-state
+non-arrow non-native callees; `new.target` scoping (D7.2.2/JC3); module-state
 activation; `globalThis` swap for foreign realms; `with`-chain relink; derived
 constructor TDZ `this` and `super` finish; legacy-async rejected-promise wrap
 (moved from hop 6 into the kernel epilogue as one flag branch — or, better,
@@ -264,7 +264,7 @@ path:
 | ID | Decision |
 |---|---|
 | **JC20v2** | **The AST activation borrows the kernel activation; no inner re-roots.** `js_interp_call_function` runs only under a call activation for its callee, pushed by a kernel instance (JC13 generic or JC21 direct). It opens no root for anything that activation or the callee already roots. **Callee:** rooted by the activation's callee home. **Non-arrow `this`:** the environment's `lexical_this` is seeded from the activation's `this` binding after the environment exists. **Arrow `this`:** the lexical environment home, or else the callee payload's `lexical_this`. **`new.target`:** non-arrow → the activation's `new.target` home; arrow → the payload's `lexical_new_target`. **Home class:** the payload's `home_class` slot, or a shared null home when the callee has no payload. The only root it keeps holds the value it creates: the `arguments` object. `RootFrame(7)` → `RootFrame(1)`. A `return f()` to the running function is an ordinary call through the kernel; no activation is reused (JSI7, §3.5 v2 note below). Payload slots are stable (`malloc`/pool, not data-zone) and traced through the rooted callee, so they are valid homes for the activation's extent. |
-| **JC21** | **AST direct call = the kernel with proven facts, entered by a guard.** An AST call site with plain arguments (the existing rooted argument span, not construct, not `super`, not an intrinsic `eval`/`require`/`import`) calls `js_call_from_ast(callee, this, args, argc, result_home)` instead of `js_call_function_prerooted_args_into`. That entry evaluates one guard and, on a hit, runs `js_call_ast_direct`, a third `always_inline` instance of the *same* kernel source with a constant mode that folds away the steps the guard proves irrelevant. It then calls `js_interp_call_function` directly instead of `fn->body`. On a miss it tail-calls `js_call`, which is observably identical, so there is no per-site state and no cache (D8.4.1v2). **Guard:** callee is a JS-layout `JsFunction` with `body_kind == AST` and `invoke == js_call_entry_generic` (ordinary capability, not bound); flags exclude `GENERATOR`, `ASYNC`, `ASYNC_GEN`, `DERIVED_CTOR`, `USES_WITH`, `HAS_BOUND_THIS`, `TYPED_ARRAY_METHOD`; no eval-initializer context and no vm-stack source; no active `with` chain; callee module state is none or equals the active module state; callee home global equals the current global. **Kept on the hit path** (the kernel steps the guard does not prove): stack guard (JC23), call activation with its homes, sloppy `this` coercion, `new.target` install, private home-class install, `arguments` source span, and result adoption into the caller's home. **Folded away:** argument-span copy (the span is pre-rooted), callee-layout split, null-body check, module-state activation, realm swap, `with` relink, generator prototype, derived-constructor TDZ, vm-source push, body-entry dispatch, owner check, and pending-scalar resolve. |
+| **JC21** | **AST direct call = the kernel with proven facts, entered by a guard.** An AST call site with plain arguments (the existing rooted argument span, not construct, not `super`, not an intrinsic `eval`/`require`/`import`) calls `js_call_from_ast(callee, this, args, argc, result_home)` instead of `js_call_function_prerooted_args_into`. That entry evaluates one guard and, on a hit, runs `js_call_ast_direct`, a third `always_inline` instance of the *same* kernel source with a constant mode that folds away the steps the guard proves irrelevant. It then calls `js_interp_call_function` directly instead of `fn->body`. On a miss it tail-calls `js_call`, which is observably identical, so there is no per-site state and no cache (D7.4.1). **Guard:** callee is a JS-layout `JsFunction` with `body_kind == AST` and `invoke == js_call_entry_generic` (ordinary capability, not bound); flags exclude `GENERATOR`, `ASYNC`, `ASYNC_GEN`, `DERIVED_CTOR`, `USES_WITH`, `HAS_BOUND_THIS`, `TYPED_ARRAY_METHOD`; no eval-initializer context and no vm-stack source; no active `with` chain; callee module state is none or equals the active module state; callee home global equals the current global. **Kept on the hit path** (the kernel steps the guard does not prove): stack guard (JC23), call activation with its homes, sloppy `this` coercion, `new.target` install, private home-class install, `arguments` source span, and result adoption into the caller's home. **Folded away:** argument-span copy (the span is pre-rooted), callee-layout split, null-body check, module-state activation, realm swap, `with` relink, generator prototype, derived-constructor TDZ, vm-source push, body-entry dispatch, owner check, and pending-scalar resolve. |
 | **JC22v2** | **One kernel source, three instances; not an entry family.** The generic `[[Call]]` instance (`js_call_entry_generic`), the `[[Construct]]` body instance (`js_call_constructor_body`) and the AST direct instance (`js_call_ast_direct`) are compile-time instantiations of `js_call_kernel`, differing only in constant operands. JC19 stands: shape variation stays flag branches in one source, and adding call-protocol state still means editing one kernel. The mode operand may only *remove* a step whose precondition a guard proved, never add semantics. `js_interp_call_function` runs one activation per call; there is no self-tail-call reuse. |
 
 #### Expected effect
@@ -491,7 +491,7 @@ ratification):
 1. *Body entry lives on `JsFunction`, not `JsCallableCode`.* Selection depends
    on per-value facts (native policy is a per-value payload; `flags` gain
    `MIR_CONTEXT_ABI` only at `js_finalize_function`), and finalization is the
-   one writer of executable capabilities (D6.2.2v2). Appended after the latch
+   one writer of executable capabilities (D7.2.2). Appended after the latch
    byte so no existing offset moves; `sizeof(JsFunction)` 88 → 96, still inside
    the 128 B class.
 2. *No leading `Context*` on the body-entry signature.* The span entry reads
@@ -752,7 +752,7 @@ ahead of that evidence; the measurement below records the outcome.
   register; a miss loads `js_call`'s address into it with
   `em_load_import_address`. One indirect call with the six operands follows, so
   the site keeps one safepoint and the call result is the ordinary error-lane
-  carrier (D8.4.3).
+  carrier (D7.4.3).
   - The first version emitted two call arms (indirect `invoke`, direct
     `js_call`) merged into one result register. `test-lambda-baseline`'s MIR
     size ratchet showed that shape cost +13 instructions, an extra safepoint and
@@ -768,7 +768,7 @@ ahead of that evidence; the measurement below records the outcome.
 - Correctness argument: `JsCallEntry` has exactly `js_call`'s signature, and
   `js_call` runs the same layout tests before entering the same `invoke`, so the
   miss target is observably identical. The guard is a layout predicate, not callee
-  identity, and stores nothing per site, as D8.4.1v2 requires.
+  identity, and stores nothing per site, as D7.4.1 requires.
 - New fixture `test/mir/js/dynamic_call_invoke_entry.{js,mir-check}` pins the
   guard loads, the `js_call` address load on a miss, and the single indirect
   call on the target register.

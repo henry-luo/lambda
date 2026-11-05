@@ -7,7 +7,7 @@ import transforms: lambda.editor.raster.transform
 import tone: lambda.editor.raster.tone
 import canvas: lambda.editor.raster.canvas
 import guides: lambda.editor.raster.guides
-import icons: ~~.mod_icons
+import icons: lambda.ui.workspace.icons
 
 // reuse shared contours where the tool and graphic names differ.
 let tool_graphics = {move:"pointer",ellipse:"circle",erase:"clear",bucket:"shading"}

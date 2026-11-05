@@ -5,7 +5,7 @@
 **Design authority:** `vibe/Lambda_Design_String_Pattern.md` (SP1–SP16, rev 5).
 Semantics anchors: S10.1.1 (`|` union everywhere), S11.1.2 (delimited
 pattern islands), S11.1.3 (range membership), S11.2.1 (match arms),
-D3.1.1v2/D3.1.2 (first-class type values, representational comparison).
+D4.1.1/D4.1.2 (first-class type values, representational comparison).
 **Deferred by ruling:** SPO1 (class-name namespace — multi-letter/Unicode
 class names) is **out of scope for this plan**; only the rev-4 single-letter
 set `d w s a` + `.` + `...` ships. The grammar work below must not paint
@@ -125,7 +125,7 @@ docs-only change.
   `false` at :6059. This is the **first time symbol patterns are definable**;
   treat the whole symbol path as new-feature work, not a port:
   `pattern_full_match` receives symbol values' content;
-  `matches(item, T)` (D3.2.1) must check the **domain first**
+  `matches(item, T)` (D4.2.1) must check the **domain first**
   (string vs symbol TypeId) then content — a string never matches a
   `\symbol(...)` type and vice versa.
 - **P1.3** Update `build_pattern_char_class` for the new single-letter CST
@@ -143,7 +143,7 @@ docs-only change.
 - **P1.6** SP7 (literal-union equivalence): normalize a **literal-only**
   pattern (`\("a" | "b")` — unions of string literals, no classes/occurrence/
   concat) into the same `Type` representation as the bare union
-  `"a" | "b"` at build time. Cheap, and makes SP7 hold under D3.1.2's
+  `"a" | "b"` at build time. Cheap, and makes SP7 hold under D4.1.2's
   representational comparison for free. Patterns with any structural
   construct compile to `TypePattern` as today.
 - **Gate (historical):** debug build; the final full gate is recorded in §7

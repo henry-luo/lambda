@@ -40,7 +40,7 @@
 | JA3 | Four module kinds: hosted languages; native IO/runtime modules; Radiant DOM API modules; data-pack extensions | adopted direction |
 | JA4 | One host executable; bundles differ only by the module set beside it; hosts are byte-identical across bundles | adopted (Python carve-out precedent) |
 | JA5 | One strict host-API tier for all modules: `jube.h` only, versioned additive-only, status codes + pending exceptions, no unwinding | adopted (landed ABI) |
-| JA5.1 | The host exports only a checked-in allowlist (hidden default visibility); any further runtime symbol a module needs is opened case by case | **adopted** (USER 2026-10-07; D7.3.6) |
+| JA5.1 | The host exports only a checked-in allowlist (hidden default visibility); any further runtime symbol a module needs is opened case by case | **adopted** (USER 2026-10-07; D9.4.6) |
 | JA6 | Value/memory boundary: `Item` is the only value currency; native structs cross as VMap projections; system resources as integer rids; precise rooting via host APIs only | adopted direction |
 | JA7 | Async boundary: modules are shielded from the async substrate — micro-kernel bridge + host-owned socket/process/signal ops; no loop escape hatch, ever | adopted direction (2026-07-26 review) |
 | JA8 | Dependency direction: core never links modules; core→module calls exist only as registered hooks with absent defaults; inter-module deps declared in manifests | adopted direction |
@@ -257,7 +257,7 @@ modules — in-tree modules are the constant test of the same contract
 third parties get.
 
 **Follow-on ruling:** JA5.1 bounds the transitional host-symbol imports with
-an export allowlist (D7.3.6).
+an export allowlist (D9.4.6).
 
 ### JA5.1 The host exports an allowlist (USER ruling 2026-10-07)
 
@@ -314,7 +314,7 @@ dropped its 126 entries; the list now holds 274.
 - On Linux, `dladdr` reads only `.dynsym`, so debug builds lose those names
   too.
 - Windows hosts still link `--export-all-symbols` to produce the module
-  import library. A `.def`-file counterpart is open (D7.3.6 footnote).
+  import library. A `.def`-file counterpart is open (D9.4.6 footnote).
 
 ## JA6. The value and memory boundary
 
@@ -381,7 +381,7 @@ the compiler's base/result-type lookups without holding the registry's session
 lock across parsing or module callbacks. Published record addresses remain
 stable until the existing module teardown boundary; this does not change
 runtime cache ownership or claim general concurrent heap dispatch. The lock is
-internal to the declared-interface owner (**D7.4.4 / D7.3.3**); no synchronization
+internal to the declared-interface owner (**D9.5.4 / D9.4.3**); no synchronization
 handle crosses the Jube ABI. Qualification and raw scene failures are tracked
 in `vibe/impl/Radiant_Impl_CSS_Support.md` §9.
 
@@ -714,7 +714,7 @@ speculatively; the core burn-down above is staged work with its own plan;
 and the remaining policy details (gate representation, realm integration,
 and enforcement) are design/implementation work, listed as open item 8.
 
-**App/script policy (USER, 2026-11-02): D7.5.5–D7.5.8.** The approved
+**App/script policy (USER, 2026-11-02): D11.2.1–D11.2.4.** The approved
 execution-root and dependency scope, default new-file creation with approval
 before overwriting existing root files, protected per-app/ad-hoc-script grants
 under `~/.lambda/setting`, and default network denial with a host-controlled
@@ -926,3 +926,28 @@ regeneration). The `radiant-dom` module remains the sole script-side door
     disassembly scan for raw syscall instructions) as an extension of the
     existing architecture-checker family; wire into `make build-test` per
     module kind.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D7.3.6 → D9.4.6
+
+**D9.4.6*** **The host exports an allowlist, nothing more.** Host code
+compiles with **hidden default visibility**, and the host executable's
+dynamic export table is exactly the checked-in allowlist
+`lambda/jube/jube_host_exports.txt` — the only symbols a loaded Jube module
+can resolve from it, in every build configuration. The allowlist is the
+bounded, reviewed record of the host-internal imports D9.4.3 retires: a
+module that needs a further runtime symbol has it **opened case by case**
+(a list entry naming its consumers, plus the `LAMBDA_*_API` marker on the
+symbol's owner declaration), and an entry no module imports is dropped. A
+host without the Jube loader exports nothing. *Exporting every global made
+every global a dead-strip root.* [JA5.1, D9.4.3]

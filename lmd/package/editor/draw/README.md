@@ -3,7 +3,7 @@
 A native Lambda drawing package for identified vertices and edges. The pure
 facade builds and edits drawing values, queries topology, validates archives,
 and generates SVG. `lambda.editor.draw.view` adds a retained interactive canvas.
-Package naming follows **D7.2.4v3**; model transitions are pure and DOM effects
+Package naming follows **D9.3.4**; model transitions are pure and DOM effects
 stay in handlers under **S1.4, S12.1.1v3, S12.1.3**.
 
 ```lambda
@@ -132,7 +132,7 @@ points as `waypoints`; terminal segment drags insert connecting stubs. Curved
 routing uses the same editable orthogonal skeleton. Green × overlays confirm
 attached endpoints. Custom cubic control-point editing remains separate.
 The demo adds a floating start-arrow/end-arrow/routing toolbar and retains
-unaffected SVG nodes during connector previews (**D4.5.1v4–D4.5.3v2**).
+unaffected SVG nodes during connector previews (**D5.5.1–D5.5.3**).
 
 `encode(document)` produces version-4 archive data; `decode` accepts that data
 or parsed JSON and also reads existing demo versions 1–3. Version 4 preserves
@@ -147,8 +147,8 @@ The initial editor supports one page and one editable layer, declarative
 polygon descriptors, plain multiline labels, and line/cubic custom edges.
 Callback registries, richer vertex content, persistent groups, obstacle
 avoidance, automatic graph layout, and mxGraph/draw.io XML interchange remain
-extensions. Arbitrary SVG source editing stays with `lambda.edit.svg` and
-`lambda.edit.drawing`; it retains its source-preserving contract.
+extensions. Arbitrary SVG source editing stays with `lambda.editor.format.svg` and
+`lambda.editor.surface.drawing`; it retains its source-preserving contract.
 
 ## Verification
 
@@ -163,6 +163,6 @@ and legacy contracts with:
 ```
 
 Use `LAMBDA_EXEC_BACKEND=interp`, `auto`, and `jit` for tier qualification
-(**D8.1.1v18**). The two-canvas native fixture is
+(**D8.3.2**). The two-canvas native fixture is
 `test/ui/draw/package_canvases.json`; its source is `_canvases.ls`. Screenshots
 and file outputs stay under `./temp/`.

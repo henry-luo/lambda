@@ -19,7 +19,7 @@ struct LambdaMvpStats {
 LambdaMvpModule* lambda_mvp_create(Transpiler* tp, MIR_context_t ctx);
 bool lambda_mvp_plan(LambdaMvpModule* module);
 bool lambda_mvp_lower(LambdaMvpModule* module);
-bool lambda_mvp_finalize(LambdaMvpModule* module, LambdaMvpStats* stats);
+bool lambda_mvp_finalize(LambdaMvpModule* module, LambdaMvpStats* stats, ArrayList** property_keys);
 void lambda_mvp_destroy(LambdaMvpModule* module);
 #endif
 

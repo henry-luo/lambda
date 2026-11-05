@@ -115,14 +115,16 @@ static const CssPropertyRuntimeMetadata kCssPropertyRuntimeMetadata[] = {
 };
 
 const CssPropertyRuntimeMetadata* css_property_runtime_metadata(CssPropertyCode property) {
-    size_t count = sizeof(kCssPropertyRuntimeMetadata) /
-        sizeof(kCssPropertyRuntimeMetadata[0]);
-    for (size_t i = 0; i < count; i++) {
-        if (kCssPropertyRuntimeMetadata[i].property == property) {
-            return &kCssPropertyRuntimeMetadata[i];
+    struct Index {
+        const CssPropertyRuntimeMetadata* properties[CSS_PROPERTY_COUNT] = {};
+        Index() {
+            for (const auto& metadata : kCssPropertyRuntimeMetadata)
+                properties[metadata.property] = &metadata;
         }
-    }
-    return nullptr;
+    };
+    // motion samples query this immutable registry for every property of every box.
+    static const Index index;
+    return property > 0 && property < CSS_PROPERTY_COUNT ? index.properties[property] : nullptr;
 }
 
 size_t css_property_runtime_metadata_count() {
@@ -585,7 +587,7 @@ const CssValue* css_property_initial_value(CssPropertyCode id, Pool* fallback) {
     const CssProperty* property = css_property_get_by_code(id);
     if (!property || id <= 0 || id >= CSS_PROPERTY_CUSTOM) return nullptr;
     // initialize every built-in before publication: one pool writer, immutable
-    // readers, and no document/view-generation leases (D4.1.4v5, D4.5.1v4).
+    // readers, and no document/view-generation leases (D5.1.4, D5.5.1).
     static CssInitialValueCache cache;
     if (cache.pool) return cache.values[id];
     CssDeclaration* declaration = css_parse_property_value_declaration(property->name,
@@ -595,10 +597,16 @@ const CssValue* css_property_initial_value(CssPropertyCode id, Pool* fallback) {
 
 static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
                                      int pseudo_type, StringBuf* out,
-                                     Pool* scratch, bool preserve_color_model,
+                                     Pool*& scratch, bool preserve_color_model,
                                      const CssomValueTarget* native_value,
                                      const CssomInheritanceProjection* inheritance) {
     if (!element) return false;
+    // native keyword/default reads borrow immutable values; only substitution,
+    // allocating shorthand projections and serialization need a temporary pool.
+    auto scratch_pool = [&]() -> Pool* {
+        if (!scratch) scratch = pool_create();
+        return scratch;
+    };
     if (inheritance && element == inheritance->origin && pseudo_type == 0)
         pseudo_type = inheritance->pseudo_type;
     DomElement* receiver = element;
@@ -624,8 +632,8 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
         if (pseudo_type == 0 && (css_animation_longhand_index(id) >= 0 ||
             css_transition_longhand_index(id) >= 0)) {
             if (native_value) return false;
-            const CssValue* animation_value = css_motion_computed_value(scratch, element, id);
-            return format_css_value(element, id, animation_value, out, scratch);
+            const CssValue* animation_value = css_motion_computed_value(scratch_pool(), element, id);
+            return format_css_value(element, id, animation_value, out, scratch_pool());
         }
         // Legacy presentational attributes participate before inherited color is
         // consulted, including for dynamic computed-style reads without layout.
@@ -659,7 +667,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             CssPropertyCode value_property = declaration && declaration->pending_shorthand_code > 0
                 ? declaration->pending_shorthand_code : component_shorthand ? declaration->property_code
                 : background_shorthand ? CSS_PROPERTY_BACKGROUND : id;
-            value = css_resolve_element_var_value(scratch, element, value,
+            value = css_resolve_element_var_value(scratch_pool(), element, value,
                 value_property);
             if (!value || !css_property_validate_value(value_property, value))
                 value = nullptr;
@@ -667,7 +675,8 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
         CssPropertyCode projection = declaration && declaration->pending_shorthand_code > 0
             ? declaration->pending_shorthand_code
             : component_shorthand ? declaration->property_code : id;
-        value = css_project_shorthand_longhand(scratch, value, projection, id);
+        if (projection != id)
+            value = css_project_shorthand_longhand(scratch_pool(), value, projection, id);
         if (cssom_value_inherits(value, id)) {
             DomElement* parent = cssom_inherited_source(element, &pseudo_type, inheritance);
             if (parent) {
@@ -686,7 +695,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
                 ? cssom_inherited_source(element, &color_pseudo) : receiver;
             CssComputedColor current = {CSS_COLOR_RGB, {0.0, 0.0, 0.0, 1.0}};
             if (color_owner) {
-                StringBuf* text = stringbuf_new(scratch);
+                StringBuf* text = stringbuf_new(scratch_pool());
                 if (!text || !serialize_computed(color_owner, CSS_PROPERTY_COLOR, color_pseudo, text)) return false;
                 String* serialized = stringbuf_to_string(text);
                 CssDeclaration* source = serialized ? css_parse_property_declaration("color", 5,
@@ -695,7 +704,7 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             }
             if (!css_color_compute(value, &computed_color, &current)) return false;
             // CSSOM's temporary tree belongs to this read; authored and registered expressions stay immutable.
-            value = css_value_create_computed_color(scratch, &computed_color);
+            value = css_value_create_computed_color(scratch_pool(), &computed_color);
             if (!value) return false;
         }
         if (!native_value && preserve_color_model) {
@@ -726,11 +735,14 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             value = &computed_bidi;
         }
         if (native_value) {
-            if (!value && property) value = css_property_initial_value(id, scratch);
+            if (!value && property) {
+                value = css_property_initial_value(id, nullptr);
+                if (!value) value = css_property_initial_value(id, scratch_pool());
+            }
             return native_value->consume(element, value, pseudo_type, native_value->result);
         }
-        return value ? format_css_value(element, id, value, out, scratch, pseudo_type)
-                     : !preserve_color_model && format_css_value(element, id, nullptr, out, scratch, pseudo_type);
+        return value ? format_css_value(element, id, value, out, scratch_pool(), pseudo_type)
+                     : !preserve_color_model && format_css_value(element, id, nullptr, out, scratch_pool(), pseudo_type);
     }
     return false;
 }
@@ -739,11 +751,10 @@ static bool consume_cascaded_value(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, StringBuf* out,
                                  bool preserve_color_model, const CssomValueTarget* native_value,
                                  const CssomInheritanceProjection* inheritance = nullptr) {
-    Pool* scratch = pool_create();
-    if (!scratch) return false;
+    Pool* scratch = nullptr;
     bool result = consume_inherited_decl(element, id, pseudo_type, out, scratch,
         preserve_color_model, native_value, inheritance);
-    pool_destroy(scratch);
+    if (scratch) pool_destroy(scratch);
     return result;
 }
 
@@ -1393,7 +1404,7 @@ static bool serialize_background_components(const CssPropAccessor* accessor, Dom
 
 static bool cssom_append_svg_length(const CssValue* input, void* data) {
     CssomSvgScalarWriter* writer = (CssomSvgScalarWriter*)data;
-    // normalization writes only to the caller-owned projection, never retained declaration values (D4.5.1v4).
+    // normalization writes only to the caller-owned projection, never retained declaration values (D5.5.1).
     CssValue* value = cssom_clone_computed_length(writer->formatter, input, &writer->lengths.svg,
         cssom_svg_length_leaf, &writer->lengths);
     if (!value) return false;
@@ -1793,6 +1804,10 @@ static bool serialize_transform(const CssPropAccessor* accessor, DomElement* ele
 static bool serialize_used_size(const CssPropAccessor* accessor, DomElement* element,
                                 int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
+    // CSSOM resolved dimensions use computed values without an associated box;
+    // a clean display:none snapshot must not expose its zero layout dimensions.
+    if (resolve_display_value(element).outer == CSS_VALUE_NONE)
+        return serialize_decl(accessor, element, pseudo_type, out);
     float value = accessor->id == CSS_PROPERTY_WIDTH ? element->width : element->height;
     if (!element->doc || !element->doc->view_tree || !element->doc->view_tree->root) {
         const BlockProp* block = element->block();
@@ -1826,7 +1841,7 @@ static bool serialize_corner_radius(const CssPropAccessor* accessor, DomElement*
     const Corner* radius = boundary && boundary->border ? &boundary->border->radius : nullptr;
     const CornerExpressions* expressions = radius ? radius->expressions.get() : nullptr;
     if (expressions) radius = &expressions->computed;
-    // axis strings share the serializer's temporary pool without imposing a size limit (D4.5.1v4).
+    // axis strings share the serializer's temporary pool without imposing a size limit (D5.5.1).
     String* axes[2][4];
     for (unsigned axis = 0; axis < 2; axis++) {
         for (unsigned corner = 0; corner < 4; corner++) {
@@ -2510,7 +2525,7 @@ static void cssom_refresh_cascade_chain(DomElement* element) {
         CssomRefreshedElement query = {current, current->style_version, current->doc->mutation_epoch};
         HashMap* refreshed = s_cssom_cascade_scope ? s_cssom_cascade_scope->refreshed : nullptr;
         const CssomRefreshedElement* cached = refreshed ? CssomRefreshedMap::get(refreshed, query) : nullptr;
-        // D4.5.1v4: this synchronous borrow ends with the candidate walk. A
+        // D5.5.1: this synchronous borrow ends with the candidate walk. A
         // pending mutation must not recascade common ancestors per descendant.
         if (cached && cached->version == query.version && cached->mutation_epoch == query.mutation_epoch) continue;
         // an unlaid-out descendant (head, defs, display:none) does not make
@@ -2663,7 +2678,7 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
 String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode id, int pseudo_type) {
     if (!pool || !element) return nullptr;
-    // intermediate formatter trees never accumulate in a retained caller pool (D4.5.1v4).
+    // intermediate formatter trees never accumulate in a retained caller pool (D5.5.1).
     Pool* scratch = pool_create();
     if (!scratch) return nullptr;
     StringBuf* output = stringbuf_new(scratch);

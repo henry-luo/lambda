@@ -1,4 +1,4 @@
-import shared: lambda.ui.core.theme
+import shared: lambda.ui.dtna.skin
 
 pub let defaults = {
     primary:"#d7ad62", success:"#82b580", warning:"#e4aa4f", error:"#e3746d",

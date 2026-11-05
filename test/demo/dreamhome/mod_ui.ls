@@ -3,7 +3,7 @@
 // draws state; each control names its command with data-act (and data-arg),
 // which dreamhome.ls dispatches.
 import controls: lambda.ui.controls
-import icons: ~~.mod_icons
+import icons: lambda.ui.workspace.icons
 import A: ~~.greetings.mod_art
 import C: .mod_catalog
 import M: .mod_model

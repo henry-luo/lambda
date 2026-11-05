@@ -1,4 +1,4 @@
-// Local demonstration messaging over real WebSockets. D7.2.4v4, S13.1–S13.3.
+// Local demonstration messaging over real WebSockets. D9.3.4, S13.1–S13.3.
 // Demo profiles are identities, not authentication credentials.
 import ws: lambda.io.websocket
 import model: .chat.model

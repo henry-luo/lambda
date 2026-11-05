@@ -510,7 +510,7 @@ static void svg_animation_registry_destroy(DomDocumentResourceData* data) {
         registry->budget_owner->total_use_count--;
         svg_animation_registry_destroy(instance->registry); lam::Temp<SvgAnimationUseInstance> owned(instance); instance = next;
     }
-    // D4.2.6/D4.5.1v3: cancel callbacks stop borrowing the document before sample storage is released.
+    // D5.2.5/D5.5.1: cancel callbacks stop borrowing the document before sample storage is released.
     for (SvgTimeline* timeline = registry->timelines; timeline;) {
         SvgTimeline* next = timeline->next;
         if (timeline->driver && registry->document->state)

@@ -1,10 +1,10 @@
-// Insert commands keep document structure and history in Lambda (S1.4, D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import commands: lambda.editor.mod_commands
-import inline_format: lambda.editor.mod_inline_format
+// Insert commands keep document structure and history in Lambda (S1.4, D10.2.1).
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import commands: lambda.editor.core.commands
+import inline_format: lambda.editor.core.inline_format
 import symbol_sets: ~~.mod_symbols
 
 pub let symbols = symbol_sets.symbols

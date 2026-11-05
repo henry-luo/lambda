@@ -17,11 +17,11 @@ unique IDs; 12 remain outside this phase. The three numerical Julia targets
 previously passed correctness checks, but their timing mismatch prevented their
 inclusion in the measured population.
 
-The implementation follows **D1.3v3** (shared substrate), **D2.6.9v3** (nominal
-Lambda Map objects), **D3.4.3v5/D3.4.5** (shape transitions and packed layouts),
-**D5.2–D5.3** (scalar ownership and precise roots), **D6.2.2v2–D6.2.4**
-(call/construct entries and closure environments), **D7.3.1–D7.3.4** (host/module
-boundary), and **D8.4.1v2/D8.4.3v2** (dispatch and explicit completions).
+The implementation follows **D1.3** (shared substrate), **D3.1.5** (nominal
+Lambda Map objects), **D3.4.3/D3.4.5** (shape transitions and packed layouts),
+**D6.2–D6.3** (scalar ownership and precise roots), **D7.2.2–D7.2.4**
+(call/construct entries and closure environments), **D9.4.1–D9.4.4** (host/module
+boundary), and **D7.4.1/D7.4.3** (dispatch and explicit completions).
 See the [formal design](../../doc/Lambda_Formal_Design.md). This plan does not
 amend these rulings or claim full ECMAScript conformance.
 
@@ -134,7 +134,7 @@ Provide the bounded benchmark environment: `console.log`, `performance.now`,
 `process.argv`, `process.platform`, `process.stdout.write`, and synchronous
 `require('fs')` reads/writes used by these sources. These are explicitly supplied
 host/module bindings, not additions to the engine's core globals allowlist
-(**D7.3.1–D7.3.4**). Audit the existing embedding/bootstrap and module boundary
+(**D9.4.1–D9.4.4**). Audit the existing embedding/bootstrap and module boundary
 before choosing the adapter. General CommonJS loading is outside this phase.
 If this requires changing a formal boundary, obtain a ruling before coding it.
 
@@ -142,7 +142,7 @@ Audit `pn_print`, `pn_output2/3`, `fn_input1/2` and the shared stream/file core
 first. Select raw UTF-8 text explicitly; Lambda's automatic input parsing is
 not `readFileSync(path, 'utf8')`. Output must be length-aware, preserve embedded
 NULs, use JS scalar conversion, and perform real writes. Keep read/write errors
-as explicit completions (**D8.4.3v2**). Never hardcode input contents, paths or
+as explicit completions (**D7.4.3**). Never hardcode input contents, paths or
 synthetic successful writes in the runtime.
 
 ## 4. Implementation stages
@@ -243,7 +243,7 @@ Files: compiler function/receiver/new lowering, `mvp_lmd_runtime_classes.cpp`,
 
 - Reuse existing Function call/construct entries, receiver ABI,
   `mvp_lmd_class_invoke`, constructor-result handling and closure environments
-  where applicable (**D6.2.2v2–D6.2.4**). Object returns replace a constructed
+  where applicable (**D7.2.2–D7.2.4**). Object returns replace a constructed
   receiver; primitive returns do not. Arrows remain nonconstructible; class
   constructors remain distinct from ordinary callable functions.
 - Support member receivers and strict/sloppy ordinary calls as admitted by
@@ -256,7 +256,7 @@ Files: compiler function/receiver/new lowering, `mvp_lmd_runtime_classes.cpp`,
   method replacement must not leave a stale direct-call target. Prototype-link
   reassignment remains excluded and must fail visibly.
 - Use the existing, precisely traced Map attribute face on Array for named
-  properties (**D2.6.6v3**). Install its shared shape lazily; preserve indexed
+  properties (**D3.1.1**). Install its shared shape lazily; preserve indexed
   storage/length and the layout of arrays without named properties.
 - Audit Lambda numeric/random primitives for `Math.round`, `Math.random` and
   `Object()`/`new Object` construction paths. JS round ties toward positive
@@ -389,22 +389,22 @@ after acceptance; preserve Results3–8 and their provenance.
 ## 8. Open checks and completion criteria
 
 1. **Host/module boundary:** finalize the execution-scoped injection API and
-   fs/process facade under **D7.3.1–D7.3.4**. No implicit expansion of core
+   fs/process facade under **D9.4.1–D9.4.4**. No implicit expansion of core
    globals or general Node/module support.
 2. **Existing mutable property caches:** `MvpLmdPropertyCache` and
    `mvp_lmd_cache_property` currently hold mutable site state, while
-   **D8.4.1v2** prohibits it. Record this as an implementation discrepancy,
+   **D7.4.1** prohibits it. Record this as an implementation discrepancy,
    not a sanctioned exception. Resolve the affected paths with compile-predicted
     guards and shared fallback before relying on them for mutable static or
     prototype data; confirm class performance against the frozen control.
     New static Function properties and ordinary-constructor prototype data use
     shared dispatch and do not populate this state. The pre-existing class-site
     caches remain a formal-design discrepancy; this phase does not sanction them.
-    **2026-10-18 closure (D8.4.1v2):** the cache cells, fill paths, cache-pointer
+    **2026-10-18 closure (D7.4.1):** the cache cells, fill paths, cache-pointer
     ABI and allocation-site variants are removed. Source guards and shared
     descriptor lookup replace them; see [MVP §36.10](../jube/JS_MVP_Lmd.md#3610-remove-cache-machinery-and-reuse-lambda-field-specialization)
     for the implementation and qualification evidence.
-3. **Named array properties:** the audit selected the existing Map attribute face on Array (**D2.6.6v3**), already traced and compacted by GC. Named writes lazily install a shared shape; no extra array fields or side table. Validate index/method fast paths against the control.
+3. **Named array properties:** the audit selected the existing Map attribute face on Array (**D3.1.1**), already traced and compacted by GC. Named writes lazily install a shared shape; no extra array fields or side table. Validate index/method fast paths against the control.
 4. **UTF-16 and numeric semantics:** ASCII benchmark success is insufficient
    for admitted public methods. Complete the stated edge matrix or explicitly
    narrow admission; preserve Lambda defaults when sharing functions.
@@ -443,9 +443,9 @@ Implemented in source, pending aggregate validation:
 - Ordinary constructors reuse the Function receiver ABI and nominal Map ancestry.
   Lazy prototype/static metadata occupies three precise closure-environment slots.
   Live nominal instances trace their constructor owner via the neutral
-  `TypeNominalExtension::owner` hook (**D5.3**, **D6.2.2v2–D6.2.4**); it adds no
+  `TypeNominalExtension::owner` hook (**D6.3**, **D7.2.2–D7.2.4**); it adds no
   conservative scan or global root retention. Named array fields use the existing
-  attribute face (**D2.6.6v3**). Shared SplitMix64 preserves Lambda's pure API while
+  attribute face (**D3.1.1**). Shared SplitMix64 preserves Lambda's pure API while
   MVP keeps execution-local mutable state.
 
 New helper inventory (names disclosed during implementation):
@@ -508,7 +508,7 @@ now proves when numeric nonindices cannot name an own array field, retaining
 native optional numeric reads and the unsigned bounds guard. Named writes keep
 the generic property path. `object_delete` replay bypassed the shared external
 root dispatcher, creating shapes different from the compiler predictions.
-`type_tree_follow` now reuses `type_tree_step` (**D3.4.3v5**); shape counters match
+`type_tree_follow` now reuses `type_tree_step` (**D3.4.3**); shape counters match
 the control again, and a focused assertion checks deletion/literal shape
 identity. No new runtime helper was added for either correction.
 
@@ -529,7 +529,7 @@ unmodified methods retain direct calls. This also corrects a reproduced `push`
 replacement returning a string being coerced to NaN, and a numeric `join`
 replacement crashing through an inferred String lane. Units with possible
 overrides still capture the callee before argument effects and retain guarded
-dispatch (**D8.4.1v2**). Focused cases cover replacement through an alias and
+dispatch (**D7.4.1**). Focused cases cover replacement through an alias and
 replacement while evaluating call arguments.
 
 The remaining Map lookup screen showed a small native-runtime difference with
@@ -537,7 +537,7 @@ unchanged MIR. Reordering property/receiver checks did not establish a benefit
 against the identical-control noise lane; both experiments were discarded.
 Known ordered-Map builtin calls now select the existing method token directly:
 the admitted runtime already rejects shadowing those method names, so repeated
-property dispatch is unnecessary (**D8.4.1v2**). Own data fields and unknown
+property dispatch is unnecessary (**D7.4.1**). Own data fields and unknown
 receivers retain shared lookup. The existing rejection checks and a focused MIR
 assertion cover this admission-dependent shortcut; performance confirmation is
 still required before acceptance.
@@ -549,7 +549,7 @@ which shared growth rebases, or appends a new owned home. Repeated retyping
 reclaims retired homes through the existing `fn_slice` copy once tail storage
 exceeds twice the live length; array identity, holes and named fields survive.
 Incoming borrowed payloads are captured before either copy or growth
-(**D5.2.2v3**, **D5.3.2–D5.3.4**). This adds no helper or immediate-value fast-path
+(**D6.2.2**, **D6.3.2–D6.3.4**). This adds no helper or immediate-value fast-path
 work. The new regression covers reversal, shared copies, sorting, growth,
 shrink/regrow, retained values and bounded storage after retyping.
 
@@ -579,7 +579,7 @@ owned-scalar correction enlarged `mvp_lmd_array_store`'s frame from 192 to
 352 bytes and introduced a stack check on immediate writes. The disclosed
 private `array_store_owned` helper now contains that existing slow path;
 the public fast path is frameless and tail-calls it only when needed. This
-retains scalar ownership and precise-root rules (**D5.2–D5.3**), with no second
+retains scalar ownership and precise-root rules (**D6.2–D6.3**), with no second
 storage implementation. Stage22 normal and forced-GC checks pass **77/77**;
 thirty-round paired confirmation removes the `object_growth` and
 `map_iteration` regressions (`confirmation-stage22/comparison.json`).
@@ -589,7 +589,7 @@ compiler now uses the existing named-key branch as its validity guard and
 omits the impossible `length` assignment branch for numeric keys. Negative,
 fractional, NaN and UINT32_MAX keys still reach named storage; string `length`
 retains resize semantics. Focused cases cover these boundaries. This uses
-existing kind facts (**D8.2.4v2**, **D8.4.1v2**), without a new helper or a
+existing kind facts (**D8.2.4**, **D7.4.1**), without a new helper or a
 benchmark-specific range assumption.
 
 Stage23 passed all **76 workload oracles**: a complete 15-round prior-60
@@ -600,7 +600,7 @@ indices are nonnegative inside the `j >= 16` branch, but only the enclosing
 loop bounds survived range analysis. The existing scoped range query now also
 intersects relational `if`/`else` bounds for counted bindings whose two writes
 both lie outside the guard. It reuses the shared AST containment query and
-affine-bound logic (**D8.2.4v2**). Mutations inside either branch suppress the
+affine-bound logic (**D8.2.4**). Mutations inside either branch suppress the
 refinement; focused value/MIR checks cover both cases. Index lowering intersects
 the emitted value's interval with the read site's interval, retaining both
 inline payload and conditional facts. No helper was added. A 90-round stage25
@@ -618,7 +618,7 @@ source patch and helper sources. Release SHA-256:
 root `lambda.exe` match this freeze; subsequent documentation updates are separate.
 
 - Normal and forced-GC focused suites: **77/77** each. Forced collection and
-  freed-memory poisoning remain enabled for the latter (**D5.3**).
+  freed-memory poisoning remain enabled for the latter (**D6.3**).
 - Full LambdaJS Test262 baseline: **40,261/40,261**, zero worker failures,
   retries or regressions, using three workers and unchanged cases/timeouts
   (`test262-stage25.log`). This checks shared-runtime compatibility, not MVP

@@ -1,4 +1,4 @@
-// D4.4.4v4, D5.3.3: a pure direct call preserves a rooted read-only place.
+// D5.4.4, D6.3.3: a pure direct call preserves a rooted read-only place.
 type Cell = {x: int, y: int}
 type Box = {cells: Cell[]}
 

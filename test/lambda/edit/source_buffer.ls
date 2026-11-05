@@ -1,7 +1,7 @@
 // lambda.edit source buffer (vibe/radiant/Radiant_Design_Source_Editor.md §5,
 // CED12): exact text round trips, chunked line access, deltas and their
 // inverses, and chunk rebuilds across boundaries.
-import buf: lambda.edit.source_buffer
+import buf: lambda.editor.surface.source_buffer
 
 fn round_trips(text) bool | error => buf.to_text(buf.from_text(text)) == text
 

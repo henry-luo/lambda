@@ -100,7 +100,7 @@ static void* sysinfo_cache_construct(EvalContext* owner) {
 static void sysinfo_cache_destroy(void* capsule) {
     SysinfoCache* cache = (SysinfoCache*)capsule;
     if (!cache || !cache->input) return;
-    // D4.2.6: release the Input's whole context; its pool cleanup is idempotent.
+    // D5.2.5: release the Input's whole context; its pool cleanup is idempotent.
     input_release_document_resources(cache->input);
     cache->input = nullptr;
 }

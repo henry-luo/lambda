@@ -552,7 +552,7 @@ static Item apply_decimal_numeric(Item item_a, LambdaNumericKind kind_a,
 }
 
 // proven decimal carriers skip vector/promotion classification, retaining the
-// same rooted arithmetic, BigInt subtype and error/absence rules (S4.4, D5.3).
+// same rooted arithmetic, BigInt subtype and error/absence rules (S4.4, D6.3).
 extern "C" Item lambda_decimal_binary(Item left, Item right, int64_t operation) {
     GUARD_ERROR2(left, right);
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
@@ -1860,7 +1860,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
         return ItemError;
     }
 
-    // namespace identity outlives transient URI/name operands (D4.6.1v4).
+    // namespace identity outlives transient URI/name operands (D5.6.1).
     if (ns_target->original) ns_target->original = pool_strdup(context->pool, ns_target->original);
     if (ns_target->type == TARGET_TYPE_PATH) ns_target->path = path_clone(context->pool, ns_target->path);
     if (!pool_add_cleanup(context->pool, target_cleanup, ns_target)) {

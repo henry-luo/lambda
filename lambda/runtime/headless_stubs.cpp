@@ -20,6 +20,15 @@ struct DomDocument;
 void free_document(DomDocument* doc) {
     (void)doc;
 }
+struct DocumentCleanupTiming;
+bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
+    (void)doc;
+    (void)timing;
+    return false;
+}
+bool document_runtime_cleanup_ready(DomDocument* doc) {
+    return doc == NULL;
+}
 
 extern "C" bool radiant_eval_context_switch(EvalContext* target) {
     (void)target;

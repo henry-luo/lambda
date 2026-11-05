@@ -1,3 +1,4 @@
+import descriptor: lambda.ui.dtna.descriptor
 import dom
 import c: lambda.ui.core.component
 import icons: .icons
@@ -13,7 +14,7 @@ pub fn descriptor(props) element^ {
     else if (props.tooltips != null and (not (props.tooltips is array) or
         any([for (tooltip in props.tooltips) not (tooltip is string)]))) raise c.fail("rate","tooltips must be an array of strings")
     else if (props.name != null and not (props.name is string)) raise c.fail("rate","name must be a string")
-    else c.node('rate',props,null,["value","default_value","count","allow_half","allow_clear","keyboard","disabled",
+    else descriptor.node('rate',props,null,["value","default_value","count","allow_half","allow_clear","keyboard","disabled",
         "readonly","size","character","tooltips","name"])^
 }
 fn character_node(props,index,value) any^ {

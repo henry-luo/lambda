@@ -1,6 +1,6 @@
 // Tune27 T27-1: a plain `T[]` boundary over a union element admits each element
 // once; the whole-array validator walk is skipped, while nested and recursive
-// element contracts still hold (D3.2.2).
+// element contracts still hold (D4.2.3).
 type Tune27Doc = {kind: string} | {kind: string, parts: Tune27Doc[]}
 
 fn tune27_leaf(k: string) Tune27Doc => {kind: k}

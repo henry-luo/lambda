@@ -7,8 +7,8 @@ and marble movement. Keep the sepia artwork, level compositions, game rules,
 sound and 280 ms rail timing. Verify normal and 2x device density, native pixel
 output, cache invalidation, all sixteen puzzles and the Radiant baseline.
 
-This work follows **D2.11.2** (external SVG shares the SVG representation while
-preserving image-document style isolation) and **D4.5.1v4** (owned, current view
+This work follows **D10.1.5** (external SVG shares the SVG representation while
+preserving image-document style isolation) and **D5.5.1** (owned, current view
 and resource state) in `doc/Lambda_Formal_Design.md`.
 
 ## Diagnosis and changes
@@ -141,8 +141,8 @@ offsets changed SVG image pixel phases, and viewport clipping changed cached
 shadow geometry. The former rebuilt SVG style/paint; the latter rebuilt blur.
 During a captured scrollbar gesture, isolated SVG images reuse their raster at
 fractional placement, then realign on resting paint. This retains image-document
-style isolation (**D2.11.2**) and current document-owned resources
-(**D4.5.1v4**). Ordinary shadows cache bounded local geometry, independent of
+style isolation (**D10.1.5**) and current document-owned resources
+(**D5.5.1**). Ordinary shadows cache bounded local geometry, independent of
 position and viewport cropping; oversized entries keep the clipped fallback and
 the existing 64 MiB budget.
 

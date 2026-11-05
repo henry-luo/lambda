@@ -2,10 +2,10 @@
 // §2): what the editor keeps but cannot edit shows as it renders, through a
 // sanitizing writer — no script runs, no style reaches the page, no link
 // navigates, no control acts — and a save writes the part's source.
-import lambda.edit.view
-import html: lambda.edit.html
-import md: lambda.edit.markdown
-import lambda.edit.model
+import lambda.editor.format.view
+import html: lambda.editor.format.html
+import md: lambda.editor.format.markdown
+import lambda.editor.format.model
 
 fn shown(items) any^ => if (len(items) == 0) "" else format(items, 'html')
 fn has_math(items) any^ {

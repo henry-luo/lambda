@@ -4,7 +4,7 @@
 **Date:** 2026-10-02.
 **Source baseline:** `8b40c7754` plus the working tree. Counts were measured on that tree with `grep` and a line-pattern script; they are occurrence counts, not AST counts, and the first migration step replaces them with an AST inventory.
 **Scope:** Radiant-specific code in four areas — view management, HTML/CSS/SVG style resolution, layout, rendering — plus the `lib/` memory primitives they stand on. State management is the next phase. Script (JS/Lambda) integration is out of scope and treated as a contract boundary.
-**Spec linkage:** **D4.1.4v4** (four mechanisms; arena = batch free with whole-arena and tail-region variants; pool = individual free; single writer / multiple readers), **D4.1.5** (owner-backed builders), **D4.2.1v3 / D4.2.3** (`MemContext` owns allocators in a tree; every arena and pool bound to a context), **D4.2.4** (batch invalidation requires exclusivity), **D4.2.5v3** (tracking is diagnostic, never the mechanism), **D4.5.1v3** (Radiant = arenas-as-regions + type-stable pools + generation handles + RAII; seam contracts pin / gen-check / copy-as-value). No fifth mechanism is introduced. The Radiant Heap of §2–§3 would revise D4.5 when ratified.
+**Spec linkage:** **D5.1.4** (four mechanisms; arena = batch free with whole-arena and tail-region variants; pool = individual free; single writer / multiple readers), **D5.1.5** (owner-backed builders), **D5.2.1 / D5.2.1** (`MemContext` owns allocators in a tree; every arena and pool bound to a context), **D5.2.3** (batch invalidation requires exclusivity), **D5.2.4** (tracking is diagnostic, never the mechanism), **D5.5.1** (Radiant = arenas-as-regions + type-stable pools + generation handles + RAII; seam contracts pin / gen-check / copy-as-value). No fifth mechanism is introduced. The Radiant Heap of §2–§3 would revise D5.5 when ratified.
 **Series:** rules R8–R16 extend R1–R7 of [Radiant_Design_Memory.md](Radiant_Design_Memory.md). The kind templates extend the template series [Memory_Safety_Template.md](../Memory_Safety_Template.md) (`lib/ownership.hpp`, `lib/tagged.hpp`).
 **Organisation:** Part I is the design; Part II is the migration plan, kept in this file as requested.
 
@@ -37,7 +37,7 @@ Phase 0 does not prove anything, does not cover state management, and does not t
 
 ## 2. Memory classes
 
-| Class | Storage (D4.1.4v4 mechanism) | Lifetime ends | Contents |
+| Class | Storage (D5.1.4 mechanism) | Lifetime ends | Contents |
 |---|---|---|---|
 | **Radiant Heap** | one ownership tree of nodes; each node stores objects in an **Arena** (batch) or as **Heap objects** (individual, from a pool) | node teardown or reset; individual destroy by the owner | every long-lived object |
 | **Stack** | scratch arena, tail-region mark/restore | restore, strictly LIFO | pass-local temporaries |
@@ -45,13 +45,13 @@ Phase 0 does not prove anything, does not cover state management, and does not t
 
 Pointers go from shorter-lived to longer-lived: Stack and Temp objects may point into the Heap; a Heap object never points at Stack or Temp memory.
 
-Per D4.2.5v3 the tree is the ownership mechanism itself. `memtrack` statistics stay diagnostic.
+Per D5.2.4 the tree is the ownership mechanism itself. `memtrack` statistics stay diagnostic.
 
 ## 3. The ownership tree
 
 ### 3.1 Nodes
 
-A node is an owner with a lifetime. It has one parent, owns its allocators, and owns its child nodes. Nodes are `MemContext` nodes (D4.2.1v3) given an object-level meaning.
+A node is an owner with a lifetime. It has one parent, owns its allocators, and owns its child nodes. Nodes are `MemContext` nodes (D5.2.1) given an object-level meaning.
 
 | Node | Parent | Allocators today (factory label) | Lifetime |
 |---|---|---|---|
@@ -183,10 +183,10 @@ It runs at quiescent points under a flag and in the test suites. The field maps 
 ## 7. Rules (extending R1–R7)
 
 - **R8 — Stack is LIFO only.** `scratch_free` is replaced by `scratch_mark` / `scratch_restore` scopes.
-- **R9 — `arena_free` and `arena_realloc` are removed.** Closes the D4.1.4v4 conformance gap. `ScratchArena` moves to the tail-region mark/rewind variant D4.1.4v4 describes.
-- **R10 — Long-lived memory is in the Radiant Heap.** `mem_*` is for Temp only and always behind an RAII holder. Heap roots allocated with `mem_calloc` move into their parent node's pool; long-lived container backing stores become pool-backed (D4.1.5 owner-backed case).
+- **R9 — `arena_free` and `arena_realloc` are removed.** Closes the D5.1.4 conformance gap. `ScratchArena` moves to the tail-region mark/rewind variant D5.1.4 describes.
+- **R10 — Long-lived memory is in the Radiant Heap.** `mem_*` is for Temp only and always behind an RAII holder. Heap roots allocated with `mem_calloc` move into their parent node's pool; long-lived container backing stores become pool-backed (D5.1.5 owner-backed case).
 - **R11 — One owner per object; one kind per pointer field.** No raw pointer field and no `void*` in a Heap struct.
-- **R12 — Pool objects are typed.** A pool that frees individually holds one object type with a free list (`DocState.range_freelist` is the existing example); this is the type-stable pool of D4.5.1v3.
+- **R12 — Pool objects are typed.** A pool that frees individually holds one object type with a free list (`DocState.range_freelist` is the existing example); this is the type-stable pool of D5.5.1.
 - **R13 — One container family.** One growable array, string builder, hash map, slot table and count implementation, each able to take its storage from a node. `Span` is the only way to pass a pointer with a length.
 - **R14 — One float-to-int conversion and one always-on check.** A saturating helper replaces raw `(int)` casts of floats that feed an index or size; `*_require` downcasts use a check that survives `NDEBUG`.
 - **R15 — Nodes die only at quiescent points.**
@@ -279,7 +279,7 @@ Every step is independently green. Gates for all: `make build`, `make test-radia
 1. Replace §10.1 with an AST-accurate inventory: every struct allocated in the four areas, its node, its storage, how its lifetime ends.
 2. Classify all pointer fields; give each `void*` a static type; list every field that fits no kind.
 3. Fix the node list of §3.1 and the slot tables of §4.1.
-4. Rule on R8–R16 and the open points of §13; draft the D4.5 revision.
+4. Rule on R8–R16 and the open points of §13; draft the D5.5 revision.
 
 *Deliverable:* the classification table as an appendix to this document. *Gate:* review.
 
@@ -289,7 +289,7 @@ Every step is independently green. Gates for all: `make build`, `make test-radia
 2. Slot table (C, `lib/`) with the generation and retirement rules of §4.1.
 3. Typed pool with free list (R12), generalising the `DomRange` free list.
 4. Node API over `MemContext`: create a node under a parent, obtain its arena and pool, tear down a subtree.
-5. Containers able to take storage from a node's pool (`hashmap_new_with_allocator` exists; `arraylist` and `strbuf` need the equivalent), per D4.1.5.
+5. Containers able to take storage from a node's pool (`hashmap_new_with_allocator` exists; `arraylist` and `strbuf` need the equivalent), per D5.1.5.
 6. Always-on check macro; saturating float-to-int helper (R14).
 7. Tests: extend `test/test_own_tagged.cpp` with positive probes and negative compile probes (implicit write, up-to-own, `void`, handle dereference), plus slot-table and typed-pool unit tests.
 

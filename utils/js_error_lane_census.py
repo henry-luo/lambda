@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JS in-band error-lane emission census (D8.4.3).
+"""JS in-band error-lane emission census (D7.4.3).
 
 Compiles a corpus of JS scripts to MIR and measures the error lane as emitted:
 
@@ -151,7 +151,7 @@ def cmd_emit(args):
           f"{total['throw_calls']:>8}{ratio:>9.2f}")
     print(f"\nMIR instructions      : {total['insns']:,}")
     print(f"emitted functions     : {total['funcs']:,}")
-    print(f"legacy helper calls   : {total['legacy_exc_calls']:,}  (D8.4.3 gate: 0)")
+    print(f"legacy helper calls   : {total['legacy_exc_calls']:,}  (D7.4.3 gate: 0)")
     if skipped:
         print(f"skipped (no artifact) : {len(skipped)} -> {', '.join(skipped[:8])}"
               + (" ..." if len(skipped) > 8 else ""))

@@ -161,19 +161,19 @@ Changes stay in memory until saved. Closing the window does not autosave.
 
 `mod_model.ls` owns immutable documents and pure transitions (**S1.4**),
 reusing `lambda.editor.draw.geometry` for picking and paths, and
-`lambda.editor.mod_history` for snapshot undo/redo. `mod_artwork.ls` builds
+`lambda.editor.core.history` for snapshot undo/redo. `mod_artwork.ls` builds
 the starter from ordinary objects. `mod_scene.ls` produces pure HTML/SVG;
 `mod_present.ls` updates retained groups and controls. `sketch.ls` owns pointer,
-keyboard, DOM and file effects (**S12.1.3 / D7.4.6**). `mod_raster.ls` reuses
+keyboard, DOM and file effects (**S12.1.3 / D7.1.1**). `mod_raster.ls` reuses
 `lambda.image` for decoding/PNG encoding and `lambda.doc.media` for data URIs.
 `dom.clipboard_read()` supplies an owned native snapshot; the demo decides what
-to paste (**D7.2.5**). The shell, stage and
+to paste (**D10.2.1**). The shell, stage and
 native input controls stay mounted during gestures, following the
-document-owned resource lifetime in **D4.5.1v4**. Each completed gesture adds
+document-owned resource lifetime in **D5.5.1**. Each completed gesture adds
 one history item; previews and cancellation add none.
 Context-menu controls mount for each invocation with their initial enablement
 and retire on dismissal. The shared `mod_context_menu.ls` helper places and
-focuses each popup after its layout commits (**D7.4.6**).
+focuses each popup after its layout commits (**D7.1.1**).
 
 This milestone covers one artboard, rectangle and multi-object selection, editable straight-node
 paths, variable-width strokes by object, basic shapes/text, raster image layers, history,
@@ -197,7 +197,7 @@ sh test/demo/previews/capture.sh sketch
 The paired `.ls`/`.txt` tests in `tests/` cover drawing and cancellation,
 history branching, shape/line constraints, movement/resizing, node editing,
 style validation, text sizing, layer visibility/locking/order and strict project
-round trips across execution tiers (**D8.1.1v18**). The registered native replays
+round trips across execution tiers (**D8.3.2**). The registered native replays
 in `test/ui/sketch/` cover visible artwork, captured mouse/touch gestures,
 inspector edits, layers, pen nodes, rectangle selection and grouped edits,
 context-menu targeting, vector clipboard edits, menu focus and window bounds,

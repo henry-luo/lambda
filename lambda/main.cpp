@@ -63,6 +63,7 @@
 
 #ifndef LAMBDA_HEADLESS
 #include "../radiant/radiant.hpp"
+#include "../radiant/window_host.hpp"
 #include "../radiant/devtools_adapter.hpp"
 #endif
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
@@ -837,6 +838,15 @@ static void lambda_report_memory_stats(const char* phase) {
 }
 
 static int lambda_main_finish(int ret_code) {
+#ifndef LAMBDA_HEADLESS
+    // Pending document owners still borrow the process registries below.
+    if (!radiant_window_host_process_shutdown_ready()) {
+        log_error("main-finish: window or export cleanup remains pending; process owners retained");
+        return ret_code ? ret_code : 1;
+    }
+    // Standalone export leases can outlive the runtime that first opened libuv.
+    if (lambda_uv_loop() && !lambda_uv_is_host_owned()) lambda_uv_cleanup();
+#endif
     lambda_report_interp_run();
     // Capture post-execution ownership before common teardown erases the peak's
     // live categories; this is opt-in diagnostic telemetry, not policy.
@@ -953,7 +963,7 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
         } else if (strcmp(argv[i], "--fullscreen") == 0) {
             out->fullscreen = true;
         } else if (is_view && strcmp(argv[i], "--autoplay") == 0) {
-            // D7.5.4: only the host grants audio activation up front.
+            // D11.3.1: only the host grants audio activation up front.
             out->autoplay = true;
         } else if (is_view && strcmp(argv[i], "--microphone") == 0) {
             out->microphone = true;
@@ -1025,7 +1035,7 @@ int cmd_layout(int argc, char** argv);
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
 #ifndef LAMBDA_HEADLESS
-// D7.5.4 host grant: every document in this viewer may start audio without a gesture.
+// D11.3.1 host grant: every document in this viewer may start audio without a gesture.
 extern void radiant_audio_grant_activation(bool granted);
 // The runtime-only host excludes these providers and their rendering types.
 extern int view_doc_in_window(const char* doc_file);
@@ -1050,7 +1060,7 @@ extern "C" int g_mir_interp_mode;
 #endif
 #ifndef LAMBDA_HEADLESS
 // Legacy document policy used by Lambda Direct; LambdaJS ignores it under
-// D8.1.3v11 and always links selected MIR natively.
+// D8.4.2 and always links selected MIR natively.
 extern int g_js_force_document_interp;
 
 // Retain the existing Lambda Direct document policy without letting it select a
@@ -1161,7 +1171,7 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 }
 #endif
 
-// RI4 (D8.1.1v17): while an entry runs, SIGINT requests an interrupt instead
+// RI4 (D8.3.6): while an entry runs, SIGINT requests an interrupt instead
 // of terminating the process; T0 turns the request into a fault at its next
 // call entry or back-edge and the session rolls the entry back. The line
 // editor owns SIGINT while it reads, so the handler is armed per entry.
@@ -1265,7 +1275,7 @@ static void repl_print_binding(void* opaque, const char* name, size_t length,
     strbuf_free(text);
 }
 
-// Session commands (D8.1.1v17 services). Returns false when `line` is not one.
+// Session commands (D8.3.6 services). Returns false when `line` is not one.
 static bool repl_session_command(InterpReplSession* session, const char* line) {
     const char* arg = NULL;
     if (repl_command(line, "env", &arg)) {
@@ -1315,7 +1325,7 @@ static bool repl_session_command(InterpReplSession* session, const char* line) {
     return false;
 }
 
-// One persistent T0 session is the only REPL engine (D8.1.1v17): each complete
+// One persistent T0 session is the only REPL engine (D8.3.6): each complete
 // entry is parsed, planned and executed as a fragment; nothing is replayed.
 // `procedural` selects the `lambda run` session kind (S16.7.6).
 int run_repl(Runtime *runtime, bool procedural) {
@@ -1441,7 +1451,7 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
         }
 
         // The error output has its own pool, which also releases the Input
-        // it holds (D4.2.6).
+        // it holds (D5.2.5).
         if (output_input->pool) pool_destroy(output_input->pool);
         // Do NOT delete output_input - it was allocated from the pool we just destroyed
         return 1;  // failure
@@ -1466,7 +1476,7 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     strbuf_free(output);
 
     // The result itself is rooted in the Runtime heap, so the wrapper Input's
-    // pool — which releases the Input with it (D4.2.6) — can go after printing.
+    // pool — which releases the Input with it (D5.2.5) — can go after printing.
     if (output_input->pool) pool_destroy(output_input->pool);
     return 0;  // success
 }
@@ -2079,7 +2089,7 @@ static void batch_crash_handler(int sig) {
 
 static void batch_alarm_handler(int sig) {
     if (!batch_timeout_owner_thread) {
-        // D5.3.6v2/D6.3.3v2: a process alarm must not jump across threads or stacks.
+        // D6.3.6/D7.5.3: a process alarm must not jump across threads or stacks.
         int saved_errno = errno;
         if (pthread_kill(batch_timeout_owner, sig) != 0) _exit(124);
         errno = saved_errno;
@@ -2441,7 +2451,7 @@ static int node_runner_main(int argc, char** argv) {
 }
 #endif // LAMBDA_NO_JS
 
-// LAMBDA_EXEC_BACKEND selects the execution tier (D8.1.1v4). Unset selects the
+// LAMBDA_EXEC_BACKEND selects the execution tier (D8.3.1). Unset selects the
 // shipped `auto` policy; `jit` explicitly requests eager whole-module
 // compilation, while `interp` runs T0 without promotion.
 #if defined(LAMBDA_HEADLESS) || defined(LAMBDA_NO_JS) || defined(LAMBDA_NO_SERVE) || defined(LAMBDA_NO_GUI)
@@ -2633,7 +2643,7 @@ static int run_chat_demo(Runtime* runtime, const char* script_path) {
             ((Signals*)handle->data)->closing--;
         });
     }
-    while (signals.closing > 0) uv_run(loop, UV_RUN_NOWAIT);
+    while (signals.closing > 0) lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
     return signals.interrupted ? 128 + signals.interrupted : result;
 #else
     return run_script_file(runtime, script_path, true);
@@ -4342,8 +4352,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                   "  --right-binding          Use right-bound book order\n"
                   "  --block-remote-resources Disable remote subresources\n", stdout);
             fputs("  --fullscreen              Start in fullscreen (F11 toggles)\n", stdout);
-            fputs("  --autoplay                Grant audio activation up front: network documents may start sound without a click (D7.5.4)\n", stdout);
-            fputs("  --microphone              Grant input to the initial document; explicit capture also requires OS permission (D7.5.10)\n", stdout);
+            fputs("  --autoplay                Grant audio activation up front: network documents may start sound without a click (D11.3.1)\n", stdout);
+            fputs("  --microphone              Grant input to the initial document; explicit capture also requires OS permission (D11.3.2)\n", stdout);
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # Open the bundled lambda.doc document viewer\n", argv[0]);
@@ -4387,7 +4397,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         event_sim_set_result_path(launch.event_result);
 
-        // the viewer ships with the package tree and follows LAMBDA_HOME (D7.2.4).
+        // the viewer ships with the package tree and follows LAMBDA_HOME (D9.3.4).
         if (filename == NULL) {
             g_lambda_main_viewer_path = host_path_join(HOST_PATH_HOME, "package/doc/doc_viewer.ls");
             filename = g_lambda_main_viewer_path;
@@ -4852,7 +4862,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // heap, name pool, module registry, and module slabs after every
         // script. Retaining an imported MIR Script across that boundary leaves
         // its cached Items and type images pointing into the retired heap, so
-        // disable L1 module retention for this command (D5.4.3).
+        // disable L1 module retention for this command (D6.4.3).
         runtime.mir_cache_disabled = true;
 
         char line[1024];
@@ -4956,7 +4966,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             runtime_reset_heap(&runtime);
 
             // Legacy lifecycle hooks remain valid; roots and document tables
-            // now belong to their requesting pool/evaluator (D5.4.2).
+            // now belong to their requesting pool/evaluator (D6.4.2).
             path_reset();
             doc_context_reset();
             write_set_reset();

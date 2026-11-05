@@ -36,7 +36,7 @@ summary and implementation record are retained below. LR02-35 moved here on
 
 ## 1. Compilation pipeline, CLI & REPL (LR_01)
 
-<a id="lr01-17"></a>**LR01-17 · The interpreter tier rejected task handles (S13.3.1v2, D8.1.1v18) · RESOLVED 2026-11-03 (found 2026-09-22)**
+<a id="lr01-17"></a>**LR01-17 · The interpreter tier rejected task handles (S13.3.1v2, D8.3.2) · RESOLVED 2026-11-03 (found 2026-09-22)**
 
 **Resolution:** The October runtime-async implementation superseded this report. Requalification
 covered all 35 executable concurrency/async regressions on interp, AUTO and JIT,
@@ -62,7 +62,7 @@ The whole `repl_history` StrBuf (`main.cpp:785`) is re-transpiled and re-run
 every turn, with error rollback implemented as a raw byte-truncate
 (`main.cpp:882`–`893`). Any non-idempotent side effect repeats each turn.
 
-Fixed 2026-10-06 (D8.1.1v17, S16.7.4): the REPL is one persistent T0 session that executes only the new entry and rolls back a failed one; see `vibe/Lambda_Design_Repl_Interp.md` §8 and `LambdaReplSessionTests`.
+Fixed 2026-10-06 (D8.3.6, S16.7.4): the REPL is one persistent T0 session that executes only the new entry and rolls back a failed one; see `vibe/Lambda_Design_Repl_Interp.md` §8 and `LambdaReplSessionTests`.
 
 <a id="lr01-18"></a>**LR01-18 · The REPL echoes `null` after a declaration-only entry · FIXED 2026-10-06 (found 2026-09-30, site snippet pass)**
 Piped into `lambda`, the entries `let x = 1` then `x` print `null` then `1`, and `1 + 2`, `let x = 1`, `x` print `3`, `null`, `1`. A script holding only declarations prints `null`, since its root is `null` (S2.5.4v2), but the script `1 + 2; let x = 1` prints only `3`, so the second echo is the REPL's own. `run_repl` (`lambda/main.cpp:1094`) re-runs the whole history each turn and prints the part of the root's output that is new (`:1235`–`:1266`); the path that turns an output that did not grow into `null` is not traced yet. No S# or D# ruling says what a REPL entry echoes; S16.2.3v3 covers only how entries are separated. The website's quickstart REPL sample avoids a `let` for this reason.
@@ -153,7 +153,7 @@ first one's keys. In the reduced repro, `ensure` read `st.nodes` as `st.id`
 keys stayed correct, which is why publication timing picked the failures.
 Each tier alone was correct because only `auto` publishes worker images.
 
-**Fix** (D8.1.1v12, D8.5.1v7):
+**Fix** (D8.3.4, D8.3.5):
 - The base is placed at publication and recorded in the layout's new
   `property_key_base` cell.
 - Generated satellite code loads it from its own `_sat_N_layout`, so the
@@ -174,7 +174,7 @@ UI DOM suite passes 127/127. That includes `codemirror_type`,
 `pkg_context_menu`, `pkg_focus_policy` and `pkg_keyboard_activation`, which
 failed in the earlier colour-work run and had been filed as pre-existing.
 
-<a id="lr01-19"></a>**LR01-19 · T0: a closure made in a module-level comprehension read the loop variable's module slot, not its snapshot (D6.2.3) · FIXED 2026-10-13 (found the same day, by the LaTeX Phase V M3 soul settings)**
+<a id="lr01-19"></a>**LR01-19 · T0: a closure made in a module-level comprehension read the loop variable's module slot, not its snapshot (D7.2.3) · FIXED 2026-10-13 (found the same day, by the LaTeX Phase V M3 soul settings)**
 `let fs = [for (k in ["a", "b", "c"]) (x) => k ++ x]` called as `fs[0]("1")` answered `"c1"` on T0 and `"a1"` on the JIT. Inside a function both tiers were right. A module-level comprehension's variable has a module slot, and `interp_read_binding_at_capture_slot` tried module storage before the closure's capture slots, so the body read the live slot, which holds the loop's last value. `lambda.latex`'s package tables are module-level comprehensions of closures, so every soul color setting was recorded under the last key. **Fix:** a capture of the current function reads its snapshot first. Captures never name a true module global, because `is_global_entry` excludes them from capture analysis. Covered by `test/lambda/closure_capture_comprehension.ls`, pinned on interp, jit and auto in `kTune27TierParity`.
 
 <a id="lr01-20"></a>**LR01-20 · T0: a let-list whose value is a function literal answered null · FIXED 2026-10-13 (found the same day, while narrowing LR01-19)**
@@ -398,7 +398,7 @@ crash shape.
 
 
 <a id="lr02-16"></a>**LR02-16 · `lambda.*` namespace not implemented · RESOLVED 2026-09-08**
-Ruled 2026-08-27 as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4**
+Ruled 2026-08-27 as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D9.3.4**
 (design v1.38.0); deliberation in `vibe/Lambda_Package.md` §5. Implemented
 the complete namespace migration:
 
@@ -454,7 +454,7 @@ package in the corpus used a multi-item let-group or a lone-declaration
 group (instrumented scan, 2026-09-22). Fixture:
 `test/lambda/list_declarations.ls`.
 
-<a id="lr02-20"></a>**LR02-20 · The C parser caps list literals, elements, calls and decompositions at 64 items (S2.5.1v2, S2.5.5v2, D8.1.2v3) · FIXED 2026-09-25 (found 2026-09-24)**
+<a id="lr02-20"></a>**LR02-20 · The C parser caps list literals, elements, calls and decompositions at 64 items (S2.5.1v2, S2.5.5v2, D8.1.1) · FIXED 2026-09-25 (found 2026-09-24)**
 `lambda_parser.c` gathers the children of a flat reduction in fixed
 proof-of-concept stack buffers, so it rejects valid source the reference
 grammar accepts. `parse_group_or_arrow` (`children[64]`, :1127) fails a
@@ -464,7 +464,7 @@ the content child (:970, :1010); `parser_parse_postfix_delimited`
 (`children[65]`, :1625) caps call arguments and index dimensions (:1631); and
 `parse_assignment_clause` (`LambdaToken names[64]`, :1467) caps decomposition
 names (:1484). A 65-item array parses, because `parse_array` builds its items
-as a `parser_list_append` chain. S2.5 sets no item limit, so under D8.1.2v3
+as a `parser_list_append` chain. S2.5 sets no item limit, so under D8.1.1
 the C side is wrong; `lambda-cst` reports such a list as `missing` (grammar
 accepts, RD rejects). It surfaced once LR02-18 gave the grammar list
 literals. Recorded rather than fixed (USER, 2026-09-24). Sibling, unruled:
@@ -487,7 +487,7 @@ heap buffer must not be shared with a `parser_probe` copy. `parse_postfix`'s
 cases (a 65-item list literal, 65 call arguments) in both S16 conformance
 scripts.
 
-*Fixed 2026-09-25:* the four fixed buffers are now `ParserGrowBuffer`s (`lambda_parser.c`). Each has 64 (or 65) inline slots and spills to the heap past them, so every reduction keeps the same children in the same order and the sink sees any count. A buffer is a local of one parse call, released by a thin wrapper around the old body (`parse_element_into`, `parse_group_or_arrow_into`, `parse_assignment_clause_into`, `parser_parse_postfix_delimited_into`), so no early return leaks it and no `parser_probe` copy shares it. The parser links only libc, so the spill uses `malloc`/`realloc`/`free` under `RAWALLOC_OK`. The "in parser POC" limit diagnostics and "too many decomposition names" are gone; a failed spill reports "out of memory while parsing". `parse_postfix` keeps its own buffer, sized to the three children its member, query and handler forms use rather than 65. A call over 16 arguments still meets the source-argument limit after parsing (E230, D6.2.2v2). The `put`/`del` cap of 32 (`LAMBDA_CRUD_MAX_CLAUSES`) is unchanged, since no PTH60v3 text rules on it. Fixtures: `test/lambda/parser_item_limits.ls` (70 list items, attributes and decomposition names, all tiers), `LambdaRdParserPoc.ReducesMoreThanSixtyFourChildren`, and mirrored accept cases in both S16 scripts (a 65-item list, 65 call arguments, 70 attributes, 70 names; 350/350 C, 337/337 Tree-sitter).
+*Fixed 2026-09-25:* the four fixed buffers are now `ParserGrowBuffer`s (`lambda_parser.c`). Each has 64 (or 65) inline slots and spills to the heap past them, so every reduction keeps the same children in the same order and the sink sees any count. A buffer is a local of one parse call, released by a thin wrapper around the old body (`parse_element_into`, `parse_group_or_arrow_into`, `parse_assignment_clause_into`, `parser_parse_postfix_delimited_into`), so no early return leaks it and no `parser_probe` copy shares it. The parser links only libc, so the spill uses `malloc`/`realloc`/`free` under `RAWALLOC_OK`. The "in parser POC" limit diagnostics and "too many decomposition names" are gone; a failed spill reports "out of memory while parsing". `parse_postfix` keeps its own buffer, sized to the three children its member, query and handler forms use rather than 65. A call over 16 arguments still meets the source-argument limit after parsing (E230, D7.2.2). The `put`/`del` cap of 32 (`LAMBDA_CRUD_MAX_CLAUSES`) is unchanged, since no PTH60v3 text rules on it. Fixtures: `test/lambda/parser_item_limits.ls` (70 list items, attributes and decomposition names, all tiers), `LambdaRdParserPoc.ReducesMoreThanSixtyFourChildren`, and mirrored accept cases in both S16 scripts (a 65-item list, 65 call arguments, 70 attributes, 70 names; 350/350 C, 337/337 Tree-sitter).
 
 <a id="lr02-24"></a>**LR02-24 · The C parser reads `x is 1 to 5` as `(x is 1) to 5` (S11.1.3, S11.1.6v2) · FIXED 2026-09-25 (found 2026-09-24)**
 Both front ends accept `let r = x is 1 to 5`, but they read it differently.
@@ -566,7 +566,7 @@ literal-union contract is not checked at all (a string literal union such as
 `"a" | "b"` is).
 
 *Fixed 2026-09-25:* three causes, all ruled by S11.4.5, S11.4.1v3 and S11.2.1.
-- **Sized ints.** T0's `interp_coerce_declared_numeric` sent every `i8`…`u32` and `u64` binding contract through the wrapping conversion (`coerce_num_sized`, `coerce_uint64`). Binding boundaries now take `lambda_type_check`'s value-aware admission, as the JIT already did (D8.3.5: admission is not a cast); only an explicit `u8(v)` wraps. The JIT's native `u32` boundary rejected with a bare `ITEM_ERROR`; its cold arm now runs the shared check, so the rejection carries its E201.
+- **Sized ints.** T0's `interp_coerce_declared_numeric` sent every `i8`…`u32` and `u64` binding contract through the wrapping conversion (`coerce_num_sized`, `coerce_uint64`). Binding boundaries now take `lambda_type_check`'s value-aware admission, as the JIT already did (D7.3.5: admission is not a cast); only an explicit `u8(v)` wraps. The JIT's native `u32` boundary rejected with a bare `ITEM_ERROR`; its cold arm now runs the shared check, so the rejection carries its E201.
 - **Literal types.** A numeric literal contract was admitted by its carrier, and the static relation proved any literal contract by TypeId, so the JIT also dropped the check on `x: "a"`. `lambda_literal_contract_value` (`transpile_shared.cpp`) recovers a literal contract's value (never from the shared `LIT_*` markers). Admission, `lambda_type_matches` (by `==`, as a literal match arm is), the validator's primitive branch and `static_boundary_relation` (deferred, never proven by TypeId) use it.
 - **Diagnostics.** `type_numeric_contract_name` names sized types (`expected u8`, not `num_sized`) in contract and validator messages, and `lambda_type_format_contract_name` prints a literal contract's value on the expected side (`expected 1 | 2`, `expected "a"`).
 
@@ -605,7 +605,7 @@ let b = 3 is 1 to 5 | 10 to 20       // false
 ```
 `3 is R` should be `true`: S11.1.3 applies a range type's membership rule in annotations, match arms and value expressions alike. The other two positions agree with it. `let v: R = 3` is admitted, and `match 3 { case 1 to 5 | 10: … }` takes the arm, because a match arm splits a union and tests each member. A range alone is right too: `3 is 1 to 5` is `true`. So the fault is in `is` against the union type, where the range member never matches. Both tiers give the same result, and so did the binary from before LR02-24's fix, through a type alias.
 
-*Fixed 2026-09-25.* The fault was not in `is` or in unions. `parse_type_pattern.cpp` built a range type with `LMD_TYPE_RANGE`, the tag of a range value, where D3.1.1v4 puts it under the shared `LMD_TYPE_TYPE` tag, told apart by its kind. Six sites special-cased the pair (`fn_is`, `lambda_type_matches`, the `let` static exemption, alias wrapping, a declared `let`'s AST type, the JIT's `let` carrier). Everything that dispatched on the tag read "an int between the bounds" as "a range", on both tiers:
+*Fixed 2026-09-25.* The fault was not in `is` or in unions. `parse_type_pattern.cpp` built a range type with `LMD_TYPE_RANGE`, the tag of a range value, where D4.1.1 puts it under the shared `LMD_TYPE_TYPE` tag, told apart by its kind. Six sites special-cased the pair (`fn_is`, `lambda_type_matches`, the `let` static exemption, alias wrapping, a declared `let`'s AST type, the JIT's `let` carrier). Everything that dispatched on the tag read "an int between the bounds" as "a range", on both tiers:
 - **Schema validator.** It had no range case ("Unsupported type for validation: 16"), so `is` failed whenever the range sat inside a union, map or array type (`{a: 3} is {a: 1 to 5}` and `[3, 4] is (1 to 5)[]` were `false`), and `lambda.exe validate` rejected range-typed fields.
 - **Map layout.** A range-typed field was laid out as a pointer to a range. Passing `{a: 3}` to `fn f(p: {a: 1 to 5})` segfaulted: admission rebuilt the map in the contract's layout, and the validator read the int 3 as a `Container*` (`map_field_to_item`). `let p: {a: 1 to 5} = {a: 3}` was a static E201, and a nominal `type Gauge { level: 1 to 5 }` read `null`.
 - **Static checks and the JIT's argument lane.** Both read a range-typed parameter as a range ([LR03-14](#lr03-14)); a `(1 to 5)[]` parameter rejected `[3, 3]`.
@@ -642,7 +642,7 @@ The same happens to a range-typed field, since the [LR03-18](<Lambda_Issue_Ledge
 - **Proven:** no check. An int still widens into a float field.
 - **Deferred:** marked in the literal's `deferred_fields` and admitted at construction by `object_literal_admit_fields` (`lambda-data-runtime.cpp`) through `lambda_type_check`, before the value reaches the fill. `<Obj a: 9>` against `1 to 5` fails with "type check at field 'a' of Obj failed: expected 1 to 5, got int 9", and an exactly integral `3.0` becomes int 3 (S11.4.5). A spread's fields are always deferred. The interpreter admits before it allocates the object; the JIT calls `object_fill_checked`, which roots the values first.
 
-S11.4.10 has a failure surface as an error value at the binding site. That is S7.7's contagion, which the spec's status table still lists as pending, and the JIT raises instead of it at every boundary. Typing the literal `T | error` instead would put E208 on every function that builds an object from an unproven value, which a call with a deferred parameter check does not. So a failure leaves as a failed declaration does today: the enclosing function returns the error, through the edge a failed map spread takes (`emit_return_if_item_error`, `interp_signal`), and its caller sees an error value (`make_grade(9) is error` is `true` in the fixture). An object that is constructed is therefore always admitted, and typed readers may trust its layout (D3.2.6).
+S11.4.10 has a failure surface as an error value at the binding site. That is S7.7's contagion, which the spec's status table still lists as pending, and the JIT raises instead of it at every boundary. Typing the literal `T | error` instead would put E208 on every function that builds an object from an unproven value, which a call with a deferred parameter check does not. So a failure leaves as a failed declaration does today: the enclosing function returns the error, through the edge a failed map spread takes (`emit_return_if_item_error`, `interp_signal`), and its caller sees an error value (`make_grade(9) is error` is `true` in the fixture). An object that is constructed is therefore always admitted, and typed readers may trust its layout (D4.2.6).
 
 Found on the way: a derived object type dropped its base fields' defaults (`resolver_object_copy_base`), so with `type Dog : Animal { … }`, `<Dog name: "Rex">` stored null in an inherited `legs: int = 4` on both tiers. The copy now keeps the default. Tracing the fixture also found [LR03-19](#lr03-19)'s cause.
 
@@ -712,27 +712,27 @@ A literal type admits every value `==` to it (S11.2.1): `1.0 is 1` and `match 1.
 
 *Fixed 2026-09-26.* A numeric literal against a numeric kind other than `number` answers *unknown*, unless the kind is an integer kind and the literal has a fraction (`1.5 & int` is still `none`); a datetime literal against `date` or `time` answers *unknown*. The answer against a literal, a range or `number` stays exact. Fixture `type_none.ls` ("a literal admits every value == to it"), three tiers.
 
-<a id="lr03-37"></a>**LR03-37 · A typed record's `any` field rebuilds the whole shape whenever a write changes its value's kind (D3.2.4v4) · FIXED 2026-10-05 (found the same day, while writing the jq benchmark VM)**
-With `type R = {a: int, path: array?, vat: any?, w: any, b: int}` held in `var r: R`, every write that stores a different kind into `vat` or `w` (int, then array, then null; or int, then string) runs `map_rebuild_for_type_change`, twice per write. That allocates a new `TypeMap` and entry chain from the context pool, which is never reclaimed. 3,000 such writes did 6,002 rebuilds. 1.2 million writes on a 4-field record took about 38 µs each on the debug build and reached 1.3 GB RSS. An `array?` field does not rebuild (3 rebuilds over 3,000 writes alternating `null` and arrays). The jq VM's 39-field `Vm` record hit this on every path step (`vm.vat`, `vm.err`), so `jq_tree` and the path filters in `jq_mix` grew past 10 GB and were killed. D3.2.4v4 has a value that adopts a named contract at construction carry the contract's physical layout. Under that layout an `any` field is an Item lane that every value fits, so no admitted write should change the layout. The record instead lays the field out by the kind of value it currently holds. A fix gives a declared `any`/`any?` field an Item lane in the contract layout and keeps the layout-changing rebuild for open, undeclared fields.
+<a id="lr03-37"></a>**LR03-37 · A typed record's `any` field rebuilds the whole shape whenever a write changes its value's kind (D4.2.5) · FIXED 2026-10-05 (found the same day, while writing the jq benchmark VM)**
+With `type R = {a: int, path: array?, vat: any?, w: any, b: int}` held in `var r: R`, every write that stores a different kind into `vat` or `w` (int, then array, then null; or int, then string) runs `map_rebuild_for_type_change`, twice per write. That allocates a new `TypeMap` and entry chain from the context pool, which is never reclaimed. 3,000 such writes did 6,002 rebuilds. 1.2 million writes on a 4-field record took about 38 µs each on the debug build and reached 1.3 GB RSS. An `array?` field does not rebuild (3 rebuilds over 3,000 writes alternating `null` and arrays). The jq VM's 39-field `Vm` record hit this on every path step (`vm.vat`, `vm.err`), so `jq_tree` and the path filters in `jq_mix` grew past 10 GB and were killed. D4.2.5 has a value that adopts a named contract at construction carry the contract's physical layout. Under that layout an `any` field is an Item lane that every value fits, so no admitted write should change the layout. The record instead lays the field out by the kind of value it currently holds. A fix gives a declared `any`/`any?` field an Item lane in the contract layout and keeps the layout-changing rebuild for open, undeclared fields.
 **Fix:** `fn_map_set` stores a write into a field whose lane is the `any` TypedItem lane in place (`map_field_store(..., LMD_TYPE_ANY)`) and keeps the field's declared contract; it no longer compares the wrapper's TypeId with the value's. A record's reified shape therefore stays storage-compatible with its contract, so later admissions hit the cached relation instead of walking every field. 3,000 kind-changing writes now do no rebuilds (the three left are the declaration's reification); the jq VM's `b_try_catch` at 256 iterations went from 519 ms to 6 ms (debug). Fixture `test/lambda/proc/map_runtime_shape_tree.ls` covers retyping alongside LR03-38.
 
-<a id="lr03-38"></a>**LR03-38 · Each new key on a runtime-grown map copies the whole shape, so building an n-key map costs O(n²) never-reclaimed pool memory (D3.4.3v3) · FIXED 2026-10-05 (found the same day, while writing the jq benchmark VM)**
-`var r = {}` followed by `r[k] = v` for n distinct computed keys goes through `fn_map_set`'s miss path into `map_extend_open_shape`. That copies all n existing `ShapeEntry`s plus the new one into `context->pool` and copies the data buffer. Lookups walk the chain linearly. Building a 512-key map 512 times takes 9.8 s and 11.9 GB RSS in release; 256 keys take 1.0 s. jq objects are Lambda maps, so the VM's `obj_with`/`obj_without` and `with_entries` exhausted memory (`jq_mix`'s `b_kv_update` passed 11 GB). Small maps leak too, because each rebuilt map mints fresh entries: `jq_bf`'s five-key state object, rebuilt on every step, helped push that row past 4 GB in 10 s. D3.4.3v3 says only a private type grows in place, and that a map grown at runtime keeps a type of its own. But nothing records that a runtime type is private: a COW clone copies the `type` pointer (`clone_mutable_map`), so copying on every growth is the only safe policy today. A fix needs a ruling on the mechanism: either an ownership mark that every type-pointer copy clears, so a private type can append its entry in place with amortised data growth, or growing runtime maps through a transition tree as `Input` maps already do (D3.4.3v3 currently exempts them).
-**Fix (user ruling 2026-10-05: the transition tree; D3.4.3v4, Formal Design 24.0.0):** runtime-grown plain maps share through a per-context runtime tree. `map_extend_open_shape` first tries `map_extend_via_runtime_tree`: an add to an empty plain map starts at the tree's root, and an add to a map whose type is a node of that tree follows its edge (`type_tree_add_map_field`, membership by `type_tree_owns`); data grows by doubling. The tree's `Input` is a context capsule extension with a 65,536-type budget. `fn_map_set` also answers a plain string key from the type's hash table, hit or miss, instead of walking every field. 64 builds of a 1,024-key map now take 11 ms with a 43 MB peak (debug), and the jq VM's `b_kv_update` stays near 180 MB. Fixture `test/lambda/proc/map_runtime_shape_tree.ls`, in the forced-collection sweep. **Residue:** an add to a literal's, contract's, nominal, parsed `Input`'s or detached private type still copies the shape (Shape_Transitions §8). **Residue closed 2026-10-06 (D3.4.3v5, Formal Design 27.0.0):** every such type is an external parent of the runtime tree -- its edges kept in the tree's own table, keyed by structure, the parent never written -- and type-changing writes take shared retype edges; from a literal, a parsed object or a spread, 16 builds of a 1,024-key map peak at 33–34 MB instead of 1.43 GB (debug). Plan and record: [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md); fixtures `proc/map_symbol_key_tree.ls` and `proc/map_external_parent.ls`, GTests `TransitionTreeKeyIdentityTest`, `TransitionTreeExternalParentTest`, `TransitionTreeRetypeTest`. Still private: declined adds, JavaScript shapes, spread link slots, qualified keys (LR03-40).
+<a id="lr03-38"></a>**LR03-38 · Each new key on a runtime-grown map copies the whole shape, so building an n-key map costs O(n²) never-reclaimed pool memory (D3.4.3) · FIXED 2026-10-05 (found the same day, while writing the jq benchmark VM)**
+`var r = {}` followed by `r[k] = v` for n distinct computed keys goes through `fn_map_set`'s miss path into `map_extend_open_shape`. That copies all n existing `ShapeEntry`s plus the new one into `context->pool` and copies the data buffer. Lookups walk the chain linearly. Building a 512-key map 512 times takes 9.8 s and 11.9 GB RSS in release; 256 keys take 1.0 s. jq objects are Lambda maps, so the VM's `obj_with`/`obj_without` and `with_entries` exhausted memory (`jq_mix`'s `b_kv_update` passed 11 GB). Small maps leak too, because each rebuilt map mints fresh entries: `jq_bf`'s five-key state object, rebuilt on every step, helped push that row past 4 GB in 10 s. D3.4.3 says only a private type grows in place, and that a map grown at runtime keeps a type of its own. But nothing records that a runtime type is private: a COW clone copies the `type` pointer (`clone_mutable_map`), so copying on every growth is the only safe policy today. A fix needs a ruling on the mechanism: either an ownership mark that every type-pointer copy clears, so a private type can append its entry in place with amortised data growth, or growing runtime maps through a transition tree as `Input` maps already do (D3.4.3 currently exempts them).
+**Fix (user ruling 2026-10-05: the transition tree; D3.4.3, Formal Design 24.0.0):** runtime-grown plain maps share through a per-context runtime tree. `map_extend_open_shape` first tries `map_extend_via_runtime_tree`: an add to an empty plain map starts at the tree's root, and an add to a map whose type is a node of that tree follows its edge (`type_tree_add_map_field`, membership by `type_tree_owns`); data grows by doubling. The tree's `Input` is a context capsule extension with a 65,536-type budget. `fn_map_set` also answers a plain string key from the type's hash table, hit or miss, instead of walking every field. 64 builds of a 1,024-key map now take 11 ms with a 43 MB peak (debug), and the jq VM's `b_kv_update` stays near 180 MB. Fixture `test/lambda/proc/map_runtime_shape_tree.ls`, in the forced-collection sweep. **Residue:** an add to a literal's, contract's, nominal, parsed `Input`'s or detached private type still copies the shape (Shape_Transitions §8). **Residue closed 2026-10-06 (D3.4.3, Formal Design 27.0.0):** every such type is an external parent of the runtime tree -- its edges kept in the tree's own table, keyed by structure, the parent never written -- and type-changing writes take shared retype edges; from a literal, a parsed object or a spread, 16 builds of a 1,024-key map peak at 33–34 MB instead of 1.43 GB (debug). Plan and record: [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md); fixtures `proc/map_symbol_key_tree.ls` and `proc/map_external_parent.ls`, GTests `TransitionTreeKeyIdentityTest`, `TransitionTreeExternalParentTest`, `TransitionTreeRetypeTest`. Still private: declined adds, JavaScript shapes, spread link slots, qualified keys (LR03-40).
 
-<a id="lr03-39"></a>**LR03-39 · The runtime shape tree's `Input` lived in the heap's pool, so a heap reset between evaluations freed it under its CONTEXT-lifetime capsule (D4.2.6) · FIXED 2026-10-06 (found the same day, while tracing the tree's lifetime; introduced by LR03-38 on 2026-10-05)**
+<a id="lr03-39"></a>**LR03-39 · The runtime shape tree's `Input` lived in the heap's pool, so a heap reset between evaluations freed it under its CONTEXT-lifetime capsule (D5.2.5) · FIXED 2026-10-06 (found the same day, while tracing the tree's lifetime; introduced by LR03-38 on 2026-10-05)**
 `runtime_shape_tree` created the tree's `Input` with `Input::create(context->pool, …)`. That pool is the heap's (`ctx->pool = ctx->heap->pool`), and `Input::create` registers `input_pool_cleanup` on it. The capsule extension holding the tree has `CONTEXT_CAPSULE_LIFETIME_CONTEXT`: it survives heap replacement and is destroyed only with the `EvalContext`, which is the Runtime's canonical, retained context (`runtime_get_eval_context`). `runtime_reset_heap` — run between every script of `lambda.exe test-batch`, the mode the Lambda gtest harness uses — destroyed the heap pool, which ran the Input's cleanup and freed its struct while the capsule still pointed at it; later scripts in the batch grew maps through the freed tree, and `runtime_cleanup` released it a second time through `context_capsule_destroy_all`, crashing in `name_pool_release` (SIGSEGV, deterministic, even with one script in the batch). The baseline stayed green because the crash came after the last `BATCH_END` marker and the harness discarded `pclose`'s status. **Fix:** the tree owns a pool of its own (`mem_pool_create`, as `InputManager::global_pool` does) and its destroy hook is `mem_pool_destroy(tree->pool)`, whose cleanup releases the Input once; the tree outlived heap replacement — unsound, because its entries carry the runtime name pool's NameIds; since LR03-43 it ends with its heap generation. The harness now charges an abnormal exit after the last marker to the last completed script, so a teardown crash fails the run (`test_lambda_helpers.hpp`, the batch chunk runner). Repro: `printf 'run a.ls\n' | ./lambda.exe test-batch --no-log` with any script that grows a plain map, exit 139 before, 0 after, also under `MallocScribble=1`.
 
 
-<a id="lr03-41"></a>**LR03-41 · A null written over a container field of a shared shape read back as the raw word 0, so `== null` was false on the JIT (S3.1, D3.4.5) · FIXED 2026-10-06 (found the same day, when D3.4.4v4 moved spread literals onto the runtime tree; latent since LR03-38)**
+<a id="lr03-41"></a>**LR03-41 · A null written over a container field of a shared shape read back as the raw word 0, so `== null` was false on the JIT (S3.1, D3.4.5) · FIXED 2026-10-06 (found the same day, when D3.4.4 moved spread literals onto the runtime tree; latent since LR03-38)**
 `var r = {}; r["marks"] = ['z']; r["marks"] = null; r.marks == null` was `false` on the JIT and `true` on T0, while `type(r.marks)` said `null`; after Impl_Map_Transition_Coverage P0 the same hit `{*:m, marks: null}`, which failed `editor_api_basic` and `dom_adapter` under the JIT sweep. A write of null into a container slot of a shared tree type stores a zero word and keeps the slot's container tag, because downgrading a shared entry's tag would change it for sibling maps (`shape_entry_retag_is_safe`). The decoder `map_field_to_item` (lambda-data.cpp) then returned the zero pointer as the Item, which every runtime comparison normalizes but the JIT's `== null` compares by its bits against `ITEM_NULL`. A private shape had hidden it: there the write retags the entry to `null`. **Fix:** the decoder reads a zero word in a container or virtual-carrier slot as the canonical `ItemNull`, as the `complex` case already did. Covered by `test/lambda/proc/map_symbol_key_tree.ls` ("null over list"), on JIT and auto.
 
-<a id="lr03-42"></a>**LR03-42 · A rebuild or growth of an element carrying a plain map type read element fields past the end of that type (D2.6.6v2) · FIXED 2026-10-06 (found the same day, when Impl_Map_Transition_Coverage P2 read the copied tag)**
+<a id="lr03-42"></a>**LR03-42 · A rebuild or growth of an element carrying a plain map type read element fields past the end of that type (D3.1.1) · FIXED 2026-10-06 (found the same day, when Impl_Map_Transition_Coverage P2 read the copied tag)**
 `map_rebuild_for_type_change` (D3.4.5) and `map_extend_open_shape`'s private path build a `TypeElmt` for an element container and copied `name`, `name_id`, `content_list` and `ns` from the old type cast to `TypeElmt`. When the container carries a plain `TypeMap` -- `test_item_repr_gtest`'s `ObjectShapeMutationRebuildsPackedFields` builds such an object, and nothing ruled it out -- that read ran past the allocation and gave the new type a garbage tag. Nothing dereferenced the tag until P2's structural fingerprint did, which crashed. **Fix:** both sites copy element fields only from a type whose own `type_id` is element (`typemap_has_element_layout`), and the tree paths (`map_extend_via_runtime_tree`, the P2 retype) require the container's kind to match its type's, so a tree node never installs a map type on an element or the reverse.
 ## 4. Numbers, decimal & datetime (LR_04)
 
-<a id="lr03-43"></a>**LR03-43 · The runtime shape tree outlived the runtime name pool, so a later batch script matched a stale edge by a recycled NameId and gave a group the wrong key (D3.4.3v5, D4.6.2v2) · FIXED 2026-10-06 (found and fixed the same day; exposed by Impl_Map_Transition_Coverage P3, which put group-by groups on the tree)**
-The runtime tree's capsule had CONTEXT lifetime, so it survived `runtime_reset_heap`, which `lambda.exe test-batch` runs between scripts. That reset releases the runtime name pool after `heap_destroy`, but a tree entry and its edge keep the NameId the key had when the edge was minted. D4.6.2v2 never lets a dynamic id outlive its pool, and the next pool hands the same ids out again. In the next script, a different name interned at the same position got an equal id, and edge lookup takes equal ids as proof of identity (D3.4.4v4). So `region` followed the previous script's `r` edge: the batch printed `<group r: "west", …>`, and `for_group_test` read `g.region` as null after `element_content_axes` in the same chunk. Each script passed alone. Pre-P3 plain maps did not reproduce it with static member names, whose catalog ids are stable. **Fix:** the tree ends with its heap generation. `runtime_shape_tree_release` drops the capsule extension after `heap_destroy` and before `name_pool_release`, in both `runtime_reset_heap` and `runtime_cleanup`, and the next growth builds a fresh tree. The capsule is now REALM lifetime. Every map on a tree node lives on that heap, so nothing outlives its type. The final cleanup also frees the tree of a Lambda-only run, which never reached `context_capsule_destroy_all`. Repro: a test-batch of `let rows = [{r: "a", n: 1}]; [for (x in rows group by x.r into g) g]` and then the same with `region` in place of `r`. The second printed key was `r` before, `region` after. With the fix the Lambda baseline is 6,233/6,234; the one failure is the environmental `pdf_svg_page_resources`.
+<a id="lr03-43"></a>**LR03-43 · The runtime shape tree outlived the runtime name pool, so a later batch script matched a stale edge by a recycled NameId and gave a group the wrong key (D3.4.3, D5.6.2) · FIXED 2026-10-06 (found and fixed the same day; exposed by Impl_Map_Transition_Coverage P3, which put group-by groups on the tree)**
+The runtime tree's capsule had CONTEXT lifetime, so it survived `runtime_reset_heap`, which `lambda.exe test-batch` runs between scripts. That reset releases the runtime name pool after `heap_destroy`, but a tree entry and its edge keep the NameId the key had when the edge was minted. D5.6.2 never lets a dynamic id outlive its pool, and the next pool hands the same ids out again. In the next script, a different name interned at the same position got an equal id, and edge lookup takes equal ids as proof of identity (D3.4.4). So `region` followed the previous script's `r` edge: the batch printed `<group r: "west", …>`, and `for_group_test` read `g.region` as null after `element_content_axes` in the same chunk. Each script passed alone. Pre-P3 plain maps did not reproduce it with static member names, whose catalog ids are stable. **Fix:** the tree ends with its heap generation. `runtime_shape_tree_release` drops the capsule extension after `heap_destroy` and before `name_pool_release`, in both `runtime_reset_heap` and `runtime_cleanup`, and the next growth builds a fresh tree. The capsule is now REALM lifetime. Every map on a tree node lives on that heap, so nothing outlives its type. The final cleanup also frees the tree of a Lambda-only run, which never reached `context_capsule_destroy_all`. Repro: a test-batch of `let rows = [{r: "a", n: 1}]; [for (x in rows group by x.r into g) g]` and then the same with `region` in place of `r`. The second printed key was `r` before, `region` after. With the fix the Lambda baseline is 6,233/6,234; the one failure is the environmental `pdf_svg_page_resources`.
 
 <a id="lr03-34"></a>**LR03-34 · A pattern type as a parameter or declaration annotation is rejected statically (S11.1.2v2, S11.4.1v3) · FIXED 2026-09-27 (found 2026-09-26, while fixing LR03-26)**
 With `type D = \(d+)`, `fn f(x: D) => x` then `f("12")` is E207 ("argument 1 expected type, got string"), and `let y: D = "12"` is E201 ("cannot initialize 'y' of type type with string"), on both tiers. An inline `x: \(d+)` fails the same way. The static relation reads the pattern's `LMD_TYPE_TYPE` tag as the `type` kind. `is`, match arms and fields test the same pattern correctly.
@@ -814,8 +814,8 @@ failure-injection path. The success path was leak-free, but the temporary
 workspace was outside the runtime's ownership and failure accounting.
 
 The stack now uses the existing `mem_alloc`/`mem_free` pair with
-`MEM_CAT_TEMP`. This implements **D4.2.1v3** and lets allocation failure return
-through the existing `ItemError` path, as required by **D4.2.2v2**. No new
+`MEM_CAT_TEMP`. This implements **D5.2.1** and lets allocation failure return
+through the existing `ItemError` path, as required by **D5.2.2**. No new
 data structure or design ruling was added.
 
 Regression: `RuntimeShapeTransition.LabelStackAllocationFailureReturnsError`
@@ -837,7 +837,7 @@ same element type; a mixed pair falls through to the generic item path, so
 `[1, 2] ++ [3.5]` is `[1, 2, 3.5]` and `[1i8, 2i8] ++ [300]` is `[1, 2, 300]`.
 Record: [plan §13](<impl/Lambda_List_Fixes (done).md>).
 
-<a id="lr05-10"></a>**LR05-10 · Sequence kind (list vs array) is not preserved anywhere (S2.5.6, S2.5.7, D2.6.5v3) · OPEN (found 2026-09-22)**
+<a id="lr05-10"></a>**LR05-10 · Sequence kind (list vs array) is not preserved anywhere (S2.5.6, S2.5.7, D3.3.1) · OPEN (found 2026-09-22)**
 A 562-probe survey (`temp/spec_survey/listarray/`, both tiers) found the
 result kind of every sequence operation decided by how the input was built,
 not by its kind. Root causes: two list flags — `is_content` set by `list_end`
@@ -877,7 +877,7 @@ Every positional site — rest and argument lists (JIT, dynamic-call adapter,
 JS timer packs, concurrency args), group/join/order keys and rows, path keys,
 query matches, clones, set operators, element-copying transforms, `zip`,
 index-addressed vector results, and the hosted-Python list operations — now
-uses the verbatim append `array_push_verbatim` (D2.6.5v3).
+uses the verbatim append `array_push_verbatim` (D3.3.1).
 *P2 landed 2026-09-22:* every sequence operation keeps its input's kind
 through one finish (`seq_finish_kind`, `seq_operands_are_lists`,
 `lambda-data-runtime.cpp`): sort/reverse/unique/take/drop/slice, element-wise
@@ -1033,17 +1033,17 @@ SO50. Full Lambda baseline passes 8,395/8,395; the expanded Eden yearly replay p
 
 A wide numeric argument in `lambda_dynamic_call` could point into the temporary
 argument List's owned scalar tail. Copying its Item into precise roots did not
-stabilize that interior payload when the List's data compacted (**D4.3.1**).
+stabilize that interior payload when the List's data compacted (**D5.3.1**).
 A four-argument callback reproduced a live u64 seed changing to reused storage
 while allocating; direct calls retained the same seed. The dynamic ABI now
 snapshots wide payloads into the caller's number extent before adaptation or
-invocation (**D5.2.3 / D5.3.3**), with checked stack exhaustion. No Procart
+invocation (**D6.2.3 / D6.3.3**), with checked stack exhaustion. No Procart
 algorithm, golden or tier override changed. The new paired scalar-ownership
 fixture fails the preserved pre-fix executable and passes interp/AUTO/JIT with
 forced GC, including a JIT collection-every-allocation poison run. The unchanged
 full foliage gate passes. [Repair and qualification record](impl/Lambda_Impl_Eden_Engine_Repairs.md).
 
-<a id="lr07-51"></a>**LR07-51 · Raising procedure float assignment emits an Item tag shift on a double (D2.4.1–D2.4.3) · FIXED (2026-10-28; qualified with inherited baseline residue)**
+<a id="lr07-51"></a>**LR07-51 · Raising procedure float assignment emits an Item tag shift on a double (D2.3.4–D2.3.5) · FIXED (2026-10-28; qualified with inherited baseline residue)**
 
 Eden's audio module failed forced-JIT compilation with `ursh` operand 2 typed
 as double. A native float assignment published an Item descriptor, and the
@@ -1058,7 +1058,7 @@ model worker's 28 checks on forced JIT. No vendor or audio algorithm changes.
 <a id="lr07-22"></a>**LR07-22 · JIT: a list spliced into a float array is read back as raw bits · FIXED 2026-10-28 (found 2026-09-25)**
 `var d = [1.5, 2.5]; d[0] = (7, 8)` splices the list (S2.5.6) on both tiers, but `[d[0], d[1], len(d)]` is then `[7, 8, 3]` on T0 and `[1.344974619049454e-284, 1.3449746190494543e-284, 3]` on the JIT, which keeps reading the old float lane. The investigation points at `mir_store_may_change_elem_type`, which misses a list right-hand side. S1.6. Reported by the LR12-27 investigation, reproduced 2026-09-25.
 
-**Resolution (2026-10-28).** S1.6; D3.3.3v3: representation-changing list stores invalidate the old float element witness. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+**Resolution (2026-10-28).** S1.6; D4.3.3: representation-changing list stores invalidate the old float element witness. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
 
 
 <a id="lr07-28"></a>**LR07-28 · JIT: an untyped array keeps its initializer's element lane after a store widens it · FIXED 2026-10-28 (found 2026-09-25)**
@@ -1083,9 +1083,9 @@ A store may widen an unannotated `var` array (S9.1.6), but the array's inferred 
 - a call to an inferred `T[]` specialization skips the argument's admission on the static type (`mir_boundary_is_redundant`), and the specialized body reads the packed lane unguarded;
 - `fill(n, v)`'s unguarded element witness (P4-3.1) survives a store whose value type is unknown, because `mir_store_may_change_elem_type` admits unknown values for int and float (it rejects them only for bool).
 
-Inference must not change a result (D3.3.1v2), and an inferred narrowing belongs to its binding only while no store can retag the lane (D3.3.3v3). The fix is a design choice between widening the binding's type at such a store and guarding these reads, which costs the numeric loops the "provably converts" rule protects. Pre-existing on HEAD. [LR07-24](<Lambda_Issue_Ledger (fixed).md#lr07-24>) fixed the bool index read, which had the same flaw.
+Inference must not change a result (D4.3.1), and an inferred narrowing belongs to its binding only while no store can retag the lane (D4.3.3). The fix is a design choice between widening the binding's type at such a store and guarding these reads, which costs the numeric loops the "provably converts" rule protects. Pre-existing on HEAD. [LR07-24](<Lambda_Issue_Ledger (fixed).md#lr07-24>) fixed the bool index read, which had the same flaw.
 
-**Resolution (2026-10-28).** S1.6; D3.3.3v3: mixed stores invalidate bool specialization and iterator element witnesses; numeric call edges retain carrier guards. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+**Resolution (2026-10-28).** S1.6; D4.3.3: mixed stores invalidate bool specialization and iterator element witnesses; numeric call edges retain carrier guards. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
 
 
 <a id="lr07-30"></a>**LR07-30 · A range-typed `var` changes its member's representation on the JIT (S1.6) · FIXED 2026-10-28 (found 2026-09-25, while fixing LR03-18)**
@@ -1104,7 +1104,7 @@ A range admits `4.0` as a member (S11.1.3), and a member keeps its own carrier. 
 <a id="lr07-43"></a>**LR07-43 · JIT: an `any` value assigned to an int-inferred `var` is truncated to the int lane (S12.2.1) · FIXED 2026-10-28 (found 2026-10-05, while writing the jq benchmark translations)**
 `let data = parse("[1.5, 2.25]", 'json')^; var t = 0; ... t = t + data[j]` ends with `t` = 3 on the JIT and 3.75 on T0. The JSON orders' `total = total + qty * price` lost every fraction the same way. The declaration-time widening (`transpile_let_stam`'s `mir_nested_control_writes_binding` scan) boxes the binding only when an assignment's carrier is predicted `float`. An `any` right-hand side keeps the int lane, and each assigned value is coerced into it. S12.2.1 lets an unannotated `var` change type and forbids silent corruption, so an `any` assignment must either widen the binding or keep it int only behind a runtime proof. Boxing every such binding at the declaration costs untyped loops their int lanes, so it needs a performance decision before it is fixed. The jq translations sidestep it by starting float sums at `0.0`, which is faithful because jq numbers are doubles.
 
-**Resolution (2026-10-28).** S12.2.1; D2.4.1-D2.4.3: unknown writes widen inferred bindings before loop emission; closed native and enforced scalar-return proofs retain their lanes. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+**Resolution (2026-10-28).** S12.2.1; D2.3.4-D2.3.5: unknown writes widen inferred bindings before loop emission; closed native and enforced scalar-return proofs retain their lanes. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
 
 
 <a id="lr07-1"></a>**LR07-1 · Numeric semantic result and physical representation were coupled · RESOLVED 2026-09-14**
@@ -1120,7 +1120,7 @@ loop binding/filter/condition, multidimensional-index, bitwise, pipe, path, decl
 and edit-index lowering. `mir_expr_carrier_type()` remains a pre-lowering
 planner only, using AST/lowering facts to select an emission path; it never
 observes an emitted MIR register. This enforces the four-authority split in
-**D2.4.1–D2.4.3**: semantics in `Type*`, planned representation in lowering,
+**D2.3.4–D2.3.5**: semantics in `Type*`, planned representation in lowering,
 emitted representation/provenance in `MirValue`, and physical register class
 only in named physical helpers.
 
@@ -1143,7 +1143,7 @@ The remaining boxed-to-native assignment arm now tests `ItemError` before
 unboxing. An `any` producer that yields an error therefore exits on the error
 channel; it can never be decoded as `0`, `0.0`, or `false` in a native local.
 This implements the destination-admission rule in **S7.8.1** and keeps the
-carrier/value distinction required by **D2.4.1–D2.4.3**. The old division-zero
+carrier/value distinction required by **D2.3.4–D2.3.5**. The old division-zero
 example was stale: **S4.5.1–S4.5.3** define computed zero divisors as numeric
 poison, not `ItemError`.
 
@@ -1162,7 +1162,7 @@ The Lambda MIR Direct `get_effective_type` helper and its cited source anchor
 are gone; the former line now belongs to unrelated import-prototype emission.
 Every emitted expression instead publishes a `MirValue` with its semantic
 contract and actual `ValueRep`, and consumers convert only through
-`em_require_rep()` under **D2.4.1–D2.4.3**. This removes the original failure
+`em_require_rep()` under **D2.3.4–D2.3.5**. This removes the original failure
 mode: interpreting a boxed `Item` as a native scalar merely because the AST
 retained a precise type.
 
@@ -1179,7 +1179,7 @@ reserved nullable-float lane for every native-double out-of-bounds path, even
 if a future policy accidentally omits the explicit float-null classification.
 The Item boundary translates that lane to `null`; `0.0` is no longer an OOB
 fallback. This implements total invalid reads under **S7.1.1v3** while retaining
-the semantic/carrier split of **D2.4.1–D2.4.3**.
+the semantic/carrier split of **D2.3.4–D2.3.5**.
 
 Regression: `proc_nullable_float_lane_read.ls` and
 `proc_nullable_lane_comparisons.ls` pass under eager JIT, alongside the
@@ -1191,11 +1191,11 @@ source with `item_at` and a machine length, whatever axis it was written with.
 `[for (z in [0], k at m) k]` gave `[null, null]`, `in` over a map or element
 missed its names and attributes, and `of` bound values instead of positions;
 the T0 interpreter was right throughout, so goldens on the `auto` tier never saw
-it (**S8.1.1v2–S8.1.3v2**, **D8.1.1** tier agreement). Every MIR loop emitter
+it (**S8.1.1v2–S8.1.3v2**, **D8.3.1** tier agreement). Every MIR loop emitter
 now opens its sources through one protocol, `mir_open_loop_source`, and binds
 through `mir_bind_loop_member`. A nested source's key list lives in a slot zeroed
 before the outer loop and released at both its own end and the outer end, so a
-`break` cannot leak its exact GC roots (**D5.4.2**). Verified by the nested-axis
+`break` cannot leak its exact GC roots (**D6.4.2**). Verified by the nested-axis
 cases on both tiers and the Lambda baseline.
 
 <a id="lr07-r7"></a>**LR07-R7 · Precise-root classification trusted dishonest static types · RESOLVED 2026-09-13**
@@ -1203,7 +1203,7 @@ The producer and consumer halves now share the value-side TypeId
 classification: `mir_value_type_id` handles the overloaded `LMD_TYPE_TYPE`,
 and `lambda_gc_value_class` fails closed when the semantic contract is
 unresolved. This preserves the precise RootFrame/Rooted ownership required by
-**D2.4.1–D2.4.3** and **D5.4.2** without restoring conservative native-stack
+**D2.3.4–D2.3.5** and **D6.4.2** without restoring conservative native-stack
 scanning.
 
 `LAMBDA_ROOT_WITNESS=2` covers named locals and expression temporaries across
@@ -1303,7 +1303,7 @@ callee's declaration, which a dynamic call does not have. Either reject named
 arguments on a dynamic callee or resolve them against the runtime signature
 (`Function::fn_type`).
 
-*Fixed 2026-09-25:* S12.3.2 and D6.2.2v2 already rule it: a dynamic call with named arguments is rejected. `resolve_call_body` (`build_ast.cpp`) now reports E212 at the first named argument when the callee is neither a system function, a resolved object method, a direct function (`ast_direct_call_function`) nor a type conversion. Every shape that had bound positionally — a `let`-bound function, an arrow, a `fn` parameter, a map-field function, an immediately invoked arrow — is rejected on both tiers; direct and module-aliased calls still bind by name. A compile scan of all 1,934 tracked `.ls` files found no caller relying on the old binding, and `doc/Lambda_Func.md` now states the rule. Fixture `test/lambda/negative/semantic/named_arg_dynamic_call.ls` (`NegativeScriptTest.NamedArgumentsNeedStaticallyKnownCallee`). A statically resolved object method still binds named arguments by position: [LR07-19](#lr07-19).
+*Fixed 2026-09-25:* S12.3.2 and D7.2.2 already rule it: a dynamic call with named arguments is rejected. `resolve_call_body` (`build_ast.cpp`) now reports E212 at the first named argument when the callee is neither a system function, a resolved object method, a direct function (`ast_direct_call_function`) nor a type conversion. Every shape that had bound positionally — a `let`-bound function, an arrow, a `fn` parameter, a map-field function, an immediately invoked arrow — is rejected on both tiers; direct and module-aliased calls still bind by name. A compile scan of all 1,934 tracked `.ls` files found no caller relying on the old binding, and `doc/Lambda_Func.md` now states the rule. Fixture `test/lambda/negative/semantic/named_arg_dynamic_call.ls` (`NegativeScriptTest.NamedArgumentsNeedStaticallyKnownCallee`). A statically resolved object method still binds named arguments by position: [LR07-19](#lr07-19).
 
 <a id="lr07-17"></a>**LR07-17 · JIT: an imported `pub let` holding an int literal reads `0` · FIXED 2026-09-25**
 A module with `pub let A = 10` and `pub let B = 1 + 2`, imported with
@@ -1313,9 +1313,9 @@ interpreter. Computed values, floats, strings, and arrays import correctly, and
 `load_module_var_slots` (`transpile-mir.cpp:7733`) — the literal never reaches
 its slot. The survey also reports, unverified here, that a module whose
 annotated init fails is still importable on the JIT (reads `0`, exit 0) while
-the interpreter aborts, contradicting **D7.2.2**. Violates **S1.6**.
+the interpreter aborts, contradicting **D9.3.2**. Violates **S1.6**.
 
-*Fixed 2026-09-25:* the fault was the importer's const-fold pass, not `load_module_var_slots`. An imported name points at the provider's own declaration, and `interp_const_binding_decl` (`interp.cpp`) accepted it, so `interp_const_init_value` read the provider's literal span out of the *importer's* source text (a comment line added above the import changed the value read) or looked its fold handle up in the importer's constant pool; a large module could read past the importer's buffer. Int, negative, hex, bool and `x: int = 5` literals were affected; floats, strings and computed values were not. An imported name is now never a const binding, so the read goes through the module slot, as `B` already did. The secondary claim reproduced as a separate defect: `run_script_mir` (`transpile-mir.cpp`) discarded each imported module's init result, so a module whose init ended in an ordinary error (`pub let C: int = g("s")`) still ran its importer on the JIT, exit 0. It now publishes the error and stops, as T0's `interp_execute` does (D7.2.2). The existing `test/lambda/import_vars.ls` had been wrong on the JIT all along (`version` read 0); goldens run on `auto`, which starts in T0. Fixtures: `import_const_exports.ls` (with `mod_const_exports.ls`) and `import_vars.ls` in `kTune27TierParity`; `negative/import_init_error_driver.ls` (`NegativeScriptTest.ImportInitErrorBlocksExecution`, all three tiers). Found on the way: [LR07-20](<Lambda_Issue_Ledger (fixed).md#lr07-20>).
+*Fixed 2026-09-25:* the fault was the importer's const-fold pass, not `load_module_var_slots`. An imported name points at the provider's own declaration, and `interp_const_binding_decl` (`interp.cpp`) accepted it, so `interp_const_init_value` read the provider's literal span out of the *importer's* source text (a comment line added above the import changed the value read) or looked its fold handle up in the importer's constant pool; a large module could read past the importer's buffer. Int, negative, hex, bool and `x: int = 5` literals were affected; floats, strings and computed values were not. An imported name is now never a const binding, so the read goes through the module slot, as `B` already did. The secondary claim reproduced as a separate defect: `run_script_mir` (`transpile-mir.cpp`) discarded each imported module's init result, so a module whose init ended in an ordinary error (`pub let C: int = g("s")`) still ran its importer on the JIT, exit 0. It now publishes the error and stops, as T0's `interp_execute` does (D9.3.2). The existing `test/lambda/import_vars.ls` had been wrong on the JIT all along (`version` read 0); goldens run on `auto`, which starts in T0. Fixtures: `import_const_exports.ls` (with `mod_const_exports.ls`) and `import_vars.ls` in `kTune27TierParity`; `negative/import_init_error_driver.ls` (`NegativeScriptTest.ImportInitErrorBlocksExecution`, all three tiers). Found on the way: [LR07-20](<Lambda_Issue_Ledger (fixed).md#lr07-20>).
 
 <a id="lr07-19"></a>**LR07-19 · Named arguments to an object method bind by position · FIXED 2026-09-26 (found 2026-09-25)**
 `type T { k: int, fn m(a, b) => a - b + k }` with `let t = <T k: 100>`: `t.m(b: 1, a: 5)` is `96`, not `104`, on both tiers. T0 refuses a method call with named arguments at plan time (`interp_plan.cpp`), so the script runs on the JIT, which lowers the call through a bound closure (`fn_member`) with a positional argument list. The method is statically resolved (`TypeMethod::ast_def`), so S12.3.2's rejection of dynamic calls does not apply; it should bind by name, as a direct call does (`doc/Lambda_Func.md`). A build-time reorder against `ast_def` works when the named arguments leave no gap; skipping an optional parameter by name needs a ruling on whether an absent optional equals an explicit `null`. Found while fixing LR07-16.
@@ -1343,7 +1343,7 @@ T0 prints `["t", "f"]`; the JIT prints `["t", "t"]`: a wrong value with no error
 <a id="lr07-24"></a>**LR07-24 · JIT: a widened bool array's read folded the new value to `false` · FIXED 2026-09-25 (found the same day)**
 `var mixed = fill(3, true); mixed[2] = "mixed"; mixed[2]` is `"mixed"` on T0 and `false` on the JIT (`proc/proc_fill.ls`, `proc/proc_fill_bool_lane.ls`).
 
-*Fixed 2026-09-25:* the index read of an array whose inferred element type is bool (`nested_bool` in `emit_generic_array_index_value`) guards the packed ELEM_BOOL layout and falls back to `item_at`. T21-1c made that read publish a native bool, folding the slow arm's Item to its low bit; the store had already turned the array into a generic one, so the slow arm held the string. The read is now a native bool only when every arm yields one (`mir_array_bool_elements_proven`): a declared rank-one bool lane, or a binding witness, which is installed only when no store can retag the lane (for bool, `mir_store_may_change_elem_type` rejects every value not proven bool). Otherwise it uses `MIR_INDEX_RESULT_BOXED_BOOL`: the fast arm's byte is boxed, and the slow arm's Item is kept. Inference must never change a result (D3.3.1v2, D3.3.3v3). The declared `bool[]` fast paths that T21-1c's gates measured (`sieve2`, `primes2`) are unchanged. The same flaw in other consumers is [LR07-28](<Lambda_Issue_Ledger (fixed).md#lr07-28>).
+*Fixed 2026-09-25:* the index read of an array whose inferred element type is bool (`nested_bool` in `emit_generic_array_index_value`) guards the packed ELEM_BOOL layout and falls back to `item_at`. T21-1c made that read publish a native bool, folding the slow arm's Item to its low bit; the store had already turned the array into a generic one, so the slow arm held the string. The read is now a native bool only when every arm yields one (`mir_array_bool_elements_proven`): a declared rank-one bool lane, or a binding witness, which is installed only when no store can retag the lane (for bool, `mir_store_may_change_elem_type` rejects every value not proven bool). Otherwise it uses `MIR_INDEX_RESULT_BOXED_BOOL`: the fast arm's byte is boxed, and the slow arm's Item is kept. Inference must never change a result (D4.3.1, D4.3.3). The declared `bool[]` fast paths that T21-1c's gates measured (`sieve2`, `primes2`) are unchanged. The same flaw in other consumers is [LR07-28](<Lambda_Issue_Ledger (fixed).md#lr07-28>).
 
 <a id="lr07-25"></a>**LR07-25 · JIT: a repeated literal key read its first entry · FIXED 2026-09-25 (found the same day)**
 `{a: 1, a: 2, b: 3}.a` is `2` on T0 and `1` on the JIT (`map_duplicate_key_lookup.ls`, four rows).
@@ -1358,7 +1358,7 @@ With `type digits = \(d+)`, `match "123" { case digits: "number" default: "other
 <a id="lr07-27"></a>**LR07-27 · JIT: a direct store wrote a raw int64 over an `i64?` field · FIXED 2026-09-25 (found the same day)**
 With `type Row = {value: i64?}`, `var t: Row = {value: 7i64}; t.value = null; t.value = 8i64; t.value` is `8` on T0 and `error` on the JIT (`proc/proc_nullable_native_i64_map.ls`).
 
-*Fixed 2026-09-25:* a persistent `i64?` field is a TypedItem, the wide-optional layout (D2.5.2v3, D2.6.4v3), but `shape_entry_storage_type_id` reports its value domain, int64. The typed-record direct store in member assignment wrote `it2l(null)`, then a raw 8, over the TypedItem, and the next read found an invalid tag. The typed direct read already refused such lanes. `mir_direct_field_lane_supported` now states the one rule both directions follow: a nullable native lane is accessed directly only for containers (null is the zero pointer) and `int` (`INT_LANE_NULL`). `bool?`, `float?`, `i64?` and `u64?` stores take the checked setter. Representation follows the full contract, never the TypeId (D2.5.1).
+*Fixed 2026-09-25:* a persistent `i64?` field is a TypedItem, the wide-optional layout (D2.4.2, D2.6.2), but `shape_entry_storage_type_id` reports its value domain, int64. The typed-record direct store in member assignment wrote `it2l(null)`, then a raw 8, over the TypedItem, and the next read found an invalid tag. The typed direct read already refused such lanes. `mir_direct_field_lane_supported` now states the one rule both directions follow: a nullable native lane is accessed directly only for containers (null is the zero pointer) and `int` (`INT_LANE_NULL`). `bool?`, `float?`, `i64?` and `u64?` stores take the checked setter. Representation follows the full contract, never the TypeId (D2.4.1).
 
 <a id="lr07-31"></a>**LR07-31 · `~key` in a single-subject body read a stale register, and a value arm hid a nested pipe's `~` (S10.1.3, S1.6) · FIXED 2026-09-25 (found 2026-09-25)**
 A match arm, a constraint predicate, a handler's value arm and a method bind `~` to one subject, so `~key` is null there; T0 had it so for arms and constraints. The JIT left `pipe_index_reg` as it found it (`mir_bind_subject`, `transpile_match`, the method prologue). Inside a pipe, `~key` read the pipe's index, so `[5, 6] |> match ~ { case int: ~key }` was `[0, 1]`. Outside any pipe the function did not compile ("undeclared reg 0"), for `match 5 { case int: ~key }` and for a method reading `~key`. In a handler's value arm the JIT read the pipe's index or `0`, and T0 dereferenced the arm context's missing key slot and segfaulted. With no walk at all (top level, a view's model) the JIT read `0` where T0 read null. The JIT also bound the value arm's `~` with a flag that outranked the pipe context, so a pipe nested in the arm read the handled value as its own `~`: `[1, 2] ^ {0} ~ { ~ |> ~ * 10 }` was `[[10, 20], [10, 20]]`.
@@ -1400,14 +1400,14 @@ The interpreter rejected `let m: 1 = 2`, `let f: 2.5 = 1.5` and `g(2)` against `
 
 *Fixed 2026-09-26.* Both shortcuts exclude a literal or const contract, which then takes the general boundary and its value check (the neighbouring `optional_int_lane_declaration` already excluded literals). Fixtures `negative/runtime/literal_admission_int_declaration.ls`, `literal_admission_float_declaration.ls` and `literal_admission_int_param.ls`, each rejected on every tier (`ExpectRejectedOnEveryTier`).
 
-<a id="lr07-44"></a>**LR07-44 · JIT: a statically typed record passed to a `var` parameter is re-admitted at every call, and a nested write re-validates the whole root (D3.2.4v4) · FIXED 2026-10-05 (found the same day, while writing the jq benchmark VM)**
-In `test/benchmark/jq_vm.ls`, `vm_run` holds `var vm: Vm = {...}` and calls helpers such as `pn st_push(var vm: Vm, v)`. Every call runs `lambda_type_check` on the argument (boundary "parameter 'vm' of _st_push"), and every nested write like `vm.fk_kind[i] = x` runs another check of the whole record ("typed nested map assignment"). Each check walks all 39 fields through `validate_against_map_type`, comparing names with `strcmp`, and walks `int[]` fields whose certificate a push has cleared. In a release sample of the VM, validation and its `strcmp` were the top symbolized costs on the main thread. A micro-benchmark with a 3-field record measured a `var` record call about 10× a write to a local array. D3.2.4v4 lets a boundary be elided when the source provably carries the contract's layout, which a `var vm: Vm` binding does by construction. The checks belong only where that proof is missing (the user's rule: run-time checks only at unresolved sites).
-**Root cause:** the checks were the intended O(1) design, but they always missed. The inline guard at a typed boundary (`emit_checked_boundary`) and the direct typed store (`mir_emit_typed_path_store`) both test that the record's `TypeMap` IS the trusted contract. Admission reified the `Vm` literal field by field into a private, storage-compatible `TypeMap` and kept it, so both guards missed on every call and write. LR03-37 then rebuilt that private type on each `any`-field write, which also defeated the cached relation and forced the 39-field walk. **Fix:** with LR03-37 fixed, admission adopts the contract's own `TypeMap` when reification ends storage-compatible with no open extra fields (`runtime_type_admit_map_env`, D3.2.4v4: adopting the contract). The parameter boundary is then an inline pointer compare, and a nested write takes the proven-root runtime path. Plain `map_get` reads on a trusted contract or tree node also answer from the hash table instead of walking every field. In a release sample of the jq VM, `lambda_type_check` fell to 2.5% of the main thread. The rest of the nested-write cost is the copy-on-write store itself. `jq_bf` V1 went from 163 s to 133 s.
+<a id="lr07-44"></a>**LR07-44 · JIT: a statically typed record passed to a `var` parameter is re-admitted at every call, and a nested write re-validates the whole root (D4.2.5) · FIXED 2026-10-05 (found the same day, while writing the jq benchmark VM)**
+In `test/benchmark/jq_vm.ls`, `vm_run` holds `var vm: Vm = {...}` and calls helpers such as `pn st_push(var vm: Vm, v)`. Every call runs `lambda_type_check` on the argument (boundary "parameter 'vm' of _st_push"), and every nested write like `vm.fk_kind[i] = x` runs another check of the whole record ("typed nested map assignment"). Each check walks all 39 fields through `validate_against_map_type`, comparing names with `strcmp`, and walks `int[]` fields whose certificate a push has cleared. In a release sample of the VM, validation and its `strcmp` were the top symbolized costs on the main thread. A micro-benchmark with a 3-field record measured a `var` record call about 10× a write to a local array. D4.2.5 lets a boundary be elided when the source provably carries the contract's layout, which a `var vm: Vm` binding does by construction. The checks belong only where that proof is missing (the user's rule: run-time checks only at unresolved sites).
+**Root cause:** the checks were the intended O(1) design, but they always missed. The inline guard at a typed boundary (`emit_checked_boundary`) and the direct typed store (`mir_emit_typed_path_store`) both test that the record's `TypeMap` IS the trusted contract. Admission reified the `Vm` literal field by field into a private, storage-compatible `TypeMap` and kept it, so both guards missed on every call and write. LR03-37 then rebuilt that private type on each `any`-field write, which also defeated the cached relation and forced the 39-field walk. **Fix:** with LR03-37 fixed, admission adopts the contract's own `TypeMap` when reification ends storage-compatible with no open extra fields (`runtime_type_admit_map_env`, D4.2.5: adopting the contract). The parameter boundary is then an inline pointer compare, and a nested write takes the proven-root runtime path. Plain `map_get` reads on a trusted contract or tree node also answer from the hash table instead of walking every field. In a release sample of the jq VM, `lambda_type_check` fell to 2.5% of the main thread. The rest of the nested-write cost is the copy-on-write store itself. `jq_bf` V1 went from 163 s to 133 s.
 
 <a id="lr07-45"></a>**LR07-45 · JIT: a name-key index write on an `any` object was lowered as a positional array write · FIXED 2026-10-05 (found the same day, while writing the jq benchmark VM)**
 `pn make() { {a: 1} }; var c = make(); c["a"] = "x"` left `c` unchanged and logged `fn_array_set: index 0 out of bounds` on the JIT; so did `var r = o; r[k] = v` with `o` an untyped parameter. The index-assign lowering routed a map or element object to the member setter, but an object typed `any` with a `string` key matched neither that route nor the generic-key route, fell to the positional path, unboxed the key to index 0 and called `fn_array_set` on the map. **Fix:** a name key on an `any` object takes the member route (`route_member` in the `AST_NODE_INDEX_ASSIGN_STAM` lowering). Covered by `test/lambda/proc/param_alias_write.ls` (`by_index`).
 
-<a id="lr07-46"></a>**LR07-46 · JIT: a map filter loop rewound the root-stack top beneath the map's key list, so `test/lambda/pipe_filter.ls` crashed in `item_attr` (D5.3.3) · FIXED 2026-10-06 (found 2026-10-05, in the JIT golden sweep; reproduced on the master build)**
+<a id="lr07-46"></a>**LR07-46 · JIT: a map filter loop rewound the root-stack top beneath the map's key list, so `test/lambda/pipe_filter.ls` crashed in `item_attr` (D6.3.3) · FIXED 2026-10-06 (found 2026-10-05, in the JIT golden sweep; reproduced on the master build)**
 `LAMBDA_EXEC_BACKEND=jit ./lambda.exe test/lambda/pipe_filter.ls` exited with SIGSEGV in `strlen` under `item_attr`; the auto tier runs the script in T0, so the baseline never saw it. The first record blamed an interaction between statements. In fact `{a: 1, b: 2, c: 3} |: ~ != 2` alone crashes; a lone filter ending in `;` had been rejected by the parser before it could run. `{a: "x", b: "y", c: "z"} |: ~ != "y"` does not crash but silently returns `["x", null, null]`.
 **Root cause:** the side-root publication frontier (`em_compute_root_publication_frontier`, shared by the Lambda and JS emitters). A frame publishes `side_root_top = root_end` lazily, at the first may-GC call on each path. A frontier that some path has already published must instead use the non-rewinding guard, because a native `RootFrame` may sit above `root_end` by then. `item_keys` is such a frame: it keeps a map's key `Symbol`s in side-stack chunks until `symbol_key_list_free`. The analysis got both properties wrong:
 - It iterated "every incoming path has published" up from zero, which is the least fixpoint. A loop with one call-free path through its body (the inline fast path of `~ != 2`) never proved its header published.
@@ -1424,13 +1424,13 @@ Covered by fixture `test/mir/lambda/root_publication_map_keys.ls`, checked on al
 `fn f(n) { if (n is array) [for (item in n) f(item)] else if (n < 0) f(0 - n) else n * 10 }` returned `10` for `f([1, -2])` on the JIT and `[10, 20]` on T0. The shape is common in recursive tree scans: `lambda.doc.math`'s `unmapped_commands` gained a `chemistry` branch that recurses in tail position, and then lost every command after an item that yielded nothing. The auto tier runs such scripts in T0, so the baseline passed.
 **Root cause:** a function with a real self tail call gets a TCO label, and a call is rewritten as a jump whenever `in_tail_position` is set. A comprehension in tail position (an `if` arm, a function's result) passed that flag through `emit_for_result` into its sources and body, so the per-item self call jumped back to the start with the item as its argument. **Fix:** `emit_for_result`, the one entry for every `for` body, clears `in_tail_position` for the whole loop and restores it after (`MirTailPositionOff`). Covered by `test/lambda/tail_call_in_comprehension.ls`, pinned on interp, jit and auto in `kTune27TierParity`.
 
-<a id="lr07-49"></a>**LR07-49 · JIT: `string()` of a wide integer returned by a `pn` with an annotated `i64`/`u64` local reached its consumer as a bare `String*` (D2.4.1) · FIXED 2026-10-21 (found the same day, while moving `wide_int_native_lane` to an in-range constant for S4.1.5)**
+<a id="lr07-49"></a>**LR07-49 · JIT: `string()` of a wide integer returned by a `pn` with an annotated `i64`/`u64` local reached its consumer as a bare `String*` (D2.3.4) · FIXED 2026-10-21 (found the same day, while moving `wide_int_native_lane` to an in-range constant for S4.1.5)**
 `pn f() { var acc: i64 = 0i64; acc = acc + 7i64; return acc }` then `let r = f(); print(string(r))` printed `null` on the JIT (`fn_string unhandled type: raw_pointer`) and `7` on T0; a large value segfaulted. It predated the day's sized-integer work (reproduced with all of it reverted). `test/mir/lambda/wide_int_native_lane.ls` had passed only because its overflowing constant produced the same wrong output on every run, and neither harness read its values.
 **Root cause:** the wide integer was never the problem — the pending-pair return resolved correctly. `string()` returns a raw `String*` (`C_RET_STRING`). The call's carrier was the boxed `any` lane because `mir_call_may_defect` saw a defect-capable operand (f's typed `var` store), so `mir_call_value_from_result` published the register as an Item; but no rejected join was built (`rejected_error_flows` was false), so nothing boxed the raw pointer, and `print` received it untagged. **Fix:** `POST_PROCESS_CARRIER` at the three generic system-call return points boxes a raw C return (`String*`, `Symbol*`, int64, double) with `emit_box` whenever the call's carrier is `any`; `bool` and DateTime returns were already boxed by their post-processing. The two predicates still answer differently (MIR defect facts vs the AST's rejected-flow flag); only the representation mismatch is fixed. **Tests:** `test/mir/lambda/wide_int_native_lane.txt` plus `LambdaTypedPathTests.WideIntNativeLaneValues` / `…Jit` now pin the fixture's values.
 
 ## 8. Memory management & GC (LR_08)
 
-<a id="lr08-14"></a>**LR08-14 · UI attribute retyping misclassifies arena buffers as pool migrations (D3.4.5 / D4.5.1v4–D4.5.2) · FIXED 2026-10-29 (Lambda baseline 8,410/8,410 and native replay qualified)**
+<a id="lr08-14"></a>**LR08-14 · UI attribute retyping misclassifies arena buffers as pool migrations (D3.4.5 / D5.5.1–D5.5.2) · FIXED 2026-10-29 (Lambda baseline 8,410/8,410 and native replay qualified)**
 
 An element's int→text retype migrated attribute data to the runtime pool and
 set its migration flag. A following shape extension installed arena data but
@@ -1457,10 +1457,10 @@ Abandonment frees a parked activation's stack and runs no code on it (RA7). The 
 - **Effect.** When an interpreted generator or async body parks inside such a scope and is then abandoned (its carrier collected, `js_generator_map_heap_destroy` / `js_async_frame_map_heap_destroy`), the destructor never runs. The root stays registered for the rest of the heap's life, and so does everything that environment reaches. The example above keeps the million-element array alive.
 - **Worse while parked.** The registration is a strong global root, not an edge from the carrier. A parked body whose environment holds a reference back to its own generator or promise therefore keeps itself reachable and is never collected, even when nothing else refers to it.
 - **Scope.** The AST tier only. MIR bodies keep their locals in the generator env, traced through the carrier, and their frame roots live in the activation's root segment, which abandonment releases. The general audit RA-O2 calls for (native frames that own heap memory across a possible suspension, in both interpreters and in runtime helpers that call back into script) has not been done; this is the one case found so far.
-- **Fix direction.** Hold the environment in the activation's root segment (an exact slot the carrier's trace already marks, D5.1.1v3, RA3), not in the global root registry, so that parking keeps it only through the carrier and abandonment releases it with the segment. A `JsInterpEnv` is a GC object, not an Item, so the slot needs an object-pointer form or an Item wrapper. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (P2) and the RA-O2 open item.
+- **Fix direction.** Hold the environment in the activation's root segment (an exact slot the carrier's trace already marks, D6.1.1, RA3), not in the global root registry, so that parking keeps it only through the carrier and abandonment releases it with the segment. A `JsInterpEnv` is a GC object, not an Item, so the slot needs an object-pointer form or an Item wrapper. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (P2) and the RA-O2 open item.
 - **Gate for the fix.** The example above, under `LAMBDA_GC_FORCE_EVERY=1`, must leave the global root count unchanged after `it = null` and a collection, in both the generator and the async (`await` in a block) forms.
 
-**Fixed 2026-10-29 (D5.1.1v3 / D5.3.3).** `JsInterpEnvRoot` now owns an exact object-pointer side-root slot in its activation segment. Abandonment releases the segment without requiring a destructor; a parked environment cannot globally root its own carrier. Realm-persistent globals retain explicit registration before ownership transfer. `JsInterpreter.AbandonedParkedScopesDoNotRegisterGlobalRoots` covers generator and async cycles with unchanged global root counts. The broader RA-O2 native-owner inventory remains open.
+**Fixed 2026-10-29 (D6.1.1 / D6.3.3).** `JsInterpEnvRoot` now owns an exact object-pointer side-root slot in its activation segment. Abandonment releases the segment without requiring a destructor; a parked environment cannot globally root its own carrier. Realm-persistent globals retain explicit registration before ownership transfer. `JsInterpreter.AbandonedParkedScopesDoNotRegisterGlobalRoots` covers generator and async cycles with unchanged global root counts. The broader RA-O2 native-owner inventory remains open.
 
 See [implementation and qualification](<impl/Lambda_Impl_Ledger_Error_Activation_Followup (done).md>).
 
@@ -1470,8 +1470,8 @@ The collector-side face is resolved with the same fail-closed
 [LR07-R7](#lr07-r7). Level-2 witness coverage checks both candidate bindings and
 non-candidate expression temporaries against actual GC-managed pointer lanes;
 the current corpus sweep reports zero violations. The implementation remains
-precise `RootFrame`/`Rooted` ownership, as required by **D2.4.1–D2.4.3** and
-**D5.4.2**, never conservative stack scanning.
+precise `RootFrame`/`Rooted` ownership, as required by **D2.3.4–D2.3.5** and
+**D6.4.2**, never conservative stack scanning.
 
 <a id="lr08-4"></a>**LR08-4 · Wide scalar ownership at Lambda escaping stores · RESOLVED 2026-09-14**
 The Lambda-core audit is complete: native Arrays and packed Map/Shape fields
@@ -1479,8 +1479,8 @@ now use their destination-owned layouts; generic containers, closure
 environments, VMap, module storage, concurrency/task state, and async paths
 route escaping scalar Items through their owning store/rehome helpers. Concat
 rebases through `array_set`, and a wide intermediate held across `wait` remains
-correct under forced collection. This satisfies **D2.5.2v3**, **D2.6.1v3**,
-**D2.6.4v3**, and **D5.2.2v3** for the Lambda runtime.
+correct under forced collection. This satisfies **D2.4.2**, **D3.2.1**,
+**D2.6.2**, and **D6.2.2** for the Lambda runtime.
 
 The audit found two JavaScript-native carrier defects after the Lambda-core
 paths were closed: Error standard own fields and JS collection entry storage.
@@ -1501,8 +1501,8 @@ literal 64, and deleting both clamps. Same sweep produced LR09-30 above.
 The JS realm's native module builders were written against an implicit
 "no collection happens here" assumption. Under
 `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` this fails in three distinct
-ways, all violating **D5.4.2** (a value under construction is live and needs an
-exact root); D2.1.7 pins the heap as non-moving, so these are liveness bugs, not
+ways, all violating **D6.4.2** (a value under construction is live and needs an
+exact root); D2.1.6 pins the heap as non-moving, so these are liveness bugs, not
 address-stability bugs.
 
 1. **Root ranges registered one Item too high.** Five `JsNamespaceState`-derived
@@ -1532,7 +1532,7 @@ address-stability bugs.
    operand is built first is an unrooted temporary while its sibling allocates.
    The canonical rooted publisher `js_install_native_*`
    (`js_runtime_function.cpp`) already carries this rule as a comment citing
-   D5.2/D6.2.2v2, but hand-rolled `*_set_method` clones bypassed it. Fixed:
+   D6.2/D7.2.2, but hand-rolled `*_set_method` clones bypassed it. Fixed:
    `stream_set_method`, `assert_set_method`/`assert_set_fresh_method`/
    `assert_set_method_item`, `js_path_set_method`, `dns_set_constant`,
    `js_message_port_data_clone_error`, and the `js_net` address-property and
@@ -1578,7 +1578,7 @@ a defect list — most entries are reachable through an already-rooted owner.
 
 
 <a id="lr08-1"></a>**LR08-1 · Decimal `mpd_t` leak (in-code TODO) · RESOLVED 2026-09-05**
-Per **D4.3.3**, the GC delegates out-of-zone cleanup to the C++
+Per **D5.3.2**, the GC delegates out-of-zone cleanup to the C++
 `heap_gc_destroy_external_payload` bridge. For `LMD_TYPE_DECIMAL`, it calls
 `decimal_payload_release`, which runs `mpd_del(&dec_val)` and clears the
 embedded payload before sweep reclaims the wrapper. Teardown uses the same
@@ -1590,7 +1590,7 @@ context teardown.
 
 
 <a id="lr08-5"></a>**LR08-5 · Hard-coded struct byte offsets in tracing and compaction · RESOLVED 2026-09-05**
-D2.6.6v2/D3.4.1: the C collector now consumes `LAMBDA_GC_OFF_*` constants
+D3.1.1/D3.4.1: the C collector now consumes `LAMBDA_GC_OFF_*` constants
 derived by `offsetof` from one canonical C ABI layout. Assertions bind that
 layout to the C and C++ definitions of the container chain, `TypeMap`,
 `ShapeEntry`, `TypedItem`, `ArrayNumShape`, `Function`, and `VMap`; trace,
@@ -1599,7 +1599,7 @@ The retained separate `item_to_ptr` high-byte-zero platform assumption is not
 an offset-layout issue.
 
 <a id="lr08-6"></a>**LR08-6 · `SHAPE_POOL_MAX_CHAIN_LENGTH` = 64 returned a NULL shape · RESOLVED 2026-09-25 (verified 2026-09-26)**
-A map or element with more than 64 fields got no pooled shape (`shape_pool.cpp`), with only a `log_warn` and a possible NULL dereference downstream. The shape pool was retired on 2026-09-25 (`c7aa73eb4`, D3.4.3v2): maps, parsed elements and MarkEditor rebuilds share whole types through the per-Input transition tree, which has no chain cap, and a declined tree gives the container a private chain of its own (`rebuild_private_chain`). A rebuild that cannot describe or lay out its fields returns `ItemError`. Verified 2026-09-26 when the entry was found still open: `MarkEditorTest.RebuildLaysOutManyFields` (201 fields) and `LaneStorageResolverTests.ShapeBuilderHasNoFieldLimit` (200), and a 10,001-key JSON map reads back whole; it also prints since [LR11-4](#lr11-4).
+A map or element with more than 64 fields got no pooled shape (`shape_pool.cpp`), with only a `log_warn` and a possible NULL dereference downstream. The shape pool was retired on 2026-09-25 (`c7aa73eb4`, D3.4.3): maps, parsed elements and MarkEditor rebuilds share whole types through the per-Input transition tree, which has no chain cap, and a declined tree gives the container a private chain of its own (`rebuild_private_chain`). A rebuild that cannot describe or lay out its fields returns `ItemError`. Verified 2026-09-26 when the entry was found still open: `MarkEditorTest.RebuildLaysOutManyFields` (201 fields) and `LaneStorageResolverTests.ShapeBuilderHasNoFieldLimit` (200), and a 10,001-key JSON map reads back whole; it also prints since [LR11-4](#lr11-4).
 
 
 ## 9. Runtime builtins (LR_09)
@@ -1614,7 +1614,7 @@ the table.
 Generic fixed-arity direct-call lowering now evaluates each argument to a
 `MirValue` and requests that row's carrier through `em_require_rep()` before
 forming the MIR call prototype. Thus the producer's contract and representation
-stay explicit until the ABI boundary, as required by **D2.4.1–D2.4.3**. The
+stay explicit until the ABI boundary, as required by **D2.3.4–D2.3.5**. The
 bitwise code retains only semantic dispatch: dynamic/full-width cases use the
 boxed classifier, while proven compact-int cases use the descriptor-selected
 native carrier. Interpreter planning and dispatch read the same descriptors.
@@ -1776,14 +1776,14 @@ __attribute__((noinline)) static int64_t probe(int64_t depth) {
 }
 // entry of an activation: probe(3 * 1024) — about 3 MB on a 2 MB stack
 ```
-A stack overflow is a fault that lands on its boundary (S7.11.1v2, S7.11.2v2), and an activation owns an execution boundary at its root so the fault lands on its own stack (D5.3.6v2). Run as the entry of an activation (`activation_create` + `activation_resume`, in a `test_lambda_concurrency_gtest` case), the recursion above does not fault: the process dies with exit 138, an uncaught SIGBUS. The existing `ActivationCore.StackOverflowLandsOnTheActivationsOwnBoundary`, which recurses without bound through 512-byte frames, is contained. So containment depends on the shape of the overflowing frames.
+A stack overflow is a fault that lands on its boundary (S7.11.1v2, S7.11.2v2), and an activation owns an execution boundary at its root so the fault lands on its own stack (D6.3.6). Run as the entry of an activation (`activation_create` + `activation_resume`, in a `test_lambda_concurrency_gtest` case), the recursion above does not fault: the process dies with exit 138, an uncaught SIGBUS. The existing `ActivationCore.StackOverflowLandsOnTheActivationsOwnBoundary`, which recurses without bound through 512-byte frames, is contained. So containment depends on the shape of the overflowing frames.
 - **What is known.** The handler (`stack_overflow_signal_handler`, `lambda/runtime/lambda-stack.cpp`) re-raises on one of two paths: `is_stack_overflow_fault` rejects the fault address, or no signal-armed boundary is found. Which one fires was not distinguished; a debugger could not be attached in the session.
 - **Likely place to look.** `is_stack_overflow_fault` recognizes only addresses within 64 KB of a stack bottom it derives from the TLS bounds and the recoverable limit (`lambda_stack_bounds_for`, `lambda_stack_recoverable_limit_for`). An activation's guard page sits below its own `low`, which need not fall in that window, and macOS reports the guard hit as SIGBUS.
 - **Not caused by RA6.** The same recursion reproduces with RA6's `activation_call_on_base` uninvolved, so this is a P0 gap. Through `activation_call_on_base` the same depth completes, because the work runs on the base stack.
 - **Script reachability.** Generated Lambda and JS code checks the recoverable stack limit at frame entry and faults softly, so a script overflow is not known to reach the guard page. Native recursion is the exposure: runtime C helpers, parsers, and hosted-module code running on an activation.
 - **Gate for the fix.** The probe above, run directly on an activation, must complete with `activation_fault()` set and the process alive. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (RA6 entry).
 
-**Verified resolved 2026-10-29 (S7.11.1v2 / S7.11.2v2 / D5.3.6v2).** On the current macOS checkout, the original finite 3,072-frame native recursion is contained on the activation's own execution boundary. `ActivationCore.FiniteNativeOverflowLandsOnTheActivationsOwnBoundary` retains the direct probe alongside the existing unbounded case. No signal-handler change or fault suppression is made. This receipt is macOS qualification, not a claim of new cross-platform coverage.
+**Verified resolved 2026-10-29 (S7.11.1v2 / S7.11.2v2 / D6.3.6).** On the current macOS checkout, the original finite 3,072-frame native recursion is contained on the activation's own execution boundary. `ActivationCore.FiniteNativeOverflowLandsOnTheActivationsOwnBoundary` retains the direct probe alongside the existing unbounded case. No signal-handler change or fault suppression is made. This receipt is macOS qualification, not a claim of new cross-platform coverage.
 
 See [implementation and qualification](<impl/Lambda_Impl_Ledger_Error_Activation_Followup (done).md>).
 
@@ -1851,9 +1851,9 @@ The header comment still claims symbols ≤32 chars are pooled
 (`lambda/io/mark_builder.cpp:12`), but `createSymbol` (`:126`–`:134`) is
 **unconditional `arena_alloc`** — no pooling branch exists. Anyone relying on
 symbol pointer-identity for short symbols will be surprised.
-*User-doc drift (noted 2026-10-23):* `doc/Lambda_Data.md` §Symbol Literals tells users that symbols are interned, that only one copy exists, and that comparison is O(1) pointer equality. D4.6.1v4 rules that pointer equality is not a Lambda textual-symbol comparison, and interning is an implementation strategy that S1.6 makes invisible. The doc should state symbol identity as the `NameKey` (S8.2.2v6) instead.
+*User-doc drift (noted 2026-10-23):* `doc/Lambda_Data.md` §Symbol Literals tells users that symbols are interned, that only one copy exists, and that comparison is O(1) pointer equality. D5.6.1 rules that pointer equality is not a Lambda textual-symbol comparison, and interning is an implementation strategy that S1.6 makes invisible. The doc should state symbol identity as the `NameKey` (S8.2.2v6) instead.
 
-**Resolution (2026-10-28).** S8.2.2v6; D4.6.1v4: allocator comments and symbol docs now state arena allocation and NameKey identity without pointer-identity promises. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+**Resolution (2026-10-28).** S8.2.2v6; D5.6.1: allocator comments and symbol docs now state arena allocation and NameKey identity without pointer-identity promises. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
 
 
 <a id="lr11-9"></a>**LR11-9 · An input parser's informational notes are logged at error level · FIXED 2026-10-28 (found 2026-09-30, site snippet pass)**
@@ -1866,7 +1866,7 @@ Every CSV read logs `[ERR!] Parse errors (0 errors):` followed by "CSV has 2 col
 `path_clone` replays the immutable path spine into the destination pool, giving
 every copied non-`sys` path independent names and links. Resolution and metadata
 caches are deliberately not copied, so no source-owned payload survives. This
-keeps the ownership chain precise under **D4.4.3**. Regression:
+keeps the ownership chain precise under **D5.4.3**. Regression:
 `MarkBuilderDeepCopyTest.CopyPathRehomesSpineAndDropsSourceCaches` destroys the
 source pool before reading the copied path.
 
@@ -1901,7 +1901,7 @@ newly exposed vector/matrix packing mismatch is repaired as part of this fix.
 
 <details><summary>Original report and investigation (historical)</summary>
 
-S9.1.2 / D4.4.6. Found while testing T29-5; present on the post-T29-3 binary,
+S9.1.2 / D5.4.5. Found while testing T29-5; present on the post-T29-3 binary,
 both tiers, for a loop-built and a packed matrix alike:
 ```
 var m = [fill(3, 1), fill(3, 1), fill(3, 1)]
@@ -1917,7 +1917,7 @@ copy is alive, but both writes are visible through the other name. Repro:
 
 </details>
 
-<a id="lr12-10"></a>**LR12-10 · Copies of var parameters and place borrows saw later writes · FIXED 2026-11-03 (S9.1.2, S9.1.3v3, D4.4.7)**
+<a id="lr12-10"></a>**LR12-10 · Copies of var parameters and place borrows saw later writes · FIXED 2026-11-03 (S9.1.2, S9.1.3v3, D5.4.6)**
 
 **Resolution:** Qualification: **8,718/8,718** Lambda/input baseline. Place arguments now transport caller-owned precisely rooted Item homes and
 evaluated path keys. Both tiers publish scalar/container rebinds and COW
@@ -1975,7 +1975,7 @@ the caller's write instead. Needs the place-borrow home of CW33 cost item 2
 (`vibe/Lambda_Design_Runtime_COW.md` §11.10). Repro: `cell_alias` in
 `temp/varparam_more.ls` (expected 550, prints 5050).
 
-*Scoped 2026-09-25:* the residue is broader than `cell_alias`. Seven place-borrow shapes fail in three ways — a copy sees the write (a record, `int[]` on T0), a rebind is lost (`c = {…}`, `int[]`), or the caller loses the write (`int[]` on the JIT, untyped and `Cell?` parameters) — and a scalar place (`inc(b.size)`) is skipped on T0 and errors on the JIT. CW33 item 2's mechanism cannot be built as written: `&parent->items[i]` is not a stable home under D4.3.1 (array items and map field buffers move) or CW37/D4.4.4v4 (data-zone pointers are never facts), and record fields are packed typed lanes, not Item words. It needs a designer amendment (CW33 item 2 v2: a caller-owned rooted Item home, with a reinstall after the call) and a ruling on scalar places. Record: `temp/wv/LR12-10/`. Found on the way: [LR12-32](<Lambda_Issue_Ledger (fixed).md#lr12-32>), [LR12-33](<Lambda_Issue_Ledger (fixed).md#lr12-33>).
+*Scoped 2026-09-25:* the residue is broader than `cell_alias`. Seven place-borrow shapes fail in three ways — a copy sees the write (a record, `int[]` on T0), a rebind is lost (`c = {…}`, `int[]`), or the caller loses the write (`int[]` on the JIT, untyped and `Cell?` parameters) — and a scalar place (`inc(b.size)`) is skipped on T0 and errors on the JIT. CW33 item 2's mechanism cannot be built as written: `&parent->items[i]` is not a stable home under D5.3.1 (array items and map field buffers move) or CW37/D5.4.4 (data-zone pointers are never facts), and record fields are packed typed lanes, not Item words. It needs a designer amendment (CW33 item 2 v2: a caller-owned rooted Item home, with a reinstall after the call) and a ruling on scalar places. Record: `temp/wv/LR12-10/`. Found on the way: [LR12-32](<Lambda_Issue_Ledger (fixed).md#lr12-32>), [LR12-33](<Lambda_Issue_Ledger (fixed).md#lr12-33>).
 
 </details>
 
@@ -1991,7 +1991,7 @@ into ASan-poisoned stack shadow. Both the new convex fixture and the existing
 `test/scene3d/runtime.html` reproduce it; this observation does not establish
 whether the report denotes an application lifetime defect or missing sanitizer
 bookkeeping for reusable native stacks. No baseline-build comparison was made.
-Preserve activation/precise-root ownership (**D5.1.1v3 / D5.3.3 / D5.3.6v2**);
+Preserve activation/precise-root ownership (**D6.1.1 / D6.3.3 / D6.3.6**);
 do not restore native-stack scanning or suppress stack-use-after-scope to make
 the gate pass.
 
@@ -2012,14 +2012,14 @@ The mesh/heightfield delivery on the same date reproduces this report with
 Its 53 instrumented native physics cases and forced/poisoned-GC mesh goldens
 on both ASan tiers pass; live async sanitizer coverage remains open.
 
-**Fixed 2026-10-29 (D5.1.1v3 / D5.3.3 / D5.3.6v2).** A fresh pre-fix ASan host reproduces the 160-byte priming write. Reused mappings retained a retired stack lifetime's poison, and activation switches lacked ASan fiber ownership notifications. Priming now begins a new idle-stack lifetime; normal, nested, terminal and base-stack switches notify ASan. Cold native-stack serialization copies inactive physical bytes without changing application shadow. Four AST/MIR JS stress runs and the original Scene3D runtime/mesh event files pass, with 22/22 and 17/17 assertions. Forced/poisoned GC and stack-use-after-return checking remain enabled. A live-local cold-stack control passes; an actual expired C++ scoped local still reports stack-use-after-scope. No native-stack GC scanning or vendor change.
+**Fixed 2026-10-29 (D6.1.1 / D6.3.3 / D6.3.6).** A fresh pre-fix ASan host reproduces the 160-byte priming write. Reused mappings retained a retired stack lifetime's poison, and activation switches lacked ASan fiber ownership notifications. Priming now begins a new idle-stack lifetime; normal, nested, terminal and base-stack switches notify ASan. Cold native-stack serialization copies inactive physical bytes without changing application shadow. Four AST/MIR JS stress runs and the original Scene3D runtime/mesh event files pass, with 22/22 and 17/17 assertions. Forced/poisoned GC and stack-use-after-return checking remain enabled. A live-local cold-stack control passes; an actual expired C++ scoped local still reports stack-use-after-scope. No native-stack GC scanning or vendor change.
 
 See [implementation and qualification](<impl/Lambda_Impl_Ledger_Error_Activation_Followup (done).md>).
 
 <a id="lr12-31"></a>**LR12-31 · A row assignment into a packed matrix flattens it · FIXED 2026-10-31 (found 2026-09-25)**
 `var q = [[1, 2], [3, 4]]; q[0] = [9, 9]` leaves `q` as `[[9, 9], 2, 3, 4]` on both tiers, where `[[9, 9], [3, 4]]` is right: the literal is packed into a 2-D ArrayNum, and the write widens it through `convert_specialized_to_generic`, which flattens N-D storage. Reported by the LR12-27 investigation, reproduced 2026-09-25.
 
-**Resolution/verification (2026-10-31), S1.6 / S9.1.2 / D8.1.1v18.** The shared
+**Resolution/verification (2026-10-31), S1.6 / S9.1.2 / D8.3.2.** The shared
 runtime setter already preserves leading-axis rows and widens to owned rows;
 the remaining strict-T0 failure was its obsolete shape-based admission guard.
 T0 now uses that same row-aware COW setter. `proc/ledger_matrix_rows.ls` covers
@@ -2035,14 +2035,14 @@ alias policy. Implementation and qualification:
 
 
 <a id="lr12-34"></a>**LR12-34 · Reassigning from a place aliases it; the JIT does not capture a place stored into a field · FIXED 2026-10-29 (found 2026-09-25)**
-- `var row = [0]; row = m[0]; m[0][1] = 9` shows the 9 through `row` on both tiers, even for a push-built (generic) matrix. D4.4.6's place-copy rule covers declarations only, and both tiers mark reassignments from plain names only, so the fix needs the rule extended to reassignment (S9.1.2).
+- `var row = [0]; row = m[0]; m[0][1] = 9` shows the 9 through `row` on both tiers, even for a push-built (generic) matrix. D5.4.5's place-copy rule covers declarations only, and both tiers mark reassignments from plain names only, so the fix needs the rule extended to reassignment (S9.1.2).
 - `r.x = m[0]; m[0][1] = 9` shows the 9 through `r.x` on the JIT only: T0 captures the row (`ast_expr_insertion_needs_capture`), while `mir_emit_value_capture` returns early unless the value is a plain name (S9.3.1, S1.6).
 Reported by the LR12-14 investigation, reproduced 2026-09-25.
 
 **Resolution/verification (2026-10-29).** S9.1.2 / S9.3.1: the reassignment half already passes after the preceding alias pass. MIR now captures the selected borrowed RHS at the existing expression producer boundary and records shared children on the destination as well as the source. Member/index insertion, branches, operand-returning expressions, both mutation directions and an index evaluated once are covered by `proc/ledger_place_insertion.ls`. Full implementation and gates: [ownership follow-up](<impl/Lambda_Impl_Ledger_Ownership_Followup (done).md>).
 
 
-<a id="lr12-41"></a>**LR12-41 · An index write on a copy of a parsed element is lost (S9.1.6) · VERIFIED RESOLVED 2026-10-29 (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
+<a id="lr12-41"></a>**LR12-41 · An index write on a copy of a parsed element is lost (S9.1.6) · VERIFIED RESOLVED 2026-10-29 (found 2026-10-06, while writing the D3.4.3 fixture; reproduces on the master build)**
 `let x = parse("<r><i k=\"1\"/></r>", 'xml')^; var e = x[0]; e["z"] = "4"` reads `e.z` back as `null` on JIT and auto, while `e.z = "4"` keeps it, and an index write on an element literal (`var e = <div k: "1">; e["z"] = "4"`) keeps it too. LR12-39's `is_immortal` fix does not change it. The index-assign lowering for an element-typed `var` seen through a parsed document's content does not republish, or does not reach, the copy the write makes; it needs the MIR of the write traced as LR12-39's was.
 
 **Resolution/verification (2026-10-29).** S9.1.2 / S9.1.6: the original case already passes on the preserved pre-change executable on interp, jit and auto. `proc/ledger_parsed_element_index.ls` now pins repeated constant-key writes, a variable-key overwrite, existing child attributes and source independence. This is closure of a stale record, not a new implementation credited to this pass. Full implementation and gates: [ownership follow-up](<impl/Lambda_Impl_Ledger_Ownership_Followup (done).md>).
@@ -2060,7 +2060,7 @@ Reported by the LR12-14 investigation, reproduced 2026-09-25.
 **Resolution (2026-10-28).** S9.1.2: operand-returning expressions cross the alias boundary and all possible source roots record sharing for later stores. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
 
 
-<a id="lr12-40"></a>**LR12-40 · A `var` bound to a container member read aliases it, so an index write through the `var` changes the source (S9.1.2) · FIXED 2026-10-28 (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
+<a id="lr12-40"></a>**LR12-40 · A `var` bound to a container member read aliases it, so an index write through the `var` changes the source (S9.1.2) · FIXED 2026-10-28 (found 2026-10-06, while writing the D3.4.3 fixture; reproduces on the master build)**
 `let lit = {arr: [1, 2]}; var b = lit.arr; b[0] = 10` leaves `lit.arr == [10, 2]` on JIT and auto; the same holds for a parsed document (`let d = parse("{\"arr\": [1, 2]}", 'json')^; var a = d.arr; a[0] = 10` changes `d.arr`). A `let` binding's value, and a parsed document, are changed in place, which S9.1.2's value semantics forbid. LR12-38 fixed the parameter form (`var r = o` with `o` a parameter); this is the member-read form, where the declaration binds a child container of another value without marking it shared, and the index write takes the unique in-place path.
 
 **Resolution (2026-10-28).** S9.1.2: a retained container member/index value crosses the same COW boundary as a bare alias. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
@@ -2144,7 +2144,7 @@ That only matters when `f` returns an argument through a dynamic callee (see
 LR12-11).
 
 <a id="lr12-13"></a>**LR12-13 · Index-then-field stores under a declared record array · FIXED 2026-09-17**
-D3.2.4v3. Found while testing LR12-12, present on the Result46 binary.
+D4.2.5. Found while testing LR12-12, present on the Result46 binary.
 `var bag: Box[] = [...]; bag[0].size = 6` failed on T0 with "typed nested
 array assignment index is out of bounds": `lambda_array_path_set_checked`
 walked only index keys. The JIT took the raw COW path store and admitted
@@ -2182,7 +2182,7 @@ Closed as a symptom: the four entries are one missing feature — TE-15's
 containment and the defect system channel — recorded as [LR12-24](Lambda_Issue_Ledger.md#lr12-24).
 
 <a id="lr12-17"></a>**LR12-17 · JIT COW facts ignored control flow; writes leaked into shared values · FIXED 2026-09-17**
-S9.1.2 / D4.4.1. Found in Tune29 §20.3, present on the Result46 binary. MIR
+S9.1.2 / D5.4.1. Found in Tune29 §20.3, present on the Result46 binary. MIR
 Direct chooses a raw or a share-checked store from per-binding "may be
 shared" facts, and updated them in emission order only. A detach or rebind in
 one `if`/`match` arm cleared the fact for the path that skipped the arm. A
@@ -2210,7 +2210,7 @@ Closed as a symptom: the four entries are one missing feature — TE-15's
 containment and the defect system channel — recorded as [LR12-24](Lambda_Issue_Ledger.md#lr12-24).
 
 <a id="lr12-19"></a>**LR12-19 · Literal-bounded dense loops read past a short array · FIXED 2026-09-18**
-S7.1.3v2, D4.3.1. Found in Tune30 T30-1; present on v46. For
+S7.1.3v2, D5.3.1. Found in Tune30 T30-1; present on v46. For
 `while (i < 5) { … a[i] … }`, `mir_dense_loop_scan` never copied the literal
 bound into its result, so the dense guard compared each array's length with
 `-1`, which is always true. Every proven read then loaded past the end of a
@@ -2325,7 +2325,7 @@ ran from `fn` context, including the module top level. The colour walk
 (`colour_walk_call`, `build_ast.cpp`) skipped every system function, although
 these rows are `is_proc` in `sys_func_defs`. The walk now reads `is_proc` for
 every system-function callee, built-in rows and host-module `pn(...)` Jube
-rows (D7.4.6, ES48) alike, and reports E224. A name with both colours
+rows (D7.1.1, ES48) alike, and reports E224. A name with both colours
 (`call`) has already resolved to its `fn` row by then. Reliance sites migrated
 with the fix:
 
@@ -2365,7 +2365,7 @@ Runtime cost: release builds, paired A/B against the tree before this fix, 11 pa
 `pn f(o) { var r = o; r.x = 7; r }` called with a `let a = {x: 1}` left `a.x == 7` on all three tiers, with member or index syntax, and `r = o` by reassignment did the same. An alias is an ownership boundary only when its source is an owned binding or a `var` parameter (`mir_expr_is_owned_binding_alias`; T0's declaration and reassignment binds), and a plain parameter is neither, so neither binding was marked. CW29's snapshot covers only writes through the parameter itself. **Fix:** `build_ast` flags each binding aliased from a plain parameter that the body writes through (`NameEntry::param_alias_written`, from the same `ast_body_may_write_entry` walk CW29 uses), and both tiers mark such an alias (`ast_parameter_alias_marks`), so its first write detaches. A read-only alias or rebind stays a borrow and keeps its typed lane: marking every parameter alias boxed `tune14_rebind`'s `int[]` locals. Fixture `test/lambda/proc/param_alias_write.ls`.
 
 
-<a id="lr12-39"></a>**LR12-39 · A copy-on-write copy of a parsed container inherited `is_immortal`, so every later write copied it again and an un-republished write was lost (S9.1.2) · FIXED 2026-10-06 (found the same day, while writing the D3.4.3v5 external-parent fixture)**
+<a id="lr12-39"></a>**LR12-39 · A copy-on-write copy of a parsed container inherited `is_immortal`, so every later write copied it again and an un-republished write was lost (S9.1.2) · FIXED 2026-10-06 (found the same day, while writing the D3.4.3 external-parent fixture)**
 `let doc = parse("{\"a\": 1}", 'json')^; var p = doc; p.c = 3; p["d"] = "four"` ended with no `d`, on both tiers; so did `p["c"] = 3; p["d"] = "four"`. A first index write alone, a member write, and a literal source all kept it. `clone_mutable_container_flags` (lambda-eval.cpp) copies the source's flag byte and clears `is_static` and `is_data_migrated`, but kept `is_immortal`, which `map_pooled` sets on every parsed map. `cow_prepare_write` treats an immortal container as shared, so each write to the copy copied it again and returned a new object; the compiler republishes the result of the write that detaches a marked alias, but rightly treats the copy as unique afterwards, so the second write's new object was dropped. The copy's data is written in the mutable encoding, so keeping the bit also made immortal-owner reads (`map_read_field_for_owner`, `container_scalar_read`) misread its wide scalars. **Fix:** a COW copy clears `is_immortal`. Covered by `test/lambda/proc/map_external_parent.ls` (the parsed section), on JIT and auto and in the forced-GC sweep. Found alongside, still open: [LR12-40](<Lambda_Issue_Ledger (fixed).md#lr12-40>) and [LR12-41](<Lambda_Issue_Ledger (fixed).md#lr12-41>).
 ## 13. Schema validator (LR_13)
 
@@ -2383,7 +2383,7 @@ entry point. A general fix needs proper compiler/runtime ownership for schema
 imports, rather than suppressing the fault. Evidence:
 `temp/procart-meadow/schema-backtrace.log`, working tree based on `7c7ebfc81`.
 
-**Resolution/verification (2026-10-29).** S11.4.1v3 / S16.9.8 / D4.2.6: schema loading uses the normal AST-only loader with an owned Runtime and the schema source directory. Imported type owners outlive the registry through the result pool; CLI result destruction releases them before the shared input cache. The old C loader entry is retained alongside a source-path-aware entry. Relative valid/invalid schema inputs and post-registry reporting have native regression coverage. Full implementation and gates: [ownership follow-up](<impl/Lambda_Impl_Ledger_Ownership_Followup (done).md>).
+**Resolution/verification (2026-10-29).** S11.4.1v3 / S16.9.8 / D5.2.5: schema loading uses the normal AST-only loader with an owned Runtime and the schema source directory. Imported type owners outlive the registry through the result pool; CLI result destruction releases them before the shared input cache. The old C loader entry is retained alongside a source-path-aware entry. Relative valid/invalid schema inputs and post-registry reporting have native regression coverage. Full implementation and gates: [ownership follow-up](<impl/Lambda_Impl_Ledger_Ownership_Followup (done).md>).
 
 
 <a id="lr13-14"></a>**LR13-14 · The empty bracket pattern `[]` admits every array (S11.1.6v3) · FIXED 2026-10-28 (found 2026-09-26, extending S11.1.7 to container literals)**
@@ -2422,7 +2422,7 @@ hint appears and that disabling the option omits it.
 - `validate` of an XML file holding three `<li>` fails against `<document; <li>*>` and `<document; <li>+>` ("Element content length mismatch: expected 1, got 3"), while a file holding three `<p>` passes `<document; <li>, <li>, <li>>`. XML input wraps its top-level elements in `document`.
 - The [Validator Guide](../doc/Lambda_Validator.md)'s own `Page` schema relies on runs (`<meta …>*`, `<h1>+`, `<p>*`). Under this check a run counts as one child, and the nested patterns are never reached.
 
-**Why it went unnoticed:** the validator GTests build `TypeElmt`s by hand with `content_length` set to the exact child count they want (`test_validator_features_gtest.cpp`, `test_ast_validator_gtest.cpp`); no Lambda test puts an occurrence inside element content; and the validator targets run outside the baseline (the validator's [LR13-9](Lambda_Issue_Ledger.md#lr13-9), filed as LR12-1). The S2.1.3 and D2.6.6 implementation footnotes (Appendix A of each formal spec) and that LR13-9 entry all record the count check as implemented, without this caveat.
+**Why it went unnoticed:** the validator GTests build `TypeElmt`s by hand with `content_length` set to the exact child count they want (`test_validator_features_gtest.cpp`, `test_ast_validator_gtest.cpp`); no Lambda test puts an occurrence inside element content; and the validator targets run outside the baseline (the validator's [LR13-9](Lambda_Issue_Ledger.md#lr13-9), filed as LR12-1). The S2.1.3 and D3.1.1 implementation footnotes (Appendix A of each formal spec) and that LR13-9 entry all record the count check as implemented, without this caveat.
 
 *Fixed 2026-09-25 ([Impl_Element_Type_Sharing P0](<impl/Lambda_Impl_Element_Type_Sharing.md>)):* S11.1.6v3 ruled element content a sequence-pattern slot. The content section now resolves to `TypeElmt::content_list`, a typed `TypeList` filled as a bracket pattern is, and `validate_against_element_type` matches the children with `array_pattern_runs_match` in the fast verdict and with the shared `validate_sequence_pattern` on the reporting path. A second defect under the same symptom: the per-slot shortcut `array_pattern_simple_type_matches` reduced a structural slot (`<p>`, `{y: int}`, `[int, int]`) to a TypeId test, so `[<li>]` matched `[<p>]` as well; only bare kinds take it now. Every reproducer above now answers correctly on both tiers. Tests: `test/lambda/element_content_pattern.ls`; the validator GTests use content patterns instead of counts.
 
@@ -2450,7 +2450,7 @@ An expression builds a union's arms bare (`int | datetime` in an expression hold
 
 A sound fix types the reads before the widening assignment: either a declaration-time scan, as MIR's `mir_nested_control_writes_binding` does, or re-resolving the scope once an entry widens.
 
-**Resolution (2026-10-28).** S12.2.1; D3.3.3v3: compact and N-D literals reject stale widened dependencies, including immutable aliases and nested arithmetic. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
+**Resolution (2026-10-28).** S12.2.1; D4.3.3: compact and N-D literals reject stale widened dependencies, including immutable aliases and nested arithmetic. Implementation, regression fixtures and qualification: [ruled ledger fixes](<impl/Lambda_Impl_Ledger_Ruled_Fixes (done).md>).
 
 
 <a id="lr03-44"></a>**LR03-44 · A numeric or bool literal type admits any value of its kind as an array item or a bracket-pattern slot (S11.2.1, S10.1.1v4, S11.1.1v3) · FIXED 2026-10-28 (found 2026-10-21, while implementing S11.4.12)**
@@ -2482,7 +2482,7 @@ integers. The interpreter now always uses the Item-aware bitwise helpers, which
 reject noninteger operands. MIR emits a raw word instruction only when both the
 numeric classifier and `MirValue` carrier prove a native `int`; guarded or boxed
 results route through the shared Item helper instead. This preserves **S4.1.2**
-and the representation authority split in **D2.4.1–D2.4.3**.
+and the representation authority split in **D2.3.4–D2.3.5**.
 
 Regression: `bitwise_invalid_operands.ls` verifies that fractional operands
 produce `error()` under eager JIT; `transpile_bitwise.ls`,
@@ -2499,7 +2499,7 @@ accessor `ShapeEntry` is a map-private virtual descriptor with
 object root only until that edge is published. Generic Map readers never
 decode the cell as an `Item`. Descriptor conversion materializes a fresh
 physical lane before accessor→data, and abandons a former data lane for
-data→accessor, as required by **D3.4.8**.
+data→accessor, as required by **D3.4.7**.
 
 Regression: `JsInterpreter.KeepsAccessorCellsVirtualAndAliveAcrossCollection`
 forces a collection after accessor installation, and
@@ -2549,7 +2549,7 @@ the one C consumer, reaches fields by raw byte offset, and every other consumer
 is C++ and sees `lambda.hpp`. So the mirror was dead weight that would have
 produced wrong offsets the moment any C code used it by name.
 
-Found by the D2.6.6v2 phase-1 work: adding the first-ever layout assertions to
+Found by the D3.1.1 phase-1 work: adding the first-ever layout assertions to
 the mirror failed the build immediately. Fixed by giving all four mirror structs
 the exact eight-byte header, and the assertions now stand as the guard. The
 general lesson is worth keeping: a hand-written mirror without an assertion is
@@ -2568,7 +2568,7 @@ Under S2.1.4 it is a **defect, not an error path**: Lambda objects are open by
 default (OB15 part 3), extension is an ordinary member addition, and every
 shape reached from a declared shape must share the one nominal record (OB16),
 so the value stays an instance of its type and its methods keep resolving.
-**Resolved with D2.6.6v2 phase 2.** The nominal record is now a `TypeMap`
+**Resolved with D3.1.1 phase 2.** The nominal record is now a `TypeMap`
 field, and both shape-rebuild sites copy it forward: the generic transition in
 `fn_map_set`'s rebuild path, and `map_extend_open_shape`, which is the one that
 actually produces a grown shape. The second mattered more than expected — until
@@ -2586,8 +2586,8 @@ both tiers and under forced GC.
 <a id="ts-4"></a>**TS-4 · A named map type on a *local* is a COW value root, not a borrow · RESOLVED 2026-09-14**
 The historical report predates the current COW model. A local map binding is a
 snapshot by default, not an unconstrained alias; this is the required semantic
-behaviour under **D4.4.1–D4.4.2**. The narrowly proven read-modify-write place
-case receives a runtime-guarded borrow only when it satisfies **D4.4.4**;
+behaviour under **D5.4.1–D5.4.2**. The narrowly proven read-modify-write place
+case receives a runtime-guarded borrow only when it satisfies **D5.4.4**;
 otherwise the snapshot remains required.
 
 The old correctness repro no longer reproduces: release `splay2` completes
@@ -2686,7 +2686,7 @@ The fix keeps the signature as a fast routing key and wires the existing
 uses a stack-only probe, so repeated lookups do not consume arena storage; the
 element name is retained as existing cache metadata so element signatures are
 confirmed as well. This implements the structural identity required by
-**D3.4.2** and exact name identity in **D3.4.4v2**.
+**D3.4.2** and exact name identity in **D3.4.4**.
 
 Regression: `NamespaceTest.ShapePoolCollisionDoesNotAliasDifferentFieldNames`
 uses the supported `NULL`-name normalization collision and verifies that
@@ -2704,8 +2704,8 @@ each unchecked copy was reachable rather than theoretical.
 The sites now share `ast_copy_source_text`, which checks the allocation,
 records `ERR_OUT_OF_MEMORY` (`E309`) against the literal span, and returns
 `TYPE_ERROR`/a failed static-literal probe before the buffer is read. This
-follows the checked allocation contract in **D4.2.1v3** and the allocation
-failure handoff in **D4.2.2v2**. The consolidation removes the duplicated
+follows the checked allocation contract in **D5.2.1** and the allocation
+failure handoff in **D5.2.2**. The consolidation removes the duplicated
 copy-and-terminate code; no new data structure or design ruling was added.
 
 Worth recording separately: the migration from `malloc` to `mem_alloc`
@@ -3035,7 +3035,7 @@ regression passes, as does the full baseline.
 `AstFieldNode::is_proc_method_reference` marks a resolved dotted `pn` member;
 the call builder clears that mark only when it consumes the member as the direct
 callee. The shared final AST pass rejects every remaining mark with E224 before
-either T0 or MIR lowering. This implements **S12.3.3v2** and **D2.6.7** without
+either T0 or MIR lowering. This implements **S12.3.3v2** and **D3.1.4** without
 changing the runtime member lane that valid `pn` calls need. Regression:
 `NegativeScriptTest.SemanticError_ProcMethodCannotBeTakenAsValue`; the retained
 positive member-value fixture passes on both JIT and T0.
@@ -3048,7 +3048,7 @@ report success separately, so `9223372036854775807i64` remains a finite `i64`
 while failed conversion returns `ItemError`. `fn_int64` now has a boxed `Item`
 ABI, and MIR preserves that result until the existing error boundary; `it2l`
 remains a legacy `IntLane` accessor and never represents a conversion failure.
-This follows **S7.10.3**, **D2.4.3**, and the private-lane rule in **D2.2.2**.
+This follows **S7.10.3**, **D2.3.5**, and the private-lane rule in **D2.2.2**.
 Regression coverage: `test/lambda/int64.ls`, `ItemRepresentation.Int64AlwaysUsesPointerBackedPayload`,
 `LambdaDecimal.QuietInt64ExtractionRejectsOverflowAndInvalidComparison`, and
 `scalar_home_donation.mir-check`; `make test-lambda-baseline` passes 5087/5087.
@@ -3119,8 +3119,8 @@ passes 3914/3914.
 <a id="lr05-r5"></a>**LR05-R5 · `fn_label` flood-fill workspace bypassed the runtime allocator · RESOLVED 2026-08-28**
 The flood-fill workspace now uses the existing checked `mem_alloc`/`mem_free`
 path with `MEM_CAT_TEMP` instead of raw `malloc`/`free`. This keeps temporary
-allocation failure and ownership tracking aligned with **D4.2.1v3** and
-**D4.2.2v2**. Regression: `RuntimeShapeTransition.LabelStackAllocationFailureReturnsError`;
+allocation failure and ownership tracking aligned with **D5.2.1** and
+**D5.2.2**. Regression: `RuntimeShapeTransition.LabelStackAllocationFailureReturnsError`;
 the representation suite passes 29/29 and the Lambda baseline passes
 3977/3977.
 
@@ -3322,7 +3322,7 @@ was internally inconsistent — it omitted the trailing empty segment that the
 spec and the sibling `\(d)` row require.
 
 Follow-up: `pattern_split` and `fn_split`/`fn_split3` were later converted from
-`list_push` + a merging suspension to plain `array_push` (D2.6.5), removing the
+`list_push` + a merging suspension to plain `array_push` (D3.3.1), removing the
 RAII guard, both flag set-sites and all six restore points — net −18 lines, and
 `split` no longer touches the global flag at all. Output is byte-identical.
 
@@ -3350,7 +3350,7 @@ signature, an all-`null` argument list, and `call()` (S12.3.4), which shares the
 adapter. `test/std/core/functions/variadic_args.ls` loses the note that kept it
 to numeric arguments and now covers the string/`null` cases directly.
 
-**Generalized to D2.6.5** (Formal Design v1.27.0): the append API *is* the
+**Generalized to D3.3.1** (Formal Design v1.27.0): the append API *is* the
 choice of content normalization — `list_push` for element and script top-level
 content, `array_push` for every other collection — and a builder must never
 re-express the choice as ambient state — the process-wide suppression flag that
@@ -3375,7 +3375,7 @@ defect. Regenerated. The neighbouring tests could not have caught it either:
 string, so two adjacent strings never met; both now cover strings and `null`.
 
 Note the merge half is ambient-dependent — string merging is gated on an active
-input context while null-stripping is unconditional (Design Appendix A, D2.6.5),
+input context while null-stripping is unconditional (Design Appendix A, D3.3.1),
 which is why the same function could merge in one call path and not another.
 
 The `disable_string_merging` flag turned out to be **vestigial**: its sole
@@ -3477,7 +3477,7 @@ The custom `mem_alloc` calls and `strview_to_cstr` literal copies were
 fallible, but their callers read the returned buffers before checking them.
 `ast_copy_source_text` now centralizes the seven literal source-copy sites,
 reports `E309`, and returns the existing `TYPE_ERROR` recovery value. This
-keeps the literal path aligned with **D4.2.1v3** and **D4.2.2v2** without
+keeps the literal path aligned with **D5.2.1** and **D5.2.2** without
 introducing a new data structure or design rule.
 
 Regression: `AstBuildAllocationTest.SizedLiteralCopyFailureDoesNotCrash`.
@@ -3493,7 +3493,7 @@ Lambda expression lowering has no semantic `MIR_reg_type()` probe or raw-registe
 expression shim. The historical truncation, boxed-result, and error-unboxing
 failures are resolved by the implementation records, including
 [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>) and
-[LR07-4](<Lambda_Issue_Ledger (fixed).md#lr07-4>), under **D2.4.1–D2.4.3**.
+[LR07-4](<Lambda_Issue_Ledger (fixed).md#lr07-4>), under **D2.3.4–D2.3.5**.
 
 <a id="oi-4"></a>**OI-4 · RegExp semantics · RESOLVED 2026-09-15**
 The runtime now uses selective structural-equivalence routing rather than the
@@ -3509,7 +3509,7 @@ explicit error instead of falling through to RE2. `JsBtExecResult` also
 separates no-match from budget exhaustion and allocation failure; shared
 RegExp/String consumers propagate the latter outcomes without no-match state
 updates. This fulfils the guest-semantics and explicit-failure requirements of
-**D1.3**, **D1.4v3**, and **D8.4.3v2**.
+**D1.3**, **D1.4**, and **D7.4.3**.
 
 Focused evidence: `test_js_regex_router_poc_gtest` passes its 4,260-case route
 audit, 13-pattern × 765-subject Node differential (zero divergent digests),
@@ -3538,7 +3538,7 @@ Transferred minimum heights floor an image's natural width instead of replacing
 it with a provisional zero; the 776-case sizing baseline passes.
 
 All 40 reduced geometry assertions agree with Chromium and pass on native
-interpreter and MIR Direct (**D8.1.1v17**). They cover variable/direct templates,
+interpreter and MIR Direct (**D8.3.6**). They cover variable/direct templates,
 fractional/weighted/auto/fixed tracks, spans, named lines, hidden items and
 resizing. Six control/image assertions and four real-gallery spacing assertions
 also pass on both tiers. Evidence
@@ -3557,7 +3557,7 @@ Authored flex/grid alignment, vertical writing and text-box trimming retain
 their existing paths. Package CSS needs no changes; no formal ruling changes.
 
 The independent `button_text_alignment_contracts` fixture passes all 16
-assertions on interpreter and MIR Direct (**D8.1.1v17**), checking flow, row,
+assertions on interpreter and MIR Direct (**D8.3.6**), checking flow, row,
 column, small/tall and stretched buttons, authored flex/grid alignment and
 viewport resizing. Chromium agrees with all 16 assertions. Evidence is under
 `temp/ui_dtna/pagination_alignment/`; aggregate validation is recorded in the
@@ -3577,7 +3577,7 @@ minimums by the CSS maximum (CSS Flexbox §4.5 and §9.9.3). Package CSS and
 component spacing need no changes; no formal ruling changes.
 
 The independent `flex_control_intrinsic_contracts` fixture passes all 18
-assertions on interpreter and MIR Direct (**D8.1.1v17**), covering Select,
+assertions on interpreter and MIR Direct (**D8.3.6**), covering Select,
 Input and Textarea, content/border boxes, minima, maxima and sibling gaps.
 Chromium agrees with all 18 oracles. The actual gallery fixture passes both
 spacing and native checkbox-click assertions on each tier. Evidence is under
@@ -3599,7 +3599,7 @@ before retirement. Existing dispatch ordering is **ES25/ES26**; presentation
 remains functional under **S12.1.3**. No formal ruling changes.
 
 The independent `test/ui/dtna/form_activation_rebind.json` improves from 4/8 to
-8/8 assertions on both execution tiers (**D8.1.1v17**), covering nested text hits,
+8/8 assertions on both execution tiers (**D8.3.6**), covering nested text hits,
 author click/form redraws, submit cancellation, retained edits and actual reset.
 Button's fixture passes all 64 assertions per tier. Logs are under
 `temp/ui_dtna/button_increment/`; aggregate results are recorded separately.
@@ -3617,13 +3617,13 @@ matching and preserves their borrowed snapshots during clear traversal;
 `cmd_layout.cpp` follows the same rule. Layout rebinds to the host's replacement
 pseudo tree. Per-element CSSOM recascade replaces the host pseudo trees as well,
 discarding branches that no longer match while retained generated boxes keep
-their retired borrow until layout (**D4.5.1v4**). The property table exposes
+their retired borrow until layout (**D5.5.1**). The property table exposes
 `pointer-events` through its shared inherited-declaration serializer.
 
 `test/ui/dtna/pointer_events_cssom_contracts.json` passes ten assertions, including
 live ancestor-class swaps and synchronous pseudo values. The complete-stylesheet
 probe improves from 0/2 to 2/2 clicks; Spin passes 41 assertions on each execution
-tier (**D8.1.1v17**). Evidence is in `temp/ui_dtna/spin_increment/`; full aggregate
+tier (**D8.3.6**). Evidence is in `temp/ui_dtna/spin_increment/`; full aggregate
 reruns remain separate gates. No formal semantics or design ruling changes.
 
 <a id="ui-1"></a>**UI-1 · Repeated ordinary markup moves its embedded native node between presentation slots · FIXED 2026-10-11 (found 2026-10-10)**
@@ -3636,7 +3636,7 @@ it out of the earlier parent. This was independent of the component package;
 `fn_apply1` correctly passed unmatched ordinary markup through unchanged.
 
 The user settled the pending ordinary-markup presentation contract as
-**D4.5.3**: MarkBuilder recursively copies Elements and their content at
+**D5.5.3**: MarkBuilder recursively copies Elements and their content at
 UI/view-mode DOM construction, even for already-owned values. Normal Lambda
 evaluation keeps ownership-based sharing. The DOM copies retain original
 source/result keys; full rebuilds migrate native state/frame owners, and SVG
@@ -3785,7 +3785,7 @@ Implementation and final qualification: [parser, admission and formatting follow
 *Original report and prior history:*
 
 While migrating the generated-paint clipping fixture to the automatic TikZ
-layout path (**D7.5.3v2**), a named node with
+layout path (**D9.5.6**), a named node with
 `[fill=blue,minimum width=200px,minimum height=200px]` reports runtime error 318
 (`unsupported TikZ dimension: 200px`) and then exits 139 on the auto tier.
 TikZ accepts TeX dimensions, so rejection is expected; a process fault during
@@ -3827,7 +3827,7 @@ single non-thread-local flag: concurrent compilation/execution that wants
 per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
 [Runtime globals audit].
 
-**Final resolution:** **D5.4.1–D5.4.4 / RG12:** the process-global flag is removed. Native I/O reads the active canonical owner's `Runtime::dry_run`, including the C filesystem path and CLI compile-time resource reads. Independent threaded owners retain distinct configuration; the native owner test alternates both modes without cross-talk.
+**Final resolution:** **D6.4.1–D6.4.4 / RG12:** the process-global flag is removed. Native I/O reads the active canonical owner's `Runtime::dry_run`, including the C filesystem path and CLI compile-time resource reads. Independent threaded owners retain distinct configuration; the native owner test alternates both modes without cross-talk.
 
 Implementation and qualification: [names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
 
@@ -3855,7 +3855,7 @@ made the first attempt silently useless: `is_type_optional()` reads `type->op`
 on the `TypeUnary`, not the AST node's `op`; a wrapper that sets only the AST
 side parses but is invisible to every consumer.
 
-**Map/pattern slice fixed 2026-10-29 (S16.9.5 / D3.2.4v4):**
+**Map/pattern slice fixed 2026-10-29 (S16.9.5 / D4.2.5):**
 `ShapeEntry::is_optional` distinguishes missing-field permission from the value
 contract. Map and attribute patterns carry it; declaration checks, full/fast
 validation and runtime map admission agree. `let v: Rec = {name: "a"}` now
@@ -3878,7 +3878,7 @@ explicit-null attribute example described the old conflated implementation;
 Implementation and final qualification:
 [parser, admission and formatting follow-up](<impl/Lambda_Impl_Ledger_Parser_Admission_Followup (done).md>).
 
-**Final resolution:** **S16.9.5 / D3.2.4v4:** the remaining nominal constructors and required element attributes now preserve field presence independently of nullability. Optional constructors retain sparse fields, defaults, spreads, inheritance and nominal identity on both tiers. Read-only methods and untaken assignments do not add absent keys; a taken nullable assignment stores a present null. Full and fast element validation reject missing required attributes, including nullable ones. The earlier map/pattern slice remains covered.
+**Final resolution:** **S16.9.5 / D4.2.5:** the remaining nominal constructors and required element attributes now preserve field presence independently of nullability. Optional constructors retain sparse fields, defaults, spreads, inheritance and nominal identity on both tiers. Read-only methods and untaken assignments do not add absent keys; a taken nullable assignment stores a present null. Full and fast element validation reject missing required attributes, including nullable ones. The earlier map/pattern slice remains covered.
 
 Implementation and qualification: [names, presence and run-configuration follow-up](<impl/Lambda_Impl_Ledger_Names_Presence_Followup (done).md>).
 

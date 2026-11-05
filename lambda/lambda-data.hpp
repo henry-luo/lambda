@@ -154,7 +154,7 @@ typedef struct EvalContext : Context {
     // active-module selector used by hosted and interpreter entry points.
     LambdaModuleState* jit_current_module_state;
     // Keep new shell bookkeeping at the tail: generated and native callers
-    // depend on the established module-state offsets (D8.1.3v10).
+    // depend on the established module-state offsets (D8.4.1).
     uint32_t execution_depth;
     // JSCU27: one directory for context-owned subsystem state. Reading a
     // capsule is an indexed load; the lifecycle contract travels with it.
@@ -358,7 +358,7 @@ typedef struct ShapeEntry {
     StrView* name;
     Type* type;  // type of the field
     int64_t byte_offset;  // byte offset of the map field
-    // D3.4.3v3: the chain link. A transition-tree node shares its chain with
+    // D3.4.3: the chain link. A transition-tree node shares its chain with
     // the descendant that extended it in place, so the link may run past a
     // type's `last` into fields that type does not have. Walk a type's fields
     // with FOR_EACH_MAP_FIELD / typemap_next_field, never by this link alone.
@@ -370,7 +370,7 @@ typedef struct ShapeEntry {
     uint8_t key_kind;  // NAME_KEY_STRING, NAME_KEY_SYMBOL, or NAME_KEY_PRIVATE.
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
     bool is_optional;  // S16.9.5: field absence, independent of a nullable value
-    // D3.4.3v3: the entry's position in a transition-tree chain, set when the
+    // D3.4.3: the entry's position in a transition-tree chain, set when the
     // tree appends it; 0 for every other entry. A hash table shared along a
     // chain holds descendants' entries too, and a type rejects any entry at or
     // past its own length. Sits in padding: ShapeEntry does not grow.
@@ -398,7 +398,7 @@ typedef struct ShapeEntry {
 // _platform_memcmp reached from these two walks, on names like "id" and "link".
 // Compare inline at identifier length and keep memcmp only where its vectorised
 // loop actually pays. Reads the same authoritative bytes, so every shape
-// resolves exactly as before (D4.6.1v2-D4.6.2v2).
+// resolves exactly as before (D5.6.1-D5.6.2).
 static inline bool shape_field_name_equals(const ShapeEntry* entry,
         const char* chars, size_t len) {
     if (!entry || !entry->name || !entry->name->str || !chars) return false;
@@ -487,14 +487,14 @@ typedef struct TypeMap : Type {
     // Lazily allocated only for shared JS shapes; non-JS/private shapes should
     // not pay for prototype-walk metadata they never use.
     struct JsProtoEntryCache* js_proto_entry_cache;
-    // D2.6.6v2 phase 2: the nominal record, or NULL for a structural shape.
+    // D3.1.1 phase 2: the nominal record, or NULL for a structural shape.
     // Authoritative; the container's `is_nominal` header bit only caches it.
     struct TypeNominal* nominal;
-    // D3.2.4v4: an immutable extended shape may retain a verified declared prefix.
+    // D4.2.5: an immutable extended shape may retain a verified declared prefix.
     const struct TypeMap* verified_contract;
 } TypeMap;
 
-// D3.4.3v3: a type's fields run from `shape` through `last`. A transition-tree
+// D3.4.3: a type's fields run from `shape` through `last`. A transition-tree
 // node shares its chain with the descendant that extended it in place, so the
 // chain may continue past `last`; every walk stops there. A type whose `last`
 // is unset owns an unshared chain and walks it to its end.
@@ -562,7 +562,7 @@ static_assert(offsetof(TypeMap, byte_size) == LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE &
 
 typedef struct TypeMapTransition {
     NameId name_id;
-    // D3.4.4v4: a STRING edge keeps its spelling and its routing hash, since an
+    // D3.4.4: a STRING edge keeps its spelling and its routing hash, since an
     // id proves a STRING name equal but never different; identity kinds match
     // by name_id alone
     uint32_t name_hash;
@@ -655,12 +655,12 @@ bool lambda_type_accepts_null(Type* type);
 // heterogeneous unions and error-admitting `null | T`.
 Type* lambda_type_nullable_lane_base(Type* type, bool* nullable);
 
-// THE resolver (D2.6.1, D3.4.6): total over well-formed contracts. A null
+// THE resolver (D3.2.1, D3.4.6): total over well-formed contracts. A null
 // contract logs and yields LANE_STORAGE_INVALID (D1.9: never a guess).
 LaneStorageDesc lambda_lane_storage_desc_for(Type* type);
 
 // Persistent native destinations refine the scalar ABI only where an optional
-// full-width integer cannot encode null in one raw word (D2.5.2v3).
+// full-width integer cannot encode null in one raw word (D2.4.2).
 LaneStorageDesc lambda_persistent_lane_storage_desc_for(Type* type);
 
 // Width projection: the packed slot size of a field holding `type`.
@@ -803,9 +803,9 @@ static inline int typemap_hash_recommended_capacity(int64_t expected_fields) {
     return capacity;
 }
 
-// Where a type's records come from (D4.1.4v4). A transition-tree node is never
+// Where a type's records come from (D5.1.4). A transition-tree node is never
 // freed on its own, so it takes the Input's arena and goes with the Input
-// (D3.4.3v3, D4.2.6); a type a container owns takes a pool.
+// (D3.4.3, D5.2.5); a type a container owns takes a pool.
 typedef struct TypeAlloc {
     Pool* pool;
     Arena* arena;   // when set, records come from here rather than `pool`
@@ -856,7 +856,7 @@ static inline bool typemap_shape_name_equals_hash(ShapeEntry* e, const char* key
            memcmp(e->name->str, key, (size_t)key_len) == 0;
 }
 
-// D3.4.4v4: a JS Symbol or private name is its record; a STRING name is its
+// D3.4.4: a JS Symbol or private name is its record; a STRING name is its
 // spelling, of which equal ids are only a fast proof -- ids are per name pool,
 // and an unpooled key has none, so two entries with different ids may still
 // name one field, and a shared table must not take both.
@@ -926,7 +926,7 @@ static inline ShapeEntry* typemap_shape_lookup_last_by_name_id(TypeMap* tm,
     return found;
 }
 
-// D3.4.3v3: a table shared along a transition-tree chain also holds the
+// D3.4.3: a table shared along a transition-tree chain also holds the
 // entries of descendants that extended the chain in place; theirs sit at or
 // past this type's length. A shared table never takes a second entry for an
 // identity it holds, so hitting one of theirs means the name is not a field of
@@ -999,7 +999,7 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     slots[slot] = entry;
 }
 
-// D3.4.3v3: whether the table already holds an entry with `entry`'s identity.
+// D3.4.3: whether the table already holds an entry with `entry`'s identity.
 // A chain's shared table must not take such an entry: overwriting the slot
 // would hide a field from the types that still read it through the table.
 static inline bool typemap_hash_holds_equal(TypeMap* tm, ShapeEntry* entry) {
@@ -1060,7 +1060,7 @@ static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* k
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
         ShapeEntry* e = slots[slot];
         if (!e) return NULL;  // empty slot → not found
-        // D3.4.4v4: owned shape copies retain the record id even when their bytes move.
+        // D3.4.4: owned shape copies retain the record id even when their bytes move.
         if ((name_id != NAME_ID_NONE && e->key_kind == NAME_KEY_STRING && e->name_id == name_id) ||
                 typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
             return typemap_hash_entry_is_own(tm, e) ? e : NULL;
@@ -1099,10 +1099,10 @@ static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,
 typedef struct TypeElmt : TypeMap {
     StrView name;  // local name of the element
     NameId name_id;  // generated element identity; NAME_ID_NONE for custom names.
-    // D2.6.6v3: a DECLARED element type's content pattern, matched against the
+    // D3.1.1: a DECLARED element type's content pattern, matched against the
     // children as a sequence pattern (S11.1.6v3); NULL leaves content
     // unconstrained. Instance and literal types never carry one, so it plays
-    // no part in type sharing (D3.4.3v3).
+    // no part in type sharing (D3.4.3).
     TypeList* content_list;
     Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;
@@ -1132,14 +1132,14 @@ typedef uint8_t (*ConstraintFn)(uint64_t value);
 
 // TypeObject: nominally-typed map with methods
 // Extends TypeMap — inherits shape (fields), length, byte_size, type_index
-// D2.6.6v2 phase 2 (S2.1.4): the NOMINAL RECORD. Nominal-ness is a property of
+// D3.1.1 phase 2 (S2.1.4): the NOMINAL RECORD. Nominal-ness is a property of
 // the type descriptor, not a container kind — a nominal value is an ordinary
 // map or element whose shape points here. One record is shared by the declared
 // shape AND by every shape reached from it by extension, which is what lets an
 // open instance gain a field without ceasing to be an instance of its type
 // (S2.1.4 part 3, OB16); `is T` therefore compares this POINTER, never a name.
 // The record is sealed for the life of the evaluation (S2.1.4 part 2).
-// D2.6.9v3: guest member semantics are explicit beside the shared nominal identity.
+// D3.1.5: guest member semantics are explicit beside the shared nominal identity.
 struct TypeNominalExtension {
     Item (*member)(Item receiver, const char* key, size_t length, bool* found);
     // an instance retains guest metadata through a precisely traced, nonmoving owner.
@@ -1158,7 +1158,7 @@ typedef struct TypeNominal {
     void* extension_data;        // evaluation-owned metadata; guest roots own its Items
 } TypeNominal;
 
-// D2.6.6v2 phase 2: an object's shape extends TypeElmt, not TypeMap. A nominal
+// D3.1.1 phase 2: an object's shape extends TypeElmt, not TypeMap. A nominal
 // type declares ONE structural kind (S2.1.3v2) — map or element — and this shape
 // serves both: a nominal map simply leaves the element fields unused, while a
 // nominal element needs `name`/`content_list`/`ns` at TypeElmt's own offsets
@@ -1289,7 +1289,7 @@ typedef struct TypeFunc : Type {
     bool is_variadic;           // function accepts variadic args (...)
     bool can_raise;             // legacy metadata: the outcome contract admits error
     bool may_return_error;      // true if an Item-valued call may contain an ordinary error
-    // D6.1.3: may the result be an error the signature does not declare (a
+    // D7.1.3: may the result be an error the signature does not declare (a
     // failed deferred check)? Conservative, set when the body completes
     // (`defect_known`); build_ast boxes a literal slot fed by such a call.
     bool may_defect;
@@ -1427,7 +1427,7 @@ extern Type TYPE_ANY_NO_ERROR;
 extern Type TYPE_ANY_NO_NULL;
 extern Type TYPE_ANY_NO_ERROR_OR_NULL;
 
-// D3.1.1v4: a range type `X to Y` is a type-kind node under the shared
+// D4.1.1: a range type `X to Y` is a type-kind node under the shared
 // LMD_TYPE_TYPE tag. It must never wear LMD_TYPE_RANGE, the tag of a range
 // VALUE, or every tag-driven consumer reads "an int from 1 to 5" as "a range"
 // (LR03-18, LR03-14).
@@ -1494,7 +1494,7 @@ static inline bool lambda_type_param_is_colour_poly(const TypeParam* param) {
     return contract == &TYPE_FUNC;
 }
 
-// D2.6.6v2: the generic map/element/object descriptors are compact `Type`
+// D3.1.1: the generic map/element/object descriptors are compact `Type`
 // singletons.  Only a concrete descriptor can be read as its extended
 // TypeMap shape; keeping the discriminator here prevents each language front
 // end from duplicating that ABI boundary.
@@ -1651,7 +1651,7 @@ extern TypeType LIT_TYPE_U64;
 extern TypeType LIT_TYPE_F16;
 extern TypeType LIT_TYPE_F32;
 
-// D2.6.6v2 phase 2 (S2.1.1v3): the value's NOMINAL RECORD, or NULL when it is
+// D3.1.1 phase 2 (S2.1.1v3): the value's NOMINAL RECORD, or NULL when it is
 // structural. `A is object` is exactly "this returns non-NULL", and it is
 // orthogonal to the structural kind — a nominal map answers both `is map` and
 // `is object`. The record is reached through the shape, which is authoritative;
@@ -1723,7 +1723,7 @@ static inline const TypeMap* typemap_preserved_contract(const TypeMap* target,
 }
 
 extern TypeMap EmptyMap;
-// D2.6.6v2: an array now has its own attribute face, so a JS array's companion
+// D3.1.1: an array now has its own attribute face, so a JS array's companion
 // property map is held there — one tagged Item in an 8-byte buffer — instead of
 // in a reserved tail slot inside the elements buffer. This shape marks that
 // buffer. The companion stays a real object (a sparse array's companion is a
@@ -1745,17 +1745,17 @@ typedef struct Input {
     NamePool* name_pool;        // centralized name management
     TypeMap* shape_transition_root;
     int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
-    // D3.4.3v4: the map graph's budget; 0 means MAX_SHAPE_GRAPH. The runtime
+    // D3.4.3: the map graph's budget; 0 means MAX_SHAPE_GRAPH. The runtime
     // tree raises it, since every runtime-grown map shares that one tree.
     int shape_graph_budget;
-    // D3.4.3v3: one empty root per element tag and namespace, a pool-owned
+    // D3.4.3: one empty root per element tag and namespace, a pool-owned
     // open-addressing table keyed by the pooled tag-name pointer; element
     // nodes (roots included) count against their own budget
     struct TypeElmt** element_roots;
     int element_root_cap;
     int element_root_count;
     int element_transition_shapes;    // bounded by MAX_ELEMENT_SHAPE_GRAPH
-    // D3.4.3v5: the runtime tree also grows from parents it does not own -- a
+    // D3.4.3: the runtime tree also grows from parents it does not own -- a
     // literal's, contract's, nominal, parsed or private type. Their edges live
     // here, keyed by the parent's address, so the parent is never written.
     // Only the runtime tree sets `keeps_external_edges`; the table is lazy.
@@ -1800,7 +1800,7 @@ typedef struct Input {
 // Resolve the Input that owns an active UI result arena.
 Input* ui_result_input(Arena* arena, bool report_missing = true);
 
-// D3.4.3v4/v5: the evaluation context's runtime shape tree (a capsule of the
+// D3.4.3/v5: the evaluation context's runtime shape tree (a capsule of the
 // Runtime's canonical EvalContext); NULL outside an evaluation.
 Input* runtime_shape_tree(void);
 // Drops that tree with its heap generation: after heap teardown, before the
@@ -1830,7 +1830,7 @@ void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena, Input
 // and an owned wide-scalar tail moves with the dense items that point into it.
 bool list_grow_io(List* list, int64_t min_capacity, Pool* pool, Arena* arena);
 // ui_mode content helpers shared by every content append path (collection_io.cpp):
-// UI element content must be document-owned (D4.5.2).
+// UI element content must be document-owned (D5.5.2).
 Item ui_copy_string_to_arena(Arena* arena, Item str_item);
 Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next);
 Item ui_copy_content_to_input(Input* owner, Item item);
@@ -1869,7 +1869,7 @@ bool map_put_undefined_unique_absent_bulk_heap(Map* mp, String** keys, int count
     Input* input, uint8_t shape_flags);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
-// D3.4.3v3: element types share through the Input's transition tree. The root
+// D3.4.3: element types share through the Input's transition tree. The root
 // for a tag and namespace (NULL: keep a private type), and the attribute add
 // that follows or mints an edge from an element's tree type.
 TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns);
@@ -1883,7 +1883,7 @@ typedef struct TypeTreeStep {
     TypeId type_id;
 } TypeTreeStep;
 
-// D3.4.3v3: a rebuilt type comes from the tree too. The root a container's
+// D3.4.3: a rebuilt type comes from the tree too. The root a container's
 // rebuild starts from (NULL: the container stays private), and the node
 // reached by adding `steps` from `start` (NULL: the tree declined).
 TypeMap* type_tree_root_like(Input* input, Map* container);

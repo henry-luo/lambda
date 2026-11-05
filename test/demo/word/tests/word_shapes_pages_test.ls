@@ -2,10 +2,10 @@ import model: ~~.mod_model
 import shapes: ~~.mod_shapes
 import page: ~~.mod_page
 import files: ~~.mod_io
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.model
+import lambda.editor.core.source_pos
 
 let doc = node('doc',[node('p',[text("BeforeAfter")])])
 let editor = edit_set_selection(model.open_editor(doc),text_selection(pos([0,0],6),pos([0,0],6)))

@@ -1,4 +1,5 @@
 import chat: lambda.chat
+import icons: lambda.ui.workspace.icons
 import files: .mod_files
 
 let EMOJI = [{text:"😀", label:"Grinning face"}, {text:"😊", label:"Smiling face"},
@@ -11,10 +12,7 @@ let EMOJI = [{text:"😀", label:"Grinning face"}, {text:"😊", label:"Smiling 
 
 let PATHS = {
     chat: "M4 4h16v12H9l-5 4z M8 8h8 M8 12h5",
-    search: "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13 M16 16l5 5",
-    send: "M3 3l19 9-19 9 4-9z M7 12h15",
     more: "M12 4v1 M12 11v1 M12 18v1",
-    check: "M4 12l5 5L20 6",
     double: "M2 12l5 5L18 6 M12 15l2 2L25 6",
     lock: "M6 10h12v11H6z M8 10V7a4 4 0 0 1 8 0v3",
     people: "M16 21v-3a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v3 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M19 4a4 4 0 0 1 0 7 M22 21v-3a4 4 0 0 0-3-4",
@@ -22,12 +20,12 @@ let PATHS = {
     emoji: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20 M7 14q5 6 10 0 M8 8v2 M16 8v2",
     attach: "M8 13l7-7a3 3 0 0 1 4 4L9 20a5 5 0 0 1-7-7L13 2 M6 14l9-9",
     image: "M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M16 7h1",
-    save: "M12 3v12 M7 10l5 5 5-5 M4 16v5h16v-5",
-    close: "M6 6l12 12 M18 6L6 18"
+    save: "M12 3v12 M7 10l5 5 5-5 M4 16v5h16v-5"
 }
 fn icon(key) => <svg width:"22", height:"22", viewBox:if (key == "double") "0 0 28 24" else "0 0 24 24",
     fill:"none", stroke:"currentColor", 'stroke-width':"1.7", 'stroke-linecap':"round", 'stroke-linejoin':"round",
-    'aria-hidden':"true", <path d:PATHS[key]>>
+    'aria-hidden':"true",
+    if (key in ["search","send","check","close"]) icons.glyph(key) else <path d:PATHS[key]>>
 fn avatar(user, size = "") => (let p = chat.profile(user),
     <span class:"avatar " ++ p.color ++ " " ++ size, p.initials>)
 fn contact(st, p) => (let unread = chat.unread((st.inboxes[st.user] or []), st.user, p.id),
@@ -90,7 +88,7 @@ pub fn page(st) => (let selected = chat.profile(st.peer),
             <div class:"rail-spacer">
             <span class:"rail-footer", (icon("lock"))>;
             (avatar(st.user, "small"))>
-        <aside class:"sidebar",
+        <aside class:"sidebar workspace-chrome",
             <header class:"sidebar-heading", <h1 "Chats">; <span class:"wordmark", "lambda">>;
             (profile_picker(st));
             <label class:"search", (icon("search"));
@@ -105,7 +103,7 @@ pub fn page(st) => (let selected = chat.profile(st.peer),
                 <p "A conversation has two sides.">
                 <span if (st.shared) "Open another window with a different profile to reply." else "Switch your profile above to reply.">>>
         <main class:"conversation",
-            <header class:"conversation-heading",
+            <header class:"conversation-heading workspace-chrome",
                 (avatar(st.peer));
                 <div class:"conversation-person", <h2 selected.name>;
                     <span class:"presence" ++ (if (st.online[st.peer] == true) " is-online" else ""),

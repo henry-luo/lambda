@@ -6,8 +6,8 @@
 > cursor, module graph, runtime catalog, data API, `JubeLanguageDef` and
 > `lambda <language>` dispatch) were deleted, with a Jube ABI bump
 > (`JUBE_ABI_VERSION` 8, `JUBE_HOST_API_VERSION` 5). No guest language is
-> hosted. This document is kept as the design record; D7.4.3 still constrains
-> any future guest, and D8.2.3v2 no longer names a guest acceptance test.
+> hosted. This document is kept as the design record; D9.5.3 still constrains
+> any future guest, and D8.2.3 no longer names a guest acceptance test.
 >
 > **Status:** design proposal; overall direction agreed 2026-07-20
 >
@@ -1103,3 +1103,50 @@ implementation ADRs before code lands:
 
 Each ADR should use Python as the extracting consumer while proving that the
 resulting contract contains no Python-specific semantics.
+
+---
+
+## Formal Design detail (relocated 2026-11-04)
+
+Formal Design spec 61.0.0 (2026-11-04) keeps only principles and stable
+decisions. This section keeps the full text that the old rulings below had
+before the rewrite, because their detail belongs to this record. Each
+heading gives the old ID and the new ruling. IDs inside the text use the
+new numbering. Implementation history:
+[`Lambda_Impl_Formal_Design_History.md`](impl/Lambda_Impl_Formal_Design_History.md).
+
+### ex-D1.2v2 → D1.2
+
+**D1.2* — Explicit guest ABI boundary.** `Item` is the only value
+currency across Lambda, Jube, native modules, and every **host boundary**.
+A separately versioned guest execution ABI may keep private values and
+private object pointers while executing, but none may cross that boundary
+or be reinterpreted as an `Item`; crossing requires an explicit owned
+adapter. Native host structs cross as VMap projections and system resources
+as integer rids. [JA6, JM22]
+
+### ex-D1.3v3 → D1.3
+
+**D1.3* — Shared host substrate, private guest cores.** There is one
+host MIR library and at most one event loop per host context. A guest first
+reuses every applicable untyped-Lambda substrate component: source-admission
+ownership, parser/AST and binding facts, MIR lifecycle and diagnostics,
+memory-accounting categories, logging, build/test gates, and explicit
+return/cleanup discipline. A guest may own a private value heap, root stack,
+and semantic kernels only where its isolated ABI under D1.2 makes direct
+reuse semantically invalid; each such boundary must be named and tested.
+It may not acquire another host Runtime, event loop, allocator framework, or
+Lambda-side stack owner. [Lang_Hosting P1–P10, C1–C10, JM22]
+
+### ex-D7.4.3 → D9.5.3
+
+**D9.5.3** Guest hosting crosses **no core types**: no `Runtime*`,
+`EvalContext*`, `Input*`, `MIR_context_t`, or `AstNode*` over the
+boundary — opaque handles and versioned sub-API tables only. Every
+callable runtime helper carries catalog metadata (signatures, ownership,
+GC/allocation effects, re-entry, exception behavior); lowering resolves
+through the catalog, never by guessing. The host owns heap activation,
+context install, side-stack entry/exit, and recovery boundaries —
+guests never construct contexts or touch global runtime pointers (the
+G1 gate). The JS merged Item error lane (D7.4.3) is not reused as another
+guest's exception model.* [Lang_Hosting §5–§7, §13, D7.4.3]

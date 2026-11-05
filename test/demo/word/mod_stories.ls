@@ -1,7 +1,7 @@
-// Repeated stories are document data, independent of the body caret (S1.4, D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_transaction
+// Repeated stories are document data, independent of the body caret (S1.4, D10.2.1).
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.transaction
 import page: .mod_page
 import objects: .mod_objects
 

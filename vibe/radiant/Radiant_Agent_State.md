@@ -5,7 +5,7 @@ state ledger: RS17–RS27 extend `Radiant_Design_State_Management.md`'s
 RS1–RS16. The v1 SQLite state store and browser integration are landed.
 
 **Formal-spec linkage:** no `S#` ruling covers native browser-profile data.
-`D4.2.1v3` and `D4.2.3` require one explicit owner and lifetime for the
+`D5.2.1` and `D5.2.1` require one explicit owner and lifetime for the
 profile store; `D1.9` and `D1.10` require malformed state to fail closed and
 each invariant below to have an enforcement gate. No change to either formal
 specification is proposed: this is a Radiant host-service design.
@@ -48,7 +48,7 @@ the state store's small transactional writes and private schema.
 `BrowsingSession` owns the profile, the `RadiantStateStore`, and the one
 shared `CookieJar`. A document and its resource manager borrow them. Replacing
 a page therefore cannot discard session cookies, create a second jar, or reset
-the history owner. This is the lifetime boundary required by `D4.2.3`.
+the history owner. This is the lifetime boundary required by `D5.2.1`.
 
 Before this change, `BrowsingSession` owned only an in-memory `HistoryEntry[]`,
 while `resource_manager_create()` created a jar at `./temp/cookies.dat` for

@@ -21,4 +21,4 @@ bool io_resource_file_guard(void* context, const char* relative,
 struct LambdaTask;
 // The caller checks file-I/O authority and owns the returned anchor and leaf.
 Item io_resource_create_anchor(Item target, const char* operation, LambdaTask* owner,
-    FileAnchor** anchor, char** leaf);
+    uint32_t flags, FileAnchor** anchor, char** leaf);

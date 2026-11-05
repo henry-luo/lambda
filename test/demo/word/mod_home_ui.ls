@@ -1,12 +1,12 @@
 // Word's Home tab: Undo, Clipboard, Font, Paragraph, Styles, and Editing groups.
 // Split buttons repeat the last choice; their chevrons open the shared ribbon menu.
-import lambda.editor.mod_editor
-import lambda.editor.mod_step
+import lambda.editor.model
+import lambda.editor.core.step
 import model: .mod_model
 import home: .mod_home
 import document: .mod_document
-import ribbon_icons: .mod_ribbon_icons
-import ribbon: ~~.mod_ribbon
+import ribbon_icons: lambda.ui.workspace.ribbon_icons
+import ribbon: lambda.ui.workspace.ribbon
 
 pub let emphasis = [{id:"bold",mark:'strong'},{id:"italic",mark:'em'},{id:"underline",mark:'u'},
     {id:"strikethrough",icon:"strike",mark:'del'},{id:"subscript",mark:'sub'},{id:"superscript",mark:'sup'}]

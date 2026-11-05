@@ -2,7 +2,7 @@ import model: ~~.~~.mod_model
 import files: ~~.~~.mod_io
 import stories: ~~.~~.mod_stories
 import radiant
-import lambda.editor.mod_doc
+import lambda.editor.core.doc
 
 pn main() {
     let doc = node('doc',[for (i in 1 to 100) node('p',[text("Paragraph " ++ string(i) ++

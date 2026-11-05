@@ -1,8 +1,8 @@
 import spelling: lambda.doc.spelling
 import front: lambda.doc.spelling.front_coded
 import incremental: lambda.doc.spelling.incremental
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.core.step
 
 fn checked(checker,units) any^ => incremental.accept(units,[for (request in incremental.pending(units))
     {*:request,report:spelling.check(checker,request.text)^}])

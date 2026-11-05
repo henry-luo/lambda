@@ -1,4 +1,4 @@
-// D3.3.3v3: split's string pointer lane has no value certificate, but its
+// D4.3.3: split's string pointer lane has no value certificate, but its
 // physical descriptor suffices for a checked string Item read.
 fn read(words: string[] as W, index: int) string? => words[index]
 

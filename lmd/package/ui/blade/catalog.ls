@@ -1,4 +1,4 @@
-import shared: lambda.ui.core.catalog
+import shared: lambda.ui.dtna.catalog
 import widgets: .widgets
 
 let tags = {

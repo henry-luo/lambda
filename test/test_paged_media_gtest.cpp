@@ -1601,7 +1601,7 @@ static LayoutViewNode* source_image_fragment(ViewTree* tree, DomNode* source) {
 }
 
 static void expect_independent_workspace_image(const LayoutViewNode* fragment, DomElement* source) {
-    // D4.5.1v4 / paged design §1.3.5: the workspace survives layout; editions own separate resources.
+    // D5.5.1 / paged design §1.3.5: the workspace survives layout; editions own separate resources.
     ASSERT_NE(fragment, nullptr); ASSERT_NE(fragment->image_box, nullptr);
     ASSERT_NE(source->embed, nullptr); ASSERT_NE(source->embedp()->img, nullptr);
     EXPECT_NE(fragment->image_box->image.get(), source->embedp()->img.get());
@@ -2156,7 +2156,7 @@ TEST_F(SecondaryViewTest, FoDecorationArithmeticUsesCssExpansionAndAbsoluteLongh
 }
 
 TEST_F(SecondaryViewTest, SvgIntakeUsesHtmlForeignContentNames) {
-    // xmlns spellings do not override HTML's SVG namespace assignment (D2.11.2).
+    // xmlns spellings do not override HTML's SVG namespace assignment (D10.1.5).
     const char* admitted[] = {"<svg/>", "<svg xmlns='http://www.w3.org/2000/svg'/>",
         "<SVG viewbox='0 0 20 10'/>", "<svg xmlns='urn:foreign'/>", "<svg xmlns=\"\"/>"};
     for (const char* xml : admitted) { SCOPED_TRACE(xml); EXPECT_NE(parse_svg_document(input, xml), nullptr); }
@@ -2865,7 +2865,7 @@ TEST_F(SecondaryViewTest, OversizedAndDeniedImagesReturnSourceDiagnosticsWithout
     ImageSurface* empty = render_secondary_page_snapshot(fallback, 1, 1.0f); ASSERT_NE(empty, nullptr);
     expect_snapshot_rgb(empty, 40, 20, 255, 255, 255); image_surface_destroy(empty);
 
-    // HTML retains its browsing fallback; a native document must diagnose an unavailable graphic (D7.1.2v2).
+    // HTML retains its browsing fallback; a native document must diagnose an unavailable graphic (D9.1.2).
     DomElement* native = block(nullptr, nullptr, "r:page-document"); ASSERT_NE(native, nullptr);
     ASSERT_TRUE(native->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     ASSERT_TRUE(source->DomNode::remove_child(native)); source = native; doc.root = lam::up(native);
@@ -2915,7 +2915,7 @@ TEST_F(SecondaryViewTest, ImagesUseTheSameProducerInFootnotesAndRepeatedRunningF
         EXPECT_EQ(node->image_box->image.get(), footnote->image_box->image.get());
     }
     EXPECT_EQ(logos, 2u);
-    // DOM image slots are the workspace; the edition owns a separate resource (D4.5.1v4)
+    // DOM image slots are the workspace; the edition owns a separate resource (D5.5.1)
     ASSERT_NE(note_image->embed, nullptr); ASSERT_NE(running_image->embed, nullptr);
     EXPECT_NE(footnote->image_box->image.get(), note_image->embedp()->img.get());
     image_cache_cleanup(shared_ui());
@@ -3300,7 +3300,7 @@ TEST_F(SecondaryViewTest, SourceFontShorthandAndBlockBordersBelongToTheSelectedV
     ASSERT_NE(box->computed_boundary->border, nullptr);
     EXPECT_FLOAT_EQ(box->computed_boundary->border->width.left, 2.0f);
     EXPECT_FLOAT_EQ(box->rect.height, 80.0f);
-    // paged-media §1.3.5 uses the DOM workspace and publishes owned copies (D4.5.1v4).
+    // paged-media §1.3.5 uses the DOM workspace and publishes owned copies (D5.5.1).
     EXPECT_EQ(child->x, 0.0f); EXPECT_FLOAT_EQ(child->width, 220.0f);
     EXPECT_NE(box->computed_boundary.get(), child->boundary());
     DomNode* text = child->first_child; ASSERT_NE(text, nullptr);
@@ -3530,7 +3530,7 @@ TEST_F(SecondaryViewTest, CaptionInheritanceAndGeneratedCountersPreserveSourceOr
     LayoutViewNode* final = source_fragment(tree, last, VIEW_FRAGMENT_BODY, true);
     ASSERT_NE(above, nullptr); ASSERT_NE(below, nullptr); ASSERT_NE(final, nullptr);
     EXPECT_LT(above->rect.y, below->rect.y); EXPECT_LT(below->rect.y, final->rect.y);
-    // body fragments no longer own page-context styles; the layout workspace owns alignment (D4.5.1v4).
+    // body fragments no longer own page-context styles; the layout workspace owns alignment (D5.5.1).
     EXPECT_EQ(above->computed_style, nullptr); EXPECT_EQ(below->computed_style, nullptr);
     ASSERT_NE(top->blk, nullptr); ASSERT_NE(bottom->blk, nullptr);
     EXPECT_EQ(top->block()->text_align, CSS_VALUE_LEFT); EXPECT_EQ(bottom->block()->text_align, CSS_VALUE_CENTER);
@@ -4534,7 +4534,7 @@ TEST_F(SecondaryViewTest, RowSpanHeightDistributionIncludesSpacingAndAlignsConte
     EXPECT_FLOAT_EQ(cell->rect.height, 72.0f);
     expect_glyph_line_position(source_glyph_text(tree, span->first_child, "Span"), cell->rect.y + 60.0f, 12.0f);
     expect_source_range_coverage(tree, span->first_child);
-    // D4.5.1v4 / D4.1.4v5: old glyph storage and paint survive later source edits and rollback.
+    // D5.5.1 / D5.1.4: old glyph storage and paint survive later source edits and rollback.
     EXPECT_FLOAT_EQ(retained_text->glyph_run->baseline_y, retained_baseline);
     for (size_t i = 0; i < 2; i++) {
         ImageSurface* after = render_secondary_page_snapshot(retained, 1, i ? 2.0f : 1.0f); ASSERT_NE(after, nullptr);
@@ -4959,7 +4959,7 @@ TEST_F(SecondaryViewTest, CompletedCellCoverageAndNodeBudgetsRejectBeforePublish
     ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
     EXPECT_EQ(tree->model->node_count, complete);
     ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
-    // retained ranges belong to their edition arena (D4.5.1v4 / D4.1.4v5).
+    // retained ranges belong to their edition arena (D5.5.1 / D5.1.4).
     EXPECT_EQ(view_tree_page_material(retained, retained->model->pages.get()[0]), old_page);
     EXPECT_TRUE(slot->table_range->missing); EXPECT_EQ(slot->table_range->column, 2u);
 }
@@ -5260,7 +5260,7 @@ TEST_F(SecondaryViewTest, AnonymousTableSourceTextIsDiagnosedAtItsSource) {
     content();
     EXPECT_GT(view_tree_node_state(tree, source_text, false)->occurrence_count, 1u);
     ASSERT_TRUE(view_tree_secondary_release(&doc, tree));
-    // D4.5.1v4 / D4.1.4v5: fixup workspace and source styles do not own retained glyph payloads.
+    // D5.5.1 / D5.1.4: fixup workspace and source styles do not own retained glyph payloads.
     for (size_t i = 0; i < 2; i++) {
         ImageSurface* after = render_secondary_page_snapshot(retained, 1, i ? 2.0f : 1.0f); ASSERT_NE(after, nullptr);
         expect_same_surface_pixels(before[i], after);
@@ -7136,7 +7136,7 @@ TEST_F(SecondaryViewTest, PagedColumnWidthsOverrideFirstRowCellsAndFollowEachPag
     for (LayoutViewNode* occurrence = view_tree_node_state(tree, cell, false)->first_occurrence; occurrence; occurrence = occurrence->next_occurrence)
         if (occurrence->paint_box) { ASSERT_LT(page, 3u); EXPECT_FLOAT_EQ(occurrence->rect.width, widths[page++]); }
     EXPECT_EQ(page, 3u);
-    // the DOM now stores the common layout workspace, including column properties (D4.5.1v4).
+    // the DOM now stores the common layout workspace, including column properties (D5.5.1).
     ASSERT_NE(first->blk, nullptr); EXPECT_FLOAT_EQ(first->width, 55.0f); EXPECT_FLOAT_EQ(source->width, 220.0f);
     expect_table_cell_track(tree, cell, 10.0f, 55.0f, 3);
     ViewTree* retained = nullptr; ViewTree* changed = nullptr;
@@ -17474,7 +17474,7 @@ TEST(FontMetricTest, SystemColorGlyphAdvancesExcludeAutomaticTracking) {
         EXPECT_TRUE(font_platform_has_color_glyphs(font));
         // independent Chromium captures establish advances, including bitmap optical sizing.
         EXPECT_NEAR(font_platform_get_glyph_advance(font, 0x1F600), entry.advance, 0.01f);
-        TextExtents run = font_platform_measure_text(font, "😀", 4, 0.0f);
+        TextExtents run = font_platform_measure_text(nullptr, font, "😀", 4, 0.0f);
         EXPECT_NEAR(run.width, entry.advance, 0.01f);
         font_platform_destroy_ct_font(font);
     }

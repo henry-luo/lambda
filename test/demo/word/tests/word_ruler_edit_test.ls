@@ -2,10 +2,10 @@ import ruler: ~~.mod_ruler
 import model: ~~.mod_model
 import page: ~~.mod_page
 import stories: ~~.mod_stories
-import lambda.editor.mod_doc
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_step
+import lambda.editor.core.doc
+import lambda.editor.model
+import lambda.editor.core.source_pos
+import lambda.editor.core.step
 
 let base = model.open_editor(node('doc',[node('p',[text("First paragraph")]),node('p',[text("Second paragraph")])]))
 let p = {indent:20,first:10,right:30}

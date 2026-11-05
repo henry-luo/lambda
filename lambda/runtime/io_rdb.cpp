@@ -413,7 +413,8 @@ Item spool_begin_value(Item handle, Item path) {
     Rooted<Item> held_handle(roots, handle), held_path(roots, path);
     FileAnchor* parent = NULL;
     char* leaf = NULL;
-    Item opened = io_resource_create_anchor(held_path.get(), "io.rdb.spool_begin", scope->owner, &parent, &leaf);
+    // A private temporary spool has no durable publication requirement.
+    Item opened = io_resource_create_anchor(held_path.get(), "io.rdb.spool_begin", scope->owner, 0, &parent, &leaf);
     if (item_is_error(opened)) return opened;
     FileAnchor* directory = file_anchor_directory(parent, leaf, true, FILE_ANCHOR_PRIVATE);
     mem_free(leaf);
@@ -507,7 +508,7 @@ Item export_begin_value(Item handle, Item target) {
     Rooted<Item> held_handle(roots, handle), held_target(roots, target);
     char* leaf = NULL;
     Item opened = io_resource_create_anchor(held_target.get(), "io.rdb.export_begin", scope->owner,
-                                             &scope->export_anchor, &leaf);
+                                             FILE_ANCHOR_FULL_SYNC, &scope->export_anchor, &leaf);
     if (item_is_error(opened)) return opened;
     scope->export_writer = file_anchor_write_begin(scope->export_anchor, leaf, NULL);
     mem_free(leaf);

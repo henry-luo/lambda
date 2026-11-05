@@ -70,7 +70,7 @@ The parser supports 7 lightweight markup formats:
   their arguments, and `{{{parameter|default}}}` uses a distinct marker and
   `default` attribute. `<nowiki>` shields these constructs from parsing. The
   wiki formatter writes the saved source back out. These nodes are built with
-  `MarkBuilder` under D7.1.5; no template definition lookup or expansion is
+  `MarkBuilder` under D9.1.4; no template definition lookup or expansion is
   implied by loading the document.
 
 ### Org-mode

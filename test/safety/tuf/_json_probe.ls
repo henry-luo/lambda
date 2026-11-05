@@ -1,4 +1,4 @@
-// D7.5.8: differential oracle uses the production strict reader and encoder.
+// D11.2.4: differential oracle uses the production strict reader and encoder.
 import json: lambda.security.tuf.json
 import meta: lambda.security.tuf.metadata
 fn probe(row) map^ {

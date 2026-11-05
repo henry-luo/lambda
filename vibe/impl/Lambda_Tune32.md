@@ -139,7 +139,7 @@ arrays and results.
 
 The minimal variants narrow the source contracts. They demonstrate what
 information helps for these accepted benchmark inputs, not permission to
-impose those contracts on arbitrary untyped calls (**D3.3.1v2–D3.3.3v3**).
+impose those contracts on arbitrary untyped calls (**D4.3.1–D4.3.3**).
 
 ### 2.4 Additional evidence and limits
 
@@ -177,16 +177,16 @@ in section 13. Instrumented MIR-dump runs are not timing samples.
 
 | Formal authority | Requirement for Tune32 |
 |---|---|
-| **D3.3.1v2, D3.3.2v2** | Accepted programs evaluate identically with weaker or stronger inference. Keep entry-shape specialization separate from body/result inference; infer an implementation, not a new runtime contract. |
-| **D3.3.3v3, D3.3.4** | Binding-scoped narrowing is not an array certificate. Prove the actual carrier, preserve legal widening, and retain nullable indexed results until a valid proof removes absence. |
-| **D3.3.5, D8.2.5v3–D8.2.6** | Extend existing declarative result relations, the shared analysis schedule and `MirValue` lowering. Do not add a parallel type oracle or node-fact database. |
-| **D8.3.1v2–D8.3.4v3** | Raw entries require complete exact shape keys and static proof or boxed-entry guards. An inferred mismatch reaches boxed source semantics, not a declared-type admission error. Preserve `var` homes and boxed fallback. |
-| **D8.4.1v2** | No mutable inline caches, feedback vectors or runtime-patched specialization. Use compile-predicted shapes and immutable guards. |
-| **S4.1.1–S4.1.5, D2.5.2v3** | Preserve int poison/saturation and sized-int behavior; use each carrier's actual null sentinel. Native bool absence is not interchangeable with boxed null or false. |
+| **D4.3.1, D4.3.2** | Accepted programs evaluate identically with weaker or stronger inference. Keep entry-shape specialization separate from body/result inference; infer an implementation, not a new runtime contract. |
+| **D4.3.3, D2.4.3** | Binding-scoped narrowing is not an array certificate. Prove the actual carrier, preserve legal widening, and retain nullable indexed results until a valid proof removes absence. |
+| **D4.3.4, D8.2.5–D8.2.6** | Extend existing declarative result relations, the shared analysis schedule and `MirValue` lowering. Do not add a parallel type oracle or node-fact database. |
+| **D7.3.1–D7.3.4** | Raw entries require complete exact shape keys and static proof or boxed-entry guards. An inferred mismatch reaches boxed source semantics, not a declared-type admission error. Preserve `var` homes and boxed fallback. |
+| **D7.4.1** | No mutable inline caches, feedback vectors or runtime-patched specialization. Use compile-predicted shapes and immutable guards. |
+| **S4.1.1–S4.1.5, D2.4.2** | Preserve int poison/saturation and sized-int behavior; use each carrier's actual null sentinel. Native bool absence is not interchangeable with boxed null or false. |
 | **S7.1.1v3, S7.1.3v2** | Invalid reads yield null; invalid writes raise through the hard error channel. Preserve operand evaluation order and error propagation. |
 | **S9.1.2–S9.1.3, S9.2.2** | Value snapshots, plain-parameter isolation, exclusive borrows and caller write-back remain observable obligations. |
-| **D4.3.1, D4.4.4v4–D4.4.6** | Reload movable data-zone pointers after relevant allocation points; invalidate path/ownership facts after conflicting writes, sharing or replacement. |
-| **D5.3.1–D5.3.4** | Keep canonical roots current at collecting calls. Native pointer proofs do not replace ownership. Reuse emitter root handling and precise `RootFrame` / `Rooted` helpers. |
+| **D5.3.1, D5.4.4–D5.4.5** | Reload movable data-zone pointers after relevant allocation points; invalidate path/ownership facts after conflicting writes, sharing or replacement. |
+| **D6.3.1–D6.3.4** | Keep canonical roots current at collecting calls. Native pointer proofs do not replace ownership. Reuse emitter root handling and precise `RootFrame` / `Rooted` helpers. |
 | **D8.6.1–D8.6.3** | Review emission growth explicitly, inspect finalized release MIR, and run forced-GC plus poison oracles. Never weaken a test to conceal incorrect behavior. |
 
 Use the existing helpers before adding another variant; extract shared code
@@ -274,7 +274,7 @@ executed-work census.
 4. Keep widening and COW replacement on the existing fallback, including
    publication of a replacement owner. Do not attach a declared `bool[]`
    certificate to an open array just because its initial values are boolean
-   (**D3.3.3v3**).
+   (**D4.3.3**).
 5. Audit bool facts through aliases, rebindings, loops and `var` calls. Share
    transfer rules with the existing integer/float lane analysis; avoid a
    benchmark-specific boolean branch that bypasses invalidation.
@@ -332,7 +332,7 @@ the declared-only fusion gate alone may not close its gap.
    callee parameter. Recover a justified string fact or a complete predicted
    function-entry shape. If the call edge is open, retain `_b` and its exact
    guard. Do not coerce a mixed array argument into string to reach the fast
-   body (**D8.3.1v2–D8.3.3**).
+   body (**D7.3.1–D7.3.3**).
 4. Reuse `emit_string_char_pair_compare` and its existing byte/Unicode
    fallback. Evaluate every operand once, preserving the existing lowering
    order (**S7.7.1**); root the left
@@ -530,7 +530,7 @@ the timed release.
    Start with read-only regions; do not combine this step with new write or
    aggregate-lifetime conventions.
 5. Bound code growth. Prefer improving an existing plan and small guarded
-   consumers over cloning entire functions. Preserve **D8.4.1v2**: no mutable
+   consumers over cloning entire functions. Preserve **D7.4.1**: no mutable
    per-site cache or profiling-driven recompilation.
 
 ### 10.3 Tests and disposition
@@ -539,7 +539,7 @@ Exercise two shapes sharing a field name with different offsets, missing
 fields, null receivers, nullable fields, mixed arrays, shape transitions,
 nested indices, constructor returns, collection during RHS evaluation and
 alias/COW mutation between reads. The generic miss must remain output-equal
-to ordinary access under **S7.1.1v3, D3.4.5, D4.4.4v4**.
+to ordinary access under **S7.1.1v3, D3.4.5, D5.4.4**.
 
 Proceed to implementation only when current profile/census evidence identifies
 a hot eligible region. Retain a pilot only with a measurable paired release
@@ -691,10 +691,10 @@ diagnostic anchor. Durable evidence is in
 
 | Track | Actual change | Mechanism evidence |
 |---|---|---|
-| T32-1 | Classify boolean fill as packed ArrayNum; install a guarded element witness without an array certificate | Native `u8` stores, with carrier/bounds/COW fallbacks; empty and mixed arrays keep source semantics (**D3.3.3v3**) |
-| T32-2 | Admit inferred string carriers to shared character fusion; nullable nested string elements predict a guarded entry while the honest caller join stays ANY | Fused byte/Unicode comparison in raw bodies; complete boxed body handles absent rows and other keys (**D8.3.1v2–D8.3.3**, **S8.2.4v3**) |
-| T32-3 | Treat a closed matching scalar edge to an already native consumer as useful forwarding; permit existing leaf inlining only after complete actual argument admission | Levenshtein `min3` stops forwarding to `_min2_b`; inferred leaf parameters use resolved native facts, with no invented source annotation (**D8.2.5v3**, **D8.3.2**) |
-| T32-4 | Enable fixed scalar inferred raw tail loops, proving every argument again; keep boxed slow bodies recursive | Divrec raw backedges have no self-call; argument permutation, float lanes and a 20,000-step countdown pass (**D8.3.2**) |
+| T32-1 | Classify boolean fill as packed ArrayNum; install a guarded element witness without an array certificate | Native `u8` stores, with carrier/bounds/COW fallbacks; empty and mixed arrays keep source semantics (**D4.3.3**) |
+| T32-2 | Admit inferred string carriers to shared character fusion; nullable nested string elements predict a guarded entry while the honest caller join stays ANY | Fused byte/Unicode comparison in raw bodies; complete boxed body handles absent rows and other keys (**D7.3.1–D7.3.3**, **S8.2.4v3**) |
+| T32-3 | Treat a closed matching scalar edge to an already native consumer as useful forwarding; permit existing leaf inlining only after complete actual argument admission | Levenshtein `min3` stops forwarding to `_min2_b`; inferred leaf parameters use resolved native facts, with no invented source annotation (**D8.2.5**, **D7.3.2**) |
+| T32-4 | Enable fixed scalar inferred raw tail loops, proving every argument again; keep boxed slow bodies recursive | Divrec raw backedges have no self-call; argument permutation, float lanes and a 20,000-step countdown pass (**D7.3.2**) |
 
 The residual Levenshtein experiment identifies helper declarations, rather
 than row or counter declarations, as the limiting factor. On the control,
@@ -709,7 +709,7 @@ defect: a shape-changing self call reached the boxed body, but native return
 analysis decoded its string result as integer zero. A fixed scalar recursive
 return now needs matching argument-lane proof; otherwise its result stays
 Item-valued. The new fixture returns `"done"` identically on JIT, interpreter
-and AUTO, with all three GC stress modes (**D3.3.1v2**, **D8.3.2**).
+and AUTO, with all three GC stress modes (**D4.3.1**, **D7.3.2**).
 
 **Evaluation-order clarification:** **S7.7.1** does not prescribe strict
 left-to-right expression evaluation. Native indexing already evaluates keys
@@ -757,7 +757,7 @@ and root traffic intact; cloning the whole function would exceed this track's
 bounded-consumer scope. **T32-5 is deferred after investigation; no record
 optimization is claimed.** The next bounded question is propagation of the
 constructor's complete field facts through scene-array reads, followed by a
-measured scalar consumer region (**D3.3.3v3**, **D8.4.1v2**, **D5.3.4**).
+measured scalar consumer region (**D4.3.3**, **D7.4.1**, **D6.3.4**).
 
 ### 13.4 Full population and outlier closure
 
@@ -797,7 +797,7 @@ Within each group, every result has the same normalized output hash.
 The string declaration advantage has closed for Levenshtein and Fast Diff.
 Primes retains a guarded inferred-array path, while a declared `bool[]`
 can reuse its checked contract; this remaining gap is intentional proof
-cost (**D3.3.3v3**), not a reason to fabricate a certificate. Divrec's
+cost (**D4.3.3**), not a reason to fabricate a certificate. Divrec's
 scalar inferred loop now reaches its typed companion's performance.
 The diagnostic families also show that additional annotations are not
 universally beneficial: the Levenshtein array-only family takes 5.272 ms
@@ -826,7 +826,7 @@ and [`final-asan.json`](../../temp/tune32/final-asan.json).
 `check_gc_effects.py` verifies 93 NO_GC imports and 288 call-graph nodes.
 `check_gc_root_hazards.py` checks 16,649 migrated native functions and finds
 no automatic-local roots or transient registration guards. No helper effects
-classification or rooting convention was weakened (**D5.3.1–D5.3.4**).
+classification or rooting convention was weakened (**D6.3.1–D6.3.4**).
 
 An extra ratchet run on the **release/default budget profile** has three
 pre-existing failures: `js_hoisted_modvar_write_through` (`js_main` 87 vs
@@ -979,7 +979,7 @@ implemented and needs to participate in the resolved argument/result chain,
 not be duplicated in another special-case table. Reuse the existing string
 push and comparison lowerings once actual carrier/bounds/tag proof is available.
 Inference remains binding-local, indexed reads retain null, and no string-array
-certificate may be invented (**D3.3.3v3–D3.3.5**, **D8.2.5v3**, **D8.3.2**).
+certificate may be invented (**D4.3.3–D4.3.4**, **D8.2.5**, **D7.3.2**).
 
 The executed three-way-merge census drops from 334.6 million helper calls and
 2.918 billion root reloads in untyped to 55.8 million and 606.2 million in typed.
@@ -1005,7 +1005,7 @@ scalar consumers.** Start with read-only `gcbench` and `raytrace3d` before mutab
 Richards/CD paths. The constructor fact must include field storage and
 nullability, not just a layout candidate. Carry it across return/parameter and
 array-read edges; use exact immutable guards and preserve the full generic miss
-path (**D8.3.1v2–D8.3.3**, **D8.4.1v2**). A map shape alone does not authorize an
+path (**D7.3.1–D7.3.3**, **D7.4.1**). A map shape alone does not authorize an
 unchecked scalar decode after an in-place retag.
 
 There are two reusable typed mechanisms: direct constructor allocation/stores
@@ -1031,12 +1031,12 @@ proof obligation, but not necessarily a requirement to repeat every check per
 iteration. Investigate loop-entry carrier/element/bounds guards and stable owner
 facts using existing loop and COW plans, preserving out-of-bounds reads, failing
 writes and snapshot/borrow behavior (**S7.1.1v3**, **S7.1.3v2**, **S9.1.2–S9.1.3**,
-**D3.3.3v3**). Keep its priority below the text and record pipelines.
+**D4.3.3**). Keep its priority below the text and record pipelines.
 
 Root-traffic reductions should follow from eliminating generic MAY_GC calls,
 shortening actual live ranges and auditing exact effects. These counters are
 executed events, not CPU samples or collection counts; they do not justify
-removing required reloads or weakening precise ownership (**D5.3.4**).
+removing required reloads or weakening precise ownership (**D6.3.4**).
 
 ### 14.4 Acceptance for the next tuning round
 
@@ -1046,7 +1046,7 @@ pairs and typed companions, then the 63+63 population screen. Require emitted
 mechanism evidence as well as elapsed-time gains. Include mixed/empty/nullable
 arrays, widening and rebinding, Unicode, record retags, COW snapshots/borrow
 writeback, escaping calls, boxed misses and data-zone compaction/poison cases
-(objects themselves do not move: **D4.3.1**). Run the
+(objects themselves do not move: **D5.3.1**). Run the
 Lambda and Test262 baselines for engine changes. This review itself changes no
 engine code; its adopted benchmark receives full-output tier/GC validation.
 
@@ -1130,7 +1130,7 @@ function and binding summaries; `MirFlowFact`, `MirFlowIndexBound` and scoped
 lowering plans for dominating execution facts. Type-only erasable properties
 follow the lazy `Type` side-record rule. Do not add a competing ID-keyed
 per-node type table or mutate the shared `TYPE_ANY` singletons
-(**D8.2.5v3**).
+(**D8.2.5**).
 
 An inferred string-element fact is tied to the analyzed binding. Across a
 return, assignment or call boundary, establish the receiving binding's fact
@@ -1138,7 +1138,7 @@ from the complete producer/edge proof; do not smuggle it through a container
 certificate. Joins retain only facts true on every reachable incoming path.
 Use resolved binding identity, not identifier spelling. Rebinding, incompatible
 writes, escaping aliases and unknown effects kill the relevant local facts
-(**D3.3.1v2–D3.3.4**).
+(**D4.3.1–D2.4.3**).
 
 Extend the existing inference worklist/pass schedule and its invalidation epoch.
 Compute summaries once per relevant analysis revision, using the indexed
@@ -1150,15 +1150,15 @@ Function entry specialization remains subject to complete, bounded, immutable
 exact keys and the existing `_b` fallback. Operation-local guards do not create
 a third path into a raw callee. No partial per-parameter raw specialization,
 whole-array re-admission on every read, inline cache or feedback-selected body
-is introduced (**D8.3.1v2–D8.3.3**, **D8.4.1v2**). Any call-entry guard hoisting
-must separately satisfy **D8.3.4v3**; synchronous `pn` is not eligible for that
+is introduced (**D7.3.1–D7.3.3**, **D7.4.1**). Any call-entry guard hoisting
+must separately satisfy **D7.3.4**; synchronous `pn` is not eligible for that
 hoisting merely because a local loop guard is legal.
 
 Use `MirValue` and `em_require_rep()` for carrier conversion. Root insertion and
-final-store ownership stay with the emitter (**D2.4.1–D2.4.3**, **D8.2.6**,
-**D5.3.4**). Object-zone addresses do not move, but array items/map data may
+final-store ownership stay with the emitter (**D2.3.4–D2.3.5**, **D8.2.6**,
+**D6.3.4**). Object-zone addresses do not move, but array items/map data may
 move during data-zone compaction. Reload such data pointers from a live owner
-after collecting calls or COW replacement (**D4.3.1**, **D4.4.4v4**).
+after collecting calls or COW replacement (**D5.3.1**, **D5.4.4**).
 
 ### 15.4 T32-II-0 — Establish the control and proof-loss inventory
 
@@ -1242,7 +1242,7 @@ Implement in this order:
 The expected deliverable is a correct fact chain, not necessarily a standalone
 speedup. Measure II-1 together with its first consumer in II-2. Intermediate
 analysis precision must preserve accepted-program results under inference
-erasure (**D3.3.1v2**, **D3.3.2v2**, **D3.3.5**).
+erasure (**D4.3.1**, **D4.3.2**, **D4.3.4**).
 
 ### 15.6 T32-II-2 — Guarded string collection reads and consumers
 
@@ -1275,7 +1275,7 @@ guarded boxed-slot path through the shared index planner:
 5. Keep the boxed source/owner alive through loads and collecting operations.
    Publish a pointer-represented string with the correct emitter-owned root
    class. The null/miss join remains nullable/boxed unless the use site's flow
-   proof justifies a narrower result (**D3.3.4**, **D5.3.4**).
+   proof justifies a narrower result (**D2.4.3**, **D6.3.4**).
 
 Extend the shared length/bounds relation to eligible generic arrays, rather
 than duplicating typed-array bounds logic. Tie it to the same unchanged array
@@ -1369,7 +1369,7 @@ floats and unsupported values. Verify exact returned values under forced GC
 and poison. Inspect MIR for the expected allocator and descriptor-correct
 stores; measure generic construction helper reduction separately from read
 improvements. This work changes lowering, not allocation policy or source
-admission (**D3.3.2v2**, **D4.3.1**, **D5.3.4**).
+admission (**D4.3.2**, **D5.3.1**, **D6.3.4**).
 
 ### 15.9 T32-II-5 — Guarded record reads and scalar consumer regions
 
@@ -1393,7 +1393,7 @@ For each eligible field access, discharge these obligations separately:
    its actual `Item`/tag handling; a nullable slot retains null. A matching map
    descriptor is insufficient for mutable null/bool lanes that can retag in
    place. Reuse the exclusions in `mir_guarded_field_storage_admits` and check
-   the runtime retag/rebuild rules (**D3.4.5**, **D4.3.4**).
+   the runtime retag/rebuild rules (**D3.4.5**, **D5.3.3**).
 3. Any subsequent array indexing has an independently valid carrier/index/
    extent proof. Raytrace's dynamic axis does not become in-bounds because its
    enclosing triangle has a known shape.
@@ -1471,7 +1471,7 @@ Do not detach COW storage, perform a failing write check or allocate a new owner
 before proving that the original loop executes the corresponding operation.
 An out-of-bounds read still yields null; an invalid write still fails. Shared
 snapshots and `var` caller-home publication must be unchanged
-(**S7.1.1v3**, **S7.1.3v2**, **S9.1.2–S9.1.3**, **D4.4.3–D4.4.4v4**).
+(**S7.1.1v3**, **S7.1.3v2**, **S9.1.2–S9.1.3**, **D5.4.3–D5.4.4**).
 
 A whole-array validation on every inner-loop entry may cost more than repeated
 element guards. Measure the actual guard scope and trip counts. Retain the
@@ -1507,7 +1507,7 @@ Assert finalized MIR structure without raw addresses (**D8.6.2**): actual load
 width/carrier, dominating guard, preserved fallback, root class and conversion
 points. Use executed profiles to distinguish a cold fallback's presence from
 its hot execution. Never delete roots/reloads merely to lower a counter or
-introduce another static liveness authority (**D5.3.4**, **D8.6.3**).
+introduce another static liveness authority (**D6.3.4**, **D8.6.3**).
 
 Run the emission-size ratchet with **zero slack**. A justified emission increase
 needs an explicit, reviewable budget change with the implementation and measured
@@ -1713,20 +1713,20 @@ This section records actual work; §15 retains the original plan and targets.
 - **II-1/II-2:** shared `SYS_RESULT_TEXT_SPLIT` element instantiation; closed
   string builders and bounded producer/result forwarding candidates, cached in
   the existing call-site analysis epoch. Inferred strings do not select a numeric
-  array lane or manufacture a certificate (**D3.3.3v3, D8.2.5v3**).
+  array lane or manufacture a certificate (**D4.3.3, D8.2.5**).
   The shared index planner handles ordinary boxed slots. The pointer reader
   separately checks the actual native STRING descriptor that `split` installs.
   Both retain bounds/null and generic carrier fallbacks; comparisons check selected
-  values' string tags before native equality (**D3.3.4, S7.1.1v3**).
+  values' string tags before native equality (**D2.4.3, S7.1.1v3**).
 - **II-3:** extend the existing 48-node leaf plan to read-only string selection,
   without captures, mutation, recursion or broader arbitrary calls. Arguments
   are evaluated once before the implicit error boundary. Nullable results remain
-  Items and use emitter-owned roots (**D8.3.1v2–D8.3.3, D5.3.4**).
+  Items and use emitter-owned roots (**D7.3.1–D7.3.3, D6.3.4**).
 - **II-4:** inferred fixed-key constructors reuse `map_alloc_for_type` and the
   existing descriptor writer `set_field_value`; values are evaluated/captured/
   rooted in source order before allocation. Region capabilities and allocator
   policy are preserved. Nine-byte ANY slots use their complete descriptor, and
-  unsupported literals retain `map_fill` (**D2.6.4v3, D4.3.1, S7.7.1**).
+  unsupported literals retain `map_fill` (**D2.6.2, D5.3.1, S7.7.1**).
 - **II-5:** prefer an addressable internal-node candidate over a null-slot leaf;
   carry bounded candidates through returned array selection. Exact map-kind and
   shape guards authorize descriptor reads of ANY slots, with boxed fallback.
@@ -1734,12 +1734,12 @@ This section records actual work; §15 retains the original plan and targets.
   one-operation scalar consumer extends the existing null comparison lowering:
   convert the member's `MirValue` to Item, compare its null tag, and retain the
   kernel for type values. This preserves existing type(null) compatibility and
-  error/null behavior (**D8.4.1v2, D3.4.5, S5.1.1–S5.1.2**).
+  error/null behavior (**D7.4.1, D3.4.5, S5.1.1–S5.1.2**).
 - **II-6:** inferred bool arrays use actual carrier/layout/element checks at
   loop entry, separately from extent and exclusive-owner proofs. Same-lane stores
   use the existing scoped write/COW machinery. Guard misses skip subsequent
   length/ownership dereferences; zero-trip error producers do not crash
-  (**D3.3.1v2, S7.9.3, S9.1.2–S9.1.3**).
+  (**D4.3.1, S7.9.3, S9.1.2–S9.1.3**).
 
 Two correctness defects were reproduced before fixing their causes. A native
 string array rejected an incompatible unannotated store instead of using the
@@ -1779,7 +1779,7 @@ patch and comparison are retained as `record-region-*`; the narrower measured
 record/null consumer is retained instead. This is a rejected optimization, not
 an unresolved implementation blocker. Inferred small-record result expansion
 remains conditionally deferred: this phase establishes no profitable complete
-result-home plan and introduces no new ABI (**D5.3.4, D8.3.2**).
+result-home plan and introduces no new ABI (**D6.3.4, D7.3.2**).
 
 Executed profiles establish the mechanisms independently of timing: merge's
 30.855 million `word_at` calls and 27.291 million inner `fn_index` calls disappear;
@@ -1820,7 +1820,7 @@ with poison and the MIR interpreter with forced GC. The final release and ASAN
 binaries pass **72/72** focused boundary runs. Root/effect audits pass:
 16,667 migrated native functions and 95 NO_GC imports / 302 call-graph nodes.
 The patched ASAN MIR compiler also replays both the captured Navier–Stokes
-module and its reduced reproducer without a memory error (**D5.3.4**).
+module and its reduced reproducer without a memory error (**D6.3.4**).
 
 ### 16.4 Correctness gates and inherited failures
 
@@ -1877,7 +1877,7 @@ typed roots whose layout was already proven. Read admission now branches over
 unsafe header access only when the carrier actually needs probing. Store
 admission separates established carrier layout from live copy-on-write
 ownership; borrowed typed stores retain the ownership byte check. This follows
-**D3.3.2v2** and **D5.3.4**, without removing bounds or COW guards.
+**D4.3.2** and **D6.3.4**, without removing bounds or COW guards.
 
 The refined candidate's 31-pair confirmation restores typed NBody:
 **0.9919**, 21/31 wins; untyped NBody is **0.9998**, 17/31 wins. All complete
@@ -1962,7 +1962,7 @@ generic equality calls fall from 12,870,000 to 1,551,000. GCbench retains
 descriptor allocation for 3,222,190 constructors and descriptor-fast field
 paths; Primes records its admitted dense loop path. These are executed-event
 counters, not CPU samples, and do not authorize removing roots, bounds, COW,
-or fallback operations (**D5.3.4**, **S7.1.1v3**, **S9.1.2–S9.1.3**).
+or fallback operations (**D6.3.4**, **S7.1.1v3**, **S9.1.2–S9.1.3**).
 
 The full-procedure compiler diagnostic uses nine alternating samples per pilot
 row and records the phase's `transpile` time, emitted module instruction count

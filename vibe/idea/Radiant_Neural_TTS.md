@@ -93,7 +93,7 @@ are three ways around it:
    its source under GPL-3.0, and Radiant's code stays separate. The cost is
    process management and shipping a second executable. A first-party helper
    is not a third-party module, so the T2 requirements (separate process + OS
-   sandbox + capability broker, D7.5.1) do not automatically apply. That still
+   sandbox + capability broker, D11.1.1) do not automatically apply. That still
    needs to be confirmed.
 3. **A model that reads raw text.** Supertonic reportedly needs no G2P;
    Pocket TTS might not either (*verify*). This removes the problem entirely.
@@ -110,9 +110,9 @@ English first, with platform voices for everything else.
 **The engine interface already fits.**
 [`rdt_speech.h`](../../radiant/rdt_speech.h) renders a whole utterance,
 asynchronously, to mono float PCM plus boundary marks, from plain copied data
-(D4.5.2). The speech service already resamples each render to the bus rate and
+(D5.5.2). The speech service already resamples each render to the bus rate and
 rescales its marks. It also queues utterances, schedules `at:`, fires events,
-and applies the audible-output gate (D7.5.4,
+and applies the audible-output gate (D11.3.1,
 [speech design §3](../radiant/Radiant_Design_Speech.md#3-architecture)). A
 neural engine would be one more implementation of `rdt_speech_*`. Nothing
 above the interface changes.
@@ -160,7 +160,7 @@ above the interface changes.
 ## 5. Inference runtime and packaging
 
 - **ONNX Runtime** (MIT) is mature and runs on all three operating systems,
-  but it normally ships as a shared library. D7.1.1 keeps Lambda to static
+  but it normally ships as a shared library. D9.1.1 keeps Lambda to static
   libraries (dynamic linking is reserved for Jube modules). The choice is a
   static ONNX Runtime build linked into `radiant.a`, or the helper-process
   route from §3. Its effect on binary size must be measured; the release
@@ -178,11 +178,11 @@ above the interface changes.
      ([§7](../radiant/Radiant_Design_Speech.md#7-packaging-and-licensing)),
      installed by an explicit user command;
   2. download on first use, behind a visible consent prompt and through the
-     central IO API (D7.5.2). This conflicts with demos that promise no
+     central IO API (D11.1.2). This conflicts with demos that promise no
      network use;
   3. one small voice bundled with the release, with larger models optional.
 - **Build profiles.** The engine belongs only to Radiant builds, never to
-  `lambda-cli` (D7.1.6). The headless profiles (D7.1.4v2) might want it for
+  `lambda-cli` (D9.2.2). The headless profiles (D9.2.1) might want it for
   offline rendering and export.
 - **Memory.** Load the model lazily on the first `speak` and release it after
   an idle period. Native peak memory has to be measured, since the benchmark's
@@ -232,7 +232,7 @@ above the interface changes.
    The design excludes network services and cloning, not local engines.
 2. **Licensing:** may eSpeak NG (GPL-3.0) run in a separate helper process,
    or must the text front end be license-clean?
-3. **Process model:** a static ONNX Runtime inside `radiant.a` (D7.1.1), or a
+3. **Process model:** a static ONNX Runtime inside `radiant.a` (D9.1.1), or a
    helper process?
 4. **Weight licences:** Apache-2.0 only, or also OpenRAIL-M and CC BY 4.0
    with use restrictions?
@@ -261,5 +261,5 @@ above the interface changes.
   <https://www.yaps.ai/blog/best-local-tts-models>.
 - Child TTS by FastPitch transfer learning: <https://arxiv.org/abs/2311.04313>;
   code: <https://github.com/C3Imaging/child_tts_fastpitch>.
-- Formal rulings cited: D4.5.2, D7.1.1, D7.1.4v2, D7.1.6, D7.5.1, D7.5.2,
-  D7.5.4 (`python3 utils/formal_index.py <ID>`).
+- Formal rulings cited: D5.5.2, D9.1.1, D9.2.1, D9.2.2, D11.1.1, D11.1.2,
+  D11.3.1 (`python3 utils/formal_index.py <ID>`).

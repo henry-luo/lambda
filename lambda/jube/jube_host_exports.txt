@@ -1,8 +1,8 @@
-# Lambda host export allowlist (doc/Lambda_Formal_Design.md D7.3.6).
+# Lambda host export allowlist (doc/Lambda_Formal_Design.md D9.4.6).
 #
 # The host executable is compiled with hidden default visibility and links with
 # this list, so these are the only symbols a dlopen'ed Jube module can resolve
-# from it. Each entry is host-internal coupling that D7.3.3 retires in favour of
+# from it. Each entry is host-internal coupling that D9.4.3 retires in favour of
 # jube.h services; the list only grows by a reviewed, case-by-case opening:
 #   1. add the linker name below (Itanium-mangled for C++, no Mach-O "_"),
 #      followed by "# <consuming modules>";

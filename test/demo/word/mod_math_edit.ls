@@ -1,8 +1,8 @@
 // Word's in-place equation caret. The field tree is reparsed from the stored source after every
 // edit, and each edit is one equation.format transaction, so undo, the LaTeX pane and exports agree.
-import lambda.editor.mod_doc
-import lambda.editor.mod_source_pos
-import image: lambda.editor.mod_image
+import lambda.editor.core.doc
+import lambda.editor.core.source_pos
+import image: lambda.editor.image
 import field: .mod_math_field
 import equation: .mod_equation
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "T29-3 (D2.5.3): an int tree over possibly out-of-range reads tests each read once for null and branches to one null result -- no operator carries the old pair null test (eq/eq/or), and a literal operand is never tested. A non-null int equality tests nan on one side only (S4.1.2).",
+  "description": "T29-3 (D2.4.3): an int tree over possibly out-of-range reads tests each read once for null and branches to one null result -- no operator carries the old pair null test (eq/eq/or), and a literal operand is never tested. A non-null int equality tests nan on one side only (S4.1.2).",
   "checks": [
     {
       "in_func": "_step_#",

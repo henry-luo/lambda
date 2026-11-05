@@ -245,7 +245,7 @@ typedef enum Operator {
     OPERATOR_ZERO_MORE,
     OPERATOR_REPEAT,
     // `T[]` is a value-array contract, distinct from validator occurrence
-    // counts such as `T[3]` (D3.1.1v2).
+    // counts such as `T[3]` (D4.1.1).
     OPERATOR_ARRAY,
 
     OPERATOR_ASSIGN,
@@ -374,7 +374,7 @@ struct NameEntry {
     bool cow_param_root_returned;
     // A `var` parameter needs caller-home transport only when its body can
     // replace or retain the borrowed binding. Pure in-place writes keep the
-    // caller's descriptor valid (S9.2.1, D3.3.3v3).
+    // caller's descriptor valid (S9.2.1, D4.3.3).
     bool cow_var_param_may_publish;
     // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
     // base binding it aliases (chased through view-of-view). The call-site
@@ -430,7 +430,7 @@ struct NameEntry {
     // borrow -- read-and-return helpers (rbt_get) must not share-mark the
     // stored value they hand out.
     bool place_copy_mutated;
-    // CW24v3 / D4.4.6: the PLACE may be written while this copy is alive --
+    // CW24v3 / D5.4.5: the PLACE may be written while this copy is alive --
     // a write through the root (or a path prefix) between the bind and the
     // copy's last use, a `var` pass of the root in that range, or the copy
     // escaping the function. The copy is then a real second holder and the
@@ -565,7 +565,7 @@ struct AstNode {
     AstNodeType node_type;
     // Const-value handle. `node->type` already carries the inferred type, and
     // the few declaring nodes carry their own `declared_type`; zero-initialized
-    // allocation makes AST_CONST_NONE the default (RC12, D8.2.5v2).
+    // allocation makes AST_CONST_NONE the default (RC12, D8.2.5).
     AstConstKind const_kind;
     uint32_t const_index;
     // The direct binder stamps this instead of allocating a per-pass visited
@@ -717,7 +717,7 @@ bool ast_any_binding_pattern_child(AstNode* node,
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
 // Direct reduction reserves index storage as a node is born. Binding assigns
 // its stable ID in structural preorder after provisional scopes are remapped,
-// preserving the range invariant (D8.2.4v2/D8.2.5v3).
+// preserving the range invariant (D8.2.4/D8.2.5).
 bool ast_index_note_allocation(AstIndex* index, AstNode* node);
 bool ast_index_prepare_binding(AstIndex* index);
 bool ast_index_bind_node(AstIndex* index, AstNode* node, AstNode* parent,
@@ -788,7 +788,7 @@ static inline AstNode* ast_index_parent(const AstIndex* index, const AstNode* no
     return index && parent_id < index->count ? index->nodes[parent_id] : NULL;
 }
 
-// T29-1 / CW37 (D4.4.4v4): a record place spelled repeatedly in a `pn` body is
+// T29-1 / CW37 (D5.4.4): a record place spelled repeatedly in a `pn` body is
 // read through a synthesized handle. The first spelling binds it; later
 // spellings use it while the place and its ownership are unchanged. Decided
 // once at script finalize (lambda_ast_plan_place_handles); the interpreter
@@ -922,7 +922,7 @@ typedef struct AstPrimaryNode : AstNode {
     AstNode *expr;
     // Bare compact literals retain their decoded scalar here.  The shared
     // literal Type remains type-only, so a source span is never reparsed on
-    // each AST-interpreter evaluation (D8.1.3v11/D8.2.5v2).
+    // each AST-interpreter evaluation (D8.4.2/D8.2.5).
     int64_t literal_value;
     AstPrimaryLiteralValueKind literal_value_kind;
 } AstPrimaryNode;
@@ -997,7 +997,7 @@ typedef struct AstIdentNode : AstNode {
     // LambdaJS: 1-based slot of a static member name in the script's realm
     // literal cache, which holds its canonical property key (0 = none). The
     // parser assigns it like a string literal's slot; the AST stores no
-    // runtime String (D4.6.2v2). Also in tail padding.
+    // runtime String (D5.6.2). Also in tail padding.
     uint32_t js_property_key_slot;
 } AstIdentNode;
 // name, entry, capture owner, then slot + flag inside one padded word
@@ -1069,7 +1069,7 @@ typedef struct AstLoopControlNode : AstNode {
     AstNode *update;
     AstNode *body;
     NameScope *vars;
-    // D8.1.1v14: 1-based handoff ordinal of a `while` that is a direct
+    // D8.3.2: 1-based handoff ordinal of a `while` that is a direct
     // statement of a `pn` body (frame-plan pass); 0 = never a handoff loop
     uint8_t interp_handoff_ordinal;
 } AstLoopControlNode;
@@ -1264,6 +1264,22 @@ static inline AstNode* ast_unwrap_primary_to_leaf(AstNode* node) {
         node = ((AstPrimaryNode*)node)->expr;
     }
     return node;
+}
+
+// a self-prefixed join is the only assignment that can retain an owned
+// string append buffer. Both MIR lowerings use this whole-body may-own fact.
+static inline bool ast_is_owned_string_append(AstNode* node, NameEntry* binding) {
+    if (!node || node->node_type != AST_NODE_ASSIGN_STAM ||
+            ((AstAssignStamNode*)node)->target_entry != binding) return false;
+    AstNode* left = ast_unwrap_primary(((AstAssignStamNode*)node)->value);
+    bool joined = false;
+    while (left && left->node_type == AST_NODE_BINARY &&
+            ((AstBinaryNode*)left)->op == OPERATOR_JOIN) {
+        joined = true;
+        left = ast_unwrap_primary(((AstBinaryNode*)left)->left);
+    }
+    return joined && left && left->node_type == AST_NODE_IDENT &&
+        ((AstIdentNode*)left)->entry == binding;
 }
 
 // The root identifier of a member/index chain (`t.nodes[i].value` -> `t`), or
@@ -1531,7 +1547,7 @@ typedef struct AstFuncNode : AstNode {
     bool is_that_predicate;
     // T29-1: number of synthesized place-handle slots in this body
     uint16_t place_handle_count;
-    // D8.1.1v14: a synthesized loop continuation, whose parameters are the
+    // D8.3.2: a synthesized loop continuation, whose parameters are the
     // live-in locals of a T0 activation. They arrive from another binding's
     // ownership, so each is snapshot-marked at entry like a written param.
     bool is_loop_continuation;
@@ -1825,18 +1841,18 @@ typedef struct FnVariantAnalysis {
 
 // P2 tier-up state belongs to the definition site, rather than to individual
 // Function values: aliases of one `fn` must observe the same immutable native
-// entry once it is published (D8.1.1v2 §5.1).
+// entry once it is published (D8.3.1 §5.1).
 typedef enum FnPromotionState {
     FN_PROMOTION_INTERP,
     // The hot definition keeps executing T0 while its immutable satellite
-    // image is built by the process-wide compiler pool (D8.1.1v12).
+    // image is built by the process-wide compiler pool (D8.3.4).
     FN_PROMOTION_QUEUED,
     FN_PROMOTION_COMPILING,
     FN_PROMOTION_COMPILED,
     FN_PROMOTION_PINNED_INTERP,
 } FnPromotionState;
 
-// D8.1.1v14 loop-head handoff: the top-level `while` loops of a `pn` body that
+// D8.3.2 loop-head handoff: the top-level `while` loops of a `pn` body that
 // a running activation may leave at, numbered 1.. by the frame-plan pass.
 enum { INTERP_HANDOFF_LOOP_MAX = 8 };
 
@@ -1850,10 +1866,10 @@ typedef enum FnLoopHandoffState : uint8_t {
 typedef struct FnPromotionCell {
     FnPromotionState state;
     uint32_t call_count;
-    // self-tail edges are eligible for entry-equivalent handoff (D8.1.1v5)
+    // self-tail edges are eligible for entry-equivalent handoff (D8.3.2)
     uint32_t tail_edge_count;
     void* boxed_entry;
-    // D8.1.1v14: back-edges of each handoff loop, counted over the loop's
+    // D8.3.2: back-edges of each handoff loop, counted over the loop's
     // whole subtree and accumulated across activations. The first loop to
     // reach LAMBDA_LOOP_JIT_THRESHOLD owns the one continuation of this definition.
     uint32_t loop_backedges[INTERP_HANDOFF_LOOP_MAX];
@@ -1863,7 +1879,7 @@ typedef struct FnPromotionCell {
     const struct AstFuncNode* loop_continuation;
     NameEntry* const* loop_live_ins;    // continuation parameters, in order
     uint8_t loop_live_in_count;
-    // D8.1.1v18: trailing hidden parameters a `for` continuation takes after
+    // D8.3.2: trailing hidden parameters a `for` continuation takes after
     // its live-ins -- the walk's snapshot and its resume position; 0 for `while`
     uint8_t loop_resume_arg_count;
     bool loop_entered;                  // first handoff logged
@@ -1940,7 +1956,7 @@ typedef struct FnAnalysis {
     const char* may_await_cause;
     // Defect-origin scanning is invariant after a call-site round. Its atomic
     // epoch keeps retained-template compilation from reading another worker's
-    // result (D8.2.5v2).
+    // result (D8.2.5).
     uint32_t mir_cached_defect_origin_epoch;
     bool mir_cached_defect_origin;
     FnVariantAnalysis variants[4];

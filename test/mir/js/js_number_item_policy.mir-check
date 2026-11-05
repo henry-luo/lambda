@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.1.3v25: for-in snapshots produce String keys; the native cursor is never boxed through the retired Lambda int2it API.",
+  "description": "D8.4.2: for-in snapshots produce String keys; the native cursor is never boxed through the retired Lambda int2it API.",
   "checks": [
     {
       "in_func": "mvp_lmd_program",

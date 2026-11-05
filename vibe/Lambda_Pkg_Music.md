@@ -28,12 +28,12 @@ without revising the formal specifications:
 
 | Topic | Governing rulings | Application here |
 |---|---|---|
-| Source packages and namespace | [D7.2.1–D7.2.4v2, D7.2.6](../doc/Lambda_Formal_Design.md#d72-script-packages), S16.9.8 | Explicit `lambda.music` entry module; source distribution and ordinary imports |
+| Source packages and namespace | [D9.3.1–D9.3.4, D9.3.5](../doc/Lambda_Formal_Design.md#d93-script-packages), S16.9.8 | Explicit `lambda.music` entry module; source distribution and ordinary imports |
 | Pure computation and effects | [S12.1.1v2, S12.1.3](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) | Score/layout transformations are `fn`; transport commands are `pn` |
 | Input snapshots and errors | S12.4.1v2, S14.3.1v2, [S7.4.2–S7.4.4](../doc/Lambda_Formal_Semantics.md#s74-the-three-failure-channels) | Reuse input/ZIP ownership; public fallible operations declare raised errors |
-| Host boundaries and IO | D7.1.1–D7.1.2v2, D7.4.6, D7.5.2–D7.5.3 | Central resource acquisition; fonts, UI, and audio through the Radiant host interface |
-| Retained ownership | D4.1.3, D4.5.2–D4.5.3v2, D5.3.3 | Input-owned documents, copied UI data, precisely rooted runtime values |
-| Build profiles | D7.1.4v2–D7.1.7v6 | Distinguish data processing, headless engraving, and live playback capabilities |
+| Host boundaries and IO | D9.1.1–D9.1.2, D7.1.1, D11.1.2–D9.5.6 | Central resource acquisition; fonts, UI, and audio through the Radiant host interface |
+| Retained ownership | D5.1.3, D5.5.2–D5.5.3, D6.3.3 | Input-owned documents, copied UI data, precisely rooted runtime values |
+| Build profiles | D9.2.1–D9.2.3 | Distinguish data processing, headless engraving, and live playback capabilities |
 
 See [Formal Design](../doc/Lambda_Formal_Design.md),
 [Formal Semantics](../doc/Lambda_Formal_Semantics.md), and
@@ -139,8 +139,8 @@ audio engine. [OSMD README](https://github.com/opensheetmusicdisplay/opensheetmu
 Phase 3 adds `score-timewise` through the same part/measure reader, composite
 meters with different denominators, and inference of omitted graphical note
 types using exact duration, dots and tuplet ratios. Existing strict XML and
-namespace rules remain in force. These are package policies (D7.2.5), with
-ordinary immutable score values (D7.2.4v2) and raised validation errors (S7.4.2).
+namespace rules remain in force. These are package policies (D10.2.1), with
+ordinary immutable score values (D9.3.4) and raised validation errors (S7.4.2).
 
 Lyrics preserve ordered text/elision fragments, verse identity, placement,
 visibility and extension endpoints. Verse lanes stay consistent across notes;
@@ -149,14 +149,14 @@ groups join the written-event highlight bindings. During playback, the audio
 clock selects the active syllable, including melismas and tied continuations;
 repeat-specific `time-only` verses use the performed pass. Color selection,
 pause, seeking, stop and score following share the existing player handlers
-(S12.1.1v2/D7.4.6). Text is visual underlay, without synthesized singing.
+(S12.1.1v2/D7.1.1). Text is visual underlay, without synthesized singing.
 
 MusicXML requests the shared XML parser's `preserve_whitespace:true` option.
 Otherwise, trimming each text-only fragment independently would concatenate
 adjacent words. This generic parse option exposes the parser's existing
 whitespace mechanism; its default remains unchanged. `from_xml` consumes the
 supplied tree without reconstructing text that its caller already discarded
-(D7.2.4v2/S8.1.2v2).
+(D9.3.4/S8.1.2v2).
 
 Lyric groups retain stable written IDs and member note IDs, while layout
 assigns verse lanes per staff/placement and measures text with the existing
@@ -176,7 +176,7 @@ and [extensions](https://www.w3.org/2021/06/musicxml40/musicxml-reference/elemen
 `import music: lambda.music` resolves to the explicit public entry module
 `lmd/package/music.ls`, with implementation modules under
 `lmd/package/music/`. There is no implicit directory index, following
-D7.2.4v2/D7.2.6 and the [package import conventions](../doc/Lambda_Packages.md#21-how-paths-resolve).
+D9.3.4/D9.3.5 and the [package import conventions](../doc/Lambda_Packages.md#21-how-paths-resolve).
 The package introduces neither a language keyword nor a new core `TypeId`.
 
 The listed public APIs exist for the bounded profile. `Score`, `Layout`, and `Performance` are
@@ -201,8 +201,8 @@ Successful values carry diagnostics for recoverable omissions.
 use in `fn`; it does not retain an open stream. Acquiring an audio device,
 starting playback, and writing exported bytes are procedural effects
 (S12.1.1v2). Player construction does not start sound. Its template handlers
-issue transport commands through the host boundary (S12.1.3/D7.4.6). Whether
-a document may start sound at all follows the audible-output gate D7.5.4
+issue transport commands through the host boundary (S12.1.3/D7.1.1). Whether
+a document may start sound at all follows the audible-output gate D11.3.1
 (USER, 2026-10-19): local documents may, and network documents need
 activation; the player's Play button satisfies both.
 
@@ -387,7 +387,7 @@ dependence on the viewer's installed music font. Measure and render text with
 the same selected face; standalone export must embed permitted font data or
 outline the text for reproducibility. Preserve accessible score/part/measure
 descriptions even when visible glyphs are paths. Reuse the existing font
-measurement/outline mechanisms through the host API (D7.5.3), exposing a
+measurement/outline mechanisms through the host API (D9.5.6), exposing a
 generic missing primitive if necessary. Do not couple music to math's private
 layout structures or copy its font loader.
 
@@ -400,7 +400,7 @@ playhead without scraping the SVG or rerunning engraving on every audio tick.
 A width, visible-part, scale, or font change can invalidate layout. A playhead
 or selection change only updates an overlay. Cache keys include score
 revision, resolved options, font identity, and engraving-profile version;
-caches belong to the caller/view instance, respecting D7.2.1's module-state
+caches belong to the caller/view instance, respecting D9.3.1's module-state
 rules. Separate parse, layout, and paint costs when evaluating performance.
 
 ## 7. Phase 2: performance and MIDI
@@ -532,9 +532,9 @@ new score's cursor. Device loss transitions to an error state with cleanup.
 The player view owns the session through its document lifecycle. Navigation,
 view removal, explicit close, failure, and process teardown all stop playback.
 Retained native state owns its buffers; crossing Lambda values are copied or
-precisely rooted under D4.5.2/D5.3.3. There are no naked GC pointers in audio
+precisely rooted under D5.5.2/D6.3.3. There are no naked GC pointers in audio
 threads and no module-global player. Exposed host command signatures are `pn`
-(D7.4.6); pure template evaluation only constructs the player presentation.
+(D7.1.1); pure template evaluation only constructs the player presentation.
 
 The cursor reads performed position and the occurrence map, then uses the
 current layout index. Pauses, repeats, seeking, and tempo changes therefore
@@ -561,11 +561,11 @@ the viewport height. Following scales the engraving event bounds through the
 displayed page rectangles and scrolls only when the sounding group leaves the
 visible area. Seeking and resizing use the same path. If a short scrollport
 cannot show all simultaneous parts, the leading note takes priority. This is
-presentation state and does not change the audio clock (S12.1.1v2/D7.4.6).
+presentation state and does not change the audio clock (S12.1.1v2/D7.1.1).
 Highlighting sets glyph fill and inherited stroke color for the whole note,
 including stems/flags and shared chord stems/beams. Shared symbols remain
 highlighted while any connected note sounds. Changing the color updates the
-current highlight without changing transport state (S12.1.1v2/D7.4.6).
+current highlight without changing transport state (S12.1.1v2/D7.1.1).
 
 ## 8. Platform and dependency boundaries
 
@@ -574,7 +574,7 @@ current highlight without changing transport state (S12.1.1v2/D7.4.6).
 | Full `lambda.exe` | MusicXML data, font-backed engraving, SVG, live viewer; MIDI playback where a real audio backend is implemented |
 | Full headless Radiant profile | Same engraving and SVG/export checks, no required window or audio device |
 | `lambda-cli` | XML/MXL normalization and pure performance/SMF operations; no Radiant font or live-player dependency |
-| `lambda-wasm` | Outside the initial delivery; do not imply filesystem, ZIP, font, or audio capabilities excluded by D7.1.7v6 |
+| `lambda-wasm` | Outside the initial delivery; do not imply filesystem, ZIP, font, or audio capabilities excluded by D9.2.3 |
 
 Keep data modules independent of the rendering/player modules so importing
 them in the runtime-only profile does not eagerly import Radiant. The main
@@ -583,10 +583,10 @@ for reduced profiles. A missing font or audio capability returns an explicit
 unsupported-capability error. It never silently falls back to a webview,
 network service, installed command-line player, or empty successful output.
 
-All score/font/SoundFont bytes use central IO policy (D7.1.2v2/D7.5.2).
+All score/font/SoundFont bytes use central IO policy (D9.1.2/D11.1.2).
 Embedded score references do not fetch resources implicitly. Loading a URL is
 an explicit caller action; local scores must display offline using bundled
-assets. Native adapters remain above the runtime boundary (D7.5.3), with no
+assets. Native adapters remain above the runtime boundary (D9.5.6), with no
 `lambda-rt` link to Radiant.
 
 OSMD uses BSD-3-Clause; retain upstream attribution and applicable notices
@@ -667,7 +667,7 @@ Tentative direction: shape the Lambda surface after Web MIDI, start with native 
 - **Clocks:** live timestamps come from the host clock, while the transport runs on the audio-bus sample clock. Play-along and recording need a defined mapping.
 - **Discovery and permission:** port enumeration, hot-plug, and whether access prompts as browsers do for Web MIDI.
 
-As with the player, the adapter stays above the runtime boundary and reaches Lambda only through the `radiant-dom` module (D7.5.3v2); Lambda values crossing it are copied.
+As with the player, the adapter stays above the runtime boundary and reaches Lambda only through the `radiant-dom` module (D9.5.6); Lambda values crossing it are copied.
 
 ## Appendix A. Integration and module boundaries
 

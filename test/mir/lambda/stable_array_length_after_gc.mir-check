@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D4.4.4v4/S9.1.2: a collecting split refreshes a stable admitted int[] data pointer but does not reload its unchanged logical length; a var-resizing path retains checked mutation and fresh length reads.",
+  "description": "D5.4.4/S9.1.2: a collecting split refreshes a stable admitted int[] data pointer but does not reload its unchanged logical length; a var-resizing path retains checked mutation and fresh length reads.",
   "checks": [
     {
       "in_func": "_stable_length_#",

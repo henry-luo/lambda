@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.1.3v27, D6.2.2v2, D8.4.3v2: native direct calls return value and explicit error separately and test the error before use. The inlined boxed body retains destination-owned scalar publication.",
+  "description": "D8.4.2, D7.2.2, D7.4.3: native direct calls return value and explicit error separately and test the error before use. The inlined boxed body retains destination-owned scalar publication.",
   "checks": [
     {
       "in_func": "mvp_lmd_f2",

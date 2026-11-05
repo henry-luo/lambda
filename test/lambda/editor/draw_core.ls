@@ -1,8 +1,8 @@
 import draw: lambda.editor.draw
 import model: lambda.editor.draw.model
-import doc: lambda.editor.mod_doc
-import tx: lambda.editor.mod_transaction
-import step: lambda.editor.mod_step
+import doc: lambda.editor.core.doc
+import tx: lambda.editor.core.transaction
+import step: lambda.editor.core.step
 fn check(label,condition) => condition
 let a = draw.vertex("a","rect",{x:80.0,y:120.0,width:160.0,height:80.0},{label:"Input"})^
 let descriptor = {id:"service",outline:[[0.2,0],[1,0],[0.8,1],[0,1]],

@@ -1,7 +1,7 @@
 # Place borrows and numeric-view snapshots
 
 **Completed:** 2026-11-03. **Rulings:** S9.1.2, S9.1.3v3, S9.2.2v2,
-D4.3.1, D4.4.4v4, D4.4.7; async requalification under D8.1.1v18.
+D5.3.1, D5.4.4, D5.4.6; async requalification under D8.3.2.
 
 ## Completion record
 
@@ -10,7 +10,7 @@ D4.3.1, D4.4.4v4, D4.4.7; async requalification under D8.1.1v18.
   concurrent MVP/RDB work; those edits were preserved.
 - The user approved caller-rooted place homes, writable scalar places,
   partial-error publication and snapshot view values on 2026-11-03.
-  S9.1.3v3 / S9.2.2v2 / D4.4.7 and CW32v3/CW33v2 record that decision.
+  S9.1.3v3 / S9.2.2v2 / D5.4.6 and CW32v3/CW33v2 record that decision.
 - LR12-10 and LR12-14 are fixed; LR01-17's September report is superseded
   by the October runtime-async implementation and requalified here. All
   three records moved to the fixed issue ledger with their original reports.

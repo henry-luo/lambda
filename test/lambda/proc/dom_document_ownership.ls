@@ -1,4 +1,4 @@
-// D4.5.1v4: evaluator ownership keeps native storage alive through weak wrappers.
+// D5.5.1: evaluator ownership keeps native storage alive through weak wrappers.
 import dom
 import radiant
 

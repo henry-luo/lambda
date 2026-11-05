@@ -1,32 +1,16 @@
 // S1.4 / S12.1.3: filesystem snapshots and session transitions are immutable values.
-fn path_parts(parts, index, kept) any^ => if (index >= len(parts)) kept else (
-    let part = parts[index],
-    path_parts(parts,index+1,if (part == "" or part == ".") kept
-        else if (part == "..") slice(kept,0,max(0,len(kept)-1)) else [*kept,part]))
-pub fn absolute(path, base, home="/") any^ {
-    let expanded = if (path == "~") home else if (starts_with(path,"~/")) home ++ slice(path,1) else path
-    let rooted = if (starts_with(expanded,"/")) expanded else base ++ "/" ++ expanded;
-    "/" ++ join(path_parts(split(rooted,"/"),0,[]),"/")
-}
-pub fn basename(path) any^ => if (path == "/") "Computer" else split(path,"/")[last]
+import paths: lambda.io.path
+import file_info: lambda.io.file_info
+import browser: lambda.ui.workspace.file_browser
+pub fn absolute(path,base,home="/") any^ => paths.absolute(path,base,home)^
+pub fn basename(path) any^ => browser.basename(path)^
 pub fn parent(path) any^ => absolute("..",path)
 pub fn child_path(folder,filename) => (if (folder == "/") "/" else folder ++ "/") ++ filename
-pub fn crumbs(path) any^ {
-    let parts = [for (p in ((split(path,"/")) ^ { [] }) where p != "") p];
-    [{name:"Computer",path:"/"},*[for (i,p in parts) {name:p,path:"/" ++ join(slice(parts,0,i+1),"/")}]]
-}
-pub fn kind(extension, dir=false) => if (dir) "Folder"
-    else if (contains(["png","jpg","jpeg","gif","webp","svg","avif","bmp","tif","tiff","ico"],extension)) "Image"
-    else if (contains(["md","markdown","txt","log","csv"],extension)) "Text document"
-    else if (contains(["ls","js","ts","cpp","c","h","hpp","py","css","html","sh"],extension)) "Source code"
-    else if (contains(["json","yaml","yml","toml","xml"],extension)) "Data file"
-    else if (extension == "pdf") "PDF document"
-    else if (contains(["zip","gz","tar","jar"],extension)) "Archive"
-    else if (contains(["mp3","wav","flac","m4a"],extension)) "Audio"
-    else if (contains(["mp4","mov","webm"],extension)) "Video" else "Document"
+pub fn crumbs(path) any^ => browser.crumbs(path)^
+pub fn kind(extension,dir=false) => file_info.kind(extension,dir)
 // navigation capability is separate from physical file kind and write capability.
-pub fn archive(entry) => entry != null and not entry.dir and (entry.archive == true or lower(entry.extension or "") == "zip")
-pub fn browsable(entry) => entry != null and (entry.dir or archive(entry))
+pub let archive = file_info.archive
+pub let browsable = file_info.browsable
 pub fn read_only(st) => st.container.locator != null
 pub fn location_readonly(st,path) => any([for (location in st.locations or []) location.path == path])
 pub fn writable(st,action) any^ => if (contains(["new-file","new-folder"],action)) not read_only(st)
@@ -45,28 +29,12 @@ pub fn preview_size(width,available) {
     let limits = preview_limits(available);
     max(limits.min,min(width,limits.max))
 }
-pub fn size_label(bytes) any^ => if (bytes == null) "—" else if (bytes < 1024) string(bytes) ++ " bytes"
-    else if (bytes < 1048576) string(round(bytes/102.4)/10) ++ " KB"
-    else if (bytes < 1073741824) string(round(bytes/104857.6)/10) ++ " MB"
-    else string(round(bytes/107374182.4)/10) ++ " GB"
-pub fn initial(path) => {path:path,entries:[],revision:0,serial:0,container:null,archive_cache:null,locations:[],viewports:null,row_cache:[],reveal:false,measure_frame:0,
-    columns:[{path:path,entries:[],query:"",container:null,revision:0}],history:[path],cursor:0,query:"",sort:"name",descending:false,
-    mode:"icons",hidden:false,preview:true,preview_width:null,preview_drag:null,selected:[],focus:"",anchor:"",look:false,dialog:false,
-    error:"",preview_data:null,menu:null,operation:null,drag:null,thumbnails:{frame:0,job:0,request:null,generation:0}}
-fn sort_key(entry, key) => if (key == "size") entry.size else if (key == "modified") entry.modified_raw or entry.modified
-    else if (key == "kind") entry.kind else lower(entry.name)
-// snapshot revisions avoid comparing native archive nodes, whose equality can force member content.
-fn visible_key(st) => {revision:st.revision,query:st.query,sort:st.sort,descending:st.descending,hidden:st.hidden}
-fn ordered_rows(st) any^ {
-    let matching = [for (e in st.entries where (((st.hidden or not starts_with(e.name,".")) and
-        contains(lower(e.name),lower(trim(st.query)))) ^ { false }) order by lower(e.name)) e]
-    let ordered = sort(matching,{dir:if (st.descending) 'desc' else 'asc',by:(e)any^ =>sort_key(e,st.sort)});
-    [*[for (e in ordered where ((browsable(e)) ^ { false })) e],*[for (e in ordered where ((not browsable(e)) ^ { false })) e]]
-}
-pub fn visible(st) any^ {
-    let cached = [for (c in st.row_cache or [] where c.path == st.path and c.key == visible_key(st)) c][0];
-    if (cached == null) ordered_rows(st) else cached.rows
-}
+pub fn size_label(bytes) any^ => browser.size_label(bytes)^
+pub fn initial(path) => {*:browser.initial(path),container:null,archive_cache:null,locations:[],viewports:null,measure_frame:0,
+    columns:[{path:path,entries:[],query:"",container:null,revision:0}],preview:true,preview_width:null,preview_drag:null,look:false,dialog:false,
+    menu:null,operation:null,drag:null,thumbnails:{frame:0,job:0,request:null,generation:0}}
+fn visible_key(st) => browser.visible_key(st)
+pub fn visible(st) any^ => browser.visible(st)^
 pub fn prepare(st) => {*:st,row_cache:[for (i,c in st.columns) (
     let part = column(st,i), let key = visible_key(part),
     {path:part.path,key:key,rows:visible(part)})]}
@@ -93,16 +61,11 @@ pub fn window(st) {
         {first:first_row*columns,last:min(count,end_row*columns),before:first_row*stride,after:max(0,total-end_row)*stride}
     }
 }
-pub fn reconcile(st) any^ {
-    let paths = [for (e in ((visible(st)) ^ { [] })) e.path]
-    let selected = [for (p in st.selected where ((contains(paths,p)) ^ { false })) p];
-    {*:st,selected:selected,focus:if (contains(selected,st.focus)) st.focus else if (len(selected)>0) selected[last] else "",
-        anchor:if (contains(paths,st.anchor)) st.anchor else "",preview_data:null,look:false}
-}
+pub fn reconcile(st) any^ => browser.reconcile(st)^
 pub fn listing(st,path,entries,cursor=-1,container=null,revision=-1) any^ {
-    let version = if (revision>=0) revision else st.serial+1
-    let record = cursor < 0 and path != st.path
-    let history = if (record) [*slice(st.history,0,st.cursor+1),path] else st.history
+    let base = browser.listing(st,path,entries,cursor,revision)^
+    let version = base.revision
+    let history = base.history
     // keep snapshots only along the visited branch; unrelated destinations start a new column root.
     let columns = [for (c in st.columns) if (c.path == st.path) {*:c,entries:st.entries,query:st.query,container:st.container,revision:st.revision} else c]
     let paths = [for (c in columns) c.path]
@@ -111,10 +74,9 @@ pub fn listing(st,path,entries,cursor=-1,container=null,revision=-1) any^ {
     let kept = if (at>=0) slice(columns,0,at) else if (ancestor>=0) slice(columns,0,ancestor+1) else [];
     // history keeps small locators; only the active archive/branch retains captured member nodes.
     let locations = [for (location in st.locations where ((location.path != path and contains(history,location.path)) ^ { false })) location];
-    {*:st,path:path,entries:entries,container:container,revision:version,serial:max(st.serial,version),
+    {*:base,container:container,
         archive_cache:if (container.locator == null) null else st.archive_cache,
         locations:[*locations,*if (container.locator != null) [{path:path,locator:container.locator}] else []],
-        history:history,cursor:if (record) len(history)-1 else if (cursor>=0) cursor else st.cursor,
         columns:[*kept,{path:path,entries:entries,query:"",container:container,revision:version}],
         query:"",selected:[],focus:"",anchor:"",reveal:false,preview_data:null,look:false,dialog:false,menu:null,operation:null,drag:null,error:""}
 }
@@ -133,24 +95,9 @@ pub fn previous_column(st) any^ {
     let previous = activate_column(st,len(st.columns)-2);
     if (previous.path == path) st else choose(previous,path)
 }
-pub fn choose(st,path,toggle=false,extend=false) {
-    let paths = [for (e in ((visible(st)) ^ { [] })) e.path]
-    let at = position(paths,path)
-    let anchor = position(paths,st.anchor)
-    let selected = if (at < 0) st.selected
-        else if (extend and anchor >= 0) slice(paths,min(at,anchor),max(at,anchor)+1)
-        else if (toggle) (if (contains(st.selected,path)) [for (p in st.selected where p != path) p] else [*st.selected,path])
-        else [path];
-    {*:st,selected:selected,focus:if (contains(selected,path)) path else if (len(selected)>0) selected[last] else "",
-        anchor:if (extend and anchor >= 0) st.anchor else path,reveal:true,preview_data:null,error:""}
-}
-pub fn move(st,delta,extend=false) any^ {
-    let rows = visible(st)
-    let at = position([for (e in rows) e.path],st.focus)
-    let next = if (at < 0) (if (delta < 0) len(rows)-1 else 0) else max(0,min(len(rows)-1,at+delta));
-    if (len(rows)==0) st else choose(st,rows[next].path,false,extend)
-}
-pub fn focused(st) => [for (e in st.entries where e.path == st.focus) e][0]
+pub fn choose(st,path,toggle=false,extend=false) => browser.choose(st,path,toggle,extend)
+pub fn move(st,delta,extend=false) any^ => browser.move(st,delta,extend)^
+pub fn focused(st) => browser.focused(st)
 pub fn preview_entry(st) any^ => if (st.focus != "") focused(st) else if (archive(st.container)) st.container else null
 pub fn valid_name(value) any^ => value is string and trim(value) != "" and value != "." and value != ".." and
     not contains(value,"/") and not contains(value,"\\") and not contains(value,"\u0000")
@@ -169,10 +116,7 @@ pub fn relocated(st,changes) any^ {
             locator:{*:location.locator,outer:remap(location.locator.outer,changes)}}],
         selected:[for (p in st.selected) remap(p,changes)],focus:remap(st.focus,changes),anchor:remap(st.anchor,changes),preview_data:null}
 }
-pub fn position(values,value) {
-    let found = index_of(values,value);
-    if (found == null) -1 else found
-}
+pub fn position(values,value) => browser.position(values,value)
 pub fn status(st) any^ {
     let total = len(visible(st));
     string(total) ++ (if (total==1) " item" else " items") ++

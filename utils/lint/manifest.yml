@@ -294,7 +294,7 @@ rules:
     file: utils/lint/rules/c-cpp/no-raw-shape-chain-walk.yml
     category: correctness
     tags: [lambda, shape, transition-tree, mandatory]
-    note: "D3.4.3v3: a tree node's chain runs on past `last`; walks go through FOR_EACH_MAP_FIELD / typemap_next_field."
+    note: "D3.4.3: a tree node's chain runs on past `last`; walks go through FOR_EACH_MAP_FIELD / typemap_next_field."
 
   todo-inventory:
     backend: ast-grep
@@ -415,7 +415,7 @@ rules:
     file: utils/lint/rules/structural/check_dom_editable_architecture.py
     category: architecture
     tags: [dom, editing, registry, waist, mandatory]
-    note: "D7.2.5/D7.5.3 ratchet: the standard editing descriptor registry has one lambda/dom owner and the retired ambient set_selection ABI cannot return."
+    note: "D10.2.1/D9.5.6 ratchet: the standard editing descriptor registry has one lambda/dom owner and the retired ambient set_selection ABI cannot return."
 
   no-new-per-file-header:
     backend: python

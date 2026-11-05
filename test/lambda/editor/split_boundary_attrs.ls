@@ -1,9 +1,9 @@
-// D7.2.5: hosts declare which boundary attributes stay on the original block.
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import commands: lambda.editor.mod_commands
-import html: lambda.edit.html
+// D10.2.1: hosts declare which boundary attributes stay on the original block.
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import commands: lambda.editor.core.commands
+import html: lambda.editor.format.html
 
 let attrs = [{name:'id',value:"anchor"},{name:'page-start',value:true},{name:'style',value:"text-align:center"}]
 let doc = node('doc',[node_attrs('p',attrs,[text("BeforeAfter")])])

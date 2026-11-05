@@ -1,16 +1,16 @@
-// S12.1.3 / D7.5.3: editor commands publish through the existing DOM host boundary.
+// S12.1.3 / D9.5.6: editor commands publish through the existing DOM host boundary.
 import dom
 import m: .mod_model
 import v: .mod_view
 import c: lambda.slide.common
 import html: lambda.slide.html
-import u: ~~.mod_publish
+import u: lambda.ui.core.publish
 import geometry: lambda.editor.draw.geometry
 import slide: lambda.slide
 import resources: ~~.mod_resources
 import home: .mod_home
 import home_ui: .mod_home_ui
-import menus: ~~.mod_context_menu
+import menus: lambda.ui.core.menu
 import insert_model: .mod_insert
 import insert_ui: .mod_insert_ui
 import insert_data: .mod_insert_data
@@ -21,11 +21,11 @@ import effects: lambda.slide.transitions
 import animations: .mod_animations
 import animations_ui: .mod_animations_ui
 import animation_catalog: lambda.slide.animation
-import splitter: ~~.mod_splitter
+import splitter: lambda.ui.core.splitter
 import exports: ~~.mod_export
 import inline_text: .mod_inline
-import spelling: lambda.edit.spelling
-import font_picker: ~~.word.mod_font_picker
+import spelling: lambda.editor.spelling
+import font_picker: lambda.ui.workspace.font_picker
 import text_offsets: lambda.dom.edit_history
 import slide_drag: .mod_slide_drag
 import importer: ~~.mod_import

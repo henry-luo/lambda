@@ -81,6 +81,7 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(SOURCE.parent / "mod_resources.ls", work / "mod_resources.ls")
     shutil.copyfile(SOURCE.parent / "mod_publish.ls", work / "mod_publish.ls")
+    shutil.copyfile(SOURCE.parent / "mod_splitter.ls", work / "mod_splitter.ls")
     cases = [("current", prepare("current", work=work))]
     if args.reference:
         cases.insert(0, ("reference", prepare("reference", args.reference, work=work)))

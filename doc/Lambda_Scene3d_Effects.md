@@ -2,8 +2,8 @@
 
 `lambda.scene3d.effects` applies animated GLSL materials to image textures:
 typography, SVG paths and gradients, and raster images use the same API. Scene
-construction is pure (**S12.1.1v3**, **D7.2.4v4**); Radiant owns GPU resources
-and playback (**D4.5.1v4**, **D4.5.2**, **D7.5.3v2**).
+construction is pure (**S12.1.1v3**, **D9.3.4**); Radiant owns GPU resources
+and playback (**D5.5.1**, **D5.5.2**, **D9.5.6**).
 
 Open the complete, offline gallery:
 

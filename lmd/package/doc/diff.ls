@@ -1,4 +1,4 @@
-// lambda.doc.diff is an explicit source-package facade (D7.2.4/D7.2.6).
+// lambda.doc.diff is an explicit source-package facade (D9.3.4/D9.3.5).
 import parser: .diff.parse
 import git: .diff.git
 import presentation: .diff.presentation

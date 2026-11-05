@@ -1459,7 +1459,7 @@ TEST_F(MemoryPoolTest, InterleeavedReallocAndAlloc) {
 // ========================================================================
 
 // ========================================================================
-// Cleanups (D4.2.6): a pool owns a non-block resource and releases it at the
+// Cleanups (D5.2.5): a pool owns a non-block resource and releases it at the
 // latest when its own blocks go
 // ========================================================================
 

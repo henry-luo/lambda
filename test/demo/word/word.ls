@@ -1,22 +1,24 @@
 // Native Lambda/Radiant port of WordCraft's command-driven writing workspace.
-// S12.1.3 / D7.2.5: handlers own state; the body only projects the model.
+// S12.1.3 / D10.2.1: handlers own state; the body only projects the model.
 import dom
-import lambda.editor.mod_editor
-import lambda.editor.mod_source_pos
+import lambda.editor.model
+import lambda.editor.core.source_pos
 import edit_result: lambda.dom.edit_result
-import session: lambda.edit.session
+import session: lambda.editor.session
 import resources: ~~.mod_resources
+import office_style: lambda.ui.workspace.office
+import workspace_theme: lambda.ui.workspace.tokens
 import model: .mod_model
 import ui: .mod_ui
 import surface: .mod_surface
 import app: .mod_app
 import page: .mod_page
 import review: .mod_review
-import controller: lambda.edit.controller
-import image: lambda.editor.mod_image
+import controller: lambda.editor.controller
+import image: lambda.editor.image
 import changes: .mod_changes
 import handles: .mod_handles
-import context: ~~.mod_context_menu
+import context: lambda.ui.core.menu
 import focused: .mod_context
 import tables: .mod_table
 import ruler: .mod_ruler
@@ -30,13 +32,15 @@ import equation_edit: .mod_equation_edit
 import math_edit: .mod_math_edit
 import print: .mod_print
 import lookup: .mod_lookup
-import spelling: lambda.edit.spelling
+import spelling: lambda.editor.spelling
 import ribbon_overflow: .mod_ribbon_overflow
 import picker: .mod_file_picker
-import font_picker: .mod_font_picker
+import font_picker: lambda.ui.workspace.font_picker
 
 let BASE = url_resolve(resources.entry_uri()^,".")
-let CSS = input(url_resolve(BASE,"../office.css"),'text')^ ++ input(url_resolve(BASE,"word.css"),'text')^
+let CSS = office_style.document_css ++ office_style.css ++ input(url_resolve(BASE,"word.css"),'text')^
+let OFFICE_THEME = workspace_theme.variables({primary:"#0a84ff",text:"#1d1d1f",text_secondary:"#6e6e73",
+    border:"#d9dbe1",background:"#f5f5f7",surface:"#ffffff",font_family:"-apple-system, 'Helvetica Neue', Arial, sans-serif"})^
 let MIN_WINDOW_WIDTH = 800
 
 // keep render-only calculations out of the handler activation scope.
@@ -53,7 +57,7 @@ fn workspace(st) {
     let page_count = len(page.sheets(st.editor.doc))
     let layout = if (st.read_only) "print" else st.layout;
     let comment_css = review.css(st.editor.doc);
-    <body id:"word", class:trim((if (st.focused) "focus-mode " else "") ++
+    <body id:"word",style:OFFICE_THEME, class:trim("workspace-office " ++ (if (st.focused) "focus-mode " else "") ++
         (if (st.nav and st.search_mode!=null) "search-open " else "") ++ (if (layout=="web") "web-layout " else "") ++
         (if (st.show_changes) "" else "hide-changes ") ++ (if (st.home.marks) "show-marks " else "") ++
         (if (st.home.painter!=null) "format-painting" else "")), ["data-dirty"]:string(dirty), ["data-view"]:views.active(st.layout,st.read_only),
@@ -502,11 +506,12 @@ on keydown(evt) {
         return 'pass'
     }
     if ((st.context!=null)^) {
-        if (contains(["ArrowUp","ArrowDown","Home","End"],evt.key)^) {
+        let menu_key = context.key_action(string(evt.key))^
+        if (menu_key=='navigate') {
             context.navigate(evt.target,"word-context-menu",evt.key)^
             return 'prevent-default'
         }
-        if (contains(["Escape","Tab"],evt.key)^) {
+        if (menu_key=='dismiss') {
             st = {*:st,context:null}
             ribbon_overflow.close(evt.target)^
             app.focus_document(evt.target)^
@@ -552,4 +557,4 @@ on closerequest(evt) {
 
 // keep spelling chrome beside the edit view so async results cannot reconcile the ribbon during typing.
 <html lang:"en", <head <meta charset:"utf-8"> <title "Word — Lambda workspace"> <style CSS ++ surface.document_css ++ surface.print_css ++ changes.css ++ spelling.css ++ font_picker.css>>
-    apply(<word_app>,{mode:"edit"}); spelling.widget("word"); font_picker.widget()>
+    apply(<word_app>,{mode:"edit"}); spelling.widget("word"); font_picker.widget("word")>

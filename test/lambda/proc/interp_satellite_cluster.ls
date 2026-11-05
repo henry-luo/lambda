@@ -1,4 +1,4 @@
-// D8.1.1v9: a satellite image co-compiles its target's direct-callee cluster,
+// D8.3.3: a satellite image co-compiles its target's direct-callee cluster,
 // so calls among them are direct native edges with the eager tier's call-site
 // inference (`half`/`sub_until` take int lanes from their call sites), while a
 // callee that must stay in T0 (a nested definition pins it) is still reached

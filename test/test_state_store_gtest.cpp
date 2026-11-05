@@ -367,7 +367,7 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
     control->form = lam::view_prop(&original);  // test-owned prop
     ASSERT_TRUE(form_control_store_text_value(doc.state, static_cast<View*>(control), "svg", 3, 3));
     ASSERT_TRUE(root->remove_child(control));
-    // D4.5.1v3: layout properties are temporary; the registered DOM control owns its value.
+    // D5.5.1: layout properties are temporary; the registered DOM control owns its value.
     control->form = nullptr; control->view_type = RDT_VIEW_NONE;
     state_store_prune_after_reflow(doc.state);
     uint32_t length = 0;
@@ -411,6 +411,32 @@ TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) 
     EXPECT_TRUE(state_get_bool(doc_state, live, "mutation-live-state"));
     EXPECT_FALSE(state_get_bool(doc_state, orphan, "mutation-orphan-state"));
     dom_lifecycle_destroy(&doc);
+}
+
+TEST_F(StateStoreDomMutationTest, FocusDoesNotPopulateUnrelatedSubtrees) {
+    DocState* doc_state = state();
+    lam::ArrayList<DomElement*> children(MEM_CAT_LAYOUT);
+    for (int i = 0; i < 512; i++) {
+        DomElement* child = make_element();
+        ASSERT_TRUE(children.append(child));
+        ASSERT_TRUE(orphan->append_child(child));
+    }
+    live->tag_name = lam::up("button");
+    live->tag_id = MARKUP_NAME_BUTTON;
+    doc_state->transition_depth++;
+    focus_set_programmatic(doc_state, live, true);
+    doc_state->transition_depth--;
+    EXPECT_EQ(focus_get(doc_state), live);
+    EXPECT_TRUE(state_get_bool(doc_state, root, STATE_FOCUS_WITHIN));
+    EXPECT_TRUE(state_get_bool(doc_state, live, STATE_FOCUS_VISIBLE));
+    // focus state scales with the ancestor path, including on the first transition.
+    EXPECT_LE(hashmap_count(doc_state->state_map), 4u);
+    for (DomElement* child : children) {
+        EXPECT_FALSE(state_get_bool(doc_state, child, STATE_FOCUS_WITHIN));
+        EXPECT_EQ(view_state_get(doc_state, child), nullptr);
+        orphan->remove_child(child);
+        delete child;
+    }
 }
 
 TEST_F(StateStoreDomMutationTest, BulkPruningPreservesLiveValuesAndRebuildsFocusPath) {

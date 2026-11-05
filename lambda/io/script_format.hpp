@@ -3,7 +3,7 @@
 #include <string.h>
 #include "wiki_format.hpp"
 
-// Routing only; source syntax belongs to the script packages (D7.1.1).
+// Routing only; source syntax belongs to the script packages (D9.1.1).
 inline const char* script_format_target(const char* type, const char* flavor = nullptr) {
     if (!type) return nullptr;
     if (!strncmp(type, "markup:", 7)) return script_format_target(type + 7);

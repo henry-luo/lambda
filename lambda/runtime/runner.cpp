@@ -62,7 +62,9 @@
 
 extern "C" Item js_get_key_default(Item object, Item key);
 struct DomDocument;
-extern void free_document(DomDocument* doc);
+struct DocumentCleanupTiming;
+extern bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing);
+extern bool document_runtime_cleanup_ready(DomDocument* doc);
 
 #ifndef LAMBDA_MIR_CACHE_DEFAULT
 #define LAMBDA_MIR_CACHE_DEFAULT 1
@@ -388,7 +390,7 @@ extern "C" void lambda_compiler_timing_get(LambdaCompilerTiming* out) {
 void lambda_home_init(void) {
     host_paths_init_from_env();
 #ifndef LAMBDA_NO_LATEX
-    // bundled TeX resources follow the document package namespace (D7.2.4v3, D7.2.7v2).
+    // bundled TeX resources follow the document package namespace (D9.3.4, D10.2.2).
     char* tex_dir = host_path_join(HOST_PATH_HOME, "package/doc/latex/tex");
     tex::set_resource_dir(tex_dir);
     if (tex_dir) mem_free(tex_dir);
@@ -966,7 +968,7 @@ static bool lambda_ast_template_is_reusable_shallow(const Script* script) {
 
 // An executing Runtime sees a shell around a process-cache template.  Cache
 // graph operations must follow the immutable owner, never retain or validate
-// the shell's EvalContext-local edges (D8.5.1v7).
+// the shell's EvalContext-local edges (D8.3.5).
 static const Script* lambda_cache_template_owner(const Script* script) {
     if (!script) return NULL;
     return script->cache_owned_template ? script : script->cache_template;
@@ -1189,7 +1191,7 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
         // AST reuse borrows parser/analysis facts only. A MIR context
         // (including satellites promoted by an earlier execution) is
         // runtime-local and must never be copied into the new shell
-        // (D8.5.1v3).
+        // (D8.5.1).
         instance->jit_context = NULL;
         instance->main_func = NULL;
         instance->mir_gen_initialized = false;
@@ -1252,7 +1254,7 @@ static Script* lambda_ast_template_clone_graph(Runtime* runtime,
     }
 #ifndef LAMBDA_NO_MIR
     // The MIR code is shared, but apply() resolves through a fresh
-    // EvalContext-owned template registry (D8.5.1v7).
+    // EvalContext-owned template registry (D8.3.5).
     if (instance->cache_mir_artifact) lambda_register_mir_view_templates(instance);
 #endif
     return instance;
@@ -1367,15 +1369,15 @@ LambdaError* get_persistent_last_error() {
     return context ? context->last_error : NULL;
 }
 
-// full evaluator handoff needs JS teardown and native stack rebinding (D5.4.1).
-// D5.4.1: only a quiescent owner may release its thread and precise side-stack binding.
+// full evaluator handoff needs JS teardown and native stack rebinding (D6.4.1).
+// D6.4.1: only a quiescent owner may release its thread and precise side-stack binding.
 bool eval_context_transfer_thread(EvalContext* target) {
     if (!target) return false;
     if (context == target) return true;
     if (context) {
         EvalContext* prev = context;
         if (prev->execution_depth != 0) {
-            // D5.4.1: releasing a live guest owner invalidates its open frames.
+            // D6.4.1: releasing a live guest owner invalidates its open frames.
             log_error("eval-switch: outgoing context is executing");
             return false;
         }
@@ -1391,7 +1393,7 @@ bool eval_context_transfer_thread(EvalContext* target) {
         return false;
     }
     // A document preloaded on a worker carries that worker's native stack
-    // limit until its evaluator is bound to this thread (D5.4.1).
+    // limit until its evaluator is bound to this thread (D6.4.1).
     lambda_stack_init();
     target->stack_limit = lambda_stack_recoverable_limit();
     return true;
@@ -1456,7 +1458,7 @@ void transpiler_clear_direct_imports(Transpiler* tp, const Script* script) {
     if (!tp) return;
     ArrayList* direct_imports = tp->direct_imports;
     tp->direct_imports = NULL;
-    // D8.5.1v7: a copied Transpiler can alias the executing Script's runtime
+    // D8.3.5: a copied Transpiler can alias the executing Script's runtime
     // dependency graph. Keep that graph alive while cache overlays rebuild it.
     if (direct_imports && (!script || direct_imports != script->direct_imports)) {
         arraylist_free(direct_imports);
@@ -1478,7 +1480,7 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
 }
 
 // The source/AST cache key is backend-neutral: every profile with the
-// resource cache loads through it, including a T0-only build (D8.5.1v4).
+// resource cache loads through it, including a T0-only build (D8.5.1).
 static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
         const char* path, const char* source, bool inline_source,
         bool is_import) {
@@ -1615,7 +1617,7 @@ static bool interp_force_jit_script(Script* script, Runtime* runtime,bool preser
     InterpSatelliteImage* retained = NULL;
     main_func_t previous_main = script->main_func;
     if (preserve_live_slab && script->jit_context) {
-        // D8.5.1v7: published satellites keep their sealed BSS and code when
+        // D8.3.5: published satellites keep their sealed BSS and code when
         // a native importer needs a complete export image of this T0 module.
         retained = (InterpSatelliteImage*)mem_calloc(1, sizeof(InterpSatelliteImage), MEM_CAT_SYSTEM);
         if (!retained) return false;
@@ -1732,7 +1734,7 @@ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
 }
 
 // Activates a cached AST template in T0. Only the AUTO fallback tail lowers
-// MIR; a T0-only build refuses there like explicit interp (D8.1.1v15).
+// MIR; a T0-only build refuses there like explicit interp (D8.3.1).
 static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         Script* script) {
     if (!runtime || !script) return false;
@@ -1949,7 +1951,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     }
     if (profiling || compiler_timing) profile_get_time(&p4);
     // Allocation reserves dense node IDs and bind publishes graph columns, so
-    // no post-validation index walk remains (D8.2.4/D8.2.5v2).
+    // no post-validation index walk remains (D8.2.4/D8.2.5).
     if (profiling || compiler_timing) p5 = p4;
 #ifndef LAMBDA_NO_AMBIENT_PROVIDERS
     get_time(&end);
@@ -1979,7 +1981,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     }
 #endif
 
-    // D8.1.1v15: only AUTO may fall back when the walker rejects a script.
+    // D8.3.1: only AUTO may fall back when the walker rejects a script.
     if (lambda_tier_selected() == LAMBDA_TIER_INTERP ||
             lambda_tier_selected() == LAMBDA_TIER_AUTO) {
         profile_time_t plan0, plan1;
@@ -2165,7 +2167,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 #else
     // Build the static closure before the root enters its Runtime. Workers only
     // publish AST templates; import initialization and tier selection stay on
-    // this execution path (D8.1.1v13, D8.5.1v7).
+    // this execution path (D8.3.5, D8.3.5).
     if (runtime && !runtime->ast_prebuild_only && !is_import && !source &&
             lambda_tier_selected() != LAMBDA_TIER_JIT &&
             input_script_cache_ast_enabled(input_manager_global_script_cache())) {
@@ -2226,7 +2228,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     const char* exact_source = source_lease.source();
     size_t exact_source_length = source_lease.source_length();
     // REPL fragments append mutable AST/source history. Until that history is
-    // part of its key, retain only its common source record (D8.5.1v3).
+    // part of its key, retain only its common source record (D8.5.1).
     bool cache_artifact_enabled = input_script_cache_policy(script_cache) != INPUT_SCRIPT_CACHE_OFF &&
         !lambda_mvp_selected() && strcmp(lookup_path, "<repl-session>") != 0;
 
@@ -2330,7 +2332,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             }
             // Generated imports name logical units, but those units still
             // need this Runtime's dense slabs before the cached root enters
-            // MIR. Instantiate the complete cached dependency cone (D8.5.1v3).
+            // MIR. Instantiate the complete cached dependency cone (D8.5.1).
             Script* instance = lambda_ast_template_clone_for_runtime(runtime,
                 cached_template, source_lease.scope());
             if (instance) {
@@ -2355,7 +2357,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
     // T0 AST templates retain only parser/validation/frame-plan facts. A hit
     // always receives a new Script and dense module slab, never an old
-    // EvalContext, satisfying D8.5.1v3 without changing tier policy.
+    // EvalContext, satisfying D8.5.1 without changing tier policy.
     void* cached_ast = NULL;
     if (cache_artifact_enabled && lambda_tier_selected() != LAMBDA_TIER_JIT &&
             input_script_cache_get_ast(raw_lease, &cached_ast)) {
@@ -2419,7 +2421,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         // A waiter can observe READY only after the owner published between
         // this call's first lookup and claim. Retry that normal hit without
         // retiring it; only a lookup that actually rejected an artifact is
-        // untrusted (D8.5.1v3).
+        // untrusted (D8.5.1).
         if (cache_artifact_rejected) {
             lambda_cache_invalidate_untrusted_cone(script_cache,
                 input_script_compilation_unit_id(input_script_lease_input(raw_lease)),
@@ -2652,7 +2654,7 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     lambda_tier_set(was_tier);
     runtime->use_mir_direct = was_mir_direct;
 #ifndef LAMBDA_NO_JS
-    // cached MIR shells also need fresh exports in the importing Runtime (D5.4.3 / D8.5.1v7).
+    // cached MIR shells also need fresh exports in the importing Runtime (D6.4.3 / D8.3.5).
     register_lambda_script_namespace(runtime, script);
 #endif
     return script;
@@ -2700,7 +2702,7 @@ static void repl_report_transpiler_errors(ArrayList* errors) {
 
 // One entry's append transaction over the session Script. Every rejection
 // or failure restores exactly these fields, so an entry is all-or-nothing
-// (D8.1.1v17) and the next one sees the last successful environment.
+// (D8.3.6) and the next one sees the last successful environment.
 typedef struct ReplEntryTxn {
     Script* script;
     AstScript* root;
@@ -2809,7 +2811,7 @@ void interp_repl_session_destroy(InterpReplSession* session) {
         }
         // Each REPL Script receives a unique module id. Releasing its exact
         // root before freeing the Script prevents `clear` from pinning its
-        // former bindings until the whole Runtime exits (D5.3.3).
+        // former bindings until the whole Runtime exits (D6.3.3).
         lambda_module_state_release(script->module_state_id);
         int index = script->index;
         runtime_free_script(runtime, script, true);
@@ -2828,7 +2830,7 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime,
 
     // The normal loader owns AST/pool initialization. Build the empty session
     // through its T0 branch whatever tier the shell selected: the session is
-    // always T0, and the tier only governs satellite promotion (D8.1.1v17).
+    // always T0, and the tier only governs satellite promotion (D8.3.6).
     LambdaTier saved_tier = lambda_tier_selected();
     lambda_tier_set(LAMBDA_TIER_INTERP);
     Script* script = load_script(runtime, "<repl-session>", "", false);
@@ -2916,7 +2918,7 @@ static ReplEntryStatus repl_entry_build(InterpReplSession* session,
     LambdaParseStatus parse_status = lambda_rd_reduce_ast(&tp, fragment_source,
         strlen(source), &parsed_root, &parse_error);
     if (parse_status == LAMBDA_PARSE_INCOMPLETE) {
-        // The C parser is the completeness authority (D8.1.1v17): the driver
+        // The C parser is the completeness authority (D8.3.6): the driver
         // keeps collecting lines, and nothing of this probe is retained.
         free_transpiler_error_list(tp.errors);
         repl_entry_rollback(txn);
@@ -3026,7 +3028,7 @@ ReplEntryStatus interp_repl_session_eval(InterpReplSession* session,
 }
 
 // ---------------------------------------------------------------------------
-// Session services (D8.1.1v17): each reads the live scope and slab or builds
+// Session services (D8.3.6): each reads the live scope and slab or builds
 // an entry without running it; none re-runs anything.
 // ---------------------------------------------------------------------------
 
@@ -3189,7 +3191,7 @@ void runner_setup_context(Runner* runner) {
         heap_init();
         ctx->pool = ctx->heap->pool;
         // Publish the owner pair together so retained-context users always
-        // observe a coherent heap/name-pool generation (D5.2.1v3).
+        // observe a coherent heap/name-pool generation (D6.2.1).
         runtime_context_publish_owners(rt, ctx);
     }
     path_register_pool_provider(runner_path_pool_provider);
@@ -3515,7 +3517,7 @@ void runtime_free_all_scripts(Runtime* runtime) {
     if (runtime->scripts) {
         // Satellites compile a dependent script from its retained AST, which
         // may reference Type descriptors owned by an imported script. Drain
-        // every worker before any dependency pool is released (D8.5.1v6).
+        // every worker before any dependency pool is released (D8.3.4).
         for (int i = 0; i < runtime->scripts->length; i++) {
             interp_satellite_cancel_script((Script*)runtime->scripts->data[i]);
         }
@@ -3580,7 +3582,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     }
 #endif
     if (script->cache_owned_template) {
-        // D8.5.1v2: the cache entry retains its template lease until eviction.
+        // D8.5.1: the cache entry retains its template lease until eviction.
         // Closing it here would evict the image and recursively destroy this
         // Script while runtime cleanup still owns its stack frame.
         return;
@@ -3782,8 +3784,115 @@ static void runtime_quiesce_satellite_workers(Runtime* runtime);
 
 static void runtime_quiesce_satellite_workers(Runtime* runtime);
 
+static bool runtime_document_preflight(Runtime* runtime) {
+    if (!runtime->dom_doc || document_runtime_cleanup_ready((DomDocument*)runtime->dom_doc)) return true;
+    log_error("runtime-document-preflight: document is not ready for retirement");
+    return false;
+}
+
+static bool runtime_join_document_tasks(Runtime* runtime, bool wait_for_tasks = true) {
+#ifndef LAMBDA_NO_TASKS
+    LambdaScheduler* scheduler = runtime_scheduler(runtime);
+    // A guard also pins a heapless runtime's scheduler and evaluator.
+    if (lambda_scheduler_has_document_retirement_guards(scheduler)) return false;
+    if (scheduler) {
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        // Neither task stacks nor active base-stack execution are quiescent.
+        if (activation_current() || (context && context->execution_depth) ||
+                (owner && owner->execution_depth)) return false;
+        if (!runtime_heap(runtime)) return true;
+        if (!owner || !eval_context_init(owner) || !runtime_context_bind_retained(runtime, owner) ||
+                (js_runtime_state_for(owner) && !js_runtime_state_init(owner))) return false;
+        owner->scheduler = scheduler;
+        return wait_for_tasks ? lambda_scheduler_join_document_tasks(scheduler) :
+            lambda_scheduler_document_tasks_progress(scheduler) == LAMBDA_DOCUMENT_JOIN_DONE;
+    }
+#else
+    (void)runtime;
+    (void)wait_for_tasks;
+#endif
+    return true;
+}
+
+static void runtime_release_tasks_and_resources(Runtime* runtime, EvalContext* owner) {
+#ifndef LAMBDA_NO_TASKS
+    RuntimeResourceTable* table = runtime_resource_table_context(owner);
+    if (runtime_scheduler(runtime)) {
+        // A task's SQLite attachment owns the connection until its worker joins.
+        runtime_resource_table_close_except_group(table, RUNTIME_RESOURCE_GROUP_DATABASE);
+        if (runtime_scheduler(runtime)) {
+            owner->scheduler = runtime_scheduler(runtime);
+            lambda_scheduler_destroy(runtime_scheduler(runtime));
+            runtime_set_scheduler(runtime, NULL);
+        }
+    }
+#else
+    (void)runtime;
+#endif
+    // A teardown callback may have installed the table after the first lookup.
+    runtime_resource_table_clear(runtime_resource_table_context(owner));
+}
+
+bool runtime_document_retirement_pin(Runtime* runtime) {
+    if (!runtime || !runtime->eval_context || runtime->eval_context != context ||
+            runtime->cleanup_in_progress || runtime->cleanup_incomplete ||
+            runtime->document_retirement_pins == UINT32_MAX) return false;
+    runtime->document_retirement_pins++;
+    return true;
+}
+
+bool runtime_document_retirement_unpin(Runtime* runtime) {
+    if (!runtime || !runtime->eval_context || runtime->eval_context != context ||
+            runtime->cleanup_in_progress || runtime->cleanup_incomplete ||
+            !runtime->document_retirement_pins) return false;
+    runtime->document_retirement_pins--;
+    return true;
+}
+
+bool runtime_borrow_acquire(Runtime* runtime) {
+    if (!runtime || !runtime->eval_context || runtime->eval_context != context ||
+            runtime->cleanup_destructive || runtime->cleanup_incomplete ||
+            runtime->native_borrows == UINT32_MAX) return false;
+    runtime->native_borrows++;
+    return true;
+}
+
+bool runtime_borrow_release(Runtime* runtime) {
+    if (!runtime || !runtime->eval_context || runtime->eval_context != context ||
+            runtime->cleanup_destructive || runtime->cleanup_incomplete || !runtime->native_borrows)
+        return false;
+    runtime->native_borrows--;
+    return true;
+}
+
+struct RuntimeCleanupAttempt {
+    Runtime* runtime;
+    bool destructive;
+    bool complete;
+    ~RuntimeCleanupAttempt() {
+        runtime->cleanup_in_progress = false;
+        runtime->cleanup_destructive = false;
+        if (destructive && !complete) runtime->cleanup_incomplete = true;
+    }
+};
+
 void runtime_reset_heap(Runtime* runtime) {
     if (!runtime) return;
+    if (runtime->cleanup_in_progress || runtime->cleanup_incomplete || runtime->document_retirement_pins ||
+            runtime->native_borrows) {
+        log_error("runtime-document-join: heap reset refused during runtime retirement");
+        return;
+    }
+    runtime->cleanup_in_progress = true;
+    RuntimeCleanupAttempt attempt = {runtime, false, false};
+    if (!runtime_document_preflight(runtime)) return;
+    // S13.3.1v2: cleanup must run while the document and its resources live.
+    if (!runtime_join_document_tasks(runtime)) {
+        log_error("runtime-document-join: heap reset refused; document tasks were not joined");
+        return;
+    }
+    // Masked task cleanup can create a native borrower while the join runs.
+    if (runtime->native_borrows) return;
     // A satellite still lowering the finished script reads types and names
     // this reset frees; retire and await it first, as runtime_cleanup does.
     // test-batch resets the heap before it frees the scripts, and a worker
@@ -3793,10 +3902,14 @@ void runtime_reset_heap(Runtime* runtime) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
         if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
+        if (runtime->native_borrows) return;
         cleanup_context->result = ItemNull;
         cleanup_context->scheduler = runtime_scheduler(runtime);
         if (js_runtime_state_for(cleanup_context) &&
                 !js_runtime_state_init(cleanup_context)) return;
+        if (runtime->native_borrows) return;
+        runtime->cleanup_destructive = true;
+        attempt.destructive = true;
         // Diagnostics can own allocations from the retiring heap. Clear
         // them before teardown so the next batch never frees a stale
         // context-owned error while setting up its fresh heap.
@@ -3808,7 +3921,7 @@ void runtime_reset_heap(Runtime* runtime) {
         tmpl_state_destroy();
         // Template entries retain both name-pool strings and JIT body pointers
         // from this evaluation. Keeping them across heap replacement let the
-        // next script dispatch through unmapped code (D5.4.3).
+        // next script dispatch through unmapped code (D6.4.3).
         TemplateRegistry* template_registry = cleanup_context->template_registry;
         cleanup_context->template_registry = NULL;
         template_registry_destroy(template_registry);
@@ -3825,19 +3938,12 @@ void runtime_reset_heap(Runtime* runtime) {
         } else {
             // Lambda DOM imports also allocate Radiant Velmt/VArray wrappers
             // from this heap. Retire their weak cache slots before replacing
-            // the heap even when no JavaScript source ran (D7.4.5v2).
+            // the heap even when no JavaScript source ran (D9.5.5).
             dom_batch_reset();
         }
 
-        // native owners belong to the evaluator even when no JS realm exists.
-        runtime_resource_table_clear(runtime_resource_table_context(cleanup_context));
-
-#ifndef LAMBDA_NO_TASKS
-        if (runtime_scheduler(runtime)) {
-            lambda_scheduler_destroy(runtime_scheduler(runtime));
-            runtime_set_scheduler(runtime, NULL);
-        }
-#endif
+        // Native owners belong to the evaluator even when no JS realm exists.
+        runtime_release_tasks_and_resources(runtime, cleanup_context);
         if (runtime->js_runtime_used) {
             js_event_loop_shutdown();
     #ifndef LAMBDA_NO_TASKS
@@ -3872,7 +3978,7 @@ void runtime_reset_heap(Runtime* runtime) {
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
         runtime_shape_tree_release(cleanup_context);
-        // D4.2.1v2/RN-NamePool: GC finalizers may still inspect NameRecords;
+        // D5.2.1/RN-NamePool: GC finalizers may still inspect NameRecords;
         // release the dedicated runtime pool only after heap destruction.
         if (runtime_name_pool(runtime)) {
             name_pool_release(runtime_name_pool(runtime));
@@ -3882,6 +3988,7 @@ void runtime_reset_heap(Runtime* runtime) {
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
     }
+    attempt.complete = true;
 }
 
 void runtime_request_satellite_cancel(Runtime* runtime) {
@@ -3901,22 +4008,56 @@ static void runtime_quiesce_satellite_workers(Runtime* runtime) {
     }
 }
 
-void runtime_cleanup(Runtime* runtime) {
-    if (!runtime) return;
+static RuntimeCleanupResult runtime_try_cleanup_impl(Runtime* runtime, bool retirement_owner,
+                                                     bool wait_for_tasks) {
+    if (!runtime) return RUNTIME_CLEANUP_COMPLETE;
+    if (runtime->cleanup_incomplete) return RUNTIME_CLEANUP_INCOMPLETE;
+    if (runtime->cleanup_in_progress) return RUNTIME_CLEANUP_RETRY;
+    if (runtime->native_borrows) return RUNTIME_CLEANUP_RETRY;
+    if (retirement_owner) {
+        if (runtime->document_retirement_pins != 1 || !runtime->eval_context ||
+                runtime->eval_context != context) return RUNTIME_CLEANUP_RETRY;
+    } else if (runtime->document_retirement_pins) return RUNTIME_CLEANUP_RETRY;
+    runtime->cleanup_in_progress = true;
+    RuntimeCleanupAttempt attempt = {runtime, false, false};
+    // Refuse before retiring native owners if their document is not ready to close.
+    if (!runtime_document_preflight(runtime)) return RUNTIME_CLEANUP_RETRY;
+    // S13.3.1v2: document cleanup precedes editor, template and resource teardown.
+    if (!runtime_join_document_tasks(runtime, wait_for_tasks)) {
+        log_error("runtime-document-join: cleanup refused; document tasks were not joined");
+        return RUNTIME_CLEANUP_RETRY;
+    }
+    if (runtime->native_borrows) return RUNTIME_CLEANUP_RETRY;
     runtime_quiesce_satellite_workers(runtime);
     // Document/transaction capsules retire with their owning heap after tasks
-    // join; do not reset the currently active peer (D5.4.2-D5.4.4).
+    // join; do not reset the currently active peer (D6.4.2-D6.4.4).
     EvalContext* cleanup_owner = runtime->eval_context;
     if (cleanup_owner) {
-        if (!eval_context_init(cleanup_owner)) return;
+        if (!eval_context_init(cleanup_owner)) return RUNTIME_CLEANUP_RETRY;
         if (js_runtime_state_for(cleanup_owner) &&
-                !js_runtime_state_init(cleanup_owner)) return;
-        if (cleanup_owner->cwd) {
-            // A session can end before its first execution; unlike the JIT
-            // output path, that leaves its per-execution cwd URL to cleanup.
-            url_destroy(cleanup_owner->cwd);
-            cleanup_owner->cwd = NULL;
-        }
+                !js_runtime_state_init(cleanup_owner)) return RUNTIME_CLEANUP_RETRY;
+    }
+    EvalContext* cleanup_context = NULL;
+    if (runtime_heap(runtime)) {
+        cleanup_context = cleanup_owner ? cleanup_owner : runtime_get_eval_context(runtime);
+        if (!cleanup_context || !runtime_context_bind_retained(runtime, cleanup_context) ||
+                (js_runtime_state_for(cleanup_context) && !js_runtime_state_init(cleanup_context)))
+            return RUNTIME_CLEANUP_RETRY;
+    }
+#ifndef LAMBDA_NO_TASKS
+    // Heapless schedulers still need the shutdown gate before close callbacks run.
+    if (!runtime_heap(runtime) && runtime_scheduler(runtime) &&
+            !(wait_for_tasks ? lambda_scheduler_join_document_tasks(runtime_scheduler(runtime)) :
+                lambda_scheduler_document_tasks_progress(runtime_scheduler(runtime)) == LAMBDA_DOCUMENT_JOIN_DONE))
+        return RUNTIME_CLEANUP_RETRY;
+#endif
+    // Refusals above leave native owners attached; later failures must not be retried.
+    if (runtime->native_borrows) return RUNTIME_CLEANUP_RETRY;
+    runtime->cleanup_destructive = true;
+    attempt.destructive = true;
+    if (cleanup_owner && cleanup_owner->cwd) {
+        url_destroy(cleanup_owner->cwd);
+        cleanup_owner->cwd = NULL;
     }
     // The Radiant host owns the shared libuv loop across document and script
     // runtimes; retiring either one must leave other realms' handles live.
@@ -3938,28 +4079,15 @@ void runtime_cleanup(Runtime* runtime) {
 
     // Destroy retained execution state (heap and name_pool)
     if (runtime_heap(runtime)) {
-        EvalContext* cleanup_context = cleanup_owner
-            ? cleanup_owner : runtime_get_eval_context(runtime);
-        if (!cleanup_context) return;
-        if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
         cleanup_context->result = ItemNull;
-        if (js_runtime_state_for(cleanup_context) &&
-                !js_runtime_state_init(cleanup_context)) return;
 
         // Destruction follows the same owner-bound path as heap replacement.
         edit_bridge_destroy();
         render_map_destroy();
         tmpl_state_destroy();
 
-        // cancel native owners while their heap is valid, including Lambda DOM loads.
-        runtime_resource_table_clear(runtime_resource_table_context(cleanup_context));
-#ifndef LAMBDA_NO_TASKS
-        if (runtime_scheduler(runtime)) {
-            cleanup_context->scheduler = runtime_scheduler(runtime);
-            lambda_scheduler_destroy(runtime_scheduler(runtime));
-            runtime_set_scheduler(runtime, NULL);
-        }
-#endif
+        // Cancel native owners while their heap is valid, including Lambda DOM loads.
+        runtime_release_tasks_and_resources(runtime, cleanup_context);
 
         if (js_runtime_state_for(cleanup_context)) js_event_loop_shutdown();
 #ifndef LAMBDA_NO_TASKS
@@ -3969,13 +4097,15 @@ void runtime_cleanup(Runtime* runtime) {
 
         dom_shutdown();
         if (runtime->dom_doc) {
-            free_document((DomDocument*)runtime->dom_doc);
+            // A refused document close leaves native owners live; stop before freeing their heap.
+            if (!free_document_profiled((DomDocument*)runtime->dom_doc, NULL))
+                return RUNTIME_CLEANUP_INCOMPLETE;
             runtime->dom_doc = NULL;
             // Child teardown can leave its evaluator and JS capsule bound here.
             if (!eval_context_matches(cleanup_context) &&
-                    !eval_context_transfer_thread(cleanup_context)) return;
+                    !eval_context_transfer_thread(cleanup_context)) return RUNTIME_CLEANUP_INCOMPLETE;
             if (js_runtime_state_for(cleanup_context) &&
-                    !js_runtime_state_init(cleanup_context)) return;
+                    !js_runtime_state_init(cleanup_context)) return RUNTIME_CLEANUP_INCOMPLETE;
         }
         runtime->dom_ui_context = NULL;
 
@@ -4009,7 +4139,7 @@ void runtime_cleanup(Runtime* runtime) {
             // Full JS capsule destruction can release function-owned module
             // bindings, so keep both the JS realm and its slabs alive until it
             // has completed while the owning heap is still valid.
-            if (!js_runtime_state_thread_matches(cleanup_context)) return;
+            if (!js_runtime_state_thread_matches(cleanup_context)) return RUNTIME_CLEANUP_INCOMPLETE;
             // One-shot teardown has no later heap calls; finish eval-generated
             // MIR while its deferred-context list still belongs to this realm.
             js_runtime_state_destroy_context();
@@ -4024,7 +4154,7 @@ void runtime_cleanup(Runtime* runtime) {
         runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
         runtime_shape_tree_release(cleanup_context);
-        // D4.2.1v2/RN-NamePool: GC finalizers can traverse name-backed
+        // D5.2.1/RN-NamePool: GC finalizers can traverse name-backed
         // shapes, so the dedicated runtime pool outlives heap teardown.
         if (runtime_name_pool(runtime)) {
             name_pool_release(runtime_name_pool(runtime));
@@ -4034,16 +4164,19 @@ void runtime_cleanup(Runtime* runtime) {
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
     } else {
+        // A scheduler or native owner can exist before the first heap is created.
+        if (cleanup_owner) runtime_release_tasks_and_resources(runtime, cleanup_owner);
         dom_shutdown();
         if (runtime->dom_doc) {
-            free_document((DomDocument*)runtime->dom_doc);
+            if (!free_document_profiled((DomDocument*)runtime->dom_doc, NULL))
+                return RUNTIME_CLEANUP_INCOMPLETE;
             runtime->dom_doc = NULL;
         }
         runtime->dom_ui_context = NULL;
     }
     if (!event_loop_cleaned) {
         if (runtime->eval_context && js_runtime_state_for(runtime->eval_context)) {
-            if (!js_runtime_state_init(runtime->eval_context)) return;
+            if (!js_runtime_state_init(runtime->eval_context)) return RUNTIME_CLEANUP_INCOMPLETE;
             js_event_loop_shutdown();
         }
 #ifndef LAMBDA_NO_TASKS
@@ -4062,7 +4195,7 @@ void runtime_cleanup(Runtime* runtime) {
         lambda_module_state_destroy();
         // core capsules are evaluator-owned, independently of the optional JS capsule.
         context_capsule_destroy_all(retiring_context);
-        if (!eval_context_shutdown(retiring_context)) return;
+        if (!eval_context_shutdown(retiring_context)) return RUNTIME_CLEANUP_INCOMPLETE;
         mem_free(runtime->eval_context);
         runtime->eval_context = NULL;
     }
@@ -4071,6 +4204,28 @@ void runtime_cleanup(Runtime* runtime) {
     runtime_close_js_module_mir_scopes(runtime);
 #endif
     runtime_free_all_scripts(runtime);
+    attempt.complete = true;
+    return RUNTIME_CLEANUP_COMPLETE;
+}
+
+RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime) {
+    return runtime_try_cleanup_impl(runtime, false, true);
+}
+
+RuntimeCleanupResult runtime_try_cleanup_nonblocking(Runtime* runtime) {
+    return runtime_try_cleanup_impl(runtime, false, false);
+}
+
+RuntimeCleanupResult runtime_try_cleanup_retirement_pinned(Runtime* runtime) {
+    return runtime_try_cleanup_impl(runtime, true, true);
+}
+
+RuntimeCleanupResult runtime_try_cleanup_retirement_pinned_nonblocking(Runtime* runtime) {
+    return runtime_try_cleanup_impl(runtime, true, false);
+}
+
+void runtime_cleanup(Runtime* runtime) {
+    (void)runtime_try_cleanup(runtime);
 }
 
 // ============================================================================

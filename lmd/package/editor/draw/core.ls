@@ -5,9 +5,9 @@ import geom: .geometry
 import motion: lambda.slide.motion
 import paths: .path
 import defaults: lambda.slide.common
-import doc: lambda.editor.mod_doc
-import step: lambda.editor.mod_step
-import tx: lambda.editor.mod_transaction
+import doc: lambda.editor.core.doc
+import step: lambda.editor.core.step
+import tx: lambda.editor.core.transaction
 
 pub fn finite(v) any^ => geom.finite_number(v)
 fn value(v,fallback) any^ => defaults.value(v,fallback)

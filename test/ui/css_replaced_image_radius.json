@@ -1,0 +1,156 @@
+{
+  "name": "Replaced raster and SVG images clip to their rounded content box through radius mutation",
+  "html": "test/ui/css_replaced_image_radius.html",
+  "viewport": {
+    "width": 400,
+    "height": 180
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#raster",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#raster",
+        "offset_x": 20,
+        "offset_y": 40
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#vector",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#vector",
+        "offset_x": 20,
+        "offset_y": 40
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#padded",
+        "offset_x": 14,
+        "offset_y": 14
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#padded",
+        "offset_x": 32,
+        "offset_y": 52
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#padded",
+        "offset_x": 50,
+        "offset_y": 2
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#square"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#raster",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#vector",
+        "offset_x": 2,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#padded",
+        "offset_x": 14,
+        "offset_y": 14
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    }
+  ]
+}

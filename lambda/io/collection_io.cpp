@@ -10,7 +10,7 @@
 
 // UI content helpers, shared by this Input-owned append and the runtime's
 // list_push: UI element content lives in an arena the collector never traces
-// (D4.1.1v2), so what it holds must be owned by the document (D4.5.2).
+// (D5.1.1), so what it holds must be owned by the document (D5.5.2).
 
 // Copy a string into `arena` as a fat [DomText][String][chars] node, the form
 // the DOM build adopts in place.
@@ -130,7 +130,7 @@ void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena,
         if (text && text->len == 0) return;  // S2.6.2: empty text contributes no content
         if (ui_mode) item = ui_copy_string_to_arena(arena, item);
     } else if (ui_mode && list->type_id == LMD_TYPE_ELEMENT) {
-        // D4.5.2: element content is document-owned, as in the runtime's list_push
+        // D5.5.2: element content is document-owned, as in the runtime's list_push
         item = ui_copy_content_to_input(ui_input, item);
     }
     if (type_id == LMD_TYPE_STRING && list->length > 0 && list->items) {

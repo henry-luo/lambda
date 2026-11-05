@@ -1,4 +1,4 @@
-// S9.1.2/D4.4.1: owner cycles preserve retained snapshots and live temporaries.
+// S9.1.2/D5.4.1: owner cycles preserve retained snapshots and live temporaries.
 pn rotate_rows(n) {
     var a = fill(n, 1)^
     var b = fill(n, 2)^

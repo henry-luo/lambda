@@ -1,10 +1,10 @@
-// Text revisions are source marks; accepting/rejecting edits never restores an old document (S1.4, D7.2.5).
-import lambda.editor.mod_doc
-import lambda.editor.mod_step
-import lambda.editor.mod_source_pos
-import lambda.editor.mod_transaction
-import inline_format: lambda.editor.mod_inline_format
-import rendering: lambda.edit.model
+// Text revisions are source marks; accepting/rejecting edits never restores an old document (S1.4, D10.2.1).
+import lambda.editor.core.doc
+import lambda.editor.core.step
+import lambda.editor.core.source_pos
+import lambda.editor.core.transaction
+import inline_format: lambda.editor.core.inline_format
+import rendering: lambda.editor.format.model
 import objects: .mod_objects
 
 pub let defaults = {enabled:false,author:"Me"}

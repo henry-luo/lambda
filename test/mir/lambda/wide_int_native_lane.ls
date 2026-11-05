@@ -5,7 +5,7 @@
 // fn_add/fn_sub/fn_mul, and let pack_sized_integer push a number home for a
 // result the next instruction unboxed again. Three side-stack words per
 // operation, none of them reclaimed inside a loop body — which is why the
-// accumulators below used to exhaust the side stack (D5.2.3 / DO24) rather
+// accumulators below used to exhaust the side stack (D6.2.3 / DO24) rather
 // than merely run slow.
 //
 // The classifier's I64/U64 result cell wraps in two's complement

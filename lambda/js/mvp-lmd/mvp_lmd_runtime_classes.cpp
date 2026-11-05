@@ -149,7 +149,7 @@ extern "C" Item mvp_lmd_set_prototype(Item object, Item prototype) {
     MvpLmdLibraryState* library = mvp_lmd_program_library();
     if (!library || !map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     if (!map->type) map->type = type_tree_map_root(runtime_shape_tree());
-    // D2.6.10: this traced private slot never rewrites TypeNominal::base.
+    // D3.1.2: this traced private slot never rewrites TypeNominal::base.
     return map_shape_set(map, library->prototype_key, parent.get())
         ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
@@ -982,7 +982,7 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
         bool retains_parent = cls->ast && cls->ast->superclass;
         int captures = fn->closure_field_count, count = captures + 3 + cls->initializer_count + cls->field_count +
             (cls->private_method_mask ? 2 : 0) + (retains_parent ? 1 : 0);
-        // D5.3: large classes retain their metadata through one ordinary Array
+        // D6.3: large classes retain their metadata through one ordinary Array
         // slot, preserving the shared Function header and small-class layout.
         cls->indirect_values = count > UINT8_MAX;
         int closure_count = cls->indirect_values ? captures + 1 : count;
@@ -1000,7 +1000,7 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
         if (!env) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         if (captures) memcpy(env, fn->closure_env, captures * sizeof(Item));
         // nominal ancestry outlives mutable prototype links; keep its parent
-        // constructor in the existing precisely traced closure (D5.3).
+        // constructor in the existing precisely traced closure (D6.3).
         if (cls->indirect_values) env[captures] = metadata.get();
         fn->closure_env = env; fn->closure_field_count = closure_count; fn->home = cls; fn->constructor = true; fn->non_constructible = false;
         cls->owner = fn; cls->property_slot = captures;
