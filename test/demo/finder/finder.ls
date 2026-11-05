@@ -1,5 +1,6 @@
 // S12.1.3 / D5.5.1: keep the native shell and controls; update retained regions in handlers.
 import dom
+import workspace_shell: lambda.ui.workspace.shell
 import resources: ~~.mod_resources
 import model: .mod_model
 import files: .mod_io
@@ -564,7 +565,7 @@ on keydown(evt) {
     return 'pass'
 }
 <html lang:"en",<head <meta charset:"UTF-8"><meta name:"viewport",content:"width=device-width, initial-scale=1">
-    <title "Finder — Lambda"><link rel:"stylesheet",href:url_resolve(BASE,"finder.css")>>
-    <body apply(<finder_session rendered:ui.tree(INITIAL,PLACES)>);
+    <title "Finder — Lambda"><style workspace_shell.css><link rel:"stylesheet",href:url_resolve(BASE,"finder.css")>>
+    <body class:"workspace-shell",style:workspace_shell.variables({primary:"#388de0",text:"#303741",background:"#f6f7f9"})^,apply(<finder_session rendered:ui.tree(INITIAL,PLACES)>);
         <script src:url_resolve(BASE,"finder.js")>>
 >

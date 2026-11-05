@@ -5,7 +5,7 @@ import dom
 import resources: ~~.mod_resources
 import updates: lambda.ui.core.publish
 import interaction: lambda.ui.core.interaction
-import workspace_theme: lambda.ui.workspace.tokens
+import workspace_shell: lambda.ui.workspace.shell
 import corpus: .mod_corpus
 import L: .mod_library
 import G: .mod_grid
@@ -1123,8 +1123,8 @@ on load(evt) {
 }
 
 <html lang:"en",<head <meta charset:"UTF-8"><meta name:"viewport",content:"width=device-width, initial-scale=1">
-    <title "Photos — Lambda"><style slide_html.css><link rel:"stylesheet",href:url_resolve(BASE, "photo-album.css")>>
-    apply(<album_document rendered:<body style:workspace_theme.variables({background:"#f5f5f7",surface:"#ffffff",
+    <title "Photos — Lambda"><style (workspace_shell.css ++ slide_html.css)><link rel:"stylesheet",href:url_resolve(BASE, "photo-album.css")>>
+    apply(<album_document rendered:<body class:"workspace-shell",style:workspace_shell.variables({background:"#f5f5f7",surface:"#ffffff",
         text:"#1d1d1f",text_secondary:"#6e6e73",border:"#d9dbe1",primary:"#0a84ff"})^,
         apply(<album_session rendered:ui.tree(LIB, FETCH)>)>>)
 >

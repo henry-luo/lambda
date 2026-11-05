@@ -1,0 +1,46 @@
+{
+  "name": "Inherited normal line-height uses each flex item font; lengths, percentages and unitless numbers retain their own inheritance rules",
+  "html": "test/ui/flex_inherited_normal_line_height.html",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#normal .label"
+      },
+      "height": 10
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#normal .tail"
+      },
+      "y": 10,
+      "height": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#length .label"
+      },
+      "height": 24
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#number .label"
+      },
+      "height": 25
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#percent .label"
+      },
+      "height": 30
+    }
+  ]
+}

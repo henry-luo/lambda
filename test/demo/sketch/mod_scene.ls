@@ -109,19 +109,19 @@ pub fn layers(st) => <div for (i in ((0 to len(st.doc.layers)-1) ^ { [] }))
         (button("lock-" ++ l.id,if (l.locked) "Unlock " ++ l.name else "Lock " ++ l.name,"layer-locked/" ++ l.id,if (l.locked) "lock" else "unlock",{class:if (l.locked) "mini" else "mini off"}))>)>
 
 pub fn tree() => <main id:"sketch",'data-error':"",
-    <header class:"topbar",
+    <header class:"topbar workspace-chrome",
         <div class:"brand",<div class:"brand-mark",(icon("sketch"))><h1 "Sketch"><span class:"badge","LAMBDA">>
         <div class:"file-tools",(button("blank","New","blank"));(button("open","Open","open"));(button("import-image","Import image · Ctrl/Cmd Shift I","import-image","image"));(button("save","Save project","save","save"))>
         <div class:"document-heading",<strong id:"document-title","Somewhere, slowly"><span id:"save-state","Saved">>
         <div class:"header-end",(button("example","Sample illustration","example"));<button id:"export",class:"primary",type:"button",'data-action':"export",(icon("export"));<span "Export SVG">>>>
-    <nav class:"options",'aria-label':"Tool options",
+    <nav class:"options workspace-chrome",'aria-label':"Tool options",
         <strong id:"tool-title","Brush"><span class:"divider">
         <label 'for':"prop-size",<span "Size"><input id:"prop-size",type:"number",min:"0.1",max:"4096",step:"1",'data-property':"size"><span "px">>
         <label 'for':"prop-opacity",<span "Opacity"><input id:"prop-opacity",type:"number",min:"0",max:"1",step:"0.1",'data-property':"opacity">>
         <span class:"divider"><div class:"history-tools",(button("undo","Undo · Ctrl/Cmd Z","undo","undo"));(button("redo","Redo · Ctrl/Cmd Shift Z","redo","redo"))>
         <div class:"options-end",(button("grid","Snap to 20 px grid","grid","grid",{'aria-pressed':"false"}));(button("fit","Fit artboard · 0","fit","fit"))>>
     <div class:"workspace",
-        <nav class:"tool-rail",'aria-label':"Drawing tools",for (tool in m.TOOLS)
+        <nav class:"tool-rail workspace-chrome",'aria-label':"Drawing tools",for (tool in m.TOOLS)
             (button("tool-" ++ tool.id,tool.label ++ " · " ++ tool.key,"tool-" ++ tool.id,tool.id,{'aria-pressed':string(tool.id=="brush"),class:"tool"}))>
         <section class:"canvas-column",
             <div class:"document-tab",<span class:"tab-dot"><strong id:"tab-title","Somewhere, slowly"><span ".sketch"><span class:"tab-note","VECTOR ARTBOARD">>
