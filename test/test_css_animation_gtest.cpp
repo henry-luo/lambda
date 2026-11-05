@@ -149,6 +149,93 @@ TEST(DomDocumentOwnership, LoaderRuntimeSurvivesActiveCleanupAndRetries) {
     EXPECT_EQ(ui.loader_runtime.get(), nullptr);
 }
 
+TEST(DomDocumentOwnership, WindowRetainsRefusedDocumentAndLoaderUntilRetry) {
+    ASSERT_EXIT({
+        UiContext ui = {};
+        Runtime* loader = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+        Runtime other = {};
+        if (!loader) _Exit(2);
+        runtime_init(loader);
+        runtime_init(&other);
+        ui.loader_runtime = lam::own(loader);
+        if (!runtime_get_eval_context(loader) || !runtime_get_eval_context(&other)) _Exit(3);
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document) _Exit(4);
+        document->js.runtime = loader;
+        document->lambda_runtime = &other;
+        ui.document = lam::up(document);
+        ui.paged_scroll_x = 12.0f;
+        ui.paged_scroll_y = 34.0f;
+        // An owner mismatch must not detach the shell or its loader.
+        ui.destroy();
+        if (ui.document.get() != document || ui.loader_runtime.get() != loader || destroyed ||
+            ui.paged_scroll_x != 12.0f || ui.paged_scroll_y != 34.0f) _Exit(5);
+        document->js.runtime = nullptr;
+        document->lambda_runtime = nullptr;
+        document->destroying = true;
+        ui.destroy_document();
+        if (ui.document.get() != document || destroyed || ui.paged_scroll_x != 12.0f) _Exit(6);
+        document->destroying = false;
+        ui.destroy_document();
+        if (ui.document || destroyed != 1 || ui.paged_scroll_x != 0.0f ||
+            ui.paged_scroll_y != 0.0f || ui.loader_runtime.get() != loader) _Exit(7);
+        if (!ui_context_release_loader_runtime(&ui)) _Exit(8);
+        runtime_cleanup(&other);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, WindowRetainsDocumentWhileItsEvaluatorRuns) {
+    ASSERT_EXIT({
+        Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+        if (!runtime) _Exit(2);
+        runtime_init(runtime);
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        if (!owner || !eval_context_transfer_thread(owner) ||
+            item_is_error(js_interp_execute_source(runtime, "null;", 5,
+                "active-window-document.js", nullptr))) _Exit(3);
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document) _Exit(4);
+        document->js.runtime = runtime;
+        document->lambda_runtime = runtime;
+        document->owns_script_runtime = true;
+        UiContext ui = {};
+        ui.document = lam::up(document);
+        {
+            RuntimeExecutionScope active(owner);
+            if (document_runtime_cleanup_ready(document) || ui.destroy_document() ||
+                ui.document.get() != document || destroyed || !runtime_heap(runtime)) _Exit(5);
+        }
+        if (!ui.destroy_document() || ui.document || destroyed != 1) _Exit(6);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, WindowRetainsDocumentWhileItsLoaderRuns) {
+    ASSERT_EXIT({
+        Runtime loader = {};
+        runtime_init(&loader);
+        EvalContext* owner = runtime_get_eval_context(&loader);
+        if (!owner || !eval_context_transfer_thread(owner)) _Exit(2);
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document) _Exit(3);
+        document->loader_runtime = lam::up(&loader);
+        UiContext ui = {};
+        ui.document = lam::up(document);
+        {
+            RuntimeExecutionScope active(owner);
+            if (document_runtime_cleanup_ready(document) || ui.destroy_document() ||
+                ui.document.get() != document || destroyed) _Exit(4);
+        }
+        if (!ui.destroy_document() || ui.document || destroyed != 1) _Exit(5);
+        runtime_cleanup(&loader);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
 TEST(DomDocumentOwnership, RuntimeCleanupOwnsRecursiveDocumentRelease) {
     for (int owned = 0; owned < 3; ++owned) {
         Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);

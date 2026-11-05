@@ -4702,7 +4702,7 @@ typedef struct UiContext {
 
     int init(bool headless, float requested_device_scale = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
-    void destroy_document();
+    bool destroy_document();
     void destroy();
 } UiContext;
 
