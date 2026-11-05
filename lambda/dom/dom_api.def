@@ -832,6 +832,10 @@ DOM_OP(CORE, query_local_fonts, window, 1, "fn(options: any) -> [map]^", dom_eng
 // D7.5.10: explicit capture acquisition/control; append without moving published catalog slots.
 DOM_OP(CORE, audio_capture, media, 2, "pn(n: any, request: map) -> map|null", dom_engine_audio_capture, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
+// D7.5.3: expose coalescing through the DOM/Radiant boundary without changing ordinary requests.
+DOM_OP(CORE, request_frame_once, timing, 2, "pn(n: any, event_name: string) -> int", dom_engine_request_frame_once, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_RAW(frame_request_once_native, timing, uint64_t, (void* owner, const char* event_name), dom_engine_frame_request_once, DOM_F_NATIVE)
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

@@ -1,0 +1,24 @@
+{
+  "name": "DBench keeps a million-row SQLite table bounded",
+  "html": "temp/dbench-prepared/million_rows/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "million_rows"],
+  "viewport": {"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#target"},"text":"temp/dbench-million.sqlite","clear":true},
+    {"type":"click","target":{"selector":"#connect"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-table","equals":"records"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"assert_script","js":"document.querySelectorAll('#result-grid td[data-row]').length<500"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT id, payload FROM records WHERE id >= 999745 ORDER BY id","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_text","target":{"selector":"#result-0-0"},"contains":"999745"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"script","js":"const p=document.getElementById('result-scroll');p.scrollTop=6500;p.dispatchEvent(new Event('scroll'))"},
+    {"type":"assert_script","js":"+document.getElementById('result-grid').dataset.firstRow>0 && document.querySelectorAll('#result-grid td[data-row]').length<500"},
+    {"type":"click","target":{"selector":"#more"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Result complete"}
+  ]
+}

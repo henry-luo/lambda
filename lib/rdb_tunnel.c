@@ -29,8 +29,10 @@ void rdb_tunnel_close(RdbTunnel* tunnel) { (void)tunnel; }
 
 #else
 
+#include "time_util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -39,6 +41,7 @@ void rdb_tunnel_close(RdbTunnel* tunnel) { (void)tunnel; }
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -85,6 +88,7 @@ struct RdbTunnelSession {
     pthread_t                thread;
     bool                     tls;
     bool                     tls_ready;     /* contexts initialised (must be freed) */
+    uint64_t                 upgrade_deadline_ms;
     mbedtls_ssl_context      ssl;
     mbedtls_ssl_config       conf;
     mbedtls_entropy_context  entropy;
@@ -105,8 +109,35 @@ static void tunnel_no_sigpipe(int fd) {
 #endif
 }
 
-static bool fd_write_all(int fd, const uint8_t* buf, size_t n) {
+// Upgrade I/O must not inherit an unbounded wait from a stalled upstream;
+// remove these timeouts before relaying queries, which may legitimately run longer.
+static bool tunnel_socket_timeout(int fd, int64_t timeout_ms) {
+    struct timeval tv = { (time_t)(timeout_ms / 1000), (suseconds_t)((timeout_ms % 1000) * 1000) };
+    return setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0 &&
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == 0;
+}
+
+static int tunnel_timeout_ms(const RdbTunnel* t) {
+    int64_t timeout = t->spec.connect_timeout_ms > 0 ? t->spec.connect_timeout_ms : RDB_TUNNEL_CONNECT_MS;
+    return timeout > INT_MAX ? INT_MAX : (int)timeout;
+}
+
+static int tunnel_remaining_ms(const RdbTunnelSession* s) {
+    uint64_t now = time_now_ms();
+    if (now >= s->upgrade_deadline_ms) return 0;
+    uint64_t remaining = s->upgrade_deadline_ms - now;
+    return remaining > INT_MAX ? INT_MAX : (int)remaining;
+}
+
+static bool tunnel_prepare_io(const RdbTunnelSession* s, int fd) {
+    if (!s->upgrade_deadline_ms) return true;
+    int remaining = tunnel_remaining_ms(s);
+    return remaining > 0 && tunnel_socket_timeout(fd, remaining);
+}
+
+static bool fd_write_all(RdbTunnelSession* s, int fd, const uint8_t* buf, size_t n) {
     while (n > 0) {
+        if (!tunnel_prepare_io(s, fd)) return false;
         ssize_t w = send(fd, buf, n, MSG_NOSIGNAL);
         if (w < 0 && errno == EINTR) continue;
         if (w <= 0) return false;
@@ -116,8 +147,9 @@ static bool fd_write_all(int fd, const uint8_t* buf, size_t n) {
     return true;
 }
 
-static bool fd_read_exact(int fd, uint8_t* buf, size_t n) {
+static bool fd_read_exact(RdbTunnelSession* s, int fd, uint8_t* buf, size_t n) {
     while (n > 0) {
+        if (!tunnel_prepare_io(s, fd)) return false;
         ssize_t r = recv(fd, buf, n, 0);
         if (r < 0 && errno == EINTR) continue;
         if (r <= 0) return false;
@@ -152,16 +184,16 @@ static int tunnel_connect_fd(int family, const struct sockaddr* addr, socklen_t 
     return fd;
 }
 
-static int tunnel_connect_upstream(const RdbTunnel* t) {
-    int64_t timeout = t->spec.connect_timeout_ms > 0 ? t->spec.connect_timeout_ms
-                                                      : RDB_TUNNEL_CONNECT_MS;
+static int tunnel_connect_upstream(const RdbTunnelSession* s) {
+    const RdbTunnel* t = s->tunnel;
     if (t->target.kind == RDB_PEER_UNIX_SOCKET) {
         struct sockaddr_un addr;
         memset(&addr, 0, sizeof(addr));
         addr.sun_family = AF_UNIX;
         if (strlen(t->target.path) >= sizeof(addr.sun_path)) return -1;
         strcpy(addr.sun_path, t->target.path);
-        return tunnel_connect_fd(AF_UNIX, (struct sockaddr*)&addr, sizeof(addr), timeout);
+        int remaining = tunnel_remaining_ms(s);
+        return remaining ? tunnel_connect_fd(AF_UNIX, (struct sockaddr*)&addr, sizeof(addr), remaining) : -1;
     }
     if (t->target.kind != RDB_PEER_TCP) return -1;
     char port[16];
@@ -174,7 +206,9 @@ static int tunnel_connect_upstream(const RdbTunnel* t) {
     if (getaddrinfo(t->target.host, port, &hints, &list) != 0) return -1;
     int fd = -1;
     for (struct addrinfo* ai = list; ai && fd < 0; ai = ai->ai_next) {
-        fd = tunnel_connect_fd(ai->ai_family, ai->ai_addr, ai->ai_addrlen, timeout);
+        int remaining = tunnel_remaining_ms(s);
+        if (!remaining) break;
+        fd = tunnel_connect_fd(ai->ai_family, ai->ai_addr, ai->ai_addrlen, remaining);
     }
     freeaddrinfo(list);
     if (fd >= 0) {
@@ -189,13 +223,17 @@ static int tunnel_connect_upstream(const RdbTunnel* t) {
  * ══════════════════════════════════════════════════════════════════════ */
 
 static int tls_bio_send(void* ctx, const unsigned char* buf, size_t len) {
-    ssize_t w = send(*(int*)ctx, buf, len, MSG_NOSIGNAL);
+    RdbTunnelSession* s = (RdbTunnelSession*)ctx;
+    if (!tunnel_prepare_io(s, s->server_fd)) return MBEDTLS_ERR_NET_SEND_FAILED;
+    ssize_t w = send(s->server_fd, buf, len, MSG_NOSIGNAL);
     if (w < 0) return errno == EINTR ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
     return (int)w;
 }
 
 static int tls_bio_recv(void* ctx, unsigned char* buf, size_t len) {
-    ssize_t r = recv(*(int*)ctx, buf, len, 0);
+    RdbTunnelSession* s = (RdbTunnelSession*)ctx;
+    if (!tunnel_prepare_io(s, s->server_fd)) return MBEDTLS_ERR_NET_RECV_FAILED;
+    ssize_t r = recv(s->server_fd, buf, len, 0);
     if (r < 0) return errno == EINTR ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
     return (int)r;
 }
@@ -270,7 +308,7 @@ static bool tls_start(RdbTunnelSession* s) {
         tls_log_error(t, "TLS setup", ret);
         return false;
     }
-    mbedtls_ssl_set_bio(&s->ssl, &s->server_fd, tls_bio_send, tls_bio_recv, NULL);
+    mbedtls_ssl_set_bio(&s->ssl, s, tls_bio_send, tls_bio_recv, NULL);
     while ((ret = mbedtls_ssl_handshake(&s->ssl)) != 0) {
         if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
         tls_log_error(t, "TLS handshake", ret);
@@ -283,7 +321,7 @@ static bool tls_start(RdbTunnelSession* s) {
 }
 
 static bool up_write_all(RdbTunnelSession* s, const uint8_t* buf, size_t n) {
-    if (!s->tls) return fd_write_all(s->server_fd, buf, n);
+    if (!s->tls) return fd_write_all(s, s->server_fd, buf, n);
     while (n > 0) {
         int w = mbedtls_ssl_write(&s->ssl, buf, n);
         if (w == MBEDTLS_ERR_SSL_WANT_READ || w == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
@@ -298,7 +336,10 @@ static bool up_write_all(RdbTunnelSession* s, const uint8_t* buf, size_t n) {
 static int up_read_some(RdbTunnelSession* s, uint8_t* buf, size_t cap) {
     if (!s->tls) {
         ssize_t r;
-        do { r = recv(s->server_fd, buf, cap, 0); } while (r < 0 && errno == EINTR);
+        do {
+            if (!tunnel_prepare_io(s, s->server_fd)) return -1;
+            r = recv(s->server_fd, buf, cap, 0);
+        } while (r < 0 && errno == EINTR);
         return (int)r;
     }
     for (;;) {
@@ -331,8 +372,8 @@ static bool upgrade_postgres(RdbTunnelSession* s) {
     // SSLRequest: length 8, code 80877103; the server answers 'S' or 'N'
     static const uint8_t ssl_request[8] = { 0, 0, 0, 8, 0x04, 0xd2, 0x16, 0x2f };
     uint8_t answer = 0;
-    if (!fd_write_all(s->server_fd, ssl_request, sizeof(ssl_request)) ||
-            !fd_read_exact(s->server_fd, &answer, 1)) {
+    if (!fd_write_all(s, s->server_fd, ssl_request, sizeof(ssl_request)) ||
+            !fd_read_exact(s, s->server_fd, &answer, 1)) {
         log_error("rdb-tunnel: %s:%d closed during SSLRequest", t->target.host, t->target.port);
         return false;
     }
@@ -353,20 +394,20 @@ static uint32_t mysql_packet_length(const uint8_t* h) {
 }
 
 static bool mysql_read_packet(RdbTunnelSession* s, bool from_server, MysqlPacket* p) {
-    bool ok = from_server ? up_read_exact(s, p->header, 4) : fd_read_exact(s->client_fd, p->header, 4);
+    bool ok = from_server ? up_read_exact(s, p->header, 4) : fd_read_exact(s, s->client_fd, p->header, 4);
     if (!ok) return false;
     p->length = mysql_packet_length(p->header);
     if (p->length > RDB_MYSQL_MAX_HANDSHAKE_PACKET) return false;
     p->payload = (uint8_t*)mem_alloc(p->length ? p->length : 1, MEM_CAT_INPUT_OTHER);
     return from_server ? up_read_exact(s, p->payload, p->length)
-                       : fd_read_exact(s->client_fd, p->payload, p->length);
+                       : fd_read_exact(s, s->client_fd, p->payload, p->length);
 }
 
 static bool mysql_write_packet(RdbTunnelSession* s, bool to_server, uint8_t seq,
                                const uint8_t* payload, uint32_t length) {
     uint8_t header[4] = { (uint8_t)length, (uint8_t)(length >> 8), (uint8_t)(length >> 16), seq };
     if (to_server) return up_write_all(s, header, 4) && up_write_all(s, payload, length);
-    return fd_write_all(s->client_fd, header, 4) && fd_write_all(s->client_fd, payload, length);
+    return fd_write_all(s, s->client_fd, header, 4) && fd_write_all(s, s->client_fd, payload, length);
 }
 
 /** offset of the low capability word in a protocol-10 server greeting */
@@ -425,9 +466,12 @@ static bool upgrade_mysql(RdbTunnelSession* s) {
         struct pollfd fds[3] = {
             { s->client_fd, POLLIN, 0 }, { s->server_fd, POLLIN, 0 }, { t->wake[0], POLLIN, 0 },
         };
-        if (!buffered && poll(fds, 3, -1) < 0) {
-            if (errno == EINTR) continue;
-            goto done;
+        if (!buffered) {
+            int remaining = tunnel_remaining_ms(s);
+            if (!remaining) goto done;
+            int ready = poll(fds, 3, remaining);
+            if (ready < 0 && errno == EINTR) continue;
+            if (ready <= 0) goto done;
         }
         if (fds[2].revents) goto done;
         if (buffered || (fds[1].revents & (POLLIN | POLLHUP | POLLERR))) {
@@ -520,11 +564,11 @@ static bool pg_filter_forward(RdbTunnelSession* s, PgAuthFilter* f, const uint8_
         } else if (msg[0] == 'E') {
             f->active = false;
         }
-        if (!fd_write_all(s->client_fd, msg, out)) return false;
+        if (!fd_write_all(s, s->client_fd, msg, out)) return false;
         at += size;
     }
     // whatever follows authentication is relayed unchanged
-    bool ok = f->active || fd_write_all(s->client_fd, f->data + at, f->len - at);
+    bool ok = f->active || fd_write_all(s, s->client_fd, f->data + at, f->len - at);
     memmove(f->data, f->data + at, f->active ? f->len - at : 0);
     f->len = f->active ? f->len - at : 0;
     return ok;
@@ -547,7 +591,7 @@ static void session_relay(RdbTunnelSession* s) {
             int r = up_read_some(s, buf, RDB_TUNNEL_BUF);
             if (r <= 0) break;
             bool sent = filter.active ? pg_filter_forward(s, &filter, buf, (size_t)r)
-                                      : fd_write_all(s->client_fd, buf, (size_t)r);
+                                      : fd_write_all(s, s->client_fd, buf, (size_t)r);
             if (!sent) break;
             continue;
         }
@@ -573,7 +617,8 @@ static void session_close_fds(RdbTunnelSession* s) {
 static void* session_main(void* arg) {
     RdbTunnelSession* s = (RdbTunnelSession*)arg;
     RdbTunnel* t = s->tunnel;
-    int fd = tunnel_connect_upstream(t);
+    s->upgrade_deadline_ms = time_now_ms() + (uint64_t)tunnel_timeout_ms(t);
+    int fd = tunnel_connect_upstream(s);
     pthread_mutex_lock(&t->lock);
     s->server_fd = fd;
     pthread_mutex_unlock(&t->lock);
@@ -581,6 +626,8 @@ static void* session_main(void* arg) {
         log_error("rdb-tunnel: cannot connect to %s:%d", t->target.host, t->target.port);
     } else {
         bool upgraded = t->spec.protocol == RDB_WIRE_POSTGRES ? upgrade_postgres(s) : upgrade_mysql(s);
+        if (upgraded) upgraded = tunnel_socket_timeout(s->server_fd, 0) && tunnel_socket_timeout(s->client_fd, 0);
+        s->upgrade_deadline_ms = 0;
         if (upgraded) session_relay(s);
         if (s->tls) mbedtls_ssl_close_notify(&s->ssl);
     }

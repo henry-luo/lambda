@@ -2,6 +2,7 @@
 #if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
 #include "io_file_search.hpp"
 #include "io_resource.hpp"
+#include "io_rdb_value.hpp"
 #include "io_sqlite.hpp"
 #include "lambda-number-runtime.hpp"
 #include "concurrency.h"
@@ -246,78 +247,6 @@ Item close_scope(Bool unwinding) {
     return result == RDB_OK ? ItemNull : io_fs_error(ERR_IO_ERROR, "io.sqlite: transaction rolled back or commit failed");
 }
 
-struct BoundValues {
-    RdbValue* values;
-    int count;
-    size_t bytes;
-};
-
-void release_values(BoundValues* bound) {
-    if (!bound->values) return;
-    for (int i = 0; i < bound->count; i++) {
-        if (bound->values[i].type == RDB_TYPE_STRING || bound->values[i].type == RDB_TYPE_BLOB)
-            mem_free((void*)bound->values[i].str_val);
-    }
-    mem_free(bound->values);
-}
-
-bool copy_bytes(size_t* total, RdbValue* out, const char* bytes, size_t length) {
-    if (length > INT_MAX || length > SQLITE_VALUE_BYTES_LIMIT - *total || (!bytes && length)) return false;
-    *total += length;
-    out->str_len = (int)length;
-    if (!length) { out->str_val = NULL; return true; }
-    char* copy = (char*)mem_alloc(length, MEM_CAT_EVAL);
-    if (!copy) return false;
-    memcpy(copy, bytes, length);
-    out->str_val = copy;
-    return true;
-}
-
-bool bind_values(Item params, BoundValues* out) {
-    TypeId type = get_type_id(params);
-    if (type == LMD_TYPE_NULL) return true;
-    if ((type != LMD_TYPE_ARRAY && type != LMD_TYPE_ARRAY_NUM) || vector_is_ndim(params)) return false;
-    int64_t count = vector_length(params);
-    if (count < 0 || count > SQLITE_PARAM_LIMIT) return false;
-    out->count = (int)count;
-    if (!count) return true;
-    out->values = (RdbValue*)mem_calloc((size_t)count, sizeof(RdbValue), MEM_CAT_EVAL);
-    if (!out->values) return false;
-    for (int i = 0; i < out->count; i++) {
-        Item value = vector_get(params, i);
-        RdbValue* target = &out->values[i];
-        TypeId kind = get_type_id(value);
-        if (kind == LMD_TYPE_NULL) { target->type = RDB_TYPE_NULL; target->is_null = true; }
-        else if (kind == LMD_TYPE_BOOL) { target->type = RDB_TYPE_BOOL; target->bool_val = it2b(value); }
-        else if (kind == LMD_TYPE_INT || kind == LMD_TYPE_INT64 || kind == LMD_TYPE_UINT64 ||
-                kind == LMD_TYPE_FLOAT || kind == LMD_TYPE_NUM_SIZED) {
-            LambdaNumericRuntimePart numeric;
-            if (!lambda_numeric_runtime_part(value, &numeric)) return false;
-            if (kind == LMD_TYPE_FLOAT || (kind == LMD_TYPE_NUM_SIZED && numeric.kind == LAMBDA_NUM_PART_FLOAT)) {
-                target->type = RDB_TYPE_FLOAT;
-                target->float_val = numeric.float_value;
-                if (!isfinite(target->float_val)) return false;
-            } else {
-                target->type = RDB_TYPE_INT;
-                if (!lambda_item_to_int64_exact(value, &target->int_val)) return false;
-            }
-        } else if (kind == LMD_TYPE_STRING) {
-            target->type = RDB_TYPE_STRING;
-            if (!utf8_valid(value.get_chars(), value.get_len()) ||
-                    !copy_bytes(&out->bytes, target, value.get_chars(), value.get_len())) return false;
-        } else if (kind == LMD_TYPE_BINARY) {
-            target->type = RDB_TYPE_BLOB;
-            Binary* binary = value.get_binary();
-            if (!copy_bytes(&out->bytes, target, (const char*)binary_data(binary), binary_length(binary))) return false;
-        } else return false;
-    }
-    return true;
-}
-
-// Worker-owned rows never contain Lambda Items or borrowed SQLite cells.
-struct NativeRow {
-    BoundValues cells;
-};
 struct SqliteJob {
     Pool* pool;
     RdbSqliteTxn* tx;
@@ -326,10 +255,8 @@ struct SqliteJob {
     char* path;
     char* sql;
     size_t sql_len;
-    BoundValues params;
-    ArrayList* rows;
-    size_t row_bytes;
-    size_t row_cells;
+    IoRdbParams params;
+    IoRdbRows* rows;
     bool query;
 };
 
@@ -342,13 +269,8 @@ void free_job(SqliteJob* job) {
     }
     if (job->tx && !job->scope) { (void)rdb_sqlite_tx_finish(job->tx, true); job->tx = NULL; }
     if (job->pool) pool_destroy(job->pool);
-    for (int i = 0; job->rows && i < arraylist_length(job->rows); i++) {
-        NativeRow* row = (NativeRow*)arraylist_get(job->rows, i);
-        release_values(&row->cells);
-        mem_free(row);
-    }
-    if (job->rows) arraylist_free(job->rows);
-    release_values(&job->params);
+    io_rdb_rows_free(job->rows);
+    io_rdb_params_free(&job->params);
     mem_free(job->path);
     mem_free(job->sql);
     mem_free(job);
@@ -356,71 +278,7 @@ void free_job(SqliteJob* job) {
 
 bool collect_row(void* user, int count, const char* const* names, const RdbValue* values) {
     (void)names;
-    SqliteJob* job = (SqliteJob*)user;
-    if (count < 0 || count > SQLITE_COLUMN_LIMIT || arraylist_length(job->rows) >= SQLITE_ROW_LIMIT ||
-            (size_t)count > SQLITE_CELL_LIMIT - job->row_cells) return false;
-    job->row_cells += (size_t)count;
-    NativeRow* row = (NativeRow*)mem_calloc(1, sizeof(NativeRow), MEM_CAT_EVAL);
-    if (!row) return false;
-    row->cells.count = count;
-    row->cells.values = count ? (RdbValue*)mem_calloc((size_t)count, sizeof(RdbValue), MEM_CAT_EVAL) : NULL;
-    if (count && !row->cells.values) { mem_free(row); return false; }
-    bool ok = true;
-    for (int i = 0; ok && i < count; i++) {
-        row->cells.values[i] = values[i];
-        RdbValue* cell = &row->cells.values[i];
-        if (cell->type == RDB_TYPE_STRING || cell->type == RDB_TYPE_BLOB) {
-            cell->str_val = NULL;
-            if (values[i].str_len < 0 || (values[i].type == RDB_TYPE_STRING &&
-                    (!values[i].str_val || !utf8_valid(values[i].str_val, (size_t)values[i].str_len)))) {
-                ok = false;
-            } else {
-                ok = copy_bytes(&job->row_bytes, cell, values[i].str_val, (size_t)values[i].str_len);
-            }
-        }
-    }
-    if (ok) ok = arraylist_append(job->rows, row) != 0;
-    if (!ok) { release_values(&row->cells); mem_free(row); }
-    return ok;
-}
-
-// Only the owner task allocates and roots Lambda values (D5.3.1–D5.3.3).
-bool materialize_rows(SqliteJob* job, Rooted<Array*>* result) {
-    RootFrame roots(2);
-    Rooted<Array*> row(roots, (Array*)NULL);
-    Rooted<Item> cell(roots, ItemNull);
-    for (int r = 0; r < arraylist_length(job->rows); r++) {
-        NativeRow* source = (NativeRow*)arraylist_get(job->rows, r);
-        row.set(array_plain());
-        if (!row.get()) return false;
-        for (int i = 0; i < source->cells.count; i++) {
-            RdbValue* v = &source->cells.values[i];
-            int64_t wide = 0;
-            double real = 0;
-            if (v->is_null || v->type == RDB_TYPE_NULL) cell.set(ItemNull);
-            else if (v->type == RDB_TYPE_INT) {
-                wide = v->int_val;
-                cell.set(wide >= INT53_MIN && wide <= INT53_MAX ? (Item){.item = i2it(wide)} : (Item){.item = l2it(&wide)});
-            } else if (v->type == RDB_TYPE_FLOAT) {
-                real = v->float_val;
-                if (!isfinite(real)) return false;
-                cell.set(lambda_float_ptr_to_item(&real));
-            } else if (v->type == RDB_TYPE_STRING) {
-                cell.set(io_fs_make_string(v->str_val ? v->str_val : "", (size_t)v->str_len));
-            } else if (v->type == RDB_TYPE_BLOB) {
-                Binary* binary = heap_binary_from_bytes(v->str_val ? v->str_val : "", v->str_len);
-                cell.set(binary ? (Item){.item = x2it(binary)} : ItemError);
-            } else return false;
-            if (item_is_error(cell.get())) return false;
-            int64_t before = row.get()->length;
-            array_push_verbatim(row.get(), cell.get());
-            if (row.get()->length != before + 1) return false;
-        }
-        int64_t before = result->get()->length;
-        array_push_verbatim(result->get(), (Item){.array = row.get()});
-        if (result->get()->length != before + 1) return false;
-    }
-    return true;
+    return io_rdb_rows_append(((SqliteJob*)user)->rows, values, count);
 }
 
 void run_job(LambdaOffload* offload, void* data) {
@@ -508,8 +366,9 @@ Item sqlite_statement(Item path, Item sql, Item params, bool query) {
     if (!scope) job->path = mem_dup_n(held_path.get().get_chars(), held_path.get().get_len(), MEM_CAT_EVAL);
     job->sql = mem_dup_n(held_sql.get().get_chars(), held_sql.get().get_len(), MEM_CAT_EVAL);
     job->sql_len = held_sql.get().get_len();
-    job->rows = query ? arraylist_new(8) : NULL;
-    bool valid = (scope || job->path) && job->sql && (!query || job->rows) && bind_values(held_params.get(), &job->params);
+    job->rows = query ? io_rdb_rows_new(SQLITE_ROW_LIMIT, SQLITE_COLUMN_LIMIT,
+        SQLITE_CELL_LIMIT, SQLITE_VALUE_BYTES_LIMIT) : NULL;
+    bool valid = (scope || job->path) && job->sql && (!query || job->rows) && io_rdb_bind_values(held_params.get(), &job->params, SQLITE_PARAM_LIMIT, SQLITE_VALUE_BYTES_LIMIT);
     if (!valid) {
         if (scope) rdb_sqlite_tx_mark_failed(scope->tx);
         free_job(job);
@@ -532,7 +391,7 @@ Item sqlite_statement(Item path, Item sql, Item params, bool query) {
     int status = rdb_sqlite_tx_work_end(job->work);
     job->work = NULL;
     bool ok = !item_is_error(outcome.get()) && status == RDB_OK;
-    if (ok && query) ok = materialize_rows(job, &result);
+    if (ok && query) ok = io_rdb_rows_materialize(job->rows, &result);
     int finish = RDB_OK;
     if (scope) {
         if (!ok) rdb_sqlite_tx_mark_failed(scope->tx);

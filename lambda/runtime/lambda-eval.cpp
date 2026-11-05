@@ -12432,8 +12432,23 @@ TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target
     return name ? elmt_tree_root(tree, name, ns) : NULL;
 }
 
-// D3.4.3v5: an add to a plain map or an element follows (or mints) an edge of
-// the runtime tree. An empty plain map starts at the root; a node of the tree
+static bool container_uses_ui_arena(const Container* container) {
+    return container && !container->is_heap && container->type_id == LMD_TYPE_ELEMENT &&
+        context && context->ui_mode && context->arena;
+}
+
+static Input* shape_tree_for_container(Container* container) {
+    if (container_uses_ui_arena(container) && arena_owns(context->arena, container)) {
+        // a document may outlive a shared loader's heap generation.
+        Input* input = ui_result_input(context->arena, false);
+        if (input) input->keeps_external_edges = true;
+        return input;
+    }
+    return runtime_shape_tree();
+}
+
+// D3.4.3v5: an add follows (or mints) an edge of the runtime or document tree.
+// an empty plain map starts at the root; a node of the tree
 // follows its own edges; any other type -- a literal's, a contract's, a
 // nominal type's, a parsed document's or a private type -- is an external
 // parent, which the tree grows from without writing it. Maps built from the
@@ -12442,7 +12457,7 @@ TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target
 // entries that were never reclaimed (LR03-38). Data grows by doubling. A type
 // the tree declines -- fan-out, budget, JS shape metadata, spread slots --
 // keeps the private path.
-static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
+static bool map_extend_via_shape_tree(Item map_item, Item key, Item value) {
     TypeId container_type = get_type_id(map_item);
     TypeId key_type = get_type_id(key);
     if ((container_type != LMD_TYPE_MAP && container_type != LMD_TYPE_ELEMENT &&
@@ -12472,11 +12487,11 @@ static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     if (!map || value_type == LMD_TYPE_ERROR) return false;
     if (!is_element && container_type != LMD_TYPE_ARRAY_NUM && map->map_kind != MAP_KIND_PLAIN &&
             map->map_kind != MAP_KIND_ORDERED) return false;
-    // UI-mode elements keep their attribute buffers in the context arena, which
-    // only the private path allocates from
-    if (is_element && context && context->ui_mode && context->arena) return false;
+    bool ui_mode = is_element && context && context->ui_mode && context->arena;
+    bool ui_element = ui_mode && !map->is_heap && arena_owns(context->arena, map);
+    if (ui_mode && !ui_element) return false;
     TypeMap* old_type = (TypeMap*)map->type;
-    Input* tree = runtime_shape_tree();
+    Input* tree = shape_tree_for_container((Container*)map);
     // a tree node takes its kind from its parent, so a container whose type is
     // of the other kind keeps the private path
     // both array carriers use a TypeMap attribute face; ArrayNum's map_kind selects its numeric lane.
@@ -12497,33 +12512,35 @@ static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
 
     int64_t old_size = empty_plain ? 0 : old_type->byte_size;
     int64_t needed = target->byte_size;
+    RootFrame roots(2);
+    Rooted<Map*> rooted_map(roots, map);
+    Rooted<Item> rooted_value(roots, value);
+    if (ui_element) {
+        Item held = rooted_value.get();
+        if (!ui_prepare_element_field(&held)) return false;
+        rooted_value.set(held);
+    }
     if (!map->data || map->data_cap < needed) {
         int64_t capacity = map->data_cap > 0 ? (int64_t)map->data_cap : 32;
         while (capacity < needed) capacity *= 2;
         if (capacity > INT_MAX) return false;
-        RootFrame roots(2);
-        Rooted<Map*> rooted_map(roots, map);
-        Rooted<Item> rooted_value(roots, value);
-        void* new_data = heap_data_calloc((size_t)capacity);
+        void* new_data = ui_element ? arena_calloc(context->arena, (size_t)capacity)
+                                    : heap_data_calloc((size_t)capacity);
         if (!new_data) return false;
         map = rooted_map.get();
-        value = rooted_value.get();
         if (map->data && old_size > 0) memcpy(new_data, map->data, (size_t)old_size);
         map->data = new_data;
         map->data_cap = (int)capacity;
+        if (ui_element) map->is_data_migrated = 0;
     }
-    map_field_store((char*)map->data + entry->byte_offset, value, value_type);
+    map = rooted_map.get();
+    map_field_store((char*)map->data + entry->byte_offset, rooted_value.get(), value_type);
     map->type = target;
     return true;
 }
 
-static bool container_uses_ui_arena(const Container* container) {
-    return container && !container->is_heap && container->type_id == LMD_TYPE_ELEMENT &&
-        context && context->ui_mode && context->arena;
-}
-
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
-    if (map_extend_via_runtime_tree(map_item, key, value)) return true;
+    if (map_extend_via_shape_tree(map_item, key, value)) return true;
     // S2.1.4 part 3: a nominal instance is OPEN — it may hold fields its type
     // does not declare. Element-shaped values are admitted too: since D2.6.6v2
     // every container shares Map's attribute face at the same offsets, so the
@@ -14459,7 +14476,7 @@ static bool container_retype_field(Container* owner, TypeId kind, void** type_sl
         void** data_slot, int* cap_slot, ShapeEntry* field, Item value) {
     TypeMap* source = (TypeMap*)*type_slot;
     TypeId tid = get_type_id(value);
-    Input* tree = runtime_shape_tree();
+    Input* tree = shape_tree_for_container(owner);
     const TypeMapRetypePlan* plan = NULL;
     TypeMap* target = tree ? type_tree_retype_field(tree, source, field, tid, &plan) : NULL;
     if (target) return container_move_to_type(type_slot, data_slot, cap_slot,
@@ -14533,6 +14550,7 @@ static inline bool map_shape_delete_impl(Map* map, String* key, ShapeEntry* remo
         target = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
         if (!target) return false;
         target->nominal = old->nominal; target->is_nominal = old->is_nominal;
+        target->has_spread = old->has_spread;
         target->type_index = -1; target->is_private_clone = true;
         FOR_EACH_MAP_FIELD(old, field) {
             if (field == removed) continue;
@@ -15899,9 +15917,22 @@ static inline __attribute__((always_inline)) Item map_set_impl(Item map_item, It
                 return container_retype_field(cont, map_type_id, type_slot,
                     data_slot, cap_slot, entry, value) ? ItemNull : ItemError;
             }
+            // JS data properties admit values of any type. Once a packed,
+            // non-constructor property changes type, retain that contract in
+            // a TypedItem lane instead of rebuilding its whole shape for each
+            // subsequent assignment (D3.4.5). Keep the initial numeric lane,
+            // which also supports lossless integer writes to a float field.
+            bool initial_numeric = field_type == LMD_TYPE_UNDEFINED &&
+                (value_type == LMD_TYPE_INT || value_type == LMD_TYPE_FLOAT);
+            bool dynamic_js_field = map_type_id == LMD_TYPE_MAP &&
+                (map_item.map->map_kind == MAP_KIND_PLAIN ||
+                 map_item.map->map_kind == MAP_KIND_DESC) && map_type->js_meta &&
+                !map_type->nominal && !map_type->is_nominal && !map_type->slot_entries &&
+                map_type->slot_count == 0 && !map_type->is_shared_constructor_shape &&
+                value_type != LMD_TYPE_ERROR && !initial_numeric;
             map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
                                         map_type_id, cont, entry,
-                                        type_info[value_type].type, value);
+                                        type_info[dynamic_js_field ? LMD_TYPE_ANY : value_type].type, value);
             return ItemNull;
         }
         entry = table_answers ? NULL : typemap_next_field(map_type, entry);

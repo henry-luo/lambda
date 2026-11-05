@@ -54,6 +54,7 @@ extern "C" {
 }
 
 #ifndef _WIN32
+#include <dirent.h>
 #if defined(__APPLE__) || defined(__linux__)
 struct AnchorSyncTrace;
 static thread_local AnchorSyncTrace* anchor_sync_trace = nullptr;
@@ -544,6 +545,88 @@ TEST_F(FileAnchorTest, AtomicPublicationRequiresUnchangedAdmittedRevision) {
     guard.external_change = nullptr;
     expect_text(anchor, "file", "external changed bytes");
     mem_free(target);
+}
+
+TEST_F(FileAnchorTest, IncrementalAtomicWriterPublishesOnlyOnCommit) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    FileAtomicWriter* writer = file_anchor_write_begin(anchor, "result", nullptr);
+    ASSERT_NE(writer, nullptr);
+    ASSERT_TRUE(file_anchor_write_chunk(writer, "first", 5));
+    ASSERT_TRUE(file_anchor_write_chunk(writer, " second", 7));
+    char* path = file_path_join(project, "result");
+    EXPECT_FALSE(file_exists(path));
+    ASSERT_EQ(file_anchor_write_commit(writer), 0);
+    expect_text(anchor, "result", "first second");
+
+    writer = file_anchor_write_begin(anchor, "aborted", nullptr);
+    ASSERT_NE(writer, nullptr);
+    ASSERT_TRUE(file_anchor_write_chunk(writer, "partial", 7));
+    file_anchor_write_abort(writer);
+    char* aborted = file_path_join(project, "aborted");
+    EXPECT_FALSE(file_exists(aborted));
+
+    writer = file_anchor_write_begin(anchor, "conflict", nullptr);
+    ASSERT_NE(writer, nullptr);
+    ASSERT_TRUE(file_anchor_write_chunk(writer, "new", 3));
+    seed("project/conflict", "other");
+    EXPECT_EQ(file_anchor_write_commit(writer), -1);
+    EXPECT_EQ(errno, EEXIST);
+    expect_text(anchor, "conflict", "other");
+    mem_free(path); mem_free(aborted);
+}
+
+TEST_F(FileAnchorTest, IncrementalAtomicWriterRechecksAuthorityAndRevision) {
+    AnchorGuardState guard = {};
+    FileAnchor* anchor = open(FILE_ANCHOR_SAME_DEVICE, protect_anchor_object, &guard);
+    ASSERT_NE(anchor, nullptr);
+    ASSERT_EQ(file_anchor_write_atomic(anchor, "file", "before", 6, nullptr), 0);
+    FileRevision revision; ASSERT_TRUE(file_anchor_stat(anchor, "file", &revision));
+    FileAtomicWriter* writer = file_anchor_write_begin(anchor, "file", &revision);
+    ASSERT_NE(writer, nullptr);
+    ASSERT_TRUE(file_anchor_write_chunk(writer, "replacement", 11));
+    char* path = file_path_join(project, "file");
+    ASSERT_EQ(write_binary_file_atomic(path, "external", 8), 0);
+    EXPECT_EQ(file_anchor_write_commit(writer), -1);
+    EXPECT_EQ(errno, ESTALE);
+    expect_text(anchor, "file", "external");
+
+    writer = file_anchor_write_begin(anchor, "revoked", nullptr);
+    ASSERT_NE(writer, nullptr);
+    ASSERT_TRUE(file_anchor_write_chunk(writer, "private", 7));
+    guard.create_checks = 1;
+    guard.revoke_after_dispatch = true;
+    EXPECT_EQ(file_anchor_write_commit(writer), -1);
+    EXPECT_EQ(errno, EACCES);
+    char* denied = file_path_join(project, "revoked");
+    EXPECT_FALSE(file_exists(denied));
+    mem_free(path); mem_free(denied);
+}
+
+TEST_F(FileAnchorTest, IncrementalAtomicWriterRejectsAReplacedStage) {
+    FileAnchor* anchor = open(); ASSERT_NE(anchor, nullptr);
+    FileAtomicWriter* writer = file_anchor_write_begin(anchor, "result", nullptr);
+    ASSERT_NE(writer, nullptr);
+    ASSERT_TRUE(file_anchor_write_chunk(writer, "original", 8));
+    DIR* directory = opendir(project); ASSERT_NE(directory, nullptr);
+    char* stage = nullptr;
+    struct dirent* entry;
+    while ((entry = readdir(directory))) {
+        if (!strncmp(entry->d_name, FILE_ATOMIC_STAGE_PREFIX, strlen(FILE_ATOMIC_STAGE_PREFIX))) {
+            stage = file_path_join(project, entry->d_name);
+            break;
+        }
+    }
+    closedir(directory);
+    ASSERT_NE(stage, nullptr);
+    char* moved = file_path_join(project, "moved-stage");
+    ASSERT_EQ(rename(stage, moved), 0);
+    ASSERT_EQ(write_binary_file(stage, "other", 5), 0);
+    EXPECT_EQ(file_anchor_write_commit(writer), -1);
+    EXPECT_EQ(errno, ESTALE);
+    char* result = file_path_join(project, "result");
+    EXPECT_FALSE(file_exists(result));
+    EXPECT_TRUE(file_exists(stage));
+    mem_free(stage); mem_free(moved); mem_free(result);
 }
 
 TEST_F(FileAnchorTest, SpecialFilesAreNeverOpenedAsContent) {

@@ -17,6 +17,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -28,10 +29,12 @@
 
 extern "C" {
 #include "../lib/rdb.h"
+#include "../lib/rdb_spool.h"
 #include "../lib/file.h"
 #include "../lib/rdb_sqlite_tx.h"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include "../lib/sqlite/sqlite3.h"
 }
 
@@ -199,6 +202,31 @@ TEST_F(RdbTest, OpenClose) {
     EXPECT_NE(conn->driver, nullptr);
     EXPECT_TRUE(conn->readonly);
     EXPECT_STREQ(conn->uri, TEST_DB_PATH);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, ReadonlySqliteRejectsExternalFilesAndStateChanges) {
+    const char* attached = "temp/rdb_readonly_attach.db";
+    const char* vacuumed = "temp/rdb_readonly_vacuum.db";
+    unlink(attached);
+    unlink(vacuumed);
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    ASSERT_EQ(rdb_load_schema(conn), RDB_OK);
+    const char* forbidden[] = {
+        "ATTACH DATABASE 'temp/rdb_readonly_attach.db' AS other",
+        "VACUUM INTO 'temp/rdb_readonly_vacuum.db'",
+        "PRAGMA journal_mode = WAL", "PRAGMA foreign_keys = OFF",
+        "CREATE TEMP TABLE hidden(x)", "INSERT INTO authors VALUES (9, 'blocked', NULL, 0, 1)",
+        "SELECT load_extension('missing')"
+    };
+    for (const char* sql : forbidden) EXPECT_EQ(rdb_prepare(conn, sql), nullptr) << sql;
+    EXPECT_NE(access(attached, F_OK), 0);
+    EXPECT_NE(access(vacuumed, F_OK), 0);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT name FROM authors ORDER BY id");
+    ASSERT_NE(stmt, nullptr);
+    EXPECT_EQ(rdb_step(stmt), RDB_ROW);
+    rdb_finalize(stmt);
     rdb_close(conn);
 }
 
@@ -989,12 +1017,23 @@ TEST_F(RdbTypesTest, ReadRealValue) {
     rdb_finalize(stmt);
 }
 
-TEST_F(RdbTypesTest, ReadBlobIsDeferred) {
-    RdbStmt* stmt = rdb_prepare(conn, "SELECT col_blob FROM types_test");
+TEST_F(RdbTypesTest, ReadBlobDistinguishesBytesEmptyAndNull) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT col_blob, X'', NULL FROM types_test");
     ASSERT_EQ(rdb_step(stmt), RDB_ROW);
     RdbValue val = rdb_column_value(stmt, 0);
     EXPECT_EQ(val.type, RDB_TYPE_BLOB);
-    EXPECT_TRUE(val.is_null); // deferred to Phase 2
+    EXPECT_FALSE(val.is_null);
+    ASSERT_EQ(val.str_len, 4);
+    const unsigned char expected[] = {0xde, 0xad, 0xbe, 0xef};
+    ASSERT_NE(val.str_val, nullptr);
+    EXPECT_EQ(memcmp(val.str_val, expected, sizeof(expected)), 0);
+    RdbValue empty = rdb_column_value(stmt, 1);
+    EXPECT_EQ(empty.type, RDB_TYPE_BLOB);
+    EXPECT_FALSE(empty.is_null);
+    EXPECT_EQ(empty.str_len, 0);
+    RdbValue missing = rdb_column_value(stmt, 2);
+    EXPECT_EQ(missing.type, RDB_TYPE_NULL);
+    EXPECT_TRUE(missing.is_null);
     rdb_finalize(stmt);
 }
 
@@ -1924,6 +1963,16 @@ struct FakeDriverState {
     int  finalizes;
     bool skip_register;     // contract violation: open without registering
     bool wrong_peer;        // connects somewhere it was not authorised for
+    uv_sem_t* open_entered;
+    uv_sem_t* open_resume;
+    uv_sem_t* schema_entered;
+    uv_sem_t* schema_resume;
+    uv_sem_t* prepare_entered;
+    uv_sem_t* prepare_resume;
+    uv_sem_t* fetch_entered;
+    uv_sem_t* fetch_resume;
+    uv_sem_t* finalize_entered;
+    uv_sem_t* finalize_resume;
 };
 static FakeDriverState fake;
 static int fake_stmt_token;
@@ -1943,6 +1992,10 @@ static int fake_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
                      const RdbOpenOptions* opts, void** out_conn) {
     (void)opts;
     fake.opens++;
+    if (fake.open_entered) {
+        uv_sem_post(fake.open_entered);
+        uv_sem_wait(fake.open_resume);
+    }
     void* native = &fake;
     if (!fake.skip_register) {
         RdbConnInfo info;
@@ -1961,13 +2014,30 @@ static int fake_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
 }
 
 static void fake_close(void* conn) { (void)conn; fake.closes++; }
-static int fake_load_schema(void*, const RdbHostAPI*, void*, RdbSchema*) { return RDB_OK; }
-static int fake_prepare(void*, const char*, void** out) { *out = &fake_stmt_token; return RDB_OK; }
+static int fake_load_schema(void*, const RdbHostAPI*, void*, RdbSchema*) {
+    if (fake.schema_entered) {
+        uv_sem_post(fake.schema_entered);
+        uv_sem_wait(fake.schema_resume);
+    }
+    return RDB_OK;
+}
+static int fake_prepare(void*, const char*, void** out) {
+    if (fake.prepare_entered) { uv_sem_post(fake.prepare_entered); uv_sem_wait(fake.prepare_resume); }
+    *out = &fake_stmt_token;
+    return RDB_OK;
+}
 static int fake_bind(void*, int, const RdbParam*) { return RDB_OK; }
-static int fake_step(void*) { return RDB_DONE; }
+static int fake_step(void*) {
+    if (fake.fetch_entered) { uv_sem_post(fake.fetch_entered); uv_sem_wait(fake.fetch_resume); }
+    return RDB_DONE;
+}
 static int fake_column_count(void*) { return 0; }
+static int fake_column_desc(void*, int, RdbColumnDesc*) { return RDB_ERROR; }
 static RdbValue fake_value(void*, int) { RdbValue v; memset(&v, 0, sizeof(v)); v.is_null = true; return v; }
-static void fake_finalize(void*) { fake.finalizes++; }
+static void fake_finalize(void*) {
+    if (fake.finalize_entered) { uv_sem_post(fake.finalize_entered); uv_sem_wait(fake.finalize_resume); }
+    fake.finalizes++;
+}
 static const char* fake_error(void*) { return "fake"; }
 
 static RdbDriver make_fake_driver(const char* name) {
@@ -1984,6 +2054,7 @@ static RdbDriver make_fake_driver(const char* name) {
     d.bind_param = fake_bind;
     d.step = fake_step;
     d.column_count = fake_column_count;
+    d.column_desc = fake_column_desc;
     d.column_value = fake_value;
     d.finalize = fake_finalize;
     d.error_msg = fake_error;
@@ -2108,6 +2179,301 @@ TEST_F(RdbRegistryTest, AuthorisationHappensBeforeConnecting) {
     EXPECT_EQ(fake.opens, 0);
 }
 
+struct OpenWorkRace { RdbOpenWork* work; int status; const int* cancelled; };
+static void open_work_thread(void* user) {
+    OpenWorkRace* race = (OpenWorkRace*)user;
+    race->status = rdb_open_work_run(race->work, race->cancelled);
+}
+
+TEST_F(RdbRegistryTest, OpenWorkerRegistersBeforeWorkAndClosesOnTeardown) {
+    RdbOpenWork* work = rdb_open_work_begin(pool, "fakedb://bob:pw@db.example/x", "fakedb", true);
+    ASSERT_NE(work, nullptr);
+    EXPECT_EQ(registry.adds, 1);
+    EXPECT_EQ(fake.opens, 0);
+    uv_sem_t entered, resume;
+    ASSERT_EQ(uv_sem_init(&entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&resume, 0), 0);
+    fake.open_entered = &entered;
+    fake.open_resume = &resume;
+    OpenWorkRace race = {work, RDB_ERROR, NULL};
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, open_work_thread, &race), 0);
+    uv_sem_wait(&entered);
+    rdb_conn_life_close(registry.life);
+    EXPECT_EQ(fake.closes, 0);
+    uv_sem_post(&resume);
+    uv_thread_join(&thread);
+    EXPECT_EQ(race.status, RDB_OK);
+    EXPECT_EQ(rdb_open_work_end(work, true), nullptr);
+    EXPECT_EQ(fake.closes, 1);
+    EXPECT_EQ(registry.removes, 0);
+    uv_sem_destroy(&entered);
+    uv_sem_destroy(&resume);
+}
+
+TEST_F(RdbRegistryTest, OpenWorkerRejectsCancellationAndUnauthorisedPeer) {
+    RdbOpenWork* work = rdb_open_work_begin(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(work, nullptr);
+    int cancelled = 1;
+    EXPECT_EQ(rdb_open_work_run(work, &cancelled), RDB_ERROR);
+    EXPECT_EQ(rdb_open_work_end(work, true), nullptr);
+    EXPECT_EQ(fake.opens, 0);
+    EXPECT_EQ(fake.closes, 0);
+    EXPECT_EQ(registry.removes, 1);
+    fake.wrong_peer = true;
+    work = rdb_open_work_begin(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(work, nullptr);
+    EXPECT_EQ(rdb_open_work_run(work, NULL), RDB_ERROR);
+    EXPECT_EQ(rdb_open_work_end(work, true), nullptr);
+    EXPECT_EQ(fake.closes, 1);
+    EXPECT_EQ(registry.removes, 2);
+}
+
+TEST_F(RdbRegistryTest, OpenWorkerClosesConnectionWhenCancelledDuringOpen) {
+    RdbOpenWork* work = rdb_open_work_begin(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(work, nullptr);
+    uv_sem_t entered, resume;
+    ASSERT_EQ(uv_sem_init(&entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&resume, 0), 0);
+    fake.open_entered = &entered;
+    fake.open_resume = &resume;
+    int cancelled = 0;
+    OpenWorkRace race = {work, RDB_OK, &cancelled};
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, open_work_thread, &race), 0);
+    uv_sem_wait(&entered);
+    __atomic_store_n(&cancelled, 1, __ATOMIC_RELEASE);
+    uv_sem_post(&resume);
+    uv_thread_join(&thread);
+    EXPECT_EQ(race.status, RDB_ERROR);
+    EXPECT_EQ(rdb_open_work_end(work, true), nullptr);
+    EXPECT_EQ(fake.closes, 1);
+    EXPECT_EQ(registry.removes, 1);
+    uv_sem_destroy(&entered);
+    uv_sem_destroy(&resume);
+}
+
+TEST_F(RdbTest, OpenWorkerOpensSqliteReadOnly) {
+    OpenWorkRace race = {rdb_open_work_begin(pool, TEST_DB_PATH, "sqlite", true), RDB_ERROR, NULL};
+    ASSERT_NE(race.work, nullptr);
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, open_work_thread, &race), 0);
+    uv_thread_join(&thread);
+    ASSERT_EQ(race.status, RDB_OK);
+    RdbConn* conn = rdb_open_work_end(race.work, true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT COUNT(*) FROM authors");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 3);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+struct PrepareWorkRace { RdbPrepareWork* work; int status; };
+static void prepare_work_thread(void* user) {
+    PrepareWorkRace* race = (PrepareWorkRace*)user;
+    race->status = rdb_prepare_work_run(race->work, NULL);
+}
+struct FetchRows { int count; int64_t ids[8]; };
+static bool capture_fetch_row(void* user, int count, const RdbValue* values) {
+    FetchRows* rows = (FetchRows*)user;
+    if (count < 1 || rows->count >= 8 || values[0].type != RDB_TYPE_INT) return false;
+    rows->ids[rows->count++] = values[0].int_val;
+    return true;
+}
+struct FetchWorkRace { RdbFetchWork* work; int status; };
+static void fetch_work_thread(void* user) {
+    FetchWorkRace* race = (FetchWorkRace*)user;
+    race->status = rdb_fetch_work_run(race->work, NULL);
+}
+
+TEST_F(RdbTest, StatementWorkersReturnBoundedRowsAndDuplicateMetadata) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    RdbParam param = {};
+    param.type = RDB_TYPE_INT;
+    param.int_val = 2;
+    PrepareWorkRace prepare = {rdb_prepare_work_begin(conn,
+        "SELECT id AS n, name AS n FROM authors WHERE id >= ?1 ORDER BY id", &param, 1), RDB_ERROR};
+    ASSERT_NE(prepare.work, nullptr);
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, prepare_work_thread, &prepare), 0);
+    uv_thread_join(&thread);
+    ASSERT_EQ(prepare.status, RDB_OK);
+    RdbStmt* stmt = rdb_prepare_work_end(prepare.work, true);
+    ASSERT_NE(stmt, nullptr);
+    Pool* metadata = pool_create();
+    ASSERT_NE(metadata, nullptr);
+    FetchRows rows = {};
+    FetchWorkRace fetch = {rdb_fetch_work_begin(stmt, 1, 10, metadata, capture_fetch_row, &rows), RDB_ERROR};
+    ASSERT_NE(fetch.work, nullptr);
+    ASSERT_EQ(uv_thread_create(&thread, fetch_work_thread, &fetch), 0);
+    uv_thread_join(&thread);
+    ASSERT_EQ(fetch.status, RDB_OK);
+    RdbFetchResult result = {};
+    ASSERT_EQ(rdb_fetch_work_end(fetch.work, &result), RDB_OK);
+    ASSERT_EQ(result.column_count, 2);
+    EXPECT_STREQ(result.columns[0].name, "n");
+    EXPECT_STREQ(result.columns[1].name, "n");
+    EXPECT_EQ(result.row_count, 1);
+    EXPECT_FALSE(result.done);
+    fetch = {rdb_fetch_work_begin(stmt, 2, 10, metadata, capture_fetch_row, &rows), RDB_ERROR};
+    ASSERT_NE(fetch.work, nullptr);
+    ASSERT_EQ(uv_thread_create(&thread, fetch_work_thread, &fetch), 0);
+    uv_thread_join(&thread);
+    ASSERT_EQ(fetch.status, RDB_OK);
+    ASSERT_EQ(rdb_fetch_work_end(fetch.work, &result), RDB_OK);
+    EXPECT_EQ(result.row_count, 1);
+    EXPECT_TRUE(result.done);
+    EXPECT_EQ(rows.count, 2);
+    EXPECT_EQ(rows.ids[0], 2);
+    EXPECT_EQ(rows.ids[1], 3);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+    EXPECT_STREQ(result.columns[0].name, "n");
+    pool_destroy(metadata);
+}
+
+TEST_F(RdbTest, StatementWorkerRejectsMissingOrExtraParameters) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    RdbParam param = {};
+    param.type = RDB_TYPE_INT;
+    param.int_val = 1;
+    RdbPrepareWork* work = rdb_prepare_work_begin(conn, "SELECT ?1, ?2", &param, 1);
+    ASSERT_NE(work, nullptr);
+    EXPECT_EQ(rdb_prepare_work_run(work, NULL), RDB_ERROR);
+    EXPECT_EQ(rdb_prepare_work_end(work, true), nullptr);
+    work = rdb_prepare_work_begin(conn, "SELECT 1", &param, 1);
+    ASSERT_NE(work, nullptr);
+    EXPECT_EQ(rdb_prepare_work_run(work, NULL), RDB_ERROR);
+    EXPECT_EQ(rdb_prepare_work_end(work, true), nullptr);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SqlitePrepareRejectsSecondStatementBeforePreparingIt) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", false);
+    ASSERT_NE(conn, nullptr);
+    EXPECT_EQ(rdb_prepare(conn, "SELECT 1; PRAGMA user_version=42"), nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "PRAGMA user_version");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 0);
+    rdb_finalize(stmt);
+    stmt = rdb_prepare(conn, "SELECT ';' AS text; /* ; */ -- ;\n ;");
+    ASSERT_NE(stmt, nullptr);
+    EXPECT_EQ(rdb_step(stmt), RDB_ROW);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbRegistryTest, PrepareWorkerFinalizesIfRegistryClosesDuringWork) {
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    PrepareWorkRace race = {rdb_prepare_work_begin(conn, "SELECT 1", NULL, 0), RDB_ERROR};
+    ASSERT_NE(race.work, nullptr);
+    uv_sem_t entered, resume;
+    ASSERT_EQ(uv_sem_init(&entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&resume, 0), 0);
+    fake.prepare_entered = &entered;
+    fake.prepare_resume = &resume;
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, prepare_work_thread, &race), 0);
+    uv_sem_wait(&entered);
+    rdb_conn_life_close(registry.life);
+    EXPECT_EQ(fake.closes, 0);
+    uv_sem_post(&resume);
+    uv_thread_join(&thread);
+    EXPECT_EQ(race.status, RDB_OK);
+    EXPECT_EQ(rdb_prepare_work_end(race.work, true), nullptr);
+    EXPECT_EQ(fake.finalizes, 1);
+    EXPECT_EQ(fake.closes, 1);
+    rdb_close(conn);
+    uv_sem_destroy(&entered);
+    uv_sem_destroy(&resume);
+}
+
+TEST_F(RdbRegistryTest, FetchWorkerPinsStatementUntilRegistryTeardownFinishes) {
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT 1");
+    ASSERT_NE(stmt, nullptr);
+    Pool* metadata = pool_create();
+    ASSERT_NE(metadata, nullptr);
+    FetchRows rows = {};
+    FetchWorkRace race = {rdb_fetch_work_begin(stmt, 1, 10, metadata, capture_fetch_row, &rows), RDB_ERROR};
+    ASSERT_NE(race.work, nullptr);
+    uv_sem_t entered, resume;
+    ASSERT_EQ(uv_sem_init(&entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&resume, 0), 0);
+    fake.fetch_entered = &entered;
+    fake.fetch_resume = &resume;
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, fetch_work_thread, &race), 0);
+    uv_sem_wait(&entered);
+    rdb_conn_life_close(registry.life);
+    EXPECT_EQ(fake.closes, 0);
+    EXPECT_EQ(fake.finalizes, 0);
+    uv_sem_post(&resume);
+    uv_thread_join(&thread);
+    EXPECT_EQ(race.status, RDB_OK);
+    RdbFetchResult result = {};
+    EXPECT_EQ(rdb_fetch_work_end(race.work, &result), RDB_ERROR);
+    EXPECT_EQ(fake.finalizes, 1);
+    EXPECT_EQ(fake.closes, 1);
+    rdb_close(conn);
+    uv_sem_destroy(&entered);
+    uv_sem_destroy(&resume);
+    pool_destroy(metadata);
+}
+
+static void finalize_work_thread(void* data) { rdb_finalize_work_run((RdbFinalizeWork*)data); }
+TEST_F(RdbRegistryTest, FinalizeWorkerKeepsConnectionAliveAcrossTeardown) {
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT 1");
+    ASSERT_NE(stmt, nullptr);
+    RdbFinalizeWork* work = rdb_finalize_work_begin(stmt);
+    ASSERT_NE(work, nullptr);
+    uv_sem_t entered, resume;
+    ASSERT_EQ(uv_sem_init(&entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&resume, 0), 0);
+    fake.finalize_entered = &entered;
+    fake.finalize_resume = &resume;
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, finalize_work_thread, work), 0);
+    uv_sem_wait(&entered);
+    rdb_conn_life_close(registry.life);
+    EXPECT_EQ(fake.closes, 0);
+    uv_sem_post(&resume);
+    uv_thread_join(&thread);
+    EXPECT_EQ(fake.finalizes, 1);
+    rdb_finalize_work_end(work);
+    EXPECT_EQ(fake.closes, 1);
+    rdb_finalize(stmt);
+    EXPECT_EQ(fake.finalizes, 1);
+    rdb_close(conn);
+    uv_sem_destroy(&entered);
+    uv_sem_destroy(&resume);
+}
+
+TEST_F(RdbRegistryTest, OpenWorkerRefusesUnregisteredHandleAndRejectedResult) {
+    fake.skip_register = true;
+    RdbOpenWork* work = rdb_open_work_begin(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(work, nullptr);
+    EXPECT_EQ(rdb_open_work_run(work, NULL), RDB_ERROR);
+    EXPECT_EQ(rdb_open_work_end(work, true), nullptr);
+    EXPECT_EQ(fake.closes, 1);
+    fake.skip_register = false;
+    work = rdb_open_work_begin(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(work, nullptr);
+    EXPECT_EQ(rdb_open_work_run(work, NULL), RDB_OK);
+    EXPECT_EQ(rdb_open_work_end(work, false), nullptr);
+    EXPECT_EQ(fake.closes, 2);
+    EXPECT_EQ(registry.removes, 2);
+}
+
 TEST_F(RdbRegistryTest, SqliteRejectsAmbiguousOrTruncatedTargetsBeforeAuthorization) {
     rdb_sqlite_register();
     registry.refuse_authorize = true;
@@ -2180,16 +2546,129 @@ TEST(RdbDriverTable, IncompatibleTablesAreRejected) {
 
 #ifndef _WIN32     // the bridge's AF_UNIX listener is POSIX-only so far
 
+class RdbSpoolTest : public ::testing::Test {
+protected:
+    char directory[128] = "temp/rdb-spool-XXXXXX";
+    FileAnchor* anchor = nullptr;
+    void SetUp() override {
+        ensure_temp_dir();
+        ASSERT_NE(mkdtemp(directory), nullptr);
+        FileAnchorOptions options = {FILE_ANCHOR_PRIVATE};
+        anchor = file_anchor_open(directory, &options);
+        ASSERT_NE(anchor, nullptr);
+    }
+    void TearDown() override {
+        file_anchor_close(anchor);
+        EXPECT_EQ(rmdir(directory), 0);
+    }
+};
+
+struct SpoolCheck { int seen; };
+static bool check_spooled_row(void* context, int count, const RdbValue* values) {
+    SpoolCheck* check = (SpoolCheck*)context;
+    EXPECT_EQ(count, 6);
+    if (count != 6) return false;
+    if (check->seen == 0) {
+        const char text[] = {'a', '\0', 'b'};
+        const unsigned char binary[] = {0, 255};
+        EXPECT_TRUE(values[0].is_null);
+        EXPECT_EQ(values[1].type, RDB_TYPE_INT); EXPECT_EQ(values[1].int_val, INT64_MIN);
+        EXPECT_EQ(values[2].type, RDB_TYPE_FLOAT); EXPECT_EQ(values[2].float_val, -12.5);
+        EXPECT_EQ(values[3].type, RDB_TYPE_STRING); EXPECT_EQ(values[3].str_len, 3);
+        if (values[3].str_len != 3) return false;
+        EXPECT_EQ(memcmp(values[3].str_val, text, sizeof(text)), 0);
+        EXPECT_EQ(values[4].type, RDB_TYPE_BLOB); EXPECT_EQ(values[4].str_len, 2);
+        if (values[4].str_len != 2) return false;
+        EXPECT_EQ(memcmp(values[4].str_val, binary, sizeof(binary)), 0);
+        EXPECT_EQ(values[5].type, RDB_TYPE_BOOL); EXPECT_TRUE(values[5].bool_val);
+    } else {
+        EXPECT_EQ(values[3].type, RDB_TYPE_STRING); EXPECT_EQ(values[3].str_len, 0);
+        EXPECT_EQ(values[4].type, RDB_TYPE_BLOB); EXPECT_EQ(values[4].str_len, 0);
+        EXPECT_FALSE(values[5].bool_val);
+    }
+    check->seen++;
+    return true;
+}
+
+static bool count_spool_entry(void* context, const char*, const FileRevision*) {
+    (*(int*)context)++;
+    return true;
+}
+
+TEST_F(RdbSpoolTest, TypedRowsRemainRandomlyReadableAndAnonymous) {
+    RdbSpool* spool = rdb_spool_open(anchor, 4096, 8, 6);
+    ASSERT_NE(spool, nullptr);
+    int entries = 0;
+    ASSERT_TRUE(file_anchor_visit_strict(anchor, 16, count_spool_entry, &entries));
+    EXPECT_EQ(entries, 0);
+    const char text[] = {'a', '\0', 'b'};
+    const unsigned char binary[] = {0, 255};
+    RdbValue first[6] = {};
+    first[0].type = RDB_TYPE_NULL; first[0].is_null = true;
+    first[1].type = RDB_TYPE_INT; first[1].int_val = INT64_MIN;
+    first[2].type = RDB_TYPE_FLOAT; first[2].float_val = -12.5;
+    first[3].type = RDB_TYPE_STRING; first[3].str_val = text; first[3].str_len = sizeof(text);
+    first[4].type = RDB_TYPE_BLOB; first[4].str_val = (const char*)binary; first[4].str_len = sizeof(binary);
+    first[5].type = RDB_TYPE_BOOL; first[5].bool_val = true;
+    RdbValue second[6]; memcpy(second, first, sizeof(first));
+    second[3].str_val = nullptr; second[3].str_len = 0;
+    second[4].str_val = nullptr; second[4].str_len = 0;
+    second[5].bool_val = false;
+    RdbSpoolRow rows[] = {{6, first}, {6, second}};
+    ASSERT_EQ(rdb_spool_append(spool, rows, 2), RDB_SPOOL_OK);
+    EXPECT_EQ(rdb_spool_count(spool), 2U);
+    EXPECT_GT(rdb_spool_bytes(spool), 0U);
+    SpoolCheck check = {};
+    EXPECT_EQ(rdb_spool_read(spool, 0, 2, check_spooled_row, &check), RDB_SPOOL_OK);
+    EXPECT_EQ(check.seen, 2);
+    check.seen = 1;
+    EXPECT_EQ(rdb_spool_read(spool, 1, 1, check_spooled_row, &check), RDB_SPOOL_OK);
+    EXPECT_EQ(rdb_spool_read(spool, 2, 1, check_spooled_row, &check), RDB_SPOOL_INVALID);
+    rdb_spool_close(spool);
+}
+
+TEST_F(RdbSpoolTest, QuotaAndInvalidBatchesLeaveThePrefixReadable) {
+    RdbSpool* spool = rdb_spool_open(anchor, 30, 4, 1);
+    ASSERT_NE(spool, nullptr);
+    RdbValue value = {}; value.type = RDB_TYPE_INT; value.int_val = 7;
+    RdbSpoolRow row = {1, &value};
+    ASSERT_EQ(rdb_spool_append(spool, &row, 1), RDB_SPOOL_OK);
+    uint64_t bytes = rdb_spool_bytes(spool);
+    EXPECT_EQ(rdb_spool_append(spool, &row, 1), RDB_SPOOL_LIMIT);
+    EXPECT_EQ(rdb_spool_count(spool), 1U); EXPECT_EQ(rdb_spool_bytes(spool), bytes);
+    RdbValue invalid = {}; invalid.type = RDB_TYPE_STRING; invalid.str_len = -1;
+    RdbSpoolRow bad = {1, &invalid};
+    EXPECT_EQ(rdb_spool_append(spool, &bad, 1), RDB_SPOOL_INVALID);
+    auto read = [](void* context, int count, const RdbValue* values) -> bool {
+        if (count != 1 || values[0].type != RDB_TYPE_INT || values[0].int_val != 7) return false;
+        (*(int*)context)++;
+        return true;
+    };
+    int seen = 0;
+    EXPECT_EQ(rdb_spool_read(spool, 0, 1, read, &seen), RDB_SPOOL_OK);
+    EXPECT_EQ(seen, 1);
+    rdb_spool_close(spool);
+}
+
 #include "../lib/rdb_tunnel.h"
 #include <pthread.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 
 enum FakeServerMode {
     FAKE_PG_REFUSE_TLS,     // read SSLRequest, answer 'N', then echo
     FAKE_ECHO,              // echo from the first byte
     FAKE_MYSQL_NO_TLS,      // send a greeting without CLIENT_SSL, then echo
+    FAKE_PG_STALL,          // hold the SSLRequest without answering
+    FAKE_PG_STALL_TLS,      // accept SSLRequest but never finish TLS
+    FAKE_MYSQL_STALL,       // hold the connection without a greeting
+    FAKE_MYSQL_TRICKLE,     // send a greeting header slower than the total deadline
 };
 
 struct FakeServer {
@@ -2214,6 +2693,31 @@ static void* fake_server_main(void* arg) {
         ssize_t n = recv(fd, buf, 8, MSG_WAITALL);
         fs->saw_ssl_request = n == 8 && buf[4] == 0x04 && buf[5] == 0xd2 && buf[6] == 0x16 && buf[7] == 0x2f;
         send(fd, "N", 1, 0);
+    } else if (fs->mode == FAKE_PG_STALL || fs->mode == FAKE_PG_STALL_TLS) {
+        if (recv(fd, buf, 8, MSG_WAITALL) == 8 && fs->mode == FAKE_PG_STALL_TLS) {
+            send(fd, "S", 1, 0);
+        }
+        while (recv(fd, buf, sizeof(buf), 0) > 0) {}
+        close(fd);
+        return NULL;
+    } else if (fs->mode == FAKE_MYSQL_TRICKLE) {
+#ifdef SO_NOSIGPIPE
+        int on = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+#endif
+        const uint8_t header[4] = { 40, 0, 0, 0 };
+        for (size_t i = 0; i < 44; i++) {
+            uint8_t byte = i < sizeof(header) ? header[i] : 0;
+            if (send(fd, &byte, 1, MSG_NOSIGNAL) != 1) break;
+            usleep(70000);
+        }
+        while (recv(fd, buf, sizeof(buf), 0) > 0) {}
+        close(fd);
+        return NULL;
+    } else if (fs->mode == FAKE_MYSQL_STALL) {
+        while (recv(fd, buf, sizeof(buf), 0) > 0) {}
+        close(fd);
+        return NULL;
     } else if (fs->mode == FAKE_MYSQL_NO_TLS) {
         uint8_t header[4] = { sizeof(fake_mysql_greeting), 0, 0, 0 };
         send(fd, header, 4, 0);
@@ -2286,6 +2790,33 @@ static int connect_local(const char* path) {
 static ssize_t round_trip(int fd, char* reply, size_t cap) {
     send(fd, "ping", 4, 0);
     return recv(fd, reply, cap, MSG_WAITALL);
+}
+
+TEST(RdbTunnel, StalledProtocolAndTlsUpgradesTimeOut) {
+    const FakeServerMode modes[] = { FAKE_PG_STALL, FAKE_PG_STALL_TLS, FAKE_MYSQL_STALL, FAKE_MYSQL_TRICKLE };
+    for (FakeServerMode mode : modes) {
+        FakeServer fs;
+        ASSERT_TRUE(fake_server_start(&fs, mode));
+        RdbTarget target = loopback_target(fs.port);
+        RdbTunnelSpec spec = tunnel_spec(mode >= FAKE_MYSQL_STALL ? RDB_WIRE_MYSQL : RDB_WIRE_POSTGRES,
+                                         RDB_TLS_REQUIRE);
+        spec.connect_timeout_ms = 150;
+        char endpoint[1024];
+        RdbTunnel* tunnel = rdb_tunnel_open(&target, &spec, endpoint, sizeof(endpoint));
+        ASSERT_NE(tunnel, nullptr);
+        char sock[1100];
+        if (spec.protocol == RDB_WIRE_POSTGRES) snprintf(sock, sizeof(sock), "%s/.s.PGSQL.%d", endpoint, fs.port);
+        else snprintf(sock, sizeof(sock), "%s", endpoint);
+        int fd = connect_local(sock);
+        ASSERT_GE(fd, 0);
+        struct pollfd waiting = { fd, POLLIN, 0 };
+        EXPECT_EQ(poll(&waiting, 1, 2000), 1) << "mode " << mode;
+        char byte;
+        EXPECT_EQ(recv(fd, &byte, 1, 0), 0) << "mode " << mode;
+        close(fd);
+        rdb_tunnel_close(tunnel);
+        fake_server_stop(&fs);
+    }
 }
 
 TEST(RdbTunnel, PostgresPreferFallsBackToPlaintextWhenRefused) {
@@ -2456,6 +2987,42 @@ static const RdbDriver* live_resolver(const char* name) {
     return NULL;
 }
 
+TEST(RdbModuleUriTest, MysqlResolvesBracketedIpv6AndRejectsInvalidPorts) {
+    const RdbDriver* driver = live_resolver("mysql");
+    if (!driver) GTEST_SKIP() << "rdb-drivers module not built";
+    RdbTarget target = {};
+    int count = 0;
+    EXPECT_EQ(driver->resolve_targets("mysql://u:p@[2001:db8::1]:3307/db", &target, 1, &count), RDB_OK);
+    EXPECT_EQ(count, 1);
+    EXPECT_STREQ(target.host, "2001:db8::1");
+    EXPECT_EQ(target.port, 3307);
+    EXPECT_EQ(driver->resolve_targets("mysql://u:p@[fe80::1%25en0]/db", &target, 1, &count), RDB_OK);
+    EXPECT_STREQ(target.host, "fe80::1%en0");
+    EXPECT_EQ(target.port, 3306);
+    const char* invalid[] = {"mysql://[::1/db", "mysql://[::1]extra/db", "mysql://[::1]:/db",
+        "mysql://[::1]:65536/db", "mysql://host:12x/db", "mysql://::1/db",
+        "mysql://host%00.attacker/db", "mysql://host%2/db", "mysql://user:p%00x@host/db"};
+    for (const char* uri : invalid) {
+        SCOPED_TRACE(uri);
+        EXPECT_EQ(driver->resolve_targets(uri, &target, 1, &count), RDB_ERROR);
+        EXPECT_EQ(count, 0);
+    }
+    char oversized[300];
+    memset(oversized, 'a', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
+    char uri[400];
+    str_fmt(uri, sizeof(uri), "mysql://%s/db", oversized);
+    EXPECT_EQ(driver->resolve_targets(uri, &target, 1, &count), RDB_ERROR);
+    str_fmt(uri, sizeof(uri), "mysql://%s@host/db", oversized);
+    EXPECT_EQ(driver->resolve_targets(uri, &target, 1, &count), RDB_ERROR);
+    str_fmt(uri, sizeof(uri), "mysql://host/%s", oversized);
+    EXPECT_EQ(driver->resolve_targets(uri, &target, 1, &count), RDB_ERROR);
+    str_fmt(uri, sizeof(uri), "mysql://host/db?%s=1", oversized);
+    EXPECT_EQ(driver->resolve_targets(uri, &target, 1, &count), RDB_ERROR);
+    EXPECT_EQ(driver->resolve_targets("mysql://host/db", nullptr, 0, &count), RDB_ERROR);
+    EXPECT_EQ(count, 0);
+}
+
 static double live_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -2513,6 +3080,196 @@ TEST(RdbLiveCancel, PostgresqlInterruptsSleep) {
 
 TEST(RdbLiveCancel, MysqlInterruptsSleep) {
     live_cancel_check("LAMBDA_TEST_MYSQL_URI", "mysql", "SELECT SLEEP(30)");
+}
+
+TEST(RdbLiveStreaming, PostgresqlRowsMetadataAndEarlyClose) {
+    const char* uri = getenv("LAMBDA_TEST_PG_URI");
+    if (!uri) GTEST_SKIP() << "LAMBDA_TEST_PG_URI not set";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver("postgresql")) GTEST_SKIP() << "rdb-drivers module not built";
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    RdbConn* conn = rdb_open(pool, uri, "postgresql", true);
+    ASSERT_NE(conn, nullptr);
+    EXPECT_TRUE(conn->driver->caps & RDB_CAP_STREAMING);
+
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT n::bigint AS number, decode('0001ff','hex') AS bytes, NULL::text AS empty "
+        "FROM generate_series(1, 5000) AS n");
+    ASSERT_NE(stmt, nullptr);
+    EXPECT_EQ(rdb_column_count(stmt), 3);
+    RdbColumnDesc desc;
+    ASSERT_EQ(rdb_column_desc(stmt, 0, &desc), RDB_OK);
+    const char* first_name = desc.name;
+    EXPECT_STREQ(first_name, "number");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 1);
+    RdbValue bytes = rdb_column_value(stmt, 1);
+    ASSERT_EQ(bytes.type, RDB_TYPE_BLOB);
+    ASSERT_FALSE(bytes.is_null);
+    ASSERT_EQ(bytes.str_len, 3);
+    EXPECT_EQ(memcmp(bytes.str_val, "\x00\x01\xff", 3), 0);
+    EXPECT_TRUE(rdb_column_value(stmt, 2).is_null);
+
+    // Another statement cannot consume the wire while this result is active.
+    RdbStmt* competing = rdb_prepare(conn, "SELECT 2");
+    ASSERT_NE(competing, nullptr);
+    EXPECT_EQ(rdb_step(competing), RDB_ERROR);
+    rdb_finalize(competing);
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 2);
+    EXPECT_STREQ(first_name, "number");
+    rdb_finalize(stmt);
+
+    // Cancelling an unfinished stream drains it so the connection can be reused.
+    stmt = rdb_prepare(conn, "SELECT 1 AS answer WHERE false");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_column_count(stmt), 1);
+    ASSERT_EQ(rdb_column_desc(stmt, 0, &desc), RDB_OK);
+    EXPECT_STREQ(desc.name, "answer");
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+    rdb_finalize(stmt);
+    stmt = rdb_prepare(conn, "SELECT 3");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 3);
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbLiveStreaming, MysqlRowsMetadataAndEarlyClose) {
+    const char* uri = getenv("LAMBDA_TEST_MYSQL_URI");
+    if (!uri) GTEST_SKIP() << "LAMBDA_TEST_MYSQL_URI not set";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver("mysql")) GTEST_SKIP() << "rdb-drivers module not built";
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    RdbConn* conn = rdb_open(pool, uri, "mysql", true);
+    ASSERT_NE(conn, nullptr);
+    EXPECT_TRUE(conn->driver->caps & RDB_CAP_STREAMING);
+
+    RdbStmt* stmt = rdb_prepare(conn,
+        "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<100) "
+        "SELECT n AS number, IF(n=2,REPEAT('y',4000),REPEAT('x',2048)) AS value, "
+        "UNHEX('0001ff') AS bytes, NULL AS null_value FROM seq");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_column_count(stmt), 4);
+    RdbColumnDesc desc;
+    ASSERT_EQ(rdb_column_desc(stmt, 0, &desc), RDB_OK);
+    const char* first_name = desc.name;
+    EXPECT_STREQ(first_name, "number");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 1);
+    RdbValue value = rdb_column_value(stmt, 1);
+    ASSERT_FALSE(value.is_null);
+    ASSERT_EQ(value.str_len, 2048);
+    EXPECT_EQ(value.str_val[0], 'x');
+    EXPECT_EQ(value.str_val[2047], 'x');
+    RdbValue bytes = rdb_column_value(stmt, 2);
+    ASSERT_EQ(bytes.type, RDB_TYPE_BLOB);
+    ASSERT_FALSE(bytes.is_null);
+    ASSERT_EQ(bytes.str_len, 3);
+    EXPECT_EQ(memcmp(bytes.str_val, "\x00\x01\xff", 3), 0);
+    EXPECT_TRUE(rdb_column_value(stmt, 3).is_null);
+    EXPECT_EQ(rdb_prepare(conn, "SELECT 2"), nullptr);
+
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 2);
+    value = rdb_column_value(stmt, 1);
+    ASSERT_EQ(value.str_len, 4000);
+    EXPECT_EQ(value.str_val[0], 'y');
+    EXPECT_EQ(value.str_val[3999], 'y');
+    EXPECT_STREQ(first_name, "number");
+    rdb_finalize(stmt);
+
+    stmt = rdb_prepare(conn, "SELECT 1 AS answer WHERE false");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_column_count(stmt), 1);
+    ASSERT_EQ(rdb_column_desc(stmt, 0, &desc), RDB_OK);
+    EXPECT_STREQ(desc.name, "answer");
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+    rdb_finalize(stmt);
+    stmt = rdb_prepare(conn, "SELECT 3");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 3);
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+static void live_streaming_commands(const char* env, const char* driver) {
+    const char* uri = getenv(env);
+    if (!uri) GTEST_SKIP() << env << " not set";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver(driver)) GTEST_SKIP() << "rdb-drivers module not built";
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    RdbConn* conn = rdb_open(pool, uri, driver, false);
+    ASSERT_NE(conn, nullptr);
+    const char* commands[] = {
+        "CREATE TEMPORARY TABLE dbench_stream_commands (id INT)",
+        "INSERT INTO dbench_stream_commands VALUES (1)",
+        "UPDATE dbench_stream_commands SET id=2 WHERE id=1"
+    };
+    for (const char* command : commands) {
+        RdbStmt* stmt = rdb_prepare(conn, command);
+        ASSERT_NE(stmt, nullptr);
+        EXPECT_EQ(rdb_step(stmt), RDB_DONE) << command;
+        rdb_finalize(stmt);
+    }
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT id FROM dbench_stream_commands");
+    ASSERT_NE(stmt, nullptr);
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 2);
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbLiveStreaming, PostgresqlCommands) {
+    live_streaming_commands("LAMBDA_TEST_PG_URI", "postgresql");
+}
+
+TEST(RdbLiveStreaming, PostgresqlCopyDoesNotLeaveSessionInCopyMode) {
+    const char* uri = getenv("LAMBDA_TEST_PG_URI");
+    if (!uri) GTEST_SKIP() << "LAMBDA_TEST_PG_URI not set";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver("postgresql")) GTEST_SKIP() << "rdb-drivers module not built";
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    RdbConn* conn = rdb_open(pool, uri, "postgresql", false);
+    ASSERT_NE(conn, nullptr);
+    const char* queries[] = {
+        "COPY (SELECT n FROM generate_series(1, 10000) n) TO STDOUT",
+        "CREATE TEMP TABLE dbench_copy_test (id integer)",
+        "COPY dbench_copy_test FROM STDIN"
+    };
+    for (int i = 0; i < 3; i++) {
+        RdbStmt* stmt = rdb_prepare(conn, queries[i]);
+        ASSERT_NE(stmt, nullptr);
+        EXPECT_EQ(rdb_step(stmt), i == 1 ? RDB_DONE : RDB_ERROR);
+        rdb_finalize(stmt);
+        stmt = rdb_prepare(conn, "SELECT 1");
+        ASSERT_NE(stmt, nullptr);
+        EXPECT_EQ(rdb_step(stmt), RDB_ROW);
+        rdb_finalize(stmt);
+    }
+    rdb_close(conn);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbLiveStreaming, MysqlCommands) {
+    live_streaming_commands("LAMBDA_TEST_MYSQL_URI", "mysql");
 }
 
 #endif  // _WIN32
@@ -2917,6 +3674,194 @@ TEST_F(RdbRegistryTest, HeldConnectionDefersCloseUntilFinalRelease) {
     rdb_conn_life_release(second);
     EXPECT_EQ(fake.closes, 1);
 }
+
+struct SchemaWorkRace { RdbSchemaWork* work; int status; };
+static void schema_work_thread(void* user) {
+    SchemaWorkRace* race = (SchemaWorkRace*)user;
+    race->status = rdb_schema_work_run(race->work, NULL);
+}
+
+TEST_F(RdbRegistryTest, SchemaWorkerPinsConnectionThroughRegistryTeardown) {
+    RdbConn* conn = rdb_open(pool, "fakedb://db.example/x", "fakedb", true);
+    ASSERT_NE(conn, nullptr);
+    Pool* result_pool = pool_create();
+    ASSERT_NE(result_pool, nullptr);
+    SchemaWorkRace race = {rdb_schema_work_begin(conn, result_pool), RDB_ERROR};
+    ASSERT_NE(race.work, nullptr);
+    uv_sem_t entered, resume;
+    ASSERT_EQ(uv_sem_init(&entered, 0), 0);
+    ASSERT_EQ(uv_sem_init(&resume, 0), 0);
+    fake.schema_entered = &entered;
+    fake.schema_resume = &resume;
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, schema_work_thread, &race), 0);
+    uv_sem_wait(&entered);
+    rdb_conn_life_close(registry.life);
+    EXPECT_EQ(fake.closes, 0);
+    uv_sem_post(&resume);
+    uv_thread_join(&thread);
+    EXPECT_EQ(race.status, RDB_OK);
+    RdbSchema output = {};
+    EXPECT_EQ(rdb_schema_work_end(race.work, &output), RDB_ERROR);
+    EXPECT_EQ(fake.closes, 1);
+    rdb_close(conn);
+    uv_sem_destroy(&entered);
+    uv_sem_destroy(&resume);
+    pool_destroy(result_pool);
+}
+
+TEST_F(RdbTest, SchemaWorkerReturnsIndependentMetadataAndHonorsCancellation) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    Pool* result_pool = pool_create();
+    ASSERT_NE(result_pool, nullptr);
+    RdbSchemaWork* work = rdb_schema_work_begin(conn, result_pool);
+    ASSERT_NE(work, nullptr);
+    ASSERT_EQ(rdb_schema_work_run(work, NULL), RDB_OK);
+    RdbSchema result = {};
+    ASSERT_EQ(rdb_schema_work_end(work, &result), RDB_OK);
+    rdb_close(conn);
+    bool found_books = false;
+    for (int i = 0; i < result.table_count; i++) {
+        if (strcmp(result.tables[i].name, "books") == 0) {
+            found_books = result.tables[i].column_count == 7 && result.tables[i].fk_count == 1;
+        }
+    }
+    EXPECT_TRUE(found_books);
+    conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    work = rdb_schema_work_begin(conn, result_pool);
+    ASSERT_NE(work, nullptr);
+    int cancelled = 1;
+    EXPECT_EQ(rdb_schema_work_run(work, &cancelled), RDB_ERROR);
+    EXPECT_EQ(rdb_schema_work_end(work, &result), RDB_ERROR);
+    rdb_close(conn);
+    pool_destroy(result_pool);
+}
+
+#ifndef _WIN32
+static void live_open_worker(const char* env, const char* driver) {
+    const char* uri = getenv(env);
+    if (!uri) GTEST_SKIP() << env << " not set";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver(driver)) GTEST_SKIP() << "rdb-drivers module not built";
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    OpenWorkRace race = {rdb_open_work_begin(pool, uri, driver, true), RDB_ERROR, NULL};
+    ASSERT_NE(race.work, nullptr);
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, open_work_thread, &race), 0);
+    uv_thread_join(&thread);
+    ASSERT_EQ(race.status, RDB_OK);
+    RdbConn* conn = rdb_open_work_end(race.work, true);
+    ASSERT_NE(conn, nullptr);
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT 1");
+    ASSERT_NE(stmt, nullptr);
+    EXPECT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 1);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbLiveOpenWork, PostgresqlConnection) {
+    live_open_worker("LAMBDA_TEST_PG_URI", "postgresql");
+}
+TEST(RdbLiveOpenWork, MysqlConnection) {
+    live_open_worker("LAMBDA_TEST_MYSQL_URI", "mysql");
+}
+
+static void live_schema_worker(const char* env, const char* driver) {
+    const char* uri = getenv(env);
+    if (!uri) GTEST_SKIP() << env << " not set";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver(driver)) GTEST_SKIP() << "rdb-drivers module not built";
+    Pool* pool = pool_create();
+    Pool* result_pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    ASSERT_NE(result_pool, nullptr);
+    RdbConn* conn = rdb_open(pool, uri, driver, true);
+    ASSERT_NE(conn, nullptr);
+    SchemaWorkRace race = {rdb_schema_work_begin(conn, result_pool), RDB_ERROR};
+    ASSERT_NE(race.work, nullptr);
+    uv_thread_t thread;
+    ASSERT_EQ(uv_thread_create(&thread, schema_work_thread, &race), 0);
+    uv_thread_join(&thread);
+    ASSERT_EQ(race.status, RDB_OK);
+    RdbSchema schema = {};
+    ASSERT_EQ(rdb_schema_work_end(race.work, &schema), RDB_OK);
+    rdb_close(conn);
+    ASSERT_GT(schema.table_count, 0);
+    ASSERT_GT(schema.tables[0].column_count, 0);
+    EXPECT_NE(schema.tables[0].columns[0].name, nullptr);
+    pool_destroy(result_pool);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbLiveSchemaWork, PostgresqlMetadata) {
+    live_schema_worker("LAMBDA_TEST_PG_URI", "postgresql");
+}
+TEST(RdbLiveSchemaWork, MysqlMetadata) {
+    live_schema_worker("LAMBDA_TEST_MYSQL_URI", "mysql");
+}
+
+static void live_statement_workers(const char* env, const char* driver) {
+    const char* uri = getenv(env);
+    if (!uri) GTEST_SKIP() << env << " not set";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver(driver)) GTEST_SKIP() << "rdb-drivers module not built";
+    Pool* pool = pool_create();
+    Pool* metadata = pool_create();
+    ASSERT_NE(pool, nullptr);
+    ASSERT_NE(metadata, nullptr);
+    RdbConn* conn = rdb_open(pool, uri, driver, true);
+    ASSERT_NE(conn, nullptr);
+    const char* queries[] = {
+        "SELECT 1 AS n, 10 AS n UNION ALL SELECT 2, 20 UNION ALL SELECT 3, 30",
+        "SELECT 1 AS n, 10 AS n WHERE 1=0"
+    };
+    for (int i = 0; i < 2; i++) {
+        PrepareWorkRace prepare = {rdb_prepare_work_begin(conn, queries[i], NULL, 0), RDB_ERROR};
+        ASSERT_NE(prepare.work, nullptr);
+        uv_thread_t thread;
+        ASSERT_EQ(uv_thread_create(&thread, prepare_work_thread, &prepare), 0);
+        uv_thread_join(&thread);
+        ASSERT_EQ(prepare.status, RDB_OK);
+        RdbStmt* stmt = rdb_prepare_work_end(prepare.work, true);
+        ASSERT_NE(stmt, nullptr);
+        FetchRows rows = {};
+        RdbFetchResult result = {};
+        int batches = i ? 1 : 2;
+        for (int b = 0; b < batches; b++) {
+            FetchWorkRace fetch = {rdb_fetch_work_begin(stmt, 2, 10, metadata, capture_fetch_row, &rows), RDB_ERROR};
+            ASSERT_NE(fetch.work, nullptr);
+            ASSERT_EQ(uv_thread_create(&thread, fetch_work_thread, &fetch), 0);
+            uv_thread_join(&thread);
+            ASSERT_EQ(fetch.status, RDB_OK);
+            ASSERT_EQ(rdb_fetch_work_end(fetch.work, &result), RDB_OK);
+            ASSERT_EQ(result.column_count, 2);
+            EXPECT_STREQ(result.columns[0].name, "n");
+            EXPECT_STREQ(result.columns[1].name, "n");
+        }
+        EXPECT_TRUE(result.done);
+        EXPECT_EQ(rows.count, i ? 0 : 3);
+        rdb_finalize(stmt);
+    }
+    rdb_close(conn);
+    pool_destroy(metadata);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbLiveStatementWork, PostgresqlResults) {
+    live_statement_workers("LAMBDA_TEST_PG_URI", "postgresql");
+}
+TEST(RdbLiveStatementWork, MysqlResults) {
+    live_statement_workers("LAMBDA_TEST_MYSQL_URI", "mysql");
+}
+#endif
 
 TEST_F(RdbRegistryTest, SqliteTransactionHonorsHostAuthorization) {
     ensure_temp_dir();

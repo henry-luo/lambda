@@ -1,0 +1,17 @@
+{
+  "name": "DBench executes an explicitly selected SQL statement",
+  "html": "test/demo/dbench/dbench.ls",
+  "viewport": {"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#sql"},"text":"-- 😀\nSELECT 22; SELECT 33","clear":true},
+    {"type":"script","js":"let e=document.getElementById('sql');let n=e.value.indexOf('SELECT 33');e.focus();e.setSelectionRange(n,n+9)"},
+    {"type":"key_press","key":"Enter","mods_str":"ctrl"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-mode","equals":"query"},
+    {"type":"assert_text","target":{"selector":"#result-0-0"},"contains":"33"},
+    {"type":"script","js":"let e=document.getElementById('sql');let n=e.value.indexOf('SELECT 22');e.focus();e.setSelectionRange(n,n+9)"},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_text","target":{"selector":"#result-0-0"},"contains":"22"}
+  ]
+}

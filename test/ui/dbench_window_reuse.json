@@ -1,0 +1,22 @@
+{
+  "name": "DBench reuses the overscanned window for small scrolls",
+  "html": "test/demo/dbench/dbench.ls",
+  "viewport": {"width": 1280, "height": 800},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-connected","equals":"true"},
+    {"type":"click","target":{"selector":"[data-table=wide_records]"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-table","equals":"wide_records"},
+    {"type":"assert_attribute","target":{"selector":"#result-grid"},"attribute":"aria-colcount","equals":"81"},
+    {"type":"script","js":"const p=document.getElementById('result-scroll');p.scrollTop=2700;p.scrollLeft=5000;p.dispatchEvent(new Event('scroll'))"},
+    {"type":"assert_script","js":"+document.getElementById('result-grid').dataset.firstRow>0 && +document.getElementById('result-grid').dataset.firstColumn>0"},
+    {"type":"script","js":"window.dbenchBeforeSmallScroll=document.getElementById('result-grid');window.dbenchBeforeFirstRow=+window.dbenchBeforeSmallScroll.dataset.firstRow;window.dbenchBeforeLastRow=window.dbenchBeforeSmallScroll.dataset.lastRow;window.dbenchBeforeLastColumn=window.dbenchBeforeSmallScroll.dataset.lastColumn;const p=document.getElementById('result-scroll');p.scrollTop+=27;p.scrollLeft+=40;p.dispatchEvent(new Event('scroll'))"},
+    {"type":"wait","ms":100},
+    {"type":"assert_script","js":"(()=>{const p=document.getElementById('result-scroll'),g=document.getElementById('result-grid');return g===window.dbenchBeforeSmallScroll && g.dataset.lastRow===window.dbenchBeforeLastRow && g.dataset.lastColumn===window.dbenchBeforeLastColumn && +g.dataset.lastRow>=Math.ceil((p.scrollTop+p.clientHeight-27)/27) && +g.dataset.lastColumn>=Math.ceil((p.scrollLeft+p.clientWidth-46)/160)})()"},
+    {"type":"script","js":"const p=document.getElementById('result-scroll');p.scrollTop+=108;p.scrollLeft+=320;p.dispatchEvent(new Event('scroll'))"},
+    {"type":"assert_script","js":"(()=>{const p=document.getElementById('result-scroll'),g=document.getElementById('result-grid');return +g.dataset.firstRow>window.dbenchBeforeFirstRow && +g.dataset.lastRow>=Math.ceil((p.scrollTop+p.clientHeight-27)/27) && +g.dataset.lastColumn>=Math.ceil((p.scrollLeft+p.clientWidth-46)/160)})()"},
+    {"type":"script","js":"const g=document.getElementById('result-grid');window.dbenchRowsBeforeResize=+g.dataset.lastRow-+g.dataset.firstRow"},
+    {"type":"resize","width":1280,"height":600},
+    {"type":"assert_script","js":"(()=>{const g=document.getElementById('result-grid');return +g.dataset.lastRow-+g.dataset.firstRow<window.dbenchRowsBeforeResize})()"}
+  ]
+}

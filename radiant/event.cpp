@@ -11736,6 +11736,7 @@ struct RadiantFrameRequest {
     bool pending;
     bool delivering;
     bool window_event;
+    bool coalesced;
     RadiantFrameRequest* next;
 };
 
@@ -11794,12 +11795,22 @@ static void radiant_defer_template_reconcile(DomDocument* doc) {
     }
 }
 
-extern "C" uint64_t dom_engine_frame_request(void* owner, const char* event_name) {
+static uint64_t frame_request(void* owner, const char* event_name, bool coalesce) {
     DomElement* elem = static_cast<DomElement*>(owner);
     if (!elem || !elem->doc || !event_name || !*event_name || !dom_is_connected(elem)) return 0;
     RadiantFrameQueue* queue = frame_queue_for_document(elem->doc, true);
-    // tokens fit the packed Lambda int; zero always denotes a refused request
-    if (!queue || queue->next_token >= 0x7FFFFFFFFFFFULL) return 0;
+    if (!queue) return 0;
+    if (coalesce) {
+        DomNodeRef owner_ref = dom_node_ref(elem);
+        for (RadiantFrameRequest* pending = queue->requests; pending; pending = pending->next) {
+            // a request made during delivery belongs to the next frame.
+            if (pending->pending && !pending->delivering && pending->coalesced && !pending->window_event &&
+                    dom_node_ref_identity_compare(pending->owner, owner_ref) == 0 &&
+                    strcmp(pending->name->str, event_name) == 0) return pending->token;
+        }
+    }
+    // tokens fit the packed Lambda int; an existing coalesced token needs no new ID.
+    if (queue->next_token >= 0x7FFFFFFFFFFFULL) return 0;
     RadiantFrameRequest** slot = &queue->requests;
     RadiantFrameRequest* previous = nullptr;
     while (*slot && ((*slot)->pending || (*slot)->delivering)) {
@@ -11829,7 +11840,16 @@ extern "C" uint64_t dom_engine_frame_request(void* owner, const char* event_name
     request->token = ++queue->next_token;
     request->pending = true;
     request->window_event = false;
+    request->coalesced = coalesce;
     return request->token;
+}
+
+extern "C" uint64_t dom_engine_frame_request(void* owner, const char* event_name) {
+    return frame_request(owner, event_name, false);
+}
+
+extern "C" uint64_t dom_engine_frame_request_once(void* owner, const char* event_name) {
+    return frame_request(owner, event_name, true);
 }
 
 extern "C" bool dom_engine_window_watch(void* owner, const char* event_name, bool enabled) {
@@ -12033,12 +12053,23 @@ extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
         double total_ms = time_elapsed_ms_f(started, time_now_ns());
         StyleEpochStats style_stats = {};
         style_epoch_get_stats(doc, &style_stats);
+        DomLifecycleStats lifecycle = {};
+        dom_lifecycle_get_stats(doc, &lifecycle);
+        ArenaStats input_stats = {};
+        if (doc->input) arena_get_stats(doc->input->arena, &input_stats);
+        size_t render_forward = 0, render_reverse = 0;
+        Runtime* render_runtime = dom_document_script_runtime(doc);
+        EvalContext* render_owner = render_runtime ? runtime_get_eval_context(render_runtime) : nullptr;
+        render_map_get_counts(render_owner, &render_forward, &render_reverse);
+        int64_t attribute_roots = runtime_ui_attribute_root_count(render_owner);
         // Synthetic dispatch reconciles inside its own scope; profile that nested commit too.
         log_notice("[FRAME_PROFILE] timestamp_ms=%.3f document_timestamp_ms=%.3f total_ms=%.3f script_host_ms=%.3f "
             "cascade_ms=%.3f layout_ms=%.3f repaint_request_ms=%.3f events=%u "
             "mutations=%u commits=%u slots=%u layout_before=%u layout_after=%u dom_bytes=%zu view_bytes=%zu "
             "input_arena_bytes=%zu node_arena_bytes=%zu commit_dom_growth=%lld cascade_dom_growth=%lld "
-            "journal_capacity=%d style_entries=%llu style_cold_bytes=%zu style_live_bytes=%zu style_evictions=%llu",
+            "journal_capacity=%d style_entries=%llu style_cold_bytes=%zu style_live_bytes=%zu style_evictions=%llu "
+            "retire_scheduled=%llu retire_nodes=%llu retire_pinned=%llu retire_pending_bytes=%zu retire_wrapper_bytes=%zu "
+            "input_active_bytes=%zu input_retired_bytes=%zu input_reuse_hits=%llu render_forward=%zu render_reverse=%zu ui_active_roots=%lld",
             timestamp_ms, js_performance_monotonic_to_relative(timestamp_ms), total_ms,
             total_ms - profile.cascade_ms - profile.layout_ms - profile.repaint_ms,
             profile.cascade_ms, profile.layout_ms, profile.repaint_ms,
@@ -12049,7 +12080,11 @@ extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
             (long long)profile.commit_dom_growth, (long long)profile.cascade_dom_growth,
             doc->js.mutation_record_capacity, (unsigned long long)style_stats.canonical_entry_count,
             style_stats.current_unbound_bytes, style_stats.current_live_bytes,
-            (unsigned long long)style_stats.cache_eviction_count);
+            (unsigned long long)style_stats.cache_eviction_count,
+            (unsigned long long)lifecycle.scheduled_candidates, (unsigned long long)lifecycle.retired_nodes,
+            (unsigned long long)lifecycle.rejected_pinned, lifecycle.pending_primary_bytes, lifecycle.wrapper_stranded_bytes,
+            input_stats.active_bytes, input_stats.retired_bytes, (unsigned long long)input_stats.reuse_hits,
+            render_forward, render_reverse, (long long)attribute_roots);
         if (queue->profile_frames++ % 35 == 0) {
             log_mem_stage("frame-profile");
             MemSnapshot* memory = mem_snapshot_capture(nullptr);

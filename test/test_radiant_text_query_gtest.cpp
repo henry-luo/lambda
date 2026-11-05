@@ -11806,6 +11806,51 @@ TEST_F(RadiantTextQuery, TableAndRowLengthsDoNotBorrowDescendantFonts) {
     }
 }
 
+TEST_F(RadiantTextQuery, FixedTableTracksIgnoreLaterRowContents) {
+    for (const char* collapse : {"separate", "collapse"}) {
+        SCOPED_TRACE(collapse);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}table{table-layout:fixed;width:300px;"
+            "border-spacing:0;border-collapse:%s}td{padding:0}"
+            "</style><table id=result><caption>caption</caption>"
+            "<tr><td id=first style='width:30%%'>a</td><td id=second>b</td></tr>"
+            "<tr><td colspan=2 style='width:90%%;white-space:nowrap'>"
+            "unbreakableunbreakableunbreakableunbreakableunbreakableunbreakable"
+            "</td></tr></table>", collapse);
+        ASSERT_NE(layout_script_source(source), nullptr);
+        DomElement* first = dom_find_element_by_id(document->root, "first");
+        DomElement* second = dom_find_element_by_id(document->root, "second");
+        ASSERT_TRUE(first && second);
+        EXPECT_NEAR(first->width, 90.0f, 0.02f);
+        EXPECT_NEAR(second->width, 210.0f, 0.02f);
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantTextQuery, TableCellStylesRemainLiveAfterGeneratedContentPreparation) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0}table{table-layout:fixed;width:200px;"
+        "border-spacing:0}td{padding:0}td::before{content:counter(c)}"
+        "</style><table id=result><tbody><tr>"
+        "<td id=first style='width:25%'>a</td><td id=second>b</td>"
+        "</tr></tbody></table>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* first = dom_find_element_by_id(document->root, "first");
+    DomElement* second = dom_find_element_by_id(document->root, "second");
+    ASSERT_TRUE(first && second);
+    for (const char* width : {"25%", "40%", "25%"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(first, "width", width));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float expected = strcmp(width, "40%") == 0 ? 80.0f : 50.0f;
+        EXPECT_NEAR(first->width, expected, 0.02f);
+        EXPECT_NEAR(second->width, 200.0f - expected, 0.02f);
+    }
+}
+
 TEST_F(RadiantTextQuery, FixedTableColumnLengthsKeepTheirOwnerAndPercentageBasis) {
     for (bool group : {false, true}) {
         SCOPED_TRACE(group);

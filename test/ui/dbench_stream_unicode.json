@@ -1,0 +1,20 @@
+{
+  "name":"DBench streams a long multibyte value without splitting characters",
+  "html": "temp/dbench-prepared/stream_unicode/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "stream_unicode"],
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT replace(hex(zeroblob(70000)), '00', '😀') AS value","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-mode","equals":"query"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-loading","equals":"false","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#export"}},
+    {"type":"type","target":{"selector":"#export-path"},"text":"temp/dbench-stream-unicode.json","clear":true},
+    {"type":"select_option","target":{"selector":"#export-kind"},"value":"json"},
+    {"type":"select_option","target":{"selector":"#export-scope"},"value":"complete"},
+    {"type":"click","target":{"selector":"#export-save"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Created temp/dbench-stream-unicode.json","assert_timeout":30000}
+  ]
+}

@@ -1,6 +1,6 @@
 import dom
 
-view <probe> state token: 0, calls: 0, last_stamp: -1.0, later: 0, saved_selection: null {
+view <probe> state token: 0, calls: 0, once_calls: 0, last_stamp: -1.0, later: 0, saved_selection: null {
     ~.tree
 }
 on click(evt) {
@@ -19,6 +19,14 @@ on click(evt) {
     dom.set_base_and_extent(selection, label, 0, label, 0)
     dom.request_frame(owner, "earlier_frame")
     later = dom.request_frame(owner, "later_frame")
+    let first = dom.request_frame_once(owner, "once_frame")
+    let duplicate = dom.request_frame_once(owner, "once_frame")
+    let other_token = dom.request_frame_once(other, "once_frame")
+    dom.set_attribute(owner, "data-once-tokens", if (first>0 and first==duplicate and first!=other_token and
+        dom.cancel_frame(other,other_token)) "true" else "false")
+    dom.request_frame(owner, "once_frame")
+    let cancelled_once = dom.request_frame_once(owner, "cancelled_once_frame")
+    dom.set_attribute(owner, "data-once-cancelled", if (dom.cancel_frame(owner,cancelled_once)) "true" else "false")
     return 'handled'
 }
 on probe_frame(evt) {
@@ -44,6 +52,17 @@ on cancelled_frame(evt) { dom.set_attribute(evt.target, "data-cancelled", "false
 on detached_frame(evt) { dom.set_attribute(evt.target, "data-detached-fired", "true") }
 on earlier_frame(evt) { dom.set_attribute(evt.target, "data-cross-cancel", if (dom.cancel_frame(evt.target, later)) "true" else "false") }
 on later_frame(evt) { dom.set_attribute(evt.target, "data-cross-cancel", "false") }
+on once_frame(evt) {
+    once_calls=once_calls+1
+    dom.set_attribute(evt.target,"data-once-calls",string(once_calls))
+    if (once_calls==1) {
+        // Requests during delivery must be coalesced into the next frame.
+        dom.request_frame_once(evt.target,"once_frame")
+        dom.request_frame_once(evt.target,"once_frame")
+    }
+    return 'handled'
+}
+on cancelled_once_frame(evt) { dom.set_attribute(evt.target,"data-once-cancelled","false") }
 
 let source = <probe tree: <div id: "owner", ["data-cancelled"]: "false", ["data-detached-fired"]: "false",
     <button id: "start", "Start"> <div id: "other"> <div id: "victim">>>;

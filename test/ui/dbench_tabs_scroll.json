@@ -1,0 +1,19 @@
+{
+  "name":"DBench restores each tab's virtual grid position",
+  "html":"test/demo/dbench/dbench.ls",
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT * FROM wide_records ORDER BY record_id","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-loading","equals":"false","assert_timeout":30000},
+    {"type":"script","js":"let p=document.getElementById('result-scroll');p.scrollTop=1300;p.scrollLeft=1200;p.dispatchEvent(new Event('scroll'))"},
+    {"type":"assert_script","js":"(()=>{let p=document.getElementById('result-scroll'),g=document.getElementById('result-grid');return p.scrollTop>1000&&p.scrollLeft>1000&&+g.dataset.firstRow>20&&+g.dataset.firstColumn>4})()","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-active-tab","equals":"2"},
+    {"type":"click","target":{"selector":"#tab-1"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-active-tab","equals":"1"},
+    {"type":"assert_script","js":"(()=>{let p=document.getElementById('result-scroll'),g=document.getElementById('result-grid');return p.scrollTop>1000&&p.scrollLeft>1000&&+g.dataset.firstRow>20&&+g.dataset.firstColumn>4&&g.querySelectorAll('td[data-row]').length<500})()","assert_timeout":30000}
+  ]
+}

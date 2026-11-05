@@ -59,9 +59,13 @@ This first milestone covers an editable desktop spreadsheet. XLSX/CSV import,
 cross-sheet references, formula reference
 translation during copy/sort, charts, filters, merged cells and drag fill remain
 future work. Clipboard and sorting retain formula source text.
-The default grid is 60 × 20; loaded workbooks support at most 500 rows, 100 columns
-and 50 worksheets. Formula source is limited to 512 characters and nested
-evaluation/dependencies to 64 levels. The grid is rendered in full.
+The default grid is 60 × 20; loaded workbooks support at most 100,000 rows,
+1,000 columns and 50 worksheets. The grid generates only visible rows and
+columns plus a small overscan; selection and navigation use logical cell
+addresses across the whole sheet. Dragging at an edge scrolls the viewport.
+Copy, formatting, sorting and CSV export are limited to a rectangle of one
+million cells while those operations materialize their results. Formula source
+is limited to 512 characters and nested evaluation/dependencies to 64 levels.
 
 The shell reuses Word's theme, header, buttons and status styles from
 `../office.css`. Word loads that same stylesheet. Ribbon layout and controls use
@@ -91,6 +95,10 @@ Verification:
   --event-file test/ui/sheet_handle.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_files.json
 ./lambda.exe demo sheet --headless --event-file test/ui/sheet_resize.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_virtual_grid.json
+./lambda.exe view test/demo/sheet/sheet.ls --headless \
+  --event-file test/ui/sheet_virtual_drag.json
 
 # Refresh the demo index's actual app screenshot.
 sh test/demo/previews/capture.sh sheet

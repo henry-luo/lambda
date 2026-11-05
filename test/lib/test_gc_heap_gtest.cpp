@@ -18,11 +18,14 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <cstdint>
+#include <math.h>
 #include <stdlib.h>
 
 #include "../../lambda/lambda-data.hpp"
+#include "../../lambda/input/input.hpp"
 #include "../../lambda/core/lambda-decimal.hpp"
 #include "../../lambda/runtime/heap_api.h"
+#include "../../lambda/runtime/lambda-root-frame.hpp"
 #include "../../lambda/runtime/transpiler.hpp"
 #include "../../lambda/runtime/interp.hpp"
 #include "../../lambda/runtime/root_vector.h"
@@ -232,6 +235,77 @@ TEST_F(UICollectionStorageTest, ArenaElementBufferKeepsDocumentOwnership) {
     EXPECT_TRUE(arena_owns(document_arena, element->items));
 }
 
+TEST_F(UICollectionStorageTest, AttributeRootsFollowValueRepresentationAndArenaOwnership) {
+    EXPECT_EQ(runtime_ui_attribute_root_count(nullptr), 0);
+    EXPECT_EQ(runtime_ui_attribute_root_count(&runtime), 0);
+    double samples[] = {0.0, -0.0, 1.5, -2.25, INFINITY, NAN};
+    for (double sample : samples) {
+        Item value = lambda_float_ptr_to_item(&sample);
+        ASSERT_TRUE(lambda_item_is_self_contained(value.item));
+        uint64_t original = value.item;
+        ASSERT_TRUE(ui_prepare_element_field(&value));
+        EXPECT_EQ(value.item, original);
+    }
+    EXPECT_EQ(runtime_ui_attribute_root_count(&runtime), 0);
+
+    String* text = string_from_strview_arena(strview_init("text", 4), document_arena);
+    ASSERT_NE(text, nullptr);
+    Item text_item = {.item = s2it(text)};
+    ASSERT_TRUE(ui_prepare_element_field(&text_item));
+    ASSERT_NE(text_item.get_safe_string(), nullptr);
+    EXPECT_STREQ(text_item.get_safe_string()->chars, "text");
+    EXPECT_EQ(runtime_ui_attribute_root_count(&runtime), 0);
+
+    Element* local = elmt_with_type(&EmptyElmt);
+    Array* local_array = (Array*)arena_calloc(document_arena, sizeof(Array));
+    Map* local_map = (Map*)arena_calloc(document_arena, sizeof(Map));
+    ASSERT_TRUE(local && local_array && local_map);
+    local_array->type_id = LMD_TYPE_ARRAY;
+    local_map->type_id = LMD_TYPE_MAP;
+    Item local_values[] = {{.element = local}, {.array = local_array}, {.map = local_map}};
+    for (Item& value : local_values) {
+        EXPECT_TRUE(arena_owns(document_arena, value.container));
+        EXPECT_FALSE(gc_is_managed(gc, value.container));
+        ASSERT_TRUE(ui_prepare_element_field(&value));
+    }
+    EXPECT_EQ(runtime_ui_attribute_root_count(&runtime), 0);
+
+    Input* other_input = Input::create(runtime_pool);
+    ASSERT_TRUE(other_input && other_input->arena);
+    Element* foreign = (Element*)arena_calloc(other_input->arena, sizeof(Element));
+    ASSERT_NE(foreign, nullptr);
+    foreign->type_id = LMD_TYPE_ELEMENT;
+    foreign->type = &EmptyElmt;
+    Item foreign_item = {.element = foreign};
+    EXPECT_FALSE(arena_owns(document_arena, foreign));
+    ASSERT_TRUE(ui_prepare_element_field(&foreign_item));
+    EXPECT_EQ(runtime_ui_attribute_root_count(&runtime), 1);
+
+    // pointer-backed scalar representations keep their existing root entries.
+    uint64_t tiny_bits = 1;
+    double tiny = 0.0;
+    memcpy(&tiny, &tiny_bits, sizeof(tiny));
+    Item boxed = lambda_float_ptr_to_item(&tiny);
+    ASSERT_FALSE(lambda_item_is_self_contained(boxed.item));
+    ASSERT_TRUE(ui_prepare_element_field(&boxed));
+    int64_t wide = INT64_MAX;
+    Item wide_item = {.item = l2it(&wide)};
+    ASSERT_FALSE(lambda_item_is_self_contained(wide_item.item));
+    ASSERT_TRUE(ui_prepare_element_field(&wide_item));
+    EXPECT_EQ(runtime_ui_attribute_root_count(&runtime), 3);
+
+    Map* payload = (Map*)gc_heap_calloc(gc, sizeof(Map), LMD_TYPE_MAP);
+    ASSERT_NE(payload, nullptr);
+    payload->type_id = LMD_TYPE_MAP;
+    payload->type = &EmptyMap;
+    Item held = {.map = payload};
+    ASSERT_TRUE(ui_prepare_element_field(&held));
+    EXPECT_EQ(runtime_ui_attribute_root_count(&runtime), 4);
+    gc_collect(gc, nullptr, 0);
+    EXPECT_EQ(held.map->type, &EmptyMap);
+    EXPECT_EQ(runtime_ui_attribute_root_count(&runtime), 4);
+}
+
 TEST_F(UICollectionStorageTest, AttributeRetypesAndExtensionsKeepDocumentOwnership) {
     Element* element = elmt_with_type(&EmptyElmt);
     ASSERT_NE(element, nullptr);
@@ -252,6 +326,123 @@ TEST_F(UICollectionStorageTest, AttributeRetypesAndExtensionsKeepDocumentOwnersh
     }
     EXPECT_EQ(fn_index(owner, key).item, b2it(0));
     EXPECT_EQ(it2i(fn_index(owner, added)), 3);
+}
+
+TEST_F(UICollectionStorageTest, DynamicElementShapesShareWithinTheirDocument) {
+    Input* input = Input::create(runtime_pool);
+    ASSERT_NE(input, nullptr);
+    ASSERT_NE(input->arena, nullptr);
+    Runtime document_runtime = {};
+    document_runtime.ui_mode = true;
+    document_runtime.result_input = input;
+    struct InputBinding {
+        EvalContext* context;
+        Arena* previous_arena;
+        Runtime* previous_runtime;
+        ~InputBinding() { context->arena = previous_arena; context->runtime = previous_runtime; }
+    } binding{&runtime, runtime.arena, runtime.runtime};
+    runtime.arena = input->arena;
+    runtime.runtime = &document_runtime;
+
+    // computed-key literals carry this marker even before they have a slot.
+    TypeElmt computed = EmptyElmt;
+    computed.has_spread = true;
+    Element* first = elmt_with_type(&computed);
+    Element* second = elmt_with_type(&computed);
+    ASSERT_TRUE(first && second);
+    Item key = {.item = s2it(string_from_strview_arena(strview_init("label", 5), input->arena))};
+    Item extra = {.item = s2it(string_from_strview_arena(strview_init("number", 6), input->arena))};
+    Item one = {.item = s2it(string_from_strview_arena(strview_init("one", 3), input->arena))};
+    Item two = {.item = s2it(string_from_strview_arena(strview_init("two", 3), input->arena))};
+    Item first_item = {.element = first}, second_item = {.element = second};
+    ASSERT_EQ(get_type_id(map_literal_put(first_item, key, one)), LMD_TYPE_ELEMENT);
+    ASSERT_EQ(get_type_id(map_literal_put(second_item, key, two)), LMD_TYPE_ELEMENT);
+    ASSERT_EQ(get_type_id(map_literal_put(first_item, extra, {.item = i2it(1)})), LMD_TYPE_ELEMENT);
+    ASSERT_EQ(get_type_id(map_literal_put(second_item, extra, {.item = i2it(2)})), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(first->type, second->type);
+    EXPECT_TRUE(((TypeElmt*)first->type)->has_spread);
+    EXPECT_TRUE(arena_owns(input->arena, first->type));
+    EXPECT_TRUE(arena_owns(input->arena, first->data));
+    EXPECT_TRUE(arena_owns(input->arena, second->data));
+    String* first_label = fn_index(first_item, key).get_safe_string();
+    String* second_label = fn_index(second_item, key).get_safe_string();
+    ASSERT_TRUE(first_label && second_label);
+    EXPECT_STREQ(first_label->chars, "one");
+    EXPECT_STREQ(second_label->chars, "two");
+    Element* plain = elmt_with_type(&EmptyElmt);
+    ASSERT_NE(plain, nullptr);
+    Item plain_item = {.element = plain};
+    ASSERT_EQ(get_type_id(map_literal_put(plain_item, key, one)), LMD_TYPE_ELEMENT);
+    ASSERT_EQ(get_type_id(map_literal_put(plain_item, extra, {.item = i2it(1)})), LMD_TYPE_ELEMENT);
+    EXPECT_NE(first->type, plain->type);
+    EXPECT_FALSE(((TypeElmt*)plain->type)->has_spread);
+
+    // retyping one shared field must not change the other element's contract.
+    ASSERT_EQ(get_type_id(map_literal_put(first_item, key, {.item = i2it(42)})), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(it2i(fn_index(first_item, key)), 42);
+    second_label = fn_index(second_item, key).get_safe_string();
+    ASSERT_NE(second_label, nullptr);
+    EXPECT_STREQ(second_label->chars, "two");
+    EXPECT_TRUE(arena_owns(input->arena, first->type));
+    EXPECT_TRUE(((TypeElmt*)first->type)->has_spread);
+    EXPECT_TRUE(arena_owns(input->arena, first->data));
+
+    // the untraced UI arena must retain a heap-valued attribute across GC.
+    Map* payload = (Map*)gc_heap_calloc(gc, sizeof(Map), LMD_TYPE_MAP);
+    ASSERT_NE(payload, nullptr);
+    payload->type_id = LMD_TYPE_MAP;
+    payload->type = &EmptyMap;
+    Item payload_key = {.item = s2it(string_from_strview_arena(strview_init("payload", 7), input->arena))};
+    ASSERT_EQ(get_type_id(map_literal_put(first_item, payload_key, {.map = payload})), LMD_TYPE_ELEMENT);
+    gc_collect(gc, nullptr, 0);
+    Item retained = fn_index(first_item, payload_key);
+    ASSERT_EQ(get_type_id(retained), LMD_TYPE_MAP);
+    EXPECT_EQ(retained.map, payload);
+    EXPECT_EQ(retained.map->type, &EmptyMap);
+
+    // a literal with a real unnamed spread slot cannot use the named-field tree.
+    ShapeEntry spread = {};
+    spread.type = &TYPE_MAP;
+    TypeElmt unresolved = EmptyElmt;
+    unresolved.has_spread = true;
+    unresolved.shape = unresolved.last = &spread;
+    unresolved.length = 1;
+    ShapeEntry* added = nullptr;
+    EXPECT_EQ(type_tree_add_map_field_chars(input, (TypeMap*)&unresolved,
+        "other", 5, LMD_TYPE_INT, &added), nullptr);
+    EXPECT_EQ(added, nullptr);
+
+    Input* other_input = Input::create(runtime_pool);
+    ASSERT_TRUE(other_input && other_input->arena);
+    document_runtime.result_input = other_input;
+    runtime.arena = other_input->arena;
+    Element* other = elmt_with_type(&computed);
+    ASSERT_NE(other, nullptr);
+    ASSERT_EQ(get_type_id(map_literal_put({.element = other}, key, one)), LMD_TYPE_ELEMENT);
+    EXPECT_TRUE(arena_owns(other_input->arena, other->type));
+    EXPECT_FALSE(arena_owns(input->arena, other->type));
+    EXPECT_EQ(it2i(fn_index(first_item, key)), 42);
+}
+
+TEST_F(UICollectionStorageTest, RuntimeKeyMapDeletionPreservesItsShapeAndValues) {
+    TypeMap recipe = EmptyMap;
+    recipe.has_spread = true;
+    Map* map = (Map*)gc_heap_calloc(gc, sizeof(Map), LMD_TYPE_MAP);
+    ASSERT_NE(map, nullptr);
+    map->type_id = LMD_TYPE_MAP;
+    map->is_heap = true;
+    map->type = &recipe;
+    RootFrame roots(1);
+    Rooted<Item> owner(roots, {.map = map});
+    Item first = {.item = s2it(string_from_strview_arena(strview_init("first", 5), document_arena))};
+    Item second = {.item = s2it(string_from_strview_arena(strview_init("second", 6), document_arena))};
+    ASSERT_EQ(get_type_id(map_literal_put(owner.get(), first, {.item = i2it(1)})), LMD_TYPE_MAP);
+    ASSERT_EQ(get_type_id(map_literal_put(owner.get(), second, {.item = i2it(2)})), LMD_TYPE_MAP);
+    EXPECT_TRUE(((TypeMap*)owner.get().map->type)->is_transition_shared_shape);
+    ASSERT_TRUE(map_shape_delete(owner.get().map, first.get_safe_string()));
+    EXPECT_TRUE(((TypeMap*)owner.get().map->type)->has_spread);
+    EXPECT_EQ(get_type_id(fn_index(owner.get(), first)), LMD_TYPE_NULL);
+    EXPECT_EQ(it2i(fn_index(owner.get(), second)), 2);
 }
 
 static int external_destroy_calls = 0;

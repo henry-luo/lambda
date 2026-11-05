@@ -1145,6 +1145,65 @@ TEST_F(LambdaConcurrencyRuntime, ShutdownJoinsOffloadBeforeReleasingTaskAttachme
     EXPECT_TRUE(probe.release_order_valid);
 }
 
+struct InterruptTeardownProbe {
+    uv_sem_t started;
+    uv_sem_t interrupted;
+    int worker_done;
+    int cancel_done;
+    int released;
+    bool release_order_valid;
+    bool delay_worker;
+};
+static void interrupt_teardown_worker(LambdaOffload*, void* data) {
+    InterruptTeardownProbe* probe = (InterruptTeardownProbe*)data;
+    uv_sem_post(&probe->started);
+    uv_sem_wait(&probe->interrupted);
+    if (probe->delay_worker) uv_sleep(30);
+    __atomic_store_n(&probe->worker_done, 1, __ATOMIC_RELEASE);
+}
+static void interrupt_teardown_cancel(void* data) {
+    InterruptTeardownProbe* probe = (InterruptTeardownProbe*)data;
+    uv_sem_post(&probe->interrupted);
+    if (!probe->delay_worker) uv_sleep(30);
+    __atomic_store_n(&probe->cancel_done, 1, __ATOMIC_RELEASE);
+}
+static void interrupt_teardown_release(void* data) {
+    InterruptTeardownProbe* probe = (InterruptTeardownProbe*)data;
+    probe->release_order_valid = __atomic_load_n(&probe->worker_done, __ATOMIC_ACQUIRE) &&
+        __atomic_load_n(&probe->cancel_done, __ATOMIC_ACQUIRE);
+    probe->released++;
+}
+static Item interrupt_teardown_task(Activation*, Item arg) {
+    static const LambdaOffloadOps ops = {
+        interrupt_teardown_worker, NULL, interrupt_teardown_release, interrupt_teardown_cancel
+    };
+    return lambda_task_offload(&ops, (void*)(uintptr_t)arg.item, 0);
+}
+
+TEST_F(LambdaConcurrencyRuntime, ShutdownJoinsInterruptAndWorkerBeforeRelease) {
+    for (int phase = 0; phase < 2; phase++) {
+        InterruptTeardownProbe probe = {};
+        probe.delay_worker = phase != 0;
+        ASSERT_EQ(uv_sem_init(&probe.started, 0), 0);
+        ASSERT_EQ(uv_sem_init(&probe.interrupted, 0), 0);
+        ASSERT_NE(lambda_task_create(scheduler, interrupt_teardown_task, frame_arg(&probe)), nullptr);
+        ASSERT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+        uv_sem_wait(&probe.started);
+        lambda_scheduler_destroy(scheduler);
+        scheduler = NULL;
+        eval.scheduler = NULL;
+        EXPECT_EQ(probe.released, 1);
+        EXPECT_TRUE(probe.release_order_valid);
+        uv_sem_destroy(&probe.started);
+        uv_sem_destroy(&probe.interrupted);
+        if (phase == 0) {
+            scheduler = lambda_scheduler_create(3);
+            ASSERT_NE(scheduler, nullptr);
+            eval.scheduler = scheduler;
+        }
+    }
+}
+
 // S7.4.4: a payload-less compatibility value never borrows another error's state.
 TEST_F(LambdaConcurrencyRuntime, LegacyErrorMembersDoNotBorrowAmbientDiagnostics) {
     // Error members intern their stable default text in the runtime name pool.

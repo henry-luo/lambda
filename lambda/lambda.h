@@ -764,6 +764,20 @@ typedef enum SysFunc {
     SYSPROC_IO_SQLITE_CLONE,    // lambda.io.sqlite clone(source, path) - snapshot target
     SYSPROC_IO_SQLITE_PREIMAGE, // lambda.io.sqlite preimage(tx, path) - pre-write backup
     SYSPROC_IO_CREATE_FILE,      // io.create_file(path, bytes) - publish a new file
+    SYSPROC_IO_RDB_DATABASE,     // scoped, read-only RDB target
+    SYSPROC_IO_RDB_SCHEMA,       // positional schema metadata
+    SYSPROC_IO_RDB_DETAILS,      // index and foreign-key metadata
+    SYSPROC_IO_RDB_EXECUTE,
+    SYSPROC_IO_RDB_FETCH,
+    SYSPROC_IO_RDB_FINISH,
+    SYSPROC_IO_RDB_SPOOL_BEGIN,
+    SYSPROC_IO_RDB_SPOOL_READ,
+    SYSPROC_IO_RDB_SPOOL_CLOSE,
+    SYSPROC_IO_RDB_SPOOL_SEAL,
+    SYSPROC_IO_RDB_EXPORT_BEGIN,
+    SYSPROC_IO_RDB_EXPORT_WRITE,
+    SYSPROC_IO_RDB_EXPORT_COMMIT,
+    SYSPROC_IO_RDB_EXPORT_ABORT,
 } SysFunc;
 
 typedef struct Type {
@@ -3657,6 +3671,21 @@ extern "C" {
     Item pn_io_sqlite_execute3(Item path, Item sql, Item params);
     Item pn_io_sqlite_query2(Item path, Item sql);
     Item pn_io_sqlite_query3(Item path, Item sql, Item params);
+    Item pn_io_rdb_database(Item uri, Item driver);
+    Item pn_io_rdb_schema(Item handle);
+    Item pn_io_rdb_details(Item handle);
+    Item pn_io_rdb_execute2(Item handle, Item sql);
+    Item pn_io_rdb_execute3(Item handle, Item sql, Item params);
+    Item pn_io_rdb_fetch(Item handle, Item count);
+    Item pn_io_rdb_finish(Item handle);
+    Item pn_io_rdb_spool_begin(Item handle, Item path);
+    Item pn_io_rdb_spool_read(Item handle, Item first, Item count);
+    Item pn_io_rdb_spool_close(Item handle);
+    Item pn_io_rdb_spool_seal(Item handle);
+    Item pn_io_rdb_export_begin(Item handle, Item path);
+    Item pn_io_rdb_export_write(Item handle, Item content);
+    Item pn_io_rdb_export_commit(Item handle);
+    Item pn_io_rdb_export_abort(Item handle);
     Item pn_io_loopback_listen(void);
     Item pn_io_loopback_accept(Item listener, Item seconds, Item page);
 

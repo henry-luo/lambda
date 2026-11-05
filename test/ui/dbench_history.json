@@ -1,0 +1,21 @@
+{
+  "name": "DBench query history omits bound parameters",
+  "html": "test/demo/dbench/dbench.ls",
+  "viewport": {"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT ?1 AS answer","clear":true},
+    {"type":"type","target":{"selector":"#sql-params"},"text":"[42]","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_text","target":{"selector":"#result-0-0"},"contains":"42"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT 0","clear":true},
+    {"type":"click","target":{"selector":"#history"}},
+    {"type":"assert_text","target":{"selector":"[data-history=\"0\"]"},"contains":"SELECT ?1 AS answer"},
+    {"type":"click","target":{"selector":"[data-history=\"0\"]"}},
+    {"type":"assert_script","js":"document.getElementById('sql').value==='SELECT ?1 AS answer' && document.getElementById('sql-params').value==='[]'"},
+    {"type":"click","target":{"selector":"#history"}},
+    {"type":"click","target":{"selector":"#history-clear"}},
+    {"type":"assert_count","target":{"selector":"[data-history]"},"equals":0}
+  ]
+}

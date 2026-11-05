@@ -117,6 +117,9 @@ typedef struct LambdaOffloadOps {
     void (*run)(LambdaOffload* job, void* data);
     Item (*progress)(void* data, bool final);
     void (*release)(void* data);
+    // Optional blocking interrupt on a dedicated thread; run and cancel are
+    // both joined before release. It must be safe concurrent with run.
+    void (*cancel)(void* data);
 } LambdaOffloadOps;
 // ItemNull once run returned; the cancellation error, or the progress hook's.
 Item lambda_task_offload(const LambdaOffloadOps* ops, void* data, int64_t progress_ms);

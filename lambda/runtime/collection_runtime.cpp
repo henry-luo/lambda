@@ -14,10 +14,6 @@ extern __thread Context* input_context;
 extern "C" bool js_array_runtime_items_release(Array* owner);
 extern "C" bool js_array_immortal_props_store(Array* owner, Map* props);
 
-// The UI content helpers (ui_copy_*_to_*) live with the Input-owned append in
-// lambda-data; this resolves the document Input that owns a UI arena.
-Input* ui_result_input(Arena* arena);
-
 static Arena* ui_collection_arena(const List* owner) {
     // UI-mode elements are arena-owned and therefore cannot keep a GC data
     // buffer alive. Every buffer reachable from one must use the same arena.

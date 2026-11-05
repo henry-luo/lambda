@@ -356,6 +356,9 @@ typedef struct RdbDriver {
     /* column batches, optional (RDB7); batches outlive the statement */
     int  (*result_schema)(void* stmt, struct ArrowSchema* out);
     int  (*fetch_batch)(void* stmt, int64_t max_rows, struct ArrowArray* out);
+
+    /* optional: exact bind count, or -1 when the backend cannot know yet */
+    int  (*parameter_count)(void* stmt);
 } RdbDriver;
 
 /* the prefix every driver must provide; later fields are size-gated */

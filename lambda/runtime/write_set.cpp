@@ -19,6 +19,7 @@
 #endif
 #if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
 #include "io_sqlite.hpp"
+#include "io_rdb.hpp"
 #endif
 
 // D5.4.2-D5.4.4: transactions and retained edits belong to one evaluator.
@@ -115,8 +116,8 @@ static void write_set_clear(void) { write_set_clear_state(write_set_state(false)
 
 bool write_set_record(const WriteEdit* edit) {
 #if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
-    if (io_sqlite_scope_open_here()) {
-        set_runtime_error(ERR_INVALID_OPERATION, "document updates cannot join a SQLite transaction");
+    if (io_sqlite_scope_open_here() || io_rdb_scope_open_here()) {
+        set_runtime_error(ERR_INVALID_OPERATION, "document updates cannot join a database scope");
         return false;
     }
 #endif
@@ -837,14 +838,21 @@ extern "C" Item fn_rollback(void) {
 
 extern "C" Item fn_open_begin(Item target) {
 #if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
+    if (io_rdb_is_target(target)) {
+        if (write_set_transaction_open_here() || io_sqlite_scope_open_here() || io_rdb_scope_open_here()) {
+            set_runtime_error(ERR_INVALID_OPERATION, "nested database scopes are not supported");
+            return ItemError;
+        }
+        return io_rdb_open(target);
+    }
     if (io_sqlite_is_target(target)) {
-        if (write_set_transaction_open_here() || io_sqlite_scope_open_here()) {
+        if (write_set_transaction_open_here() || io_sqlite_scope_open_here() || io_rdb_scope_open_here()) {
             set_runtime_error(ERR_INVALID_OPERATION, "nested open transactions are not supported");
             return ItemError;
         }
         return io_sqlite_open(target);
     }
-    if (io_sqlite_scope_open_here()) {
+    if (io_sqlite_scope_open_here() || io_rdb_scope_open_here()) {
         set_runtime_error(ERR_INVALID_OPERATION, "nested open transactions are not supported");
         return ItemError;
     }
@@ -876,6 +884,7 @@ extern "C" Item fn_open_begin(Item target) {
 
 extern "C" Item fn_open_end(Bool unwinding) {
 #if !defined(LAMBDA_NO_FILE_IO) && !defined(LAMBDA_IME_RESOURCE_IO) && !defined(LAMBDA_NO_TASKS)
+    if (io_rdb_scope_open_here()) return io_rdb_close(unwinding);
     if (io_sqlite_scope_open_here()) return io_sqlite_close(unwinding);
 #endif
     // PTH66v2: commit at the end, and ALWAYS roll back when the block exits by

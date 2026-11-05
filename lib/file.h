@@ -144,10 +144,19 @@ bool file_anchor_read_all_named(FileAnchor* anchor, const char* relative, uint64
     MemCategory category, char** out_data, size_t* out_size, FileRevision* out_revision,
     char** out_path);
 // NULL expected means create-only; otherwise require the admitted revision.
-// Checks binding before staging and publication; not CAS against external writers.
+// Checks destination and staged-inode bindings before publication; not CAS
+// against external writers.
 // 0 = durable, -1 = not committed, 1 = committed but directory sync failed.
 int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
     const void* content, size_t size, const FileRevision* expected);
+// Incremental form of the same atomic publication. The anchor and guard context
+// must outlive the writer; commit and abort consume it. Never lend it to workers.
+typedef struct FileAtomicWriter FileAtomicWriter;
+FileAtomicWriter* file_anchor_write_begin(FileAnchor* anchor, const char* relative,
+    const FileRevision* expected);
+bool file_anchor_write_chunk(FileAtomicWriter* writer, const void* content, size_t size);
+int file_anchor_write_commit(FileAtomicWriter* writer);
+void file_anchor_write_abort(FileAtomicWriter* writer);
 // Opens without truncation/creation; verifies the held object before mutation.
 // 0 = durable; -1 = unchanged; 1 = mutation began but an error left partial or
 // non-durable bytes. Preserve errno for errors; never blindly retry status 1.

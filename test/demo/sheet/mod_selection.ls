@@ -2,6 +2,8 @@
 import dom
 import m: .mod_model
 import capture: ~~.mod_splitter
+import window: .mod_window
+import gesture: lambda.ui.core.virtual_grid_gesture
 
 fn port(owner) => dom.get_element_by_id(dom.root_node(owner),"grid-scroll")
 pub fn cell(target) {
@@ -19,16 +21,24 @@ pub pn begin(owner,st,evt) {
     return {*:next,selection_click:true,selection_drag:{*:gesture,
         previous:{row:st.row,col:st.col,anchor:st.anchor}}}
 }
-pub pn move(owner,st,x,y) {
-    // captured moves target the scrollport; hit-test the pointer to find the cell underneath.
-    let hit=cell(dom.element_from_point(dom.owner_document(owner),x,y))
-    if ((hit==null or (hit.row==st.row and hit.col==st.col))^) { return st }
-    return m.select(st,hit.row,hit.col,true)
+pub pn move(owner,st,x,y,final=false,edge_tick=false) {
+    let root=dom.get_element_by_id(dom.root_node(owner),"sheet")
+    let axes=if (edge_tick) window.axes(st)^ else null
+    let update=gesture.move(root,port(owner),st.selection_drag,x,y,final,edge_tick,axes,
+        44,26,"#sheet-grid td[data-row][data-col]","sheet_drag_scroll")^
+    let next={*:st,selection_drag:update.gesture}
+    if ((update.hit==null or (update.hit.row==st.row and update.hit.col==st.col))^) { return next }
+    return m.select(next,update.hit.row,update.hit.col,true)
 }
 pub pn finish(owner,st,cancel=false) {
     let gesture=st.selection_drag
     if (gesture==null) { return st }
     capture.release(port(owner),gesture)
-    return {*:st,selection_drag:null,row:if (cancel) gesture.previous.row else st.row,
-        col:if (cancel) gesture.previous.col else st.col,anchor:if (cancel) gesture.previous.anchor else st.anchor}
+    let next={*:st,selection_drag:null}
+    // Restore the selection through the model so its cached statistics agree.
+    if (cancel) {
+        let anchor=gesture.previous.anchor
+        return m.select(m.select(next,anchor.row,anchor.col),gesture.previous.row,gesture.previous.col,true)
+    }
+    return next
 }

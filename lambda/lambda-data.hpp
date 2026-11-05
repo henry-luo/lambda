@@ -1797,6 +1797,9 @@ typedef struct Input {
                                            NamePool* name_parent = nullptr);
 } Input;
 
+// Resolve the Input that owns an active UI result arena.
+Input* ui_result_input(Arena* arena, bool report_missing = true);
+
 // D3.4.3v4/v5: the evaluation context's runtime shape tree (a capsule of the
 // Runtime's canonical EvalContext); NULL outside an evaluation.
 Input* runtime_shape_tree(void);

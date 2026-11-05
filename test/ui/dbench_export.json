@@ -1,0 +1,26 @@
+{
+  "name": "DBench exports selected loaded values without replacing a file",
+  "html": "temp/dbench-prepared/export/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "export"],
+  "viewport": {"width": 1280, "height": 800},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"click","target":{"selector":"#result-0-1"}},
+    {"type":"key_press","key":"ArrowDown","mods_str":"shift"},
+    {"type":"click","target":{"selector":"#export"}},
+    {"type":"type","target":{"selector":"#export-path"},"text":"temp/dbench-export-ui.csv","clear":true},
+    {"type":"select_option","target":{"selector":"#export-scope"},"value":"selection"},
+    {"type":"click","target":{"selector":"#export-save"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Created temp/dbench-export-ui.csv"},
+    {"type":"click","target":{"selector":"#export"}},
+    {"type":"click","target":{"selector":"#export-save"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Export failed"},
+    {"type":"assert_count","target":{"selector":".error"},"equals":1},
+    {"type":"click","target":{"selector":"#export-cancel"}},
+    {"type":"click","target":{"selector":"#save-sql"}},
+    {"type":"type","target":{"selector":"#export-path"},"text":"temp/dbench-script-ui.sql","clear":true},
+    {"type":"click","target":{"selector":"#export-save"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Created temp/dbench-script-ui.sql"}
+  ]
+}

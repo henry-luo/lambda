@@ -1,0 +1,20 @@
+{
+  "name":"DBench retains tab tasks across collection and cancellation",
+  "html":"test/demo/dbench/dbench.ls",
+  "viewport":{"width":960,"height":700},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-connected","equals":"true","assert_timeout":30000},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT 42 AS answer","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"click","target":{"selector":"#tab-1"}},
+    {"type":"click","target":{"selector":"#tab-2"}},
+    {"type":"assert_text","target":{"selector":"#result-0-0"},"contains":"42","assert_timeout":30000},
+    {"type":"click","target":{"selector":"[data-tab-close='2']"}},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-active-tab","equals":"3"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-connected","equals":"true","assert_timeout":30000}
+  ]
+}

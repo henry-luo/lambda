@@ -10,7 +10,7 @@ pub pn accept(st,owner) {
     let node=dom.get_element_by_id(dom.root_node(owner),if (st.editing) "cell-editor" else "formula-input")
     return m.set_value(st,dom.get_state(node,"value") or "")
 }
-pub fn new_book(st,sample=false) => {*:m.initial(if (sample) m.sample() else m.blank()),row:0,col:0,anchor:{row:0,col:0}}
+pub fn new_book(st,sample=false) any^ => m.select(m.initial(if (sample) m.sample() else m.blank())^,0,0)
 pub pn command(st,id,owner) map^ {
     if (id=="undo" or id=="redo") { return m.history(st,id=="redo") }
     if (id=="new" or id=="sample" or id=="open") {
@@ -41,7 +41,7 @@ pub pn command(st,id,owner) map^ {
         }
         if (st.dialog=="open") {
             let book=files.read(path)^
-            return {*:m.initial(book),path:path,row:0,col:0,anchor:{row:0,col:0},status:"Opened " ++ path}
+            return {*:m.select(m.initial(book)^,0,0),path:path,status:"Opened " ++ path}
         }
         if (st.dialog=="export") {
             files.export_csv(m.current(st),path)^
@@ -53,7 +53,7 @@ pub pn command(st,id,owner) map^ {
         return saved
     }
     if (id=="copy" or id=="cut") {
-        dom.clipboard_write(m.copy_text(st))
+        dom.clipboard_write(m.copy_text(st)^)
         return if (id=="cut") m.clear(st) else {*:st,status:"Copied selection"}
     }
     if (id=="paste") {
@@ -68,8 +68,8 @@ pub pn command(st,id,owner) map^ {
     if (id=="sort-asc" or id=="sort-desc") { return m.sort_rows(st,id=="sort-desc") }
     if (id=="add-sheet") { return m.add_sheet(st) }
     if (id=="add-rows") {
-        if (m.current(st).rows>=500) { return {*:st,status:"This demo supports up to 500 rows per sheet"} }
-        return m.change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) {*:s,rows:min(s.rows+10,500)} else s]},"Rows added")
+        if (m.current(st).rows>=m.MAX_ROWS) { return {*:st,status:"This demo supports up to " ++ string(m.MAX_ROWS) ++ " rows per sheet"} }
+        return m.change(st,{*:st.book,sheets:[for (i,s in st.book.sheets) if (i==st.sheet) {*:s,rows:min(s.rows+10,m.MAX_ROWS)} else s]},"Rows added")
     }
     if (id=="gridlines") { return {*:st,grid:not st.grid} }
     if (id=="show-formulas") { return {*:st,formulas:not st.formulas} }

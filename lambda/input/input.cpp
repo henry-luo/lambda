@@ -720,10 +720,11 @@ static bool external_parent_admissible(const TypeMap* parent, bool data_attribut
     if (!parent || (parent->type_id != LMD_TYPE_MAP && parent->type_id != LMD_TYPE_ELEMENT)) {
         return false;
     }
-    if (parent->js_meta || parent->has_spread || parent->has_array_index_shape ||
+    if (parent->js_meta || parent->has_array_index_shape ||
             parent->slot_entries || parent->slot_count > 0) return false;
     int64_t count = 0;
     FOR_EACH_MAP_FIELD(parent, field) {
+        // runtime-key literals keep has_spread even when every stored field is named.
         if (!field->name || field->byte_offset < 0 || (field->flags & (data_attributes ? ~(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE) : 0xFF)) || field->accessor) {
             return false;
         }
@@ -745,7 +746,8 @@ static bool external_identity_matches(const TypeMap* parent, const TypeMap* chil
     if (!parent || !child || child->type_id != parent->type_id ||
             child->nominal != parent->nominal || child->is_nominal != parent->is_nominal ||
             child->struct_name != parent->struct_name ||
-            child->has_named_shape != parent->has_named_shape) {
+            child->has_named_shape != parent->has_named_shape ||
+            child->has_spread != parent->has_spread) {
         return false;
     }
     if (parent->type_id == LMD_TYPE_ELEMENT) {
@@ -853,7 +855,7 @@ static uint64_t fingerprint_mix_ptr(uint64_t h, const void* ptr) {
 static uint64_t external_parent_fingerprint(const TypeMap* parent) {
     uint64_t h = 0xcbf29ce484222325ull;
     uint8_t header[4] = {parent->type_id, (uint8_t)parent->is_nominal,
-        (uint8_t)parent->has_named_shape, 0};
+        (uint8_t)parent->has_named_shape, (uint8_t)parent->has_spread};
     h = fingerprint_mix(h, header, sizeof(header));
     h = fingerprint_mix(h, &parent->length, sizeof(parent->length));
     h = fingerprint_mix_ptr(h, parent->nominal);
@@ -1393,6 +1395,7 @@ static TypeMap* type_tree_retype_target(Input* input, TypeMap* parent, const Sha
     target->last = last;
     target->length = parent->length;
     target->byte_size = offset;
+    target->has_spread = parent->has_spread;
     target->is_trusted_contract = false;
     target->is_private_clone = false;
     target->is_shared_constructor_shape = false;
@@ -1481,6 +1484,8 @@ TypeMap* type_tree_delete_field(Input* input, Map* container, const ShapeEntry* 
     if (out_plan) *out_plan = NULL;
     TypeMap* parent = container ? (TypeMap*)container->type : NULL;
     if (!input || !parent || !field) return NULL;
+    // root replay does not preserve the runtime-key marker; use a preserving clone.
+    if (parent->has_spread) return NULL;
     bool owned = parent->is_transition_shared_shape && type_tree_owns(input, parent);
     int count = 0;
     if (owned) for (TypeMapRetypePlan* plan = parent->retype_plans; plan; plan = plan->next) {

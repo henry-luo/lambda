@@ -1,0 +1,15 @@
+{
+  "name": "DBench selection continues across virtual rows at the scrollport edge",
+  "html": "test/demo/dbench/dbench.ls",
+  "viewport": {"width": 1280, "height": 800},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"mouse_down","target":{"selector":"#result-0-0"}},
+    {"type":"mouse_move","x":550,"y":738},
+    {"type":"wait","ms":300},
+    {"type":"assert_script","js":"document.getElementById('result-scroll').scrollTop>0 && +document.getElementById('result-grid').dataset.firstRow>0"},
+    {"type":"mouse_up","x":550,"y":738},
+    {"type":"assert_script","js":"document.querySelectorAll('#result-grid td[aria-selected=true]').length>1 && document.querySelectorAll('#result-grid td[data-row]').length<500"}
+  ]
+}

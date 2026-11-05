@@ -2174,6 +2174,112 @@ pn main() {
 }
 ```
 
+#### lambda.io.rdb
+
+`lambda.io.rdb` is an initial, read-only session surface for database explorers.
+The target and its native connection are scoped to the owning task: acquisition
+occurs on entry to `open`, and the connection closes on exit or cancellation
+(S12.4.1v3–S12.4.3, D11.1.2). A session handle cannot be used by a child task
+or after its scope exits. Nested `open` blocks and document updates inside the
+session scope are currently rejected. This scope is a connection lifetime,
+not a SQLite transaction under S12.4.4v4.
+
+| Procedure | Result | Behavior |
+|----------|--------|----------|
+| `database(uri, driver)` | target or error | Make a target for `sqlite`, `mysql`, or `postgresql`; opening requests a read-only connection. |
+| `schema(session)` | array of rows or error | Describe tables, views and their ordered columns. |
+| `details(session)` | array of rows or error | Describe indexes and outgoing foreign keys. |
+| `execute(session, sql, params?)` | `null` or error | Prepare one statement with positional parameters; finish the previous result first. |
+| `fetch(session, count)` | `[columns, rows, done]` or error | Fetch at most `count` rows, where `count` is 1–256. |
+| `finish(session)` | `null` or error | Release the current result; safe when no result is active. |
+| `spool_begin(session, directory)` | `null` or error | Start a private result spool before the first fetch. |
+| `spool_read(session, first, count)` | rows or error | Read a retained window by zero-based index; `count` is 0–256. |
+| `spool_seal(session)` | `null` or error | Stop recording future batches while retaining the current prefix. |
+| `spool_close(session)` | `null` or error | Discard the spool; safe when none exists. |
+| `export_begin(session, path)` | `null` or error | Stage a new local file while a result or spool is retained; never replace an existing destination. |
+| `export_write(session, content)` | `null` or error | Append one text or binary chunk of at most 16 MiB to the staged file. |
+| `export_commit(session)` | `null` or error | Publish the staged file; an error can report that publication succeeded but directory sync failed. |
+| `export_abort(session)` | `null` or error | Discard a staged file; safe when none exists. |
+
+An optional spool records fetched batches before returning them. It preserves
+positional values and permits backward reads after `finish`; preparing the
+next statement or leaving the task-owned session closes it (S12.4.2–S12.4.3).
+The supplied path names a private directory whose parent must exist. Spool files
+are created and unlinked there before any rows are written. The POSIX-only
+implementation limits each result to 1,000,000 rows and 256 MiB on disk, plus
+an in-memory row-offset index. A failed append leaves the retained prefix
+readable, reports an incomplete result, and prevents further fetching while
+that spool remains open. Sealing retains the prefix while allowing a caller to
+drain the rest of a cursor without growing the spool. File access requires host
+authorization and is unavailable in dry-run and confined profiles without a
+broker (D11.1.2). Spool reads and writes run on the owning task and can block
+on storage.
+
+Export staging is owned by the same task and scope as the session. Scope exit,
+cancellation or explicit abort removes an unpublished stage. Publication
+rechecks the destination and task authorization and is create-only; the file
+operations currently run on the owning task and can block on storage. Export
+does not itself consume or rerun a query. It is a separate host file write,
+not a database write, and is unavailable in dry-run or confined profiles
+without an appropriate broker (D11.1.2).
+
+Each schema row is `[table, is_view, column, declared_type, nullable,
+primary_key_position]`. The key position is zero for a non-key column and
+starts at one for a key column. A table without columns has one row with a
+null column and declared type. Each `details` row is either
+`[table, "index", index_name, column, unique]` (one per indexed column, or a
+null column when unavailable) or `[table, "foreign_key", column, referenced_table,
+referenced_column]`. These reflect the metadata supplied by the driver, which
+may not describe expression indexes or all composite-key relationships. Each
+call reloads schema metadata. The network drivers enumerate the current MySQL
+database or PostgreSQL schema.
+
+`fetch` returns ordered `[name, type]` column descriptors and positional rows,
+so duplicate names and zero-row result metadata survive. Type names are
+`null`, `integer`, `float`, `string`, `decimal`, `datetime`, `json`, `boolean`,
+`binary`, or `unknown`; a backend may report `unknown` for an expression.
+`done` is false when another fetch may be needed, including a batch exactly at
+the requested limit. Finish a result before preparing another statement or
+loading schema. Closing a scope also releases its current result. PostgreSQL
+executes when the first batch is fetched, so a statement error can first
+appear in `fetch`. No statement is automatically retried.
+
+Parameters are bound separately from SQL. The current common driver ABI
+accepts null, boolean, signed integer, finite float, and UTF-8 text without
+embedded NUL; binary parameters and embedded-NUL text are rejected rather
+than truncated. Decimal, datetime and JSON result values arrive as text;
+binary values remain binary. Individual batches are capped at 1,024 columns
+and 16 MiB of copied text/binary values. The PostgreSQL client may allocate a
+large individual value before this application-side limit is checked.
+
+SQLite opens an existing file read-only, rejects `file:` URIs and prevents
+attachment of additional databases and state-changing PRAGMAs. The network
+drivers require the `rdb-drivers` Jube module; the existing host TLS bridge's
+platform limitations and connection options apply (RDB11/RDB12). Use
+read-only database credentials for remote connections. The initial confined
+app profile has no database broker and denies acquisition (D11.1.2).
+MySQL URI components use percent encoding; bracket IPv6 hosts. Invalid escapes,
+embedded NULs, oversized bounded fields and invalid ports are rejected rather than
+silently changing the target.
+Acquisition, statement work, fetching and schema loading park the task while
+native work runs. Task cancellation asks a supporting driver to interrupt a
+running statement, then joins the statement and interrupt before cleanup. A
+cancelled connection attempt waits for the driver call or its connection
+timeout to finish. Closing the connection or unwinding an unfinished result
+can still block the caller. Schema results are capped at 100,000 rows and 16 MiB of text after
+loading; driver-side metadata allocation is not yet bounded by those limits.
+
+```lambda
+import rdb: lambda.io.rdb
+
+pn main() {
+    open session = (rdb.database("catalog.sqlite", "sqlite")^) {
+        let columns = rdb.schema(session)^
+        print(columns)
+    }
+}
+```
+
 #### lambda.io.secret
 
 Passwords and tokens in the OS secret store, as a built-in module at `lambda.io.secret` (D7.2.4v4). Import it with an alias: `import secret: lambda.io.secret`. A value is a generic password named by a `service` and an `account`, both non-empty text. On macOS the store is the user's login Keychain. Other platforms raise `no secret store on this platform` until they gain a backend. All three functions are procedures: the OS may wait on an unlock or access prompt, so each call runs on a worker thread while the calling task parks. Values are never logged (`vibe/Lambda_Demo_Mail.md` ML6).

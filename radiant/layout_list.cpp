@@ -839,6 +839,19 @@ void LayoutCounterScope::close() {
     context = nullptr;
 }
 
+static bool generated_cell_has_table_owner(DomElement* cell) {
+    if (!cell || layout_element_is_out_of_flow(cell)) return false;
+    DomElement* row = cell->parent_element();
+    if (!row || layout_resolved_display(row).inner != CSS_VALUE_TABLE_ROW ||
+        layout_element_is_out_of_flow(row)) return false;
+    DomElement* owner = row->parent_element();
+    if (owner && layout_display_is_table_row_group(layout_resolved_display(owner).inner)) {
+        if (layout_element_is_out_of_flow(owner)) return false;
+        owner = owner->parent_element();
+    }
+    return owner && layout_resolved_display(owner).inner == CSS_VALUE_TABLE;
+}
+
 static bool prepare_generated_subtree(LayoutContext* context, DomNode* node, unsigned depth,
                                       int* remaining) {
     if (!node || !node->is_element() || node->view_type == RDT_VIEW_MARKER) return true;
@@ -856,6 +869,10 @@ static bool prepare_generated_subtree(LayoutContext* context, DomNode* node, uns
     context->block.parent = lam::up(&saved.block);
     context->block.given_width = context->block.given_height = -1.0f;
     context->font.current_font_size = -1.0f;
+    // A normal table cell uses the same property storage in preparation and table layout.
+    if (element->view_type == RDT_VIEW_TABLE_CELL && generated_cell_has_table_owner(element) &&
+        radiant::css_resolved_style_cache_allowed(context, element))
+        element->ensure_cell(context->doc->view_tree);
     // preparation reads computed inputs without replacing already committed flow outputs.
     bool computed_current = element->styles_resolved() && !element->needs_style_recompute() &&
         radiant::css_resolved_style_input_revision(context, element);
