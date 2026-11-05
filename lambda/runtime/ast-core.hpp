@@ -1353,8 +1353,10 @@ static inline AstNode* ast_cow_value_source(AstNode* expr) {
     return source;
 }
 
+extern "C" bool ast_call_returns_retained_container(AstNode* node);
+
 // The shape half of "does this initializer hand back a freshly-owned
-// container": literals, calls and `new` produce a new owner, while member and
+// container": literals, fresh-result calls and `new` own their value, while member and
 // index reads are borrows of an existing one. The IDENT case is deliberately
 // not here -- it propagates the *source binding's* own answer, which each tier
 // resolves through its own binding table (MirVarEntry / NameEntry::cow_owned).
@@ -1368,8 +1370,9 @@ static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
     case AST_NODE_LIST:
     case AST_NODE_OBJECT_LITERAL:
     case AST_NODE_NEW_EXPR:
-    case AST_NODE_CALL_EXPR:
         return true;
+    case AST_NODE_CALL_EXPR:
+        return !ast_call_returns_retained_container(root_expr);
     case AST_NODE_BINARY:
         return ast_join_produces_fresh_array(root_expr);
     case AST_NODE_PIPE:
@@ -1909,6 +1912,8 @@ typedef struct FnAnalysis {
     // The body starts a non-escaping child, so its blocks enter task scopes
     // that join children on exit (both tiers read this syntactic fact).
     bool owns_task_scopes;
+    // returned globals/captures retain another observer outside the activation.
+    bool returns_retained_container;
     // JavaScript profile observations are stored on the same function-owned
     // record so indexed MIR passes do not maintain a second fact table.
     bool js_has_direct_eval;

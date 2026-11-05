@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "test_lambda_native_compiler.hpp"
 #include <mpdecimal.h>
 #include <cstring>
 #include <cstdio>
@@ -538,8 +539,8 @@ TEST(LambdaScriptCache, ReusesMirImageAcrossFreshRuntimes) {
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
 
-    LambdaTier saved_tier = lambda_tier_selected();
-    lambda_tier_set(LAMBDA_TIER_JIT);
+    LambdaTestNativeCompiler compiler;
+    compiler.select(LAMBDA_TIER_JIT);
     Runtime first = {};
     runtime_init(&first);
     Input* first_output = run_script_mir(&first, source, (char*)identity, true);
@@ -555,13 +556,38 @@ TEST(LambdaScriptCache, ReusesMirImageAcrossFreshRuntimes) {
     EXPECT_EQ(get_type_id(second_output->root), LMD_TYPE_INT);
     EXPECT_EQ(it2i(second_output->root), 3);
     runtime_cleanup(&second);
-    lambda_tier_set(saved_tier);
 
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
     EXPECT_GE(after.mir_builds, before.mir_builds + 1);
     EXPECT_GE(after.mir_hits, before.mir_hits + 1);
     EXPECT_GE(after.module_hits, before.module_hits + 1);
+}
+
+// D8.5.1: immutable images retain their compiler identity across fresh contexts.
+TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
+    const char* source = "fn answer() => 41; answer() + 1";
+    const char* identity = "<lambda-cache-compiler-isolation>";
+    const char* compilers[] = {"mvp", "production", "mvp"};
+    const Script* owners[3] = {};
+    for (unsigned i = 0; i < 3; i++) {
+        LambdaTestNativeCompiler compiler(LAMBDA_TIER_JIT);
+        compiler.select_compiler(compilers[i]);
+        Runtime runtime = {};
+        runtime_init(&runtime);
+        Input* output = run_script_mir(&runtime, source, (char*)identity, true);
+        ASSERT_NE(output, nullptr);
+        ASSERT_EQ(get_type_id(output->root), LMD_TYPE_INT);
+        EXPECT_EQ(it2i(output->root), 42);
+        ASSERT_NE(runtime.scripts, nullptr);
+        ASSERT_GT(runtime.scripts->length, 0);
+        Script* instance = (Script*)runtime.scripts->data[0];
+        owners[i] = instance->cache_template ? instance->cache_template : instance;
+        EXPECT_TRUE(owners[i]->cache_owned_template);
+        if (i == 1) EXPECT_NE(owners[1], owners[0]);
+        if (i == 2) EXPECT_EQ(owners[2], owners[0]);
+        runtime_cleanup(&runtime);
+    }
 }
 
 TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
@@ -577,9 +603,9 @@ TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
 
-    LambdaTier saved_tier = lambda_tier_selected();
+    LambdaTestNativeCompiler compiler;
     // A prior eager image must not occupy AUTO's fallback image key.
-    lambda_tier_set(LAMBDA_TIER_JIT);
+    compiler.select(LAMBDA_TIER_JIT);
     Runtime eager = {};
     runtime_init(&eager);
     Input* eager_output = run_script_mir(&eager, source, (char*)identity, true);
@@ -587,7 +613,7 @@ TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
     EXPECT_EQ(it2i(eager_output->root), 42);
     runtime_cleanup(&eager);
 
-    lambda_tier_set(LAMBDA_TIER_AUTO);
+    compiler.select(LAMBDA_TIER_AUTO);
     Runtime first = {};
     runtime_init(&first);
     Input* first_output = run_script_mir(&first, source, (char*)identity, true);
@@ -614,7 +640,6 @@ TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
     Script* second_dependency = (Script*)second_root->direct_imports->data[0];
     EXPECT_EQ(second_dependency->cache_template, first_dependency_image);
     runtime_cleanup(&second);
-    lambda_tier_set(saved_tier);
 
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
@@ -662,8 +687,8 @@ TEST(LambdaScriptCache, ReusesInterpreterAstTemplateAcrossFreshRuntimes) {
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
 
-    LambdaTier saved_tier = lambda_tier_selected();
-    lambda_tier_set(LAMBDA_TIER_INTERP);
+    LambdaTestNativeCompiler compiler;
+    compiler.select(LAMBDA_TIER_INTERP);
     Runtime first = {};
     runtime_init(&first);
     Input* first_output = run_script_mir(&first, source, (char*)identity, true);
@@ -687,7 +712,6 @@ TEST(LambdaScriptCache, ReusesInterpreterAstTemplateAcrossFreshRuntimes) {
         second_instance->cache_compilation_unit_id, &dense_module_id));
     EXPECT_EQ(dense_module_id, second_instance->module_state_id);
     runtime_cleanup(&second);
-    lambda_tier_set(saved_tier);
 
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
@@ -703,8 +727,8 @@ TEST(LambdaScriptCache, ReusesInterpreterAstImportConeAcrossFreshRuntimes) {
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
 
-    LambdaTier saved_tier = lambda_tier_selected();
-    lambda_tier_set(LAMBDA_TIER_INTERP);
+    LambdaTestNativeCompiler compiler;
+    compiler.select(LAMBDA_TIER_INTERP);
     Runtime first = {};
     runtime_init(&first);
     Input* first_output = run_script_mir(&first, NULL, (char*)path, true);
@@ -740,7 +764,6 @@ TEST(LambdaScriptCache, ReusesInterpreterAstImportConeAcrossFreshRuntimes) {
         second_dependency->cache_compilation_unit_id, &dependency_slab));
     EXPECT_EQ(dependency_slab, second_dependency->module_state_id);
     runtime_cleanup(&second);
-    lambda_tier_set(saved_tier);
 
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
@@ -756,8 +779,8 @@ TEST(LambdaScriptCache, ReusesInterpreterAstViewTemplateAcrossFreshRuntimes) {
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
 
-    LambdaTier saved_tier = lambda_tier_selected();
-    lambda_tier_set(LAMBDA_TIER_INTERP);
+    LambdaTestNativeCompiler compiler;
+    compiler.select(LAMBDA_TIER_INTERP);
     Runtime first = {};
     runtime_init(&first);
     Input* first_output = run_script_mir(&first, NULL, (char*)path, true);
@@ -783,7 +806,6 @@ TEST(LambdaScriptCache, ReusesInterpreterAstViewTemplateAcrossFreshRuntimes) {
     ASSERT_EQ(second_instance->ast_overlay_strings->length, 1);
     EXPECT_NE(second_instance->ast_overlay_strings->data[0], first_ref);
     runtime_cleanup(&second);
-    lambda_tier_set(saved_tier);
 
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
@@ -799,8 +821,8 @@ TEST(LambdaScriptCache, ReusesImportedMirConeAcrossFreshRuntimes) {
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
 
-    LambdaTier saved_tier = lambda_tier_selected();
-    lambda_tier_set(LAMBDA_TIER_JIT);
+    LambdaTestNativeCompiler compiler;
+    compiler.select(LAMBDA_TIER_JIT);
     Runtime first = {};
     runtime_init(&first);
     Input* first_output = run_script_mir(&first, NULL, (char*)path, true);
@@ -833,7 +855,6 @@ TEST(LambdaScriptCache, ReusesImportedMirConeAcrossFreshRuntimes) {
         second_dependency->cache_compilation_unit_id, &dependency_slab));
     EXPECT_EQ(dependency_slab, second_dependency->module_state_id);
     runtime_cleanup(&second);
-    lambda_tier_set(saved_tier);
 
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
@@ -857,8 +878,8 @@ TEST(LambdaScriptCache, RetiresCachedImportConeWhenDependencyFileChanges) {
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
 
-    LambdaTier saved_tier = lambda_tier_selected();
-    lambda_tier_set(LAMBDA_TIER_JIT);
+    LambdaTestNativeCompiler compiler;
+    compiler.select(LAMBDA_TIER_JIT);
     Runtime first = {};
     runtime_init(&first);
     Input* first_output = run_script_mir(&first, NULL, (char*)root_path, true);
@@ -887,7 +908,6 @@ TEST(LambdaScriptCache, RetiresCachedImportConeWhenDependencyFileChanges) {
     Script* second_root = (Script*)second.scripts->data[0];
     EXPECT_NE(second_root->cache_template, first_root);
     runtime_cleanup(&second);
-    lambda_tier_set(saved_tier);
 
     InputScriptCacheStats after = {};
     input_script_cache_get_stats(cache, &after);
@@ -951,8 +971,8 @@ TEST(LambdaScriptCache, SingleFlightsSameSourceMirBuildAcrossFreshRuntimes) {
     ASSERT_NE(cache, nullptr);
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
-    LambdaTier saved_tier = lambda_tier_selected();
-    lambda_tier_set(LAMBDA_TIER_JIT);
+    LambdaTestNativeCompiler compiler;
+    compiler.select(LAMBDA_TIER_JIT);
 
     const int worker_count = 6;
     pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -976,7 +996,6 @@ TEST(LambdaScriptCache, SingleFlightsSameSourceMirBuildAcrossFreshRuntimes) {
     }
     pthread_cond_destroy(&start_cond);
     pthread_mutex_destroy(&start_mutex);
-    lambda_tier_set(saved_tier);
     mem_free(source);
 
     InputScriptCacheStats after = {};

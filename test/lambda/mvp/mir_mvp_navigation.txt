@@ -1,0 +1,7 @@
+[true, true, true, true, true]
+[true, true]
+[true, true]
+[true, true, true, true]
+[\.a, \./, /.a, /]
+[\.a, /]
+[\.row.1, \.row.2]

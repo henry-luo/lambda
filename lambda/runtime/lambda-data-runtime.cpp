@@ -1951,16 +1951,8 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
     return result;
 }
 
-// finalize an array builder - returns the array as an Item. An empty array is
-// the empty array: list producers collapse through list_collapse_*, so this
-// never reports an item-position marker (S2.5.5v2).
-Item array_end(Array* arr) {
-    if (arr->length == 0) {
-        return {.array = arr};
-    }
-    // Dynamic N-D promotion: when children are uniform ArrayNums, fold into a tensor
-    ArrayNum* nd = try_promote_to_ndim(arr);
-    if (nd) return {.array_num = nd};
+// scalar packing does not require flattening independently owned nested rows.
+Item array_end_flat(Array* arr) {
     // 1-D promotion: when every child is a numeric scalar, fold into a typed array.
     // Lists are skipped: a list keeps its kind bit on a generic container
     // (S2.5.1v2).
@@ -1969,6 +1961,16 @@ Item array_end(Array* arr) {
         if (flat) return {.array_num = flat};
     }
     return {.array = arr};
+}
+
+// an empty array stays an array; list collapse belongs to its own producer
+// boundary (S2.5.5v2), independent of numeric storage selection.
+Item array_end(Array* arr) {
+    if (arr->length) {
+        ArrayNum* nd = try_promote_to_ndim(arr);
+        if (nd) return {.array_num = nd};
+    }
+    return array_end_flat(arr);
 }
 
 static bool array_push_spread_array_items(Array* arr, Item item, bool require_spreadable) {

@@ -28,6 +28,7 @@
 
 #include <gtest/gtest.h>
 #include "test_lambda_tier_helpers.hpp"
+#include "test_lambda_compiler.hpp"
 #include "test_mir_check_helpers.hpp"
 
 #include <cstdint>
@@ -194,7 +195,8 @@ static FixtureRun run_fixture_script(const char* name, const char* tier,
     options.env = env;
     options.timeout_ms = 60000;
     options.merge_stderr = false;
-    ShellResult result = shell_exec(executable, args, &options);
+    ShellResult result = js ? shell_exec(executable, args, &options)
+        : lambda_test_shell_exec(executable, args, &options);
     if (result.stdout_buf) run.std_out.assign(result.stdout_buf);
     if (result.stderr_buf) run.std_err.assign(result.stderr_buf);
     bool exited_clean = result.exit_code == 0 && !result.timed_out;
@@ -257,7 +259,7 @@ TEST(LambdaOptGc, ContradictoryPlannedEffectFailsBeforePublication) {
     ShellOptions options = {};
     options.env = env;
     options.timeout_ms = 60000;
-    ShellResult result = shell_exec(executable, args, &options);
+    ShellResult result = lambda_test_shell_exec(executable, args, &options);
     EXPECT_FALSE(result.timed_out);
     EXPECT_NE(result.exit_code, 0);
     const char* diagnostic = result.stderr_buf ? result.stderr_buf : "";
@@ -279,7 +281,7 @@ TEST(LambdaOptGc, RootlessMirStackProbeStillRecoversOverflow) {
     ShellOptions options = {};
     options.env = env;
     options.timeout_ms = 60000;
-    ShellResult result = shell_exec(executable, args, &options);
+    ShellResult result = lambda_test_shell_exec(executable, args, &options);
     EXPECT_FALSE(result.timed_out);
     EXPECT_NE(result.exit_code, 0);
     const char* diagnostic = result.stderr_buf ? result.stderr_buf : "";
@@ -685,7 +687,7 @@ TEST(LambdaOptProfile, ExecutedCallsAreCountedOnlyWhenEnabled) {
         ShellOptions options = {};
         options.env = env;
         options.timeout_ms = 60000;
-        ShellResult result = shell_exec(executable, args, &options);
+        ShellResult result = lambda_test_shell_exec(executable, args, &options);
         EXPECT_EQ(result.exit_code, 0);
         EXPECT_FALSE(result.timed_out);
         ASSERT_NE(result.stdout_buf, nullptr);
@@ -733,7 +735,7 @@ TEST(LambdaOptProfile, ExecutedCallsCanBeAttributedToCaller) {
     ShellOptions options = {};
     options.env = env;
     options.timeout_ms = 60000;
-    ShellResult result = shell_exec(executable, args, &options);
+    ShellResult result = lambda_test_shell_exec(executable, args, &options);
     EXPECT_EQ(result.exit_code, 0);
     EXPECT_FALSE(result.timed_out);
     ASSERT_NE(result.stdout_buf, nullptr);
@@ -795,7 +797,7 @@ static char* run_profiled_lambda_fixture(const char* script,
     ShellOptions options = {};
     options.env = env;
     options.timeout_ms = 60000;
-    ShellResult result = shell_exec(executable, args, &options);
+    ShellResult result = lambda_test_shell_exec(executable, args, &options);
     EXPECT_EQ(result.exit_code, 0);
     EXPECT_FALSE(result.timed_out);
     EXPECT_NE(result.stdout_buf, nullptr);

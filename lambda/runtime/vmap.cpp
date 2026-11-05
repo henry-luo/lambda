@@ -208,6 +208,8 @@ static Item stabilize_value(HashMapData* hd, Item value) {
 
 // insert or update an entry (in-place mutation)
 static void hashmap_data_set(HashMapData* hd, Item key, Item value) {
+    // an entry keeps a snapshot of its source, including mutable arrays.
+    cow_capture_value(value);
     value = stabilize_value(hd, value);
     HashMapEntry probe = { .key = key };
     const HashMapEntry* existing = (const HashMapEntry*)hashmap_get(hd->table, &probe);

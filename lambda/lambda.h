@@ -1618,6 +1618,7 @@ void array_push_spread(Array* arr, Item item);      // push item, spreading if s
 Item seq_spread_value(Item item);
 Item seq_spread_item(Item item);
 Item array_end(Array* arr);  // finalize and return array as Item
+Item array_end_flat(Array* arr);  // pack scalar lanes while retaining nested row owners
 #ifdef __cplusplus
 extern "C" {
 #endif

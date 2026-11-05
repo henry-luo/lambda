@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "test_lambda_compiler.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
@@ -57,7 +58,7 @@ char* execute_lambda_command(const char* argument) {
     ShellOptions options = {0};
     options.merge_stderr = true;
     // These smoke tests pass one argv value; shell operators would obscure the actual CLI result.
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     char* output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
     shell_result_free(&shell_result);
     return output;

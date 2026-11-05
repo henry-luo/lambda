@@ -1,0 +1,9 @@
+7
+9
+[1, 2, null, "a", "b"]
+[2.5, 9.5]
+[true, true]
+true
+true
+true
+true

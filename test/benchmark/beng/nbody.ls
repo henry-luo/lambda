@@ -37,7 +37,8 @@ fn format9(x) any^ {
     return result
 }
 
-pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[], dt: float) {
+// S9.1.2/S9.1.3: the simulation updates caller-owned positions and velocities.
+pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], var bvy: float[], var bvz: float[], bmass: float[], dt: float) {
     var i: int = 0
     while (i < 5) {
         var j: int = i + 1
@@ -89,7 +90,7 @@ fn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz
     return e
 }
 
-pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) {
+pn offset_momentum(var bvx: float[], var bvy: float[], var bvz: float[], bmass: float[]) {
     var px = 0.0
     var py = 0.0
     var pz = 0.0

@@ -1,0 +1,5 @@
+["zero", "high", "high", "greeting", "record"]
+["other", "failed"]
+["hit", "miss", "hit", "hit", "miss"]
+[3, 9, 3, null]
+[7, 8, 12, true]

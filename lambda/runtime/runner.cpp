@@ -1496,7 +1496,9 @@ static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
     request.parse_flags = runtime->static_warning ? "static-warning" : "default";
     request.resolution_base = runtime->import_base_dir
         ? runtime->import_base_dir : path;
-    request.backend = "mir-direct";
+    // the two emitters own different code images even for identical source;
+    // never satisfy an MVP request with a cached Full image (D8.5.1).
+    request.backend = lambda_mvp_selected() ? "mir-direct-mvp" : "mir-direct";
     // MIR artifacts built by explicit JIT do not carry AUTO's unsupported-AST
     // decision. Keep those code images separate under the existing MIR key.
     LambdaTier tier = lambda_tier_selected();
@@ -2230,7 +2232,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // REPL fragments append mutable AST/source history. Until that history is
     // part of its key, retain only its common source record (D8.5.1).
     bool cache_artifact_enabled = input_script_cache_policy(script_cache) != INPUT_SCRIPT_CACHE_OFF &&
-        !lambda_mvp_selected() && strcmp(lookup_path, "<repl-session>") != 0;
+        strcmp(lookup_path, "<repl-session>") != 0;
 
     // find the script in the path index (thread-safe)
 #if !defined(_WIN32) && !defined(LAMBDA_NO_TASKS)

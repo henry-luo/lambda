@@ -3,18 +3,61 @@
 #include "mvp.hpp"
 #include "../mir_emitter_shared.hpp"
 #include "../lambda-error.h"
+#include "../type_contract.hpp"
 
-static inline bool mvp_boxed_entry(AstFuncNode* function) {
-    return function && (((TypeFunc*)function->type)->is_public || function->node_type == AST_NODE_FUNC_EXPR);
+// all incoming-edge proofs use the receiver's formal position (S10.1.2v4).
+static inline int mvp_call_argument_count(AstCallNode* call) {
+    if (!call) return 0;
+    AstFuncNode* target = ast_call_has_named_args(call) ? ast_direct_call_function(call) : NULL;
+    if (target) return ast_linked_node_count(target->param);
+    return ast_linked_node_count(call->argument) + (call->pipe_inject ? 1 : 0);
 }
 
-static inline bool mvp_parameter_receiver(AstFuncNode* function) {
-    if (mvp_boxed_entry(function)) return true;
-    for (AstNamedNode* node = function ? function->param : NULL; node; node = (AstNamedNode*)node->next) {
-        TypeParam* parameter = lambda_type_param(node->type);
-        if (parameter && parameter->is_optional) return true;
+static inline AstNode* mvp_call_argument(AstCallNode* call, int position) {
+    if (!call) return NULL;
+    if (ast_call_has_named_args(call)) {
+        AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {};
+        ast_resolve_call_arguments(call, ast_direct_call_function(call), ast_linked_node_count(call->argument), resolved);
+        return position >= 0 && position < LAMBDA_MAX_FUNCTION_ARGS ? resolved[position] : NULL;
     }
-    return false;
+    return ast_positional_call_argument(call->argument, call->pipe_inject ? call->pipe_receiver : NULL, position);
+}
+
+static inline bool mvp_function_expression(const AstNode* node) {
+    return node && (node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) &&
+        !((const AstFuncNode*)node)->name;
+}
+
+static inline bool mvp_exact_membership_domain(Type* type) {
+    return type == &TYPE_NULL || type == &TYPE_ERROR || type == &TYPE_BOOL || type == &TYPE_STRING ||
+        type == &TYPE_SYMBOL || type == &TYPE_BINARY || type == &TYPE_DTIME || type == &TYPE_MAP;
+}
+
+static inline bool mvp_membership_proven(Type* source, Type* expected) {
+    // leave schema-top predicate behavior with the shared kernel while the
+    // contract/schema uniformity question remains open (SO7).
+    if (!source || !expected || expected == &TYPE_ANY) return false;
+    return lambda_type_contract_is_subtype(source, expected);
+}
+
+static inline bool mvp_direct_callee_node(const AstIndex* index, AstNodeId id) {
+    AstNode* node = id < index->count ? index->nodes[id] : NULL;
+    AstNodeId parent = ast_index_parent_id(index, id);
+    while (parent < index->count && index->nodes[parent]->node_type == AST_NODE_PRIMARY)
+        parent = ast_index_parent_id(index, parent);
+    AstNode* consumer = parent < index->count ? index->nodes[parent] : NULL;
+    return consumer && consumer->node_type == AST_NODE_CALL_EXPR &&
+        !ast_index_call_is_task_launch(index, parent) &&
+        ast_unwrap_primary(((AstCallNode*)consumer)->function) == node;
+}
+
+static inline AstFuncNode* mvp_function_value_reference(const AstIndex* index, AstNodeId id) {
+    AstNode* node = id < index->count ? index->nodes[id] : NULL;
+    if (!node || node->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    AstNode* definition = entry ? entry->node : NULL;
+    if (!definition || !ast_index_node_is_function(definition) || mvp_direct_callee_node(index, id)) return NULL;
+    return (AstFuncNode*)definition;
 }
 
 struct MvpFunction {
@@ -24,14 +67,37 @@ struct MvpFunction {
     FnVariantAnalysis abi;
     Type* declared_result;
     Type* result_contract;
+    Type* scalar_result_fallback;
     AstFunctionId id;
     uint32_t inline_cost;
     bool imported;
+    bool boxed_entry;
+    bool no_value_result;
+    bool owns_open_scopes;
+};
+
+static inline bool mvp_parameter_receiver(MvpFunction* function) {
+    if (function && function->boxed_entry) return true;
+    for (AstNamedNode* node = function && function->ast ? function->ast->param : NULL;
+            node; node = (AstNamedNode*)node->next) {
+        TypeParam* parameter = lambda_type_param(node->type);
+        if (parameter && parameter->is_optional) return true;
+    }
+    return false;
+}
+
+enum MvpCleanupKind { MVP_CLEANUP_TASK, MVP_CLEANUP_TRANSACTION, MVP_CLEANUP_RECOVERY };
+struct MvpCleanup {
+    MvpCleanup* parent;
+    MIR_reg_t record;
+    MvpCleanupKind kind;
 };
 
 struct MvpErrorTarget {
     MIR_label_t done;
     MIR_reg_t error;
+    MvpCleanup* cleanup_base;
+    bool unwinds;
 };
 struct MvpScope {
     MvpScope* parent;
@@ -66,6 +132,7 @@ struct MvpBinding {
     bool module_scalar;
     bool module_managed;
     bool iteration_binding;
+    bool capture_binding;
     bool array_written;
     bool coordinate_written;
     bool scalar_snapshot;
@@ -73,6 +140,7 @@ struct MvpBinding {
     ArrayRepCert* array_cert;
     MIR_reg_t dense_items;
     bool constant_float;
+    bool closed_parameter;
     double float_value;
     Item constant_item;
     bool constant_ready;
@@ -110,6 +178,7 @@ struct MvpControl {
     MvpControl* parent;
     MIR_label_t next;
     MIR_label_t done;
+    MvpCleanup* cleanup_base;
 };
 
 struct MvpInline {
@@ -143,12 +212,19 @@ struct MvpCompiler {
     LambdaMvpModule* module;
     MvpFunction* function;
     MirEmitter em;
+    MIR_reg_t environment;
     MvpControl* control;
     MvpScope* scope;
+    MvpCleanup* cleanups;
     MvpInline* inlining;
     MvpErrorTarget* condition_failure;
     AstNode* consuming_array_join;
     MIR_reg_t current_error;
+    MIR_reg_t current_item;
+    MIR_reg_t current_index;
+    MIR_reg_t current_parent;
+    MIR_reg_t current_root;
+    MIR_reg_t last_index_item;
     uint32_t inline_cost;
     MvpFloatConstant* float_constants;
     MvpStringByte* string_bytes;
@@ -225,11 +301,13 @@ bool mvp_proc_has_final_return(AstFuncNode* function);
 AstNode* mvp_single_statement(AstNode* node);
 AstNode* mvp_function_result_expression(MvpFunction* function);
 bool mvp_prefers_packed_tensor(LambdaMvpModule* module, AstNode* literal);
+bool mvp_native_range_source(AstNode* source);
 Type* mvp_value_contract(LambdaMvpModule* module, AstNode* node, int depth = 0, bool dense_arrays = false);
 MvpIntRange mvp_int_range(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_same_integer_expression(LambdaMvpModule* module, AstNode* left, AstNode* right, int depth = 0);
 MvpScaledInteger mvp_scaled_integer(LambdaMvpModule* module, AstNode* node, int depth = 0);
 Type* mvp_array_element(Type* contract);
+Type* mvp_module_array_literal_element(LambdaMvpModule* module, MvpBinding* binding, AstNode* source);
 bool mvp_array_contract(Type* contract);
 bool mvp_consuming_array_join(LambdaMvpModule* m, MvpBinding* binding, AstNode* value);
 bool mvp_binary_bitwise(SysFunc fn);
@@ -241,6 +319,14 @@ ShapeEntry* mvp_member_field(LambdaMvpModule* module, AstFieldNode* node,
     TypeMap** shape = NULL, bool success_only = false);
 Type* mvp_match_type(AstNode* pattern);
 bool mvp_boundary_proven(Type* source, Type* destination);
+// private array observations require the exact primitive element domain;
+// numeric subtyping cannot turn int elements into float elements (D4.3.3).
+static inline bool mvp_private_domain_proven(Type* source, Type* destination) {
+    Type* element = mvp_array_element(destination);
+    return source && destination && source->type_id == destination->type_id &&
+        (!element || (mvp_array_element(source) == element &&
+            lambda_array_contract_is_plain(source))) && mvp_boundary_proven(source, destination);
+}
 bool mvp_parameter_borrowable(LambdaMvpModule* module, AstNamedNode* parameter, bool forwarding = true);
 bool mvp_pure_key(AstNode* node, int depth = 0, bool allow_pure_calls = false);
 bool mvp_index_key(LambdaMvpModule* module, AstNode* node, int depth = 0);

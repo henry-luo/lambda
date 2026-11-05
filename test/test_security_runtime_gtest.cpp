@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "test_lambda_native_compiler.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/security_context.h"
 #include "../lambda/runtime/context_capsule.h"
@@ -43,7 +44,7 @@ struct SecurityRuntimeCapture {
 class SecurityRuntimeTest : public ::testing::TestWithParam<LambdaTier> {
 protected:
     Runtime runtime = {};
-    LambdaTier saved_tier;
+    LambdaTestNativeCompiler compiler;
     SecurityFileBroker* broker = nullptr;
     SecurityRuntimeCapture capture = {};
     bool runtime_live = false;
@@ -150,7 +151,7 @@ protected:
 
     void SetUp() override {
         log_init(nullptr);
-        saved_tier = lambda_tier_selected(); lambda_tier_set(GetParam());
+        compiler.select(GetParam());
         temporary = dir_temp_create("security_runtime"); ASSERT_NE(temporary, nullptr);
         fixture_directory = file_realpath(temporary); ASSERT_NE(fixture_directory, nullptr);
         directory = file_path_join(fixture_directory, "project"); ASSERT_NE(directory, nullptr);
@@ -168,7 +169,6 @@ protected:
         security_file_broker_destroy(broker);
         if (temporary) dir_delete(temporary);
         mem_free(script_path); mem_free(directory); mem_free(fixture_directory); mem_free(temporary);
-        lambda_tier_set(saved_tier);
     }
 
     void seed(const char* relative, const char* statement, bool outside = false) {
@@ -228,7 +228,9 @@ protected:
         StrBuf* source = strbuf_create(statement);
         ASSERT_NE(source, nullptr);
         ASSERT_TRUE(rewrite_source(source));
-        Input* output = run_script_mir(&runtime, source->str, path ? path : script_path, true);
+        Script* script = nullptr;
+        Input* output = run_script_mir(&runtime, source->str, path ? path : script_path, true, &script);
+        compiler.expect_mvp_admitted(script);
         last_run = output;
         strbuf_free(source);
         ASSERT_NE(output, nullptr);

@@ -477,22 +477,6 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         }
         return;
     }
-    if (node->node_type == AST_NODE_PIPE) {
-        AstBinaryNode* pipe = (AstBinaryNode*)node;
-        AstNode* right = ast_unwrap_primary(pipe->right);
-        if (pipe->op == OPERATOR_PIPE && right &&
-                right->node_type == AST_NODE_CALL_EXPR &&
-                ast_call_has_named_args((AstCallNode*)right) &&
-                !interp_named_sys_args_supported(ast_unwrap_primary(
-                    ((AstCallNode*)right)->function))) {
-            // The aggregate pipe injects one positional argument outside the
-            // call AST. Only pure system rows lower named operands in source
-            // order; Lambda formals still need a merged/reordered ABI.
-            sc->ok = false;
-            sc->reject = AST_NODE_NAMED_ARG;
-            return;
-        }
-    }
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         AstNode* call_callee = ast_unwrap_primary(call->function);
@@ -528,12 +512,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         if (call_callee && call_callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)call_callee)->fn_info;
             if (info && info->fn == SYSPROC_VMAP_SET) {
-                AstNode* owner = ast_unwrap_primary(call->argument);
+                AstCowPath path = {};
+                AstNode* owner = ast_collect_cow_path(&path, call->argument)
+                    ? ast_unwrap_primary(path.root) : NULL;
                 NameEntry* owner_entry = owner && owner->node_type == AST_NODE_IDENT
                     ? ((AstIdentNode*)owner)->entry : NULL;
-                // The shared VMap COW entry has a replacement channel only
-                // for a direct local binding. Dynamic/import receivers remain
-                // on MIR rather than mutating an owner T0 cannot publish.
+                // eval_call already publishes a borrowed projected leaf;
+                // dynamic/import roots still have no replacement channel.
                 if (!owner_entry || owner_entry->import || !call->argument->next ||
                         !call->argument->next->next || call->argument->next->next->next) {
                     sc->ok = false;
@@ -977,7 +962,7 @@ static void plan_destination(Pool* pool, AstNode* node, Type* contract, int dept
     case AST_NODE_CONTENT:
     case AST_NODE_LIST: {
         int values = 0, declarations = 0, statements = 0;
-        AstNode* result = interp_proc_block_last_value((AstListNode*)node,
+        AstNode* result = ast_proc_block_last_value(((AstListNode*)node)->item,
             &values, &declarations, &statements);
         if (values == 1) plan_destination(pool, result, contract, depth + 1, construction_only);
         return;
@@ -1149,7 +1134,6 @@ static void plan_link_call_shape(Pool* pool, AstCallNode* call) {
     (void)ast_plan_call_shape(call);
     AstFuncNode* target = ast_direct_call_function(call);
     if (!target || !call->interp_call_shape_planned || call->interp_has_spread_args ||
-            (call->pipe_inject && call->interp_has_named_args) ||
             call->interp_source_argc > LAMBDA_MAX_FUNCTION_ARGS) return;
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {};
     ast_resolve_call_arguments(call, target, call->interp_source_argc, resolved);
@@ -1792,34 +1776,12 @@ static void plan_finish(PlanCtx* pc) {
 // A procedural block's value is its LAST value expression; every earlier one,
 // and every declaration, loop and side-effect statement, runs as a statement.
 // Returns that item (NULL when the block has none) and the three counts.
-AstNode* interp_proc_block_last_value(AstListNode* list_node,
-        int* value_count, int* decl_count, int* stam_count) {
-    AstNode* last_executable = NULL;
-    for (AstNode* scan = list_node->item; scan; scan = scan->next) {
-        if (!is_declaration_node(scan)) last_executable = scan;
-    }
-    AstNode* last_value = NULL;
-    for (AstNode* item = list_node->item; item; item = item->next) {
-        if (is_declaration_node(item)) { (*decl_count)++; continue; }
-        if (is_side_effect_stam(item->node_type) ||
-                is_proc_flow_side_effect_node(item, last_executable) ||
-                item->node_type == AST_NODE_LOOP ||
-                ast_for_discards_result(item)) {
-            (*stam_count)++;
-            continue;
-        }
-        (*value_count)++;
-        last_value = item;
-    }
-    return last_value;
-}
-
 // Record a block's procedural shape once; eval_content read it from the
 // items at every evaluation (3% of a loop-heavy T0 profile). Counts that do
 // not fit the fields leave the block unscanned, so it keeps the live scan.
 static void plan_scan_proc_block(AstListNode* list_node) {
     int values = 0, decls = 0, stams = 0;
-    AstNode* last_value = interp_proc_block_last_value(list_node, &values, &decls, &stams);
+    AstNode* last_value = ast_proc_block_last_value(list_node->item, &values, &decls, &stams);
     if (values > UINT16_MAX || decls > UINT16_MAX || stams > UINT16_MAX) return;
     list_node->interp_proc_last_value = last_value;
     list_node->interp_proc_value_count = (uint16_t)values;

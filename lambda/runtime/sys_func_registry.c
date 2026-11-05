@@ -1529,10 +1529,10 @@ SysFuncInfo sys_func_defs[] = {
     // VMap functions — handled by special transpiler paths
     // ========================================================================
     {SYSFUNC_VMAP_NEW, "map", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_map0", NULL, NULL, NULL, false, 0},  // transpiler special case
+     C_RET_ITEM, NULL, "vmap_new", NULL, NULL, NULL, false, 0},
 
     {SYSFUNC_VMAP_NEW, "map", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_map1", NULL, NULL, NULL, false, 0},  // transpiler special case
+     C_RET_ITEM, NULL, "vmap_from_array", NULL, NULL, NULL, false, 0},
 
     {SYSPROC_VMAP_SET, "set", 3, &TYPE_NULL, true, true, true, LMD_TYPE_VMAP, false,
      C_RET_ITEM, NULL, "pn_set3", NULL, NULL, NULL, false, 0},  // transpiler special case
@@ -1743,7 +1743,10 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"lambda_side_stack_ensure_for", FPTR(lambda_side_stack_ensure_for)},
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
-    {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for)},
+    {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
     {"lambda_recovery_frame_arm", FPTR(lambda_recovery_frame_arm)},
     {"lambda_recovery_frame_raise_fault", FPTR(lambda_recovery_frame_raise_fault)},
     {"lambda_recovery_frame_restore_landing", FPTR(lambda_recovery_frame_restore_landing)},
@@ -1799,6 +1802,7 @@ JitImport jit_runtime_imports[] = {
     {"seq_spread_value", FPTR(seq_spread_value)},
     {"seq_spread_item", FPTR(seq_spread_item)},
     {"array_end", FPTR(array_end)},
+    {"array_end_flat", FPTR(array_end_flat)},
     // These addresses must leave the symbol table with the disabled PDF backend.
 #ifndef LAMBDA_NO_PDF
     {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
@@ -2474,6 +2478,9 @@ JitImport jit_runtime_imports[] = {
     // Heap allocation
     // ========================================================================
     {"heap_calloc", FPTR(heap_calloc)},
+    {"heap_calloc_closure_env", FPTR(heap_calloc_closure_env),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"heap_calloc_class", FPTR(heap_calloc_class)},
     {"lambda_region_begin", FPTR(lambda_region_begin)},
     {"lambda_region_end", FPTR(lambda_region_end)},
@@ -3735,8 +3742,10 @@ JitImport jit_runtime_imports[] = {
     // select() packs its variadic handles and named timeout at the call site,
     // so its registry row carries no entry point; generated code imports it.
     {"pn_select", FPTR(pn_select)},
-    {"lambda_task_scope_enter", FPTR(lambda_task_scope_enter)},
-    {"lambda_task_scope_current", FPTR(lambda_task_scope_current)},
+    {"lambda_task_scope_enter", FPTR(lambda_task_scope_enter),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_RAW_NON_GC_POINTER, 0}},
+    {"lambda_task_scope_current", FPTR(lambda_task_scope_current),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_RAW_NON_GC_POINTER, 0}},
     {"lambda_task_scope_leave", FPTR(lambda_task_scope_leave)},
     {"lambda_task_scope_unwind", FPTR(lambda_task_scope_unwind)},
     {"lambda_task_start_function", FPTR(lambda_task_start_function)},
