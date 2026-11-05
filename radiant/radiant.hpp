@@ -211,6 +211,8 @@ bool radiant_document_virtual_clock(struct UiContext* uicon, double* now_ms);
 void script_runner_set_execute_external_scripts(bool execute);
 void collect_and_compile_event_handlers(DomDocument* dom_doc);
 void script_runner_cleanup_js_state(DomDocument* dom_doc);
+// Detach document state but return its owned runtime for quiescent retirement.
+Runtime* script_runner_defer_js_state_cleanup(DomDocument* dom_doc);
 void script_runner_cleanup_heap(void);
 bool script_runner_js_batch_cleanup_unsafe(void);
 // host checkpoints exclude native layout CPU; script-forced reflows remain charged.
@@ -391,7 +393,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 void ui_context_present_surface(UiContext* uicon, const ImageSurface* surface);
 // keep the completed native frame visible while a resized surface awaits repaint.
 bool ui_context_resize_window_surface(UiContext* uicon, int pixel_width, int pixel_height);
-void ui_context_cleanup(UiContext* uicon);
+bool ui_context_cleanup(UiContext* uicon);
 struct DocumentCleanupTiming {
     double network_ms = 0.0;
     double state_ms = 0.0;

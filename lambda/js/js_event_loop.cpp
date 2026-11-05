@@ -338,7 +338,7 @@ extern "C" int js_animation_frame_drain(int max_frames) {
     while (runtime_job_queue_size(&animation_frame_queue) > 0 && frames < max_frames) {
         timestamp_ms += 16.6667;
         called += js_animation_frame_flush(timestamp_ms);
-        uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+        lambda_uv_run_loop(lambda_uv_loop(), UV_RUN_NOWAIT);
         js_event_loop_render_checkpoint();
         frames++;
     }
@@ -893,7 +893,7 @@ static int virtual_timer_fire_due(double target_ms) {
         fired++;
 
         uv_loop_t* loop = lambda_uv_loop();
-        if (loop) uv_run(loop, UV_RUN_NOWAIT);
+        if (loop) lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
     }
     if (virtual_timer_next_due(target_ms, turn_limit)) {
         log_error("event_loop: virtual timer drain exceeded %d callbacks", callback_limit);
@@ -1459,7 +1459,7 @@ extern "C" void js_event_loop_shutdown(void) {
     if (loop) {
         int safety = timer_handle_count + 16;
         while (timer_handle_count > 0 && safety-- > 0) {
-            uv_run(loop, UV_RUN_NOWAIT);
+            lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
         }
     }
     timer_force_shutdown = false;
@@ -1556,7 +1556,7 @@ static int event_loop_close_refed_handles_after_watchdog(uv_loop_t* loop, uv_han
     event_loop_shutting_down = true;
     uv_walk(loop, event_loop_close_refed_handle_cb, &state);
     for (int i = 0; i < 8 && state.closed > 0; i++) {
-        uv_run(loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
     }
     return state.closed;
 }
@@ -1703,7 +1703,7 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
 
     for (int turn = 0; turn < max_turns; turn++) {
         int before = js_microtask_pending_count();
-        uv_run(loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
         int after_uv = js_microtask_pending_count();
         int frame_callbacks = js_animation_frame_has_pending()
             ? js_animation_frame_flush(js_performance_monotonic_now_ms()) : 0;
@@ -1740,7 +1740,7 @@ extern "C" void js_event_loop_pump_nowait(void) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return;
     for (int turn = 0; turn < 4; turn++) {
-        int active = uv_run(loop, UV_RUN_NOWAIT);
+        int active = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
         js_microtask_flush();
         if (!active) break;
     }
@@ -1777,10 +1777,10 @@ static bool event_loop_pump_native_wait(int max_wait_ms) {
     }
     cap.data = &state;
     uv_timer_start(&cap, event_loop_pump_wait_cap_cb, (uint64_t)max_wait_ms, 0);
-    uv_run(loop, UV_RUN_ONCE);
+    lambda_uv_run_loop(loop, UV_RUN_ONCE);
     uv_timer_stop(&cap);
     uv_close((uv_handle_t*)&cap, NULL);
-    uv_run(loop, UV_RUN_NOWAIT);
+    lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
     js_microtask_flush();
     return !state.cap_fired;
 }
@@ -1867,7 +1867,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
         // process.exit() must bypass ordinary libuv liveness; Node does not wait
         // for servers or sockets once user code requested hard termination.
         close_all_timer_handles();
-        uv_run(loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
         return 0;
     }
 
@@ -1899,7 +1899,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
                 int remaining_ms = (int)((budget_ns - elapsed_ns + 999999ULL) / 1000000ULL);
                 event_loop_pump_native_wait(remaining_ms);
             }
-            int active = uv_run(loop, UV_RUN_NOWAIT);
+            int active = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
             js_event_loop_render_checkpoint();
             // Headless layout has no native frame clock; drain queued rAF work
             // so scripts using two-frame rendering checkpoints can commit their
@@ -1913,7 +1913,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
                 !js_animation_frame_has_pending()) break;
         }
         close_all_timer_handles();
-        uv_run(loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
         js_event_loop_render_checkpoint();
         return 0;
     }
@@ -1937,7 +1937,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
 
         // existing page-load drains retain their interval cleanup policy; host programs opt in.
         if (!keep_intervals) stop_all_interval_timers();
-        uv_run(loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
         if (dom_get_ui_context() && !animation_frame_drain_active &&
             js_animation_frame_has_pending()) {
             // Headless pages need rendering opportunities while timers are
@@ -1951,14 +1951,14 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
             // Give each native turn a rendering opportunity before blocking on
             // a later timer, otherwise fetched HTML waits for timeout callbacks.
             do {
-                result = uv_run(loop, UV_RUN_NOWAIT);
+                result = lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
                 js_event_loop_render_checkpoint();
                 if (js_animation_frame_has_pending()) {
                     js_animation_frame_drain(64);
                     continue;
                 }
                 if (!result || watchdog_state.fired) break;
-                result = uv_run(loop, UV_RUN_ONCE);
+                result = lambda_uv_run_loop(loop, UV_RUN_ONCE);
                 js_event_loop_render_checkpoint();
                 if (js_animation_frame_has_pending()) js_animation_frame_drain(64);
             } while (!watchdog_state.fired && (result || js_animation_frame_has_pending()));
@@ -1971,7 +1971,7 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
         while (!watchdog_state.fired && dom_tick_headless_animation_frame() &&
                animation_frames < 256) {
             js_event_loop_render_checkpoint();
-            uv_run(loop, UV_RUN_NOWAIT);
+            lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
             animation_frames++;
         }
         if (animation_frames >= 256 && dom_tick_headless_animation_frame()) {
@@ -1986,12 +1986,12 @@ static int js_event_loop_drain_impl(bool keep_intervals) {
         uv_timer_stop(&watchdog);
         uv_close((uv_handle_t*)&watchdog, NULL);
         // run once more to process the close callback
-        uv_run(loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
 
         // stop any interval timers created by one-shot callbacks during drain
         stop_all_interval_timers();
         // drain close callbacks from stopped intervals
-        uv_run(loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
 
         // final microtask flush after loop exits
         js_microtask_flush();

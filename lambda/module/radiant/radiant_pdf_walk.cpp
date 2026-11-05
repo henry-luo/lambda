@@ -1025,7 +1025,7 @@ static Item pdf_walk(Item path_item, Item options_item,
             if (selection_pool) pool_destroy(selection_pool);
             // selected handles must retire before their owning UI font context.
             context->text_resources.clear();
-            render_export_session_end(session);
+            render_export_session_finish(session);
             binary_schema_owner_release(owner);
         }
     } cleanup = {owner, &owned_session, &ctx, selection_pool};

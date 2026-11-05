@@ -63,6 +63,7 @@
 
 #ifndef LAMBDA_HEADLESS
 #include "../radiant/radiant.hpp"
+#include "../radiant/window_host.hpp"
 #include "../radiant/devtools_adapter.hpp"
 #endif
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
@@ -837,6 +838,15 @@ static void lambda_report_memory_stats(const char* phase) {
 }
 
 static int lambda_main_finish(int ret_code) {
+#ifndef LAMBDA_HEADLESS
+    // Pending document owners still borrow the process registries below.
+    if (!radiant_window_host_process_shutdown_ready()) {
+        log_error("main-finish: window or export cleanup remains pending; process owners retained");
+        return ret_code ? ret_code : 1;
+    }
+    // Standalone export leases can outlive the runtime that first opened libuv.
+    if (lambda_uv_loop() && !lambda_uv_is_host_owned()) lambda_uv_cleanup();
+#endif
     lambda_report_interp_run();
     // Capture post-execution ownership before common teardown erases the peak's
     // live categories; this is opt-in diagnostic telemetry, not policy.
@@ -2632,7 +2642,7 @@ static int run_chat_demo(Runtime* runtime, const char* script_path) {
             ((Signals*)handle->data)->closing--;
         });
     }
-    while (signals.closing > 0) uv_run(loop, UV_RUN_NOWAIT);
+    while (signals.closing > 0) lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
     return signals.interrupted ? 128 + signals.interrupted : result;
 #else
     return run_script_file(runtime, script_path, true);

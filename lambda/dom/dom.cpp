@@ -39,6 +39,7 @@
 #include "../jube/jube_interface.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/async.h"
+#include "../runtime/concurrency.h"
 #include "../io/mark_builder.hpp"
 #include "../io/mark_editor.hpp"
 #include "../core/mark_reader.hpp"
@@ -118,7 +119,8 @@ static void dom_close_owned_document(void* data) {
 
 extern "C" bool dom_retain_owned_document(void* native_document) {
     DomDocument* document = (DomDocument*)native_document;
-    if (!document || document->destroying || !context) return false;
+    // A pending retirement cannot acquire another runtime owner mid-join.
+    if (!document || document->destroying || lambda_document_lifetime_guard_active(document) || !context) return false;
     for (DomDocumentResource* entry = document->resources; entry; entry = entry->next) {
         if (entry->destroy == dom_owned_document_destroyed)
             return ((DomOwnedDocumentResource*)entry->data.get())->id != 0;

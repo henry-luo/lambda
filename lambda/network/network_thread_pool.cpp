@@ -148,7 +148,7 @@ void thread_pool_wait_all(NetworkThreadPool* pool) {
     uv_loop_t* loop = lambda_uv_loop();
     if (loop) {
         while (atomic_load(&pool->pending_count) > 0) {
-            uv_run(loop, UV_RUN_ONCE);
+            lambda_uv_run_loop(loop, UV_RUN_ONCE);
         }
     }
 

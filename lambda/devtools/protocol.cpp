@@ -257,7 +257,7 @@ void devtools_destroy(DevtoolsConnection* connection) {
     devtools_close(connection);
     // close callbacks retire pending writes before the connection storage goes away.
     while (connection->initialized && !connection->closed)
-        uv_run(connection->pipe.loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(connection->pipe.loop, UV_RUN_NOWAIT);
     if (connection->requests) {
         for (int i = 0; i < connection->requests->length; i++)
             strbuf_free((StrBuf*)connection->requests->data[i]);

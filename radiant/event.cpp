@@ -3639,6 +3639,8 @@ static __thread int s_event_scope_depth = 0;
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     if (!doc) return false;
     if (dom_document_script_runtime(doc)) return true;   // EO3: already owns one
+    // Retirement has fixed the evaluator owners that its task join must cover.
+    if (doc->destroying || lambda_document_lifetime_guard_active(doc)) return false;
 
     // A static render deliberately drops its page realm after load. Rebinding
     // UA behavior afterwards would create a second document evaluator and can
@@ -13471,26 +13473,19 @@ void radiant_cancel_async_document_loads(DomDocument* document) {
     }
 }
 
-void radiant_drain_async_document_loads(UiContext* uicon) {
-    if (!uicon) return;
+bool radiant_poll_async_document_loads(UiContext* uicon) {
+    if (!uicon) return true;
     uicon->async_script_navigation = false;
+    radiant_commit_async_document_loads(uicon);
+    for (AsyncScriptNavigation* job = s_async_script_navigations; job; job = job->next)
+        if (job->uicon == uicon) return false;
+    return true;
+}
+
+void radiant_drain_async_document_loads(UiContext* uicon) {
     uv_loop_t* loop = lambda_uv_loop();
-    if (!loop) return;
-    bool pending = true;
-    while (pending) {
-        pending = false;
-        for (AsyncScriptNavigation* job = s_async_script_navigations;
-             job; job = job->next) {
-            if (job->uicon == uicon) {
-                pending = true;
-                break;
-            }
-        }
-        if (pending) {
-            uv_run(loop, UV_RUN_ONCE);
-            radiant_commit_async_document_loads(uicon);
-        }
-    }
+    while (!radiant_poll_async_document_loads(uicon) && loop)
+        lambda_uv_run_loop(loop, UV_RUN_ONCE);
 }
 
 bool radiant_execute_location_navigation(UiContext* uicon, DomDocument* source,
