@@ -2,6 +2,9 @@
 
 **Date:** 2026-11-05
 
+Next implementation milestone: [language parity and untyped execution](impl/Lambda_Impl_MIR_MVP_Language_Parity_and_Untyped.md).
+That expansion is planned; the measurements below describe the preceding tuning work.
+
 **Status:** experimental typed compiler behind an explicit selector. Coverage
 extends to **all 77 registered typed benchmark entries** across eight suites:
 the previously covered 48 plus 29 additions, including duplicate suite ports.
