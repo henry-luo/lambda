@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused release-only Lambda MIR MVP/C2MIR comparison; retain every sample."""
+"""Release-only typed/untyped Lambda MIR comparison; retain every sample."""
 
 import argparse
 import datetime
@@ -131,14 +131,15 @@ def wait_for_benchmark_idle():
             time.sleep(1)
 
 
-def sumfp_batch_sources(source, c_source, count):
+def sumfp_batch_sources(source, c_source, count, variant="typed"):
     """Retain both original kernels; consume every result in the same timed batch."""
-    scratch = ROOT / "temp/lambda_mir_mvp" / f"sumfp_batch_{count}"
+    scratch = ROOT / "temp/lambda_mir_mvp" / f"sumfp_batch_{count}" / variant
     scratch.mkdir(parents=True, exist_ok=True)
+    float_annotation, int_annotation = (": float", ": int") if variant == "typed" else ("", "")
     lambda_text = source.read_text().split("pn main()", 1)[0] + f'''pn main() {{
     let t0 = clock()
-    var total: float = 0.0
-    var i: int = 0
+    var total{float_annotation} = 0.0
+    var i{int_annotation} = 0
     while (i < {count}) {{ total = total + benchmark(); i = i + 1 }}
     let elapsed = (clock() - t0) * 1000.0
     if (abs(total - 5000050000.0 * {count}.0) < 1.0) {{ print("sumfp: PASS\\n") }}
@@ -188,6 +189,8 @@ def main():
                "original": ORIGINAL_CASES, "additional": ADDITIONAL_CASES, "covered": COVERED_CASES,
                "completion": COMPLETION_CASES, "all": CASES}
     parser.add_argument("--subset", choices=tuple(subsets), default="all")
+    parser.add_argument("--variant", choices=("typed", "untyped", "both"), default="typed",
+                        help="run canonical name2.ls, name.ls, or both without changing either workload")
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--benchmark-root", type=Path, default=ROOT / "test/benchmark",
                         help="archived benchmark corpus; keeps paired workloads stable during shared edits")
@@ -238,7 +241,7 @@ def main():
             parser.error("source manifest does not identify the candidate executable")
     base = os.environ.copy()
     for key in tuple(base):
-        if key.startswith(("LAMBDA_", "MIR_")):
+        if key.startswith(("LAMBDA_", "MIR_", "COW_EXEC_")):
             del base[key]
     base["LAMBDA_EXEC_BACKEND"] = "jit"
     base.pop("JS_MIR_INTERP", None)
@@ -263,7 +266,7 @@ def main():
                                                 ROOT / "test/benchmark/benchmark_provenance.py"], ROOT),
         "timer_scope": "historical C main including validation/output" if args.legacy_timer else
                        "matched per-row execution boundaries; compilation excluded; see each row for timed output",
-        "runs": args.runs, "warmups": args.warmups, "cases": [],
+        "runs": args.runs, "warmups": args.warmups, "variant": args.variant, "cases": [],
         "pause_for_jobs": args.pause_for_jobs,
     }
     if archived_identity:
@@ -276,15 +279,16 @@ def main():
         cases = tuple(case for case in cases if "/".join(case) == args.case)
         if not cases:
             parser.error("selected case is outside the subset")
-    for suite, name in cases:
-        source = args.benchmark_root.resolve() / suite / f"{name}2.ls"
+    variants = ("typed", "untyped") if args.variant == "both" else (args.variant,)
+    for suite, name, variant in ((suite, name, variant) for suite, name in cases for variant in variants):
+        source = args.benchmark_root.resolve() / suite / f"{name}{'2' if variant == 'typed' else ''}.ls"
         c_source = source.parent / "c2mir" / f"{name}.c"
         golden = lambda_golden_path(source)
         expected = golden.read_text().strip()
         c_expected = source.with_suffix(".txt").read_text().strip()
         run_source, run_c_source, batch = source, c_source, None
         if args.sumfp_batch > 1:
-            run_source, run_c_source, batch = sumfp_batch_sources(source, c_source, args.sumfp_batch)
+            run_source, run_c_source, batch = sumfp_batch_sources(source, c_source, args.sumfp_batch, variant)
         commands = {
             "mvp": [str(executable), "run", str(run_source), "--no-log"],
             "production": [str(control), "run", str(run_source), "--no-log"],
@@ -330,7 +334,7 @@ def main():
                     if elapsed is None or elapsed < 0 or not math.isfinite(elapsed):
                         raise RuntimeError(f"invalid timer {elapsed}")
                 except (RuntimeError, subprocess.TimeoutExpired) as error:
-                    detail = f"{suite}/{name} {engine}: {error}"
+                    detail = f"{suite}/{name}/{variant} {engine}: {error}"
                     if not args.record_failures:
                         raise RuntimeError(detail) from error
                     failures[engine] = {"iteration": iteration, "error": detail}
@@ -352,7 +356,8 @@ def main():
             iteration += 1
         medians = {engine: statistics.median(values) if values and engine not in failures else None
                    for engine, values in samples.items()}
-        row = {"name": f"{suite}/{name}", "lambda_sha256": sha256_file(source),
+        row = {"name": f"{suite}/{name}", "variant": variant,
+               "case_id": f"{suite}/{name}/{variant}", "lambda_sha256": sha256_file(source),
                "timer_scope": "C main including final reporting; Lambda uses its script clock pair" if args.legacy_timer else
                    "setup and workload with intermediate output; final long-lived tree check/output excluded" if name == "gcbench" else
                    "workload plus formatting/output; final DONE line excluded" if (suite, name) == ("larceny", "pnpoly") else
@@ -405,14 +410,23 @@ def main():
                             f"{engine}=UNMEASURED" if not measure_c2mir and engine in unavailable else
                             f"{engine}=UNAVAILABLE" if engine in unavailable else f"{engine}=FAILED"
                             for engine, elapsed in medians.items())
-        print(f"{row['name']}: {timings}, ratio={ratio_text}", flush=True)
-    for engine in binaries:
-        if engine != "mvp":
+        print(f"{row['case_id']}: {timings}, ratio={ratio_text}", flush=True)
+    def aggregate(rows):
+        result = {}
+        for engine in binaries:
+            if engine == "mvp":
+                continue
             resolved = all("mvp" not in row["engine_failures"] and engine not in row["engine_failures"] and
                            not row["timer_resolution_limited"]["mvp"] and
-                           not row["timer_resolution_limited"][engine] for row in report["cases"])
-            report[f"geomean_mvp_over_{engine}"] = statistics.geometric_mean(
-                row["median_ms"]["mvp"] / row["median_ms"][engine] for row in report["cases"]) if resolved else None
+                           not row["timer_resolution_limited"][engine] for row in rows)
+            result[f"geomean_mvp_over_{engine}"] = statistics.geometric_mean(
+                row["median_ms"]["mvp"] / row["median_ms"][engine] for row in rows) if rows and resolved else None
+        return result
+    report["variant_summaries"] = {variant: aggregate([row for row in report["cases"] if row["variant"] == variant])
+                                   for variant in variants}
+    # keep the legacy typed aggregate, but never mix typed/untyped ratios into one claim.
+    report.update(aggregate(report["cases"]) if len(variants) == 1 else
+                  {f"geomean_mvp_over_{engine}": None for engine in binaries if engine != "mvp"})
     report["qualification"] = f"{args.subset} subset; coverage and per-row performance qualification are separate" + (
         "; historical timer scopes differ" if args.legacy_timer else "; matched workload boundaries, paired bootstrap per row")
     if args.regression_only:
