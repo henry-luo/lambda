@@ -402,6 +402,59 @@ class LambdaMirMvpTests(unittest.TestCase):
                 self.assertFalse(row["engine_failures"])
                 self.assertIn("c2mir", row["engine_unavailable"])
 
+    def test_typed_untyped_variants_use_their_own_oracles(self):
+        corpus = Path(self.scratch.name) / "variant-corpus"
+        sources = corpus / "r7rs"
+        sources.mkdir(parents=True)
+        for name, text in (("fib", "untyped stdout"), ("fib2", "typed stdout")):
+            (sources / (name + ".ls")).write_text(f'pn main() {{ print("{text}") }}\n')
+            (sources / (name + ".txt")).write_text("reference oracle\n")
+            (sources / (name + ".formatted.txt")).write_text(text + "\n")
+        output = Path(self.scratch.name) / "variants.json"
+        seen = set()
+
+        def invoke(command, env):
+            self.assertNotIn("COW_EXEC_PROFILE", env)
+            source = Path(command[2])
+            seen.add(source.name)
+            text = "untyped stdout" if source.name == "fib.ls" else "typed stdout"
+            elapsed = 1 if env["LAMBDA_MIR_COMPILER"] == "mvp" else 2
+            return f"{text}\n__TIMING__:{elapsed}\n"
+
+        arguments = ["lambda_mir_mvp.py", "--release", "--lambda-only", "--exe", str(self.exe),
+                     "--variant", "both", "--case", "r7rs/fib", "--runs", "3", "--warmups", "1",
+                     "--benchmark-root", str(corpus), "--output", str(output)]
+        with mock.patch.object(sys, "argv", arguments), mock.patch.object(lambda_mir_mvp, "invoke", invoke), \
+                mock.patch.dict(os.environ, {"COW_EXEC_PROFILE": "1"}), mock.patch("builtins.print"):
+            lambda_mir_mvp.main()
+        data = json.loads(output.read_text())
+        self.assertEqual(seen, {"fib.ls", "fib2.ls"})
+        self.assertEqual({row["case_id"] for row in data["cases"]},
+                         {"r7rs/fib/typed", "r7rs/fib/untyped"})
+        for row in data["cases"]:
+            self.assertFalse(row["engine_failures"])
+            self.assertTrue(row["performance_gates"]["faster_than_full_mir"])
+            self.assertTrue(row["golden_path"].endswith(".formatted.txt"))
+            self.assertEqual(len(row["samples_ms"]["mvp"]), 3)
+        self.assertIsNone(data["geomean_mvp_over_production"])
+        for summary in data["variant_summaries"].values():
+            self.assertEqual(summary["geomean_mvp_over_production"], 0.5)
+
+    def test_sumfp_supplements_preserve_untyped_kernel_and_harness(self):
+        directory = self.benchmark_root / "r7rs"
+        c_source = directory / "c2mir/sumfp.c"
+        generated = []
+        for variant, name in (("typed", "sumfp2.ls"), ("untyped", "sumfp.ls")):
+            source = directory / name
+            result, _, metadata = lambda_mir_mvp.sumfp_batch_sources(source, c_source, 3, variant)
+            generated.append(result)
+            kernel = source.read_text().split("pn main()", 1)[0]
+            self.assertTrue(metadata["lambda_source"].startswith(kernel))
+            if variant == "untyped":
+                self.assertNotRegex(metadata["lambda_source"], r"var (?:total|i)\s*:")
+            self.assertTrue(result.with_suffix(".txt").is_file())
+        self.assertNotEqual(*generated)
+
     def test_batch_record_and_decimal_paths(self):
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
             {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
