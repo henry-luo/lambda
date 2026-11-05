@@ -1,0 +1,14 @@
+{
+  "format": "lambda-sheet",
+  "version": 1,
+  "title": "Sparse large workbook",
+  "sheets": [{
+    "title": "Large",
+    "rows": 100000,
+    "cols": 1000,
+    "cells": [
+      {"row": 0, "col": 0, "raw": "First", "style": {}},
+      {"row": 99999, "col": 999, "raw": "Last", "style": {}}
+    ]
+  }]
+}

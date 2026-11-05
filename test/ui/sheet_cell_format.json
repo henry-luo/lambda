@@ -1,0 +1,20 @@
+{
+  "name": "Sheet default and authored cell styles follow zoom",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {"width": 1440, "height": 900},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"wait","ms":100},
+    {"type":"assert_script","js":"document.querySelector('#cell-A13 .spill')!==null && document.querySelector('#cell-A5 .spill')===null && document.querySelector('#cell-H20 .spill')===null && document.querySelector('#cell-C5 .spill')===null && document.querySelector('#cell-F5 .spill')===null"},
+    {"type":"assert_script","js":"document.querySelector('#cell-H20 .cell-text')===null && document.querySelector('#cell-A19 .cell-text')!==null && document.getElementById('cell-H20').getBoundingClientRect().height===document.getElementById('cell-A20').getBoundingClientRect().height"},
+    {"type":"click","target":{"selector":"#cell-C5"}},
+    {"type":"select_option","target":{"selector":"#font"},"value":"Georgia"},
+    {"type":"select_option","target":{"selector":"#size"},"value":"14"},
+    {"type":"click","target":{"selector":"#bold"}},
+    {"type":"assert_script","js":"(()=>{const s=getComputedStyle(document.getElementById('cell-C5'));return s.fontFamily.includes('Georgia') && s.fontSize==='14px' && s.fontWeight==='700' && s.textAlign==='right'})()"},
+    {"type":"click","target":{"selector":"#status-zoom-in"}},
+    {"type":"assert_script","js":"(()=>{const s=getComputedStyle(document.getElementById('cell-C5')),e=getComputedStyle(document.getElementById('cell-H20'));return s.fontSize==='15.4px' && e.fontSize==='13.2px'})()"},
+    {"type":"click","target":{"selector":"#align-left"}},
+    {"type":"assert_script","js":"getComputedStyle(document.getElementById('cell-C5')).textAlign==='left'"}
+  ]
+}

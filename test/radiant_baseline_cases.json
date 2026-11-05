@@ -374,6 +374,8 @@
     "FontShapedLineCacheTest.DirectionsAndWidthFeaturesKeepSeparateShapes",
     "FontShapedLineCacheTest.TextWalkReusesBoundariesAndRestoresNestedAndChangedSources",
     "EventSimTiming.RetryAndHostTurnsAccumulateBeforeFinalResultIsWritten",
+    "RadiantEventSimulation.ShutdownReleasesNavigationHistoryBeforeTheScriptCache",
+    "RadiantEventSimulation.ShutdownReleasesPagesLeftByBackNavigation",
     "RadiantDocumentTest.CursorMetadataInheritsWithoutLayoutAndMixedGeometryStillReflows",
     "RadiantDocumentTest.VerticalBidiPaintAndPartialRangesSharePhysicalInlinePositions",
     "RadiantDocumentTest.VerticalRangesExpandUnitsAndMapCaseExpansionAndCollapsedSpaces",

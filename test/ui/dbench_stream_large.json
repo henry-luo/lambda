@@ -1,0 +1,19 @@
+{
+  "name":"DBench streams a result larger than its grid cache to CSV",
+  "html": "temp/dbench-prepared/stream_large/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "stream_large"],
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT order_id, customer_id, status FROM orders ORDER BY order_id","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-mode","equals":"query"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-loading","equals":"false","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#export"}},
+    {"type":"type","target":{"selector":"#export-path"},"text":"temp/dbench-stream-large.csv","clear":true},
+    {"type":"select_option","target":{"selector":"#export-scope"},"value":"complete"},
+    {"type":"click","target":{"selector":"#export-save"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Created temp/dbench-stream-large.csv","assert_timeout":60000}
+  ]
+}

@@ -7136,8 +7136,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table,
         }
     }
     float* col_widths = meta->col_widths;
+    float fixed_explicit_width = table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED
+        ? table_resolve_fixed_explicit_size(lycon, table, LAYOUT_AXIS_X) : 0.0f;
     ArrayList* colspan_widths = arraylist_new(8);
-    table->each_cell( [&](ViewTableRow* row, ViewTableCell* tcell) {
+    // Definite fixed tables size tracks from columns and the first row, not cell
+    // contents. Retain intrinsic minima when max-width still consumes them.
+    bool need_intrinsic_cells = fixed_explicit_width <= 0.0f ||
+        (table->blk && table->block()->given_max_width >= 0.0f);
+    if (need_intrinsic_cells) table->each_cell( [&](ViewTableRow* row, ViewTableCell* tcell) {
             (void)row;
             int col = tcell->td->col_index;
             LayoutFontScope font_scope(lycon);
@@ -7211,8 +7217,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table,
                 arraylist_append(colspan_widths, contribution);
             }
     });
-    float fixed_explicit_width = table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED
-        ? table_resolve_fixed_explicit_size(lycon, table, LAYOUT_AXIS_X) : 0.0f;
     float* shares = scope.array_zero<float>(columns);
     bool shared = false;
     for (int c = 0; c < columns; c++) {

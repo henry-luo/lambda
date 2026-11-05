@@ -1,0 +1,458 @@
+{
+  "name": "DBench navigates a result larger than its memory window",
+  "html": "temp/dbench-prepared/spool_window/dbench/dbench.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "256"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#sql"
+      },
+      "text": "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<3000) SELECT x, 'Row ' || x FROM n",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-mode",
+      "equals": "query"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result-0-0"
+      },
+      "contains": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "512",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "768",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "1024",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "1280",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "1536",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "1792",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "2048",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "2304",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "2560",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "script",
+      "js": "const d=document.getElementById('dbench');d.dispatchEvent(new CustomEvent('dbench_result',{detail:{type:'window',tab:+d.dataset.activeTab,generation:+d.dataset.generation,token:+d.dataset.token,window_token:+d.dataset.windowToken-1,first:0,rows:[[999,'stale']]}}))"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result-0-0"
+      },
+      "contains": "1"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('result-scroll');p.scrollTop=54000;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "assert_script",
+      "js": "+document.getElementById('result-grid').dataset.firstRow>1900 && document.querySelectorAll('#result-grid td[data-row]').length<500",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result-2000-0"
+      },
+      "contains": "2001",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('result-scroll');p.scrollTop=0;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result-0-0"
+      },
+      "contains": "1",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "2560"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#result-0-0"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "End",
+      "mods_str": "ctrl+shift"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#copy"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Selection copied",
+      "assert_timeout": 30000
+    },
+    {
+      "type": "assert_clipboard",
+      "contains": "Row 2560"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#export-path"
+      },
+      "text": "temp/dbench-spool-selection.csv",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#export-scope"
+      },
+      "value": "selection"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export-save"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Created temp/dbench-spool-selection.csv",
+      "assert_timeout": 60000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#more"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-rows",
+      "equals": "2816",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#export-path"
+      },
+      "text": "temp/dbench-spool-complete.json",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#export-kind"
+      },
+      "value": "json"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#export-scope"
+      },
+      "value": "complete"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export-save"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Created temp/dbench-spool-complete.json",
+      "assert_timeout": 60000
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('result-scroll');p.scrollTop=0;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result-0-0"
+      },
+      "contains": "1",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#export-path"
+      },
+      "text": "temp/dbench-spool-after.csv",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#export-scope"
+      },
+      "value": "loaded"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export-save"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Created temp/dbench-spool-after.csv",
+      "assert_timeout": 60000
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('result-scroll');p.scrollTop=54000;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#result-2000-0"
+      },
+      "contains": "2001",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disconnect"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#dbench"
+      },
+      "attribute": "data-connected",
+      "equals": "false"
+    },
+    {
+      "type": "script",
+      "js": "const p=document.getElementById('result-scroll');p.scrollTop=0;p.dispatchEvent(new Event('scroll'))"
+    },
+    {
+      "type": "assert_script",
+      "js": "const d=document.getElementById('dbench'), c=document.getElementById('result-0-0');+d.dataset.offset>0 && c && +c.textContent===+d.dataset.offset+1",
+      "assert_timeout": 20000
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#result-0-0"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#copy"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Selection copied"
+    }
+  ],
+  "prepare": [
+    "python3",
+    "test/demo/dbench/tests/_prepare_ui.py",
+    "spool_window"
+  ]
+}

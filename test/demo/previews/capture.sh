@@ -30,6 +30,7 @@ greetings 0 0 1040 558
 dreamhome 150 40 1040 558
 word 0 0 1040 558
 sheet 0 0 1280 687
+dbench 0 0 1280 687
 note 0 0 960 516
 slides 0 0 1040 558
 finder 200 130 1080 580 765 210
@@ -47,8 +48,10 @@ echo "$SHOTS" | while read -r name x y w h cx cy; do
     [ -f "$entry" ] || entry=test/demo/$name/index.html
     click=""
     [ -n "$cx" ] && click="{\"type\":\"click\",\"x\":$cx,\"y\":$cy},{\"type\":\"wait\",\"ms\":2000},"
-    printf '{"name":"capture %s","viewport":{"width":1280,"height":800},"events":[{"type":"wait","ms":3000},%s{"type":"render","file":"%s/%s.png"}]}\n' \
-        "$name" "$click" "$WORK" "$name" > "$WORK/$name.json"
+    ready=""
+    [ "$name" = dbench ] && ready='{ "type":"assert_script", "js":"document.getElementById(\u0027dbench\u0027).dataset.rows !== \u00270\u0027" },'
+    printf '{"name":"capture %s","viewport":{"width":1280,"height":800},"events":[{"type":"wait","ms":3000},%s%s{"type":"render","file":"%s/%s.png"}]}\n' \
+        "$name" "$click" "$ready" "$WORK" "$name" > "$WORK/$name.json"
     ./lambda.exe view "$entry" --headless --no-log --event-file "$WORK/$name.json" > "$WORK/$name.log" 2>&1
     printf '<html><body style="margin:0;overflow:hidden"><img src="%s.png" style="display:block;margin:-%spx 0 0 -%spx"></body></html>\n' \
         "$name" "$y" "$x" > "$WORK/$name-crop.html"

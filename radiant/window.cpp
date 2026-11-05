@@ -1358,7 +1358,7 @@ static int window_finish_event_sim(EventSimContext* sim_ctx) {
         ui_context.document = lam::up((DomDocument*)sim_ctx->original_document);
         sim_ctx->frame_stack_depth = 0;
     }
-    event_sim_free(sim_ctx);
+    event_sim_free(sim_ctx, ui_context.document);
     return fail_count;
 }
 

@@ -162,9 +162,9 @@ static const char* shred_format(ShredKind kind) {
 
 static const char* shred_tag_name(RdbType tag) {
     switch (tag) {
-        case RDB_TYPE_DECIMAL:  return "decimal";
-        case RDB_TYPE_DATETIME: return "datetime";
-        case RDB_TYPE_JSON:     return "json";
+        case RDB_TYPE_DECIMAL:
+        case RDB_TYPE_DATETIME:
+        case RDB_TYPE_JSON:     return rdb_type_name(tag);
         default:                return NULL;
     }
 }

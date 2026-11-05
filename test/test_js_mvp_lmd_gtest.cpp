@@ -1114,6 +1114,52 @@ TEST_F(JsFormalMir, PreparedWindowDispatchSharesAndRestoresTheCurrentEvent) {
     EXPECT_EQ(value.item, ITEM_TRUE);
 }
 
+TEST_F(JsFormalMir, DynamicGlobalPropertyRetainsOneShapeAcrossValueTypes) {
+    EvalContext* owner = NULL;
+    bool reusing = false;
+    ASSERT_TRUE(js_prepare_eval_context(&runtime, true, &owner, &reusing));
+    ASSERT_TRUE(js_runtime_state_ensure_input(owner));
+    RootFrame roots(3);
+    Rooted<Item> global(roots, js_get_global_this());
+    Rooted<Item> key(roots, js_name_item("dynamicPropertyProbe"));
+    Rooted<Item> current(roots, ItemNull);
+    ASSERT_EQ(get_type_id(global.get()), LMD_TYPE_MAP);
+    ASSERT_FALSE(item_is_error(run("typeof Object.getOwnPropertyDescriptor")));
+    ASSERT_FALSE(item_is_error(js_set_key_default(global.get(), key.get(), make_js_undefined())));
+    ASSERT_FALSE(item_is_error(js_set_key_default(global.get(), key.get(), js_name_item("warm"))));
+    TypeMap* stable_shape = (TypeMap*)global.get().map->type;
+    for (int i = 0; i < 6; i++) {
+        switch (i) {
+        case 0: current.set(make_js_undefined()); break;
+        case 1: current.set(ItemNull); break;
+        case 2: current.set((Item){.item = b2it(true)}); break;
+        case 3: current.set((Item){.item = i2it(42)}); break;
+        case 4: current.set(js_name_item("text")); break;
+        default: current.set(js_new_object()); break;
+        }
+        ASSERT_FALSE(item_is_error(js_set_key_default(global.get(), key.get(), current.get())));
+        heap_gc_collect();
+        EXPECT_EQ(js_get_key_default(global.get(), key.get()).item, current.get().item);
+        EXPECT_EQ((TypeMap*)global.get().map->type, stable_shape) << "value index " << i;
+    }
+    const char* check = R"JS(
+        (() => {
+            let values=[undefined, null, true, 42, 5e-324, 'text', {held:7}, [1,2]];
+            for (let value of values) {
+                globalThis.dynamicPropertyProbe=value; gc();
+                let descriptor=Object.getOwnPropertyDescriptor(globalThis,'dynamicPropertyProbe');
+                if (globalThis.dynamicPropertyProbe!==value || descriptor.value!==value ||
+                    !descriptor.writable || !descriptor.enumerable || !descriptor.configurable)
+                    return false;
+            }
+            return true;
+        })()
+    )JS";
+    Item result = run(check);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+
 TEST_F(JsFormalMir, NativeHostBasesPreserveConstructionFieldsAndLiveLinks) {
     Item value = run(R"JS(
         class Strategy extends CountQueuingStrategy {

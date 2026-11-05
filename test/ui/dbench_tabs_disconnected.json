@@ -1,0 +1,16 @@
+{
+  "name":"DBench starts a disconnected tab with the selected engine",
+  "html":"test/demo/dbench/dbench.ls",
+  "viewport":{"width":960,"height":700},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-connected","equals":"true","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#disconnect"}},
+    {"type":"select_option","target":{"selector":"#driver"},"value":"mysql"},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-active-tab","equals":"2"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-connected","equals":"false"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-editable-sqlite","equals":"false"},
+    {"type":"assert_script","js":"document.getElementById('driver').value==='mysql'","assert_timeout":5000}
+  ]
+}

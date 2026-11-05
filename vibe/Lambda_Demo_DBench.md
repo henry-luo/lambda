@@ -1,7 +1,8 @@
 # DBench — Database Workbench Demo Proposal
 
-**Status:** Proposal, 2026-11-04. This document proposes development; it does
-not claim that DBench or the shared virtual grid is implemented.
+**Status:** Working proposal, 2026-11-04. DBench and the shared virtual grid are
+under implementation; the [implementation checkpoint](impl/Lambda_Impl_DBench.md)
+records completed behavior, verification and remaining work.
 
 **User requirements:** a new Lambda demo named `dbench`, similar to DBeaver,
 with SQLite, MySQL and PostgreSQL connections. Reuse Sheet's grid interaction
@@ -28,6 +29,7 @@ ruling are RDB1–RDB9, RDB11/RDB12 and JA16.1–JA16.4 in
 That section retains its own proposal/ratification status; reuse of its
 implementation does not ratify its outstanding decisions. No language or
 runtime ruling changes are made here.
+
 
 ## 1. Product direction
 

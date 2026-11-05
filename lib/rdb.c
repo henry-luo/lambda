@@ -237,6 +237,7 @@ typedef struct {
     const RdbTarget*  targets;
     int               target_count;
     bool              registered;
+    bool              reserved;
     void*             native;
 } RdbOpenCtx;
 
@@ -285,15 +286,17 @@ static int rdb_host_conn_register(void* open_ctx, void* native_conn, const RdbCo
         return RDB_ERROR;
     }
     ctx->life->handle = native_conn;
-    uint32_t rid = 0;
-    if (rdb_registry_hooks && rdb_registry_hooks->add &&
-            rdb_registry_hooks->add(ctx->life, ctx->conn->uri, &rid, &ctx->life->registry) != RDB_OK) {
-        ctx->life->handle = NULL;
-        log_error("rdb-registry: host refused connection '%s'", ctx->life->uri);
-        return RDB_ERROR;
+    if (!ctx->reserved) {
+        uint32_t rid = 0;
+        if (rdb_registry_hooks && rdb_registry_hooks->add &&
+                rdb_registry_hooks->add(ctx->life, ctx->conn->uri, &rid, &ctx->life->registry) != RDB_OK) {
+            ctx->life->handle = NULL;
+            log_error("rdb-registry: host refused connection '%s'", ctx->life->uri);
+            return RDB_ERROR;
+        }
+        ctx->life->rid = rid;
+        ctx->conn->rid = rid;
     }
-    ctx->life->rid = rid;
-    ctx->conn->rid = rid;
     ctx->conn->info = *info;
     ctx->native = native_conn;
     ctx->registered = true;
@@ -427,8 +430,29 @@ bool rdb_target_authorized(const char* uri, const char* type) {
     return rdb_resolve_authorized(driver, name, uri, targets, &count);
 }
 
-static RdbConn* rdb_open_impl(Pool* pool, const char* uri, const char* type, bool readonly,
-                              bool sqlite_no_create) {
+struct RdbOpenWork {
+    RdbConn* conn;
+    RdbConnLife* life;
+    RdbOpenCtx ctx;
+    RdbTarget targets[RDB_MAX_TARGETS];
+    RdbOpenOptions options;
+    char* uri;
+    void* handle;
+    int status;
+    bool ran;
+};
+
+static void rdb_open_wipe_uri(RdbOpenWork* work) {
+    if (!work->uri) return;
+    size_t length = strlen(work->uri);
+    volatile char* bytes = work->uri;
+    while (length--) *bytes++ = 0;
+    mem_free(work->uri);
+    work->uri = NULL;
+}
+
+static RdbOpenWork* rdb_open_work_prepare(Pool* pool, const char* uri, const char* type,
+                                          bool readonly, bool sqlite_no_create, bool reserve) {
     if (!pool || !uri) return NULL;
     char redacted[1024];
     rdb_redact_uri(uri, redacted, sizeof(redacted));
@@ -443,75 +467,116 @@ static RdbConn* rdb_open_impl(Pool* pool, const char* uri, const char* type, boo
         return NULL;
     }
 
+    RdbOpenWork* work = (RdbOpenWork*)mem_calloc(1, sizeof(RdbOpenWork), MEM_CAT_INPUT_OTHER);
+    if (!work) return NULL;
     RdbConn* conn = (RdbConn*)pool_calloc(pool, sizeof(RdbConn));
-    if (!conn) {
-        log_error("rdb: allocation failed for RdbConn");
-        return NULL;
-    }
+    if (!conn) { mem_free(work); return NULL; }
     conn->driver   = driver;
     conn->pool     = pool;
     conn->readonly = readonly;
     conn->uri      = pool_strdup(pool, redacted);
 
     // JA16.3: resolve the URI into concrete targets and authorise them first
-    RdbTarget targets[RDB_MAX_TARGETS];
     int target_count = 0;
-    if (!rdb_resolve_authorized(driver, driver_name, uri, targets, &target_count)) {
+    if (!conn->uri || !rdb_resolve_authorized(driver, driver_name, uri, work->targets, &target_count)) {
         log_error("rdb: cannot resolve or authorize '%s'", redacted);
+        mem_free(work);
         return NULL;
     }
 
     RdbConnLife* life = (RdbConnLife*)mem_calloc(1, sizeof(RdbConnLife), MEM_CAT_INPUT_OTHER);
-    if (!life) return NULL;
+    if (!life) { mem_free(work); return NULL; }
     life->driver = driver;
     life->stmts = arraylist_new(4);
     snprintf(life->uri, sizeof(life->uri), "%s", redacted);
-
-    RdbOpenCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.conn = conn;
-    ctx.life = life;
-    ctx.targets = targets;
-    ctx.target_count = target_count;
-    RdbOpenOptions opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.struct_size = sizeof(opts);
-    opts.readonly = readonly;
-    opts.sqlite_no_create = sqlite_no_create;
-
-    void* handle = NULL;
-    int rc = driver->open(&rdb_host_api, &ctx, uri, &opts, &handle);
-    // registration is structural: success without registering this handle is a
-    // contract violation, so the host closes it rather than trusting it
-    bool violation = rc == RDB_OK && (!ctx.registered || ctx.native != handle);
-    if (rc != RDB_OK || violation) {
-        if (violation) {
-            log_error("rdb: driver '%s' opened '%s' without registering it", driver_name, redacted);
-            if (handle && handle != ctx.native) driver->close(handle);
-        }
-        // a failed open leaves no native connection: the driver closed its own,
-        // so releasing the registry row must not close it again
-        if (ctx.registered) {
-            if (violation) {
-                life->owner_closing = true;
-                rdb_conn_life_close(life);
-            }
-            life->closed = true;
-            if (life->rid && rdb_registry_hooks && rdb_registry_hooks->remove) {
-                rdb_registry_hooks->remove(life->registry, life->rid);
-            }
-        }
+    work->uri = mem_strdup(uri, MEM_CAT_INPUT_OTHER);
+    if (!life->stmts || !work->uri) {
+        rdb_open_wipe_uri(work);
         rdb_life_free(life);
-        log_error("rdb: failed to open connection to '%s'", redacted);
+        mem_free(work);
         return NULL;
     }
-    conn->handle = handle;
+    // A pending driver call pins the registry record until its owner joins it.
+    life->active_calls = 1;
     conn->life = life;
-    // the host, not the driver, knows whether its bridge guarantees TLS
-    if (life->tunnel_count > 0) conn->info.tls = life->tls_guaranteed;
-    log_debug("rdb: opened '%s' with driver '%s' (readonly=%d, rid=%u)",
-              redacted, driver_name, readonly, conn->rid);
+    work->conn = conn;
+    work->life = life;
+    work->ctx.conn = conn;
+    work->ctx.life = life;
+    work->ctx.targets = work->targets;
+    work->ctx.target_count = target_count;
+    work->ctx.reserved = reserve;
+    work->options.struct_size = sizeof(RdbOpenOptions);
+    work->options.readonly = readonly;
+    work->options.sqlite_no_create = sqlite_no_create;
+    work->status = RDB_ERROR;
+    if (reserve && rdb_registry_hooks && rdb_registry_hooks->add &&
+            rdb_registry_hooks->add(life, conn->uri, &life->rid, &life->registry) != RDB_OK) {
+        rdb_open_wipe_uri(work);
+        conn->life = NULL;
+        rdb_life_free(life);
+        mem_free(work);
+        return NULL;
+    }
+    conn->rid = life->rid;
+    if (life->closed) { (void)rdb_open_work_end(work, false); return NULL; }
+    return work;
+}
+
+RdbOpenWork* rdb_open_work_begin(Pool* pool, const char* uri, const char* type, bool readonly) {
+    return rdb_open_work_prepare(pool, uri, type, readonly, false, true);
+}
+
+int rdb_open_work_run(RdbOpenWork* work, const int* cancelled) {
+    if (!work || work->ran) return RDB_ERROR;
+    work->ran = true;
+    if (cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) {
+        rdb_open_wipe_uri(work);
+        return RDB_ERROR;
+    }
+    const RdbDriver* driver = work->conn->driver;
+    int rc = driver->open(&rdb_host_api, &work->ctx, work->uri, &work->options, &work->handle);
+    rdb_open_wipe_uri(work);
+    bool violation = rc == RDB_OK && (!work->ctx.registered || work->ctx.native != work->handle);
+    if (violation) {
+        log_error("rdb: driver '%s' opened '%s' without registering it", driver->name, work->conn->uri);
+        if (work->handle && work->handle != work->ctx.native) driver->close(work->handle);
+    } else if (rc != RDB_OK && work->ctx.registered) {
+        // A failing driver owns and closes the native connection it registered.
+        work->life->handle = NULL;
+    }
+    if (rc == RDB_OK && !violation &&
+            (!cancelled || !__atomic_load_n(cancelled, __ATOMIC_ACQUIRE))) work->status = RDB_OK;
+    return work->status;
+}
+
+RdbConn* rdb_open_work_end(RdbOpenWork* work, bool accept) {
+    if (!work) return NULL;
+    RdbConn* conn = work->conn;
+    RdbConnLife* life = work->life;
+    bool ok = accept && work->ran && work->status == RDB_OK && !life->closed;
+    rdb_open_wipe_uri(work);
+    if (ok) {
+        conn->handle = work->handle;
+        if (life->tunnel_count > 0) conn->info.tls = life->tls_guaranteed;
+        rdb_conn_life_release(life);
+        log_debug("rdb: opened '%s' with driver '%s' (readonly=%d, rid=%u)",
+                  conn->uri, conn->driver->name, conn->readonly, conn->rid);
+    } else {
+        rdb_close(conn);
+        rdb_conn_life_release(life);
+        conn = NULL;
+    }
+    mem_free(work);
     return conn;
+}
+
+static RdbConn* rdb_open_impl(Pool* pool, const char* uri, const char* type, bool readonly,
+                              bool sqlite_no_create) {
+    RdbOpenWork* work = rdb_open_work_prepare(pool, uri, type, readonly, sqlite_no_create, false);
+    if (!work) return NULL;
+    (void)rdb_open_work_run(work, NULL);
+    return rdb_open_work_end(work, true);
 }
 
 RdbConn* rdb_open(Pool* pool, const char* uri, const char* type, bool readonly) {
@@ -624,15 +689,62 @@ static void rdb_build_reverse_fks(Pool* pool, RdbSchema* schema) {
     }
 }
 
-int rdb_load_schema(RdbConn* conn) {
-    if (!rdb_conn_live(conn) || !conn->driver->load_schema) return RDB_ERROR;
-    memset(&conn->schema, 0, sizeof(conn->schema));
-    int rc = conn->driver->load_schema(conn->handle, &rdb_host_api, conn->pool, &conn->schema);
+static int rdb_read_schema(const RdbDriver* driver, void* handle, Pool* pool, RdbSchema* schema) {
+    memset(schema, 0, sizeof(*schema));
+    int rc = driver->load_schema(handle, &rdb_host_api, pool, schema);
     if (rc == RDB_OK) {
-        rdb_derive_link_names(conn->pool, &conn->schema);
-        rdb_build_reverse_fks(conn->pool, &conn->schema);
+        rdb_derive_link_names(pool, schema);
+        rdb_build_reverse_fks(pool, schema);
     }
     return rc;
+}
+
+int rdb_load_schema(RdbConn* conn) {
+    if (!rdb_conn_live(conn) || !conn->driver->load_schema) return RDB_ERROR;
+    return rdb_read_schema(conn->driver, conn->handle, conn->pool, &conn->schema);
+}
+
+struct RdbSchemaWork {
+    RdbConnLife* pin;
+    const RdbDriver* driver;
+    void* handle;
+    Pool* pool;
+    RdbSchema schema;
+    int status;
+    bool ran;
+};
+
+RdbSchemaWork* rdb_schema_work_begin(RdbConn* conn, Pool* result_pool) {
+    if (!conn || !result_pool || !conn->driver || !conn->driver->load_schema) return NULL;
+    RdbConnLife* pin = rdb_conn_life_hold(conn);
+    if (!pin) return NULL;
+    RdbSchemaWork* work = (RdbSchemaWork*)mem_calloc(1, sizeof(RdbSchemaWork), MEM_CAT_INPUT_OTHER);
+    if (!work) { rdb_conn_life_release(pin); return NULL; }
+    work->pin = pin;
+    work->driver = conn->driver;
+    work->handle = conn->handle;
+    work->pool = result_pool;
+    work->status = RDB_ERROR;
+    return work;
+}
+
+int rdb_schema_work_run(RdbSchemaWork* work, const int* cancelled) {
+    if (!work || work->ran) return RDB_ERROR;
+    work->ran = true;
+    if (cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) return RDB_ERROR;
+    // The worker touches only its captured handle and private metadata pool.
+    work->status = rdb_read_schema(work->driver, work->handle, work->pool, &work->schema);
+    if (cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) work->status = RDB_ERROR;
+    return work->status;
+}
+
+int rdb_schema_work_end(RdbSchemaWork* work, RdbSchema* out) {
+    if (!work) return RDB_ERROR;
+    int status = work->ran && !work->pin->closed ? work->status : RDB_ERROR;
+    if (status == RDB_OK && out) *out = work->schema;
+    rdb_conn_life_release(work->pin);
+    mem_free(work);
+    return status;
 }
 
 RdbTable* rdb_get_table(RdbConn* conn, const char* table_name) {
@@ -651,6 +763,21 @@ RdbColumn* rdb_get_column(RdbTable* table, const char* column_name) {
             return &table->columns[i];
     }
     return NULL;
+}
+
+const char* rdb_type_name(RdbType type) {
+    switch (type) {
+        case RDB_TYPE_NULL: return "null";
+        case RDB_TYPE_INT: return "integer";
+        case RDB_TYPE_FLOAT: return "float";
+        case RDB_TYPE_STRING: return "string";
+        case RDB_TYPE_DECIMAL: return "decimal";
+        case RDB_TYPE_DATETIME: return "datetime";
+        case RDB_TYPE_JSON: return "json";
+        case RDB_TYPE_BOOL: return "boolean";
+        case RDB_TYPE_BLOB: return "binary";
+        default: return "unknown";
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -689,25 +816,176 @@ void rdb_append_placeholder(StrBuf* sb, const RdbDialect* dialect, int index) {
  * Query execution — wrappers delegating to the driver table
  * ══════════════════════════════════════════════════════════════════════ */
 
-RdbStmt* rdb_prepare(RdbConn* conn, const char* sql) {
-    if (!rdb_conn_live(conn) || !sql) return NULL;
-    void* handle = NULL;
-    if (conn->driver->prepare(conn->handle, sql, &handle) != RDB_OK || !handle) return NULL;
-    RdbStmt* stmt = (RdbStmt*)pool_calloc(conn->pool, sizeof(RdbStmt));
-    if (!stmt) {
-        conn->driver->finalize(handle);
-        return NULL;
+struct RdbPrepareWork {
+    RdbConn* conn;
+    RdbConnLife* pin;
+    const RdbDriver* driver;
+    void* connection;
+    void* statement;
+    char* sql;
+    const RdbParam* params;
+    int count;
+    int status;
+    bool ran;
+    bool strict_params;
+};
+
+static RdbPrepareWork* rdb_prepare_work_create(RdbConn* conn, const char* sql,
+                                               const RdbParam* params, int count, bool strict_params) {
+    if (!sql || count < 0 || (count && !params) || !rdb_conn_live(conn)) return NULL;
+    RdbConnLife* pin = rdb_conn_life_hold(conn);
+    if (!pin) return NULL;
+    RdbPrepareWork* work = (RdbPrepareWork*)mem_calloc(1, sizeof(RdbPrepareWork), MEM_CAT_INPUT_OTHER);
+    if (!work) { rdb_conn_life_release(pin); return NULL; }
+    work->sql = mem_strdup(sql, MEM_CAT_INPUT_OTHER);
+    if (!work->sql) { mem_free(work); rdb_conn_life_release(pin); return NULL; }
+    work->conn = conn;
+    work->pin = pin;
+    work->driver = conn->driver;
+    work->connection = conn->handle;
+    work->params = params;
+    work->count = count;
+    work->strict_params = strict_params;
+    work->status = RDB_ERROR;
+    return work;
+}
+
+RdbPrepareWork* rdb_prepare_work_begin(RdbConn* conn, const char* sql,
+                                       const RdbParam* params, int count) {
+    return rdb_prepare_work_create(conn, sql, params, count, true);
+}
+
+int rdb_prepare_work_run(RdbPrepareWork* work, const int* cancelled) {
+    if (!work || work->ran) return RDB_ERROR;
+    work->ran = true;
+    if (cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) return RDB_ERROR;
+    if (work->driver->prepare(work->connection, work->sql, &work->statement) != RDB_OK ||
+            !work->statement || (work->count && !work->driver->bind_param)) return RDB_ERROR;
+    if (work->strict_params && work->driver->struct_size >=
+            offsetof(RdbDriver, parameter_count) + sizeof(work->driver->parameter_count) &&
+            work->driver->parameter_count) {
+        int expected = work->driver->parameter_count(work->statement);
+        if (expected >= 0 && expected != work->count) return RDB_ERROR;
     }
-    stmt->conn = conn;
-    stmt->handle = handle;
-    // the close cascade finalizes whatever the owner leaves live
-    arraylist_append(conn->life->stmts, handle);
+    for (int i = 0; i < work->count; i++) {
+        if ((cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) ||
+                work->driver->bind_param(work->statement, i + 1, &work->params[i]) != RDB_OK)
+            return RDB_ERROR;
+    }
+    if (cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) return RDB_ERROR;
+    work->status = RDB_OK;
+    return RDB_OK;
+}
+
+RdbStmt* rdb_prepare_work_end(RdbPrepareWork* work, bool accept) {
+    if (!work) return NULL;
+    RdbStmt* stmt = NULL;
+    if (accept && work->ran && work->status == RDB_OK && !work->pin->closed &&
+            work->conn->life == work->pin) {
+        stmt = (RdbStmt*)pool_calloc(work->conn->pool, sizeof(RdbStmt));
+        if (stmt && arraylist_append(work->pin->stmts, work->statement)) {
+            stmt->conn = work->conn;
+            stmt->handle = work->statement;
+            work->statement = NULL;
+        } else stmt = NULL;
+    }
+    if (work->statement) work->driver->finalize(work->statement);
+    rdb_conn_life_release(work->pin);
+    mem_free(work->sql);
+    mem_free(work);
     return stmt;
+}
+
+RdbStmt* rdb_prepare(RdbConn* conn, const char* sql) {
+    RdbPrepareWork* work = rdb_prepare_work_create(conn, sql, NULL, 0, false);
+    if (!work) return NULL;
+    (void)rdb_prepare_work_run(work, NULL);
+    return rdb_prepare_work_end(work, true);
 }
 
 /** a statement is usable while its handle and connection are both live */
 static bool rdb_stmt_live(const RdbStmt* stmt) {
     return stmt && stmt->handle && rdb_conn_live(stmt->conn);
+}
+
+struct RdbFetchWork {
+    RdbConnLife* pin;
+    const RdbDriver* driver;
+    void* statement;
+    int max_rows;
+    int max_columns;
+    Pool* pool;
+    RdbRowFn row;
+    void* user;
+    RdbFetchResult result;
+    int status;
+    bool ran;
+};
+
+RdbFetchWork* rdb_fetch_work_begin(RdbStmt* stmt, int max_rows, int max_columns,
+                                  Pool* result_pool, RdbRowFn row, void* user) {
+    if (!rdb_stmt_live(stmt) || max_rows <= 0 || max_columns <= 0 || !result_pool || !row) return NULL;
+    RdbConnLife* pin = rdb_conn_life_hold(stmt->conn);
+    if (!pin) return NULL;
+    RdbFetchWork* work = (RdbFetchWork*)mem_calloc(1, sizeof(RdbFetchWork), MEM_CAT_INPUT_OTHER);
+    if (!work) { rdb_conn_life_release(pin); return NULL; }
+    work->pin = pin;
+    work->driver = stmt->conn->driver;
+    work->statement = stmt->handle;
+    work->max_rows = max_rows;
+    work->max_columns = max_columns;
+    work->pool = result_pool;
+    work->row = row;
+    work->user = user;
+    work->status = RDB_ERROR;
+    return work;
+}
+
+int rdb_fetch_work_run(RdbFetchWork* work, const int* cancelled) {
+    if (!work || work->ran) return RDB_ERROR;
+    work->ran = true;
+    if ((cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) ||
+            !work->driver->column_count || !work->driver->column_desc) return RDB_ERROR;
+    int count = work->driver->column_count(work->statement);
+    if (count < 0 || count > work->max_columns) return RDB_ERROR;
+    work->result.column_count = count;
+    if (count) {
+        work->result.columns = (RdbColumnDesc*)pool_calloc(work->pool, (size_t)count * sizeof(RdbColumnDesc));
+        if (!work->result.columns) return RDB_ERROR;
+        for (int c = 0; c < count; c++) {
+            RdbColumnDesc desc;
+            if (work->driver->column_desc(work->statement, c, &desc) != RDB_OK ||
+                    !desc.name || strlen(desc.name) > 4096) return RDB_ERROR;
+            work->result.columns[c] = desc;
+            work->result.columns[c].name = pool_strdup(work->pool, desc.name);
+            if (!work->result.columns[c].name) return RDB_ERROR;
+        }
+    }
+    RdbValue* values = count ? (RdbValue*)mem_calloc((size_t)count, sizeof(RdbValue), MEM_CAT_INPUT_OTHER) : NULL;
+    if (count && !values) return RDB_ERROR;
+    int rc = RDB_OK;
+    while (work->result.row_count < work->max_rows) {
+        if (cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) { rc = RDB_ERROR; break; }
+        int step = work->driver->step(work->statement);
+        if (step == RDB_DONE) { work->result.done = true; break; }
+        if (step != RDB_ROW) { rc = step; break; }
+        for (int c = 0; c < count; c++) values[c] = work->driver->column_value(work->statement, c);
+        if (!work->row(work->user, count, values)) { rc = RDB_ERROR; break; }
+        work->result.row_count++;
+    }
+    mem_free(values);
+    if (cancelled && __atomic_load_n(cancelled, __ATOMIC_ACQUIRE)) rc = RDB_ERROR;
+    work->status = rc;
+    return rc;
+}
+
+int rdb_fetch_work_end(RdbFetchWork* work, RdbFetchResult* out) {
+    if (!work) return RDB_ERROR;
+    int status = work->ran && !work->pin->closed ? work->status : RDB_ERROR;
+    if (status == RDB_OK && out) *out = work->result;
+    rdb_conn_life_release(work->pin);
+    mem_free(work);
+    return status;
 }
 
 int rdb_bind_int(RdbStmt* stmt, int index, int64_t value) {
@@ -767,15 +1045,15 @@ int rdb_column_desc(RdbStmt* stmt, int col_index, RdbColumnDesc* out) {
     return stmt->conn->driver->column_desc(stmt->handle, col_index, out);
 }
 
-void rdb_finalize(RdbStmt* stmt) {
-    if (!stmt) return;
+static void* rdb_detach_statement(RdbStmt* stmt) {
+    if (!stmt) return NULL;
     rdb_batch_shred_free(stmt->shred);
     stmt->shred = NULL;
-    if (!stmt->handle) return;
+    if (!stmt->handle) return NULL;
     void* handle = stmt->handle;
     stmt->handle = NULL;
     // a closed connection already finalized every live statement
-    if (!rdb_conn_live(stmt->conn)) return;
+    if (!rdb_conn_live(stmt->conn)) return NULL;
     ArrayList* live = stmt->conn->life->stmts;
     for (int i = 0; i < live->length; i++) {
         if (live->data[i] == handle) {
@@ -783,7 +1061,47 @@ void rdb_finalize(RdbStmt* stmt) {
             break;
         }
     }
-    stmt->conn->driver->finalize(handle);
+    return handle;
+}
+
+struct RdbFinalizeWork {
+    RdbConnLife* pin;
+    const RdbDriver* driver;
+    void* statement;
+    bool ran;
+};
+
+RdbFinalizeWork* rdb_finalize_work_begin(RdbStmt* stmt) {
+    if (!rdb_stmt_live(stmt)) return NULL;
+    RdbConnLife* pin = rdb_conn_life_hold(stmt->conn);
+    if (!pin) return NULL;
+    RdbFinalizeWork* work = (RdbFinalizeWork*)mem_calloc(1, sizeof(RdbFinalizeWork), MEM_CAT_INPUT_OTHER);
+    if (!work) { rdb_conn_life_release(pin); return NULL; }
+    work->pin = pin;
+    work->driver = stmt->conn->driver;
+    work->statement = rdb_detach_statement(stmt);
+    if (!work->statement) { rdb_conn_life_release(pin); mem_free(work); return NULL; }
+    return work;
+}
+
+void rdb_finalize_work_run(RdbFinalizeWork* work) {
+    if (!work || work->ran) return;
+    work->ran = true;
+    work->driver->finalize(work->statement);
+}
+
+void rdb_finalize_work_end(RdbFinalizeWork* work) {
+    if (!work) return;
+    // A cancelled queued job still has to release its native statement.
+    if (!work->ran) rdb_finalize_work_run(work);
+    rdb_conn_life_release(work->pin);
+    mem_free(work);
+}
+
+void rdb_finalize(RdbStmt* stmt) {
+    const RdbDriver* driver = stmt && stmt->conn ? stmt->conn->driver : NULL;
+    void* handle = rdb_detach_statement(stmt);
+    if (handle && driver) driver->finalize(handle);
 }
 
 int64_t rdb_row_count(RdbConn* conn, const char* table_name) {

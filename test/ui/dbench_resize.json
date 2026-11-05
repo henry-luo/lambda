@@ -1,0 +1,32 @@
+{
+  "name": "DBench resizes navigator and SQL editor panes",
+  "html": "test/demo/dbench/dbench.ls",
+  "viewport": {"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"mouse_down","target":{"selector":"#sidebar-divider"}},
+    {"type":"mouse_move","x":370,"y":160},
+    {"type":"mouse_up","x":370,"y":160},
+    {"type":"assert_script","js":"document.getElementById('sidebar').getBoundingClientRect().width>340"},
+    {"type":"key_press","key":"Home"},
+    {"type":"assert_attribute","target":{"selector":"#sidebar-divider"},"attribute":"aria-valuenow","equals":"180"},
+    {"type":"mouse_down","target":{"selector":"#editor-divider"}},
+    {"type":"mouse_move","x":500,"y":330},
+    {"type":"mouse_up","x":500,"y":330},
+    {"type":"assert_script","js":"document.getElementById('sql').getBoundingClientRect().height>100"},
+    {"type":"key_press","key":"Home"},
+    {"type":"assert_attribute","target":{"selector":"#editor-divider"},"attribute":"aria-valuenow","equals":"62"},
+    {"type":"mouse_down","target":{"selector":"#result-col-resize-0"}},
+    {"type":"mouse_move","x":500,"y":350},
+    {"type":"mouse_up","x":500,"y":350},
+    {"type":"assert_script","js":"document.getElementById('result-0-0').getBoundingClientRect().width>200"},
+    {"type":"click","target":{"selector":"#next"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-offset","equals":"256"},
+    {"type":"assert_script","js":"document.getElementById('result-0-0').getBoundingClientRect().width>200"},
+    {"type":"script","js":"document.getElementById('result-col-resize-0').focus()"},
+    {"type":"key_press","key":"Home"},
+    {"type":"assert_attribute","target":{"selector":"#result-col-resize-0"},"attribute":"aria-valuenow","equals":"50"},
+    {"type":"assert_script","js":"document.querySelectorAll('#result-grid td[data-row]').length<500"}
+  ]
+}

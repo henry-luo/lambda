@@ -81,7 +81,8 @@ struct DomBoundary;
     OP(bool, element_client_frame, (DomNode* node, RdtMatrix* matrix, float* origin_x, float* origin_y), (node, matrix, origin_x, origin_y), false) \
     OP(bool, source_boundary, (DomNode* root, const SourcePosC* position, DomBoundary* boundary), (root, position, boundary), false) \
     OP(bool, text_control_selection_rects, (UiContext* ui, DomElement* element, uint32_t start, uint32_t end, void (*callback)(float, float, float, float, void*), void* owner), (ui, element, start, end, callback, owner), false) \
-    OP(int, url_attribute_get, (Item receiver, Item* out, const char* attribute), (receiver, out, attribute), 0)
+    OP(int, url_attribute_get, (Item receiver, Item* out, const char* attribute), (receiver, out, attribute), 0) \
+    OP(Item, request_frame_once, (Item owner, Item event_name), (owner, event_name), ItemNull)
 
 struct DomHostEngineOps {
 #define DOM_HOST_FIELD(result, name, parameters, arguments, absence) result (*name) parameters;

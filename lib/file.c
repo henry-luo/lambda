@@ -19,6 +19,7 @@
 
 #include <string.h>
 #include "memtrack.h"
+#include "digest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -1526,144 +1527,243 @@ bool file_anchor_read_all_named(FileAnchor* anchor, const char* relative, uint64
     return true;
 }
 
+struct FileAtomicWriter {
+    FileAnchor* anchor;
+    char* relative;
+    char* copy;
+    const char* leaf;
+    char stage[48];
+    int parent;
+    FILE* stream;
+    bool replacing;
+    bool failed;
+    bool stage_untrusted;
+    bool stage_identified;
+    uint64_t stage_device, stage_inode;
+    size_t bytes_written;
+    DigestCtx* digest;
+    uint8_t expected_digest[32];
+    bool digest_finalized;
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
-static bool file_anchor_stage_matches(int parent, const char* stage, const struct stat* expected) {
-    struct stat st;
-    if (fstatat(parent, stage, &st, AT_SYMLINK_NOFOLLOW) != 0) return false;
-    FileRevision actual = file_revision_from_stat(&st);
-    FileRevision original = file_revision_from_stat(expected);
-#ifdef __APPLE__
-    bool same_change_time = st.st_ctimespec.tv_nsec == expected->st_ctimespec.tv_nsec;
-#else
-    bool same_change_time = st.st_ctim.tv_nsec == expected->st_ctim.tv_nsec;
+    struct stat stage_snapshot;
+    bool stage_snapshot_valid;
 #endif
-    if (!S_ISREG(st.st_mode) || st.st_nlink != 1 || !same_change_time || !file_revision_equal(&original, &actual)) {
+    FileRevision expected;
+};
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+// A staged name can be replaced while a streaming writer is parked. Never
+// publish or remove a different inode merely because it reused that name.
+static bool file_anchor_stage_bound(const FileAtomicWriter* writer) {
+    struct stat st;
+    if (!writer->stage_identified || fstatat(writer->parent, writer->stage, &st, AT_SYMLINK_NOFOLLOW) != 0 ||
+            !S_ISREG(st.st_mode) || st.st_nlink != 1 ||
+            (uint64_t)st.st_dev != writer->stage_device || (uint64_t)st.st_ino != writer->stage_inode) {
         errno = ESTALE;
         return false;
     }
     return true;
 }
 
-static bool file_anchor_stage_has_content(int fd, const void* content, size_t size) {
-    unsigned char buffer[16384];
-    size_t offset = 0;
-    while (offset < size) {
-        off_t position = (off_t)offset;
-        if (position < 0 || (uint64_t)position != (uint64_t)offset) { errno = EFBIG; return false; }
-        size_t remaining = size - offset;
-        size_t chunk = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
-        ssize_t count = pread(fd, buffer, chunk, position);
-        if (count < 0 && errno == EINTR) continue;
-        if (count <= 0) { if (!count) errno = ESTALE; return false; }
-        if (memcmp(buffer, (const unsigned char*)content + offset, (size_t)count)) { errno = ESTALE; return false; }
-        offset += (size_t)count;
-    }
+static bool file_anchor_stage_matches_snapshot(const FileAtomicWriter* writer) {
+    if (!writer->stage_snapshot_valid) return true;
+    struct stat st;
+    if (fstat(fileno(writer->stream), &st) != 0) return false;
+    FileRevision expected = file_revision_from_stat(&writer->stage_snapshot);
+    FileRevision actual = file_revision_from_stat(&st);
+#ifdef __APPLE__
+    bool same_change_time = st.st_ctimespec.tv_nsec == writer->stage_snapshot.st_ctimespec.tv_nsec;
+#else
+    bool same_change_time = st.st_ctim.tv_nsec == writer->stage_snapshot.st_ctim.tv_nsec;
+#endif
+    if (!same_change_time || !file_revision_equal(&expected, &actual)) { errno = ESTALE; return false; }
     return true;
 }
 
-static void file_anchor_discard_stage(int parent, const char* stage, const struct stat* expected,
-        int fd, const void* content, size_t size) {
-    int error = errno;
-    // Only an unchanged prefix of our input is safe to remove after an error.
-    if (expected->st_size >= 0 && (uint64_t)expected->st_size <= size &&
-            file_anchor_stage_matches(parent, stage, expected) &&
-            file_anchor_stage_has_content(fd, content, (size_t)expected->st_size) &&
-            file_anchor_stage_matches(parent, stage, expected)) (void)unlinkat(parent, stage, 0);
-    errno = error;
+// A host callback can modify the original inode, even while preserving its
+// timestamps. Verify the streamed bytes before publication or cleanup.
+static bool file_anchor_stage_has_content(FileAtomicWriter* writer) {
+    if (!writer->stream || !writer->digest || !file_anchor_stage_bound(writer) ||
+            !file_anchor_stage_matches_snapshot(writer)) return false;
+    if (!writer->digest_finalized) {
+        if (!digest_finalize(writer->digest, writer->expected_digest, sizeof(writer->expected_digest))) return false;
+        writer->digest_finalized = true;
+    }
+    int fd = fileno(writer->stream);
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size < 0 || (uint64_t)st.st_size != writer->bytes_written) {
+        errno = ESTALE; return false;
+    }
+    DigestCtx* actual = digest_ctx_new(DIGEST_SHA256);
+    if (!actual) { errno = ENOMEM; return false; }
+    unsigned char buffer[16384];
+    size_t offset = 0;
+    bool ok = true;
+    int read_error = 0;
+    while (offset < writer->bytes_written) {
+        off_t position = (off_t)offset;
+        if (position < 0 || (uint64_t)position != (uint64_t)offset) { ok = false; break; }
+        size_t remaining = writer->bytes_written - offset;
+        size_t chunk = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        ssize_t count = pread(fd, buffer, chunk, position);
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) { read_error = errno; ok = false; break; }
+        if (count == 0 || !digest_update(actual, buffer, (size_t)count)) { ok = false; break; }
+        offset += (size_t)count;
+    }
+    uint8_t actual_digest[32];
+    ok = ok && digest_finalize(actual, actual_digest, sizeof(actual_digest)) &&
+        memcmp(actual_digest, writer->expected_digest, sizeof(actual_digest)) == 0 &&
+        file_anchor_stage_bound(writer) && file_anchor_stage_matches_snapshot(writer);
+    digest_ctx_free(actual);
+    if (!ok) errno = read_error ? read_error : ESTALE;
+    return ok;
 }
 #endif
 
-int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
-        const void* content, size_t size, const FileRevision* expected) {
+void file_anchor_write_abort(FileAtomicWriter* writer) {
 #if defined(_WIN32) || defined(__EMSCRIPTEN__)
-    (void)anchor; (void)relative; (void)content; (void)size; (void)expected; errno = ENOTSUP; return -1;
+    (void)writer;
 #else
-    if (!content || (expected && (!expected->stat.exists || !expected->stat.is_file))) {
-        errno = EINVAL; return -1;
+    if (!writer) return;
+    int error = errno;
+    if (writer->parent >= 0) {
+        if (!writer->stage_untrusted && writer->stage[0] && writer->stream && fflush(writer->stream) == 0 &&
+                file_anchor_stage_has_content(writer)) unlinkat(writer->parent, writer->stage, 0);
     }
-    char* copy = NULL; const char* leaf = NULL;
-    int parent = file_anchor_parent(anchor, relative, &copy, &leaf);
-    if (parent < 0) { mem_free(copy); return -1; }
+    if (writer->stream) fclose(writer->stream);
+    if (writer->parent >= 0) close(writer->parent);
+    if (writer->digest) digest_ctx_free(writer->digest);
+    mem_free(writer->copy);
+    mem_free(writer->relative);
+    mem_free(writer);
+    errno = error;
+#endif
+}
+
+FileAtomicWriter* file_anchor_write_begin(FileAnchor* anchor, const char* relative,
+        const FileRevision* expected) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)anchor; (void)relative; (void)expected; errno = ENOTSUP; return NULL;
+#else
+    if (!anchor || !relative || (expected && (!expected->stat.exists || !expected->stat.is_file))) {
+        errno = EINVAL; return NULL;
+    }
+    FileAtomicWriter* writer = (FileAtomicWriter*)mem_calloc(1, sizeof(FileAtomicWriter), MEM_CAT_SYSTEM);
+    if (!writer) { errno = ENOMEM; return NULL; }
+    writer->parent = -1;
+    writer->anchor = anchor;
+    writer->digest = digest_ctx_new(DIGEST_SHA256);
+    if (!writer->digest) { errno = ENOMEM; goto failed; }
+    writer->relative = mem_strdup(relative, MEM_CAT_SYSTEM);
+    if (!writer->relative) { errno = ENOMEM; goto failed; }
+    writer->replacing = expected != NULL;
+    if (expected) writer->expected = *expected;
+    writer->parent = file_anchor_parent(anchor, relative, &writer->copy, &writer->leaf);
+    if (writer->parent < 0) goto failed;
     struct stat st;
-    bool exists = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
+    bool exists = fstatat(writer->parent, writer->leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
     FileRevision actual = file_revision_from_stat(exists ? &st : NULL);
-    int result = -1;
-    int stage_hold = -1;
-    if (!exists && errno != ENOENT) goto done;
-    if (!expected && exists) { errno = EEXIST; goto done; }
+    if (!exists && errno != ENOENT) goto failed;
+    if (!expected && exists) { errno = EEXIST; goto failed; }
     if (expected && (!exists || !file_anchor_object_stat(anchor, &st) ||
-        !file_revision_equal(expected, &actual))) { errno = ESTALE; goto done; }
+        !file_revision_equal(expected, &actual))) { errno = ESTALE; goto failed; }
     if (!file_anchor_guard(anchor, relative, expected ? FILE_ANCHOR_REPLACE : FILE_ANCHOR_CREATE,
-            exists ? &actual : NULL)) goto done;
+            exists ? &actual : NULL)) goto failed;
     uint8_t random[16];
-    char stage[48];
     int fd = -1;
     for (int retry = 0; retry < 8; retry++) {
-        if (!crypto_random_bytes(random, sizeof(random))) { errno = EIO; goto done; }
-        memcpy(stage, FILE_ATOMIC_STAGE_PREFIX, sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1);
-        hex_encode(random, sizeof(random), stage + sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1);
-        fd = openat(parent, stage, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (!crypto_random_bytes(random, sizeof(random))) { errno = EIO; goto failed; }
+        memcpy(writer->stage, FILE_ATOMIC_STAGE_PREFIX, sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1);
+        hex_encode(random, sizeof(random), writer->stage + sizeof(FILE_ATOMIC_STAGE_PREFIX) - 1);
+        fd = openat(writer->parent, writer->stage, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (fd >= 0 || errno != EEXIST) break;
+        writer->stage[0] = 0; // a collision belongs to another writer
     }
-    if (fd < 0) goto done;
-    struct stat stage_stat;
-    if (fstat(fd, &stage_stat) != 0) { close(fd); goto done; }
-    // Keep the inode alive through authorization and publication to prevent reuse.
-    stage_hold = fcntl(fd, F_DUPFD_CLOEXEC, 0);
-    if (stage_hold < 0) {
-        int error = errno; file_anchor_discard_stage(parent, stage, &stage_stat, fd, content, size); close(fd); errno = error; goto done;
+    if (fd < 0) { writer->stage[0] = 0; goto failed; }
+    struct stat staged;
+    if (fstat(fd, &staged) != 0) { int error = errno; close(fd); errno = error; goto failed; }
+    writer->stage_identified = true;
+    writer->stage_device = (uint64_t)staged.st_dev;
+    writer->stage_inode = (uint64_t)staged.st_ino;
+    writer->stream = fdopen(fd, "w+b");
+    if (!writer->stream) {
+        int error = errno;
+        struct stat empty_stage;
+        if (fstat(fd, &empty_stage) == 0 && empty_stage.st_size == 0 &&
+                file_anchor_stage_bound(writer)) {
+            unlinkat(writer->parent, writer->stage, 0);
+            writer->stage[0] = 0;
+        }
+        file_anchor_write_abort(writer);
+        close(fd);
+        errno = error;
+        return NULL;
     }
-    FILE* stream = fdopen(fd, "wb");
-    if (!stream) { int error = errno; close(fd); errno = error; file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done; }
-    bool written = fwrite(content, 1, size, stream) == size && fflush(stream) == 0 &&
+    return writer;
+failed:
+    file_anchor_write_abort(writer);
+    return NULL;
+#endif
+}
+
+bool file_anchor_write_chunk(FileAtomicWriter* writer, const void* content, size_t size) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)writer; (void)content; (void)size; errno = ENOTSUP; return false;
+#else
+    if (!writer || !writer->stream || !content || writer->failed) { errno = EINVAL; return false; }
+    if (size > SIZE_MAX - writer->bytes_written) { writer->failed = true; errno = EFBIG; return false; }
+    size_t written = fwrite(content, 1, size, writer->stream);
+    if (!digest_update(writer->digest, content, written)) { writer->failed = true; return false; }
+    writer->bytes_written += written;
+    if (written != size) { writer->failed = true; return false; }
+    return true;
+#endif
+}
+
+int file_anchor_write_commit(FileAtomicWriter* writer) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+    (void)writer; errno = ENOTSUP; return -1;
+#else
+    if (!writer || !writer->stream) { errno = EINVAL; return -1; }
+    FileAnchor* anchor = writer->anchor;
+    int result = -1;
+    int fd = fileno(writer->stream);
+    // The open stream pins the stage inode until publication and cleanup.
+    bool written = !writer->failed && fflush(writer->stream) == 0 &&
         file_anchor_sync(fd, anchor->options.flags) == 0;
-    int write_error = errno;
-    struct stat completed_stat;
-    if (fstat(fd, &completed_stat) == 0) stage_stat = completed_stat;
-    else { written = false; write_error = errno; }
-    if (fclose(stream) != 0) { written = false; write_error = errno; }
-    if (!written) { errno = write_error; file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done; }
-    if (!file_anchor_validate(anchor)) { file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done; }
-    if (expected) {
-        exists = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
-        actual = file_revision_from_stat(exists ? &st : NULL);
-        if (!exists || !file_anchor_object_stat(anchor, &st) || !file_revision_equal(expected, &actual)) {
-            errno = ESTALE; file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
+    if (!written || !file_anchor_validate(anchor)) goto done;
+    if (fstat(fd, &writer->stage_snapshot) != 0) goto done;
+    writer->stage_snapshot_valid = true;
+    if (writer->replacing) {
+        struct stat st;
+        bool exists = fstatat(writer->parent, writer->leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
+        FileRevision actual = file_revision_from_stat(exists ? &st : NULL);
+        if (!exists || !file_anchor_object_stat(anchor, &st) || !file_revision_equal(&writer->expected, &actual)) {
+            errno = ESTALE; goto done;
         }
-        if (!file_anchor_guard(anchor, relative, FILE_ANCHOR_REPLACE, &actual)) {
-            file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
-        }
+        if (!file_anchor_guard(anchor, writer->relative, FILE_ANCHOR_REPLACE, &actual)) goto done;
     } else {
-        if (!file_anchor_guard(anchor, relative, FILE_ANCHOR_CREATE, NULL)) {
-            file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
+        if (!file_anchor_guard(anchor, writer->relative, FILE_ANCHOR_CREATE, NULL)) goto done;
+    }
+    // A guard can replace a parent or destination after the earlier checks.
+    if (!file_anchor_parent_matches(anchor, writer->relative, writer->parent)) goto done;
+    if (writer->replacing) {
+        struct stat st;
+        bool exists = fstatat(writer->parent, writer->leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
+        FileRevision actual = file_revision_from_stat(exists ? &st : NULL);
+        if (!exists || !file_anchor_object_stat(anchor, &st) || !file_revision_equal(&writer->expected, &actual)) {
+            errno = ESTALE; goto done;
         }
     }
-    // Host guards can change bindings; validate after the final callback.
-    if (!file_anchor_parent_matches(anchor, relative, parent)) {
-        file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
-    }
-    if (expected) {
-        exists = fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0;
-        actual = file_revision_from_stat(exists ? &st : NULL);
-        if (!exists || !file_anchor_object_stat(anchor, &st) || !file_revision_equal(expected, &actual)) {
-            errno = ESTALE; file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size); goto done;
-        }
-    }
-    if (!file_anchor_stage_matches(parent, stage, &stage_stat)) {
-        errno = ESTALE; goto done;
-    }
-    // Do not rely on timestamp granularity to detect changes made by a guard.
-    if (!file_anchor_stage_has_content(stage_hold, content, size) ||
-            !file_anchor_stage_matches(parent, stage, &stage_stat)) {
-        goto done;
-    }
-    result = expected ? renameat(parent, stage, parent, leaf) :
-        file_publish_new_at(parent, stage, parent, leaf);
+    if (!file_anchor_stage_has_content(writer)) { writer->stage_untrusted = true; goto done; }
+    result = writer->replacing ? renameat(writer->parent, writer->stage, writer->parent, writer->leaf)
+        : file_publish_new_at(writer->parent, writer->stage, writer->parent, writer->leaf);
     {
         int publish_error = errno;
-        if (result != 0) file_anchor_discard_stage(parent, stage, &stage_stat, stage_hold, content, size);
+        if (result == 0) writer->stage[0] = 0;
         // publication has committed even if directory durability cannot be confirmed
-        if (result == 0 && file_anchor_sync(parent, anchor->options.flags) != 0) {
+        if (result == 0 && file_anchor_sync(writer->parent, anchor->options.flags) != 0) {
             publish_error = errno;
             log_error("FILE-ANCHOR: publication committed but directory sync failed");
             result = 1;
@@ -1673,13 +1773,20 @@ int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
 done:
     {
         int error = errno;
-        if (stage_hold >= 0) close(stage_hold);
-        close(parent);
-        mem_free(copy);
+        file_anchor_write_abort(writer);
         errno = error;
     }
     return result;
 #endif
+}
+
+int file_anchor_write_atomic(FileAnchor* anchor, const char* relative,
+        const void* content, size_t size, const FileRevision* expected) {
+    if (!content) { errno = EINVAL; return -1; }
+    FileAtomicWriter* writer = file_anchor_write_begin(anchor, relative, expected);
+    if (!writer) return -1;
+    if (!file_anchor_write_chunk(writer, content, size)) { file_anchor_write_abort(writer); return -1; }
+    return file_anchor_write_commit(writer);
 }
 
 static bool file_path_has_atomic_stage_folded(const char* path) {

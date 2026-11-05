@@ -1,5 +1,6 @@
 #include "../io/fs_node.hpp"
 #include "io_file_search.hpp"
+#include "io_resource.hpp"
 #include "../io/mark_output_builder.hpp"
 #include "transpiler.hpp"
 #include "../../lib/log.h"
@@ -465,7 +466,6 @@ Item pn_output_append(Item source, Item target_item) {
 
 extern void free_fetch_response(FetchResponse* response);
 Item _map_get(TypeMap* type, void* data, const char* key, bool* found);
-extern "C" StrBuf* lambda_get_local_path_from_item(Item item);
 
 // ---------------------------------------------------------------------------
 // fetch / io.fetch (AR-E1, AR-E2, AR-E3v2). The transfer runs on the thread
@@ -1330,11 +1330,44 @@ extern "C" StrBuf* lambda_get_local_path_from_item(Item item) {
 }
 
 // Check cancellation immediately before the anchor stages or publishes bytes.
-static bool create_file_guard(void* context, const char* relative, FileAnchorAction action,
+bool io_resource_file_guard(void* context, const char* relative, FileAnchorAction action,
         const FileRevision* object) {
     (void)relative; (void)action; (void)object;
     LambdaTask* task = (LambdaTask*)context;
     return !task || !lambda_task_cancel_requested(task);
+}
+
+Item io_resource_create_anchor(Item target, const char* operation, LambdaTask* owner,
+        uint32_t flags, FileAnchor** out_anchor, char** out_leaf) {
+    *out_anchor = NULL;
+    *out_leaf = NULL;
+    TypeId type = get_type_id(target);
+    if ((!is_text_type_id(type) && type != LMD_TYPE_PATH) ||
+            (is_text_type_id(type) && (!target.get_chars() || memchr(target.get_chars(), 0, target.get_len()))))
+        return io_fs_error(ERR_TYPE_MISMATCH, "%s: expected a local path", operation);
+    RootFrame roots(1);
+    Rooted<Item> held(roots, target);
+    StrBuf* path = lambda_get_local_path_from_item(held.get());
+    if (!path || !path->str || !path->length || memchr(path->str, 0, path->length) || file_path_has_atomic_stage(path->str)) {
+        if (path) strbuf_free(path);
+        return io_fs_error(ERR_INVALID_OPERATION, "%s: invalid local path", operation);
+    }
+    const char* leaf = file_path_basename(path->str);
+    char* parent = file_path_dirname(path->str);
+    FileAnchorOptions options = {flags, io_resource_file_guard, owner, NULL, NULL};
+    FileAnchor* anchor = parent && leaf && *leaf && strcmp(leaf, ".") && strcmp(leaf, "..")
+        ? file_anchor_open(parent, &options) : NULL;
+    char* name = anchor ? mem_strdup(leaf, MEM_CAT_EVAL) : NULL;
+    mem_free(parent);
+    strbuf_free(path);
+    if (!anchor || !name) {
+        if (anchor) file_anchor_close(anchor);
+        mem_free(name);
+        return io_fs_error(ERR_FILE_WRITE_ERROR, "%s: cannot open the destination directory", operation);
+    }
+    *out_anchor = anchor;
+    *out_leaf = name;
+    return ItemNull;
 }
 
 // A distinct operation makes older runtimes reject create-only publication.
@@ -1346,28 +1379,14 @@ Item pn_io_create_file(Item target_item, Item content) {
         return io_fs_error(ERR_INVALID_OPERATION, "io.create_file: unavailable in dry-run mode");
     RootFrame roots(2);
     Rooted<Item> target_root(roots, target_item), content_root(roots, content);
-    TypeId target_type = get_type_id(target_item), content_type = get_type_id(content);
-    if ((!is_text_type_id(target_type) && target_type != LMD_TYPE_PATH) ||
-            (is_text_type_id(target_type) && (!target_item.get_chars() ||
-                memchr(target_item.get_chars(), 0, target_item.get_len()))) ||
-            (content_type != LMD_TYPE_STRING && content_type != LMD_TYPE_BINARY))
+    TypeId content_type = get_type_id(content);
+    if (content_type != LMD_TYPE_STRING && content_type != LMD_TYPE_BINARY)
         return io_fs_error(ERR_TYPE_MISMATCH, "io.create_file: expected a local path and text or binary content");
-    StrBuf* path = lambda_get_local_path_from_item(target_root.get());
-    if (!path || !path->str || !path->length || memchr(path->str, 0, path->length) || file_path_has_atomic_stage(path->str)) {
-        if (path) strbuf_free(path);
-        return io_fs_error(ERR_INVALID_OPERATION, "io.create_file: invalid local path");
-    }
-    const char* leaf = file_path_basename(path->str);
-    char* parent = file_path_dirname(path->str);
-    // Confirmed create-only exports require the same durable publication barrier.
-    FileAnchorOptions options = {FILE_ANCHOR_FULL_SYNC, create_file_guard, lambda_task_running(), NULL, NULL};
-    FileAnchor* anchor = parent && leaf && *leaf && strcmp(leaf, ".") && strcmp(leaf, "..")
-        ? file_anchor_open(parent, &options) : NULL;
-    mem_free(parent);
-    if (!anchor) {
-        strbuf_free(path);
-        return io_fs_error(ERR_FILE_WRITE_ERROR, "io.create_file: cannot open the destination directory");
-    }
+    FileAnchor* anchor = NULL;
+    char* leaf = NULL;
+    Item opened = io_resource_create_anchor(target_root.get(), "io.create_file", lambda_task_running(),
+        FILE_ANCHOR_FULL_SYNC, &anchor, &leaf);
+    if (item_is_error(opened)) return opened;
     const void* bytes = NULL;
     size_t size = 0;
     if (content_type == LMD_TYPE_STRING) {
@@ -1382,7 +1401,7 @@ Item pn_io_create_file(Item target_item, Item content) {
     int status = bytes ? file_anchor_write_atomic(anchor, leaf, bytes, size, NULL) : -1;
     int error = errno;
     file_anchor_close(anchor);
-    strbuf_free(path);
+    mem_free(leaf);
     if (status == 1) return io_fs_error(ERR_FILE_WRITE_ERROR,
         "io.create_file: file was published but directory durability is uncertain; inspect before retrying");
     if (status != 0) return io_fs_error(ERR_FILE_WRITE_ERROR, "io.create_file: publication failed: %s", strerror(error));

@@ -12,13 +12,14 @@
  * URI → targets and tunnel options
  * ══════════════════════════════════════════════════════════════════════ */
 
-// libpq options the host's bridge replaces or the driver handles itself
+// libpq options the host's bridge replaces or the driver handles itself.
+// Keep connect_timeout: it must bound libpq authentication as well as the bridge.
 static const char* const pg_bridge_keys[] = {
     "host", "hostaddr", "port", "sslmode", "sslrootcert", "sslcert", "sslkey", "sslpassword",
     "sslcrl", "sslcrldir", "sslsni", "sslcompression", "ssl_min_protocol_version",
     "ssl_max_protocol_version", "sslnegotiation", "requiressl", "sslcertmode", "gssencmode",
     "gsslib", "krbsrvname", "gssdelegation", "requirepeer", "target_session_attrs",
-    "load_balance_hosts", "connect_timeout",
+    "load_balance_hosts",
 };
 
 typedef struct {
@@ -158,6 +159,7 @@ static char* pg_bridge_conninfo(const PgUri* u, const char* endpoint, int port) 
 
 typedef struct {
     PGconn* pg;
+    void* active_stmt;          // a streaming result owns the connection until drained
 } PgConn;
 
 static const RdbDialect pg_dialect = { RDB_PLACEHOLDER_DOLLAR, '"' };
@@ -249,7 +251,8 @@ static int pg_ping(void* conn) {
 }
 
 static int pg_reset(void* conn) {
-    return pg_exec_command(((PgConn*)conn)->pg, "DISCARD ALL") ? RDB_OK : RDB_ERROR;
+    PgConn* c = (PgConn*)conn;
+    return !c->active_stmt && pg_exec_command(c->pg, "DISCARD ALL") ? RDB_OK : RDB_ERROR;
 }
 
 static int pg_cancel(void* conn) {
@@ -261,9 +264,11 @@ static int pg_cancel(void* conn) {
 }
 
 static int pg_set_timeout(void* conn, int64_t statement_ms) {
+    PgConn* c = (PgConn*)conn;
+    if (c->active_stmt) return RDB_ERROR;
     char sql[64];
     snprintf(sql, sizeof(sql), "SET statement_timeout = %" PRId64, statement_ms);
-    return pg_exec_command(((PgConn*)conn)->pg, sql) ? RDB_OK : RDB_ERROR;
+    return pg_exec_command(c->pg, sql) ? RDB_OK : RDB_ERROR;
 }
 
 static const char* pg_error_msg(void* conn) {
@@ -288,7 +293,7 @@ static RdbType pg_type_for_oid(Oid oid) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
- * Statements: executed on first use, results buffered
+ * Statements: executed on first use, one result row at a time
  * ══════════════════════════════════════════════════════════════════════ */
 
 typedef struct {
@@ -298,6 +303,14 @@ typedef struct {
     int       param_count;
     PGresult* res;
     int       row;
+    bool      started;
+    bool      done;
+    int       result;
+    int       column_count;
+    char**    column_names;
+    RdbType*  column_types;
+    unsigned char** decoded;
+    size_t*   decoded_lengths;
 } PgStmt;
 
 static int pg_prepare(void* conn, const char* sql, void** out_stmt) {
@@ -311,7 +324,7 @@ static int pg_prepare(void* conn, const char* sql, void** out_stmt) {
 
 static int pg_bind_param(void* stmt, int index, const RdbParam* param) {
     PgStmt* s = (PgStmt*)stmt;
-    if (index < 1 || s->res) return RDB_ERROR;
+    if (index < 1 || s->started) return RDB_ERROR;
     if (index > s->param_count) {
         s->params = (char**)realloc(s->params, (size_t)index * sizeof(char*));
         for (int i = s->param_count; i < index; i++) s->params[i] = NULL;
@@ -322,35 +335,115 @@ static int pg_bind_param(void* stmt, int index, const RdbParam* param) {
     return RDB_OK;
 }
 
-static int pg_execute(PgStmt* s) {
-    if (s->res) return RDB_OK;
+static void pg_clear_decoded(PgStmt* s) {
+    for (int c = 0; s->decoded && c < s->column_count; c++) {
+        PQfreemem(s->decoded[c]);
+        s->decoded[c] = NULL;
+    }
+}
+
+static void pg_drain(PgStmt* s) {
+    PGresult* extra;
+    while ((extra = PQgetResult(s->conn->pg)) != NULL) PQclear(extra);
+    s->done = true;
+    if (s->conn->active_stmt == s) s->conn->active_stmt = NULL;
+}
+
+static int pg_failure(PgStmt* s) {
     PGconn* pg = s->conn->pg;
-    s->res = PQexecParams(pg, s->sql, s->param_count, NULL, (const char* const*)s->params,
-                          NULL, NULL, 0);
-    ExecStatusType status = PQresultStatus(s->res);
-    if (status == PGRES_TUPLES_OK || status == PGRES_COMMAND_OK) return RDB_OK;
     rdb_mod_log(RDB_LOG_ERROR, "rdb pg: query failed: %s", PQerrorMessage(pg));
-    return PQstatus(pg) == CONNECTION_OK ? RDB_ERROR : RDB_CONN_LOST;
+    s->result = PQstatus(pg) == CONNECTION_OK ? RDB_ERROR : RDB_CONN_LOST;
+    if (s->conn->active_stmt == s) pg_drain(s);
+    return s->result;
+}
+
+static void pg_end_unsupported_copy(PgStmt* s, ExecStatusType status) {
+    PGconn* pg = s->conn->pg;
+    // COPY has its own wire protocol; PQgetResult alone cannot drain it.
+    if (status == PGRES_COPY_OUT || status == PGRES_COPY_BOTH) (void)pg_cancel(s->conn);
+    if (status == PGRES_COPY_IN || status == PGRES_COPY_BOTH)
+        (void)PQputCopyEnd(pg, "COPY is not supported by the RDB row interface");
+    if (status == PGRES_COPY_OUT || status == PGRES_COPY_BOTH) {
+        char* data = NULL;
+        int received;
+        while ((received = PQgetCopyData(pg, &data, 0)) > 0) {
+            PQfreemem(data);
+            data = NULL;
+        }
+    }
+}
+
+static int pg_execute(PgStmt* s) {
+    if (s->started) return s->result;
+    s->started = true;
+    if (s->conn->active_stmt) return s->result = RDB_ERROR;
+    PGconn* pg = s->conn->pg;
+    if (!PQsendQueryParams(pg, s->sql, s->param_count, NULL, (const char* const*)s->params,
+                           NULL, NULL, 0)) return pg_failure(s);
+    s->conn->active_stmt = s;
+    // libpq requires selecting single-row mode before retrieving the first result.
+    if (!PQsetSingleRowMode(pg)) return pg_failure(s);
+    s->res = PQgetResult(pg);
+    if (!s->res) return pg_failure(s);
+    ExecStatusType status = PQresultStatus(s->res);
+    if (status == PGRES_COPY_IN || status == PGRES_COPY_OUT || status == PGRES_COPY_BOTH)
+        pg_end_unsupported_copy(s, status);
+    if (status != PGRES_SINGLE_TUPLE && status != PGRES_TUPLES_OK && status != PGRES_COMMAND_OK)
+        return pg_failure(s);
+
+    // PGresult changes on every step; the ABI keeps names valid until finalize.
+    s->column_count = PQnfields(s->res);
+    if (s->column_count) {
+        size_t n = (size_t)s->column_count;
+        s->column_names = (char**)calloc(n, sizeof(char*));
+        s->column_types = (RdbType*)calloc(n, sizeof(RdbType));
+        s->decoded = (unsigned char**)calloc(n, sizeof(unsigned char*));
+        s->decoded_lengths = (size_t*)calloc(n, sizeof(size_t));
+        if (!s->column_names || !s->column_types || !s->decoded || !s->decoded_lengths) {
+            (void)pg_cancel(s->conn);
+            return pg_failure(s);
+        }
+        for (int c = 0; c < s->column_count; c++) {
+            s->column_names[c] = rdb_mod_strdup(PQfname(s->res, c));
+            if (!s->column_names[c]) { (void)pg_cancel(s->conn); return pg_failure(s); }
+            s->column_types[c] = pg_type_for_oid(PQftype(s->res, c));
+        }
+    }
+    if (status != PGRES_SINGLE_TUPLE) pg_drain(s);
+    return RDB_OK;
 }
 
 static int pg_step(void* stmt) {
     PgStmt* s = (PgStmt*)stmt;
     int rc = pg_execute(s);
     if (rc != RDB_OK) return rc;
-    s->row++;
-    return s->row < PQntuples(s->res) ? RDB_ROW : RDB_DONE;
+    if (s->done) return RDB_DONE;
+    if (s->row < 0) { s->row = 0; return RDB_ROW; }
+    pg_clear_decoded(s);
+    PQclear(s->res);
+    s->res = PQgetResult(s->conn->pg);
+    if (!s->res) return pg_failure(s);
+    ExecStatusType status = PQresultStatus(s->res);
+    if (status == PGRES_SINGLE_TUPLE) return RDB_ROW;
+    if (status == PGRES_TUPLES_OK || status == PGRES_COMMAND_OK) {
+        pg_drain(s);
+        return RDB_DONE;
+    }
+    if (status == PGRES_COPY_IN || status == PGRES_COPY_OUT || status == PGRES_COPY_BOTH)
+        pg_end_unsupported_copy(s, status);
+    return pg_failure(s);
 }
 
 static int pg_column_count(void* stmt) {
     PgStmt* s = (PgStmt*)stmt;
-    return pg_execute(s) == RDB_OK ? PQnfields(s->res) : 0;
+    return pg_execute(s) == RDB_OK ? s->column_count : 0;
 }
 
 static int pg_column_desc(void* stmt, int col, RdbColumnDesc* out) {
     PgStmt* s = (PgStmt*)stmt;
-    if (pg_execute(s) != RDB_OK || col < 0 || col >= PQnfields(s->res)) return RDB_ERROR;
-    out->name = PQfname(s->res, col);
-    out->type = pg_type_for_oid(PQftype(s->res, col));
+    if (pg_execute(s) != RDB_OK || col < 0 || col >= s->column_count) return RDB_ERROR;
+    out->name = s->column_names[col];
+    out->type = s->column_types[col];
     return RDB_OK;
 }
 
@@ -371,7 +464,14 @@ static RdbValue pg_column_value(void* stmt, int col) {
         case RDB_TYPE_INT:   v.int_val = strtoll(text, NULL, 10); break;
         case RDB_TYPE_FLOAT: v.float_val = strtod(text, NULL); break;
         case RDB_TYPE_BOOL:  v.bool_val = text[0] == 't'; break;
-        case RDB_TYPE_BLOB:  v.is_null = true; break;   // binary columns arrive in Phase 2, as for SQLite
+        case RDB_TYPE_BLOB: {
+            if (!s->decoded[col])
+                s->decoded[col] = PQunescapeBytea((const unsigned char*)text, &s->decoded_lengths[col]);
+            if (!s->decoded[col] || s->decoded_lengths[col] > INT32_MAX) { v.is_null = true; break; }
+            v.str_val = (const char*)s->decoded[col];
+            v.str_len = (int)s->decoded_lengths[col];
+            break;
+        }
         default:
             v.type = RDB_TYPE_STRING;   // decimal/datetime/JSON travel as text (RDB6)
             v.str_val = text;
@@ -384,7 +484,18 @@ static RdbValue pg_column_value(void* stmt, int col) {
 static void pg_finalize(void* stmt) {
     PgStmt* s = (PgStmt*)stmt;
     if (!s) return;
+    if (s->conn->active_stmt == s) {
+        // A partially read result owns the wire until it is cancelled and drained.
+        (void)pg_cancel(s->conn);
+        pg_drain(s);
+    }
+    pg_clear_decoded(s);
     PQclear(s->res);
+    for (int c = 0; c < s->column_count; c++) free(s->column_names ? s->column_names[c] : NULL);
+    free(s->column_names);
+    free(s->column_types);
+    free(s->decoded);
+    free(s->decoded_lengths);
     for (int i = 0; i < s->param_count; i++) free(s->params[i]);
     free(s->params);
     free(s->sql);
@@ -497,6 +608,7 @@ static void pg_load_functions(PGresult* res, const RdbModMeta* m, RdbSchema* out
 }
 
 static int pg_load_schema(void* conn, const RdbHostAPI* host, void* meta, RdbSchema* out) {
+    if (((PgConn*)conn)->active_stmt) return RDB_ERROR;
     PGconn* pg = ((PgConn*)conn)->pg;
     RdbModMeta m = { host, meta };
     PGresult* tables = pg_catalog_query(pg,
@@ -570,7 +682,7 @@ const RdbDriver rdb_pg_driver = {
     RDB_DRIVER_API_VERSION,
     "postgresql",
     &pg_dialect,
-    RDB_CAP_CANCEL | RDB_CAP_STATEMENT_TIMEOUT,
+    RDB_CAP_CANCEL | RDB_CAP_STATEMENT_TIMEOUT | RDB_CAP_STREAMING,
     pg_resolve_targets,
     pg_open,
     pg_close,
@@ -589,4 +701,5 @@ const RdbDriver rdb_pg_driver = {
     pg_error_msg,
     NULL,       // result_schema: row driver, served by the host adapter
     NULL,       // fetch_batch
+    NULL,       // parameter_count is checked by the server at execution
 };

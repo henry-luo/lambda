@@ -47,9 +47,19 @@ BACKENDS = [
 def run_script(source: str, name: str, env: dict = None) -> str:
     WORK.mkdir(parents=True, exist_ok=True)
     script = WORK / name
-    script.write_text(source)
-    proc = subprocess.run([str(LAMBDA), str(script)], cwd=ROOT, capture_output=True,
-                          text=True, timeout=120, env={**os.environ, **(env or {})})
+    # The generated script contains credentials; restrict even an existing file
+    # before writing and remove it after the child has finished reading it.
+    try:
+        with open(script, "w", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
+            os.chmod(script, 0o600)
+            output.write(source)
+        proc = subprocess.run([str(LAMBDA), str(script)], cwd=ROOT, capture_output=True,
+                              text=True, timeout=120, env={**os.environ, **(env or {})})
+    finally:
+        script.unlink(missing_ok=True)
+    if proc.returncode:
+        # Do not print compiler diagnostics that can include the source URI.
+        return f"process failed (exit {proc.returncode})\n"
     # results are stdout; stderr carries diagnostics already recorded in log.txt
     lines = [l for l in proc.stdout.splitlines() if not TIMESTAMP.match(l)]
     return "\n".join(lines).strip() + "\n"
@@ -105,7 +115,8 @@ def main() -> int:
                 passes += 1
         if update:
             continue
-        probe = 'let db = input("{{URI}}") or "FAILED"\nif (db == "FAILED") "FAILED" else "ok"\n'
+        # `or` handles absence; the input error outcome must be handled first.
+        probe = 'let db = (input("{{URI}}") ^ { null }) or "FAILED"\nif (db == "FAILED") "FAILED" else "ok"\n'
         verify_mode = [m for m in modes if m.lower().replace("_", "-").startswith("verify")][-1]
         parts = urlsplit(uri)
         wrong_password = urlunsplit(parts._replace(

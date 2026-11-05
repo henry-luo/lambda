@@ -425,6 +425,8 @@ bool runtime_context_follow_ui_result(Runtime* runtime, EvalContext* ctx);
 // published and releases them when it closes (D5.5.2 rooted exemption).
 void* runtime_take_ui_attribute_roots(Runtime* runtime);
 void ui_attribute_roots_release(void* roots);
+// count active context-owned attribute roots without creating a root vector.
+int64_t runtime_ui_attribute_root_count(EvalContext* owner);
 // Non-blocking close notification: satellite workers observe this before the
 // document/runtime owner starts its full teardown.
 void runtime_request_satellite_cancel(Runtime* runtime);

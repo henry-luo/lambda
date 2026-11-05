@@ -1,0 +1,32 @@
+{
+  "name":"DBench keeps staged edits with their tab",
+  "html": "temp/dbench-prepared/tabs_edit/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "tabs_edit"],
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#target"},"text":"temp/dbench-tabs-edit.sqlite","clear":true},
+    {"type":"click","target":{"selector":"#connect"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-editable-sqlite","equals":"true","assert_timeout":30000},
+    {"type":"assert_text","target":{"selector":"#result-0-1"},"contains":"Customer 001","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#result-0-1"}},
+    {"type":"click","target":{"selector":"#edit-cell"}},
+    {"type":"type","target":{"selector":"#edit-value"},"text":"Tab one edit","clear":true},
+    {"type":"click","target":{"selector":"#stage-value"}},
+    {"type":"assert_text","target":{"selector":".pending"},"contains":"Tab one edit"},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-connected","equals":"true","assert_timeout":30000},
+    {"type":"assert_count","target":{"selector":".pending"},"equals":0},
+    {"type":"click","target":{"selector":"[data-tab-close='1']"}},
+    {"type":"assert_text","target":{"selector":".error"},"contains":"staged changes"},
+    {"type":"assert_count","target":{"selector":"#tab-1"},"equals":1},
+    {"type":"click","target":{"selector":"#tab-1"}},
+    {"type":"assert_text","target":{"selector":".pending"},"contains":"Tab one edit"},
+    {"type":"click","target":{"selector":"#apply-changes"}},
+    {"type":"assert_text","target":{"selector":"#result-0-1"},"contains":"Tab one edit","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#tab-2"}},
+    {"type":"click","target":{"selector":"#refresh"}},
+    {"type":"assert_text","target":{"selector":"#result-0-1"},"contains":"Tab one edit","assert_timeout":30000}
+  ]
+}

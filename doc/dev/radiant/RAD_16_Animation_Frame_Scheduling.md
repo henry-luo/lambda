@@ -152,6 +152,12 @@ owner on a later frame. Detail is the positive request token; `time_stamp` is th
 document-relative monotonic time in milliseconds. Zero means the host refused a
 request. Cancellation is scoped to the owner and token.
 
+`request_frame_once(owner, event_name)` shares an already pending coalesced
+request for that same owner and event, returning its token. Cancelling that
+token cancels the shared request. Ordinary `request_frame` calls remain
+independent, even for the same owner and event. A coalesced request made while
+its handler is delivering schedules the next frame (D7.5.3v2).
+
 `dom_engine_frame_request/cancel/tick` in `event.cpp` implement a document resource
 with generation-checked native references, copied names and reusable request
 slots. Delivery uses a token watermark so requests created in a callback wait
@@ -204,6 +210,8 @@ allocations cannot be mistaken for bounded document storage (D5.1.4).
 The trace also separates DOM-pool growth during cascade from total commit growth.
 Journal capacity and canonical style counts/live/cold bytes accompany the trace
 so cache growth can be distinguished from allocations outside the style epoch.
+`ui_active_roots` counts UI attribute roots in the document's active script
+context; loader roots transferred to a document are outside this count (D4.5.2).
 Source-position/selection event snapshots use rooted GC maps/arrays, cloned from
 private immutable per-document schemas (D5.1.1, D6.3.3). Retaining an event
 snapshot does not force new Input-arena allocations on every frame.

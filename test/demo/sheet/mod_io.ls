@@ -20,7 +20,7 @@ fn valid_dimensions(sheet,axis) {
     }])
 }
 fn valid_sheet(s) any^ => s is map and s.title is string and s.rows is int and s.cols is int and
-    s.rows>=1 and s.rows<=500 and s.cols>=1 and s.cols<=100 and s.cells is array and
+    s.rows>=1 and s.rows<=m.MAX_ROWS and s.cols>=1 and s.cols<=m.MAX_COLUMNS and s.cells is array and
     all([for (c in s.cells) valid_cell(c,s)]) and
     len(unique([for (c in s.cells) f.address(c.row,c.col)]))==len(s.cells) and
     valid_dimensions(s,"column") and valid_dimensions(s,"row")
@@ -31,11 +31,13 @@ pub fn restore(book) map^ {
 }
 pub fn read(path) map^ => restore(input(path,'json')^)^
 fn quoted(value) => "\"" ++ replace(if (value is number) (format(value,'json') ^ {string(value)}) else string(value),"\"","\"\"") ++ "\""
-pub fn csv(sheet) {
+pub fn csv(sheet) string^ {
     let used=[for (c in sheet.cells where c.raw!="") c]
     let rows=if (len(used)==0) 0 else max([for (c in used) c.row])
     let cols=if (len(used)==0) 0 else max([for (c in used) c.col]);
-    join([for (r in 0 to rows) join([for (c in 0 to cols) quoted(f.display(sheet,r,c))],",")],"\r\n") ++ "\r\n"
+    // CSV currently materializes the used rectangle before writing it.
+    if ((rows+1)*(cols+1)>m.MAX_MATERIALIZED_CELLS) raise error("Sheet: used range is too large to export as CSV")
+    else join([for (r in 0 to rows) join([for (c in 0 to cols) quoted(f.display(sheet,r,c))],",")],"\r\n") ++ "\r\n"
 }
 pub pn write(book,path) any^ { return output(format(book,'json')^,path,{format:'text',atomic:true})^ }
-pub pn export_csv(sheet,path) any^ { return output(csv(sheet),path,{format:'text',atomic:true})^ }
+pub pn export_csv(sheet,path) any^ { return output(csv(sheet)^,path,{format:'text',atomic:true})^ }

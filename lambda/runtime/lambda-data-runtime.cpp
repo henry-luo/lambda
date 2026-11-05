@@ -3097,14 +3097,15 @@ Element* elmt_with_tl(int64_t type_index, void* type_list_ptr) {
 // The document Input whose arena backs ui_mode content -- the runtime's result
 // Input, or the Input a parser is building -- so list_push can deep-copy
 // non-string content into it (ui_copy_content_to_input, D5.5.2).
-Input* ui_result_input(Arena* arena) {
+Input* ui_result_input(Arena* arena, bool report_missing) {
     Runtime* runtime = context ? context->runtime : nullptr;
     if (runtime && runtime->result_input && runtime->result_input->arena == arena) {
         return runtime->result_input;
     }
     InputAllocationContext* owner = input_allocation_context;
     if (owner && owner->input && owner->arena == arena) return owner->input;
-    log_error("ui-content-copy: no document Input owns the UI arena; content left in place");
+    if (report_missing)
+        log_error("ui-content-copy: no document Input owns the UI arena; content left in place");
     return nullptr;
 }
 
@@ -3431,10 +3432,14 @@ void ui_attribute_roots_release(void* roots) {
     if (roots) ui_attribute_roots_destroy(roots);
 }
 
+int64_t runtime_ui_attribute_root_count(EvalContext* owner) {
+    UiAttributeRoots* state = owner ? (UiAttributeRoots*)context_capsule(
+        owner, CONTEXT_CAPSULE_UI_ATTRIBUTE_ROOTS) : nullptr;
+    return state ? root_vector_count(&state->values) : 0;
+}
+
 bool ui_prepare_element_field(Item* value) {
     if (!value || !context || !context->arena) return false;
-    RootVector* retained = ui_attribute_roots();
-    if (!retained) return false;
     TypeId type = get_type_id(*value);
     if (type == LMD_TYPE_STRING) {
         // Arena elements cannot keep GC text live through their attribute data.
@@ -3445,9 +3450,11 @@ bool ui_prepare_element_field(Item* value) {
             if (!held) return false;
             *value = {.item = s2it(held)};
         }
-    } else if (type > LMD_TYPE_INT && !root_vector_push(retained, *value)) {
-        // Non-text attributes can still point into the GC heap.
-        return false;
+    } else if (type > LMD_TYPE_INT && !lambda_item_is_self_contained(value->item) &&
+            !(is_container_type_id(type) && arena_owns(context->arena, value->container))) {
+        // a GC root cannot retain document-arena storage; other pointers keep their roots.
+        RootVector* retained = ui_attribute_roots();
+        if (!retained || !root_vector_push(retained, *value)) return false;
     }
     return true;
 }

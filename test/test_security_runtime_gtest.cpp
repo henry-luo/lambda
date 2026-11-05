@@ -824,6 +824,17 @@ TEST_P(SecurityRuntimeTest, ScopedSqliteDeniesBeforeOpeningOrCreatingTheFile) {
     mem_free(path);
 }
 
+TEST_P(SecurityRuntimeTest, ScopedRdbDeniesBeforeOpeningTheFile) {
+    run("import rdb: lambda.io.rdb\n"
+        "pn main() { let target = rdb.database(\"@ROOT@/denied-rdb.db\", \"sqlite\")^; "
+        "open session = target { rdb.schema(session)^ }; return null }\n");
+    expect_failed(last_run);
+    char* path = file_path_join(directory, "denied-rdb.db");
+    ASSERT_NE(path, nullptr);
+    EXPECT_FALSE(file_exists(path));
+    mem_free(path);
+}
+
 TEST_P(SecurityRuntimeTest, DatabaseHostHookDeniesBeforeOpeningOrCreatingTheFile) {
     run("pn main() { null }\n");
     char* path = file_path_join(directory, "denied.db"); ASSERT_NE(path, nullptr);

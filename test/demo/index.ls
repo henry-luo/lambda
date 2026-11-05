@@ -54,6 +54,8 @@ let DEMOS = [
      blurb: "A word processor with ribbon, tables and equations."},
     {name: "sheet", title: "Sheet", cat: "productivity", sub: "Spreadsheets",
      blurb: "Plan and calculate with formulas, formatting and worksheets."},
+    {name: "dbench", title: "DBench", cat: "productivity", sub: "Database workbench",
+     blurb: "Explore databases, browse tables and run SQL."},
     {name: "slides", title: "Slides", cat: "productivity", sub: "Presentations",
      blurb: "Create, edit and present slides, with notes and animations."},
     {name: "note", title: "Notes", cat: "productivity", sub: "Notes",

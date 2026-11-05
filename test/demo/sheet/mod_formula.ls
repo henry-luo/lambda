@@ -36,7 +36,10 @@ fn tokens(source,at=0) array^ {
         else raise error("#VALUE!")
     }
 }
-pub fn cell(sheet,row,col) => [for (c in sheet.cells where c.row==row and c.col==col) c][0]
+// A prepared sheet supplies an address index so visible cells and references avoid scans.
+pub fn indexed_cell(sheet,key) => sheet.cell_index[key]
+pub fn cell(sheet,row,col) any^ => if (sheet.cell_index!=null) indexed_cell(sheet,address(row,col)^)
+    else [for (c in sheet.cells where c.row==row and c.col==col) c][0]
 fn numeric(value) any^ => if (value is number) value else if (value==null or value=="") 0 else raise error("#VALUE!")
 fn reference(sheet,key,path) any^ {
     let p = position(key)^

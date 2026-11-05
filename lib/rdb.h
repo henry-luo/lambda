@@ -64,6 +64,15 @@ RdbConn* rdb_open(Pool* pool, const char* uri, const char* type, bool readonly);
 /* SQLite writable open without SQLITE_OPEN_CREATE, through the same host registry. */
 RdbConn* rdb_open_sqlite_existing(Pool* pool, const char* path);
 
+/** Open in three phases: prepare and finish on the owning thread, run on a
+ * joined worker. Preparation authorizes the target and reserves its host
+ * registry record. Cancellation is checked before and after the driver call;
+ * a caller must still join that call before finishing or destroying `pool`. */
+typedef struct RdbOpenWork RdbOpenWork;
+RdbOpenWork* rdb_open_work_begin(Pool* pool, const char* uri, const char* type, bool readonly);
+int rdb_open_work_run(RdbOpenWork* work, const int* cancelled);
+RdbConn* rdb_open_work_end(RdbOpenWork* work, bool accept);
+
 /** Close a database connection; finalizes any statements still live. */
 void rdb_close(RdbConn* conn);
 
@@ -80,11 +89,23 @@ int rdb_set_timeout(RdbConn* conn, int64_t statement_ms);
 /** Load / refresh schema metadata into conn->schema. */
 int rdb_load_schema(RdbConn* conn);
 
+/** Owner-prepared schema work. `result_pool` belongs exclusively to the worker
+ * until run returns and must outlive the returned schema. The owner joins the
+ * worker before end, including during teardown. No connection operations may
+ * overlap this work. */
+typedef struct RdbSchemaWork RdbSchemaWork;
+RdbSchemaWork* rdb_schema_work_begin(RdbConn* conn, Pool* result_pool);
+int rdb_schema_work_run(RdbSchemaWork* work, const int* cancelled);
+int rdb_schema_work_end(RdbSchemaWork* work, RdbSchema* out);
+
 /** Look up table by name (NULL if not found). */
 RdbTable* rdb_get_table(RdbConn* conn, const char* table_name);
 
 /** Look up column by name within a table (NULL if not found). */
 RdbColumn* rdb_get_column(RdbTable* table, const char* column_name);
+
+/** Stable normalized name for a result-column type. */
+const char* rdb_type_name(RdbType type);
 
 /* ══════════════════════════════════════════════════════════════════════
  * Public API — SQL rendering through the driver dialect (RDB5)
@@ -105,6 +126,36 @@ void rdb_append_placeholder(StrBuf* sb, const RdbDialect* dialect, int index);
 
 /** Prepare a parameterized SQL statement. */
 RdbStmt* rdb_prepare(RdbConn* conn, const char* sql);
+
+/** The parameters and their strings must remain alive through run. Begin/end
+ * are owner-thread operations; run is performed by a worker joined before end.
+ * No other operation may use the connection during this work. */
+typedef struct RdbPrepareWork RdbPrepareWork;
+RdbPrepareWork* rdb_prepare_work_begin(RdbConn* conn, const char* sql,
+                                       const RdbParam* params, int count);
+int rdb_prepare_work_run(RdbPrepareWork* work, const int* cancelled);
+RdbStmt* rdb_prepare_work_end(RdbPrepareWork* work, bool accept);
+
+/** Worker callback receives values borrowed until the next step. */
+typedef bool (*RdbRowFn)(void* user, int count, const RdbValue* values);
+typedef struct RdbFetchWork RdbFetchWork;
+typedef struct RdbFetchResult {
+    int column_count;
+    RdbColumnDesc* columns;   /* result_pool-owned; names are copied */
+    int row_count;
+    bool done;                /* false means more rows may be available */
+} RdbFetchResult;
+RdbFetchWork* rdb_fetch_work_begin(RdbStmt* stmt, int max_rows, int max_columns,
+                                  Pool* result_pool, RdbRowFn row, void* user);
+int rdb_fetch_work_run(RdbFetchWork* work, const int* cancelled);
+int rdb_fetch_work_end(RdbFetchWork* work, RdbFetchResult* out);
+
+/** Finalization can drain a network result, so run may block. Begin/end run
+ * on the owner; if the worker never ran, end performs the cleanup itself. */
+typedef struct RdbFinalizeWork RdbFinalizeWork;
+RdbFinalizeWork* rdb_finalize_work_begin(RdbStmt* stmt);
+void rdb_finalize_work_run(RdbFinalizeWork* work);
+void rdb_finalize_work_end(RdbFinalizeWork* work);
 
 /** Bind parameter at 1-based index. */
 int rdb_bind_int(RdbStmt* stmt, int index, int64_t value);

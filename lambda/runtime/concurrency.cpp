@@ -107,6 +107,11 @@ struct LambdaOffload {
     int64_t progress_ms;
     uint64_t last_notify_ms;   // worker thread, atomic
     int cancel_flag;           // atomic
+    int cancel_finished;       // cancel thread, atomic
+    uv_thread_t cancel_thread;
+    bool cancel_started;       // loop thread
+    bool cancel_joined;        // loop thread
+    bool worker_done;          // loop thread
     bool progress_pending;     // loop thread
     bool done;
     bool wake_closed;
@@ -2071,8 +2076,19 @@ extern "C" Item pn_io_read(Item target) {
 
 static void offload_cancel(LambdaOffload* job) {
     if (!job || job->done) return;
-    __atomic_store_n(&job->cancel_flag, 1, __ATOMIC_RELEASE);
-    uv_cancel((uv_req_t*)&job->work);
+    if (__atomic_exchange_n(&job->cancel_flag, 1, __ATOMIC_ACQ_REL)) return;
+    int status = uv_cancel((uv_req_t*)&job->work);
+    if (status == UV_EBUSY && job->ops->cancel) {
+        // A dedicated thread can interrupt even when every libuv worker is busy.
+        uv_ref((uv_handle_t*)&job->wake);
+        if (uv_thread_create(&job->cancel_thread, [](void* data) {
+                LambdaOffload* job = (LambdaOffload*)data;
+                job->ops->cancel(job->data);
+                __atomic_store_n(&job->cancel_finished, 1, __ATOMIC_RELEASE);
+                uv_async_send(&job->wake);
+            }, job) == 0) job->cancel_started = true;
+        else uv_unref((uv_handle_t*)&job->wake);
+    }
 }
 
 // Closes the wake handle; the record is freed once libuv lets go of it.
@@ -2258,6 +2274,14 @@ extern "C" Item lambda_task_offload(const LambdaOffloadOps* ops, void* data, int
     if (uv_async_init(lambda_uv_loop(), &job->wake, [](uv_async_t* handle) {
             LambdaOffload* job = (LambdaOffload*)handle->data;
             if (!job || job->done) return;
+            if (job->cancel_started && !job->cancel_joined &&
+                    __atomic_load_n(&job->cancel_finished, __ATOMIC_ACQUIRE)) {
+                uv_thread_join(&job->cancel_thread);
+                job->cancel_joined = true;
+                uv_unref((uv_handle_t*)&job->wake);
+                if (job->worker_done) job->done = true;
+            }
+            if (job->done) { offload_wake_task(job); return; }
             job->progress_pending = true;
             offload_wake_task(job);
         }) != 0) {
@@ -2271,7 +2295,8 @@ extern "C" Item lambda_task_offload(const LambdaOffloadOps* ops, void* data, int
         job->ops->run(job, job->data);
     }, [](uv_work_t* request, int status) {
         LambdaOffload* job = (LambdaOffload*)request->data;
-        job->done = true;
+        job->worker_done = true;
+        job->done = !job->cancel_started || job->cancel_joined;
         if (status == UV_ECANCELED) __atomic_store_n(&job->cancel_flag, 1, __ATOMIC_RELEASE);
         offload_wake_task(job);
     });

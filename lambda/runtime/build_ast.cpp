@@ -3586,6 +3586,7 @@ static const struct { const char* path; const char* module; } io_leaf_modules[] 
     {"lambda.io.secret", "io_secret"},
     {"lambda.io.loopback", "io_loopback"},
     {"lambda.io.sqlite", "io_sqlite"},
+    {"lambda.io.rdb", "io_rdb"},
     {"lambda.io.websocket", "io_websocket"},
 };
 

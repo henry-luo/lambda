@@ -962,6 +962,74 @@ protected:
     }
 };
 
+class RadiantEventSimulation : public RadiantDocumentTest {
+protected:
+    struct PageLifetime : DomDocumentResourceData {
+        unsigned releases = 0;
+        static void destroy(DomDocumentResourceData* data) {
+            static_cast<PageLifetime*>(data)->releases++;
+        }
+    } pages[3];
+    EventSimContext* simulation = nullptr;
+    void TearDown() override {
+        event_sim_free(simulation, ui.document);
+        document = ui.document;
+        RadiantDocumentTest::TearDown();
+    }
+    void check_navigation(bool back) {
+        ASSERT_NE(load_script_source("<div id=result>initial page</div>"), nullptr);
+        ASSERT_TRUE(dom_document_add_resource(document, &pages[0], PageLifetime::destroy));
+        const char* page_path = "temp/event_sim_navigation_page.html";
+        const char page[] = "<!doctype html><div>replacement page</div>";
+        ASSERT_EQ(write_binary_file(page_path, page, sizeof(page) - 1), 0);
+        lam::Temp<char> absolute_path(file_realpath(page_path));
+        ASSERT_NE(absolute_path.get(), nullptr);
+        char events[2048];
+        snprintf(events, sizeof(events),
+            "{\"event_interval_ms\":0,\"events\":["
+            "{\"type\":\"navigate\",\"url\":\"%s\"},"
+            "{\"type\":\"navigate\",\"url\":\"%s\"},"
+            "{\"type\":\"%s\",\"ms\":0}]}",
+            absolute_path.get(), absolute_path.get(), back ? "navigate_back" : "wait");
+        const char* events_path = "temp/event_sim_navigation_events.json";
+        ASSERT_EQ(write_binary_file(events_path, events, strlen(events)), 0);
+        simulation = event_sim_load(events_path);
+        ASSERT_NE(simulation, nullptr);
+        ui.viewport_width = 320.0f;
+        ui.viewport_height = 200.0f;
+        DomDocument* loaded[3] = {document};
+        for (unsigned i = 1; i < 3; i++) {
+            ASSERT_TRUE(event_sim_update(simulation, &ui, nullptr, i));
+            ASSERT_EQ(simulation->fail_count, 0);
+            loaded[i] = ui.document;
+            ASSERT_NE(loaded[i], loaded[i - 1]);
+            ASSERT_TRUE(dom_document_add_resource(loaded[i], &pages[i], PageLifetime::destroy));
+        }
+        EXPECT_FALSE(event_sim_update(simulation, &ui, nullptr, 3));
+        ASSERT_EQ(simulation->fail_count, 0);
+        DomDocument* retained = loaded[back ? 1 : 2];
+        ASSERT_EQ(ui.document.get(), retained);
+        event_sim_free(simulation, retained);
+        simulation = nullptr;
+        document = retained;
+        for (unsigned i = 0; i < 3; i++) {
+            EXPECT_EQ(pages[i].releases, loaded[i] == retained ? 0u : 1u);
+        }
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+        for (const auto& page : pages) EXPECT_EQ(page.releases, 1u);
+    }
+};
+
+TEST_F(RadiantEventSimulation, ShutdownReleasesNavigationHistoryBeforeTheScriptCache) {
+    check_navigation(false);
+}
+
+TEST_F(RadiantEventSimulation, ShutdownReleasesPagesLeftByBackNavigation) {
+    check_navigation(true);
+}
+
 TEST_F(RadiantDocumentTest, TreeMembershipPreservesSubtreesDetachedAndUnregisteredTargets) {
     DomElement* root = load_script_source(
         "<div id=result><span id=member>member</span></div><div id=other>other</div>");
@@ -12335,6 +12403,51 @@ TEST_F(RadiantDocumentTest, TableAndRowLengthsDoNotBorrowDescendantFonts) {
         ui.document = nullptr;
         free_document(document);
         document = nullptr;
+    }
+}
+
+TEST_F(RadiantDocumentTest, FixedTableTracksIgnoreLaterRowContents) {
+    for (const char* collapse : {"separate", "collapse"}) {
+        SCOPED_TRACE(collapse);
+        StrBuf* source = strbuf_new();
+        strbuf_append_format(source,
+            "<!doctype html><style>body{margin:0}table{table-layout:fixed;width:300px;"
+            "border-spacing:0;border-collapse:%s}td{padding:0}"
+            "</style><table id=result><caption>caption</caption>"
+            "<tr><td id=first style='width:30%%'>a</td><td id=second>b</td></tr>"
+            "<tr><td colspan=2 style='width:90%%;white-space:nowrap'>"
+            "unbreakableunbreakableunbreakableunbreakableunbreakableunbreakable"
+            "</td></tr></table>", collapse);
+        ASSERT_NE(layout_script_source(source), nullptr);
+        DomElement* first = dom_find_element_by_id(document->root, "first");
+        DomElement* second = dom_find_element_by_id(document->root, "second");
+        ASSERT_TRUE(first && second);
+        EXPECT_NEAR(first->width, 90.0f, 0.02f);
+        EXPECT_NEAR(second->width, 210.0f, 0.02f);
+        ui.document = nullptr;
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+TEST_F(RadiantDocumentTest, TableCellStylesRemainLiveAfterGeneratedContentPreparation) {
+    StrBuf* source = strbuf_new();
+    strbuf_append_str(source,
+        "<!doctype html><style>body{margin:0}table{table-layout:fixed;width:200px;"
+        "border-spacing:0}td{padding:0}td::before{content:counter(c)}"
+        "</style><table id=result><tbody><tr>"
+        "<td id=first style='width:25%'>a</td><td id=second>b</td>"
+        "</tr></tbody></table>");
+    ASSERT_NE(layout_script_source(source), nullptr);
+    DomElement* first = dom_find_element_by_id(document->root, "first");
+    DomElement* second = dom_find_element_by_id(document->root, "second");
+    ASSERT_TRUE(first && second);
+    for (const char* width : {"25%", "40%", "25%"}) {
+        ASSERT_TRUE(dom_cssom_set_inline_property(first, "width", width));
+        ASSERT_TRUE(dom_ensure_geometry_snapshot(document));
+        float expected = strcmp(width, "40%") == 0 ? 80.0f : 50.0f;
+        EXPECT_NEAR(first->width, expected, 0.02f);
+        EXPECT_NEAR(second->width, 200.0f - expected, 0.02f);
     }
 }
 

@@ -1,0 +1,17 @@
+{
+  "name": "Sheet selection continues across virtual rows at the scrollport edge",
+  "html": "test/demo/sheet/sheet.ls",
+  "viewport": {"width": 1440, "height": 900},
+  "input_turn_ms": 0,
+  "events": [
+    {"type": "wait", "ms": 100},
+    {"type": "mouse_down", "target": {"selector": "#cell-C5"}},
+    {"type": "mouse_move", "x": 550, "y": 830},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_script", "js": "document.getElementById('grid-scroll').scrollTop>0 && +document.getElementById('sheet-grid').dataset.firstRow>0"},
+    {"type": "assert_script", "js": "+document.querySelector('#sheet-grid td.active').dataset.row>4"},
+    {"type": "mouse_up", "x": 550, "y": 830},
+    {"type": "assert_attribute", "target": {"selector": "#sheet"}, "attribute": "data-selecting", "equals": "false"},
+    {"type": "assert_script", "js": "document.querySelectorAll('#sheet-grid td[data-row]').length<500"}
+  ]
+}

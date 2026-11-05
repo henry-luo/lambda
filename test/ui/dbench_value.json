@@ -1,0 +1,21 @@
+{
+  "name":"DBench inspects null, empty, binary and bounded text values",
+  "html":"test/demo/dbench/dbench.ls",
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT NULL AS missing, '' AS empty, X'00FF' AS bytes, printf('%.*c',5000,'x') AS long_text","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"1"},
+    {"type":"click","target":{"selector":"#inspect-value"}},
+    {"type":"assert_text","target":{"selector":"#value-content"},"contains":"NULL"},
+    {"type":"click","target":{"selector":"#value-next"}},
+    {"type":"assert_text","target":{"selector":"#value-content"},"contains":"(empty text)"},
+    {"type":"click","target":{"selector":"#value-next"}},
+    {"type":"assert_text","target":{"selector":"#value-content"},"contains":"binary: 2 bytes"},
+    {"type":"assert_text","target":{"selector":".value-heading"},"contains":"value binary"},
+    {"type":"click","target":{"selector":"#value-next"}},
+    {"type":"assert_script","js":"let t=document.getElementById('value-content').textContent; t.length===4097 && t.endsWith('…')"}
+  ]
+}

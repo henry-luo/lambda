@@ -28,6 +28,38 @@
 
 static const RdbDialect sqlite_dialect = { RDB_PLACEHOLDER_QNUM, '"' };
 
+static bool sqlite_denied_external_action(int action, const char* arg2) {
+    return action == SQLITE_ATTACH || action == SQLITE_DETACH ||
+        (action == SQLITE_FUNCTION && arg2 && sqlite3_stricmp(arg2, "load_extension") == 0);
+}
+
+/* Read-only connections may inspect metadata but cannot open another database
+ * or run PRAGMAs that can change state during statement preparation. */
+static int sqlite_readonly_authorize(void* user, int action, const char* arg1,
+                                     const char* arg2, const char* db, const char* source) {
+    (void)user; (void)db; (void)source;
+    if (sqlite_denied_external_action(action, arg2) || action == SQLITE_TRANSACTION ||
+        action == SQLITE_SAVEPOINT || action == SQLITE_CREATE_VTABLE || action == SQLITE_DROP_VTABLE)
+        return SQLITE_DENY;
+    if (action == SQLITE_PRAGMA) {
+        static const char* allowed[] = {"table_info", "index_list", "index_info", "foreign_key_list",
+                                        "function_list", "page_count", "page_size"};
+        for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
+            if (arg1 && sqlite3_stricmp(arg1, allowed[i]) == 0) return SQLITE_OK;
+        }
+        return SQLITE_DENY;
+    }
+    return SQLITE_OK;
+}
+
+/* The clone source is private to the host and needs a read transaction to pin
+ * a consistent snapshot; all other read-only restrictions still apply. */
+static int sqlite_clone_authorize(void* user, int action, const char* arg1,
+                                  const char* arg2, const char* db, const char* source) {
+    if (action == SQLITE_TRANSACTION) return SQLITE_OK;
+    return sqlite_readonly_authorize(user, action, arg1, arg2, db, source);
+}
+
 /** a SQLite database is a file, or memory for ":memory:" and "" */
 static bool sqlite_target(const char* uri, RdbTarget* out) {
     memset(out, 0, sizeof(*out));
@@ -65,6 +97,10 @@ static int sqlite_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
     if (rc != SQLITE_OK) {
         log_error("rdb sqlite: open failed: %s", sqlite3_errmsg(db));
         if (db) sqlite3_close(db);
+        return RDB_ERROR;
+    }
+    if (opts->readonly && sqlite3_set_authorizer(db, sqlite_readonly_authorize, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
         return RDB_ERROR;
     }
     // JA16.1: the host owns the connection from here on
@@ -556,12 +592,50 @@ static int sqlite_load_schema(void* conn, const RdbHostAPI* host, void* meta,
  * Query execution — statement handles are raw sqlite3_stmt pointers
  * ══════════════════════════════════════════════════════════════════════ */
 
+static bool sqlite_empty_tail(const char* tail, const char* end) {
+    while (tail < end) {
+        if (isspace((unsigned char)*tail) || *tail == ';') { tail++; continue; }
+        if (end - tail >= 2 && tail[0] == '-' && tail[1] == '-') {
+            tail += 2;
+            while (tail < end && *tail != '\n' && *tail != '\r') tail++;
+            continue;
+        }
+        if (end - tail >= 2 && tail[0] == '/' && tail[1] == '*') {
+            tail += 2;
+            while (end - tail >= 2 && !(tail[0] == '*' && tail[1] == '/')) tail++;
+            if (end - tail >= 2) tail += 2;
+            else tail = end;
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+static int sqlite_prepare_single(sqlite3* db, const char* sql, int length, sqlite3_stmt** out) {
+    const char* tail = NULL;
+    sqlite3_stmt* stmt = NULL;
+    int rc = sqlite3_prepare_v3(db, sql, length, 0, &stmt, &tail);
+    // Do not prepare a second statement: some PRAGMAs act during preparation.
+    if (rc != SQLITE_OK || !stmt || !tail || !sqlite_empty_tail(tail, sql + length)) {
+        if (stmt) sqlite3_finalize(stmt);
+        return RDB_ERROR;
+    }
+    *out = stmt;
+    return RDB_OK;
+}
+
 static int sqlite_prepare(void* conn, const char* sql, void** out_stmt) {
     sqlite3* db = (sqlite3*)conn;
     sqlite3_stmt* raw = NULL;
-    int rc = sqlite3_prepare_v2(db, sql, -1, &raw, NULL);
-    if (rc != SQLITE_OK) {
+    size_t length = strlen(sql);
+    if (length > INT_MAX || sqlite_prepare_single(db, sql, (int)length, &raw) != RDB_OK) {
         log_error("rdb sqlite: prepare failed: %s", sqlite3_errmsg(db));
+        return RDB_ERROR;
+    }
+    // OPEN_READONLY applies to the main file; also reject writes to temp objects.
+    if (sqlite3_db_readonly(db, "main") == 1 && !sqlite3_stmt_readonly(raw)) {
+        sqlite3_finalize(raw);
         return RDB_ERROR;
     }
     *out_stmt = raw;
@@ -594,6 +668,8 @@ static int sqlite_bind_param(void* stmt, int index, const RdbParam* param) {
     }
     return (rc == SQLITE_OK) ? RDB_OK : RDB_ERROR;
 }
+
+static int sqlite_parameter_count(void* stmt) { return sqlite3_bind_parameter_count((sqlite3_stmt*)stmt); }
 
 static int sqlite_step(void* stmt) {
     int rc = sqlite3_step((sqlite3_stmt*)stmt);
@@ -640,7 +716,9 @@ static RdbValue sqlite_column_value(void* stmt, int col_index) {
             break;
         case SQLITE_BLOB:
             val.type    = RDB_TYPE_BLOB;
-            val.is_null = true; /* defer BLOB to Phase 2 */
+            // A zero-length BLOB may have a null pointer but is not SQL NULL.
+            val.str_val = (const char*)sqlite3_column_blob(raw, col_index);
+            val.str_len = sqlite3_column_bytes(raw, col_index);
             break;
         case SQLITE_NULL:
             val.type    = RDB_TYPE_NULL;
@@ -687,6 +765,7 @@ static const RdbDriver sqlite_driver = {
     .column_value    = sqlite_column_value,
     .finalize        = sqlite_finalize,
     .error_msg       = sqlite_error_msg,
+    .parameter_count = sqlite_parameter_count,
 };
 
 void rdb_sqlite_register(void) {
@@ -805,11 +884,9 @@ static int sqlite_tx_authorize(void* user, int action, const char* arg1,
     if (action == SQLITE_PRAGMA && arg1 && !arg2 &&
             (sqlite3_stricmp(arg1, "foreign_key_check") == 0 ||
              sqlite3_stricmp(arg1, "integrity_check") == 0)) return SQLITE_OK;
-    if (action == SQLITE_ATTACH || action == SQLITE_DETACH || action == SQLITE_TRANSACTION ||
+    if (sqlite_denied_external_action(action, arg2) || action == SQLITE_TRANSACTION ||
         action == SQLITE_SAVEPOINT || action == SQLITE_PRAGMA || action == SQLITE_CREATE_VTABLE ||
         action == SQLITE_DROP_VTABLE) return SQLITE_DENY;
-    if (action == SQLITE_FUNCTION && arg2 && sqlite3_stricmp(arg2, "load_extension") == 0)
-        return SQLITE_DENY;
     return SQLITE_OK;
 }
 
@@ -994,6 +1071,10 @@ static RdbSqliteClone* sqlite_clone_prepare(Pool* pool, const char* source,
     }
     clone->source_db = (sqlite3*)clone->source->handle;
     clone->destination_db = (sqlite3*)clone->destination->handle;
+    if (sqlite3_set_authorizer(clone->source_db, sqlite_clone_authorize, NULL) != SQLITE_OK) {
+        rdb_sqlite_clone_discard(clone);
+        return NULL;
+    }
     return clone;
 }
 
@@ -1121,16 +1202,11 @@ static int sqlite_tx_execute_core(RdbSqliteWork* work, const char* sql, size_t s
         sqlite3_progress_handler(db, 1000, sqlite_tx_progress, (void*)cancelled);
     }
     sqlite3_stmt* stmt = NULL;
-    sqlite3_stmt* extra = NULL;
-    const char* tail = NULL;
     RdbValue* values = NULL;
     const char** names = NULL;
     tx->statement_alter = false;
-    int rc = sqlite3_prepare_v3(db, sql, (int)sql_len, 0, &stmt, &tail);
-    if (rc != SQLITE_OK || !stmt || !tail) goto fail;
-    /* Preparing the tail catches a second statement without executing either. */
-    rc = sqlite3_prepare_v3(db, tail, (int)(sql + sql_len - tail), 0, &extra, NULL);
-    if (rc != SQLITE_OK || extra) goto fail;
+    int rc = sqlite_prepare_single(db, sql, (int)sql_len, &stmt);
+    if (rc != RDB_OK) goto fail;
     // A pre-migration backup must precede every statement that can write.
     if (!sqlite3_stmt_readonly(stmt)) { tx->preimage_available = false; tx->pristine = false; }
     if (sqlite3_bind_parameter_count(stmt) != param_count) goto fail;
@@ -1154,12 +1230,6 @@ static int sqlite_tx_execute_core(RdbSqliteWork* work, const char* sql, size_t s
         for (int i = 0; i < count; i++) {
             values[i] = sqlite_column_value(stmt, i);
             if (values[i].type == RDB_TYPE_STRING && !values[i].str_val) goto fail;
-            if (sqlite3_column_type(stmt, i) == SQLITE_BLOB) {
-                values[i].type = RDB_TYPE_BLOB;
-                values[i].is_null = false;
-                values[i].str_val = (const char*)sqlite3_column_blob(stmt, i);
-                values[i].str_len = sqlite3_column_bytes(stmt, i);
-            }
             if (values[i].type == RDB_TYPE_FLOAT && !isfinite(values[i].float_val)) goto fail;
         }
         if (!row_fn(user, count, names, values) ||
@@ -1176,7 +1246,6 @@ static int sqlite_tx_execute_core(RdbSqliteWork* work, const char* sql, size_t s
     return RDB_OK;
 fail:
     tx->stepping_alter = false;
-    if (extra) sqlite3_finalize(extra);
     if (stmt) sqlite3_finalize(stmt);
     mem_free(values);
     mem_free(names);
