@@ -228,6 +228,7 @@
     "RadiantDocumentTest.SiblingVerticalFloatWrappersShareUsedBfcCoordinates",
     "RadiantDocumentTest.UnicodeEmailPatternSurvivesDirectMatcherResourceLimit",
     "RadiantDocumentTest.FragmentNavigationRetainsCurrentDocumentTimers",
+    "RadiantDocumentTest.LiveRemoteImageHonorsDocumentResourcePolicy",
     "RadiantDocumentTest.CachedSvgDeliveryUsesItsOwnerBeforePublicationAndAcrossDocuments",
     "RadiantDocumentTest.AbsoluteSameDocumentNavigationRetainsTimers",
     "RadiantDocumentTest.ContainerSettlementKeepsCommittedGeometryWithFixedPseudoDescendants",

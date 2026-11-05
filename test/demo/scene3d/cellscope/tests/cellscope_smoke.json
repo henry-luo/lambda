@@ -11,7 +11,7 @@
     },
     {
       "type": "assert_script",
-      "js": "Array.from(document.querySelectorAll('.specimen img')).every(el=>{const r=el.getBoundingClientRect();return r.width===48&&r.height===44})"
+      "js": "Array.from(document.querySelectorAll('.specimen img')).every(el=>{const r=el.getBoundingClientRect();return r.width===48&&r.height===44&&el.naturalWidth>0&&el.getAttribute('src')==='assets/'+el.closest('.specimen').getAttribute('data-cell')+'.png'})"
     },
     {
       "type": "assert_script",

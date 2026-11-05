@@ -2214,13 +2214,6 @@ EventSimContext* event_sim_load(const char* json_file) {
             return nullptr;
         }
         ctx->profile_events = root_map.get("profile_events").asBool();
-#ifndef NDEBUG
-        if (ctx->profile_events) {
-            log_error("event_sim: event measurements require a release build");
-            event_sim_free(ctx);
-            return nullptr;
-        }
-#endif
     }
 
     // Parse each event

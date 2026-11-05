@@ -11,6 +11,7 @@ extern "C" {
 struct NetworkResourceManager;
 struct NetworkThreadPool;
 struct EnhancedFileCache;
+struct UiContext;
 
 /**
  * Initialize network support for a document.
@@ -24,6 +25,10 @@ struct EnhancedFileCache;
 int radiant_init_network_support(DomDocument* doc,
                                   struct NetworkThreadPool* thread_pool,
                                   struct EnhancedFileCache* file_cache);
+
+// Live top-level documents queue image bytes without blocking layout or paint.
+void radiant_request_live_image(DomDocument* doc, struct UiContext* ui, const char* source);
+void radiant_network_wake_platform(void* user_data);
 
 /**
  * Discover and queue all network resources in a document.

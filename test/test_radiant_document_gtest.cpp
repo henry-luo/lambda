@@ -5794,6 +5794,16 @@ TEST_F(RadiantDocumentTest, InlineSizeQueriesSettleGeneratedBlockExtent) {
     }
 }
 
+TEST_F(RadiantDocumentTest, LiveRemoteImageHonorsDocumentResourcePolicy) {
+    ASSERT_NE(load_script_source("<div id='result'></div>"), nullptr);
+    document->resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+    ui.async_script_navigation = true;
+    ui.document = lam::up(document);
+    radiant_request_live_image(document, &ui, "https://example.test/denied.png");
+    EXPECT_EQ(document->resource_manager, nullptr);
+    ui.async_script_navigation = false;
+}
+
 TEST_F(RadiantDocumentTest, CachedSvgDeliveryUsesItsOwnerBeforePublicationAndAcrossDocuments) {
     ASSERT_NE(load_script_source("<div id='result'><img id='image'></div>"), nullptr);
     DomElement* image = dom_find_element_by_id(document->root->as_element(), "image");

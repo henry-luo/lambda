@@ -18,6 +18,8 @@ let textures = [for (n in all_nodes where ((name(n) == 'texture') ^ { false })) 
     valid:s.validate(s.scene([s.camera({id:"camera"}),plant],{camera:"camera"}))^,
     local_models:len([for (c in data.cells where ((assets.model(c.id).local == true) ^ { false })) c]),
     remote_models:len([for (c in data.cells where ((assets.model(c.id) != null and assets.model(c.id).local != true) ^ { false })) c]),
+    local_thumbnails:all([for (c in data.cells) starts_with(assets.thumbnail(c.id),"assets/") and
+        ends_with(assets.thumbnail(c.id),".png") and exists("test/demo/scene3d/cellscope/" ++ assets.thumbnail(c.id))]),
     pinned_https:all([for (id in ["whiteBlood"])
         starts_with(assets.source(base,id),"https://raw.githubusercontent.com/") and
         contains(assets.source(base,id),"1cab982e7a0f96af854a696430c0724707764358") and ends_with(assets.source(base,id),".glb")]),
