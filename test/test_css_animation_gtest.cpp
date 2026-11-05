@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include "../lib/strbuf.h"
 #include "../lib/tagged.hpp"
 #include "../lib/uv_loop.h"
@@ -20,6 +21,7 @@
 #include "../radiant/event.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/radiant.hpp"
+#include "../radiant/window_host.hpp"
 #include "../radiant/render_css3d.hpp"
 #include "../radiant/resource_loaders.h"
 #include "../radiant/network_integration.h"
@@ -29,6 +31,7 @@
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 
 extern "C" {
@@ -49,6 +52,13 @@ extern "C" {
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/runtime/lambda-root-frame.hpp"
 #include "../lambda/runtime/template_registry.h"
+#include "../lambda/network/network_thread_pool.h"
+#include "../lambda/network/enhanced_file_cache.h"
+
+extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc);
+extern UiContext ui_context;
+extern int view_doc_in_window_with_events(const char*, const char*, bool, const char**, int,
+    bool, bool, const RenderPagedOptions*, bool, bool);
 
 static struct {
     unsigned starts, ends, iterations, cancels;
@@ -76,6 +86,16 @@ static void cssom_document_lifetime_destroyed(DomDocumentResourceData* data) {
     mem_free(probe);
 }
 
+static bool cssom_observe_document_lifetime(DomDocument* document, unsigned* destroyed) {
+    CssomDocumentLifetimeProbe* probe = (CssomDocumentLifetimeProbe*)mem_calloc(
+        1, sizeof(*probe), MEM_CAT_LAYOUT);
+    if (!probe) return false;
+    probe->destroyed = destroyed;
+    if (dom_document_add_resource(document, probe, cssom_document_lifetime_destroyed)) return true;
+    mem_free(probe);
+    return false;
+}
+
 static DomDocument* cssom_create_owned_document(unsigned* destroyed) {
     Pool* pool = pool_create();
     Input* input = pool ? Input::create(pool) : nullptr;
@@ -86,16 +106,7 @@ static DomDocument* cssom_create_owned_document(unsigned* destroyed) {
     }
     dom_document_finalize_loader_pool(document, pool);
     document->root = lam::up(DomElement::create(document, "html", nullptr));
-    CssomDocumentLifetimeProbe* probe = (CssomDocumentLifetimeProbe*)mem_calloc(
-        1, sizeof(*probe), MEM_CAT_LAYOUT);
-    if (!probe || !document->root) {
-        if (probe) mem_free(probe);
-        free_document(document);
-        return nullptr;
-    }
-    probe->destroyed = destroyed;
-    if (!dom_document_add_resource(document, probe, cssom_document_lifetime_destroyed)) {
-        mem_free(probe);
+    if (!document->root || !cssom_observe_document_lifetime(document, destroyed)) {
         free_document(document);
         return nullptr;
     }
@@ -236,6 +247,652 @@ TEST(DomDocumentOwnership, WindowRetainsDocumentWhileItsLoaderRuns) {
     }, ::testing::ExitedWithCode(0), "");
 }
 
+TEST(DomDocumentOwnership, RetiringDocumentRejectsNewEvaluatorOwners) {
+    ASSERT_EXIT({
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document) _Exit(2);
+        LambdaDocumentLifetimeGuard* guard = lambda_document_lifetime_guard_begin(document);
+        if (!guard || radiant_document_ensure_evaluator(document) ||
+            layout_document_package_runtime(document, "lambda.dom") || document->lambda_runtime) _Exit(3);
+        if (!lambda_document_lifetime_guard_end(guard)) _Exit(4);
+        free_document(document);
+        _Exit(destroyed == 1 ? 0 : 5);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, WindowRefusesDistinctRuntimesSharingOneEvaluator) {
+    ASSERT_EXIT({
+        Runtime* first = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+        Runtime* second = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+        if (!first || !second) _Exit(2);
+        runtime_init(first);
+        runtime_init(second);
+        EvalContext* owner = runtime_get_eval_context(first);
+        if (!owner || !eval_context_transfer_thread(owner)) _Exit(3);
+        second->eval_context = owner;
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        if (!document) _Exit(4);
+        document->js.runtime = first;
+        document->lambda_runtime = second;
+        UiContext ui = {};
+        ui.document = lam::up(document);
+        if (ui.destroy_document() || ui.document.get() != document || destroyed) _Exit(5);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+static Runtime* cssom_guarded_loader(LambdaScheduler** out_scheduler, void* other_document,
+                                     bool with_heap = false) {
+    Runtime* loader = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+    if (!loader) return nullptr;
+    runtime_init(loader);
+    EvalContext* owner = runtime_get_eval_context(loader);
+    if (!owner || !eval_context_transfer_thread(owner)) return nullptr;
+    if (with_heap && (item_is_error(js_interp_execute_source(loader, "null;", 5,
+            "guarded-export-loader.js", nullptr)) || !runtime_heap(loader))) return nullptr;
+    LambdaScheduler* scheduler = runtime_scheduler(loader);
+    if (!scheduler) scheduler = lambda_scheduler_create(3);
+    if (!scheduler) return nullptr;
+    runtime_set_scheduler(loader, scheduler);
+    if (!lambda_document_retirement_guard_begin(scheduler, other_document)) return nullptr;
+    *out_scheduler = scheduler;
+    return loader;
+}
+
+TEST(DomDocumentOwnership, WindowRetainsWebViewsWhenDocumentJoinRefuses) {
+    ASSERT_EXIT({
+        int other_document = 0;
+        LambdaScheduler* scheduler = nullptr;
+        Runtime* loader = cssom_guarded_loader(&scheduler, &other_document);
+        if (!loader) _Exit(2);
+        EvalContext* owner = runtime_get_eval_context(loader);
+        unsigned destroyed = 0;
+        DomDocument* document = cssom_create_owned_document(&destroyed);
+        UiContext ui = {};
+        if (!document || ui_context_init(&ui, true, 1.0f) != 0) _Exit(6);
+        // An empty manager needs only a non-null window identity; it creates no native handles.
+        WebViewManager* manager = webview_manager_create((RadiantWindow*)&ui);
+        if (!manager) _Exit(7);
+        ui.webview_mgr = manager;
+        ui.document = lam::up(document);
+        ui.loader_runtime = lam::own(loader);
+        document->loader_runtime = lam::up(loader);
+        if (ui_context_cleanup(&ui) || ui.document.get() != document ||
+            ui.webview_mgr != manager || destroyed) _Exit(8);
+        if (!eval_context_transfer_thread(owner) ||
+            !lambda_document_retirement_guard_end(scheduler, &other_document) ||
+            !ui_context_cleanup(&ui) || ui.webview_mgr || destroyed != 1) _Exit(9);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+static void exercise_export_session_retention(bool loader_refusal) {
+    Runtime first = {};
+    Runtime second = {};
+    runtime_init(&first);
+    runtime_init(&second);
+    if (!runtime_get_eval_context(&first) || !runtime_get_eval_context(&second)) _Exit(2);
+    unsigned destroyed = 0;
+    DomDocument* document = cssom_create_owned_document(&destroyed);
+    UiContext* ui = (UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_LAYOUT);
+    Url* url = url_parse("file:///export-session-test.html");
+    if (!document || !ui || !url || ui_context_init(ui, true, 1.0f) != 0) _Exit(3);
+    Runtime* loader = nullptr;
+    LambdaScheduler* scheduler = nullptr;
+    int other_document = 0;
+    if (loader_refusal) {
+        loader = cssom_guarded_loader(&scheduler, &other_document);
+        if (!loader) _Exit(6);
+        ui->loader_runtime = lam::own(loader);
+    } else {
+        document->js.runtime = &first;
+        document->lambda_runtime = &second;
+    }
+    ui->document = lam::up(document);
+    RenderExportSession session = {};
+    session.ui_context = lam::up(ui);
+    session.owned_ui_context = lam::own(ui);
+    session.base_url = lam::own(url);
+    session.document = lam::up(document);
+    if (render_export_session_end(&session) || session.owned_ui_context.get() != ui ||
+        session.ui_context.get() != ui || session.base_url.get() != url ||
+        session.document.get() != (loader_refusal ? nullptr : document) ||
+        destroyed != (loader_refusal ? 1u : 0u)) _Exit(4);
+    if (loader_refusal) {
+        if (!lambda_document_retirement_guard_end(scheduler, &other_document)) _Exit(10);
+    } else {
+        document->js.runtime = nullptr;
+        document->lambda_runtime = nullptr;
+    }
+    if (!render_export_session_end(&session) || session.owned_ui_context || session.ui_context ||
+        session.base_url || session.document || destroyed != 1) _Exit(5);
+    runtime_cleanup(&first);
+    runtime_cleanup(&second);
+    _Exit(0);
+}
+
+TEST(DomDocumentOwnership, ExportSessionRetainsRefusedDocumentAndUrl) {
+    ASSERT_EXIT(exercise_export_session_retention(false), ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, ExportSessionClearsDocumentAndRetainsUrlOnLoaderRefusal) {
+    ASSERT_EXIT(exercise_export_session_retention(true), ::testing::ExitedWithCode(0), "");
+}
+
+struct CssomExportRetirementProbe : DomDocumentResourceData {
+    bool* reentry_refused;
+};
+
+static void cssom_export_retirement_destroyed(DomDocumentResourceData* data) {
+    CssomExportRetirementProbe* probe = (CssomExportRetirementProbe*)data;
+    *probe->reentry_refused = !render_export_retire_pending();
+    mem_free(probe);
+}
+
+static void cssom_export_retirement_uv_callback(uv_timer_t* timer) {
+    bool* refused = (bool*)timer->data;
+    *refused = !render_export_retire_pending();
+    uv_close((uv_handle_t*)timer, nullptr);
+}
+
+struct CssomExportCloseProbe : DomDocumentResourceData {
+    RenderExportSession* session;
+    bool* refused;
+};
+
+static void cssom_export_close_reenter(DomDocumentResourceData* data) {
+    CssomExportCloseProbe* probe = (CssomExportCloseProbe*)data;
+    *probe->refused = !render_export_session_finish(probe->session);
+    mem_free(probe);
+}
+
+struct CssomExportThreadProbe {
+    RenderExportSession* session;
+    bool end_refused;
+    bool handoff_refused;
+    size_t pending;
+};
+
+static void* cssom_export_wrong_thread(void* data) {
+    CssomExportThreadProbe* probe = (CssomExportThreadProbe*)data;
+    probe->end_refused = !render_export_session_end(probe->session);
+    probe->handoff_refused = !render_export_session_finish(probe->session);
+    probe->pending = render_export_pending_count();
+    return nullptr;
+}
+
+static bool cssom_guarded_export(RenderExportSession* session, int* other_document,
+        LambdaScheduler** scheduler, Runtime** loader, unsigned* destroyed, bool with_heap = false) {
+    if (!render_export_session_begin_source(session, "<html><body>export</body></html>",
+            80, 60, false)) return false;
+    UiContext* ui = session->ui_context;
+    DomDocument* document = session->document;
+    if (!ui || !document || !session->base_url || ui->loader_runtime || document->loader_runtime ||
+            !cssom_observe_document_lifetime(document, destroyed)) return false;
+    *loader = cssom_guarded_loader(scheduler, other_document, with_heap);
+    if (!*loader) return false;
+    ui->loader_runtime = lam::own(*loader);
+    document->loader_runtime = lam::up(*loader);
+    return true;
+}
+
+struct CssomWindowHostFixture {
+    NetworkThreadPool* pool;
+    EnhancedFileCache* cache;
+    BrowsingSession* browsing;
+    Pool* load_pool;
+    Url* cwd;
+    DomDocument* document;
+    unsigned destroyed;
+};
+
+static bool cssom_start_window_host(CssomWindowHostFixture* fixture) {
+    char preview[] = "1-3";
+    char exported[] = "2";
+    char imported[] = "4-5";
+    RenderPagedOptions options = render_paged_options_default();
+    options.preview_pages = lam::up((const char*)preview);
+    options.export_pages = lam::up((const char*)exported);
+    options.import_pages = lam::up((const char*)imported);
+    if (!radiant_window_host_begin(&options)) return false;
+    const RenderPagedOptions* owned = radiant_window_host_options();
+    if (!owned || owned->preview_pages.get() == preview || owned->export_pages.get() == exported ||
+            owned->import_pages.get() == imported) return false;
+    preview[0] = exported[0] = imported[0] = '9';
+    if (strcmp(owned->preview_pages, "1-3") || strcmp(owned->export_pages, "2") ||
+            strcmp(owned->import_pages, "4-5")) return false;
+    if (ui_context_init(&ui_context, true, 1.0f) != 0) return false;
+    ui_context.paged_options = lam::up(owned);
+    fixture->document = cssom_create_owned_document(&fixture->destroyed);
+    fixture->pool = thread_pool_create(1);
+    fixture->cache = enhanced_cache_create("temp/accounting-window-host-test", 1024 * 1024, 16);
+    fixture->browsing = session_create(fixture->pool, fixture->cache);
+    fixture->load_pool = pool_create();
+    fixture->cwd = get_current_dir();
+    if (!fixture->document || !fixture->pool || !fixture->cache || !fixture->browsing ||
+            !fixture->load_pool || !fixture->cwd) return false;
+    ui_context.document = lam::up(fixture->document);
+    ui_context.browsing_session = fixture->browsing;
+    radiant_window_host_loop_started();
+    return true;
+}
+
+static bool cssom_finish_window_host(CssomWindowHostFixture* fixture) {
+    return radiant_window_host_finish(fixture->pool, fixture->cache, fixture->load_pool,
+                                      fixture->cwd, false, true);
+}
+
+struct CssomWindowHostThreadProbe {
+    bool retry_refused;
+    bool begin_refused;
+};
+
+static void* cssom_window_host_wrong_thread(void* data) {
+    CssomWindowHostThreadProbe* probe = (CssomWindowHostThreadProbe*)data;
+    probe->retry_refused = !radiant_window_host_retry();
+    probe->begin_refused = !radiant_window_host_begin(nullptr);
+    return nullptr;
+}
+
+static void cssom_window_host_uv_callback(uv_timer_t* timer) {
+    bool* refused = (bool*)timer->data;
+    *refused = !radiant_window_host_retry();
+    uv_close((uv_handle_t*)timer, nullptr);
+}
+
+struct CssomWindowHostReentry : DomDocumentResourceData {
+    bool* refused;
+};
+
+static void cssom_window_host_resource_destroyed(DomDocumentResourceData* data) {
+    CssomWindowHostReentry* probe = (CssomWindowHostReentry*)data;
+    *probe->refused = !radiant_window_host_retry();
+    mem_free(probe);
+}
+
+TEST(DomDocumentOwnership, WindowHostRetainsServicesAndOptionsUntilDocumentRetry) {
+    ASSERT_EXIT({
+        bool prior_deferred = dom_retire_set_deferred(false);
+        CssomWindowHostFixture fixture = {};
+        if (!cssom_start_window_host(&fixture) || radiant_window_host_process_shutdown_ready()) _Exit(2);
+        int other_document = 0;
+        LambdaScheduler* scheduler = nullptr;
+        Runtime* loader = cssom_guarded_loader(&scheduler, &other_document);
+        if (!loader) _Exit(3);
+        ui_context.loader_runtime = lam::own(loader);
+        fixture.document->loader_runtime = lam::up(loader);
+        bool reentry_refused = false;
+        CssomWindowHostReentry* probe = (CssomWindowHostReentry*)mem_calloc(
+            1, sizeof(*probe), MEM_CAT_LAYOUT);
+        if (!probe) _Exit(4);
+        probe->refused = &reentry_refused;
+        if (!dom_document_add_resource(fixture.document, probe, cssom_window_host_resource_destroyed)) _Exit(5);
+        // The host must capture every owner even when retirement cannot allocate.
+        memtrack_fault_inject(0);
+        bool closed = cssom_finish_window_host(&fixture);
+        memtrack_fault_clear();
+        if (closed || !radiant_window_host_pending() || ui_context.document.get() != fixture.document ||
+            ui_context.browsing_session != fixture.browsing || fixture.destroyed ||
+            !lambda_uv_is_host_owned() || !lambda_uv_loop() || !pool_calloc(fixture.load_pool, 8) ||
+            !url_get_href(fixture.cwd) || !enhanced_cache_get_directory(fixture.cache) ||
+            thread_pool_get_active_count(fixture.pool) != 0 ||
+            strcmp(ui_context.paged_options->preview_pages, "1-3") ||
+            !dom_retire_set_deferred(true)) _Exit(6);
+        if (radiant_window_host_process_shutdown_ready() || !radiant_window_host_pending()) _Exit(15);
+        {
+            RuntimeExecutionScope active(runtime_get_eval_context(loader));
+            if (radiant_window_host_retry() || !radiant_window_host_pending() || fixture.destroyed) _Exit(14);
+        }
+        CssomWindowHostThreadProbe thread_probe = {};
+        pthread_t thread;
+        if (pthread_create(&thread, nullptr, cssom_window_host_wrong_thread, &thread_probe) != 0 ||
+                pthread_join(thread, nullptr) != 0 || !thread_probe.retry_refused ||
+                !thread_probe.begin_refused) _Exit(7);
+        bool uv_refused = false;
+        uv_timer_t timer = {};
+        if (uv_timer_init(lambda_uv_loop(), &timer) != 0) _Exit(8);
+        timer.data = &uv_refused;
+        if (uv_timer_start(&timer, cssom_window_host_uv_callback, 0, 0) != 0) _Exit(9);
+        lambda_uv_run_loop(lambda_uv_loop(), UV_RUN_NOWAIT);
+        if (!uv_refused || radiant_window_host_begin(nullptr) || !radiant_window_host_pending() ||
+                ui_context.document.get() != fixture.document || fixture.destroyed) _Exit(10);
+        EvalContext* owner = runtime_get_eval_context(loader);
+        const RenderPagedOptions* previous_options = ui_context.paged_options;
+        if (!eval_context_transfer_thread(owner) ||
+                !lambda_document_retirement_guard_end(scheduler, &other_document) ||
+                !radiant_window_host_begin(previous_options) || radiant_window_host_pending() ||
+                ui_context.document || ui_context.browsing_session || ui_context.paged_options ||
+                fixture.destroyed != 1 || !reentry_refused || lambda_uv_loop() ||
+                lambda_uv_is_host_owned()) _Exit(11);
+        const RenderPagedOptions* copied_options = radiant_window_host_options();
+        if (!copied_options || strcmp(copied_options->preview_pages, "1-3") ||
+                strcmp(copied_options->export_pages, "2") || strcmp(copied_options->import_pages, "4-5") ||
+                ui_context_init(&ui_context, true, 1.0f) != 0 ||
+                !radiant_window_host_finish(nullptr, nullptr, nullptr, nullptr, false, false)) _Exit(12);
+        if (dom_retire_set_deferred(prior_deferred)) _Exit(13);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, WindowHostRetainsServicesUntilExportRetry) {
+    ASSERT_EXIT({
+        int other_document = 0;
+        LambdaScheduler* scheduler = nullptr;
+        Runtime* loader = nullptr;
+        unsigned export_destroyed = 0;
+        {
+            RenderExportSession session = {};
+            if (!cssom_guarded_export(&session, &other_document, &scheduler, &loader,
+                    &export_destroyed) || render_export_session_finish(&session)) _Exit(2);
+        }
+        CssomWindowHostFixture fixture = {};
+        if (!cssom_start_window_host(&fixture) || cssom_finish_window_host(&fixture) ||
+            !radiant_window_host_pending() || render_export_pending_count() != 1 ||
+            ui_context.document.get() != fixture.document || fixture.destroyed || export_destroyed ||
+            ui_context.browsing_session != fixture.browsing || !lambda_uv_loop() ||
+            !enhanced_cache_get_directory(fixture.cache) || !url_get_href(fixture.cwd)) _Exit(3);
+        if (radiant_window_host_process_shutdown_ready() || !radiant_window_host_pending()) _Exit(5);
+        if (!eval_context_transfer_thread(runtime_get_eval_context(loader)) ||
+            !lambda_document_retirement_guard_end(scheduler, &other_document) ||
+            !radiant_window_host_process_shutdown_ready() || radiant_window_host_pending() ||
+            render_export_pending_count() || fixture.destroyed != 1 || export_destroyed != 1 ||
+            ui_context.browsing_session || lambda_uv_loop()) _Exit(4);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, WindowHostWaitsForAnActiveExportLease) {
+    ASSERT_EXIT({
+        RenderExportSession session = {};
+        if (!render_export_session_begin_source(&session, "<html></html>", 80, 60, false)) _Exit(2);
+        CssomWindowHostFixture fixture = {};
+        if (!cssom_start_window_host(&fixture) || cssom_finish_window_host(&fixture) ||
+            !radiant_window_host_pending() || ui_context.document.get() != fixture.document ||
+            fixture.destroyed || !lambda_uv_has_host_leases()) _Exit(3);
+        if (!render_export_session_finish(&session) || lambda_uv_has_host_leases() ||
+            !radiant_window_host_retry() || radiant_window_host_pending() ||
+            fixture.destroyed != 1 || ui_context.browsing_session || lambda_uv_loop()) _Exit(4);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+static int cssom_failed_view_with_borrowed_options() {
+    char pages[] = "1-3";
+    RenderPagedOptions options = render_paged_options_default();
+    options.preview_pages = lam::up((const char*)pages);
+    return view_doc_in_window_with_events("temp/accounting-host.unsupported", nullptr, true,
+        nullptr, 0, false, false, &options, false, false);
+}
+
+TEST(DomDocumentOwnership, WindowHostRetainsFailedLoadUntilExportRetry) {
+    ASSERT_EXIT({
+        int other_document = 0;
+        LambdaScheduler* scheduler = nullptr;
+        Runtime* loader = nullptr;
+        unsigned export_destroyed = 0;
+        {
+            RenderExportSession session = {};
+            if (!cssom_guarded_export(&session, &other_document, &scheduler, &loader,
+                    &export_destroyed) || render_export_session_finish(&session)) _Exit(2);
+        }
+        if (cssom_failed_view_with_borrowed_options() == 0 || !radiant_window_host_pending() ||
+            !ui_context.browsing_session || !ui_context.browsing_session->file_cache ||
+            !enhanced_cache_get_directory(ui_context.browsing_session->file_cache) ||
+            !ui_context.paged_options || strcmp(ui_context.paged_options->preview_pages, "1-3") ||
+            !lambda_uv_loop() || !lambda_uv_is_host_owned() || export_destroyed) _Exit(3);
+        if (!eval_context_transfer_thread(runtime_get_eval_context(loader)) ||
+            !lambda_document_retirement_guard_end(scheduler, &other_document) ||
+            !radiant_window_host_retry() || radiant_window_host_pending() ||
+            render_export_pending_count() || export_destroyed != 1 ||
+            ui_context.browsing_session || ui_context.paged_options || lambda_uv_loop()) _Exit(4);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, WindowHostOptionAllocationFailureLeavesNoOwner) {
+    ASSERT_EXIT({
+        RenderPagedOptions options = render_paged_options_default();
+        options.preview_pages = lam::up((const char*)"1-3");
+        options.export_pages = lam::up((const char*)"2");
+        options.import_pages = lam::up((const char*)"4-5");
+        for (size_t allocations = 0; allocations < 3; allocations++) {
+            memtrack_fault_inject(allocations);
+            bool begun = radiant_window_host_begin(&options);
+            memtrack_fault_clear();
+            if (begun || radiant_window_host_pending() || radiant_window_host_options()) _Exit(2);
+        }
+        if (!radiant_window_host_begin(nullptr) || ui_context_init(&ui_context, true, 1.0f) != 0 ||
+                !radiant_window_host_finish(nullptr, nullptr, nullptr, nullptr, false, false)) _Exit(3);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, ExportCloseCannotTransferDuringItsOwnResourceWalk) {
+    ASSERT_EXIT({
+        RenderExportSession session = {};
+        if (!render_export_session_begin_source(&session, "<html></html>", 80, 60, false)) _Exit(2);
+        bool refused = false;
+        CssomExportCloseProbe* probe = (CssomExportCloseProbe*)mem_calloc(
+            1, sizeof(*probe), MEM_CAT_LAYOUT);
+        if (!probe) _Exit(3);
+        probe->session = &session;
+        probe->refused = &refused;
+        if (!dom_document_add_resource(session.document, probe, cssom_export_close_reenter)) _Exit(4);
+        if (!render_export_session_finish(&session) || !refused || session.owned_ui_context ||
+            session.deferred_owner || render_export_pending_count()) _Exit(5);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, ExportCloseStaysOnItsOwnerThread) {
+    ASSERT_EXIT({
+        RenderExportSession session = {};
+        if (!render_export_session_begin_source(&session, "<html></html>", 80, 60, false)) _Exit(2);
+        UiContext* ui = session.ui_context;
+        Url* base = session.base_url;
+        DomDocument* document = session.document;
+        CssomExportThreadProbe probe = {};
+        probe.session = &session;
+        pthread_t thread;
+        if (pthread_create(&thread, nullptr, cssom_export_wrong_thread, &probe) != 0 ||
+                pthread_join(thread, nullptr) != 0) _Exit(3);
+        if (!probe.end_refused || !probe.handoff_refused || probe.pending ||
+            session.ui_context.get() != ui || session.base_url.get() != base ||
+            session.document.get() != document || render_export_pending_count()) _Exit(4);
+        if (!render_export_session_finish(&session) || session.owned_ui_context ||
+            session.base_url || render_export_pending_count()) _Exit(5);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, DeferredExportRetainsBorrowedCallerRuntime) {
+    ASSERT_EXIT({
+        Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+        if (!runtime) _Exit(2);
+        runtime_init(runtime);
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        if (!owner || !eval_context_transfer_thread(owner) ||
+            item_is_error(js_interp_execute_source(runtime, "null;", 5,
+                "borrowed-export-caller.js", nullptr))) _Exit(3);
+        Heap* heap = runtime_heap(runtime);
+        {
+            RuntimeExecutionScope active(owner);
+            RenderExportSession session = {};
+            if (!render_export_session_begin_source(&session, "<html></html>", 80, 60, false) ||
+                    runtime->native_borrows != 1) _Exit(4);
+            // Package layout may leave a document borrowing the caller's evaluator.
+            session.document->loader_runtime = lam::up(runtime);
+            if (render_export_session_finish(&session) || render_export_pending_count() != 1) _Exit(5);
+        }
+        runtime_reset_heap(runtime);
+        if (runtime_heap(runtime) != heap || runtime->native_borrows != 1 ||
+            runtime_try_cleanup(runtime) != RUNTIME_CLEANUP_RETRY || !render_export_retire_pending() ||
+            render_export_pending_count() || runtime->native_borrows || runtime_heap(runtime) != heap) _Exit(6);
+        if (runtime_try_cleanup(runtime) != RUNTIME_CLEANUP_COMPLETE) _Exit(7);
+        mem_free(runtime);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, ExportHandoffSurvivesStackAndAllocationFailure) {
+    ASSERT_EXIT({
+        if (render_export_pending_count()) _Exit(2);
+        int other_document = 0;
+        LambdaScheduler* scheduler = nullptr;
+        Runtime* loader = nullptr;
+        DomDocument* document = nullptr;
+        Url* base = nullptr;
+        unsigned destroyed = 0;
+        bool reentry_refused = false;
+        {
+            RenderExportSession session = {};
+            if (!cssom_guarded_export(&session, &other_document, &scheduler, &loader, &destroyed)) _Exit(3);
+            document = session.document;
+            base = session.base_url;
+            CssomExportRetirementProbe* probe = (CssomExportRetirementProbe*)mem_calloc(
+                1, sizeof(*probe), MEM_CAT_LAYOUT);
+            if (!probe) _Exit(5);
+            probe->reentry_refused = &reentry_refused;
+            if (!dom_document_add_resource(document, probe, cssom_export_retirement_destroyed)) _Exit(6);
+            // The preallocated owner must accept the transfer even when close cannot allocate.
+            memtrack_fault_inject(0);
+            bool completed = render_export_session_finish(&session);
+            memtrack_fault_clear();
+            if (completed || session.owned_ui_context || session.base_url || session.document ||
+                render_export_pending_count() != 1 || destroyed || !url_get_href(base)) _Exit(8);
+        }
+        EvalContext* owner = runtime_get_eval_context(loader);
+        if (radiant_window_host_process_shutdown_ready() || render_export_pending_count() != 1) _Exit(16);
+        {
+            RuntimeExecutionScope active(owner);
+            if (render_export_retire_pending() || render_export_pending_count() != 1 || destroyed) _Exit(9);
+        }
+        bool uv_refused = false;
+        uv_timer_t timer = {};
+        if (uv_timer_init(lambda_uv_loop(), &timer) != 0) _Exit(10);
+        timer.data = &uv_refused;
+        if (uv_timer_start(&timer, cssom_export_retirement_uv_callback, 0, 0) != 0) _Exit(11);
+        lambda_uv_run_loop(lambda_uv_loop(), UV_RUN_NOWAIT);
+        if (!uv_refused || render_export_retire_pending() || render_export_pending_count() != 1 ||
+            destroyed || !url_get_href(base)) _Exit(12);
+        if (!eval_context_transfer_thread(owner) ||
+            !lambda_document_retirement_guard_end(scheduler, &other_document)) _Exit(13);
+        UiContext host = {};
+        host.input_dispatch_depth = 1;
+        radiant_pump_js_event_loop(&host, -1);
+        if (render_export_pending_count() != 1 || destroyed) _Exit(14);
+        host.input_dispatch_depth = 0;
+        radiant_pump_js_event_loop(&host, -1);
+        if (render_export_pending_count() || destroyed != 1 || !reentry_refused) _Exit(15);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, ExportRetirementAdvancesOtherOwnersWhenOneIsBlocked) {
+    ASSERT_EXIT({
+        int documents[2] = {};
+        LambdaScheduler* schedulers[2] = {};
+        Runtime* loaders[2] = {};
+        unsigned destroyed[2] = {};
+        for (int i = 0; i < 2; i++) {
+            RenderExportSession session = {};
+            if (!cssom_guarded_export(&session, &documents[i], &schedulers[i], &loaders[i],
+                    &destroyed[i]) || render_export_session_finish(&session)) _Exit(2);
+        }
+        if (render_export_pending_count() != 2 ||
+            !eval_context_transfer_thread(runtime_get_eval_context(loaders[1])) ||
+            !lambda_document_retirement_guard_end(schedulers[1], &documents[1]) ||
+            render_export_retire_pending() || render_export_pending_count() != 1 ||
+            destroyed[0] || destroyed[1] != 1) _Exit(3);
+        if (!eval_context_transfer_thread(runtime_get_eval_context(loaders[0])) ||
+            !lambda_document_retirement_guard_end(schedulers[0], &documents[0]) ||
+            !render_export_retire_pending() || render_export_pending_count() ||
+            destroyed[0] != 1) _Exit(4);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, ExportRetirementKeepsSharedLoopUntilAllOwnersFinish) {
+    ASSERT_EXIT({
+        int documents[2] = {};
+        LambdaScheduler* schedulers[2] = {};
+        Runtime* loaders[2] = {};
+        unsigned destroyed[2] = {};
+        for (int i = 0; i < 2; i++) {
+            RenderExportSession session = {};
+            if (!cssom_guarded_export(&session, &documents[i], &schedulers[i], &loaders[i],
+                    &destroyed[i], true) || render_export_session_finish(&session)) _Exit(2);
+        }
+        if (!lambda_uv_loop() || render_export_pending_count() != 2) _Exit(30);
+        if (!eval_context_transfer_thread(runtime_get_eval_context(loaders[1])) ||
+            !lambda_document_retirement_guard_end(schedulers[1], &documents[1])) _Exit(31);
+        if (render_export_retire_pending() || render_export_pending_count() != 1 ||
+            destroyed[0] || destroyed[1] != 1) _Exit(32);
+        if (!lambda_uv_loop()) _Exit(33);
+        if (!eval_context_transfer_thread(runtime_get_eval_context(loaders[0])) ||
+            !lambda_document_retirement_guard_end(schedulers[0], &documents[0]) ||
+            !render_export_retire_pending() || render_export_pending_count() || destroyed[0] != 1) _Exit(4);
+        if (lambda_uv_loop()) lambda_uv_cleanup();
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+static void cssom_export_during_loop_cleanup(uv_handle_t* handle) {
+    bool* refused = (bool*)handle->data;
+    RenderExportSession session = {};
+    *refused = !render_export_session_begin_source(&session, "<html></html>", 80, 60, false) &&
+        !session.deferred_owner && !session.owned_ui_context;
+}
+
+TEST(DomDocumentOwnership, ExportLeaseProtectsLoopAndRejectsTeardownReentry) {
+    ASSERT_EXIT({
+        RenderExportSession session = {};
+        if (!render_export_session_begin_source(&session, "<html></html>", 80, 60, false) ||
+            lambda_uv_init() != 0 || !lambda_uv_has_host_leases() || !lambda_uv_is_host_owned()) _Exit(2);
+        uv_loop_t* loop = lambda_uv_loop();
+        bool reentry_refused = false;
+        uv_timer_t timer = {};
+        if (!loop || uv_timer_init(loop, &timer) != 0) _Exit(3);
+        timer.data = &reentry_refused;
+        uv_close((uv_handle_t*)&timer, cssom_export_during_loop_cleanup);
+        lambda_uv_cleanup();
+        lambda_uv_abandon();
+        if (lambda_uv_loop() != loop || !lambda_uv_has_host_leases() || reentry_refused ||
+            radiant_window_host_process_shutdown_ready()) _Exit(4);
+        if (!render_export_session_finish(&session) || lambda_uv_has_host_leases() ||
+            !radiant_window_host_process_shutdown_ready() || lambda_uv_loop() != loop) _Exit(5);
+        lambda_uv_cleanup();
+        if (lambda_uv_loop() || !reentry_refused || lambda_uv_has_host_leases()) _Exit(6);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, ExportHandoffReservationFailsBeforeAcquisition) {
+    ASSERT_EXIT({
+        for (size_t allocations = 0; allocations < 2; allocations++) {
+            RenderExportSession session = {};
+            memtrack_fault_inject(allocations);
+            bool begun = render_export_session_begin_source(&session, "<html></html>", 80, 60, false);
+            memtrack_fault_clear();
+            if (begun || session.owned_ui_context || session.base_url || session.deferred_owner ||
+                render_export_pending_count()) _Exit(2);
+        }
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
+TEST(DomDocumentOwnership, FailedExportSetupReleasesReservedOwner) {
+    ASSERT_EXIT({
+        RenderExportSession session = {};
+        if (render_export_session_begin_source(&session, "", 80, 60, false) ||
+            session.owned_ui_context || session.base_url || session.deferred_owner ||
+            render_export_pending_count()) _Exit(2);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
+}
+
 TEST(DomDocumentOwnership, RuntimeCleanupOwnsRecursiveDocumentRelease) {
     for (int owned = 0; owned < 3; ++owned) {
         Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
@@ -271,6 +928,48 @@ static const RuntimeResourceDescriptor runtime_cleanup_probe_descriptor = {
 
 static void runtime_cleanup_probe_closed(void* data) {
     ++*(unsigned*)data;
+}
+
+struct RuntimeCleanupExportProbe {
+    Runtime* runtime;
+    bool attempted;
+    bool refused;
+};
+
+static void runtime_cleanup_start_export(void* data) {
+    RuntimeCleanupExportProbe* probe = (RuntimeCleanupExportProbe*)data;
+    RenderExportSession session = {};
+    probe->attempted = true;
+    bool begun = render_export_session_begin_source(&session, "<html></html>", 80, 60, false);
+    probe->refused = !begun;
+    if (begun) {
+        session.document->loader_runtime = lam::up(probe->runtime);
+        render_export_session_finish(&session);
+    }
+}
+
+TEST(DomDocumentOwnership, WindowHostRejectsNewBorrowDuringDestructiveRuntimeCleanup) {
+    ASSERT_EXIT({
+        CssomWindowHostFixture fixture = {};
+        if (!cssom_start_window_host(&fixture)) _Exit(2);
+        Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_EVAL);
+        if (!runtime) _Exit(3);
+        runtime_init(runtime);
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        if (!owner || !eval_context_transfer_thread(owner) ||
+            item_is_error(js_interp_execute_source(runtime, "null;", 5,
+                "window-host-destructive-export.js", nullptr))) _Exit(4);
+        RuntimeCleanupExportProbe probe = {};
+        probe.runtime = runtime;
+        RuntimeResourceTable* table = runtime_resource_table_context_ensure(owner);
+        if (!table || !runtime_resource_table_add_native_owned(table, nullptr,
+                &runtime_cleanup_probe_descriptor, runtime_cleanup_start_export, &probe)) _Exit(5);
+        ui_context.loader_runtime = lam::own(runtime);
+        if (!cssom_finish_window_host(&fixture) || !probe.attempted || !probe.refused ||
+            fixture.destroyed != 1 || radiant_window_host_pending() ||
+            render_export_pending_count() || lambda_uv_has_host_leases()) _Exit(6);
+        _Exit(0);
+    }, ::testing::ExitedWithCode(0), "");
 }
 
 TEST(DomDocumentOwnership, IncompatibleDocumentOwnersRefuseRuntimeCleanupBeforeTeardown) {

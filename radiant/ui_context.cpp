@@ -15,12 +15,14 @@
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
 #include "../lib/time_util.h"
+#include "../lib/uv_loop.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/dom/dom_events.h"
+#include "../lambda/dom/dom_observers.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/concurrency.h"
@@ -515,21 +517,44 @@ void free_document(DomDocument* doc) {
 struct DocumentCleanupOwners {
     EvalContext* timer;
     EvalContext* state;
+    EvalContext* loader;
+};
+
+struct WindowDocumentRetirement {
+    DomDocument* document;
+    Runtime* runtimes[3];
+    EvalContext* owners[3];
+    bool pinned[3];
+    int runtime_count;
+    LambdaDocumentLifetimeGuard* lifetime;
+    Runtime* deferred_js;
+    Runtime* deferred_script;
+    Input* input;
+    Pool* loader_pool;
+    bool destroying;
+    bool destroyed;
+    bool incomplete;
 };
 
 static bool document_cleanup_owners(DomDocument* doc, DocumentCleanupOwners* owners) {
     Runtime* timer_runtime = doc->js.runtime ? doc->js.runtime : doc->lambda_runtime;
     Runtime* state_runtime = dom_document_script_runtime(doc);
+    Runtime* loader_runtime = dom_document_loader_runtime(doc);
     // A partially retired evaluator cannot safely service document teardown.
     if ((timer_runtime && timer_runtime->cleanup_incomplete) ||
-            (state_runtime && state_runtime->cleanup_incomplete)) {
+            (state_runtime && state_runtime->cleanup_incomplete) ||
+            (loader_runtime && loader_runtime->cleanup_incomplete)) {
         log_error("free_document: document evaluator cleanup is incomplete; document retained");
         return false;
     }
     owners->timer = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
     owners->state = state_runtime == timer_runtime ? owners->timer :
         (state_runtime ? runtime_get_eval_context(state_runtime) : nullptr);
-    if ((timer_runtime && !owners->timer) || (state_runtime && !owners->state)) {
+    owners->loader = loader_runtime == state_runtime ? owners->state :
+        (loader_runtime == timer_runtime ? owners->timer :
+            (loader_runtime ? runtime_get_eval_context(loader_runtime) : nullptr));
+    if ((timer_runtime && !owners->timer) || (state_runtime && !owners->state) ||
+            (loader_runtime && !owners->loader)) {
         log_error("free_document: could not obtain document evaluator; document retained");
         return false;
     }
@@ -539,12 +564,13 @@ static bool document_cleanup_owners(DomDocument* doc, DocumentCleanupOwners* own
         return false;
     }
     // The current owner cannot release the roots or stack executing this close.
-    if ((owners->timer && owners->timer->execution_depth) ||
-            (owners->state && owners->state->execution_depth)
+    bool active = (owners->timer && owners->timer->execution_depth) ||
+        (owners->state && owners->state->execution_depth) ||
+        (owners->loader && owners->loader->execution_depth);
 #ifndef LAMBDA_NO_TASKS
-            || ((owners->timer || owners->state) && activation_current())
+    active = active || ((owners->timer || owners->state || owners->loader) && activation_current());
 #endif
-            ) {
+    if (active) {
         log_error("free_document: document evaluator is active; document retained");
         return false;
     }
@@ -559,9 +585,15 @@ bool document_runtime_cleanup_ready(DomDocument* doc) {
     return document_cleanup_owners(doc, &owners);
 }
 
-bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
+static bool free_document_profiled_impl(DomDocument* doc, DocumentCleanupTiming* timing,
+        WindowDocumentRetirement* retirement) {
     if (!doc) return true;
     if (doc->destroying) return true;
+    // A window's pending close owns the document until its join and resource walk finish.
+    if (!retirement && lambda_document_lifetime_guard_active(doc)) {
+        log_error("free_document: window retirement is pending; document retained");
+        return false;
+    }
     // Every check that can refuse teardown runs before the first release, so a
     // refused document stays whole and owned instead of half torn down (its
     // Input and loader pool used to be detached and then dropped on return).
@@ -592,7 +624,22 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
 
     // S13.3.1v2: tasks the document owns are cancelled, then joined, while its
     // state and DOM still exist, so their cleanup runs against a live document
-    if (state_owner) lambda_document_tasks_release(doc);
+    if (!retirement && state_owner && lambda_document_tasks_release(doc) < 0) {
+        log_error("free_document: document tasks did not join; document retained");
+        return false;
+    }
+    // Observer pins must leave each participating realm before the document arena dies.
+    if (retirement) {
+        for (int i = 0; i < retirement->runtime_count; i++) {
+            EvalContext* owner = retirement->owners[i];
+            if (!owner || !radiant_eval_context_switch(owner) ||
+                    (js_runtime_state_for(owner) && !js_runtime_state_init(owner))) return false;
+            dom_observers_release_document(doc);
+        }
+        if (document_owner && !radiant_eval_context_switch(document_owner)) return false;
+    } else {
+        dom_observers_release_document(doc);
+    }
     // Cancellation cleanup may attach resources before native teardown starts.
     doc->destroying = true;
 
@@ -644,7 +691,8 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // can be destroyed only after the document has detached those references.
     {
         DocumentCleanupTimer phase(timing ? &timing->script_ms : nullptr);
-        script_runner_cleanup_js_state(doc);
+        if (retirement) retirement->deferred_js = script_runner_defer_js_state_cleanup(doc);
+        else script_runner_cleanup_js_state(doc);
     }
 
     // Embedded documents belong to their iframe elements. The view-tree walk
@@ -679,6 +727,10 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
         // An outer runtime cleanup remains responsible for its own allocation.
         doc->lambda_runtime = nullptr;
         doc->owns_script_runtime = false;
+    } else if (retirement && doc->lambda_runtime) {
+        retirement->deferred_script = doc->lambda_runtime;
+        doc->lambda_runtime = nullptr;
+        doc->owns_script_runtime = false;
     } else if (doc->owns_script_runtime && doc->lambda_runtime) {
         owned_runtime.reset(doc->lambda_runtime);
         doc->lambda_runtime = nullptr;
@@ -688,8 +740,19 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     // The Input context owns parser arenas outside the loader pool. Release it
     // after every DOM-owned allocator has detached from the same context. A
     // foreign document borrows its creator's Input, which remains live.
+    if (retirement) {
+        // Deferred owners must not rediscover this document after its arena is gone.
+        for (int i = 0; i < retirement->runtime_count; i++)
+            if (retirement->runtimes[i]->dom_doc == doc) retirement->runtimes[i]->dom_doc = nullptr;
+    }
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
+    if (retirement) {
+        retirement->input = document_input;
+        retirement->loader_pool = owned_loader_pool;
+        retirement->destroyed = true;
+        return true;
+    }
     if (owned_runtime) {
         // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D6.4.1).
         if (!radiant_eval_context_switch(runtime_get_eval_context(owned_runtime.get()))) {
@@ -705,12 +768,15 @@ bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
     return true;
 }
 
-void ui_context_cleanup(UiContext* uicon) {
-    if (!uicon) return;
-    uicon->destroy();
+bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
+    return free_document_profiled_impl(doc, timing, nullptr);
 }
 
-bool ui_context_release_loader_runtime(UiContext* uicon) {
+bool ui_context_cleanup(UiContext* uicon) {
+    return !uicon || uicon->destroy();
+}
+
+bool ui_context_release_loader_runtime(UiContext* uicon, bool wait_for_tasks) {
     if (!uicon || !uicon->loader_runtime) return true;
     Runtime* runtime = uicon->loader_runtime.get();
     // Teardown is quiescent: take the thread from whichever document
@@ -720,7 +786,8 @@ bool ui_context_release_loader_runtime(UiContext* uicon) {
         log_error("loader-runtime: could not bind the window loader runtime for release");
         return false;
     }
-    RuntimeCleanupResult result = runtime_try_cleanup(runtime);
+    RuntimeCleanupResult result = wait_for_tasks ? runtime_try_cleanup(runtime) :
+        runtime_try_cleanup_nonblocking(runtime);
     if (result != RUNTIME_CLEANUP_COMPLETE) {
         log_error("loader-runtime: cleanup %s; window retains the runtime",
             result == RUNTIME_CLEANUP_RETRY ? "needs a quiescent retry" : "is incomplete");
@@ -732,39 +799,228 @@ bool ui_context_release_loader_runtime(UiContext* uicon) {
     return true;
 }
 
+static int window_document_runtimes(DomDocument* doc, Runtime** runtimes) {
+    Runtime* candidates[] = {doc->js.runtime, doc->lambda_runtime, doc->loader_runtime.get()};
+    int count = 0;
+    for (Runtime* candidate : candidates) {
+        if (!candidate) continue;
+        bool found = false;
+        for (int i = 0; i < count; i++) if (runtimes[i] == candidate) found = true;
+        if (!found) runtimes[count++] = candidate;
+    }
+    return count;
+}
+
+static bool window_document_owner_first(WindowDocumentRetirement* retirement, int index) {
+    for (int i = 0; i < index; i++)
+        if (retirement->owners[i] == retirement->owners[index]) return false;
+    return true;
+}
+
+bool ui_context_document_has_pending_native_work(UiContext* ui) {
+    WindowDocumentRetirement* retirement = ui ? ui->document_retirement : nullptr;
+    if (!retirement || !ui->document) return false;
+    for (int i = 0; i < retirement->runtime_count; i++) {
+        EvalContext* owner = retirement->owners[i];
+        if (owner && window_document_owner_first(retirement, i) &&
+                lambda_document_tasks_have_pending_native_work(owner->scheduler, ui->document)) return true;
+    }
+    return false;
+}
+
+static bool window_document_bind_owner(EvalContext* owner) {
+    return radiant_eval_context_switch(owner) &&
+        (!js_runtime_state_for(owner) || js_runtime_state_init(owner));
+}
+
+static bool window_document_retirement_in_callback(const UiContext* ui) {
+    return (ui->document || ui->document_retirement) && lambda_uv_is_running();
+}
+
+static int window_document_runtime_index(WindowDocumentRetirement* retirement, Runtime* runtime) {
+    for (int i = 0; i < retirement->runtime_count; i++)
+        if (retirement->runtimes[i] == runtime) return i;
+    return -1;
+}
+
+static bool window_document_retire(UiContext* ui, WindowDocumentRetirement* retirement,
+                                   bool wait_for_tasks) {
+    if (!lambda_document_lifetime_guard_is_current(retirement->lifetime)) return false;
+    if (!retirement->destroyed) {
+        DomDocument* doc = ui->document;
+        if (!doc || doc != retirement->document || doc->destroying ||
+                !document_runtime_cleanup_ready(doc)) {
+            log_debug("window-document: runtime preflight is not ready");
+            return false;
+        }
+        Runtime* current[3] = {};
+        int count = window_document_runtimes(doc, current);
+        if (count != retirement->runtime_count) return false;
+        for (int i = 0; i < count; i++) if (current[i] != retirement->runtimes[i]) return false;
+
+        // Pin every owner before running any cancellation callback on the shared loop.
+        for (int i = 0; i < count; i++) {
+            if (retirement->pinned[i]) continue;
+            if (!window_document_bind_owner(retirement->owners[i]) ||
+                    !runtime_document_retirement_pin(retirement->runtimes[i])) {
+                log_debug("window-document: runtime pin is not ready");
+                return false;
+            }
+            retirement->pinned[i] = true;
+        }
+        // Mark all schedulers first: cleanup on one may advance another on the loop.
+        for (int i = 0; i < count; i++) {
+            if (!window_document_owner_first(retirement, i)) continue;
+            EvalContext* owner = retirement->owners[i];
+            if (!window_document_bind_owner(owner)) return false;
+            // An independent scheduler guard has its own retirement owner.
+            if (lambda_scheduler_has_document_retirement_guards(owner->scheduler)) return false;
+            if (owner->scheduler && lambda_document_tasks_cancel(owner->scheduler, doc) < 0) return false;
+        }
+        for (;;) {
+            bool pending = false;
+            bool advanced = false;
+            for (int i = 0; i < count; i++) {
+                if (!window_document_owner_first(retirement, i)) continue;
+                EvalContext* owner = retirement->owners[i];
+                if (!window_document_bind_owner(owner)) return false;
+                if (!owner->scheduler) continue;
+                LambdaDocumentJoinProgress progress = lambda_document_tasks_progress(
+                    owner->scheduler, doc, retirement->lifetime);
+                if (progress == LAMBDA_DOCUMENT_JOIN_ERROR) {
+                    log_debug("window-document: scheduler progress refused");
+                    return false;
+                }
+                pending |= progress != LAMBDA_DOCUMENT_JOIN_DONE;
+                advanced |= progress == LAMBDA_DOCUMENT_JOIN_ADVANCED;
+            }
+            if (!pending) break;
+            // Host retries yield after one round so unrelated loop handles cannot stall a frame.
+            if (!wait_for_tasks) {
+                log_debug("window-document: scheduler pending, advanced=%d", advanced);
+                return false;
+            }
+            if (advanced) continue;
+            uv_loop_t* loop = lambda_uv_loop();
+            if (!loop || !uv_loop_alive(loop)) return false;
+            // Each scheduler gets a turn before an unrelated wake can keep the loop alive.
+            lambda_uv_run_loop(loop, UV_RUN_ONCE);
+        }
+        count = window_document_runtimes(doc, current);
+        if (count != retirement->runtime_count) return false;
+        for (int i = 0; i < count; i++) if (current[i] != retirement->runtimes[i]) return false;
+        if (!free_document_profiled_impl(doc, nullptr, retirement)) return false;
+        ui->document = nullptr;
+        ui->paged_view = nullptr;
+        ui->paged_scroll_x = ui->paged_scroll_y = 0.0f;
+    }
+
+    // Close an owned runtime under its pin so callbacks cannot retire another owner.
+    Runtime** deferred[] = {&retirement->deferred_js, &retirement->deferred_script};
+    for (Runtime** slot : deferred) {
+        Runtime* runtime = *slot;
+        if (!runtime) continue;
+        // The window, not the document, owns its shared loader runtime.
+        if (ui->loader_runtime.get() == runtime) { *slot = nullptr; continue; }
+        int index = window_document_runtime_index(retirement, runtime);
+        if (index < 0 || !retirement->pinned[index] || retirement->incomplete ||
+                !radiant_eval_context_switch(retirement->owners[index])) return false;
+        RuntimeCleanupResult result = wait_for_tasks ? runtime_try_cleanup_retirement_pinned(runtime) :
+            runtime_try_cleanup_retirement_pinned_nonblocking(runtime);
+        if (result != RUNTIME_CLEANUP_COMPLETE) {
+            retirement->incomplete = result == RUNTIME_CLEANUP_INCOMPLETE;
+            return false;
+        }
+        retirement->pinned[index] = false;
+        retirement->runtimes[index] = nullptr;
+        retirement->owners[index] = nullptr;
+        *slot = nullptr;
+        if (retirement->deferred_js == runtime) retirement->deferred_js = nullptr;
+        if (retirement->deferred_script == runtime) retirement->deferred_script = nullptr;
+        mem_free(runtime);
+    }
+    // Borrowed runtimes remain pinned until all owned runtimes have finished.
+    for (int i = 0; i < retirement->runtime_count; i++) {
+        if (!retirement->pinned[i]) continue;
+        if (!radiant_eval_context_switch(retirement->owners[i]) ||
+                !runtime_document_retirement_unpin(retirement->runtimes[i])) return false;
+        retirement->pinned[i] = false;
+    }
+    if (retirement->input) input_release_document_resources(retirement->input);
+    if (retirement->loader_pool) mem_pool_destroy(retirement->loader_pool);
+    retirement->input = nullptr;
+    retirement->loader_pool = nullptr;
+    return lambda_document_lifetime_guard_end(retirement->lifetime);
+}
+
 // the window shell owns the top-level document and releases it here; other
 // holders of `document` only borrow it
-bool UiContext::destroy_document() {
-    // An outer destruction still owns the document until its resource walk ends.
-    if (document && (document->destroying || !free_document_profiled(document, nullptr))) return false;
+bool UiContext::destroy_document(bool wait_for_tasks) {
+    WindowDocumentRetirement* retirement = document_retirement;
+    // Libuv cannot be re-entered while cancellation cleanup needs its loop.
+    if (window_document_retirement_in_callback(this)) return false;
+    if (retirement && retirement->destroying) return false;
+    if (!retirement && document) {
+        if (document->destroying || !document_runtime_cleanup_ready(document)) return false;
+        retirement = (WindowDocumentRetirement*)mem_calloc(1, sizeof(*retirement), MEM_CAT_LAYOUT);
+        if (!retirement) return false;
+        retirement->document = document;
+        retirement->runtime_count = window_document_runtimes(document, retirement->runtimes);
+        for (int i = 0; i < retirement->runtime_count; i++) {
+            retirement->owners[i] = runtime_get_eval_context(retirement->runtimes[i]);
+            if (!retirement->owners[i]) { mem_free(retirement); return false; }
+            for (int j = 0; j < i; j++) {
+                // Two controllers sharing one evaluator cannot independently retire it.
+                if (retirement->owners[i] == retirement->owners[j]) {
+                    log_error("ui-context: distinct runtimes share a document evaluator; document retained");
+                    mem_free(retirement);
+                    return false;
+                }
+            }
+        }
+        retirement->lifetime = lambda_document_lifetime_guard_begin(document);
+        if (!retirement->lifetime) { mem_free(retirement); return false; }
+        document_retirement = retirement;
+    }
+    if (retirement) {
+        retirement->destroying = true;
+        bool complete = window_document_retire(this, retirement, wait_for_tasks);
+        retirement->destroying = false;
+        if (!complete) return false;
+        document_retirement = nullptr;
+        mem_free(retirement);
+    }
     document = nullptr;
     paged_view = nullptr;
     paged_scroll_x = paged_scroll_y = 0.0f;
     return true;
 }
 
-void UiContext::destroy() {
+bool UiContext::destroy(bool wait_for_tasks) {
     log_debug("cleaning up UI context");
 
+    if (window_document_retirement_in_callback(this)) {
+        log_error("ui-context: document cleanup deferred until the event loop returns");
+        return false;
+    }
     // Keep the window's dependent owners intact when preflight already refuses.
     if (document && !document_runtime_cleanup_ready(document)) {
         log_error("ui-context: document not ready; remaining teardown stopped");
-        return;
+        return false;
     }
-    // destroy all webviews before tearing down the window
+    if (!destroy_document(wait_for_tasks)) {
+        log_error("ui-context: document retained; remaining teardown stopped");
+        return false;
+    }
+    // A refused document retirement still needs its native web-view handles.
     if (webview_mgr) {
         webview_manager_destroy(webview_mgr);
         webview_mgr = nullptr;
     }
-
-    if (!destroy_document()) {
-        log_error("ui-context: document retained; remaining teardown stopped");
-        return;
-    }
     // its documents borrowed the loader runtime, so it goes after them
-    if (!ui_context_release_loader_runtime(this)) {
+    if (!ui_context_release_loader_runtime(this, wait_for_tasks)) {
         log_error("ui-context: loader runtime retained; remaining teardown stopped");
-        return;
+        return false;
     }
 
     log_debug("cleaning up font resources");
@@ -815,4 +1071,5 @@ void UiContext::destroy() {
         radiant_platform_destroy_window(window);
         window = nullptr;
     }
+    return true;
 }

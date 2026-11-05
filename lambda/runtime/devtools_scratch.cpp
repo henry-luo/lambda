@@ -322,7 +322,7 @@ int devtools_run_scratch(int fd) {
     inspector.connection = devtools_open(fd, commands, sizeof(commands) / sizeof(commands[0]), &inspector);
     int status = inspector.connection ? 0 : 1;
     while (devtools_connected(inspector.connection)) {
-        uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+        lambda_uv_run_loop(lambda_uv_loop(), UV_RUN_NOWAIT);
         devtools_dispatch_pending(inspector.connection);
         uv_sleep(8);
     }

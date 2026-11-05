@@ -4657,6 +4657,7 @@ typedef struct UiContext {
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
     lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
+    struct WindowDocumentRetirement* document_retirement; // owns pending close state across retries
     // the document registry owns the paged edition; launch options outlive the window loop.
     lam::Up<ViewTree> paged_view;
     lam::Up<const struct RenderPagedOptions> paged_options;
@@ -4702,8 +4703,8 @@ typedef struct UiContext {
 
     int init(bool headless, float requested_device_scale = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
-    bool destroy_document();
-    void destroy();
+    bool destroy_document(bool wait_for_tasks = true);
+    bool destroy(bool wait_for_tasks = true);
 } UiContext;
 
 void ui_context_init_default_fonts(UiContext* uicon);
@@ -4864,7 +4865,8 @@ struct LayoutLoaderHostScope {
 // its math.
 bool layout_path_uses_loader_runtime(const char* path);
 // Releases the window's loader runtime; its documents must already be gone.
-bool ui_context_release_loader_runtime(struct UiContext* uicon);
+bool ui_context_release_loader_runtime(struct UiContext* uicon, bool wait_for_tasks = true);
+bool ui_context_document_has_pending_native_work(struct UiContext* uicon);
 Runtime* ui_context_loader_runtime(struct UiContext* uicon);
 // Ends the loader runtime's work on one document: the document takes the UI
 // attribute roots that work published (with no document they are dropped),

@@ -71,6 +71,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/concurrency.h"
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/interp.hpp"
 #include "../lambda/js/js_interp.hpp"
@@ -3532,6 +3533,8 @@ Runtime* layout_document_package_runtime(DomDocument* document, const char* pack
         }
         return runtime;
     }
+    // Do not attach a new evaluator after the retiring window fixed its owners.
+    if (document->destroying || lambda_document_lifetime_guard_active(document)) return nullptr;
     // A synchronous render inside Lambda shares its live evaluator; it cannot
     // transfer that thread to a second runtime while caller roots are active.
     if (context && context->execution_depth != 0) return context->runtime;

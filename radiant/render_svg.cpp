@@ -1511,7 +1511,7 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
         return 1;
     }
     int result = render_export_session_to_svg(&session, svg_file);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -1526,6 +1526,6 @@ int render_document_transform_to_svg(const char* document_file,
         return 1;
     }
     int result = render_export_session_to_svg(&session, svg_file);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }

@@ -4479,7 +4479,7 @@ bool render_effect_group_finish(RenderEffectGroup* group,
 
 // ===== render_export_support.hpp =====
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
-void ui_context_cleanup(UiContext* uicon);
+bool ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
 // paged: lay the document out as a page flow for that composition (layout_paged.cpp)
@@ -4700,6 +4700,7 @@ typedef struct RenderExportSession {
     lam::Up<UiContext> ui_context;
     lam::Own<UiContext> owned_ui_context;
     lam::Own<Url> base_url;
+    lam::Own<struct RenderExportRetirement> deferred_owner;
     lam::Up<DomDocument> document;
     lam::Up<ViewTree> paged_view;
     float output_scale;
@@ -4717,6 +4718,8 @@ typedef struct RenderExportSession {
     bool auto_width;
     bool auto_height;
     bool print_media;
+    bool ui_closed;
+    bool closing;
 } RenderExportSession;
 
 void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind,
@@ -4739,7 +4742,12 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     int viewport_width, int viewport_height, int fallback_width, int fallback_height,
     float output_scale, float device_scale, bool raster_surface, bool paged = false,
     bool print_media = false);
-void render_export_session_end(RenderExportSession* session);
+// A refused close retains the session's owned context and URL for a quiescent retry.
+bool render_export_session_end(RenderExportSession* session);
+// Stack owners transfer a refused close to a preallocated owner on this thread.
+bool render_export_session_finish(RenderExportSession* session);
+bool render_export_retire_pending();
+size_t render_export_pending_count();
 int render_export_session_to_png(RenderExportSession* session, const char* filename,
                                   bool transparent_background = false);
 int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);

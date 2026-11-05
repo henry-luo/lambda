@@ -20,6 +20,7 @@
 #include "mime.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/uv_loop.h"
 
 #include <string.h>
 #include "../../lib/mem.h"
@@ -83,9 +84,9 @@ void server_destroy(Server *server) {
     if (!server) return;
     server_stop(server);
     // close callbacks and queued workers still borrow the server and its pool.
-    if (server->owns_loop) uv_run(server->loop, UV_RUN_DEFAULT);
+    if (server->owns_loop) lambda_uv_run_loop(server->loop, UV_RUN_DEFAULT);
     else while (server->connections || worker_pool_active_count(server->worker_pool)) {
-        uv_run(server->loop, UV_RUN_ONCE);
+        lambda_uv_run_loop(server->loop, UV_RUN_ONCE);
     }
 
     // destroy components
@@ -216,7 +217,7 @@ int server_run(Server *server) {
     uv_signal_start(&server->sigterm_handle, on_signal, SIGTERM);
 
     log_info("server event loop running");
-    int r = uv_run(server->loop, UV_RUN_DEFAULT);
+    int r = lambda_uv_run_loop(server->loop, UV_RUN_DEFAULT);
     log_info("server event loop stopped");
     return r;
 }

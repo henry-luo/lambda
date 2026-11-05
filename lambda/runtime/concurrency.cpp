@@ -207,6 +207,11 @@ struct LambdaDocumentRetirementGuard {
     LambdaDocumentRetirementGuard* next;
 };
 
+struct LambdaDocumentLifetimeGuard {
+    void* document;
+    LambdaDocumentLifetimeGuard* next;
+};
+
 struct LambdaScheduler {
     EvalContext* owner;
     LambdaTask* all_tasks;
@@ -241,6 +246,8 @@ static LambdaScheduler* attached_scheduler;
 // The UI layer's answer to "which document is running Lambda code now", null
 // when none is (a script, the REPL); S13.3.1v2's `owner: 'document'` needs one.
 static void* (*document_probe)(void);
+// Document hosts and their schedulers retire on the same owner thread.
+static thread_local LambdaDocumentLifetimeGuard* document_lifetime_guards;
 static uint64_t scheduler_serial_next = 1;
 static LambdaPromiseIsFn promise_is;
 static LambdaPromiseWaitFn promise_wait;
@@ -762,7 +769,7 @@ extern "C" LambdaScheduler* lambda_scheduler_create(int mailbox_capacity) {
 }
 
 static bool scheduler_poll_teardown(EvalContext* owner, uv_run_mode mode) {
-    uv_run(lambda_uv_loop(), mode);
+    lambda_uv_run_loop(lambda_uv_loop(), mode);
     // shared-loop callbacks can bind another document; teardown must return to its precise root owner.
     if (owner && context != owner && !js_runtime_context_enter_turn(owner->runtime, owner)) {
         log_error("scheduler-teardown: could not restore the retiring evaluator");
@@ -987,6 +994,12 @@ extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
     return 1;
 }
 
+static thread_local uint64_t scheduler_progress_generation;
+
+extern "C" uint64_t lambda_scheduler_progress_generation(void) {
+    return scheduler_progress_generation;
+}
+
 extern "C" int lambda_scheduler_run_ready(LambdaScheduler* scheduler) {
     if (!scheduler || scheduler->owner != context || scheduler->draining) return 0;
     scheduler->draining = true;
@@ -999,6 +1012,7 @@ extern "C" int lambda_scheduler_run_ready(LambdaScheduler* scheduler) {
     }
     scheduler->draining = false;
     scheduler_release_wake_if_idle(scheduler);
+    if (ran) scheduler_progress_generation++;
     return ran;
 }
 
@@ -1096,7 +1110,7 @@ static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) 
                 watchdog_started = true;
             }
         }
-        uv_run(loop, UV_RUN_ONCE);
+        lambda_uv_run_loop(loop, UV_RUN_ONCE);
         if (scheduler_run_satisfied(scheduler, awaited)) break;
         // A root task's wait is stuck only when nothing but this watchdog
         // keeps the loop alive. A timer, an offloaded job or a child process
@@ -1115,7 +1129,7 @@ static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) 
         if (!uv_is_closing((uv_handle_t*)&watchdog)) {
             uv_close((uv_handle_t*)&watchdog, NULL);
         }
-        uv_run(loop, UV_RUN_NOWAIT);
+        lambda_uv_run_loop(loop, UV_RUN_NOWAIT);
     }
     // Weak registrations that nothing can settle never fail a drain.
     if (!awaited && scheduler_drain_live(scheduler) == 0 && scheduler->weak_count > 0) {
@@ -1451,6 +1465,43 @@ extern "C" void lambda_set_document_probe(void* (*probe)(void)) {
     document_probe = probe;
 }
 
+static bool document_lifetime_retiring(void* document) {
+    for (LambdaDocumentLifetimeGuard* guard = document_lifetime_guards; guard; guard = guard->next)
+        if (guard->document == document) return true;
+    return false;
+}
+
+extern "C" bool lambda_document_lifetime_guard_active(void* document) {
+    return document && document_lifetime_retiring(document);
+}
+
+extern "C" LambdaDocumentLifetimeGuard* lambda_document_lifetime_guard_begin(void* document) {
+    if (!document || document_lifetime_retiring(document)) return NULL;
+    LambdaDocumentLifetimeGuard* guard = (LambdaDocumentLifetimeGuard*)mem_calloc(
+        1, sizeof(LambdaDocumentLifetimeGuard), MEM_CAT_EVAL);
+    if (!guard) return NULL;
+    guard->document = document;
+    guard->next = document_lifetime_guards;
+    document_lifetime_guards = guard;
+    return guard;
+}
+
+extern "C" bool lambda_document_lifetime_guard_is_current(LambdaDocumentLifetimeGuard* guard) {
+    for (LambdaDocumentLifetimeGuard* entry = document_lifetime_guards; entry; entry = entry->next)
+        if (entry == guard) return true;
+    return false;
+}
+
+extern "C" bool lambda_document_lifetime_guard_end(LambdaDocumentLifetimeGuard* guard) {
+    for (LambdaDocumentLifetimeGuard** link = &document_lifetime_guards; *link; link = &(*link)->next) {
+        if (*link != guard) continue;
+        *link = guard->next;
+        mem_free(guard);
+        return true;
+    }
+    return false;
+}
+
 static bool document_tasks_marked_retiring(LambdaScheduler* scheduler, void* document) {
     for (LambdaTask* task = scheduler ? scheduler->all_tasks : NULL; task; task = task->next_all) {
         if (task->owner_document == document && task->document_retiring) return true;
@@ -1473,7 +1524,8 @@ static bool document_tasks_retiring(LambdaScheduler* scheduler, void* document) 
 
 extern "C" bool lambda_document_retirement_guard_begin(LambdaScheduler* scheduler, void* document) {
     // A guard acquired during runtime shutdown would outlive its scheduler.
-    if (!scheduler || scheduler->owner != context || !document || scheduler->document_shutdown) return false;
+    if (!scheduler || scheduler->owner != context || !document || scheduler->document_shutdown ||
+            document_lifetime_retiring(document)) return false;
     if (document_has_retirement_guard(scheduler, document)) return true;
     LambdaDocumentRetirementGuard* guard = (LambdaDocumentRetirementGuard*)mem_calloc(
         1, sizeof(LambdaDocumentRetirementGuard), MEM_CAT_EVAL);
@@ -1516,7 +1568,8 @@ extern "C" Item lambda_task_start_document(Item function, List* args) {
             "start: owner 'document' needs a running document (a view's handler or template)");
     }
     LambdaScheduler* scheduler = context ? context->scheduler : NULL;
-    if ((scheduler && scheduler->document_shutdown) || document_tasks_retiring(scheduler, document)) {
+    if (document_lifetime_retiring(document) || (scheduler && scheduler->document_shutdown) ||
+            document_tasks_retiring(scheduler, document)) {
         LambdaTask* parent = lambda_current_task();
         if (!(parent && parent->owner_document == document &&
                 (parent->cleanup_masked || parent->document_cleanup_descendant)))
@@ -1528,6 +1581,16 @@ extern "C" Item lambda_task_start_document(Item function, List* args) {
 static bool document_tasks_pending(LambdaScheduler* scheduler, void* document) {
     for (LambdaTask* task = scheduler->all_tasks; task; task = task->next_all) {
         if (task->owner_document == document && task->state != LAMBDA_TASK_DONE) return true;
+    }
+    return false;
+}
+
+extern "C" bool lambda_document_tasks_have_pending_native_work(LambdaScheduler* scheduler, void* document) {
+    if (!scheduler || !document) return false;
+    for (LambdaTask* task = scheduler->all_tasks; task; task = task->next_all) {
+        if (task->owner_document == document && task->state != LAMBDA_TASK_DONE &&
+                ((task->offload && !task->offload->done) || (task->file_read && !task->file_read->done)))
+            return true;
     }
     return false;
 }
@@ -1575,22 +1638,57 @@ static bool scheduler_join_document_work(LambdaScheduler* scheduler, void* docum
     return true;
 }
 
-extern "C" bool lambda_document_tasks_join_guarded(LambdaScheduler* scheduler, void* document) {
+extern "C" LambdaDocumentJoinProgress lambda_document_tasks_progress(LambdaScheduler* scheduler,
+        void* document, LambdaDocumentLifetimeGuard* guard) {
+    if (!lambda_document_lifetime_guard_is_current(guard) || guard->document != document ||
+            !scheduler || !context || scheduler->owner != context || scheduler->document_joining ||
+            scheduler->draining || scheduler->current || activation_current() || context->execution_depth ||
+            lambda_uv_is_running())
+        return LAMBDA_DOCUMENT_JOIN_ERROR;
+    if (lambda_document_tasks_cancel(scheduler, document) < 0) return LAMBDA_DOCUMENT_JOIN_ERROR;
+    scheduler->document_joining = true;
+    int ran = lambda_scheduler_run_ready(scheduler);
+    scheduler->document_joining = false;
+    if (!document_tasks_pending(scheduler, document)) {
+        // A callback can leave another evaluator bound; detach after the host rebinds.
+        if (context != scheduler->owner) return LAMBDA_DOCUMENT_JOIN_ADVANCED;
+        return lambda_document_tasks_detach_joined(scheduler, document)
+            ? LAMBDA_DOCUMENT_JOIN_DONE : LAMBDA_DOCUMENT_JOIN_ERROR;
+    }
+    if (!ran) {
+        for (LambdaTask* task = scheduler->all_tasks; task; task = task->next_all) {
+            if (task->owner_document == document && task->state != LAMBDA_TASK_DONE)
+                log_debug("scheduler-document-join: waiting task=%llu state=%d park=%d masked=%d offload=%d file=%d timer=%d",
+                    (unsigned long long)task->id, task->state, task->park_kind, task->cleanup_masked,
+                    task->offload != NULL, task->file_read != NULL, task->timer != NULL);
+        }
+    }
+    return ran ? LAMBDA_DOCUMENT_JOIN_ADVANCED : LAMBDA_DOCUMENT_JOIN_WAITING;
+}
+
+static int document_tasks_join(LambdaScheduler* scheduler, void* document) {
     if (!scheduler || !context || scheduler->owner != context || !document ||
-            !document_has_retirement_guard(scheduler, document) || scheduler->document_joining) return false;
-    if (lambda_document_tasks_cancel(scheduler, document) < 0) return false;
+            scheduler->document_joining) return -1;
+    int released = lambda_document_tasks_cancel(scheduler, document);
+    if (released < 0) return -1;
     // Cancellation is safe on an active stack; driving or detaching its owner is not.
-    if (scheduler->draining || scheduler->current || activation_current() || context->execution_depth) return false;
+    if (scheduler->draining || scheduler->current || activation_current() || context->execution_depth ||
+            lambda_uv_is_running()) return -1;
     scheduler->document_joining = true;
     bool joined = scheduler_join_document_work(scheduler, document);
     scheduler->document_joining = false;
-    return joined && lambda_document_tasks_detach_joined(scheduler, document);
+    return joined && lambda_document_tasks_detach_joined(scheduler, document) ? released : -1;
 }
 
-extern "C" bool lambda_scheduler_join_document_tasks(LambdaScheduler* scheduler) {
+extern "C" bool lambda_document_tasks_join_guarded(LambdaScheduler* scheduler, void* document) {
+    if (!document_has_retirement_guard(scheduler, document)) return false;
+    return document_tasks_join(scheduler, document) >= 0;
+}
+
+static bool scheduler_document_shutdown_begin(LambdaScheduler* scheduler) {
     if (!scheduler || scheduler->owner != context || scheduler->draining ||
             scheduler->document_joining || scheduler->document_guards ||
-            scheduler->current || activation_current()) return false;
+            scheduler->current || activation_current() || lambda_uv_is_running()) return false;
     // A document host must release its guard before this scheduler can retire.
     // The scheduler-wide gate also covers documents with no existing tasks.
     scheduler->document_shutdown = true;
@@ -1600,6 +1698,22 @@ extern "C" bool lambda_scheduler_join_document_tasks(LambdaScheduler* scheduler)
         task->document_retiring = true;
         if (task->state != LAMBDA_TASK_DONE && !task->cancel_requested) lambda_task_cancel(task);
     }
+    return true;
+}
+
+extern "C" LambdaDocumentJoinProgress lambda_scheduler_document_tasks_progress(LambdaScheduler* scheduler) {
+    if (!context || context->execution_depth || !scheduler_document_shutdown_begin(scheduler))
+        return LAMBDA_DOCUMENT_JOIN_ERROR;
+    int ran = lambda_scheduler_run_ready(scheduler);
+    scheduler->document_joining = false;
+    // A ready task can bind another evaluator before returning to the host.
+    if (context != scheduler->owner) return LAMBDA_DOCUMENT_JOIN_ADVANCED;
+    if (!scheduler->document_live) return LAMBDA_DOCUMENT_JOIN_DONE;
+    return ran ? LAMBDA_DOCUMENT_JOIN_ADVANCED : LAMBDA_DOCUMENT_JOIN_WAITING;
+}
+
+extern "C" bool lambda_scheduler_join_document_tasks(LambdaScheduler* scheduler) {
+    if (!scheduler_document_shutdown_begin(scheduler)) return false;
     bool joined = scheduler_join_document_work(scheduler, NULL);
     scheduler->document_joining = false;
     return joined;
@@ -1610,38 +1724,14 @@ extern "C" bool lambda_scheduler_join_document_tasks(LambdaScheduler* scheduler)
 // runs while the document's state and DOM still exist. Masked cleanup can wait
 // on timers or descendants as well as native work, so it has no time limit
 // while this scheduler can run. A stalled or reentrant scheduler is still
-// reported below. Returns the number of tasks initially cancelled.
+// reported below. Returns the number of live tasks, or -1 while ownership must be retained.
 extern "C" int lambda_document_tasks_release(void* document) {
     LambdaScheduler* scheduler = context ? context->scheduler : NULL;
     if (!scheduler || !document) return 0;
-    int released = lambda_document_tasks_cancel(scheduler, document);
-    if (released < 0) return released;
-    if (!released) { (void)lambda_document_tasks_detach_joined(scheduler, document); return 0; }
-    uv_loop_t* loop = lambda_uv_loop();
-    uint64_t deadline = time_now_ms() + 5000;
-    while (document_tasks_pending(scheduler, document) &&
-            (time_now_ms() < deadline ||
-                (!scheduler->draining && scheduler->owner == context))) {
-        int ran = lambda_scheduler_run_ready(scheduler);
-        if (!document_tasks_pending(scheduler, document)) break;
-        if (scheduler->run_queue.first) continue;
-        if (!loop || (!ran && !uv_loop_alive(loop))) break;
-        // Another document's callback can change the shared loop's evaluator.
-        if (!scheduler_poll_teardown(scheduler->owner, ran > 0 ? UV_RUN_NOWAIT : UV_RUN_ONCE)) break;
-    }
-    if (lambda_document_tasks_detach_joined(scheduler, document)) return released;
-    for (LambdaTask* task = scheduler->all_tasks; task; task = task->next_all) {
-        if (task->owner_document != document) continue;
-        if (task->state != LAMBDA_TASK_DONE) {
-            log_error("concurrency document: task %llu did not finish after cancellation",
-                (unsigned long long)task->id);
-            scheduler->document_live--;  // ownerless now: the scheduler's teardown frees it
-        }
-        task->owner_document = NULL;
-        task->document_retiring = false;
-        task->document_cleanup_descendant = false;
-    }
-    return released;
+    // Only the coordinating host may drive a document with a lifetime guard.
+    if (document_lifetime_retiring(document)) return -1;
+    // A stalled join must keep the document attached for the host's retry.
+    return document_tasks_join(scheduler, document);
 }
 
 static LambdaTask* lambda_current_task(void) {

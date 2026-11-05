@@ -178,7 +178,10 @@ struct Runtime {
     EvalContext* eval_context;
     bool js_runtime_used;
     bool no_task_drain;
+    uint32_t document_retirement_pins;
+    uint32_t native_borrows;
     bool cleanup_in_progress;
+    bool cleanup_destructive;
     bool cleanup_incomplete;
 };
 
@@ -433,8 +436,19 @@ typedef enum RuntimeCleanupResult {
 // RETRY preserves the owner for a quiescent retry; INCOMPLETE means native
 // teardown already began and must not be retried or treated as completed.
 RuntimeCleanupResult runtime_try_cleanup(Runtime* runtime);
+// Advance ready document cleanup without waiting for libuv.
+RuntimeCleanupResult runtime_try_cleanup_nonblocking(Runtime* runtime);
+// The sole bound retirement pin may close its runtime without opening a reentry gap.
+RuntimeCleanupResult runtime_try_cleanup_retirement_pinned(Runtime* runtime);
+RuntimeCleanupResult runtime_try_cleanup_retirement_pinned_nonblocking(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
+// The bound owner pins its runtime while a document is retiring.
+bool runtime_document_retirement_pin(Runtime* runtime);
+bool runtime_document_retirement_unpin(Runtime* runtime);
+// Native borrowers keep the bound evaluator and its heap alive until release.
+bool runtime_borrow_acquire(Runtime* runtime);
+bool runtime_borrow_release(Runtime* runtime);
 EvalContext* runtime_get_eval_context(Runtime* runtime);
 
 // SCU14 (D6.4.1): isolate resources live on the canonical EvalContext. Reads

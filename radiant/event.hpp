@@ -65,6 +65,7 @@ void clear_document_interaction_state_before_detach(DomDocument* doc);
 void radiant_cancel_async_document_loads(DomDocument* doc);
 bool radiant_commit_async_document_loads(UiContext* uicon);
 bool radiant_async_document_loads_pending(UiContext* uicon);
+bool radiant_poll_async_document_loads(UiContext* uicon);
 void radiant_drain_async_document_loads(UiContext* uicon);
 bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 

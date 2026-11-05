@@ -158,7 +158,7 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         return 1;
     }
     int result = render_export_session_to_png(&session, png_file);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -174,7 +174,7 @@ int render_document_transform_to_png(const char* document_file,
         return 1;
     }
     int result = render_export_session_to_png(&session, png_file);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -208,7 +208,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
         return 1;
     }
     int result = render_export_session_to_jpeg(&session, jpeg_file, quality);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 
@@ -224,7 +224,7 @@ int render_document_transform_to_jpeg(const char* document_file,
         return 1;
     }
     int result = render_export_session_to_jpeg(&session, jpeg_file, quality);
-    render_export_session_end(&session);
+    render_export_session_finish(&session);
     return result;
 }
 

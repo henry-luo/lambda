@@ -22,11 +22,17 @@ uv_loop_t* lambda_uv_loop(void);
 // lifecycle
 int  lambda_uv_init(void);       // create loop, return 0 on success
 int  lambda_uv_run(void);        // run until no active handles/requests
+int  lambda_uv_run_loop(uv_loop_t* loop, uv_run_mode mode);
+bool lambda_uv_is_running(void);
 void lambda_uv_stop(void);       // stop loop (from signal handler etc.)
 void lambda_uv_cleanup(void);    // close all handles, free loop
 void lambda_uv_abandon(void);    // free an unsafe loop without walking handles
 void lambda_uv_set_host_owned(bool owned);
 bool lambda_uv_is_host_owned(void);
+// Long-lived owners keep the shared loop through nested runtime teardown.
+bool lambda_uv_host_lease_acquire(void);
+bool lambda_uv_host_lease_release(void);
+bool lambda_uv_has_host_leases(void);
 
 // JS task integration — called at event-loop phase checkpoints
 void lambda_uv_set_microtask_drain(void (*drain_fn)(void));
