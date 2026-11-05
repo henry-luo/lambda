@@ -7293,6 +7293,38 @@ bool radiant_attribute_has_css_dependency(DomDocument* doc, DomElement* element,
     return found || dom_js_document_rule_tree_has_match(doc, dom_js_rule_has_attribute_value_dependency, (void*)name);
 }
 
+struct CursorAttributeDependency { const char* name; bool found = false; };
+
+static bool dom_js_rule_has_non_cursor_attribute_dependency(CssRule* rule, void* data) {
+    auto* dependency = (CursorAttributeDependency*)data;
+    if (!dom_js_rule_has_attribute_value_dependency(rule, (void*)dependency->name)) return false;
+    if (rule->type != CSS_RULE_STYLE || rule->data.style_rule.nested_rule_count) return true;
+    dependency->found = true;
+    for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+        CssDeclaration* declaration = rule->data.style_rule.declarations[i];
+        if (!declaration || declaration->property_code != CSS_PROPERTY_CURSOR) return true;
+    }
+    return false;
+}
+
+void radiant_notify_template_attribute(DomElement* element, const char* name, const char* old_value) {
+    DomDocument* doc = element->doc;
+    CursorAttributeDependency dependency = {name};
+    bool attribute_value = false;
+    if (element->specified_style) style_tree_foreach(element->specified_style,
+        dom_js_style_has_attribute_value, &attribute_value);
+    bool cursor_only = !attribute_value && !dom_js_stylesheet_tree_has_match(
+        doc->services.ua_focus_stylesheet, dom_js_rule_has_non_cursor_attribute_dependency, &dependency) &&
+        !dom_js_document_rule_tree_has_match(doc,
+        dom_js_rule_has_non_cursor_attribute_dependency, &dependency) && dependency.found;
+    int count = doc->js.mutation_record_count;
+    dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, element, element->parent, name, old_value);
+    if (cursor_only && doc->js.mutation_record_count == count + 1) {
+        // retain the ordinary attribute/observer record; only its proven style effect is narrower.
+        doc->js.mutation_records[count].presentation_property = CSS_PROPERTY_CURSOR;
+    }
+}
+
 extern "C" bool dom_engine_attribute_has_css_dependency(DomDocument* doc, DomElement* element, const char* name) {
     return radiant_attribute_has_css_dependency(doc, element, name);
 }
@@ -7915,6 +7947,22 @@ static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
     return true;
 }
 
+bool radiant_prepare_dom_mutation_layout(DomDocument* doc, const char** reason) {
+    if (!dom_js_mutation_can_incremental(doc, true, reason)) return false;
+    SelectorMatcher matcher_storage;
+    selector_matcher_init(&matcher_storage, doc->document_pool);
+    state_configure_selector_matcher((DocState*)doc->state, &matcher_storage);
+    if (!dom_js_reset_mutated_layout_subtrees(doc, &matcher_storage)) {
+        if (reason) *reason = "reset-root-allocation";
+        return false;
+    }
+    if (!dom_js_recascade_mutations(doc, &matcher_storage)) {
+        if (reason) *reason = "cascade-root-allocation";
+        return false;
+    }
+    return true;
+}
+
 typedef struct DomJsDirtyBound {
     DomNode* node;
     float x;
@@ -8047,20 +8095,6 @@ static bool post_html_handler_incremental_rebuild(
         uint64_t t_start, uint64_t t0,
         int mutations,
         const char** fallback_reason_out) {
-    const char* reason = nullptr;
-    if (!dom_js_mutation_can_incremental(doc, true, &reason)) {
-        log_info("html handler incremental: fallback=%s", reason ? reason : "unknown");
-        if (fallback_reason_out) *fallback_reason_out = reason ? reason : "unknown";
-        return false;
-    }
-    if (fallback_reason_out) *fallback_reason_out = "eligible";
-
-    Pool* pool = doc->document_pool;
-    SelectorMatcher matcher_storage;
-    selector_matcher_init(&matcher_storage, pool);
-    SelectorMatcher* matcher = &matcher_storage;
-    state_configure_selector_matcher((DocState*)doc->state, matcher);
-
     DomNode* repaint_roots[DOM_JS_MUTATION_RECORD_CAP] = {};
     bool repaint_root_overflow = false;
     int repaint_root_count = dom_js_collect_repaint_roots(
@@ -8074,15 +8108,7 @@ static bool post_html_handler_incremental_rebuild(
         }
     }
 
-    if (!dom_js_reset_mutated_layout_subtrees(doc, matcher)) {
-        if (fallback_reason_out) *fallback_reason_out = "reset-root-allocation";
-        return false;
-    }
-
-    if (!dom_js_recascade_mutations(doc, matcher)) {
-        if (fallback_reason_out) *fallback_reason_out = "cascade-root-allocation";
-        return false;
-    }
+    if (!radiant_prepare_dom_mutation_layout(doc, fallback_reason_out)) return false;
 
     uint64_t t1 = time_now_ns();
     frame_profile_cascade_finished(doc);
@@ -8298,6 +8324,52 @@ static bool post_html_handler_paint_only_commit(EventContext* evcon, DomDocument
     return true;
 }
 
+static bool post_html_handler_cursor_only_commit(EventContext* evcon, DomDocument* doc, int mutations) {
+    DocState* state = doc->state;
+    if (!state || !doc->view_tree || !doc->root || !doc->js.mutation_record_count ||
+        doc->js.mutation_record_overflow || doc->js.inline_stylesheet_mutation_count ||
+        doc->js.reflow_pending_before_batch || state->reflow_scheduler.pending) return false;
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord& record = doc->js.mutation_records[i];
+        if (record.kind != DOM_JS_MUTATION_ATTRIBUTE || record.presentation_property != CSS_PROPERTY_CURSOR ||
+            record.direction_sensitive || !dom_js_record_has_connected_endpoint(doc, &record)) return false;
+    }
+    const char* reason = nullptr;
+    if (!radiant_apply_load_mutation_cascade(doc, &reason)) return false;
+    LayoutContext lycon = {};
+    lycon.doc = lam::up(doc);
+    lycon.ui_context = lam::up(evcon->ui_context);
+    lycon.pool = lam::up(doc->view_tree->prop_pool);
+    // cursor is inherited, so refresh descendants in parent-first order without resetting geometry.
+    view_geometry_walk_dom_tree(doc->root, [](DomNode* node, void* data) {
+        node->layout_dirty = false;
+        DomElement* element = node->as_element();
+        if (!element) return true;
+        auto* lycon = (LayoutContext*)data;
+        lycon->view = lam::up(static_cast<View*>(element));
+        lycon->elmt = lam::up(element);
+        CssValue inherited = {};
+        inherited.type = CSS_VALUE_TYPE_KEYWORD;
+        inherited.data.keyword = CSS_VALUE_INHERIT;
+        CssDeclaration fallback = {};
+        fallback.property_code = CSS_PROPERTY_CURSOR;
+        fallback.value = &inherited;
+        const CssDeclaration* declaration = element->specified_style
+            ? style_tree_get_declaration(element->specified_style, CSS_PROPERTY_CURSOR) : nullptr;
+        resolve_css_property(CSS_PROPERTY_CURSOR, declaration ? declaration : &fallback, lycon);
+        element->set_styles_resolved(true);
+        element->set_needs_style_recompute(false);
+        return true;
+    }, &lycon);
+    doc_state_clear_reflow(state);
+    if (!doc->js.dirty_before_batch &&
+        state->full_repaint_requests == doc->js.full_repaint_requests_before_batch) state->is_dirty = false;
+    dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "cursor-only", mutations,
+        doc->js.mutation_record_count, 0, "cursor-properties", "none", "retained", 0);
+    layout_publish_document_geometry(evcon->ui_context, doc);
+    return true;
+}
+
 static bool post_html_handler_detached_only_commit(UiContext* ui, DomDocument* doc, int mutations) {
     DocState* state = (DocState*)doc->state;
     if (!doc->view_tree || !doc->view_tree->root || doc->js.mutation_record_count <= 0 ||
@@ -8362,6 +8434,10 @@ static void post_html_handler_rebuild_impl(EventContext* evcon,
     dom_cssom_sync_mutated_inline_stylesheets(doc);
 
     if (post_html_handler_detached_only_commit(evcon->ui_context, doc, mutations)) {
+        dom_js_mutation_reset_records(doc);
+        return;
+    }
+    if (post_html_handler_cursor_only_commit(evcon, doc, mutations)) {
         dom_js_mutation_reset_records(doc);
         return;
     }

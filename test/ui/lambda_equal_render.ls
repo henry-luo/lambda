@@ -5,6 +5,9 @@ view <probe> state hidden: 0, value: 0, held: null {
         <button id: "noop", "No change">
         <button id: "change", "Change">
         <output id: "value", string(value)>
+        <section id: "row", class: if (value % 2 == 1) "wide" else "narrow",
+            <input id: "kept", value: "source">
+        >
     >
 }
 on click(evt) {
@@ -22,4 +25,4 @@ on click(evt) {
     return 'handled'
 }
 
-<html <body apply(<probe>)>>
+<html <head <style ".narrow{width:100px;height:30px}.wide{width:150px;height:40px}">> <body apply(<probe>)>>

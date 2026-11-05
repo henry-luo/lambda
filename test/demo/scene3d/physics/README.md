@@ -24,9 +24,9 @@ its gates count the trajectories produced by the paddle and collisions.
 
 The descriptions in `_scenes.ls` are shared by the viewer and the pure batch
 checks (**S12.1.1v2**). Document-owned worlds advance on the native physics clock
-(**S12.1.5v2**); `playground.js` only sends controls through the Radiant host
-boundary (**D9.5.6**), updates telemetry and moves the camera. Three's existing
-OrbitControls supplies camera interaction; Radiant renders every scene.
+(**S12.1.5v2**). Lambda view handlers send controls through the Radiant host
+boundary (**D9.5.6**), update telemetry and operate the shared native Scene3D
+camera viewer. Radiant renders every scene.
 
 `_scenes.ls` derives visual and collider dimensions from the same part lists.
 The shared sphere geometry in `../_geometry.ls` is also used by Ringworld.

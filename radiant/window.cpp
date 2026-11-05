@@ -1371,6 +1371,7 @@ static const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
 // The desktop loop below waits on the platform; a display-link host calls this
 // from its own run loop instead.
 double radiant_window_tick(RadiantWindowLoop* loop) {
+    EventSimProfileTurn profile(loop->sim_ctx);
     double currentTime = radiant_frame_clock_now(loop->frame_clock);
     bool frame_driven = false;
 
@@ -2036,6 +2037,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (sim_ctx && sim_ctx->is_running) {
             double current_time = 0.0;
             while (sim_ctx->is_running && !ui_context.render_failed) {
+                EventSimProfileTurn profile(sim_ctx);
                 SimEvent* next_ev = (sim_ctx->current_index >= 0 &&
                     sim_ctx->current_index < sim_ctx->events->length)
                     ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index]

@@ -9,15 +9,15 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready"
+      "js": "(()=>{if(!globalThis.phWorld){const x=new XMLHttpRequest();x.open('GET','../../../scene3d/_physics_probe.js',false);x.send();(0,eval)(x.responseText)}return phWorld() && phWorld().getAttribute('data-ready')==='true';})()"
     },
     {
       "type": "script",
-      "js": "physicsDemo.restart()"
+      "js": "phRequest({operation:\"reset\"})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 0"
+      "js": "phState().tick === 0"
     },
     {
       "type": "snapshot_surface",
@@ -29,15 +29,15 @@
     },
     {
       "type": "script",
-      "js": "physicsDemo.request({operation:'step',ticks:1200})"
+      "js": "phRequest({operation:'step',ticks:1200})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.counted.size >= 12 && physicsDemo.counted.size <= 18"
+      "js": "phCount() >= 12 && phCount() <= 18"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.bins[0].size + physicsDemo.bins[1].size + physicsDemo.bins[2].size === physicsDemo.counted.size"
+      "js": "phBins()[0].length + phBins()[1].length + phBins()[2].length === phCount()"
     },
     {
       "type": "assert_surface",
@@ -58,7 +58,7 @@
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 1200"
+      "js": "phState().tick === 1200"
     },
     {
       "type": "collect_gc",
@@ -66,19 +66,19 @@
     },
     {
       "type": "script",
-      "js": "physicsDemo.previousCount = physicsDemo.counted.size; physicsDemo.request({operation:'step',ticks:240})"
+      "js": "globalThis.previousCount = phCount(); phRequest({operation:'step',ticks:240})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.counted.size >= physicsDemo.previousCount && physicsDemo.counted.size <= 18"
+      "js": "phCount() >= globalThis.previousCount && phCount() <= 18"
     },
     {
       "type": "script",
-      "js": "physicsDemo.restart()"
+      "js": "phRequest({operation:\"reset\"})"
     },
     {
       "type": "assert_script",
-      "js": "physicsDemo.state.tick === 0 && physicsDemo.counted.size === 0 && physicsDemo.bins.every(bin => bin.size === 0)"
+      "js": "phState().tick === 0 && phCount() === 0 && phBins().every(bin => bin.length === 0)"
     }
   ]
 }

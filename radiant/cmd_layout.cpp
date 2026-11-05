@@ -4965,20 +4965,21 @@ void rebuild_lambda_doc(UiContext* uicon) {
 }
 
 // retain equal branches while advancing source identities for nested handlers and ranges.
-static bool render_metadata_attribute(const char* key, ItemReader value) {
-    return key && (strncmp(key, "data-", 5) == 0 || strncmp(key, "aria-", 5) == 0) &&
+static bool render_patchable_attribute(const char* key, ItemReader value) {
+    // class writes use normal mutation/style invalidation; equal descendants keep live control state.
+    return key && (strcmp(key, "class") == 0 || strncmp(key, "data-", 5) == 0 || strncmp(key, "aria-", 5) == 0) &&
         value.isString();
 }
 
-static bool render_metadata_only(ElementReader before, ElementReader after) {
+static bool render_attributes_patchable(ElementReader before, ElementReader after) {
     auto check = [](ElementReader from, ElementReader to) {
         auto attrs = from.attrs();
         const char* key; ItemReader value;
         while (attrs.next(&key, &value)) {
             ItemReader other = to.get_attr(key);
             if (to.has_attr(key) && fn_eq_strict(value.item(), other.item()) == BOOL_TRUE) continue;
-            if (!render_metadata_attribute(key, value) ||
-                (to.has_attr(key) && !render_metadata_attribute(key, other))) return false;
+            if (!render_patchable_attribute(key, value) ||
+                (to.has_attr(key) && !render_patchable_attribute(key, other))) return false;
         }
         return true;
     };
@@ -5030,7 +5031,7 @@ static bool collect_render_frontier(DomDocument* doc, const RetransformResult& c
         descend = a->ns == b->ns && strview_equal(&a->name, b->name.str) &&
             before.childCount() == after.childCount() &&
             native && !layout_is_svg_viewport(native->tag()) &&
-            render_metadata_only(before, after);
+            render_attributes_patchable(before, after);
     }
     if (descend) {
         // text or fragment changes keep their enclosing element as the replacement unit.
@@ -5076,7 +5077,7 @@ static void retain_render_branch(DomDocument* doc, const RenderRetainedBranch& b
         if (after.has_attr(key)) continue;
         const char* old = node->get_attribute(key);
         node->remove_attribute(key);
-        dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
+        radiant_notify_template_attribute(node, key, old);
     }
     attrs = after.attrs();
     while (attrs.next(&key, &value)) {
@@ -5084,7 +5085,7 @@ static void retain_render_branch(DomDocument* doc, const RenderRetainedBranch& b
         const char* old = node->get_attribute(key);
         if (!dom_set_non_style_metadata(node, key, value.cstring())) {
             node->set_attribute(key, value.cstring());
-            dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, node, node->parent, key, old);
+            radiant_notify_template_attribute(node, key, old);
         }
     }
     dom_rebind_render_element(doc, branch.previous.element, branch.current.element);
@@ -5103,6 +5104,9 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         log_error("rebuild_lambda_doc_incremental: no html_root in document");
         return;
     }
+
+    // finish earlier imperative writes before staging this template's attribute/splice batch.
+    if (doc->js.mutation_count > 0) radiant_reconcile_dom_mutations(uicon, doc);
 
     lam::ArrayList<RetransformResult> frontier(MEM_CAT_TEMP);
     lam::ArrayList<RenderRetainedBranch> retained(MEM_CAT_TEMP);
@@ -5126,12 +5130,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             return;
         }
     }
-
-    // Imperative DOM writes made earlier in this handler turn (e.g. set_inner_html
-    // after a nested dispatch re-rendered another view) are pending in the mutation
-    // ledger. The splice below cascades only the template subtrees, yet resets that
-    // ledger at the end, so commit those writes first or they never get their cascade.
-    if (doc->js.mutation_count > 0) radiant_reconcile_dom_mutations(uicon, doc);
 
     bool can_incremental = (doc->element_dom_map != nullptr) &&
                            (doc->root != nullptr) &&
@@ -5284,12 +5282,17 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         // each committed subtree owns its next frame; unrelated components stay idle.
         radiant_queue_template_render_events(doc, new_dom);
     }
-    if (stylesheet_changed) {
+    const char* mutation_reason = nullptr;
+    bool broad_mutation = doc->js.mutation_count > 0 &&
+        !radiant_prepare_dom_mutation_layout(doc, &mutation_reason);
+    // retained class writes and replaced children share one final style/layout commit (D5.5.3).
+    if (stylesheet_changed || broad_mutation) {
         // stylesheet selectors can affect siblings outside the replaced template subtree.
         style_epoch_mark_global_change(doc);
         view_geometry_walk_dom_tree(doc->root, clear_load_stylesheet_cascade_visitor, nullptr);
         layout_apply_css_stylesheets(doc, doc->root, doc->stylesheets, doc->stylesheet_count,
                                     doc->document_pool, css_engine);
+        if (broad_mutation && doc->view_tree) view_pool_reset_retained(doc->view_tree);
         set_layout_dirty_subtree(doc->root, true);
     }
     auto t_dom_css = time_now_ns();

@@ -51,7 +51,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='domino' && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Domino circuit\" && document.getElementById('world').getBoundingClientRect().right<=390"
+      "js": "document.querySelector('#world[data-ready=\"true\"][data-demo=\"domino\"]')!==null && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Domino circuit\" && document.getElementById('world').getBoundingClientRect().right<=390"
     },
     {
       "type": "capture_surface",
@@ -78,7 +78,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='salvage' && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Salvage bay\" && document.getElementById('world').getBoundingClientRect().right<=390"
+      "js": "document.querySelector('#world[data-ready=\"true\"][data-demo=\"salvage\"]')!==null && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Salvage bay\" && document.getElementById('world').getBoundingClientRect().right<=390"
     },
     {
       "type": "click",
@@ -100,7 +100,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='sorter' && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Marble sorter\" && document.getElementById('world').getBoundingClientRect().right<=390"
+      "js": "document.querySelector('#world[data-ready=\"true\"][data-demo=\"sorter\"]')!==null && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Marble sorter\" && document.getElementById('world').getBoundingClientRect().right<=390"
     },
     {
       "type": "click",
@@ -122,7 +122,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='bounce' && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Bounce lab\" && document.getElementById('world').getBoundingClientRect().right<=390"
+      "js": "document.querySelector('#world[data-ready=\"true\"][data-demo=\"bounce\"]')!==null && document.querySelectorAll('.scene3d-breadcrumbs a').length===1 && document.querySelector('.scene3d-breadcrumbs [aria-current=page]').textContent===\"Bounce lab\" && document.getElementById('world').getBoundingClientRect().right<=390"
     },
     {
       "type": "click",

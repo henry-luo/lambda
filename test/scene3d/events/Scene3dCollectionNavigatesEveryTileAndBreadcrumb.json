@@ -63,7 +63,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='domino'"
+      "js": "document.querySelector('#world[data-ready=\"true\"][data-demo=\"domino\"]')!==null"
     },
     {
       "type": "click",
@@ -89,7 +89,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='salvage'"
+      "js": "document.querySelector('#world[data-ready=\"true\"][data-demo=\"salvage\"]')!==null"
     },
     {
       "type": "click",
@@ -115,7 +115,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='sorter'"
+      "js": "document.querySelector('#world[data-ready=\"true\"][data-demo=\"sorter\"]')!==null"
     },
     {
       "type": "click",
@@ -141,7 +141,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.physicsDemo && physicsDemo.ready && physicsDemo.kind==='bounce'"
+      "js": "document.querySelector('#world[data-ready=\"true\"][data-demo=\"bounce\"]')!==null"
     },
     {
       "type": "click",
@@ -183,7 +183,7 @@
     {
       "type": "click",
       "target": {
-        "selector": ".demo-tile[href=\"three-gallery.html\"]"
+        "selector": ".demo-tile[href=\"three-gallery.ls\"]"
       },
       "scroll_into_view": true
     },
@@ -193,7 +193,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.threeGalleryReady===true"
+      "js": "document.querySelector('#garden[data-ready=true]')!==null"
     },
     {
       "type": "click",
@@ -209,7 +209,7 @@
     {
       "type": "click",
       "target": {
-        "selector": ".demo-tile[href=\"observatory.html\"]"
+        "selector": ".demo-tile[href=\"observatory.ls\"]"
       },
       "scroll_into_view": true
     },
@@ -219,7 +219,7 @@
     },
     {
       "type": "assert_script",
-      "js": "globalThis.observatoryReady===true"
+      "js": "document.querySelector('#status[data-ready=true]')!==null"
     },
     {
       "type": "click",

@@ -9,15 +9,15 @@
   "events": [
     {
       "type": "assert_script",
-      "js": "threeGalleryReady===true && document.title==='Crystal garden / Scene3D'"
+      "js": "document.querySelector('#garden[data-ready=true]')!==null && document.title==='Crystal garden / Scene3D'"
     },
     {
       "type": "script",
-      "js": "globalThis.initialCamera=threeGallery.camera.position.clone();globalThis.initialTarget=threeGallery.controls.target.clone()"
+      "js": "globalThis.gPose=()=>({position:JSON.parse(document.getElementById('garden-camera').getAttribute('position')),target:JSON.parse(document.getElementById('garden-camera').getAttribute('target'))});\nglobalThis.gDist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);globalThis.gPolar=()=>{const p=gPose();return Math.acos((p.position[1]-p.target[1])/gDist(p.position,p.target))};globalThis.gClick=id=>document.getElementById(id).click();\nglobalThis.initialCamera=gPose().position;globalThis.initialTarget=gPose().target"
     },
     {
       "type": "snapshot_surface",
-      "source": "canvas",
+      "source": "scene3d",
       "target": "#garden",
       "name": "initial"
     },
@@ -38,11 +38,11 @@
     },
     {
       "type": "assert_script",
-      "js": "threeGallery.camera.position.distanceTo(initialCamera)>.1 && document.activeElement===document.getElementById('garden')"
+      "js": "gDist(gPose().position,initialCamera)>.1 && document.activeElement===document.getElementById('garden')"
     },
     {
       "type": "assert_surface",
-      "source": "canvas",
+      "source": "scene3d",
       "target": "#garden",
       "reference": "initial",
       "count": {
@@ -62,7 +62,7 @@
     },
     {
       "type": "script",
-      "js": "globalThis.beforePan=threeGallery.controls.target.clone()"
+      "js": "globalThis.beforePan=gPose().target"
     },
     {
       "type": "mouse_down",
@@ -81,11 +81,11 @@
     },
     {
       "type": "assert_script",
-      "js": "threeGallery.controls.target.distanceTo(beforePan)>.1"
+      "js": "gDist(gPose().target,beforePan)>.1"
     },
     {
       "type": "script",
-      "js": "globalThis.beforeWheel=threeGallery.camera.position.distanceTo(threeGallery.controls.target)"
+      "js": "globalThis.beforeWheel=gDist(gPose().position,gPose().target)"
     },
     {
       "type": "scroll",
@@ -95,11 +95,11 @@
     },
     {
       "type": "assert_script",
-      "js": "Math.abs(threeGallery.camera.position.distanceTo(threeGallery.controls.target)-beforeWheel)>.01"
+      "js": "Math.abs(gDist(gPose().position,gPose().target)-beforeWheel)>.01"
     },
     {
       "type": "script",
-      "js": "globalThis.beforeTilt=threeGallery.controls.getPolarAngle()"
+      "js": "globalThis.beforeTilt=gPolar()"
     },
     {
       "type": "click",
@@ -110,11 +110,11 @@
     },
     {
       "type": "assert_script",
-      "js": "threeGallery.controls.getPolarAngle()<beforeTilt-.01"
+      "js": "gPolar()<beforeTilt-.01"
     },
     {
       "type": "script",
-      "js": "globalThis.beforeZoom=threeGallery.camera.position.distanceTo(threeGallery.controls.target)"
+      "js": "globalThis.beforeZoom=gDist(gPose().position,gPose().target)"
     },
     {
       "type": "click",
@@ -125,7 +125,7 @@
     },
     {
       "type": "assert_script",
-      "js": "threeGallery.camera.position.distanceTo(threeGallery.controls.target)<beforeZoom"
+      "js": "gDist(gPose().position,gPose().target)<beforeZoom"
     },
     {
       "type": "click",
@@ -136,7 +136,7 @@
     },
     {
       "type": "assert_script",
-      "js": "Math.abs(threeGallery.camera.position.distanceTo(threeGallery.controls.target)-beforeZoom)<.00001"
+      "js": "Math.abs(gDist(gPose().position,gPose().target)-beforeZoom)<.00001"
     },
     {
       "type": "capture_surface",
@@ -152,7 +152,7 @@
     },
     {
       "type": "assert_script",
-      "js": "threeGallery.camera.position.distanceTo(initialCamera)<.00001 && threeGallery.controls.target.distanceTo(initialTarget)<.00001 && document.getElementById('orbit-mode').getAttribute('aria-pressed')==='true'"
+      "js": "gDist(gPose().position,initialCamera)<.00001 && gDist(gPose().target,initialTarget)<.00001 && document.getElementById('orbit-mode').getAttribute('aria-pressed')==='true'"
     },
     {
       "type": "click",
@@ -163,7 +163,7 @@
     },
     {
       "type": "script",
-      "js": "globalThis.beforeKeyPan=threeGallery.controls.target.clone();globalThis.beforeKeyTilt=threeGallery.controls.getPolarAngle();globalThis.beforeKeyZoom=threeGallery.camera.position.distanceTo(threeGallery.controls.target)"
+      "js": "globalThis.beforeKeyPan=gPose().target;globalThis.beforeKeyTilt=gPolar();globalThis.beforeKeyZoom=gDist(gPose().position,gPose().target)"
     },
     {
       "type": "key_press",
@@ -176,7 +176,7 @@
     },
     {
       "type": "assert_script",
-      "js": "threeGallery.controls.target.distanceTo(beforeKeyPan)>.001 && threeGallery.controls.getPolarAngle()<beforeKeyTilt-.001"
+      "js": "gDist(gPose().target,beforeKeyPan)>.001 && gPolar()<beforeKeyTilt-.001"
     },
     {
       "type": "key_press",
@@ -184,7 +184,7 @@
     },
     {
       "type": "assert_script",
-      "js": "threeGallery.camera.position.distanceTo(threeGallery.controls.target)<beforeKeyZoom"
+      "js": "gDist(gPose().position,gPose().target)<beforeKeyZoom"
     },
     {
       "type": "key_press",
@@ -192,23 +192,23 @@
     },
     {
       "type": "assert_script",
-      "js": "threeGallery.camera.position.distanceTo(initialCamera)<.00001 && threeGallery.controls.target.distanceTo(initialTarget)<.00001"
+      "js": "gDist(gPose().position,initialCamera)<.00001 && gDist(gPose().target,initialTarget)<.00001"
     },
     {
       "type": "script",
-      "js": "threeGallery.controls.dollyIn(.0001);threeGallery.controls.rotateUp(10)"
+      "js": "for(let i=0;i<50;i++)gClick('zoom-in');for(let i=0;i<50;i++)gClick('tilt-up')"
     },
     {
       "type": "assert_script",
-      "js": "Math.abs(threeGallery.camera.position.distanceTo(threeGallery.controls.target)-4)<.00001 && threeGallery.controls.getPolarAngle()>=.07999"
+      "js": "Math.abs(gDist(gPose().position,gPose().target)-4)<.00001 && gPolar()>=.07999"
     },
     {
       "type": "script",
-      "js": "threeGallery.controls.dollyOut(.0001);threeGallery.controls.rotateUp(-10)"
+      "js": "for(let i=0;i<50;i++)gClick('zoom-out');for(let i=0;i<50;i++)gClick('tilt-down')"
     },
     {
       "type": "assert_script",
-      "js": "Math.abs(threeGallery.camera.position.distanceTo(threeGallery.controls.target)-35)<.00001 && threeGallery.controls.getPolarAngle()<=Math.PI*.49001"
+      "js": "Math.abs(gDist(gPose().position,gPose().target)-35)<.00001 && gPolar()<=Math.PI*.49001"
     },
     {
       "type": "click",

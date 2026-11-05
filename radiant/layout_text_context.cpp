@@ -4,6 +4,17 @@
 #include "../lib/utf.h"
 #include <limits.h>
 
+LayoutTextShapingScope::LayoutTextShapingScope(LayoutContext* owner, DomNode* source,
+        const unsigned char* first, const unsigned char* last)
+    : context(owner), previous(owner->text_shaping.get()), node(source),
+      source_start(first), source_end(last) {
+    context->text_shaping = lam::up(this);
+}
+
+LayoutTextShapingScope::~LayoutTextShapingScope() {
+    context->text_shaping = lam::up(previous);
+}
+
 CssEnum layout_inline_boundary_keyword(DomElement* element,
         CssPropertyCode property, CssEnum initial, CssEnum inherited) {
     bool ruby_bidi = false;
@@ -187,12 +198,34 @@ bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node
     if (!text_end && text_node && text_start) text_end = text_start + text_node->as_text()->length;
     if (!text_start || !text_end) return false;
     if (start < text_start || start > text_end || length > (size_t)(text_end - start)) return false;
+    auto measure_context = [&](const char* source, size_t count, size_t before) {
+        if (!layout_measure_shaping_text(lycon, source, count, before, length, width)) return false;
+        if (following_context) *following_context = before + length < count;
+        return true;
+    };
+    LayoutTextShapingScope* cached = lycon->text_shaping.get();
+    if (cached && (cached->node != text_node || cached->source_start != text_start ||
+        cached->source_end != text_end)) cached = nullptr;
+    if (cached) {
+        cached->requests++;
+        if (cached->word_start && cached->cursive == cursive && start >= cached->word_start &&
+            start + length <= cached->word_end) {
+            cached->hits++;
+            if (start == cached->word_start && start + length == cached->word_end) return false;
+            return measure_context((const char*)cached->word_start,
+                (size_t)(cached->word_end - cached->word_start),
+                (size_t)(start - cached->word_start));
+        }
+    }
     ScratchScope scope(&lycon->scratch);
     struct Piece { const char* text; size_t length; Piece* next; };
     Piece* before = nullptr;
     Piece* after = nullptr;
     Piece** after_tail = &after;
     size_t before_length = 0, after_length = 0;
+    const unsigned char* word_start = start;
+    const unsigned char* word_end = start + length;
+    bool external_context = false;
     auto append_piece = [&](const char* source, size_t count, bool forward) {
         Piece* piece = scope.array<Piece>(1);
         if (!piece) return false;
@@ -214,6 +247,8 @@ bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node
         size_t local_first, local_last;
         layout_text_shaping_context_slice(local, local_length, forward, cursive,
             &local_first, &local_last);
+        if (forward) word_end = (const unsigned char*)local + local_last;
+        else word_start = (const unsigned char*)local + local_first;
         // an emergency break or tracked grapheme still shapes in its unbroken word.
         if (local_last > local_first) {
             if (!append_piece(local + local_first, local_last - local_first, forward)) return false;
@@ -226,11 +261,22 @@ bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node
             layout_text_shaping_context_slice(source, neighbor->length, forward, cursive, &first, &last);
             if (last == first) break;
             if (!append_piece(source + first, last - first, forward)) return false;
+            external_context = true;
             if (first != 0 || last != neighbor->length) break;
             node = neighbor;
         }
     }
+    if (cached && !external_context) {
+        // adjacent graphemes share these boundaries; rescanning/copying the full word was quadratic.
+        cached->word_start = word_start;
+        cached->word_end = word_end;
+        cached->cursive = cursive;
+    }
     if (!before_length && !after_length) return false;
+    if (!external_context) {
+        return measure_context((const char*)word_start,
+            (size_t)(word_end - word_start), (size_t)(start - word_start));
+    }
     size_t total_length = before_length + length + after_length;
     if (total_length > INT_MAX) return false;
     char* context = scope.array<char>(total_length);
@@ -242,10 +288,7 @@ bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node
     for (Piece* piece = before; piece; piece = piece->next) append(piece->text, piece->length);
     append((const char*)start, length);
     for (Piece* piece = after; piece; piece = piece->next) append(piece->text, piece->length);
-    if (!layout_measure_shaping_text(lycon, context, total_length,
-            before_length, length, width)) return false;
-    if (following_context) *following_context = after_length != 0;
-    return true;
+    return measure_context(context, total_length, before_length);
 }
 
 bool layout_text_source_word_start(const unsigned char* text, size_t byte_offset) {

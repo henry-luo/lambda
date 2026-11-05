@@ -361,6 +361,7 @@ struct FontContext {
     // because pool_destroy will free all grouped owner memory in bulk
     bool            destroying;
     uint64_t        resource_generation; // descriptor changes and first source resolution
+    uint64_t        shaped_line_requests, shaped_line_hits; // complete platform-line reuse, including ranges
 };
 
 static inline uint64_t font_context_next_handle_identity(FontContext* ctx) {
@@ -547,7 +548,7 @@ bool                font_platform_has_color_glyphs(void* ct_font_ref);
 float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);
 float               font_platform_get_pair_kerning(void* ct_font_ref,
                                                     uint32_t left_cp, uint32_t right_cp);
-TextExtents         font_platform_measure_text(void* ct_font_ref,
+TextExtents         font_platform_measure_text(FontHandle* handle, void* ct_font_ref,
                                                 const char* text, int byte_len,
                                                 float fallback_height);
 void*               font_platform_create_text_line(void* ct_font_ref,
@@ -558,7 +559,7 @@ bool                font_platform_visit_face_text(FontHandle* handle,
                         void* context, FontFaceTextMetrics* metrics);
 bool                font_platform_vertical_translation(void* ct_font_ref,
                         uint32_t glyph, float* x, float* y);
-bool                font_platform_measure_text_range(void* ct_font_ref,
+bool                font_platform_measure_text_range(FontHandle* handle, void* ct_font_ref,
                         const char* text, int byte_len, int range_start,
                         int range_length, float fallback_height, TextExtents* extents);
 

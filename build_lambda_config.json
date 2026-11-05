@@ -4251,7 +4251,7 @@
             "additional_sources": [
               "test/test_window_fullscreen_gtest.cpp"
             ],
-            "name": "Radiant Document Integration Tests",
+            "name": "Radiant Document Tests",
             "dependencies": [
               "lambda-rt",
               "node-core",

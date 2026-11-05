@@ -7,4 +7,4 @@ ui.page("sorter",scenes.sorter(),{
     actions:[{id:"run-sorter",label:"Run a fresh batch",primary:true,restart:true,play:true,request:{operation:"read"}}],
     labels:["BLUE GATE","GREEN GATE","AMBER GATE"],
     note:"The paddle is kinematic: it keeps turning when marbles hit it. The coloured gates sense overlap without pushing marbles, and each marble is counted once."
-})
+})^

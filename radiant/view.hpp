@@ -3215,16 +3215,7 @@ inline View* view_tree_find_live_id(DomNode* node, uint32_t view_id) {
     return nullptr;
 }
 
-inline bool view_tree_contains_view(DomNode* node, View* view) {
-    if (!node || !view) return false;
-    if (static_cast<View*>(node) == view) return true;
-    if (!node->is_element()) return false;
-    DomElement* element = static_cast<DomElement*>(node);
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (view_tree_contains_view(child, view)) return true;
-    }
-    return false;
-}
+bool view_tree_contains_view(DomNode* node, View* view);
 
 struct MeasurementCacheEntry;
 struct CanonicalInlineEntry;
@@ -4702,7 +4693,7 @@ typedef struct UiContext {
 
     int init(bool headless, float requested_device_scale = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
-    void destroy_document();
+    bool destroy_document();
     void destroy();
 } UiContext;
 
