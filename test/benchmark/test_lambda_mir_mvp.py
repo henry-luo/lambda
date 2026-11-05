@@ -37,7 +37,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         source = self.script_source(source)
         env = os.environ.copy()
         for key in tuple(env):
-            if key.startswith(("LAMBDA_", "MIR_")):
+            if key.startswith(("LAMBDA_", "MIR_", "COW_EXEC_")):
                 del env[key]
         env.update(LAMBDA_EXEC_BACKEND="jit", LAMBDA_MIR_COMPILER="mvp")
         env.pop("JS_MIR_INTERP", None)
@@ -63,8 +63,10 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_benchmark_goldens(self):
         for suite, name in CASES:
-            with self.subTest(suite=suite, name=name):
-                self.check_golden(ROOT / "test/benchmark" / suite / f"{name}2.ls")
+            for compiler in ("mvp", "production"):
+                with self.subTest(suite=suite, name=name, compiler=compiler):
+                    self.check_golden(ROOT / "test/benchmark" / suite / f"{name}2.ls",
+                                      {"LAMBDA_MIR_COMPILER": compiler})
 
     def test_complete_benchmark_manifest(self):
         self.assertEqual(len(CASES), len(set(CASES)))
@@ -78,10 +80,13 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_benchmark_expansion_semantics(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_benchmark_expansion.ls"
         modes = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
-                 {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"})
+                 {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3", "LAMBDA_GC_POISON_FREED": "1"},
+                 {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1", "COW_EXEC_PROFILE": "1",
+                  "COW_EXEC_PROFILE_OUT": str(Path(self.scratch.name) / "capture-profile.tsv")})
         for compiler in ("mvp", "production"):
             for mode in modes:
-                for fixture in (source, ROOT / "test/lambda/mvp/mir_mvp_u32.ls"):
+                for fixture in (source, ROOT / "test/lambda/mvp/mir_mvp_u32.ls",
+                                ROOT / "test/lambda/mvp/mir_mvp_index_recurrence.ls"):
                     with self.subTest(compiler=compiler, mode=mode, fixture=fixture.name):
                         self.check_golden(fixture, {**mode, "LAMBDA_MIR_COMPILER": compiler})
         for mode in modes:
@@ -598,8 +603,11 @@ class LambdaMirMvpTests(unittest.TestCase):
         for name in ("sum_tail", "even_read", "odd_read"):
             body = self.function_mir(source, name)
             self.assertEqual(len(re.findall(r"\tcall\tcow_capture_value_", body)), 0, name)
+            self.assertNotRegex(body, r"\tmov\tu8:4\(")
         body = self.function_mir(source, "retain")
-        self.assertGreater(len(re.findall(r"\tcall\tcow_capture_value_", body)), 0)
+        self.assertNotRegex(body, r"\tcall\tcow_capture_value_")
+        self.assertRegex(body, r"\tor\t[^\n]+, 1\n")
+        self.assertRegex(body, r"\tmov\tu8:4\(")
         body = self.function_mir(source, "plain_write")
         self.assertIn("\tcall\tlambda_array_scalar_snapshot", body)
         self.assertNotRegex(body, r"\tcall\tcow_capture_value_")

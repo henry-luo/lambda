@@ -15,33 +15,47 @@ queries with grouping and ordering (**S2.5.2v2, S7.9.3, S9.1.2–S9.2.3,
 S14.1.1v2**). It retains independent MVP planning and lowering; shared physical
 helpers now also construct literal paths and plain function objects.
 
-The current complete performance run passes all 77 MVP goldens and clearly
-beats Full MIR on **70/77** entries, including a matched Sumfp supplement.
-**Three medians remain slower**: CD (+8.3%), Microdiff (+10.0%) and
-RegexRedux (+0.3%, statistically inconclusive). Pidigits and Permute have faster
-inconclusive medians; two Full controls fail. The fresh Lambda baseline passes
-8,756/8,756 (6,644 fresh runtime checks plus 2,112 unchanged parser results).
+The current release has faster medians than Full MIR on **all 77 entries**.
+Its complete 30-pair primary campaign, including the matched 10,000-call Sumfp
+supplement, clears all 77 confidence gates. Five completed 50-pair confirmations
+leave **76 clear wins and one inconclusive result**: CD remains faster at
+167.164 versus 173.874 ms, but its upper confidence bound crosses parity.
+The other four confirmations pass. Four planned confirmations remain unfinished
+at the user's wrap-up request.
 
-The performance milestone remains open. The 15-pair comparison against the
-previous MVP retains one Diviter regression flag (+1.4% median). The original 48
-30-pair repeat was stopped at the user's wrap-up request, so the current source
-has no completed zero-regression qualification. Earlier phase-1 results
-(58 Full wins and zero original 48 regression flags) remain historical.
+Base64 (+2.6%) and AWFY DeltaBlue (+2.7%) flag primary regressions against a
+fresh starting MVP. Their independent follow-up was stopped before sampling.
+The all-77 performance and zero-regression milestones remain **open**. See
+[phase3 analysis](../test/benchmark/lambda_mvp/tune77_phase3_analysis_2026-11-05.json)
+and [validation](../test/benchmark/lambda_mvp/tune77_phase3_validation_2026-11-05.json).
+The historical phase2 result of 70 clear wins retains its slower medians,
+invalid Full controls and incomplete original-48 regression qualification;
+it is not mixed with current evidence.
 
-The second batch adds guarded physical boxed-array reads, admitted pointer-field
-stores, linked module/key locations, scalar/error observations, native literal
-comparisons and shared semantic type/null predicates. It removes repeated
-capture/freezing work while retaining mutable wide-scalar snapshots. New probes
-also fixed open-array nested-write dispatch and projected-RHS insertion capture
-(**D4.2.5, D6.2–D6.3, S7.9.3, S9.1.2–S9.1.3, S9.3.1**). Runtime types and
-layouts remain shared.
+The tuning removes runtime-spine RMW copies, shares guarded open-string append,
+retains checked length and Boolean success facts, elides nonretaining call
+snapshots and unused query storage, and fuses sole-consumer match counts.
+Direct unprofiled COW marks use the runtime's kind policy; diagnostic profiling
+retains the helper (**D5.4.1–D5.4.4, S3.4, S9.1.2–S9.1.3, S9.3.1,
+S7.9.3, S17.7.1**). Dynamic native admission preserves existing contracts
+(**S4.1, S11.4.1v5, D4.3.3**). Runtime types, layouts and precise ownership
+remain shared.
 
-See the [wrap-up](impl/Lambda_Impl_MIR_MVP.md#2026-11-05-wrap-up),
-[analysis](../test/benchmark/lambda_mvp/tune77_phase2_analysis_2026-11-05.json) and
-[validation](../test/benchmark/lambda_mvp/tune77_phase2_validation_2026-11-05.json)
-for paired execution windows, source/build/input identities and remaining gaps.
-C2MIR is unmeasured. Further tuning stopped at the user's request; unvalidated
-RMW work is saved as a private follow-up patch and is absent from live source.
+Both formerly invalid Full controls now pass: TextSearch's active recurrence
+proof prevents a compiler stack overflow (**D8.2.5**), and NavierStokes retains
+caller homes for typed-array COW replacements (**D4.3.3, D5.4.6**). Both
+compilers pass all 77 benchmark goldens. The Lambda baseline passes
+**8,770/8,770**: 6,658 fresh runtime checks plus 2,112 unchanged parser results
+with recorded provenance; no reruns for this final host. The broader gate
+retains 58 legacy failures and four pre-existing Full-only negative-probe
+failures, with no new normalized headers versus the fresh control. Targeted
+poisoned-GC checks pass.
+
+Measurements use paired release execution windows, excluding startup/JIT.
+The original-48 regression report selects the same 30-pair primary observations;
+its Sumfp supplement is retained separately. Sources, workloads and outputs are
+hashed. See the [implementation checkpoint](impl/Lambda_Impl_MIR_MVP.md#current-checkpoint).
+C2MIR is unmeasured. Benchmark workloads and goldens remain unchanged.
 
 ## 1. Objective
 

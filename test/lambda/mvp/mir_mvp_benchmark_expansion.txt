@@ -61,3 +61,16 @@ recovery: 2,3
 membership: true true true
 text-outcome: first
 observer: true true
+rmw-parent: 9 109
+string-append: 404211
+checked-length: n=2 n=2 length
+discarded-query: 600
+erased-capture: 12491
+not-outcome: false true not-first
+rmw-root: 9 109
+count-find: 2 3 1 0 1 0 0 2
+count-errors: source pattern options true true
+logical-normal: true logic-first
+float-admit: 2 2.5 true true float-first
+integer-admit: 2 true true int-first true
+array-admit: 5 5.5 5 7 true

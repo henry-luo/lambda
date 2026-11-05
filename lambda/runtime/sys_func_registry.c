@@ -1968,6 +1968,13 @@ JitImport jit_runtime_imports[] = {
     {"fn_find3", FPTR(fn_find3),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    // fused length returns an inline count or the original Error Item.
+    {"fn_len_find2", FPTR(fn_len_find2),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"fn_len_find3", FPTR(fn_len_find3),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"fn_replace3", FPTR(fn_replace),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM, 0,
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
@@ -2601,6 +2608,10 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"cow_bind_rmw_handle", FPTR(cow_bind_rmw_handle)},
+    {"cow_bind_rmw_root", FPTR(cow_bind_rmw_root),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) | JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"cow_prepare_write", FPTR(cow_prepare_write)},
     {"cow_prepare_write_profiled", FPTR(cow_prepare_write_profiled)},
     {"lambda_array_scalar_snapshot", FPTR(lambda_array_scalar_snapshot),
@@ -4072,6 +4083,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "cow_mark_shared", "cow_capture_value", "cow_bind_var",
         "cow_mark_shared_profiled", "cow_capture_value_profiled",
         "cow_bind_var_profiled",
+        // the constant-zero spine wrapper cannot reach fn_index or allocation.
+        "cow_bind_rmw_root",
         "lambda_exec_profile_note_call",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));

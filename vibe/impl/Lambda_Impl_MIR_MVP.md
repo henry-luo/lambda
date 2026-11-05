@@ -3,20 +3,34 @@
 2026-11-05. Implements and tunes
 [the MIR MVP proposal](../Lambda_Design_MIR_MVP.md), following the
 [JS MVP-Lmd approach](../jube/JS_MVP_Lmd.md). **Experimental; the performance
-milestone remains open.** All 77 registered typed benchmarks pass their MVP
-output checks. The current complete timing run clearly beats Full MIR on
-**70/77**, using a matched Sumfp supplement for its timer-limited primary window.
-**Three medians remain slower** (CD, Microdiff and RegexRedux); Pidigits and
-Permute have faster inconclusive medians; two Full controls fail.
+milestone remains open.** The current release has faster medians than corrected
+Full MIR on all 77 registered benchmarks. The complete 30-pair primary run,
+with the matched Sumfp supplement, clears all 77 confidence gates. Five completed
+50-pair confirmations leave **76 clear wins and CD inconclusive**. CD's median
+is still faster: 167.164 versus 173.874 ms, but its ratio upper bound is 1.011953.
+No benchmark has a slower Full-comparison median.
 
-The fresh Lambda baseline passes **8,756/8,756**. Shared fixtures pass normal,
-forced/poisoned and seeded/poisoned GC modes; 18 array benchmarks pass forced GC.
-The 65-group broader gate retains 58 legacy failing subtests with no new failure
-headers. The complete 15-pair comparison against the phase-1 MVP retains one
-Diviter regression flag (+1.4% median). The original 48 30-pair repeat was stopped
-at the user's wrap-up request, so this source has **no completed zero-regression
-qualification**. See the [wrap-up evidence](#2026-11-05-wrap-up) and retain earlier
-qualification sections as historical evidence. C2MIR is unmeasured.
+Both compilers pass all 77 benchmark goldens. The Lambda baseline passes
+**8,770 checks**: 6,658 fresh runtime checks and 2,112 unchanged parser results
+with recorded provenance. Targeted poisoned-GC checks pass. The broader gate
+retains 58 legacy failures plus four pre-existing Full-only negative-probe
+failures, with no new normalized failure headers against the fresh control.
+
+Base64 (+2.6%) and AWFY DeltaBlue (+2.7%) flag regressions against the starting
+MVP in the primary campaign. Their independent follow-up was stopped before
+sampling at the user's wrap-up request. Four of nine planned confirmations
+remain unfinished. **Do not claim the all-77 performance milestone or zero
+regression.** C2MIR is unmeasured. Changes are uncommitted.
+
+Published [analysis](../../test/benchmark/lambda_mvp/tune77_phase3_analysis_2026-11-05.json),
+[validation](../../test/benchmark/lambda_mvp/tune77_phase3_validation_2026-11-05.json),
+[primary samples](../../test/benchmark/lambda_mvp/tune77_phase3_full_2026-11-05.json),
+[Sumfp supplement](../../test/benchmark/lambda_mvp/tune77_phase3_sumfp_2026-11-05.json),
+[completed confirmations](../../test/benchmark/lambda_mvp/tune77_phase3_confirmations_2026-11-05.json)
+and [original-48 selection](../../test/benchmark/lambda_mvp/tune77_phase3_regression48_2026-11-05.json)
+identify the same frozen release and source hashes. Historical phase2 results
+remain separate, including their invalid Full controls and incomplete regression
+qualification.
 
 Authority: **D1.4, D1.6, D2.3.4–D2.3.5, D6.2–D6.3,
 D8.2.4–D8.2.6, D7.4.1–D7.4.2**; numeric semantics
@@ -26,37 +40,23 @@ containment **S3.5, S7.7.2–S7.7.3**. No formal ruling changes.
 
 ## Current checkpoint
 
-- **Updated:** 2026-11-05; **wrapped up at user request**. No active build/test/benchmark coordinator. Goal remains all 77 faster than Full, preserving original 48; targets are not all met. Commit scope: validated MVP sources, tests, documentation and evidence; unrelated work excluded.
-- Branch `master`, starting commit `64be60daa`. Unrelated package/editor work, shared `lambda.exe`, runtime data models and vendor files are untouched. Lambda baseline only; C2MIR unmeasured.
-- Authority: D2.3.5, D4.2.5, D4.3.3, D5.6.1–D5.6.2, D6.2–D6.3, D7.4.1–D7.4.2; S3.4, S5.1.1v2, S7.4.4, S7.6.1v9, S7.9.3, S9.1.2–S9.1.3, S9.3.1, S10.6.1, S11.1, S11.4.1v5, S12.2.1v3. No ruling changes.
-- Private build artifacts/snapshots: `temp/lambda_mir_mvp/tune77_full/`; investigations/profiles/campaigns: `temp/lambda_mir_mvp/tune77_phase2/`.
-- Active checked source/release: **`captured_fields`**, SHA256 `ca0746fe673f1c78845144d45de6127e33a15ce9df534dd9ad7537762cd2e645`. All42 live compiler hashes agree with release/debug manifests after wrap-up restoration.
-- Build: release O3/ThinLTO/march=native, frozen expansion runtime inputs; rebuilt MVP/Full/registry TUs. Debug host `captured_fields_debug` is correctness/debugging only. No root executable replacement.
-- Correctness: all 77 MVP benchmark goldens; 21 paired diagnostic profiles; expanded/u32 fixtures in both compilers under normal, forced/poisoned and seeded/poisoned GC; 18 forced-GC array benchmarks pass.
-- Broad gate: 65 groups, same 58 legacy failing subtests versus starting 59, no new normalized failure headers. `captured_fields-broad.log` retains failures.
-- Fresh Lambda baseline **8,756/8,756**: 6,644 fresh runtime checks plus 2,112 unchanged parser results, no reruns. Evidence: `captured_fields-baseline-{analysis,provenance}.json`.
-- Complete performance: Full 77×15 with phase-1 MVP, plus matched Sumfp 10k×30 versus Full/stage24. Paired release self-reported execution windows, startup/JIT excluded, process interference monitoring. Frozen912-input corpus plus four live paths verified; workloads/iterations/goldens unchanged.
-- Results: **70 clear Full wins /77**, five gate misses, two invalid Full controls. Original48:45 clear wins, two faster inconclusive medians, one invalid control; no slower Full medians. Additional29:25 clear wins, three slower medians, one invalid control.
-- Slower medians MVP/Full: CD 194.975/180.002 ms (+8.3%), Microdiff 32.622/29.665 (+10.0%), RegexRedux 0.750/0.748 (+0.3%, statistically inconclusive).
-- Faster inconclusive Full comparisons: Pidigits 0.337/0.355 ms; Permute 0.070/0.075 ms. Strict one-sided95% upper bound must be below1.0 to count a clear win.
-- Invalid Full controls: NavierStokes checksum12 vs77; TextSearch exit-11. Both reproduce in the starting control. MVP outputs pass all 77.
-- Phase-1 MVP comparison: one retained Diviter regression flag,236.176/232.810 ms (+1.4% median; two-sided lower ratio bound1.000107). Sumfp's primary prior-MVP comparison remains timer-limited; the supplement compares stage24.
-- The original 48×30 repeat was stopped before producing samples at the user's wrap-up request. **No zero-regression claim for current source.** `wrap-up-campaign-status.json` and own-process cancellation inventory retain this disposition.
-- Published current evidence: `test/benchmark/lambda_mvp/tune77_phase2_{full,sumfp,analysis,validation}_2026-11-05.json`. Original phase-1 six Nov4 reports remain unchanged; they retain the earlier58-win/zero-original 48-regression qualification.
-- Starting MVP: `expand_all/stage24-release.exe`, SHA256 `c98251585039ceee4677c706e151768fe21fea3b5ade1e1510b67e77112b1fa7`; phase-1 MVP: `primitive_push_effects-release.exe`, SHA256 `f4ccd15e804c0e8a1cd021436c47de32018e2d498d1a6ef3aa41732aa486f418`.
-- Phase2 retains all phase-1 native u32/record-COW/N-D/exclusive-borrow/float/tail-root work. Scalar/error facts avoid revalidation/no-op captures/freezes; mutable wide scalars still snapshot owned number homes.
-- Context-linked module/key locations, per-use predefined NameIds, enforced constructor destinations/union arms, selective tensor packing and shared ownership/shape queries remain in place.
-- Shared physical helpers cover certified append, literal UTF-8 comparison, semantic type/null predicates and physical array words. Unknown/view/JS/native/virtual carriers retain checked fallbacks.
-- Primitive-array normal domains survive only invariant typed var borrows; storage/escape queries retain strict no-borrow defaults. Unannotated direct mutation stays conservative.
-- Current batch adds guarded generic boxed-array reads, single/fresh literal capture policy, pure-sibling scalar observations, bool/Error `not` facts, open-array nested-write dispatch and admitted GC-pointer field stores.
-- Known-container captures skip the helper if already shared. Integer text joins reuse the rooted formatter; recovery/conditional joins share normal-domain unions; exact Error metadata reuses shared AST typing.
-- New probes exposed an existing projected-RHS alias bug (MVP199 vs Full179). Member/array/nested writes now capture borrowed RHS children before native/checked stores. Typed container slots match reader eligibility independently of the scalar-native flag.
-- Superseded fixture/conversion/alias failures remain recorded, without relaxed goldens. Earlier `primitive_borrows` baseline emission expectations were updated with retained initial/rerun logs; current baseline passes without reruns.
-- The unbuilt RMW follow-up was removed from live source at wrap-up and saved as `rmw-follow-up-unvalidated.patch`; restoration and all 42 hashes are recorded in `wrap-up-source-restoration.json`. It is not qualified or applied.
-- Follow-up roots: CD has 39,799 extra plain-array copies/26.7MB versus Full; MVP omits runtime spine handling/release markers for shared-AST RMW borrows. Full also has an open-string spare-capacity append MVP lacks. See `rmw-observations.md` for these and checked-len/nonretaining-call hypotheses.
-- Existing debt probes `wide-sibling-existing-gap.*` and `domain-push-probe.json` reproduce earlier issues. Do not remove wide snapshots or infer new array write contracts from them.
-- If resumed: implement/test the RMW and shared append/normal-result fixes as a batch; independently investigate Diviter and confirm near-boundary Full comparisons; then run original 48×30 and update same-source evidence. Keep all primary flags/failed controls explicit.
-- Disk ~1.2GiB free. Keep frozen inputs/snapshots and private evidence. Superseded gzip/object cleanup inventories retain provenance. Performance targets remain open; the commit does not claim completion.
+- **Wrapped up:** 2026-11-05 at the user's request. Resumed at `775c00d61` for all 77 faster than Full, preserving covered performance. The milestone remains open. No commit requested for this batch.
+- Frozen **`guarded_admission`** release SHA256 `7d48648ec773ff4d1347b94a75c836daa22803f6fdb27de284112aac9c935948`; debug host `8a7b1428d04d27157c818ef4caa8bed837bb0c973e1c0313635802eb5cf7ee61`. All44 release/debug/live compiler source hashes match. Private release O3/ThinLTO/march=native; debug/assertions/profiling host is correctness only. Root executable, runtime layouts, vendor code and benchmark workloads/goldens are untouched.
+- Artifacts: `temp/lambda_mir_mvp/tune77_phase3/`; frozen912-file corpus/four live inputs and private baseline workspace under `tune77_full/`. The fresh starting control rebuilt all766 translation units, SHA256 `601f852480d402053a243581609f75020ac0689074d5e46f9a33cff2f7de708b`.
+- Changes: runtime-spine RMW binding/release, shared guarded string append, checked-length success facts, nonretaining pure calls, discarded query storage, direct unprofiled COW marking, Boolean negation/logical success facts, bounded recursive array expansion and fused `len(find(...))` using shared search/window semantics (**D5.4.1–D5.4.4, S3.4, S7.9.3, S9.1.2–S9.1.3, S9.3.1, S17.7.1**).
+- Direct-parent RMW selects an audited noncollecting wrapper over the existing policy. Deeper paths retain the collecting helper because indexed/virtual reads can materialize ancestors (**D5.4.4, D6.3.2**). Full retains its original helper selection. Full controls fix proof-query recursion and typed-array COW publication (**D8.2.5, D4.3.3, D5.4.6**).
+- Dynamic native float admission reuses the proven int-to-float relation. Exact float-to-int admission checks finite range and round-trip equality before selecting the int lane. Primitive-array admission requires the physical lane and exact uncounted error-free primitive certificate; other shapes retain runtime validation (**S4.1, S4.4–S4.5, S11.4.1v5, D4.3.3**).
+- Profiles: CD removes39,799 excess plain-array copies/26,745,128 copied bytes and uses440,622 noncollecting root RMW calls. Its runtime type checks drop100,100→20,100. Microdiff removes106,600 spread pushes/41,000 discarded arrays and all61,501 NOT/63,554 truth helper calls. RegexRedux replaces nine find-array constructions with count-only calls. Permute still records5,924 stack checks; no call-reduction claim applies to the bounded recursive change.
+- Final release passes all77 MVP/Full benchmark goldens,18 forced-GC benchmark cases and expanded/u32/recurrence fixtures in all MVP normal/forced/seeded/profiled poisoned-GC modes. The broader65-group gate has62 failures:58 legacy broader-gate failures plus four pre-existing Full-only negative-probe failures. The same harness on the fresh starting control has69 failures; no new normalized headers.
+- Full's negative probe loses the Error payload of `not (error(...) in ...)`. Both starting/current Full print false; both MVPs print the payload. The byte membership ABI loses Error identity before NOT. Golden and failures remain visible (**S7.9.3**). Actual benchmark controls pass.
+- **Final baseline:8,770/8,770**, comprising6,658 fresh runtime checks and2,112 reused unchanged parser results with provenance hashes. No reruns for this final host. Earlier hosts retained ENOSPC/link-start races and an omitted production NO_GC audit entry; the latter was corrected only after proving the zero-link helper cannot allocate/index/reenter. Private object resolution now follows reuse-manifest chains. Losslessly archived older logs/binaries have inventories; do not archive active hosts.
+- User authorized stopping the competing dbench baseline; exact four-process inventory `user-authorized-baseline-stop.json`. Never replace shared executables or interrupt unrelated work. Lambda baseline only.
+- **Final prespecified protocol:** all77×30 against corrected same-binary Full and the fresh starting MVP; matched Sumfp10k×30; original48 selected from the same30-pair campaign, not another run. Nine fixed50-pair confirmations: CD, Microdiff, RegexRedux, NavierStokes, HashMap, JQRecords, Pidigits, Permute, Diviter. Paired release execution windows exclude startup/JIT; whole pairs disturbed by builds/tests are discarded. Clear Full win requires the one-sided95% ratio upper bound below1; starting-MVP regression requires the two-sided95% lower bound above1. Historical stage24 partial comparisons remain separate.
+- Final primary: **77/77 clear Full wins** using 30 paired observations and the matched Sumfp supplement. Original 48 and added 29 both pass their primary gates. No engine/output failures. The raw zero-duration primary Sumfp observation remains retained and unqualified separately.
+- Five completed 50-pair confirmations: CD remains faster but inconclusive; Microdiff, RegexRedux, NavierStokes and HashMap pass. Replacing these preselected rows with their confirmation observations yields **76/77 clear wins**, including 48/48 original entries and 28/29 additions. No slower Full medians. Do not discard CD's repeat because its primary passed.
+- Primary starting-MVP regression flags: Base64 +2.6% and AWFY DeltaBlue +2.7%. The completed confirmations add no regression flags. No zero-regression claim. The original-48 report is a selection of the same 30-pair primary campaign; its timer-limited aggregate stays unresolved, with matched Sumfp retained separately.
+- At user wrap-up, stopped the unfinished JQRecords confirmation and remaining Pidigits/Permute/Diviter queue. Stopped the queued 100-pair regression follow-up before it sampled. Exact own-process inventories are `wrapup-stopped-confirmations.json` and `wrapup-stopped-regression-followup.json`; no workers remain. All completed raw reports are preserved; no new compiler edits followed the frozen qualification.
+- Next resume: resolve the two starting-MVP flags and CD's narrow Full margin, then finish source-matched qualification. CD's profile still records 435,072 pair-array constructions, 870,144 literal append calls and 20,100 runtime type checks. These are measured costs, not a validated new optimization. No literal-allocation change was implemented during wrap-up. C2MIR remains unmeasured.
 
 ## Implementation
 
