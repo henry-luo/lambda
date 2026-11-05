@@ -72,6 +72,61 @@ pn container_field_captures() int^ {
     left.values[0] = 9
     return saved.values[0] * 100 + right.values[0] * 10 + left.values[0]
 }
+pn rmw_parent_snapshot(shared: bool) int^ {
+    var owner = {nested: {rows: [{value: 1}]}}
+    let previous = if (shared) owner else null
+    var row = owner.nested.rows[0]
+    row.value = 9
+    owner.nested.rows[0] = row
+    return (if (shared) previous.nested.rows[0].value else 0) * 100 + owner.nested.rows[0].value
+}
+pn string_append_snapshot() int^ {
+    var words: array = []
+    var index: int = 0
+    while (index < 40) { words.push("x")^; index = index + 1 }
+    let previous = words
+    words.push("é")^
+    words.push(null)^
+    return len(previous) * 10000 + len(words) * 100 + len(words[40]) * 10 +
+        (if (words[41] == null) 1 else 0)
+}
+pn rmw_root_snapshot(shared: bool) int^ {
+    var rows = [{value: 1}]
+    let previous = if (shared) rows else null
+    var row = rows[0]
+    row.value = 9
+    rows[0] = row
+    return (if (shared) previous[0].value else 0) * 100 + rows[0].value
+}
+fn observed_size(value: any) string^ => "n=" ++ len(value)
+fn admitted_dynamic_float(value: any) float^ { let held: float = value; held }
+fn admitted_dynamic_integer(value: any) int^ { let held: int = value; held }
+fn admitted_dynamic_rows(value: any) float^ {
+    let rows: float[] = value
+    rows[0] + rows[1]
+}
+pn discarded_queries() int^ {
+    var count: int = 0
+    for (value in [1, 2, 3] where value > 1) {
+        count = count + value;
+        [value, value]
+    }
+    let kept = [for (value in [4, 5]) value + count]
+    return count * 100 + kept[0] * 10 + kept[1]
+}
+pn erased_capture_changes() int^ {
+    var value: any = {value: 1}
+    let record_copy = value
+    value = [2]
+    let array_copy = value
+    value = 1e-300
+    let scalar_copy = value
+    value = [4]
+    let next_copy = value
+    value[0] = 9
+    return record_copy.value * 10000 + array_copy[0] * 1000 + next_copy[0] * 100 +
+        value[0] * 10 + (if (scalar_copy == 1e-300) 1 else 0)
+}
 pn append_integers(count: int) int^ {
     var values: int[] = []
     var index: int = 0
@@ -188,6 +243,9 @@ fn dot_part(a: float[], b: float[], count: int) float^ {
     }
     total
 }
+
+type counted_word = \("ab" | "xy")
+type counted_empty = \("a"*)
 
 pn main() {
     print("module: " ++ first_seed() ++ " " ++ default_external(3) ++ " " ++ dependency_rows[0][1] ++ "\n")
@@ -337,4 +395,39 @@ pn main() {
     print("membership: " ++ ("key" at {key: 1}) ++ " " ++ (1 in [0, 1]) ++ " " ++ (0 of [4]) ++ "\n")
     print("text-outcome: " ++ ((failed_text("first") == failed_text("second")) ^ { ^.message }) ++ "\n")
     print("observer: " ++ (type(error("observed")) == error) ++ " " ++ contains("lambda", "mb") ++ "\n")
+    print("rmw-parent: " ++ rmw_parent_snapshot(false) ++ " " ++ rmw_parent_snapshot(true) ++ "\n")
+    print("string-append: " ++ string_append_snapshot() ++ "\n")
+    print("checked-length: " ++ observed_size([1, 2]) ++ " " ++ observed_size("é猫") ++ " " ++
+        (observed_size(failed_text("length")) ^ { ^.message }) ++ "\n")
+    print("discarded-query: " ++ discarded_queries() ++ "\n")
+    print("erased-capture: " ++ erased_capture_changes() ++ "\n")
+    print("not-outcome: " ++ (not (1 in [1])) ++ " " ++ (not (2 in [1])) ++ " " ++
+        ((not (error("not-first") in [1])) ^ { ^.message }) ++ "\n")
+    print("rmw-root: " ++ rmw_root_snapshot(false) ++ " " ++ rmw_root_snapshot(true) ++ "\n")
+    print("count-find: " ++ len(find("ab xy AB", counted_word)) ++ " " ++
+        len(find("ab xy AB", counted_word, {ignore_case: true})) ++ " " ++
+        len(find("ab xy AB", counted_word, {last: 1})) ++ " " ++
+        len(find("ab xy AB", counted_word, {limit: 0})) ++ " " ++
+        len(find("", counted_empty)) ++ " " ++ len(find("", "")) ++ " " ++
+        len(find(null, counted_word)) ++ " " ++ len(find("éÉ", "é", {ignore_case: true})) ++ "\n")
+    print("count-errors: " ++ (len(find(failed_text("source"), counted_word)) ^ { ^.message }) ++ " " ++
+        (len(find("ab", failed_text("pattern"))) ^ { ^.message }) ++ " " ++
+        (len(find("ab", counted_word, failed_text("options"))) ^ { ^.message }) ++ " " ++
+        (type(len(find(42, counted_word))) == error) ++ " " ++
+        (type(len(find("ab", counted_word, {limit: -1}))) == error) ++ "\n")
+    print("logical-normal: " ++ ((not (1 in [1]) or not (2 in [1])) and not (3 in [1])) ++ " " ++
+        ((not (error("logic-first") in [1]) or not (error("logic-second") in [1])) ^ { ^.message }) ++ "\n")
+    print("float-admit: " ++ admitted_dynamic_float(2) ++ " " ++ admitted_dynamic_float(2.5) ++ " " ++
+        (type(admitted_dynamic_float(null)) == error) ++ " " ++ (type(admitted_dynamic_float("2")) == error) ++ " " ++
+        (admitted_dynamic_float(error("float-first")) ^ { ^.message }) ++ "\n")
+    print("integer-admit: " ++ admitted_dynamic_integer(2.0) ++ " " ++
+        (type(admitted_dynamic_integer(2.25)) == error) ++ " " ++
+        (type(admitted_dynamic_integer(9007199254740992.0)) == error) ++ " " ++
+        (admitted_dynamic_integer(error("int-first")) ^ { ^.message }) ++ " " ++
+        (admitted_dynamic_integer(0.0 / 0.0) is nan) ++ "\n")
+    let typed_rows: float[] = [2.0, 3.0]
+    let counted_rows: float[2] = [3.0, 4.0]
+    print("array-admit: " ++ admitted_dynamic_rows(typed_rows) ++ " " ++
+        admitted_dynamic_rows([2.5, 3]) ++ " " ++ admitted_dynamic_rows(slice(typed_rows, 0, 2)) ++ " " ++
+        admitted_dynamic_rows(counted_rows) ++ " " ++ (type(admitted_dynamic_rows(["bad", 1])) == error) ++ "\n")
 }

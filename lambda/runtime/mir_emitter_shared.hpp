@@ -5389,11 +5389,12 @@ static inline MIR_reg_t em_call_1(MirEmitter* em, const char* fn_name,
 // non-band case (nan, inf, out of range) to the cold helper -- D2I is undefined
 // for those on some targets.
 static inline MIR_reg_t em_double_to_int_lane(MirEmitter* em, MIR_reg_t d_reg,
-        bool floor_before, bool include_signature) {
+        bool floor_before, bool include_signature, MIR_label_t range_miss = NULL) {
     MIR_reg_t result = em_new_reg(em, "double_int_lane", MIR_T_I64);
     MIR_reg_t lower = em_new_reg(em, "double_int_lower", MIR_T_I64);
     MIR_reg_t upper = em_new_reg(em, "double_int_upper", MIR_T_I64);
-    MIR_label_t slow = em_new_label(em), done = em_new_label(em);
+    MIR_label_t slow = range_miss ? range_miss : em_new_label(em);
+    MIR_label_t done = range_miss ? NULL : em_new_label(em);
     // ordered comparisons reject NaN too; D2I must never see poison or an
     // out-of-band value. Nonnegative truncation also implements floor (S4.2).
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DGE,
@@ -5408,6 +5409,9 @@ static inline MIR_reg_t em_double_to_int_lane(MirEmitter* em, MIR_reg_t d_reg,
         MIR_new_label_op(em->ctx, slow), MIR_new_reg_op(em->ctx, upper)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_D2I,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, d_reg)));
+    // admission owns rejection/poison handling; only the proven finite lane
+    // returns here when the caller supplies its boundary fallback.
+    if (range_miss) return result;
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, done)));
     em_emit_label(em, slow);
     if (floor_before) {

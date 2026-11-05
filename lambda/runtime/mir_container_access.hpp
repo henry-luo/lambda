@@ -35,7 +35,7 @@ static inline void em_array_num_elem_guard(MirEmitter* em, MIR_reg_t arr_ptr,
 
 // caller policy selects whether immutable-storage flags need their own guard.
 static inline void em_container_cow_guard(MirEmitter* em, MIR_reg_t pointer,
-        MIR_label_t miss, bool immutable_flags = false) {
+        MIR_label_t miss, bool immutable_flags = false, MIR_reg_t* raw_state = NULL) {
     uint64_t mask = COW_STATE_SHARED;
     MIR_disp_t offset = offsetof(Container, cow_state);
     MIR_type_t width = MIR_T_U8;
@@ -47,10 +47,43 @@ static inline void em_container_cow_guard(MirEmitter* em, MIR_reg_t pointer,
         memcpy(&mask, bytes, sizeof(mask)); offset = 0; width = MIR_T_I64;
     }
     MIR_reg_t state = em_load_at(em, pointer, offset, width, "cow_header");
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, state),
+    if (raw_state) *raw_state = state;
+    MIR_reg_t masked = raw_state ? em_new_reg(em, "cow_mask", MIR_T_I64) : state;
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, masked),
         MIR_new_reg_op(em->ctx, state), MIR_new_uint_op(em->ctx, mask)));
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, miss),
-        MIR_new_reg_op(em->ctx, state)));
+        MIR_new_reg_op(em->ctx, masked)));
+}
+
+// test the runtime's COW-kind policy without calling or materializing a value.
+static inline void em_cow_kind_guard(MirEmitter* em, MIR_reg_t pointer, MIR_label_t miss) {
+    uint64_t kinds = 0;
+    static_assert(LMD_TYPE_COUNT <= 64, "COW kinds fit one MIR word");
+    for (int i = 0; i < LMD_TYPE_COUNT; i++)
+        if (cow_type_is_container((TypeId)i)) kinds |= UINT64_C(1) << i;
+    MIR_reg_t kind = em_load_at(em, pointer, LAMBDA_GC_OFF_CONTAINER_TYPE_ID, MIR_T_U8, "capture_kind");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBGE, MIR_new_label_op(em->ctx, miss),
+        MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, 64)));
+    MIR_reg_t allowed = em_new_reg(em, "capture_allowed", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, allowed),
+        MIR_new_uint_op(em->ctx, kinds)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, allowed),
+        MIR_new_reg_op(em->ctx, allowed), MIR_new_reg_op(em->ctx, kind)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, allowed),
+        MIR_new_reg_op(em->ctx, allowed), MIR_new_int_op(em->ctx, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF, MIR_new_label_op(em->ctx, miss),
+        MIR_new_reg_op(em->ctx, allowed)));
+}
+
+// the unprofiled capture is one idempotent header update, never an allocation.
+// Shared headers stay read-only; tagged scalars and non-COW carriers are unchanged.
+static inline void em_container_capture(MirEmitter* em, MIR_reg_t pointer,
+        MIR_reg_t state, bool proven_container, MIR_label_t done) {
+    if (!proven_container) em_cow_kind_guard(em, pointer, done);
+    MIR_reg_t shared = em_new_reg(em, "capture_shared", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR, MIR_new_reg_op(em->ctx, shared),
+        MIR_new_reg_op(em->ctx, state), MIR_new_int_op(em->ctx, COW_STATE_SHARED)));
+    em_store_at(em, pointer, offsetof(Container, cow_state), MIR_T_U8, shared);
 }
 
 // owned shaped arrays carry one stride table, rather than nested row pointers.
@@ -127,7 +160,7 @@ static inline void em_array_cert_word_guard(MirEmitter* em, MIR_reg_t cert,
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 #endif
 static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
-        Type* contract, MIR_label_t l_bail) {
+        Type* contract, MIR_label_t l_bail, bool primitive_admission = false) {
     LambdaArrayContractInfo info = {};
     if (!lambda_array_contract_info(contract, &info)) return;
     MIR_reg_t cert = em_new_reg(em, "array_cert", MIR_T_I64);
@@ -144,12 +177,16 @@ static inline void em_array_rep_cert_guard(MirEmitter* em, MIR_reg_t arr_ptr,
     static_assert(offsetof(LaneStorageDesc, nullable) == offsetof(LaneStorageDesc, kind) + 1,
         "certificate lane and nullability must be adjacent");
     uint8_t flags = ARRAY_REP_CERT_EXACT | ARRAY_REP_CERT_ERROR_FREE;
+    if (primitive_admission) flags |= ARRAY_REP_CERT_PRIMITIVE_VALUES;
     if (info.leaf_element && (info.leaf_element->type_id == LMD_TYPE_MAP ||
             info.leaf_element->type_id == LMD_TYPE_ELEMENT)) {
         flags |= ARRAY_REP_CERT_REIFIED;
     }
     uint8_t rank_flags_bytes[] = {info.rank, flags};
-    uint8_t rank_flags_mask_bytes[] = {UINT8_MAX, flags};
+    // admission may reuse only the same uncounted primitive domain. Counted,
+    // reified and future certificate variants retain runtime admission.
+    uint8_t rank_flags_mask_bytes[] = {UINT8_MAX,
+        (uint8_t)(primitive_admission ? UINT8_MAX : flags)};
     uint8_t lane_bytes[] = {info.leaf_lane.kind, info.leaf_lane.nullable};
     uint16_t rank_flags, rank_flags_mask, lane;
     memcpy(&rank_flags, rank_flags_bytes, sizeof(rank_flags));
@@ -182,6 +219,55 @@ static inline void em_array_num_append(MirEmitter* em, MIR_reg_t array,
         MIR_new_reg_op(em->ctx, length), MIR_new_int_op(em->ctx, 1)));
     em_store_at(em, array, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, length);
 }
+
+// a unique open boxed array can append one string without allocation.
+// all other carriers retain checked growth, sequence and certificate policy.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+static inline void em_open_string_append(MirEmitter* em, MIR_reg_t owner,
+        MIR_reg_t value, MIR_label_t cold) {
+    MIR_reg_t tag = em_new_reg(em, "string_push_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
+        MIR_new_reg_op(em->ctx, value), MIR_new_int_op(em->ctx, 56)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, cold),
+        MIR_new_reg_op(em->ctx, tag), MIR_new_int_op(em->ctx, LMD_TYPE_STRING)));
+    MIR_reg_t array = em_guard_container(em, owner, LMD_TYPE_ARRAY, cold);
+    em_container_cow_guard(em, array, cold, true);
+    MIR_reg_t flags = em_load_at(em, array, LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS, MIR_T_U8, "string_push_flags");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, flags),
+        MIR_new_reg_op(em->ctx, flags), MIR_new_int_op(em->ctx,
+            CONTAINER_ARRAY_FLAG_NDIM | CONTAINER_ARRAY_FLAG_NATIVE_LANE | (1u << 1) | JS_ELEMENTS_STATE_MASK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, cold),
+        MIR_new_reg_op(em->ctx, flags)));
+    MIR_reg_t state = em_load_at(em, array, offsetof(Container, reserved_state), MIR_T_U8, "string_push_state");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, state),
+        MIR_new_reg_op(em->ctx, state), MIR_new_int_op(em->ctx, CONTAINER_STATE_VIRTUAL_LIST)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, cold),
+        MIR_new_reg_op(em->ctx, state)));
+    MIR_reg_t cert = em_load_at(em, array, offsetof(List, rep_cert), MIR_T_I64, "string_push_cert");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, cold),
+        MIR_new_reg_op(em->ctx, cert), MIR_new_int_op(em->ctx, 0)));
+    MIR_reg_t extra = em_load_at(em, array, LAMBDA_GC_OFF_LIST_EXTRA, MIR_T_I64, "string_push_extra");
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, cold),
+        MIR_new_reg_op(em->ctx, extra), MIR_new_int_op(em->ctx, 0)));
+    MIR_reg_t length = em_load_at(em, array, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "string_push_length");
+    MIR_reg_t capacity = em_load_at(em, array, LAMBDA_GC_OFF_LIST_CAPACITY, MIR_T_I64, "string_push_capacity");
+    MIR_reg_t spare = em_new_reg(em, "string_push_spare", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_SUB, MIR_new_reg_op(em->ctx, spare),
+        MIR_new_reg_op(em->ctx, capacity), MIR_new_reg_op(em->ctx, length)));
+    // preserve the runtime's spare sentinel slot at the growth boundary.
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BLE, MIR_new_label_op(em->ctx, cold),
+        MIR_new_reg_op(em->ctx, spare), MIR_new_int_op(em->ctx, 1)));
+    em_store_at(em, em_array_element_address(em, array, length, sizeof(Item)), 0, MIR_T_I64, value);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD, MIR_new_reg_op(em->ctx, length),
+        MIR_new_reg_op(em->ctx, length), MIR_new_int_op(em->ctx, 1)));
+    em_store_at(em, array, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, length);
+}
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 // physical Array words exclude shaped, JS and virtual storage. Pointer lanes
 // may opt in to raw words; generic Item readers must reject those lanes.

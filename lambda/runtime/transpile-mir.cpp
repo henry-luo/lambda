@@ -1260,10 +1260,6 @@ static AstNamedNode* mir_param_at(AstFuncNode* fn_node, int index) {
     return param;
 }
 
-static bool mir_var_param_may_publish(AstNamedNode* param) {
-    return !param || !param->entry || param->entry->cow_var_param_may_publish;
-}
-
 static Type* mir_named_contract(AstNamedNode* named) {
     if (!named) return NULL;
     TypeParam* parameter = lambda_type_param(named->type);
@@ -1273,6 +1269,13 @@ static Type* mir_named_contract(AstNamedNode* named) {
     if (parameter && parameter->contract_type) return parameter->contract_type;
     if (named->declared_type) return named->declared_type;
     return parameter ? parameter->full_type : named->type;
+}
+
+static bool mir_var_param_may_publish(AstNamedNode* param) {
+    if (!param || !param->entry || param->entry->cow_var_param_may_publish) return true;
+    // an indexed typed-array write can detach a shared input even when the
+    // body never explicitly rebinds that parameter (D5.4.6).
+    return lambda_array_contract_element(mir_named_contract(param)) != NULL;
 }
 
 // An explicit `var array` is a boxed COW carrier even through a native call.
@@ -12127,9 +12130,29 @@ struct MirNumericJoinProof {
     int budget;
     bool integer_only;
     AstFuncNode* function;
-    const AstBinaryNode* expression;
+    const AstNode* expression;
     MirNumericJoinProof* parent;
 };
+
+// carrier queries can reenter through an indexed recurrence. Keep one
+// active proof chain across both numeric joins and position queries (D8.2.5).
+struct MirNumericJoinScope {
+    MirTranspiler* mt;
+    MirNumericJoinProof proof;
+    MirNumericJoinScope(MirTranspiler* compiler, const AstNode* expression)
+        : mt(compiler), proof{{}, 0, 96} {
+        proof.expression = expression;
+        proof.parent = mt->numeric_join_proof;
+        mt->numeric_join_proof = &proof;
+    }
+    ~MirNumericJoinScope() { mt->numeric_join_proof = proof.parent; }
+};
+
+static bool mir_numeric_join_active(MirTranspiler* mt, const AstNode* node) {
+    for (MirNumericJoinProof* active = mt->numeric_join_proof; active; active = active->parent)
+        if (active->expression == node) return true;
+    return false;
+}
 
 // Prove the complete local recurrence stays in int|float. The Item tag still
 // records which member is live; only a float-domain consumer may erase it.
@@ -12213,18 +12236,10 @@ static bool mir_numeric_join_proven(MirTranspiler* mt, AstBinaryNode* binary,
             mir_body_has_nested_function(mt->func_body)) return false;
     // carrier inference can reopen this recurrence through a min/max initializer;
     // a repeated active expression is an unresolved proof, not a fresh search.
-    for (MirNumericJoinProof* active = mt->numeric_join_proof; active;
-            active = active->parent) {
-        if (active->expression == binary) return false;
-    }
-    MirNumericJoinProof proof = {{}, 0, 96};
-    proof.expression = binary;
-    proof.parent = mt->numeric_join_proof;
-    mt->numeric_join_proof = &proof;
-    bool proven = mir_numeric_join_operand(mt, binary->left, &proof) &&
-        mir_numeric_join_operand(mt, binary->right, &proof);
-    mt->numeric_join_proof = proof.parent;
-    return proven;
+    if (mir_numeric_join_active(mt, binary)) return false;
+    MirNumericJoinScope scope(mt, binary);
+    return mir_numeric_join_operand(mt, binary->left, &scope.proof) &&
+        mir_numeric_join_operand(mt, binary->right, &scope.proof);
 }
 
 static TypeId mir_numeric_join_consumer(MirTranspiler* mt, AstBinaryNode* binary,
@@ -12239,13 +12254,14 @@ static TypeId mir_numeric_join_consumer(MirTranspiler* mt, AstBinaryNode* binary
 }
 
 static bool mir_index_expr_is_numeric_position(MirTranspiler* mt, AstNode* node) {
+    if (mir_numeric_join_active(mt, node)) return false;
+    MirNumericJoinScope scope(mt, node);
     if (mir_index_expr_is_native_int(mt, node)) return true;
     TypeId tid = mir_expr_carrier_type(mt, node);
     if (tid == LMD_TYPE_FLOAT && !mir_argument_may_return_item_error(mt, node)) return true;
     if (tid != LMD_TYPE_ANY || !mt->func_body || mir_in_inline_context(mt) ||
             mir_body_has_nested_function(mt->func_body)) return false;
-    MirNumericJoinProof proof = {{}, 0, 96};
-    return mir_numeric_join_operand(mt, node, &proof);
+    return mir_numeric_join_operand(mt, node, &scope.proof);
 }
 
 static bool mir_numeric_index_fast_read(MirTranspiler* mt, AstNode* object,
@@ -23981,12 +23997,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                                 : emit_null_item_reg(mt);
                         }
                         MIR_reg_t boxed = emit_box(mt, val, var_tid);
-                        val = emit_call_5(mt, "cow_bind_rmw_handle", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, root_boxed),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, link_count),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, link_keys[0]),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, link_keys[1]));
+                        val = em_bind_rmw_handle(&mt->em, root_boxed, boxed, link_count, link_keys);
                         var_tid = LMD_TYPE_ANY;
                         expr_tid = LMD_TYPE_ANY;
                         borrow_bound = true;
@@ -31897,77 +31908,12 @@ static bool mir_emit_open_string_push(MirTranspiler* mt, MirVarEntry* root,
     MIR_reg_t value = transpile_box_item(mt, value_node);
     mir_emit_insertion_capture(mt, value_node, value);
     MIR_reg_t owner = emit_box(mt, root->reg, root->type_id);
-    MIR_reg_t array = emit_unbox_container(mt, owner);
-    MIR_label_t cold = new_label(mt);
-    MIR_label_t done = new_label(mt);
+    MIR_label_t cold = new_label(mt), done = new_label(mt);
     MIR_reg_t result = new_reg(mt, "string_push_result", MIR_T_I64);
-    MIR_reg_t value_tag = new_reg(mt, "string_push_tag", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH,
-        MIR_new_reg_op(mt->ctx, value_tag), MIR_new_reg_op(mt->ctx, value),
-        MIR_new_int_op(mt->ctx, 56)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-        MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, value_tag),
-        MIR_new_int_op(mt->ctx, LMD_TYPE_STRING)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
-        MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, array),
-        MIR_new_int_op(mt->ctx, 0)));
-    MIR_reg_t kind = em_load_at(&mt->em, array, MIR_CONTAINER_TYPE_ID_OFFSET,
-        MIR_T_U8, "string_push_kind");
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-        MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, kind),
-        MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY)));
-    MIR_reg_t flags = em_load_at(&mt->em, array,
-        (MIR_disp_t)offsetof(Container, flags), MIR_T_U8, "string_push_flags");
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, flags), MIR_new_reg_op(mt->ctx, flags),
-        MIR_new_int_op(mt->ctx, CONTAINER_FLAG_STATIC | CONTAINER_FLAG_IMMORTAL)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, flags)));
-    MIR_reg_t array_flags = em_load_at(&mt->em, array,
-        MIR_CONTAINER_ARRAY_FLAGS_OFFSET, MIR_T_U8, "string_push_array_flags");
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, array_flags), MIR_new_reg_op(mt->ctx, array_flags),
-        MIR_new_int_op(mt->ctx, CONTAINER_ARRAY_FLAG_NATIVE_LANE)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, array_flags)));
-    MIR_reg_t cert = em_load_at(&mt->em, array, MIR_CONTAINER_REP_CERT_OFFSET,
-        MIR_T_I64, "string_push_cert");
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-        MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, cert),
-        MIR_new_int_op(mt->ctx, 0)));
-    emit_array_num_cow_guard(mt, array, cold);
-    MIR_reg_t extra = em_load_at(&mt->em, array, MIR_CONTAINER_EXTRA_OFFSET,
-        MIR_T_I64, "string_push_extra");
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-        MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, extra),
-        MIR_new_int_op(mt->ctx, 0)));
-    MIR_reg_t length = em_load_at(&mt->em, array, MIR_CONTAINER_LENGTH_OFFSET,
-        MIR_T_I64, "string_push_length");
-    MIR_reg_t capacity = em_load_at(&mt->em, array, MIR_CONTAINER_CAPACITY_OFFSET,
-        MIR_T_I64, "string_push_capacity");
-    MIR_reg_t spare = new_reg(mt, "string_push_spare", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_SUB,
-        MIR_new_reg_op(mt->ctx, spare), MIR_new_reg_op(mt->ctx, capacity),
-        MIR_new_reg_op(mt->ctx, length)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BLE,
-        MIR_new_label_op(mt->ctx, cold), MIR_new_reg_op(mt->ctx, spare),
-        MIR_new_int_op(mt->ctx, 1)));
-    MIR_reg_t items = em_load_at(&mt->em, array, MIR_CONTAINER_ITEMS_OFFSET,
-        MIR_T_I64, "string_push_items");
-    MIR_reg_t slot = em_element_address(&mt->em, items, length, sizeof(Item));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, slot, 0, 1),
-        MIR_new_reg_op(mt->ctx, value)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, length), MIR_new_reg_op(mt->ctx, length),
-        MIR_new_int_op(mt->ctx, 1)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET,
-            array, 0, 1), MIR_new_reg_op(mt->ctx, length)));
+    em_open_string_append(&mt->em, owner, value, cold);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, owner)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, done)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
     emit_label(mt, cold);
     MIR_reg_t fallback = mir_emit_array_push(mt, owner, value, NULL);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
