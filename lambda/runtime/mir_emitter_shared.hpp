@@ -482,6 +482,9 @@ struct MirFrameState {
     ScalarReturnClass scalar_return_mode;
     MIR_type_t return_type;
     MIR_reg_t runtime;
+    // Lambda rest context is restored at the common completion boundary.
+    MIR_reg_t vargs_roots;
+    MIR_insn_t vargs_root_fixup;
     MIR_reg_t root_base;
     MIR_reg_t root_end;
     MIR_reg_t number_base;
@@ -1581,6 +1584,15 @@ static inline void em_store_frame_slot_typed(MirEmitter* em,
 // helper calls existed — and prepending keeps it ahead of every entry path
 // (TCO loop-backs, generator resume dispatch). Neither base may be a side-root
 // slot: raw double bits in a GC-scanned slot would be misread as a tagged Item.
+// fixed raw storage belongs to this native activation, outside precise roots.
+static inline MIR_reg_t em_fixed_stack_storage(MirEmitter* em, const char* name, int64_t bytes) {
+    MIR_reg_t address = em_new_reg(em, name, MIR_T_P);
+    MIR_prepend_insn(em->ctx, em->func_item,
+        MIR_new_insn(em->ctx, MIR_ALLOCA, MIR_new_reg_op(em->ctx, address),
+            MIR_new_int_op(em->ctx, bytes)));
+    return address;
+}
+
 static inline MIR_reg_t em_bitcast_scratch_base(MirEmitter* em,
         MIR_disp_t* disp_out) {
     // frame.runtime is only meaningful while the frame is active; suspend and
@@ -1594,10 +1606,7 @@ static inline MIR_reg_t em_bitcast_scratch_base(MirEmitter* em,
     if (em->bitcast_slot_addr && em->bitcast_slot_func == em->func_item) {
         return em->bitcast_slot_addr;
     }
-    MIR_reg_t addr = em_new_reg(em, "fbits_slot", MIR_T_I64);
-    MIR_prepend_insn(em->ctx, em->func_item,
-        MIR_new_insn(em->ctx, MIR_ALLOCA, MIR_new_reg_op(em->ctx, addr),
-            MIR_new_int_op(em->ctx, (int64_t)sizeof(uint64_t))));
+    MIR_reg_t addr = em_fixed_stack_storage(em, "fbits_slot", sizeof(uint64_t));
     em->bitcast_slot_func = em->func_item;
     em->bitcast_slot_addr = addr;
     return addr;
@@ -4201,7 +4210,7 @@ static inline bool em_finalize_recorded_roots(MirEmitter* em,
         MIR_reg_t frame_base, MIR_insn_t anchor,
         MirRootWriteBackResult* result, const char* log_label) {
     MirFrameState* frame = em ? &em->frame : NULL;
-    if (!frame || frame->gc_candidate_count == 0) return true;
+    if (!frame || (!frame->gc_candidate_count && !frame->fixed_root_slots)) return true;
     int home_count = frame->root_slot_count + 1;
     uint8_t* preserved = (uint8_t*)mem_calloc(
         (size_t)home_count, sizeof(uint8_t), MEM_CAT_TEMP);

@@ -27,8 +27,17 @@ bool mvp_reject(LambdaMvpModule* m, AstNode* node, const char* reason) {
     return false;
 }
 
+// a removed error-only arm is bottom, not a missing type descriptor.
+static Type* normal_domain(LambdaMvpModule* m, Type* contract) {
+    Type* normal = lambda_type_remove_error(m->tp->pool, contract);
+    return normal ? normal : &TYPE_NONE;
+}
+
 ValueRep mvp_rep(Type* type) {
     if (!type) return VALUE_REP_ITEM;
+    // dependent contracts describe selected values, not Type* carriers. Type
+    // values themselves can also be GC-owned (D2.3.1, D4.1.4).
+    if (type == &TYPE_TYPE || lambda_type_contract_has_binder(type, true)) return VALUE_REP_ITEM;
     // an ordinary error alternative needs Item transport until discharge;
     // its type-expression pointer is not a runtime value (S7.8.1, D2.3.5).
     if (lambda_type_accepts_error(type)) return VALUE_REP_ITEM;
@@ -94,6 +103,12 @@ MvpBinding* mvp_local_binding(LambdaMvpModule* m, AstNode* node) {
 MvpBinding* mvp_place_root(LambdaMvpModule* m, AstNode* node) {
     AstCowPath path = {};
     return ast_collect_cow_path(&path, node) ? mvp_local_binding(m, path.root) : NULL;
+}
+
+static bool require_tensor(MvpBinding* binding) {
+    if (!binding || binding->tensor_required) return false;
+    binding->tensor_required = true;
+    return true;
 }
 
 bool mvp_array_contract(Type* contract) {
@@ -193,6 +208,8 @@ Type* mvp_match_type(AstNode* pattern) {
 
 bool mvp_boundary_proven(Type* source, Type* destination) {
     if (!source) return false;
+    // equality of binder descriptors cannot skip publishing/resolving slots.
+    if (lambda_type_contract_has_binder(destination, true)) return false;
     if (lambda_static_boundary_relation(source, destination, false) == STATIC_BOUNDARY_PROVEN) return true;
     if (!lambda_array_contract_compatible(source, destination, true)) return false;
     Type* element = lambda_array_contract_element(source);
@@ -399,6 +416,7 @@ AstFieldNode* mvp_string_index(LambdaMvpModule* m, AstNode* node, int depth) {
     node = ast_unwrap_primary_to_leaf(node);
     if (!node || depth > 32 || node->node_type != AST_NODE_INDEX_EXPR) return NULL;
     AstFieldNode* index = (AstFieldNode*)node;
+    if (index->field && index->field->next) return NULL;
     return mvp_value_contract(m, index->object, depth + 1)->type_id == LMD_TYPE_STRING &&
         mvp_value_contract(m, index->field, depth + 1)->type_id == LMD_TYPE_INT ? index : NULL;
 }
@@ -499,7 +517,11 @@ Type* mvp_binding_return_contract(LambdaMvpModule* m, NameEntry* entry) {
     if (!entry || !entry->node || entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
     AstDeclaratorNode* declaration = (AstDeclaratorNode*)entry->node;
     AstIndex* index = &m->tp->ast_index;
-    AstFunctionId declared_owner = index->owner_functions[ast_index_find(index, declaration)];
+    AstNodeId declaration_id = ast_index_find(index, declaration);
+    // synthetic decomposition targets have storage IDs but no initializer
+    // node from which a contextual constructor proof could be derived.
+    if (declaration_id >= index->count) return NULL;
+    AstFunctionId declared_owner = index->owner_functions[declaration_id];
     uint32_t count = 0;
     const AstNodeId* uses = ast_index_binding_uses(index, ast_index_find_binding_entry(index, entry), &count);
     Type* target = NULL;
@@ -617,7 +639,7 @@ bool mvp_prefers_packed_tensor(LambdaMvpModule* m, AstNode* literal) {
             lambda_array_num_elem_type_for_contract(info.leaf_element, &lane)) return true;
     for (uint32_t i = 0; i < m->binding_count; i++) {
         MvpBinding* b = &m->bindings[i];
-        if (b->coordinate_written && b->entry && b->entry->node &&
+        if (b->tensor_required && b->entry && b->entry->node &&
                 b->entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
                 ast_unwrap_primary_to_leaf(((AstDeclaratorNode*)b->entry->node)->init) == literal) return true;
     }
@@ -629,6 +651,9 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
     AstNode* n = ast_unwrap_primary_to_leaf(source);
     if (!n) return &TYPE_NULL;
     if (depth > 32) return &TYPE_ANY;
+    if (n->node_type == AST_NODE_NAMED_ARG || n->node_type == AST_NODE_KEY_EXPR)
+        return mvp_value_contract(m, ((AstNamedNode*)n)->as, depth + 1, dense_arrays);
+    if (ast_is_explicit_type_value(n) || n->node_type == AST_NODE_PATTERN_ISLAND) return &TYPE_TYPE;
     if (n->node_type == AST_NODE_PIPE) {
         AstPipeNode* pipe = (AstPipeNode*)n;
         if (pipe->op == OPERATOR_THAT)
@@ -675,6 +700,9 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
     }
     // an indexed read can be absent even under a non-null element contract (S7.1.1v3).
     if (n->node_type == AST_NODE_INDEX_EXPR) {
+        // a multi-axis read has neither the first row's contract nor its range.
+        AstFieldNode* index = (AstFieldNode*)n;
+        if (index->field && index->field->next) return &TYPE_ANY;
         MvpBinding* b = mvp_local_binding(m, ((AstFieldNode*)n)->object);
         bool optional_key = false;
         Type* key_contract = mvp_value_contract(m, ((AstFieldNode*)n)->field, depth + 1, dense_arrays);
@@ -704,8 +732,11 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
             ? lambda_type_union_normalized(m->tp->pool, result, &TYPE_ERROR) : result;
     }
     if (n->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)n)->entry;
+        if (entry && entry->is_binder) return &TYPE_TYPE;
         MvpBinding* b = mvp_binding(m, ((AstIdentNode*)n)->entry);
         if (!b) return &TYPE_ANY;
+        if (lambda_type_contract_has_binder(b->contract, true)) return &TYPE_ANY;
         // the same immutable null predicate drives effect planning and emitted
         // branch observations; querying a condition itself never narrows it.
         AstIndex* index = &m->tp->ast_index;
@@ -766,7 +797,7 @@ Type* mvp_value_contract(LambdaMvpModule* m, AstNode* source, int depth, bool de
         Type* successful_arg = lambda_type_remove_error(m->tp->pool, arg_contract);
         if (info->fn == SYSFUNC_SHR && mvp_int_range(m, n).finite) return &TYPE_INT;
         if (mvp_binary_bitwise(info->fn) && successful_arg && successful_arg->type_id == LMD_TYPE_INT &&
-                lambda_type_remove_error(m->tp->pool,
+                normal_domain(m,
                     mvp_value_contract(m, mvp_call_argument(call, 1), depth + 1, dense_arrays))->type_id == LMD_TYPE_INT)
             return lambda_type_union_normalized(m->tp->pool, &TYPE_INT, &TYPE_ERROR);
         if (info->fn == SYSFUNC_LEN && ((successful_arg && successful_arg->type_id == LMD_TYPE_STRING) || mvp_array_contract(successful_arg)))
@@ -913,6 +944,7 @@ MvpIntRange mvp_int_range(LambdaMvpModule* m, AstNode* node, int depth) {
         return {true, literal, literal};
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* index = (AstFieldNode*)node;
+        if (index->field && index->field->next) return {};
         MvpBinding* owner = mvp_local_binding(m, index->object);
         // absence cannot enter a finite range proof, even for an immutable table.
         if (owner && owner->readonly_literal && mvp_array_index_present(m, owner, index->field))
@@ -1807,7 +1839,10 @@ static bool update_closed_values(LambdaMvpModule* m, bool choose_domain = false)
             // implicit parameters short-circuit Error at their existing
             // boundary; an explicit any still admits it as a body value.
             if (b->admission_contract == &TYPE_ANY_NO_ERROR)
-                incoming = lambda_type_remove_error(m->tp->pool, incoming);
+                incoming = normal_domain(m, incoming);
+            // an error-only actual never enters this implicit parameter.
+            // it supplies no normal-domain evidence (S7.7.3, D4.3.1).
+            if (incoming == &TYPE_NONE) continue;
             bool errors = lambda_type_accepts_error(incoming);
             if (choose_domain) {
                 if (incoming->type_id == LMD_TYPE_FLOAT && !errors && b->contract == &TYPE_INT) {
@@ -1841,8 +1876,10 @@ static bool update_closed_values(LambdaMvpModule* m, bool choose_domain = false)
         if (index->nodes[i]->node_type != AST_NODE_RETURN_STAM || owner >= m->function_count) continue;
         MvpFunction* f = &m->functions[owner];
         if (!f->scalar_result_fallback) continue;
-        Type* incoming = lambda_type_remove_error(m->tp->pool,
+        Type* incoming = normal_domain(m,
             mvp_value_contract(m, ((AstReturnNode*)index->nodes[i])->value));
+        // error-only exits do not constrain the successful native lane.
+        if (incoming == &TYPE_NONE) continue;
         if (choose_domain) {
             if (incoming->type_id == LMD_TYPE_FLOAT && f->result_contract == &TYPE_INT) {
                 f->result_contract = &TYPE_FLOAT; changed = true;
@@ -1918,6 +1955,17 @@ static bool widen_inferred_binding(LambdaMvpModule* m, MvpBinding* b, Type* sour
 static bool admitted_contract(Type* type, Pool* pool) {
     if (!type) return true;
     type = type_field_unwrap_simple_decl(type);
+    if (type == &TYPE_TYPE) return true;
+    if (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINDER)
+        return admitted_contract(((TypeBinder*)type)->bound, pool);
+    if (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BOUND_REF)
+        return admitted_contract(((TypeBoundRef*)type)->bound, pool);
+    // annotation admission checks only the base; predicates belong to `is`,
+    // match and handler type positions (S11.4.6v4).
+    if (lambda_type_is_constrained(type)) {
+        Type* base = lambda_constrained_type_base(type);
+        return base && admitted_contract(base, pool);
+    }
     // abstract numeric contracts use the shared Item admission and owned-result
     // protocol; their LMD_TYPE_TYPE tag does not denote a Type* value (D2.3.1).
     if (type == &TYPE_ERROR || type == &TYPE_ANY_NO_ERROR || type_is_global_meta_type(type) ||
@@ -1926,7 +1974,7 @@ static bool admitted_contract(Type* type, Pool* pool) {
         Type* success = lambda_type_remove_error(pool, type);
         if (success != type) return admitted_contract(success, pool);
     }
-    if (lambda_type_is_union(type)) {
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
         TypeBinary* alternatives = (TypeBinary*)type;
         return admitted_contract(alternatives->left, pool) && admitted_contract(alternatives->right, pool);
     }
@@ -2162,6 +2210,10 @@ bool mvp_array_reverse_plan(LambdaMvpModule* m, AstLoopControlNode* loop, MvpArr
 }
 
 static void plan_return(MvpFunction* f, Type* type, bool external) {
+    // a bound reference belongs to this activation; callers receive an Item
+    // whose actual type is established by the callee's return admission.
+    if (lambda_type_contract_has_binder(f->declared_result, true) ||
+            lambda_type_contract_has_binder(type, true)) type = &TYPE_ANY;
     external |= f->boxed_entry;
     ValueRep rep = external ? VALUE_REP_ITEM : mvp_rep(type);
     bool native = rep != VALUE_REP_ITEM;
@@ -2183,7 +2235,7 @@ static void plan_return(MvpFunction* f, Type* type, bool external) {
 // initializer's provisional carrier (D4.3.1, S12.2.1v3).
 static bool admitted_var_arguments(LambdaMvpModule* m, AstCallNode* call, MvpFunction* f) {
     AstNamedNode* param = f->ast->param;
-    for (int i = 0; i < mvp_call_argument_count(call); i++, param = (AstNamedNode*)param->next) {
+    for (int i = 0; i < mvp_call_argument_count(call) && param; i++, param = (AstNamedNode*)param->next) {
         AstNode* arg = mvp_call_argument(call, i);
         TypeParam* p = lambda_type_param(param->type);
         if (p && p->is_var_param) {
@@ -2191,7 +2243,7 @@ static bool admitted_var_arguments(LambdaMvpModule* m, AstCallNode* call, MvpFun
             Type* contract = mvp_contract(param);
             bool invariant = b && (lambda_type_repr_equal(b->contract, contract) ||
                 lambda_type_repr_equal(b->admission_contract, contract) ||
-                b->contract == &TYPE_ANY ||
+                mvp_boundary_proven(&TYPE_ANY, b->admission_contract) ||
                 (mvp_array_contract(b->contract) && lambda_array_contract_compatible(b->contract, contract, true)));
             if (!b) {
                 AstCowPath path = {};
@@ -2212,24 +2264,43 @@ static bool admitted_var_arguments(LambdaMvpModule* m, AstCallNode* call, MvpFun
     return true;
 }
 
-static MvpFunction* require_function_reference(LambdaMvpModule* m, AstFuncNode* target, AstNode* callee) {
+MvpFunction* mvp_require_function_reference(LambdaMvpModule* m, AstFuncNode* target,
+        AstNode* callee, Script* owner) {
     MvpFunction* f = mvp_function(m, target);
-    if (!f && callee && callee->node_type == AST_NODE_IDENT) {
+    if (!owner && callee && callee->node_type == AST_NODE_IDENT) {
         NameEntry* entry = ((AstIdentNode*)callee)->entry;
-        Script* owner = entry ? entry->import_owner ? entry->import_owner : entry->import ? entry->import->script : NULL : NULL;
-        if (owner && ((TypeFunc*)target->type)->is_public) {
+        owner = entry ? entry->import_owner ? entry->import_owner : entry->import ? entry->import->script : NULL : NULL;
+    }
+    if (!f && owner) {
+        if (((TypeFunc*)target->type)->is_public || target->is_that_predicate) {
             f = (MvpFunction*)mem_calloc(1, sizeof(MvpFunction), MEM_CAT_TEMP);
             f->ast = target; f->imported = f->boxed_entry = true; f->id = AST_FUNCTION_ID_INVALID;
             StrBuf* name = strbuf_new_cap(64);
-            write_fn_name_for_script_ex(name, target, owner, "_b");
+            bool js_export = owner->profile == &js_profile;
+            TypeFunc* signature = (TypeFunc*)target->type;
+            if (js_export && signature->param_count > 8) {
+                strbuf_free(name); mem_free(f);
+                mvp_reject(m, callee, "JavaScript export arity exceeds the shared bridge limit");
+                return NULL;
+            }
+            write_fn_name_for_script_ex(name, target, owner, js_export ? "" : "_b");
             f->name = name_pool_create_name(m->tp->name_pool, name->str)->chars;
             strbuf_free(name);
-            f->abi.param_count = ast_linked_node_count(target->param);
+            if (js_export) {
+                f->js_export_name = f->name;
+                f->js_export_owner = owner;
+                // imported JS declarations have an arity but no Core AST
+                // parameters. Their adapter owns a separate activation ID.
+                unsigned offset = m->imported_functions ? m->imported_functions->length : 0;
+                f->id = m->function_count + offset;
+                char adapter[64]; snprintf(adapter, sizeof(adapter), "mvp_js_export_%u", offset);
+                f->name = name_pool_create_name(m->tp->name_pool, adapter)->chars;
+            }
+            f->abi.param_count = js_export ? signature->param_count : ast_linked_node_count(target->param);
             f->abi.params = (FnParamAnalysis*)mem_calloc(f->abi.param_count, sizeof(FnParamAnalysis), MEM_CAT_TEMP);
             for (int i = 0; i < f->abi.param_count; i++) f->abi.params[i] = {LMD_TYPE_ANY, VALUE_REP_ITEM, 0};
             f->abi.effects.may_gc = f->abi.effects.may_reenter = f->abi.effects.may_return_error = true;
             f->declared_result = &TYPE_ANY;
-            TypeFunc* signature = (TypeFunc*)target->type;
             Type* normal = &TYPE_ANY;
             if (signature->has_explicit_return_contract && signature->return_contract &&
                     !lambda_type_contract_has_binder(signature->return_contract, true)) {
@@ -2251,21 +2322,47 @@ static MvpFunction* require_function_reference(LambdaMvpModule* m, AstFuncNode* 
     return f;
 }
 
+static bool require_constraint_predicates(LambdaMvpModule* m, AstNode* pattern) {
+    pattern = ast_unwrap_primary(pattern);
+    if (pattern && pattern->node_type == AST_NODE_BINARY_TYPE &&
+            ((AstBinaryNode*)pattern)->op == OPERATOR_UNION) {
+        AstBinaryNode* alternatives = (AstBinaryNode*)pattern;
+        return require_constraint_predicates(m, alternatives->left) &&
+            require_constraint_predicates(m, alternatives->right);
+    }
+    TypeConstrained* constrained = ast_constrained_type(pattern);
+    if (!constrained) return true;
+    TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_layers(constrained, layers);
+    if (count < 0) return mvp_reject(m, pattern, "invalid constrained predicate chain");
+    for (int i = 0; i < count; i++) {
+        Script* owner = runtime_script_instance(m->tp->runtime, layers[i]->module);
+        if (!mvp_require_function_reference(m, layers[i]->predicate_fn, NULL, owner))
+            return mvp_reject(m, pattern, "constrained predicate's declaring module is unavailable");
+    }
+    return true;
+}
+
 static bool admitted_call(LambdaMvpModule* m, AstCallNode* call, bool task_launch = false) {
     if (call->interp_has_spread_args)
         return mvp_reject(m, call, "spread arguments are not admitted yet");
     AstNode* callee = ast_unwrap_primary_to_leaf(call->function);
     AstFuncNode* target = ast_direct_call_function(call);
-    if (ast_call_has_named_args(call) && !target)
+    if (ast_call_has_named_args(call) && !target && !interp_named_sys_args_supported(callee))
         return mvp_reject(m, call, "named arguments require a direct lexical definition");
     int count = mvp_call_argument_count(call);
+    if (count > LAMBDA_MAX_FUNCTION_ARGS && (!callee || callee->node_type != AST_NODE_SYS_FUNC ||
+            ((AstSysFuncNode*)callee)->fn_info->fn != SYSPROC_PRINT))
+        return mvp_reject(m, call, "call exceeds the shared argument limit");
     if (target) {
-        MvpFunction* f = require_function_reference(m, target, callee);
-        if (!f || (!task_launch && (count < ((TypeFunc*)target->type)->required_param_count || count > f->abi.param_count)))
-            return mvp_reject(m, call, "a direct call requires an admitted fixed-arity definition");
+        MvpFunction* f = mvp_require_function_reference(m, target, callee);
+        if (!f || (!task_launch && (count < ((TypeFunc*)target->type)->required_param_count ||
+                (!mvp_variadic_function(f) && count > f->abi.param_count))))
+            return mvp_reject(m, call, "direct call arguments do not fit the admitted definition");
         return true;
     }
     if (task_launch) return true;
+    if (ast_numeric_type_call_target(call)) return true;
     if (!callee || callee->node_type != AST_NODE_SYS_FUNC)
         return !ast_called_type_target(call->function) ||
             mvp_reject(m, call, "type constructors require constructor lowering");
@@ -2388,9 +2485,14 @@ static bool admitted_assignment(LambdaMvpModule* m, AstAssignStamNode* assignmen
         AstCowPath path = {};
         MvpBinding* b = ast_collect_cow_path(&path, assignment->object)
             ? mvp_local_binding(m, path.root) : NULL;
+        Type* plain = b ? lambda_type_remove_error_and_null(m->tp->pool, b->contract) : NULL;
         bool carrier = b && (mvp_array_element(b->contract) || b->rep == VALUE_REP_ITEM ||
-            mvp_array_contract(b->contract) || ast_declared_type_is_map(b->contract));
-        if (!b || b->owner != owner || (final_domains && !carrier)) {
+            mvp_array_contract(b->contract) || ast_declared_type_is_map(b->contract) ||
+            (plain && plain->type_id == LMD_TYPE_ELEMENT));
+        FnCapture* capture = b && owner < m->function_count
+            ? mvp_function_capture(&m->functions[owner], b->entry) : NULL;
+        bool live = capture && capture->lambda_live_local;
+        if (!b || (b->owner != owner && !live) || (final_domains && !carrier)) {
             char reason[160];
             snprintf(reason, sizeof(reason), "indexed write place: binding=%s type=%d kind=%d rep=%d owner=%u function=%u",
                 b ? b->entry->name->chars : "missing", b ? b->contract->type_id : -1,
@@ -2469,6 +2571,15 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         MvpFunction* f = &m->functions[i];
         f->ast = (AstFuncNode*)index->functions[i].node;
         f->id = i;
+        for (AstNode* parent = ast_index_parent(index, f->ast); parent;
+                parent = ast_index_parent(index, parent)) {
+            if (ast_index_node_is_function(parent)) break;
+            if (parent->node_type == AST_NODE_OBJECT_TYPE) {
+                Type* type = parent->type;
+                if (type && type->type_id == LMD_TYPE_TYPE) f->method_owner = (TypeObject*)((TypeType*)type)->type;
+                break;
+            }
+        }
         if (!f->ast || (f->ast->node_type != AST_NODE_FUNC && f->ast->node_type != AST_NODE_PROC &&
                 f->ast->node_type != AST_NODE_FUNC_EXPR))
             return mvp_reject(m, f->ast, "callable definition requires function/procedure lowering");
@@ -2476,18 +2587,19 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         f->no_value_result = procedure_has_no_value_result(f->ast);
         // escaping definitions need checked Item admission; closed direct-only
         // definitions keep their native signature (D7.2.2/D4.3.1).
-        f->boxed_entry |= signature->is_public || mvp_function_expression(f->ast) || f->ast->captures;
-        bool dependent = lambda_type_contract_has_binder(signature->return_contract, true);
-        for (TypeParam* parameter = signature->param; parameter; parameter = parameter->next)
-            dependent |= parameter->contract_type && parameter->contract_type->type_id == LMD_TYPE_TYPE &&
-                parameter->contract_type->kind == TYPE_KIND_BOUND_REF;
-        if (signature->is_variadic || (signature->binder_count && dependent))
-            return mvp_reject(m, f->ast, "variadic or dependent definitions are not admitted");
+        f->boxed_entry |= signature->is_public || mvp_function_expression(f->ast) ||
+            f->ast->is_that_predicate || f->ast->captures || f->method_owner || signature->is_variadic || signature->binder_count;
+        if (signature->binder_count > LAMBDA_MAX_FUNCTION_ARGS)
+            return mvp_reject(m, f->ast, "binder slots exceed the shared call-frame limit");
         if (ast_function_capture_count(f->ast) > UINT8_MAX)
             return mvp_reject(m, f->ast, "capture count exceeds the shared closure ABI");
         for (FnCapture* cap = f->ast->captures; cap; cap = cap->next) {
-            if (cap->is_mutable || cap->lambda_live_local)
-                return mvp_reject(m, f->ast, "mutable captures require shared-home lowering");
+            if (mvp_static_type_capture(cap) || mvp_method_field(f, cap->entry)) continue;
+            if (cap->entry && cap->entry->is_binder) continue;
+            if (f->method_owner)
+                return mvp_reject(m, f->ast, "method lexical captures require receiver environments");
+            if (cap->is_mutable && !cap->lambda_live_local)
+                return mvp_reject(m, f->ast, "legacy mutable snapshots require environment write-back");
             if (!cap->entry || cap->entry->import || cap->entry->import_owner ||
                     ast_index_find_binding_entry(index, cap->entry) >= m->binding_count ||
                     (cap->entry->node && (ast_index_node_is_function(cap->entry->node) ||
@@ -2495,11 +2607,12 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 return mvp_reject(m, f->ast, "capture requires an indexed lexical value binding");
         }
         // shared owned-slot readers carry the registry's collecting effect.
-        f->abi.effects.may_gc = f->ast->captures != NULL;
+        f->abi.effects.may_gc = f->ast->captures != NULL || f->method_owner != NULL || signature->binder_count;
+        f->abi.effects.may_reenter = f->abi.effects.may_return_error = signature->binder_count != 0;
         char name[64];
         snprintf(name, sizeof(name), "mvp_%u_%s", i, f->ast->name ? f->ast->name->chars : "fn");
         f->name = name_pool_create_name(m->tp->name_pool, name)->chars;
-        if (signature->is_public || mvp_function_expression(f->ast)) {
+        if (signature->is_public || mvp_function_expression(f->ast) || f->ast->is_that_predicate || f->method_owner) {
             StrBuf* exported = strbuf_new_cap(64);
             write_fn_name_ex(exported, f->ast, NULL, "_b");
             f->name = name_pool_create_name(m->tp->name_pool, exported->str)->chars;
@@ -2538,7 +2651,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         // successful scalar lane (S11.4.2v3, D2.3.5).
         plan_return(f, success == &TYPE_ANY_NO_ERROR || success == &TYPE_NONE ||
             mvp_boundary_proven(f->declared_result, &TYPE_ERROR) ? f->declared_result : success, false);
-        if (index->functions[i].parent == AST_FUNCTION_ID_INVALID &&
+        if (!f->method_owner && index->functions[i].parent == AST_FUNCTION_ID_INVALID &&
                 f->ast->name && strcmp(f->ast->name->chars, "main") == 0) {
             if (f->abi.param_count) return mvp_reject(m, f->ast, "main arguments are not admitted yet");
             m->main = f;
@@ -2580,7 +2693,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 b->contract = &TYPE_ANY; b->rep = VALUE_REP_ITEM;
             }
             else if (b->entry->is_mutable &&
-                    lambda_type_remove_error(m->tp->pool, b->contract)->type_id == LMD_TYPE_MAP) {
+                    normal_domain(m, b->contract)->type_id == LMD_TYPE_MAP) {
                 // reset the successful record arm too: Record | Error must not
                 // retain a physical layout proof across open field writes.
                 // Typed calls re-establish their prefix (D2.4.3, S12.2.1v3).
@@ -2590,6 +2703,21 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                     ? &TYPE_ANY : &TYPE_MAP;
                 b->rep = mvp_rep(b->contract);
             }
+        }
+    }
+    // canonical decomposition targets are synthetic declarators outside the
+    // node walk. Their owning declaration supplies the activation (D8.2.4).
+    for (AstNodeId i = 0; i < index->count; i++) {
+        if (index->nodes[i]->node_type != AST_NODE_DECOMPOSE) continue;
+        AstDecomposeNode* node = (AstDecomposeNode*)index->nodes[i];
+        for (int n = 0; n < node->name_count; n++) {
+            MvpBinding* b = mvp_binding(m, node->entries ? node->entries[n] : NULL);
+            if (!b) return mvp_reject(m, node, "decomposition requires canonical target bindings");
+            b->owner = index->owner_functions[i];
+            // projection inference adds no contract, including for missing
+            // members or targets later rebound to a different kind (D4.3.1).
+            b->contract = b->admission_contract = &TYPE_ANY;
+            b->rep = VALUE_REP_ITEM;
         }
     }
     seed_closed_values(m);
@@ -2678,11 +2806,11 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         case AST_NODE_EXPR_STMT: case AST_NODE_PRIMARY:
         case AST_NODE_TYPE: case AST_NODE_SYS_FUNC: case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
         case AST_NODE_PARAM: case AST_NODE_RETURN_STAM: case AST_NODE_IF_EXPR:
-        case AST_NODE_LET_STAM: case AST_NODE_VAR_STAM:
+        case AST_NODE_LET_STAM: case AST_NODE_VAR_STAM: case AST_NODE_DECOMPOSE:
         case AST_NODE_BREAK_STAM: case AST_NODE_CONTINUE_STAM: case AST_NODE_FOR_CLAUSE: case AST_NODE_FOR_INDEX:
         case AST_NODE_TYPE_STAM: case AST_NODE_MAP_TYPE: case AST_NODE_ARRAY_TYPE:
         case AST_NODE_CONTENT_TYPE: case AST_NODE_ELMT_TYPE: case AST_NODE_FUNC_TYPE:
-        case AST_NODE_UNARY_TYPE: case AST_NODE_BINARY_TYPE:
+        case AST_NODE_UNARY_TYPE: case AST_NODE_BINARY_TYPE: case AST_NODE_CONSTRAINED_TYPE:
         case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
         case AST_NODE_PATTERN_CHAR_CLASS: case AST_NODE_PATTERN_SEQ: case AST_NODE_PATTERN_RANGE: case AST_NODE_LIST_TYPE:
         case AST_NODE_PATH_EXPR: case AST_NODE_PATH_INDEX_EXPR: case AST_NODE_NAVIGATION_EXPR: case AST_NODE_QUERY_EXPR:
@@ -2691,12 +2819,11 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         case AST_NODE_IMPORT: case AST_NODE_PUB_STAM:
         case AST_NODE_GROUP_CLAUSE: case AST_NODE_GROUP_KEY: case AST_NODE_ORDER_SPEC:
         case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG: case AST_NODE_MEMBER_EXPR: case AST_NODE_LIST: case AST_NODE_SPREAD:
-        case AST_NODE_MATCH_ARM:
             break;
         case AST_NODE_IDENT: {
             NameEntry* entry = ((AstIdentNode*)node)->entry;
             if (entry && entry->node && ast_index_node_is_function(entry->node) &&
-                    !require_function_reference(m, (AstFuncNode*)entry->node, node))
+                    !mvp_require_function_reference(m, (AstFuncNode*)entry->node, node))
                 return mvp_reject(m, node, "callable value requires an indexed or public imported definition");
             break;
         }
@@ -2709,17 +2836,20 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             break;
         }
         case AST_NODE_MATCH_EXPR:
-            for (AstMatchArm* arm = ((AstMatchNode*)node)->first_arm; arm; arm = (AstMatchArm*)arm->next)
-                if (arm->pattern && ast_constrained_type(arm->pattern))
-                    return mvp_reject(m, arm, "constrained match requires predicate lowering");
+            break;
+        case AST_NODE_OBJECT_TYPE:
+            break;
+        case AST_NODE_OBJECT_LITERAL:
+            break;
+        case AST_NODE_MATCH_ARM:
+            if (!require_constraint_predicates(m, ((AstMatchArm*)node)->pattern)) return false;
             break;
         case AST_NODE_PIPE:
             if (((AstPipeNode*)node)->op != OPERATOR_THAT &&
                     !admitted_pipe_body(m, (AstPipeNode*)node, owner)) return false;
             break;
         case AST_NODE_HANDLER_EXPR: case AST_NODE_HANDLER_STAM:
-            if (ast_constrained_type(((AstHandlerNode*)node)->filter))
-                return mvp_reject(m, node, "constrained handler filters require predicate lowering");
+            if (!require_constraint_predicates(m, ((AstHandlerNode*)node)->filter)) return false;
             break;
         case AST_NODE_VARIABLE_DECLARATOR: {
             AstDeclaratorNode* d = (AstDeclaratorNode*)node;
@@ -2808,6 +2938,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         }
         case AST_NODE_BINARY: {
             Operator op = ((AstBinaryNode*)node)->op;
+            if (op == OPERATOR_IS && !require_constraint_predicates(m, ((AstBinaryNode*)node)->right)) return false;
             if (op == OPERATOR_TO) {
                 AstNodeId parent = ast_index_parent_id(index, i);
                 while (parent < index->count && index->nodes[parent]->node_type == AST_NODE_PRIMARY)
@@ -2873,6 +3004,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 NameEntry* entry = ((AstIdentNode*)node)->entry;
                 MvpBinding* binding = mvp_binding(m, entry);
                 collects = mvp_function_value_reference(index, i) != NULL;
+                collects |= entry && entry->lambda_shared_local;
                 // context-slab reads and their return admission can collect;
                 // determine this before the storage descriptors are emitted.
                 if (entry && entry->node && entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
@@ -2883,16 +3015,19 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             }
             if ((node->node_type == AST_NODE_PRIMARY && node->type &&
                     (node->type->type_id == LMD_TYPE_DTIME || node->type->type_id == LMD_TYPE_COMPLEX)) ||
-                    node->node_type == AST_NODE_ELEMENT || node->node_type == AST_NODE_PATH_EXPR ||
+                    node->node_type == AST_NODE_ELEMENT || node->node_type == AST_NODE_OBJECT_LITERAL ||
+                    node->node_type == AST_NODE_OBJECT_TYPE ||
+                    node->node_type == AST_NODE_PATH_EXPR ||
                     mvp_function_expression(node) ||
                     node->node_type == AST_NODE_ARRAY || node->node_type == AST_NODE_LIST ||
-                    node->node_type == AST_NODE_SPREAD ||
+                    node->node_type == AST_NODE_SPREAD || node->node_type == AST_NODE_DECOMPOSE ||
                     node->node_type == AST_NODE_MATCH_EXPR ||
                     node->node_type == AST_NODE_MEMBER_ASSIGN_STAM || node->node_type == AST_NODE_INDEX_ASSIGN_STAM)
                 collects = fails = true;
             if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                 MvpBinding* binding = mvp_binding(m, ((AstDeclaratorNode*)node)->entry);
                 if (binding && binding->module_managed) collects = fails = true;
+                if (binding && binding->entry->lambda_shared_local) collects = true;
             }
             if (node->node_type == AST_NODE_SYS_FUNC && !mvp_direct_callee_node(index, i)) collects = true;
             if (node->node_type == AST_NODE_START || node->node_type == AST_NODE_OPEN_STAM ||
@@ -2923,6 +3058,9 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 collects = true;
                 fails = !mvp_match_type(((AstBinaryNode*)node)->right);
             }
+            // predicate calls are implicit AST edges, including recursive
+            // tests and imported declaring scopes (S11.4.11).
+            if (ast_constrained_type(node)) collects = reenters = true;
             if (node->node_type == AST_NODE_MAP) {
                 collects = true;
                 fails = mvp_contextual_map_contract(m, node) && mvp_value_contract(m, node) == &TYPE_ANY;
@@ -2954,11 +3092,12 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 AstCallNode* call = (AstCallNode*)node;
                 MvpFunction* callee = mvp_function(m, ast_direct_call_function(call));
                 if (callee) {
-                    collects = callee->abi.effects.may_gc || callee->ast->captures;
+                    bool rest = mvp_variadic_function(callee) && mvp_call_argument_count(call) > callee->abi.param_count;
+                    collects = callee->abi.effects.may_gc || callee->ast->captures || rest;
                     fails = callee->abi.effects.may_return_error;
-                    reenters = callee->abi.effects.may_reenter || callee->ast->captures;
+                    reenters = callee->abi.effects.may_reenter || callee->ast->captures || rest;
                     AstNamedNode* param = callee->ast->param;
-                    for (int a = 0; a < mvp_call_argument_count(call); a++, param = (AstNamedNode*)param->next)
+                    for (int a = 0; a < mvp_call_argument_count(call) && param; a++, param = (AstNamedNode*)param->next)
                         fails |= !mvp_boundary_proven(mvp_value_contract(m, mvp_call_argument(call, a)), mvp_contract(param));
                 }
                 else {
@@ -3134,11 +3273,29 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
     }
     plan_integer_ranges(m);
     plan_float_parameters(m);
+    for (uint32_t i = 0; i < m->binding_count; i++) {
+        MvpBinding* b = &m->bindings[i];
+        if (lambda_type_contract_has_binder(b->contract, true)) {
+            // the annotation remains the receiving contract. Observers see
+            // boxed runtime values, including Error when the selection admits it.
+            b->contract = &TYPE_ANY; b->rep = VALUE_REP_ITEM;
+            b->closed_parameter = b->scalar_snapshot = false;
+            b->producer_success_contract = NULL; b->array_cert = NULL;
+            b->range.finite = b->constant_float = b->constant_ready =
+                b->readonly_literal = b->string_buffer_owned = false;
+        }
+        if (!b->entry || !b->entry->lambda_shared_local) continue;
+        // shared homes publish ordinary Items, including nullable/error
+        // outcomes; the source annotation still owns admission (S9.1.4v2).
+        b->rep = VALUE_REP_ITEM;
+        b->range.finite = b->constant_float = b->readonly_literal = b->string_buffer_owned = false;
+    }
     for (AstNodeId i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         AstNode* object = NULL; AstNode* key = NULL;
         if (node->node_type == AST_NODE_INDEX_EXPR) {
             object = ((AstFieldNode*)node)->object; key = ((AstFieldNode*)node)->field;
+            if (key && key->next) require_tensor(mvp_place_root(m, object));
         } else if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
             object = ((AstAssignStamNode*)node)->object; key = ((AstAssignStamNode*)node)->key;
             AstCowPath path = {};
@@ -3146,7 +3303,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
                 bool indices = true;
                 for (int k = 0; k < path.count; k++) indices &= !path.is_member[k];
                 MvpBinding* root = indices ? mvp_local_binding(m, path.root) : NULL;
-                if (root) root->coordinate_written = true;
+                require_tensor(root);
             }
         }
         MvpBinding* b = mvp_local_binding(m, object);
@@ -3160,6 +3317,13 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
     // accessor requirements so closed callers can guard forwarded owners too.
     do {
         changed = false;
+        // tensor observations follow immutable aliases back to their producer.
+        for (uint32_t i = 0; i < m->binding_count; i++) {
+            MvpBinding* binding = &m->bindings[i];
+            AstNode* definition = binding->entry ? binding->entry->node : NULL;
+            if (binding->tensor_required && definition && definition->node_type == AST_NODE_VARIABLE_DECLARATOR)
+                changed |= require_tensor(mvp_place_root(m, ((AstDeclaratorNode*)definition)->init));
+        }
         for (AstNodeId i = 0; i < index->count; i++) {
             if (index->nodes[i]->node_type != AST_NODE_CALL_EXPR) continue;
             AstCallNode* call = (AstCallNode*)index->nodes[i];
@@ -3168,9 +3332,8 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             for (int a = 0; a < mvp_call_argument_count(call) && p; a++, p = (AstNamedNode*)p->next) {
                 AstNode* actual = mvp_call_argument(call, a);
                 MvpBinding* source = mvp_local_binding(m, actual), *formal = mvp_binding(m, p->entry);
-                if (source && formal && formal->coordinate_written && !source->coordinate_written) {
-                    source->coordinate_written = true; changed = true;
-                }
+                if (formal && formal->tensor_required)
+                    changed |= require_tensor(mvp_place_root(m, actual));
                 if (source && formal && mvp_array_element(source->contract) && formal->array_extent > source->array_extent) {
                     source->array_extent = formal->array_extent; changed = true;
                 }
@@ -3216,10 +3379,17 @@ bool lambda_mvp_lower(LambdaMvpModule* m) {
         m->functions[i].target = MIR_new_forward(m->ctx, m->functions[i].name);
     for (int i = 0; m->imported_functions && i < m->imported_functions->length; i++) {
         MvpFunction* function = (MvpFunction*)m->imported_functions->data[i];
-        function->target = MIR_new_import(m->ctx, function->name);
+        if (function->js_export_name) {
+            function->js_export_ref = MIR_new_import(m->ctx, function->js_export_name);
+            function->target = MIR_new_forward(m->ctx, function->name);
+        } else function->target = MIR_new_import(m->ctx, function->name);
     }
     for (uint32_t i = 0; i < m->function_count && !m->failed; i++)
         mvp_emit_function(m, &m->functions[i]);
+    for (int i = 0; m->imported_functions && i < m->imported_functions->length && !m->failed; i++) {
+        MvpFunction* function = (MvpFunction*)m->imported_functions->data[i];
+        if (function->js_export_name) mvp_emit_function(m, function);
+    }
     if (!m->failed) mvp_emit_function(m, &m->entry);
     if (!m->failed && m->property_keys && m->property_keys->length) {
         uint32_t bytes = 0;

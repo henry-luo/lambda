@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-05
 
-**Status:** active goal; P0 infrastructure, P1 boxed lowering and P2 callable values are in progress.
+**Status:** goal paused at the user's wrap-up request; language parity and performance gates remain incomplete.
 
 **Starting tree:** `71296a16a9622f764229720ed2c321330efcd278`, branch `master`.
 
@@ -18,81 +18,72 @@ object layouts, type system, scheduler and precise GC remain shared.
 
 ## Current checkpoint
 
-- **Updated:** 2026-11-06. Active goal; language parity, aggregate GTests and
-  all performance acceptance gates remain open. No completion is claimed.
-- **Scope:** all implemented Lambda features, applicable MVP GTests, all 77
-  untyped entries faster than Full, and preservation of typed performance.
-  Retain only Full's audited interpreter delegation (**D8.3.1–D8.3.3**).
-- **Tree:** main checkout `master`, observed HEAD `6fee0897d`; preserve unrelated
-  work. Root `lambda.exe` and test executables are untouched. Private release
-  snapshots/workspaces live under `temp/lambda_mir_mvp/language_untyped/`.
-- **Settled:** shared types, data layouts, ABI, scheduler and precise GC.
-  Inference adds no source contracts or hidden fallback (**D4.3.1–D4.3.3,
-  D7.3.1–D7.3.4**). No C2MIR execution or Radiant baseline is required/run.
-- **Corpus:** authorized v2 repairs are frozen in `benchmarks-v2/` with a
-  483-file manifest. Five untyped ports changed; the shared Richards module,
-  complete Prettier oracle and nine missing JetStream goldens are recorded.
-  Typed sources and five runtime inputs are unchanged. Preserve the original
-  72/77 result separately; do not apply v2 results retroactively (§10.8).
-- **Starting release:** 766 translation units / 3,116 frozen source files;
-  SHA256 `e6ce4c8cb10e284d2454dc0e04f63632c9a8e20e95b2a0a774b6ec048f01f6ba`.
-- **Current engine:** `p4_range_member_domains-release.exe`, SHA256
-  `0f8f7ecc08e26ae67778cc9ca76c73fd5452b7b5935b0c6b33983e8f9cc1104c`.
-  Its frozen source matches current runtime/compiler files. The runner's
-  selected source fingerprint has 53 files; older identities are unchanged.
-- **Implemented:** boxed collections/content, callable values, readonly
-  captures, named/default calls, queries/windows/paths, open var transport,
-  dynamic native procedures, same-context tasks and lexical child cleanup.
-  New slices add open/CRUD, procedural fault frames, private composite module
-  storage, wide/complex literals, scalar-home result liveness, retained-call
-  ownership and clean range-member domains (§10.30–§10.38).
-- **Current correctness:** MVP and Full retain **77/77 untyped and 77/77
-  typed** v2 outputs. All seven focused Python methods pass **322 script
-  checks**. The latest range/query/module tier/GC matrix is **27/27**.
-  The module fixture's expanded twelve-result oracle passes all tiers/GC;
-  its Full/T0 ownership controls are repaired. Older selected failures still
-  need constrained types, nested-matrix handling and projected var support.
-  These are correctness runs, not performance measurements (§10.37–§10.38).
-- **Native evidence:** source-matched `p4_retained_propagation` security
-  **96/96**, selected cache **8/8 normal + 8/8 forced GC**, and selected real
-  ownership/callable/task fixtures **4/4**. The newer range engine differs
-  by the shared range-domain fix. Older task matrix **108/108**, real task
-  family **13/13**. Broad native concurrency remains red on its older paired
-  controls: the same 45 failed tests plus one failed suite setup. DOM ordinal
-  parity fails first, followed by context-owner failures (§10.31).
-- **Broad CLI census:** the older `p3_local_fault_handlers` pair completes:
-  MVP **950/2,086**, Full **1,693/2,086**; 757 MVP-only, 14 Full-only and
-  379 shared failures. Test inputs had zero drift, but package sources were
-  linked without complete provenance. A starting/current package AST control
-  exposes a shared regression from `p1_range_frontend`, now repaired below.
-  Do not call all shared failures pre-existing (§10.38).
-- **Fresh census running:** both current policies use separate workspaces,
-  two workers each, and **8,989** hashed inputs, including **940** frozen lmd
-  files. Both discover **2,089** scripts. Exec sessions **2946** (MVP) and
-  **96780** (Full); prefix `p4-range-member-domains-*-discovered-census`.
-  Results remain pending. No aggregate Lambda baseline is qualified.
-- **Known failures:** mutable/live captures, variadic/dependent definitions,
-  constrained types, object/view routes and native-module calls remain partial.
-  Two selected P4 MVP failures are `math_science_linear` (nested row carriers)
-  and `handler_convenience` (constrained type admission). Retained module
-  and closure result ownership is now qualified by the expanded oracle.
-  Projected var admission, six older Full content/procedure controls, shared
-  path-GC faults and older ownership fixtures remain open (§10.31–§10.38).
-- **Performance:** the last monitored screen uses older frozen
-  `p2_named_borrow_transport`, not current source. Untyped: 77 valid, 26 lower
-  medians, 24 screening interval upper bounds below Full, geometric mean
-  MVP/Full **1.1913**, 13 disturbed whole rounds discarded. Typed: 77 valid,
-  15 possible-regression flags, Sumfp resolution-limited, two discarded rounds.
-  All prior flags remain in the 49-row confirmation selection v6. No current
-  performance campaign is running or qualified (§10.29).
-- **Next:** finish/reconcile the current frozen census, retain every failure,
-  and batch the remaining language work. Constrained-type audit (§10.39)
-  identifies the shared predicate/test emission to promote next. Finish native
-  module calls, result-domain joins, mutable/live captures, variadic/dependent
-  definitions and object/view routes; repair the shared native ordinal/context
-  cause. Complete actual aggregate Lambda gates. Profile all slower untyped
-  rows, then run current-source 30-pair primary and preselected 50-pair
-  confirmation campaigns without competing work, with matched batched Sumfp.
+- **Updated:** 2026-11-06. Goal paused at the user's wrap-up request. Full
+  implemented language/GTest parity, faster untyped benchmarks and typed
+  performance preservation remain open.
+- **Scope:** only Full's existing interpreter delegations (D8.3.1–D8.3.3).
+  Shared value layouts, scheduler and precise GC. Lambda baseline only; no
+  Radiant baseline/C2MIR execution. No commit requested; root exes untouched.
+- **Tree:** `master`, HEAD `b8e29b077` plus recorded changes. Evidence under
+  `temp/lambda_mir_mvp/language_untyped/`.
+- **Last qualified release:** `p15_ndim_owners-release.exe`, SHA256
+  `b81fef5ba18aa42050cadaa25a6c556b46d60555adab86cf3f73da0933fc80f0`.
+  Frozen graph 769 release units / 3,543 source files; source drift zero.
+  Current native VFS snapshots verified. All p14/p15 jobs are terminal.
+  `p15-ndim-owners-validation-summary.json` records provenance.
+- **Wrap-up audit:** release binary, 3,543 source hashes and 1,262 input
+  hashes still match P15. All tracked build/test session handles are closed.
+  The subsequent N-D representation investigation was read-only; no further
+  compiler change was started. Resume from the next action below.
+- **Inputs:** 1,262 recorded files and corpus v2's 483 frozen files, drift zero.
+  Authorized v2 benchmark repairs remain distinct from original 72/77 (§10.8).
+  Variadic tail-oracle repairs retain `[1, 1]` (S16.9.7, §10.55). No existing
+  p13–p15 oracle changed; p14's newly authored declarations-only helper golden
+  was corrected to empty and both compiler policies rerun (§10.58).
+- **Implemented:** boxed values/collections, calls/defaults, captures, queries,
+  paths, var transport, procedures/tasks/scopes, CRUD/open/fault frames,
+  nominal types/methods, scalar joins, inferred fields, decomposition and
+  precise confined pn homes (§10.43–§10.54). Variadics (§10.55), dependent
+  definitions/binder values (§10.56), call forms/error-only domains (§10.57).
+- **New p14:** imported type-value effects; shared JS bridge (arity 0–8),
+  boxed adapters and canonical hosted import identity (S5.5.1v2, D7.2.1,
+  D7.4.1–D7.4.3; §10.58). No additional AST fallback.
+- **New p15:** all coordinates of N-D reads, fixed native coordinate storage,
+  receiver roots and tensor requirements through aliases/direct calls
+  (S8.2.4v3, D6.3.1, D6.3.4; §10.59). Frozen p14 Full controls reproduce the
+  collecting-key buffer defect fixed in both compilers. All seven image
+  fixtures now pass MVP under normal and both forced-GC policies.
+- **Focused checks:** **177/177 MVP** across 59 fixtures / three GC policies;
+  Full **165/177**, T0 **156/177**. AUTO/production control **75/75**. Twenty-five
+  Python methods pass **970 script checks**, including typed 77/77 under each
+  compiler. Untyped **77/77 each**. Native cache/index/import **11 + 11 GC**,
+  admission/diagnostics **4 + 4 GC**, security **98/98 explicitly MVP**.
+- **Real harness:** **137/152 MVP, 119/152 Full**. All ten added MVP rows pass;
+  no prior passing row regresses in the common 142. The same fifteen MVP
+  failures also fail Full. Full/T0 binder, var/rest and JS-value controls and
+  T0 index exclusions remain visible. Aggregate Lambda baseline unqualified.
+- **Census:** old frozen p12 supervisor completed **86/86** compiler chunks.
+  Population 2,123; paired reports **1,873**, passing **1,334 MVP / 1,637 Full**.
+  Input drift zero. Chunks 14, 16, 22, 23, 24 have six missing/timed-out reports;
+  250 cases remain outside the paired count. Reported failures: 320 MVP-only,
+  219 shared, 17 Full-only. This does not qualify p15. Both census sessions
+  (49890, resumed 6287) are terminal. Disk-interrupted attempt preserved;
+  atomic state writes and superseded-archive cleanup are recorded separately.
+- **Known gaps:** N-D literal/dynamic-row normalization (three retained screen
+  failures), views/edit/event lowering, named-function declaration snapshots,
+  captured dependent annotations/default ordering, method lexical captures and
+  receiver places, dynamic/projected var transport and native result joins.
+  S9.1.4v2 governs legal capture writes; Full's legacy pn-parent write-back
+  grants no new permission. Preserve shared frontend/package failures.
+- **Performance:** no current timing qualification. Old p2 untyped screen:
+  26/77 lower medians, 24 screening upper bounds below Full, GM 1.1913.
+  Preserve all 49 v6 confirmations. Old typed p6/p5: ten slower/twelve faster
+  flags, GM 0.99763. Goldens do not prove performance preservation.
+- **Next:** replace unproved nested-row storage with a canonicalization proof
+  for literal/opaque N-D producers; implement native views and investigate the
+  census's MVP-only cases and unresolved chunks. Finish aggregate Lambda gates
+  and 30-pair primary / 50-pair confirmation timing, including batched Sumfp,
+  without competing jobs.
 
 ## 1. Acceptance contract
 
@@ -2174,3 +2165,868 @@ capture reader and binding setup before admitting recursive/outer-local cases.
 Retain explicit refusal until their ownership/ABI is implemented; generic
 runtime membership cannot substitute for executing named predicates. No
 constrained-type lowering is added in this checkpoint.
+
+
+### 10.40 Native constrained predicates and current release graph (2026-11-06)
+
+**S11.2.1/S11.4.11** require named/inline constrained membership and match
+patterns to admit the base, then execute each predicate layer innermost first
+in its declaring scope. A falsy or Error answer fails the test.
+**S11.4.6v4** keeps ordinary annotations and first-class generic membership
+base-only. No semantic ruling changes here.
+
+Promoted Full's physical base/predicate/truth loop and imported boxed-entry
+trampoline into `mir_function_value.hpp`; both MIR implementations call these
+helpers. MVP plans synthetic `that` functions as canonical boxed exports,
+uses the existing imported-function factory with an explicit declaring owner,
+and records implicit predicate GC/reentry edges. At entry, the candidate is
+current item/root and parent/key are null. Immutable captured type bindings
+remain type values and occupy their original environment slots without being
+mistaken for mutable lexical homes. Local calls discharge the result companion
+before truth classification. There is no new interpreter fallback.
+
+HEAD advanced to `b8e29b077` while the goal was inactive. The old private
+release graph omitted three newly merged units (`io_rdb.cpp`,
+`io_rdb_value.cpp`, `rdb_spool.c`), and its source inventory omitted macro
+files such as `dom_api.def`. The first private compile therefore linked with
+undefined RDB providers. It is retained as **compilation-only**, never as a
+successful tested binary. Extended the private graph to match the current
+`lambda-rt`/`lambda-lib` source patterns and froze omitted tracked source,
+header and macro inputs. The qualified graph has 769 units and 3,543 input
+files; the source inventory check reports zero drift. Build root binaries and
+vendor sources remain untouched.
+
+Evidence uses `p5-constrained-current-*` for the initial predicate-only release
+and `p5-constrained-objects-*` for the final slice. The initial MVP matrix is
+15/21: five predicate fixtures pass all three GC modes; two are refused at
+nominal declarations. The final release fixes those declarations/literals:
+all seven constrained fixtures pass all three tiers and GC modes (**63/63**).
+The seven fixtures cover inline/named/aliased tests, recursion to depth 2,000,
+outer locals and nested closures, imported private helpers/module bindings,
+Error answers, annotation bases, and filtered functional/procedural handlers.
+`test_constrained_type_predicates` keeps these cases in the durable Python gate.
+
+### 10.41 Checked nominal literal values (2026-11-06)
+
+MVP now materializes immutable nominal type descriptors and constructs nominal
+maps/elements through the existing `object_from_fields` runtime boundary.
+That boundary resolves optional presence and admits all fields before exposing
+the packed layout (**S16.9.5/S11.4.10**). Declared defaults are evaluated only
+for absent keys. Written and spread fields use the existing keyed builder and
+persistent slot images; content uses `object_content_fill`, preserving element
+normalization (**S2.1.3/D3.3.1**). A shared literal-staging helper replaces the
+repeated map/element staging setup before adding the object case.
+
+`mir_mvp_nominal_values.ls/.txt` pins spread independence, default values,
+optional absence, nominal/structural identity and normalized content. Together
+with `object_default`, `object_constraint` and `object_field_admission`, all
+three tiers/GC modes pass **36/36**. Object-level constraint behavior remains
+Full's existing base-only behavior; method-bearing types are explicitly
+refused until their registration/receiver ABI is implemented. The unchanged
+`object_boxed_field_layout` fixture exposes this remaining refusal in three
+MVP rows; its six Full/T0 controls pass. Do not report that 81-row diagnostic
+matrix as all green.
+
+Final release SHA256:
+`032973621496469fb4343e7e78d82a9abd6777a8a822d9260e6930ab2a8c7555`.
+Nine focused Python methods pass **388 script invocations**, including 77/77
+typed goldens under each MIR policy. Separate frozen-v2 untyped runs retain
+**77/77** under each policy. The real private discovered-script harness passes
+**11/11** selected tests with `LAMBDA_EXEC_BACKEND=jit` and
+`LAMBDA_TEST_MIR_COMPILER=mvp`. A negative-test filter matches zero discoveries;
+that command is retained as zero executed tests, not negative-test coverage.
+No benchmark timing or aggregate Lambda baseline result is claimed.
+
+Source-matched private native executables also pass security **98/98** and
+the selected cache lane **8/8 normal + 8/8 forced GC**. The two view cache
+cases remain outside this focused lane, as before; the full native concurrency
+failure set remains open. Native logs, JSON and executable/object hashes are
+recorded under `p5-constrained-objects-native-*` and
+`p5_constrained_objects-native-tests-admission/manifest.json`.
+
+### 10.42 Range census completion and merge-input limitations (2026-11-06)
+
+The older range-repaired Full census completes **1,731/2,089**, with 358
+failures. Its MVP pair records 1,048 subprocess completions and then stalls;
+a process check finds the harness alone, with no child processes. Terminated
+only that task's stalled harness (PID 23336), retaining its partial log and
+exit 143. No complete MVP count or paired failure partition exists for it.
+
+The 8,989-input drift check detects **ten** changed linked demo/UI inputs
+following the merge; the copied Lambda/lmd fixtures remain frozen. Those
+linked-input changes and the older executable mean this census does not
+qualify the current source tree. Do not attribute all shared failures to
+pre-existing debt or combine it with a later result as one experiment.
+The previous shared range-member regression is repaired as recorded in §10.38;
+this new census evidence does not reverse that focused source-matched control.
+
+
+### 10.43 Native nominal method entries and receiver snapshots (2026-11-06)
+
+**S12.3.3v2/S12.3.4v2** define bound fn methods and dynamic invocation;
+**S7.4.6v3/S12.1.2v3** govern early completion of either callable colour.
+MVP now identifies a method's declaring nominal type from the immutable index,
+exports its canonical boxed entry, and receives the receiver through the same
+hidden argument as Full. Receiver fields become activation-local bindings;
+current item/root are self, while parent/key are null. Procedure completion
+publishes only potentially written fields at the common return point.
+Optional presence survives untaken writes and explicit null assignments
+(**S16.9.5**). Declaring scopes, field contracts and nominal identity remain
+shared; no runtime data layout changes or new interpreter fallback are added.
+
+Promoted Full's physical field load/presence test, field publication and method
+registration into `mir_function_value.hpp`. The two frontends retain their
+binding/representation choices but share these physical operations. MVP
+prepares a procedure receiver before creating its mutating bound closure and
+publishes the replacement to the caller. The initial method screen passes
+15/33; remaining typed string-field loads were described as unrestricted
+`any`, so the converter could not select a pointer lane. Restoring the
+receiver's admitted field contract fixes that decoding root cause.
+
+The new `mir_mvp_bound_methods.ls/.txt` pins a saved fn receiver before a later
+pn mutation. The valid fixture initially returns `[false, false, true]` on all
+three tiers. A separate control with the preceding `p5_constrained_objects`
+release reproduces **0/6** under Full/T0, proving the shared failure predates
+this method implementation. The first authoring attempt omitted mandatory
+acknowledgement and was rejected E228; that invalid attempt is retained
+separately, not counted as runtime evidence.
+
+Root cause: the shared method binder retained self without recording a value
+capture. It now roots self precisely and captures fn receivers by value;
+procedure receivers preserve the caller's detached writable owner
+(**S12.3.3v2/S9.3.1**). This fixes MVP/T0, but Full still skipped preparation
+when its static `cow_marked` fact was absent. Runtime method binding can share
+a receiver without changing that compiler fact. Full now consults the runtime
+COW preparation path for every procedure-method receiver. All nine snapshot
+rows subsequently pass. No conservative stack scanning is introduced.
+
+### 10.44 Method defaults, raw spreads and nominal element writes
+
+The 27-row expanded MVP screen passes 24/27; only named-method optional holes
+remain. The frontend had already resolved/reordered these calls. Their omitted
+argument nodes were lowered as explicit null, suppressing defaults or failing
+a typed parameter. Both direct and dynamic MVP serialization now preserve
+`ITEM_MISSING_ARGUMENT`; explicit null remains a supplied value
+(**S12.3.1/S12.3.4v2**). The five-fixture tier/GC control then passes **45/45**.
+
+A broader 22-fixture matrix reaches **192/198**. `object_update` crashes in MVP
+while compiling a method's `<Vec *:~, ...>` body. LLDB and the AST dump show
+that nominal updates store their spread as a raw expression, including
+`AST_NODE_CURRENT_ITEM`. Shared literal staging incorrectly casts every item
+to `AstNamedNode` before reading its key/flags. It now checks for
+`AST_NODE_KEY_EXPR` before accessing that payload; raw expressions use the
+existing spread lane. This also removes an accidental dependence on the
+payload bytes of identifier spread nodes.
+
+`proc/object_open_instance` exposes the other refusal: MVP admitted array/map
+member-write carriers but omitted the element structural kind. Element-shaped
+nominal instances use the same attribute-write boundary, so admission now
+includes that actual carrier (**S2.1.4**). The existing builder preserves the
+nominal record and content across shape growth. Both repairs retain the
+original fixtures and goldens; the complete current matrix is **198/198**.
+
+### 10.45 Current method milestone evidence and remaining work
+
+Current release `p5_method_update_places-release.exe`, SHA256
+`2fafec587161419615061f48e33da47f6e7bee7906e87e6166bc5e02cbc87fec`, is a private
+O3 ThinLTO native build on HEAD `b8e29b077` plus the recorded uncommitted method,
+constraint and nominal work. Artifacts use `p5-method-update-places-*`.
+The 769-unit graph/3,543-file inventory from §10.40 remains; the native cache
+fixture is independently frozen by its native-build overlay and manifest.
+
+- Current tier/GC method matrix **198/198**, with the imported helper hashed.
+- Ten durable Python methods **514 script invocations**, including 77/77 typed
+  goldens under each compiler; `test_nominal_methods` adds 21 method fixtures.
+- Separate corpus-v2 untyped checks **77/77** under each compiler.
+- Real discovered-script harness **22/22** with MVP/JIT selected.
+- Current private native security **98/98**; selected cache **8/8 normal plus
+  8/8 forced GC**. The compiler-isolation test now checks both a plain callable
+  and a nominal receiver snapshot across MVP/Full/MVP fresh runtimes, retaining
+  the original cache-owner assertions (**D8.5.1**). Its local runtime owner
+  guarantees teardown even on a fatal assertion. The final formatted fixture
+  snapshot also passes **8/8 normal + 8/8 forced GC**; both manifest identities
+  are retained, with `p5_method_update_places-native-tests-methods-final/manifest.json`
+  matching the current fixture source. The CLI source inventory differs only
+  at this independently rebuilt native fixture; runtime/compiler source drift
+  is zero. Combined evidence is indexed by
+  `p5-method-update-places-validation-summary.json`.
+
+This does not close all method combinations, the complete language/GTest gate
+or performance acceptance. Lexical/live captures, explicit receiver places and
+var-argument dispatch still need their remaining acceptance cases. Views,
+foreign/native builtins, dependent/variadic definitions, result-domain joins,
+linear-science row carriers and the recorded shared ownership/concurrency
+faults remain open. No Radiant/C2MIR campaign or current timing qualification
+is claimed.
+
+
+### 10.46 Descriptor-backed native import metadata (2026-11-06)
+
+The older census records 1,098 repeated builtin-admission messages. A current
+DOM failure identifies the root: `import_resolver` resolves descriptor-backed
+system functions through `find_dynamic_sys_func_import`, while
+`jit_import_get_metadata` only consults the static import table. MVP admission
+requires that metadata and therefore refuses valid fixed-arity native module
+calls such as `dom.next_sibling`.
+
+The shared metadata lookup now recognizes that same descriptor-backed symbol
+set. It declares the actual public Item result (**D7.6.1**) and a dynamic scalar
+result class, while retaining conservative GC, reentry and exception effects
+(**D7.1.3**). Unknown symbols still fail lookup. MVP's existing registry-based
+fixed-arity lowering consumes this shared repair; no backend allowlist or
+interpreter fallback is introduced. Runtime type/data layouts are unchanged.
+
+`p6_native_module_metadata` builds only `mir.c` relative to the preceding engine.
+Its first 11-fixture DOM matrix is **96/99**; only `dom_edit_plan` remains,
+exposing an independent scalar-join lowering failure. The dedicated new
+`mir_mvp_module_builtins` fixture verifies direct published native signatures
+with one through five arguments, including document selection boundaries and
+mutation. The initial authoring attempt used first-class builtin references;
+all tiers reject those at the existing E229 Core dynamic-ABI boundary. That
+unsupported reference route is unchanged; the valid fixture exercises the
+published direct-call ABI. Keep that initial diagnostic separate from the
+later direct-call result.
+
+### 10.47 Scalar conditional outcomes and wider package controls
+
+MVP already widened pointer `if` joins when an emitted branch had a boxed
+outcome, but retained inferred native scalar joins. `dom_insert_html` exposes
+the Boolean case: the source infers bool, while the actual C builtin producer
+publishes an Item. `_is_clip_def` in the PDF package has the same problem.
+
+Generalized that existing emitted-carrier join decision to all scalar lanes
+(**D2.3.4/D2.3.5**). A boxed outcome remains Item until its authorized enclosing
+boundary; a join originally allocated as floating-point receives a separate
+I64 result register. This preserves Error alternatives instead of decoding
+them as native values (**S7.9.3**). Neither source contracts nor builtin return
+contracts are strengthened by this change.
+
+`mir_mvp_scalar_joins` pins Boolean, integer, float and Error-valued selection.
+After correcting a missing statement separator in the new fixture, the old
+metadata-only engine refuses it **0/3**, reproducing the Boolean conversion
+failure. The repaired engine and Full/T0 pass both new fixtures **18/18**.
+The DOM command registry then passes all three tiers and GC modes. A broader
+four-fixture package diagnostic is **33/36**: PDF image/interpreter, citeproc
+data and MathML pass, while `test_latex_citeproc_errors` reaches a new MVP
+runtime failure, `expected array, got array`, in all three GC modes. Full/T0
+retain its unchanged golden. This is open correctness work, not a passing
+package aggregate.
+
+Current private release `p6_native_calls_joins-release.exe`, SHA256
+`253938ce884899e7b0af13bbbb5607f4d38787508c2ce50d1dd666ee818d4826`, uses the
+existing 769-unit release graph and 3,543-file source inventory on HEAD
+`b8e29b077` plus recorded uncommitted changes. Runtime/compiler drift is zero;
+the latest native test fixture has its own snapshot below. Package inputs
+(943 files) have zero observed drift.
+
+- New native-call/conditional family: **117/117** tier/GC checks.
+- Wider package diagnostic: **33/36**; combined diagnostic **150/153**.
+- Eleven Python methods: **592 script invocations**, including 77/77 typed
+  goldens under each MIR compiler. Separate untyped v2 runs: **77/77** each.
+- Real harness: 16 selected scripts pass; the separately selected citeproc
+  error fixture fails. Retain both JSON files as **16/17**, not an all-green gate.
+
+No aggregate Lambda baseline or current performance qualification is claimed.
+A short monitored typed comparison with `p5_method_update_places` completes
+with all 77 outputs retained, ten slower flags and twelve faster flags. Of
+76 usable ratios, 39 medians are higher and 37 lower; their geometric mean is
+0.99763. Sumfp's near-zero samples cannot produce a meaningful ratio. The
+`p6-native-calls-joins-typed-regression-screen*.json` artifacts retain the raw
+samples and flags. These self-reported workload times use three measured
+pairs and one warmup, without Full measurements; they cannot replace the
+primary/confirmation campaigns or clear the existing v6 confirmation set.
+
+### 10.48 Effective native VFS audit and corrected cache evidence
+
+The first native metadata unit reports the old `EXPECT_EQ(reentry, YES)` even
+though the current source checks that reentry is not `NO`. The private native
+builder appended a fixture mapping after the CLI source overlay's mapping of
+the same path. Clang selected the first mapping, so copying/hashing the new
+fixture did not prove the compiler read it. This also invalidates §10.45's
+claim that the extended nominal-method cache assertions had executed; the
+base eight tests passed, but the added case was shadowed. Preserve the earlier
+reports and their limitation instead of applying later results retroactively.
+
+The private builder now removes the old mapping before adding the native
+snapshot, asserts unique virtual paths and retains virtual source names so
+relative includes resolve through the intended overlay. The final audit finds
+exactly one mapping to the current native snapshot. Both native executables
+are rebuilt under `p6_native_calls_joins-native-tests-native-effective/`.
+Current effective builds pass **98/98 security**, and **9/9 selected cache and
+metadata tests normally plus 9/9 under forced GC**. The metadata unit verifies
+boxed results, dynamic scalar classification and conservative effects for
+three descriptor entries, plus rejection of an unknown symbol. The expanded
+MVP/Full/MVP cache test now genuinely exercises nominal method snapshots across
+fresh runtimes. Two view cache cases remain outside this selected lane.
+
+Authoritative native reports use `p6-native-calls-joins-native-effective-*`;
+the corresponding `manifest.json` and unique effective `overlay.json` identify
+the compiled test sources and runtime objects. Earlier `native-imports`
+reports are superseded for newer fixture assertions.
+
+### 10.49 Inferred record fields are not constructor contracts (2026-11-06)
+
+The citeproc failure from §10.47 reproduces during `style` import alone.
+Its `ENUMS`/`ATTRIBUTES` initializers fail; standalone arrays pass. The minimal
+control `{names: ["a", "b"]}` fails only MVP, while a computed-key map and
+Full/T0 pass. The homogeneous inferred array retains its first literal's
+element type. `binding_value` supplies the inferred map shape as a destination,
+and `map_literal` mistakenly admits every field against that observation.
+
+Only trusted declared destinations now select constructor admission. Inferred
+descriptors still select storage; they add no runtime obligation
+(**D4.3.1–D4.3.3**). The new `mir_mvp_inferred_record_fields` fixture includes
+string, int, bool, float, mixed and nested arrays, inferred function results,
+and an explicit array contract that must still reject invalid input. Old p6
+fails the fixture in all three GC modes; Full/T0 retain its golden.
+
+Private p7 release SHA256
+`5bfa508c0656caa6143bb33e2a63f7263857edcda686c25d9f1b6e1167132ba2`
+passes **36/36** focused tier/GC checks, **616** Python script checks and all
+77 typed/untyped outputs under each MIR compiler. Citeproc's unchanged error
+oracle now passes. Evidence: `p7-inferred-record-fields-*`.
+
+### 10.50 Named and positional decomposition
+
+MVP now emits comma decomposition (**S16.8.7**), using the canonical target
+entries from the shared AST. The RHS runs once; each target captures its
+projected child and owns scalar bytes across later projections (**S9.1.2,
+D6.2.3**). Extracted the projection call into `em_decompose_item`, used by
+both MIR emitters. Targets retain Item transport without an inferred source
+contract. Globals use the existing module storage path; local targets receive
+their declaring activation (**D8.2.4**). Synthetic targets cannot supply an
+initializer-based contextual constructor proof.
+
+Initial lowering passes **27/27** tier/GC checks. Expanded coverage adds an
+unread target, exposing a shared-index omission: synthetic targets acquired
+binding IDs only through identifier uses or assignments. The index now
+publishes all decomposition entries at the declaration. Binding publication
+can grow storage independently of the structural node count. A native unit
+publishes 320 targets across two nodes and checks identity reuse. Its effective
+native build passes with the current test snapshot.
+
+Current `p8_decomposition_indexed` release SHA256
+`2c3cb863e51397e414361c7a468a1fe51605c6800f4c46594f1c2ad1da61011a`
+passes **54/54** focused tier/GC checks and **21/21 real GTests under each MIR
+compiler**. Cases cover lexical and global bindings, missing members,
+shadowing, COW projections, rebindings, wide scalars and a procedural RHS
+evaluated once. The pre-index expanded candidate retains its **51/54** failure
+report; it does not qualify the repaired release. Mutable/live capture
+decomposition still depends on the unimplemented shared-home path.
+
+Final focused validation retains **77/77 typed and 77/77 untyped** v2 outputs
+under each MIR compiler. Thirteen Python methods pass **640 script checks**.
+Current effective native index/cache/metadata tests pass **10/10 normally and
+10/10 with forced GC/poison**, and the security suite passes **98/98 with MVP
+explicitly selected**. A first security run omitted the selector and used
+Full; it also finishes **98/98** before a proposed stop, so no process is
+terminated. Keep its report as a Full control, not MVP evidence.
+
+The validation summary records binary/source/runner hashes, package inputs,
+fixture hashes and unique effective native VFS mappings. Runtime/compiler
+drift is zero; the native index unit is newer than the CLI inventory and is
+verified through its separate snapshot. No current performance acceptance
+or aggregate Lambda baseline is claimed.
+
+### 10.51 Broader MVP fixture census and retained failures
+
+Rebuilt the real discovery harness from p7's frozen current source, using the
+unique effective VFS mappings from §10.48. A selection covering all 87 then
+present MVP fixtures plus five matching controls runs **92** scripts. MVP
+passes **71**, Full **63**; **16** failures are shared, five are MVP-only and
+thirteen Full-only. These are diagnostic results, not baseline qualification.
+The shared set includes source-contract failures and existing output
+differences; no scripts, goldens or failure accounting are changed.
+
+The MVP-only set contains `copy_loops`, `iterations`, `kernel_loops`,
+`inferred_record_fields` and `scalar_var_lanes`. Three time out. The other
+two finish their script but are charged abnormal process exits by the
+harness's existing teardown check. The new record fixture passes a separate
+one-case real harness run (**1/1**); this does not clear its batch failure.
+Keep the root cause open. The subsequent p8 21-case positive selection passes
+both policies, but does not replace this broader failing selection.
+
+Reports: `p7-inferred-record-fields-real-{mvp,full}-gtest.json`, their summary,
+and `p7-inferred-record-fields-isolated-gtest.json`. Existing MVP fixture and
+recorded package input hashes remain unchanged during the run; the census is
+still narrower than the aggregate Lambda gate.
+
+### 10.52 Store containment follows the receiver binding (2026-11-06)
+
+All three MVP-only loop timeouts reproduce with p8 in short, isolated runs.
+PTY capture shows the last completed operation: the next call attempts a
+rejected array store. MVP uses the current statement scope, abandoning a
+loop body's tail and its counter update, then repeats the same iteration.
+Full selects the receiver binding's declaring region (**S7.7.6v2**).
+
+Array, member and projected-place stores now select that binding's scope;
+parameter/module roots retain callable containment. Inlined calls retain
+their own completion boundary. The same error branch emits the existing
+retained/partial-state diagnostic with the receiver name and skipped tail.
+This changes neither whole-binding continuation (**S7.7.4v2/S7.7.5v3**) nor
+the destination's store admission contract.
+
+`mir_mvp_store_containment` covers parameter arrays, outer and inner block
+locals, fields, nested paths, partial writes and COW snapshots. Full/T0 pass
+its initial control **6/6**. Private p9 SHA256
+`961fd0356f6db04b343710da13dd1c2a2c0261bd86fdcf4e057ed54b0a1ace72`
+passes the new fixture, all three previously timed-out fixtures and
+`ledger_containment`: **45/45** tier/GC checks. Fourteen Python methods pass
+**670** script checks; all 77 typed/untyped v2 outputs remain valid for both
+MIR compilers. A first private build catches an omitted source argument at
+one projected-var publication call; the corrected p9 build is authoritative.
+
+The broader real harness is **80/95 MVP versus 66/95 Full**. All fifteen
+remaining MVP failures also fail Full; no MVP-only failure remains in this
+selection. The earlier two abnormal batch exits no longer reproduce here;
+do not infer a separate lifecycle root cause from that observation. Existing
+fixture/package hashes remain unchanged. Reports use `p9-store-boundaries-*`.
+
+### 10.53 Confined nested-procedure capture homes
+
+MVP now consumes the shared confinement facts for parent-fn locals
+(**S9.1.4v2, D7.2.3**). Each executing declaration, including decomposition,
+creates the runtime's existing owned-slot home. Confined pn environments
+capture that home; pure functions and escaping closures copy the current
+value. Snapshot capture rules and the pn-from-fn prohibition remain enforced
+by the shared builder. Legacy pn-parent mutable snapshot write-back stays
+open and is still explicitly refused.
+
+Shared bindings use Item transport while their original annotation continues
+to own admission. Shared-home reads/allocations enter the GC effect plan.
+Publication updates the home; post-call reloads use raw loads without
+overwriting a pending scalar companion. Cached layout/ownership witnesses
+are invalidated on reentry. Active homes follow the lexical scope stack,
+so callbacks after a branch cannot read an unexecuted or exited local.
+Home-owning functions retain an activation boundary for precise ownership;
+the existing native-call route handles them. Shared home construction and
+noncalling reload emission are extracted for both MIR frontends.
+
+Six existing fixtures fail the old p9 MVP **0/18**. Current p10 passes those
+plus `mir_mvp_confined_capture_homes`: **63/63** across three tiers and three
+GC modes. This includes scalar tails, COW children, decomposed targets, fresh
+loop homes, creation-time snapshots, typed numeric admission and branch exit.
+The first version of the new fixture omitted an explicit `any` return on a
+snapshot of a deferred float outcome; all tiers correctly reject it with
+E208. The source now admits that outcome explicitly; its golden is unchanged.
+
+Private p10 SHA256
+`bb80290be0e68a7ed7c1567f30396be1361221c8b33a93e667e2f21be02e8b3b`
+passes **712 script checks** in fifteen Python methods. The expanded real
+harness is **87/102 MVP versus 73/102 Full**, retaining the same fifteen
+shared failures. The native compiler-isolation test adds a shared-home and
+pure-snapshot image across MVP/Full/MVP runtimes; final effective native
+results are recorded below. No aggregate Lambda or current performance
+acceptance is claimed.
+
+### 10.54 Nullable capture outcomes and final checkpoint
+
+Extended the new fixture with retained validation errors and nullable int,
+float and bool snapshots. After replacing two reserved type words used as
+local names, MVP and T0 agree; Full captures nullable bool null as integer
+`2`. The old p9 Full reproduces the same value in all GC modes, proving it
+precedes the shared-emission refactor.
+
+Full had already decoded the Boolean initializer into the 0/1/2 lane but
+rebuilt its producer descriptor from the original AST expression. Boxing
+that value into a shared home loses the nullable bool contract. The producer
+now retains the admitted physical lane and its nullable contract
+(**D2.3.4–D2.3.5**), preserving null through the existing boxing operation.
+No runtime value layout or source contract changes.
+
+Final private release `p10_capture_outcomes`, SHA256
+`b6bdd2d85bc018b0bf4e2da2a355e7c8b42e27088f5eec5dc6cbc5a9b7573051`,
+passes **108/108** focused tier/GC checks and **712** script checks across
+fifteen Python methods. Both MIR policies retain **77/77 typed and 77/77
+untyped** benchmark outputs. Effective native index/cache/metadata tests
+pass **10/10 normally + 10/10 forced GC/poison**, including the new
+MVP/Full/MVP shared-home image case; security passes **98/98 with MVP
+explicitly selected** and its interpreter controls retained.
+
+The broader real GTest selection remains **87/102 MVP versus 73/102 Full**.
+All fifteen MVP failures also fail Full. Retain that failing selection;
+these results do not qualify the aggregate Lambda gate. Current source,
+fixture and package drift is zero. The final validation summary records
+source/runner hashes and verifies the native overlay's unique effective
+test mappings. Current performance qualification and the full goal stay open.
+
+### 10.55 Variadic definitions, positional slots and call completion
+
+MVP now admits variadic functions and procedures through the shared boxed
+entry protocol (**D7.2.2, D7.4.1**). Fixed parameters retain their signature
+positions and `Function.arity`; a trailing Item carries the rest array.
+Direct calls package extras after fixed-argument admission. Dynamic calls
+use the existing signature adapter, and imported definitions and bound
+methods retain their declaring context. Rest definitions remain outside
+MVP's current inline and dense-call expansions, whose state does not model
+the receiving rest activation.
+
+`em_argument_array` owns physical argument construction for Full rest calls,
+MVP direct rest calls and MVP dynamic calls. The verbatim append preserves
+nulls, adjacent text and each list's array image (**D3.3.1, S2.5.6**). Named
+resolution now counts supplied extras as well as fixed slots, while formal
+proofs and var-place checks stop at the fixed parameter list.
+
+Both MIR policies keep previous/current rest owners in fixed precise frame
+slots; ambient `EvalContext.current_vargs` is not a GC root (**D6.1.1,
+D6.3.1**). Their common completion restores the previous context, including
+parameter rejection and explicit return. Full's wrapper installs the
+receiving context before defaults; its existing default-activation scan now
+recognizes `varg()`/`varg(n)`. Noncollecting bodies still reserve and initialize
+their owner slots. An intermediate register-root implementation failed
+`func_param` because the root finalizer removed its root frame; that candidate
+is superseded by fixed ownership, rather than an artificial liveness read.
+
+The existing Full/T0 self-tail transform rebound only fixed parameters and
+discarded rest operand evaluation. It now builds and publishes the recursive
+call's new rest array before rebinding fixed slots (**S16.9.7**). The two
+tracked `interp_variadic*.txt` tail results change from `[2, 7]` to `[1, 1]`.
+`p11-variadic-oracle-repairs.json` retains old/new text and hashes. These are
+core oracle corrections; the frozen v2 benchmark corpus does not change.
+The new admission case also exposed Full's unchecked declared tail operand
+and T0's premature rest evaluation. Full checks an unproved non-error
+declared operand; T0 evaluates extras after fixed admission (**S7.7.3**).
+
+Five new executable fixtures and one companion module cover positional
+null/text/list values, wide scalar ownership, defaults, nested restores,
+closure values, imports, bound methods, self-recursive effects, rejection
+order and var rebinds. Every new script has its paired golden. The native
+cache-isolation case adds a variadic/default/tail image across fresh
+MVP/Full/MVP runtimes. The new Python methods retain the Full var-rebind
+failure as a recorded control: MVP passes `mir_mvp_variadic_exits`, Full
+returns the old caller value, and forced T0 excludes that var/rest call.
+The oracle and failing controls remain visible.
+
+Private release `p11_variadic_admission` (O3 ThinLTO, no DEBUG), SHA256
+`8b0e4ae983c7ee759b8c2a46d9f7d90e205081cb687eaefda0c5baeaf1a828b9`,
+passes **78/78 MVP** tier/GC checks across 26 fixtures. Full and T0 each pass
+75/78; the six controls above are the only failures in the 234-row matrix.
+AUTO handoff passes **9/9**. Seventeen Python methods pass **793** script
+checks, including **77/77 typed** goldens under each compiler; canonical
+untyped outputs also pass **77/77 each**. Native cache/index/metadata passes
+**10/10 normal + 10/10 forced GC/poison**; security passes **98/98** with MVP
+selected. The real harness expands from 102 to 117 cases: **102/117 MVP,
+87/117 Full**, with the same fifteen shared MVP failures and no newly failing
+row on either compiler's original population. Source, recorded-input and
+benchmark-corpus drift is zero; native effective overlays are verified.
+
+Evidence: `p11-variadic-final-validation-summary.json`, its tier/GC, AUTO,
+Python, native and real-harness reports, and the frozen release manifests.
+These are focused correctness results. Language/GTest parity, dependent
+definitions and current performance gates remain open.
+
+
+### 10.56 Boxed dependent definitions and first-class binder values (2026-11-06)
+
+MVP now emits dependent definitions through a boxed entry rather than rejecting
+all signatures containing binders. The activation allocates the selection
+slots in the existing fixed precise-root suffix. Every site admits its value
+before publishing a selection, and dependent reference parameters are checked
+after the sites have joined. Defaults, body boundaries and declared dependent
+returns use that activation's environment (**S11.4.8v2, D4.1.4**). Dependent
+annotations remain receiving contracts; value observers retain an open Item
+representation until an independent proof permits narrowing (**D2.3.1,
+D4.3.3**). No additional interpreter delegation was introduced.
+
+The written dependent return contract must survive success-domain planning.
+Removing its error alternative had also replaced a `TypeBoundRef` with its
+copied `type` bound, causing a returned number to be checked as a type value.
+MVP now checks the written contract in the callee and publishes an ordinary
+boxed result to the caller. Binder names in closure environments retain the
+selected first-class type value, rather than reading an unrelated child's
+slot. Empty nested sites read their declared bound, as required by
+**S11.4.8v2**; Full and T0 share that fallback.
+
+Type-expression classification is shared with the AST builder. A type-valued
+expression such as `int` cannot take its represented type's integer carrier:
+that had incorrectly packed `[int, int, 40]` as a numeric array. Forwarding a
+runtime type value now retains deferred admission instead of requiring literal
+syntax. Static binder collection uses a conservative approximation for a
+runtime type value or nested site and refuses to use that approximation as an
+exact specialization key. Nested array arguments retain their whole written
+container contract; the site's scalar bound is not the argument's contract
+(**S11.4.8v2, D2.3.1, D4.1.4**). A negative fixture still rejects an integer
+passed to `T: type` with E207.
+
+An admission result needs more information than the Item's error tag.
+`any` and `error` may admit Error as data (**S11.4.3**), while an incompatible
+repeated binder selection must still fail. The shared admission kernel now
+optionally reports a separate Boolean status through
+`lambda_type_check_env_status`, without repeating the check or changing Item
+layout. An unchanged Error fast return reports whether it was admitted; a
+binder site still performs the walk that publishes its selection. MVP reuses
+one native status cell per activation, allocated at entry so loop checks do
+not grow the native stack. Existing boundary APIs retain their signatures
+and rich failure diagnostics. The native regression uses the canonical
+`alloc_type_kind` creation path, which publishes the process's binder-presence
+flag before a binder-bearing contract can be observed.
+
+New paired fixtures cover dependent defaults and imported/dynamic calls,
+forwarded type values, wrong dependent returns, deferred local reassignment,
+empty nested sites, repeated-site joins, captured type names, escaping
+first-class type snapshots, wide scalar lifetime and Error-as-data admission.
+The helper module and E207 negative fixture also have paired goldens.
+`NegativeScriptTest.TypeBinderDiagnosticsRemainSpecific` includes the new
+rejection on interp/JIT/AUTO; a native admission test distinguishes accepted
+Error data from failure and checks that a rejected join preserves its prior
+selection. The cache isolation test alternates MVP/Full/MVP across fresh
+runtimes and verifies independent invocation selections. Its possible error
+outcomes are explicitly propagated under **S7.5–S7.6**.
+
+Qualification uses `p12_binders_qualified-release.exe` (release O3 ThinLTO,
+769 units), SHA256
+`47e6865187f0d4f43674ec5a4d7b26dd3da0761881cf39084e1cafede21deade`:
+
+- Tier/GC matrix: **111/111 MVP**, **102/111 Full**, **102/111 T0** across
+  37 fixtures. AUTO checks pass **12/12**. A later captured metadata import
+  is separately rechecked **9/9** with source/golden dependency hashes.
+- Twenty Python methods pass **853 script invocations**, including all
+  77 typed goldens under both compilers. All 77 untyped v2 goldens also pass
+  each compiler. These are output checks, not speed measurements.
+- Native cache/index/import metadata pass **10/10 normal and 10/10 forced
+  GC**. Admission/diagnostic checks pass **4/4 normal and 4/4 forced GC**.
+  Security passes **98/98 with MVP selected** and interpreter controls retained.
+- The real harness passes **114/129 MVP and 97/129 Full**. All twelve new
+  rows pass MVP; no prior passing row regresses on the common 117-case
+  population under either policy. The same fifteen MVP failures also fail
+  Full; none is dropped or relabeled as supported.
+
+The non-MVP matrix failures remain visible: `mir_mvp_binder_values` exposes
+Full's dependent numeric conversion/type captures and T0's captured binder
+environment, and `mir_mvp_binder_outcomes` exposes admitted Error completion.
+The values fixture has matching failures under the earlier p11 Full/T0
+controls; the outcomes fixture has recorded before/after controls. Full/T0
+also retain the variadic var/rest failures from §10.55. No shared failure is
+used as a reason to weaken a golden.
+
+`p12-binder-qualified-validation-summary.json` records binary, runner, native
+object/overlay and result hashes. The 3,543-file CLI source inventory has no
+engine drift. Two native test units were corrected after that inventory and
+are qualified through separate current VFS snapshots and the same frozen
+engine objects. Their old failed runs remain as diagnostics; only the corrected
+native runs qualify those fixtures. All 1,208 recorded inputs and 483 frozen
+corpus files are unchanged at final audit. No existing oracle or benchmark
+source changed in p12. Full language closure, aggregate Lambda GTests and
+current typed/untyped performance targets remain open.
+
+
+A follow-up diagnostic retains an additional boundary-ordering gap:
+`observed(T: type, value: T, witness = type(value))` returns an integer type
+witness for `observed(float, 1)` under all three tiers, while admission of
+`value` converts it to float. The temporary expected-value probe records
+**0/9** tier/GC matches in `p13-binder-default-observer-before.json`; it is not
+part of the passing p12 population. The MVP parameter pass defers dependent
+reference admission until after later defaults have evaluated. Resolve the
+interaction between repeated-site joins, default dependencies and converted
+parameter reads before claiming full dependent-call coverage
+(**S11.4.8v2, S11.4.6v4**). No shared failure or oracle was changed.
+
+
+### 10.57 Named system operands, numeric type calls and empty normal domains
+
+**2026-11-06.** A fresh paired census identified three separate call-boundary
+families. MVP rejected named system operands, treated explicit sized/u64
+conversion types as Function values, and crashed during closed-domain planning
+when a call argument contained only Error. These are implemented without new
+interpreter delegation.
+
+Named system operands now use the existing shared interpreter planner's
+system-call admission predicate. Their AST wrappers forward the child value
+and descriptor; system operands keep their source order and registry ABI.
+This covers the existing `skip_null` aggregate forms without fabricating a
+second option resolver. Dynamic Lambda named calls retain the declaration
+requirement (**S12.3.2**).
+
+One shared AST classifier identifies the numeric Type producers that Full
+already intercepts for explicit conversion. MVP, Full and T0 use that
+classifier; both MIR compilers use the same physical conversion emitter.
+The returned Item retains conversion errors before any caller propagation,
+without conflating explicit conversion with declared-contract admission
+(**D4.2.1, D2.3.1**). The new `mir_mvp_numeric_type_calls` fixture checks
+signed/unsigned wrapping, f32, a wide u64 result, Error transport and retained
+array values under GC.
+
+The admission crash was localized with small source reductions and an O3
+release image with local symbols retained. Its backtrace ends in
+`update_closed_values`; this was a compiler-planning crash, before a MIR dump
+could be produced. `lambda_type_remove_error` returns NULL for an error-only
+contract. The planner dereferenced that result while choosing a private
+parameter lane, even though the implicit parameter rejects that argument
+before the function can be entered (**S7.7.3**). The same root cause was
+reproduced in an Error-bound bitwise argument, a successful-return domain scan
+and an inferred mutable Error binding.
+
+The shared private planner helper now normalizes that empty success domain to
+`none`. Error-only call edges and exits provide no successful carrier evidence;
+other observers can safely inspect the bottom type. The receiving contracts,
+Error values, call effects and failure transport stay intact (**D4.3.1,
+S11.1.7**). `mir_mvp_empty_normal_domains` combines all these cases with normal
+calls, so the regression covers both the rejected edge and the surviving
+successful lane. The original `admission_call_outcomes` now matches its existing
+golden across all three tiers and GC modes; no oracle was changed.
+
+Qualification uses `p13_empty_normal_domain-release.exe` (O3 ThinLTO, 769-unit
+release graph), SHA256
+`367b7a65f45f9cdaf6780c1ae506f89ef2d390be3ea40825c6bda43f3d47c3cd`:
+
+- **129/129 MVP** tier/GC checks across 43 fixtures; Full and T0 each pass
+  **120/129**, retaining the nine controls from §10.55–§10.56. AUTO passes
+  **30/30**. The original fixtures remain in the population.
+- Twenty-one Python methods pass **877 script invocations**. All 77 typed
+  goldens and all 77 untyped v2 goldens pass under each compiler.
+- Native cache/index/import metadata pass **10/10 normal + 10/10 forced GC**;
+  admission/diagnostic checks pass **4/4 + 4/4**; security passes **98/98**
+  with MVP selected and explicit interpreter controls retained.
+- The real harness passes **120/135 MVP and 103/135 Full**. Six new rows
+  include the two new fixtures plus `agg_null_absence`,
+  `admission_call_outcomes`, `error_conversion_outcomes` and
+  `fallible_scalar_member_call`. All six pass both policies. No prior passing
+  row regresses in the common 129-case population; the same fifteen MVP
+  failures also fail Full.
+
+`p13-call-forms-validation-summary.json` records the executable, runner,
+fixture, native object/overlay and report identities. The 3,543 source files,
+1,220 recorded inputs and 483 frozen corpus files have zero drift at final
+audit. Separate conversion-family screens retain the still-failing image and
+imported-type cases; they are not silently included in passing counts. This
+qualifies focused correctness, not the aggregate Lambda baseline or current
+speed targets.
+
+The frozen p12 discovery census is independent of this p13 qualification.
+`run_discovery_census.py` records 2,123 discovered tests, copies the Lambda/lmd
+inputs, uses corpus v2 benchmark sources and hashes 9,044 inputs in total.
+It compares 50-case selections under both compiler policies through the real
+harness, with separate reports and an explicit supervisor deadline. A stalled
+or unreported compiler chunk remains unresolved; its cases are not counted as
+passing. The first audit has 700 paired reported cases (**515 MVP, 603 Full**),
+no input drift, and one unresolved MVP chunk. The live runner continues beyond
+that audit. `p12-current-paired-census-summary.json` records the exact compared
+population and partial status; do not combine it with p13 as one experiment.
+Shared chart-package failures include frontend E312 on a range-index/len
+comparison before either compiler runs. They remain visible shared failures,
+not evidence that an MVP lowering route has been exercised.
+
+An authority audit also distinguishes the old capture-write compatibility
+code from valid new coverage: **S9.1.4v2** permits writes only in the confined
+parent-fn case and otherwise retains immutable snapshots. Full's legacy
+pn-parent write-back code grants no additional language permission. Keep the
+capture-admission audit visible; do not remove MVP's rejection merely to
+reproduce a nonconforming write-back path.
+
+
+### 10.58 Imported type values and JavaScript export adapters
+
+**D6.3.2** keeps the emitted-helper effect check authoritative. Imported type
+values exposed an incorrect default effect for `base_type`: this helper reads
+only the execution context's static literal-type table and does not allocate
+or reenter. The registry now records that bounded read as noncollecting. MVP
+can compile `import_type_values.ls` without weakening the ratchet.
+
+**D7.4.1–D7.4.3, D6.2.3** require the foreign callable and its result owner to
+cross their actual ABI. A JS import symbol denotes a hosted function object,
+not a Core code address. The synthetic declaration publishes an arity but has
+no Core AST parameter chain. MVP now reads its declared arity, imports the
+hosted object under its actual symbol, and emits a checked Core boxed adapter
+for direct calls and function values. It uses Full's existing bridge range
+(0–8 arguments); larger foreign signatures remain rejected. Both MIR compilers
+share `em_js_export_call`, which precisely roots the hosted callable and owns
+the result's scalar home. This adds no Lambda interpreter delegation.
+
+**S5.5.1v2, D7.2.1** govern adapter identity. A cross-import probe showed that
+each importer previously created a new synthetic AST for the same guest
+namespace. Per-importer native adapters also have different code addresses.
+MVP stamps the existing `Function::def` / `def_module` fields with the export
+site; equality uses the site when both operands publish one and otherwise
+retains the existing native-pointer path. The canonical `ModuleDescriptor`
+retains its synthetic import Script, distinct from the guest's parsed Script
+at the same file path. The runtime owns that AST and clears the descriptor's
+borrowed pointer before retiring it. It is never a process-wide AST cache or
+a new GC root. JS-tainted import cones already exclude sealed MIR images.
+
+The new paired fixtures `mir_mvp_js_exports` and `mir_mvp_js_export_values`
+exercise direct bridge arities 0–8, cold floating results retained across
+allocation, text, guest module state, errors, saved/array-held functions,
+higher-order calls, closure captures and cross-import function identity.
+`_mir_mvp_js_export_module.ls` has its own empty golden because it has no
+entry expression. Its initial newly authored null oracle was corrected after
+both compilers emitted no output; no existing oracle changed. The initial
+and repeated real-harness reports remain separate. The native fresh-runtime
+case covers state isolation and cross-import equality in three executions.
+Full/T0 still reject ordinary calls through imported JS function values with
+E229; those controls keep their semantic oracle and remain visible failures.
+
+Qualification artifacts use prefix `p14-foreign-descriptor` under the task's
+temporary directory. The current release is frozen before broad validation;
+initial identity probes pass the three GC policies. The final 49-fixture matrix passes **147/147 MVP**, with **135/147**
+under each control. AUTO/production passes **45/45**. Twenty-four Python
+methods pass **910 script invocations** (including 77 typed goldens per
+compiler), and untyped goldens pass **77/77 each**. Native checks pass
+**11 + 11 forced GC** cache/index/import cases, **4 + 4** admission cases,
+and **98** security cases with MVP selected. The real harness passes
+**127/142 MVP, 109/142 Full**, with no prior passing row regressing. The
+same fifteen shared failures remain. All 1,239 recorded inputs and 483
+frozen corpus files are unchanged after the final checks; engine/native
+source provenance is verified. Final AUTO controls use production: the
+explicit MVP policy continues to require JIT, and the deliberately rejected
+AUTO/MVP attempt remains a separate diagnostic artifact. Aggregate Lambda baseline and current performance remain
+unqualified. This milestone does not establish all-language parity.
+
+
+### 10.59 Complete coordinate reads and temporary storage ownership
+
+**S8.2.4v3, S7.1.1v3, D2.3.4** require an N-D read to consume its entire key
+list and keep an invalid receiver, wrong rank or invalid coordinate as null.
+MVP previously emitted its single-index reader for a multi-key AST node,
+returning a leading-axis row and skipping later key effects. The shared
+`em_index_nd` stages every native coordinate and calls the existing runtime
+reader. Full preserves its existing per-coordinate native conversions; MVP
+uses the existing checked `fn_int64_index`. Both evaluate the receiver before
+the keys and preserve its `last` binding. Multi-key reads no longer acquire
+a first-row value/range proof or an ASCII-character specialization.
+
+**D6.3.1, D6.3.4** distinguish the rooted receiver from raw temporary coordinates. A
+collecting-key probe failed under both frozen p14 Full and the initial p15
+candidate: `heap_data_calloc` produces data-zone bytes without an independent
+object owner, so rooting their raw address cannot keep them alive. Coordinates
+now occupy fixed native-frame storage allocated once per lexical read, outside
+precise GC roots. The receiver remains precisely rooted across every key.
+`em_fixed_stack_storage` also replaces the existing fixed bitcast fallback and
+MVP admission-status allocation shape. This introduces no stack scanning.
+
+Nested row storage is an MVP representation optimization. Its existing tensor
+requirement now includes multi-key observations, immutable aliases and direct
+call arguments, rather than coordinate writes alone. This makes the existing
+`ndim_any_receiver` case work while retaining the prior row representation for
+other consumers. It is not complete N-D construction support: the separate
+`p15-ndim-literal-screen.json` retains three MVP failures (`typed_array_ndim_index`,
+`typed_array_ndim_literal`, `typed_array_ndim_dynamic`). The first still exposes
+unnormalized inner rows of 3-D literals; shape observers and opaque row producers
+need a broader canonicalization proof. `typed_array_ndim_iter` passes that screen.
+
+New paired fixtures `mir_mvp_ndim_reads` and `mir_mvp_ndim_effects` cover scalar
+and cold-float results, all coordinates, misses, `last`, allocating keys and
+observable receiver/key evaluation order. Together with the existing dynamic
+receiver and seven image fixtures, **30/30 MVP and 30/30 Full** checks pass over
+three GC policies. T0 retains its explicit index-expression exclusions in the
+control report. `p15-ndim-owners-family.json` records that focused result.
+The frozen candidate's final 59-fixture matrix passes **177/177 MVP**;
+Full passes **165/177**, T0 **156/177**, retaining their existing controls and
+index exclusions. AUTO/production passes **75/75**. Twenty-five Python methods
+pass **970 script invocations**, including all 77 typed goldens under each
+compiler; all 77 canonical untyped goldens pass under each compiler too.
+Native cache/index/import checks pass **11 + 11 forced GC**, admission checks
+**4 + 4**, and security **98/98 with MVP selected**. The real harness passes
+**137/152 MVP, 119/152 Full**, adding ten passing MVP rows with no prior passing
+row regressing; the same fifteen shared failures remain. All 1,262 recorded
+inputs and 483 corpus files have zero drift. Engine/native effective-source
+provenance is verified in `p15-ndim-owners-validation-summary.json`. Existing
+semantic oracles remain unchanged. Aggregate Lambda baseline and performance
+qualification remain open.
+
+The independent frozen p12 census also finished its 86 compiler chunks. Five
+chunks retain six missing/timed-out reports (250 unpaired cases); they do not
+become passes. Its 1,873 paired reports have 1,334 MVP and 1,637 Full passes,
+with zero input drift. The disk-interrupted unsaved attempt was preserved and
+repeated after reclaiming superseded task link archives; source objects,
+executables and evidence remain. No census process is still running. This
+older diagnostic is not combined with p15 as a current whole-corpus gate.

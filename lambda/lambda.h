@@ -3076,6 +3076,9 @@ extern "C" {
     // legacy ABI remains a NULL-env wrapper for every existing boundary.
     Item lambda_type_check_env(Item value, Type* expected, Type** env,
         const char* boundary);
+    // status separates an admitted Error value from a failed dependent check.
+    Item lambda_type_check_env_status(Item value, Type* expected, Type** env,
+        const char* boundary, Bool* admitted);
     // A boundary label that is formatted only if the check fails. The T0
     // walker checks every declared binding, assignment and argument, and
     // formatting the label eagerly cost it 15-29% of its time. `text` is used

@@ -565,28 +565,139 @@ TEST(LambdaScriptCache, ReusesMirImageAcrossFreshRuntimes) {
 }
 
 // D8.5.1: immutable images retain their compiler identity across fresh contexts.
+struct LambdaCacheRuntime {
+    Runtime runtime = {};
+    LambdaCacheRuntime() { runtime_init(&runtime); }
+    ~LambdaCacheRuntime() { runtime_cleanup(&runtime); }
+};
+
+TEST(LambdaAstIndex, PublishesUnreadDecompositionTargets) {
+    struct IndexOwner {
+        AstIndex value = {};
+        ~IndexOwner() { ast_index_destroy(&value); }
+    } index;
+    // exceed the initial node-table capacity while publishing only two nodes.
+    NameEntry targets[320] = {};
+    NameEntry* entries[320];
+    for (int i = 0; i < 320; i++) entries[i] = &targets[i];
+    AstIdentNode source = {};
+    source.node_type = AST_NODE_IDENT;
+    source.entry = entries[0];
+    AstDecomposeNode declaration = {};
+    declaration.node_type = AST_NODE_DECOMPOSE;
+    declaration.as = (AstNode*)&source;
+    declaration.name_count = 320;
+    declaration.entries = entries;
+    ASSERT_TRUE(ast_index_build_profile(&index.value, (AstNode*)&declaration, NULL));
+    EXPECT_EQ(index.value.count, 2u);
+    EXPECT_EQ(index.value.binding_count, 320u);
+    for (int i = 0; i < 320; i++) {
+        AstBindingId id = ast_index_find_binding_entry(&index.value, entries[i]);
+        EXPECT_NE(id, AST_BINDING_ID_INVALID);
+        EXPECT_EQ(ast_index_binding(&index.value, id), entries[i]);
+    }
+    AstBindingId first = ast_index_find_binding_entry(&index.value, entries[0]);
+    EXPECT_EQ(ast_index_binding_id(&index.value, (AstNode*)&source), first);
+}
+
+TEST(LambdaNativeModuleImports, DescriptorMetadataMatchesResolvedEntries) {
+    LambdaCacheRuntime scope;
+    const char* names[] = {"dom_node_name", "dom_create_node", "dom_set_base_and_extent"};
+    for (const char* name : names) {
+        ASSERT_NE(find_dynamic_sys_func_import(name), nullptr) << name;
+        JitImportMetadata metadata = {};
+        ASSERT_TRUE(jit_import_get_metadata(name, &metadata)) << name;
+        EXPECT_EQ(metadata.ret_class, JIT_VALUE_BOXED_ITEM);
+        EXPECT_EQ(metadata.gc_effect, JIT_EFFECT_MAY_GC);
+        EXPECT_NE(metadata.reentry_effect, JIT_REENTRY_NO);
+        EXPECT_EQ(jit_import_scalar_return_class(&metadata), SCALAR_RETURN_DYNAMIC);
+    }
+    JitImportMetadata missing = {};
+    EXPECT_EQ(find_dynamic_sys_func_import("missing_descriptor_function"), nullptr);
+    EXPECT_FALSE(jit_import_get_metadata("missing_descriptor_function", &missing));
+}
+
 TEST(LambdaScriptCache, KeepsMvpAndFullMirImagesSeparate) {
-    const char* source = "fn answer() => 41; answer() + 1";
-    const char* identity = "<lambda-cache-compiler-isolation>";
+    const struct { const char* source; const char* identity; } cases[] = {
+        {"fn answer() => 41; answer() + 1", "<lambda-cache-compiler-isolation>"},
+        // method tables and bound receiver snapshots must survive evaluator
+        // teardown and reuse the image belonging to their compiler (S9.3.1).
+        {"type C { value: int,\n fn read() => value\n pn bump() { value = value + 1 } }\n"
+         "pn main() { var c = <C value: 7>; let saved = c.read; c.bump()^;\n"
+         "if (saved() == 7 and c.read() == 8) 42 else 0 }",
+         "<lambda-cache-method-compiler-isolation>"},
+        {"fn local(seed) { var value = seed; pn read() { return value };\n"
+         "let saved = () => value; value = value + 2; return [saved(), value] };\n"
+         "let result = local(38); if (result[0] == 38 and result[1] == 40) 42 else 0",
+         "<lambda-cache-shared-home-isolation>"},
+        // rest context and its generated entry survive cache reuse across
+        // fresh EvalContexts; a nested default must see its own empty rest.
+        {"fn defaults(n = len(varg())^, ...) any^ => n;\n"
+         "fn tail(n, ...) => if (n == 0) varg(0) else tail(n - 1, n);\n"
+         "fn outer(...) { let n = defaults(); return [n, len(varg()), tail(3, 9)] };\n"
+         "let result = outer(1, 2); if (result == [0, 2, 1]) 42 else 0",
+         "<lambda-cache-variadic-isolation>"},
+        // binder selections belong to an invocation, including cached images
+        // entered under another compiler and a fresh EvalContext (D4.1.4).
+        {"fn choose(T: type, value: T) T => value;\n"
+         "fn selected(value: number as T) type => T;\n"
+         "let a = choose(int, 40)^; let b = choose(float, 2.5)^;\n"
+         "let integral = selected(3)^; let fractional = selected(3.5)^;\n"
+         "if (a == 40 and b == 2.5 and integral == int and fractional == float) 42 else 0",
+         "<lambda-cache-binder-isolation>"}
+    };
     const char* compilers[] = {"mvp", "production", "mvp"};
-    const Script* owners[3] = {};
-    for (unsigned i = 0; i < 3; i++) {
-        LambdaTestNativeCompiler compiler(LAMBDA_TIER_JIT);
-        compiler.select_compiler(compilers[i]);
-        Runtime runtime = {};
-        runtime_init(&runtime);
-        Input* output = run_script_mir(&runtime, source, (char*)identity, true);
+    for (const auto& test : cases) {
+        const Script* owners[3] = {};
+        for (unsigned i = 0; i < 3; i++) {
+            LambdaTestNativeCompiler compiler(LAMBDA_TIER_JIT);
+            compiler.select_compiler(compilers[i]);
+            LambdaCacheRuntime scope;
+            Runtime& runtime = scope.runtime;
+            Input* output = run_script_mir(&runtime, test.source, (char*)test.identity, true);
+            ASSERT_NE(output, nullptr);
+            ASSERT_EQ(get_type_id(output->root), LMD_TYPE_INT);
+            EXPECT_EQ(it2i(output->root), 42);
+            ASSERT_NE(runtime.scripts, nullptr);
+            ASSERT_GT(runtime.scripts->length, 0);
+            Script* instance = (Script*)runtime.scripts->data[0];
+            owners[i] = instance->cache_template ? instance->cache_template : instance;
+            EXPECT_TRUE(owners[i]->cache_owned_template);
+            if (i == 1) EXPECT_NE(owners[1], owners[0]);
+            if (i == 2) EXPECT_EQ(owners[2], owners[0]);
+        }
+    }
+}
+
+TEST(LambdaScriptCache, ForeignExportsRetainExecutionOwnedNamespaces) {
+    // D7.4.1/D6.2.3: each fresh runtime owns the guest environment; a sealed
+    // Core image must not retain a previous runtime's mutable JS namespace.
+    const char* source =
+        "import guest: ._mir_mvp_js_exports\n"
+        "import other: ._mir_mvp_js_export_module\n"
+        "let saved = guest.arity2\n"
+        "let borrowed = other.exported_value()^\n"
+        "let same = (saved == borrowed)^\n"
+        "let initial = guest.arity0()^\n"
+        "let first = saved(2, 3)^\n"
+        "let changed = guest.step()^\n"
+        "let later = saved(2, 3)^;\n"
+        "if (same and initial == 41 and first == 46 and changed == 42 and later == 47) 42 else 0";
+    LambdaTestNativeCompiler compiler(LAMBDA_TIER_JIT);
+    compiler.select_compiler("mvp");
+    for (int iteration = 0; iteration < 3; iteration++) {
+        LambdaCacheRuntime scope;
+        Input* output = run_script_mir(&scope.runtime, source,
+            (char*)"test/lambda/mvp/_cache_js_exports.ls", true);
         ASSERT_NE(output, nullptr);
         ASSERT_EQ(get_type_id(output->root), LMD_TYPE_INT);
         EXPECT_EQ(it2i(output->root), 42);
-        ASSERT_NE(runtime.scripts, nullptr);
-        ASSERT_GT(runtime.scripts->length, 0);
-        Script* instance = (Script*)runtime.scripts->data[0];
-        owners[i] = instance->cache_template ? instance->cache_template : instance;
-        EXPECT_TRUE(owners[i]->cache_owned_template);
-        if (i == 1) EXPECT_NE(owners[1], owners[0]);
-        if (i == 2) EXPECT_EQ(owners[2], owners[0]);
-        runtime_cleanup(&runtime);
+        ASSERT_NE(scope.runtime.scripts, nullptr);
+        ASSERT_GT(scope.runtime.scripts->length, 0);
+        Script* script = (Script*)scope.runtime.scripts->data[0];
+        ASSERT_NE(script->jit_context, nullptr);
+        EXPECT_TRUE(script->cache_cross_lang_tainted);
+        EXPECT_FALSE(script->cache_mir_artifact);
     }
 }
 

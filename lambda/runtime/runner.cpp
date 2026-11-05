@@ -3555,6 +3555,11 @@ void runtime_cleanup_ast_prebuild_worker(Runtime* runtime) {
 
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (!script) return;
+    // hosted descriptors borrow bridge ASTs only while this Runtime owns them.
+    for (ModuleDescriptor* module = module_registry_first_for_runtime(runtime);
+            module; module = module_registry_next(module)) {
+        if (module->lambda_import_script == script) module->lambda_import_script = NULL;
+    }
     runtime_module_unit_index_delete_script(runtime, script);
     if (remove_index && script->reference) {
         runtime_loaded_script_delete_instance(runtime, script);

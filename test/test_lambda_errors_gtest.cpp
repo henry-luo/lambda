@@ -89,6 +89,40 @@ TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
     EXPECT_EQ(before, after);
 }
 
+TEST_F(EvalContextTest, DependentAdmissionDistinguishesErrorDataFromFailure) {
+    // S11.4.3/S11.4.8v2: identical Item tags cannot report admission status.
+    Item failure = ItemError;
+    Bool admitted = BOOL_FALSE;
+    Item result = lambda_type_check_env_status(failure, &TYPE_ANY, nullptr, "open", &admitted);
+    EXPECT_EQ(result.item, failure.item);
+    EXPECT_EQ(admitted, BOOL_TRUE);
+    result = lambda_type_check_env_status(failure, &TYPE_INT, nullptr, "closed", &admitted);
+    EXPECT_EQ(result.item, failure.item);
+    EXPECT_EQ(admitted, BOOL_FALSE);
+
+    TypeBinder* site = (TypeBinder*)alloc_type_kind(eval.pool, TYPE_KIND_BINDER, sizeof(TypeBinder));
+    ASSERT_NE(site, nullptr);
+    site->bound = &TYPE_ANY;
+    // these selections are canonical static types, with no managed owner.
+    Type* environment[1] = {};
+    result = lambda_type_check_env_status(failure, (Type*)site, environment, "site", &admitted);
+    EXPECT_EQ(result.item, failure.item);
+    EXPECT_EQ(admitted, BOOL_TRUE);
+    ASSERT_EQ(environment[0], &TYPE_ERROR);
+    TypeBoundRef* reference = (TypeBoundRef*)alloc_type_kind(eval.pool, TYPE_KIND_BOUND_REF, sizeof(TypeBoundRef));
+    ASSERT_NE(reference, nullptr);
+    reference->bound = &TYPE_ANY;
+    result = lambda_type_check_env_status(failure, (Type*)reference, environment, "reference", &admitted);
+    EXPECT_EQ(result.item, failure.item);
+    EXPECT_EQ(admitted, BOOL_TRUE);
+
+    Item number = {.item = i2it(1)};
+    result = lambda_type_check_env_status(number, (Type*)site, environment, "join", &admitted);
+    EXPECT_EQ(get_type_id(result), LMD_TYPE_ERROR);
+    EXPECT_EQ(admitted, BOOL_FALSE);
+    EXPECT_EQ(environment[0], &TYPE_ERROR);
+}
+
 // S9.1.4v2/D5.3.2: closure environments, rather than native locals, own
 // the shared binding after its parent's explicit root is released.
 TEST_F(EvalContextTest, ConfinedCaptureHomesShareWritesAndTraceTheirValues) {
@@ -3384,6 +3418,8 @@ TEST_F(NegativeScriptTest, TypeBinderDiagnosticsRemainSpecific) {
         "a binder is not allowed in a return type");
     ExpectErrorMessage("test/lambda/negative/semantic/type_binder_trailing_that.ls",
         "a binder must follow the complete parameter contract");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/type_binder_value_mismatch.ls",
+        false, "argument 1 must be an explicit type value");
 }
 
 TEST_F(NegativeScriptTest, TypeSubtypeDiagnosticsRemainSpecific) {

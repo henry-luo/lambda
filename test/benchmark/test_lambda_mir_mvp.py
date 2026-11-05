@@ -119,6 +119,131 @@ class LambdaMirMvpTests(unittest.TestCase):
         names = ("mir_mvp_range_domains", "mir_mvp_query_sources")
         self.check_gc_fixtures(ROOT / "test/lambda/mvp" / (name + ".ls") for name in names)
 
+    def test_constrained_type_predicates(self):
+        # S11.4.6v4/S11.4.11 cover declaring scopes, recursive predicates,
+        # Error answers, base-only annotations and filtered handlers.
+        names = ("constrained_type", "constrained_type_base", "constrained_type_hoisted",
+                 "constrained_type_predicate", "constrained_type_recursive",
+                 "handler_convenience", "proc/handler_control")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_nominal_literal_values(self):
+        names = ("object_default", "object_constraint", "object_field_admission",
+                 "mvp/mir_mvp_nominal_values")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_nominal_methods(self):
+        # S12.3.3v2/S12.3.4v2/S7.4.6v3: bound receiver snapshots, named
+        # defaults and field publication agree across both generated ABIs.
+        names = ("mvp/mir_mvp_bound_methods", "import_pub_types", "object", "object_nominal",
+                 "object_method_receiver", "object_method_value", "object_inherit", "object_content",
+                 "object_boxed_field_layout", "object_optional_presence", "object_method_named_args",
+                 "object_update", "object_direct_access", "proc/object_method_write",
+                 "proc/object_optional_method", "proc/object_mutation", "proc/object_direct_access",
+                 "proc/object_boxed_field_write", "proc/object_open_instance",
+                 "proc/proc_keyword_object_members", "proc/proc_object_counter")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_native_module_calls_and_scalar_joins(self):
+        names = ("mvp/mir_mvp_module_builtins", "mvp/mir_mvp_scalar_joins",
+                 "dom_derive_chardata", "dom_derive_traversal", "dom_derive_query", "dom_derive_forms",
+                 "dom_derive_urlencode", "dom_edit", "dom_edit_protocol", "dom_edit_plan",
+                 "dom_stylesheet", "dom_validate", "dom_local_fonts")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_inferred_record_fields(self):
+        names = ("mvp/mir_mvp_inferred_record_fields", "latex/test_latex_citeproc_errors",
+                 "latex/test_latex_citeproc_data", "mathml_format")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_decomposition_values(self):
+        names = ("mvp/mir_mvp_decomposition", "mvp/mir_mvp_decomposition_proc",
+                 "fn_local_decomposition", "interp_decompose")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_store_containment(self):
+        names = ("mvp/mir_mvp_store_containment", "mvp/mir_mvp_copy_loops",
+                 "mvp/mir_mvp_iterations", "mvp/mir_mvp_kernel_loops", "proc/ledger_containment")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_confined_capture_homes(self):
+        names = ("mvp/mir_mvp_confined_capture_homes", "fn_local_confined_capture",
+                 "fn_local_capture_modes", "fn_local_capture_iterations", "fn_local_capture_roots",
+                 "fn_local_decomposition_capture", "proc/fn_local_decomposition_snapshot")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_variadic_calls(self):
+        # S16.9.7/D7.4.1: direct, imported and boxed entries share rest slots;
+        # self-tail calls evaluate new rest operands and preserve their effects.
+        names = ("mvp/mir_mvp_variadic_values", "mvp/mir_mvp_variadic_modules",
+                 "mvp/mir_mvp_variadic_recursion", "mvp/mir_mvp_variadic_admission",
+                 "arrow_variadic", "interp_variadic",
+                 "interp_variadic_promoted", "fn_local_capture_flow", "call_dynamic_apply",
+                 "type_enforcement_dynamic_call", "func_param", "func_param2",
+                 "dynamic_call_scalar_ownership")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_variadic_var_outcomes(self):
+        # Full currently loses this var rebind and T0 excludes the call; retain
+        # the S9.1.3 oracle and record those controls in the parity checkpoint.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_variadic_exits.ls", mode)
+
+    def test_binder_calls(self):
+        # S11.4.8v2/D4.1.4: site joins, dependent admission, defaults and
+        # empty nested selections retain the same contract on every call.
+        names = ("type_binder", "type_binder_leading", "type_binder_raw_variants",
+                 "proc/type_binder_proc_raw", "proc/type_binder_var_record_raw",
+                 "type_param_error_short_circuit", "proc/proc_type_param_error_short_circuit",
+                 "proc/generic_array_var_cow_home", "mvp/mir_mvp_binder_calls")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_binder_type_captures(self):
+        # retain the declared oracle: Full/T0 already fail the captured type
+        # cases under p11; their controls remain in the real parity reports.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_binder_values.ls", mode)
+
+    def test_binder_error_admission(self):
+        # S11.4.3/S11.4.8v2: an admitted Error is data; an incompatible
+        # repeated-site selection still rejects the invocation.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_binder_outcomes.ls", mode)
+
+    def test_extended_call_operands(self):
+        # D4.2.1/S7.7.3: conversions and named system operands share checked
+        # call transport; Error-only edges do not create a native value lane.
+        names = ("agg_null_absence", "admission_call_outcomes",
+                 "mvp/mir_mvp_numeric_type_calls", "mvp/mir_mvp_empty_normal_domains")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_imported_type_values(self):
+        self.check_gc_fixtures((ROOT / "test/lambda/import_type_values.ls",))
+
+    def test_javascript_exports(self):
+        # D7.4.1/D6.2.3: retain the defining namespace and caller-owned scalar
+        # homes through each physical bridge arity, including stack operands.
+        names = ("import_js", "import_js_naming", "binary_js_bridge", "mvp/mir_mvp_js_exports")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_javascript_export_values(self):
+        # Full/T0's E229 controls remain in the parity reports; MVP publishes
+        # a Core boxed adapter instead of reinterpreting a JsFunction as code.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_js_export_values.ls", mode)
+
+    def test_ndim_reads_and_images(self):
+        # S8.2.4v3/D6.2.3: coordinates and their receiver survive allocating
+        # keys; image channels expose the same N-D runtime representation.
+        names = ("mvp/mir_mvp_ndim_reads", "mvp/mir_mvp_ndim_effects", "ndim_any_receiver",
+                 "image_composition", "image_edit", "image_gif_disposal", "image_import",
+                 "image_paint", "image_psd", "image_raster")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
     def test_content_list_and_spread_semantics(self):
         names = ("mir_mvp_content", "mir_mvp_root_content", "mir_mvp_elements",
                              "mir_mvp_type_membership", "mir_mvp_query_context", "mir_mvp_generic_operators",

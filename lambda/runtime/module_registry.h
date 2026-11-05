@@ -33,6 +33,7 @@ typedef struct ModuleDescriptor {
     const char* path;           // resolved absolute path (unique key, owned)
     const char* source_lang;    // "lambda", "js", "python", ... (static string, not owned)
     LangProfile* profile;       // resolved language profile for shared AST phases
+    struct Script* lambda_import_script; // runtime-owned synthetic Core import AST
     Item namespace_obj;         // namespace Item (map of exported symbols)
     // CommonJS `module` object for a JS file loaded through require(). A
     // second fact beside the namespace, not a retag of it: the loader owns

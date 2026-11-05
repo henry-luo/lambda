@@ -1496,6 +1496,36 @@ static inline bool ast_definition_denotes_type(const AstNode* definition) {
     }
 }
 
+// type expressions yield first-class type values, not instances of their payload.
+static inline bool ast_is_explicit_type_value(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_TYPE:
+    case AST_NODE_CONTENT_TYPE:
+    case AST_NODE_LIST_TYPE:
+    case AST_NODE_ARRAY_TYPE:
+    case AST_NODE_MAP_TYPE:
+    case AST_NODE_ELMT_TYPE:
+    case AST_NODE_FUNC_TYPE:
+    case AST_NODE_BINARY_TYPE:
+    case AST_NODE_UNARY_TYPE:
+    case AST_NODE_CONSTRAINED_TYPE:
+    case AST_NODE_OBJECT_TYPE:
+    case AST_NODE_STRING_PATTERN:
+    case AST_NODE_SYMBOL_PATTERN:
+        return true;
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        return ast_definition_denotes_type(ident->entry ? ident->entry->node : NULL);
+    }
+    default:
+        return false;
+    }
+}
+
+
+
 static inline struct NameEntry* ast_open_alias_entry(const AstOpenNode* node) {
     AstNode* decl = node ? node->alias_decl : NULL;
     return decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR

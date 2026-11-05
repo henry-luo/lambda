@@ -121,7 +121,15 @@ bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
     init_func_map();
     JitImport key = {.name = name, .func = NULL};
     const JitImport* found = (const JitImport*)hashmap_get(func_map, &key);
-    if (!found) return false;
+    if (!found) {
+        // descriptor-backed modules use the same fixed Item ABI as their
+        // exported system-function rows. Keep effects conservative, but let
+        // metadata and address lookup recognize the same symbols (D7.6.1).
+        if (!find_dynamic_sys_func_import(name)) return false;
+        metadata->ret_class = JIT_VALUE_BOXED_ITEM;
+        metadata->flags |= JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_DYNAMIC);
+        return true;
+    }
     *metadata = found->metadata;
     if (metadata->ret_class == JIT_VALUE_UNKNOWN) {
         for (int i = 0; i < sys_func_def_count; i++) {

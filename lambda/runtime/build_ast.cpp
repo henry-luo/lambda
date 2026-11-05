@@ -957,7 +957,6 @@ static Type* sys_func_call_result_type(Transpiler* tp, SysFuncInfo* info,
 bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out);
 static bool sys_conversion_literal_is_error_free(Transpiler* tp, SysFuncInfo* info,
         AstNode* first_arg);
-static bool ast_is_explicit_type_value(AstNode* node);
 
 static bool sys_conversion_has_error_free_numeric_input(Type* type) {
     // Keep this proof deliberately narrower than the abstract `number` type:
@@ -3931,7 +3930,13 @@ static Type* static_binder_argument_type(AstNode* argument, TypeBinder* binder,
     if (!argument || !argument->type || !binder) return NULL;
     Type* candidate = boundary_unwrap_type(argument->type);
     if (binder->bound == &TYPE_TYPE) {
-        return ast_is_explicit_type_value(argument) ? candidate : NULL;
+        if (ast_is_explicit_type_value(argument)) return candidate;
+        if (lambda_static_boundary_relation(argument->type, &TYPE_TYPE, true) == STATIC_BOUNDARY_REJECTED)
+            return NULL;
+        // the argument's category is type; its selected inner contract is
+        // runtime data and cannot become an exact specialization key.
+        *exact = false;
+        return &TYPE_ANY;
     }
     // S11.4.8v2/S4.2.2: a value binder selects a type, not a scalar singleton.
     Item literal;
@@ -3971,13 +3976,16 @@ static Type* static_binder_join(Type* left, Type* right) {
 }
 
 static bool static_bind_argument(Type** env, bool* written, TypeBinder* binder,
-        AstNode* argument, bool require_exact = false) {
+        AstNode* argument, bool require_exact = false, bool* deferred = NULL,
+        bool nested_site = false) {
     if (!env || !written || !binder || binder->slot >= LAMBDA_MAX_FUNCTION_ARGS) {
         return false;
     }
     bool exact = false;
-    Type* candidate = static_binder_argument_type(argument, binder, &exact);
+    // a nested site observes a subvalue, never the whole array/constraint.
+    Type* candidate = nested_site ? binder->bound : static_binder_argument_type(argument, binder, &exact);
     if (!candidate || (require_exact && !exact)) return false;
+    if (deferred && !exact) *deferred = true;
     if (!written[binder->slot]) {
         env[binder->slot] = candidate;
         written[binder->slot] = true;
@@ -4005,7 +4013,8 @@ bool lambda_ast_collect_static_binder_env(AstCallNode* call,
         TypeBinder* binder = param->binder ? param->binder :
             static_contract_binder_site(parameter_boundary_type(param));
         if (!binder) continue;
-        if (!static_bind_argument(env_out, written, binder, argument, true)) return false;
+        bool nested = !param->binder && parameter_boundary_type(param) != (Type*)binder;
+        if (!static_bind_argument(env_out, written, binder, argument, true, NULL, nested)) return false;
     }
     for (uint16_t i = 0; i < func_type->binder_count; i++) {
         if (!written[i] || !env_out[i]) return false;
@@ -4127,6 +4136,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     bool parameter_short_circuits_error = callee_error;
     Type* binder_env[LAMBDA_MAX_FUNCTION_ARGS] = {};
     bool binder_written[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    bool binder_deferred = false;
     AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     int slot_count = resolve_call_boundary_arguments(call, injected, by_param);
     AstFuncNode* named_callee = ast_call_has_named_args(call)
@@ -4142,7 +4152,8 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         TypeBinder* binder = binder_param->binder ? binder_param->binder :
             static_contract_binder_site(parameter_boundary_type(binder_param));
         if (!binder) continue;
-        if (!static_bind_argument(binder_env, binder_written, binder, binder_arg)) {
+        bool nested = !binder_param->binder && parameter_boundary_type(binder_param) != (Type*)binder;
+        if (!static_bind_argument(binder_env, binder_written, binder, binder_arg, false, &binder_deferred, nested)) {
             if (!line) line = source_span_start_line(tp, diagnostic_span);
             record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
                 binder->bound == &TYPE_TYPE
@@ -4210,14 +4221,6 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         if (!arg || ast_is_omitted_argument(arg)) continue;
         TypeBinder* binder_site = expected_param->binder ? expected_param->binder :
             static_contract_binder_site(parameter_boundary_type(expected_param));
-        if (expected_param->binder && !ast_is_explicit_type_value(arg)) {
-            record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
-                "argument %d must be an explicit type value", arg_index + 1);
-            if (!should_continue_transpiling(tp)) {
-                call->type = &TYPE_ERROR;
-                return false;
-            }
-        }
         if (expected_param->is_var_param) {
             AstIdentNode* root = compound_root_ident(arg);
             if (!root || !root->entry || !root->entry->is_mutable) {
@@ -4287,13 +4290,17 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         }
         Type* full_type = parameter_boundary_type(expected_param);
         full_type = lambda_ast_resolve_binder_contract(full_type, binder_env);
-        if (binder_site) full_type = binder_site->bound;
         if (parameter_short_circuits_argument_error(tp, expected_param, arg)) {
             parameter_short_circuits_error = true;
         }
-        StaticBoundaryResult relation = expected_param->binder
+        // a type-valued expression can supply a binder just like a literal;
+        // only a known type literal proves admission without the type boundary.
+        StaticBoundaryResult relation = expected_param->binder && ast_is_explicit_type_value(arg)
             ? STATIC_BOUNDARY_PROVEN
             : lambda_static_boundary_relation(arg->type, full_type, true);
+        if (binder_deferred && !binder_site && relation == STATIC_BOUNDARY_PROVEN &&
+                lambda_type_contract_has_binder(parameter_boundary_type(expected_param), true))
+            relation = STATIC_BOUNDARY_DEFERRED;
         if (expected_param->has_explicit_contract &&
                 relation == STATIC_BOUNDARY_DEFERRED &&
                 !ast_boundary_cannot_fail(arg, full_type)) {
@@ -5611,32 +5618,6 @@ static Type* alloc_array_num_result_type(Transpiler* tp, AstBinaryNode* ast_node
     return (Type*)type;
 }
 
-static bool ast_is_explicit_type_value(AstNode* node) {
-    node = boundary_unwrap_primary(node);
-    if (!node) return false;
-    switch (node->node_type) {
-    case AST_NODE_TYPE:
-    case AST_NODE_CONTENT_TYPE:
-    case AST_NODE_LIST_TYPE:
-    case AST_NODE_ARRAY_TYPE:
-    case AST_NODE_MAP_TYPE:
-    case AST_NODE_ELMT_TYPE:
-    case AST_NODE_FUNC_TYPE:
-    case AST_NODE_BINARY_TYPE:
-    case AST_NODE_UNARY_TYPE:
-    case AST_NODE_CONSTRAINED_TYPE:
-    case AST_NODE_OBJECT_TYPE:
-    case AST_NODE_STRING_PATTERN:
-    case AST_NODE_SYMBOL_PATTERN:
-        return true;
-    case AST_NODE_IDENT: {
-        AstIdentNode* ident = (AstIdentNode*)node;
-        return ast_definition_denotes_type(ident->entry ? ident->entry->node : NULL);
-    }
-    default:
-        return false;
-    }
-}
 
 static bool ast_may_evaluate_to_type_value(AstNode* node) {
     node = boundary_unwrap_primary(node);

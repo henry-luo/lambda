@@ -3,6 +3,199 @@
 #include "mir_emitter_shared.hpp"
 #include "recovery_frame.h"
 
+// EvalContext uses the same single-inheritance layout as Full's heap offsets.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static constexpr size_t MIR_EVAL_CONTEXT_VARGS_OFFSET = offsetof(EvalContext, current_vargs);
+#pragma clang diagnostic pop
+
+typedef MIR_reg_t (*MirArgumentItem)(void*, int);
+
+// conversion returns an Item so rejected inputs retain their error value.
+static inline MIR_reg_t em_numeric_type_call(MirEmitter* em, Type* target, MIR_reg_t item) {
+    return target->type_id == LMD_TYPE_NUM_SIZED
+        ? em_call_2(em, "coerce_num_sized", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(em->ctx, item),
+            MIR_T_I64, MIR_new_int_op(em->ctx, type_num_sized_kind(target)), true)
+        : em_call_1(em, "coerce_uint64", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(em->ctx, item), true);
+}
+
+// JS exports retain a Function object and its module environment, not a Core
+// code pointer. The shared bridge writes cold scalars into this frame's home.
+static inline MIR_reg_t em_js_export_call(MirEmitter* em, MIR_item_t target,
+        int count, const MIR_op_t* arguments) {
+    MIR_reg_t function = em_new_reg(em, "js_export", MIR_T_P);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, function), MIR_new_ref_op(em->ctx, target)));
+    if (em->root_call_value)
+        em->root_call_value(em->call_owner, function, JIT_VALUE_RAW_GC_POINTER);
+    int slot = em_scalar_home_new(em);
+    MIR_reg_t home = em_materialize_frame_ref(em, em_scalar_home_ref(em, slot));
+    MIR_type_t types[LAMBDA_MAX_FUNCTION_ARGS + 2];
+    MIR_op_t operands[LAMBDA_MAX_FUNCTION_ARGS + 2];
+    types[0] = MIR_T_P; operands[0] = MIR_new_reg_op(em->ctx, function);
+    for (int i = 0; i < count; i++) {
+        types[i + 1] = MIR_T_I64; operands[i + 1] = arguments[i];
+    }
+    types[count + 1] = MIR_T_P; operands[count + 1] = MIR_new_reg_op(em->ctx, home);
+    const char* bridge = mir_em_format_name(em, "js_call_export_%d_into", count);
+    MIR_reg_t result = em_call_with_args(em, bridge, MIR_T_I64,
+        count + 2, types, operands, true);
+    em_scalar_home_bind(em, slot, result);
+    return result;
+}
+
+// D4.1.1/D4.1.4: admission holds inner contracts; expressions read type Items.
+static inline MIR_reg_t em_binder_type_value(MirEmitter* em, MIR_reg_t environment,
+        uint16_t slot, Type* bound) {
+    MIR_reg_t selected = em_load_at(em, environment, slot * sizeof(Type*),
+        MIR_T_I64, "binder_type");
+    // S11.4.8v2: an empty nested site selects its declared bound.
+    MIR_label_t ready = em_new_label(em);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, ready),
+        MIR_new_reg_op(em->ctx, selected), MIR_new_int_op(em->ctx, 0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, selected),
+        MIR_new_int_op(em->ctx, (intptr_t)bound)));
+    em_emit_label(em, ready);
+    return em_call_1(em, "lambda_type_value_from_contract", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(em->ctx, selected), true);
+}
+
+// D3.3.1: call/rest slots retain nulls and keep a list as one array image.
+// The precise candidate survives evaluation of every later argument.
+static inline MIR_reg_t em_argument_array(MirEmitter* em, int first, int count,
+        MirArgumentItem read, void* owner) {
+    MIR_reg_t arguments = em_call_0(em, "array_plain", MIR_T_P, true);
+    if (em->root_call_value)
+        em->root_call_value(em->call_owner, arguments, JIT_VALUE_RAW_GC_POINTER);
+    for (int i = first; i < count; i++) {
+        MIR_reg_t item = read(owner, i);
+        if (!item) continue;
+        if (em->root_call_value)
+            em->root_call_value(em->call_owner, item, JIT_VALUE_BOXED_ITEM);
+        em_call_void_2(em, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(em->ctx, arguments),
+            MIR_T_I64, MIR_new_reg_op(em->ctx, item), true);
+    }
+    return arguments;
+}
+
+struct MirMethodField {
+    MIR_reg_t item;
+    MIR_reg_t present;
+};
+
+static inline MirMethodField em_method_field_load(MirEmitter* em,
+        MIR_reg_t self, const ShapeEntry* field) {
+    const char* name = mir_em_persist_name(em, *field->name).str;
+    MirMethodField value = {};
+    value.item = em_call_2(em, "item_attr", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, self),
+        MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)name), true);
+    if (em->root_call_value) em->root_call_value(em->call_owner, value.item, JIT_VALUE_BOXED_ITEM);
+    if (field->is_optional) {
+        MIR_reg_t text = em_call_2(em, "heap_strcpy", MIR_T_P,
+            MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)name),
+            MIR_T_I64, MIR_new_int_op(em->ctx, field->name->length), true);
+        MirValue key = em_require_rep(em,
+            em_value_for_rep(text, LMD_TYPE_STRING, VALUE_REP_RAW_GC_POINTER, &TYPE_STRING), VALUE_REP_ITEM);
+        value.present = em_call_2(em, "fn_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(em->ctx, key.reg),
+            MIR_T_I64, MIR_new_reg_op(em->ctx, self), true);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UEXT8,
+            MIR_new_reg_op(em->ctx, value.present), MIR_new_reg_op(em->ctx, value.present)));
+    }
+    return value;
+}
+
+// S7.4.6v3/S16.9.5: an untouched absent field stays absent; an assigned null
+// is present. Both frontends publish the same final snapshot on early return.
+static inline void em_method_field_store(MirEmitter* em, MIR_reg_t self,
+        const ShapeEntry* field, MIR_reg_t item, MIR_reg_t present, MirResultCheck check) {
+    MIR_label_t done = em_new_label(em);
+    if (present) {
+        MIR_label_t store = em_new_label(em);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, store),
+            MIR_new_reg_op(em->ctx, present)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, done),
+            MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, ITEM_NULL)));
+        em_emit_label(em, store);
+    }
+    const char* name = mir_em_persist_name(em, *field->name).str;
+    MIR_reg_t symbol = em_call_2(em, "heap_create_symbol", MIR_T_P,
+        MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)name),
+        MIR_T_I64, MIR_new_int_op(em->ctx, field->name->length), true);
+    MirValue key = em_require_rep(em,
+        em_value_for_rep(symbol, LMD_TYPE_SYMBOL, VALUE_REP_RAW_GC_POINTER, &TYPE_SYMBOL), VALUE_REP_ITEM);
+    MIR_reg_t result = em_call_3(em, "fn_map_set", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, self), MIR_T_I64, MIR_new_reg_op(em->ctx, key.reg),
+        MIR_T_I64, MIR_new_reg_op(em->ctx, item), true);
+    check(em->call_owner, result);
+    em_emit_label(em, done);
+}
+
+static inline void em_object_method_register(MirEmitter* em, int type_index,
+        AstFuncNode* method, MIR_item_t target) {
+    const char* name = mir_em_persist_cstr(em, method->name->chars).str;
+    MIR_reg_t address = em_new_reg(em, "method_address", MIR_T_P);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, address), MIR_new_ref_op(em->ctx, target)));
+    em_call_void_5(em, "object_type_set_method", MIR_T_I64, MIR_new_int_op(em->ctx, type_index),
+        MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)name), MIR_T_P, MIR_new_reg_op(em->ctx, address),
+        MIR_T_I64, MIR_new_int_op(em->ctx, ast_linked_node_count(method->param)),
+        MIR_T_I64, MIR_new_int_op(em->ctx, lambda_type_func_is_proc(method->type)), true);
+}
+
+typedef MIR_reg_t (*MirConstraintPredicate)(void*, TypeConstrained*, MIR_reg_t);
+typedef MIR_reg_t (*MirConstraintTruth)(void*, MIR_reg_t);
+
+// S11.2.1/S11.4.11: admit the base, then call each declaring-scope predicate
+// innermost first. A predicate's Error answer is false, not a propagated fault.
+static inline MIR_reg_t em_constrained_type_test(MirEmitter* em,
+        TypeConstrained* constrained, MIR_reg_t value, MIR_reg_t type_value,
+        MirConstraintPredicate predicate, MirConstraintTruth truth) {
+    MIR_reg_t result = em_new_reg(em, "ct_result", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, result),
+        MIR_new_int_op(em->ctx, 0)));
+    TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_layers(constrained, layers);
+    if (count < 0) return result;
+    MIR_label_t done = em_new_label(em);
+    MIR_reg_t admitted = em_call_2(em, "fn_is", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, value),
+        MIR_T_I64, MIR_new_reg_op(em->ctx, type_value), true);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UEXT8,
+        MIR_new_reg_op(em->ctx, admitted), MIR_new_reg_op(em->ctx, admitted)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, done),
+        MIR_new_reg_op(em->ctx, admitted), MIR_new_int_op(em->ctx, BOOL_TRUE)));
+    for (int i = 0; i < count; i++) {
+        MIR_reg_t answer = predicate(em->call_owner, layers[i], value);
+        MIR_reg_t accepts = truth(em->call_owner, answer);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF, MIR_new_label_op(em->ctx, done),
+            MIR_new_reg_op(em->ctx, accepts)));
+    }
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, result),
+        MIR_new_int_op(em->ctx, 1)));
+    em_emit_label(em, done);
+    return result;
+}
+
+// imported boxed entries need the trampoline to bind their declaring context.
+static inline MIR_reg_t em_imported_constraint_call(MirEmitter* em, MIR_item_t target,
+        MIR_reg_t value) {
+    MIR_reg_t address = em_new_reg(em, "that_fp", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, address), MIR_new_ref_op(em->ctx, target)));
+    MIR_var_t vars[3] = {{MIR_T_P, "fp", 0}, {MIR_T_I64, "p", 0}, {MIR_T_P, "home", 0}};
+    MirImportEntry* trampoline = em_ensure_import(em, "fn_call_boxed_1_into", MIR_T_I64, 3, vars, 1, true);
+    MIR_reg_t answer = em_new_reg(em, "that_answer", MIR_T_I64);
+    MIR_op_t ops[6] = {MIR_new_ref_op(em->ctx, trampoline->proto),
+        MIR_new_ref_op(em->ctx, trampoline->import), MIR_new_reg_op(em->ctx, answer),
+        MIR_new_reg_op(em->ctx, address), MIR_new_reg_op(em->ctx, value), MIR_new_int_op(em->ctx, 0)};
+    em_emit_borrowed_call(em, "fn_call_boxed_1_into", MIR_new_insn_arr(em->ctx, MIR_CALL, 6, ops));
+    return answer;
+}
+
 static inline void em_mark_boxed_function(MirEmitter* em, MIR_reg_t object,
         bool procedure, uint32_t shape) {
     em_call_void_1(em, "lambda_function_mark_mir_context_abi", MIR_T_P, MIR_new_reg_op(em->ctx, object), true);
@@ -44,6 +237,29 @@ static inline MIR_reg_t em_function_value(MirEmitter* em, MIR_reg_t address,
 }
 
 typedef MIR_reg_t (*MirCaptureReader)(void* owner, FnCapture* capture);
+
+static inline MIR_reg_t em_capture_home_new(MirEmitter* em, MIR_reg_t item) {
+    MIR_reg_t home = em_call_1(em, "lambda_capture_home_new", MIR_T_P,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, item), true);
+    if (em->root_call_value) em->root_call_value(em->call_owner, home, JIT_VALUE_RAW_GC_POINTER);
+    return home;
+}
+
+// reload after a callback without a call that could overwrite its companion.
+static inline MIR_reg_t em_capture_home_peek(MirEmitter* em, MIR_reg_t home) {
+    MIR_reg_t items = em_load_at(em, home, LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_P, "shared_items");
+    return em_load_at(em, items, 0, MIR_T_I64, "shared_value");
+}
+
+// S16.8.7: both decomposition forms project the same once-evaluated source.
+static inline MIR_reg_t em_decompose_item(MirEmitter* em, AstDecomposeNode* node,
+        MIR_reg_t source, int index) {
+    const char* name = node->is_named
+        ? mir_em_persist_cstr(em, node->names[index]->chars).str : NULL;
+    return em_call_2(em, node->is_named ? "item_attr" : "item_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, source), node->is_named ? MIR_T_P : MIR_T_I64,
+        MIR_new_int_op(em->ctx, node->is_named ? (intptr_t)name : index), true);
+}
 
 // each flat environment owns its Item payloads; frontends supply lexical reads
 // and capture permissions, while this loop owns layout and precise roots.

@@ -22,6 +22,14 @@ extern "C" {
 
 bool has_current_item_ref(AstNode* node);
 
+// S11.4.8v2: nested binder sites establish slots before reference admission.
+static inline bool ast_parameter_is_binder_site(const AstNamedNode* parameter) {
+    TypeParam* type = parameter ? lambda_type_param(parameter->type) : NULL;
+    Type* contract = type && type->contract_type
+        ? type->contract_type : parameter ? parameter->declared_type : NULL;
+    return type && (type->binder || lambda_type_contract_has_binder(contract, false));
+}
+
 typedef struct JubeModuleImport {
     String* module;
     String* alias;
@@ -389,6 +397,15 @@ static inline bool ast_call_has_named_args(const AstCallNode* call) {
         if (arg->node_type == AST_NODE_NAMED_ARG) return true;
     }
     return false;
+}
+
+// explicit sized/u64 conversion calls use a Type producer, not a callable.
+static inline Type* ast_numeric_type_call_target(const AstCallNode* call) {
+    if (!call || call->pipe_inject || !call->argument || call->argument->next) return NULL;
+    AstNode* target = ast_unwrap_primary_to_leaf(call->function);
+    Type* type = target && target->node_type == AST_NODE_TYPE ? ast_called_type_target(target) : NULL;
+    return type && (type->type_id == LMD_TYPE_NUM_SIZED || type->type_id == LMD_TYPE_UINT64)
+        ? type : NULL;
 }
 
 static inline AstNode* ast_positional_call_argument(AstNode* arguments,

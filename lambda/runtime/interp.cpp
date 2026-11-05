@@ -1459,14 +1459,6 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         plan);
 }
 
-static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
-    TypeParam* parameter_type = parameter ? lambda_type_param(parameter->type) : NULL;
-    Type* contract = parameter_type && parameter_type->contract_type
-        ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
-    return parameter_type && (parameter_type->binder ||
-        lambda_type_contract_has_binder(contract, false));
-}
-
 // "<kind> '<name>'" for a declaration or assignment; `owner` is the kind
 static void interp_format_named_boundary(const LambdaBoundary* boundary,
         char* out, size_t capacity) {
@@ -2217,7 +2209,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         // argument may read a parameter (`loop(n - 1, acc + n)`), and writing
         // the slots as we go would feed the new n into acc.
         uint16_t params = f->plan->param_count;
-        RootSpan next_args((size_t)(params > 0 ? params : 1));
+        bool variadic = direct_signature && direct_signature->is_variadic;
+        RootSpan next_args((size_t)params + (variadic || !params ? 1 : 0));
+        if (!next_args.valid()) return ItemError;
         uint64_t* words = next_args.words();
         bool tail_handoff_candidate = interp_tail_handoff_candidate(f);
         RootSpan handoff_args(tail_handoff_candidate ? (size_t)params : 0);
@@ -2261,7 +2255,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                     i++, parameter = (AstNamedNode*)((AstNode*)parameter)->next) {
                 // only a signature with binder slots has binder sites
                 bool binder_site = f->binder_count &&
-                    interp_parameter_is_binder_site(parameter);
+                    ast_parameter_is_binder_site(parameter);
                 if (binder_site != (pass == 0)) continue;
                 Item source = (Item){.item = words[i]};
                 LambdaBoundary boundary = interp_parameter_boundary(f, f->fn,
@@ -2287,6 +2281,23 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             }
             return rejected;
         }
+        if (variadic) {
+            List* rest = list();
+            if (!rest) return ItemError;
+            words[params] = (uint64_t)(uintptr_t)rest;
+            // S16.9.7: a self-tail call owns its newly evaluated rest operands,
+            // after fixed admission (S7.7.3), before rebinding any fixed slots.
+            for (int i = params; i < argc; i++) {
+                AstNode* value_node = has_named_args ? resolved_args[i] : positional;
+                if (!has_named_args && positional) positional = positional->next;
+                if (!value_node) continue;
+                Item extra = eval_expr(f, value_node);
+                if (interp_frame_pending(f)) return ItemNull;
+                array_push_verbatim((Array*)(uintptr_t)words[params], extra);
+            }
+        }
+        if (variadic && !interp_set_frame_vargs(f, (Item){.item = words[params]}))
+            return ItemError;
         for (int p = 0; p < (int)params; p++) {
             f->slots[p] = words[p];
         }
@@ -2308,9 +2319,6 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                 return ItemNull;
             }
         }
-        // MIR's self-tail loop has no write to its hidden `_vargs` parameter:
-        // it rebinds fixed slots only, so the initial rest-list remains the
-        // activation's `varg()` view for every iteration.
         f->signal = EvalSignal::TAIL_CALL;
         return ItemNull;
     }
@@ -2343,9 +2351,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
 
     if (!injected && source_argc == 1 && callee &&
             callee->node_type == AST_NODE_TYPE) {
-        Type* target_type = ast_called_type_target(callee);
-        if (target_type && (target_type->type_id == LMD_TYPE_NUM_SIZED ||
-                target_type->type_id == LMD_TYPE_UINT64)) {
+        Type* target_type = ast_numeric_type_call_target(node);
+        if (target_type) {
             Item source = eval_expr(f, node->argument);
             if (interp_frame_pending(f)) return ItemNull;
             if (item_is_error(source)) return source;
@@ -5951,13 +5958,14 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // same ItemError carrier so a surrounding handler can recover it.
         if (!entry) return ItemError;
         if (entry->is_binder && entry->binder) {
-            if (!f->binder_env || entry->binder_slot >= f->binder_count ||
-                    !f->binder_env[entry->binder_slot]) {
+            if (!f->binder_env || entry->binder_slot >= f->binder_count) {
                 log_error("interp-binder: unresolved binder '%.*s'", entry->name
                     ? (int)entry->name->len : 0, entry->name ? entry->name->chars : "");
                 return ItemError;
             }
-            return lambda_type_value_from_contract(f->binder_env[entry->binder_slot]);
+            // an empty nested binder has no encountered value to select from.
+            Type* selected = f->binder_env[entry->binder_slot];
+            return lambda_type_value_from_contract(selected ? selected : entry->binder->bound);
         }
         // A name bound by `type T = …` is a compile-time binding: it denotes
         // the Type* its declaration built, not a slab slot (which a type
@@ -7373,7 +7381,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 p = next) {
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
-            if (!frame->binder_count || !interp_parameter_is_binder_site(p)) continue;
+            if (!frame->binder_count || !ast_parameter_is_binder_site(p)) continue;
             LambdaBoundary boundary = interp_parameter_boundary(frame, fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
@@ -7393,7 +7401,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 p = next) {
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
-            if (frame->binder_count && interp_parameter_is_binder_site(p)) continue;
+            if (frame->binder_count && ast_parameter_is_binder_site(p)) continue;
             LambdaBoundary boundary = interp_parameter_boundary(frame, fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,

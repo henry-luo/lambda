@@ -2525,7 +2525,10 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Type system and pattern matching
     // ========================================================================
-    {"base_type", FPTR(base_type)},
+    // this is a bounded read of the context's static literal-type table.
+    {"base_type", FPTR(base_type),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"const_type", FPTR(const_type)},
     {"const_type_with_tl", FPTR(const_type_with_tl)},
     {"const_pattern", FPTR(const_pattern)},
@@ -2727,6 +2730,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_fn_colour_guard_list", FPTR(lambda_fn_colour_guard_list)},
     {"lambda_fn_colour_guard_args", FPTR(lambda_fn_colour_guard_args)},
     {"lambda_type_check_env", FPTR(lambda_type_check_env)},
+    {"lambda_type_check_env_status", FPTR(lambda_type_check_env_status)},
     {"lambda_type_value_is_exact", FPTR(lambda_type_value_is_exact)},
     {"lambda_value_type_is_exact", FPTR(lambda_value_type_is_exact)},
     {"lambda_type_value_from_contract", FPTR(lambda_type_value_from_contract)},

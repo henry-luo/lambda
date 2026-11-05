@@ -2859,10 +2859,18 @@ static bool runtime_type_admit_binder(Item value, TypeBinder* binder,
     return true;
 }
 
+static Item type_check_with_status(Item value, Type* expected, Type** env,
+    const LambdaBoundary* boundary, Bool* admitted);
+
+Item lambda_type_check_env_status(Item value, Type* expected, Type** env,
+        const char* boundary, Bool* admitted) {
+    LambdaBoundary label = {boundary, NULL, NULL, NULL, 0};
+    return type_check_with_status(value, expected, env, &label, admitted);
+}
+
 Item lambda_type_check_env(Item value, Type* expected, Type** env,
         const char* boundary) {
-    LambdaBoundary label = {boundary, NULL, NULL, NULL, 0};
-    return lambda_type_check_lazy(value, expected, env, &label);
+    return lambda_type_check_env_status(value, expected, env, boundary, NULL);
 }
 
 Item lambda_report_boundary_failure(Item failure, const char* binding,
@@ -2884,13 +2892,26 @@ Item lambda_report_boundary_failure(Item failure, const char* binding,
 
 Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
         const LambdaBoundary* boundary) {
-    // Plain T preserves a prior diagnostic. Error-admitting contracts still
-    // check their alternatives under normal admission (S7.4.2v3/S11.4.6v3).
-    if (get_type_id(value) == LMD_TYPE_ERROR &&
-            lambda_boundary_preserves_error(expected)) return value;
+    return type_check_with_status(value, expected, env, boundary, NULL);
+}
+
+static Item type_check_with_status(Item value, Type* expected, Type** env,
+        const LambdaBoundary* boundary, Bool* admitted) {
+    if (admitted) *admitted = BOOL_FALSE;
+    // the unchanged Error can be admitted data or a preserved rejection.
+    // binder sites must still publish their selected type (S11.4.8v2).
+    Type* resolved = env ? runtime_boundary_unwrap_type(expected, env) : expected;
+    if (get_type_id(value) == LMD_TYPE_ERROR && lambda_boundary_preserves_error(resolved)) {
+        bool accepts_error = lambda_type_accepts_error(resolved);
+        if (!accepts_error || !lambda_type_contract_has_binder(expected, true)) {
+            if (admitted) *admitted = accepts_error ? BOOL_TRUE : BOOL_FALSE;
+            return value;
+        }
+    }
 
     Item converted = ItemError;
     if (runtime_type_admit_value_env(value, expected, env, &converted)) {
+        if (admitted) *admitted = BOOL_TRUE;
         return converted;
     }
 
@@ -3710,8 +3731,11 @@ static Bool cross_seq_eq(Item a_item, TypeId a_tid, Item b_item, TypeId b_tid,
 }
 
 static Bool function_eq(Function* a, Function* b, int depth, EqualityContext* equality) {
-        if (!a || !b) return BOOL_FALSE;
-    if (a->ptr != b->ptr || a->arity != b->arity || a->entry_abi != b->entry_abi ||
+    if (!a || !b) return BOOL_FALSE;
+    // S5.5.1v2: separate native adapters can represent the same definition.
+    bool same_definition = a->def && b->def
+        ? a->def == b->def && a->def_module == b->def_module : a->ptr == b->ptr;
+    if (!same_definition || a->arity != b->arity || a->entry_abi != b->entry_abi ||
             a->has_kwargs != b->has_kwargs ||
             a->is_generator != b->is_generator ||
             a->is_coroutine != b->is_coroutine ||
@@ -7479,17 +7503,22 @@ extern "C" const TypeMethod* lambda_object_find_method(const TypeObject* type,
 }
 
 static Item lambda_bind_object_method(const TypeMethod* method, Item self) {
+    RootFrame roots(1);
+    Rooted<Item> receiver(roots, self);
+    // a saved fn method owns a receiver snapshot; pn methods retain the
+    // caller's already-detached writable receiver (S12.3.3v2/S9.3.1).
+    if (!method->is_proc) receiver.set(cow_capture_value(receiver.get()));
     // A method carries a compiled entry only once it has been JIT-compiled;
     // under T0 it has an AST definition instead. Binding used to require
     // compiled_fn, so a bare `obj.m` read null on the interpreter tier while
     // `obj.m()` worked — the call path builds the interpreted closure itself.
     if (!method->compiled_fn) {
-        Function* interpreted = interp_bind_object_method(method, self);
+        Function* interpreted = interp_bind_object_method(method, receiver.get());
         if (!interpreted) return ItemNull;
         return {.item = (uint64_t)(uintptr_t)interpreted};
     }
     Function* bound = to_closure_named(method->compiled_fn, method->arity,
-        (void*)(uintptr_t)self.item, method->compiled_name);
+        (void*)(uintptr_t)receiver.get().item, method->compiled_name);
     // A method table keeps raw code, so reattach its TypeFunc when rebuilding
     // the bound closure; dynamic dispatch needs it to validate and marshal calls.
     lambda_function_set_type(bound, method->fn_type);

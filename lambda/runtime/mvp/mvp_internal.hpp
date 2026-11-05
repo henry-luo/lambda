@@ -9,8 +9,10 @@
 static inline int mvp_call_argument_count(AstCallNode* call) {
     if (!call) return 0;
     AstFuncNode* target = ast_call_has_named_args(call) ? ast_direct_call_function(call) : NULL;
-    if (target) return ast_linked_node_count(target->param);
-    return ast_linked_node_count(call->argument) + (call->pipe_inject ? 1 : 0);
+    int supplied = ast_linked_node_count(call->argument) + (call->pipe_inject ? 1 : 0);
+    if (!target) return supplied;
+    int fixed = ast_linked_node_count(target->param);
+    return ((TypeFunc*)target->type)->is_variadic && supplied > fixed ? supplied : fixed;
 }
 
 static inline AstNode* mvp_call_argument(AstCallNode* call, int position) {
@@ -26,6 +28,10 @@ static inline AstNode* mvp_call_argument(AstCallNode* call, int position) {
 static inline bool mvp_function_expression(const AstNode* node) {
     return node && (node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) &&
         !((const AstFuncNode*)node)->name;
+}
+
+static inline bool mvp_static_type_capture(const FnCapture* capture) {
+    return capture && capture->entry && ast_definition_denotes_type(capture->entry->node);
 }
 
 static inline bool mvp_exact_membership_domain(Type* type) {
@@ -62,8 +68,12 @@ static inline AstFuncNode* mvp_function_value_reference(const AstIndex* index, A
 
 struct MvpFunction {
     AstFuncNode* ast;
+    TypeObject* method_owner;
     const char* name;
+    const char* js_export_name;
+    Script* js_export_owner;
     MIR_item_t target;
+    MIR_item_t js_export_ref;
     FnVariantAnalysis abi;
     Type* declared_result;
     Type* result_contract;
@@ -75,6 +85,28 @@ struct MvpFunction {
     bool no_value_result;
     bool owns_open_scopes;
 };
+
+static inline bool mvp_variadic_function(const MvpFunction* function) {
+    return function && function->ast && ((TypeFunc*)function->ast->type)->is_variadic;
+}
+
+static inline uint16_t mvp_function_binder_count(const MvpFunction* function) {
+    return function && function->ast ? ((TypeFunc*)function->ast->type)->binder_count : 0;
+}
+
+static inline ShapeEntry* mvp_method_field(MvpFunction* function, NameEntry* entry) {
+    TypeObject* owner = function ? function->method_owner : NULL;
+    for (ShapeEntry* field = owner ? owner->shape : NULL; field; field = typemap_next_field(owner, field))
+        if (field->binding == entry) return field;
+    return NULL;
+}
+
+static inline FnCapture* mvp_function_capture(MvpFunction* function, NameEntry* entry) {
+    for (FnCapture* capture = function && function->ast ? function->ast->captures : NULL;
+            capture; capture = capture->next)
+        if (capture->entry == entry) return capture;
+    return NULL;
+}
 
 static inline bool mvp_parameter_receiver(MvpFunction* function) {
     if (function && function->boxed_entry) return true;
@@ -120,6 +152,8 @@ struct MvpBinding {
     AstFunctionId owner;
     MvpIntRange range;
     MIR_reg_t var_home;
+    MIR_reg_t capture_home;
+    MIR_reg_t method_field_present;
     MIR_reg_t array_native;
     MIR_reg_t array_float_native;
     MIR_reg_t record_writable;
@@ -134,7 +168,7 @@ struct MvpBinding {
     bool iteration_binding;
     bool capture_binding;
     bool array_written;
-    bool coordinate_written;
+    bool tensor_required;
     bool scalar_snapshot;
     bool array_accessed;
     ArrayRepCert* array_cert;
@@ -213,9 +247,13 @@ struct MvpCompiler {
     MvpFunction* function;
     MirEmitter em;
     MIR_reg_t environment;
+    MIR_reg_t vargs_roots;
+    MIR_reg_t binder_env;
+    MIR_reg_t admission_status;
     MvpControl* control;
     MvpScope* scope;
     MvpCleanup* cleanups;
+    ArrayList* shared_bindings;
     MvpInline* inlining;
     MvpErrorTarget* condition_failure;
     AstNode* consuming_array_join;
@@ -295,6 +333,8 @@ bool mvp_reject(LambdaMvpModule* module, AstNode* node, const char* reason);
 ValueRep mvp_rep(Type* type);
 Type* mvp_contract(AstNode* declaration);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
+MvpFunction* mvp_require_function_reference(LambdaMvpModule* module, AstFuncNode* target,
+    AstNode* callee, Script* owner = NULL);
 MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
 Type* mvp_binding_return_contract(LambdaMvpModule* module, NameEntry* entry);
 bool mvp_proc_has_final_return(AstFuncNode* function);

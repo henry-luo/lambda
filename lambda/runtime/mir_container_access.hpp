@@ -1,6 +1,28 @@
 #pragma once
 #include "mir_emitter_shared.hpp"
 
+typedef MIR_reg_t (*MirIndexCoordinateReader)(void* owner, AstNode* key);
+
+// S8.2.4v3: all coordinates address one receiver; a miss stays a boxed null.
+static inline MIR_reg_t em_index_nd(MirEmitter* em, MIR_reg_t receiver,
+        AstNode* keys, MirIndexCoordinateReader read, void* owner) {
+    if (em->root_call_value)
+        em->root_call_value(em->call_owner, receiver, JIT_VALUE_BOXED_ITEM);
+    int count = em_linked_node_count(keys);
+    // data-zone bytes have no independent GC owner. Raw coordinates instead
+    // live once per activation, across collecting keys and repeated loop reads.
+    MIR_reg_t indices = em_fixed_stack_storage(em, "nd_indices", (int64_t)count * sizeof(int64_t));
+    int position = 0;
+    for (AstNode* key = keys; key; key = key->next, position++) {
+        MIR_reg_t coordinate = read(owner, key);
+        em_store_at(em, indices, (MIR_disp_t)position * sizeof(int64_t), MIR_T_I64, coordinate);
+    }
+    return em_call_3(em, "fn_index_nd", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, receiver),
+        MIR_T_I64, MIR_new_int_op(em->ctx, count),
+        MIR_T_P, MIR_new_reg_op(em->ctx, indices), true);
+}
+
 // a nested subscript binds its key's `last`; only its receiver can still
 // refer to the enclosing subscript's last index (S7.2.2).
 static inline void em_scan_index_last(AstNode* child, AstNode* parent, void* context) {
