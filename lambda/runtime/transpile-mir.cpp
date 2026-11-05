@@ -25104,14 +25104,10 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
         // Preserve that producer-selected lane through the content wrapper;
         // forcing Item here loses the physical fact before the ABI boundary.
         ValueRep lane = lambda_canonical_rep_for_type_id(mt->native_return_tid);
-        // A plain call (not folded, not a primary wrapper -- the two forms
-        // transpile_expr_value lowers differently under a required lane) is
-        // lowered first and then given the lane, so an open call result can
-        // take the declared-return admission instead of a refused move.
-        MirValue result = node->node_type == AST_NODE_CALL_EXPR &&
-                node->const_kind == AST_CONST_NONE
-            ? mir_require_native_return(mt, node, transpile_expr_value(mt, node), lane)
-            : transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP, lane);
+        // every open tail, including an imported procedure's untyped parameter,
+        // needs return admission before carrier conversion (S11.4.2v3).
+        MirValue result = mir_require_native_return(mt, node,
+            transpile_expr_value(mt, node), lane);
         mt->preserve_proc_if_result = saved_preserve_proc_if_result;
         return result;
     }

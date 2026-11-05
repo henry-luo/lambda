@@ -104,7 +104,7 @@ pub fn note_list(st) {
 pub fn toolbar(st) {
     let n = model.current(st)
     let disabled = n==null or n.deleted;
-    <header class:"titlebar",
+    <header class:"titlebar workspace-chrome",
         <div class:"window-controls",["aria-hidden"]:"true",<span class:"traffic red"><span class:"traffic yellow"><span class:"traffic green">>
         <div class:"list-tools",button("toggle-sidebar","sidebar.toggle","Show or hide folders","menu-fold",{},not st.sidebar);
             <div class:"tool-spacer"> button("delete-note","note.delete",if (n.deleted) "Delete permanently" else "Delete note","delete",{},false,n==null)>

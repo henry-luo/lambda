@@ -56,7 +56,7 @@ fn account_section(st, a) any^ {
 }
 
 fn sidebar(st) => <aside class:"sidebar",
-    <div class:"sidebar-top",
+    <div class:"sidebar-top workspace-chrome",
         <button id:"get-mail", type:"button", class:"tool-button", 'data-action':"get-mail", title:"Get Mail", 'aria-label':"Get Mail",
             icons.icon("mail", 18)>
         <button id:"compose-new", type:"button", class:"tool-button", 'data-action':"compose", title:"New Message", 'aria-label':"New Message",
@@ -140,7 +140,7 @@ fn viewer_toolbar(m, local, role) {
     let has_message = m != null
     let flagged = has_message and "\\Flagged" in (m.flags or [])
     let unread = has_message and not ("\\Seen" in (m.flags or []));
-    <div class:"viewer-toolbar",
+    <div class:"viewer-toolbar workspace-chrome",
         <div class:"tool-group", tool("reply", "reply", "reply", "Reply", has_message); tool("reply-all", "reply-all", "reply_all", "Reply All", has_message);
             tool("forward", "forward", "forward", "Forward", has_message)>;
         if (local) <div class:"tool-group",

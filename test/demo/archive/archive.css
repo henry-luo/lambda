@@ -1,8 +1,8 @@
-:root { --bg: #f4f2ee; --panel: #ffffff; --ink: #1f2328; --muted: #6a6f76; --line: #dedad3; --accent: #2d6cdf;
+.workspace-shell { --bg: var(--lambda-app-background); --panel: var(--lambda-app-surface); --ink: var(--lambda-app-text); --muted: var(--lambda-app-text-secondary); --line: var(--lambda-app-border); --accent: var(--lambda-app-primary);
   --accent-soft: #e6eefc; --bad: #c0392b; --ok: #2e7d4f; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--lambda-app-font-family); }
 #archive { display: flex; flex-direction: column; height: 100vh; }
 .bars { padding: 10px 14px 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .add-bar, .search-bar { display: flex; gap: 6px; align-items: center; }

@@ -1,5 +1,5 @@
 {
-  "name": "A column flex item that is a wrapping row gets its wrapped height, so later items stay inside the container",
+  "name": "A column flex item that is a wrapping row includes fixed and minimum child heights, so later items stay inside the container",
   "html": "test/ui/flex_column_wrapping_row_height.html",
   "viewport": {"width": 1000, "height": 600},
   "events": [

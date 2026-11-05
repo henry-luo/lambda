@@ -130,14 +130,16 @@ investigations without a plan. Follow [Doc Convention §5.1](doc/Doc_Convention.
 ```bash
 make build-test               # Build all test executables
 make test                     # Every suite except jube and the online view test (make test-all runs everything)
-make test-lambda-baseline     # Lambda core functionalities (must pass 100%, when changes maked to Lambda engine)
-make test-radiant-baseline    # Radiant core functionalities (must pass 100%, when changes maked to Radiant engine)
+make test-lambda-baseline     # Full Lambda baseline suite; run at major milestones or session end
+make test-radiant-baseline    # Full Radiant baseline suite; run at major milestones or session end
 ```
+**Test cadence:** Avoid running the full Lambda or Radiant baseline suites after every incremental change. Run them at major milestones or at the end of a work session. For incremental changes, run focused unit tests related to the changed code.
+
 **Test data**: run `./setup-test.sh` once per checkout — it links `test/<corpus>` to the sibling `../lambda-test` repo and fetches the pinned WPT into `ref/wpt`; suites using those corpora fail without it. All make targets: `make help` and [`doc/dev/Make_Guide.md`](doc/dev/Make_Guide.md).
 
 **Test map**: [`test/README.md`](test/README.md) — which gate covers which source area, every harness with its fixture dirs and golden convention, and single-test commands. Every `.ls` in a golden-driven test directory needs its golden; name helper, module and playground scripts `_*` or `mod_*`.
 
-**Radiant workflow (required reading)**: read [`radiant/README.md`](radiant/README.md) before Radiant development. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation and run required aggregate gates at milestone boundaries; repeat broad checks only for relevant new changes, failures or unresolved concerns. Batch related fixes before expensive qualification, keep unrelated debt in the backlog, and record completion by behavior rather than growing test counts. Documentation-only changes need document checks, not engine builds or regression suites.
+**Radiant workflow (required reading)**: read [`radiant/README.md`](radiant/README.md) before Radiant development. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation; run aggregate baseline gates at major milestones or at the end of a work session, and use focused tests for incremental changes. Batch related fixes before expensive qualification, keep unrelated debt in the backlog, and record completion by behavior rather than growing test counts. Documentation-only changes need document checks, not engine builds or regression suites.
 
 **Broad HTML/CSS priorities**: finish the highest-impact features used by common pages before less important features or detailed conformance residue. Rank work by user impact, usage frequency, dependency value and effort. Define a useful core milestone for each feature, finish it, and move on with remaining limitations recorded honestly as partial support. Keep rare combinations, exhaustive reflection and minor isolated fidelity differences in the long-tail backlog unless they block the selected milestone or expose a serious shared defect. Do not let an effectively unbounded standards tail prevent delivery of the important features.
 

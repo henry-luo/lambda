@@ -1,5 +1,6 @@
 // A native three-pane Notes workspace, using the Finder/Word demo conventions.
 import dom
+import workspace_shell: lambda.ui.workspace.shell
 import context: lambda.ui.core.menu
 import focus: lambda.ui.core.focus
 import workspace_dialog: lambda.ui.workspace.dialog
@@ -11,10 +12,11 @@ import model: .mod_model
 import ui: .mod_ui
 import images: .mod_images
 
-let CSS = workspace_dialog.css ++ input(url_resolve(resources.entry_uri()^,"note.css"),'text')^
+let CSS = workspace_shell.css ++ workspace_dialog.css ++ input(url_resolve(resources.entry_uri()^,"note.css"),'text')^
 
 edit <notes_app> () any^ state st:app.initial() {
-    <body id:"notes",class:if (st.sidebar) "" else "sidebar-hidden",
+    <body id:"notes",class:if (st.sidebar) "workspace-shell" else "workspace-shell sidebar-hidden",
+        style:workspace_shell.variables({primary:"#d6a52e",text:"#292927",background:"#fffefb"})^,
         ["data-selected"]:st.selected,["data-folder"]:st.folder,["data-dirty"]:string(model.dirty(st)),
         ui.toolbar(st);
         <main class:"workspace",ui.sidebar(st);ui.note_list(st);ui.editor(st)>

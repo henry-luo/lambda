@@ -1,0 +1,21 @@
+{
+  "name": "Workspace shell tokens and keyboard focus stay scoped to each application",
+  "html": "test/ui/workspace_shell.ls",
+  "viewport": {"width": 700, "height": 400},
+  "events": [
+    {"type":"assert_style","target":{"selector":"#shell-one"},"property":"color","equals":"rgb(32, 48, 64)"},
+    {"type":"assert_style","target":{"selector":"#shell-two"},"property":"color","equals":"rgb(64, 80, 96)"},
+    {"type":"assert_style","target":{"selector":"#outside"},"property":"color","equals":"rgb(18, 52, 86)"},
+    {"type":"click","target":{"selector":"#one-first"}},
+    {"type":"key_press","key":"Tab"},
+    {"type":"assert_focus","target":{"selector":"#one-next"}},
+    {"type":"assert_style","target":{"selector":"#one-next"},"property":"outline-color","equals":"rgb(16, 32, 48)"},
+    {"type":"key_press","key":"Tab"},
+    {"type":"assert_focus","target":{"selector":"#document-button"}},
+    {"type":"assert_style","target":{"selector":"#document-button"},"property":"outline-color","equals":"rgb(204, 0, 0)"},
+    {"type":"click","target":{"selector":"#two-first"}},
+    {"type":"key_press","key":"Tab"},
+    {"type":"assert_focus","target":{"selector":"#two-next"}},
+    {"type":"assert_style","target":{"selector":"#two-next"},"property":"outline-color","equals":"rgb(160, 64, 32)"}
+  ]
+}

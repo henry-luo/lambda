@@ -97,7 +97,7 @@ pub fn tree(st,places) => <main id:"finder",'data-mode':st.mode,'data-path':st.p
         <div class:"sidebar-bottom",<span class:"connection-dot"><span "On your computer"><small "Browse · Discover · Preview">>
     >;
     <section class:"workspace",
-        <header class:"toolbar",
+        <header class:"toolbar workspace-chrome",
             <div class:"navigation",(button("back","Back (⌘[)","back"));(button("forward","Forward (⌘])","forward"))>;
             <div class:"folder-heading",<h1 id:"folder-title",if (st.path == places[0].path) "Demo Files" else model.basename(st.path)><p id:"folder-subtitle","Your files, a little more familiar.">>;
             <div class:"toolbar-actions",

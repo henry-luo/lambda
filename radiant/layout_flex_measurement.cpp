@@ -93,8 +93,12 @@ float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* targe
             }
         }
         if (resolved_value) {
+            // normal stays a keyword through inheritance and uses the target's
+            // font metrics; only computed lengths belong to the declaring owner.
+            DomElement* owner = resolved_value->type == CSS_VALUE_TYPE_KEYWORD &&
+                resolved_value->data.keyword == CSS_VALUE_NORMAL ? target : elem;
             return layout_resolve_line_height_value(
-                lycon, resolved_value, elem, target_font_size);
+                lycon, resolved_value, owner, target_font_size);
         }
 
         elem = view_geometry_nearest_dom_element(elem->parent, 0);
