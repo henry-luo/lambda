@@ -1056,14 +1056,15 @@ TEST(LambdaOptCow, MoveOutBindsBorrow) {
 // slot detaches exactly once; the 1,000 appends through one unique place
 // never copy (array_unique_mutations counts them).
 TEST(LambdaOptCow, PlaceMutatorDetachesEachAliasedSlotOnce) {
-    // this construct needs MIR; a strict T0 pin must reject it (D8.3.1)
-    expect_interp_rejection(opt_executable(), "test/lambda/proc/cow_place_mutator.ls",
-        "AST_NODE_SYS_FUNC");
-    static const char* const tiers[] = {"jit", "auto"};
-    for (int t = 0; t < 2; t++) {
+    // D8.3.1/S9.2.2: the interpreter's place dispatch preserves the same COW contract.
+    const auto expected = fixture_source("test/lambda/proc/cow_place_mutator.txt");
+    ASSERT_FALSE(expected.empty());
+    static const char* const tiers[] = {"jit", "auto", "interp"};
+    for (int t = 0; t < 3; t++) {
         FixtureRun run = run_fixture("cow_place_mutator", tiers[t],
             fixture_source("test/lambda/proc/cow_place_mutator.ls"), true);
         ASSERT_TRUE(run.ok) << tiers[t];
+        EXPECT_EQ(run.std_out, expected) << tiers[t];
         // the map rows are not pinned: the census prints two container kinds
         // under the `map` label, and the reader keeps the last one
         EXPECT_EQ(run.profile.get("array_shared_copies"), 7u) << tiers[t];

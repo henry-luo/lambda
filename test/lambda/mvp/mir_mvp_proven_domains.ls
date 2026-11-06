@@ -29,12 +29,12 @@ pn put_erased(var values: int[], key: int, member: any) any { values[key] = memb
 // recursive forwarding keeps caller-owned precise homes alive across GC (D6.3).
 pn rewrite(var a: int[], var box: Cell, depth: int) any {
     if (depth == 0) {
-        a = fill(3, 40)
+        a = fill(3, 40)^
         box = {value: 50, next: null}
         return null
     }
     let garbage = fill(8, depth)
-    rewrite(a, box, depth - 1)
+    rewrite(a, box, depth - 1)^
     a[0] = a[0] + 1
     box.value = box.value + 1
 }
@@ -85,7 +85,7 @@ pn main() {
     print(match missing_flag { case error: true default: false }); print("\n")
     var typed: int[] = [1, 2]
     let original = typed
-    put_erased(typed, 0, 7)
+    put_erased(typed, 0, 7)^
     let bad_member = put_erased(typed, 1, "bad")
     print(original[0]); print(" "); print(typed[0]); print(" ")
     print(match bad_member { case error: true default: false }); print(" "); print(typed[1]); print("\n")
@@ -94,7 +94,7 @@ pn main() {
     var box: Cell = cell(1)
     let old_data = data
     let old_box = box
-    rewrite(data, box, 8)
+    rewrite(data, box, 8)^
     print(data[0]); print(" "); print(box.value); print(" ")
     print(old_data[0]); print(" "); print(old_box.value); print("\n")
 }

@@ -265,7 +265,6 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsMatchGoldens) {
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
-    "test/lambda/mvp",
     "test/lambda/archive",
     "test/lambda/ime",
     "test/lambda/docbook/proc",
@@ -286,6 +285,15 @@ static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
 };
 static const size_t NUM_PROCEDURAL_TEST_DIRECTORIES = sizeof(PROCEDURAL_TEST_DIRECTORIES) / sizeof(PROCEDURAL_TEST_DIRECTORIES[0]);
 
+// D8.3.1: compiler regressions exercise their explicit lane; ordinary goldens
+// retain AUTO and the existing cross-tier production checks.
+static const struct {
+    const char* directory;
+    const char* compiler;
+} COMPILER_TEST_DIRECTORIES[] = {
+    {"test/lambda/mvp", "mvp"},
+};
+
 //==============================================================================
 // Test Discovery
 //==============================================================================
@@ -303,6 +311,11 @@ std::vector<LambdaTestInfo> discover_all_tests() {
     // Discover procedural script tests
     for (size_t i = 0; i < NUM_PROCEDURAL_TEST_DIRECTORIES; i++) {
         std::vector<LambdaTestInfo> dir_tests = discover_tests_in_directory(PROCEDURAL_TEST_DIRECTORIES[i], true);
+        all_tests.insert(all_tests.end(), dir_tests.begin(), dir_tests.end());
+    }
+    for (const auto& directory : COMPILER_TEST_DIRECTORIES) {
+        auto dir_tests = discover_tests_in_directory(directory.directory, true);
+        for (auto& test : dir_tests) test.compiler = directory.compiler;
         all_tests.insert(all_tests.end(), dir_tests.begin(), dir_tests.end());
     }
 
@@ -409,6 +422,7 @@ public:
         std::vector<bool> procs;
         for (const auto& test : g_lambda_tests) {
             if (test.missing_expected) continue;  // fails in its test body without running
+            if (test.compiler) continue;  // these run with their explicit compiler below
             if (!lambda_script_matches_gtest_filter(test, gtest_filter.c_str())) continue;
             scripts.push_back(test.script_path);
             procs.push_back(test.is_procedural);
@@ -427,6 +441,12 @@ TEST_P(LambdaScriptTest, ExecuteAndCompare) {
     const LambdaTestInfo& info = GetParam();
     ASSERT_FALSE(info.missing_expected) << "No expected output " << info.expected_path
         << " for " << info.script_path << ": " LAMBDA_MISSING_GOLDEN_HINT;
+    if (info.compiler) {
+        RecordProperty("lambda_compiler", info.compiler);
+        test_lambda_script_against_file(info.script_path.c_str(), info.expected_path.c_str(),
+            info.is_procedural, "jit", info.compiler);
+        return;
+    }
 
     // Look up batch result
     auto it = batch_results.find(info.script_path);
@@ -571,7 +591,7 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/cow_var_nullable_record.ls", "test/lambda/proc/cow_var_nullable_record.txt"},
     {"test/lambda/proc/cow_var_nullable_record_typed_handle.ls",
      "test/lambda/proc/cow_var_nullable_record_typed_handle.txt"},
-    {"test/lambda/proc/cow_place_mutator.ls", "test/lambda/proc/cow_place_mutator.txt", "AST_NODE_SYS_FUNC"},
+    {"test/lambda/proc/cow_place_mutator.ls", "test/lambda/proc/cow_place_mutator.txt"},
     {"test/lambda/proc/cow_rmw_sibling_borrow.ls", "test/lambda/proc/cow_rmw_sibling_borrow.txt"},
     {"test/lambda/proc/cow_move_out_bind.ls", "test/lambda/proc/cow_move_out_bind.txt"},
     // Tune28: D5.4.5 place-copy marks and CW36 branch store-backs

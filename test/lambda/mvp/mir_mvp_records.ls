@@ -13,7 +13,7 @@ fn chain(n: int) Node? {
     return {value: n, next: chain(n - 1)}
 }
 
-fn total(node: Node?) int {
+fn total(node: Node?) int^ {
     var cursor = node
     var sum: int = 0
     while (cursor != null) {
@@ -33,7 +33,7 @@ fn checked(value) int { return value }
 pn main() {
     var counter: Counter = {count: 2, flag: false}
     let observer: Counter = counter
-    bump(counter, 5)
+    bump(counter, 5)^
     print(observer.count); print(" "); print(counter.count); print(" ")
     print(observer.flag); print(" "); print(counter.flag); print("\n")
     let nodes = chain(20)

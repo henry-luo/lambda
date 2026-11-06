@@ -52,6 +52,7 @@ struct LambdaTestInfo {
     std::string test_name;
     bool is_procedural;  // true for procedural scripts (run with "lambda.exe run")
     bool missing_expected = false;  // discovered without its golden: the test fails
+    const char* compiler = nullptr; // explicit compiler for compiler-specific fixtures
 
     // For Google Test parameterized test naming
     friend std::ostream& operator<<(std::ostream& os, const LambdaTestInfo& info) {
@@ -146,8 +147,8 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 // `tier` pins LAMBDA_EXEC_BACKEND (e.g. "jit"); NULL keeps the default auto tier, which
 // only reaches the JIT for functions hot enough to promote.
 inline char* execute_lambda_script(const char* script_path, bool is_procedural = false,
-        const char* tier = NULL) {
-    LambdaTestCompilerEnv environment(tier);
+        const char* tier = NULL, const char* compiler = NULL) {
+    LambdaTestCompilerEnv environment(tier, nullptr, compiler);
     if (!environment.valid) return nullptr;
     const char* args[5] = {LAMBDA_EXE};
     unsigned count = 1;
@@ -371,7 +372,7 @@ inline void strip_lambda_protocol_lines(char* output) {
 
 // Helper function to test lambda script against expected output file
 inline void test_lambda_script_against_file(const char* script_path, const char* expected_file_path,
-        bool is_procedural, const char* tier = NULL) {
+        bool is_procedural, const char* tier = NULL, const char* compiler = NULL) {
     const char* script_name = strrchr(script_path, '/');
     script_name = script_name ? script_name + 1 : script_path;
 
@@ -379,7 +380,7 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
     char* expected_output = read_expected_output(platform_expected_path(expected_file_path).c_str());
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
 
-    char* actual_output = execute_lambda_script(script_path, is_procedural, tier);
+    char* actual_output = execute_lambda_script(script_path, is_procedural, tier, compiler);
     ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path
         << (tier ? " (LAMBDA_EXEC_BACKEND=" : "") << (tier ? tier : "") << (tier ? ")" : "");
 

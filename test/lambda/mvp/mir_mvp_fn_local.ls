@@ -12,7 +12,7 @@ fn collect(n: int) int {
     if (value < 3) { value = value + 1 }
     while (value < 4) { value = value + 1 }
 }
-fn checked(value) int {
+fn checked(value) int^ {
     let admitted: int = value
     return admitted
 }

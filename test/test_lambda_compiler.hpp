@@ -12,8 +12,10 @@ struct LambdaTestCompilerEnv {
     bool valid = true;
 
     explicit LambdaTestCompilerEnv(const char* tier = nullptr,
-            const ShellEnvEntry* extra = nullptr) {
-        const char* selected = getenv("LAMBDA_TEST_MIR_COMPILER");
+            const ShellEnvEntry* extra = nullptr,
+            const char* required_compiler = nullptr) {
+        const char* selected = required_compiler ? required_compiler
+            : getenv("LAMBDA_TEST_MIR_COMPILER");
         if (tier && strcmp(tier, "jit") && strcmp(tier, "auto") && strcmp(tier, "interp")) {
             ADD_FAILURE() << "invalid Lambda test tier: " << tier;
             valid = false; return;

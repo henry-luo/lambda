@@ -1,5 +1,5 @@
 // closed tables refine reads; inferred containers still admit other contents.
-fn choose(start: int) int {
+fn choose(start: int) int^ {
     var table = [2, 0, 1]
     var values: int[] = [10, 20, 30]
     var sum: int = 0

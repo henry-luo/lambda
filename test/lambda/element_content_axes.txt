@@ -16,11 +16,11 @@
 "-- `last` is the final CHILD, not the final member --"
 <q
   "y">
-"-- the mapping pipe traverses content, so no phantom row is produced --"
-[<p
+"-- the mapping pipe traverses attribute values then content --"
+["a", "b", <p
     "x">, <q
     "y">]
-2
+4
 "-- the set functions over content (S10.1.1v2 retired `| & !` on containers) --"
 [<p
     "x">, <q

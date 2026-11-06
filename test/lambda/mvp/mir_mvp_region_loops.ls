@@ -146,7 +146,7 @@ pn main() {
     evolve(a, b, 2)^
     print(a); print(" "); print(saved); print("\n")
     var short: int[] = [1, 2]
-    evolve(short, b, 2)^
+    let failed_evolve = evolve(short, b, 2)
     print(short); print("\n")
     evolve(a, short, 0)^
     print(a); print("\n")
@@ -165,7 +165,7 @@ pn main() {
     print(reverse(reversed, 0, 4)); print(" "); print(reversed); print(" "); print(original); print("\n")
     print(reverse(reversed, 1, 3)); print(" "); print(reversed); print("\n")
     print(reverse(reversed, 2, -1)); print(" "); print(reversed); print("\n")
-    reverse(short, 0, 3); reverse(short, -1, 1)
+    let failed_high = reverse(short, 0, 3); let failed_low = reverse(short, -1, 1)
     print(short); print("\n")
     var floating: float[] = [-0.0, 1.5, 0.0, 0.0 / 0.0]
     reverse_float(floating, 0, 3)

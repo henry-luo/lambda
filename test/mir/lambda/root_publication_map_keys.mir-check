@@ -5,11 +5,14 @@
     {
       "in_func": "main",
       "in_range": {
-        "from": "call\titem_keys_p, item_keys",
-        "to": "call\tsymbol_key_list_free_p, symbol_key_list_free"
+        "from": ", item_keys,",
+        "to": ", symbol_key_list_free,"
       },
       "expect": [
-        "call\tpipe_map_val_p, pipe_map_val"
+        ", iter_len,",
+        ", iter_val_at,",
+        ", iter_key_at,",
+        ", array_push,"
       ],
       "forbid": [
         "(runtime), {{r}}"

@@ -31,7 +31,8 @@ idx
 "-- `last` is the final CHILD, not the final member --"
 e[last]
 
-"-- the mapping pipe traverses content, so no phantom row is produced --"
+// S10.1.2v4: the pipe and `in` share the attribute-then-content walk.
+"-- the mapping pipe traverses attribute values then content --"
 let piped = e |> ~
 piped
 len(piped)
