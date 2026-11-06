@@ -1,0 +1,1 @@
+../../radiant/test/test_radiant_svg_hit_gtest.cpp

@@ -2,7 +2,7 @@ id: no-radiant-view-cast-layout
 language: cpp
 severity: error
 message: >-
-  Unsafe View*/Dom* cast in layout code. Route downcasts through lib/tagged.hpp
+  Unsafe View*/Dom* cast in layout code. Route downcasts through radiant/tagged.hpp
   helpers (lam::view_as_*/view_require_*/dom_as<>/dom_require<>), or mark an
   audited exception with a trailing "// RADIANT_CAST_OK: <reason>".
 metadata:

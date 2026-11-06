@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../lambda-data.hpp"
+#include "value_rep.h"
 
 typedef bool (*LambdaTypeDependencyVisitor)(Type* type, void* context);
 bool lambda_type_visit_dependencies(Type* type, bool include_refs,

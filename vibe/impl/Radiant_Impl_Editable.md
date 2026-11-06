@@ -1678,9 +1678,6 @@ callable false-returning stub.
 
 Update:
 
-- `doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md`;
-- `doc/dev/radiant/RAD_19_Form_Controls.md`;
-- `doc/dev/radiant/diagram/rad18_dispatch_seam.mmd`;
 - active Stage 5 editing material that still prescribes `data-editable`;
 - capability/support tables for editor configurations and exclusions.
 
@@ -1726,7 +1723,7 @@ one structured result schema.
 | build config / `Makefile` source lists | include new native files and test targets through `build_lambda_config.json`/generated build process | 2, 7 |
 | `test/editable-editors/` | exact packages, offline bundles, capability manifest, authoritative-state probes | 0, 7 |
 | `test/ui/` and focused GTests | gate/order/mutation/selection/composition/mixed-route tests | all |
-| `doc/dev/radiant/`, `vibe/editing/` | current docs and historical supersession | 8 |
+| `vibe/editing/` | historical supersession | 8 |
 
 When adding new C+ source files, update `build_lambda_config.json` and run the
 normal generator. Do not manually edit generated `.lua` build files.

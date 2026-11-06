@@ -15287,6 +15287,29 @@ static void resolve_if(Transpiler* tp, AstIfNode* node) {
     validate_if_branch_homogeneity(tp, span, then_branch, else_branch);
 }
 
+static Type* direct_range_bound_member_type(AstNode* bound) {
+    bound = ast_unwrap_primary_to_leaf(bound);
+    if (!bound || !bound->type) return NULL;
+    if (bound->type->type_id == LMD_TYPE_STRING) return &TYPE_STRING;
+    if (is_numeric_type_id(bound->type->type_id)) return &TYPE_INT;
+    // S11.1.3: an arithmetic bound can form an integer range or fail, but
+    // cannot produce a character range even when its operand types are open.
+    if (bound->node_type == AST_NODE_BINARY) {
+        switch (((AstBinaryNode*)bound)->op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+        case OPERATOR_DIV: case OPERATOR_IDIV: case OPERATOR_MOD:
+        case OPERATOR_POW:
+            return &TYPE_INT;
+        default:
+            break;
+        }
+    } else if (bound->node_type == AST_NODE_UNARY) {
+        Operator op = ((AstUnaryNode*)bound)->op;
+        if (op == OPERATOR_NEG || op == OPERATOR_POS) return &TYPE_INT;
+    }
+    return NULL;
+}
+
 static Type* direct_range_element_type(Transpiler* tp, AstNode* source) {
     AstNode* value = ast_unwrap_primary(source);
     while (value && value->node_type == AST_NODE_UNARY &&
@@ -15302,17 +15325,11 @@ static Type* direct_range_element_type(Transpiler* tp, AstNode* source) {
     if (value && value->node_type == AST_NODE_BINARY &&
             ((AstBinaryNode*)value)->op == OPERATOR_TO) {
         AstBinaryNode* range = (AstBinaryNode*)value;
-        TypeId left = range->left && range->left->type
-            ? range->left->type->type_id : LMD_TYPE_ANY;
-        TypeId right = range->right && range->right->type
-            ? range->right->type->type_id : LMD_TYPE_ANY;
-        if (left == LMD_TYPE_STRING && right == LMD_TYPE_STRING) {
-            // String ranges iterate codepoint strings; treating every range as
-            // an int unboxes each Item result and turns characters into zero
-            // (S7.1, D2.2.2).
-            return &TYPE_STRING;
-        }
-        if (left == LMD_TYPE_INT && right == LMD_TYPE_INT) return &TYPE_INT;
+        // S11.1.3: successful bounds share a domain, so either known bound
+        // determines the member type even when the other bound is dynamic.
+        Type* member = direct_range_bound_member_type(range->left);
+        if (!member) member = direct_range_bound_member_type(range->right);
+        if (member) return member;
     }
     // range construction may fail, but its members are integers or codepoint
     // strings, never Error values. Keep that distinction at call admission

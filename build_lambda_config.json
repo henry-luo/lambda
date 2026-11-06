@@ -1,6 +1,8 @@
 {
   "config_imports": [
-    "build_deps_config.json"
+    "build_deps_config.json",
+    "../lambda-input/build_targets.json",
+    "../radiant/build_targets.json"
   ],
   "name": "lambda",
   "description": "Lambda: A modern functional scripting language for data processing and editing",
@@ -116,7 +118,7 @@
     "lambda/format/format_latex_html_v2.cpp",
     "lambda/input/input-adoc.cpp",
     "lib/font/font_config.c",
-    "lib/test_font_path_gtest.cpp",
+    "test/test_font_path_gtest.cpp",
     "lambda/runtime/http_module.cpp"
   ],
   "defines": [
@@ -508,250 +510,6 @@
       ]
     },
     {
-      "name": "lambda-lib",
-      "description": "Static general-purpose library layer",
-      "target_dir": "build/lib/%{cfg.platform}/%{cfg.buildcfg}",
-      "pic_linux": true,
-      "lang": "c++17",
-      "source_patterns": [
-        "lib/*.c",
-        "lib/*.cpp",
-        "lib/font/*.c",
-        "lib/font/*.cpp",
-        "lib/font/woff2/*.c",
-        "lib/font/woff2/*.cpp",
-        "lib/grep/*.cpp",
-        "lib/fts/*.cpp",
-        "lib/physics/*.c",
-        "lib/procgen/*.c",
-        "lib/image/*.cpp"
-      ],
-      "exclude_patterns": [
-        "lib/clock_compat.c",
-        "lib/test_*.c",
-        "lib/test_*.cpp"
-      ],
-      "source_files": [
-        "lib/sqlite/sqlite3.c"
-      ],
-      "file_rules": [
-        {
-          "files": [
-            "lib/procgen/*.c"
-          ],
-          "build_options": [
-            "-ffp-contract=off"
-          ]
-        }
-      ],
-      "libraries": [
-        "utf8proc",
-        "re2",
-        "curl",
-        "nghttp2",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
-        "libuv",
-        "brotlidec",
-        "brotlicommon",
-        "ThorVG",
-        "pthread",
-        "image-codecs",
-        "zlib",
-        "archive-iconv",
-        "openssl-crypto"
-      ],
-      "linux": {
-        "additional_libraries": [
-          "gomp"
-        ]
-      },
-      "windows": {
-        "additional_libraries": [
-          "dwrite",
-          "ole32",
-          "dbghelp",
-          "iphlpapi",
-          "userenv",
-          "opengl32",
-          "imm32",
-          "ws2_32",
-          "gdi32",
-          "crypt32",
-          "bcrypt",
-          "advapi32",
-          "user32",
-          "shell32",
-          "winmm",
-          "rpcrt4",
-          "wsock32",
-          "secur32",
-          "wldap32"
-        ]
-      },
-      "defines": [
-        "UTF8PROC_STATIC",
-        "MEMPOOL_RUNTIME_VM_PROVIDER"
-      ]
-    },
-    {
-      "name": "lambda-data",
-      "description": "Static Lambda core/io data and document-processing layer",
-      "pic_linux": true,
-      "lang": "c++17",
-      "source_patterns": [
-        "lambda/input/input*.cpp",
-        "lambda/input/markup/*.cpp",
-        "lambda/input/markup/block/*.cpp",
-        "lambda/input/markup/inline/*.cpp",
-        "lambda/input/markup/format/*.cpp",
-        "lambda/format/format*.cpp",
-        "lambda/network/*.cpp",
-        "lambda/devtools/*.cpp"
-      ],
-      "exclude_patterns": [
-        "lambda/format/format_latex_html.cpp",
-        "lambda/format/format_latex_html_v2.cpp"
-      ],
-      "source_files": [
-        "lambda/core/print.cpp",
-        "lambda/core/binary.cpp",
-        "lambda/core/utf_string.cpp",
-        "lambda/core/name_pool.cpp",
-        "lambda/core/well_known_markup_names.c",
-        "lambda/core/well_known_lambda_names.c",
-        "lambda/js/js_well_known_names.c",
-        "lambda/core/shape_builder.cpp",
-        "lambda/core/lambda-data.cpp",
-        "lambda/io/collection_io.cpp",
-        "lambda/io/mcp.cpp",
-        "lambda/io/mcp_client.cpp",
-        "lambda/io/mcp_tools.cpp",
-        "lambda/io/archive.cpp",
-        "lambda/io/archive_native.cpp",
-        "lambda/io/zip_archive.cpp",
-        "lambda/io/target.cpp",
-        "lambda/io/security_policy.cpp",
-        "lambda/io/security_io.cpp",
-        "lambda/io/security_channel.cpp",
-        "lambda/core/lambda-decimal.cpp",
-        "lambda/io/mark_builder.cpp",
-        "lambda/core/mark_reader.cpp",
-        "lambda/io/mark_editor.cpp",
-        "lambda/core/mem_factory_core.cpp",
-        "lambda/core/collection_storage.cpp",
-        "lambda/core/target_identity.cpp",
-        "lambda/format/format.cpp",
-        "lambda/format/html-defs.cpp",
-        "lambda/core/path.c",
-        "lambda/input/parse_error.cpp",
-        "lambda/input/rdb_query.cpp",
-        "lambda/input/source_tracker.cpp",
-        "lambda/input/input-context.cpp",
-        "lambda/input/input-latex-scanner.c",
-        "lambda/input/pdf_decompress.cpp",
-        "lambda/input/css/css_tokenizer.cpp",
-        "lambda/input/css/css_properties.cpp",
-        "lambda/input/css/css_value_parser.cpp",
-        "lambda/input/css/css_value.cpp",
-        "lambda/input/css/css_value.cpp",
-        "lambda/input/css/css_parser.cpp",
-        "lambda/input/css/css_paged_media.cpp",
-        "lambda/input/css/css_engine.cpp",
-        "lambda/input/css/css_counter_hook.cpp",
-        "lambda/input/css/css_symbol_hook.cpp",
-        "lambda/input/css/css_formatter.cpp",
-        "lambda/input/css/css_style_node.cpp",
-        "lambda/input/css/css_font_face.cpp",
-        "lambda/input/css/dom_node.cpp",
-        "lambda/input/css/dom_element.cpp",
-        "lambda/input/css/dom_lifecycle.cpp",
-        "lambda/input/css/style_epoch.cpp",
-        "lambda/input/css/selector_matcher.cpp",
-        "radiant/view_prop_defaults.cpp",
-        "radiant/view_prop_ensure.cpp",
-        "lambda/input/html5/html5_tree_builder.cpp",
-        "lambda/input/html5/html5_tokenizer.cpp",
-        "lambda/input/html5/html5_parser.cpp",
-        "lambda/input/html5/html5_token.cpp",
-        "lib/rdb_sqlite.c",
-        "lambda/core/physics_scene.cpp",
-        "lambda/core/navigation_graph.cpp",
-        "lambda/io/image_io.cpp"
-      ],
-      "libraries": [
-        "lambda-lib",
-        "mpdec",
-        "utf8proc",
-        "nghttp2",
-        "curl",
-        "ngtcp2_crypto_ossl",
-        "ngtcp2",
-        "nghttp3",
-        "zstd",
-        "ssh2",
-        "idn2",
-        "ssl",
-        "crypto",
-        "unistring",
-        "iconv",
-        "brotlidec",
-        "brotlicommon",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
-        "zlib",
-        "re2",
-        "libuv",
-        "pthread",
-        "psl",
-        "wldap32",
-        "secur32",
-        "iphlpapi",
-        "archive-readers",
-        "lzma",
-        "bzip2",
-        "archive-iconv",
-        "openjpeg"
-      ],
-      "macos": {
-        "exclude_libraries": [
-          "ngtcp2_crypto_ossl",
-          "ngtcp2",
-          "nghttp3",
-          "ssh2",
-          "idn2",
-          "ssl",
-          "crypto",
-          "unistring",
-          "iconv"
-        ]
-      },
-      "linux": {
-        "exclude_libraries": [
-          "ngtcp2_crypto_ossl",
-          "ngtcp2",
-          "nghttp3",
-          "ssh2",
-          "idn2",
-          "ssl",
-          "crypto",
-          "unistring",
-          "iconv"
-        ]
-      },
-      "defines": [
-        "SIMPLE_SCHEMA_PARSER",
-        "PATH_NO_ITERATION",
-        "LAMBDA_IO_STATIC_VALUES",
-        "UTF8PROC_STATIC",
-        "SQLITE_THREADSAFE=1",
-        "SQLITE_OMIT_LOAD_EXTENSION"
-      ],
-      "link": "static"
-    },
-    {
       "name": "lambda-rt",
       "description": "Static active Lambda and LambdaJS runtime layer",
       "pic_linux": true,
@@ -865,7 +623,7 @@
         "lambda/core/name_pool.cpp",
         "lambda/core/well_known_markup_names.c",
         "lambda/core/well_known_lambda_names.c",
-        "lambda/js/js_well_known_names.c",
+        "lambda/core/js_well_known_names.c",
         "lambda/core/shape_builder.cpp",
         "lambda/core/lambda-data.cpp",
         "lambda/core/lambda-decimal.cpp",
@@ -965,7 +723,9 @@
       "libraries": [
         "lambda-rt",
         "node-core",
+        "lambda-radiant-adapter",
         "radiant",
+        "radiant-properties",
         "lambda-data",
         "lambda-lib",
         "mir",
@@ -1050,74 +810,20 @@
       "link": "static"
     },
     {
-      "name": "radiant",
-      "description": "Static Radiant layout, rendering, and UI layer",
+      "name": "lambda-radiant-adapter",
+      "description": "Lambda runtime and script adapters for the native Radiant engine",
       "pic_linux": true,
       "lang": "c++17",
       "source_patterns": [
-        "radiant/*.cpp",
-        "radiant/scene3d/*.cpp",
         "lambda/module/radiant/*.cpp"
-      ],
-      "objcxx_source_files": [
-        "radiant/audio_capture_mac_static.cpp",
-        "radiant/app_icon_mac_static.cpp",
-        "radiant/clipboard_mac_static.cpp",
-        "radiant/ime_mac_static.cpp",
-        "radiant/webview_child_mac_static.cpp",
-        "radiant/webview_layer_mac_static.cpp"
       ],
       "libraries": [
         "lambda-rt",
+        "radiant",
+        "radiant-properties",
         "lambda-data",
-        "lambda-lib",
-        "fribidi",
-        "ThorVG",
-        "glfw",
-        "image-codecs",
-        "pthread"
+        "lambda-lib"
       ],
-      "macos": {
-        "additional_libraries": [
-          "CoreFoundation",
-          "Security",
-          "CoreServices",
-          "SystemConfiguration",
-          "Cocoa",
-          "IOKit",
-          "CoreVideo",
-          "AVFoundation",
-          "AudioToolbox",
-          "CoreMedia",
-          "GL",
-          "Foundation",
-          "CoreGraphics",
-          "Accelerate",
-          "CoreText",
-          "AppKit",
-          "Carbon",
-          "WebKit"
-        ]
-      },
-      "linux": {
-        "additional_libraries": [
-          "GL",
-          "GLU",
-          "gomp",
-          "webkit2gtk-4.1",
-          "gtk+-3.0",
-          "glib-2.0",
-          "gio-2.0",
-          "gobject-2.0",
-          "cairo",
-          "javascriptcoregtk-4.1"
-        ]
-      },
-      "windows": {
-        "exclude_libraries": [
-          "fribidi"
-        ]
-      },
       "link": "static"
     },
     {
@@ -1466,7 +1172,7 @@
         "lambda/runtime/parser/source_parser.c",
         "lambda/runtime/parser/lambda_lexer.c",
         "lambda/runtime/parser/lambda_parser.c",
-        "lambda/js/js_well_known_names.c"
+        "lambda/core/js_well_known_names.c"
       ],
       "exclude_source_files": [
         "lambda/runtime/lambda-decimal-runtime.cpp",
@@ -1476,7 +1182,7 @@
         "lambda/input/input-adoc.cpp",
         "lib/font/font_config.c",
         "lib/clock_compat.c",
-        "lib/test_font_path_gtest.cpp",
+        "test/test_font_path_gtest.cpp",
         "lambda/network/network_resource_manager.cpp"
       ],
       "includes": [
@@ -1542,9 +1248,10 @@
         "lambda/devtools"
       ],
       "remove_source_files": [
-        "lambda/js/js_well_known_names.c"
+        "lambda/core/js_well_known_names.c"
       ],
       "extra_exclude_source_files": [
+        "lambda/core/js_well_known_names.c",
         "lambda/runtime/devtools_scratch.cpp",
         "lib/sqlite/sqlite3.c",
         "lib/rdb_sqlite.c",
@@ -2685,6 +2392,7 @@
         "lambda/runtime/parser/lambda_lexer.c",
         "lambda/runtime/parser/lambda_parser.c",
         "lambda/runtime/radiant_event_hook.cpp",
+        "lambda/runtime/document_host.cpp",
         "lambda/runtime/re2_wrapper.cpp",
         "lambda/runtime/recovery_frame.c",
         "lambda/runtime/render_map.cpp",
@@ -3105,7 +2813,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "libraries": [
               "gtest",
@@ -4107,9 +3817,203 @@
         "category": "baseline",
         "tests": [
           {
+            "source": "test_radiant_editing_dom_host_gtest.cpp",
+            "name": "Native Editing DOM Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/editing_dom_host.cpp", "radiant/script_loop_host.cpp"],
+            "binary": "test_radiant_editing_dom_host_gtest.exe"
+          },
+          {
+            "source": "test_scene3d_navigation_event_host_gtest.cpp",
+            "name": "Native Scene3D Navigation Event Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/scene3d/scene3d_navigation_event_host.cpp"],
+            "binary": "test_scene3d_navigation_event_host_gtest.exe"
+          },
+          {
+            "source": "test_radiant_state_store_host_gtest.cpp",
+            "name": "Native StateStore Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": ["lambda-lib"],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/state_store_host.cpp"],
+            "binary": "test_radiant_state_store_host_gtest.exe"
+          },
+          {
+            "source": "test_radiant_devtools_host_gtest.cpp",
+            "name": "Native DevTools Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/devtools_host.cpp"],
+            "binary": "test_radiant_devtools_host_gtest.exe"
+          },
+          {
+            "source": "test_clipboard_store_gtest.cpp",
+            "name": "Clipboard Store Ownership Tests",
+            "dependencies": [
+              "radiant-properties",
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/clipboard.cpp"
+            ],
+            "macos": {
+              "additional_sources": [
+                "radiant/clipboard.cpp",
+                "radiant/clipboard_mac.mm",
+                "test/test_clipboard_mac_cases.mm"
+              ],
+              "libraries": [
+                "Cocoa"
+              ]
+            },
+            "binary": "test_clipboard_store_gtest.exe",
+            "icon": "\ud83d\udccb"
+          },
+          {
+            "source": "test_radiant_source_path_gtest.cpp",
+            "name": "Native Source Path Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": ["lambda-data", "lambda-lib"],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/source_path.cpp", "radiant/source_path_value.cpp", "radiant/source_position_host.cpp"],
+            "binary": "test_radiant_source_path_gtest.exe"
+          },
+          {
+            "source": "test_radiant_svg_hit_gtest.cpp",
+            "name": "Native SVG Hit Geometry Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": ["lambda-data", "lambda-lib"],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/svg_hit.cpp", "radiant/rdt_path.cpp", "radiant/render_path_geometry.cpp"],
+            "binary": "test_radiant_svg_hit_gtest.exe"
+          },
+          {
+            "source": "test_radiant_svg_length_gtest.cpp",
+            "name": "Native SVG Length Axis Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/svg_length_axis.cpp"],
+            "binary": "test_radiant_svg_length_gtest.exe"
+          },
+          {
+            "source": "test_radiant_resource_observer_gtest.cpp",
+            "name": "Native Resource Observer Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/resource_observer.cpp"],
+            "binary": "test_radiant_resource_observer_gtest.exe"
+          },
+          {
+            "source": "test_radiant_event_sim_script_host_gtest.cpp",
+            "name": "Native Event Simulation Script Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/event_sim_script_host.cpp"],
+            "binary": "test_radiant_event_sim_script_host_gtest.exe"
+          },
+          {
+            "source": "test_radiant_export_runtime_host_gtest.cpp",
+            "name": "Native Export Runtime Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/export_runtime_host.cpp"],
+            "binary": "test_radiant_export_runtime_host_gtest.exe"
+          },
+          {
+            "source": "test_radiant_speech_event_host_gtest.cpp",
+            "name": "Native Speech Event Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/speech_event_host.cpp"],
+            "binary": "test_radiant_speech_event_host_gtest.exe"
+          },
+          {
+            "source": "test_scene3d_physics_event_host_gtest.cpp",
+            "name": "Native Scene3D Physics Event Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/scene3d/scene3d_physics_event_host.cpp"],
+            "binary": "test_scene3d_physics_event_host_gtest.exe"
+          },
+          {
+            "source": "test_radiant_pdf_export_host_gtest.cpp",
+            "name": "Native PDF Export Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/pdf_export_host.cpp"],
+            "binary": "test_radiant_pdf_export_host_gtest.exe"
+          },
+          {
+            "source": "test_radiant_layout_host_gtest.cpp",
+            "name": "Native Layout Host Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/layout_host.cpp"],
+            "binary": "test_radiant_layout_host_gtest.exe"
+          },
+          {
+            "source": "test_radiant_scroll_observer_gtest.cpp",
+            "name": "Native Scroll Observer Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/scroll_observer.cpp"],
+            "binary": "test_radiant_scroll_observer_gtest.exe"
+          },
+          {
+            "source": "test_radiant_no_script_host_gtest.cpp",
+            "name": "Native Loader Without Script Host Tests",
+            "dependencies": ["lambda-rt", "node-core", "lambda-radiant-adapter", "radiant", "radiant-properties"],
+            "libraries": ["gtest", "gtest_main"],
+            "binary": "test_radiant_no_script_host_gtest.exe"
+          },
+          {
+            "source": "test_radiant_input_value_gtest.cpp",
+            "name": "Native Input Value Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": ["lambda-data", "lambda-lib"],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["radiant/input_value.cpp", "radiant/input_state.cpp", "radiant/select_options.cpp", "radiant/form_controls.cpp", "radiant/loader_runtime_host.cpp", "radiant/reactive_render_host.cpp", "radiant/stylesheet_sync.cpp"],
+            "binary": "test_radiant_input_value_gtest.exe"
+          },
+          {
+            "source": "test_radiant_clock_gtest.cpp",
+            "name": "Native Document Clock Tests",
+            "radiant_native_sources_independent": true,
+            "dependencies": [],
+            "libraries": [
+              "gtest",
+              "gtest_main",
+              "uv"
+            ],
+            "additional_sources": [
+              "radiant/document_clock.cpp"
+            ],
+            "binary": "test_radiant_clock_gtest.exe"
+          },
+          {
             "source": "test_retained_display_list_gtest.cpp",
             "name": "Retained Display List Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4133,6 +4037,7 @@
             "source": "test_display_list_gtest.cpp",
             "name": "Display List Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data",
               "lambda-lib"
             ],
@@ -4159,6 +4064,7 @@
               "radiant/render_border_geometry.cpp",
               "radiant/render_geometry.cpp",
               "radiant/render_path.cpp",
+              "radiant/render_path_geometry.cpp",
               "radiant/view_length.cpp",
               "radiant/view_transform.cpp",
               "radiant/animation_value.cpp",
@@ -4179,7 +4085,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "libraries": [
               "gtest",
@@ -4215,7 +4123,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "libraries": [
               "gtest",
@@ -4255,7 +4165,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "libraries": [
               "gtest",
@@ -4295,7 +4207,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "libraries": [
               "gtest",
@@ -4329,6 +4243,7 @@
             "source": "test/test_layout_custom_gtest.cpp",
             "name": "Custom Layout Engine Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4337,6 +4252,7 @@
             ],
             "additional_sources": [
               "radiant/layout_custom.cpp",
+              "radiant/package_layout_host.cpp",
               "radiant/layout_box.cpp",
               "radiant/stacking_order.cpp",
               "test/test_unlinked_layout_stubs.cpp"
@@ -4347,14 +4263,16 @@
           {
             "source": "test/test_paged_media_gtest.cpp",
             "additional_sources": [
-              "lib/test_font_path_gtest.cpp",
+              "test/test_font_path_gtest.cpp",
               "test/test_radiant_pdf_walk_gtest.cpp"
             ],
             "name": "Paged Media Tests",
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "libraries": [
               "gtest",
@@ -4402,6 +4320,7 @@
             "source": "test_animation_gtest.cpp",
             "name": "Animation Scheduler Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4419,6 +4338,7 @@
             "source": "test_state_store_gtest.cpp",
             "name": "StateStore DOM Mutation Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4432,16 +4352,22 @@
               "lambda/input/css/dom_lifecycle.cpp",
               "lambda/input/css/style_epoch.cpp",
               "lambda/input/css/selector_matcher.cpp",
-              "lambda/runtime/render_map.cpp",
-              "lambda/runtime/template_state.cpp",
-              "lambda/runtime/context_capsule.cpp",
-              "lambda/runtime/security_context.cpp",
               "radiant/animation.cpp",
               "radiant/display_list_bounds.cpp",
               "radiant/display_list_storage.cpp",
               "radiant/view_clip.cpp",
               "radiant/dom_range.cpp",
               "radiant/dom_range_resolver.cpp",
+              "radiant/dom_mutation_record.cpp",
+              "radiant/dom_mutation_state.cpp",
+              "radiant/dom_backed_tree.cpp",
+              "radiant/select_options.cpp",
+              "radiant/dom_mutation_prepare.cpp",
+              "radiant/layout_table_mutation.cpp",
+              "radiant/css_mutation_queries.cpp",
+              "radiant/css_inheritance.cpp",
+              "radiant/editing_dom_host.cpp",
+              "radiant/editing_dom_waist.cpp",
               "radiant/form_control_model.cpp",
               "radiant/layout_tags.cpp",
               "radiant/text_metrics.cpp",
@@ -4450,7 +4376,9 @@
               "radiant/event_state_log.cpp",
               "radiant/layout_counters.cpp",
               "radiant/retained_display_list.cpp",
+              "radiant/scroll_request.cpp",
               "radiant/state_store.cpp",
+              "radiant/state_store_host.cpp",
               "radiant/symbol_resolver.cpp",
               "radiant/view_select.cpp",
               "test/test_state_store_stubs.cpp",
@@ -4466,7 +4394,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "libraries": [
               "gtest",
@@ -4500,6 +4430,7 @@
             "source": "test_gif_player_gtest.cpp",
             "name": "GIF Animation Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4522,6 +4453,7 @@
             "source": "test_video_gtest.cpp",
             "name": "Video Playback Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4559,6 +4491,7 @@
             "source": "test_midi_player_gtest.cpp",
             "name": "MIDI Playback Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4578,6 +4511,7 @@
             "source": "test_audio_player_gtest.cpp",
             "name": "Decoded Audio Playback Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4605,6 +4539,7 @@
             "source": "test_lottie_player_gtest.cpp",
             "name": "Lottie Animation Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -4920,6 +4855,23 @@
             ],
             "requires_lambda_exe": true,
             "icon": "\ud83d\udd00"
+          },
+          {
+            "source": "test_browsing_session_gtest.cpp",
+            "name": "Browsing Session Memory Tests",
+            "dependencies": [
+              "radiant-properties",
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/browsing_session.cpp"
+            ],
+            "binary": "test_browsing_session_gtest.exe",
+            "icon": "\ud83e\udded"
           }
         ],
         "type": "library"
@@ -4929,6 +4881,14 @@
         "name": "\ud83d\udcc4 Input Processing Tests",
         "category": "baseline",
         "tests": [
+          {
+            "source": "test_input_math_gtest.cpp",
+            "name": "Native Math Input Tests",
+            "dependencies": ["lambda-data"],
+            "libraries": ["gtest", "gtest_main"],
+            "additional_sources": ["test/test_input_test_helpers.cpp"],
+            "binary": "test_input_math_gtest.exe"
+          },
           {
             "source": "lib/test_mime_detect_gtest.cpp",
             "name": "MIME Detection Tests",
@@ -4954,22 +4914,6 @@
             ],
             "binary": "test_mark_builder_gtest.exe",
             "icon": "\ud83c\udfd7\ufe0f"
-          },
-          {
-            "source": "test_npm_package_json_gtest.cpp",
-            "name": " npm package.json Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lambda/module/npm/npm_package_json.cpp"
-            ],
-            "binary": "test_npm_package_json_gtest.exe",
-            "icon": "\ud83d\udce6"
           },
           {
             "source": "test_mark_builder_deepcopy_gtest.cpp",
@@ -5003,24 +4947,6 @@
               "lib/test_utils_pool.c"
             ],
             "binary": "test_mark_editor_gtest.exe",
-            "icon": "\u270f\ufe0f"
-          },
-          {
-            "source": "test_edit_bridge_gtest.cpp",
-            "name": "Edit Bridge Session Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lambda/runtime/edit_bridge.cpp",
-              "lib/test_utils.c",
-              "lib/test_utils_pool.c"
-            ],
-            "binary": "test_edit_bridge_gtest.exe",
             "icon": "\u270f\ufe0f"
           },
           {
@@ -5097,20 +5023,6 @@
             "icon": "\ud83d\udee1\ufe0f"
           },
           {
-            "source": "test_math_ascii_gtest.cpp",
-            "name": "ASCII Math Roundtrip Tests",
-            "dependencies": [
-              "lambda-rt",
-              "radiant"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "binary": "test_math_ascii_gtest.exe",
-            "icon": "\ud83d\udd24"
-          },
-          {
             "source": "test_markup_roundtrip_gtest.cpp",
             "name": "Markup Roundtrip Tests",
             "dependencies": [
@@ -5137,7 +5049,6 @@
               "lib/test_utils.c",
               "lib/test_utils_pool.c"
             ],
-            "requires_lambda_exe": true,
             "binary": "test_format_markup_gtest.exe",
             "icon": "\ud83d\udcdd"
           },
@@ -5152,7 +5063,10 @@
               "gtest_main"
             ],
             "binary": "test_markup_modular_gtest.exe",
-            "icon": "\ud83e\udde9"
+            "icon": "\ud83e\udde9",
+            "additional_sources": [
+              "test/test_input_test_helpers.cpp"
+            ]
           },
           {
             "source": "test_input_sourcepos_gtest.cpp",
@@ -5181,6 +5095,20 @@
             "icon": "\ud83c\udf10"
           },
           {
+            "source": "test_input_dom_native_gtest.cpp",
+            "name": "Native Input Document Tests",
+            "dependencies": ["lambda-data"],
+            "libraries": ["gtest", "gtest_main"],
+            "binary": "test_input_dom_native_gtest.exe"
+          },
+          {
+            "source": "test_input_blob_url_gtest.cpp",
+            "name": "Input Blob URL Tests",
+            "dependencies": ["lambda-data"],
+            "libraries": ["gtest", "gtest_main"],
+            "binary": "test_input_blob_url_gtest.exe"
+          },
+          {
             "source": "test_input_model_gtest.cpp",
             "name": "Textual 3D Model Input Tests",
             "dependencies": [
@@ -5204,7 +5132,10 @@
               "gtest_main"
             ],
             "binary": "test_input_roundtrip_gtest.exe",
-            "icon": "\ud83d\udd04"
+            "icon": "\ud83d\udd04",
+            "additional_sources": [
+              "test/test_input_test_helpers.cpp"
+            ]
           },
           {
             "source": "test_input_rdb_gtest.cpp",
@@ -5348,137 +5279,6 @@
             "icon": "\ud83d\udea8"
           },
           {
-            "source": "test_lambda_domnode_gtest.cpp",
-            "name": "DomNodeBase Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lambda/input/css/dom_node.cpp",
-              "lambda/input/css/dom_element.cpp",
-              "lambda/input/css/selector_matcher.cpp",
-              "radiant/symbol_resolver.cpp",
-              "radiant/layout_counters.cpp",
-              "radiant/layout_tags.cpp"
-            ],
-            "binary": "test_lambda_domnode_gtest.exe",
-            "icon": "\ud83d\udd17"
-          },
-          {
-            "source": "test_dom_range_gtest.cpp",
-            "name": "DOM Range / Selection Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lambda/input/css/dom_node.cpp",
-              "lambda/input/css/dom_element.cpp",
-              "lambda/input/css/selector_matcher.cpp",
-              "radiant/symbol_resolver.cpp",
-              "radiant/layout_counters.cpp",
-              "radiant/dom_range.cpp",
-              "radiant/dom_range_resolver.cpp",
-              "radiant/form_control_model.cpp",
-              "radiant/layout_tags.cpp",
-              "radiant/text_metrics.cpp",
-              "radiant/view_geometry.cpp",
-              "radiant/editing_host.cpp",
-              "test/test_dom_range_stubs.cpp",
-              "test/test_dom_engine_provider_gtest.cpp",
-              "lambda/dom/dom_engine_seam.cpp",
-              "lib/test_utils.c",
-              "lib/test_utils_pool.c",
-              "test/test_unlinked_layout_stubs.cpp"
-            ],
-            "binary": "test_dom_range_gtest.exe",
-            "icon": "\ud83c\udfaf"
-          },
-          {
-            "source": "test_browsing_session_gtest.cpp",
-            "name": "Browsing Session Memory Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "radiant/browsing_session.cpp"
-            ],
-            "binary": "test_browsing_session_gtest.exe",
-            "icon": "\ud83e\udded"
-          },
-          {
-            "source": "test_clipboard_store_gtest.cpp",
-            "name": "Clipboard Store Ownership Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "radiant/clipboard.cpp"
-            ],
-            "macos": {
-              "additional_sources": [
-                "radiant/clipboard.cpp",
-                "radiant/clipboard_mac.mm",
-                "test/test_clipboard_mac_cases.mm"
-              ],
-              "libraries": [
-                "Cocoa"
-              ]
-            },
-            "binary": "test_clipboard_store_gtest.exe",
-            "icon": "\ud83d\udccb"
-          },
-          {
-            "source": "test_source_pos_bridge_gtest.cpp",
-            "name": "Editor Source-Position Bridge Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lambda/input/css/dom_node.cpp",
-              "lambda/input/css/dom_element.cpp",
-              "lambda/input/css/selector_matcher.cpp",
-              "lambda/runtime/render_map.cpp",
-              "lambda/runtime/context_capsule.cpp",
-              "lambda/runtime/security_context.cpp",
-              "radiant/symbol_resolver.cpp",
-              "radiant/layout_counters.cpp",
-              "radiant/dom_range.cpp",
-              "radiant/dom_range_resolver.cpp",
-              "radiant/form_control_model.cpp",
-              "radiant/layout_tags.cpp",
-              "radiant/text_metrics.cpp",
-              "radiant/view_geometry.cpp",
-              "radiant/source_pos_bridge.cpp",
-              "radiant/editing_host.cpp",
-              "test/test_dom_range_stubs.cpp",
-              "lib/test_utils.c",
-              "lib/test_utils_pool.c",
-              "test/test_unlinked_layout_stubs.cpp"
-            ],
-            "binary": "test_source_pos_bridge_gtest.exe",
-            "icon": "\ud83e\udea2"
-          },
-          {
             "source": "test_dir_gtest.cpp",
             "name": "Directory Listing Tests",
             "dependencies": [
@@ -5490,9 +5290,7 @@
             ],
             "additional_sources": [
               "lib/test_utils.c",
-              "lib/test_utils_runtime.cpp",
-              "lambda/runtime/runtime-state.cpp",
-              "lambda/runtime/side_stack.c"
+              "test/test_input_test_helpers.cpp"
             ],
             "binary": "test_dir_gtest.exe",
             "icon": "\ud83d\udcc1"
@@ -5717,65 +5515,10 @@
             "icon": "\ud83c\udfa8"
           },
           {
-            "source": "test/css/test_css_dom_integration.cpp",
-            "name": "DOM Integration & Selector Matching Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lib/avl_tree.c",
-              "lib/hashmap.c",
-              "lambda/input/css/css_style_node.cpp",
-              "lambda/input/css/css_properties.cpp",
-              "lambda/input/css/css_value_parser.cpp",
-              "lambda/input/css/css_value.cpp",
-              "lambda/input/css/css_formatter.cpp",
-              "lambda/input/css/dom_node.cpp",
-              "lambda/input/css/dom_element.cpp",
-              "lambda/input/css/selector_matcher.cpp",
-              "radiant/symbol_resolver.cpp",
-              "radiant/layout_counters.cpp",
-              "radiant/layout_tags.cpp"
-            ],
-            "binary": "test_css_dom_integration.exe",
-            "icon": "\ud83c\udf10"
-          },
-          {
-            "source": "test/css/test_css_dom_crud.cpp",
-            "name": "DOM Element CRUD Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "additional_sources": [
-              "lib/avl_tree.c",
-              "lib/hashmap.c",
-              "lambda/input/css/css_style_node.cpp",
-              "lambda/input/css/css_properties.cpp",
-              "lambda/input/css/css_value_parser.cpp",
-              "lambda/input/css/css_value.cpp",
-              "lambda/input/css/css_formatter.cpp",
-              "lambda/input/css/dom_node.cpp",
-              "lambda/input/css/dom_element.cpp",
-              "lambda/input/css/selector_matcher.cpp",
-              "radiant/symbol_resolver.cpp",
-              "radiant/layout_counters.cpp",
-              "radiant/layout_tags.cpp"
-            ],
-            "binary": "test_css_dom_crud.exe",
-            "icon": "\u270f\ufe0f"
-          },
-          {
             "source": "test/css/test_css_style_application_gtest.cpp",
             "name": "CSS Style Application Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -5814,6 +5557,7 @@
             "source": "test_html_css_gtest.cpp",
             "name": "HTML to CSS E2E Integration Tests",
             "dependencies": [
+              "radiant-properties",
               "lambda-data"
             ],
             "libraries": [
@@ -6119,6 +5863,119 @@
         "category": "baseline",
         "tests": [
           {
+            "source": "test_math_ascii_gtest.cpp",
+            "name": "ASCII Math Roundtrip Tests",
+            "dependencies": [
+              "lambda-rt",
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_math_ascii_gtest.exe",
+            "icon": "\ud83d\udd24"
+          },
+          {
+            "source": "test/test_math_gtest.cpp",
+            "name": "Math Roundtrip Tests",
+            "dependencies": [
+              "lambda-rt",
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_math_gtest.exe",
+            "icon": "\ud83d\udd22"
+          },
+          {
+            "source": "test_editing_gc_gtest.cpp",
+            "name": "Editing History GC Integration Tests",
+            "dependencies": ["lambda-lib"],
+            "libraries": ["gtest", "gtest_main"],
+            "binary": "test_editing_gc_gtest.exe"
+          },
+          {
+            "source": "test_edit_bridge_gtest.cpp",
+            "name": "Edit Bridge Session Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lambda/runtime/edit_bridge.cpp",
+              "lib/test_utils.c",
+              "lib/test_utils_pool.c"
+            ],
+            "binary": "test_edit_bridge_gtest.exe",
+            "icon": "\u270f\ufe0f"
+          },
+          {
+            "source": "test_npm_package_json_gtest.cpp",
+            "name": " npm package.json Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lambda/module/npm/npm_package_json.cpp"
+            ],
+            "binary": "test_npm_package_json_gtest.exe",
+            "icon": "\ud83d\udce6"
+          },
+          {
+            "source": "test_source_pos_bridge_gtest.cpp",
+            "name": "Editor Source-Position Bridge Tests",
+            "dependencies": [
+              "radiant-properties",
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lambda/input/css/dom_node.cpp",
+              "lambda/input/css/dom_element.cpp",
+              "lambda/input/css/selector_matcher.cpp",
+              "lambda/runtime/render_map.cpp",
+              "lambda/runtime/context_capsule.cpp",
+              "lambda/runtime/security_context.cpp",
+              "radiant/symbol_resolver.cpp",
+              "radiant/layout_counters.cpp",
+              "radiant/dom_range.cpp",
+              "radiant/dom_range_resolver.cpp",
+              "radiant/form_control_model.cpp",
+              "radiant/layout_tags.cpp",
+              "radiant/text_metrics.cpp",
+              "radiant/view_geometry.cpp",
+              "radiant/source_pos_bridge.cpp",
+              "radiant/source_path.cpp",
+              "radiant/source_path_value.cpp",
+              "radiant/source_position_host.cpp",
+              "lambda/module/radiant/source_position_adapter.cpp",
+              "radiant/editing_host.cpp",
+              "test/test_dom_range_stubs.cpp",
+              "lib/test_utils.c",
+              "lib/test_utils_pool.c",
+              "test/test_unlinked_layout_stubs.cpp"
+            ],
+            "binary": "test_source_pos_bridge_gtest.exe",
+            "icon": "\ud83e\udea2"
+          },
+          {
             "source": "test_serve_gtest.cpp",
             "name": "Web Server Module Tests",
             "dependencies": [
@@ -6230,7 +6087,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "additional_sources": [
               "lambda/runtime/concurrency.cpp",
@@ -6271,7 +6130,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "additional_sources": [
               "lambda/runtime/concurrency.cpp",
@@ -6313,7 +6174,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "additional_sources": [
               "lambda/runtime/concurrency.cpp",
@@ -6411,7 +6274,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "binary": "test_js_mvp_lmd_gtest.exe",
             "libraries": [
@@ -6447,7 +6312,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "binary": "test_item_repr_gtest.exe",
             "libraries": [
@@ -6525,7 +6392,9 @@
             ],
             "dependencies": [
               "lambda-rt",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "binary": "test_lambda_runtime_gtest.exe",
             "libraries": [
@@ -6618,7 +6487,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "binary": "test_js_parser_benchmark_gtest.exe",
             "libraries": [
@@ -6653,7 +6524,9 @@
             "name": "JavaScript Script Ownership Tests",
             "dependencies": [
               "lambda-rt",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "binary": "test_js_script_gtest.exe",
             "libraries": [
@@ -6840,6 +6713,141 @@
             ],
             "requires_lambda_exe": true,
             "icon": "\ud83d\udd37"
+          },
+          {
+            "source": "test_wiki_script_integration_gtest.cpp",
+            "name": "Wiki Script Writer Integration Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "test/test_input_test_helpers.cpp",
+              "test/test_wiki_script_helper.cpp",
+              "lib/test_utils.c",
+              "lib/test_utils_pool.c"
+            ],
+            "requires_lambda_exe": true,
+            "binary": "test_wiki_script_integration_gtest.exe",
+            "icon": "\ud83d\udcdd"
+          },
+          {
+            "source": "test_lambda_domnode_gtest.cpp",
+            "name": "DomNodeBase Tests",
+            "dependencies": [
+              "radiant-properties",
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lambda/input/css/dom_node.cpp",
+              "lambda/input/css/dom_element.cpp",
+              "lambda/input/css/selector_matcher.cpp",
+              "radiant/symbol_resolver.cpp",
+              "radiant/layout_counters.cpp",
+              "radiant/layout_tags.cpp"
+            ],
+            "binary": "test_lambda_domnode_gtest.exe",
+            "icon": "\ud83d\udd17"
+          },
+          {
+            "source": "test_dom_range_gtest.cpp",
+            "name": "DOM Range / Selection Tests",
+            "dependencies": [
+              "radiant-properties",
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lambda/input/css/dom_node.cpp",
+              "lambda/input/css/dom_element.cpp",
+              "lambda/input/css/selector_matcher.cpp",
+              "radiant/symbol_resolver.cpp",
+              "radiant/layout_counters.cpp",
+              "radiant/dom_range.cpp",
+              "radiant/dom_range_resolver.cpp",
+              "radiant/form_control_model.cpp",
+              "radiant/layout_tags.cpp",
+              "radiant/text_metrics.cpp",
+              "radiant/view_geometry.cpp",
+              "radiant/editing_host.cpp",
+              "test/test_dom_range_stubs.cpp",
+              "test/test_dom_engine_provider_gtest.cpp",
+              "lambda/dom/dom_engine_seam.cpp",
+              "lambda/runtime/document_host.cpp",
+              "lib/test_utils.c",
+              "lib/test_utils_pool.c",
+              "test/test_unlinked_layout_stubs.cpp"
+            ],
+            "binary": "test_dom_range_gtest.exe",
+            "icon": "\ud83c\udfaf"
+          },
+          {
+            "source": "test/css/test_css_dom_integration.cpp",
+            "name": "DOM Integration & Selector Matching Tests",
+            "dependencies": [
+              "radiant-properties",
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lib/avl_tree.c",
+              "lib/hashmap.c",
+              "lambda/input/css/css_style_node.cpp",
+              "lambda/input/css/css_properties.cpp",
+              "lambda/input/css/css_value_parser.cpp",
+              "lambda/input/css/css_value.cpp",
+              "lambda/input/css/css_formatter.cpp",
+              "lambda/input/css/dom_node.cpp",
+              "lambda/input/css/dom_element.cpp",
+              "lambda/input/css/selector_matcher.cpp",
+              "radiant/symbol_resolver.cpp",
+              "radiant/layout_counters.cpp",
+              "radiant/layout_tags.cpp"
+            ],
+            "binary": "test_css_dom_integration.exe",
+            "icon": "\ud83c\udf10"
+          },
+          {
+            "source": "test/css/test_css_dom_crud.cpp",
+            "name": "DOM Element CRUD Tests",
+            "dependencies": [
+              "radiant-properties",
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lib/avl_tree.c",
+              "lib/hashmap.c",
+              "lambda/input/css/css_style_node.cpp",
+              "lambda/input/css/css_properties.cpp",
+              "lambda/input/css/css_value_parser.cpp",
+              "lambda/input/css/css_value.cpp",
+              "lambda/input/css/css_formatter.cpp",
+              "lambda/input/css/dom_node.cpp",
+              "lambda/input/css/dom_element.cpp",
+              "lambda/input/css/selector_matcher.cpp",
+              "radiant/symbol_resolver.cpp",
+              "radiant/layout_counters.cpp",
+              "radiant/layout_tags.cpp"
+            ],
+            "binary": "test_css_dom_crud.exe",
+            "icon": "\u270f\ufe0f"
           }
         ],
         "type": "lambda",
@@ -6874,20 +6882,6 @@
             ],
             "parallel": false,
             "icon": "\ud83c\udf33"
-          },
-          {
-            "source": "test/test_math_gtest.cpp",
-            "name": "Math Roundtrip Tests",
-            "dependencies": [
-              "lambda-rt",
-              "radiant"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "binary": "test_math_gtest.exe",
-            "icon": "\ud83d\udd22"
           },
           {
             "source": "test/test_http_gtest.cpp",
@@ -6988,7 +6982,9 @@
             "dependencies": [
               "lambda-rt",
               "node-core",
-              "radiant"
+              "lambda-radiant-adapter",
+              "radiant",
+              "radiant-properties"
             ],
             "libraries": [
               "gtest",

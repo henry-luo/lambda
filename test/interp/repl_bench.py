@@ -2,7 +2,7 @@
 """Per-line REPL latency vs history length, for corpus item C3.
 
 The REPL re-parses, re-builds and (on the JIT tier) re-lowers the entire
-accumulated history for every line — LR_01 Known Issue #8's O(n^2). This driver
+accumulated history for every line — the O(n^2) of ledger entry LR01-7. This driver
 feeds a synthetic history of a given length and times the marginal line, so the
 compile share T0 removes is measurable directly.
 

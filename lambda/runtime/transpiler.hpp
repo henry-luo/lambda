@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../../lib/document_transform.h"
+
 #include "../../lib/log.h"
 #include "../io/input-allocation-context.h"
 #include "../io/resource_policy.h"
@@ -285,38 +287,6 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 // Load and initialize a file-backed package without synthesizing an import script.
 Input* run_lambda_package_module(Runtime* runtime, const char* package_module,
                                  Script** out_package = nullptr);
-// How the transform export receives its document argument. PARSED transforms
-// get `input(target, input_type)`; PATH transforms get the resolved local path
-// and perform their own effectful read in a procedural entry (S12.1.1v2).
-enum LambdaDocumentTransformSource {
-    LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED = 0,
-    LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH,
-};
-
-struct LambdaDocumentTransformConfig {
-    const char* input_type;
-    const char* package_module;
-    const char* function_name;
-    LambdaDocumentTransformSource source;
-    // A stateless transform keeps nothing between documents, so a window runs
-    // it on its one shared loader runtime; a stateful application (edit) keeps
-    // a runtime per document.
-    bool stateless;
-};
-
-enum LambdaDocumentTransformOptionKind {
-    LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
-    LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL,
-};
-
-// Native callers pass typed transform options without constructing Lambda source.
-struct LambdaDocumentTransformOption {
-    const char* name;
-    LambdaDocumentTransformOptionKind kind;
-    const char* string_value;
-    bool bool_value;
-};
-
 const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
     const char* input_type);
 // Loads a file-backed package, parses the source through `input()`, and calls

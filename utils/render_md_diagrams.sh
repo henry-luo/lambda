@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render Markdown design-doc diagrams to SVG (for any doc set under doc/dev/*/).
+# Render Markdown design-doc diagrams to SVG (for any directory of diagram sources).
 #   Mermaid (.mmd)         -> <name>.svg              via mermaid-cli (npx -p @mermaid-js/mermaid-cli mmdc)
 #   Structurizr DSL (.dsl) -> <view-key>.svg per view via structurizr-cli (export to mermaid) + mmdc
 # Files whose name starts with "_" are scratch and skipped.

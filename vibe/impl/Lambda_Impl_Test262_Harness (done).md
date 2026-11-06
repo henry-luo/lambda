@@ -49,8 +49,6 @@ Scripts in the common runtime), **D6.3.3** (precise native roots), and
    unchanged. A worker exiting before lifecycle emission leaves zero timing
    fields; it is still classified by the existing result/recovery rules.
 
-See [JS_16 §1.1](../../doc/dev/js/JS_16_Testing.md#11-current-batch-throughput-implementation)
-for timing scope and protocol details.
 
 ## Verification
 

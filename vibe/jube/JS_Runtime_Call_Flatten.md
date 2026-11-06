@@ -17,7 +17,7 @@ site to the callee's compiled body — the C++ adapter/dispatch layers and the
 two MIR functions emitted per JS function. Construction (`new`) shares the
 tail of this path and is covered where it differs. **Out of scope**: what a
 call site does *before* dispatch (property `Get`, argument evaluation, frame
-slots — see `doc/dev/js/JS_03_Value_Model.md` §7), native/direct call
+slots), native/direct call
 lowering, inlining, TCO, and per-site specialization of property access.
 
 **Formal anchors**: D7.2.2 (per-callee `invoke`/`construct` capabilities;
@@ -1025,7 +1025,7 @@ That work stays under the interpreter design's open item 7.
 calls has the same class of defect: a self-tail call inside `try/finally` skips
 every `finally`. `test/js/regression_ast_self_tail_call.js` therefore fails line
 2 under `test_js_gtest --full-mir`. It is tracked separately, together with the
-rewrite's silent `tco_count` cap (JS_05 known issue 5).
+rewrite's silent `tco_count` cap (JS05-5).
 
 ## Appendix S — Superseded rulings
 

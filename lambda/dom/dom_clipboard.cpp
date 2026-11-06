@@ -34,6 +34,7 @@
 #include "dom_events.h"
 #include "dom.h"
 #include "dom_platform.h"
+#include "../input/css/dom_blob_url.hpp"
 #include "../lambda-data.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../runtime/transpiler.hpp"
@@ -83,7 +84,6 @@ JS_FORWARD_STATIC_VOID( js_clipboard_set_method, (Item object, const char* name,
 #define g_drag_data_transfer (js_runtime_state.clipboard.drag_data_transfer)
 #define g_file_reader_proto (js_runtime_state.clipboard.file_reader_prototype)
 #define g_clipboard_generation (js_runtime_state.clipboard.generation)
-static uint64_t blob_url_next_id = 1;
 JS_FORWARD_STATIC_EXPRESSION(bool, clipboard_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.clipboard)))
 
 static void attach_known_prototype(Item obj, Item proto) {
@@ -281,31 +281,6 @@ static char* blob_data_uri(Item blob) {
     return result;
 }
 
-struct DomBlobUrl : DomDocumentResourceData {
-    char* url;
-    char* data_uri;
-};
-
-static void blob_url_destroy(DomDocumentResourceData* data) {
-    DomBlobUrl* entry = (DomBlobUrl*)data;
-    mem_free(entry->url); mem_free(entry->data_uri); mem_free(entry);
-}
-
-static DomBlobUrl* blob_url_find(DomDocument* document, const char* url) {
-    if (!document || !url) return nullptr;
-    for (DomDocumentResource* resource = document->resources; resource; resource = resource->next) {
-        if (resource->destroy != blob_url_destroy) continue;
-        DomBlobUrl* entry = (DomBlobUrl*)resource->data.get();
-        if (strcmp(entry->url, url) == 0) return entry;
-    }
-    return nullptr;
-}
-
-extern "C" const char* dom_blob_url_data_uri(DomDocument* document, const char* url) {
-    DomBlobUrl* entry = blob_url_find(document, url);
-    return entry ? entry->data_uri : nullptr;
-}
-
 extern "C" Item js_dom_url_create_object_url(Item object) {
     JsClass class_id = js_class_id(object);
     if (class_id != JS_CLASS_BLOB && class_id != JS_CLASS_FILE) {
@@ -315,22 +290,8 @@ extern "C" Item js_dom_url_create_object_url(Item object) {
     Rooted<Item> blob(roots, object);
     DomDocument* document = (DomDocument*)dom_get_document();
     if (!document) return dom_realm_throw_type_error("Blob URLs require a document");
-    DomBlobUrl* entry = (DomBlobUrl*)mem_calloc(1, sizeof(DomBlobUrl), MEM_CAT_SYSTEM);
-    if (!entry) return ItemError;
-    entry->data_uri = blob_data_uri(blob.get());
-    StrBuf* url = strbuf_new();
-    if (!url || !entry->data_uri) { strbuf_free(url); blob_url_destroy(entry); return ItemError; }
-    const char* origin = document->url ? url_get_origin(document->url) : nullptr;
-    uint64_t id = __atomic_fetch_add(&blob_url_next_id, 1, __ATOMIC_RELAXED);
-    strbuf_append_format(url, "blob:%s/%llu", origin && *origin ? origin : "null", (unsigned long long)id);
-    entry->url = mem_dup_n(url->str, url->length, MEM_CAT_SYSTEM);
-    // D5.5.1: decoding and selected editions can outlive the script heap that created the Blob.
-    if (!entry->url || !dom_document_add_resource(document, entry, blob_url_destroy)) {
-        strbuf_free(url); blob_url_destroy(entry); return ItemError;
-    }
-    Item result = make_str_n(entry->url, strlen(entry->url));
-    strbuf_free(url);
-    return result;
+    const char* url = dom_blob_url_create(document, blob_data_uri(blob.get()));
+    return url ? make_str_n(url, strlen(url)) : ItemError;
 }
 
 extern "C" Item js_dom_url_revoke_object_url(Item url) {
@@ -338,8 +299,7 @@ extern "C" Item js_dom_url_revoke_object_url(Item url) {
     Rooted<Item> text(roots, js_to_string(url));
     if (item_is_error(text.get())) return text.get();
     DomDocument* document = (DomDocument*)dom_get_document();
-    DomBlobUrl* entry = blob_url_find(document, fn_to_cstr(text.get()));
-    if (entry) dom_document_release_resource(document, entry);
+    dom_blob_url_revoke(document, fn_to_cstr(text.get()));
     return make_js_undefined();
 }
 
@@ -862,47 +822,52 @@ static bool dt_normalize_format(Item type_item, char* out, size_t out_cap) {
 // Recompute the public items/files/types arrays in place from _items.
 // Required to preserve caller-held references like `const fl = dt.files`.
 static void dt_recompute_views(Item dt) {
-    Item items = dom_realm_get_cstr(dt, "items");
-    Item files = dom_realm_get_cstr(dt, "files");
-    Item types = dom_realm_get_cstr(dt, "types");
-    Item rec   = dom_realm_get_cstr(dt, "_items");
-    if (get_type_id(items) != LMD_TYPE_ARRAY ||
-        get_type_id(files) != LMD_TYPE_ARRAY ||
-        get_type_id(types) != LMD_TYPE_ARRAY ||
-        get_type_id(rec)   != LMD_TYPE_ARRAY) return;
+    // Each view and transient proxy must survive property and method allocation.
+    RootFrame roots(10);
+    Rooted<Item> owner(roots, dt);
+    Rooted<Item> items(roots, dom_realm_get_cstr(owner.get(), "items"));
+    Rooted<Item> files(roots, dom_realm_get_cstr(owner.get(), "files"));
+    Rooted<Item> types(roots, dom_realm_get_cstr(owner.get(), "types"));
+    Rooted<Item> rec(roots, dom_realm_get_cstr(owner.get(), "_items"));
+    Rooted<Item> record(roots, ItemNull), kind(roots, ItemNull), type(roots, ItemNull);
+    Rooted<Item> proxy(roots, ItemNull), value(roots, ItemNull);
+    if (get_type_id(items.get()) != LMD_TYPE_ARRAY ||
+        get_type_id(files.get()) != LMD_TYPE_ARRAY ||
+        get_type_id(types.get()) != LMD_TYPE_ARRAY ||
+        get_type_id(rec.get()) != LMD_TYPE_ARRAY) return;
 
-    items.array->length = 0;
-    files.array->length = 0;
-    types.array->length = 0;
+    items.get().array->length = 0;
+    files.get().array->length = 0;
+    types.get().array->length = 0;
 
-    int64_t n = js_array_length(rec);
+    int64_t n = js_array_length(rec.get());
     bool has_files = false;
     for (int64_t i = 0; i < n; i++) {
-        Item r = js_elements_get_int(rec, i);
-        Item kind = dom_realm_get_cstr(r, "kind");
-        Item type = dom_realm_get_cstr(r, "type");
+        record.set(js_elements_get_int(rec.get(), i));
+        kind.set(dom_realm_get_cstr(record.get(), "kind"));
+        type.set(dom_realm_get_cstr(record.get(), "type"));
 
         // public DataTransferItem-like proxy: { kind, type }
-        Item proxy = js_new_object();
-        dom_realm_set_cstr(proxy, "kind", kind);
-        dom_realm_set_cstr(proxy, "type", type);
-        dom_realm_set_cstr(proxy, "_record", r);
-        js_clipboard_set_method(proxy, "getAsFile", js_dt_item_get_as_file);
-        js_clipboard_set_method(proxy, "getAsString", js_dt_item_get_as_string);
-        js_array_push(items, proxy);
+        proxy.set(js_new_object());
+        dom_realm_set_cstr(proxy.get(), "kind", kind.get());
+        dom_realm_set_cstr(proxy.get(), "type", type.get());
+        dom_realm_set_cstr(proxy.get(), "_record", record.get());
+        js_clipboard_set_method(proxy.get(), "getAsFile", js_dt_item_get_as_file);
+        js_clipboard_set_method(proxy.get(), "getAsString", js_dt_item_get_as_string);
+        js_array_push(items.get(), proxy.get());
 
-        bool is_file = dt_record_kind_is(r, "file", 4);
+        bool is_file = dt_record_kind_is(record.get(), "file", 4);
         if (is_file) {
             has_files = true;
-            Item f = dom_realm_get_cstr(r, "file");
-            if (f.item != ITEM_NULL) js_array_push(files, f);
-        } else if (get_type_id(type) == LMD_TYPE_STRING) {
+            value.set(dom_realm_get_cstr(record.get(), "file"));
+            if (value.get().item != ITEM_NULL) js_array_push(files.get(), value.get());
+        } else if (get_type_id(type.get()) == LMD_TYPE_STRING) {
             // dedupe types for string entries
-            String* ts = it2s(type);
+            String* ts = it2s(type.get());
             bool seen = false;
-            int64_t tn = js_array_length(types);
+            int64_t tn = js_array_length(types.get());
             for (int64_t j = 0; j < tn; j++) {
-                Item ev = js_elements_get_int(types, j);
+                Item ev = js_elements_get_int(types.get(), j);
                 if (get_type_id(ev) == LMD_TYPE_STRING) {
                     String* es = it2s(ev);
                     if (es && ts && es->len == ts->len &&
@@ -911,10 +876,13 @@ static void dt_recompute_views(Item dt) {
                     }
                 }
             }
-            if (!seen) js_array_push(types, type);
+            if (!seen) js_array_push(types.get(), type.get());
         }
     }
-    if (has_files) js_array_push(types, make_str("Files"));
+    if (has_files) {
+        value.set(make_str("Files"));
+        js_array_push(types.get(), value.get());
+    }
 }
 
 extern "C" Item js_dt_item_get_as_file(void) {
@@ -940,54 +908,55 @@ extern "C" Item js_dt_item_get_as_string(Item callback) {
 
 // items.add(data, type?) — DataTransferItemList.add
 extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
-    Item items = dom_realm_receiver();
-    if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
-    Item dt = dom_realm_get_cstr(items, "_owner");
-    if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
-    if (dt_is_read_only(dt)) return ItemNull;
-    Item rec_arr = dom_realm_get_cstr(dt, "_items");
-    if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
-
-    Item record = js_new_object();
-    bool is_file_arg = dt_is_class(data_arg, "File", 4) ||
-                       dt_is_class(data_arg, "Blob", 4);
+    RootFrame roots(8);
+    Rooted<Item> items(roots, dom_realm_receiver()), data(roots, data_arg), type(roots, type_arg);
+    if (get_type_id(items.get()) != LMD_TYPE_ARRAY) return ItemNull;
+    Rooted<Item> dt(roots, dom_realm_get_cstr(items.get(), "_owner"));
+    if (get_type_id(dt.get()) != LMD_TYPE_MAP) return ItemNull;
+    if (dt_is_read_only(dt.get())) return ItemNull;
+    Rooted<Item> rec_arr(roots, dom_realm_get_cstr(dt.get(), "_items"));
+    if (get_type_id(rec_arr.get()) != LMD_TYPE_ARRAY) return ItemNull;
+    // The record and input values remain live until both public views are rebuilt.
+    Rooted<Item> record(roots, js_new_object()), temporary(roots, ItemNull), items_view(roots, ItemNull);
+    bool is_file_arg = dt_is_class(data.get(), "File", 4) ||
+                       dt_is_class(data.get(), "Blob", 4);
 
     if (is_file_arg) {
-        Item ftype = dom_realm_get_cstr(data_arg, "type");
-        if (get_type_id(ftype) != LMD_TYPE_STRING) ftype = make_str("");
-        dom_realm_set_cstr(record, "kind", make_str("file"));
-        dom_realm_set_cstr(record, "type", ftype);
-        dom_realm_set_cstr(record, "file", data_arg);
-        js_array_push(rec_arr, record);
-    } else if (get_type_id(data_arg) == LMD_TYPE_STRING) {
-        if (get_type_id(type_arg) != LMD_TYPE_STRING) {
+        temporary.set(dom_realm_get_cstr(data.get(), "type"));
+        if (get_type_id(temporary.get()) != LMD_TYPE_STRING) temporary.set(make_str(""));
+        dom_realm_set_cstr(record.get(), "kind", make_str("file"));
+        dom_realm_set_cstr(record.get(), "type", temporary.get());
+        dom_realm_set_cstr(record.get(), "file", data.get());
+        js_array_push(rec_arr.get(), record.get());
+    } else if (get_type_id(data.get()) == LMD_TYPE_STRING) {
+        if (get_type_id(type.get()) != LMD_TYPE_STRING) {
             return dom_realm_throw_type_error(
                 "DataTransferItemList.add requires a type for strings");
         }
         char tbuf[256];
-        if (!dt_normalize_format(type_arg, tbuf, sizeof(tbuf))) return ItemNull;
+        if (!dt_normalize_format(type.get(), tbuf, sizeof(tbuf))) return ItemNull;
         // Spec: only one string item per type allowed.
         size_t tlen = strlen(tbuf);
-        int64_t n = js_array_length(rec_arr);
+        int64_t n = js_array_length(rec_arr.get());
         for (int64_t i = 0; i < n; i++) {
-            Item r = js_elements_get_int(rec_arr, i);
+            Item r = js_elements_get_int(rec_arr.get(), i);
             if (dt_record_string_type_is(r, tbuf, tlen)) {
                 return dom_realm_throw_type_error(
                     "NotSupportedError: type already present");
             }
         }
-        dom_realm_set_cstr(record, "kind", make_str("string"));
-        dom_realm_set_cstr(record, "type", make_str(tbuf));
-        dom_realm_set_cstr(record, "value", data_arg);
-        js_array_push(rec_arr, record);
+        dom_realm_set_cstr(record.get(), "kind", make_str("string"));
+        dom_realm_set_cstr(record.get(), "type", make_str(tbuf));
+        dom_realm_set_cstr(record.get(), "value", data.get());
+        js_array_push(rec_arr.get(), record.get());
     } else {
         return ItemNull;
     }
 
-    dt_recompute_views(dt);
-    Item items_view = dom_realm_get_cstr(dt, "items");
-    int64_t ln = js_array_length(items_view);
-    return (ln > 0) ? js_elements_get_int(items_view, ln - 1) : ItemNull;
+    dt_recompute_views(dt.get());
+    items_view.set(dom_realm_get_cstr(dt.get(), "items"));
+    int64_t ln = js_array_length(items_view.get());
+    return (ln > 0) ? js_elements_get_int(items_view.get(), ln - 1) : ItemNull;
 }
 
 extern "C" Item js_dt_items_item(Item idx_arg) {

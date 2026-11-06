@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { createWorkspace, snapshotExecutable } = require('./test_workspace.js');
+const { gtestResultCounts } = require('./gtest_result_counts.js');
 
 // ─── CLI argument parsing ──────────────────────────────────────────────────────
 
@@ -1072,11 +1073,7 @@ function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIM
         total = passed + failed;
     } else if (typeof data.tests === 'number') {
         // GTest format: { tests: N, failures: M, disabled: D, testsuites: [...] }
-        const disabled = data.disabled || 0;
-        total = data.tests - disabled;
-        skipped = data.skipped || 0;
-        failed = data.failures || 0;
-        passed = total - failed - skipped;
+        ({ total, skipped, failed, passed } = gtestResultCounts(data));
         // Extract failed test names from testsuites
         if (Array.isArray(data.testsuites)) {
             for (const suite of data.testsuites) {

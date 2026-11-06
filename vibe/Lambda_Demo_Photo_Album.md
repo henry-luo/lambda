@@ -740,7 +740,7 @@ resolution. The `photo_album` UI suite now has six replays.
 **Findings outside the demo.**
 
 - `viewport_size` returns null inside an embedded document by design
-  (RAD_16, implementation footnote in `Lambda_Impl_Slide_Presentation.md`), so a
+  (implementation footnote in `Lambda_Impl_Slide_Presentation.md`), so a
   `.slides` page in an iframe never fits its canvas. Embedding the player
   directly avoids it; a frame-aware viewport would need a design change.
 - An embedded player resolves image sources against the host page, not the
@@ -863,7 +863,7 @@ measured with a release host on the full corpus at 1440 × 900, using
 
 | Cause | Change | Effect |
 |---|---|---|
-| Each frame wrote the leaf's `transform` and shade `opacity` as inline style, so Radiant relaid out the document on every frame (26 ms). | Frames write through the presentation channel (`dom.presentation_style_set_property`, RAD_16); each leaf starts with `rotateY(0deg)`, so a turn replaces a transform. | Frame commits drop from 27 ms to 0.6 ms (paint-only). |
+| Each frame wrote the leaf's `transform` and shade `opacity` as inline style, so Radiant relaid out the document on every frame (26 ms). | Frames write through the presentation channel (`dom.presentation_style_set_property`); each leaf starts with `rotateY(0deg)`, so a turn replaces a transform. | Frame commits drop from 27 ms to 0.6 ms (paint-only). |
 | Every page's gutter shade was a blurred inset `box-shadow`, re-blurred at page size on every repaint (~35 ms a frame). | Use a 28 px gradient band instead. The spine shade on the back cover becomes a gradient over the cloth. | |
 | Near-invisible 1.8 %-alpha paper stripes cost ~25 ms a frame. | Removed. | |
 | Turns eased in from rest, and their clock started at the first frame, so the leaf barely moved for the first two or three frames. | Turns ease out (cubic), and their clock starts at the input's time stamp. | The leaf is at −112° 120 ms after the key. |

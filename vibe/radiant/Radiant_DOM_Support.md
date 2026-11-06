@@ -1,7 +1,7 @@
 # Radiant DOM Support — Coverage, Roadmap, Non-Goals
 
 **Status:** implementation reference — updated 2026-09-11; DOM2 library, WPT, and native UI coverage is integrated into the Radiant baseline gate, with two animation/library fixtures still outstanding. **Three scope changes are recorded in this revision** (see §0).
-**Context:** consolidates the DOM API surface implemented by LambdaJS over Radiant (`lambda/dom/dom*.cpp`, `radiant/`), the library-compatibility gap analyses (`vibe/jube/Transpile_Js30_jQuery.md`, `Transpile_Js34_Bootstrap.md`), and the design docs `doc/dev/js/JS_13_Web_DOM.md`, `doc/dev/radiant/RAD_15/16/18/19/21`. Goal statement: **jQuery and Bootstrap fully supported; rich-text editors supported both as model owners and through the shipped user-agent editing action, including `execCommand` (D10.2.1); canvas-based graphics editors supported through a real Canvas 2D backend (§2.7).**
+**Context:** consolidates the DOM API surface implemented by LambdaJS over Radiant (`lambda/dom/dom*.cpp`, `radiant/`), the library-compatibility gap analyses (`vibe/jube/Transpile_Js30_jQuery.md`, `Transpile_Js34_Bootstrap.md`). Goal statement: **jQuery and Bootstrap fully supported; rich-text editors supported both as model owners and through the shipped user-agent editing action, including `execCommand` (D10.2.1); canvas-based graphics editors supported through a real Canvas 2D backend (§2.7).**
 **Implementation path:** all new DOM surface MUST follow the Jube module-owned DOM bridge — [Lambda_Jube_DOM.md](../Lambda_Jube_DOM.md) (DOM1: `radiant` module registration, branded non-owning VMap wrappers, module-side wrapper cache) and [Lambda_Jube_DOM2.md](../Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol; the property/method dispatch home for everything in §2). New APIs land as module-owned dispatch under `lambda/module/radiant/`, not as new ad-hoc branches in `lambda/dom/dom.cpp`. Downstream consumer: [Lambda_Design_DOM_Pkg.md](../Lambda_Design_DOM_Pkg.md) (the Lambda `dom` package rides the same protocol).
 
 Three implementation tiers exist and must be distinguished when reading this doc:
@@ -40,7 +40,7 @@ ruling, §2.7 is a *working* scope commitment: promote it to a `D#` ruling in
 
 ### 1.2 Events — native, 3-phase dispatch
 
-`lambda/dom/dom_events.cpp`; funneled from Radiant's single `handle_event()` (`radiant/event.cpp`, RAD_15).
+`lambda/dom/dom_events.cpp`; funneled from Radiant's single `handle_event()` (`radiant/event.cpp`).
 
 - **EventTarget** on nodes, document, window, and bare `new EventTarget()`; `addEventListener` options `{capture, once, passive, signal}` (AbortSignal honored).
 - **Full capture → target → bubble dispatch**, `stopPropagation`/`stopImmediatePropagation`/`preventDefault`/`defaultPrevented`, `composedPath`, `window.event`, pre-activation for checkbox/radio/submit, re-entrancy protection.
@@ -57,7 +57,7 @@ ruling, §2.7 is a *working* scope commitment: promote it to a `D#` ruling in
 
 ### 1.4 Selection / Range / clipboard / editing — native
 
-`lambda/dom/dom_selection.cpp` over `radiant/dom_range.{hpp,cpp}` (RAD_18); editing policy in `lambda/dom/*.ls` (RAD_18, D10.2.1).
+`lambda/dom/dom_selection.cpp` over `radiant/dom_range.{hpp,cpp}`; editing policy in `lambda/dom/*.ls` (D10.2.1).
 
 - **Range**: all boundary setters, `collapse`, `selectNode(Contents)`, `cloneContents`/`extractContents`/`deleteContents`/`insertNode`/`surroundContents`, `compareBoundaryPoints`/`comparePoint`/`isPointInRange`/`intersectsNode`, `getBoundingClientRect`/`getClientRects`, `toString`.
 - **Selection**: anchor/focus props (+ legacy base/extent aliases), `addRange`/`removeRange`/`getRangeAt`, `collapse*`, `extend`, `modify`, `setBaseAndExtent`, `selectAllChildren`, `deleteFromDocument`, `containsNode`.
@@ -70,7 +70,7 @@ ruling, §2.7 is a *working* scope commitment: promote it to a `D#` ruling in
 
 ### 1.5 Forms — native
 
-RAD_19; DOM-level in `lambda/dom/dom.cpp`, editing in `radiant/text_edit.cpp` / `text_control.cpp`.
+DOM-level in `lambda/dom/dom.cpp`, editing in `radiant/text_edit.cpp` / `text_control.cpp`.
 
 - `value`/`checked`/`selected` (+ `default*`), `selectedIndex`, `selectedOptions`, `options`, `form.elements`, `document.forms`, the full attribute IDL set (`disabled`, `readOnly`, `required`, `placeholder`, `min/max/step`, `maxLength`, `pattern`, `tabIndex`, …).
 - `focus()`/`blur()`/`click()`, `document.activeElement`.
@@ -169,14 +169,14 @@ API: `RdtVector` (`radiant/render.hpp`) binds to a caller-owned ABGR8888 buffer 
 publishes path construction (`rdt_path_move_to`/`cubic_to`/`add_rect`/`add_circle`),
 `rdt_fill_path`/`rdt_stroke_path`/`rdt_fill_rect`, linear and radial gradients,
 nested alpha-mask clipping, `rdt_draw_image`, and an `RdtMatrix` affine laid out to
-match the backend (RAD_14 §2). Canvas 2D is a state machine over that vocabulary,
+match the backend. Canvas 2D is a state machine over that vocabulary,
 not a new rasterizer. ThorVG is the sole active backend; optional features must gate
 on `rdt_vector_get_caps`, never on backend identity.
 
 28. ◻ **`<canvas>` as a rendered replaced element.** `HTMLCanvasElement.width`/`height` (incl. the "setting either clears and resets the context" rule), a backing ABGR8888 surface per canvas, a painter in the Radiant render walk that composites it, and `devicePixelRatio`-aware backing-store sizing. `getContext("2d")` returns a live context bound to that surface.
-29. ◻ **Context state and transforms.** `save`/`restore` stack, `translate`/`scale`/`rotate`/`transform`/`setTransform`/`resetTransform`/`getTransform`, `globalAlpha`, `globalCompositeOperation`, `lineWidth`/`lineCap`/`lineJoin`/`miterLimit`/`setLineDash`/`lineDashOffset`, and `clip()`. *Known constraint:* the ThorVG backend emulates clipping with a thread-local mask stack of fixed depth `RDT_MAX_CLIP_DEPTH 8` (RAD_14 §2.3), while canvas `save`/`restore` nesting is unbounded — resolve this before §2.7 phase 2, either by deepening the stack or by flattening clip regions.
+29. ◻ **Context state and transforms.** `save`/`restore` stack, `translate`/`scale`/`rotate`/`transform`/`setTransform`/`resetTransform`/`getTransform`, `globalAlpha`, `globalCompositeOperation`, `lineWidth`/`lineCap`/`lineJoin`/`miterLimit`/`setLineDash`/`lineDashOffset`, and `clip()`. *Known constraint:* the ThorVG backend emulates clipping with a thread-local mask stack of fixed depth `RDT_MAX_CLIP_DEPTH 8`, while canvas `save`/`restore` nesting is unbounded — resolve this before §2.7 phase 2, either by deepening the stack or by flattening clip regions.
 30. ◻ **Paths and painting.** `beginPath`/`closePath`/`moveTo`/`lineTo`/`quadraticCurveTo`/`bezierCurveTo`/`arc`/`arcTo`/`ellipse`/`rect`/`roundRect`; `fill`/`stroke` with `nonzero`/`evenodd`; `fillRect`/`strokeRect`/`clearRect`; **`Path2D`** as a retained path object; `isPointInPath`/`isPointInStroke` for hit testing.
-31. ◻ **Paint sources, images, and text.** `fillStyle`/`strokeStyle` over the shared CSS color parser; `createLinearGradient`/`createRadialGradient`/`createConicGradient`; `createPattern` with repetition modes; `drawImage` in all three overloads; `fillText`/`strokeText` with `textAlign`/`textBaseline`/`direction`; and **full `TextMetrics`** — today `measureText` returns `{width}` alone, so `actualBoundingBox*` and `fontBoundingBox*` must be added from `lib/font/`. Shadows and `ctx.filter` gate on `RdtVectorCaps`; note that native `gaussian_blur` is advertised on Apple only (RAD_14 §2.2).
+31. ◻ **Paint sources, images, and text.** `fillStyle`/`strokeStyle` over the shared CSS color parser; `createLinearGradient`/`createRadialGradient`/`createConicGradient`; `createPattern` with repetition modes; `drawImage` in all three overloads; `fillText`/`strokeText` with `textAlign`/`textBaseline`/`direction`; and **full `TextMetrics`** — today `measureText` returns `{width}` alone, so `actualBoundingBox*` and `fontBoundingBox*` must be added from `lib/font/`. Shadows and `ctx.filter` gate on `RdtVectorCaps`; note that native `gaussian_blur` is advertised on Apple only.
 32. ◻ **Pixels, export, and import.** `ImageData` + `createImageData`/`getImageData`/`putImageData`; `canvas.toDataURL`/`toBlob`; `createImageBitmap`/`ImageBitmap`; `OffscreenCanvas` promoted from measure-only to a real backing surface. Import is currently impossible and must land with this item: **`FileReader` has zero occurrences in the tree**, and `createObjectURL` exists only on the Node `url` module, not on the web `URL` global.
 33. ◻ **Interaction primitives canvas editors need regardless of drawing.** **`setPointerCapture`/`releasePointerCapture`/`hasPointerCapture`** — zero occurrences today, and without capture a shape drag or resize breaks the moment the pointer leaves the element; `PointerEvent.getCoalescedEvents()` for smooth freehand ink; real platform stylus `pressure`/`tiltX`/`tiltY` (the fields exist but `pressure` is synthesized as `buttons ? 0.5 : 0.0`, `dom_events.cpp:1772`); and `document.elementsFromPoint` for overlapping-shape hit tests. **These are independently valuable** — #33 also unblocks the SVG drawing track and should land first.
 
@@ -197,7 +197,7 @@ on `rdt_vector_get_caps`, never on backend identity.
 > D10.2.1 — see §0 and §2.6. Legacy editors that require `execCommand` inline
 > formatting are inside the compatibility target; Editor.js in particular moved
 > from §5.4 (rejected) to the integration suite. Form text controls
-> (`input`/`textarea`) are still natively edited (RAD_19) on their own path.
+> (`input`/`textarea`) are still natively edited on their own path.
 
 ### 3.1 No Web Components — Shadow DOM and custom elements
 
@@ -309,7 +309,7 @@ Suites marked ✅ already have a runner; ◻ = vendored in `ref/wpt/`, runner st
 
 **Explicitly skipped suites (non-goals, §3):** `shadow-dom/`, `custom-elements/`, `websockets/`, `workers/`, `IndexedDB/`. `editing/` is **no longer skipped** — under D10.2.1 its manifest-selected cases run in the two editing runners above. `webgl/`, `webgpu/`, and `html/canvas/*offscreen*worker*` stay out per §2.7's stated limits.
 
-Practical notes: (a) new runners should clone the `test_wpt_selection_gtest.cpp` pattern — recursive discovery, helper-script allowlist, shim injection, stdout result parsing; (b) full-tree runs are a non-goal — WPT is ~50k tests, most irrelevant to Radiant; curated per-suite runners with pinned pass/fail baselines (like `wpt_form_baseline.txt`) are the model; (c) Radiant's WebDriver endpoint (RAD_23, `Radiant_WebDriver.md`) is the eventual transport if we ever want upstream `wptrunner` integration, but the in-process gtest runners are cheaper and are the committed path.
+Practical notes: (a) new runners should clone the `test_wpt_selection_gtest.cpp` pattern — recursive discovery, helper-script allowlist, shim injection, stdout result parsing; (b) full-tree runs are a non-goal — WPT is ~50k tests, most irrelevant to Radiant; curated per-suite runners with pinned pass/fail baselines (like `wpt_form_baseline.txt`) are the model; (c) Radiant's WebDriver endpoint (`Radiant_WebDriver.md`) is the eventual transport if we ever want upstream `wptrunner` integration, but the in-process gtest runners are cheaper and are the committed path.
 
 ---
 

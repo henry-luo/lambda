@@ -38,8 +38,8 @@ pn main() {
     print(dynamic(a, "bad")); print(" "); print(dynamic(a, 4294967296)); print("\n")
     let old: float[] = a
     print(borrow(a, a)); print(" "); print(a[0]); print(" "); print(1.0 / old[0] < 0.0); print("\n")
-    write_absent(a)
-    boundary(a)
+    let failed_write = write_absent(a)
+    let failed_boundary = boundary(a)
     print(a[0]); print("\n")
     var empty: float[] = fill(0, 0.0)^
     print(absent(empty, 0)); print("\n")

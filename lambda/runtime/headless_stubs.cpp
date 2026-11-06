@@ -14,20 +14,10 @@ extern "C" Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item)
     return svg_item;
 }
 
-// runner teardown reaches these only when runtime->dom_doc is set, which only
-// the Radiant document loaders do
+// without Radiant there is no native document to free
 struct DomDocument;
 void free_document(DomDocument* doc) {
     (void)doc;
-}
-struct DocumentCleanupTiming;
-bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing) {
-    (void)doc;
-    (void)timing;
-    return false;
-}
-bool document_runtime_cleanup_ready(DomDocument* doc) {
-    return doc == NULL;
 }
 
 extern "C" bool radiant_eval_context_switch(EvalContext* target) {

@@ -6,17 +6,330 @@ extern "C" {
 }
 #include "../lib/test_utils.h"
 #include "../lib/arraylist.hpp"
-#include "../lib/tagged.hpp"
+#include "../radiant/tagged.hpp"
 #include "../lib/mem.h"
 
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
+#include "../lambda/input/css/css_parser.hpp"
+#include "../radiant/css_mutation_queries.hpp"
+#include "../radiant/dom_mutation_prepare.hpp"
+#include "../radiant/dom_mutation_record.hpp"
+#include "../radiant/dom_backed_tree.hpp"
 #include "../radiant/event.hpp"
 #include "../radiant/state_store_internal.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/render_metrics.hpp"
+#include "../radiant/scroll_request.hpp"
+#include "../radiant/select_options.hpp"
+#include "test_native_input_document.hpp"
 
 #include <new>
+
+TEST(NativeCssMutationQuery, FindsRelationalAttributesInNestedRules) {
+    CssSimpleSelector attribute = {};
+    attribute.type = CSS_SELECTOR_ATTR_EXACT;
+    attribute.attribute.name = "data-state";
+    CssSimpleSelector* inner_simples[] = {&attribute};
+    CssCompoundSelector inner_compound = {};
+    inner_compound.simple_selectors = inner_simples;
+    inner_compound.simple_selector_count = 1;
+    CssCompoundSelector* inner_compounds[] = {&inner_compound};
+    CssSelector inner = {};
+    inner.compound_selectors = inner_compounds;
+    inner.compound_selector_count = 1;
+    CssSelector* arguments[] = {&inner};
+    CssSimpleSelector has = {};
+    has.type = CSS_SELECTOR_PSEUDO_HAS;
+    has.function_selectors = arguments;
+    has.function_selector_count = 1;
+    CssSimpleSelector* outer_simples[] = {&has};
+    CssCompoundSelector outer_compound = {};
+    outer_compound.simple_selectors = outer_simples;
+    outer_compound.simple_selector_count = 1;
+    CssCompoundSelector* outer_compounds[] = {&outer_compound};
+    CssSelector outer = {};
+    outer.compound_selectors = outer_compounds;
+    outer.compound_selector_count = 1;
+    CssRule style = {};
+    style.type = CSS_RULE_STYLE;
+    style.data.style_rule.selector = &outer;
+    CssRule* nested[] = {&style};
+    CssRule media = {};
+    media.type = CSS_RULE_MEDIA;
+    media.data.conditional_rule.rules = nested;
+    media.data.conditional_rule.rule_count = 1;
+    CssRule* rules[] = {&media};
+    CssStylesheet sheet = {};
+    sheet.rules = rules;
+    sheet.rule_count = 1;
+    CssStylesheet* sheets[] = {&sheet};
+    DomDocument document = {};
+    document.stylesheets = lam::own_arr(sheets);
+    document.stylesheet_count = 1;
+    EXPECT_TRUE(dom_engine_attribute_has_relational_css_dependency(&document, "DATA-STATE"));
+    EXPECT_FALSE(dom_engine_attribute_has_relational_css_dependency(&document, "data-other"));
+    sheet.disabled = true;
+    EXPECT_FALSE(dom_engine_attribute_has_relational_css_dependency(&document, "data-state"));
+    EXPECT_TRUE(css_property_runtime_inherited(CSS_PROPERTY_COLOR));
+    EXPECT_FALSE(css_property_runtime_inherited(CSS_PROPERTY_WIDTH));
+}
+
+TEST(NativeEditingWithoutScriptHost, TextEditPublishesMutationAndReflow) {
+    NativeInputDocument fixture;
+    Input* input = fixture.input;
+    DomDocument* document = fixture.document;
+    ASSERT_NE(document, nullptr);
+    DomElement* parent = dom_create_backed_element_identity(document, "div", nullptr, false);
+    ASSERT_NE(parent, nullptr);
+    ASSERT_TRUE(parent->set_attribute("contenteditable", "true"));
+    document->root = lam::up(parent);
+    DomText* text = parent->append_text("abc");
+    ASSERT_NE(text, nullptr);
+    ASSERT_EQ(radiant_dom_prepare_children_mutation(parent, nullptr), parent);
+    DomElement* inserted = dom_create_backed_element_identity(document, "span", nullptr, false);
+    ASSERT_NE(inserted, nullptr);
+    ASSERT_TRUE(radiant_dom_insert_backed_element(parent, inserted, text, nullptr));
+    EXPECT_EQ(parent->first_child, inserted);
+    EXPECT_EQ(dom_backed_node_index(parent, inserted), 0);
+    EXPECT_EQ(dom_backed_node_index(parent, text), 1);
+    DomText* prefix = DomText::create_detached_copy(document, "z", 1);
+    ASSERT_NE(prefix, nullptr);
+    ASSERT_TRUE(radiant_dom_insert_backed_text(parent, prefix, text, nullptr));
+    EXPECT_EQ(dom_backed_node_index(parent, prefix), 1);
+    EXPECT_EQ(dom_backed_node_index(parent, text), 2);
+    Pool* foreign_pool = pool_create();
+    ASSERT_NE(foreign_pool, nullptr);
+    Input* foreign_input = Input::create(foreign_pool);
+    ASSERT_NE(foreign_input, nullptr);
+    DomDocument* foreign_document = dom_document_create(foreign_input);
+    ASSERT_NE(foreign_document, nullptr);
+    DomText* foreign_text = DomText::create_detached_copy(foreign_document, "foreign", 7);
+    ASSERT_NE(foreign_text, nullptr);
+    EXPECT_FALSE(radiant_dom_insert_before_child(parent, foreign_text, nullptr, nullptr));
+    EXPECT_EQ(foreign_text->parent, nullptr);
+    EXPECT_EQ(dom_element_backing(parent)->length, 3);
+    dom_document_destroy(foreign_document);
+    pool_destroy(foreign_pool);
+    StateStore* store = state_store_create(document);
+    ASSERT_NE(store, nullptr);
+    DocState* state = state_store_doc_state(store);
+    ASSERT_NE(state, nullptr);
+    doc_state_clear_reflow(state);
+    uint64_t epoch = document->mutation_epoch;
+    uint32_t caret = 0;
+    ASSERT_TRUE(dom_edit_replace_range_u16(state, text, 1, 2, "X", &caret));
+    EXPECT_STREQ(text->text, "aXc");
+    EXPECT_EQ(caret, 2u);
+    EXPECT_EQ(document->mutation_epoch, epoch + 1);
+    EXPECT_EQ(document->js.mutation_count, 1);
+    ASSERT_EQ(document->js.mutation_record_count, 1);
+    EXPECT_EQ(document->js.mutation_records[0].kind, DOM_JS_MUTATION_TEXT);
+    EXPECT_EQ(document->js.mutation_records[0].target, text);
+    EXPECT_TRUE(state->needs_reflow);
+    dom_js_mutation_records_reset(document);
+    state->dom_selection = dom_selection_create(state);
+    ASSERT_NE(state->dom_selection, nullptr);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_selection_collapse(state->dom_selection, parent, 3, &exception));
+    uint64_t insertion_epoch = document->mutation_epoch;
+    DomEditInvocation invocation = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, parent, {parent, 3}, {parent, 3}, &invocation));
+    uint32_t inserted_caret = 0;
+    ASSERT_TRUE(dom_edit_insert_at_boundary_u16(&invocation, "Q", &inserted_caret));
+    ASSERT_TRUE(dom_edit_invocation_commit_selection(&invocation));
+    dom_edit_invocation_end(&invocation);
+    ASSERT_NE(parent->last_child, nullptr);
+    ASSERT_TRUE(parent->last_child->is_text());
+    EXPECT_STREQ(parent->last_child->as_text()->text, "Q");
+    EXPECT_EQ(inserted_caret, 1u);
+    EXPECT_EQ(dom_backed_node_index(parent, parent->last_child), 3);
+    EXPECT_EQ(document->js.mutation_count, 1);
+    // The transaction advances the clock at the write and again when it publishes.
+    EXPECT_EQ(document->mutation_epoch, insertion_epoch + 2);
+    ASSERT_EQ(document->js.mutation_record_count, 1);
+    EXPECT_EQ(document->js.mutation_records[0].kind, DOM_JS_MUTATION_CHILD_INSERT);
+    EXPECT_EQ(document->js.mutation_records[0].target, parent->last_child);
+    DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
+    EXPECT_EQ(focus.node, parent->last_child);
+    EXPECT_EQ(focus.offset, 1u);
+    dom_js_mutation_records_reset(document);
+    DomNode* original_last = parent->last_child;
+    ASSERT_TRUE(dom_selection_collapse(state->dom_selection, parent, 4, &exception));
+    DomRange* original_range = dom_selection_get_range_at(state->dom_selection, 0, &exception);
+    ASSERT_NE(original_range, nullptr);
+    int32_t original_range_refs = ref_count_get(&original_range->ref_count);
+    DomEditInvocation aborted = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, parent, {parent, 4}, {parent, 4}, &aborted));
+    ASSERT_TRUE(dom_edit_insert_at_boundary_u16(&aborted, "discard", nullptr));
+    dom_edit_invocation_end(&aborted);
+    EXPECT_EQ(parent->last_child, original_last);
+    EXPECT_EQ(dom_element_backing(parent)->length, 4);
+    EXPECT_EQ(dom_backed_node_index(parent, original_last), 3);
+    EXPECT_EQ(dom_selection_get_range_at(state->dom_selection, 0, &exception), original_range);
+    EXPECT_EQ(ref_count_get(&original_range->ref_count), original_range_refs);
+    focus = dom_selection_focus_boundary(state->dom_selection);
+    EXPECT_EQ(focus.node, parent);
+    EXPECT_EQ(focus.offset, 4u);
+    EXPECT_STREQ(text->text, "aXc");
+    EXPECT_STREQ(original_last->as_text()->text, "Q");
+    DomEditInvocation aborted_text = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, parent, {text, 1}, {text, 1}, &aborted_text));
+    ASSERT_TRUE(dom_edit_invocation_replace_range_u16(&aborted_text, text, 1, 2, "lost", nullptr));
+    dom_edit_invocation_end(&aborted_text);
+    EXPECT_STREQ(text->text, "aXc");
+    EXPECT_EQ(dom_backed_node_index(parent, text), 2);
+    EXPECT_STREQ(original_last->as_text()->text, "Q");
+    EXPECT_EQ(document->js.mutation_count, 0);
+    EXPECT_EQ(document->js.mutation_record_count, 0);
+    radiant_dom_record_mutation_detail(document, DOM_JS_MUTATION_TEXT, text, parent,
+        0, nullptr, CSS_PROPERTY_UNKNOWN);
+    ASSERT_EQ(document->js.mutation_record_count, 1);
+    DomNodeRef text_ref = dom_node_ref(text);
+    uint32_t previous_pins = dom_node_pin_count(document, text_ref, DOM_NODE_PIN_RECONCILE);
+    uint32_t previous_mask = document->js.mutation_kind_mask;
+    DomEditInvocation aborted_after_record = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, parent, {parent, 4}, {parent, 4}, &aborted_after_record));
+    ASSERT_TRUE(dom_edit_insert_at_boundary_u16(&aborted_after_record, "discard", nullptr));
+    dom_edit_invocation_end(&aborted_after_record);
+    ASSERT_EQ(document->js.mutation_record_count, 1);
+    EXPECT_EQ(document->js.mutation_records[0].target, text);
+    EXPECT_EQ(document->js.mutation_kind_mask, previous_mask);
+    EXPECT_EQ(dom_node_pin_count(document, text_ref, DOM_NODE_PIN_RECONCILE), previous_pins);
+    dom_js_mutation_records_reset(document);
+    int64_t wide_value = INT64_C(0x123456789abcdef);
+    array_append(static_cast<Array*>(dom_element_backing(parent)),
+        Item{.item = l2it(&wide_value)}, input->pool, input->arena);
+    ASSERT_EQ(dom_element_backing(parent)->length, 5);
+    DomEditInvocation aborted_wide = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, parent, {parent, 4}, {parent, 4}, &aborted_wide));
+    ASSERT_TRUE(dom_edit_insert_at_boundary_u16(&aborted_wide, "discard", nullptr));
+    dom_edit_invocation_end(&aborted_wide);
+    Element* restored = dom_element_backing(parent);
+    ASSERT_EQ(restored->length, 5);
+    EXPECT_EQ(get_type_id(restored->items[4]), LMD_TYPE_INT64);
+    EXPECT_EQ(restored->items[4].get_int64(), wide_value);
+    uintptr_t value_address = (uintptr_t)restored->items[4].int64_ptr;
+    EXPECT_GE(value_address, (uintptr_t)restored->items);
+    EXPECT_LT(value_address, (uintptr_t)(restored->items + restored->capacity));
+    state_store_destroy(document);
+}
+
+TEST(NativeEditingWithoutScriptHost, MergeBlocksCommitsAndAbortRestoresBacking) {
+    NativeInputDocument fixture;
+    DomDocument* document = fixture.document;
+    ASSERT_NE(document, nullptr);
+    DomElement* host = dom_create_backed_element_identity(document, "div", nullptr, false);
+    DomElement* left = dom_create_backed_element_identity(document, "p", nullptr, false);
+    DomElement* right = dom_create_backed_element_identity(document, "p", nullptr, false);
+    ASSERT_TRUE(host && left && right);
+    ASSERT_TRUE(host->set_attribute("contenteditable", "true"));
+    document->root = lam::up(host);
+    ASSERT_TRUE(radiant_dom_insert_before_child(host, left, nullptr, nullptr));
+    ASSERT_TRUE(radiant_dom_insert_before_child(host, right, nullptr, nullptr));
+    DomText* left_text = left->append_text("left");
+    DomText* right_text = right->append_text("right");
+    ASSERT_TRUE(left_text && right_text);
+    dom_js_mutation_records_reset(document);
+    StateStore* store = state_store_create(document);
+    ASSERT_NE(store, nullptr);
+    DocState* state = state_store_doc_state(store);
+    ASSERT_NE(state, nullptr);
+    state->dom_selection = dom_selection_create(state);
+    ASSERT_NE(state->dom_selection, nullptr);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_selection_collapse(state->dom_selection, left_text, 4, &exception));
+    DomEditInvocation aborted = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, host, {left_text, 4}, {left_text, 4}, &aborted));
+    ASSERT_TRUE(dom_edit_merge_adjacent_blocks(&aborted, left, right));
+    dom_edit_invocation_end(&aborted);
+    EXPECT_EQ(host->first_child, left);
+    EXPECT_EQ(host->last_child, right);
+    EXPECT_EQ(left->first_child, left_text);
+    EXPECT_EQ(right->first_child, right_text);
+    EXPECT_EQ(dom_backed_node_index(host, left), 0);
+    EXPECT_EQ(dom_backed_node_index(host, right), 1);
+    EXPECT_EQ(dom_backed_node_index(right, right_text), 0);
+    EXPECT_EQ(document->js.mutation_record_count, 0);
+
+    DomEditInvocation committed = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, host, {left_text, 4}, {left_text, 4}, &committed));
+    ASSERT_TRUE(dom_edit_merge_adjacent_blocks(&committed, left, right));
+    ASSERT_TRUE(dom_edit_invocation_commit_selection(&committed));
+    dom_edit_invocation_end(&committed);
+    EXPECT_EQ(host->first_child, left);
+    EXPECT_EQ(host->last_child, left);
+    EXPECT_EQ(right->parent, nullptr);
+    EXPECT_EQ(left->last_child, right_text);
+    EXPECT_EQ(dom_element_backing(host)->length, 1);
+    EXPECT_EQ(dom_backed_node_index(left, right_text), 1);
+    state_store_destroy(document);
+}
+
+TEST(NativeEditingWithoutScriptHost, RemovingOptionRestoresLiveSelectionOnAbort) {
+    NativeInputDocument fixture;
+    DomDocument* document = fixture.document;
+    ASSERT_NE(document, nullptr);
+    DomElement* host = dom_create_backed_element_identity(document, "div", nullptr, false);
+    DomElement* select = dom_create_backed_element_identity(document, "select", nullptr, false);
+    DomElement* first = dom_create_backed_element_identity(document, "option", nullptr, false);
+    DomElement* second = dom_create_backed_element_identity(document, "option", nullptr, false);
+    ASSERT_TRUE(host && select && first && second);
+    ASSERT_TRUE(host->set_attribute("contenteditable", "true"));
+    document->root = lam::up(host);
+    ASSERT_TRUE(radiant_dom_insert_before_child(host, select, nullptr, nullptr));
+    ASSERT_TRUE(radiant_dom_insert_before_child(select, first, nullptr, nullptr));
+    ASSERT_TRUE(radiant_dom_insert_before_child(select, second, nullptr, nullptr));
+    dom_js_mutation_records_reset(document);
+    StateStore* store = state_store_create(document);
+    ASSERT_NE(store, nullptr);
+    DocState* state = state_store_doc_state(store);
+    ASSERT_NE(state, nullptr);
+    FormControlProp form{};
+    form.control_type = FORM_CONTROL_SELECT;
+    form.option_count = 2;
+    select->set_role_kind(DomElement::ROLE_FORM);
+    select->form = lam::view_prop(&form);
+    first->set_option_selectedness(true);
+    ASSERT_FALSE(second->has_option_selectedness());
+    radiant_select_sync_native_index(select, 0, 2);
+    state->dom_selection = dom_selection_create(state);
+    ASSERT_NE(state->dom_selection, nullptr);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_selection_collapse(state->dom_selection, host, 0, &exception));
+    DomEditInvocation aborted = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, host, {host, 0}, {host, 0}, &aborted));
+    ASSERT_TRUE(dom_edit_invocation_begin_transaction(&aborted));
+    ASSERT_TRUE(radiant_dom_remove_edit_child(first));
+    EXPECT_TRUE(dom_option_is_selected(second));
+    EXPECT_EQ(form.option_count, 1);
+    dom_edit_invocation_end(&aborted);
+    EXPECT_EQ(select->first_child, first);
+    EXPECT_TRUE(dom_option_is_selected(first));
+    EXPECT_FALSE(dom_option_is_selected(second));
+    EXPECT_FALSE(second->has_option_selectedness());
+    EXPECT_EQ(form.option_count, 2);
+    EXPECT_EQ(form_control_get_selected_index(state, select), 0);
+    EXPECT_EQ(dom_backed_node_index(select, first), 0);
+    EXPECT_EQ(document->js.mutation_record_count, 0);
+
+    DomEditInvocation committed = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, host, {host, 0}, {host, 0}, &committed));
+    ASSERT_TRUE(dom_edit_invocation_begin_transaction(&committed));
+    ASSERT_TRUE(radiant_dom_remove_edit_child(first));
+    // The transaction commits even when no new selection outcome was requested.
+    EXPECT_FALSE(dom_edit_invocation_commit_selection(&committed));
+    EXPECT_EQ(committed.transaction, nullptr);
+    dom_edit_invocation_end(&committed);
+    EXPECT_EQ(select->first_child, second);
+    EXPECT_TRUE(dom_option_is_selected(second));
+    EXPECT_EQ(form.option_count, 1);
+    EXPECT_EQ(form_control_get_selected_index(state, select), 0);
+    select->form = nullptr;
+    state_store_destroy(document);
+}
 
 class StateStoreDomMutationTest : public ::testing::Test {
 protected:
@@ -76,6 +389,57 @@ protected:
         return doc.state;
     }
 };
+
+TEST_F(StateStoreDomMutationTest, NativeOptionPseudoStatesFollowLiveSelectedness) {
+    live->tag_name = lam::up("option");
+    SelectorQueryScratch query;
+    ASSERT_TRUE(query.parse_list(":checked"));
+    query.matcher = selector_matcher_create(query.pool);
+    ASSERT_NE(query.matcher, nullptr);
+    selector_matcher_set_cache_enabled(query.matcher, false);
+    state_configure_selector_matcher(state(), query.matcher);
+    live->set_option_selectedness(false);
+    EXPECT_FALSE(state_resolve_selector_pseudo_state(state(), live, PSEUDO_STATE_CHECKED));
+    EXPECT_FALSE(state_resolve_selector_pseudo_state(state(), live, PSEUDO_STATE_SELECTED));
+    EXPECT_FALSE(selector_matcher_matches_group(query.matcher, query.group, live, nullptr));
+    live->set_option_selectedness(true);
+    EXPECT_TRUE(state_resolve_selector_pseudo_state(state(), live, PSEUDO_STATE_CHECKED));
+    EXPECT_TRUE(state_resolve_selector_pseudo_state(state(), live, PSEUDO_STATE_SELECTED));
+    EXPECT_TRUE(selector_matcher_matches_group(query.matcher, query.group, live, nullptr));
+    ViewTree tree = {};
+    doc.view_tree = lam::own(&tree);
+    EXPECT_TRUE(state_resolve_selector_pseudo_state(state(), live, PSEUDO_STATE_CHECKED));
+    live->set_option_selectedness(false);
+    EXPECT_FALSE(state_resolve_selector_pseudo_state(state(), live, PSEUDO_STATE_CHECKED));
+    doc.view_tree = nullptr;
+}
+
+TEST_F(StateStoreDomMutationTest, ScrollRequestReplacesAndReleasesPinnedTargets) {
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, live, sizeof(DomElement), false));
+    ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
+    DomNodeRef first = dom_node_ref(live), second = dom_node_ref(orphan);
+    radiant_queue_scroll_into_view(&doc, live, true, false, DOM_SCROLL_ALIGN_END,
+                                   DOM_SCROLL_ALIGN_CENTER, DOM_SCROLL_BEHAVIOR_SMOOTH);
+    EXPECT_EQ(dom_node_pin_count(&doc, first, DOM_NODE_PIN_RECONCILE), 1u);
+    EXPECT_EQ(doc.pending_scroll_into_view_target.address, first.address);
+    EXPECT_TRUE(doc.pending_scroll_into_view_center);
+    EXPECT_EQ(doc.pending_scroll_into_view_block, DOM_SCROLL_ALIGN_END);
+    EXPECT_EQ(doc.pending_scroll_into_view_inline, DOM_SCROLL_ALIGN_CENTER);
+    EXPECT_EQ(doc.pending_scroll_into_view_behavior, DOM_SCROLL_BEHAVIOR_SMOOTH);
+    EXPECT_TRUE(state()->needs_repaint);
+    radiant_queue_scroll_into_view(&doc, orphan, false, true, DOM_SCROLL_ALIGN_START,
+                                   DOM_SCROLL_ALIGN_NEAREST, DOM_SCROLL_BEHAVIOR_AUTO);
+    EXPECT_EQ(dom_node_pin_count(&doc, first, DOM_NODE_PIN_RECONCILE), 0u);
+    EXPECT_EQ(dom_node_pin_count(&doc, second, DOM_NODE_PIN_RECONCILE), 1u);
+    EXPECT_EQ(doc.pending_scroll_into_view_target.address, second.address);
+    EXPECT_TRUE(doc.pending_scroll_into_view_if_needed);
+    radiant_queue_scroll_into_view(&doc, drop, false, false, DOM_SCROLL_ALIGN_START,
+                                   DOM_SCROLL_ALIGN_NEAREST, DOM_SCROLL_BEHAVIOR_AUTO);
+    EXPECT_EQ(dom_node_pin_count(&doc, second, DOM_NODE_PIN_RECONCILE), 0u);
+    EXPECT_EQ(doc.pending_scroll_into_view_target.address, nullptr);
+    dom_lifecycle_destroy(&doc);
+}
 
 TEST_F(StateStoreDomMutationTest, InputMethodTransportReleasesPendingRequestsAndPopupLabels) {
     MemtrackCategoryStats before = {}, after = {};
@@ -641,13 +1005,15 @@ TEST_F(StateStoreDomMutationTest, HiddenSelectUpdatesRetainedSelectionWithoutLay
     form.option_count = 3;
     live->tag_name = lam::up("select");
     live->tag_id = MARKUP_NAME_SELECT;
+    live->set_role_kind(DomElement::ROLE_FORM);
     live->form = lam::view_prop(&form);
     form_control_set_selected_index(state(), live, 0);
     ASSERT_EQ(form_control_get_selected_index(state(), live), 0);
 
     // display:none removes the layout box while the control and its state remain alive.
     live->view_type = RDT_VIEW_NONE;
-    form_control_set_selected_index(state(), live, 2);
+    radiant_select_sync_native_index(live, 2, 5);
+    EXPECT_EQ(form.option_count, 5);
     EXPECT_EQ(form_control_get_selected_index(state(), live), 2);
     live->form = nullptr;
     form_control_set_selected_index(state(), live, 1);

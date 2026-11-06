@@ -12,6 +12,8 @@
  */
 #pragma once
 
+#include "../input/css/dom_xml_serializer.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,22 +26,6 @@ const char* dom_element_attribute_ns(void* element, const char* namespace_uri, c
 void dom_invalidate_layout_subtree(void* node);
 void dom_svg_invalidate_presentation(void* node);
 
-struct StrBuf;
-// optional serializer overrides are borrowed for the duration of one element.
-typedef struct DomXmlAttributeOverride {
-    const char* name;
-    const char* value;
-    const char* namespace_uri;
-    struct DomXmlAttributeOverride* next;
-    bool written;
-} DomXmlAttributeOverride;
-typedef struct DomXmlProjection {
-    void* context;
-    bool (*include_element)(void* context, void* element);
-    DomXmlAttributeOverride* (*attributes)(void* context, void* element);
-    bool (*append_children)(void* context, void* element, struct StrBuf* output);
-} DomXmlProjection;
-bool dom_serialize_xml(void* node, struct StrBuf* output, const DomXmlProjection* projection);
 
 
 #include "../lambda.h"
@@ -103,6 +89,7 @@ Item dom_make_rect_in(struct DomDocument* doc,
 bool dom_has_committed_geometry_snapshot(void* dom_doc);
 bool dom_ensure_geometry_snapshot(struct DomDocument* dom_doc);
 float dom_scrollable_extent(void* element, bool width_axis);
+float dom_svg_geometry_fallback_dimension(void* element, bool width_axis);
 
 /**
  * Return the topmost painted SVG element at viewport coordinates, or NULL.
@@ -118,9 +105,6 @@ bool dom_svg_element_geometry_bounds(void* element, float* left, float* top,
     float* right, float* bottom);
 // SVG2 conditional processing uses user preferences; requiredFeatures is obsolete and ignored.
 bool dom_svg_conditions_match(const char* extensions, const char* languages, const char* preferences);
-// realm-neutral fill/stroke query over the same contour walker used by SVG hit testing.
-bool dom_geometry_path_query(const void* path, float left, float top, float right, float bottom,
-    bool rectangle, int fill_rule, float stroke_width, int cap, int join);
 bool dom_svg_element_is_eligible(void* element);
 void* dom_svg_switch_selected_child(void* element);
 const char* dom_document_preferred_languages(void* document);
@@ -502,7 +486,6 @@ Item js_file_new(Item parts, Item name, Item options);
 /** Activation bridges invoked after the UA tier claims an event. */
 Item dom_focus_method_bridge(void* dom_elem, bool focus);
 Item dom_scroll_into_view_bridge(void* dom_elem);
-void dom_scroll_into_view_if_needed_bridge(void* dom_elem);
 void dom_select_set_selected_index_bridge(void* dom_elem, Item value);
 
 /** dataset expando write, routed from the JS property-set path. */

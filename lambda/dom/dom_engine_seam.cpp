@@ -9,6 +9,8 @@
 #include "dom_host_engine.h"
 #include "dom_collection_types.h"
 #include "dom_event_host.h"
+#include "../input/css/dom_element.hpp"
+#include "../../lib/provider.hpp"
 
 // Native providers belong to the lower runtime; native module registration
 // publishes immutable process-lifetime tables without an upward link (D9.1.3).
@@ -19,75 +21,61 @@ static const DomHostEngineOps* host_engine_operations = nullptr;
 static const DomCollectionHostTypes* collection_host_types = nullptr;
 static const DomEventHostOps* event_host_operations = nullptr;
 
-template<class Operations, class... Fields>
-static bool dom_provider_register(const Operations** slot, const Operations* operations, Fields... fields) {
-    if (!operations || !(... && (operations->*fields))) return false;
-    const Operations* expected = nullptr;
-    return __atomic_compare_exchange_n(slot, &expected, operations, false,
-                                       __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) ||
-           expected == operations;
-}
-
-template<class Operations>
-static const Operations* dom_provider_load(const Operations* const* slot) {
-    return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
-}
-
 #define DOM_PROVIDER_MEMBER(result, name, parameters) , &Operations::name
 extern "C" bool dom_canvas_register_engine(const DomCanvasEngineOps* operations) {
     using Operations = DomCanvasEngineOps;
-    return dom_provider_register(&canvas_engine_operations, operations
+    return lambda_provider_register(&canvas_engine_operations, operations
         DOM_CANVAS_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
 }
 
 extern "C" bool dom_webgl_register_engine(const DomWebGlEngineOps* operations) {
     using Operations = DomWebGlEngineOps;
-    return dom_provider_register(&webgl_engine_operations, operations
-        DOM_WEBGL_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
+    return lambda_provider_register(&webgl_engine_operations, operations
+        WEBGL_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
 }
 
 extern "C" bool dom_style_register_engine(const DomStyleEngineOps* operations) {
     using Operations = DomStyleEngineOps;
-    return dom_provider_register(&style_engine_operations, operations
+    return lambda_provider_register(&style_engine_operations, operations
         DOM_STYLE_ENGINE_OPERATIONS(DOM_PROVIDER_MEMBER));
 }
 #define DOM_HOST_MEMBER(result, name, parameters, arguments, absence) , &Operations::name
 extern "C" bool dom_host_register_engine(const DomHostEngineOps* operations) {
     using Operations = DomHostEngineOps;
-    return dom_provider_register(&host_engine_operations, operations
+    return lambda_provider_register(&host_engine_operations, operations
         DOM_HOST_ENGINE_OPERATIONS(DOM_HOST_MEMBER));
 }
 #undef DOM_HOST_MEMBER
 #define DOM_COLLECTION_MEMBER(name) , &Operations::name
 extern "C" bool dom_collection_register_types(const DomCollectionHostTypes* types) {
     using Operations = DomCollectionHostTypes;
-    return dom_provider_register(&collection_host_types, types
+    return lambda_provider_register(&collection_host_types, types
         DOM_COLLECTION_HOST_TYPES(DOM_COLLECTION_MEMBER));
 }
 #undef DOM_COLLECTION_MEMBER
 #define DOM_EVENT_MEMBER(result, name, parameters, arguments, absence) , &Operations::name
 extern "C" bool dom_event_register_host(const DomEventHostOps* operations) {
     using Operations = DomEventHostOps;
-    return dom_provider_register(&event_host_operations, operations
+    return lambda_provider_register(&event_host_operations, operations
         DOM_EVENT_HOST_OPERATIONS(DOM_EVENT_MEMBER));
 }
 #undef DOM_EVENT_MEMBER
 #undef DOM_PROVIDER_MEMBER
 
 extern "C" const DomCanvasEngineOps* dom_canvas_engine_ops(void) {
-    return dom_provider_load(&canvas_engine_operations);
+    return lambda_provider_load(&canvas_engine_operations);
 }
 
 extern "C" const DomWebGlEngineOps* dom_webgl_engine_ops(void) {
-    return dom_provider_load(&webgl_engine_operations);
+    return lambda_provider_load(&webgl_engine_operations);
 }
 
 extern "C" const DomStyleEngineOps* dom_style_engine_ops(void) {
-    return dom_provider_load(&style_engine_operations);
+    return lambda_provider_load(&style_engine_operations);
 }
 
 extern "C" const DomHostEngineOps* dom_host_engine_ops(void) {
-    return dom_provider_load(&host_engine_operations);
+    return lambda_provider_load(&host_engine_operations);
 }
 
 // lower-owned catalog wrappers preserve absence without upward native imports.
@@ -100,7 +88,7 @@ DOM_HOST_ENGINE_OPERATIONS(DOM_HOST_DEFINE)
 #undef DOM_HOST_DEFINE
 
 extern "C" const DomCollectionHostTypes* dom_collection_host_types(void) {
-    return dom_provider_load(&collection_host_types);
+    return lambda_provider_load(&collection_host_types);
 }
 
 #define DOM_COLLECTION_GET(name) \
@@ -112,7 +100,7 @@ DOM_COLLECTION_HOST_TYPES(DOM_COLLECTION_GET)
 #undef DOM_COLLECTION_GET
 
 extern "C" const DomEventHostOps* dom_event_host_ops(void) {
-    return dom_provider_load(&event_host_operations);
+    return lambda_provider_load(&event_host_operations);
 }
 
 #define DOM_EVENT_DEFINE(result, name, parameters, arguments, absence) \

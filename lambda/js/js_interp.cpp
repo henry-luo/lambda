@@ -30,7 +30,7 @@
 #include "../../lib/file.h"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
-#include "../../lib/tagged.hpp"
+#include "../../radiant/tagged.hpp"
 #include "../../lib/url.h"
 
 // every walker entry installs MVP operations; native ABI callbacks restore the

@@ -5,7 +5,7 @@
 #include "js_runtime_state.hpp"
 #include "js_function.hpp"
 #include "js_props.h"
-#include "js_well_known_names.h"
+#include "../core/js_well_known_names.h"
 #include "js_event_loop.h"
 #include "../io/resource_policy.h"
 #include "../runtime/heap_api.h"

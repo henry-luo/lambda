@@ -2,7 +2,7 @@
 
 > **Status:** Consolidated design record, 2026-10-21. It merges the four earlier typed-array proposals — Typed Array 1 (one `ArrayNum` type with compact lanes, 2026-04), 2 (N-D arrays, views, vectorized math, masks, 2026-06), 3 (LambdaJS storage unification, 2026-06) and 4 (image processing, SIMD auto-vectorization, mutable views, 2026-06) — and brings them in line with the rulings ratified since: the number model, `T[]` contracts, copy-on-write values and views, and keyword element-wise comparison. The body states the current design only. Superseded wording is kept, struck through, in [Appendix S](#appendix-s--superseded-rulings). Updated the same day with two rulings by the user, now S9.3.2 (construction preserves each element's type and precision) and S10.2.4 (array arithmetic promotes as scalar arithmetic does). Implementation status and the few implementation notes are in [Appendix A](#appendix-a--implementation-notes-and-status).
 >
-> **Scope:** Lambda's homogeneous numeric array: element kinds, contracts, construction, indexing and selection, N-D shape, arithmetic, views and mutation, the byte-storage substrate shared with LambdaJS, the image-processing library, and the performance model. Non-numeric typed arrays (`string[]`, record arrays) share the contract model but are native-lane `Array`s, covered by the [impl plan](impl/Lambda_Impl_Typed_Array.md). The JS spec layer is covered by [JS_12_TypedArrays](../doc/dev/js/JS_12_TypedArrays.md).
+> **Scope:** Lambda's homogeneous numeric array: element kinds, contracts, construction, indexing and selection, N-D shape, arithmetic, views and mutation, the byte-storage substrate shared with LambdaJS, the image-processing library, and the performance model. Non-numeric typed arrays (`string[]`, record arrays) share the contract model but are native-lane `Array`s, covered by the [impl plan](impl/Lambda_Impl_Typed_Array.md).
 >
 > **Authority:** the formal specs win wherever they speak (`doc/Doc_Convention.md` §2). This record is normative only where no `S#`/`D#` ruling covers the point. Where the code disagrees with either, the code is the defect; Appendix A.7 lists the known gaps.
 
@@ -28,7 +28,7 @@
 | Construction preserves each element's type and precision | S9.3.2 | §4 |
 | Read views are snapshots; write-through views are borrows | S9.2.2, S9.2.4v2, S9.3.1 | §8 |
 
-**Related records:** [Number Model](Lambda_Semantics_Number_Model.md) (lane semantics, §3.3–§3.5), [Runtime COW](Lambda_Design_Runtime_COW.md) (CW16, views as borrows), [Type Enforcement](Lambda_Design_Type_Enforcement.md) (TE-1..TE-9), [Binary type §11](Lambda_Type_Binary.md) (`ByteStorage` / `ByteBufferHandle`), [Expr_Query §4.1](Lambda_Expr_Query.md) (subscript worlds), [DataFrame](Lambda_Design_DataFrame.md) (future consumer). Implementation records: [Lambda_Impl_Typed_Array.md](impl/Lambda_Impl_Typed_Array.md) (`T[]` contracts, certificates), [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md) (byte substrate). Detailed design: [LR_05 §4–§8](../doc/dev/lambda/LR_05_Strings_and_Vectors.md) (the `ArrayNum` engine), [LR_03 §4](../doc/dev/lambda/LR_03_Value_and_Type_Model.md) (layout), [LR_08](../doc/dev/lambda/LR_08_Memory_and_GC.md) (GC), [LR_11](../doc/dev/lambda/LR_11_Mark_Data_API.md) (readers).
+**Related records:** [Number Model](Lambda_Semantics_Number_Model.md) (lane semantics, §3.3–§3.5), [Runtime COW](Lambda_Design_Runtime_COW.md) (CW16, views as borrows), [Type Enforcement](Lambda_Design_Type_Enforcement.md) (TE-1..TE-9), [Binary type §11](Lambda_Type_Binary.md) (`ByteStorage` / `ByteBufferHandle`), [Expr_Query §4.1](Lambda_Expr_Query.md) (subscript worlds), [DataFrame](Lambda_Design_DataFrame.md) (future consumer). Implementation records: [Lambda_Impl_Typed_Array.md](impl/Lambda_Impl_Typed_Array.md) (`T[]` contracts, certificates), [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md) (byte substrate).
 
 ---
 
@@ -463,7 +463,7 @@ Deferred, designed but not built: region assignment (§8.3); `transpose` with a 
 
 ## Appendix A — Implementation notes and status
 
-Detailed design lives in [LR_05](../doc/dev/lambda/LR_05_Strings_and_Vectors.md), [LR_03 §4](../doc/dev/lambda/LR_03_Value_and_Type_Model.md) and [LR_08](../doc/dev/lambda/LR_08_Memory_and_GC.md). These notes cover only what the design above depends on.
+These notes cover only what the design above depends on.
 
 ### A.1 Layout
 
@@ -526,7 +526,7 @@ Element-wise arithmetic classifies each operation with the scalar numeric classi
 | `var`-parameter view borrows (§8.3) | built for leading-axis rows |
 | Element and masked writes (§8.3) | built (`proc_ndim_index_write.ls`, `proc_mask_assign.ls`) |
 | Region writes (§8.3) | not built; rejected with "range slice-assignment is not supported" |
-| Pinning (§8.4) | retired; the collector rebases views (LR_03, LR_05, the d05 diagram, [Binary §11.2](Lambda_Type_Binary.md), [DataFrame](Lambda_Design_DataFrame.md), Concurrency, Runtime_Structs and code comments synced 2026-10-21) |
+| Pinning (§8.4) | retired; the collector rebases views ([Binary §11.2](Lambda_Type_Binary.md), [DataFrame](Lambda_Design_DataFrame.md), Concurrency, Runtime_Structs and code comments synced 2026-10-21) |
 | Arena-backed views (§8.4) | rejected, as designed (`ravel` copies instead) |
 | JS substrate (§9.3) | built: `JsArrayBuffer` is a `ByteBufferHandle`; JS typed arrays are buffer-handle views; the old duplicated storage fields are deleted (test262 typed-array pages green at the 2026-06-30 cut) |
 | Lambda ↔ JS bridge (§9.4) | not built; `new Float64Array(lambdaArray)` copies |
@@ -538,7 +538,7 @@ Element-wise arithmetic classifies each operation with the scalar numeric classi
 
 ## Appendix B — Mark Reader guidelines
 
-The readers (`ItemReader`, `ArrayReader`, `MapReader`, `ElementReader`) are how formatters and validators see typed arrays. The guidelines were first recorded in Typed Array 2 and should move to a Mark Reader design record when one exists; [LR_11](../doc/dev/lambda/LR_11_Mark_Data_API.md) describes the readers as built.
+The readers (`ItemReader`, `ArrayReader`, `MapReader`, `ElementReader`) are how formatters and validators see typed arrays. The guidelines were first recorded in Typed Array 2 and should move to a Mark Reader design record when one exists.
 
 - **G1 — Four logical shapes only.** Consumers see arrays, maps, items and scalars. A typed `ArrayNum` (1-D, N-D, compact, or a view) answers `isArray()`/`asArray()` like any array; its elements arrive as ordinary scalars or, for N-D, nested arrays. No element kind, shape or stride leaks into consumer code, so one code path serves every representation, and new representations need no consumer changes.
 - **G2 — Traversal allocates nothing.** Readers are small stack values; an N-D sub-tensor is an inline `{base, offset, axis}` cursor, not a heap view. Leaf scalars are packed inline or point into the live buffer. The one exception is an explicit request to materialize a sub-tensor as a standalone value, which is documented as leaving the zero-allocation path; formatters never make it.

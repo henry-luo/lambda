@@ -31,5 +31,12 @@ document.getElementById('check').addEventListener('click', function () {
     check('children', grid.children.length === 3 && grid.childNodes.length === 3);
     check('siblings', grid.firstChild.nextSibling === document.getElementById('b') && grid.lastChild.previousSibling === document.getElementById('b'));
     check('parent', document.getElementById('c').parentNode === document.getElementById('row'));
+    var b = document.getElementById('b');
+    var row = document.getElementById('row');
+    grid.removeChild(b);
+    check('removed', b.parentNode === null && grid.children.length === 2);
+    grid.insertBefore(b, row);
+    check('reinserted', b.parentNode === grid && grid.children.length === 3 &&
+        grid.children[1] === b && grid.children[2] === row);
 });
 </script>

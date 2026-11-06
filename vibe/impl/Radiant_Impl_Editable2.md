@@ -1298,7 +1298,6 @@ a native shortcut around an unmet earlier exit gate.
 
 #### UA-6.3 Documentation and build cutover
 
-- update `RAD_18_Editing_Selection_Ranges.md` and related diagrams;
 - update DOM state/default/API working docs where ownership or failure behavior
   changed;
 - update the design §20 status and the D10.2.1 implementation-status appendix;

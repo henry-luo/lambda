@@ -3,7 +3,7 @@
 > **Status**: **RATIFIED — implementation complete** (2026-09-01). §2–§3 are **descriptive** — the current state of the three dispatch flows, verified against the tree at 2026-09-04. §4.1's rulings **ES22–ES29 are ratified in full (2026-09-01, user)**, §4.3's resolution design is endorsed, and ESO63/ESO67/ESO69 are resolved (ESO68 narrowed to measurement). F17–F21 are implemented; only the separately tracked deferred/measurement ledger items remain.
 > **Role**: the design home for the event **dispatch mechanism** — how an event reaches handlers across the three flows, what object the handlers receive, and how cancellation composes. Complements `vibe/Lambda_Design_DOM_Default.md`, which owns default-action **placement** (what runs after dispatch); the boundary between the two docs is the boundary between *delivering* an event and *acting* on it.
 > **Scope**: propagation, handler registration and addressing, the event object, cancellation/verdict semantics, synthetic dispatch, and the unification design. **Out of scope**: which default actions exist and their status (the DOM_Default ledger), state storage and the waist (DOM_State ES-series), and the JS property/binding architecture (Jube DOM3/DOM4).
-> **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (ES5 pipeline, ES10 peers-over-one-state, ES15 verdicts), `vibe/Lambda_Design_DOM_Default.md` (§5.2 single-sourced activation, resolved ESO49), `vibe/Lambda_Design_DOM_Pkg.md` (placement policy), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `doc/dev/radiant/RAD_15_Events_Input.md`, `doc/dev/js/JS_13_Web_DOM.md` §5.
+> **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (ES5 pipeline, ES10 peers-over-one-state, ES15 verdicts), `vibe/Lambda_Design_DOM_Default.md` (§5.2 single-sourced activation, resolved ESO49), `vibe/Lambda_Design_DOM_Pkg.md` (placement policy), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `vibe/radiant/Radiant_Design_Event.md`.
 > **Formal anchors**: S12.1.3 (reactive templates: body pure `fn`, mutation only in `on` handlers), S12.2.2 (element mutation), S9.1.4 (state lives in view state), D7.2.2 (observable property Get + `[[Call]]`), D3.4.7/D9.5.1–D9.5.4 (host-object metadata and the VMap/Jube bridge), D5.5.1 (the Radiant memory seam), D8 (module/runtime ownership).
 > **Ledger series**: extends the DOM-State area's `ES#` (decisions) / `ESO#` (open issues) / `F#` (migration stages) per `doc/Doc_Convention.md` §4 — no new series. Decisions **ES22–ES29** (all ratified 2026-09-01; **ES23v2** revised 2026-10-06, user — continuous events reach declaring author templates, old text in Appendix S); open issues **ESO63–ESO69** (ESO63/ESO67/ESO69 resolved, ESO68 narrowed); migration stages **F17–F21**.
 
@@ -51,7 +51,7 @@ Facts the unification builds on, all landed:
 
 **Registration.** Listener storage is **external to the DOM structs** — a side-table in `dom_events.cpp` (`:363–404`): `NodeListenerEntry { key, owner_doc, node_ref, target_root, listeners }`, keyed by `DomNode*` for elements, sentinel addresses for `document`/`window`, or the object pointer for a plain `new EventTarget()`, with a pointer-key hashmap index over the entries. Each `EventListener` carries the type string, a GC-rooted callback, `capture`/`once`/`passive` flags, an optional `AbortSignal` root, and a `removed` tombstone. `on<type>` IDL handlers occupy per-element slots; inline HTML attributes compile into them via `js_dom_set_event_handler_function`.
 
-**Dispatch.** `js_dom_dispatch_event` (JS_13 §5) validates the one native
+**Dispatch.** `js_dom_dispatch_event` validates the one native
 record, builds the target→ancestors→document→window path, then runs capture,
 target, and bubble. At each target/bubble node it fires JS listeners before
 that node's producing Lambda-template participant. The record's
@@ -269,7 +269,7 @@ Each stage is independently landable and behavior-neutral-verifiable against the
 | **F18 — one propagation walk** | The engine owns path + phases + stop state; JS listeners and author-template handlers consulted per node in ES23's ratified order via the §4.3 resolution (per-store event-type masks, JS per-type listener counts, per-template event-name masks, ≤2 hashed probes per node); author-tier suppression narrowed per ES29 — claim no longer suppresses the UA tier (audit existing claiming templates; add explicit `'prevent-default'` where that intent was real); `build_path`/`build_view_stack`/author walk merge | a JS `stopPropagation()` stops author-template handlers on ancestors (pinned test); per-node interleaving pinned per ESO63; a claiming author template over a checkbox no longer suppresses the toggle without `'prevent-default'` (pinned test) |
 | **F19 — synthetic dispatch + activation single-sourcing (implemented 2026-09-01)** | `dispatchEvent`/`el.click()` route through `radiant_dispatch_synthetic_dom_event`; `form.ls` owns the popover claim; checkbox/radio/popover claims are shared by both entries; the embedded JS activation pass, `js_did_activation`, and cancel-revert block are deleted | `dom_synthetic_activation.json` proves load-time `click()`, both radio synthetic entries, cancellation, and popover visibility; DOM_Default §5.2 flips; ESO49 closes |
 | **F20 — remaining entry families (implemented 2026-09-01)** | `event_sim` (WebDriver substrate), editing/IME/composition dispatchers, and `radiant.dispatch()` re-entry fold onto the engine's one entry | no dispatcher constructs events outside the record factories |
-| **F21 — cleanup (implemented 2026-09-01)** | Stale comments (`event.cpp:2625`); retire transitional stop-flag thread-locals (JS_13 known-issue 7); doc updates: JS_13 §5, RAD_15, DOM_Default §2.1 pipeline | grep-clean; docs verified-against stamps updated |
+| **F21 — cleanup (implemented 2026-09-01)** | Stale comments (`event.cpp:2625`); retire transitional stop-flag thread-locals; doc updates: DOM_Default §2.1 pipeline | grep-clean; docs verified-against stamps updated |
 
 Sequencing rationale: F17 before F18 because a shared walk needs a shared event to thread through it; F19 after both because deleting the JS activation pass is safe only when synthetic events can reach the behavior registry; F20/F21 are consolidation.
 
@@ -343,9 +343,9 @@ The stale live-JS-realm package-deferral explanation is removed: the package
 now joins the document's one runtime, including pages that established it from
 JS. JS propagation has one source of truth in the native event record's
 `__stop_prop` and `__stop_imm` members; the claimed thread-local mirrors had
-already been retired, so F21 removes their stale JS_13 ledger entry rather than
-reintroducing a second state channel. The verified JS_13, RAD_15, and
-DOM_Default descriptions now show the ES22 author tier, ES24 record, ES29
+already been retired, so F21 removes their stale ledger entry rather than
+reintroducing a second state channel. The verified DOM_Default
+descriptions now show the ES22 author tier, ES24 record, ES29
 cancellation boundary, and S12.1.3 settle stage.
 
 Validation: `git diff --check`; targeted stale-state scan; `make build`; and

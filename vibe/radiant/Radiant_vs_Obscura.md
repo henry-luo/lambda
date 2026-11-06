@@ -95,7 +95,7 @@ selection/range, events, and rendering data.
 ## 3. Radiant DOM surface today
 
 For this comparison, "Radiant DOM" means Radiant plus the LambdaJS host objects
-documented in `doc/dev/js/JS_13_Web_DOM.md` and driven from
+documented in `doc/JS_DOM_Support.md` and driven from
 `radiant/script_runner.cpp`.
 
 Radiant already has substantial core browser DOM support:
@@ -384,8 +384,7 @@ The practical takeaway is:
 
 | File | Relevance |
 |---|---|
-| `doc/dev/js/JS_13_Web_DOM.md` | Current LambdaJS DOM/CSSOM/events/fetch surface and known gaps. |
-| `doc/dev/radiant/RAD_21_JS_Scripting_Integration.md` | Radiant script runner, browser preamble, and no-op shim list. |
+| `doc/JS_DOM_Support.md` | Current LambdaJS DOM/CSSOM/events/fetch surface and known gaps. |
 | `lambda/js/js_dom.cpp` | DOM bridge, document/element methods, mutation dirtying, Shadow DOM basics. |
 | `lambda/js/js_dom_events.cpp` | EventTarget listener storage and 3-phase dispatch. |
 | `lambda/js/js_cssom.cpp` | CSSOM wrappers and CSS namespace. |

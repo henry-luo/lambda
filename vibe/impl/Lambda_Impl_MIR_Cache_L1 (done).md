@@ -146,12 +146,11 @@ Registry slots are **never compacted**: retiring a script NULLs its `runtime->sc
 
 ### Phase 4 — Measurement + summary output
 
-**Checkpoint 2026-07-12:** batch-end summary now reports `modules_cached`, `compiles_saved`, path-index `hit_rate`, raw counters, invalidations, and whether the retained cache was disabled. Retained MIR import caching is default-on in both debug and release builds (`LAMBDA_MIR_CACHE_DEFAULT=1` unless a build opts out). `LAMBDA_DISABLE_MIR_CACHE=1` disables retained import caching for apples-to-apples timing while preserving same-run import dedup and circular-import detection. `doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md` now documents the module cache and links this plan.
+**Checkpoint 2026-07-12:** batch-end summary now reports `modules_cached`, `compiles_saved`, path-index `hit_rate`, raw counters, invalidations, and whether the retained cache was disabled. Retained MIR import caching is default-on in both debug and release builds (`LAMBDA_MIR_CACHE_DEFAULT=1` unless a build opts out). `LAMBDA_DISABLE_MIR_CACHE=1` disables retained import caching for apples-to-apples timing while preserving same-run import dedup and circular-import detection.
 
 1. Batch-end summary line (`modules cached: X, compiles saved: Y, hit rate`).
 2. Re-run the Phase 0 measurement; record before/after wall-time for `make test-lambda-baseline` and the profile split in §9.
-3. Update `doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md` with a short "module cache" section; cross-link the design doc.
-4. **Exit gate:** measured speedup documented; no regression in `make test-lambda-baseline`.
+3. **Exit gate:** measured speedup documented; no regression in `make test-lambda-baseline`.
 
 ---
 

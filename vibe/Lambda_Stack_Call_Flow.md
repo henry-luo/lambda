@@ -255,4 +255,4 @@ When a `fn` is materialized as a value (`let f = add`, closures, member fns), th
 | Scalar-home adoption | `em_adopt_scalar_item` — `mir_emitter_shared.hpp:878` |
 | Dynamic runtime dispatch | `fn_call_into` — `lambda-eval.cpp:770`; `fn_call0..3_into` — `:828+`; `_b` trampolines `fn_call_boxed_N(_into)` |
 | Function object | `struct Function` — `lambda.h:966` |
-| Design doc | `doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md` §5 (calls/inference), §6 (side frames) |
+| Design doc | `vibe/Lambda_Transpiler.md`, `vibe/Lambda_Design_Stack_Frame.md` |

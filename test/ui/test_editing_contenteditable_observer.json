@@ -1,0 +1,12 @@
+{
+  "name": "Contenteditable mutation observer retains old text",
+  "html": "test/ui/ce/editable-dom-observer.html",
+  "viewport": { "width": 480, "height": 180 },
+  "events": [
+    { "type": "set_editing_selection", "target": { "selector": "#surface" }, "start": 1, "end": 3 },
+    { "type": "click", "target": { "selector": "#edit" } },
+    { "type": "wait", "ms": 100 },
+    { "type": "assert_text", "target": { "selector": "#result" }, "equals": "true|sXd" },
+    { "type": "assert_text", "target": { "selector": "#observed" }, "equals": "seed|sXd" }
+  ]
+}

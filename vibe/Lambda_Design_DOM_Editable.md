@@ -21,7 +21,7 @@ layout, hit testing, text shaping, or caret geometry into Lambda.
   prototype lineage.
 - [Lambda DOM Event Dispatch](Lambda_Design_DOM_Dispatch.md) owns author/UA
   event ordering and cancellation.
-- [RAD_18](../doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md) describes the
+- [Radiant selection design](radiant/Radiant_Design_Selection.md) describes the
   implemented native Selection/Range and caret substrate.
 
 > **Formal linkage.** D10.2.1 requires all UA editing policy to remain in the
@@ -1066,7 +1066,7 @@ all pass without fixture-local edit logic.
   standard descriptor switches.
 - Add source ratchets for the retired `set_selection` ABI and duplicate
   registries.
-- Update RAD_18 and the parent editable implementation notes after the design
+- Update the parent editable implementation notes after the design
   is ratified and shipped.
 
 **Exit:** the ownership rules are mechanically enforced as required by D1.10.

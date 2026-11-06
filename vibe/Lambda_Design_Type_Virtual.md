@@ -693,7 +693,6 @@ and teardown remain correct.
   guarding packed-storage specializations.
 - Replace remaining repeated TypeId lists with semantic helpers.
 - Update formal D9.5.5 implementation status only after every exit gate passes.
-- Distill the landed design into the relevant `doc/dev` runtime/DOM documents.
 
 ### 6.1 Implementation status (2026-09-08)
 

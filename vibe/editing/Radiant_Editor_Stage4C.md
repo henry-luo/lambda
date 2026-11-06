@@ -7,7 +7,7 @@
 - **Phase C — expanded `event_sim` coverage:** promote the most important remaining Phase-A behaviors into real UI fixtures (§4.3), especially cases whose bugs only appear with Radiant geometry, DOM selection, clipboard, toolbar state, and event routing.
 
 Where the runtime falls short, **enhance DOM fidelity (`js_dom`) and `event_sim`** rather than weaken the tests (CLAUDE.md #1).
-**Builds on:** [Radiant_Editor_Stage4B.md](Radiant_Editor_Stage4B.md) (the plain-DOM editor + common C++ substrate + the `view --event-file` testdriver), [JS_13_Web_DOM.md](../../doc/dev/js/JS_13_Web_DOM.md) (LambdaJS DOM surface + known issues).
+**Builds on:** [Radiant_Editor_Stage4B.md](Radiant_Editor_Stage4B.md) (the plain-DOM editor + common C++ substrate + the `view --event-file` testdriver), [JS_DOM_Support.md](../../doc/JS_DOM_Support.md) (LambdaJS DOM surface).
 
 ---
 

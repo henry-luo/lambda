@@ -21,7 +21,7 @@
 #include "../lambda/input/input-parsers.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
-#include "../lib/tagged.hpp"
+#include "../radiant/tagged.hpp"
 #include "../lib/file.h"
 #include "../lib/font/font.h"
 #include "../lib/font/font_internal.h"

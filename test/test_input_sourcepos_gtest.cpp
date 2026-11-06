@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../lambda/lambda-data.hpp"
+#include "../lambda/core/data.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/markup/markup_highlight.hpp"
 #include "../lambda/input/markup/markup_parser.hpp"

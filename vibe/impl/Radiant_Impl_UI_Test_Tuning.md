@@ -87,7 +87,7 @@ The doc fixtures spend most of their time in pane clicks: a property toggle, tab
 | Change | Where | Effect |
 |---|---|---|
 | Pane-local state: the preview tab, property filter and property open/closed/more paths are state on a stateful `document_pane` model. The app rebuilds the model only for a new file or a CSV change; CSV state stays on the app because a column release can land over the file panel | `lmd/package/doc/doc_viewer.ls`, ported to the `test/ui/doc_editor.ls` fork | Pane click dom_patch 10 → ~1.5 ms |
-| Retained flex items (`FlexRetainedPass`): a clean item of an incremental pass replays its last measurement, hypothetical cross size and content pass under the same keys | `layout_flex_measurement.cpp`, hooks in `layout_flex.cpp` and `layout_flex_multipass.cpp`; see RAD_01 §6 | Intrinsic requests per pane click 2,353 → 15 |
+| Retained flex items (`FlexRetainedPass`): a clean item of an incremental pass replays its last measurement, hypothetical cross size and content pass under the same keys | `layout_flex_measurement.cpp`, hooks in `layout_flex.cpp` and `layout_flex_multipass.cpp` | Intrinsic requests per pane click 2,353 → 15 |
 
 Pane-click layout, `doc_viewer_toml`: **~160 ms → ~18 ms**. This is the debug-build `rebuild_incr` layout time of a pane click, measured at low machine load; without replay the same click takes ~65 ms.
 

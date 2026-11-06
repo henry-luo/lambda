@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../lambda.h"
+#include "../../lib/language_preferences.h"
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -19,13 +20,7 @@ Item dom_match_media(Item query_item);
 void dom_match_media_notify_resize(void);
 void dom_match_media_reset(void);
 
-// caller owns the normalized comma-separated UI language list (mem_free).
-char* dom_platform_preferred_languages(void);
-
 const char* dom_platform_can_play_type(const char* mime_type, size_t length);
-
-// borrowed immutable bytes for this document's live Blob URL, usable after script teardown.
-const char* dom_blob_url_data_uri(struct DomDocument* document, const char* url);
 
 // Host-facing entry point (F23) — see the note in dom.h.
 #ifdef __cplusplus

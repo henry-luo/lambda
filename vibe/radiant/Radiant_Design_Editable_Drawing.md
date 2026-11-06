@@ -7,7 +7,7 @@ one Radiant `DomDocument`.
 
 **Builds on:** [Radiant Editable Support](Radiant_Design_Editable.md),
 [Radiant Native DOM API](Radiant_Design_DOM_API.md), and
-[LambdaJS Web DOM](../../doc/dev/js/JS_13_Web_DOM.md).
+[JS and DOM support](../../doc/JS_DOM_Support.md).
 
 ---
 

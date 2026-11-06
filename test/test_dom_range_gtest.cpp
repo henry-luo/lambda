@@ -111,6 +111,38 @@ protected:
 // ============================================================================
 // dom_node_boundary_length
 // ============================================================================
+TEST_F(DomRangeTest, NativeLayoutInvalidationMarksSubtreeAndAncestors) {
+    div->layout_dirty = span->layout_dirty = hello->layout_dirty = b->layout_dirty = false;
+    div->set_styles_resolved(true);
+    span->set_styles_resolved(true);
+    b->set_styles_resolved(true);
+
+    dom_invalidate_layout_subtree(span);
+    EXPECT_TRUE(div->layout_dirty);
+    EXPECT_TRUE(span->layout_dirty);
+    EXPECT_TRUE(hello->layout_dirty);
+    EXPECT_FALSE(b->layout_dirty);
+    EXPECT_FALSE(div->styles_resolved());
+    EXPECT_FALSE(span->styles_resolved());
+    EXPECT_TRUE(b->styles_resolved());
+}
+
+TEST_F(DomRangeTest, NativeSvgPresentationInvalidationAdvancesOnlyItsLineage) {
+    uint64_t epoch = doc_storage.style_query_epoch;
+    uint64_t div_generation = div->layer_generation;
+    uint64_t span_generation = span->layer_generation;
+    uint64_t sibling_generation = b->layer_generation;
+
+    dom_svg_invalidate_presentation(span);
+    EXPECT_EQ(doc_storage.style_query_epoch, epoch + 1);
+    EXPECT_EQ(div->layer_generation, div_generation + 1);
+    EXPECT_EQ(span->layer_generation, span_generation + 1);
+    EXPECT_EQ(b->layer_generation, sibling_generation);
+    dom_layer_note_mutation(span, true);
+    EXPECT_EQ(div->layer_generation, div_generation + 2);
+    EXPECT_EQ(span->layer_generation, span_generation + 1);
+}
+
 TEST_F(DomRangeTest, BoundaryLengthForElementCountsChildren) {
     EXPECT_EQ(dom_node_boundary_length(div),  2u);
     EXPECT_EQ(dom_node_boundary_length(span), 1u);

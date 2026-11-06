@@ -1,53 +1,18 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 
-#include "../lambda/lambda-data.hpp"
-#include "../lambda/runtime/heap_api.h"
-#include "../lambda/runtime/lambda-error.h"
-#include "../lambda/runtime/runtime-state.h"
-#include "../lambda/runtime/side_stack.h"
-#include "../lambda/runtime/template_registry.h"
+#include "../lambda/core/data.hpp"
 #include "../radiant/event.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/view.hpp"
 
-__thread EvalContext* context = NULL;
-
-bool eval_context_init(EvalContext* owner) {
-    if (!owner || (context && context != owner)) return false;
-    context = owner;
-    return true;
-}
-
-bool eval_context_matches(const EvalContext* owner) {
-    return owner && context == owner;
-}
-
-bool eval_context_shutdown(EvalContext* owner) {
-    if (!owner || context != owner) return false;
-    context = NULL;
-    return true;
-}
-
-EvalContext* runtime_get_eval_context(Runtime* runtime) {
-    (void)runtime;
-    // The standalone StateStore fixture has no owning Lambda or JS Runtime;
-    // returning null keeps semantic maps disabled while satisfying the
-    // production StateStore's runtime-context boundary.
-    return NULL;
-}
-
-static TemplateRegistry* test_template_registry = NULL;
-
-extern "C" TemplateRegistry** template_registry_current_slot(void) {
-    // The standalone state-store target has no EvalContext, so provide the
-    // context-owned registry slot locally instead of defining the retired
-    // process-global g_template_registry symbol.
-    return &test_template_registry;
-}
-
 UiContext ui_context{};
+
+// This slice has no style resolver or layout view pool; unexpected use must fail.
+DisplayValue resolve_display_value(void*) { abort(); }
+void view_tree_release_retired_subtree(ViewTree*, DomNode*) { abort(); }
 
 void radiant_sync_pseudo_state(View*, uint32_t, bool) {
     // this standalone target has no cascade; native UI fixtures check popup restyling.
@@ -57,99 +22,10 @@ void radiant_sync_focus_style(View*, uint32_t) {
     // this standalone target has no cascade; native UI fixtures check focus restyling.
 }
 
-extern "C" void heap_register_gc_root(uint64_t* slot) {
-    (void)slot;
-    // This pool-backed state-store target omits lambda-rt and never compacts;
-    // render_map's process slot therefore needs no GC registration here.
-}
-
-// The package-state slot is released by DocState teardown. This standalone
-// target has no collecting heap and never populates the slot, so matching the
-// existing registration stub keeps the production lifecycle call linkable.
-extern "C" void heap_unregister_gc_root(uint64_t* slot) {
-    (void)slot;
-}
-
-extern "C" void heap_unregister_gc_root_for(Context* owner, uint64_t* slot) {
-    (void)owner;
-    heap_unregister_gc_root(slot);
-}
-
-extern "C" bool heap_register_gc_root_for(Context* owner, uint64_t* slot) {
-    (void)owner;
-    (void)slot;
-    // security_context.cpp is linked for this fixture, which has no collecting runtime heap.
-    return true;
-}
-
-extern "C" void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
-    (void)code;
-    (void)format;
-    // The standalone StateStore target has no runtime error context to update.
-}
-
 void layout_content_visibility_invalidate(DocState* state) {
     // this target has no layout pipeline; relevance projection is tested in view/UI fixtures.
     (void)state;
 }
-
-// Retained DOM deltas live in the production editing waist, which this
-// pool-backed StateStore target deliberately does not link. The fixture never
-// creates one, so its teardown seam only needs to preserve that ownership
-// boundary while exercising the rest of DocState destruction.
-void dom_edit_discard_retained_deltas(DocState* state) {
-    if (!state) return;
-    state->editing.dom_edit_retained_mutations = nullptr;
-}
-
-extern "C" bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base, int count) {
-    (void)runtime;
-    (void)base;
-    (void)count;
-    // This target has no collecting heap; render-map root publication is a
-    // link-time dependency only because the exercised state path has no bound context.
-    return true;
-}
-
-extern "C" bool heap_try_register_gc_root_range(uint64_t* base, int count) {
-    (void)base;
-    (void)count;
-    return true;
-}
-
-extern "C" void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base) {
-    (void)runtime;
-    (void)base;
-}
-
-extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
-    (void)base;
-}
-
-// render_map's retransform branch is not exercised by the standalone
-// StateStore target. Its runtime-only helpers must stay inert here because
-// this fixture intentionally has no Lambda execution context.
-void expand_list(List*, Arena*) {}
-
-extern "C" Context* eval_context_tls_runtime(void) {
-    return (Context*)context;
-}
-
-extern "C" bool lambda_root_frame_begin(LambdaRootFrame*, size_t) {
-    return false;
-}
-
-extern "C" uint64_t* lambda_root_frame_take_slot(LambdaRootFrame*) {
-    return NULL;
-}
-
-extern "C" void lambda_root_frame_end(LambdaRootFrame*) {}
-
-extern "C" void lambda_side_stack_restore(LambdaSideStackSnapshot) {
-    // The standalone target has no bound runtime or side-stack reservation.
-}
-
-extern "C" void lambda_root_frame_overflow_error(void) {}
 
 extern "C" bool dom_option_selectedness(void* dom_elem) {
     DomElement* option = (DomElement*)dom_elem;
@@ -158,14 +34,6 @@ extern "C" bool dom_option_selectedness(void* dom_elem) {
     // native mirror to preserve DOM-owned selectedness without an EvalContext.
     if (option->has_option_selectedness()) return option->option_selectedness();
     return option->has_attribute("selected");
-}
-
-void render_map_record_path(Item source_item, const char* template_ref,
-                            const int* path_indices, int depth) {
-    (void)source_item;
-    (void)template_ref;
-    (void)path_indices;
-    (void)depth;
 }
 
 bool is_view_focusable(View* view) {
@@ -185,6 +53,10 @@ bool is_view_programmatically_focusable(View* view) {
 
 void view_pool_release_detached_subtree(DomNode* root) {
     (void)root;
+}
+
+void view_pool_release_detached_subtree_in_tree(ViewTree*, DomNode* root) {
+    view_pool_release_detached_subtree(root);
 }
 
 void rdt_path_free(RdtPath* path) {

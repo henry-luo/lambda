@@ -732,8 +732,8 @@ Generated files:
 - `lambda/core/well_known_markup_names.c`
 - `lambda/core/well_known_lambda_names.h`
 - `lambda/core/well_known_lambda_names.c`
-- `lambda/js/js_well_known_names.h`
-- `lambda/js/js_well_known_names.c`
+- `lambda/core/js_well_known_names.h`
+- `lambda/core/js_well_known_names.c`
 
 Tasks:
 

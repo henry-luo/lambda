@@ -5,7 +5,7 @@
 #include "radiant_pdf_text.hpp"
 #include "radiant_pdf_source.hpp"
 #include "radiant_pdf_semantics.hpp"
-#include "../../../lib/tagged.hpp"
+#include "../../../radiant/tagged.hpp"
 #include "../../runtime/binary_schema.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/context_capsule.h"

@@ -62,9 +62,9 @@ Chromium structural-corpus program.
 
 **Builds on:**
 
-- [RAD_15 — Events and Input](../../doc/dev/radiant/RAD_15_Events_Input.md)
-- [RAD_18 — Editing, Selection and DOM Ranges](../../doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md)
-- [RAD_21 — JS Scripting Integration](../../doc/dev/radiant/RAD_21_JS_Scripting_Integration.md)
+- [Radiant DOM Events](Radiant_Design_Event.md)
+- [Radiant Selection, Caret and DOM Range](Radiant_Design_Selection.md)
+- [Radiant Native DOM API](Radiant_Design_DOM_API.md)
 
 ---
 
@@ -1399,7 +1399,7 @@ engine.
   APIs.
 - Bundle ProseMirror and capture its construction/API trace before expanding
   the operation matrix.
-- Update detailed design documentation where it describes a native-rich path
+- Update the design records where they describe a native-rich path
   that is no longer present.
 
 **Exit:** current behavior is represented by tests, editor-required capability
@@ -1765,10 +1765,7 @@ indefinitely.
   converter is intentionally supplied;
 - remove old field aliases after the last in-tree fixture is migrated.
 
-Update the current developer documentation
-`RAD_18_Editing_Selection_Ranges.md`,
-`RAD_19_Form_Controls.md`, and
-`diagram/rad18_dispatch_seam.mmd` at cutover. Older `vibe/editing/` phase and
+At cutover, older `vibe/editing/` phase and
 design records should receive a short “superseded by this proposal” banner
 rather than being rewritten to look historically current. The CE1–CE3 history
 is consolidated in §17.2 and its separate records are removed. Active Stage 5
@@ -1819,7 +1816,7 @@ The cleanup is complete only when:
 | `lambda/js/js_dom.cpp` | JavaScript handler registration bridge, automation routing, and thin `execCommand`/`queryCommand*` package dispatch |
 | `lambda/js/js_dom_observers.cpp` | observer conformance fixes found by editor tests |
 | `radiant/event_sim.cpp` | composition/editor assertions and replay metadata |
-| `doc/dev/radiant/`, `vibe/editing/` | current-design cutover plus superseded historical-document markers |
+| `vibe/editing/` | superseded historical-document markers |
 | `test/ui/`, editor bundle fixtures | required CodeMirror, ProseMirror, Editor.js, Radiant-template, and migration regressions |
 
 Before creating a native primitive, search for existing static helpers and

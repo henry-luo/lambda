@@ -12,7 +12,7 @@ fn px(v, s) any^ => A.n(v * s) ++ "px"
 // the style properties a drag changes; the editor writes them directly while a gesture runs
 pub fn geometry(it, s) => {left: px(it.x, s), top: px(it.y, s), width: px(it.w, s),
     height: if (it.kind == "text") "auto" else px(it.h, s),
-    // every item keeps a transform, so a drag's transform-only preview stays paint-only (RAD_16 §8)
+    // every item keeps a transform, so a drag's transform-only preview stays paint-only
     transform: "rotate(" ++ A.n(it.rot) ++ "deg)",
     'font-size': if (it.kind == "text") px(it.size, s) else null,
     'letter-spacing': if (it.kind == "text") px(it.spacing, s) else null}

@@ -170,7 +170,3 @@ Lambda `[1.0, 2.0, 3.0]` ArrayNum surfaces in JS as (or like) a Float64Array.
 | 38 | P4h hoisted data ptr/len stale after in-loop buffer resize | MEDIUM — **FIXED 2026-07-14** | latent UAF in JIT fast path |
 | 39 | Raw fallback duplicates element switch; view mismatch → silent `0.0` | LOW | maintenance / silent-failure hazard |
 | 40 | Lambda ArrayNum items not indexable from JS (one-way unification) | LOW→MEDIUM | interop design gap |
-
-Related: `doc/dev/js/JS_12_TypedArrays.md` still documents the pre-migration
-raw-storage design (zero ArrayNum mentions) — being fixed in background task
-`task_a17cd7b2`.

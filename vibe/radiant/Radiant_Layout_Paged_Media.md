@@ -1073,7 +1073,7 @@ External references checked on 2026-10-05:
 
 XSL-FO references checked separately on 2026-10-09: [XSL 1.1 Recommendation, 2006-12-05](https://www.w3.org/TR/2006/REC-xsl11-20061205/) and [its published errata](https://www.w3.org/2006/12/xsl11-errata.html), covering the scope and semantics in §11. The proposed implementation follows the existing formal ownership/layering rulings; neither specification is a claim of current FO support.
 
-Repository references: [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), [coordinate decisions RSC1–RSC12](Radiant_Scale.md), [multicol working proposal](Radiant_Layout_Multicol.md), [layout driver overview](../../doc/dev/radiant/RAD_03_Layout_Driver_Block_BFC.md), [paint/render overview](../../doc/dev/radiant/RAD_13_Render_Walk_Painters.md), and [Lambda PDF byte-output design](../Lambda_Design_PDF_Output.md).
+Repository references: [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), [coordinate decisions RSC1–RSC12](Radiant_Scale.md), [multicol working proposal](Radiant_Layout_Multicol.md), [rendering design](Radiant_Design_Rendering.md), and [Lambda PDF byte-output design](../Lambda_Design_PDF_Output.md).
 
 ## Appendix C. Unified page model implementation sketch
 

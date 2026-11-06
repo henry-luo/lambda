@@ -318,9 +318,9 @@ the shipping command resolves to a stub.
 | **Total** | **2,496** |
 
 **Owner decision: retire.** The complete implementation directory, command and
-headless stubs, build configuration, tests, lint/dedup exceptions, RAD_23, and
-its diagrams were deleted. Maintained indexes and architecture diagrams now end
-at RAD_22 and expose no WebDriver command or component.
+headless stubs, build configuration, tests, lint/dedup exceptions, its design doc and
+its diagrams were deleted. Maintained indexes and architecture diagrams now
+expose no WebDriver command or component.
 
 ## 8. Structural convergence campaigns
 

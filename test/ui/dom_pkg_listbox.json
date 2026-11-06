@@ -190,6 +190,13 @@
     {
       "type": "assert_count",
       "target": {
+        "selector": "#picks option:checked"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
         "selector": "#picks option[selected]"
       },
       "count": 0

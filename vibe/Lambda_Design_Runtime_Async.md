@@ -76,7 +76,7 @@ These are consequences of having several mechanisms; the design removes the caus
 - Lambda MIR pays a re-descent of the whole call chain on every poll.
 - `pn_select` has no cancellation check before parking (`concurrency.cpp:1598`).
 - `LambdaTask` records are freed only in `lambda_scheduler_destroy`, not when a task completes (`concurrency.cpp:699`).
-- `doc/dev/js/JS_09_Async_Modules.md` and `vibe/Lambda_Design_JS_Interpreter.md` describe promise pools and an interpreter that cannot run async code; both are stale.
+- `vibe/Lambda_Design_JS_Interpreter.md` describes promise pools and an interpreter that cannot run async code; it is stale.
 
 ### 2.4 Measured footprint of the current mechanisms
 
@@ -371,7 +371,7 @@ Each phase is shippable and ends green.
 - One job queue with lanes, one drain, one watchdog. JS activations become weakly registered tasks (JSCU25).
 - Gate: Lambda and Radiant baselines; `RuntimeGlobalsConcurrency`; the JSCU25 acceptance cases in `Lambda_Design_Structs_JS.md` §1.5.
 
-**P6 — Documents.** After ratification: revise the formal specs (§11), and refresh `doc/dev/js/JS_08`, `JS_09`, `doc/dev/lambda/LR_12` and `doc/Lambda_Concurrency.md`.
+**P6 — Documents.** After ratification: revise the formal specs (§11), and refresh `doc/Lambda_Concurrency.md`.
 
 P1 comes before the JS work because Lambda's async test surface is the smaller one and the Lambda interpreter is where the goal is unmet. P2 comes before P4 because the interpreter replay machinery is the larger deletion and carries no measurement risk.
 
@@ -453,7 +453,7 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
   - Ast_Interpreter: AI11v2 and AI24v2.
   - Structs_JS: JSCU26 superseded, JSCU32's suspension half superseded, and JSCU25 recorded as standing but unimplemented.
   - Runtime_Error_Handling: REH-D12 superseded, REH-D13 revised. Exec_Recovery: ER-D11 noted.
-- **`doc/dev` refreshed:** `JS_08`, `JS_09` (with three diagrams re-rendered), `LR_12` and `Lambda_Concurrency.md`, plus the one stale passage in `Lambda_Error_Handling.md`.
+- **Docs refreshed:** `Lambda_Concurrency.md`, plus the one stale passage in `Lambda_Error_Handling.md`.
 - **RA10 built:** a per-activation native barrier, raised by the Jube host's `call_function` (`jube_host_call_function`). `activation_suspend` beneath it is a reported fault. Covered by the gtest `ActivationCore.NativeBarrierRefusesSuspension`.
 - **Fixed while refreshing the docs:**
   - A MIR async generator whose `await` rejected resumed with the raw throw-signal object, so `await` evaluated to it and `catch` never ran. This failed on the untouched base too. `js_gen_park` now returns an await's throw signal as an error, which both tiers route as a throw.

@@ -366,7 +366,7 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "../lib/image.h"
 #include "../lib/file.h"
 #include "../lib/memtrack.h"
-#include "../lib/tagged.hpp"
+#include "../radiant/tagged.hpp"
 
 TEST(RadiantProviderInit, NativeEmbeddingRegistrationIsIdempotent) {
     ASSERT_TRUE(radiant_register_dom_engine_providers());

@@ -10,13 +10,8 @@ output, vector export, native overlays, nested documents, and HiDPI changes
 coordinate domains; this document is the working design authority for the
 topic
 **Decision series:** RSC1–RSC12
-**Detailed implementation descriptions:**
-[RAD_12](../../doc/dev/radiant/RAD_12_Paint_IR_Display_List.md),
-[RAD_13](../../doc/dev/radiant/RAD_13_Render_Walk_Painters.md),
-[RAD_15](../../doc/dev/radiant/RAD_15_Events_Input.md),
-[RAD_17](../../doc/dev/radiant/RAD_17_Interaction_State.md),
-[RAD_19](../../doc/dev/radiant/RAD_19_Form_Controls.md), and
-[RAD_20](../../doc/dev/radiant/RAD_20_Application_Shell_Browsing.md)
+**Related design:** [rendering](Radiant_Design_Rendering.md), [events](Radiant_Design_Event.md),
+[interaction state](Radiant_Design_State_Machine.md) and [form input](Radiant_Design_Form_Input.md)
 
 ---
 

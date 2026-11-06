@@ -4058,7 +4058,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #else
         "setjmp",
 #endif
-        "is_truthy",
+        "is_truthy", "base_type",
         "push_d", "box_int64_value", "box_uint64_value",
         "int2it", "int2it_i64",
         "lambda_mir_double_bits", "lambda_mir_bits_double",

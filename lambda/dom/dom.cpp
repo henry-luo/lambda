@@ -9,6 +9,7 @@
  */
 
 #include "dom.h"
+#include "../module/radiant/script_runner_host.hpp"
 #include "dom_graphics.h"
 #include "dom_style.h"
 #include "dom_collection_types.h"
@@ -45,6 +46,8 @@
 #include "../core/mark_reader.hpp"
 #include "../module/radiant/radiant_input_value.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
+#include "../../radiant/select_options.hpp"
+#include "../../radiant/form_controls.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_factory.h"
@@ -52,7 +55,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/mem_grow.hpp"
-#include "../../lib/tagged.hpp"
+#include "../../radiant/tagged.hpp"
 
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_weak(uint64_t* slot);
@@ -83,6 +86,11 @@ static bool dom_radio_group_has_checked(DomElement* element);
 #include "../../radiant/event.hpp"
 #include "../../radiant/layout.hpp"
 #include "../../radiant/render.hpp"
+#include "../../radiant/svg_hit.hpp"
+#include "../../radiant/svg_geometry_context.hpp"
+#include "../../radiant/dom_mutation_state.hpp"
+#include "../../radiant/dom_mutation_record.hpp"
+#include "../../radiant/dom_backed_tree.hpp"
 #include "../input/html5/html5_parser.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_typed.hpp"
@@ -179,7 +187,9 @@ static bool dom_scroll_should_animate(DomElement* elem) {
         if (dom_scroll_operation_override.behavior == DOM_SCROLL_BEHAVIOR_SMOOTH)
             return true;
     }
-    return elem && elem->scroll()->scroll_behavior == CSS_VALUE_SMOOTH;
+    // The absent native scroll property has the engine's auto behavior.
+    return elem && elem->scroller &&
+        dom_engine_scroll_property(elem)->scroll_behavior == CSS_VALUE_SMOOTH;
 }
 
 static DomScrollBehavior dom_scroll_behavior_from_item(Item value) {
@@ -265,9 +275,6 @@ static Item dom_svg_get_transform_list(DomElement* elem);
 static Item dom_svg_get_animated_class_name(DomElement* elem);
 static Item dom_svg_create_transform(void);
 static Item dom_svg_create_transform_from_matrix(Item matrix);
-static RdtMatrix dom_svg_transform_from_element(DomElement* elem);
-DomElement* dom_find_element_by_id(DomElement* root, const char* id);
-
 static Html5Parser* dom_create_fragment_parser(DomDocument* doc,
                                                DomElement* context = nullptr) {
     if (!doc || !doc->document_pool || !doc->input || !doc->input->arena) {
@@ -394,44 +401,6 @@ static Url* dom_make_fallback_url(const char* raw_url);
 
 static inline DocState* dom_current_state();
 
-static void dom_mark_dirty_subtree(DomNode* root) {
-    if (!root) return;
-
-    root->layout_dirty = true;
-    if (root->is_element()) {
-        DomElement* elem = root->as_element();
-        // generated table roles survive an ancestor style mutation; no authored
-        // declaration exists from which a later reflow could reconstruct them.
-        if (!elem->is_table_fixup()) elem->set_styles_resolved(false);
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            dom_mark_dirty_subtree(child);
-        }
-    }
-}
-
-static void dom_mark_dirty_ancestors(DomNode* node) {
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        cur->layout_dirty = true;
-        if (cur->is_element()) {
-            DomElement* elem = cur->as_element();
-            if (!elem->is_table_fixup()) elem->set_styles_resolved(false);
-        }
-    }
-}
-
-extern "C" void dom_invalidate_layout_subtree(void* node) {
-    DomNode* root = (DomNode*)node;
-    dom_mark_dirty_subtree(root);
-    dom_mark_dirty_ancestors(root);
-}
-
-static inline uint32_t dom_mutation_bit(DomJsMutationKind kind) {
-    uint32_t slot = (uint32_t)kind;
-    if (slot >= 31) slot = 0;
-    return 1u << slot;
-}
-
-
 static DomDocument* dom_registry_owner_for_detached_node(DomNode* node);
 
 static DomDocument* dom_node_owner_document(DomNode* node) {
@@ -463,78 +432,12 @@ static DomDocument* dom_mutation_document(DomNode* target, DomNode* parent) {
     return doc ? doc : _js_current_document;
 }
 
-static DomNode* dom_mutation_source_parent(DomNode* parent) {
-    // Table fixup boxes are layout-only and have no lifecycle identity; mutation
-    // records must retain the nearest source-DOM ancestor instead of pinning them.
-    while (parent && parent->is_element() && parent->as_element()->is_table_fixup()) {
-        parent = parent->parent;
-    }
-    return parent;
-}
-
-static DomNode* dom_table_fixup_significant_sibling(DomNode* child,
-                                                       bool forward) {
-    for (DomNode* sibling = child ? (forward ? child->next_sibling
-                                             : child->prev_sibling) : nullptr;
-         sibling; sibling = forward ? sibling->next_sibling : sibling->prev_sibling) {
-        if (sibling->is_text()) {
-            if (!layout_dom_text_has_non_whitespace(sibling->as_text())) continue;
-            return sibling;
-        }
-        if (!sibling->is_element()) return sibling;
-        DisplayValue display = resolve_display_value((void*)sibling);
-        if (layout_display_is_none(display)) continue;
-        return sibling;
-    }
-    return nullptr;
-}
-
-static bool dom_removal_merges_table_fixup_runs(DomElement* parent,
-                                                  DomNode* child) {
-    if (!parent || !child) return false;
-    DomNode* previous = dom_table_fixup_significant_sibling(child, false);
-    DomNode* next = dom_table_fixup_significant_sibling(child, true);
-    // removing a separator can join any table-internal runs in either block
-    // or inline flow; their generated wrappers must not preserve old partitions.
-    return previous && previous->is_element() && previous->as_element()->is_table_fixup() &&
-        next && next->is_element() && next->as_element()->is_table_fixup();
-}
-
-static bool dom_child_is_nested_in_table_fixup(DomElement* parent,
-                                                DomNode* child) {
-    for (DomNode* ancestor = child ? child->parent : nullptr;
-         ancestor && ancestor != static_cast<DomNode*>(parent);
-         ancestor = ancestor->parent) {
-        if (ancestor->is_element() && ancestor->as_element()->is_table_fixup()) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static DomElement* dom_prepare_children_for_mutation(DomElement* parent,
-                                                        DomNode* changed_child = nullptr) {
-    DomNode* source_parent = dom_mutation_source_parent(
-        static_cast<DomNode*>(parent));
-    if (!source_parent || !source_parent->is_element()) return nullptr;
-    DomElement* source_element = source_parent->as_element();
-    bool changes_table_structure = !changed_child || !changed_child->is_element();
-    bool merges_table_fixup_runs = false;
-    bool child_is_nested_in_table_fixup = dom_child_is_nested_in_table_fixup(
-        source_element, changed_child);
-    if (changed_child && changed_child->is_element()) {
-        DisplayValue display = resolve_display_value((void*)changed_child);
-        changes_table_structure = is_table_internal_display(display.inner);
-        merges_table_fixup_runs = dom_removal_merges_table_fixup_runs(
-            source_element, changed_child);
-    }
-    if (changes_table_structure || merges_table_fixup_runs ||
-        child_is_nested_in_table_fixup) {
-        // A source child may sit below a retained table wrapper. Unwrap before
-        // mutating so DOM removal addresses the authored parent, not the box.
-        dom_engine_prepare_children_mutation(source_element);
-    }
-    return source_element;
+static DomElement* dom_prepare_children_for_mutation(DomElement* parent, DomNode* changed_child = nullptr) {
+    DomNode* source = dom_source_inclusive_ancestor(parent);
+    if (!source || !source->is_element()) return nullptr;
+    // Without an engine the former unwrap hook was a no-op.
+    if (!dom_host_engine_ops()) return source->as_element();
+    return dom_engine_prepare_children_mutation(source->as_element(), changed_child);
 }
 
 static DocState* dom_state_for_nodes(DomNode* target, DomNode* parent) {
@@ -542,179 +445,13 @@ static DocState* dom_state_for_nodes(DomNode* target, DomNode* parent) {
     return doc ? doc->state : nullptr;
 }
 
-static bool dom_mutation_node_was_connected(DomDocument* doc, DomNode* node) {
-    if (!doc || !doc->root || !node) return false;
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current == static_cast<DomNode*>(doc->root)) return true;
-    }
-    return false;
-}
-
-static DomJsMutationAttribute dom_mutation_attribute_from_name(DomDocument* doc, const char* name) {
-    if (name && str_icmp_cstr(name, "class") == 0) {
-        return DOM_JS_MUTATION_ATTRIBUTE_CLASS;
-    }
-    // data/ARIA writes cannot change native pseudo states; only an attribute
-    // reference inside :has() can make their cascade escape the local subtree.
-    if (name && (strncmp(name, "data-", 5) == 0 || strncmp(name, "aria-", 5) == 0) &&
-        !dom_engine_attribute_has_relational_css_dependency(doc, name))
-        return DOM_JS_MUTATION_ATTRIBUTE_LOCAL;
-    return DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
-}
-
-static bool dom_mutation_attribute_affects_direction(const char* name) {
-    // unknown names stay conservative; CSS visibility does not filter first-strong text.
-    return !name || str_ieq_cstr(name, "dir") || str_ieq_cstr(name, "value") ||
-        str_ieq_cstr(name, "type") || str_ieq_cstr(name, "slot") ||
-        str_ieq_cstr(name, "name") || str_istarts_with_cstr(name, "xmlns");
-}
-
-static bool dom_mutation_child_list_affects_direction(DomNode* parent) {
-    // slot distribution can affect a different tree; retain its conservative closure.
-    if (dom_shadow_root(parent)) return true;
-    for (DomElement* ancestor = parent ? parent->as_element() : nullptr;
-         ancestor; ancestor = dom_parent_element(ancestor)) {
-        if (ancestor->shadow_root_element()) return true;
-        CssEnum direction = dom_html_direction_state(ancestor);
-        if (direction == CSS_VALUE_LTR || direction == CSS_VALUE_RTL) return false;
-        if (direction == CSS_VALUE_AUTO || dom_element_is_html_tag(ancestor, MARKUP_NAME_BDI))
-            return true;
-    }
-    return false;
-}
-
-static inline void dom_record_mutation_detail(DomJsMutationKind kind,
-                                                 DomNode* target,
-                                                 DomNode* parent,
-                                                 uint32_t sequence,
-                                                 const char* attribute_name = nullptr,
-                                                 CssPropertyCode presentation_property = CSS_PROPERTY_UNKNOWN) {
-    parent = dom_mutation_source_parent(parent);
+static inline void dom_record_mutation_detail(DomJsMutationKind kind, DomNode* target,
+        DomNode* parent, uint32_t sequence, const char* attribute_name = nullptr,
+        CssPropertyCode presentation_property = CSS_PROPERTY_UNKNOWN) {
+    parent = dom_source_inclusive_ancestor(parent);
     DomDocument* doc = dom_mutation_document(target, parent);
-    if (!doc) return;
-
-    if (sequence == 0) {
-        sequence = doc->js.mutation_sequence + 1;
-    }
-    // the reconciler may skip layout only for reflow requests this batch made
-    if (doc->js.mutation_record_count == 0 && doc->js.mutation_record_overflow == 0) {
-        doc->js.reflow_pending_before_batch = doc->state && doc->state->needs_reflow;
-        doc->js.dirty_before_batch = doc->state && doc->state->is_dirty;
-        doc->js.full_repaint_requests_before_batch = doc->state ? doc->state->full_repaint_requests : 0;
-    }
-    doc->js.mutation_kind_mask |= dom_mutation_bit(kind);
-
-    if (dom_js_mutation_records_reserve(doc, doc->js.mutation_record_count + 1)) {
-        DomNodeRef target_ref = dom_node_ref(target);
-        DomNodeRef parent_ref = dom_node_ref(parent);
-        if (target && !dom_node_pin(doc, target_ref, DOM_NODE_PIN_RECONCILE)) return;
-        if (parent && !dom_node_pin(doc, parent_ref, DOM_NODE_PIN_RECONCILE)) {
-            if (target) dom_node_unpin(doc, target_ref, DOM_NODE_PIN_RECONCILE);
-            return;
-        }
-        DomJsMutationRecord* record =
-            &doc->js.mutation_records[doc->js.mutation_record_count++];
-        record->sequence = sequence;
-        record->kind = kind;
-        record->target = target;
-        record->parent = parent;
-        record->target_id = target_ref.expected_id;
-        record->parent_id = parent_ref.expected_id;
-        record->attribute = kind == DOM_JS_MUTATION_ATTRIBUTE
-            ? dom_mutation_attribute_from_name(doc, attribute_name)
-            : DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
-        record->direction_sensitive = kind == DOM_JS_MUTATION_ATTRIBUTE
-            ? dom_mutation_attribute_affects_direction(attribute_name)
-            : (kind == DOM_JS_MUTATION_CHILD_INSERT || kind == DOM_JS_MUTATION_CHILD_REMOVE)
-                ? dom_mutation_child_list_affects_direction(parent)
-                : kind == DOM_JS_MUTATION_TEXT || kind == DOM_JS_MUTATION_CONTROL_VALUE;
-        record->presentation_property = presentation_property;
-        record->was_connected =
-            dom_mutation_node_was_connected(doc, target) ||
-            dom_mutation_node_was_connected(doc, parent);
-    } else {
-        doc->js.mutation_record_overflow++;
-    }
-
-    if (target) {
-        dom_invalidate_layout_subtree(target);
-    }
-    if (parent) {
-        dom_mark_dirty_ancestors(parent);
-    }
-}
-
-static void dom_record_inline_stylesheet_owner(DomDocument* doc,
-                                               DomElement* style) {
-    if (!doc || !style) return;
-    DomJsRuntime* js = &doc->js;
-    for (int i = 0; i < js->inline_stylesheet_mutation_count; i++) {
-        if (js->inline_stylesheet_mutations[i] == style) return;
-    }
-    if (js->inline_stylesheet_mutation_count >=
-        js->inline_stylesheet_mutation_capacity) {
-        if (!lam::pool_copy_grow_array(doc->document_pool,
-                                       &js->inline_stylesheet_mutations,
-                                       &js->inline_stylesheet_mutation_capacity,
-                                       js->inline_stylesheet_mutation_count,
-                                       js->inline_stylesheet_mutation_count + 1, 4, false)) {
-            log_error("dom mutation: failed to retain inline stylesheet owner");
-            return;
-        }
-    }
-    js->inline_stylesheet_mutations[js->inline_stylesheet_mutation_count++] = style;
-}
-
-static void dom_record_inline_stylesheets_in_subtree(DomDocument* doc,
-                                                      DomNode* node) {
-    if (!node) return;
-    if (node->is_element()) {
-        DomElement* element = static_cast<DomElement*>(node);
-        if (element->tag_name && str_icmp_cstr(element->tag_name, "style") == 0) {
-            dom_record_inline_stylesheet_owner(doc, element);
-        }
-        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-            dom_record_inline_stylesheets_in_subtree(doc, child);
-        }
-    }
-}
-
-static DomElement* dom_inline_stylesheet_mutation_owner(DomNode* target,
-                                                         DomNode* parent) {
-    DomNode* candidates[] = {target, parent};
-    for (DomNode* node : candidates) {
-        if (!node) continue;
-        DomElement* element = node->is_element()
-            ? static_cast<DomElement*>(node)
-            : (node->parent && node->parent->is_element()
-                ? static_cast<DomElement*>(node->parent) : nullptr);
-        if (element && element->tag_name && str_icmp_cstr(element->tag_name, "style") == 0) {
-            return element;
-        }
-    }
-    return nullptr;
-}
-
-static void dom_record_inline_stylesheet_mutation(DomDocument* doc,
-                                                   DomJsMutationKind kind,
-                                                   DomNode* target,
-                                                   DomNode* parent) {
-    DomJsRuntime* js = doc ? &doc->js : nullptr;
-    if (!js || (kind != DOM_JS_MUTATION_CHILD_INSERT &&
-                kind != DOM_JS_MUTATION_CHILD_REMOVE &&
-                kind != DOM_JS_MUTATION_TREE_REPLACE &&
-                kind != DOM_JS_MUTATION_TEXT)) {
-        return;
-    }
-    if (kind == DOM_JS_MUTATION_CHILD_INSERT ||
-        kind == DOM_JS_MUTATION_CHILD_REMOVE ||
-        kind == DOM_JS_MUTATION_TREE_REPLACE) {
-        // A subtree replacement can introduce several <style> descendants.
-        dom_record_inline_stylesheets_in_subtree(doc, target);
-    }
-    DomElement* style = dom_inline_stylesheet_mutation_owner(target, parent);
-    if (!style) return;
-    dom_record_inline_stylesheet_owner(doc, style);
+    radiant_dom_record_mutation_detail(doc, kind, target, parent, sequence,
+                                       attribute_name, presentation_property);
 }
 
 // A host may retain generic DOM observations while applying an atomic edit
@@ -732,28 +469,6 @@ extern "C" __attribute__((weak)) bool dom_edit_transaction_defer_mutation(
     return false;
 }
 
-// Helper: increment DOM mutation counter on current document and record the
-// mutation shape for future incremental cascade/layout decisions.
-// An inline <svg> and a paint layer are painted from a cached raster while their subtree
-// is unchanged (render_svg_inline.cpp, render_paint_layer.cpp). Any mutation at or below
-// such a root, including the removal side of a move (reached through `parent`), advances
-// its generation. `moves_only` marks a non-inherited presentation write, which leaves its
-// own target's layer content unchanged.
-static void dom_layer_note_mutation(DomNode* node, bool moves_only = false) {
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur->is_element() && !(moves_only && cur == node)) cur->as_element()->layer_generation++;
-    }
-}
-
-extern "C" void dom_svg_invalidate_presentation(void* opaque) {
-    DomNode* node = (DomNode*)opaque;
-    if (!node || !node->is_element()) return;
-    // sampled paint changes expire SVG queries and layers without changing authored DOM.
-    DomDocument* document = node->as_element()->doc;
-    if (document) document->style_query_epoch++;
-    dom_layer_note_mutation(node);
-}
-
 static void dom_mutation_notify_observers(DomJsMutationKind kind, DomNode* target,
         DomNode* parent, const char* attribute_name, const char* old_value) {
     dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
@@ -768,13 +483,14 @@ static void dom_mutation_notify_observers(DomJsMutationKind kind, DomNode* targe
     }
 }
 
+// Record mutation detail for incremental cascade and layout decisions.
 static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
                                           DomNode* parent = nullptr,
                                           const char* attribute_name = nullptr,
                                           const char* old_value = nullptr,
                                           CssPropertyCode presentation_property = CSS_PROPERTY_UNKNOWN) {
-    parent = dom_mutation_source_parent(parent);
+    parent = dom_source_inclusive_ancestor(parent);
     DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
 
@@ -783,52 +499,9 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
         return;
     }
 
-    doc->js.mutation_count++;
-    doc->js.mutation_sequence++;
-    doc->mutation_epoch++;
-    // a non-inherited presentation value stays on its element (style_content_epoch)
-    bool inherited_change = presentation_property == CSS_PROPERTY_UNKNOWN ||
-        css_property_runtime_inherited(presentation_property);
-    if (inherited_change) doc->style_content_epoch++;
-    dom_layer_note_mutation(target, !inherited_change);
-    if (parent && (!target || parent != target->parent)) dom_layer_note_mutation(parent);
-    dom_record_inline_stylesheet_mutation(doc, kind, target, parent);
-
-    bool has_pending_structural_record = false;
-    if (doc->js.mutation_record_count > 0) {
-        DomJsMutationRecord* last = &doc->js.mutation_records[doc->js.mutation_record_count - 1];
-        bool legacy_flush = kind == DOM_JS_MUTATION_UNKNOWN && !target && !parent;
-        bool same_detail = last->kind == kind && last->target == target &&
-                           last->parent == parent;
-        // dom_pre_remove/dom_post_insert publish the precise structural shape
-        // before the common notifier; do not record that same mutation twice.
-        has_pending_structural_record =
-            last->sequence == doc->js.mutation_sequence &&
-            (legacy_flush || same_detail);
-    }
-
-    if (!has_pending_structural_record) {
-        dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence,
-                                   attribute_name, presentation_property);
-    }
+    radiant_dom_mutation_begin(doc, kind, target, parent, attribute_name, presentation_property);
     dom_mutation_notify_observers(kind, target, parent, attribute_name, old_value);
-
-    DocState* st = doc->state;
-    if (st) {
-        view_state_prune_orphans(st);
-        // Layout-affecting JS DOM mutations must request a reflow so JS-built
-        // structure (e.g. a script that constructs its UI at load, like the
-        // Stage-4B editor's toolbar) gets laid out and becomes hit-testable
-        // without waiting for a later edit to trigger relayout. A transient
-        // CLI document also needs a style-resolution turn for paint-only
-        // mutations: CSS transitions are created by that turn, while the
-        // long-lived renderer already owns its normal style/frame cadence.
-        // native CSSOM callers need no JS capsule; scheduling follows the document's host.
-        if (kind != DOM_JS_MUTATION_STYLE_REPAINT ||
-            (doc->js.host_ui_context && !doc->js.host_driven_loop)) {
-            doc_state_request_reflow(st);
-        }
-    }
+    radiant_dom_mutation_finish(doc, kind);
 }
 
 extern "C" void dom_custom_elements_registry_changed(void) {
@@ -841,40 +514,8 @@ extern "C" void dom_custom_elements_registry_changed(void) {
     }
 }
 
-static DomElement* dom_form_first_submitter_in_tree(DomNode* node,
-                                                    DomElement* form,
-                                                    bool skip_disabled) {
-    for (DomNode* current = node; current; current = current->next_sibling) {
-        if (!current->is_element()) continue;
-        DomElement* element = current->as_element();
-        if (dom_is_submit_button((void*)element) &&
-            dom_find_form_owner((void*)element) == form &&
-            (!skip_disabled || !dom_is_disabled((void*)element))) {
-            return element;
-        }
-        DomElement* nested = dom_form_first_submitter_in_tree(
-            element->first_child, form, skip_disabled);
-        if (nested) return nested;
-    }
-    return nullptr;
-}
-
 extern "C" void* dom_form_first_submitter(void* form_ptr, bool skip_disabled) {
-    DomElement* form = (DomElement*)form_ptr;
-    if (!form) return nullptr;
-    DomDocument* doc = form->doc;
-    bool connected = false;
-    if (doc && doc->root) {
-        for (DomNode* node = form; node; node = node->parent) {
-            if (node == (DomNode*)doc->root) {
-                connected = true;
-                break;
-            }
-        }
-    }
-    return dom_form_first_submitter_in_tree(
-        connected ? (DomNode*)doc->root : form->first_child,
-        form, skip_disabled);
+    return radiant_form_first_submitter((DomElement*)form_ptr, skip_disabled);
 }
 
 extern "C" bool dom_css_element_is_default(void* element_ptr) {
@@ -912,10 +553,6 @@ extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* 
     dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
 }
 JS_FORWARD_VOID( dom_notify_mutation_detail, (DomJsMutationKind kind, void* target,                                                 void* parent, const char* attribute_name,                                                 const char* old_value), dom_mutation_notify, (kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value))
-
-JS_FORWARD_EXPRESSION(uint64_t, dom_mutation_epoch, (DomDocument* doc),
-    doc ? doc->mutation_epoch : 0)
-
 
 extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
     DomDocument* doc = (DomDocument*)dom_doc;
@@ -1212,10 +849,7 @@ extern "C" Item dom_testdriver_touch(Item target_item, Item type_item,
 }
 
 static bool dom_node_contains(DomNode* ancestor, DomNode* node) {
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur == ancestor) return true;
-    }
-    return false;
+    return view_geometry_dom_is_descendant(node, ancestor, true);
 }
 
 static Item dom_insertion_ancestor_error() {
@@ -1250,29 +884,7 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
                                   bool release_external = true) {
     if (child && dom_node_is_connected(child)) dom_custom_element_tree_changed(child, false);
     DocState* st = dom_state_for_nodes(child, child ? child->parent : nullptr);
-    if (st && child) {
-        dom_mutation_pre_remove(st, child);
-
-        View* focused = focus_get(st);
-        if (focused && dom_node_contains(child, (DomNode*)focused)) {
-            // text-control selection is independent; removing its focused host
-            // must not create a document range after removeAllRanges().
-            focus_clear_preserve_selection(st);
-        } else {
-            View* caret_view = caret_get_view(st);
-            if (caret_view && dom_node_contains(child, (DomNode*)caret_view)) {
-                state_store_caret_clear(st);
-            }
-
-            View* anchor_view = nullptr;
-            View* focus_view = nullptr;
-            if (selection_get_extent_views(st, &anchor_view, &focus_view) &&
-                ((anchor_view && dom_node_contains(child, (DomNode*)anchor_view)) ||
-                 (focus_view && dom_node_contains(child, (DomNode*)focus_view)))) {
-                state_store_selection_clear(st);
-            }
-        }
-    }
+    radiant_dom_pre_remove_state(st, child);
     if (child && js_document_active_element &&
         dom_node_contains(child, (DomNode*)js_document_active_element)) {
         js_document_active_element = nullptr;
@@ -1911,17 +1523,6 @@ static SelectorMatcher* dom_create_selector_matcher(DomDocument* doc, Pool* pool
 JS_FORWARD_RETURN(void*, dom_create_selector_matcher_bridge, (void* dom_doc, void* pool),
     dom_create_selector_matcher, ((DomDocument*)dom_doc, (Pool*)pool))
 
-// Returns the lowercased input `type` attribute (e.g. "checkbox", "radio",
-// "submit", "button", "text"). Falls back to "text" when missing.
-static const char* _input_type_lower(DomElement* elem) {
-    static __thread char buf[24];
-    const char* raw = elem->get_attribute("type");
-    if (!raw || !*raw) return "text";
-    size_t n = str_copy(buf, sizeof(buf), raw, strlen(raw));
-    str_lower_inplace(buf, n);
-    return buf;
-}
-
 static bool dom_input_kind_has_range(RadiantInputValueKind kind) {
     return kind == RADIANT_INPUT_VALUE_NUMBER ||
         kind == RADIANT_INPUT_VALUE_RANGE ||
@@ -1934,7 +1535,7 @@ static bool dom_input_kind_has_range(RadiantInputValueKind kind) {
 
 static bool _is_checkbox_or_radio(DomElement* elem) {
     if (!_is_tag(elem, "input")) return false;
-    const char* t = _input_type_lower(elem);
+    const char* t = radiant_form_control_type(elem);
     return strcmp(t, "checkbox") == 0 || strcmp(t, "radio") == 0;
 }
 
@@ -2017,10 +1618,9 @@ extern "C" void dom_set_checked_dirty(void* dom_elem, bool checked) {
     _set_checkedness(elem, checked);
     dom_expando_flag_set(elem, "__chkDirty", (Item){.item = b2it(true)});
 }
-JS_FORWARD_RETURN(const char*, dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
+JS_FORWARD_RETURN(const char*, dom_input_type_lower, (void* dom_elem), radiant_form_control_type, ((DomElement*)dom_elem))
 extern "C" bool dom_is_disabled(void* dom_elem) {
-    DomElement* e = (DomElement*)dom_elem;
-    return e && e->has_attribute("disabled");
+    return radiant_form_control_disabled((DomElement*)dom_elem);
 }
 
 // Returns true when the element is "connected" to its owning document
@@ -2028,7 +1628,7 @@ extern "C" bool dom_is_disabled(void* dom_elem) {
 // the document's root element. Newly-created elements that haven't been
 // inserted into the tree are not connected.
 extern "C" bool dom_is_connected(void* dom_elem) {
-    return dom_element_is_connected((DomElement*)dom_elem);
+    return dom_node_is_connected((DomNode*)dom_elem);
 }
 
 // ============================================================================
@@ -2382,13 +1982,6 @@ extern "C" bool dom_element_is_svg(void* element) {
     return dom_element_is_svg((DomElement*)element);
 }
 
-extern "C" const char* dom_document_preferred_languages(void* document) {
-    DomDocument* doc = (DomDocument*)document;
-    if (!doc) return "";
-    if (!doc->services.preferred_languages) doc->services.preferred_languages = dom_platform_preferred_languages();
-    return doc->services.preferred_languages ? doc->services.preferred_languages : "";
-}
-
 static void dom_document_configuration_changed(DomDocument* doc) {
     // document configuration changes selector matches without changing an observable DOM attribute.
     if (doc->root) dom_mutation_notify(DOM_JS_MUTATION_UNKNOWN, doc->root);
@@ -2411,58 +2004,6 @@ extern "C" bool dom_document_set_preferred_languages(void* document, const char*
     // preference changes invalidate the same paint/resource generations as authored SVG mutations.
     dom_document_configuration_changed(doc);
     return true;
-}
-
-extern "C" bool dom_svg_conditions_match(const char* extensions, const char* languages, const char* preferences) {
-    // no proprietary SVG extensions are implemented; an authored requirement (including empty) fails.
-    if (extensions) return false;
-    if (!languages) return true;
-    for (const char* language = languages; *language;) {
-        const char* end = strchr(language, ','); if (!end) end = language + strlen(language);
-        while (language < end && str_char_is_ascii_space(*language)) language++;
-        const char* trimmed = end;
-        while (trimmed > language && str_char_is_ascii_space(trimmed[-1])) trimmed--;
-        size_t length = (size_t)(trimmed - language);
-        for (const char* preference = preferences ? preferences : ""; *preference;) {
-            const char* next = strchr(preference, ','); if (!next) next = preference + strlen(preference);
-            while (preference < next && str_char_is_ascii_space(*preference)) preference++;
-            const char* finish = next;
-            while (finish > preference && str_char_is_ascii_space(finish[-1])) finish--;
-            size_t prefix = (size_t)(finish - preference);
-            // SVG2 §5.7.5: the preferred tag is the prefix, followed by a hyphen boundary.
-            if (prefix && length >= prefix && str_icmp(language, prefix, preference, prefix) == 0 &&
-                (length == prefix || language[prefix] == '-')) return true;
-            preference = *next ? next + 1 : next;
-        }
-        language = *end ? end + 1 : end;
-    }
-    return false;
-}
-
-static bool dom_svg_tag_is(DomElement* elem, const char* tag) {
-    return tag && dom_element_is_svg(elem) && str_icmp_cstr(elem->local_name(), tag) == 0;
-}
-
-extern "C" bool dom_svg_element_is_eligible(void* element) {
-    DomElement* elem = (DomElement*)element;
-    if (!dom_element_is_svg(elem)) return false;
-    // conditional attributes on never-rendered definitions do not disable their referenced contents.
-    static const char* const definitions[] = {"defs", "symbol", "clipPath", "mask", "marker", "pattern",
-        "linearGradient", "radialGradient", "filter", "style", "script", "title", "desc", "metadata"};
-    for (const char* name : definitions) if (dom_svg_tag_is(elem, name)) return true;
-    if (elem->has_attribute("requiredExtensions")) return false;
-    const char* languages = elem->get_attribute("systemLanguage");
-    // HTML's empty attribute value is stored as Lambda null, but its presence still fails the test.
-    if (!languages && elem->has_attribute("systemLanguage")) languages = "";
-    return dom_svg_conditions_match(nullptr, languages,
-        dom_document_preferred_languages(elem->doc));
-}
-
-extern "C" void* dom_svg_switch_selected_child(void* element) {
-    DomElement* elem = (DomElement*)element; if (!elem) return nullptr;
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling)
-        if (child->is_element() && dom_svg_element_is_eligible(child)) return child;
-    return nullptr;
 }
 
 static const char* dom_svg_interface_name(DomElement* elem) {
@@ -4039,7 +3580,7 @@ extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
 extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
     if (!iframe || !dom_foreign_document_state_ensure()) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
-    DomDocument* loaded = iframe->embed ? iframe->embedp()->doc : nullptr;
+    DomDocument* loaded = iframe->embed ? dom_engine_embed_property(iframe)->doc : nullptr;
     if (e && loaded && e->doc != loaded) {
         // the frames collection may have exposed about:blank before navigation committed.
         if (!dom_transfer_document_storage(e->doc, loaded)) return ItemNull;
@@ -4048,7 +3589,7 @@ extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
         dom_doc_mark_has_browsing_context(loaded);
     }
     if (!e) {
-        DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
+        DomDocument* embedded_doc = iframe->embed ? dom_engine_embed_property(iframe)->doc : nullptr;
         if (embedded_doc) {
             dom_doc_mark_has_browsing_context(embedded_doc);
             // A renderer-loaded srcdoc is already a full document; observing it must not reparse its body.
@@ -4363,7 +3904,7 @@ extern "C" void dom_after_srcdoc_set(void* dom_elem) {
     DomElement* iframe = (DomElement*)dom_elem;
     IframeContentEntry* entry = lookup_iframe_entry(iframe);
     DomDocument* doc = entry ? entry->doc
-        : (iframe && iframe->embed ? iframe->embedp()->doc : nullptr);
+        : (iframe && iframe->embed ? dom_engine_embed_property(iframe)->doc : nullptr);
     // Rendered iframes navigate as full documents during layout; only detached
     // browsing contexts need the fragment hydration fallback.
     if (doc && !doc->view_tree) replace_iframe_srcdoc_document(iframe, doc);
@@ -4807,25 +4348,6 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
     Item result = computed ? js_make_string_len(computed->chars, computed->len) : js_name_item("");
     mem_pool_destroy(pool);
     return result;
-}
-
-// ============================================================================
-// Helper: find element by ID (tree walk)
-// ============================================================================
-
-DomElement* dom_find_element_by_id(DomElement* root, const char* id) {
-    if (!root || !id) return nullptr;
-    if (root->id && strcmp(root->id, id) == 0) return root;
-
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* found = dom_find_element_by_id(child->as_element(), id);
-            if (found) return found;
-        }
-        child = child->next_sibling;
-    }
-    return nullptr;
 }
 
 struct DomAriaElementRef {
@@ -5610,76 +5132,17 @@ static int64_t dom_geometry_dimension(DomElement* elem, bool width_axis) {
     return dom_headless_dimension(elem, width_axis);
 }
 
+extern "C" float dom_svg_geometry_fallback_dimension(void* element, bool width_axis) {
+    return (float)dom_geometry_dimension((DomElement*)element, width_axis);
+}
+
 static int64_t dom_geometry_client_start_border(DomElement* elem, bool vertical) {
     if (!elem) return 0;
     dom_ensure_geometry_snapshot(elem->doc);
-    if (!elem->bound || !elem->boundary()->border) return 0;
-    float width = vertical ? elem->boundary()->border->width.top
-                           : elem->boundary()->border->width.left;
+    if (!elem->bound || !dom_engine_boundary_property(elem)->border) return 0;
+    float width = vertical ? dom_engine_boundary_property(elem)->border->width.top
+                           : dom_engine_boundary_property(elem)->border->width.left;
     return (int64_t)llroundf(width);
-}
-
-static bool dom_scrollable_overflow_is_clipped(const DomElement* elem,
-                                               bool width_axis) {
-    if (!elem || !elem->scroller) return false;
-    CssEnum overflow = width_axis ? elem->scroll()->overflow_x
-                                  : elem->scroll()->overflow_y;
-    return overflow == CSS_VALUE_AUTO || overflow == CSS_VALUE_SCROLL ||
-           overflow == CSS_VALUE_HIDDEN || overflow == CSS_VALUE_CLIP;
-}
-
-static bool dom_scrollable_overflow_is_fixed(const DomElement* elem) {
-    return elem && elem->position &&
-        elem->positionp()->position == CSS_VALUE_FIXED;
-}
-
-// parent_x/parent_y: the content origin the node's x/y are relative to,
-// measured from the scroll container's border box.
-static float dom_scrollable_descendant_extent(DomNode* node, bool width_axis,
-                                              float parent_x, float parent_y) {
-    if (!node || !node->is_element()) return 0.0f;
-    DomElement* elem = node->as_element();
-    if (!elem || dom_scrollable_overflow_is_fixed(elem)) return 0.0f;
-
-    float end = width_axis ? parent_x + elem->x + elem->width
-                           : parent_y + elem->y + elem->height;
-    if (dom_scrollable_overflow_is_clipped(elem, width_axis)) {
-        return max(end, 0.0f);
-    }
-    // view x/y are relative to the parent block, so nested descendants need
-    // their ancestors' offsets; without them a multicol body's overflow
-    // columns lost the body's own inset (CSSOM scrollWidth stopped short).
-    float child_x = parent_x;
-    float child_y = parent_y;
-    dom_engine_child_content_origin(node, parent_x, parent_y, &child_x, &child_y);
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        end = max(end, dom_scrollable_descendant_extent(child, width_axis, child_x, child_y));
-    }
-    return max(end, 0.0f);
-}
-
-extern "C" float dom_scrollable_extent(void* element, bool width_axis) {
-    DomElement* elem = static_cast<DomElement*>(element);
-    if (!elem) return 0.0f;
-    float extent = max(width_axis ? elem->content_width : elem->content_height,
-                       width_axis ? elem->width : elem->height);
-    // a block's children are placed relative to its border box; an inline
-    // container's children share its own containing-block origin.
-    float origin_x = elem->is_block() ? 0.0f : -elem->x;
-    float origin_y = elem->is_block() ? 0.0f : -elem->y;
-    float descendant_extent = 0.0f;
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        descendant_extent = max(descendant_extent,
-            dom_scrollable_descendant_extent(child, width_axis, origin_x, origin_y));
-    }
-    // Scrollable overflow includes the padding after overflowing descendants.
-    // Flex boxes with overflow: clip otherwise lose that padding because their
-    // cached content size stops at the child edge.
-    float padding_end = elem->bound
-        ? (width_axis ? elem->boundary()->padding.right
-                      : elem->boundary()->padding.bottom) : 0.0f;
-    extent = max(extent, descendant_extent + padding_end);
-    return extent;
 }
 
 // ============================================================================
@@ -5714,14 +5177,6 @@ static void collect_html_text_value(const char* value, size_t length,
             strbuf_append_char(sb, (char)ch);
         }
     }
-}
-
-static bool dom_serializes_html_void(DomElement* element) {
-    if (strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml")) return false;
-    const char* local = element->local_name();
-    static const char* const names[] = {"area", "base", "basefont", "bgsound", "br", "col", "embed", "frame", "hr", "img", "input", "keygen", "link", "meta", "param", "source", "track", "wbr"};
-    for (const char* name : names) if (!strcmp(local, name)) return true;
-    return false;
 }
 
 static void collect_inner_html(DomNode* node, StrBuf* sb) {
@@ -5783,281 +5238,6 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
     }
 }
 
-static void collect_xml_attr_value(const char* value, StrBuf* sb) {
-    if (!value || !sb) return;
-    for (const char* p = value; *p; p++) {
-        if (*p == '&') strbuf_append_str(sb, "&amp;");
-        else if (*p == '<') strbuf_append_str(sb, "&lt;");
-        else if (*p == '"') strbuf_append_str(sb, "&quot;");
-        else if (*p == '\t') strbuf_append_str(sb, "&#9;");
-        else if (*p == '\n') strbuf_append_str(sb, "&#xA;");
-        else if (*p == '\r') strbuf_append_str(sb, "&#xD;");
-        else strbuf_append_char(sb, *p);
-    }
-}
-
-static void collect_xml_text_value(const char* value, size_t length, StrBuf* sb) {
-    escape_append_html_text(sb, value, length);
-}
-
-static const char* const DOM_XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
-static const char* const DOM_XMLNS_NAMESPACE = "http://www.w3.org/2000/xmlns/";
-
-struct DomXmlPrefixBinding {
-    StrView prefix;
-    const char* uri;
-    DomXmlPrefixBinding* next;
-};
-struct DomXmlSerialization {
-    Pool* pool;
-    DomXmlPrefixBinding* bindings;
-    uint64_t prefix_index;
-    StrBuf* output;
-};
-struct DomXmlFrame {
-    DomElement* element;
-    DomNode* child;
-    const char* default_namespace;
-    StrView prefix;
-    DomXmlPrefixBinding* inherited_bindings;
-    DomXmlFrame* parent;
-    bool fragment;
-};
-
-static bool dom_xml_prefix_equal(StrView a, StrView b) {
-    return a.length == b.length && (!a.length || !memcmp(a.str, b.str, a.length));
-}
-
-static StrView dom_xml_name_prefix(const char* name, const char* local) {
-    const char* colon = name ? strchr(name, ':') : nullptr;
-    return colon && !strcmp(colon + 1, local) ? StrView{name, (size_t)(colon - name)} : StrView{};
-}
-
-static DomXmlPrefixBinding* dom_xml_prefix_binding(DomXmlSerialization* context, StrView prefix) {
-    for (DomXmlPrefixBinding* binding = context->bindings; binding; binding = binding->next)
-        if (dom_xml_prefix_equal(binding->prefix, prefix)) return binding;
-    return nullptr;
-}
-
-static void dom_xml_bind_prefix(DomXmlSerialization* context, StrView prefix, const char* uri) {
-    DomXmlPrefixBinding* binding = (DomXmlPrefixBinding*)pool_calloc(context->pool, sizeof(DomXmlPrefixBinding));
-    binding->prefix = prefix; binding->uri = uri; binding->next = context->bindings;
-    context->bindings = binding;
-}
-
-static void dom_xml_append_name(StrBuf* output, StrView prefix, const char* local) {
-    if (prefix.length) { strbuf_append_str_n(output, prefix.str, prefix.length); strbuf_append_char(output, ':'); }
-    strbuf_append_str(output, local);
-}
-
-static void dom_xml_append_declaration(DomXmlSerialization* context, StrView prefix, const char* uri) {
-    strbuf_append_str(context->output, " xmlns");
-    if (prefix.length) { strbuf_append_char(context->output, ':'); strbuf_append_str_n(context->output, prefix.str, prefix.length); }
-    strbuf_append_str(context->output, "=\"");
-    collect_xml_attr_value(uri, context->output);
-    strbuf_append_char(context->output, '"');
-}
-
-static StrView dom_xml_choose_prefix(DomXmlSerialization* context, const char* uri,
-        StrView preferred, DomXmlPrefixBinding* inherited) {
-    DomXmlPrefixBinding* wanted = preferred.length ? dom_xml_prefix_binding(context, preferred) : nullptr;
-    if (wanted && !strcmp(wanted->uri, uri)) return preferred;
-    for (DomXmlPrefixBinding* binding = context->bindings; binding; binding = binding->next)
-        if (!strcmp(binding->uri, uri) && dom_xml_prefix_binding(context, binding->prefix) == binding)
-            return binding->prefix;
-    // inherited names can be rebound; names used by this element or its attributes cannot.
-    bool local_conflict = false;
-    for (DomXmlPrefixBinding* binding = context->bindings; binding != inherited; binding = binding->next)
-        if (dom_xml_prefix_equal(binding->prefix, preferred)) { local_conflict = true; break; }
-    StrView prefix = preferred;
-    if (!prefix.length || local_conflict) {
-        char generated[32];
-        do {
-            snprintf(generated, sizeof(generated), "ns%llu", (unsigned long long)context->prefix_index++);
-            prefix = {generated, strlen(generated)};
-        } while (dom_xml_prefix_binding(context, prefix));
-        char* owned = pool_strdup(context->pool, generated);
-        prefix = {owned, strlen(owned)};
-    }
-    dom_xml_bind_prefix(context, prefix, uri);
-    dom_xml_append_declaration(context, prefix, uri);
-    return prefix;
-}
-
-static void dom_xml_append_attribute(DomXmlSerialization* context, DomAttributeView attribute,
-    DomXmlPrefixBinding* inherited) {
-    StrView prefix = {};
-    if (!strcmp(attribute.namespace_uri, DOM_XML_NAMESPACE)) prefix = {"xml", 3};
-    else if (*attribute.namespace_uri) prefix = dom_xml_choose_prefix(context, attribute.namespace_uri,
-        dom_xml_name_prefix(attribute.qualified_name, attribute.local_name), inherited);
-    if (prefix.length) dom_xml_bind_prefix(context, prefix, attribute.namespace_uri);
-    strbuf_append_char(context->output, ' ');
-    dom_xml_append_name(context->output, prefix, attribute.local_name);
-    strbuf_append_str(context->output, "=\"");
-    collect_xml_attr_value(attribute.value, context->output);
-    strbuf_append_char(context->output, '"');
-}
-
-extern "C" bool dom_serialize_xml(void* opaque, StrBuf* output, const DomXmlProjection* projection) {
-    DomNode* node = (DomNode*)opaque;
-    if (!node || !output) return false;
-    Pool* pool = mem_pool_create(nullptr, MEM_ROLE_CSS, "dom.xml_serialization");
-    if (!pool) return false;
-    DomXmlSerialization context = {pool, nullptr, 1, output};
-    dom_xml_bind_prefix(&context, {"xml", 3}, DOM_XML_NAMESPACE);
-    DomXmlFrame* frame = nullptr;
-    DomNode* current = node;
-    while (current || frame) {
-        if (!current) {
-            if (frame->child) {
-                current = frame->child;
-                frame->child = dom_next_script_visible_sibling(current);
-                continue;
-            }
-            if (!frame->fragment) {
-                if (projection && projection->append_children &&
-                    !projection->append_children(projection->context, frame->element, output)) {
-                    pool_destroy(pool); return false;
-                }
-                strbuf_append_str(output, "</");
-                dom_xml_append_name(output, frame->prefix, frame->element->local_name());
-                strbuf_append_char(output, '>');
-            }
-            context.bindings = frame->inherited_bindings;
-            DomXmlFrame* parent = frame->parent;
-            pool_free(pool, frame);
-            frame = parent;
-            continue;
-        }
-        DomNode* next = current;
-        current = nullptr;
-        if (dom_is_generated_pseudo_node(next)) continue;
-        if (next->is_text()) {
-            DomText* text = next->as_text();
-            collect_xml_text_value(text->text, text->length, output);
-            continue;
-        }
-        if (next->is_comment()) {
-            DomComment* comment = next->as_comment();
-            strbuf_append_str(output, "<!--");
-            if (comment->content) strbuf_append_str_n(output, comment->content, comment->length);
-            strbuf_append_str(output, "-->");
-            continue;
-        }
-        if (!next->is_element()) continue;
-        DomElement* element = next->as_element();
-        if (projection && projection->include_element &&
-            !projection->include_element(projection->context, element)) continue;
-        DomXmlAttributeOverride* overrides = projection && projection->attributes
-            ? projection->attributes(projection->context, element) : nullptr;
-        DomXmlFrame* opened = (DomXmlFrame*)pool_calloc(pool, sizeof(DomXmlFrame));
-        if (!opened) { pool_destroy(pool); return false; }
-        opened->element = element;
-        opened->parent = frame;
-        opened->inherited_bindings = context.bindings;
-        opened->default_namespace = frame ? frame->default_namespace : "";
-        opened->child = dom_first_script_visible_child(element);
-        opened->fragment = !strcmp(element->tag_name, "#document-fragment");
-        if (opened->fragment) { frame = opened; continue; }
-
-        // declarations are recorded before choosing names, without changing the DOM.
-        const char* declared_default = nullptr;
-        DomAttributeIterator iterator = dom_element_attribute_iterator(element);
-        DomAttributeView attribute;
-        while (dom_element_next_attribute(&iterator, &attribute)) {
-            if (strcmp(attribute.namespace_uri, DOM_XMLNS_NAMESPACE)) continue;
-            const char* value = attribute.value ? attribute.value : "";
-            if (!strcmp(attribute.local_name, "xmlns")) declared_default = value;
-            else if (strcmp(value, DOM_XML_NAMESPACE))
-                dom_xml_bind_prefix(&context, {attribute.local_name, strlen(attribute.local_name)}, value);
-        }
-        const char* uri = dom_element_namespace_uri(element);
-        bool omit_default = false;
-        bool append_default = false;
-        StrView preferred = dom_xml_name_prefix(element->tag_name, element->local_name());
-        if (!strcmp(uri, opened->default_namespace)) {
-            omit_default = true;
-        } else if (!strcmp(uri, DOM_XML_NAMESPACE)) {
-            opened->prefix = {"xml", 3};
-            if (declared_default) opened->default_namespace = declared_default;
-        } else {
-            DomXmlPrefixBinding* candidate = nullptr;
-            if (*uri) {
-                candidate = preferred.length ? dom_xml_prefix_binding(&context, preferred) : nullptr;
-                if (candidate && strcmp(candidate->uri, uri)) candidate = nullptr;
-                if (!candidate) for (DomXmlPrefixBinding* binding = context.bindings; binding; binding = binding->next)
-                    if (!strcmp(binding->uri, uri) && dom_xml_prefix_binding(&context, binding->prefix) == binding) { candidate = binding; break; }
-            }
-            if (candidate) opened->prefix = candidate->prefix;
-            else if (*uri && preferred.length) opened->prefix = preferred; // chosen after the opening name below
-            else {
-                opened->default_namespace = uri;
-                omit_default = !declared_default || strcmp(declared_default, uri);
-                append_default = omit_default;
-            }
-            if (opened->prefix.length && declared_default) opened->default_namespace = declared_default;
-        }
-        // prefix generation emits declarations, so reserve output for the name first.
-        StrBuf* declarations = strbuf_new();
-        if (!declarations) { pool_destroy(pool); return false; }
-        context.output = declarations;
-        if (opened->prefix.length) {
-            opened->prefix = dom_xml_choose_prefix(&context, uri, opened->prefix, opened->inherited_bindings);
-            // reserve a reused ancestor prefix against later attribute rebindings.
-            dom_xml_bind_prefix(&context, opened->prefix, uri);
-        }
-        context.output = output;
-        strbuf_append_char(output, '<');
-        dom_xml_append_name(output, opened->prefix, element->local_name());
-        strbuf_append_str_n(output, declarations->str, declarations->length);
-        strbuf_free(declarations);
-        if (append_default) dom_xml_append_declaration(&context, {}, uri);
-
-        iterator = dom_element_attribute_iterator(element);
-        while (dom_element_next_attribute(&iterator, &attribute)) {
-            if (dom_is_internal_attr(attribute.qualified_name)) continue;
-            if (!strcmp(attribute.namespace_uri, DOM_XMLNS_NAMESPACE)) {
-                if (!strcmp(attribute.local_name, "xmlns")) {
-                    if (!omit_default) dom_xml_append_declaration(&context, {}, attribute.value);
-                } else {
-                    StrView declared = {attribute.local_name, strlen(attribute.local_name)};
-                    DomXmlPrefixBinding* ancestor = nullptr;
-                    for (DomXmlPrefixBinding* binding = opened->inherited_bindings; binding; binding = binding->next)
-                        if (dom_xml_prefix_equal(binding->prefix, declared)) { ancestor = binding; break; }
-                    const char* value = attribute.value ? attribute.value : "";
-                    if (strcmp(value, DOM_XML_NAMESPACE) && (!ancestor || strcmp(ancestor->uri, value)))
-                        dom_xml_append_declaration(&context, declared, value);
-                }
-                continue;
-            }
-            if (!*attribute.namespace_uri && omit_default && !strcmp(attribute.local_name, "xmlns")) continue;
-            for (DomXmlAttributeOverride* replacement = overrides; replacement; replacement = replacement->next)
-                if (!strcmp(replacement->name, attribute.qualified_name)) {
-                    attribute.value = replacement->value; replacement->written = true; break;
-                }
-            dom_xml_append_attribute(&context, attribute, opened->inherited_bindings);
-        }
-        for (DomXmlAttributeOverride* replacement = overrides; replacement; replacement = replacement->next) {
-            if (replacement->written) continue;
-            const char* colon = strchr(replacement->name, ':');
-            const char* local = colon ? colon + 1 : replacement->name;
-            DomAttributeView attribute = {replacement->namespace_uri ? replacement->namespace_uri : "",
-                replacement->name, local, replacement->value};
-            dom_xml_append_attribute(&context, attribute, opened->inherited_bindings);
-        }
-        if (!opened->child && !(projection && projection->append_children) &&
-            (strcmp(uri, "http://www.w3.org/1999/xhtml") || dom_serializes_html_void(element))) {
-            strbuf_append_str(output, dom_serializes_html_void(element) ? " />" : "/>");
-            context.bindings = opened->inherited_bindings;
-            pool_free(pool, opened);
-        } else {
-            strbuf_append_char(output, '>');
-            frame = opened;
-        }
-    }
-    pool_destroy(pool);
-    return true;
-}
 JS_FORWARD_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
 
 extern "C" Item dom_xml_serializer_serialize_to_string(Item node_item) {
@@ -6215,7 +5395,7 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
     DomJsMutationKind kind = elem->tag_name && str_icmp_cstr(elem->tag_name, "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
     // style text needs reparsing even though its mutation is classified as STYLE.
-    if (kind == DOM_JS_MUTATION_STYLE) dom_record_inline_stylesheet_owner(elem->doc, elem);
+    if (kind == DOM_JS_MUTATION_STYLE) radiant_dom_record_inline_stylesheet_owner(elem->doc, elem);
     dom_mutation_notify(kind, (DomNode*)elem, (DomNode*)elem);
     return true;
 }
@@ -7563,29 +6743,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
                                        DomScrollAlign inline_align = DOM_SCROLL_ALIGN_NEAREST,
                                        DomScrollBehavior behavior = DOM_SCROLL_BEHAVIOR_AUTO) {
     DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
-    if (!doc) return;
-    if (doc->pending_scroll_into_view_target.address) {
-        dom_node_unpin(doc, doc->pending_scroll_into_view_target, DOM_NODE_PIN_RECONCILE);
-    }
-    doc->pending_scroll_into_view_target = {};
-    doc->pending_scroll_into_view_center = false;
-    doc->pending_scroll_into_view_if_needed = false;
-    doc->pending_scroll_into_view_block = DOM_SCROLL_ALIGN_START;
-    doc->pending_scroll_into_view_inline = DOM_SCROLL_ALIGN_NEAREST;
-    doc->pending_scroll_into_view_behavior = DOM_SCROLL_BEHAVIOR_AUTO;
-    DomNodeRef ref = dom_node_ref((DomNode*)elem);
-    if (!dom_node_ref_validate(doc, ref) ||
-        !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
-        return;
-    }
-    doc->pending_scroll_into_view_target = ref;
-    doc->pending_scroll_into_view_center = center;
-    doc->pending_scroll_into_view_if_needed = if_needed;
-    doc->pending_scroll_into_view_block = block_align;
-    doc->pending_scroll_into_view_inline = inline_align;
-    doc->pending_scroll_into_view_behavior = behavior;
-    // scrolling changes presentation; the geometry checkpoint validates flow separately.
-    dom_engine_document_request_repaint(doc);
+    dom_engine_queue_scroll_into_view(doc, elem, center, if_needed, block_align, inline_align, behavior);
 }
 
 static Item dom_focus_method(DomElement* elem, bool focus,
@@ -7966,38 +7124,28 @@ extern "C" bool dom_css_element_matches_range(void* element_ptr,
 // user to explicitly pick a non-empty one).
 static bool _get_selectedness(DomElement* opt);
 static void _set_selectedness(DomElement* opt, bool v);
-static void _select_sync_native_selected_index(DomElement* sel,
-                                               int selected_index,
-                                               int option_count);
 
 // Walk the descendants of `sel` and append each <option> to `arr`. Direct
 // optgroup descendants contribute options, but nested option/hr/select/optgroup
 // subtrees are not part of the owning select's option list.
-static void _collect_options_impl(DomNode* node, Item arr, bool allow_optgroup) {
-    // Wrapping an option may collect before the array push or recursive visit.
+struct SelectOptionArrayRoots {
+    Rooted<Item>* options;
+    Rooted<Item>* wrapped;
+};
+
+static void _collect_option(DomElement* option, void* context) {
+    SelectOptionArrayRoots* roots = static_cast<SelectOptionArrayRoots*>(context);
+    roots->wrapped->set(dom_wrap_element(option));
+    js_array_push(roots->options->get(), roots->wrapped->get());
+}
+
+static void _collect_options(DomNode* node, Item arr) {
+    // Wrapping each option can collect; both the array and wrapper stay rooted.
     RootFrame roots(2);
     Rooted<Item> options(roots, arr), wrapped(roots, ItemNull);
-    while (node) {
-        if (node->is_element()) {
-            DomElement* ce = (DomElement*)node;
-            if (ce->tag_name) {
-                if (str_icmp_cstr(ce->tag_name, "option") == 0) {
-                    wrapped.set(dom_wrap_element(ce));
-                    js_array_push(options.get(), wrapped.get());
-                } else if (str_icmp_cstr(ce->tag_name, "select") == 0 ||
-                           str_icmp_cstr(ce->tag_name, "hr") == 0) {
-                    // skip nested select/hr subtrees
-                } else if (str_icmp_cstr(ce->tag_name, "optgroup") == 0) {
-                    if (allow_optgroup) _collect_options_impl(ce->first_child, options.get(), false);
-                } else {
-                    _collect_options_impl(ce->first_child, options.get(), allow_optgroup);
-                }
-            }
-        }
-        node = node->next_sibling;
-    }
+    SelectOptionArrayRoots context = {&options, &wrapped};
+    radiant_select_walk_options(node, _collect_option, &context);
 }
-JS_FORWARD_STATIC_VOID( _collect_options, (DomNode* node, Item arr), _collect_options_impl, (node, arr, true))
 
 // Get the option's text content (concatenated descendant text, trimmed
 // of leading/trailing ASCII whitespace, with internal whitespace
@@ -8100,7 +7248,7 @@ extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
     const char* s = fn_to_cstr(value);
     if (!s) s = "";
     if (elem->tag_name && str_icmp_cstr(elem->tag_name, "input") == 0) {
-        const char* itype = _input_type_lower(elem);
+        const char* itype = radiant_form_control_type(elem);
         bool single_line = strcmp(itype, "text") == 0 || strcmp(itype, "search") == 0 ||
                            strcmp(itype, "tel") == 0 || strcmp(itype, "url") == 0 ||
                            strcmp(itype, "email") == 0 || strcmp(itype, "password") == 0;
@@ -8260,7 +7408,7 @@ static void _select_set_selected_index(DomElement* sel, int idx) {
         if (!opt) continue;
         _set_selectedness(opt, (int)i == idx); // INT_CAST_OK: option index
     }
-    _select_sync_native_selected_index(
+    radiant_select_sync_native_index(
         sel, idx >= 0 && idx < n ? idx : -1,
         (int)n); // INT_CAST_OK: option count
     dom_expando_flag_set(sel, "__selDirty", (Item){.item = b2it(true)});
@@ -8280,7 +7428,7 @@ static void _select_select_only_option(DomElement* sel, DomElement* selected_opt
             if (selected) selected_index = (int)i; // INT_CAST_OK: option index
         }
     }
-    _select_sync_native_selected_index(sel, selected_index,
+    radiant_select_sync_native_index(sel, selected_index,
                                        (int)n); // INT_CAST_OK: option count
 }
 
@@ -8566,22 +7714,6 @@ extern "C" Item dom_select_value_bridge(void* element) {
     return (Item){.item = s2it(result)};
 }
 
-static void _select_sync_native_selected_index(DomElement* sel,
-                                               int selected_index,
-                                               int option_count) {
-    if (!sel || !_is_tag(sel, "select")) return;
-    if (sel->form_control()) {
-        // Script can reorder/add options without rebuilding the form control;
-        // keep native option bounds aligned before storing live selectedness.
-        sel->form->option_count = option_count;
-    }
-    if (sel->doc && sel->doc->state) {
-        form_control_set_selected_index((DocState*)sel->doc->state,
-                                        static_cast<View*>(sel),
-                                        selected_index);
-    }
-}
-
 // Return index of `opt` within its owner select's options list (-1 if not
 // in any select).
 static int _option_index_in_select(DomElement* opt) {
@@ -8602,53 +7734,19 @@ static int _option_index_in_select(DomElement* opt) {
 // is selectedness=true for non-multiple selects. If multiple options had
 // selectedness, only the LAST one in tree order remains selected. If none
 // had selectedness, the first non-disabled option is selected.
+static bool _select_reset_get(DomElement* option, void*) {
+    return _get_selectedness(option);
+}
+
+static void _select_reset_set(DomElement* option, bool selected, void*) {
+    _set_selectedness(option, selected);
+}
+
 static void _select_ask_for_reset(DomElement* sel) {
-    if (!sel) return;
-    if (sel->has_attribute("multiple")) return;
-    Item arr = js_array_new(0);
-    _collect_options(sel->first_child, arr);
-    int64_t n = js_array_length(arr);
-    if (n == 0) return;
-    // Find last selected option.
-    int last_selected = -1;
-    int first_non_disabled = -1;
-    for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
-        if (!opt) continue;
-        if (_get_selectedness(opt)) last_selected = (int)i; // INT_CAST_OK: option index
-        if (first_non_disabled < 0 && !opt->has_attribute("disabled")) {
-            first_non_disabled = (int)i; // INT_CAST_OK: option index
-        }
-    }
-    int chosen = (last_selected >= 0) ? last_selected :
-        (first_non_disabled >= 0 ? first_non_disabled : 0);
-    int size = 0;
-    {
-        const char* sz = sel->get_attribute("size");
-        if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
-    }
-    // For display-size <= 1 (the common dropdown), exactly one option
-    // must be selected. For listbox (size > 1) without multiple, zero or
-    // one option may be selected — but if more than one has selectedness,
-    // only the last remains.
-    bool require_one = size <= 1;
-    for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
-        if (!opt) continue;
-        if (require_one) {
-            _set_selectedness(opt, (int)i == chosen); // INT_CAST_OK: option index
-        } else {
-            // listbox: keep only the last selected (if any was selected).
-            if (last_selected < 0) {
-                _set_selectedness(opt, false);
-            } else {
-                _set_selectedness(opt, (int)i == last_selected); // INT_CAST_OK: option index
-            }
-        }
-    }
-    int native_index = require_one ? chosen : last_selected;
-    _select_sync_native_selected_index(sel, native_index,
-                                       (int)n); // INT_CAST_OK: option count
+    const RadiantSelectResetOps operations = {_select_reset_get, _select_reset_set, nullptr};
+    int selected_index = -1, option_count = 0;
+    if (radiant_select_reset(sel, &operations, &selected_index, &option_count))
+        radiant_select_sync_native_index(sel, selected_index, option_count);
 }
 
 extern "C" void dom_after_default_selected_set(void* dom_elem, bool selected) {
@@ -8683,7 +7781,7 @@ static int dom_select_apply_value(DomElement* elem, const char* value,
         _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
     }
     if (sync_native_index) {
-        _select_sync_native_selected_index(elem, found,
+        radiant_select_sync_native_index(elem, found,
             (int)n); // INT_CAST_OK: option count
     }
     return found;
@@ -8870,7 +7968,7 @@ static void _reset_form_control(DomElement* elem) {
     dom_set_user_validity(elem, false);
     const char* tag = elem->tag_name;
     if (str_icmp_cstr(tag, "input") == 0) {
-        const char* itype = _input_type_lower(elem);
+        const char* itype = radiant_form_control_type(elem);
         if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
             // checked := defaultChecked (presence of "checked" content attr)
             bool default_checked = elem->has_attribute("checked");
@@ -9741,7 +8839,7 @@ static bool _is_listed_form_control(DomElement* e) {
     if (!e || !e->tag_name) return false;
     const char* t = e->tag_name;
     if (str_icmp_cstr(t, "input") == 0) {
-        const char* it = _input_type_lower(e);
+        const char* it = radiant_form_control_type(e);
         return strcmp(it, "image") != 0;
     }
     return str_icmp_cstr(t, "button") == 0 ||
@@ -10146,9 +9244,9 @@ static void dom_scroll_observed_position(DomElement* elem, float* x, float* y) {
         *y = elem->doc->pending_viewport_scroll_y;
         return;
     }
-    if (elem->scroller && elem->scroll()->pane) {
-        *x = elem->scroll()->pane->h_scroll_position;
-        *y = elem->scroll()->pane->v_scroll_position;
+    if (elem->scroller && dom_engine_scroll_property(elem)->pane) {
+        *x = dom_engine_scroll_property(elem)->pane->h_scroll_position;
+        *y = dom_engine_scroll_property(elem)->pane->v_scroll_position;
         return;
     }
     if (elem->has_pending_element_scroll_x()) *x = elem->pending_scroll_x();
@@ -10625,8 +9723,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
                 _js_current_ui_context->viewport_width))};
         }
         float bw = 0;
-        if (elem->bound && elem->boundary()->border) {
-            bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
+        if (elem->bound && dom_engine_boundary_property(elem)->border) {
+            bw = dom_engine_boundary_property(elem)->border->width.left + dom_engine_boundary_property(elem)->border->width.right;
         }
         float zoom = dom_engine_element_effective_zoom(elem);
         return (Item){.item = i2it((int64_t)llroundf(
@@ -10640,8 +9738,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
                 _js_current_ui_context->viewport_height))};
         }
         float bh = 0;
-        if (elem->bound && elem->boundary()->border) {
-            bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
+        if (elem->bound && dom_engine_boundary_property(elem)->border) {
+            bh = dom_engine_boundary_property(elem)->border->width.top + dom_engine_boundary_property(elem)->border->width.bottom;
         }
         float zoom = dom_engine_element_effective_zoom(elem);
         return (Item){.item = i2it((int64_t)llroundf(
@@ -10705,8 +9803,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             // synchronously observable through the document's scroll root.
             return (Item){.item = i2it((int64_t)elem->doc->pending_viewport_scroll_y)};
         }
-        if (elem->scroller && elem->scroll()->pane) {
-            return (Item){.item = i2it((int64_t)elem->scroll()->pane->v_scroll_position)};
+        if (elem->scroller && dom_engine_scroll_property(elem)->pane) {
+            return (Item){.item = i2it((int64_t)dom_engine_scroll_property(elem)->pane->v_scroll_position)};
         }
         if (elem->has_pending_element_scroll_y()) {
             return (Item){.item = i2it((int64_t)elem->pending_scroll_y())};
@@ -10717,8 +9815,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (dom_is_root_scroll_target(elem) && elem->doc) {
             return (Item){.item = i2it((int64_t)elem->doc->pending_viewport_scroll_x)};
         }
-        if (elem->scroller && elem->scroll()->pane) {
-            return (Item){.item = i2it((int64_t)elem->scroll()->pane->h_scroll_position)};
+        if (elem->scroller && dom_engine_scroll_property(elem)->pane) {
+            return (Item){.item = i2it((int64_t)dom_engine_scroll_property(elem)->pane->h_scroll_position)};
         }
         if (elem->has_pending_element_scroll_x()) {
             return (Item){.item = i2it((int64_t)elem->pending_scroll_x())};
@@ -10864,7 +9962,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = b2it(_get_checkedness(elem))};
     }
     if (prop_id == JS_DOM_PROP_INDETERMINATE &&
-        _is_tag(elem, "input") && strcmp(_input_type_lower(elem), "checkbox") == 0) {
+        _is_tag(elem, "input") && strcmp(radiant_form_control_type(elem), "checkbox") == 0) {
         return (Item){.item = b2it(dom_get_indeterminate(elem))};
     }
     if (prop_id == JS_DOM_PROP_DISABLED &&
@@ -10876,7 +9974,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
         RadiantInputValueKind kind = (RadiantInputValueKind)
-            dom_engine_input_value_kind(_input_type_lower(elem));
+            dom_engine_input_value_kind(radiant_form_control_type(elem));
         if (dom_input_kind_has_range(kind)) {
             const char* live = dom_engine_input_live_value(elem);
             return js_name_item(live ? live : "");
@@ -11567,8 +10665,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             if (next_y < 0.0f) next_y = 0.0f;
             DocState* state = elem->doc->state;
             if (state && dom_has_committed_geometry_snapshot(elem->doc) &&
-                elem->scroller && elem->scroll()->pane) {
-                ScrollPane* pane = elem->scroll()->pane;
+                elem->scroller && dom_engine_scroll_property(elem)->pane) {
+                ScrollPane* pane = dom_engine_scroll_property(elem)->pane;
                 // A committed CSSOM scroll write must use the same snap positions
                 // as wheel scrolling before its value becomes observable.
                 scroll_snap_adjust_position(lam::view_as_block(static_cast<View*>(elem)),
@@ -11610,7 +10708,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             !dom_has_committed_geometry_snapshot(elem->doc));
         bool vertical_rl_signed_scroll = !is_vertical && scroll_value < 0.0f &&
             dom_engine_element_has_vertical_rl_flow(elem);
-        const FlexProp* flex = elem->embedp()->flex;
+        // An absent embed property has no flex state in the native default.
+        const FlexProp* flex = elem->embed ? dom_engine_embed_property(elem)->flex : nullptr;
         CssEnum flex_direction = flex
             ? (CssEnum)flex->direction
             : dom_engine_element_specified_keyword(elem, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_ROW);
@@ -11618,26 +10717,26 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             flex_direction == CSS_VALUE_COLUMN_REVERSE;
         bool signed_scroll = vertical_rl_signed_scroll || column_reverse_signed_scroll;
         bool signed_range_unresolved = signed_scroll && elem->scroller &&
-            elem->scroll()->pane &&
-            (is_vertical ? elem->scroll()->pane->v_min_scroll >= 0.0f
-                         : elem->scroll()->pane->h_min_scroll >= 0.0f);
+            dom_engine_scroll_property(elem)->pane &&
+            (is_vertical ? dom_engine_scroll_property(elem)->pane->v_min_scroll >= 0.0f
+                         : dom_engine_scroll_property(elem)->pane->h_min_scroll >= 0.0f);
         // CSS Overflow permits negative offsets for vertical-rl and column-reverse
         // flex flows; preserve them while the pane still has its [0, 0]
         // provisional range so final layout can clamp against real overflow.
-        if ((!elem->scroller || !elem->scroll()->pane) && scroll_value < 0.0f &&
+        if ((!elem->scroller || !dom_engine_scroll_property(elem)->pane) && scroll_value < 0.0f &&
             !signed_scroll) {
             // Without a committed pane there is no writing-mode-specific
             // signed range to validate against, so pending element scroll
             // state must retain the ordinary non-negative origin.
             scroll_value = 0.0f;
         }
-        if (elem->scroller && elem->scroll()->pane && !layout_pending &&
+        if (elem->scroller && dom_engine_scroll_property(elem)->pane && !layout_pending &&
             !signed_range_unresolved) {
             float current_x = 0.0f;
             float current_y = 0.0f;
             DocState* state = elem->doc ? elem->doc->state : nullptr;
             scroll_state_get_position_for_view(state, static_cast<View*>(elem),
-                elem->scroll()->pane, &current_x, &current_y, NULL, NULL);
+                dom_engine_scroll_property(elem)->pane, &current_x, &current_y, NULL, NULL);
             float next_x = is_vertical ? current_x : scroll_value;
             float next_y = is_vertical ? scroll_value : current_y;
             if (dom_scroll_operation_override.active) {
@@ -11648,11 +10747,11 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 &next_x, &next_y);
             bool smooth = dom_scroll_should_animate(elem) &&
                 dom_engine_scroll_begin_smooth(state, static_cast<View*>(elem),
-                    elem->scroll()->pane, next_x, next_y);
+                    dom_engine_scroll_property(elem)->pane, next_x, next_y);
             if (!smooth) {
                 dom_engine_scroll_cancel_smooth(state, static_cast<View*>(elem));
                 scroll_state_set_position_for_view(state, static_cast<View*>(elem),
-                    elem->scroll()->pane, next_x, next_y, false);
+                    dom_engine_scroll_property(elem)->pane, next_x, next_y, false);
             }
             if (is_vertical) elem->set_has_pending_element_scroll_y(false);
             else elem->set_has_pending_element_scroll_x(false);
@@ -11667,7 +10766,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         if (dom_scroll_operation_override.active) {
             float pending_x = dom_scroll_operation_override.x;
             float pending_y = dom_scroll_operation_override.y;
-            if (!elem->scroller || !elem->scroll()->pane) {
+            if (!elem->scroller || !dom_engine_scroll_property(elem)->pane) {
                 // A combined call bypasses the scalar setter's provisional
                 // range check; apply it to both axes before retaining them.
                 if (pending_x < 0.0f &&
@@ -11900,7 +10999,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
     if (prop_id == JS_DOM_PROP_INDETERMINATE &&
-        _is_tag(elem, "input") && strcmp(_input_type_lower(elem), "checkbox") == 0) {
+        _is_tag(elem, "input") && strcmp(radiant_form_control_type(elem), "checkbox") == 0) {
         dom_set_indeterminate(elem, js_is_truthy(value));
         return value;
     }
@@ -12000,7 +11099,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
         const char* s = dom_to_attr_cstr(value);
         RadiantInputValueKind kind = (RadiantInputValueKind)
-            dom_engine_input_value_kind(_input_type_lower(elem));
+            dom_engine_input_value_kind(radiant_form_control_type(elem));
         if (dom_input_kind_has_range(kind)) {
             // Numeric/date IDL values are live state; the content attribute is
             // only the default and must not replace it on each assignment.
@@ -12619,1017 +11718,13 @@ extern "C" Item dom_matrix_constructor(Item init) {
     return dom_svg_make_matrix_with_interface(matrix, "DOMMatrix");
 }
 
-typedef struct JsDomSvgBounds {
-    float left;
-    float top;
-    float right;
-    float bottom;
-    bool valid;
-} JsDomSvgBounds;
-
-static void dom_svg_bounds_include_point(JsDomSvgBounds* bounds, float x, float y) {
-    if (!bounds) return;
-    if (!bounds->valid) {
-        bounds->left = bounds->right = x;
-        bounds->top = bounds->bottom = y;
-        bounds->valid = true;
-        return;
-    }
-    bounds->left = LMB_MIN(bounds->left, x);
-    bounds->top = LMB_MIN(bounds->top, y);
-    bounds->right = LMB_MAX(bounds->right, x);
-    bounds->bottom = LMB_MAX(bounds->bottom, y);
-}
-
-static void dom_svg_bounds_include_rect(JsDomSvgBounds* bounds, float x, float y,
-                                            float width, float height) {
-    if (!bounds) return;
-    dom_svg_bounds_include_point(bounds, x, y);
-    dom_svg_bounds_include_point(bounds, x + width, y + height);
-}
-
-static void dom_svg_bounds_include_bounds(JsDomSvgBounds* bounds,
-                                              const JsDomSvgBounds* child) {
-    if (!bounds || !child || !child->valid) return;
-    dom_svg_bounds_include_point(bounds, child->left, child->top);
-    dom_svg_bounds_include_point(bounds, child->right, child->bottom);
-}
-
-static void dom_svg_bounds_apply_transform(JsDomSvgBounds* bounds,
-                                               const RdtMatrix* transform) {
-    if (!bounds || !bounds->valid || !transform) return;
-    float left = 0.0f;
-    float top = 0.0f;
-    float right = 0.0f;
-    float bottom = 0.0f;
-    rdt_matrix_transform_rect_bounds(transform, bounds->left, bounds->top,
-                                     bounds->right, bounds->bottom,
-                                     &left, &top, &right, &bottom);
-    bounds->left = left;
-    bounds->top = top;
-    bounds->right = right;
-    bounds->bottom = bottom;
-}
-
-static void dom_svg_apply_css_viewport_size(DomElement* elem, float* width, float* height) {
-    if (elem->parent && elem->parent->is_element() && dom_element_is_svg(elem->parent->as_element())) return;
-    // SVG descendants have no CSS box; the outer viewport uses committed layout.
-    LayoutContentBox content = layout_content_box((ViewBlock*)elem);
-    if (content.width > 0.0f) *width = content.width;
-    if (content.height > 0.0f) *height = content.height;
-}
-
-// the synchronous SVG hit walk borrows a linked stack of instance style scopes.
-static thread_local const SvgDomStyleScope* g_dom_svg_style_scope = nullptr;
-
-// a hit walk reads fixed geometry; sibling glyphs must not rebuild their shared
-// ancestors' font contexts and transforms. The scope expires before event handlers run.
-struct DomSvgHitGeometry {
-    DomElement* element;
-    SvgLengthContext lengths;
-    RdtMatrix local;
-    RdtMatrix screen;
-    RdtMatrix viewport;
-    bool has_lengths, has_local, has_screen, has_viewport;
-};
-using DomSvgHitGeometryMap = TypedHashMap<DomSvgHitGeometry,
-    HashMapPointerMemberKeyOps<DomSvgHitGeometry, &DomSvgHitGeometry::element>>;
-
-struct DomSvgHitGeometryScope;
-static thread_local DomSvgHitGeometryScope* g_dom_svg_hit_geometry = nullptr;
-struct DomSvgHitGeometryScope {
-    DomDocument* document;
-    HashMap* entries;
-    DomSvgHitGeometryScope* previous;
-    bool owner;
-
-    explicit DomSvgHitGeometryScope(DomElement* element) :
-        document(element ? element->doc : nullptr), entries(nullptr),
-        previous(g_dom_svg_hit_geometry), owner(document && (!previous || previous->document != document)) {
-        if (owner) {
-            entries = DomSvgHitGeometryMap::create(64);
-            g_dom_svg_hit_geometry = this;
-        }
-    }
-    ~DomSvgHitGeometryScope() {
-        if (owner) {
-            g_dom_svg_hit_geometry = previous;
-            DomSvgHitGeometryMap::destroy(entries);
-        }
-    }
-};
-
-static DomSvgHitGeometry* dom_svg_hit_geometry(DomElement* element, bool create = false) {
-    auto* scope = g_dom_svg_hit_geometry;
-    // a use instance supplies a different font/viewport ancestry for the same source.
-    if (!element || !scope || !scope->entries || scope->document != element->doc ||
-        g_dom_svg_style_scope || dom_engine_svg_animation_is_sampling(element->doc)) return nullptr;
-    DomSvgHitGeometry key = {}; key.element = element;
-    DomSvgHitGeometry* entry = DomSvgHitGeometryMap::get(scope->entries, key);
-    if (!entry && create) {
-        DomSvgHitGeometryMap::set(scope->entries, key);
-        entry = DomSvgHitGeometryMap::get(scope->entries, key);
-    }
-    return entry;
-}
-
-SvgLengthContext dom_svg_length_context(DomElement* elem) {
-    SvgLengthContext lengths = {0.0f, 0.0f, 16.0f, 8.0f};
-    if (!elem) return lengths;
-    DomSvgHitGeometry* cached = dom_svg_hit_geometry(elem);
-    if (cached && cached->has_lengths) return cached->lengths;
-    DomElement* chain[64];
-    int count = 0;
-    for (DomNode* node = elem; node && count < 64; node = dom_engine_svg_style_parent(node, g_dom_svg_style_scope)) {
-        if (node->is_element()) chain[count++] = node->as_element();
-    }
-    UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
-    FontContext* fonts = ui ? ui->font_ctx : nullptr;
-    char family[256] = "Arial";
-    FontStyleDesc font = {}; font.family = family; font.size_px = 16.0f; font.weight = FONT_WEIGHT_NORMAL;
-    bool in_svg = false;
-    for (int index = count - 1; index >= 0; index--) {
-        DomElement* current = chain[index];
-        bool svg = dom_svg_tag_is(current, "svg");
-        if (svg) in_svg = true;
-        char buffer[64];
-        if (in_svg) {
-            const char* size = dom_engine_svg_property(current, "font-size", false,
-                buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
-            if (size) lengths.font_size = svg_font_size_value(size, lengths.font_size, svg_font_x_height(fonts, &font));
-            font.size_px = lengths.font_size;
-        } else if (current->font && current->font->font_size > 0.0f) {
-            lengths.font_size = current->font->font_size;
-            font = font_style_desc_from_prop(current->font);
-            str_copy(family, sizeof(family), font.family ? font.family : "Arial", strlen(font.family ? font.family : "Arial")); font.family = family;
-        }
-        if (in_svg) {
-            char own_family[256];
-            const char* value = dom_engine_svg_property(current, "font-family", false, own_family, sizeof(own_family), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
-            if (value) str_copy(family, sizeof(family), value, strlen(value));
-            value = dom_engine_svg_property(current, "font-weight", false, buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
-            if (value) font.weight = (FontWeight)svg_font_weight_value(value, font.weight);
-            value = dom_engine_svg_property(current, "font-style", false, buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
-            if (value) font.slant = strcmp(value, "italic") == 0 ? FONT_SLANT_ITALIC
-                : strcmp(value, "oblique") == 0 ? FONT_SLANT_OBLIQUE : FONT_SLANT_NORMAL;
-        }
-        const SvgDomStyleScope* viewport_scope = g_dom_svg_style_scope;
-        while (viewport_scope && viewport_scope->root != current) viewport_scope = viewport_scope->previous;
-        if (viewport_scope && viewport_scope->has_viewport) {
-            lengths.viewport_width = viewport_scope->viewport_width;
-            lengths.viewport_height = viewport_scope->viewport_height;
-            continue;
-        }
-        if (!svg || current == elem) continue;
-        const char* viewbox = dom_engine_svg_animation_attribute(current, "viewBox");
-        if (!viewbox) viewbox = dom_engine_svg_animation_attribute(current, "viewbox");
-        SvgViewBox box = svg_parse_viewbox(viewbox);
-        if (box.has_viewbox && box.width > 0.0f && box.height > 0.0f) {
-            lengths.viewport_width = box.width; lengths.viewport_height = box.height;
-        } else {
-            float width = svg_resolve_length(dom_engine_svg_animation_attribute(current, "width"), &lengths, SVG_LENGTH_X,
-                current->width > 0.0f ? current->width : lengths.viewport_width);
-            float height = svg_resolve_length(dom_engine_svg_animation_attribute(current, "height"), &lengths, SVG_LENGTH_Y,
-                current->height > 0.0f ? current->height : lengths.viewport_height);
-            dom_svg_apply_css_viewport_size(current, &width, &height);
-            lengths.viewport_width = width; lengths.viewport_height = height;
-        }
-    }
-    lengths.x_height = svg_font_x_height(fonts, &font);
-    cached = dom_svg_hit_geometry(elem, true);
-    if (cached) { cached->lengths = lengths; cached->has_lengths = true; }
-    return lengths;
-}
-
-SvgLengthAxis dom_svg_length_axis(const char* name) {
-    if (strcmp(name, "x") == 0 || strcmp(name, "x1") == 0 || strcmp(name, "x2") == 0 ||
-        strcmp(name, "cx") == 0 || strcmp(name, "width") == 0 || strcmp(name, "rx") == 0) return SVG_LENGTH_X;
-    if (strcmp(name, "y") == 0 || strcmp(name, "y1") == 0 || strcmp(name, "y2") == 0 ||
-        strcmp(name, "cy") == 0 || strcmp(name, "height") == 0 || strcmp(name, "ry") == 0) return SVG_LENGTH_Y;
-    return SVG_LENGTH_DIAGONAL;
-}
-
-static float dom_svg_attribute_number(DomElement* elem, const char* name, float fallback) {
-    if (!elem || !name) return fallback;
-    SvgLengthContext lengths = dom_svg_length_context(elem);
-    return svg_resolve_length(dom_engine_svg_animation_attribute(elem, name), &lengths, dom_svg_length_axis(name), fallback);
-}
-
-extern "C" bool dom_svg_foreign_object_rectangle(void* element, float* x, float* y, float* width, float* height) {
-    DomElement* elem = (DomElement*)element;
-    if (!elem || !x || !y || !width || !height) return false;
-    SvgLengthContext lengths = dom_svg_length_context(elem);
-    static const char* const names[] = {"x", "y", "width", "height"};
-    float* values[] = {x, y, width, height};
-    Element* backing = dom_element_to_element(elem);
-    for (unsigned index = 0; index < 4; index++) {
-        char buffer[256] = {}; bool from_css = false;
-        const char* value = dom_engine_svg_property(elem, names[index], false,
-            buffer, sizeof(buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
-        double number = 0.0;
-        Item attribute = backing ? Item{.item = backing->get_attr(names[index]).item} : ItemNull;
-        *values[index] = !from_css && !dom_engine_svg_animation_value(elem, names[index], false) && item_try_to_double(attribute, &number) ? (float)number :
-            svg_resolve_length(value, &lengths, index % 2 ? SVG_LENGTH_Y : SVG_LENGTH_X, 0.0f);
-        if (!isfinite(*values[index])) return false;
-    }
-    return *width >= 0.0f && *height >= 0.0f;
-}
-
-extern "C" bool dom_svg_foreign_object_clips(void* element) {
-    DomElement* elem = (DomElement*)element; if (!elem) return true;
-    char buffer[64] = {}; bool from_css = false;
-    const char* overflow = dom_engine_svg_property(elem, "overflow", false,
-        buffer, sizeof(buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
-    // SVG's UA overflow:hidden applies unless the author supplies an overflow value.
-    return (!from_css && !elem->has_attribute("overflow")) || !overflow || str_icmp_cstr(overflow, "visible") != 0;
-}
-
-static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
-    RdtMatrix transform = rdt_matrix_identity();
-    if (!elem) return transform;
-    DomSvgHitGeometry* cached = dom_svg_hit_geometry(elem);
-    if (cached && cached->has_local) return cached->local;
-    char value_buffer[512];
-    bool from_css = false;
-    const char* value = dom_engine_svg_property(elem, "transform", false,
-        value_buffer, sizeof(value_buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
-    const char* names[] = {"translate", "rotate", "scale"};
-    char individual_buffers[3][256];
-    const char* individual[3] = {};
-    bool has_individual = false;
-    for (unsigned index = 0; index < 3; index++) {
-        individual[index] = dom_engine_svg_property(elem, names[index], false,
-            individual_buffers[index], sizeof(individual_buffers[index]), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
-        has_individual |= individual[index] && strcmp(individual[index], "none");
-    }
-    bool nested_viewport = dom_svg_tag_is(elem, "svg") &&
-        elem->parent && elem->parent->is_element() && dom_element_is_svg(elem->parent->as_element());
-    // individual transforms also depend on the SVG reference box when the list is absent.
-    if ((!value || strcmp(value, "none") == 0) && !has_individual && !nested_viewport) return transform;
-    SvgLengthContext lengths = dom_svg_length_context(elem);
-    Bound box = {0.0f, 0.0f, lengths.viewport_width, lengths.viewport_height};
-    for (DomNode* node = dom_engine_svg_style_parent(elem, g_dom_svg_style_scope); node && node->is_element(); node = dom_engine_svg_style_parent(node, g_dom_svg_style_scope)) {
-        DomElement* parent = node->as_element();
-        if (!dom_svg_tag_is(parent, "svg")) continue;
-        const char* viewbox = dom_engine_svg_animation_attribute(parent, "viewBox");
-        if (!viewbox) viewbox = dom_engine_svg_animation_attribute(parent, "viewbox");
-        SvgViewBox parent_box = svg_parse_viewbox(viewbox);
-        if (parent_box.has_viewbox) {
-            box = {parent_box.min_x, parent_box.min_y, parent_box.min_x + parent_box.width,
-                parent_box.min_y + parent_box.height};
-        }
-        break;
-    }
-    char box_buffer[64];
-    const char* reference = dom_engine_svg_property(elem, "transform-box", false,
-        box_buffer, sizeof(box_buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
-    if (reference && (strcmp(reference, "fill-box") == 0 || strcmp(reference, "stroke-box") == 0)) {
-        dom_svg_element_geometry_bounds(elem, &box.left, &box.top, &box.right, &box.bottom);
-    }
-    char origin_buffer[128];
-    const char* origin = dom_engine_svg_property(elem, "transform-origin", false,
-        origin_buffer, sizeof(origin_buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
-    transform = svg_resolve_local_transform(value, from_css, origin, &box, &lengths,
-        has_individual ? individual : nullptr);
-    if (nested_viewport) {
-        RdtMatrix viewport_offset = rdt_matrix_translate(
-            dom_svg_attribute_number(elem, "x", 0.0f), dom_svg_attribute_number(elem, "y", 0.0f));
-        transform = rdt_matrix_multiply(&transform, &viewport_offset);
-    }
-    cached = dom_svg_hit_geometry(elem, true);
-    if (cached) { cached->local = transform; cached->has_local = true; }
-    return transform;
-}
-
-
-extern "C" bool dom_svg_is_text(void* element) {
-    DomElement* elem = (DomElement*)element;
-    return dom_svg_tag_is(elem, "text") || dom_svg_tag_is(elem, "tspan") || dom_svg_tag_is(elem, "textPath");
-}
-
-static RdtPath* dom_svg_text_geometry_path(DomElement* elem) {
-    SvgLengthContext lengths = dom_svg_length_context(elem);
-    UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
-    return dom_engine_svg_text_path(elem, &lengths, ui ? ui->font_ctx : nullptr);
-}
-
-static RdtPath* dom_svg_basic_shape_path(DomElement* elem);
-static bool dom_svg_is_basic_shape(DomElement* elem);
-
-static DomElement* dom_svg_use_reference(DomElement* elem);
-
-static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem, int depth = 0) {
-    DomSvgSourceScope animation_sources(elem ? elem->doc : nullptr);
-    JsDomSvgBounds bounds = {};
-    if (!dom_element_is_svg(elem) || depth >= SVG_USE_DEPTH_MAX) return bounds;
-    const char* tag = elem->local_name();
-    if (dom_svg_is_basic_shape(elem)) {
-        RdtPath* path = dom_svg_basic_shape_path(elem);
-        if (path) {
-            bounds.valid = rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
-            rdt_path_free(path);
-        }
-    } else if (str_icmp_cstr(tag, "foreignObject") == 0) {
-        float x, y, width, height;
-        if (dom_svg_foreign_object_rectangle(elem, &x, &y, &width, &height))
-            dom_svg_bounds_include_rect(&bounds, x, y, width, height);
-    } else if (str_icmp_cstr(tag, "image") == 0) {
-        dom_svg_bounds_include_rect(&bounds, dom_svg_attribute_number(elem, "x", 0.0f),
-            dom_svg_attribute_number(elem, "y", 0.0f), dom_svg_attribute_number(elem, "width", 0.0f),
-            dom_svg_attribute_number(elem, "height", 0.0f));
-    } else if (dom_svg_is_text(elem)) {
-        RdtPath* path = dom_svg_text_geometry_path(elem);
-        if (path) {
-            bounds.valid = rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
-            rdt_path_free(path);
-        }
-    } else if (str_icmp_cstr(tag, "use") == 0) {
-        DomElement* reference = dom_svg_use_reference(elem);
-        DomSvgSourceScope animation_scope(elem->doc, reference, elem);
-        bounds = dom_svg_bounds_for_element(reference, depth + 1);
-        RdtMatrix reference_transform = reference ? dom_svg_transform_from_element(reference) : rdt_matrix_identity();
-        dom_svg_bounds_apply_transform(&bounds, &reference_transform);
-        RdtMatrix offset = rdt_matrix_translate(dom_svg_attribute_number(elem, "x", 0.0f),
-            dom_svg_attribute_number(elem, "y", 0.0f));
-        dom_svg_bounds_apply_transform(&bounds, &offset);
-    } else if (str_icmp_cstr(tag, "g") == 0 || str_icmp_cstr(tag, "svg") == 0 ||
-               str_icmp_cstr(tag, "a") == 0 || str_icmp_cstr(tag, "switch") == 0 ||
-               str_icmp_cstr(tag, "symbol") == 0 || str_icmp_cstr(tag, "clipPath") == 0) {
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            if (!child->is_element()) continue;
-            if (str_icmp_cstr(tag, "switch") == 0 && child != dom_svg_switch_selected_child(elem)) continue;
-            DomElement* child_elem = child->as_element();
-            JsDomSvgBounds child_bounds = dom_svg_bounds_for_element(child_elem, depth + 1);
-            RdtMatrix child_transform = dom_svg_transform_from_element(child_elem);
-            dom_svg_bounds_apply_transform(&child_bounds, &child_transform);
-            dom_svg_bounds_include_bounds(&bounds, &child_bounds);
-        }
-    }
-    return bounds;
-}
-
-bool dom_svg_element_geometry_bounds(void* element, float* left, float* top, float* right, float* bottom) {
-    if (!element || !left || !top || !right || !bottom) return false;
-    DomSvgSourceScope animation_sources(((DomElement*)element)->doc);
-    JsDomSvgBounds bounds = dom_svg_bounds_for_element((DomElement*)element);
-    if (!bounds.valid) return false;
-    *left = bounds.left; *top = bounds.top; *right = bounds.right; *bottom = bounds.bottom;
-    return true;
-}
-
 static Item dom_svg_get_bbox_for_element(DomElement* elem) {
     DomSvgSourceScope animation_sources(elem ? elem->doc : nullptr);
-    JsDomSvgBounds bounds = dom_svg_bounds_for_element(elem);
+    SvgGeometryBounds bounds = dom_svg_bounds_for_element(elem);
     if (!bounds.valid) return dom_make_rect_object(0.0f, 0.0f, 0.0f, 0.0f);
     return dom_make_rect_object(bounds.left, bounds.top,
                                    bounds.right - bounds.left,
                                    bounds.bottom - bounds.top);
-}
-
-static bool dom_svg_parse_viewbox(const char* value, float* min_x, float* min_y,
-    float* width, float* height) {
-    if (!value || !min_x || !min_y || !width || !height) return false;
-    SvgViewBox box = svg_parse_viewbox(value);
-    if (!box.has_viewbox || box.width <= 0.0f || box.height <= 0.0f) return false;
-    *min_x = box.min_x; *min_y = box.min_y; *width = box.width; *height = box.height;
-    return true;
-}
-
-static RdtMatrix dom_svg_viewbox_transform(DomElement* elem) {
-    RdtMatrix transform = rdt_matrix_identity();
-    if (!elem) return transform;
-    float min_x = 0.0f;
-    float min_y = 0.0f;
-    float viewbox_width = 0.0f;
-    float viewbox_height = 0.0f;
-    const char* viewbox = dom_engine_svg_animation_attribute(elem, "viewBox");
-    if (!viewbox) viewbox = dom_engine_svg_animation_attribute(elem, "viewbox");
-    if (!dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &viewbox_width, &viewbox_height)) {
-        return transform;
-    }
-    float viewport_width = dom_svg_attribute_number(elem, "width", 0.0f);
-    float viewport_height = dom_svg_attribute_number(elem, "height", 0.0f);
-    dom_svg_apply_css_viewport_size(elem, &viewport_width, &viewport_height);
-    if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
-        // hit-testing already has committed CSS geometry; flushing through the
-        // generic DOM path can rebuild this element before the second axis.
-        if (viewport_width <= 0.0f) viewport_width = elem->width;
-        if (viewport_height <= 0.0f) viewport_height = elem->height;
-    }
-    if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
-        if (viewport_width <= 0.0f) {
-            viewport_width = (float)dom_geometry_dimension(elem, true);
-        }
-        if (viewport_height <= 0.0f) {
-            viewport_height = (float)dom_geometry_dimension(elem, false);
-        }
-    }
-    if (viewport_width <= 0.0f || viewport_height <= 0.0f) return transform;
-    SvgViewBox box = {min_x, min_y, viewbox_width, viewbox_height, true};
-    return svg_viewbox_transform(&box, viewport_width, viewport_height,
-        dom_engine_svg_animation_attribute(elem, "preserveAspectRatio"));
-}
-
-static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
-    RdtMatrix matrix = rdt_matrix_identity();
-    if (!elem) return matrix;
-    DomSvgHitGeometry* cached = dom_svg_hit_geometry(elem);
-    if (cached && (screen_space ? cached->has_screen : cached->has_viewport))
-        return screen_space ? cached->screen : cached->viewport;
-    DomElement* chain[64];
-    int count = 0;
-    DomElement* outermost_svg = nullptr;
-    for (DomNode* current = (DomNode*)elem; current && count < 64;
-         current = current->parent) {
-        if (!current->is_element()) continue;
-        DomElement* candidate = current->as_element();
-        // an HTML integration point starts a new CSS-positioned SVG viewport.
-        if (!dom_element_is_svg(candidate)) break;
-        chain[count++] = candidate;
-        if (candidate && dom_svg_tag_is(candidate, "svg")) {
-            outermost_svg = candidate;
-        }
-    }
-    bool in_svg = false;
-    for (int i = count - 1; i >= 0; i--) {
-        DomElement* current = chain[i];
-        if (!current || !current->tag_name) continue;
-        bool svg = dom_svg_tag_is(current, "svg");
-        if (svg) in_svg = true;
-        if (in_svg) {
-            RdtMatrix local = dom_svg_transform_from_element(current);
-            matrix = rdt_matrix_multiply(&matrix, &local);
-        }
-        if (svg) {
-            RdtMatrix viewbox = dom_svg_viewbox_transform(current);
-            matrix = rdt_matrix_multiply(&matrix, &viewbox);
-        }
-    }
-    if (screen_space && outermost_svg) {
-        RdtMatrix layout_transform;
-        if (!dom_engine_foreign_object_matrix(static_cast<View*>(outermost_svg), &layout_transform, false)) {
-            RdtLogicalPoint origin = {};
-            dom_engine_element_viewport_origin(outermost_svg, &origin.x, &origin.y);
-            layout_transform = rdt_matrix_translate(origin.x, origin.y);
-        }
-        matrix = rdt_matrix_multiply(&layout_transform, &matrix);
-    }
-    cached = dom_svg_hit_geometry(elem, true);
-    if (cached) {
-        if (screen_space) { cached->screen = matrix; cached->has_screen = true; }
-        else { cached->viewport = matrix; cached->has_viewport = true; }
-    }
-    return matrix;
-}
-
-extern "C" bool dom_svg_foreign_object_client_transform(void* element, float matrix[6]) {
-    DomElement* elem = (DomElement*)element;
-    float x, y, width, height;
-    if (!elem || !matrix || !dom_svg_foreign_object_rectangle(elem, &x, &y, &width, &height)) return false;
-    RdtMatrix ctm = dom_svg_ctm(elem, true), offset = rdt_matrix_translate(x, y);
-    ctm = rdt_matrix_multiply(&ctm, &offset);
-    matrix[0] = ctm.e11; matrix[1] = ctm.e12; matrix[2] = ctm.e13;
-    matrix[3] = ctm.e21; matrix[4] = ctm.e22; matrix[5] = ctm.e23;
-    return true;
-}
-
-extern "C" bool dom_svg_foreign_object_local_point(void* element, float x, float y,
-                                                   float* local_x, float* local_y) {
-    float values[6];
-    if (!local_x || !local_y || !dom_svg_foreign_object_client_transform(element, values)) return false;
-    RdtMatrix frame = {values[0], values[1], values[2], values[3], values[4], values[5], 0, 0, 1}, inverse;
-    if (!rdt_matrix_invert_affine(&frame, &inverse)) return false;
-    rdt_matrix_transform_point(&inverse, x, y, local_x, local_y);
-    float rx, ry, width, height;
-    return dom_svg_foreign_object_rectangle(element, &rx, &ry, &width, &height) && width > 0 && height > 0 &&
-        (!dom_svg_foreign_object_clips(element) || (*local_x >= 0 && *local_y >= 0 && *local_x < width && *local_y < height));
-}
-
-extern "C" bool dom_svg_element_client_bounds(void* dom_elem, float* x, float* y,
-                                              float* width, float* height) {
-    DomElement* elem = (DomElement*)dom_elem;
-    if (!elem || !elem->tag_name || !dom_element_is_svg(elem)) return false;
-    // The outer <svg> is a CSS box, and so is HTML inside <foreignObject>
-    // (reached before any <svg> on the way up); only SVG content below an
-    // <svg> lacks one.
-    bool inside_svg = false;
-    for (DomNode* up = elem->parent; up; up = up->parent) {
-        if (!up->is_element()) continue;
-        DomElement* ancestor = up->as_element();
-        if (!ancestor || !ancestor->tag_name) continue;
-        if (dom_svg_tag_is(ancestor, "foreignObject")) return false;
-        if (dom_svg_tag_is(ancestor, "svg")) { inside_svg = true; break; }
-    }
-    if (!inside_svg) return false;
-    JsDomSvgBounds bounds = dom_svg_bounds_for_element(elem);
-    if (!bounds.valid) return false;
-    RdtMatrix screen = dom_svg_ctm(elem, true);
-    dom_svg_bounds_apply_transform(&bounds, &screen);
-    if (x) *x = bounds.left;
-    if (y) *y = bounds.top;
-    if (width) *width = bounds.right - bounds.left;
-    if (height) *height = bounds.bottom - bounds.top;
-    return true;
-}
-
-static const int JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH = 10;
-
-typedef struct JsDomSvgPathHitContext {
-    float point_x;
-    float point_y;
-    float curve_flatness;
-    bool rectangle_query, rectangle_fill_hit, subpath_rectangle_fill_hit;
-    float query_left, query_top, query_right, query_bottom;
-    float stroke_radius;
-    float* stroke_dash;          // query-owned computed lengths; released after contour inspection
-    float stroke_dash_total;
-    float stroke_dash_offset;
-    float subpath_stroke_length;
-    float first_stroke_start_x;
-    float first_stroke_start_y;
-    float first_stroke_end_x;
-    float first_stroke_end_y;
-    float last_stroke_start_x;
-    float last_stroke_start_y;
-    float last_stroke_end_x;
-    float last_stroke_end_y;
-    int stroke_dash_count;
-    RdtStrokeCap stroke_cap;
-    RdtStrokeJoin stroke_join;
-    float stroke_miter_limit;
-    int fill_winding;
-    int fill_crossings;
-    bool fill_on_edge;
-    bool subpath_fill_on_edge;
-    bool has_current;
-    bool subpath_has_draw;
-    bool subpath_closed;
-    bool has_first_stroke_segment;
-    bool has_last_stroke_segment;
-    bool stroke_enabled;
-    bool stroke_hit;
-    bool subpath_has_fill_area;
-    float current_x;
-    float current_y;
-    float subpath_start_x;
-    float subpath_start_y;
-} JsDomSvgPathHitContext;
-
-
-
-// separating axes cover both a point and an axis-aligned rectangle query.
-static bool dom_svg_query_polygon(const JsDomSvgPathHitContext* query, const float* xy, unsigned count) {
-    float left=query->rectangle_query?query->query_left:query->point_x;
-    float top=query->rectangle_query?query->query_top:query->point_y;
-    float right=query->rectangle_query?query->query_right:left;
-    float bottom=query->rectangle_query?query->query_bottom:top;
-    for (unsigned axis=0;axis<count+2;axis++) {
-        unsigned next=(axis+1)%count;
-        float nx=axis==count?1:axis==count+1?0:xy[next*2+1]-xy[axis*2+1];
-        float ny=axis==count?0:axis==count+1?1:xy[axis*2]-xy[next*2];
-        float low=INFINITY,high=-INFINITY;
-        for (unsigned i=0;i<count;i++) { float value=nx*xy[i*2]+ny*xy[i*2+1]; low=fminf(low,value);high=fmaxf(high,value); }
-        float qlow=fminf(nx*left,nx*right)+fminf(ny*top,ny*bottom);
-        float qhigh=fmaxf(nx*left,nx*right)+fmaxf(ny*top,ny*bottom);
-        if (high<qlow || low>qhigh) return false;
-    }
-    return true;
-}
-static bool dom_svg_query_triangle(const JsDomSvgPathHitContext* query,
-    float ax,float ay,float bx,float by,float cx,float cy) {
-    float xy[]={ax,ay,bx,by,cx,cy}; return dom_svg_query_polygon(query,xy,3);
-}
-static bool dom_svg_query_circle(const JsDomSvgPathHitContext* query,float x,float y,float radius) {
-    float px=query->rectangle_query?fmaxf(query->query_left,fminf(query->query_right,x)):query->point_x;
-    float py=query->rectangle_query?fmaxf(query->query_top,fminf(query->query_bottom,y)):query->point_y;
-    return (px-x)*(px-x)+(py-y)*(py-y)<=radius*radius;
-}
-
-static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* context,
-                                                float start_x, float start_y,
-                                                float end_x, float end_y,
-                                                bool start_cap, bool end_cap) {
-    if (!context) return false;
-    float dx = end_x - start_x;
-    float dy = end_y - start_y;
-    float length = hypotf(dx, dy);
-    if (length <= 0.000001f) {
-        if (context->stroke_cap == RDT_CAP_BUTT || (!start_cap && !end_cap)) return false;
-        if (context->rectangle_query) {
-            if (context->stroke_cap==RDT_CAP_ROUND) return dom_svg_query_circle(context,start_x,start_y,context->stroke_radius);
-            float r=context->stroke_radius,quad[]={start_x-r,start_y-r,start_x+r,start_y-r,start_x+r,start_y+r,start_x-r,start_y+r};
-            return dom_svg_query_polygon(context,quad,4);
-        }
-        float px = context->point_x - start_x;
-        float py = context->point_y - start_y;
-        if (context->stroke_cap == RDT_CAP_SQUARE)
-            return fabsf(px) <= context->stroke_radius && fabsf(py) <= context->stroke_radius;
-        return px * px + py * py <= context->stroke_radius * context->stroke_radius;
-    }
-    float ux = dx / length;
-    float uy = dy / length;
-    if (context->rectangle_query) {
-        float before=context->stroke_cap==RDT_CAP_SQUARE && start_cap?context->stroke_radius:0;
-        float after=context->stroke_cap==RDT_CAP_SQUARE && end_cap?context->stroke_radius:0;
-        float sx=start_x-ux*before,sy=start_y-uy*before,ex=end_x+ux*after,ey=end_y+uy*after;
-        float nx=-uy*context->stroke_radius,ny=ux*context->stroke_radius;
-        float quad[]={sx+nx,sy+ny,ex+nx,ey+ny,ex-nx,ey-ny,sx-nx,sy-ny};
-        if (dom_svg_query_polygon(context,quad,4)) return true;
-        return context->stroke_cap==RDT_CAP_ROUND &&
-            ((start_cap && dom_svg_query_circle(context,start_x,start_y,context->stroke_radius)) ||
-             (end_cap && dom_svg_query_circle(context,end_x,end_y,context->stroke_radius)));
-    }
-    float point_dx = context->point_x - start_x;
-    float point_dy = context->point_y - start_y;
-    float along = point_dx * ux + point_dy * uy;
-    float across = point_dx * -uy + point_dy * ux;
-    if (fabsf(across) > context->stroke_radius) return false;
-    float min_along = 0.0f;
-    float max_along = length;
-    if (context->stroke_cap == RDT_CAP_SQUARE) {
-        if (start_cap) min_along -= context->stroke_radius;
-        if (end_cap) max_along += context->stroke_radius;
-    }
-    if (along >= min_along && along <= max_along) return true;
-    if (context->stroke_cap != RDT_CAP_ROUND) return false;
-    if (start_cap && along < 0.0f) {
-        return point_dx * point_dx + point_dy * point_dy <=
-            context->stroke_radius * context->stroke_radius;
-    }
-    if (end_cap && along > length) {
-        float end_dx = context->point_x - end_x;
-        float end_dy = context->point_y - end_y;
-        return end_dx * end_dx + end_dy * end_dy <=
-            context->stroke_radius * context->stroke_radius;
-    }
-    return false;
-}
-
-static bool dom_svg_dash_is_on_at(const JsDomSvgPathHitContext* context,
-                                     float distance, float* out_remaining) {
-    if (!context || context->stroke_dash_count <= 0 || context->stroke_dash_total <= 0.0f) {
-        if (out_remaining) *out_remaining = 1.0e30f;
-        return true;
-    }
-    float position = math_wrap_positive_f(distance + context->stroke_dash_offset,
-        context->stroke_dash_total);
-    for (int index = 0; index < context->stroke_dash_count; index++) {
-        float length = context->stroke_dash[index];
-        if (position < length || index == context->stroke_dash_count - 1) {
-            if (out_remaining) *out_remaining = LMB_MAX(length - position, 0.0f);
-            return (index & 1) == 0;
-        }
-        position -= length;
-    }
-    if (out_remaining) *out_remaining = 0.0f;
-    return false;
-}
-
-static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
-                                         float prev_start_x, float prev_start_y,
-                                         float vertex_x, float vertex_y,
-                                         float next_end_x, float next_end_y) {
-    if (!context || context->stroke_hit) return;
-    float prev_dx = vertex_x - prev_start_x;
-    float prev_dy = vertex_y - prev_start_y;
-    float next_dx = next_end_x - vertex_x;
-    float next_dy = next_end_y - vertex_y;
-    float prev_length = hypotf(prev_dx, prev_dy);
-    float next_length = hypotf(next_dx, next_dy);
-    if (prev_length <= 0.000001f || next_length <= 0.000001f) return;
-    if (context->stroke_join == RDT_JOIN_ROUND &&
-        dom_svg_query_circle(context,vertex_x,vertex_y,context->stroke_radius)) {
-        context->stroke_hit = true;
-        return;
-    }
-    float prev_x = prev_dx / prev_length;
-    float prev_y = prev_dy / prev_length;
-    float next_x = next_dx / next_length;
-    float next_y = next_dy / next_length;
-    float cross = prev_x * next_y - prev_y * next_x;
-    if (fabsf(cross) <= 0.000001f) return;
-    float outward_sign = cross > 0.0f ? -1.0f : 1.0f;
-    float prev_normal_x = -prev_y * outward_sign;
-    float prev_normal_y = prev_x * outward_sign;
-    float next_normal_x = -next_y * outward_sign;
-    float next_normal_y = next_x * outward_sign;
-    float outer_prev_x = vertex_x + prev_normal_x * context->stroke_radius;
-    float outer_prev_y = vertex_y + prev_normal_y * context->stroke_radius;
-    float outer_next_x = vertex_x + next_normal_x * context->stroke_radius;
-    float outer_next_y = vertex_y + next_normal_y * context->stroke_radius;
-    // segment strips already cover the inner corner; the outer bevel triangle is common to bevel and miter joins.
-    context->stroke_hit = dom_svg_query_triangle(context,
-        vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
-    if (context->stroke_hit || context->stroke_join != RDT_JOIN_MITER) return;
-    float determinant = prev_x * -next_y - prev_y * -next_x;
-    if (fabsf(determinant) <= 0.000001f) return;
-    float delta_x = outer_next_x - outer_prev_x;
-    float delta_y = outer_next_y - outer_prev_y;
-    float prev_distance = (delta_x * -next_y - delta_y * -next_x) / determinant;
-    float miter_x = outer_prev_x + prev_x * prev_distance;
-    float miter_y = outer_prev_y + prev_y * prev_distance;
-    float miter_length = hypotf(miter_x - vertex_x, miter_y - vertex_y);
-    if (miter_length > context->stroke_miter_limit * context->stroke_radius) {
-        context->stroke_hit = dom_svg_query_triangle(context,
-            vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
-        return;
-    }
-    context->stroke_hit = dom_svg_query_triangle(context,
-        outer_prev_x, outer_prev_y, outer_next_x, outer_next_y, miter_x, miter_y);
-}
-
-static void dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
-                                                    float start_x, float start_y,
-                                                    float end_x, float end_y) {
-    if (!context || !context->stroke_enabled) return;
-    if (context->stroke_dash_count == 0 && context->has_last_stroke_segment) {
-        dom_svg_path_hit_add_join(context, context->last_stroke_start_x,
-            context->last_stroke_start_y, start_x, start_y, end_x, end_y);
-    }
-    float dx = end_x - start_x;
-    float dy = end_y - start_y;
-    float length = hypotf(dx, dy);
-    if (length <= 0.000001f) {
-        if (context->stroke_dash_count == 0 && dom_svg_stroke_segment_contains(context,
-            start_x, start_y, end_x, end_y, true, true)) context->stroke_hit = true;
-        return;
-    }
-    if (!context->has_first_stroke_segment) {
-        context->first_stroke_start_x = start_x;
-        context->first_stroke_start_y = start_y;
-        context->first_stroke_end_x = end_x;
-        context->first_stroke_end_y = end_y;
-        context->has_first_stroke_segment = true;
-    }
-    if (context->stroke_dash_count <= 0) {
-        if (dom_svg_stroke_segment_contains(context, start_x, start_y,
-                end_x, end_y, false, false)) {
-            context->stroke_hit = true;
-        }
-    } else {
-        // zero-length on-dashes have cap geometry even though their interval is empty.
-        if (context->stroke_cap != RDT_CAP_BUTT && context->stroke_dash_total > 0.0f) {
-            float cumulative = 0.0f;
-            for (int index = 0; index < context->stroke_dash_count; index++) {
-                if (!(index & 1) && context->stroke_dash[index] == 0.0f) {
-                    float base = cumulative - context->stroke_dash_offset;
-                    float start = context->subpath_stroke_length;
-                    float first = base + ceilf((start - base) / context->stroke_dash_total) * context->stroke_dash_total;
-                    for (float distance = first; distance <= start + length; distance += context->stroke_dash_total) {
-                        float fraction = (distance - start) / length;
-                        float x = start_x + dx * fraction;
-                        float y = start_y + dy * fraction;
-                        if (dom_svg_stroke_segment_contains(context, x, y, x, y, true, true)) context->stroke_hit = true;
-                    }
-                }
-                cumulative += context->stroke_dash[index];
-            }
-        }
-        float segment_offset = 0.0f;
-        while (segment_offset < length) {
-            float remaining = 0.0f;
-            float path_offset = context->subpath_stroke_length + segment_offset;
-            bool dash_on = dom_svg_dash_is_on_at(context, path_offset, &remaining);
-            // Inexact dash lengths (3.2, 2.4) put a boundary a few float steps
-            // from the offset; a step that small cannot advance an offset of
-            // this magnitude, and the walk spun forever. At a boundary the next
-            // dash's state applies, measured from just past it.
-            float min_step = LMB_MAX(0.000001f,
-                (fabsf(path_offset) + length) * 4.0f * FLT_EPSILON);
-            if (remaining <= min_step) {
-                dash_on = dom_svg_dash_is_on_at(context, path_offset + min_step, &remaining);
-                remaining += min_step;
-            }
-            if (remaining <= min_step) remaining = length - segment_offset;
-            float fragment_length = LMB_MIN(remaining, length - segment_offset);
-            if (dash_on) {
-                float start_fraction = segment_offset / length;
-                float end_fraction = (segment_offset + fragment_length) / length;
-                float fragment_start_x = start_x + dx * start_fraction;
-                float fragment_start_y = start_y + dy * start_fraction;
-                float fragment_end_x = start_x + dx * end_fraction;
-                float fragment_end_y = start_y + dy * end_fraction;
-                bool start_cap = path_offset <= 0.000001f ||
-                    !dom_svg_dash_is_on_at(context, path_offset - 0.0001f, nullptr);
-                bool end_cap = !dom_svg_dash_is_on_at(context,
-                    path_offset + fragment_length + 0.0001f, nullptr);
-                if (dom_svg_stroke_segment_contains(context, fragment_start_x, fragment_start_y,
-                        fragment_end_x, fragment_end_y, start_cap, end_cap)) {
-                    context->stroke_hit = true;
-                }
-            }
-            segment_offset += fragment_length;
-        }
-    }
-    context->subpath_stroke_length += length;
-    context->last_stroke_start_x = start_x;
-    context->last_stroke_start_y = start_y;
-    context->last_stroke_end_x = end_x;
-    context->last_stroke_end_y = end_y;
-    context->has_last_stroke_segment = true;
-}
-
-static void dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
-                                              float start_x, float start_y,
-                                              float end_x, float end_y) {
-    if (!context) return;
-    if (context->rectangle_query) {
-        float edge[]={start_x,start_y,end_x,end_y};
-        context->subpath_rectangle_fill_hit|=dom_svg_query_polygon(context,edge,2);
-    }
-    if (fabsf(end_y - start_y) <= 0.000001f) return;
-    bool upward = start_y <= context->point_y && end_y > context->point_y;
-    bool downward = start_y > context->point_y && end_y <= context->point_y;
-    if (!upward && !downward) return;
-    float side = (end_x - start_x) * (context->point_y - start_y) -
-        (context->point_x - start_x) * (end_y - start_y);
-    if (fabsf(side) <= 0.000001f) {
-        context->subpath_fill_on_edge = true;
-        return;
-    }
-    if (upward && side > 0.0f) {
-        context->fill_winding++;
-        context->fill_crossings++;
-    } else if (downward && side < 0.0f) {
-        context->fill_winding--;
-        context->fill_crossings++;
-    }
-}
-
-static void dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
-                                            float start_x, float start_y,
-                                            float end_x, float end_y,
-                                            bool include_stroke) {
-    if (!context) return;
-    // self-crossing contours can cancel their signed area while still enclosing filled lobes.
-    float ax=start_x-context->subpath_start_x,ay=start_y-context->subpath_start_y;
-    float bx=end_x-context->subpath_start_x,by=end_y-context->subpath_start_y;
-    context->subpath_has_fill_area |= fabsf(ax*by-ay*bx)>0.000001f;
-    if (include_stroke) {
-        dom_svg_path_hit_add_stroke_segment(context, start_x, start_y, end_x, end_y);
-    }
-    dom_svg_path_hit_add_fill_edge(context, start_x, start_y, end_x, end_y);
-}
-
-static void dom_svg_path_hit_commit_subpath_fill_edge(JsDomSvgPathHitContext* context) {
-    if (!context) return;
-    if (context->subpath_has_fill_area) {
-        context->fill_on_edge |= context->subpath_fill_on_edge;
-        context->rectangle_fill_hit |= context->subpath_rectangle_fill_hit;
-    }
-}
-
-static void dom_svg_path_hit_finish_subpath(JsDomSvgPathHitContext* context) {
-    if (!context || !context->has_current || !context->subpath_has_draw) return;
-    if (!context->subpath_closed) {
-        // SVG fill implicitly closes an open subpath, while its stroke does not.
-        dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
-                                        context->subpath_start_x, context->subpath_start_y,
-                                        false);
-        // A zero-area contour, such as <line>, has no fill boundary to pick.
-        dom_svg_path_hit_commit_subpath_fill_edge(context);
-    }
-    if (!context->subpath_closed && context->has_first_stroke_segment &&
-        context->stroke_dash_count == 0) {
-        if (dom_svg_stroke_segment_contains(context, context->first_stroke_start_x,
-                context->first_stroke_start_y, context->first_stroke_end_x,
-                context->first_stroke_end_y, true, false) ||
-            dom_svg_stroke_segment_contains(context, context->last_stroke_start_x,
-                context->last_stroke_start_y, context->last_stroke_end_x,
-                context->last_stroke_end_y, false, true)) {
-            context->stroke_hit = true;
-        }
-    }
-}
-
-static bool dom_svg_path_hit_curve_line(void* data, float x0, float y0, float x1, float y1) {
-    dom_svg_path_hit_add_segment((JsDomSvgPathHitContext*)data, x0, y0, x1, y1, true);
-    return true;
-}
-
-static void dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
-    float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3) {
-    render_path_flatten_cubic(x0, y0, x1, y1, x2, y2, x3, y3, context->curve_flatness,
-        JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH, dom_svg_path_hit_curve_line, context);
-}
-
-static bool dom_svg_is_basic_shape(DomElement* elem) {
-    if (!dom_element_is_svg(elem)) return false;
-    const char* tag = elem->local_name();
-    return str_icmp_cstr(tag, "rect") == 0 || str_icmp_cstr(tag, "circle") == 0 ||
-        str_icmp_cstr(tag, "ellipse") == 0 || str_icmp_cstr(tag, "line") == 0 ||
-        str_icmp_cstr(tag, "polyline") == 0 || str_icmp_cstr(tag, "polygon") == 0 ||
-        str_icmp_cstr(tag, "path") == 0;
-}
-
-static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
-    if (!dom_svg_is_basic_shape(elem)) return nullptr;
-    if (str_icmp_cstr(elem->local_name(), "path") == 0) return svg_parse_path_d(dom_engine_svg_animation_attribute(elem, "d"));
-    RdtPath* path = rdt_path_new();
-    SvgLengthContext lengths = dom_svg_length_context(elem);
-    if (!path || !dom_engine_svg_append_shape(elem, path, &lengths)) {
-        if (path) rdt_path_free(path);
-        return nullptr;
-    }
-    return path;
-}
-
-static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
-                                      const float* args, int arg_count) {
-    JsDomSvgPathHitContext* context = (JsDomSvgPathHitContext*)userdata;
-    if (!context) return false;
-    switch (command) {
-    case RDT_PATH_MOVE:
-        if (arg_count < 2) return false;
-        dom_svg_path_hit_finish_subpath(context);
-        context->current_x = args[0];
-        context->current_y = args[1];
-        context->subpath_start_x = args[0];
-        context->subpath_start_y = args[1];
-        context->has_current = true;
-        context->subpath_has_draw = false;
-        context->subpath_closed = false;
-        context->subpath_stroke_length = 0.0f;
-        context->has_first_stroke_segment = false;
-        context->has_last_stroke_segment = false;
-        context->subpath_has_fill_area = false;
-        context->subpath_fill_on_edge = false;
-        context->subpath_rectangle_fill_hit = false;
-        return true;
-    case RDT_PATH_LINE:
-        if (arg_count < 2 || !context->has_current) return false;
-        dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
-                                        args[0], args[1], true);
-        context->current_x = args[0];
-        context->current_y = args[1];
-        context->subpath_has_draw = true;
-        context->subpath_closed = false;
-        return true;
-    case RDT_PATH_QUAD:
-        if (arg_count < 4 || !context->has_current) return false;
-        dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
-            context->current_x + (args[0] - context->current_x) * (2.0f / 3.0f),
-            context->current_y + (args[1] - context->current_y) * (2.0f / 3.0f),
-            args[2] + (args[0] - args[2]) * (2.0f / 3.0f),
-            args[3] + (args[1] - args[3]) * (2.0f / 3.0f),
-            args[2], args[3]);
-        context->current_x = args[2];
-        context->current_y = args[3];
-        context->subpath_has_draw = true;
-        context->subpath_closed = false;
-        return true;
-    case RDT_PATH_CUBIC:
-        if (arg_count < 6 || !context->has_current) return false;
-        dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
-            args[0], args[1], args[2], args[3], args[4], args[5]);
-        context->current_x = args[4];
-        context->current_y = args[5];
-        context->subpath_has_draw = true;
-        context->subpath_closed = false;
-        return true;
-    case RDT_PATH_CLOSE:
-        if (!context->has_current || !context->subpath_has_draw) return true;
-        dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
-                                        context->subpath_start_x, context->subpath_start_y,
-                                        true);
-        if (context->stroke_dash_count == 0 && context->has_first_stroke_segment &&
-            context->has_last_stroke_segment) {
-            dom_svg_path_hit_add_join(context, context->last_stroke_start_x,
-                context->last_stroke_start_y, context->subpath_start_x,
-                context->subpath_start_y, context->first_stroke_end_x,
-                context->first_stroke_end_y);
-        }
-        context->current_x = context->subpath_start_x;
-        context->current_y = context->subpath_start_y;
-        context->subpath_closed = true;
-        dom_svg_path_hit_commit_subpath_fill_edge(context);
-        return true;
-    case RDT_PATH_RECT:
-    case RDT_PATH_CIRCLE:
-        // SVG path data is lowered to move/line/cubic commands before this
-        // visitor. Other backend-only path primitives have no SVG `d` source.
-        return false;
-    }
-    return false;
-}
-
-extern "C" bool dom_geometry_path_query(const void* opaque_path, float left,float top,float right,float bottom,
-    bool rectangle, int fill_rule,float stroke_width,int cap,int join) {
-    const RdtPath* path=(const RdtPath*)opaque_path;
-    RdtPath* contour=rdt_path_new(); RdtMatrix identity=rdt_matrix_identity();
-    if (!contour || !render_path_append_transformed(contour,path,&identity)) {
-        if (contour) rdt_path_free(contour); return false;
-    }
-    JsDomSvgPathHitContext query={};
-    query.point_x=(left+right)/2;query.point_y=(top+bottom)/2;query.curve_flatness=.01f;
-    query.rectangle_query=rectangle;query.query_left=left;query.query_top=top;query.query_right=right;query.query_bottom=bottom;
-    query.stroke_enabled=stroke_width>0;query.stroke_radius=stroke_width/2;
-    query.stroke_cap=(RdtStrokeCap)cap;query.stroke_join=(RdtStrokeJoin)join;query.stroke_miter_limit=4;
-    bool valid=rdt_path_visit(contour,dom_svg_path_hit_visit,&query);
-    if (valid) dom_svg_path_hit_finish_subpath(&query);
-    bool fill=fill_rule>=0 && (query.rectangle_fill_hit || query.fill_on_edge ||
-        (fill_rule==RDT_FILL_EVEN_ODD?(query.fill_crossings&1)!=0:query.fill_winding!=0));
-    rdt_path_free(contour);return valid && (fill || query.stroke_hit);
 }
 
 static const char* dom_svg_presentation_value(DomElement* elem, const char* name,
@@ -13671,7 +11766,7 @@ typedef struct JsDomSvgShapeHit {
     unsigned instance_depth;
 } JsDomSvgShapeHit;
 
-static void dom_svg_configure_stroke_hit(DomElement* elem, JsDomSvgPathHitContext* context) {
+static void dom_svg_configure_stroke_hit(DomElement* elem, SvgPathHitContext* context) {
     if (!context) return;
     float stroke_width = dom_svg_presentation_number(elem, "stroke-width", 1.0f, true);
     context->stroke_enabled = stroke_width > 0.0f;
@@ -13738,7 +11833,7 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
     // fill-only hits cannot reach beyond the contour bounds; a box miss avoids
     // flattening curves and resolving the unused stroke/dash cascade.
     if (!check_stroke && !result.bounding_box) { rdt_path_free(path); return result; }
-    JsDomSvgPathHitContext context = {};
+    SvgPathHitContext context = {};
     context.point_x = local_x;
     context.point_y = local_y;
     context.curve_flatness = 0.5f / min_scale;
@@ -13766,7 +11861,7 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
     if (non_scaling) {
         RdtPath* transformed = rdt_path_new();
         if (transformed && render_path_append_transformed(transformed, path, stroke_frame)) {
-            JsDomSvgPathHitContext target = {};
+            SvgPathHitContext target = {};
             rdt_matrix_transform_point(stroke_frame, local_x, local_y, &target.point_x, &target.point_y);
             target.curve_flatness = 0.5f;
             // the same affine contour as painting is stroked in CSS viewport units.
@@ -13849,7 +11944,7 @@ static JsDomSvgShapeHit dom_svg_bounds_hit_viewport_point(DomElement* elem,
             return result;
         }
     } else {
-        JsDomSvgBounds bounds = dom_svg_bounds_for_element(elem);
+        SvgGeometryBounds bounds = dom_svg_bounds_for_element(elem);
         if (!bounds.valid) return result;
         left = bounds.left;
         top = bounds.top;
@@ -13864,16 +11959,6 @@ static JsDomSvgShapeHit dom_svg_bounds_hit_viewport_point(DomElement* elem,
     return result;
 }
 
-static DomElement* dom_svg_use_reference(DomElement* elem) {
-    if (!elem || !elem->doc || !dom_svg_tag_is(elem, "use")) return nullptr;
-    const char* href = elem->get_attribute("href");
-    if (!href) href = dom_element_attribute_ns(elem, "http://www.w3.org/1999/xlink", "href");
-    if (!href || !*href) return nullptr;
-    if (href[0] != '#') return dom_engine_svg_animation_use_source(elem);
-    if (!href[1]) return nullptr;
-    return dom_find_element_by_id(elem->doc->root, href + 1);
-}
-
 static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
     const RdtMatrix* instance_ctm, float viewport_x, float viewport_y);
 static bool dom_svg_element_skips_hit_test(DomElement* elem);
@@ -13884,7 +11969,7 @@ static bool dom_svg_clip_path_contains(const RdtPath* path, const RdtMatrix* fra
         if (contour) rdt_path_free(contour);
         return false;
     }
-    JsDomSvgPathHitContext query = {};
+    SvgPathHitContext query = {};
     query.point_x = point->x; query.point_y = point->y; query.curve_flatness = .05f;
     bool valid = rdt_path_visit(contour, dom_svg_path_hit_visit, &query);
     if (valid) dom_svg_path_hit_finish_subpath(&query);
@@ -13978,7 +12063,7 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
     result = dom_svg_reference_hit_viewport_point(reference, &frame, viewport_x, viewport_y);
     if (result.instance_source && result.instance_depth < 16)
         result.instance_hosts[result.instance_depth++] = elem;
-    JsDomSvgBounds bounds = dom_svg_bounds_for_element(reference);
+    SvgGeometryBounds bounds = dom_svg_bounds_for_element(reference);
     float local_x = 0.0f, local_y = 0.0f;
     if (bounds.valid && rdt_matrix_unproject_affine_point(&frame, viewport_x, viewport_y, &local_x, &local_y))
         result.bounding_box = local_x >= bounds.left && local_x <= bounds.right &&
@@ -14238,7 +12323,7 @@ extern "C" void* dom_document_svg_element_from_point(void* doc_ptr,
 
 static DomElement* dom_offset_parent_element(DomElement* elem) {
     if (!elem) return nullptr;
-    bool static_position = !elem->position || elem->positionp()->position == CSS_VALUE_STATIC;
+    bool static_position = !elem->position || dom_engine_position_property(elem)->position == CSS_VALUE_STATIC;
     DomNode* p = elem->parent;
     while (p) {
         if (p->is_element()) {
@@ -14252,7 +12337,7 @@ static DomElement* dom_offset_parent_element(DomElement* elem) {
                  str_icmp_cstr(pe->tag_name, "th") == 0)) {
                 return pe;
             }
-            if (pe->position && pe->positionp()->position != CSS_VALUE_STATIC)
+            if (pe->position && dom_engine_position_property(pe)->position != CSS_VALUE_STATIC)
                 return pe;
         }
         p = p->parent;
@@ -14779,10 +12864,6 @@ extern "C" Item dom_scroll_into_view_bridge(void* dom_elem) {
     return dom_scroll_into_view_with_options((DomElement*)dom_elem, nullptr, 0);
 }
 
-extern "C" void dom_scroll_into_view_if_needed_bridge(void* dom_elem) {
-    dom_queue_scroll_into_view((DomElement*)dom_elem, false, true);
-}
-
 extern "C" Item dom_scroll_operation_bridge(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc) {
@@ -14823,75 +12904,6 @@ extern "C" Item dom_scroll_operation_bridge(Item elem_item,
     return make_js_undefined();
 }
 
-// Elements and comments both back onto a Mark Element, so one scan answers
-// "which Mark child of `parent` is this native handle" for either kind.
-static int64_t dom_backed_index_of_element(Element* parent_backing, Element* handle) {
-    if (!parent_backing || !handle) return -1;
-    for (int64_t i = 0; i < parent_backing->length; i++) {
-        Item item = parent_backing->items[i];
-        if (get_type_id(item) == LMD_TYPE_ELEMENT && item.element == handle) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-static int64_t dom_backed_child_index(DomElement* parent, DomElement* child) {
-    if (!parent || !child || !parent->doc || !parent->doc->input) return -1;
-    return dom_backed_index_of_element(dom_element_to_element(parent),
-                                       dom_element_to_element(child));
-}
-
-// -1 means the node is not a Mark child of `parent`: it was created or moved
-// while the parent was still unbacked, or its Mark entry has already been
-// retired. Callers must treat that as "nothing native to delete", never as a
-// failure -- a node with no backing is still linked in the DOM tree.
-static int64_t dom_backed_node_index(DomElement* parent, DomNode* child) {
-    if (!parent || !child) return -1;
-    if (child->is_element()) {
-        return dom_backed_child_index(parent, child->as_element());
-    }
-    Element* parent_backing = dom_element_to_element(parent);
-    if (child->is_comment()) {
-        return dom_backed_index_of_element(parent_backing,
-                                           ((DomComment*)child)->native_element);
-    }
-    if (!child->is_text()) return -1;
-
-    DomText* text = child->as_text();
-    if (!text || !text->native_string || !parent_backing) return -1;
-    for (int64_t i = 0; i < parent_backing->length; i++) {
-        Item item = parent_backing->items[i];
-        if (get_type_id(item) == LMD_TYPE_STRING &&
-            item.get_string() == text->native_string) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-
-
-static bool dom_remove_backed_element_item(DomElement* parent,
-                                               DomElement* child,
-                                               int64_t child_index) {
-    if (!parent || !child || child_index < 0 || !parent->doc ||
-        !parent->doc->input) {
-        return false;
-    }
-    // drag libraries may detach a wrapper before reinsertion; remove its stale
-    // Mark slot first so a later relink cannot restore the previous order.
-    Element* parent_backing = dom_element_to_element(parent);
-    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
-    Item result = editor.dom_delete_child({.element = parent_backing},
-                                            (int)child_index);
-    if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
-        log_error("dom_remove_backed_element_item: inline delete changed backing identity");
-        return false;
-    }
-    return true;
-}
-
 static bool dom_append_backed_element(DomElement* parent, DomNode* child) {
     if (!parent || !child || !child->is_element()) return false;
     parent = dom_prepare_children_for_mutation(parent);
@@ -14899,7 +12911,7 @@ static bool dom_append_backed_element(DomElement* parent, DomNode* child) {
     if (child->parent == (DomNode*)parent && parent->last_child == child) return true;
     dom_pre_remove_for_move(parent, child);
     DomElement* child_elem = child->as_element();
-    int64_t backed_index = dom_backed_child_index(parent, child_elem);
+    int64_t backed_index = dom_backed_node_index(parent, child_elem);
     if (backed_index >= 0) {
         if (child->parent == parent) {
             // Move an existing sibling through both trees so the backing order
@@ -14936,183 +12948,16 @@ static bool dom_append_backed_element(DomElement* parent, DomNode* child) {
     return true;
 }
 
-static int64_t dom_backed_insertion_index(DomElement* parent,
-                                              DomNode* ref_child) {
-    if (!parent) return -1;
-    int64_t insert_index = dom_element_to_element(parent)->length;
-    for (DomNode* candidate = ref_child; candidate;
-         candidate = candidate->next_sibling) {
-        insert_index = dom_backed_node_index(parent, candidate);
-        if (insert_index >= 0) break;
-    }
-    if (insert_index < 0) insert_index = dom_element_to_element(parent)->length;
-    return insert_index;
+static const RadiantDomBackedTreeOps lambda_backed_tree_operations = {
+    dom_prepare_children_for_mutation, dom_remove_backed_child,
+};
+
+static bool dom_insert_backed_element(DomElement* parent, DomNode* child, DomNode* reference) {
+    return radiant_dom_insert_backed_element(parent, child, reference, &lambda_backed_tree_operations);
 }
 
-static bool dom_insert_backed_element(DomElement* parent, DomNode* child,
-                                         DomNode* ref_child) {
-    if (!parent || !child || !child->is_element()) return false;
-    parent = dom_prepare_children_for_mutation(parent);
-    if (!parent) return false;
-    if (ref_child && ref_child->parent != (DomNode*)parent) return false;
-    DomElement* child_elem = child->as_element();
-    if (parent->is_synthetic() || child_elem->is_synthetic()) {
-        if (child->parent && !child->parent->remove_child(child)) return false;
-        return ((DomNode*)parent)->insert_before(child, ref_child);
-    }
-    if (!parent->doc || !parent->doc->input) return false;
-    if (child == ref_child ||
-        (child->parent == (DomNode*)parent && child->next_sibling == ref_child)) {
-        return true;
-    }
-
-    if (child->parent) {
-        if (!child->parent->is_element() ||
-            !dom_remove_backed_child(child->parent->as_element(), child)) {
-            return false;
-        }
-    } else {
-        int64_t backed_index = dom_backed_child_index(parent, child_elem);
-        if (backed_index >= 0 &&
-            !dom_remove_backed_element_item(parent, child_elem, backed_index)) {
-            return false;
-        }
-    }
-
-    int64_t insert_index = dom_backed_insertion_index(parent, ref_child);
-    if (insert_index < 0) return false;
-
-    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
-    Element* parent_backing = dom_element_to_element(parent);
-    Item result = editor.dom_insert_child({.element = parent_backing},
-                                            (int)insert_index,
-                                            {.element = dom_element_to_element(child_elem)});
-    if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
-        log_error("dom_insert_backed_element: inline insert changed backing identity");
-        return false;
-    }
-    if (child->parent != (DomNode*)parent) {
-        // MarkEditor relinks only wrappers already present in the backing
-        // Element; a newly-created mark wrapper still needs the DOM-side link
-        // or the renderer loses the element immediately after insertion.
-        return ((DomNode*)parent)->insert_before(child, ref_child);
-    }
-    return true;
-}
-
-static bool dom_detach_text_for_insertion(DomText* text) {
-    if (!text->parent) return true;
-    DomElement* previous = text->parent->as_element();
-    if (!previous) return false;
-    String* native_string = text->native_string;
-    // a synthetic destination still removes a backed source's Mark slot;
-    // unlinking only its DOM chain resurrects the old text on the next edit.
-    bool removed = previous->is_synthetic()
-        ? previous->DomNode::remove_child(text) : dom_text_remove(text);
-    if (removed && !text->native_string) text->native_string = lam::up(native_string);
-    return removed;
-}
-
-static bool dom_insert_backed_text(DomElement* parent, DomText* text,
-                                      DomNode* ref_child) {
-    if (!parent || !text || !text->native_string || !parent->doc ||
-        !parent->doc->input) return false;
-
-    // DocumentFragment nodes have no Element backing.  HTMX builds a
-    // fragment in the main document and adopts text nodes from a parsed
-    // response before splicing them into the target; sending that temporary
-    // parent through MarkEditor reports "not an element" and drops the text.
-    if (parent->is_synthetic()) {
-        if (text->parent && text->parent != (DomNode*)parent &&
-            !dom_detach_text_for_insertion(text)) return false;
-        return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
-    }
-
-    parent = dom_prepare_children_for_mutation(parent);
-    if (!parent) return false;
-
-    if (!dom_detach_text_for_insertion(text)) return false;
-    String* native_string = text->native_string;
-
-    int64_t insert_index = dom_element_to_element(parent)->length;
-    if (ref_child) {
-        insert_index = -1;
-        for (DomNode* candidate = ref_child; candidate;
-             candidate = candidate->next_sibling) {
-            int64_t candidate_index = dom_backed_node_index(parent, candidate);
-            if (candidate_index >= 0) {
-                insert_index = candidate_index;
-                break;
-            }
-        }
-        if (insert_index < 0) {
-            // DOM-only siblings are preserved by MarkEditor relinking; count
-            // backed siblings before the reference to keep their relative order.
-            insert_index = 0;
-            for (DomNode* candidate = parent->first_child;
-                 candidate && candidate != ref_child;
-                 candidate = candidate->next_sibling) {
-                if (dom_backed_node_index(parent, candidate) >= 0) {
-                    insert_index++;
-                }
-            }
-        }
-    }
-
-    MarkEditor editor(parent->doc, EDIT_MODE_INLINE);
-    Element* parent_backing = dom_element_to_element(parent);
-    Item result = editor.dom_insert_child(
-        {.element = parent_backing},
-        (int)insert_index,
-        {.item = s2it(native_string)});
-    if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
-        log_error("dom_insert_backed_text: inline insert changed backing identity");
-        return false;
-    }
-    String* inserted_string = parent_backing->items[insert_index].get_string();
-    if (!inserted_string) {
-        log_error("dom_insert_backed_text: inserted backing child is not text");
-        return false;
-    }
-    // MarkEditor may either clone the String or reuse it. Both paths can
-    // relink a fresh wrapper, which must be replaced by the preserved live
-    // node before completing this move; otherwise the same text is linked
-    // twice after a retained transaction restore (D6.3.3).
-    DomText* relinked = dom_find_text_child(parent, inserted_string);
-    // Detached clone parents have no live tree for MarkEditor to relink.
-    // The verified backing child is linked through the DOM chain below.
-    if (text->native_string != inserted_string) {
-        if (text->owns_native_string()) {
-            dom_text_release_retired_storage(parent->doc, text);
-        }
-        text->native_string = lam::up(inserted_string);
-        text->text = lam::up(inserted_string->chars);
-        text->length = inserted_string->len;
-        text->set_owns_native_string(false);
-    }
-    dom_node_registry_set_backing_value(parent->doc, text,
-        Item{.item = s2it(inserted_string)});
-    if (relinked && relinked != text) {
-        if (!((DomNode*)parent)->insert_before(text, relinked) ||
-            !((DomNode*)parent)->remove_child(relinked)) {
-            return false;
-        }
-    }
-    if (text->parent != (DomNode*)parent) {
-        // MarkEditor can update the backing list before the wrapper relink;
-        // complete the DOM-side link without creating a second Mark string.
-        return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
-    }
-    bool at_requested_position = ref_child
-        ? text->next_sibling == ref_child
-        : parent->last_child == (DomNode*)text;
-    if (!at_requested_position) {
-        // Backing relink ignores layout-only pseudos, so restore the requested
-        // live-DOM position without editing the already-correct Mark order.
-        if (!((DomNode*)parent)->remove_child((DomNode*)text)) return false;
-        return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
-    }
-    return true;
+static bool dom_insert_backed_text(DomElement* parent, DomText* text, DomNode* reference) {
+    return radiant_dom_insert_backed_text(parent, text, reference, &lambda_backed_tree_operations);
 }
 
 static bool dom_insert_fragment_children_before(DomElement* parent,
@@ -15156,28 +13001,20 @@ static bool dom_append_fragment_children(DomElement* parent,
     return dom_insert_fragment_children_before(parent, fragment, nullptr);
 }
 
-static bool dom_insert_before_child(DomElement* parent, DomNode* child,
-                                       DomNode* ref_child) {
-    if (!parent || !child) return false;
-    if (child == ref_child ||
-        (child->parent == (DomNode*)parent && child->next_sibling == ref_child)) {
-        return true;
-    }
+static void dom_tree_post_insert(DomNode* parent, DomNode* child) {
+    dom_post_insert(parent, child);
+}
 
-    // a same-parent reorder changes Element::items as well as sibling links;
-    // otherwise HTMLCollection keeps reporting the source order after insertBefore().
-    dom_pre_remove_for_move(parent, child);
-    bool inserted = child->is_element()
-        ? dom_insert_backed_element(parent, child, ref_child)
-        : child->is_text()
-            ? dom_insert_backed_text(parent, child->as_text(), ref_child)
-            : ((child->parent ? child->parent->remove_child(child) : true) &&
-               ((DomNode*)parent)->insert_before(child, ref_child));
-    if (!inserted) return false;
+static void dom_tree_notify_insert(DomNode* parent, DomNode* child) {
+    dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, parent);
+}
 
-    dom_post_insert((DomNode*)parent, child);
-    dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, (DomNode*)parent);
-    return true;
+static bool dom_insert_before_child(DomElement* parent, DomNode* child, DomNode* ref_child) {
+    static const RadiantDomTreeMutationOps operations = {
+        {dom_prepare_children_for_mutation, dom_remove_backed_child},
+        dom_pre_remove_for_move, dom_tree_post_insert, dom_tree_notify_insert,
+    };
+    return radiant_dom_insert_before_child(parent, child, ref_child, &operations);
 }
 
 static bool dom_insert_text_before_child(DomElement* parent, Item text_item,
@@ -15239,53 +13076,7 @@ static bool dom_insert_text_before_child(DomElement* parent, Item text_item,
 extern "C" bool dom_remove_backed_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return false;
     parent = dom_prepare_children_for_mutation(parent, child);
-    if (!parent || child->parent != parent) return false;
-    if (!child->is_element()) {
-        if (child->is_text()) {
-            DomText* text = (DomText*)child;
-            if (dom_backed_node_index(parent, child) >= 0) {
-                return dom_text_remove(text);
-            }
-            // Some DOM replacements have already removed the Mark string but
-            // retain its wrapper until the next native mutation. Do not delete
-            // an unrelated sibling a second time; finish that DOM unlink only.
-            return ((DomNode*)parent)->remove_child(child);
-        }
-        if (child->is_comment()) {
-            // Same shape as the text branch above. A comment appended while its
-            // parent was still unbacked has no Mark entry to retire, and
-            // dom_comment_remove() refuses in that case -- which used to leave
-            // the comment linked in the DOM tree instead of removing it.
-            if (dom_backed_node_index(parent, child) < 0) {
-                return ((DomNode*)parent)->remove_child(child);
-            }
-            return dom_comment_remove((DomComment*)child);
-        }
-        return ((DomNode*)parent)->remove_child(child);
-    }
-
-    DomElement* child_elem = child->as_element();
-    if (parent->is_synthetic() || !child_elem || child_elem->is_synthetic()) {
-        return ((DomNode*)parent)->remove_child(child);
-    }
-    if (!parent->doc || !parent->doc->input) return false;
-
-    int64_t child_index = dom_backed_child_index(parent, child_elem);
-    if (child_index < 0) {
-        // Positional DOM APIs can insert a DOM-only element between backed
-        // siblings. Its removal must not delete an unrelated Mark child.
-        return ((DomNode*)parent)->remove_child(child);
-    }
-
-    if (!dom_remove_backed_element_item(parent, child_elem, child_index)) {
-        return false;
-    }
-
-    // MarkEditor changes the backing Element list but does not unlink the
-    // dynamically-created DomNode sibling chain.  Leave that to the base DOM
-    // unlinker so layout cannot traverse a removed wrapper through its former
-    // siblings after a library's temporary-DOM capability probe finishes.
-    return ((DomNode*)parent)->remove_child(child);
+    return dom_remove_prepared_backed_child(parent, child);
 }
 
 static bool dom_replace_document_element(DomElement* old_root,
@@ -15889,7 +13680,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
         DomText* new_text = new_child->as_text();
         DomElement* old_elem = old_child->as_element();
         String* replacement_string = new_text ? new_text->native_string : nullptr;
-        int64_t old_index = dom_backed_child_index(elem, old_elem);
+        int64_t old_index = dom_backed_node_index(elem, old_elem);
         if (new_text && replacement_string && old_elem && old_index >= 0) {
             if (new_child->parent && new_child->parent != (DomNode*)elem) {
                 dom_pre_remove(new_child);
@@ -15921,7 +13712,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
         elem->doc->input) {
         DomElement* new_elem = new_child->as_element();
         DomElement* old_elem = old_child->as_element();
-        int64_t old_index = dom_backed_child_index(elem, old_elem);
+        int64_t old_index = dom_backed_node_index(elem, old_elem);
         if (new_elem && old_elem && old_index >= 0) {
             if (new_child->parent && new_child->parent != (DomNode*)elem) {
                 dom_pre_remove(new_child);

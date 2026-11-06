@@ -112,7 +112,7 @@ Bootstrap's show/hide machinery and jQuery effects both live here. Depends on no
 
 ### 3.2 Frame stepping for effects (#17)
 
-- rAF is already wired to the Radiant frame clock (RAD_16). Gap: under headless/batch runs (`lambda.exe js --document`, `view --headless`), timers and rAF must advance against real elapsed time so jQuery `.animate()`/`.fadeIn()` progress and complete. Ensure the batch drain loop pumps the frame clock + timer queue until quiescent (with a safety ceiling), and that event_sim `wait` lets transitions run to completion.
+- rAF is already wired to the Radiant frame clock. Gap: under headless/batch runs (`lambda.exe js --document`, `view --headless`), timers and rAF must advance against real elapsed time so jQuery `.animate()`/`.fadeIn()` progress and complete. Ensure the batch drain loop pumps the frame clock + timer queue until quiescent (with a safety ceiling), and that event_sim `wait` lets transitions run to completion.
 
 ### Tests
 

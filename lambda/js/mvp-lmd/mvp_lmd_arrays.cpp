@@ -6,7 +6,7 @@
 #include "../../../lib/sort.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/utf.h"
-#include "../js_well_known_names.h"
+#include "../../core/js_well_known_names.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
 #include "../js_builtin_catalog.hpp"

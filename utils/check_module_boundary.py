@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Verify the linker-level static-module boundary images.
 
-lib, core, io, and radiant are strict SharedLib links.  The active runtime
-image is also built, but SM10's approved Class-F deferment leaves its JS DOM
-and UI bindings as dynamic imports.  That set is ratcheted: additions fail,
-while removals are reported as progress.
+lib, core and io are strict SharedLib links. The transitional Radiant image
+still links the runtime and permits dynamic lookup, so it does not prove native
+closure. The runtime image's approved Class-F deferment remains ratcheted.
+DOM adapter imports from the native Radiant owner are checked separately
+against D9.1.1v3.
 """
 
+from collections import Counter, defaultdict
 from pathlib import Path
 import re
 import subprocess
 import sys
+
+from check_input_archive_headers import input_dependencies
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -45,13 +49,62 @@ def runtime_class_f_imports() -> set[str]:
     }
 
 
+def adapter_native_imports(unexpected: set[str]) -> set[str]:
+    """Admit only DOM adapter imports backed by exactly one Radiant provider."""
+    if not unexpected:
+        return set()
+    providers = Counter()
+    for archive in (ROOT / "build/lib/libradiant-cpp.a", ROOT / "build/lib/libradiant-properties.a"):
+        output = subprocess.check_output(["nm", "-gU", "-j", str(archive)], text=True, stderr=subprocess.DEVNULL)
+        providers.update(symbol for symbol in output.splitlines() if symbol in unexpected)
+    importers = defaultdict(set)
+    object_dir = ROOT / "build/obj/lambda-boundary-rt/native/debug"
+    for obj in object_dir.glob("*.o"):
+        output = subprocess.check_output(["nm", "-u", "-j", str(obj)], text=True, stderr=subprocess.DEVNULL)
+        matched = unexpected.intersection(output.splitlines())
+        if not matched:
+            continue
+        sources = list(input_dependencies(obj.with_suffix(".d")))
+        if not sources:
+            raise RuntimeError(f"missing source provenance for {obj}")
+        for symbol in matched:
+            importers[symbol].add(sources[0].as_posix())
+    catalog = (ROOT / "lambda/dom/dom_api.def").read_text(encoding="utf-8")
+    return classify_adapter_imports(unexpected, importers, providers, catalog)
+
+
+def classify_adapter_imports(unexpected, importers, providers, catalog):
+    accepted = set()
+    for symbol in unexpected:
+        sources = importers.get(symbol, set())
+        if providers.get(symbol, 0) != 1 or not sources:
+            continue
+        # The Jube registry exposes only native operations declared by the DOM catalog.
+        catalog_name = symbol.lstrip("_")
+        catalogued = any(line.startswith("DOM_RAW(") and "DOM_F_NATIVE" in line and
+                          re.search(r"\b" + re.escape(catalog_name) + r"\b", line)
+                          for line in catalog.splitlines())
+        if all(source.startswith("lambda/dom/") or
+               (source == "lambda/jube/jube_registry.cpp" and catalogued)
+               for source in sources):
+            accepted.add(symbol)
+    return accepted
+
+
 def main() -> int:
     expected = read_baseline()
     actual = runtime_class_f_imports()
-    unexpected = sorted(actual - expected)
+    additions = actual - expected
+    try:
+        adapter_imports = adapter_native_imports(additions)
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+        print(f"MODULE_BOUNDARY: cannot verify adapter ownership: {exc}", file=sys.stderr)
+        return 1
+    unexpected = sorted(additions - adapter_imports)
     resolved = sorted(expected - actual)
-    print("MODULE_BOUNDARY: strict DSOs=lib,core,io,radiant")
-    print(f"MODULE_BOUNDARY: deferred_class_f_imports={len(actual)} baseline={len(expected)}")
+    print("MODULE_BOUNDARY: strict DSOs=lib,core,io; Radiant is transitional and runtime-linked")
+    print(f"MODULE_BOUNDARY: deferred_class_f_imports={len(actual & expected)} baseline={len(expected)}")
+    print(f"MODULE_BOUNDARY: verified_dom_adapter_native_imports={len(adapter_imports)}")
     if unexpected:
         print("MODULE_BOUNDARY: new deferred Class-F imports are not allowed:", file=sys.stderr)
         for symbol in unexpected:

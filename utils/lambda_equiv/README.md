@@ -12,7 +12,7 @@ passing replacement gate.
 | Python utility | Native port status |
 |---|---|
 | `utils/update_jube_manifest_integrity.py` | Core procedure `update_jube_manifest_integrity.ls` works; CLI argument forwarding is unavailable. Import and call `update_manifest(module_dir)`. |
-| `utils/patch_static_module_makefile.py` | `patch_static_module_makefile.ls` complete for the default host invocation; core procedure is in `patch_static_module_makefile_core.ls`. |
+| `utils/patch_static_module_makefile.py` | `patch_static_module_makefile.ls` supports the default host invocation and current direct config imports; the split-archive option and recursive imports remain Python-only. |
 | `utils/check_js_node_test_separation.py` | `check_js_node_test_separation.ls` complete for the repository gate. |
 | `test/error_handling/check_recovery_boundaries.py` | `check_recovery_boundaries.ls` complete for the repository gate. |
 | `test/interp/gen_bench.py` | `gen_bench.ls` complete for the default corpus; custom CLI options remain blocked by argument forwarding. |

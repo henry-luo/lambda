@@ -79,7 +79,7 @@ Style resolution is embarrassingly parallel per subtree (Stylo); layout has para
 - **RO3 — Compositor granularity**: one compositor thread per app vs per page/window — decide by measurement.
 - **RO4 — vsync/rAF plumbing**: tick source, delivery as messages, frame-budget accounting.
 - **RO5 — Hit-testing split**: compositor-side fast path for scroll targeting vs full hit-test on the page thread (needs layout data — Chromium's split as reference).
-- **RO6 — Multi-window shells**: one shell context + N windows assumed; confirm against the application-shell design (RAD docs).
+- **RO6 — Multi-window shells**: one shell context + N windows assumed; confirm against the application-shell design.
 - **RO7 — IME / focus / editing**: synchronous-feeling interactions (composition events, caret) stay page-thread-local; verify against the editing/interaction-state designs.
 - **RO8 — Display-list serialization**: build the Mark form early for golden testing; revisit shared font/image caches when pages become processes.
 

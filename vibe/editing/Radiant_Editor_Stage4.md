@@ -230,7 +230,7 @@ The JS reference (`test/editor-js/`) renders with **React** today. A third optio
 
 ### A.2 Feasibility — LambdaJS already exposes a DOM
 
-Present in-tree: `lambda/js/js_dom.{cpp,h}`, `js_dom_events.{cpp,h}`, `js_dom_selection.{cpp,h}` (design: `doc/dev/js/JS_13_Web_DOM.md`). A standards-only editor — `createElement` / `setAttribute` / `addEventListener` / `Selection` / `Range` — can run on it. **React effectively cannot** (it assumes a full browser runtime + scheduler). So vanilla DOM is the *enabler* for the Radiant host; React is a non-starter there.
+Present in-tree: `lambda/js/js_dom.{cpp,h}`, `js_dom_events.{cpp,h}`, `js_dom_selection.{cpp,h}` (surface: `doc/JS_DOM_Support.md`). A standards-only editor — `createElement` / `setAttribute` / `addEventListener` / `Selection` / `Range` — can run on it. **React effectively cannot** (it assumes a full browser runtime + scheduler). So vanilla DOM is the *enabler* for the Radiant host; React is a non-starter there.
 
 > **De-risk before building.** Spike `js_dom` first to confirm it supports what the editor assumes under Radiant: contenteditable-style text input, `Selection` get/set (ideally `selection.modify` for caret nav), and a `beforeinput`-equivalent event. If those are present the path is clear; if contenteditable input isn't wired yet, that's a Radiant-side gap to scope separately.
 

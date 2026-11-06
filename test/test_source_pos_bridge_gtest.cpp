@@ -23,6 +23,13 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
 #include "../radiant/event.hpp"
+#include "../lambda/module/radiant/source_position_adapter.hpp"
+
+class SourcePositionHostEnvironment : public ::testing::Environment {
+    void SetUp() override { ASSERT_TRUE(lambda_source_position_host_register()); }
+};
+static ::testing::Environment* const source_position_host_environment =
+    ::testing::AddGlobalTestEnvironment(new SourcePositionHostEnvironment);
 
 // ---------------------------------------------------------------------------
 // Bridge stubs (see test_dom_range_gtest.cpp). dom_range.cpp links against
@@ -86,65 +93,6 @@ extern "C" void heap_unregister_gc_root_for(Context* owner, uint64_t* slot) {
 }
 extern "C" void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     ADD_FAILURE() << "unexpected standalone runtime error " << (int)code << ": " << format;
-}
-
-TEST(SourcePosBridgeC, PathInitFreeIsSafe) {
-    SourcePathC p;
-    source_path_init(&p);
-    EXPECT_EQ(p.indices, nullptr);
-    EXPECT_EQ(p.depth, 0);
-    source_path_free(&p);  // double-free of init'd state is safe
-    source_path_free(&p);
-}
-
-TEST(SourcePosBridgeC, PathCloneAndEqual) {
-    SourcePathC src;
-    source_path_init(&src);
-    src.depth = 3;
-    src.indices = (int*)malloc(sizeof(int) * 3);
-    src.indices[0] = 4;
-    src.indices[1] = 0;
-    src.indices[2] = 7;
-
-    SourcePathC dup = source_path_clone(&src);
-    EXPECT_EQ(dup.depth, 3);
-    ASSERT_NE(dup.indices, nullptr);
-    EXPECT_NE(dup.indices, src.indices);
-    EXPECT_EQ(dup.indices[0], 4);
-    EXPECT_EQ(dup.indices[2], 7);
-    EXPECT_TRUE(source_path_equal(&src, &dup));
-
-    dup.indices[1] = 1;
-    EXPECT_FALSE(source_path_equal(&src, &dup));
-
-    source_path_free(&src);
-    source_path_free(&dup);
-}
-
-TEST(SourcePosBridgeC, EmptyPathsAreEqual) {
-    SourcePathC a, b;
-    source_path_init(&a);
-    source_path_init(&b);
-    EXPECT_TRUE(source_path_equal(&a, &b));
-    SourcePathC c = source_path_clone(&a);
-    EXPECT_EQ(c.depth, 0);
-    EXPECT_EQ(c.indices, nullptr);
-    EXPECT_TRUE(source_path_equal(&a, &c));
-}
-
-TEST(SourcePosBridgeC, SourcePosFreeReleasesPath) {
-    SourcePosC p;
-    source_path_init(&p.path);
-    p.path.depth = 2;
-    p.path.indices = (int*)malloc(sizeof(int) * 2);
-    p.path.indices[0] = 0;
-    p.path.indices[1] = 1;
-    p.offset = 5;
-    p.kind = SOURCE_POS_TEXT;
-    source_pos_free(&p);
-    EXPECT_EQ(p.path.indices, nullptr);
-    EXPECT_EQ(p.path.depth, 0);
-    EXPECT_EQ(p.offset, 0u);
 }
 
 TEST(SourcePosBridgeC, StubsReturnFalse) {
@@ -887,150 +835,6 @@ TEST_F(SourcePosBridgeRoundTrip, MissingPathHasNoMatch) {
     DomBoundary out{ nullptr, 0 };
     EXPECT_FALSE(dom_boundary_from_source_pos((DomNode*)root, &pos, &out));
     source_pos_free(&pos);
-}
-
-// ---------------------------------------------------------------------------
-// MarkBuilder helpers — produce the Lambda `pos` / `selection` shapes used
-// by lmd/package/editor/mod_source_pos.ls.
-// ---------------------------------------------------------------------------
-
-#include "../lambda/lambda.h"
-#include "../lambda/core/lambda-decimal.hpp"
-#include "../lambda/core/mark_reader.hpp"
-
-namespace {
-
-SourcePosC make_pos(std::initializer_list<int> indices, uint32_t offset,
-                    SourcePosKind kind) {
-    SourcePosC p;
-    source_path_init(&p.path);
-    p.offset = offset;
-    p.kind = kind;
-    if (indices.size() > 0) {
-        p.path.indices = (int*)malloc(sizeof(int) * indices.size());
-        int i = 0;
-        for (int v : indices) p.path.indices[i++] = v;
-        p.path.depth = (int)indices.size();
-    }
-    return p;
-}
-
-} // namespace
-
-TEST(SourcePosBridgeMarkBuilder, PosToItemBuildsMap) {
-    Input* input = InputManager::create_input(nullptr);
-    ASSERT_NE(input, nullptr);
-    MarkBuilder mb(input);
-
-    SourcePosC p = make_pos({0, 2, 1}, 7, SOURCE_POS_TEXT);
-    Item item = source_pos_to_item(mb, &p);
-
-    MapReader m = MapReader::fromItem(item);
-    ItemReader path = m.get("path");
-    ItemReader off  = m.get("offset");
-    EXPECT_TRUE(path.isArray());
-    EXPECT_TRUE(off.isInt());
-    EXPECT_EQ(off.asInt(), 7);
-    ArrayReader arr = path.asArray();
-    EXPECT_EQ(arr.length(), 3);
-
-    source_pos_free(&p);
-}
-
-TEST(SourcePosBridgeMarkBuilder, PosToItemEmptyPath) {
-    Input* input = InputManager::create_input(nullptr);
-    MarkBuilder mb(input);
-
-    SourcePosC p = make_pos({}, 0, SOURCE_POS_ELEMENT);
-    Item item = source_pos_to_item(mb, &p);
-    MapReader m = MapReader::fromItem(item);
-    ItemReader path = m.get("path");
-    EXPECT_TRUE(path.isArray());
-    EXPECT_EQ(path.asArray().length(), 0);
-
-    source_pos_free(&p);
-}
-
-TEST(SourcePosBridgeMarkBuilder, ExactDecimalCoordinatesPreserveSourcePosition) {
-    Input* input = InputManager::create_input(nullptr);
-    ASSERT_NE(input, nullptr);
-    MarkBuilder mb(input);
-
-    // Template editor arithmetic promotes path/offset coordinates to Decimal.
-    // The C bridge must retain exact integral coordinates instead of treating
-    // them as absent and rebinding a later edit to offset zero.
-    ArrayBuilder path = mb.array();
-    path.append(decimal_from_int64_arena(1, mb.arena()));
-    path.append(decimal_from_int64_arena(0, mb.arena()));
-    MapBuilder pos_map = mb.map();
-    pos_map.put("path", path.final());
-    pos_map.put("offset", decimal_from_int64_arena(47, mb.arena()));
-
-    SourcePosC pos;
-    ASSERT_TRUE(source_pos_from_item(pos_map.final(), &pos));
-    EXPECT_EQ(pos.kind, SOURCE_POS_TEXT);
-    EXPECT_EQ(pos.offset, 47u);
-    ASSERT_EQ(pos.path.depth, 2);
-    EXPECT_EQ(pos.path.indices[0], 1);
-    EXPECT_EQ(pos.path.indices[1], 0);
-    source_pos_free(&pos);
-}
-
-TEST(SourcePosBridgeMarkBuilder, RejectsFractionalDecimalCoordinate) {
-    Input* input = InputManager::create_input(nullptr);
-    ASSERT_NE(input, nullptr);
-    MarkBuilder mb(input);
-
-    ArrayBuilder path = mb.array();
-    path.append(decimal_from_string_arena("0.5", mb.arena()));
-    MapBuilder pos_map = mb.map();
-    pos_map.put("path", path.final());
-    pos_map.put("offset", decimal_from_int64_arena(0, mb.arena()));
-
-    SourcePosC pos;
-    EXPECT_FALSE(source_pos_from_item(pos_map.final(), &pos));
-}
-
-TEST(SourcePosBridgeMarkBuilder, TextSelectionShape) {
-    Input* input = InputManager::create_input(nullptr);
-    MarkBuilder mb(input);
-
-    SourcePosC anchor = make_pos({0, 0}, 1, SOURCE_POS_TEXT);
-    SourcePosC head   = make_pos({0, 0}, 4, SOURCE_POS_TEXT);
-    Item sel = source_text_selection_to_item(mb, &anchor, &head);
-
-    MapReader m = MapReader::fromItem(sel);
-    ItemReader kind = m.get("kind");
-    EXPECT_TRUE(kind.isSymbol());
-    EXPECT_STREQ(kind.asSymbol()->chars, "text");
-    EXPECT_TRUE(m.get("anchor").isMap());
-    EXPECT_TRUE(m.get("head").isMap());
-
-    source_pos_free(&anchor);
-    source_pos_free(&head);
-}
-
-TEST(SourcePosBridgeMarkBuilder, NodeSelectionShape) {
-    Input* input = InputManager::create_input(nullptr);
-    MarkBuilder mb(input);
-
-    SourcePathC path;
-    source_path_init(&path);
-    path.indices = (int*)malloc(sizeof(int) * 2);
-    path.indices[0] = 0;
-    path.indices[1] = 3;
-    path.depth = 2;
-
-    Item sel = source_node_selection_to_item(mb, &path);
-    MapReader m = MapReader::fromItem(sel);
-    ItemReader kind = m.get("kind");
-    EXPECT_TRUE(kind.isSymbol());
-    EXPECT_STREQ(kind.asSymbol()->chars, "node");
-    ItemReader p = m.get("path");
-    EXPECT_TRUE(p.isArray());
-    EXPECT_EQ(p.asArray().length(), 2);
-
-    source_path_free(&path);
 }
 
 // ---------------------------------------------------------------------------

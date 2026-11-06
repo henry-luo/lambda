@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "test_native_provider.hpp"
 
 #include "../radiant/layout.hpp"
 #include "../radiant/render.hpp"
@@ -12,7 +13,7 @@ static int g_layout_pass_test_init_count = 0;
 static int g_layout_pass_test_cleanup_count = 0;
 static const char* g_package_layout_test_module = nullptr;
 
-bool radiant_package_layout_callback(const CustomLayoutContext*, CustomLayoutResult*,
+static bool package_layout_callback(const CustomLayoutContext*, CustomLayoutResult*,
                                      const char* module) {
     g_package_layout_test_module = module;
     return true;
@@ -132,6 +133,14 @@ static bool custom_layout_test_negative_bounds(const CustomLayoutContext* contex
 }
 
 TEST_F(CustomLayoutTest, ShippedPackagesResolveWithoutRegistration) {
+    CustomLayoutContext native_context = {};
+    CustomLayoutResult native_result = {};
+    EXPECT_FALSE(radiant_package_layout_callback(&native_context, &native_result, "missing-host"));
+    static const RadiantPackageLayoutHostOps incomplete = {nullptr};
+    static const RadiantPackageLayoutHostOps host = {package_layout_callback};
+    static const RadiantPackageLayoutHostOps conflict = {package_layout_callback};
+    ASSERT_TRUE(expect_native_provider_registration(radiant_package_layout_host_register,
+                                                     &incomplete, &host, &conflict));
     const char* names[] = {"lambda-graph", "lambda-tikz"};
     const char* modules[] = {"lambda.graph.transform", "lambda.doc.tikz.named"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {

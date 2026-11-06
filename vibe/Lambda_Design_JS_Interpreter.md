@@ -191,7 +191,7 @@ excluded. Evidence and the earlier experiment are under
 
 **Formal authority:** **D1.1–D1.10**, **D5.1.1**, **D5.1.4**, **D5.5.1**, **D5.6.1–D5.6.2**, **D6.1.1–D6.1.4**, **D6.3.2–D6.3.4**, **D6.4.1–D6.4.4**, **D7.2.1–D7.2.4**, **D7.5.1**, **D9.3.1**, **D8.3.2**, **D8.4.5**, **D8.2.1–D8.2.6**, **D7.4.1**, **D7.4.3**, and **D8.6.1–D8.6.4** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
 
-**Related designs:** [`Lambda_Design_DOM_State.md`](Lambda_Design_DOM_State.md) (ES10–ES13, EO1–EO6), [`Lambda_Design_Runtime_Globals.md`](Lambda_Design_Runtime_Globals.md) (RG0–RG14), [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md), [`doc/dev/js/JS_01_Compilation_Pipeline.md`](../doc/dev/js/JS_01_Compilation_Pipeline.md), [`JS_04_MIR_Lowering.md`](../doc/dev/js/JS_04_MIR_Lowering.md), [`JS_05_Functions_Closures.md`](../doc/dev/js/JS_05_Functions_Closures.md), [`JS_08_Iterators_Generators.md`](../doc/dev/js/JS_08_Iterators_Generators.md), and [`JS_09_Async_Modules.md`](../doc/dev/js/JS_09_Async_Modules.md).
+**Related designs:** [`Lambda_Design_DOM_State.md`](Lambda_Design_DOM_State.md) (ES10–ES13, EO1–EO6), [`Lambda_Design_Runtime_Globals.md`](Lambda_Design_Runtime_Globals.md) (RG0–RG14), [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md).
 
 ---
 
@@ -676,7 +676,7 @@ The planner records the order and target cells. The walker executes it; MIR emit
 
 An interpreted closure stores a traced pointer to the lexical environment visible at its creation. It does not copy capture values into a private vector and does not require caller-side read-back. Arrow functions retain lexical `this`, `new.target`, and `arguments` through their environment chain.
 
-This replaces the current copied-env/read-back workaround for the shared mixed-tier ABI. It also addresses the documented per-iteration staleness and fixed capture-count hazards in `JS_05_Functions_Closures.md`.
+This replaces the current copied-env/read-back workaround for the shared mixed-tier ABI. It also addresses the documented per-iteration staleness and fixed capture-count hazards (JS05-1, JS05-2).
 
 **D7.2.3 clarification required before landing:** its current unqualified snapshot-capture wording describes Lambda semantics through S9.1.4. Under **D1.3**, it cannot govern LambdaJS. The formal design should revise the ruling in place (for example, D7.2.3) to state that Lambda captures immutable values while each guest profile owns its closure semantics; LambdaJS captures lexical bindings by reference. The corresponding working design ledger must be updated in the same change.
 
@@ -1992,8 +1992,7 @@ This proposal becomes implementation authority only when the following documenta
 3. add a page/document-isolate ownership ruling to `doc/Lambda_Formal_Design.md` (recommended **D6.4.5**) stating one document `Runtime`/`EvalContext`/heap/module registry/side-stack set, with subdocuments as separate isolates handed off only at quiescent boundaries;
 4. revise `Lambda_Design_Ast_Interpreter.md` §9 to point here and remove its stale `EvalSignal`/inline-cache claims;
 5. update `Lambda_Design_DOM_State.md` §3.11–§3.12 to cite the integrated interpreter/heap/stack contract here and reconcile the EO6 implementation-status text with the current landed path;
-6. update `JS_01`, `JS_04`, `JS_05`, `JS_08`, `JS_09`, and `JS_16` as each implementation phase actually lands;
-7. create an implementation status record under `vibe/impl/` before code work claims a completed phase.
+6. create an implementation status record under `vibe/impl/` before code work claims a completed phase.
 
 The original adoption baseline predates the explicit AST backend and retained
 `JsScript` now recorded in **D8.4.2**. This document's broader mixed-tier/AUTO

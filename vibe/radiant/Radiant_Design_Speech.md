@@ -123,7 +123,7 @@ levels:
   Sub-mixes attach to and detach from the bus by generation-checked
   handles, so a closed document simply stops contributing. The window already
   owns shared services this way (the loader runtime, ES12v2/EO3v2), and Radiant
-  is single-window today (RAD_20), so the bus is effectively per process.
+  is single-window today, so the bus is effectively per process.
 
 Within a document, everything shares that sub-mix's clock, which gives:
 
@@ -490,8 +490,10 @@ As built in M1 (2026-10-19):
   first, so speech follows the frame clock, which is virtual under EventSim.
   `radiant_document_has_pending_frames` stays true while an utterance is live,
   keeping the host loop frame-driven. Events go through
-  `radiant_queue_timing_event` with bubbling on, so a view's `on` handlers hear
-  them from the owner. Fields use Lambda names: `token`, `kind`, `char_index`,
+  an optional native speech-event host, whose Lambda adapter creates rooted events
+  and calls `radiant_queue_timing_event` with bubbling on (D6.3.3, D9.1.1v3,
+  D9.1.3v2). The event fields are borrowed only during that synchronous call;
+  without a host the native service publishes no script event. Fields use Lambda names: `token`, `kind`, `char_index`,
   `char_length`, `time`, `name`, `cancelled` and `reason`. `voiceschanged` is a
   window notification, sent to documents that have read the voice list or
   spoken.

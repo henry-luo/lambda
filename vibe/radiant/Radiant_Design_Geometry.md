@@ -11,9 +11,8 @@ ownership. This document extends the coordinate-domain decisions in
 `DD4` ([Radiant_Imp_Code_Dedup (done)](Radiant_Imp_Code_Dedup%20(done).md)),
 and SVG transform hit-testing semantics in `ESO47`
 ([DOM state design](../Lambda_Design_DOM_State.md)).
-**Related detailed design:** [RAD_04 — Box Model & Containing Blocks](../../doc/dev/radiant/RAD_04_Box_Model_Containing_Blocks.md),
-[RAD_15 — Events & Input](../../doc/dev/radiant/RAD_15_Events_Input.md), and
-[RAD_18 — Editing & Selection](../../doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md)
+**Related design:** [Radiant DOM Events](Radiant_Design_Event.md) and
+[Radiant Selection, Caret and DOM Range](Radiant_Design_Selection.md)
 
 ---
 

@@ -167,7 +167,7 @@ not raw mirror fields. All `error`, all suppressed via `STATE_STORE_OK`.
 | Rule | Backend | Sev. | Suppress | Enforces | What it catches |
 |---|---|---|---|---|---|
 | `no-item-payload-cast` | ast-grep | error | `ITEM_CAST_OK` | — | Raw Item-payload casts in migrated Lambda files (`(Array*)item.item`, `0x00FFFFFFFFFFFFFF` mask). Use `lib/lambda_typed.hpp` helpers. |
-| `no-radiant-view-cast-layout` | ast-grep | error | `RADIANT_CAST_OK` | — | Unsafe `View*` / `Dom*` cast in layout files. Use `lam::view_as_*` / `dom_as<>` from `lib/tagged.hpp`. |
+| `no-radiant-view-cast-layout` | ast-grep | error | `RADIANT_CAST_OK` | — | Unsafe `View*` / `Dom*` cast in layout files. Use `lam::view_as_*` / `dom_as<>` from `radiant/tagged.hpp`. |
 | `no-radiant-view-cast-render` | ast-grep | error | `RADIANT_CAST_OK` | — | Same, in render/event/driver files (different leaf-type set). |
 | `no-std-containers` | ast-grep | warning | `STD_CONTAINER_OK` | CLAUDE rule 3 | `std::string` / `std::vector` / `std::map` / `std::unordered_map` / etc. Use `lib/` equivalents (`Str`, `ArrayList`, `HashMap`). |
 | `no-using-namespace-std-in-header` | ast-grep | error | — | — | `using namespace std;` in a `.h` / `.hpp` (poisons every TU that includes it). |
