@@ -5,7 +5,7 @@ Date: 2026-02-25 (Steps 1–2), 2026-02-26 (Steps 3–6)
 
 > **Historical phase record.** The nursery inventory and scalar layouts below
 > describe the Phase 5 implementation at that time. For the current collector,
-> use `doc/dev/lambda/LR_08_Memory_and_GC.md`; for current numeric ownership,
+> use D5.3; for current numeric ownership,
 > use `vibe/Lambda_Design_Stack_API.md` Phase 7. The numeric nursery is retired,
 > dynamic `DTIME` is GC-owned, static Mark `DTIME` is Input-arena-owned, and
 > transient `INT64`/`UINT64` use number homes.

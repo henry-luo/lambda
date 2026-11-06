@@ -71,7 +71,7 @@ semantic mismatch gets recorded (in this doc's §9 ledger) rather than silently 
 | `vibe/radiant/Radiant_vs_Obscura.md` | Provides the API inventory and priority order (observers → custom elements → adopted stylesheets → traversal/parser → storage/facades). |
 | `vibe/radiant/Radiant_Design_Concurrency.md` (RC1–RC8) | Pages are Lambda isolates with same-thread script+layout. The `dom` package instantiates per page isolate; its state lives inside the isolate. |
 | `vibe/radiant/Radiant_Design_State_Management.md` (RS1–RS16) | The state store is already Lambda-shaped; it is a Phase-3 migration target into (or alongside) this package. |
-| `doc/dev/js/JS_13_Web_DOM.md`, `RAD_21` | Document the current C+ DOM bridge and preamble no-op shims this package replaces. |
+| `doc/JS_DOM_Support.md` | Document the current C+ DOM bridge and preamble no-op shims this package replaces. |
 
 ---
 
@@ -675,6 +675,6 @@ Friction-log entries from ST1–ST3 get appended here as F-numbered rows once wo
 | `lambda/dom/dom.cpp`, `dom_events.cpp`, `dom_selection.cpp`, `dom_cssom.cpp` | current C+ DOM bridge (~18k lines) — Phase-0 carve-out source |
 | `radiant/script_runner.cpp` | browser-global preamble whose no-op shims Phase 1 deletes |
 | `radiant/webdriver/webdriver_locator.cpp` | XPath locator gap closed by Phase-2 `document.evaluate` |
-| `doc/dev/js/JS_13_Web_DOM.md` | current LambdaJS DOM surface documentation |
+| `doc/JS_DOM_Support.md` | current LambdaJS DOM surface documentation |
 | `vibe/radiant/Radiant_Design_Concurrency.md` | page-isolate model the package instantiates into |
 | `vibe/radiant/Radiant_Design_State_Management.md` | state store design — Phase-3 migration target |

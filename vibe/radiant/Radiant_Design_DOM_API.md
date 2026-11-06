@@ -27,10 +27,8 @@ The bridge lives principally in `lambda/js/js_dom.cpp`,
 `js_dom_observers.cpp`, and the C+ types under `radiant/`. The page-script
 driver is `radiant/script_runner.cpp`.
 
-This document is deliberately narrower than the full implementation maps in
-`doc/dev/js/JS_13_Web_DOM.md` and `doc/dev/radiant/RAD_21_JS_Scripting_Integration.md`.
-Those documents describe call paths in detail; this one records the public
-native contract, its implementation status, and the current scope boundary.
+This document records the public native contract, its implementation status,
+and the current scope boundary.
 
 ### 1.1 Status words
 

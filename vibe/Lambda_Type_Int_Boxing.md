@@ -492,5 +492,5 @@ Open items:
 2. Sentinel payload assignment confirmation (§3.1 proposal; note `0`/`+1` keep today's bits).
 3. Measure runtime-computed ±1 boxing frequency after landing (informational; literals free).
 4. `Lambda_Type_Double_Boxing.md` §2.3 and `Lambda_Design_Item_Boxing.md` taxonomy amendments
-   (new storage-class row: "inline rotated int"), plus `LR_03`/`JS_03` mirrors.
+   (new storage-class row: "inline rotated int").
 5. Re-baseline MIR budgets and the Result18 typed columns only after B1 lands on top of this.

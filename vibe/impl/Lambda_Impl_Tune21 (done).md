@@ -1032,9 +1032,7 @@ mark-cost rule brainfuck stays at 3 MB / 714 collections (its marks cost
 | cd / cd2, deltablue / deltablue2, fast_diff, crypto_aes, gcbench, splay, hashmap, raytrace3d, cube3d, binarytrees, json, richards, levenshtein, nbody | unchanged | 0.95–1.03 (five rows first read 1.05–1.09 and re-read 0.98–1.03 at ×7) | |
 
 Gates: `auto`/`jit`/`interp` sweeps 0 regressions; `make test-lambda-baseline`
-green (includes the forced-GC stress corpus). Dev doc
-`doc/dev/lambda/LR_08_Memory_and_GC.md` §5 re-verified (both triggers, both
-rules). Binaries `temp/lambda_t32_final.exe` / `temp/lambda_t32_debug.exe`
+green (includes the forced-GC stress corpus). Binaries `temp/lambda_t32_final.exe` / `temp/lambda_t32_debug.exe`
 (control `temp/lambda_t30_final.exe`).
 
 *Residual on havlak* (now mutator-bound): `array_push`/`expand_list` growth

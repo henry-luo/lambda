@@ -4,7 +4,7 @@
 // a document-owned surface and painted as one projected image on later frames, instead of
 // replaying its items under the 3D matrix every frame. The surface is captured in the
 // subtree's own plane: the element's transform is its placement, applied at paint time.
-// Modelled on the inline-SVG raster layer (render_svg_inline.cpp, RAD_14 §4.4): a content
+// Modelled on the inline-SVG raster layer (render_svg_inline.cpp): a content
 // stamp of generations, capture on the second identical paint, the shared two-pass raster.
 #include "render.hpp"
 #include "render_css3d.hpp"

@@ -99,7 +99,7 @@ void rc_draw_picture(RasterRenderContext* rdcon, RdtPicture* picture,
     if (rdcon && rdt_picture_get_svg_root(picture)) {
         // An SVG picture is painted into the recording here, like inline SVG:
         // its painter resolves fonts and loads resources, which replay on tile
-        // workers must never do (RAD_12 §3).
+        // workers must never do.
         render_svg_record_picture(rdcon->paint_list, rdcon->dl, &rdcon->scratch,
                                   rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr,
                                   rdcon, picture, opacity, transform);

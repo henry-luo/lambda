@@ -2753,7 +2753,6 @@ The initial stale-document set was reconciled on 2026-08-28:
 |---|---|
 | `doc/Lambda_Formal_Design.md` | Appendix A now records the physical Lambda parse→build→bind schedule, complete core `MirValue` boundaries, FunctionId-only JS artifact lookup, and the current D8.6.4 LOC/timing closeout. The remaining unchecked completion-definition bullets are separate structural roadmap work; no D8 ruling changed. Older IC examples elsewhere were editorially reconciled with **D7.4.1**. |
 | `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` | Renamed from `(done)` to `(retired)` and marked as a historical partial record whose G1/G2/G3 closeout was not accepted. Open work points here. |
-| `doc/dev/js/JS_01_Compilation_Pipeline.md` | Reverified against the 2026-08-28 tree: function/class/member arrays are exact-sized after count/fill collection, control stacks are dynamic, duplicate pointer identity and orchestration residue are explicit, and **D7.4.1** no-inline-cache terminology is restored. |
 | `Lambda_Design_Unified_AST.md` | Current continuation links now point here; the retired plan is historical only; `JsLoadIC`/`JsStoreIC` wording was removed and replaced by the formal **D7.4.1** boundary. |
 | `Lambda_Design_Ast_Interpreter.md` | The retired-plan cross-reference and header were synchronized with landed **D8.3.2**; its historical JavaScript Stage-2 section now defers to **D8.4.1**, keeps separate completion/frame semantics, reflects dynamic MIR stacks, and rejects per-node ICs under **D7.4.1**. |
 

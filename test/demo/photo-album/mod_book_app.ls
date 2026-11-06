@@ -52,7 +52,7 @@ pn mount(owner, ctx, bs) {
 fn rest_z(bs, i) any^ => if (i == bs.turned) count(bs) + 10 else if (i == bs.turned - 1) count(bs) + 9
     else if (i < bs.turned) i + 1 else count(bs) - i
 
-// Per-frame transform and shading go through the presentation channel (RAD_16): such writes
+// Per-frame transform and shading go through the presentation channel: such writes
 // repaint without layout, where an inline-style write relays out the book on every frame.
 // Same-value presentation writes cost nothing, so they need no compare.
 pn shade(owner, i, angle) {

@@ -5,8 +5,8 @@
 > **Related:**
 > - [Lambda_Data.md](../doc/Lambda_Data.md#binary-literals) — binary literal syntax
 > - [Lambda_Type.md](../doc/Lambda_Type.md) — type hierarchy
-> - [LR_00_Overview.md](../doc/dev/lambda/LR_00_Overview.md) — runtime value model (`String*`-backed storage)
-> - [JS_00_Overview.md](../doc/dev/js/JS_00_Overview.md) — `ArrayBuffer`/`Uint8Array`/`DataView` machinery in the JS jube (`lambda/js/js_typed_array.{h,cpp}`, `js_buffer.cpp`)
+> - [Formal Design](../doc/Lambda_Formal_Design.md) D2 — runtime value model (`String*`-backed storage)
+> - `ArrayBuffer`/`Uint8Array`/`DataView` machinery in the JS jube (`lambda/js/js_typed_array.{h,cpp}`, `js_buffer.cpp`)
 > - [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) — the executed Tier-1 implementation plan (B1–B8, Phases 1–5; its Phase-6 sketch is superseded by §11 and `impl/Lambda_Impl_Binary2.md`)
 > - [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md) — detailed implementation plan for the accepted shared byte-storage substrate (§11)
 > - [Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) — binary pipelines/streams (PL1–PL11); PL5 flat-buffer representation is this doc's Tier 3.1
@@ -221,7 +221,7 @@ let out: binary = bld.freeze()        // immutable snapshot
 
 - `binary.builder()` returns a mutable, growable buffer (doubling strategy).
 - `freeze()` transfers ownership into an immutable `binary` (zero‑copy when capacity ≈ length, otherwise truncating copy).
-- Internally implemented as a thin wrapper around the existing `StringBuf` machinery (see `strbuf_append_str_n` in [LR_06](../doc/dev/lambda/LR_06_C_Transpiler.md) §2).
+- Internally implemented as a thin wrapper around the existing `StringBuf` machinery (see `strbuf_append_str_n`).
 
 ### 5.2 Encoding stdlib — `encode`/`decode` with a codec selector *(API SETTLED 2026-07-15, user-confirmed)*
 

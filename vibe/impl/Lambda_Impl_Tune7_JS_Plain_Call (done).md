@@ -447,7 +447,7 @@ read. Global `js_current_this` remains for arrows/lexical capture and the
 dynamic edge. **Decision gate:** land only if the post-C3.0 T0.2 profile
 shows the remaining global traffic (callees that *do* observe `this`) is
 material on the probe set. This is the plan's only ABI-touching slice: MT7
-major lifts, mir_dump fixture review, and the JS_05 §6 doc update travel with
+major lifts and mir_dump fixture review travel with
 it.
 
 **Gates (C3.0).** T0.2 plain-call ns drops further; test262 `this`-binding and

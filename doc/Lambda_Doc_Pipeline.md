@@ -366,5 +366,5 @@ Lambda's position is the intersection the table leaves empty: a converter's brea
 - [Lambda Validator Guide](Lambda_Validator.md): writing and applying schemas.
 - [Lambda CLI Reference](Lambda_CLI.md): every command and flag.
 - [Reactive UI](Reactive_UI.md): `view` and `edit` templates, `apply()` dispatch and event handlers.
-- [Radiant Design Overview](dev/radiant/RAD_00_Overview.md), [Lambda Core Runtime Overview](dev/lambda/LR_00_Overview.md), [LambdaJS Overview](dev/js/JS_00_Overview.md): the engines in depth.
+- [Lambda_Formal_Design.md](Lambda_Formal_Design.md): the design rulings for the engines, with an index of their design records (Appendix C).
 - [Lambda Formal Semantics](Lambda_Formal_Semantics.md) and [Lambda Formal Design](Lambda_Formal_Design.md): the normative rulings (`S#`, `D#`) cited above.

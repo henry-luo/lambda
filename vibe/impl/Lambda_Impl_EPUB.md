@@ -91,7 +91,7 @@ paints an insertion caret; ordinary reading text, readonly/disabled fields,
 noneditable islands and blurred editors do not. Drag selection/copying retains
 its canonical DOM boundaries (D10.2.1). `assert_caret` can now check visibility
 independently of those boundaries. Browser behavior references and the shared
-mechanism are documented in [RAD_17](../../doc/dev/radiant/RAD_17_Interaction_State.md#3-the-data-model).
+mechanism are documented in [Radiant_Design_State_Machine.md](../radiant/Radiant_Design_State_Machine.md).
 
 ## Presentation follow-up verification (2026-10-15)
 
@@ -257,7 +257,7 @@ instead of the old cycling mode button; `store.preferences` validates the three
 new fields, which persist with the reading state.
 
 Two engine fixes came with it. Frame scrollbars now follow the embedded root's
-overflow (`layout_iframe_viewport_overflow`, RAD_20), so paged chapters scroll
+overflow (`layout_iframe_viewport_overflow`), so paged chapters scroll
 by script without a scrollbar. And `node_for` resolves a locator owned by the
 chapter's `<html>` (`n`), which `query_selector` cannot match: a new chapter
 whose first text is whitespace under `<html>` kept the previous chapter's
@@ -316,7 +316,7 @@ With the **Aa** panel wrapped to two rows, the footer was pushed below the
 window. The reader's column flex took the panel's height as its tallest
 setting group (one line), because Radiant measured a wrapping row flex item's
 content height without wrapping. Column flex items that are wrapping rows now
-use the same width-aware height query as blocks (RAD_08). The page-options
+use the same width-aware height query as blocks. The page-options
 fixture asserts the footer stays at the window bottom with the panel open.
 
 ### Search options (2026-10-26)

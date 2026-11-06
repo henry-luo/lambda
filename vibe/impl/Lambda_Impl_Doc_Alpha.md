@@ -130,7 +130,6 @@ Found while writing and checking the tutorial (pass 2, all reproduced on the deb
 | `doc/The_Unbundled_Monad.md` | → `vibe/Lambda_Design_Effect_System.md` (or `doc/dev/`) | A design-philosophy note that says of itself "descriptive, not normative"; Doc_Convention §8 reserves `doc/*.md` for user documentation, §4 puts reasoning in `vibe/`. Zero inbound links. |
 | `doc/Lambda_Jube_Runtime.md` | → `doc/dev/Jube_Modules.md` | Build targets, ABI validation, ownership boundaries: developer content (now bannered as such) |
 | `doc/Bash_Support.md` | → `doc/dev/` until the front end ships, or keep with its banner | Documents code that is not in any build |
-| `doc/dev/Radiant_Design.md`, `Lambda_and_JS_Runtime.md` | Fold into `RAD_00`/`LR_00` or mark as summaries | They are 90–110 line summaries parallel to the numbered sets' overviews |
 | `doc/dev/Bash_Runtime.md`, `Python_Runtime.md`, `Node_Runtime.md` | Refresh stamps or move `Bash_Runtime.md` (a "Design Proposal", verified 2026-03) to `vibe/` | Their content contradicts the source in the ways the hosted-language audit listed |
 | `JS262_Test_Guide.md` (repo root) | Delete; `test/js262/JS262_Test_Guide.md` is the maintained copy (the root one says 35,047 passing, the baseline is 40,261) | A stale duplicate at the top level |
 | `doc/demo*.png`, `type_hierarchy.*`, `lambda-radiant-pipeline.svg` | → `doc/img/` | Assets mixed with documents |
@@ -155,7 +154,7 @@ Pass 2 added the tutorial series, `Lambda_Packages.md`, the HTML/CSS/SVG matrix 
 |---|---|
 | **Getting Started / tutorial series** (§4) | There is no path from "installed" to "productive" in `doc/`; the site's quick start is stale |
 | `Lambda_Packages.md` | The pipeline article names eight Lambda packages (`chart`, `graph`, `latex`, `math`, `pdf`, `openapi`, `edit`, `dom`) and only `math` has a user doc; nothing says how to import a package or what `lambda.doc.*` paths exist |
-| `Radiant_Support.md` (HTML/CSS support matrix) | Users of `lambda view`/`render` have no statement of which CSS features, HTML elements, fonts and image formats are supported — the equivalent of `Markup_Formats_Support.md` for the engine. The material exists in `doc/dev/radiant/` |
+| `Radiant_Support.md` (HTML/CSS support matrix) | Users of `lambda view`/`render` have no statement of which CSS features, HTML elements, fonts and image formats are supported — the equivalent of `Markup_Formats_Support.md` for the engine. |
 | `Lambda_Known_Limitations.md` (or a section in release notes) | Alpha users need one list of what is ruled but unbuilt: streams/laziness (S8.3.2, S14.3), verbs and DataFrame (S14.2), resources (S12.4), thread/process tasks, `compile()`/`quote` (S15.3), `T^` in value position, object constraints, `as` casts, the items in §2 above. Today this is only discoverable in Appendix A of the semantics spec |
 | `Lambda_Concurrency.md`, `Lambda_Modules.md`, `Lambda_Documents.md` | See §3.3 |
 | Release notes | A `CHANGELOG.md` or `doc/Release_Notes.md` for the alpha |

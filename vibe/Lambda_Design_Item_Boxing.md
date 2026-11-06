@@ -5,7 +5,7 @@
 - **Scope:** the 64-bit `Item` representation shared by Lambda core, LambdaJS, the Jube frontends, Radiant, the MIR transpilers, and the garbage collector.
 - **Decision:** retain Lambda's hybrid representation: inline tagged values and tagged leaf pointers for scalar types; unmodified native pointers for header-bearing containers.
 - **Convention:** source references name symbols rather than fixed line numbers because line numbers drift.
-- **Related:** `Lambda_Design_Stack_API.md` Phase 7 (current scalar ownership), `impl/Lambda_Impl_Double_Boxing (done).md` (completed inline-double work), `Lambda_Transpiler.md` R1 (measured direct-string-pointer experiment), `Lambda_Semantics_Number_Model.md`, `doc/dev/lambda/LR_03_Value_and_Type_Model.md`, and `doc/dev/js/JS_03_Value_Model.md`.
+- **Related:** `Lambda_Design_Stack_API.md` Phase 7 (current scalar ownership), `impl/Lambda_Impl_Double_Boxing (done).md` (completed inline-double work), `Lambda_Transpiler.md` R1 (measured direct-string-pointer experiment), and `Lambda_Semantics_Number_Model.md`.
 
 ---
 

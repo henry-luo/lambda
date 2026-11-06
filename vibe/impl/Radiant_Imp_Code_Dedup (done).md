@@ -7,7 +7,7 @@
 
 **Goal:** collapse radiant's **140 headers** (105 of them 1:1 per-`.cpp` mirrors) into **5 coherent global headers** plus a short justified-exception list, so that each domain has exactly one place to look for existing structs and functions — the glossary/API-doc/design-space role of DD4.
 
-**Implementation status (2026-07-14): H0-H7 complete.** Every task in the coherent-header plan and its residual implementation-dedup phase is done. Radiant now has 19 headers against the permanent 24-header cap. The five coherent headers own their planned domains; retained grid implementation headers are marked internal; absorbed-header references have been migrated across `doc/dev/radiant/RAD_*.md`; and both `AGENTS.md` and `CLAUDE.md` point contributors at the coherent surfaces. Final verification: `make build` passed, `make test-radiant-baseline` passed all 6,221 required tests, `make lint` passed (with the existing golden-file warnings), `make lint ARGS='--rule ^no-int-cast-radiant$'` passed, and `make check-radiant-dup` reported 0 remaining filtered duplicate blocks. The H7 implementation removed 109 production LOC, or 87 LOC including its new descriptor contract test.
+**Implementation status (2026-07-14): H0-H7 complete.** Every task in the coherent-header plan and its residual implementation-dedup phase is done. Radiant now has 19 headers against the permanent 24-header cap. The five coherent headers own their planned domains; retained grid implementation headers are marked internal; absorbed-header references have been migrated; and both `AGENTS.md` and `CLAUDE.md` point contributors at the coherent surfaces. Final verification: `make build` passed, `make test-radiant-baseline` passed all 6,221 required tests, `make lint` passed (with the existing golden-file warnings), `make lint ARGS='--rule ^no-int-cast-radiant$'` passed, and `make check-radiant-dup` reported 0 remaining filtered duplicate blocks. The H7 implementation removed 109 production LOC, or 87 LOC including its new descriptor contract test.
 
 ---
 
@@ -162,7 +162,7 @@ Order is deliberately **leaf-first**: render (self-contained consumer, worst shr
 
 ### ✅ H6 — Lock-in (complete)
 - Flip `no-new-per-file-header` to **error**; add header-count ratchet (≤ 24) to `make lint` (tightens further when the graph family migrates to Lambda script).
-- Update `doc/dev/radiant/RAD_*.md` references and `CLAUDE.md`/`AGENTS.md` Key Entry Points table (both files, per convention).
+- Update the `CLAUDE.md`/`AGENTS.md` Key Entry Points table (both files, per convention).
 - Retro: compile-time trend, final `count_loc.sh`, and `make check-radiant-dup` re-scan (the filtered duplicate count should tick down from the removed duplicate declarations).
 
 ### ✅ H7 — Residual implementation dedup (complete)
@@ -237,16 +237,16 @@ One-liner ritual: concatenate the phase's headers, then check for duplicate `#de
 
 ## 10. Out-of-scope legacy dual-path audit backlog (added 2026-07-13; not H-phase tasks)
 
-The H-phases move declarations only (§6 scope fences). The 2026-07-13 audit of the `doc/dev/radiant/RAD_*.md` known-issues sections also found live dual representations/code paths. This table preserves those audit findings for their owning subsystem plans; it is not part of the completed H0-H6 implementation scope and is not included in H7's two-item pending phase.
+The H-phases move declarations only (§6 scope fences). The 2026-07-13 audit of the Radiant known-issues sections also found live dual representations/code paths. This table preserves those audit findings for their owning subsystem plans; it is not part of the completed H0-H6 implementation scope and is not included in H7's two-item pending phase.
 
 | # | Dual path | Canonical / legacy | Source | Action |
 |---|---|---|---|---|
-| DP1 | `DomElement::native_element` — the embedded `Element elmt` is a *copy* of the original parsed Element (dom_element_init), plus a redundant `native_element` pointer into it; two notions of "the element" to keep in sync | embedded element canonical; field carries `TODO(Phase 4): Remove` (dom_element.hpp:297–308) that never landed | RAD_01 §8, RAD_15 §10 | complete the Phase-4 removal: `dom_element_to_element()` accessor, delete the field |
-| DP2 | Grid dual representation: legacy `GridTrack` structs ↔ enhanced (Taffy-style) track layer, bridged by a per-pass adapter round-trip (`grid_enhanced_adapter.hpp`), incl. the shrink-guard workaround the round-trip forces. (The dead "pure" `run_track_sizing_algorithm` flagged alongside it in RAD_09 was already removed — see grid_enhanced_adapter.hpp:826.) | enhanced layer is the live algorithm; legacy structs persist as its I/O | RAD_09 §8 | migrate remaining consumers to the enhanced layer; delete the adapter round-trip |
-| DP3 | Selection/caret: canonical model + legacy `state_store` projection kept in sync by manual invariants | canonical model | RAD_17 §8, RAD_18 §10, RAD_19 §8 | migrate consumers off the projection, delete it — coordinate with the H3 rider (state-store band is Lambda-script-bound); the most-repeated dual-path issue in the RAD set |
-| DP4 | Legacy `render_list_bullet` (formerly in render_list.cpp and called from render_block.cpp) alongside the `::marker` path | `::marker` | RAD_11 §7 | ✅ deleted; list pixels now come only from synthetic `::marker` views |
-| DP5 | Legacy contenteditable key-handling path with unfinished stubs, superseded by the transaction path | transaction path | RAD_15 §10 | delete the legacy path |
-| DP6 | text_edit dual dispatch surfaces: `te_replace_byte_range` vs `_no_events` (text_edit.hpp:90/96); `te_ime_commit` vs `_prepare`/`_finish` (:198/205/209) | one parameterized entry each | RAD_19 §8 | collapse each pair |
-| DP7 | Raster render path only partway migrated onto the shared backend walker — two walkers live | shared backend walker | RAD_13 §10 | finish the migration; delete the raster-only walk |
+| DP1 | `DomElement::native_element` — the embedded `Element elmt` is a *copy* of the original parsed Element (dom_element_init), plus a redundant `native_element` pointer into it; two notions of "the element" to keep in sync | embedded element canonical; field carries `TODO(Phase 4): Remove` (dom_element.hpp:297–308) that never landed | RAD01, RAD15 | complete the Phase-4 removal: `dom_element_to_element()` accessor, delete the field |
+| DP2 | Grid dual representation: legacy `GridTrack` structs ↔ enhanced (Taffy-style) track layer, bridged by a per-pass adapter round-trip (`grid_enhanced_adapter.hpp`), incl. the shrink-guard workaround the round-trip forces. (The dead "pure" `run_track_sizing_algorithm` flagged alongside it in RAD09 was already removed — see grid_enhanced_adapter.hpp:826.) | enhanced layer is the live algorithm; legacy structs persist as its I/O | RAD09 | migrate remaining consumers to the enhanced layer; delete the adapter round-trip |
+| DP3 | Selection/caret: canonical model + legacy `state_store` projection kept in sync by manual invariants | canonical model | RAD17, RAD18, RAD19 | migrate consumers off the projection, delete it — coordinate with the H3 rider (state-store band is Lambda-script-bound); the most-repeated dual-path issue in the Radiant known issues |
+| DP4 | Legacy `render_list_bullet` (formerly in render_list.cpp and called from render_block.cpp) alongside the `::marker` path | `::marker` | RAD11 | ✅ deleted; list pixels now come only from synthetic `::marker` views |
+| DP5 | Legacy contenteditable key-handling path with unfinished stubs, superseded by the transaction path | transaction path | RAD15 | delete the legacy path |
+| DP6 | text_edit dual dispatch surfaces: `te_replace_byte_range` vs `_no_events` (text_edit.hpp:90/96); `te_ime_commit` vs `_prepare`/`_finish` (:198/205/209) | one parameterized entry each | RAD19 | collapse each pair |
+| DP7 | Raster render path only partway migrated onto the shared backend walker — two walkers live | shared backend walker | RAD13 | finish the migration; delete the raster-only walk |
 
 Sequencing: DP4 is a deletion with tests already green — earliest candidate, and DP-work touches `.cpp` bodies not headers, so it can run parallel to the H-phases. DP1/DP2/DP3 are the real campaigns: DP3 after H3 (its declarations will live in `event.hpp`'s state band), DP2 after H2. DP1 crosses into `lambda/input/css/` — coordinate with the DOM-side owners before scheduling.

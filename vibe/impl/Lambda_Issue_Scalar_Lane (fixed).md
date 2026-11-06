@@ -22,9 +22,7 @@ inline/residue float split is the end-state encoding. The lane-usage matrix
 **Related:** `vibe/Lambda_Design_Stack_Frame.md` (SF14),
 `vibe/impl/Lambda_Impl_Stack_Frame.md`, `vibe/impl/Lambda_Impl_Stack_Frame_JS.md`,
 `vibe/Lambda_Type_Double_Boxing.md` (LANDED inline-double self-tagging — the
-source of the inline/residue float split in §3),
-`doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md`, and
-`doc/dev/js/JS_04_MIR_Lowering.md`
+source of the inline/residue float split in §3).
 
 ---
 

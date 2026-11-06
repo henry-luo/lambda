@@ -3818,8 +3818,7 @@ raw PNG comparison retains 1,976 differing pixels; geometry parity does not
 establish exact raster parity. Final rendering and exact layout/full Radiant
 qualification follow after complete native build preparation. The complete
 result is copied by the existing constraint-keyed cache, preserving selected
-view/snapshot ownership (**D5.5.1 /D5.1.4**); the old width-pair-only cache
-description in RAD_05 §2.2 was corrected against the current implementation.
+view/snapshot ownership (**D5.5.1 /D5.1.4**).
 
 The first exact round 17 gate stops with **two sizing regressions**
 (`slice-intrinsic-size` and `clone-intrinsic-size`), so full Radiant does not

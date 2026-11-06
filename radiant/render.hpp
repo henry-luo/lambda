@@ -5075,7 +5075,7 @@ Element* render_svg_reference_scope(DomElement* svg_element);
 // Paints an SVG-DOM picture (an SVG <img>, CSS background, or <image>) into a
 // raster recording now, on the recording thread, as inline SVG is painted.
 // glyph_rdcon, when given, receives its text as glyph items. Deferring the
-// picture to replay would run the SVG painter on tile workers (RAD_12 §3).
+// picture to replay would run the SVG painter on tile workers.
 void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
                                ScratchArena* scratch, FontContext* font_ctx,
                                RasterRenderContext* glyph_rdcon, RdtPicture* picture,

@@ -21,7 +21,7 @@ anchors without document-specific CSS. `test/ui/negative_stacking` and
 `RenderOutputParity.NegativeLayersRespectContextFlowAndAncestorClips` cover
 context boundaries, clipping, flow layers and PNG/SVG/PDF parity. Complete
 positive/zero descendant lifting, negative inline contexts and blend isolation remain
-deferred; see [the implementation](../../doc/dev/radiant/RAD_13_Render_Walk_Painters.md#24-paint-order-and-z-index).
+deferred; see RAD13-1 in the [issue ledger](Radiant_Issue_Ledger.md).
 
 | Phase | Features | Status |
 |-------|----------|--------|

@@ -211,7 +211,7 @@ Each phase ends with the listed evidence; the existing continuous-layout baselin
 
 ### P7: removal and measurement
 
-- Delete the remaining dead paths, `PagedFlowNode`, `PagedFrame`, `PagedComposer`, `PagedCheckpoint`; shrink `view_tree_css.cpp` to page contexts; update `doc/HTML_CSS_SVG_Support.md` §8.1 (admitted contexts become the browsing set), `doc/dev/radiant/RAD_11` and a new `RAD_23_Paged_Composition.md`.
+- Delete the remaining dead paths, `PagedFlowNode`, `PagedFrame`, `PagedComposer`, `PagedCheckpoint`; shrink `view_tree_css.cpp` to page contexts; update `doc/HTML_CSS_SVG_Support.md` §8.1 (admitted contexts become the browsing set).
 - Gate: `make test-radiant-baseline`, the full `test_pdf_render_visual_gtest.exe`, release timing of the paged corpus against the frozen baseline (expected ≥2× faster per page), and the line counts of §3.5 reported against the actual tree.
 
 ## 6. Risks and mitigations

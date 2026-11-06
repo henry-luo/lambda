@@ -4,7 +4,7 @@
 **Status:** **PROPOSAL — not ratified.** Nothing here revises an `S#`/`D#` ruling yet. §10 lists the spec changes this design would need; each needs a user ruling before it lands.
 **User direction (2026-10-25):** Phase 1 is a **developer-build MVP**: several simple demos running on the user's own iPhone, installed from Xcode. App Store distribution is out of phase 1. External Jube modules are deferred to a later phase. Phase 1 is specified in **§1** and overrides the full-port sections where they differ.
 **Design authority:** `doc/Lambda_Formal_Design.md` — D1.1, D1.3, D9.1.1, D9.2.1 (headless profile C), D9.2.2 (`lambda-cli`), **D9.2.3 (`lambda-wasm`, the no-JIT precedent)**, D8.3.2 (T0/AUTO tiering), D8.4.5 (LambdaJS AST interpreter), D8.5 (MIR cache), D5.5 (Radiant seam).
-**Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI25), `vibe/Lambda_Design_Static_Modules.md` (wasm profile), `vibe/Lambda_Design_JS_Interpreter.md`, `vibe/Memory_Context.md` (reclaim ladder), `doc/dev/Lambda_WASM_Build.md`, `doc/dev/radiant/RAD_00_Overview.md`.
+**Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` (AI1–AI25), `vibe/Lambda_Design_Static_Modules.md` (wasm profile), `vibe/Lambda_Design_JS_Interpreter.md`, `vibe/Memory_Context.md` (reclaim ladder), `doc/dev/Lambda_WASM_Build.md`, `radiant/README.md`.
 **Scope:** porting the Lambda runtime, LambdaJS and Radiant to iOS and iPadOS (device and simulator, arm64). Android is out of scope, but §4's platform seam is meant to serve it too.
 **Ledger:** this doc opens the **`MB#`** series (mobile). Open questions are **`MB-O#`**.
 
@@ -375,7 +375,7 @@ This proposal does **not** decide the remedy. It lists the options for a user ru
 | Vector raster | ThorVG `sw_engine` only (`build_deps_config.json`) | Unchanged — CPU, portable |
 | Fonts | Own shaper (`lib/font`), CoreText rasterizer (`font_rasterize_ct.c`), CoreText fallback (`font_fallback.c:406-555`), **directory scan** of `/System/Library/Fonts` and `~/Library/Fonts` (`font_platform.c:107-156`) | §4.5 |
 | Input | Mouse, keyboard and scroll only (`event.hpp:135-153`). Pointer/touch exist only as `event_sim` test injection (`event.cpp:9523-9613`). `input_capabilities` hard-coded to fine pointer + hover (`ui_context.cpp:241-242`) | §4.6 |
-| IME | `ime_mac.mm` isa-swaps GLFW's NSView to implement NSTextInputClient (`ime_mac.mm:238-269`), feeding the RAD_15 §6 composition bridge | UITextInput (§4.7) |
+| IME | `ime_mac.mm` isa-swaps GLFW's NSView to implement NSTextInputClient (`ime_mac.mm:238-269`), feeding the composition bridge | UITextInput (§4.7) |
 | Clipboard | NSPasteboard (`clipboard_mac.mm`) | UIPasteboard |
 | Cursors | `glfwCreateStandardCursor` (`event.cpp:13873-13900`) | No-op on iPhone; `UIPointerInteraction` on iPad later |
 | Video / speech | AVFoundation (`rdt_video_avf.mm`, `rdt_speech_avf.mm`) | Portable: AVFoundation and AVSpeechSynthesizer exist on iOS |
@@ -403,7 +403,7 @@ No iOS work exists anywhere in the tree today. `TARGET_OS_IPHONE` appears only i
 
 The alternative is to keep calling GLFW and implement a GLFW-shaped shim on UIKit, the way `radiant/headless.cpp` stubs GLFW for `LAMBDA_NO_GUI`. That is rejected for iOS. The null shim works because a headless run *has* no window semantics. iOS has richer semantics than GLFW can express: touches with identifiers and phases, safe areas, keyboard frames, scene lifecycle, memory warnings. A fake GLFW would either drop them or smuggle them through invented key codes, which is a workaround (AGENTS rule 1). The seam keeps D9.2.1's principle: every profile compiles the **same Radiant sources** against a different windowing backend, with no `#ifdef` stripping of display code. The headless null backend becomes one more implementation of the interface instead of a GLFW stub.
 
-**MB8 — the shell drives Radiant by ticks; Radiant never owns the loop.** The body of `window.cpp:2146-2287` becomes `radiant_tick(budget)`: drain the event queue, pump libuv with `UV_RUN_NOWAIT`, run due timers and frame callbacks, lay out, paint, present. The desktop backend calls it from its own `while` loop. iOS calls it from a CADisplayLink callback while frames are wanted, and from the libuv backend file descriptor (`uv_backend_fd`, watched by a `dispatch_source` on the main queue) while idle. Then network completions and timers still wake an app that is not animating. The frame clock (RAD_16 §2) already only wakes the loop, so it maps directly onto CADisplayLink. ProMotion uses `preferredFrameRateRange` plus `CADisableMinimumFrameDurationOnPhone` in Info.plist.
+**MB8 — the shell drives Radiant by ticks; Radiant never owns the loop.** The body of `window.cpp:2146-2287` becomes `radiant_tick(budget)`: drain the event queue, pump libuv with `UV_RUN_NOWAIT`, run due timers and frame callbacks, lay out, paint, present. The desktop backend calls it from its own `while` loop. iOS calls it from a CADisplayLink callback while frames are wanted, and from the libuv backend file descriptor (`uv_backend_fd`, watched by a `dispatch_source` on the main queue) while idle. Then network completions and timers still wake an app that is not animating. The frame clock already only wakes the loop, so it maps directly onto CADisplayLink. ProMotion uses `preferredFrameRateRange` plus `CADisableMinimumFrameDurationOnPhone` in Info.plist.
 
 **Lifecycle.** On `sceneDidEnterBackground` the backend pauses the display link, flushes persistent state (`state_store`), releases GPU resources and lets libuv idle. On foreground it restores the surface and schedules a full repaint.
 
@@ -432,7 +432,7 @@ Text shaping is portable (own GPOS/glyf/COLR/CBDT/WOFF2 code), and rasterization
 
 **MB10 — on Apple platforms, discover fonts through CoreText.** Use `CTFontCollectionCreateFromAvailableFonts` / `CTFontManagerCopyAvailableFontFamilyNames`. Get each face's file through `kCTFontURLAttribute` when it is readable *(verify on device)*. Otherwise rasterize and measure through the `CTFontRef` without opening the file. Fonts shipped in the app bundle register through `CTFontManagerRegisterFontURLs`. Then:
 
-- `system-ui` maps to `CTFontCreateUIFontForLanguage` (the RAD_07 branch at `font.cpp:64-73`);
+- `system-ui` maps to `CTFontCreateUIFontForLanguage` (the branch at `font.cpp:64-73`);
 - `Apple Color Emoji` stays first in the emoji fallback list (`font_context.c:73-76`);
 - the `__builtin_available(macOS 13.0, *)` guard at `font_platform.c:97` gains an `iOS` clause.
 
@@ -456,7 +456,7 @@ The scroll and gesture recognizers yield to `touch-action` and to `preventDefaul
 
 ### 4.7 Text input (MB12)
 
-**MB12 — a hidden `UIView` adopting `UITextInput` hosts every editable focus.** It feeds the same composition bridge `ime_mac.mm` feeds on macOS (RAD_15 §6): `setMarkedText` maps to composition update, `insertText` to commit, `unmarkText` to composition end. Focus on a DOM editable shows the keyboard, using `inputmode` and `enterkeyhint` for the keyboard type and return key. Blur hides it. Keyboard frame changes resize the visual viewport (`visualViewport`, `interactive-widget` semantics) rather than the layout viewport.
+**MB12 — a hidden `UIView` adopting `UITextInput` hosts every editable focus.** It feeds the same composition bridge `ime_mac.mm` feeds on macOS: `setMarkedText` maps to composition update, `insertText` to commit, `unmarkText` to composition end. Focus on a DOM editable shows the keyboard, using `inputmode` and `enterkeyhint` for the keyboard type and return key. Blur hides it. Keyboard frame changes resize the visual viewport (`visualViewport`, `interactive-widget` semantics) rather than the layout viewport.
 
 Staging:
 
@@ -470,7 +470,7 @@ Hardware keyboards arrive as `UIPress`/`UIKeyCommand` and map to the existing `K
 
 - **Safe areas** feed `env(safe-area-inset-*)`, and `viewport-fit=cover` opts a page into drawing under the notch.
 - **Rotation and iPad split view** are ordinary resizes plus a content-scale check.
-- **One scene for v1.** The global `UiContext` already blocks multi-window (RAD_20 §8 item 4). iPad multi-scene waits for that refactor, which MB7's per-backend surface ownership is a step toward.
+- **One scene for v1.** The global `UiContext` already blocks multi-window. iPad multi-scene waits for that refactor, which MB7's per-backend surface ownership is a step toward.
 
 ### 4.9 Media and webview
 

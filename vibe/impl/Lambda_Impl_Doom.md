@@ -89,7 +89,7 @@ Relevant implementation starting points:
   `lmd/package/slide/live.ls`: document-owned frame tokens, `evt.time_stamp`,
   `evt.detail`, cancellation and incremental presentation writes.
 - [HTML/CSS/SVG support](../../doc/HTML_CSS_SVG_Support.md),
-  [Radiant render walk](../../doc/dev/radiant/RAD_13_Render_Walk_Painters.md),
+  [Radiant rendering](../radiant/Radiant_Design_Rendering.md),
   [test map](../../test/README.md).
 
 ## 3. File layout and source mapping

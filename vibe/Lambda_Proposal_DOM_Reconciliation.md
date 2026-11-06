@@ -15,7 +15,7 @@ Today every incremental re-render deep-copies the regenerated result into fresh 
 - cascades the whole new subtree;
 - marks it and its ancestors layout-dirty.
 
-Retained layout cannot help inside that subtree, because every node in it is new. Retained layout here means block shift reuse and the retained flex items of 2026-10-13 (RAD_01 §6).
+Retained layout cannot help inside that subtree, because every node in it is new. Retained layout here means block shift reuse and the retained flex items of 2026-10-13.
 
 The doc viewer shows the cost. Its app template owns the file tree, so any change to app state re-renders the whole ~650-row tree. Measured on 2026-10-13 (debug build, `doc_viewer_toml`):
 

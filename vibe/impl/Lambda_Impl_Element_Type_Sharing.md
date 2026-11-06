@@ -39,7 +39,7 @@ Each phase lands on its own, green on the gates below, before the next starts.
 - `lambda/validator/validate.cpp`: both the fast verdict and the reporting path match the element's content against `content_list` with `array_pattern_runs_match` (reuse the array path's slot and run helpers over an element's children); NULL skips.
 - Writers of the per-instance count, all removed: `mark_builder.cpp` `ElementBuilder::final`, `mark_editor.cpp` (its content edits no longer touch the type; `elmt_copy_with_new_children` no longer needs a new type), `input.cpp` clone (copy the pointer), `input-mark.cpp`, `input-graph.cpp`, `lambda-data-runtime.cpp` (group type), `lambda-eval.cpp` rebuilds, and the markup parsers: both `increment_element_content_length` definitions and their 122 calls; `block_table.cpp` reads the list length instead.
 - Tests: `test_html_gtest` (content starts at 0), the validator GTests (content patterns of N `any` slots or runs, instead of counts), and a new fixture `test/lambda/element_content_pattern.ls` + `.txt`: runs (`<li>*`, `<li>+`, `<li>?`), literal items, open content (`any*`), a bare `<div>`, nominal content, and the merged-string case.
-- Docs at landing: S11.1.6 and S2.1.3 footnote rows, the D3.1.1 rows, LR13-10 to the fixed archive, LR_03 §4 and LR_11 §2.1.
+- Docs at landing: S11.1.6 and S2.1.3 footnote rows, the D3.1.1 rows, and LR13-10 to the fixed archive.
 
 ### P1 — Elements on the tree (E2)
 
@@ -108,7 +108,7 @@ Each phase lands on its own, green on the gates below, before the next starts.
 **Planned work:**
 - Delete `lambda/core/shape_pool.cpp`/`.hpp`, the interning in `shape_builder.cpp` (the editor keeps a plain field-list builder), `Input::shape_pool`, the transpiler's unread `shape_pool` field, `mem_shape_pool_create` and its registry node.
 - Tests: `test_shape_pool_gtest`, the pool cases in `test_namespace_gtest`.
-- Docs: D3.4.2's signature clause, LR_08 §7, LR_11 §5, diagrams `d08_memory_regions` and `d11_mark_builder`, `Lambda_Shape_Pool.md` status.
+- Docs: D3.4.2's signature clause, `Lambda_Shape_Pool.md` status.
 
 ## Gates, every phase
 

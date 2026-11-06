@@ -1,6 +1,6 @@
 # Lambda Documentation Convention
 
-**Version:** 1.4.0 (2026-11-04)
+**Version:** 1.5.0 (2026-11-06)
 
 **Status:** normative for how Lambda documentation is organized, written, and
 kept honest. Codifies the conventions previously scattered across CLAUDE.md
@@ -17,7 +17,7 @@ rule 17, the formal specs' own headers, and working practice.
 | **Impl plans & progress** | `vibe/impl/*.md` | Full implementation plans, phases, progress, status; issue-fix records | Informative (history) |
 | **Issue ledger** | `vibe/Lambda_Issue_Ledger.md` | The one central issue ledger for Lambda | Working record, not normative |
 | **Reference grammar** | `lambda/tree-sitter-lambda/grammar.js` | Pseudo design doc: the whole surface language at one glance | **Third in the authority chain** — below vibe (it misses some corner cases) |
-| **Detailed design (final)** | `doc/dev/**` | The distilled, detailed design of each subsystem | Informative — never authority |
+| **Developer guides** | `doc/dev/*.md` | How to build, test, lint and write code in this repo | Informative — never authority |
 | **User-facing docs** | `doc/*.md` (everything else), `doc/tutorial/` | Formal user-facing language and tool documentation, and the tutorial | Descriptive of the rulings |
 
 ## 2. Authority and escalation
@@ -211,30 +211,28 @@ the locations above.
 - The actual fixing of an issue is recorded in `vibe/impl/*`; the ledger holds
   the issue, its status, and the pointer.
 
-## 7. Detailed design (`doc/dev/`)
+## 7. Developer guides (`doc/dev/`)
 
-`doc/dev` captures the "final", detailed design of each subsystem — the
-distilled architecture documents (`lambda/LR_00`–`LR_14`,
-`radiant/RAD_00`–`RAD_22`, `js/JS_00`–`JS_16`, each set indexed by its `_00`
-overview) plus developer guides (`C_Plus_Convention.md`, `Make_Guide.md`,
-`Developer_Guide.md`, …).
+`doc/dev` holds the contributor guides (`Developer_Guide.md`, `Make_Guide.md`,
+`C_Plus_Convention.md`, `Lambda_Lint_Rules.md`, …). It is not a design tier.
+Detailed design lives in the vibe records (§4). The per-subsystem design sets
+that used to live here were retired on 2026-11-06 (USER): they duplicated the
+vibe records, and §9 treats a copy as a fork that will silently diverge. Do not
+add a detailed-design document under `doc/dev`.
 
 - **Informative, never authority.** When a `doc/dev` statement disagrees with
   a formal ruling or a vibe decision record, the `doc/dev` text is stale —
   escalate per §2 if in doubt.
-- **Verified-against headers**: each detailed-design doc carries, directly
-  under its title, the line
+- **Verified-against headers**: a guide that describes current behavior
+  carries, directly under its title, the line
   `> **Last verified against tree:** YYYY-MM-DD`.
   Going stale is allowed, but visibly dated. Periodic re-sync sweeps update
-  the content and bump the date; there is no per-change sync duty. (Initial
-  sweep 2026-08-27 stamped all 63 `doc/dev` docs from git last-edit dates,
-  marked *"initial stamp from git history"* — replace that marker with a
-  plain date on the first real re-verification.)
+  the content and bump the date; there is no per-change sync duty.
 - **Cite `file:line` + exact symbol names**, never quoted code — line numbers
   drift; the symbol name is what the reader confirms against.
-- Per-doc "known issues" sections were consolidated into the central ledger;
-  do not grow new ones — the `LR_*`/`RAD_*`/`JS_*` documents are the *design*
-  record, the ledger is the *issue* record.
+- **Issues go in a ledger, never in a document's own "known issues" section.**
+  Besides the central ledger (§6), `vibe/jube/JS_Issue_Ledger.md` and
+  `vibe/radiant/Radiant_Issue_Ledger.md` hold the LambdaJS and Radiant issues.
 
 ## 8. User-facing docs (`doc/*.md`)
 

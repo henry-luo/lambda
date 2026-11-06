@@ -583,7 +583,7 @@ Do not infer performance from debug-build functional runs.
    changes that mask a defect.
 4. Refresh §15 of `HTML_CSS_SVG_Support.md` only after the corresponding cases pass;
    refresh the SVG-related §17 rows from export evidence. Update
-   [RAD_14](../../doc/dev/radiant/RAD_14_SVG_Vector_Graph.md) and the SVG2 progress
+   the SVG2 progress
    record for the final architecture. Keep remaining issues in the central
    [Lambda Issue Ledger](../Lambda_Issue_Ledger.md), linking this plan.
 5. Record each phase as completed only with its source changes, validation and

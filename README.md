@@ -311,10 +311,8 @@ See the [latest full benchmark report](test/benchmark/Overall_Result50.md) for p
 | [Formal Design](doc/Lambda_Formal_Design.md)          | Normative design/implementation specification — D-numbered rulings for the core runtime; the design authority when docs or implementation disagree |
 | [Documentation Convention](doc/Doc_Convention.md)     | How Lambda documentation is organized — document tiers, authority order, and style conventions |
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
-| [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
-| [Radiant Engine Design](doc/dev/radiant/RAD_00_Overview.md) | Detailed design of the HTML/CSS layout, rendering, and interaction engine — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table), rendering pipeline, SVG, events, editing, state, shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set) |
+| [Design Records](vibe/)                                | Working design records by subsystem: `vibe/Lambda_Design_*.md`, `vibe/radiant/` and `vibe/jube/` |
 | [JS and DOM Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
-| [LambdaJS Runtime Design](doc/dev/js/JS_00_Overview.md) | Detailed design of the embedded JavaScript engine — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility |
 
 ## Platform Support
 

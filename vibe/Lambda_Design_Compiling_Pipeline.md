@@ -21,8 +21,7 @@
 > **Ledger**: extends the compiling area's **LC#** series
 > (`Lambda_Design_Compiling.md`, LC1–LC2): decisions **LC3.1–LC3.9**, open
 > issues **LCO1–LCO6**. No new series.
-> **Companion**: `doc/dev/lambda/LR_01_Compilation_Pipeline.md` (orchestration
-> detail), `LR_02_Parsing_AST.md`, `LR_07_MIR_Transpiler_JIT.md`;
+> **Companion**: `Lambda_Grammar_Parser.md`, `Lambda_Transpiler.md`;
 > measurement tool `utils/compile_phase_bench.sh`; synthetic repros under
 > `temp/astscale/`.
 
@@ -211,7 +210,7 @@ quadratic. LCO1.
    (§1.3) mean the critical path still rebuilds modules a worker already
    built, serially, inside the importer's build pass.
 5. **The REPL and `validate`/`convert` paths inherit the same budget**
-   (`LR_01` §6: whole-history replay per line), so every millisecond saved
+   (whole-history replay per line), so every millisecond saved
    in build is saved per keystroke as well.
 
 Target, used as the acceptance bar for §4: **build ≤ 3 × parse on every

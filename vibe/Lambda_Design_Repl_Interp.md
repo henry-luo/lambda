@@ -18,7 +18,7 @@ Whole-history replay survives in exactly three places, and that is what keeps th
 |---|---|
 | `lambda/main.cpp:1133` | `LAMBDA_EXEC_BACKEND=jit` (and `--tier=jit`) still runs the 2024 model: append to `repl_history`, `run_script_mir` the whole buffer, byte-truncate on error, prefix-diff the output. |
 | `lambda/main.cpp:1137` | If `interp_repl_session_init` fails the loop silently falls back to the same replay. |
-| `vibe/Lambda_Repl.md`, `doc/dev/lambda/LR_01 §6`, ledger LR01-7/LR01-18 | The documentation still describes replay as *the* REPL. |
+| `vibe/Lambda_Repl.md`, ledger LR01-7/LR01-18 | The documentation still describes replay as *the* REPL. |
 
 So the work is not "move the REPL onto an interpreter" but **finish the move**: retire the replay path, fix the defects the session has today, and then use the live session (scope + slab) for the REPL services the replay model could never offer cheaply.
 
@@ -63,7 +63,7 @@ and rolls back the entry; G2's other runtime-diagnostic questions remain.
 | **G7** | SIGINT only observed between entries; a long-running entry cannot be interrupted | `lib/terminal_device.c:51`, no poll in `interp.cpp` |
 | **G8** | Declaration-only entries echo `null` (LR01-18) | `main.cpp:1223` |
 | **G9** | Per-entry snapshot copies the whole slab and registers a root range: O(bindings) per entry | `runtime-state.cpp:578` |
-| **G10** | Docs/ledger describe the replay model | `vibe/Lambda_Repl.md`, LR_01 §6, LR01-7 |
+| **G10** | Docs/ledger describe the replay model | `vibe/Lambda_Repl.md`, LR01-7 |
 
 ## 2. Goal and scope
 
@@ -186,7 +186,6 @@ Everything below reads the session's `NameScope` + slab, which replay could neve
 ## 7. Documents to update when this lands
 
 - `vibe/Lambda_Repl.md` — rewrite around the session model (today it documents buffer replay and Tree-sitter completeness, both gone).
-- `doc/dev/lambda/LR_01_*.md` §6 — the REPL loop section describes `run_script_mir(repl_history)`.
 - `vibe/Lambda_Issue_Ledger.md` — LR01-7 (replay) and LR01-18 (echo) close; `vibe/impl/Lambda_Impl_Ast_Interp (done).md` P4 text "imports are deliberately rejected" corrected.
 - **Landed 2026-10-06 with the rulings:** `doc/Lambda_Formal_Design.md` D8.3.6 (25.0.0) — the REPL session, replay retired, the D8.3.5 reference-parser carve-out struck, RI4–RI6; `doc/Lambda_Formal_Semantics.md` S16.7.4–S16.7.6 (57.1.0) — echo, no rebinding, session kinds. Both carry `*` footnotes until Phases A–B land; flip them then.
 - `doc/Lambda_Reference.md` / tutorial REPL samples — the website quickstart avoids `let` because of LR01-18; it can stop avoiding it.
@@ -209,7 +208,6 @@ Defects found and fixed on the way:
 
 - The error formatter left its buffer unterminated after a caret line on the source's last line, so diagnostics printed stray bytes (`lambda-error.cpp`).
 - A grown module slab is sealed; restoring the plan count after a failed entry made the next entry fail with "sealed layout changed". The transaction keeps the grown count.
-- The LR_01 REPL diagram (`doc/dev/lambda/diagram/d01_repl.svg`) still showed replay; re-rendered from its `.mmd` with mermaid-cli.
 
 Not done, and why:
 

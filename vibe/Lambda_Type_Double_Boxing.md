@@ -5,7 +5,7 @@
 - **Co-Author:** Anthropic Fable
 - **Scope:** the runtime `Item` representation of `float` (binary64) across Lambda core, LambdaJS, the MIR transpilers, and the GC. Supersedes and expands **Part 5** of `Lambda_Tuning_Proposal.md`.
 - **Convention:** `file:line` references drift; confirm against the symbol name.
-- **Related:** `Lambda_Design_Item_Boxing.md` (**the Item-representation design record this extension must preserve** — tagged scalar leaves, raw container pointers, and the invariants in its §6), `Lambda_Tuning_Proposal.md` (Parts 1–5 — the engine-wide analysis this fix comes from), `Lambda_Semantics_Number_Model.md` (number model v2 — `int` compact band, `f64` alias rule), `doc/dev/js/JS_03_Value_Model.md`, `doc/Lambda_Formal_Semantics.md` §4 (numerics ADR).
+- **Related:** `Lambda_Design_Item_Boxing.md` (**the Item-representation design record this extension must preserve** — tagged scalar leaves, raw container pointers, and the invariants in its §6), `Lambda_Tuning_Proposal.md` (Parts 1–5 — the engine-wide analysis this fix comes from), `Lambda_Semantics_Number_Model.md` (number model v2 — `int` compact band, `f64` alias rule), `doc/Lambda_Formal_Semantics.md` §4 (numerics ADR).
 
 ## 0. Summary
 
@@ -298,7 +298,6 @@ If S2 measures worse than expected (branch cost in `get_type_id` on float-light 
 - `Lambda_Tuning_Proposal.md` — Part 1 (Wall 1/Wall 4 sizing), Part 2 (stack boxing — float case subsumed by this doc), Part 3 (rooting — inline floats need none), Part 4 (the tagging-vs-NaN-boxing verdict this design implements), Part 5 (the sketch this doc supersedes).
 - `Lambda_Semantics_Number_Model.md` — §2.1 (compact band = safe-integer band), §3.2 (`f64` alias rule → §3.7 here), §5.1/§5.4 (JS number ≡ float; compact-int packing removal), Part 2 W-items (migration coordination).
 - `doc/Lambda_Formal_Semantics.md` §4 — numeric semantics ADR (value domain unchanged by this proposal; representation only).
-- `doc/dev/js/JS_03_Value_Model.md`, `JS_04_MIR_Lowering.md` — the value-model and lowering docs to update at S2.
 - `lib/gc/` — `gc_nursery.h:15` (the never-reclaimed nursery this shrinks), `gc_heap.c:770` (`item_to_ptr`), `:1202` (`gc_fixup_embedded_pointers`).
 
 ---

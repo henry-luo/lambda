@@ -123,7 +123,7 @@ levels:
   Sub-mixes attach to and detach from the bus by generation-checked
   handles, so a closed document simply stops contributing. The window already
   owns shared services this way (the loader runtime, ES12v2/EO3v2), and Radiant
-  is single-window today (RAD_20), so the bus is effectively per process.
+  is single-window today, so the bus is effectively per process.
 
 Within a document, everything shares that sub-mix's clock, which gives:
 

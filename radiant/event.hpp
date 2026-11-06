@@ -3110,7 +3110,7 @@ bool view_state_ref_follow_rebuild(DomDocument* doc, DomNodeRef* owner,
 void radiant_focus_events_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                          DomNode* new_root);
 // Pending Lambda frame requests owned inside a rebuilt subtree follow their
-// owners to the corresponding replacement nodes (RAD_16 §8).
+// owners to the corresponding replacement nodes.
 void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                            DomNode* new_root);
 void radiant_pointer_capture_follow_rebuild(DomDocument* doc, DomNode* old_root,
