@@ -1243,6 +1243,29 @@ void resolve_literal_constant(Transpiler* tp, AstNode* node) {
     }
 }
 
+static void record_bound_type_use(Transpiler* tp, TypeBoundRef* reference, NameEntry* binder) {
+    AstFuncNode* function = ast_scope_function(tp->current_scope);
+    NameScope* scope = function ? function->vars : NULL;
+    if (!scope || !reference || !binder) return;
+    for (AstBoundTypeUse* use = scope->bound_type_uses; use; use = use->next)
+        if (use->reference == reference) return;
+    AstBoundTypeUse* use = (AstBoundTypeUse*)pool_calloc(tp->pool, sizeof(AstBoundTypeUse));
+    use->reference = reference; use->binder = binder;
+    use->next = scope->bound_type_uses; scope->bound_type_uses = use;
+}
+
+static bool record_aliased_bound_type(Type* dependency, void* context) {
+    if (dependency->kind != TYPE_KIND_BOUND_REF) return true;
+    Transpiler* tp = (Transpiler*)context;
+    for (NameScope* scope = tp->current_scope; scope; scope = scope->parent)
+        for (AstBoundTypeUse* use = scope->bound_type_uses; use; use = use->next)
+            if ((Type*)use->reference == dependency) {
+                record_bound_type_use(tp, use->reference, use->binder);
+                return true;
+            }
+    return true;
+}
+
 void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
     StrView w = {ident->name->chars, ident->name->len};
     NameEntry* entry = lookup_name(tp, w);
@@ -1251,6 +1274,7 @@ void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
             TYPE_KIND_BOUND_REF, sizeof(TypeBoundRef));
         ref->slot = entry->binder_slot;
         ref->bound = entry->binder->bound;
+        record_bound_type_use(tp, ref, entry);
         // a binder reference is a type node, not a name: morph in place so
         // the parent keeps its child pointer
         static_assert(sizeof(AstTypeNode) <= sizeof(AstIdentNode),
@@ -1294,6 +1318,8 @@ void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
         record_unknown_base_type_span(tp, ident->source_span, w);
         ident->type = (Type*)&LIT_TYPE_ERROR;
     }
+    lambda_type_visit_dependencies(type_field_unwrap_simple_decl(ident->type), true,
+        record_aliased_bound_type, tp);
 }
 
 void resolve_array_type(Transpiler* tp, AstArrayNode* ast_node) {

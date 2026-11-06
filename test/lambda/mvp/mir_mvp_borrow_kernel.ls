@@ -8,7 +8,7 @@ pn repeat(var a: float[], b: float[], n: int) float^ {
     var total: float = 0.0
     var i: int = 0
     while (i < n) { total = total + step(a, b); i = i + 1 }
-    return total
+    return total^
 }
 
 pn main() {

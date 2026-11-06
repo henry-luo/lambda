@@ -39,7 +39,10 @@ Item template_call_event_handler(TemplateHandlerEntry* entry,
     } handler;
     // The registry stores MIR handlers erased; restore their context ABI here.
     handler.raw = entry->handler_func;
-    return handler.typed((Context*)context, model_item, event_item);
+    // boxed MIR callbacks can return a pending scalar plus the companion
+    // slot. Resolve it in the host's number extent before another callback.
+    return lambda_item_resolve_pending_slot(
+        handler.typed((Context*)context, model_item, event_item));
 }
 
 Item template_dispatch_event(Item model_item, bool edit_mode,
@@ -672,7 +675,7 @@ static Item invoke_template(TemplateEntry* tmpl, Item target) {
     // receives it explicitly and never reloads `_lambda_rt`.
     typedef Item (*template_body_fn)(Context*, Item);
     template_body_fn fn = (template_body_fn)tmpl->body_func;
-    return fn((Context*)context, target);
+    return lambda_item_resolve_pending_slot(fn((Context*)context, target));
 }
 
 static Item invoke_recorded_template(TemplateEntry* tmpl, Item target) {

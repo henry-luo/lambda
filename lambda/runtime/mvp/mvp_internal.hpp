@@ -30,8 +30,26 @@ static inline bool mvp_function_expression(const AstNode* node) {
         !((const AstFuncNode*)node)->name;
 }
 
+static inline bool mvp_type_has_environment(Type* type) {
+    type = type_field_unwrap_simple_decl(type);
+    for (TypeNominal* nominal = type_nominal_record(type); nominal; nominal = nominal->base)
+        for (TypeMethod* method = nominal->methods; method; method = method->next)
+            if (method->ast_def && method->ast_def->captures) return true;
+    return false;
+}
+
+static inline bool mvp_dynamic_type_binding(NameEntry* entry) {
+    return entry && entry->node && ast_definition_denotes_type(entry->node) &&
+        mvp_type_has_environment(entry->node->type);
+}
+
 static inline bool mvp_static_type_capture(const FnCapture* capture) {
-    return capture && capture->entry && ast_definition_denotes_type(capture->entry->node);
+    return capture && capture->entry && ast_definition_denotes_type(capture->entry->node) &&
+        !mvp_dynamic_type_binding(capture->entry);
+}
+
+static inline bool mvp_open_value_contract(Type* contract) {
+    return contract == &TYPE_ANY || contract == &TYPE_ANY_NO_ERROR;
 }
 
 static inline bool mvp_exact_membership_domain(Type* type) {
@@ -68,6 +86,9 @@ static inline AstFuncNode* mvp_function_value_reference(const AstIndex* index, A
 
 struct MvpFunction {
     AstFuncNode* ast;
+    AstViewNode* view;
+    AstEventHandler* handler;
+    const char* template_ref;
     TypeObject* method_owner;
     const char* name;
     const char* js_export_name;
@@ -78,13 +99,25 @@ struct MvpFunction {
     Type* declared_result;
     Type* result_contract;
     Type* scalar_result_fallback;
+    Type** captured_type_references;
+    NameEntry** captured_type_entries;
+    uint16_t captured_type_count;
     AstFunctionId id;
+    AstFunctionId parent;
     uint32_t inline_cost;
     bool imported;
     bool boxed_entry;
     bool no_value_result;
     bool owns_open_scopes;
 };
+
+static inline bool mvp_edit_model_place(MvpFunction* function, AstNode* object) {
+    if (!function || !function->handler || !function->view->is_edit) return false;
+    object = ast_unwrap_primary_to_leaf(object);
+    while (object && (object->node_type == AST_NODE_MEMBER_EXPR || object->node_type == AST_NODE_INDEX_EXPR))
+        object = ast_unwrap_primary_to_leaf(((AstFieldNode*)object)->object);
+    return object && object->node_type == AST_NODE_CURRENT_ITEM;
+}
 
 static inline bool mvp_variadic_function(const MvpFunction* function) {
     return function && function->ast && ((TypeFunc*)function->ast->type)->is_variadic;
@@ -118,7 +151,7 @@ static inline bool mvp_parameter_receiver(MvpFunction* function) {
     return false;
 }
 
-enum MvpCleanupKind { MVP_CLEANUP_TASK, MVP_CLEANUP_TRANSACTION, MVP_CLEANUP_RECOVERY };
+enum MvpCleanupKind { MVP_CLEANUP_TASK, MVP_CLEANUP_TRANSACTION, MVP_CLEANUP_RECOVERY, MVP_CLEANUP_KEYS };
 struct MvpCleanup {
     MvpCleanup* parent;
     MIR_reg_t record;
@@ -142,6 +175,7 @@ struct MvpIntRange {
 };
 struct MvpBinding {
     NameEntry* entry;
+    const char* state_name;
     Type* admission_contract;
     Type* producer_success_contract;
     Type* contract;
@@ -213,6 +247,7 @@ struct MvpControl {
     MIR_label_t next;
     MIR_label_t done;
     MvpCleanup* cleanup_base;
+    MvpCleanup* break_cleanup_base;
 };
 
 struct MvpInline {
@@ -249,6 +284,9 @@ struct MvpCompiler {
     MIR_reg_t environment;
     MIR_reg_t vargs_roots;
     MIR_reg_t binder_env;
+    MIR_reg_t captured_types;
+    MIR_reg_t method_receiver;
+    MIR_reg_t method_environment;
     MIR_reg_t admission_status;
     MvpControl* control;
     MvpScope* scope;
@@ -262,6 +300,7 @@ struct MvpCompiler {
     MIR_reg_t current_index;
     MIR_reg_t current_parent;
     MIR_reg_t current_root;
+    MIR_reg_t view_model;
     MIR_reg_t last_index_item;
     uint32_t inline_cost;
     MvpFloatConstant* float_constants;
@@ -331,8 +370,12 @@ struct MvpIndexLoopPlan {
 
 bool mvp_reject(LambdaMvpModule* module, AstNode* node, const char* reason);
 ValueRep mvp_rep(Type* type);
+Type* mvp_inferred_scalar_contract(Type* contract);
+Type* mvp_join_value_contracts(LambdaMvpModule* module, Type* left, Type* right);
+Type* mvp_bound_array_contract(Type* contract);
 Type* mvp_contract(AstNode* declaration);
 MvpFunction* mvp_function(LambdaMvpModule* module, AstFuncNode* ast);
+AstFunctionId mvp_node_owner(LambdaMvpModule* module, AstNodeId id);
 MvpFunction* mvp_require_function_reference(LambdaMvpModule* module, AstFuncNode* target,
     AstNode* callee, Script* owner = NULL);
 MvpBinding* mvp_binding(LambdaMvpModule* module, NameEntry* entry);
@@ -358,7 +401,9 @@ MvpBinding* mvp_null_condition(LambdaMvpModule* module, AstNode* condition,
 ShapeEntry* mvp_member_field(LambdaMvpModule* module, AstFieldNode* node,
     TypeMap** shape = NULL, bool success_only = false);
 Type* mvp_match_type(AstNode* pattern);
+bool mvp_match_arm_covers(Type* subject, AstMatchArm* arm);
 bool mvp_boundary_proven(Type* source, Type* destination);
+bool mvp_admission_proven(LambdaMvpModule* module, Type* source, Type* destination);
 // private array observations require the exact primitive element domain;
 // numeric subtyping cannot turn int elements into float elements (D4.3.3).
 static inline bool mvp_private_domain_proven(Type* source, Type* destination) {
@@ -377,6 +422,7 @@ TypeMap* mvp_contextual_map_contract(LambdaMvpModule* module, AstNode* node);
 TypeMap* mvp_member_candidate(LambdaMvpModule* module, NameRef name);
 bool mvp_native_math(const SysFuncInfo* info, TypeId input);
 Type* mvp_nullable_contract(LambdaMvpModule* module, Type* base);
+Type* mvp_handler_pass_contract(LambdaMvpModule* module, AstHandlerNode* handler, Type* operand);
 AstFieldNode* mvp_string_index(LambdaMvpModule* module, AstNode* node, int depth = 0);
 bool mvp_array_index_present(LambdaMvpModule* module, MvpBinding* binding, AstNode* key);
 MvpBinding* mvp_local_binding(LambdaMvpModule* module, AstNode* node);

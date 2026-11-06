@@ -5,6 +5,11 @@
 #include "../lambda-data.hpp"
 #include "value_rep.h"
 
+typedef bool (*LambdaTypeDependencyVisitor)(Type* type, void* context);
+bool lambda_type_visit_dependencies(Type* type, bool include_refs,
+    LambdaTypeDependencyVisitor visitor, void* context,
+    bool descend_functions = true, int depth = 0);
+
 // a union has no common physical record layout. Constructors may select one
 // matching arm; multiple matches retain dynamic admission (D4.2.5).
 static inline void lambda_type_select_map_arm(Type* target, TypeMap** selected,

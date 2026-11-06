@@ -5,11 +5,8 @@ pn absent(a: float[], i: int) any { return (a[i] + 1.0) * 2.0 }
 pn negate(a: float[], i: int) any { return -a[i] }
 pn dynamic(a: float[], i: any) any { return a[i] }
 pn write_absent(var a: float[]) { a[0] = a[9] + 1.0; print("UNEXPECTED WRITE\n") }
-// S7.7.2v2: deferred admission retains its error and continues.
-pn boundary(a: float[]) {
-    var scalar: float = a[9]
-    print(scalar is error); print("\n")
-}
+// a deferred initializer retains Error and continues (S7.7.2v2).
+pn boundary(a: float[]) { var scalar: float = a[9]; print(scalar is error); print("\n") }
 pn borrow(var a: float[], snapshot: float[]) float {
     a[0] = SCALE
     return snapshot[0]
@@ -56,11 +53,11 @@ pn main() {
     add_three(dest, src)^
     print(saved[2]); print(" "); print(dest[2]); print("\n")
     var short: float[] = fill(1, 4.0)^
-    let failed_add = add_three(dest, short)
+    let rejected_short = add_three(dest, short)
     print(dest[0]); print(" "); print(dest[1]); print("\n")
     print(halve(1e-310) == generic_halve(1e-310)); print(" ")
     print(halve(5e-324) == generic_halve(5e-324)); print(" ")
     print(1.0 / halve(-0.0) < 0.0); print("\n")
-    let failed_counter = nested_counter(dest)
+    let rejected_nested = nested_counter(dest)
     print(dest[0]); print(" "); print(dest[2]); print("\n")
 }

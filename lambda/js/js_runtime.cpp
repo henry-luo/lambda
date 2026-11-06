@@ -29,6 +29,7 @@
 #include "../module/node_core/node_trace_events.hpp"
 #include "../module/node_core/node_runtime_state.hpp"
 #include "../runtime/lambda-error.h"
+#include "../runtime/native_collection.hpp"
 #include "../runtime/lambda-stack.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../runtime/heap_api.h"
@@ -1074,46 +1075,12 @@ static Item js_compute_callback_this(JsFunction* fn, Item thisArg_item) {
     return thisArg_item;
 }
 
+enum { JS_COLLECTION_MAP = NATIVE_COLLECTION_MAP, JS_COLLECTION_SET = NATIVE_COLLECTION_SET };
+
 // Forward declarations for collection types used by property and intrinsic bodies.
-#define JS_COLLECTION_MAP 0
-#define JS_COLLECTION_SET 1
 
-struct JsCollectionOrderNode {
-    // slots[0..1] own the observable key/value. The matching tail slots hold
-    // wide scalar payloads so entries never borrow a caller's number frame.
-    Item slots[4];
-    JsCollectionOrderNode* next;
-    bool deleted;
-};
-
-enum JsCollectionNodeSlot {
-    JS_COLLECTION_NODE_KEY = 0,
-    JS_COLLECTION_NODE_VALUE = 1,
-    JS_COLLECTION_NODE_ITEM_COUNT = 2,
-};
-
-struct JsCollectionData {
-    HashMap* hmap;
-    Pool* pool; // native nodes share the carrier owner, independent of front-end TLS
-    int type; // JS_COLLECTION_MAP or JS_COLLECTION_SET
-    bool is_weak; // true for WeakMap/WeakSet
-    JsCollectionOrderNode* order_head;
-    JsCollectionOrderNode* order_tail;
-};
-
-// Collection instances retain ordinary Map shape/data storage for expandos,
-// while this trailing field implements the unobservable [[MapData]]/[[SetData]]
-// internal slot. It must never be represented by a string-keyed shape entry.
-struct JsCollectionMap {
-    Map base;
-    JsCollectionData* collection_data;
-};
-
-static JsCollectionData* js_get_collection_data(Item obj);
-static Item js_collection_node_raw_item(const JsCollectionOrderNode* node,
-    JsCollectionNodeSlot slot);
-static Item js_collection_node_read_item(JsCollectionOrderNode* node,
-    JsCollectionNodeSlot slot);
+static Item js_collection_node_read_item(NativeCollectionNode* node,
+    NativeCollectionSlot slot);
 
 
 
@@ -10539,7 +10506,7 @@ Item js_intrinsic_string_iterator_next_body(Item callee, Item this_value,
 static Item js_intrinsic_collection_method(int collection_type, bool is_weak,
         int operation, const char* receiver_error, Item this_value,
         Item* args, int argc) {
-    JsCollectionData* collection = js_get_collection_data(this_value);
+    NativeCollectionData* collection = native_collection_data(this_value);
     if (!collection || collection->type != collection_type ||
         collection->is_weak != is_weak) {
         return js_throw_type_error(receiver_error);
@@ -11753,7 +11720,7 @@ JS_ATOMICS_SPECIAL_BODY(js_intrinsic_atomics_islockfree_body,
 
 static Item js_intrinsic_collection_iterator_create(int collection_type,
         int mode, Item this_value) {
-    JsCollectionData* collection = js_get_collection_data(this_value);
+    NativeCollectionData* collection = native_collection_data(this_value);
     if (!collection || collection->is_weak ||
         collection->type != collection_type) {
         return js_throw_type_error("Method called on incompatible receiver");
@@ -11794,7 +11761,7 @@ JS_COLLECTION_ITERATOR_BODY(js_intrinsic_map_values_body,
 
 static Item js_intrinsic_set_operation(JsIndexedIntrinsicOp operation,
         Item this_value, Item* args, int argc) {
-    JsCollectionData* collection = js_get_collection_data(this_value);
+    NativeCollectionData* collection = native_collection_data(this_value);
     if (!collection || collection->type != JS_COLLECTION_SET ||
         collection->is_weak) {
         return js_throw_type_error(
@@ -11841,7 +11808,7 @@ enum JsCollectionSizeKind {
 
 static Item js_intrinsic_collection_size(JsCollectionSizeKind kind,
         Item this_value) {
-    JsCollectionData* collection = js_get_collection_data(this_value);
+    NativeCollectionData* collection = native_collection_data(this_value);
     bool wrong_kind = kind == JS_COLLECTION_SIZE_MAP &&
         (!collection || collection->type != JS_COLLECTION_MAP);
     wrong_kind = wrong_kind || (kind == JS_COLLECTION_SIZE_SET &&
@@ -11887,9 +11854,9 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
             get_type_id(ctype_item) != LMD_TYPE_INT) {
             return js_throw_type_error("Collection Iterator.prototype.next called on incompatible receiver");
         }
-        JsCollectionOrderNode* node = (JsCollectionOrderNode*)(uintptr_t)it2i(node_item);
-        JsCollectionData* cd = (JsCollectionData*)(uintptr_t)it2i(coll_item);
-        JsCollectionOrderNode* last_node = (JsCollectionOrderNode*)(uintptr_t)it2i(last_item);
+        NativeCollectionNode* node = (NativeCollectionNode*)(uintptr_t)it2i(node_item);
+        NativeCollectionData* cd = (NativeCollectionData*)(uintptr_t)it2i(coll_item);
+        NativeCollectionNode* last_node = (NativeCollectionNode*)(uintptr_t)it2i(last_item);
         int mode = (int)it2i(mode_item);
         int coll_type = (int)it2i(ctype_item);
         if (js_is_truthy(done_item)) {
@@ -11918,21 +11885,21 @@ Item js_intrinsic_collection_iterator_next_body(Item callee,
             value.set(js_array_new(2));
             Item pair = value.get();
             Item key = js_collection_node_read_item(node,
-                JS_COLLECTION_NODE_KEY);
+                NATIVE_COLLECTION_NODE_KEY);
             if (coll_type == JS_COLLECTION_SET) {
                 js_elements_set_int(pair, 0, key);
                 js_elements_set_int(pair, 1, key);
             } else {
                 js_elements_set_int(pair, 0, key);
                 js_elements_set_int(pair, 1, js_collection_node_read_item(node,
-                    JS_COLLECTION_NODE_VALUE));
+                    NATIVE_COLLECTION_NODE_VALUE));
             }
         } else if (mode == 1) {
-            value.set(js_collection_node_read_item(node, JS_COLLECTION_NODE_KEY));
+            value.set(js_collection_node_read_item(node, NATIVE_COLLECTION_NODE_KEY));
         } else {
             // values: for Set, key IS the value; for Map, node's value
             value.set(js_collection_node_read_item(node, coll_type == JS_COLLECTION_SET
-                ? JS_COLLECTION_NODE_KEY : JS_COLLECTION_NODE_VALUE));
+                ? NATIVE_COLLECTION_NODE_KEY : NATIVE_COLLECTION_NODE_VALUE));
         }
         // advancing allocates property keys before the yielded value reaches its result owner.
         js_set_key_cstr(this_val, "__last_node__", (Item){.item = i2it((int64_t)(uintptr_t)node)});
@@ -19010,98 +18977,12 @@ static Item js_regexp_symbol_split(Item receiver, Item string, Item limit) {
 // v11: Map/Set collections — backed by HashMap from lib/hashmap.h
 // =============================================================================
 
-struct JsCollectionEntry {
-    // The order node is the sole owner of a collection entry. Hash buckets
-    // merely index that stable node, which avoids a second mutable key/value
-    // copy and an insertion-order scan after every hash operation.
-    JsCollectionOrderNode* node;
-};
+// storage and tracing are shared with Lambda; JS retains read/coercion policy.
 
-// Insertion-order node and data structs moved to forward declaration section above
-
-static Item js_collection_node_raw_item(const JsCollectionOrderNode* node,
-        JsCollectionNodeSlot slot) {
-    return node ? node->slots[slot] : ItemNull;
-}
-
-static Item js_collection_node_read_item(JsCollectionOrderNode* node,
-        JsCollectionNodeSlot slot) {
+static Item js_collection_node_read_item(NativeCollectionNode* node,
+        NativeCollectionSlot slot) {
     return node ? js_owned_item_slot_read(node->slots,
-        JS_COLLECTION_NODE_ITEM_COUNT, slot, false) : ItemNull;
-}
-
-static void js_collection_node_store_item(JsCollectionOrderNode* node,
-        JsCollectionNodeSlot slot, Item value) {
-    if (!node) return;
-    owned_item_slot_store(node->slots, JS_COLLECTION_NODE_ITEM_COUNT, slot,
-        value);
-}
-
-static void js_collection_node_clear_items(JsCollectionOrderNode* node) {
-    js_collection_node_store_item(node, JS_COLLECTION_NODE_KEY, ItemNull);
-    js_collection_node_store_item(node, JS_COLLECTION_NODE_VALUE, ItemNull);
-}
-
-static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const JsCollectionEntry* e = (const JsCollectionEntry*)item;
-    Item k = js_collection_node_raw_item(e ? e->node : NULL,
-        JS_COLLECTION_NODE_KEY);
-    TypeId tid = get_type_id(k);
-    if (tid == LMD_TYPE_STRING) {
-        String* s = it2s(k);
-        return hashmap_hash_bytes(s->chars, s->len, seed0, seed1);
-    }
-    // Numeric types: hash as double for SameValueZero consistency
-    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
-        double d;
-        if (tid == LMD_TYPE_FLOAT) d = k.get_double();
-        else if (tid == LMD_TYPE_INT64) d = (double)it2l(k);
-        else d = (double)it2i(k);
-        // SameValueZero: -0 and +0 are the same → normalize to +0
-        if (d == 0.0) d = 0.0;
-        // SameValueZero: all NaN values are equal → use canonical NaN bits
-        if (d != d) { uint64_t nan_marker = 0x7FF8000000000001ULL; return hashmap_hash_bytes(&nan_marker, sizeof(nan_marker), seed0, seed1); }
-        return hashmap_hash_bytes(&d, sizeof(d), seed0, seed1);
-    }
-    // fallback: hash the raw item bits
-    uint64_t bits = k.item;
-    return hashmap_hash_bytes(&bits, sizeof(bits), seed0, seed1);
-}
-
-static int js_collection_compare(const void *a, const void *b, void *udata) {
-    const JsCollectionEntry* ea = (const JsCollectionEntry*)a;
-    const JsCollectionEntry* eb = (const JsCollectionEntry*)b;
-    Item ka = js_collection_node_raw_item(ea ? ea->node : NULL,
-        JS_COLLECTION_NODE_KEY);
-    Item kb = js_collection_node_raw_item(eb ? eb->node : NULL,
-        JS_COLLECTION_NODE_KEY);
-    TypeId ta = get_type_id(ka), tb = get_type_id(kb);
-    // SameValueZero: handle numeric type coercion (-0 == +0, NaN == NaN)
-    // Normalize numeric types for comparison
-    bool a_num = (ta == LMD_TYPE_INT || ta == LMD_TYPE_INT64 || ta == LMD_TYPE_FLOAT);
-    bool b_num = (tb == LMD_TYPE_INT || tb == LMD_TYPE_INT64 || tb == LMD_TYPE_FLOAT);
-    if (a_num && b_num) {
-        double da, db;
-        if (ta == LMD_TYPE_FLOAT) da = ka.get_double();
-        else if (ta == LMD_TYPE_INT64) da = (double)it2l(ka);
-        else da = (double)it2i(ka);
-        if (tb == LMD_TYPE_FLOAT) db = kb.get_double();
-        else if (tb == LMD_TYPE_INT64) db = (double)it2l(kb);
-        else db = (double)it2i(kb);
-        // SameValueZero: NaN == NaN
-        if (da != da && db != db) return 0;
-        // SameValueZero: -0 == +0
-        return (da == db) ? 0 : 1;
-    }
-    if (ta != tb) return 1;
-    if (ta == LMD_TYPE_STRING) {
-        String* sa = it2s(ka);
-        String* sb = it2s(kb);
-        if (sa->len != sb->len) return 1;
-        return memcmp(sa->chars, sb->chars, sa->len);
-    }
-    // reference equality for objects
-    return (ka.item == kb.item) ? 0 : 1;
+        NATIVE_COLLECTION_NODE_ITEM_COUNT, slot, false) : ItemNull;
 }
 
 static Item js_collection_canonical_key(Item key) {
@@ -19131,42 +19012,19 @@ bool js_can_be_held_weakly(Item key) {
         key.get_symbol()->kind != SYMBOL_JS_REGISTERED;
 }
 
-static JsCollectionData* js_get_collection_data(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP || !obj.map ||
-            obj.map->map_kind != MAP_KIND_COLLECTION) return NULL;
-    return ((JsCollectionMap*)obj.map)->collection_data;
-}
-
 bool js_collection_has_brand(Item object, int kind, bool weak) {
-    JsCollectionData* data = js_get_collection_data(object);
+    NativeCollectionData* data = native_collection_data(object);
     return data && data->type == kind && data->is_weak == weak;
 }
 
 Item js_collection_create_with_storage(TypeMap* shape, Pool* pool, int kind, bool weak) {
-    if (!shape || !pool) return ItemError;
-    JsCollectionData* data = (JsCollectionData*)pool_calloc(pool, sizeof(JsCollectionData));
-    if (!data) return ItemError;
-    data->hmap = hashmap_new(sizeof(JsCollectionEntry), 16, 0, 0,
-        js_collection_hash, js_collection_compare, NULL, NULL);
-    if (!data->hmap) return ItemError;
-    data->pool = pool;
-    data->type = kind;
-    data->is_weak = weak;
-    JsCollectionMap* collection = (JsCollectionMap*)heap_calloc(sizeof(JsCollectionMap), LMD_TYPE_MAP);
-    if (!collection) { hashmap_free(data->hmap); data->hmap = NULL; return ItemError; }
-    collection->base.type_id = LMD_TYPE_MAP;
-    collection->base.map_kind = MAP_KIND_COLLECTION;
-    collection->base.type = shape;
-    // D7.2.2: capability storage is not an observable property or cloneable field.
-    collection->collection_data = data;
-    Map* initialized = map_fill_reserve_data(&collection->base);
-    return initialized ? Item{.map = initialized} : ItemError;
+    return native_collection_create(shape, pool, kind, weak);
 }
 
 static Item js_collection_create(int kind, JsClass class_id) {
     TypeMap* shape = js_object_type_for_class(class_id);
     if (!shape) shape = js_empty_object_type_map();
-    return js_collection_create_with_storage(shape, js_input ? js_input->pool : NULL, kind, false);
+    return native_collection_create(shape, js_input ? js_input->pool : NULL, kind, false);
 }
 
 // v41: Link a collection instance to its constructor's prototype
@@ -19187,98 +19045,6 @@ static void js_collection_link_prototype(Item obj, const char* ctor_name, int ct
 }
 
 // Helper: add or update an entry in the insertion-order list
-static JsCollectionOrderNode* js_collection_find_node(JsCollectionData* cd,
-        Item key) {
-    if (!cd || !cd->hmap) return NULL;
-    JsCollectionOrderNode probe_node = {};
-    probe_node.slots[JS_COLLECTION_NODE_KEY] = key;
-    JsCollectionEntry probe = {.node = &probe_node};
-    const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_get(
-        cd->hmap, &probe);
-    return found ? found->node : NULL;
-}
-
-static bool js_collection_insert_node(JsCollectionData* cd, Item key,
-        Item value) {
-    if (!cd || !cd->hmap || !cd->pool) return false;
-    JsCollectionOrderNode* node = (JsCollectionOrderNode*)pool_calloc(
-        cd->pool, sizeof(JsCollectionOrderNode));
-    if (!node) return false;
-    js_collection_node_store_item(node, JS_COLLECTION_NODE_KEY, key);
-    js_collection_node_store_item(node, JS_COLLECTION_NODE_VALUE, value);
-    JsCollectionEntry entry = {.node = node};
-    hashmap_set(cd->hmap, &entry);
-    if (hashmap_oom(cd->hmap)) {
-        // An unpublished node is not traced; do not link a ghost entry when
-        // native hash allocation fails.
-        js_collection_node_clear_items(node);
-        return false;
-    }
-    if (cd->order_tail) cd->order_tail->next = node;
-    else cd->order_head = node;
-    cd->order_tail = node;
-    return true;
-}
-
-static void js_collection_remove_node(JsCollectionOrderNode* node) {
-    if (!node || node->deleted) return;
-    // Keep next links for live iterators and forEach. Deleted nodes are
-    // tombstones until collection teardown, but release their payload now.
-    node->deleted = true;
-    js_collection_node_clear_items(node);
-}
-
-extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
-    if (!map || map->map_kind != MAP_KIND_COLLECTION) return;
-    JsCollectionData* cd = ((JsCollectionMap*)map)->collection_data;
-    if (!cd) return;
-    if (cd->hmap && !gc_native_seen_seen_or_add(seen_native, cd->hmap)) {
-        hashmap_free(cd->hmap);
-    }
-    cd->hmap = NULL;
-    ((JsCollectionMap*)map)->collection_data = NULL;
-}
-
-static void js_collection_weak_entry_clear(uint64_t key_item, void* context) {
-    JsCollectionData* cd = (JsCollectionData*)context;
-    if (!cd || !cd->hmap || key_item == 0) return;
-    Item key = (Item){.item = key_item};
-    JsCollectionOrderNode* node = js_collection_find_node(cd, key);
-    if (!node) return;
-    JsCollectionEntry entry = {.node = node};
-    hashmap_delete(cd->hmap, &entry);
-    js_collection_remove_node(node);
-}
-
-extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
-    if (!map || !gc || map->map_kind != MAP_KIND_COLLECTION) return;
-    JsCollectionData* cd = ((JsCollectionMap*)map)->collection_data;
-    if (!cd) return;
-    if (cd->is_weak) {
-        for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-            if (node->deleted) continue;
-            // A weak value is retained only after its key is independently
-            // reachable; dead keys are removed before sweep can reuse identity.
-            if (!gc_register_ephemeron(gc,
-                                       &node->slots[JS_COLLECTION_NODE_KEY].item,
-                                       &node->slots[JS_COLLECTION_NODE_VALUE].item,
-                                       js_collection_weak_entry_clear, cd)) {
-                gc_mark_item(gc, node->slots[JS_COLLECTION_NODE_KEY].item);
-                gc_mark_item(gc, node->slots[JS_COLLECTION_NODE_VALUE].item);
-            }
-        }
-        return;
-    }
-
-    // Strong collection entries live in native insertion-order storage, which
-    // the managed Map payload scan cannot see.
-    for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-        if (node->deleted) continue;
-        gc_mark_item(gc, node->slots[JS_COLLECTION_NODE_KEY].item);
-        gc_mark_item(gc, node->slots[JS_COLLECTION_NODE_VALUE].item);
-    }
-}
-
 extern "C" Item js_map_collection_storage_new(void) {
     return js_collection_create(JS_COLLECTION_MAP, JS_CLASS_MAP);
 }
@@ -19383,7 +19149,7 @@ static bool js_async_hooks_is_gc_tracker(Item resource);
 
 const JsCollectionStorageOps js_collection_default_storage = {
     [](Item object, int kind) { return js_collection_has_brand(object, kind, false); },
-    [](Item object) { return (int64_t)hashmap_count(js_get_collection_data(object)->hmap); },
+    [](Item object) { return (int64_t)hashmap_count(native_collection_data(object)->hmap); },
     [](int kind) { return kind == JS_COLLECTION_SET ? js_set_collection_new() : js_map_collection_new(); },
     [](Item object, Item key) { return js_collection_method(object, 1, key, ItemNull); },
     [](Item object, Item key) { return js_collection_method(object, 2, key, ItemNull); },
@@ -19391,15 +19157,15 @@ const JsCollectionStorageOps js_collection_default_storage = {
     [](Item object, Item key) { return js_collection_method(object, 3, key, ItemNull); },
     [](Item) {},
     [](Item object, JsCollectionCursor* cursor, Item* key, Item* value) {
-        JsCollectionOrderNode* node = cursor->started
-            ? (cursor->position ? ((JsCollectionOrderNode*)cursor->position)->next : NULL)
-            : js_get_collection_data(object)->order_head;
+        NativeCollectionNode* node = cursor->started
+            ? (cursor->position ? ((NativeCollectionNode*)cursor->position)->next : NULL)
+            : native_collection_data(object)->order_head;
         cursor->started = true;
         while (node && node->deleted) node = node->next;
         cursor->position = (uintptr_t)node;
         if (!node) return false;
-        *key = js_collection_node_raw_item(node, JS_COLLECTION_NODE_KEY);
-        *value = js_collection_node_raw_item(node, JS_COLLECTION_NODE_VALUE);
+        *key = native_collection_node_raw_item(node, NATIVE_COLLECTION_NODE_KEY);
+        *value = native_collection_node_raw_item(node, NATIVE_COLLECTION_NODE_VALUE);
         return true;
     },
     [](Item) {}
@@ -19552,7 +19318,7 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
 Item js_collection_method_with_ops(Item obj, int method_id, Item arg1, Item arg2,
         const JsCollectionOps* supplied_ops) {
     const JsCollectionOps* ops = supplied_ops ? supplied_ops : &js_collection_default_ops;
-    JsCollectionData* cd = js_get_collection_data(obj);
+    NativeCollectionData* cd = native_collection_data(obj);
     if (!cd) return ops->error(false, "Collection receiver has no internal data");
     if (cd->is_weak && method_id <= 3 && !ops->weak_key(arg1))
         return method_id == 0 ? ops->error(false, "Invalid value used as weak collection key") :
@@ -19575,13 +19341,7 @@ Item js_collection_method_with_ops(Item obj, int method_id, Item arg1, Item arg2
             } else {
                 value = arg2;
             }
-            JsCollectionOrderNode* node = js_collection_find_node(cd, key);
-            if (node) {
-                // SameValueZero lookup identified the live node. Updating it
-                // leaves its insertion position and every iterator route intact.
-                js_collection_node_store_item(node, JS_COLLECTION_NODE_VALUE,
-                    value);
-            } else if (!js_collection_insert_node(cd, key, value)) {
+            if (!native_collection_set(cd, key, value)) {
                 return ops->error(true, "Out of memory while adding collection entry");
             }
             if (!supplied_ops && cd->is_weak && cd->type == JS_COLLECTION_MAP &&
@@ -19593,28 +19353,23 @@ Item js_collection_method_with_ops(Item obj, int method_id, Item arg1, Item arg2
         }
         case 1: { // get(key) — Map only
             JS_ASSIGN_OR_RETURN(key, js_collection_canonical_key(arg1));
-            JsCollectionOrderNode* node = js_collection_find_node(cd, key);
+            NativeCollectionNode* node = native_collection_find_node(cd, key);
             if (node) return js_collection_node_read_item(node,
-                JS_COLLECTION_NODE_VALUE);
+                NATIVE_COLLECTION_NODE_VALUE);
             return make_js_undefined();
         }
         case 2: { // has(key)
             JS_ASSIGN_OR_RETURN(key, js_collection_canonical_key(arg1));
-            return (Item){.item = b2it(js_collection_find_node(cd, key) ? BOOL_TRUE : BOOL_FALSE)};
+            return (Item){.item = b2it(native_collection_find_node(cd, key) ? BOOL_TRUE : BOOL_FALSE)};
         }
         case 3: { // delete(key)
             JS_ASSIGN_OR_RETURN(key, js_collection_canonical_key(arg1));
-            JsCollectionOrderNode* node = js_collection_find_node(cd, key);
-            if (!node) return (Item){.item = ITEM_FALSE};
-            JsCollectionEntry entry = {.node = node};
-            hashmap_delete(cd->hmap, &entry);
-            js_collection_remove_node(node);
-            return (Item){.item = ITEM_TRUE};
+            return (Item){.item = b2it(native_collection_delete(cd, key) ? BOOL_TRUE : BOOL_FALSE)};
         }
         case 4: { // clear()
-            JsCollectionOrderNode* node = cd->order_head;
+            NativeCollectionNode* node = cd->order_head;
             while (node) {
-                js_collection_remove_node(node);
+                native_collection_remove_node(node);
                 node = node->next;
             }
             hashmap_clear(cd->hmap, false);
@@ -28697,11 +28452,11 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 
     // Check if it's a Map/Set collection — convert to array directly
     if (get_type_id(iterable_root.get()) == LMD_TYPE_MAP) {
-        JsCollectionData* cd = js_get_collection_data(iterable_root.get());
+        NativeCollectionData* cd = native_collection_data(iterable_root.get());
         if (cd) {
             size_t count = hashmap_count(cd->hmap);
             array_root.set(js_array_new((int)count));
-            JsCollectionOrderNode* node = cd->order_head;
+            NativeCollectionNode* node = cd->order_head;
             int idx = 0;
             if (cd->type == JS_COLLECTION_MAP) {
                 // Map: array of [key, value] pairs
@@ -28712,11 +28467,11 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                     }
                     temp_root.set(js_array_new(2));
                     JS_ASSIGN_OR_RETURN(set_result, js_elements_set_int(
-                        temp_root.get(), 0, js_collection_node_raw_item(node,
-                            JS_COLLECTION_NODE_KEY)));
+                        temp_root.get(), 0, native_collection_node_raw_item(node,
+                            NATIVE_COLLECTION_NODE_KEY)));
                     JS_ASSIGN_OR_RETURN_INTO(set_result, js_elements_set_int(
-                        temp_root.get(), 1, js_collection_node_raw_item(node,
-                            JS_COLLECTION_NODE_VALUE)));
+                        temp_root.get(), 1, native_collection_node_raw_item(node,
+                            NATIVE_COLLECTION_NODE_VALUE)));
                     JS_ASSIGN_OR_RETURN_INTO(set_result, js_elements_set_int(array_root.get(), idx, temp_root.get()));
                     idx++;
                     node = node->next;
@@ -28729,8 +28484,8 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                         continue;
                     }
                     JS_ASSIGN_OR_RETURN(set_result, js_elements_set_int(
-                        array_root.get(), idx, js_collection_node_raw_item(node,
-                            JS_COLLECTION_NODE_KEY)));
+                        array_root.get(), idx, native_collection_node_raw_item(node,
+                            NATIVE_COLLECTION_NODE_KEY)));
                     idx++;
                     node = node->next;
                 }
@@ -32528,7 +32283,7 @@ static Item js_weak_collection_new(bool is_map) {
     if (item_is_error(object.get())) return object.get();
     // Own the fresh carrier through prototype lookup and weak-brand publication.
     js_collection_link_prototype(object.get(), is_map ? "WeakMap" : "WeakSet", 7);
-    JsCollectionData* data = js_get_collection_data(object.get());
+    NativeCollectionData* data = native_collection_data(object.get());
     if (data) data->is_weak = true;
     return object.get();
 }

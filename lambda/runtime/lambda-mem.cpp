@@ -1,4 +1,5 @@
 #include "../io/mark_output_builder.hpp"
+#include "native_collection.hpp"
 #include "heap_api.h"  // owner header: its LAMBDA_RT_API markers must reach these definitions
 #include "transpiler.hpp"
 #include <limits.h>
@@ -256,7 +257,7 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     if (map->map_kind == MAP_KIND_WEAK) { js_weak_map_gc_trace(map, gc); return; }
     js_generator_map_gc_trace(map, gc);
     js_async_frame_map_gc_trace(map, gc);
-    js_collection_map_gc_trace(map, gc);
+    native_collection_gc_trace(map, gc);
     js_iterator_map_gc_trace(map, gc);
     if (map->type_id != LMD_TYPE_MAP) return;
     if (map->map_kind == MAP_KIND_TYPED_ARRAY) {
@@ -288,7 +289,6 @@ static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_nat
 }
 
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
-extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
 extern "C" void js_generator_map_heap_destroy(Map* map);
 extern "C" void js_iterator_map_heap_destroy(Map* map);
 extern "C" void js_async_frame_map_heap_destroy(Map* map);
@@ -298,7 +298,7 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     if (map->map_kind == MAP_KIND_WEAK) { js_weak_map_heap_destroy(map); return; }
     // JS collections keep their native HashMap in a pool-owned side record; the
     // heap finalizer must release it before the pool record disappears.
-    js_collection_map_heap_destroy(map, seen_native);
+    native_collection_heap_destroy(map, seen_native);
     switch (map->map_kind) {
     case MAP_KIND_TYPED_ARRAY: {
         JsTypedArray* ta = gc_typed_array_from_map(map);
@@ -587,6 +587,8 @@ static void heap_finish_init(void) {
     gc_register_root(context->heap->gc, &context->heap->result_root);
     context->heap->last_error_root = 0;
     gc_register_root(context->heap->gc, &context->heap->last_error_root);
+    context->heap->object_environments_root = 0;
+    gc_register_root(context->heap->gc, &context->heap->object_environments_root);
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
 #ifdef LAMBDA_NO_TASKS
     gc_set_root_visitor(context->heap->gc, heap_gc_visit_template_roots);

@@ -9,61 +9,57 @@
 #include <mpdecimal.h>
 #include <stdio.h>
 
-bool lambda_type_contract_has_binder(Type* type, bool include_refs, int depth) {
-    if (!type || depth > 64 || !lambda_binder_types_exist() ||
-            is_global_simple_type(type)) return false;
+bool lambda_type_visit_dependencies(Type* type, bool include_refs,
+        LambdaTypeDependencyVisitor visitor, void* context, bool descend_functions, int depth) {
+    if (!type || depth > 64 || !lambda_binder_types_exist() || is_global_simple_type(type)) return true;
+    auto visit = [&](Type* child) {
+        return lambda_type_visit_dependencies(child, include_refs, visitor, context,
+            descend_functions, depth + 1);
+    };
+    auto parameter = [&](TypeParam* param) {
+        // parameter descriptors retain their admitted type_id; a map-valued
+        // descriptor is not itself a TypeMap payload.
+        return (!param->binder || visitor((Type*)param->binder, context)) &&
+            visit(param->contract_type ? param->contract_type : param->full_type);
+    };
     if (type->type_id == LMD_TYPE_TYPE) {
         switch (type->kind) {
-        case TYPE_KIND_BINDER:
-            return true;
-        case TYPE_KIND_BOUND_REF:
-            return include_refs;
-        case TYPE_KIND_UNARY:
-            return lambda_type_contract_has_binder(((TypeUnary*)type)->operand,
-                include_refs, depth + 1);
+        case TYPE_KIND_BINDER: return visitor(type, context);
+        case TYPE_KIND_BOUND_REF: return !include_refs || visitor(type, context);
+        case TYPE_KIND_UNARY: return visit(((TypeUnary*)type)->operand);
         case TYPE_KIND_BINARY: {
             TypeBinary* binary = (TypeBinary*)type;
-            return lambda_type_contract_has_binder(binary->left, include_refs, depth + 1) ||
-                lambda_type_contract_has_binder(binary->right, include_refs, depth + 1);
+            return visit(binary->left) && visit(binary->right);
         }
-        case TYPE_KIND_CONSTRAINED:
-            return lambda_type_contract_has_binder(((TypeConstrained*)type)->base,
-                include_refs, depth + 1);
+        case TYPE_KIND_CONSTRAINED: return visit(((TypeConstrained*)type)->base);
         case TYPE_KIND_PARAM: {
-            TypeParam* parameter = (TypeParam*)type;
-            return parameter->binder || lambda_type_contract_has_binder(
-                parameter->contract_type ? parameter->contract_type : parameter->full_type,
-                include_refs, depth + 1);
+            return parameter((TypeParam*)type);
         }
-        default:
-            return false;
+        default: return true;
         }
     }
     if (type->type_id == LMD_TYPE_ARRAY) {
-        // Generic `list` is a compact Type, unlike an inferred TypeArray.
-        // It cannot contain a binder and has no `nested` payload to inspect.
-        if (type == &TYPE_LIST || type == (Type*)&TYPE_ARRAY) return false;
-        return lambda_type_contract_has_binder(((TypeArray*)type)->nested,
-            include_refs, depth + 1);
+        if (type == &TYPE_LIST || type == (Type*)&TYPE_ARRAY) return true;
+        return visit(((TypeArray*)type)->nested);
     }
     if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
-        // The generic container descriptors are compact Type prefixes. Casting
-        // one to TypeMap reads unrelated globals through `shape` (D4.3.3).
-        if (type == &TYPE_MAP || type == &TYPE_OBJECT || type == &TYPE_ELMT) return false;
-        FOR_EACH_MAP_FIELD(type, field) {
-            if (lambda_type_contract_has_binder(field->type, include_refs, depth + 1)) return true;
-        }
+        if (type == &TYPE_MAP || type == &TYPE_OBJECT || type == &TYPE_ELMT) return true;
+        FOR_EACH_MAP_FIELD(type, field) if (!visit(field->type)) return false;
     }
-    if (TypeFunc* function = lambda_type_func_signature(type)) {
-        for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
-            if (parameter->binder || lambda_type_contract_has_binder(
-                    parameter->contract_type ? parameter->contract_type : parameter->full_type,
-                    include_refs, depth + 1)) return true;
-        }
-        return lambda_type_contract_has_binder(function->return_contract
-            ? function->return_contract : function->returned, include_refs, depth + 1);
+    TypeFunc* function = descend_functions ? lambda_type_func_signature(type) : NULL;
+    if (function) {
+        for (TypeParam* param = function->param; param; param = param->next)
+            if (!parameter(param)) return false;
+        return visit(function->return_contract ? function->return_contract : function->returned);
     }
-    return false;
+    return true;
+}
+
+static bool type_dependency_found(Type*, void*) { return false; }
+
+bool lambda_type_contract_has_binder(Type* type, bool include_refs, int depth) {
+    return !lambda_type_visit_dependencies(type, include_refs, type_dependency_found,
+        NULL, true, depth);
 }
 
 
@@ -141,9 +137,9 @@ static Type* canonical_contract_base(Type* type, int depth) {
         // register carrier is valid until admission has selected that member.
         return NULL;
     }
-    if (lambda_type_is_range(type)) {
-        // a range member keeps its own carrier (`3.0` is in `1 to 5`), so the
-        // contract has no raw register; its tag would claim a Type pointer
+    if (lambda_member_test_type_domain(type)) {
+        // range/pattern members are values, not Type pointers. Their exact
+        // membership remains checked even when their carrier domain is known.
         return NULL;
     }
     return type;
@@ -1219,8 +1215,10 @@ bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out) {
 
 Type* lambda_array_contract_element(Type* contract) {
     Type* element = NULL;
+    // element admission must see the binder/reference itself (D4.1.4);
+    // layout-only callers can inspect the bound through array_contract_info.
     return array_contract_layer(array_contract_unwrap(contract, 0), &element)
-        ? array_contract_unwrap(element, 0) : NULL;
+        ? type_field_unwrap_simple_decl(element) : NULL;
 }
 
 Type* lambda_array_contract_canonical(Type* contract) {

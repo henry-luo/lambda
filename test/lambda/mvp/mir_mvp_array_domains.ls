@@ -8,7 +8,7 @@ fn choose(start: int) int^ {
         if (values[table[i]] > 0) { sum = sum + values[table[i]] }
         i = i + 1
     }
-    return sum
+    return sum^
 }
 
 fn maybe_int(yes: bool) int? { return if (yes) 7 else null }

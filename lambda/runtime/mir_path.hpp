@@ -21,7 +21,7 @@ static inline MirPipeContext em_subject_context(MirEmitter* em,
         saved.in_pipe ? saved.root : subject};
 }
 
-typedef MIR_reg_t (*MirPipeBodyEmitter)(void*, AstPipeNode*, MirPipeContext);
+typedef MIR_reg_t (*MirPipeBodyEmitter)(void*, AstPipeNode*, MirPipeContext, MIR_reg_t keys);
 
 // S10.1.2v4/S10.1.6: pipes use the same keyed walk as for-in. The frontend
 // owns body control/cleanup admission and implicit-context restoration.
@@ -87,7 +87,7 @@ static inline MIR_reg_t em_pipe_walk(MirEmitter* em, AstPipeNode* pipe,
         MIR_T_I64, MIR_new_reg_op(ctx, index), MIR_T_I64, MIR_new_int_op(ctx, LOOP_KEY_ALL), true);
     if (em->root_call_value) em->root_call_value(em->call_owner, key, JIT_VALUE_BOXED_ITEM);
     MIR_reg_t produced = emit_body(em->call_owner, pipe,
-        {true, member, key, source, outer.in_pipe ? outer.root : source});
+        {true, member, key, source, outer.in_pipe ? outer.root : source}, keys);
     bool filter = pipe->op == OPERATOR_FILTER;
     if (filter)
         em_emit_insn(em, MIR_new_insn(ctx, MIR_BNE, MIR_new_label_op(ctx, next),
@@ -102,6 +102,107 @@ static inline MIR_reg_t em_pipe_walk(MirEmitter* em, AstPipeNode* pipe,
     em_call_void_1(em, "symbol_key_list_free", MIR_T_P, MIR_new_reg_op(ctx, keys), true);
     return em_call_2(em, "pipe_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(ctx, output),
         MIR_T_I64, MIR_new_reg_op(ctx, source), true);
+}
+
+typedef void (*MirJoinCollectSource)(void*, AstLoopNode*, MIR_reg_t rows,
+    MIR_reg_t keys, MIR_reg_t indices);
+typedef MIR_reg_t (*MirJoinPriorKey)(void*, AstLoopNode* first,
+    AstLoopNode* stop, MIR_reg_t tuple);
+
+static inline MIR_reg_t em_query_array(MirEmitter* em) {
+    MIR_reg_t array = em_call_0(em, "array_plain", MIR_T_P, true);
+    if (em->root_call_value) em->root_call_value(em->call_owner, array, JIT_VALUE_RAW_GC_POINTER);
+    return array;
+}
+
+typedef AstNode* (*MirKeyExprOf)(AstNode*);
+static inline AstNode* em_group_key_expr(AstNode* node) { return ((AstGroupKey*)node)->expr; }
+static inline AstNode* em_order_key_expr(AstNode* node) { return ((AstOrderSpec*)node)->expr; }
+static inline AstNode* em_join_prior_expr(AstNode* node) { return ((AstJoinKey*)node)->prior_expr; }
+static inline AstNode* em_join_new_expr(AstNode* node) { return ((AstJoinKey*)node)->new_expr; }
+
+static inline MIR_reg_t em_query_key(MirEmitter* em, AstNode* first, MirKeyExprOf expression) {
+    MIR_reg_t tuple = first && first->next ? em_query_array(em) : 0;
+    for (AstNode* node = first; node; node = node->next) {
+        MirValue part = em_require_rep(em, em_lower_value(em, expression(node), MIR_VALUE_ANY), VALUE_REP_ITEM);
+        if (!tuple) return part.reg;
+        em_call_void_2(em, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(em->ctx, tuple),
+            MIR_T_I64, MIR_new_reg_op(em->ctx, part.reg), true);
+    }
+    if (tuple) return tuple;
+    MIR_reg_t absent = em_new_reg(em, "absent_query_key", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, absent), MIR_new_int_op(em->ctx, ITEM_NULL)));
+    return absent;
+}
+
+static inline MIR_reg_t em_query_name(MirEmitter* em, String* name) {
+    MIR_reg_t item = em_new_reg(em, "query_name", MIR_T_I64);
+    if (name) {
+        MIR_reg_t string = em_call_1(em, "heap_create_name", MIR_T_P,
+            MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)name->chars), true);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR, MIR_new_reg_op(em->ctx, item),
+            MIR_new_reg_op(em->ctx, string), MIR_new_int_op(em->ctx, (uint64_t)LMD_TYPE_STRING << 56)));
+    } else em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, ITEM_NULL)));
+    if (em->root_call_value) em->root_call_value(em->call_owner, item, JIT_VALUE_BOXED_ITEM);
+    return item;
+}
+
+// S14.1.3: both emitters materialize each join source once and use the same
+// stable hash/cross-product stages; only lexical binding differs by backend.
+static inline MIR_reg_t em_join_stream(MirEmitter* em, AstLoopNode* first,
+        MirJoinCollectSource collect, MirJoinPriorKey prior_key) {
+    MIR_context_t ctx = em->ctx;
+    auto op = [ctx](MIR_reg_t reg) { return MIR_new_reg_op(ctx, reg); };
+    auto number = [ctx](int64_t n) { return MIR_new_int_op(ctx, n); };
+    auto absent = [&]() {
+        MIR_reg_t reg = em_new_reg(em, "absent_join_indices", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, op(reg), number(ITEM_NULL)));
+        return reg;
+    };
+    MIR_reg_t rows = em_query_array(em);
+    MIR_reg_t indices = first->index_name ? em_query_array(em) : 0;
+    collect(em->call_owner, first, rows, 0, indices);
+    MIR_reg_t tuples = em_call_4(em, "fn_join_seed_tuples", MIR_T_P,
+        MIR_T_I64, op(rows), MIR_T_I64, op(em_query_name(em, first->name)),
+        MIR_T_I64, op(em_query_name(em, first->index_name)), MIR_T_I64, op(indices ? indices : absent()), true);
+    if (em->root_call_value) em->root_call_value(em->call_owner, tuples, JIT_VALUE_RAW_GC_POINTER);
+    for (AstLoopNode* source = (AstLoopNode*)first->next; source; source = (AstLoopNode*)source->next) {
+        rows = em_query_array(em);
+        indices = source->index_name ? em_query_array(em) : 0;
+        MIR_reg_t keys = source->on ? em_query_array(em) : 0;
+        collect(em->call_owner, source, rows, keys, indices);
+        MIR_reg_t name = em_query_name(em, source->name);
+        MIR_reg_t index_name = em_query_name(em, source->index_name);
+        MIR_reg_t index_values = indices ? indices : absent();
+        if (!source->on) {
+            tuples = em_call_5(em, "fn_cross_join_tuples", MIR_T_P,
+                MIR_T_I64, op(tuples), MIR_T_I64, op(rows), MIR_T_I64, op(name),
+                MIR_T_I64, op(index_name), MIR_T_I64, op(index_values), true);
+        } else {
+            MIR_reg_t prior_keys = em_query_array(em);
+            MIR_reg_t length = em_call_1(em, "fn_len", MIR_T_I64, MIR_T_I64, op(tuples), true);
+            MIR_reg_t cursor = em_new_reg(em, "join_probe", MIR_T_I64);
+            em_emit_insn(em, MIR_new_insn(ctx, MIR_MOV, op(cursor), number(0)));
+            MIR_label_t head = em_new_label(em), done = em_new_label(em);
+            em_emit_label(em, head);
+            em_emit_insn(em, MIR_new_insn(ctx, MIR_BGE, MIR_new_label_op(ctx, done), op(cursor), op(length)));
+            MIR_reg_t tuple = em_call_2(em, "item_at", MIR_T_I64,
+                MIR_T_I64, op(tuples), MIR_T_I64, op(cursor), true);
+            MIR_reg_t key = prior_key(em->call_owner, first, source, tuple);
+            em_call_void_2(em, "array_push_verbatim", MIR_T_P, op(prior_keys), MIR_T_I64, op(key), true);
+            em_emit_insn(em, MIR_new_insn(ctx, MIR_ADD, op(cursor), op(cursor), number(1)));
+            em_emit_insn(em, MIR_new_insn(ctx, MIR_JMP, MIR_new_label_op(ctx, head)));
+            em_emit_label(em, done);
+            tuples = em_call_8(em, "fn_hash_join_tuples", MIR_T_P,
+                MIR_T_I64, op(tuples), MIR_T_I64, op(prior_keys), MIR_T_I64, op(rows), MIR_T_I64, op(keys),
+                MIR_T_I64, op(name), MIR_T_I64, number(source->optional),
+                MIR_T_I64, op(index_name), MIR_T_I64, op(index_values), true);
+        }
+        if (em->root_call_value) em->root_call_value(em->call_owner, tuples, JIT_VALUE_RAW_GC_POINTER);
+    }
+    return tuples;
 }
 
 // the shared AST proves a store-back region; runtime ancestor sharing decides

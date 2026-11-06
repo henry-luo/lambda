@@ -22,13 +22,15 @@ pn main() {
     step(a, 0)^; step(a, 1)^; step(a, 2)^; step(a, 3)^
     print(a); print("\n"); print(saved); print("\n")
     down(a)^; print(a[0]); print("\n")
-    let invalid_low = step(a, -1); let invalid_high = step(a, 4)
+    let negative_index = step(a, -1)
+    let missing_index = step(a, 4)
+    print([negative_index is error, missing_index is error]); print("\n")
     print(a); print("\n")
     print(dynamic(14)); print(" "); print(dynamic(-8)); print(" "); print(dynamic(1.5)); print("\n")
     print(dynamic("bad")); print("\n")
     print_divmod(33); print_divmod(-33); print_divmod(-32); print_divmod(0)
     print_divmod(9007199254740991); print_divmod(-9007199254740991)
-    print_divmod(int(inf))^; print_divmod(int(-inf))^; print_divmod(int(nan))
+    print_divmod(int(inf)); print_divmod(int(-inf)); print_divmod(int(nan))
     var seeds: int[] = [2, -2, 9007199254740991, int(inf)]
     let old_seeds = seeds
     affine(seeds, 0)^; affine(seeds, 1)^; affine(seeds, 2)^; affine(seeds, 3)^

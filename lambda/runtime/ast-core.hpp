@@ -17,6 +17,7 @@ typedef struct InterpFieldPlan InterpFieldPlan;
 typedef struct InterpPlacePlan InterpPlacePlan;
 typedef struct NameScope NameScope;
 typedef struct TypeBinder TypeBinder;
+typedef struct TypeBoundRef TypeBoundRef;
 typedef struct LangProfile LangProfile;
 typedef struct Pool Pool;
 struct hashmap;
@@ -385,6 +386,14 @@ typedef struct FnFramePlan {
     InterpBoundaryPlan* return_boundary;
 } FnFramePlan;
 
+// D4.1.4/D8.2.4: lexical ownership is an AST fact; serialized references
+// retain only their stable slot and copied bound.
+struct AstBoundTypeUse {
+    TypeBoundRef* reference;
+    NameEntry* binder;
+    AstBoundTypeUse* next;
+};
+
 // name_scope
 struct NameScope {
     AstScopeId scope_id;
@@ -423,6 +432,7 @@ struct NameScope {
     // Slots are assigned while parameter annotations are reduced left to
     // right. The completed TypeFunc copies the canonical sites into its table.
     uint16_t binder_count;
+    AstBoundTypeUse* bound_type_uses;
     // JavaScript direct-scope construction seals durable lexical-cell slots
     // before an AST is shared by executions (D8.2.4). Lambda frame slots stay
     // on their function plan, so the fact is unused by that profile.
@@ -1404,6 +1414,7 @@ static inline bool ast_is_explicit_type_value(AstNode* node) {
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_STRING_PATTERN:
     case AST_NODE_SYMBOL_PATTERN:
+    case AST_NODE_PATTERN_ISLAND:
         return true;
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
@@ -1614,6 +1625,7 @@ typedef struct AstClassFieldNode : AstNode {
 typedef struct AstObjectTypeNode : AstNamedNode {
     AstNode* item;
     AstNode* base_type;
+    NameEntry* base_entry;
     AstNode* content;
     AstNode* methods;
     AstNode* constraints;
@@ -1625,6 +1637,7 @@ typedef struct AstObjectTypeNode : AstNamedNode {
 // Object literal node: <TypeName key: value, content...>
 typedef struct AstObjectLiteralNode : AstMapNode {
     String* type_name;
+    NameEntry* type_entry; // lexical type value used by this constructor
     // S2.1.3 content children. Unlike an element, every literal of one object
     // type SHARES that type's TypeObject, so the per-literal content count
     // cannot live on the type — it is read from this node.

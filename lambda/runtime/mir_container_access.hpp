@@ -3,11 +3,9 @@
 
 typedef MIR_reg_t (*MirIndexCoordinateReader)(void* owner, AstNode* key);
 
-// S8.2.4v3: all coordinates address one receiver; a miss stays a boxed null.
-static inline MIR_reg_t em_index_nd(MirEmitter* em, MIR_reg_t receiver,
+// raw coordinates have activation lifetime across collecting key expressions.
+static inline MIR_reg_t em_index_coordinates(MirEmitter* em,
         AstNode* keys, MirIndexCoordinateReader read, void* owner) {
-    if (em->root_call_value)
-        em->root_call_value(em->call_owner, receiver, JIT_VALUE_BOXED_ITEM);
     int count = em_linked_node_count(keys);
     // data-zone bytes have no independent GC owner. Raw coordinates instead
     // live once per activation, across collecting keys and repeated loop reads.
@@ -17,9 +15,18 @@ static inline MIR_reg_t em_index_nd(MirEmitter* em, MIR_reg_t receiver,
         MIR_reg_t coordinate = read(owner, key);
         em_store_at(em, indices, (MIR_disp_t)position * sizeof(int64_t), MIR_T_I64, coordinate);
     }
+    return indices;
+}
+
+// S8.2.4v3: all coordinates address one receiver; a miss stays a boxed null.
+static inline MIR_reg_t em_index_nd(MirEmitter* em, MIR_reg_t receiver,
+        AstNode* keys, MirIndexCoordinateReader read, void* owner) {
+    if (em->root_call_value)
+        em->root_call_value(em->call_owner, receiver, JIT_VALUE_BOXED_ITEM);
+    MIR_reg_t indices = em_index_coordinates(em, keys, read, owner);
     return em_call_3(em, "fn_index_nd", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(em->ctx, receiver),
-        MIR_T_I64, MIR_new_int_op(em->ctx, count),
+        MIR_T_I64, MIR_new_int_op(em->ctx, em_linked_node_count(keys)),
         MIR_T_P, MIR_new_reg_op(em->ctx, indices), true);
 }
 

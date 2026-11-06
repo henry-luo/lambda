@@ -20,7 +20,7 @@ fn total(node: Node?) int^ {
         sum = sum + cursor.value
         cursor = cursor.next
     }
-    return sum
+    return sum^
 }
 
 pn bump(var counter: Counter, amount: int) any {

@@ -1709,8 +1709,12 @@ static bool boundary_type_is_extended(const Type* type, TypeKind kind) {
 }
 
 static Type* boundary_binder_bound(Type* type) {
-    if (boundary_type_is_extended(type, TYPE_KIND_BOUND_REF))
-        return ((TypeBoundRef*)type)->bound;
+    if (boundary_type_is_extended(type, TYPE_KIND_BOUND_REF)) {
+        Type* bound = ((TypeBoundRef*)type)->bound;
+        // T:type selects the type value's payload, whose value domain is
+        // unknown statically; a use of T does not require a type Item.
+        return bound == &TYPE_TYPE ? &TYPE_ANY : bound;
+    }
     if (boundary_type_is_extended(type, TYPE_KIND_BINDER))
         return ((TypeBinder*)type)->bound;
     return NULL;
@@ -2531,7 +2535,9 @@ void add_capture(Transpiler* tp, FnCapture** captures, String* name, NameEntry* 
     // Check if already captured
     FnCapture* c = *captures;
     while (c) {
-        if (c->lambda_name == name || (c->lambda_name && name &&
+        // aliases can retain two outer binders with the same spelling;
+        // capture identity follows their resolved declaration (S9.1.4v2).
+        if (entry && c->entry ? c->entry == entry : c->lambda_name == name || (c->lambda_name && name &&
             c->lambda_name->len == name->len &&
             memcmp(c->lambda_name->chars, name->chars, name->len) == 0)) {
             return; // already captured
@@ -2554,12 +2560,10 @@ void add_capture(Transpiler* tp, FnCapture** captures, String* name, NameEntry* 
 }
 
 // Mark an existing capture as mutable (called when assignment to captured var is detected)
-void mark_capture_mutable(FnCapture** captures, String* name) {
+void mark_capture_mutable(FnCapture** captures, NameEntry* entry) {
     FnCapture* c = *captures;
     while (c) {
-        if (c->lambda_name == name || (c->lambda_name && name &&
-            c->lambda_name->len == name->len &&
-            memcmp(c->lambda_name->chars, name->chars, name->len) == 0)) {
+        if (c->entry == entry) {
             c->is_mutable = true;
             return;
         }
@@ -2575,7 +2579,7 @@ static void capture_indexed_outer_binding(Transpiler* tp, AstFuncNode* fn_node,
             is_local_to_scope(entry, fn_node->vars) ||
             is_global_entry(entry, global_scope)) return;
     add_capture(tp, &fn_node->captures, name, entry);
-    if (is_mutable) mark_capture_mutable(&fn_node->captures, name);
+    if (is_mutable) mark_capture_mutable(&fn_node->captures, entry);
 }
 
 // Both tiers call a constrained type's predicate functions where `is` or a
@@ -2674,6 +2678,12 @@ static bool analyze_captures(Transpiler* tp, AstFuncNode* fn_node,
             capture_constraint_reads(&predicate_scan, index->nodes[reference->node_id]);
         }
     }
+    // annotations are not executable child edges. Their resolved lexical
+    // reads still contribute immutable captures, including through aliases.
+    for (AstBoundTypeUse* use = fn_node->vars ? fn_node->vars->bound_type_uses : NULL;
+            use; use = use->next)
+        capture_indexed_outer_binding(tp, fn_node, global_scope,
+            use->binder->name, use->binder, false);
     if (predicate_scan.seen) arraylist_free(predicate_scan.seen);
     uint32_t child_count = 0;
     const AstFunctionId* children = ast_index_function_children(index, function_id,
@@ -2827,6 +2837,18 @@ static void lambda_flow_build_node(LambdaClosureFlow* flow, uint32_t id) {
     case AST_NODE_IDENT:
         lambda_flow_edge(flow, lambda_flow_binding(flow,
             ((AstIdentNode*)node)->entry), id);
+        break;
+    case AST_NODE_OBJECT_TYPE:
+        // a retained type/instance retains its methods, including pn captures;
+        // declaration bodies alone do not prove confinement to the factory.
+        lambda_flow_children(flow, id, id);
+        lambda_flow_edge(flow, id, lambda_flow_binding(flow,
+            ((AstObjectTypeNode*)node)->entry));
+        break;
+    case AST_NODE_OBJECT_LITERAL:
+        lambda_flow_edge(flow, lambda_flow_binding(flow,
+            ((AstObjectLiteralNode*)node)->type_entry), id);
+        lambda_flow_children(flow, id, id);
         break;
     case AST_NODE_VARIABLE_DECLARATOR: {
         AstDeclaratorNode* decl = (AstDeclaratorNode*)node;
@@ -3210,6 +3232,7 @@ static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
             ((AstIdentNode*)declarator->id)->entry = entry;
     } else if (node->node_type == AST_NODE_PARAM ||
             node->node_type == AST_NODE_KEY_EXPR ||
+            node->node_type == AST_NODE_OBJECT_TYPE ||
             node->node_type == AST_NODE_FOR_INDEX) {
         // KEY_EXPR is an object type's field scope-helper (resolve_object_field
         // and the base-inheritance copy). Without the back-pointer its
@@ -3220,6 +3243,8 @@ static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
         // method body fell through to "undefined variable" and evaluated as 0
         // on the JIT tier while T0, which resolves object fields by name
         // against `method_self`, returned the right value (LR07-15, SI3v2).
+        // local nominal declarations also carry runtime lexical environments;
+        // publish their canonical binding before capture/index analysis.
         ((AstNamedNode*)node)->entry = entry;
     }
 }
@@ -6491,8 +6516,9 @@ static void resolve_map(Transpiler* tp, AstMapNode* ast_node) {
     return;
 }
 
-static TypeObject* lookup_object_type_for_tag(Transpiler* tp, StrView tag_name) {
+static TypeObject* lookup_object_type_for_tag(Transpiler* tp, StrView tag_name, NameEntry** declaration = NULL) {
     NameEntry* entry = lookup_name(tp, tag_name);
+    if (declaration) *declaration = entry;
     if (!entry || !entry->node || !entry->node->type) return NULL;
     Type* resolved = entry->node->type;
     if (resolved->type_id != LMD_TYPE_TYPE) return NULL;
@@ -7062,6 +7088,7 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
     StaticBoundaryResult body_relation = actual && checks_tail
         ? ast_return_boundary_relation(fn, fn->body, expected, actual) : STATIC_BOUNDARY_PROVEN;
     if (checks_tail && body_relation != STATIC_BOUNDARY_REJECTED &&
+            !(body_relation == STATIC_BOUNDARY_DEFERRED && lambda_type_contract_has_binder(expected, true)) &&
             !lambda_type_accepts_error(expected) && ordinary_outcome_has_error(tp, fn->body)) {
         // S7.5.1v6: widening an outcome to any does not erase a known error.
         actual = &TYPE_ERROR;
@@ -8616,6 +8643,15 @@ static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
             return NULL;
         }
     }
+    // scope publication replaces binding identities; annotation reads must
+    // follow that same map rather than retaining parser-only entries.
+    rebound->bound_type_uses = NULL;
+    for (AstBoundTypeUse* use = source->bound_type_uses; use; use = use->next) {
+        AstBoundTypeUse* copy = (AstBoundTypeUse*)pool_calloc(bind->tp->pool, sizeof(AstBoundTypeUse));
+        copy->reference = use->reference;
+        copy->binder = direct_bind_clone_entry(bind, use->binder);
+        copy->next = rebound->bound_type_uses; rebound->bound_type_uses = copy;
+    }
     return rebound;
 }
 
@@ -8769,7 +8805,6 @@ static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
     }
     case AST_NODE_OBJECT_TYPE: {
         AstObjectTypeNode* object = (AstObjectTypeNode*)node;
-        object->entry = direct_bind_entry(bind, object->entry);
         direct_bind_rewrite_object_shape(bind, object);
         direct_bind_rewrite_node(bind, object->item, node);
         direct_bind_rewrite_node(bind, object->base_type, node);
@@ -8839,6 +8874,17 @@ static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
     case AST_NODE_IDENT:
         ((AstIdentNode*)node)->entry = direct_bind_entry(bind,
             ((AstIdentNode*)node)->entry);
+        break;
+    case AST_NODE_OBJECT_TYPE: {
+        // entry edges must be rebound before the index publishes this node.
+        AstObjectTypeNode* object = (AstObjectTypeNode*)node;
+        object->entry = direct_bind_entry(bind, object->entry);
+        object->base_entry = direct_bind_entry(bind, object->base_entry);
+        break;
+    }
+    case AST_NODE_OBJECT_LITERAL:
+        ((AstObjectLiteralNode*)node)->type_entry = direct_bind_entry(bind,
+            ((AstObjectLiteralNode*)node)->type_entry);
         break;
     case AST_NODE_VARIABLE_DECLARATOR: {
         AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
@@ -9145,6 +9191,19 @@ static bool concurrency_fact_calls_may_await(ConcurrencyBodyFacts* facts,
         }
     }
     return false;
+}
+
+bool lambda_ast_plan_body_concurrency(AstNode* body, FnAnalysis* analysis) {
+    if (!analysis) return false;
+    ConcurrencyBodyFacts facts = {};
+    walk_lambda_ast(body, scan_concurrency_body_node, &facts, false);
+    analysis->owns_task_scopes = facts.owns_task_scopes;
+    const char* cause = facts.cause;
+    analysis->may_await = facts.static_may_await ||
+        concurrency_fact_calls_may_await(&facts, &cause);
+    analysis->may_await_cause = cause;
+    arraylist_free(facts.calls);
+    return !facts.failed;
 }
 
 static void concurrency_body_facts_destroy(ConcurrencyBodyFacts* facts,
@@ -9812,6 +9871,7 @@ struct LambdaSyntaxSink {
     uint32_t open_depth;
     // object types being declared; members record into the innermost
     AstObjectTypeNode* object_nodes[64];
+    uint16_t object_function_depth[64];
     uint32_t type_object_depth;
     AstObjectTypeNode* completed_object;
     AstDeclaratorNode* pending_type_alias;
@@ -9827,6 +9887,16 @@ struct LambdaSyntaxSink {
 // Resolve-pass state: the scopes and flags the scope-opening productions
 // establish around their bodies. The walker enters and leaves them at the
 // points the parser reported them.
+struct LambdaObjectResolutionState {
+    AstObjectTypeNode* node;
+    TypeObject* type;
+    NameScope* scope;
+    AstNode* field_tail;
+    ShapeEntry* shape_tail;
+    AstNode* method_tail;
+    int byte_offset;
+};
+
 struct LambdaResolver {
     Transpiler* tp;
     LambdaSyntaxUnit* unit;
@@ -9854,13 +9924,7 @@ struct LambdaResolver {
     AstEventHandler* event_handlers[64];
     uint32_t event_handler_depth;
     uint32_t type_object_depth;
-    AstObjectTypeNode* object_node;
-    TypeObject* object_type;
-    NameScope* object_scope;
-    AstNode* object_field_tail;
-    ShapeEntry* object_shape_tail;
-    AstNode* object_method_tail;
-    int object_byte_offset;
+    LambdaObjectResolutionState object;
     // S11.4.12: every pre-bound alias and its pre-bound wrapper, by index, for
     // the cycle check and publication once the walk completes
     ArrayList* prebound_aliases;
@@ -10050,11 +10114,13 @@ static void direct_adopt_pending_alias_map(Transpiler* tp, AstDeclaratorNode* al
     TypeMap* pre_map = (TypeMap*)pre_type->type;
     Type* definition = alias->type;
     Type* actual = unwrap_simple_type_type(definition);
-    if (lambda_type_is_union(actual) ||
+    if (type_nominal_record(actual) || lambda_type_is_union(actual) ||
             (actual && actual->type_id == LMD_TYPE_ELEMENT)) {
         // Pattern references retain pre_type, so publish the completed union
         // or element through that same wrapper rather than leaving an empty
         // map behind: `type S = <s S*>` matched its own children against `{}`.
+        // a nominal alias keeps the declared descriptor, including its method
+        // tail; copying only TypeMap would truncate TypeObject (S11.3.1v2).
         pre_type->type = actual;
         alias->type = (Type*)pre_type;
         ArrayList* visited = arraylist_new(8);
@@ -10085,7 +10151,8 @@ static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias)
     if (!tp || !alias || !alias->type) return;
     Type* definition = alias->type;
     Type* actual = unwrap_simple_type_type(definition);
-    if (actual && actual->type_id == LMD_TYPE_MAP && actual != &TYPE_MAP && alias->name) {
+    if (actual && actual->type_id == LMD_TYPE_MAP && actual != &TYPE_MAP &&
+            !type_nominal_record(actual) && alias->name) {
         // A named map contract carries its alias into runtime validators and
         // field lowering; anonymous `map` would lose both identities.
         TypeMap* map = (TypeMap*)actual;
@@ -11679,7 +11746,8 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
     validate_literal_keys(tp, children);
     node->item = NULL;
     StrView tag = {name->chars, (size_t)name->len};
-    TypeObject* object_type = lookup_object_type_for_tag(tp, tag);
+    NameEntry* type_entry = NULL;
+    TypeObject* object_type = lookup_object_type_for_tag(tp, tag, &type_entry);
     if (object_type) {
         // Object-typed tags are object literals, not ordinary elements; keep
         // this decision shared with other element construction so `is Type` sees the same
@@ -11688,6 +11756,7 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
             ELEMENT_SYNTAX_SIZE);
         fill_object_literal(tp, (AstObjectLiteralNode*)node, name, object_type,
             children);
+        ((AstObjectLiteralNode*)node)->type_entry = type_entry;
         return;
     }
 
@@ -14804,56 +14873,24 @@ static void resolve_assignment(Transpiler* tp, AstAssignNode* node) {
     }
 }
 
+struct DirectBinderContracts {
+    TypeBinder** binders;
+    uint16_t count;
+};
+
+static bool direct_collect_binder_contract(Type* type, void* context) {
+    DirectBinderContracts* table = (DirectBinderContracts*)context;
+    TypeBinder* binder = (TypeBinder*)type;
+    if (binder->slot < table->count && !table->binders[binder->slot])
+        table->binders[binder->slot] = binder;
+    return true;
+}
+
 static void direct_collect_binder_contracts(Type* type, TypeBinder** binders,
-        uint16_t binder_count, int depth = 0) {
-    if (!type || !binders || depth > 64) return;
-    if (type->type_id == LMD_TYPE_TYPE) {
-        switch (type->kind) {
-        case TYPE_KIND_BINDER: {
-            TypeBinder* binder = (TypeBinder*)type;
-            if (binder->slot < binder_count && !binders[binder->slot]) {
-                binders[binder->slot] = binder;
-            }
-            return;
-        }
-        case TYPE_KIND_UNARY:
-            direct_collect_binder_contracts(((TypeUnary*)type)->operand, binders,
-                binder_count, depth + 1);
-            return;
-        case TYPE_KIND_BINARY: {
-            TypeBinary* binary = (TypeBinary*)type;
-            direct_collect_binder_contracts(binary->left, binders, binder_count, depth + 1);
-            direct_collect_binder_contracts(binary->right, binders, binder_count, depth + 1);
-            return;
-        }
-        case TYPE_KIND_CONSTRAINED:
-            direct_collect_binder_contracts(((TypeConstrained*)type)->base, binders,
-                binder_count, depth + 1);
-            return;
-        case TYPE_KIND_PARAM: {
-            TypeParam* parameter = (TypeParam*)type;
-            if (parameter->binder && parameter->binder->slot < binder_count &&
-                    !binders[parameter->binder->slot]) {
-                binders[parameter->binder->slot] = parameter->binder;
-            }
-            direct_collect_binder_contracts(parameter->contract_type
-                ? parameter->contract_type : parameter->full_type, binders,
-                binder_count, depth + 1);
-            return;
-        }
-        default:
-            return;
-        }
-    }
-    if (type->type_id == LMD_TYPE_ARRAY) {
-        direct_collect_binder_contracts(((TypeArray*)type)->nested, binders,
-            binder_count, depth + 1);
-    } else if ((type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) ||
-            (type->type_id == LMD_TYPE_ELEMENT && type != &TYPE_ELMT)) {
-        FOR_EACH_MAP_FIELD(type, field) {
-            direct_collect_binder_contracts(field->type, binders, binder_count, depth + 1);
-        }
-    }
+        uint16_t binder_count) {
+    if (!binders) return;
+    DirectBinderContracts table = {binders, binder_count};
+    lambda_type_visit_dependencies(type, false, direct_collect_binder_contract, &table, false);
 }
 
 static void direct_publish_function_return(Transpiler* tp, TypeFunc* function_type,
@@ -16065,6 +16102,15 @@ static int direct_append_tail_compare(const void* a, const void* b,
 static AstNode* syntax_append_reduction_list(LambdaSyntaxSink* sink,
         AstNode* first, AstNode* item) {
     if (!item) return first;
+    if (first && !first->next && first->syntax_form == LSF_TYPE_STAM &&
+            item->syntax_form == LSF_TYPE_STAM && first->node_type == item->node_type) {
+        // keep every comma-separated alias in the semantic tree; detached
+        // clauses resolve names but cannot publish patterns or local types.
+        AstNode** declaration = &((AstLetNode*)first)->declare;
+        while (*declaration) declaration = &(*declaration)->next;
+        *declaration = ((AstLetNode*)item)->declare;
+        return first;
+    }
     syntax_detach_tail(sink, item);
     if (!first) return item;
     if (!sink->append_tails) {
@@ -16615,7 +16661,8 @@ static AstNode* syntax_function(LambdaSyntaxSink* sink,
     if (flags & LAMBDA_REDUCTION_FLAG_BODY_BLOCK) fn->syntax_aux |= LSF_FN_BODY_BLOCK;
     if (flags & LAMBDA_REDUCTION_FLAG_VARIADIC) fn->syntax_aux |= LSF_FN_VARIADIC;
     if (flags & LAMBDA_REDUCTION_FLAG_RAISED) fn->syntax_aux |= LSF_FN_RAISED;
-    if (sink->type_object_depth && sink->function_depth == 1) {
+    if (sink->type_object_depth && sink->function_depth ==
+            sink->object_function_depth[sink->type_object_depth - 1] + 1) {
         fn->syntax_aux |= LSF_FN_METHOD;
         syntax_object_member(sink, OBJECT_PART_METHOD, (AstNode*)fn);
     }
@@ -16734,6 +16781,9 @@ static void syntax_object_begin(LambdaSyntaxSink* sink,
             !arraylist_append(sink->unit->predeclared, object)) {
         sink->failed = true;
     }
+    // method depth is relative to this declaration; a type inside a callable
+    // must retain its methods just like a top-level type (S12.3.3v2).
+    sink->object_function_depth[sink->type_object_depth] = sink->function_depth;
     sink->object_nodes[sink->type_object_depth++] = object;
     sink->completed_object = NULL;
 }
@@ -17929,23 +17979,29 @@ static void resolver_view_end(LambdaResolver* r) {
 static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
     if (!base_name.length) return;
     Transpiler* tp = r->tp;
-    TypeObject* base = lookup_object_type_for_tag(tp, base_name);
+    TypeObject* base = lookup_object_type_for_tag(tp, base_name, &r->object.node->base_entry);
     if (!base) {
-        record_semantic_error_span(tp, r->object_node->source_span,
+        record_semantic_error_span(tp, r->object.node->source_span,
             ERR_SEMANTIC_ERROR, "unknown object base type '%.*s'",
             (int)base_name.length, base_name.str);
         return;
     }
-    r->object_type->base = base;
+    AstIdentNode* reference = (AstIdentNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_IDENT, r->object.node->source_span, sizeof(AstIdentNode));
+    reference->entry = r->object.node->base_entry;
+    reference->name = reference->entry->name;
+    reference->type = reference->entry->node->type;
+    r->object.node->base_type = reference;
+    r->object.type->base = base;
     // S2.1.3v2: inheritance never changes the base kind, so the derived record
     // links to the base RECORD and adopts its structural kind.
-    if (r->object_type->nominal && base->nominal) {
-        r->object_type->nominal->base = base->nominal;
-        r->object_type->nominal->struct_kind = base->nominal->struct_kind;
+    if (r->object.type->nominal && base->nominal) {
+        r->object.type->nominal->base = base->nominal;
+        r->object.type->nominal->struct_kind = base->nominal->struct_kind;
     }
     // OB7: the base's content pattern is inherited unless the derived type
     // declares its own, which replaces it (resolver_object_end)
-    r->object_type->content_list = base->content_list;
+    r->object.type->content_list = base->content_list;
     FOR_EACH_MAP_FIELD(base, parent) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
         entry->name = parent->name;
@@ -17954,13 +18010,13 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
         // stored null in the field, which a required contract cannot hold
         entry->default_value = parent->default_value;
         entry->is_optional = parent->is_optional;
-        entry->byte_offset = r->object_byte_offset;
-        if (!r->object_type->shape) r->object_type->shape = entry;
-        else r->object_shape_tail->chain_next = entry;
-        r->object_shape_tail = entry;
-        r->object_type->length++;
+        entry->byte_offset = r->object.byte_offset;
+        if (!r->object.type->shape) r->object.type->shape = entry;
+        else r->object.shape_tail->chain_next = entry;
+        r->object.shape_tail = entry;
+        r->object.type->length++;
         // stride by the field's storage class, as the base laid it out
-        r->object_byte_offset += shape_entry_storage_size(entry);
+        r->object.byte_offset += shape_entry_storage_size(entry);
 
         AstNamedNode* field = (AstNamedNode*)pool_calloc(tp->pool,
             sizeof(AstNamedNode));
@@ -18012,13 +18068,13 @@ static void resolver_object_begin(LambdaResolver* r, AstObjectTypeNode* object,
     TypeObject* object_type = object->type && object->type->type_id == LMD_TYPE_TYPE
         ? (TypeObject*)((TypeType*)object->type)->type
         : resolver_object_declare(tp, object);
-    r->object_node = object;
-    r->object_type = object_type;
-    r->object_field_tail = NULL;
-    r->object_shape_tail = NULL;
-    r->object_method_tail = NULL;
-    r->object_byte_offset = 0;
-    r->object_scope = lambda_ast_enter_scope(tp, false);
+    r->object.node = object;
+    r->object.type = object_type;
+    r->object.field_tail = NULL;
+    r->object.shape_tail = NULL;
+    r->object.method_tail = NULL;
+    r->object.byte_offset = 0;
+    r->object.scope = lambda_ast_enter_scope(tp, false);
     if (!object->is_binary_schema) resolver_object_copy_base(r, base_name);
     r->type_object_depth++;
 }
@@ -18126,11 +18182,11 @@ static bool binary_schema_field_kind(Type* type, BinaryFieldKind* kind, size_t* 
 
 static void resolve_binary_schema(LambdaResolver* r) {
     Transpiler* tp = r->tp;
-    TypeBinarySchema* type = (TypeBinarySchema*)r->object_type;
-    AstNode* metadata = (AstNode*)syntax_tail((AstNode*)r->object_node,
+    TypeBinarySchema* type = (TypeBinarySchema*)r->object.type;
+    AstNode* metadata = (AstNode*)syntax_tail((AstNode*)r->object.node,
         sizeof(AstObjectTypeNode))[LSF_OBJECT_LAYOUT];
     BinarySchema& schema = type->layout;
-    schema.tag = r->object_node->name->chars;
+    schema.tag = r->object.node->name->chars;
     schema.binding_abi = BINARY_SCHEMA_BINDING_ABI;
     schema.endian = BINARY_SCHEMA_INHERIT;
     if (binary_schema_metadata_text(tp, metadata, "endian", "big")) schema.endian = BINARY_SCHEMA_BIG;
@@ -18138,13 +18194,13 @@ static void resolve_binary_schema(LambdaResolver* r) {
     bool native = binary_schema_metadata_text(tp, metadata, "layout", "native");
     if (native || binary_schema_metadata_text(tp, metadata, "endian", "native")) schema.endian = BINARY_SCHEMA_NATIVE;
     if (!binary_schema_validate_metadata(tp, metadata, true, native)) return;
-    if (r->object_node->constraints) {
-        record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+    if (r->object.node->constraints) {
+        record_semantic_error_span(tp, r->object.node->source_span, ERR_SEMANTIC_ERROR,
             "binary schema predicates are not supported; use '& {…}' for layout metadata");
         return;
     }
-    if (r->object_node->content || r->object_node->methods) {
-        record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+    if (r->object.node->content || r->object.node->methods) {
+        record_semantic_error_span(tp, r->object.node->source_span, ERR_SEMANTIC_ERROR,
             "binary schema declarations admit fields, without methods or content patterns");
         return;
     }
@@ -18157,7 +18213,7 @@ static void resolve_binary_schema(LambdaResolver* r) {
         schema.binding = copy;
     }
     if (native && !schema.binding) {
-        record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+        record_semantic_error_span(tp, r->object.node->source_span, ERR_SEMANTIC_ERROR,
             "native binary schema requires a binding name");
     }
     Item version = ItemNull;
@@ -18168,17 +18224,17 @@ static void resolve_binary_schema(LambdaResolver* r) {
         memcpy(copy, version.get_chars(), version.get_len());
         schema.binding_version = copy;
     }
-    schema.field_count = r->object_type->length;
+    schema.field_count = r->object.type->length;
     BinarySchemaField* fields = (BinarySchemaField*)pool_calloc(tp->pool,
         schema.field_count * sizeof(BinarySchemaField));
     schema.fields = fields;
     if (!fields && schema.field_count) {
-        record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+        record_semantic_error_span(tp, r->object.node->source_span, ERR_SEMANTIC_ERROR,
             "cannot allocate binary schema field descriptors");
         return;
     }
     size_t index = 0, offset = 0;
-    for (AstNode* item = r->object_node->item; item; item = item->next, index++) {
+    for (AstNode* item = r->object.node->item; item; item = item->next, index++) {
         AstNamedNode* field = (AstNamedNode*)item;
         BinarySchemaField& physical = fields[index];
         physical.name = field->name->chars;
@@ -18289,7 +18345,7 @@ static void resolve_binary_schema(LambdaResolver* r) {
         for (size_t j = 0; j < schema.field_count; j++)
             if (strcmp(fields[j].name, fields[i].count_field) == 0) count = &fields[j];
         if (!count || count->kind < BINARY_FIELD_I8 || count->kind > BINARY_FIELD_U64)
-            record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+            record_semantic_error_span(tp, r->object.node->source_span, ERR_SEMANTIC_ERROR,
                 "native span count must name an admitted integer field");
     }
     // This declaration describes physical storage, rather than a nominal map constructor.
@@ -18302,24 +18358,22 @@ static void resolve_binary_schema(LambdaResolver* r) {
 static void resolver_object_end(LambdaResolver* r) {
     if (!r->type_object_depth) return;
     r->type_object_depth--;
-    // A type declared inside a method body closes the one open declaration
-    // state, so the enclosing type publishes no further members.
-    if (!r->object_node) return;
+    if (!r->object.node) return;
     // D3.1.1: the DECLARED content pattern. It describes the type, not any
     // one literal's children — every literal of this type shares this
     // TypeObject, so per-literal counts live on AstObjectLiteralNode instead.
     // A declared pattern replaces an inherited one (OB7).
     bool declares_content = false;
-    if (r->object_node->content) {
-        AstListNode* content = (AstListNode*)r->object_node->content;
+    if (r->object.node->content) {
+        AstListNode* content = (AstListNode*)r->object.node->content;
         if (content->list_type && content->list_type->length > 0) {
-            r->object_type->content_list = content->list_type;
+            r->object.type->content_list = content->list_type;
             declares_content = true;
         }
     }
-    if (r->object_type->nominal) {
-        TypeNominal* nominal = r->object_type->nominal;
-        if (r->object_type->base) {
+    if (r->object.type->nominal) {
+        TypeNominal* nominal = r->object.type->nominal;
+        if (r->object.type->base) {
             // S2.1.3v2: inheritance never changes the base kind, which
             // resolver_object_copy_base already adopted. Content is legal
             // only where that kind admits it (OB17). Deciding the kind from
@@ -18327,8 +18381,8 @@ static void resolver_object_end(LambdaResolver* r) {
             // no content section into a map and `V : P { string* }` into an
             // element.
             if (declares_content && nominal->struct_kind != LMD_TYPE_ELEMENT) {
-                StrView base_name = r->object_type->base->type_name;
-                record_semantic_error_span(r->tp, r->object_node->source_span,
+                StrView base_name = r->object.type->base->type_name;
+                record_semantic_error_span(r->tp, r->object.node->source_span,
                     ERR_SEMANTIC_ERROR,
                     "a content pattern needs an element-kinded type, but base type '%.*s' is a map (S2.1.3v2)",
                     (int)base_name.length, base_name.str);
@@ -18336,38 +18390,38 @@ static void resolver_object_end(LambdaResolver* r) {
         } else {
             // S2.1.3v2: the declared structure fixes ONE structural kind. A
             // content pattern makes it an element; otherwise it is a map.
-            nominal->struct_kind = r->object_type->content_list
+            nominal->struct_kind = r->object.type->content_list
                 ? LMD_TYPE_ELEMENT : LMD_TYPE_MAP;
         }
         // the descriptor and every value built from it wear that same kind
-        r->object_type->type_id = nominal->struct_kind;
+        r->object.type->type_id = nominal->struct_kind;
     }
-    r->object_type->byte_size = r->object_byte_offset;
-    r->object_type->last = r->object_shape_tail;
-    direct_prepare_trusted_field_index((TypeMap*)r->object_type, r->tp->pool);
-    arraylist_append(r->tp->type_list, r->object_node->type);
-    r->object_type->type_index = r->tp->type_list->length - 1;
-    if (r->object_node->is_binary_schema) resolve_binary_schema(r);
-    lambda_ast_leave_scope(r->tp, r->object_scope);
-    r->object_node = NULL;
-    r->object_type = NULL;
-    r->object_scope = NULL;
-    r->object_field_tail = NULL;
-    r->object_shape_tail = NULL;
-    r->object_method_tail = NULL;
-    r->object_byte_offset = 0;
+    r->object.type->byte_size = r->object.byte_offset;
+    r->object.type->last = r->object.shape_tail;
+    direct_prepare_trusted_field_index((TypeMap*)r->object.type, r->tp->pool);
+    arraylist_append(r->tp->type_list, r->object.node->type);
+    r->object.type->type_index = r->tp->type_list->length - 1;
+    if (r->object.node->is_binary_schema) resolve_binary_schema(r);
+    lambda_ast_leave_scope(r->tp, r->object.scope);
+    r->object.node = NULL;
+    r->object.type = NULL;
+    r->object.scope = NULL;
+    r->object.field_tail = NULL;
+    r->object.shape_tail = NULL;
+    r->object.method_tail = NULL;
+    r->object.byte_offset = 0;
 }
 
 static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
-    if (!r->object_node) return;
+    if (!r->object.node) return;
     Transpiler* tp = r->tp;
     AstNode* type_node = field->as;
     AstNode* default_value = (AstNode*)syntax_tail((AstNode*)field,
         sizeof(AstNamedNode))[0];
     field->type = type_node && type_node->type ? type_node->type : &TYPE_ANY;
-    if (!r->object_node->item) r->object_node->item = (AstNode*)field;
-    else r->object_field_tail->next = (AstNode*)field;
-    r->object_field_tail = (AstNode*)field;
+    if (!r->object.node->item) r->object.node->item = (AstNode*)field;
+    else r->object.field_tail->next = (AstNode*)field;
+    r->object.field_tail = (AstNode*)field;
 
     Type* field_type = unwrap_simple_type_type(field->type);
     ShapeEntry* shape = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
@@ -18378,15 +18432,15 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
     shape_entry_set_type(shape, field_type);
     shape->default_value = default_value;
     shape->is_optional = field->syntax_flags != 0;
-    shape->byte_offset = r->object_byte_offset;
-    if (!r->object_type->shape) r->object_type->shape = shape;
-    else r->object_shape_tail->chain_next = shape;
-    r->object_shape_tail = shape;
-    r->object_type->length++;
+    shape->byte_offset = r->object.byte_offset;
+    if (!r->object.type->shape) r->object.type->shape = shape;
+    else r->object.shape_tail->chain_next = shape;
+    r->object.shape_tail = shape;
+    r->object.type->length++;
     // LR03-19: stride by the field's storage class, as map shapes do
     // (resolve_field_shape). A union- or range-typed field is a 9-byte
     // TypedItem, so a flat 8 laid the next field one byte inside it.
-    r->object_byte_offset += shape_entry_storage_size(shape);
+    r->object.byte_offset += shape_entry_storage_size(shape);
 
     // Methods and constraints resolve bare field names in the object scope;
     // keep that scope entry separate from the annotation AST node.
@@ -18401,7 +18455,7 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
 }
 
 static void resolve_object_content(LambdaResolver* r, AstListNode* content) {
-    if (!r->object_node) return;
+    if (!r->object.node) return;
     content->list_type = (TypeList*)alloc_type(r->tp->pool, LMD_TYPE_ARRAY,
         sizeof(TypeList));
     // S11.1.6v3: the content pattern is a one-slot sequence pattern. The
@@ -18410,29 +18464,29 @@ static void resolve_object_content(LambdaResolver* r, AstListNode* content) {
     fill_sequence_pattern_slots(r->tp, content->list_type, content->item,
         content->item ? 1 : 0);
     content->type = (Type*)content->list_type;
-    r->object_node->content = (AstNode*)content;
+    r->object.node->content = (AstNode*)content;
 }
 
 static void resolve_object_constraint(LambdaResolver* r, AstNode* constraint) {
-    if (!r->object_node || !constraint) return;
-    if (!r->object_node->constraints) {
-        r->object_node->constraints = constraint;
+    if (!r->object.node || !constraint) return;
+    if (!r->object.node->constraints) {
+        r->object.node->constraints = constraint;
     } else {
-        AstNode* tail = r->object_node->constraints;
+        AstNode* tail = r->object.node->constraints;
         while (tail->next) tail = tail->next;
         tail->next = constraint;
     }
-    r->object_type->constraint = constraint;
-    if (r->object_type->nominal) r->object_type->nominal->constraint = constraint;
+    r->object.type->constraint = constraint;
+    if (r->object.type->nominal) r->object.type->nominal->constraint = constraint;
 }
 
 static void resolve_object_method(LambdaResolver* r, AstFuncNode* fn) {
-    if (!r->object_node || !fn) return;
+    if (!r->object.node || !fn) return;
     Transpiler* tp = r->tp;
     AstNode* method = (AstNode*)fn;
-    if (!r->object_node->methods) r->object_node->methods = method;
-    else r->object_method_tail->next = method;
-    r->object_method_tail = method;
+    if (!r->object.node->methods) r->object.node->methods = method;
+    else r->object.method_tail->next = method;
+    r->object.method_tail = method;
     TypeMethod* tm = (TypeMethod*)pool_calloc(tp->pool, sizeof(TypeMethod));
     StrView* method_name = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
     method_name->str = fn->name->chars;
@@ -18450,12 +18504,12 @@ static void resolve_object_method(LambdaResolver* r, AstFuncNode* fn) {
         tm->arity++;
     }
     tm->is_proc = method->node_type == AST_NODE_PROC;
-    if (!r->object_type->methods) r->object_type->methods = tm;
-    else r->object_type->methods_last->next = tm;
-    r->object_type->methods_last = tm;
-    r->object_type->method_count++;
+    if (!r->object.type->methods) r->object.type->methods = tm;
+    else r->object.type->methods_last->next = tm;
+    r->object.type->methods_last = tm;
+    r->object.type->method_count++;
     // the record owns the same list; both heads reference the same TypeMethods
-    TypeNominal* record = r->object_type->nominal;
+    TypeNominal* record = r->object.type->nominal;
     if (record) {
         if (!record->methods) record->methods = tm; else record->methods_last->next = tm;
         record->methods_last = tm;
@@ -19372,7 +19426,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     }
     case LSF_TYPE_STAM:
-        resolve_walk(r, ((AstLetNode*)node)->declare);
+        resolve_walk_chain(r, ((AstLetNode*)node)->declare);
         resolve_diagnostics(r, node);
         node->type = node->node_type == AST_NODE_PUB_STAM
             ? set_type_any(tp, ANY_STATEMENT) : &LIT_NULL;
@@ -19406,6 +19460,10 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     }
     case LSF_OBJECT_TYPE: {
+        // nested declarations own a fresh assembly cursor; the enclosing
+        // method/type resumes its original fields and method tail (D8.2.4).
+        LambdaObjectResolutionState outer = r->object;
+        r->object = {};
         AstObjectTypeNode* object = (AstObjectTypeNode*)node;
         void** tail = syntax_tail(node, sizeof(AstObjectTypeNode));
         resolver_object_begin(r, object, source_span_text(tp,
@@ -19427,6 +19485,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         }
         resolve_diagnostics(r, node);
         resolver_object_end(r);
+        r->object = outer;
         break;
     }
     case LSF_OBJECT_FIELD: {

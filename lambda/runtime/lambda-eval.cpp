@@ -33,6 +33,7 @@
 #include "../core/utf_string.h"
 #include "re2_wrapper.hpp"
 #include "grammar/grammar.hpp"
+#include "native_collection.hpp"
 #include "../input/markup/markup_highlight.hpp"
 #include <utf8proc.h>
 #include <mpdecimal.h>  // needed for inline decimal operations
@@ -2506,7 +2507,25 @@ static bool item_type_is_integer_subtype(Item item, TypeId type_id) {
     return numeric_type_subsumes(&actual, &TYPE_INTEGER);
 }
 
-static Type* runtime_boundary_unwrap_type(Type* type, Type** env = NULL) {
+struct RuntimeTypeEnv {
+    Type** slots;
+    Type** references;
+    Type** captured;
+    int64_t count;
+};
+
+static Type* runtime_bound_reference(TypeBoundRef* reference, RuntimeTypeEnv* env) {
+    // captured references are selected by lexical identity; local slot zero
+    // may belong to a different binder in this invocation (D4.1.4).
+    if (env) {
+        for (int64_t i = 0; i < env->count; i++)
+            if (env->references[i] == (Type*)reference) return env->captured[i];
+        if (env->slots && env->slots[reference->slot]) return env->slots[reference->slot];
+    }
+    return reference->bound;
+}
+
+static Type* runtime_boundary_unwrap_type(Type* type, RuntimeTypeEnv* env = NULL) {
     while (type && type->type_id == LMD_TYPE_TYPE &&
             !type_is_global_meta_type(type) && type->kind == TYPE_KIND_SIMPLE) {
         // Global meta-types have only the compact prefix; no TypeType payload
@@ -2528,7 +2547,7 @@ static Type* runtime_boundary_unwrap_type(Type* type, Type** env = NULL) {
     if (type && type->type_id == LMD_TYPE_TYPE &&
             type->kind == TYPE_KIND_BOUND_REF) {
         TypeBoundRef* ref = (TypeBoundRef*)type;
-        Type* bound = env && env[ref->slot] ? env[ref->slot] : ref->bound;
+        Type* bound = runtime_bound_reference(ref, env);
         if (bound) return runtime_boundary_unwrap_type(bound, env);
     }
     return type;
@@ -2570,9 +2589,9 @@ static Bool runtime_type_membership(Item value, Type* expected) {
     return matches ? BOOL_TRUE : BOOL_FALSE;
 }
 
-static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
+static bool runtime_type_admit_value_env(Item value, Type* expected, RuntimeTypeEnv* env,
     Item* converted);
-static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
+static bool runtime_type_admit_array_env(Item value, Type* expected, RuntimeTypeEnv* env,
     Item* converted);
 static bool runtime_type_admit_array(Item value, Type* expected, Item* converted) {
     return runtime_type_admit_array_env(value, expected, NULL, converted);
@@ -2844,28 +2863,36 @@ static Type* binder_join(Type* left, Type* right) {
 }
 
 static bool runtime_type_admit_binder(Item value, TypeBinder* binder,
-        Type** env, Item* converted) {
+        RuntimeTypeEnv* env, Item* converted) {
     if (!binder || !converted || !runtime_type_admit_value_env(value,
             binder->bound, env, converted)) return false;
-    if (!env) return true;
+    if (!env || !env->slots) return true;
     Type* narrowest = lambda_binder_value_type(*converted);
-    Type* prior = env[binder->slot];
+    Type* prior = env->slots[binder->slot];
     // NULL is the per-invocation unbound marker. A reference resolves to its
     // declared bound until the first binder site writes the concrete type,
     // avoiding the bound==first-value ambiguity during numeric joins (S4.2.2).
     Type* joined = prior ? binder_join(prior, narrowest) : narrowest;
     if (!joined) return false;
-    env[binder->slot] = joined;
+    env->slots[binder->slot] = joined;
     return true;
 }
 
-static Item type_check_with_status(Item value, Type* expected, Type** env,
+static Item type_check_with_status(Item value, Type* expected, RuntimeTypeEnv* env,
     const LambdaBoundary* boundary, Bool* admitted);
 
 Item lambda_type_check_env_status(Item value, Type* expected, Type** env,
         const char* boundary, Bool* admitted) {
     LambdaBoundary label = {boundary, NULL, NULL, NULL, 0};
-    return type_check_with_status(value, expected, env, &label, admitted);
+    RuntimeTypeEnv view = {env, NULL, NULL, 0};
+    return type_check_with_status(value, expected, env ? &view : NULL, &label, admitted);
+}
+
+Item lambda_type_check_captured_env_status(Item value, Type* expected, Type** local,
+        Type** references, Type** captured, int64_t count, const char* boundary, Bool* admitted) {
+    LambdaBoundary label = {boundary, NULL, NULL, NULL, 0};
+    RuntimeTypeEnv view = {local, references, captured, count};
+    return type_check_with_status(value, expected, &view, &label, admitted);
 }
 
 Item lambda_type_check_env(Item value, Type* expected, Type** env,
@@ -2892,10 +2919,11 @@ Item lambda_report_boundary_failure(Item failure, const char* binding,
 
 Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
         const LambdaBoundary* boundary) {
-    return type_check_with_status(value, expected, env, boundary, NULL);
+    RuntimeTypeEnv view = {env, NULL, NULL, 0};
+    return type_check_with_status(value, expected, env ? &view : NULL, boundary, NULL);
 }
 
-static Item type_check_with_status(Item value, Type* expected, Type** env,
+static Item type_check_with_status(Item value, Type* expected, RuntimeTypeEnv* env,
         const LambdaBoundary* boundary, Bool* admitted) {
     if (admitted) *admitted = BOOL_FALSE;
     // the unchanged Error can be admitted data or a preserved rejection.
@@ -3732,6 +3760,17 @@ static Bool cross_seq_eq(Item a_item, TypeId a_tid, Item b_item, TypeId b_tid,
 
 static Bool function_eq(Function* a, Function* b, int depth, EqualityContext* equality) {
     if (!a || !b) return BOOL_FALSE;
+    if (a->method || b->method) {
+        if (!a->method || !b->method || a->method->ast_def != b->method->ast_def)
+            return BOOL_FALSE;
+        // S12.3.3v2 compares the definition and receiver; a lexical method's
+        // second slot is implementation ownership, not another equality key.
+        Item left = a->closure_field_count ? ((Item*)a->closure_env)[0]
+            : Item{.item = (uint64_t)(uintptr_t)a->closure_env};
+        Item right = b->closure_field_count ? ((Item*)b->closure_env)[0]
+            : Item{.item = (uint64_t)(uintptr_t)b->closure_env};
+        return fn_eq_depth(left, right, depth + 1, equality);
+    }
     // S5.5.1v2: separate native adapters can represent the same definition.
     bool same_definition = a->def && b->def
         ? a->def == b->def && a->def_module == b->def_module : a->ptr == b->ptr;
@@ -7502,9 +7541,77 @@ extern "C" const TypeMethod* lambda_object_find_method(const TypeObject* type,
     return NULL;
 }
 
-static Item lambda_bind_object_method(const TypeMethod* method, Item self) {
+static Item object_environment_storage(bool create) {
+    if (!context || !context->heap) return ItemError;
+    if (context->heap->object_environments_root)
+        return {.item = context->heap->object_environments_root};
+    if (!create) return ItemNull;
     RootFrame roots(1);
+    Rooted<Item> shape(roots, map_literal_begin());
+    if (get_type_id(shape.get()) != LMD_TYPE_MAP) return ItemError;
+    Item storage = native_collection_create((TypeMap*)shape.get().map->type,
+        context->pool, NATIVE_COLLECTION_MAP, true);
+    if (get_type_id(storage) != LMD_TYPE_MAP) return ItemError;
+    context->heap->object_environments_root = storage.item;
+    return storage;
+}
+
+static Item object_environment_get(Item owner) {
+    if (!context || !context->heap || !context->heap->object_environments_root) return ItemNull;
+    Item storage = {.item = context->heap->object_environments_root};
+    NativeCollectionNode* node = native_collection_find_node(native_collection_data(storage), owner);
+    Item table = native_collection_node_raw_item(node, NATIVE_COLLECTION_NODE_VALUE);
+    return get_type_id(table) == LMD_TYPE_MAP ? table : ItemNull;
+}
+
+Item lambda_object_copy_environment(Item destination, Item source) {
+    if (!context || !context->heap || !context->heap->object_environments_root) return destination;
+    RootFrame roots(3);
+    Rooted<Item> target(roots, destination), original(roots, source);
+    Rooted<Item> table(roots, object_environment_get(original.get()));
+    if (get_type_id(table.get()) != LMD_TYPE_MAP) return target.get();
+    // declaration/instance snapshots share immutable method environments;
+    // later declaration additions detach their private table (S9.1.4v2).
+    cow_mark_shared(table.get());
+    Item storage = {.item = context->heap->object_environments_root};
+    return native_collection_set(native_collection_data(storage), target.get(), table.get())
+        ? target.get() : ItemError;
+}
+
+Item lambda_object_type_value(Item type, Item base) {
+    RootFrame roots(3);
+    Rooted<Item> declared(roots, type), parent(roots, base), result(roots, ItemNull);
+    if (get_type_id(declared.get()) != LMD_TYPE_TYPE) return ItemError;
+    result.set(lambda_type_value_from_contract(runtime_boundary_unwrap_type(declared.get().type)));
+    if (get_type_id(result.get()) == LMD_TYPE_ERROR) return result.get();
+    return lambda_object_copy_environment(result.get(), parent.get());
+}
+
+Item lambda_object_capture_method(Item type, const char* name, Item function) {
+    RootFrame roots(5);
+    Rooted<Item> owner(roots, type), captured(roots, function);
+    Rooted<Item> table(roots, object_environment_get(owner.get())), key(roots, ItemNull);
+    Rooted<Item> storage(roots, object_environment_storage(true));
+    if (get_type_id(storage.get()) != LMD_TYPE_MAP || !name ||
+            get_type_id(captured.get()) != LMD_TYPE_FUNC) return ItemError;
+    table.set(get_type_id(table.get()) == LMD_TYPE_MAP
+        ? cow_prepare_write(table.get()) : map_literal_begin());
+    if (get_type_id(table.get()) != LMD_TYPE_MAP) return ItemError;
+    String* string = heap_create_name(name);
+    if (!string) return ItemError;
+    key.set({.item = s2it(string)});
+    Item stored = fn_map_set(table.get(), key.get(), captured.get());
+    if (get_type_id(stored) == LMD_TYPE_ERROR) return stored;
+    return native_collection_set(native_collection_data(storage.get()), owner.get(), table.get())
+        ? owner.get() : ItemError;
+}
+
+static Item lambda_bind_object_method(const TypeMethod* method, Item self) {
+    RootFrame roots(4);
     Rooted<Item> receiver(roots, self);
+    Rooted<Item> captured(roots, ItemNull);
+    Rooted<void*> environment(roots, (void*)NULL);
+    Rooted<Function*> result(roots, (Function*)NULL);
     // a saved fn method owns a receiver snapshot; pn methods retain the
     // caller's already-detached writable receiver (S12.3.3v2/S9.3.1).
     if (!method->is_proc) receiver.set(cow_capture_value(receiver.get()));
@@ -7517,8 +7624,29 @@ static Item lambda_bind_object_method(const TypeMethod* method, Item self) {
         if (!interpreted) return ItemNull;
         return {.item = (uint64_t)(uintptr_t)interpreted};
     }
-    Function* bound = to_closure_named(method->compiled_fn, method->arity,
-        (void*)(uintptr_t)receiver.get().item, method->compiled_name);
+    int captures = method->ast_def ? ast_function_capture_count(method->ast_def) : 0;
+    void* bound_environment = (void*)(uintptr_t)receiver.get().item;
+    if (captures) {
+        captured.set(object_environment_get(receiver.get()));
+        captured.set(get_type_id(captured.get()) == LMD_TYPE_MAP
+            ? item_attr(captured.get(), method->name->str) : ItemNull);
+        if (get_type_id(captured.get()) != LMD_TYPE_FUNC ||
+                captured.get().function->def != method->ast_def)
+            return runtime_error_itemf(ERR_TYPE_MISMATCH, "method '%s' has no lexical environment", method->name->str);
+        // the bound environment owns the receiver and the declaring Function;
+        // that Function already owns all of its exact captured slots (D6.1.1).
+        environment.set(heap_calloc_closure_env(2 * sizeof(Item)));
+        if (!environment.get()) return ItemError;
+        owned_item_slot_store((Item*)environment.get(), 2, 0, receiver.get());
+        owned_item_slot_store((Item*)environment.get(), 2, 1, captured.get());
+        bound_environment = environment.get();
+    }
+    result.set(to_closure_named(method->compiled_fn, method->arity,
+        bound_environment, method->compiled_name));
+    Function* bound = result.get();
+    if (!bound) return ItemError;
+    bound->method = method;
+    if (captures) bound->closure_field_count = 2;
     // A method table keeps raw code, so reattach its TypeFunc when rebuilding
     // the bound closure; dynamic dispatch needs it to validate and marshal calls.
     lambda_function_set_type(bound, method->fn_type);
@@ -7529,6 +7657,28 @@ static Item lambda_bind_object_method(const TypeMethod* method, Item self) {
         lambda_function_mark_lambda_boxed_function(bound);
     }
     return {.item = (uint64_t)(uintptr_t)bound};
+}
+
+Item lambda_object_prepare_method_call(Item callable, Item* root,
+        const Item* keys, int64_t count) {
+    if (get_type_id(callable) != LMD_TYPE_FUNC || !callable.function->method ||
+            !callable.function->method->is_proc) return callable;
+    if (!root) return runtime_error_itemf(ERR_IMMUTABLE_ASSIGNMENT,
+        "mutating method requires a writable receiver place");
+    RootFrame roots(3);
+    Rooted<Item> function(roots, callable), owner(roots, *root), receiver(roots, ItemNull);
+    // detach the entire place before binding its writable leaf. The ordinary
+    // COW walker preserves snapshots retained through an ancestor (S9.1.3v3).
+    owner.set(cow_prepare_write(owner.get()));
+    if (get_type_id(owner.get()) == LMD_TYPE_ERROR) return owner.get();
+    owned_item_slot_store(root, 1, 0, owner.get());
+    receiver.set(count ? cow_path_borrow_keys(owner.get(), keys, count) : owner.get());
+    if (get_type_id(receiver.get()) == LMD_TYPE_ERROR) return receiver.get();
+    Function* bound = function.get().function;
+    if (bound->closure_field_count)
+        owned_item_slot_store((Item*)bound->closure_env, bound->closure_field_count, 0, receiver.get());
+    else bound->closure_env = (void*)(uintptr_t)receiver.get().item;
+    return function.get();
 }
 
 // S12.3.3v2 / S8.2.1v3: object member access — key domain first, then the
@@ -11230,7 +11380,7 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
             memcpy(rooted_dst.get()->data, rooted_src.get()->data, (size_t)data_cap);
         }
     }
-    return {.map = rooted_dst.get()};
+    return lambda_object_copy_environment({.map = rooted_dst.get()}, {.map = rooted_src.get()});
 }
 
 static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx) {
@@ -11273,7 +11423,7 @@ static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx)
             memcpy(rooted_dst.get()->data, rooted_src.get()->data, (size_t)data_cap);
         }
     }
-    return {.element = rooted_dst.get()};
+    return lambda_object_copy_environment({.element = rooted_dst.get()}, {.element = rooted_src.get()});
 }
 
 static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx) {
@@ -12100,7 +12250,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
         cow_mark_shape_children(type, source_data);
     }
     rooted_copy.get().container->cow_state &= ~COW_STATE_SHARED;
-    return rooted_copy.get();
+    return lambda_object_copy_environment(rooted_copy.get(), rooted_source.get());
 }
 
 static Item element_with_replacement_content(Item element, Item children,
@@ -13020,12 +13170,18 @@ Item lambda_container_path_set_checked_keys(Item owner, Item value, const Item* 
 
 Item lambda_map_path_set_checked_keys(Item owner, Item value, const Item* keys,
         int64_t shape, Type* expected, Type* leaf_contract) {
+    // this shared path adapter also handles array roots; report the receiving
+    // boundary rather than the adapter's historical map-only spelling.
+    const char* boundary = !lambda_array_contract_canonical(expected) ? "typed nested map assignment" :
+        get_type_id(owner) == LMD_TYPE_ARRAY_NUM && owner.array_num->is_ndim
+            ? "typed multi-dimensional array assignment" : "typed nested array assignment";
     return lambda_container_path_set_checked_keys(owner, value, keys, shape, expected,
-        leaf_contract, "typed nested map assignment");
+        leaf_contract, boundary);
 }
 
 static Type* runtime_array_contract_element(Type* expected) {
-    return runtime_boundary_unwrap_type(lambda_array_contract_element(expected));
+    Type* element = lambda_array_contract_element(expected);
+    return runtime_contract_uses_binder(element) ? element : runtime_boundary_unwrap_type(element);
 }
 
 HASHMAP_DEFINE_PTRKEY_HASH(array_rep_contract, LambdaArrayRepCertCacheEntry, contract,
@@ -14762,7 +14918,7 @@ static bool map_relayout_to_contract(Map* map, TypeMap* contract) {
     return true;
 }
 
-static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
+static bool runtime_type_admit_map_env(Item value, Type* expected, RuntimeTypeEnv* env,
         Item* converted, bool relation_proven = false) {
     if (get_type_id(value) != LMD_TYPE_MAP || !value.map || !expected ||
             expected->type_id != LMD_TYPE_MAP) {
@@ -14876,7 +15032,13 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
     // relation_proven means every field already passed the structural semantic
     // relation; the loop above owns the conversion proof and a graph-wide
     // validator would rescan unchanged child maps.
-    if (!relation_proven && !lambda_type_matches(rooted_candidate.get(), expected)) return false;
+    // dependent structural fields have already passed the env-aware walk.
+    // Rechecking their unbound descriptors outside that environment rejects
+    // valid selections; nominal identity/constraints still need their check.
+    bool dependent_fields_proven = runtime_contract_uses_binder(expected) &&
+        !type_nominal_record(expected) && !binary_schema_from_type(expected);
+    if (!relation_proven && !dependent_fields_proven &&
+            !lambda_type_matches(rooted_candidate.get(), expected)) return false;
     Map* admitted = rooted_candidate.get().map;
     // The loop converts each field where it lies; fields written in another
     // order still sit at other offsets, so the contract's layout is reached
@@ -14929,12 +15091,12 @@ bool lambda_array_contract_is_plain(Type* expected) {
     return homogeneous->nested && !homogeneous->item_patterns;
 }
 
-static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type** env,
+static bool runtime_type_admit_array_env_impl(Item value, Type* expected, RuntimeTypeEnv* env,
         Item* converted);
 
 // S11.1.6v2/S2.5.6: an annotation checks a list without changing its kind. When
 // admission packs or rebuilds the list, the fresh container inherits the bit.
-static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
+static bool runtime_type_admit_array_env(Item value, Type* expected, RuntimeTypeEnv* env,
         Item* converted) {
     bool is_list = item_is_list(value);
     if (!runtime_type_admit_array_env_impl(value, expected, env, converted)) return false;
@@ -14964,7 +15126,7 @@ static Item runtime_array_admission_candidate(Item value) {
     return cow_clone_one_level(value);
 }
 
-static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type** env,
+static bool runtime_type_admit_array_env_impl(Item value, Type* expected, RuntimeTypeEnv* env,
         Item* converted) {
     Type* element_type = runtime_array_contract_element(expected);
     TypeId source_type = get_type_id(value);
@@ -15365,10 +15527,11 @@ static bool runtime_union_map_rep_proves_cached(TypeMap* candidate,
 bool lambda_type_try_admit(Item value, Type* expected, Type** env, Item* converted) {
     RootFrame roots(1);
     Rooted<Item> source(roots, value);
-    return runtime_type_admit_value_env(source.get(), expected, env, converted);
+    RuntimeTypeEnv view = {env, NULL, NULL, 0};
+    return runtime_type_admit_value_env(source.get(), expected, env ? &view : NULL, converted);
 }
 
-static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
+static bool runtime_type_admit_value_env(Item value, Type* expected, RuntimeTypeEnv* env,
         Item* converted) {
     if (!converted) return false;
     if (expected && expected->type_id == LMD_TYPE_TYPE &&
@@ -15378,10 +15541,10 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
     if (expected && expected->type_id == LMD_TYPE_TYPE &&
             expected->kind == TYPE_KIND_BOUND_REF) {
         TypeBoundRef* ref = (TypeBoundRef*)expected;
-        Type* resolved = env && env[ref->slot] ? env[ref->slot] : ref->bound;
+        Type* resolved = runtime_bound_reference(ref, env);
         return resolved && runtime_type_admit_value_env(value, resolved, env, converted);
     }
-    expected = runtime_boundary_unwrap_type(expected);
+    expected = runtime_boundary_unwrap_type(expected, env);
     if (!expected) return false;
     // The bare string singleton cannot convert or refine a string value.
     if (expected == &TYPE_STRING && get_type_id(value) == LMD_TYPE_STRING) {

@@ -103,6 +103,16 @@ typedef struct LambdaConstPool LambdaConstPool;
 // D6.4.1: native I/O reads the canonical owner's run configuration.
 LAMBDA_RT_API bool lambda_dry_run_enabled(void);
 
+// lexical method and binder environments belong to the evaluator, not the
+// shared input data-model header (D4.1.4/D9.1.1).
+Item lambda_object_type_value(Item type, Item base);
+Item lambda_object_capture_method(Item type, const char* name, Item function);
+Item lambda_object_copy_environment(Item destination, Item source);
+Item lambda_object_prepare_method_call(Item callable, Item* root,
+    const Item* keys, int64_t count);
+Item lambda_type_check_captured_env_status(Item value, Type* expected, Type** local,
+    Type** references, Type** captured, int64_t count, const char* boundary, Bool* admitted);
+
 // Context-module state is established before a sealed MIR module is entered.
 // These lifecycle calls may allocate/register roots; generated code never
 // calls them from a repeated variable path.
