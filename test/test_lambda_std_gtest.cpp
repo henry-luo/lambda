@@ -7,6 +7,7 @@
 //==============================================================================
 
 #include <gtest/gtest.h>
+#include "test_lambda_compiler.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -282,7 +283,7 @@ static void run_std_sub_batch(
     progress_mutex.lock();
 #endif
     // Parallel batches must not serialize through shell stdin redirection.
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = lambda_test_shell_exec(LAMBDA_EXE, args, &options, true);
 #ifdef _WIN32
     progress_mutex.unlock();
 #endif

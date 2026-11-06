@@ -36,7 +36,7 @@ pn weakest_of(s1: int, s2: int) {
 // { value, constraints (array of constraint indices), determined_by, mark, walk_strength, stay, name }
 pn create_variable(name: string, initial_value: int) {
     return {value: initial_value, constraints: fill(0, 0), det_by: -1,
-            mark: 0, walk_str: WEAKEST, stay: 1, name: name}
+            mark: 0, walk_str: WEAKEST, stay: true, name: name}
 }
 
 // --- Constraints stored in a global array ---
@@ -53,38 +53,37 @@ pn create_constraint(kind: int, strength: int, v1: int, v2: int, scale: int, off
             v1: v1, v2: v2, scale: scale, offset: offset, satisfied: false}
 }
 
+// S9.1.2/S9.1.3: publish writes through the planner owner, not a local snapshot.
 // Planner globals stored in a state map
 pn create_planner() {
     return {current_mark: 0, vars: fill(0, null), constraints: fill(0, null),
             nv: 0, nc: 0}
 }
 
-pn planner_add_var(p, name: string, value: int) {
+pn planner_add_var(var p, name: string, value: int) {
     var idx = p.nv
     var v = create_variable(name, value)
-    var p_vars = p.vars
-    p_vars[idx] = v
+    p.vars[idx] = v
     p.nv = idx + 1
     return idx
 }
 
-pn planner_add_constraint(p, kind: int, strength: int, v1: int, v2: int, scale: int, offset: int) {
+pn planner_add_constraint(var p, kind: int, strength: int, v1: int, v2: int, scale: int, offset: int) {
     var idx = p.nc
     var c = create_constraint(kind, strength, v1, v2, scale, offset)
-    var p_constraints = p.constraints
-    p_constraints[idx] = c
+    p.constraints[idx] = c
     p.nc = idx + 1
     // add constraint to variable's constraint list
     var p_vars2 = p.vars
     var var1 = p_vars2[v1]
     var cl1 = var1.constraints
     var new_cl1 = cl1 ++ [idx]
-    var1.constraints = new_cl1
+    p.vars[v1].constraints = new_cl1
     if (v2 >= 0) {
         var var2 = (p.vars)[v2]
         var cl2 = var2.constraints
         var new_cl2 = cl2 ++ [idx]
-        var2.constraints = new_cl2
+        p.vars[v2].constraints = new_cl2
     }
     return idx
 }
@@ -122,7 +121,7 @@ pn constraint_is_input(p, ci: int, vi: int) {
     return vi == c.v2
 }
 
-pn constraint_execute(p, ci: int) {
+pn constraint_execute(var p, ci: int) {
     var c = (p.constraints)[ci]
     if (c.kind == C_STAY) {
         return 0
@@ -135,7 +134,7 @@ pn constraint_execute(p, ci: int) {
         var out_idx = constraint_output(p, ci)
         var in_var = (p.vars)[in_idx]
         var out_var = (p.vars)[out_idx]
-        out_var.value = in_var.value
+        p.vars[out_idx].value = in_var.value
         return 0
     }
     // C_SCALE
@@ -144,50 +143,50 @@ pn constraint_execute(p, ci: int) {
     var in_var = (p.vars)[in_idx]
     var out_var = (p.vars)[out_idx]
     if (c.direction == FORWARD) {
-        out_var.value = in_var.value * c.scale + c.offset
+        p.vars[out_idx].value = in_var.value * c.scale + c.offset
     } else {
-        out_var.value = (in_var.value - c.offset) / c.scale
+        p.vars[out_idx].value = (in_var.value - c.offset) / c.scale
     }
     return 0
 }
 
-pn constraint_recalc(p, ci: int) {
+pn constraint_recalc(var p, ci: int) {
     var out_idx = constraint_output(p, ci)
     var out_var = (p.vars)[out_idx]
-    out_var.walk_str = (p.constraints)[ci].strength
-    out_var.stay = (p.constraints)[ci].kind != C_EDIT
-    if (out_var.stay == 1) {
+    p.vars[out_idx].walk_str = (p.constraints)[ci].strength
+    p.vars[out_idx].stay = (p.constraints)[ci].kind != C_EDIT
+    if (p.vars[out_idx].stay == true) {
         constraint_execute(p, ci)
     }
 }
 
-pn constraint_choose_method(p, ci: int, mark: int) {
+pn constraint_choose_method(var p, ci: int, mark: int) {
     var c = (p.constraints)[ci]
     if (c.kind == C_STAY) {
         // unary: only output is v1
         var v = (p.vars)[c.v1]
         if (v.mark != mark) {
             if (stronger(c.strength, v.walk_str)^) {
-                c.direction = FORWARD
-                c.satisfied = true
+                p.constraints[ci].direction = FORWARD
+                p.constraints[ci].satisfied = true
                 return 0
             }
         }
-        c.direction = NONE
-        c.satisfied = false
+        p.constraints[ci].direction = NONE
+        p.constraints[ci].satisfied = false
         return 0
     }
     if (c.kind == C_EDIT) {
         var v = (p.vars)[c.v1]
         if (v.mark != mark) {
             if (stronger(c.strength, v.walk_str)^) {
-                c.direction = FORWARD
-                c.satisfied = true
+                p.constraints[ci].direction = FORWARD
+                p.constraints[ci].satisfied = true
                 return 0
             }
         }
-        c.direction = NONE
-        c.satisfied = false
+        p.constraints[ci].direction = NONE
+        p.constraints[ci].satisfied = false
         return 0
     }
     // binary constraint (equal or scale)
@@ -196,8 +195,8 @@ pn constraint_choose_method(p, ci: int, mark: int) {
     if (v1.mark == mark) {
         if (v2.mark != mark) {
             if (stronger(c.strength, v2.walk_str)^) {
-                c.direction = FORWARD
-                c.satisfied = true
+                p.constraints[ci].direction = FORWARD
+                p.constraints[ci].satisfied = true
                 return 0
             }
         }
@@ -205,8 +204,8 @@ pn constraint_choose_method(p, ci: int, mark: int) {
     if (v2.mark == mark) {
         if (v1.mark != mark) {
             if (stronger(c.strength, v1.walk_str)^) {
-                c.direction = BACKWARD
-                c.satisfied = true
+                p.constraints[ci].direction = BACKWARD
+                p.constraints[ci].satisfied = true
                 return 0
             }
         }
@@ -214,23 +213,23 @@ pn constraint_choose_method(p, ci: int, mark: int) {
     // Try both
     if (weaker(v1.walk_str, v2.walk_str)^) {
         if (stronger(c.strength, v1.walk_str)^) {
-            c.direction = BACKWARD
-            c.satisfied = true
+            p.constraints[ci].direction = BACKWARD
+            p.constraints[ci].satisfied = true
             return 0
         }
     } else {
         if (stronger(c.strength, v2.walk_str)^) {
-            c.direction = FORWARD
-            c.satisfied = true
+            p.constraints[ci].direction = FORWARD
+            p.constraints[ci].satisfied = true
             return 0
         }
     }
-    c.direction = NONE
-    c.satisfied = false
+    p.constraints[ci].direction = NONE
+    p.constraints[ci].satisfied = false
     return 0
 }
 
-pn incremental_add(p, ci: int) {
+pn incremental_add(var p, ci: int) {
     p.current_mark = p.current_mark + 1
     var mark = p.current_mark
     constraint_choose_method(p, ci, mark)^
@@ -255,20 +254,20 @@ pn incremental_add(p, ci: int) {
     return 0
 }
 
-pn incremental_remove(p, ci: int) {
+pn incremental_remove(var p, ci: int) {
     var c = (p.constraints)[ci]
     if (c.satisfied == false) {
         return 0
     }
     constraint_recalc(p, ci)
-    c.satisfied = false
-    c.direction = NONE
+    p.constraints[ci].satisfied = false
+    p.constraints[ci].direction = NONE
     // reset output variable
     var out_idx = constraint_output(p, ci)
     var out_var = (p.vars)[out_idx]
-    out_var.det_by = -1
-    out_var.walk_str = WEAKEST
-    out_var.stay = 1
+    p.vars[out_idx].det_by = -1
+    p.vars[out_idx].walk_str = WEAKEST
+    p.vars[out_idx].stay = true
     return 0
 }
 
@@ -307,8 +306,7 @@ pn chain_test(n: int) {
     incremental_add(p, edit_ci)
 
     // Change first variable, propagate
-    var first = (p.vars)[0]
-    first.value = 100
+    p.vars[0].value = 100
     // Execute chain
     i = 0
     while (i < n) {
@@ -362,28 +360,29 @@ pn projection_test(n: int) {
     i = 0
     while (i < n) {
         var vi = i * 2
-        var src_v = (p.vars)[vi]
-        src_v.value = i * 17 + 11
+        p.vars[vi].value = i * 17 + 11
         i = i + 1
     }
     return dst_idx
 }
 
 pn benchmark() {
-    chain_test(100)^
-    projection_test(100)
-    return 0
+    let chain_result = chain_test(100)^
+    let projection_result = projection_test(100)^
+    return chain_result + projection_result
 }
 
 pn main() {
     var __t0 = clock()
     // Original JetStream workload: 20 iterations
     var i: int = 0
+    var checksum = 0
     while (i < 20) {
-        benchmark()^
+        checksum = checksum + benchmark()^
         i = i + 1
     }
     var __t1 = clock()
-    print("deltablue: PASS\n")
+    if ((checksum == 5980)^) { print("deltablue: PASS\n") }
+    else { print("deltablue: FAIL checksum=" ++ string(checksum) ++ "\n") }
     print("__TIMING__:" ++ ((__t1 - __t0) * 1000.0) ++ "\n")
 }

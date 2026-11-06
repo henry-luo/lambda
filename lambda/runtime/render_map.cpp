@@ -307,6 +307,12 @@ void render_map_forget_retired_result(EvalContext* owner, Item result) {
     ReverseMap::erase(state->reverse_map, query);
 }
 
+void render_map_get_counts(EvalContext* owner, size_t* forward, size_t* reverse) {
+    RenderMapState* state = owner ? (RenderMapState*)context_capsule(owner, CONTEXT_CAPSULE_RENDER_MAP) : nullptr;
+    if (forward) *forward = state && state->render_map ? hashmap_count(state->render_map) : 0;
+    if (reverse) *reverse = state && state->reverse_map ? hashmap_count(state->reverse_map) : 0;
+}
+
 // ============================================================================
 // Ensure map exists (lazy creation)
 // ============================================================================

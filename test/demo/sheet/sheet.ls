@@ -9,6 +9,8 @@ import v: .mod_view
 import overflow: lambda.ui.workspace.ribbon_overflow
 import selection: .mod_selection
 import sizing: .mod_resize
+import window: .mod_window
+import virtual: lambda.ui.core.virtual_grid
 import focus: lambda.ui.core.focus
 import interaction: lambda.ui.core.interaction
 import workspace_dialog: lambda.ui.workspace.dialog
@@ -16,12 +18,14 @@ import workspace_dialog: lambda.ui.workspace.dialog
 let BASE=url_resolve(resources.entry_uri()^,".")
 let CSS=office_style.document_css ++ office_style.css ++ ribbon_style.css ++ workspace_dialog.css ++ input(url_resolve(BASE,"sheet.css"),'text')^
 fn node(owner,id) => dom.get_element_by_id(dom.root_node(owner),id)
-edit <sheet_app> () any^ state st:m.initial() {v.workspace(st)^}
+let INITIAL=m.initial()^
+edit <sheet_app> () any^ state st:INITIAL {v.workspace(st)^}
 on render(evt) {
     if (evt.event_phase==2) {
         let owner=node(evt.target,"sheet")
         dom.watch_window(owner,"resize",true)
         dom.request_frame(owner,"sheet_ribbon_ready")
+        dom.request_frame_once(owner,"sheet_grid_measure")
         if (dom.get_attribute(owner,"data-window-min")!="set" and dom.set_window_min_width(owner,720))
             dom.set_attribute(owner,"data-window-min","set")
     }
@@ -31,13 +35,60 @@ on sheet_ribbon_ready(evt) {
     if (evt.event_phase==2) overflow.update(dom.query_selector(node(evt.target,"sheet"),".editor-ribbon"),st.tab,"true")^
     return 'pass'
 }
-on resize(evt) { dom.request_frame(node(evt.target,"sheet"),"sheet_ribbon_ready"); return 'pass' }
+on resize(evt) {
+    dom.request_frame(node(evt.target,"sheet")^,"sheet_ribbon_ready")
+    dom.request_frame_once(node(evt.target,"sheet")^,"sheet_grid_measure")
+    return 'pass'
+}
+on scroll(evt) {
+    if (dom.get_attribute(evt.target,"id")=="grid-scroll")
+        dom.request_frame_once(node(evt.target,"sheet")^,"sheet_grid_measure")
+    return 'pass'
+}
+on sheet_grid_measure(evt) {
+    if (evt.event_phase!=2) { return 'pass' }
+    let port=node(evt.target,"grid-scroll")^
+    let metrics=dom.scroll_metrics(port)
+    let scroll=dom.scroll_state(port)
+    let next={x:float(scroll.x),y:float(scroll.y),width:float(metrics.client_width),height:float(metrics.client_height)}
+    let key=window.key(st)
+    let changed=st.geometry_key!=key or st.geometry==null
+    let axes=window.axes(st)^
+    let before=window.visible(axes,st.viewport)^
+    let visible=window.visible(axes,next,0,0)^
+    if ((not virtual.covers(before.rows,visible.rows) or not virtual.covers(before.columns,visible.columns) or
+            next.width!=st.viewport.width or next.height!=st.viewport.height)^) {
+        let after=window.visible(axes,next)^
+        if ((st.editing and (st.row<after.rows.first or st.row>=after.rows.last or
+                st.col<after.columns.first or st.col>=after.columns.last))^) {
+            let editor=node(port,"cell-editor")
+            if (editor!=null) { st=m.set_value(st,dom.get_state(editor,"value") or "")^ }
+        }
+        st={*:st,viewport:next}
+    }
+    if (changed) { st={*:st,geometry_key:key,geometry:axes} }
+    return 'handled'
+}
 on sheet_focus(evt) {
     if (evt.event_phase!=2) { return 'pass' }
+    let cell=node(evt.target,"cell-" ++ f.address(st.row,st.col)^)^
+    if ((st.dialog=="" and cell==null)^) {
+        // A virtual cell must be mounted before focus or scroll-into-view.
+        let port=node(evt.target,"grid-scroll")^
+        let metrics=dom.scroll_metrics(port)
+        let scroll=dom.scroll_state(port)
+        let axes=window.axes(st)^
+        let x=virtual.reveal(axes.columns,st.col,float(scroll.x),max(0,float(metrics.client_width)-44))^
+        let y=virtual.reveal(axes.rows,st.row,float(scroll.y),max(0,float(metrics.client_height)-26))^
+        dom.set_scroll_state(port,x,y)
+        dom.request_frame_once(evt.target,"sheet_grid_measure")
+        dom.request_frame(evt.target,"sheet_focus")
+        return 'handled'
+    }
     let id=if (st.dialog!="") (if (st.dialog=="replace") "dialog-cancel" else "file-path") else if (st.editing) "cell-editor" else "sheet-grid"
     dom.focus_set(node(evt.target,id),false)
     if ((st.editing and st.dialog=="")^) dom.tc_set_selection(node(evt.target,id)^,len(st.draft)^,len(st.draft)^,"none")
-    if ((st.dialog=="" and not st.editing)^) dom.scroll_into_view_options(node(evt.target,"cell-" ++ f.address(st.row,st.col))^,{block:"nearest",inline:"nearest"})
+    if ((st.dialog=="" and not st.editing)^) dom.scroll_into_view_options(cell^,{block:"nearest",inline:"nearest"})
     return 'handled'
 }
 on pointerdown(evt) {
@@ -63,6 +114,13 @@ on pointermove(evt) {
     st=selection.move(evt.target,st,evt.clientX,evt.clientY)
     return 'prevent-default'
 }
+on sheet_drag_scroll(evt) {
+    if (evt.event_phase!=2) { return 'pass' }
+    if ((st.selection_drag!=null and st.selection_drag.x!=null)^) {
+        st=selection.move(evt.target,st,st.selection_drag.x,st.selection_drag.y,false,true)
+    }
+    return 'handled'
+}
 on pointerup(evt) {
     if ((st.resize_drag!=null)^) {
         if ((evt.pointerId!=st.resize_drag.pointer)^) { return 'pass' }
@@ -71,7 +129,7 @@ on pointerup(evt) {
         return 'prevent-default'
     }
     if ((st.selection_drag==null or evt.pointerId!=st.selection_drag.pointer)^) { return 'pass' }
-    st=selection.move(evt.target,st,evt.clientX,evt.clientY)
+    st=selection.move(evt.target,st,evt.clientX,evt.clientY,true)
     st=selection.finish(evt.target,st)
     app.focus(evt.target)
     return 'prevent-default'
@@ -111,7 +169,7 @@ on click(evt) {
     let row=dom.get_attribute(target,"data-row")
     let col=dom.get_attribute(target,"data-col")
     if (tab!=null) { st={*:st,tab:tab} }
-    else if (sheet!=null) { st=m.select({*:st,sheet:int(sheet)},0,0) }
+    else if (sheet!=null) { st=m.select(m.activate(st,int(sheet))^,0,0) }
     else if (row!=null and col!=null) {
         if (dom.closest(evt.target,"#cell-editor")!=null) { return 'pass' }
         st=m.select(st,int(row),int(col),evt.shiftKey==true)
@@ -157,7 +215,7 @@ on change(evt) {
     }
     else if (id in ["font","size","fill","color","number-format"]) {
         let value=dom.get_state(evt.target,"value")
-        st=m.format_cells(st,if (id=="number-format") "format" else id,if (id=="size") int(value) else value)
+        st=m.format_cells(st,if (id=="number-format") "format" else id,if (id=="size") int(value) else value) ^ {{*:st,status:string(^.message)}}
     }
     return 'pass'
 }

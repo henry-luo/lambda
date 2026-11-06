@@ -216,6 +216,9 @@ DOM_ENGINE_WEAK void dom_engine_animation_frame_prepare(void* d,double t) {(void
 DOM_ENGINE_WEAK uint64_t dom_engine_frame_request(void* n, const char* e) {
     (void)n; (void)e; return 0;
 }
+DOM_ENGINE_WEAK uint64_t dom_engine_frame_request_once(void* n, const char* e) {
+    (void)n; (void)e; return 0;
+}
 DOM_ENGINE_WEAK bool dom_engine_frame_cancel(void* n, uint64_t t) {
     (void)n; (void)t; return false;
 }

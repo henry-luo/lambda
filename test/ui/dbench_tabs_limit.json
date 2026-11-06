@@ -1,0 +1,20 @@
+{
+  "name":"DBench bounds the number of independent tabs",
+  "html":"test/demo/dbench/dbench.ls",
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"assert_count","target":{"selector":"[role='tab']"},"equals":4},
+    {"type":"assert_script","js":"document.getElementById('tab-new').disabled"},
+    {"type":"click","target":{"selector":"[data-tab-close='4']"}},
+    {"type":"assert_count","target":{"selector":"[role='tab']"},"equals":3},
+    {"type":"click","target":{"selector":"#tab-new"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-active-tab","equals":"5"},
+    {"type":"assert_count","target":{"selector":"#tab-4"},"equals":0},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-connected","equals":"true","assert_timeout":30000}
+  ]
+}

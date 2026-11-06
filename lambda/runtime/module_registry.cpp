@@ -507,6 +507,10 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
         log_error("module_registry: hosted namespace is not map-like (type=%d)", ns_type);
         return NULL;
     }
+    // D7.2.1: the descriptor owns the canonical bridge identity. A path lookup
+    // can instead find the guest's parsed Script, whose AST is not a Core AST.
+    if (module && module->lambda_import_script && !module->lambda_import_script->is_retired)
+        return module->lambda_import_script;
 
     RootFrame roots(1);
     if (!roots.valid()) return NULL;
@@ -642,6 +646,7 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
     }
 
     symbol_key_list_free(keys);
+    if (module) module->lambda_import_script = script;
     return script;
 }
 

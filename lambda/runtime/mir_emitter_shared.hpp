@@ -18,6 +18,8 @@
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/lambda_alloca.h"
 
+typedef void (*MirResultCheck)(void* owner, MIR_reg_t result);
+
 typedef struct MirPropertyKeyEntry {
     NameRef name;
     NameId predefined_id;
@@ -480,6 +482,9 @@ struct MirFrameState {
     ScalarReturnClass scalar_return_mode;
     MIR_type_t return_type;
     MIR_reg_t runtime;
+    // Lambda rest context is restored at the common completion boundary.
+    MIR_reg_t vargs_roots;
+    MIR_insn_t vargs_root_fixup;
     MIR_reg_t root_base;
     MIR_reg_t root_end;
     MIR_reg_t number_base;
@@ -1378,6 +1383,41 @@ static inline bool em_numeric_op_plan(Operator op, MirNumericOpPlan* plan, bool 
     }
 }
 
+// both Lambda emitters use the same semantic kernel names; legacy Bool
+// equality callers explicitly request the byte-returning ABI.
+static inline const char* em_boxed_binary_helper(Operator op, bool item_equality = true) {
+    switch (op) {
+    case OPERATOR_ADD: return "fn_add";
+    case OPERATOR_SUB: return "fn_sub";
+    case OPERATOR_MUL: return "fn_mul";
+    case OPERATOR_DIV: return "fn_div";
+    case OPERATOR_IDIV: return "fn_idiv";
+    case OPERATOR_MOD: return "fn_mod";
+    case OPERATOR_POW: return "fn_pow";
+    case OPERATOR_JOIN: return "fn_join";
+    case OPERATOR_UNION: return "fn_union";
+    case OPERATOR_INTERSECT: return "fn_intersect";
+    case OPERATOR_EXCLUDE: return "fn_exclude";
+    case OPERATOR_EQ: return item_equality ? "fn_eq_value" : "fn_eq";
+    case OPERATOR_NE: return item_equality ? "fn_ne_value" : "fn_ne";
+    case OPERATOR_REF_EQ: return item_equality ? "fn_ref_eq_value" : "fn_ref_eq";
+    case OPERATOR_LT: return "fn_lt";
+    case OPERATOR_LE: return "fn_le";
+    case OPERATOR_GT: return "fn_gt";
+    case OPERATOR_GE: return "fn_ge";
+    case OPERATOR_TO: return "fn_to";
+    case OPERATOR_AT: return "fn_at";
+    case OPERATOR_IN: return "fn_in";
+    case OPERATOR_OF: return "fn_of";
+    case OPERATOR_SUBTYPE: return "fn_subtype";
+    default: return NULL;
+    }
+}
+
+static inline const char* em_reference_unary_helper(Operator op) {
+    return op == OPERATOR_FORCE ? "fn_force" : op == OPERATOR_ADDRESS_OF ? "fn_address_of" : NULL;
+}
+
 static inline void em_store_at(MirEmitter* em, MIR_reg_t base, MIR_disp_t offset,
         MIR_type_t type, MIR_reg_t value) {
     MIR_insn_code_t code = type == MIR_T_D ? MIR_DMOV : MIR_MOV;
@@ -1544,6 +1584,15 @@ static inline void em_store_frame_slot_typed(MirEmitter* em,
 // helper calls existed — and prepending keeps it ahead of every entry path
 // (TCO loop-backs, generator resume dispatch). Neither base may be a side-root
 // slot: raw double bits in a GC-scanned slot would be misread as a tagged Item.
+// fixed raw storage belongs to this native activation, outside precise roots.
+static inline MIR_reg_t em_fixed_stack_storage(MirEmitter* em, const char* name, int64_t bytes) {
+    MIR_reg_t address = em_new_reg(em, name, MIR_T_P);
+    MIR_prepend_insn(em->ctx, em->func_item,
+        MIR_new_insn(em->ctx, MIR_ALLOCA, MIR_new_reg_op(em->ctx, address),
+            MIR_new_int_op(em->ctx, bytes)));
+    return address;
+}
+
 static inline MIR_reg_t em_bitcast_scratch_base(MirEmitter* em,
         MIR_disp_t* disp_out) {
     // frame.runtime is only meaningful while the frame is active; suspend and
@@ -1557,10 +1606,7 @@ static inline MIR_reg_t em_bitcast_scratch_base(MirEmitter* em,
     if (em->bitcast_slot_addr && em->bitcast_slot_func == em->func_item) {
         return em->bitcast_slot_addr;
     }
-    MIR_reg_t addr = em_new_reg(em, "fbits_slot", MIR_T_I64);
-    MIR_prepend_insn(em->ctx, em->func_item,
-        MIR_new_insn(em->ctx, MIR_ALLOCA, MIR_new_reg_op(em->ctx, addr),
-            MIR_new_int_op(em->ctx, (int64_t)sizeof(uint64_t))));
+    MIR_reg_t addr = em_fixed_stack_storage(em, "fbits_slot", sizeof(uint64_t));
     em->bitcast_slot_func = em->func_item;
     em->bitcast_slot_addr = addr;
     return addr;
@@ -1736,6 +1782,16 @@ static inline MIR_reg_t em_box_f64_to_item(MirEmitter* em, void* owner,
         }, em_emit_double_bits(em, value));
 }
 
+static inline void em_scalar_home_bind(MirEmitter* em, int logical_home_id, MIR_reg_t reg);
+static inline int em_scalar_home_for_reg(MirEmitter* em, MIR_reg_t reg);
+
+static inline MIR_reg_t em_bind_scalar_home_result(MirEmitter* em, MIR_reg_t home, MIR_reg_t result) {
+    // address lifetime alone ends at the store/helper call. The returned Item
+    // keeps the payload alive through its last observer (D6.2.3).
+    em_scalar_home_bind(em, em_scalar_home_for_reg(em, home), result);
+    return result;
+}
+
 // materialize a cold Float payload in an already-reserved destination home.
 static inline MIR_reg_t em_store_f64_home(MirEmitter* em, MIR_reg_t value,
         MIR_reg_t home, MIR_type_t type = MIR_T_D) {
@@ -1744,7 +1800,7 @@ static inline MIR_reg_t em_store_f64_home(MirEmitter* em, MIR_reg_t value,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, home),
         MIR_new_uint_op(em->ctx, (uint64_t)LMD_TYPE_FLOAT << 56)));
-    return result;
+    return em_bind_scalar_home_result(em, home, result);
 }
 
 static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
@@ -1810,7 +1866,7 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, adopted)));
     em_emit_label(em, l_done);
-    return result;
+    return em_bind_scalar_home_result(em, target_home, result);
 }
 
 // Adopt a temporary boxed scalar before restoring its source number extent.
@@ -2166,6 +2222,23 @@ static inline MIR_reg_t em_lower_condition(MirEmitter* em, AstNode* node,
     MirValue value = em_lower_value(em, node, MIR_VALUE_BRANCH);
     value = em_materialize_pending_value(em, value, MIR_PENDING_REASON_BRANCH);
     return emit(em->call_owner, value);
+}
+
+// a proviso observes one value, without sequence traversal or a new contract
+// boundary. Only true keeps it; false, absence and predicate Error reject it.
+static inline MIR_reg_t em_proviso_result(MirEmitter* em, MIR_reg_t subject,
+        MIR_reg_t predicate) {
+    MIR_reg_t result = em_new_reg(em, "that_proviso", MIR_T_I64);
+    MIR_label_t done = em_new_label(em);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_int_op(em->ctx, ITEM_NULL)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
+        MIR_new_label_op(em->ctx, done), MIR_new_reg_op(em->ctx, predicate),
+        MIR_new_int_op(em->ctx, BOOL_TRUE)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, subject)));
+    em_emit_label(em, done);
+    return result;
 }
 
 // A join or completion consumes its pending result before writing its destination.
@@ -4137,7 +4210,7 @@ static inline bool em_finalize_recorded_roots(MirEmitter* em,
         MIR_reg_t frame_base, MIR_insn_t anchor,
         MirRootWriteBackResult* result, const char* log_label) {
     MirFrameState* frame = em ? &em->frame : NULL;
-    if (!frame || frame->gc_candidate_count == 0) return true;
+    if (!frame || (!frame->gc_candidate_count && !frame->fixed_root_slots)) return true;
     int home_count = frame->root_slot_count + 1;
     uint8_t* preserved = (uint8_t*)mem_calloc(
         (size_t)home_count, sizeof(uint8_t), MEM_CAT_TEMP);
@@ -4241,6 +4314,7 @@ static inline MIR_reg_t em_materialize_frame_ref(MirEmitter* em,
     frame->scalar_home_fixups[frame->scalar_home_fixup_count++] = {
         add, ref.kind, ref.logical_home_id
     };
+    if (ref.kind == MIR_FRAME_REF_LOCAL_SCALAR_HOME) em_scalar_home_bind(em, ref.logical_home_id, address);
     return address;
 }
 
@@ -5447,6 +5521,37 @@ static inline MIR_reg_t em_call_2(MirEmitter* em, const char* fn_name,
     return em_call_with_args(em, fn_name, ret_type, 2, types, ops, include_signature);
 }
 
+// separators precede evaluation of the next argument, so effects in that
+// expression appear in the same order as T0's variadic print.
+static inline MIR_reg_t em_print_arguments(MirEmitter* em, AstNode* arguments,
+        bool preserve_single_outcome = false, AstNode* receiver = NULL) {
+    MIR_reg_t printed = 0;
+    bool injected = receiver != NULL;
+    for (AstNode* argument = injected ? receiver : arguments; argument;
+            argument = injected ? (injected = false, arguments) : argument->next) {
+        if (printed) {
+            MIR_reg_t text = em_call_2(em, "heap_strcpy", MIR_T_P,
+                MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)" "),
+                MIR_T_I64, MIR_new_int_op(em->ctx, 1), true);
+            MirValue separator = em_require_rep(em, em_value_for_rep(text,
+                LMD_TYPE_STRING, VALUE_REP_RAW_GC_POINTER, &TYPE_STRING), VALUE_REP_ITEM);
+            em_call_1(em, "pn_print", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(em->ctx, separator.reg), true);
+        }
+        MirValue item = em_require_rep(em,
+            em_lower_value(em, argument, MIR_VALUE_ANY), VALUE_REP_ITEM);
+        printed = em_call_1(em, "pn_print", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(em->ctx, item.reg), true);
+    }
+    // retain MVP's existing single-call provider outcome; the variadic
+    // protocol and Full's existing path complete with null.
+    if (preserve_single_outcome && (receiver ? !arguments : arguments && !arguments->next)) return printed;
+    MIR_reg_t absent = em_new_reg(em, "print_null", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, absent), MIR_new_int_op(em->ctx, ITEM_NULL)));
+    return absent;
+}
+
 // promoted from production's module prologue: a matching context-local hint
 // proves the logical owner without baking runtime state into a cached image.
 #pragma clang diagnostic push
@@ -5585,4 +5690,52 @@ static inline void em_call_void_6(MirEmitter* em, const char* fn_name,
     MIR_type_t types[6] = {a1t, a2t, a3t, a4t, a5t, a6t};
     MIR_op_t ops[6] = {a1, a2, a3, a4, a5, a6};
     em_call_void_with_args(em, fn_name, 6, types, ops, include_signature);
+}
+
+// Branch to `not_list` unless the boxed item is a list: a container pointer
+// (no tag byte) whose header is an array or packed array with the kind bit
+// set (S2.5.1v2). Falls through only for a list.
+static inline void em_branch_not_list(MirEmitter* em, MIR_reg_t item, MIR_label_t not_list) {
+    MIR_reg_t tag = em_new_reg(em, "list_tag", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH, MIR_new_reg_op(em->ctx, tag),
+        MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 56)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, not_list),
+        MIR_new_reg_op(em->ctx, tag), MIR_new_int_op(em->ctx, 0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, not_list),
+        MIR_new_reg_op(em->ctx, item), MIR_new_int_op(em->ctx, 0)));
+    MIR_reg_t flags = em_new_reg(em, "list_flags", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, flags),
+        MIR_new_mem_op(em->ctx, MIR_T_U8, offsetof(Container, flags), item, 0, 1)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, flags),
+        MIR_new_reg_op(em->ctx, flags), MIR_new_int_op(em->ctx, CONTAINER_FLAG_SPREADABLE)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, not_list),
+        MIR_new_reg_op(em->ctx, flags), MIR_new_int_op(em->ctx, 0)));
+    MIR_reg_t kind = em_new_reg(em, "list_kind", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, kind),
+        MIR_new_mem_op(em->ctx, MIR_T_U8, 0, item, 0, 1)));
+    MIR_label_t is_array = em_new_label(em);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ, MIR_new_label_op(em->ctx, is_array),
+        MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, LMD_TYPE_ARRAY)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, not_list),
+        MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, LMD_TYPE_ARRAY_NUM)));
+    em_emit_label(em, is_array);
+}
+
+// a persistent single-value slot owns the array image of a transient list.
+static inline MIR_reg_t em_slot_image(MirEmitter* em, MIR_reg_t boxed, bool may_hold_list) {
+    if (!may_hold_list) return boxed;
+    MIR_reg_t result = em_new_reg(em, "slot_val", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, boxed)));
+    // the joined register, not only the allocating arm, crosses later field
+    // evaluation and owner allocation as a precisely rooted Item.
+    if (em->root_call_value) em->root_call_value(em->call_owner, result, JIT_VALUE_BOXED_ITEM);
+    MIR_label_t done = em_new_label(em);
+    em_branch_not_list(em, boxed, done);
+    MIR_reg_t image = em_call_1(em, "slot_image", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, boxed), true);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, image)));
+    em_emit_label(em, done);
+    return result;
 }

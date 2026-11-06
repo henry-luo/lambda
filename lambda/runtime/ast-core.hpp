@@ -1243,8 +1243,10 @@ static inline AstNode* ast_cow_value_source(AstNode* expr) {
     return source;
 }
 
+extern "C" bool ast_call_returns_retained_container(AstNode* node);
+
 // The shape half of "does this initializer hand back a freshly-owned
-// container": literals, calls and `new` produce a new owner, while member and
+// container": literals, fresh-result calls and `new` own their value, while member and
 // index reads are borrows of an existing one. The IDENT case is deliberately
 // not here -- it propagates the *source binding's* own answer, which each tier
 // resolves through its own binding table (MirVarEntry / NameEntry::cow_owned).
@@ -1258,8 +1260,9 @@ static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
     case AST_NODE_LIST:
     case AST_NODE_OBJECT_LITERAL:
     case AST_NODE_NEW_EXPR:
-    case AST_NODE_CALL_EXPR:
         return true;
+    case AST_NODE_CALL_EXPR:
+        return !ast_call_returns_retained_container(root_expr);
     case AST_NODE_BINARY:
         return ast_join_produces_fresh_array(root_expr);
     case AST_NODE_PIPE:
@@ -1382,6 +1385,36 @@ static inline bool ast_definition_denotes_type(const AstNode* definition) {
         return false;
     }
 }
+
+// type expressions yield first-class type values, not instances of their payload.
+static inline bool ast_is_explicit_type_value(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    switch (node->node_type) {
+    case AST_NODE_TYPE:
+    case AST_NODE_CONTENT_TYPE:
+    case AST_NODE_LIST_TYPE:
+    case AST_NODE_ARRAY_TYPE:
+    case AST_NODE_MAP_TYPE:
+    case AST_NODE_ELMT_TYPE:
+    case AST_NODE_FUNC_TYPE:
+    case AST_NODE_BINARY_TYPE:
+    case AST_NODE_UNARY_TYPE:
+    case AST_NODE_CONSTRAINED_TYPE:
+    case AST_NODE_OBJECT_TYPE:
+    case AST_NODE_STRING_PATTERN:
+    case AST_NODE_SYMBOL_PATTERN:
+        return true;
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        return ast_definition_denotes_type(ident->entry ? ident->entry->node : NULL);
+    }
+    default:
+        return false;
+    }
+}
+
+
 
 static inline struct NameEntry* ast_open_alias_entry(const AstOpenNode* node) {
     AstNode* decl = node ? node->alias_decl : NULL;
@@ -1799,6 +1832,8 @@ typedef struct FnAnalysis {
     // The body starts a non-escaping child, so its blocks enter task scopes
     // that join children on exit (both tiers read this syntactic fact).
     bool owns_task_scopes;
+    // returned globals/captures retain another observer outside the activation.
+    bool returns_retained_container;
     // JavaScript profile observations are stored on the same function-owned
     // record so indexed MIR passes do not maintain a second fact table.
     bool js_has_direct_eval;

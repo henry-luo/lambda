@@ -1411,6 +1411,38 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_SQLITE_QUERY, "io_sqlite_query", 3, &TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_sqlite_query3", PROFILE_SQLITE_FPTR(pn_io_sqlite_query3), NULL, NULL, false, 0, true},
 
+    // Read-only task-owned sessions share the SQLite profile's runtime needs.
+    {SYSPROC_IO_RDB_DATABASE, "io_rdb_database", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_database", PROFILE_SQLITE_FPTR(pn_io_rdb_database), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_SCHEMA, "io_rdb_schema", 1, &TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_schema", PROFILE_SQLITE_FPTR(pn_io_rdb_schema), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_DETAILS, "io_rdb_details", 1, &TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_details", PROFILE_SQLITE_FPTR(pn_io_rdb_details), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_EXECUTE, "io_rdb_execute", 2, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_execute2", PROFILE_SQLITE_FPTR(pn_io_rdb_execute2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RDB_EXECUTE, "io_rdb_execute", 3, &TYPE_NULL, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_execute3", PROFILE_SQLITE_FPTR(pn_io_rdb_execute3), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_RDB_FETCH, "io_rdb_fetch", 2, &TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_fetch", PROFILE_SQLITE_FPTR(pn_io_rdb_fetch), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_FINISH, "io_rdb_finish", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_finish", PROFILE_SQLITE_FPTR(pn_io_rdb_finish), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_SPOOL_BEGIN, "io_rdb_spool_begin", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_spool_begin", PROFILE_SQLITE_FPTR(pn_io_rdb_spool_begin), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_SPOOL_READ, "io_rdb_spool_read", 3, &TYPE_ARRAY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_spool_read", PROFILE_SQLITE_FPTR(pn_io_rdb_spool_read), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_SPOOL_CLOSE, "io_rdb_spool_close", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_spool_close", PROFILE_SQLITE_FPTR(pn_io_rdb_spool_close), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_SPOOL_SEAL, "io_rdb_spool_seal", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_spool_seal", PROFILE_SQLITE_FPTR(pn_io_rdb_spool_seal), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_EXPORT_BEGIN, "io_rdb_export_begin", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_export_begin", PROFILE_SQLITE_FPTR(pn_io_rdb_export_begin), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_EXPORT_WRITE, "io_rdb_export_write", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_export_write", PROFILE_SQLITE_FPTR(pn_io_rdb_export_write), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_EXPORT_COMMIT, "io_rdb_export_commit", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_export_commit", PROFILE_SQLITE_FPTR(pn_io_rdb_export_commit), NULL, NULL, false, 0, false},
+    {SYSPROC_IO_RDB_EXPORT_ABORT, "io_rdb_export_abort", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_rdb_export_abort", PROFILE_SQLITE_FPTR(pn_io_rdb_export_abort), NULL, NULL, false, 0, false},
+
     // lambda.io.loopback (D9.3.4): one browser request on 127.0.0.1, reached
     // only through `import loopback: lambda.io.loopback`; accept parks the task
     {SYSPROC_IO_LOOPBACK_LISTEN, "io_loopback_listen", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
@@ -1529,10 +1561,10 @@ SysFuncInfo sys_func_defs[] = {
     // VMap functions — handled by special transpiler paths
     // ========================================================================
     {SYSFUNC_VMAP_NEW, "map", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_map0", NULL, NULL, NULL, false, 0},  // transpiler special case
+     C_RET_ITEM, NULL, "vmap_new", NULL, NULL, NULL, false, 0},
 
     {SYSFUNC_VMAP_NEW, "map", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_map1", NULL, NULL, NULL, false, 0},  // transpiler special case
+     C_RET_ITEM, NULL, "vmap_from_array", NULL, NULL, NULL, false, 0},
 
     {SYSPROC_VMAP_SET, "set", 3, &TYPE_NULL, true, true, true, LMD_TYPE_VMAP, false,
      C_RET_ITEM, NULL, "pn_set3", NULL, NULL, NULL, false, 0},  // transpiler special case
@@ -1743,7 +1775,10 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"lambda_side_stack_ensure_for", FPTR(lambda_side_stack_ensure_for)},
     {"lambda_side_stack_ensure_tls", FPTR(lambda_side_stack_ensure_tls)},
-    {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for)},
+    {"lambda_recovery_frame_begin_for", FPTR(lambda_recovery_frame_begin_for),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
     {"lambda_recovery_frame_arm", FPTR(lambda_recovery_frame_arm)},
     {"lambda_recovery_frame_raise_fault", FPTR(lambda_recovery_frame_raise_fault)},
     {"lambda_recovery_frame_restore_landing", FPTR(lambda_recovery_frame_restore_landing)},
@@ -1799,6 +1834,7 @@ JitImport jit_runtime_imports[] = {
     {"seq_spread_value", FPTR(seq_spread_value)},
     {"seq_spread_item", FPTR(seq_spread_item)},
     {"array_end", FPTR(array_end)},
+    {"array_end_flat", FPTR(array_end_flat)},
     // These addresses must leave the symbol table with the disabled PDF backend.
 #ifndef LAMBDA_NO_PDF
     {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
@@ -2474,6 +2510,9 @@ JitImport jit_runtime_imports[] = {
     // Heap allocation
     // ========================================================================
     {"heap_calloc", FPTR(heap_calloc)},
+    {"heap_calloc_closure_env", FPTR(heap_calloc_closure_env),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"heap_calloc_class", FPTR(heap_calloc_class)},
     {"lambda_region_begin", FPTR(lambda_region_begin)},
     {"lambda_region_end", FPTR(lambda_region_end)},
@@ -2486,7 +2525,10 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Type system and pattern matching
     // ========================================================================
-    {"base_type", FPTR(base_type)},
+    // this is a bounded read of the context's static literal-type table.
+    {"base_type", FPTR(base_type),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"const_type", FPTR(const_type)},
     {"const_type_with_tl", FPTR(const_type_with_tl)},
     {"const_pattern", FPTR(const_pattern)},
@@ -2688,6 +2730,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_fn_colour_guard_list", FPTR(lambda_fn_colour_guard_list)},
     {"lambda_fn_colour_guard_args", FPTR(lambda_fn_colour_guard_args)},
     {"lambda_type_check_env", FPTR(lambda_type_check_env)},
+    {"lambda_type_check_env_status", FPTR(lambda_type_check_env_status)},
     {"lambda_type_value_is_exact", FPTR(lambda_type_value_is_exact)},
     {"lambda_value_type_is_exact", FPTR(lambda_value_type_is_exact)},
     {"lambda_type_value_from_contract", FPTR(lambda_type_value_from_contract)},
@@ -3735,8 +3778,10 @@ JitImport jit_runtime_imports[] = {
     // select() packs its variadic handles and named timeout at the call site,
     // so its registry row carries no entry point; generated code imports it.
     {"pn_select", FPTR(pn_select)},
-    {"lambda_task_scope_enter", FPTR(lambda_task_scope_enter)},
-    {"lambda_task_scope_current", FPTR(lambda_task_scope_current)},
+    {"lambda_task_scope_enter", FPTR(lambda_task_scope_enter),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_RAW_NON_GC_POINTER, 0}},
+    {"lambda_task_scope_current", FPTR(lambda_task_scope_current),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_RAW_NON_GC_POINTER, 0}},
     {"lambda_task_scope_leave", FPTR(lambda_task_scope_leave)},
     {"lambda_task_scope_unwind", FPTR(lambda_task_scope_unwind)},
     {"lambda_task_start_function", FPTR(lambda_task_start_function)},
@@ -4008,7 +4053,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #else
         "setjmp",
 #endif
-        "is_truthy",
+        "is_truthy", "base_type",
         "push_d", "box_int64_value", "box_uint64_value",
         "int2it", "int2it_i64",
         "lambda_mir_double_bits", "lambda_mir_bits_double",

@@ -15,6 +15,7 @@
 #include "../lambda/runtime/compiler_timing.hpp"
 #include "test_script_discovery.hpp"
 #include "test_process.h"
+#include "test_lambda_compiler.hpp"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -146,60 +147,24 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 // only reaches the JIT for functions hot enough to promote.
 inline char* execute_lambda_script(const char* script_path, bool is_procedural = false,
         const char* tier = NULL) {
-    char command[512];
-    const char* exe = "lambda.exe";
-    const char* no_log_flag = " --no-log";  // always disable logging in tests for performance
-    char tier_prefix[48] = "";
-#ifdef _WIN32
-    if (tier) snprintf(tier_prefix, sizeof(tier_prefix), "set \"LAMBDA_EXEC_BACKEND=%s\" && ", tier);
-#else
-    if (tier) snprintf(tier_prefix, sizeof(tier_prefix), "LAMBDA_EXEC_BACKEND=%s ", tier);
-#endif
-#ifdef _WIN32
-    if (is_procedural) {
-        snprintf(command, sizeof(command), "%s%s run%s \"%s\"", tier_prefix, exe, no_log_flag, script_path);
-    } else {
-        snprintf(command, sizeof(command), "%s%s%s \"%s\"", tier_prefix, exe, no_log_flag, script_path);
-    }
-#else
-    if (is_procedural) {
-        snprintf(command, sizeof(command), "%s./%s run%s \"%s\"", tier_prefix, exe, no_log_flag, script_path);
-    } else {
-        snprintf(command, sizeof(command), "%s./%s%s \"%s\"", tier_prefix, exe, no_log_flag, script_path);
-    }
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        fprintf(stderr, "Error: Could not execute command: %s\n", command);
+    LambdaTestCompilerEnv environment(tier);
+    if (!environment.valid) return nullptr;
+    const char* args[5] = {LAMBDA_EXE};
+    unsigned count = 1;
+    if (is_procedural) args[count++] = "run";
+    args[count++] = "--no-log"; args[count++] = script_path;
+    ShellOptions options = {};
+    options.env = environment.entries;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    if (result.exit_code != 0 || result.timed_out || result.output_limit_exceeded) {
+        ADD_FAILURE() << script_path << ": Lambda exit " << result.exit_code << "\n"
+            << (result.stderr_buf ? result.stderr_buf : "");
+        shell_result_free(&result);
         return nullptr;
     }
-
-    // Read output in chunks
-    char buffer[1024];
-    size_t total_size = 0;
-    char* full_output = nullptr;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        char* new_output = (char*)realloc(full_output, total_size + len + 1);
-        if (!new_output) {
-            free(full_output);
-            pclose(pipe);
-            return nullptr;
-        }
-        full_output = new_output;
-        strcpy(full_output + total_size, buffer);
-        total_size += len;
-    }
-
-    int exit_code = pclose(pipe);
-    if (WEXITSTATUS(exit_code) != 0) {
-        fprintf(stderr, "Error: lambda.exe exited with code %d for script: %s\n",
-                WEXITSTATUS(exit_code), script_path);
-        free(full_output);
-        return nullptr;
-    }
+    char* full_output = result.stdout_buf;
+    result.stdout_buf = nullptr;
+    shell_result_free(&result);
 
     // If no output was collected, return empty string
     if (!full_output) {
@@ -558,14 +523,18 @@ inline void run_sub_batch(
     }
     fclose(manifest);
 
-    char command[512];
+    char command[640], compiler_prefix[128];
+    LambdaTestCompilerEnv environment;
+    if (!environment.command_prefix(compiler_prefix, sizeof(compiler_prefix))) {
+        unlink(manifest_path); return;
+    }
     const char* exe = "lambda.exe";
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "%s test-batch --no-log --timeout=60 < \"%s\"",
-             exe, manifest_path);
+    snprintf(command, sizeof(command), "%s%s test-batch --no-log --timeout=60 < \"%s\"",
+             compiler_prefix, exe, manifest_path);
 #else
-    snprintf(command, sizeof(command), "./%s test-batch --no-log --timeout=60 < \"%s\"",
-             exe, manifest_path);
+    snprintf(command, sizeof(command), "%s./%s test-batch --no-log --timeout=60 < \"%s\"",
+             compiler_prefix, exe, manifest_path);
 #endif
 
     FILE* pipe = popen(command, "r");

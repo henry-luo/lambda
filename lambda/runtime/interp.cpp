@@ -768,12 +768,6 @@ static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded)
 static void exec_declaration(InterpFrame* f, AstNode* node);
 static Item interp_emit_output(InterpFrame* f, AstNode* node, uint64_t* destination);
 
-static bool interp_is_list_producer(AstNode* node) {
-    node = ast_unwrap_primary(node);
-    return node && (node->node_type == AST_NODE_FOR_EXPR ||
-        node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_CONTENT ||
-        node->node_type == AST_NODE_SPREAD);
-}
 
 // Evaluate an item of a list, array literal, block, content, or for-body. A
 // list producer sitting here is in an item position (S2.5.5v2): it finishes
@@ -782,7 +776,7 @@ static bool interp_is_list_producer(AstNode* node) {
 // mir_box_sequence_item so the tiers agree.
 static Item interp_eval_sequence_item(InterpFrame* f, AstNode* item) {
     AstNode* saved = f->st->list_item_producer;
-    f->st->list_item_producer = interp_is_list_producer(item) ? ast_unwrap_primary(item) : NULL;
+    f->st->list_item_producer = ast_is_list_producer(item) ? ast_unwrap_primary(item) : NULL;
     Item value = eval_expr(f, item);
     f->st->list_item_producer = saved;
     return value;
@@ -1463,14 +1457,6 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     return interp_coerce_declared_binding(f, value, parameter->declared_type,
         boundary ? boundary : &declared_parameter_label,
         plan);
-}
-
-static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
-    TypeParam* parameter_type = parameter ? lambda_type_param(parameter->type) : NULL;
-    Type* contract = parameter_type && parameter_type->contract_type
-        ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
-    return parameter_type && (parameter_type->binder ||
-        lambda_type_contract_has_binder(contract, false));
 }
 
 // "<kind> '<name>'" for a declaration or assignment; `owner` is the kind
@@ -2223,7 +2209,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         // argument may read a parameter (`loop(n - 1, acc + n)`), and writing
         // the slots as we go would feed the new n into acc.
         uint16_t params = f->plan->param_count;
-        RootSpan next_args((size_t)(params > 0 ? params : 1));
+        bool variadic = direct_signature && direct_signature->is_variadic;
+        RootSpan next_args((size_t)params + (variadic || !params ? 1 : 0));
+        if (!next_args.valid()) return ItemError;
         uint64_t* words = next_args.words();
         bool tail_handoff_candidate = interp_tail_handoff_candidate(f);
         RootSpan handoff_args(tail_handoff_candidate ? (size_t)params : 0);
@@ -2231,7 +2219,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
         uint64_t* handoff_words = handoff_args.words();
         AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
         if (has_named_args) {
-            ast_resolve_call_args(node->argument, direct_fn, source_argc, resolved_args);
+            ast_resolve_call_arguments(node, direct_fn, source_argc, resolved_args);
         }
         AstNode* positional = node->argument;
         AstNamedNode* parameter = f->fn->param;
@@ -2267,7 +2255,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                     i++, parameter = (AstNamedNode*)((AstNode*)parameter)->next) {
                 // only a signature with binder slots has binder sites
                 bool binder_site = f->binder_count &&
-                    interp_parameter_is_binder_site(parameter);
+                    ast_parameter_is_binder_site(parameter);
                 if (binder_site != (pass == 0)) continue;
                 Item source = (Item){.item = words[i]};
                 LambdaBoundary boundary = interp_parameter_boundary(f, f->fn,
@@ -2293,6 +2281,23 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             }
             return rejected;
         }
+        if (variadic) {
+            List* rest = list();
+            if (!rest) return ItemError;
+            words[params] = (uint64_t)(uintptr_t)rest;
+            // S16.9.7: a self-tail call owns its newly evaluated rest operands,
+            // after fixed admission (S7.7.3), before rebinding any fixed slots.
+            for (int i = params; i < argc; i++) {
+                AstNode* value_node = has_named_args ? resolved_args[i] : positional;
+                if (!has_named_args && positional) positional = positional->next;
+                if (!value_node) continue;
+                Item extra = eval_expr(f, value_node);
+                if (interp_frame_pending(f)) return ItemNull;
+                array_push_verbatim((Array*)(uintptr_t)words[params], extra);
+            }
+        }
+        if (variadic && !interp_set_frame_vargs(f, (Item){.item = words[params]}))
+            return ItemError;
         for (int p = 0; p < (int)params; p++) {
             f->slots[p] = words[p];
         }
@@ -2314,18 +2319,15 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
                 return ItemNull;
             }
         }
-        // MIR's self-tail loop has no write to its hidden `_vargs` parameter:
-        // it rebinds fixed slots only, so the initial rest-list remains the
-        // activation's `varg()` view for every iteration.
         f->signal = EvalSignal::TAIL_CALL;
         return ItemNull;
     }
 
     int named_param_count = argc;
     if (has_named_args && !interp_named_sys_args_supported(callee)) {
-        if (injected || !direct_fn) {
+        if (!direct_fn) {
             // Named operands are reordered against a Lambda declaration; a
-            // dynamic or injected call has no equivalent positional ABI.
+            // dynamic callee has no declaration supplying formal positions.
             log_error("interp: named arguments need a direct Lambda call");
             return ItemError;
         }
@@ -2349,9 +2351,8 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
 
     if (!injected && source_argc == 1 && callee &&
             callee->node_type == AST_NODE_TYPE) {
-        Type* target_type = ast_called_type_target(callee);
-        if (target_type && (target_type->type_id == LMD_TYPE_NUM_SIZED ||
-                target_type->type_id == LMD_TYPE_UINT64)) {
+        Type* target_type = ast_numeric_type_call_target(node);
+        if (target_type) {
             Item source = eval_expr(f, node->argument);
             if (interp_frame_pending(f)) return ItemNull;
             if (item_is_error(source)) return source;
@@ -2644,9 +2645,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
     int i = 0;
     if (has_named_args) {
         AstNode* resolved_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        ast_resolve_call_args(node->argument, direct_fn, source_argc, resolved_args);
+        ast_resolve_call_arguments(node, direct_fn, source_argc, resolved_args);
         for (i = 0; i < dispatch_argc; i++) {
-            words[i] = borrow_args[i] && !borrowed[i] ? ITEM_NULL :
+            words[i] = injected && !i ? injected->item : borrow_args[i] && !borrowed[i] ? ITEM_NULL :
                 resolved_args[i] ? eval_expr(f, resolved_args[i]).item :
                 ITEM_MISSING_ARGUMENT;
             if (interp_frame_pending(f)) return ItemNull;
@@ -2791,14 +2792,14 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
             for (int index = 0; index < dispatch_argc; index++) {
                 transport->mir_var_homes[index] = NULL;
             }
-            if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
+            if (ast_call_result_needs_capture((AstNode*)node)) cow_mark_shared(result);
             return interp_check_contract_return(f, node, publish_places(result));
         }
         Item result = interp_call_with_borrowed(fn, (const Item*)(void*)words,
             dispatch_argc, f, borrowed, borrow_homes);
         // LR12-11 (S9.1.2): the result may be (part of) an argument the caller
         // still holds; both observers must detach before a write
-        if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
+        if (ast_call_result_needs_capture((AstNode*)node)) cow_mark_shared(result);
         return interp_check_contract_return(f, node, publish_places(result));
     }
     // Every callee — interpreted or native — reaches its body through the
@@ -2814,7 +2815,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected,
     }
     Item result = interp_call_function_result(fn, dispatch_argc ? &args : NULL);
     // LR12-11: same call-site mark as the borrowed path above
-    if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
+    if (ast_call_result_needs_capture((AstNode*)node)) cow_mark_shared(result);
     return interp_check_contract_return(f, node, result);
 }
 
@@ -3334,11 +3335,14 @@ class InterpContextGuard {
     InterpContext entry_;
     bool active_;
 public:
-    InterpContextGuard(InterpState* st, uint64_t* item, uint64_t* index)
-            : st_(st), entry_{item, index, NULL, NULL, st ? st->contexts : NULL},
-              active_(st && item) {
-        if (active_) st_->contexts = &entry_;
+    explicit InterpContextGuard(InterpState* st)
+            : st_(st), entry_{NULL, NULL, NULL, NULL, st ? st->contexts : NULL},
+              active_(st != NULL) {
+        // an ordinary function starts outside its caller's lexical context.
+        if (active_) st_->contexts = NULL;
     }
+    InterpContextGuard(InterpState* st, uint64_t* item, uint64_t* index)
+            : InterpContextGuard(st, item, index, NULL, NULL) {}
     InterpContextGuard(InterpState* st, uint64_t* item, uint64_t* index,
             uint64_t* parent, uint64_t* root)
             : st_(st), entry_{item, index, parent, root, st ? st->contexts : NULL},
@@ -3612,7 +3616,6 @@ static Item eval_match(InterpFrame* f, AstMatchNode* node) {
 // build_ast already owns this question — transpile_pipe asks it the same way to
 // choose between argument injection and the mapping loop, so both tiers split
 // on one predicate.
-extern bool has_current_item_ref(AstNode* node);
 
 // Generic arrays own their wide scalar payload in the tail of the same
 // container.  `array_get` intentionally canonicalizes a small u64 through the
@@ -3713,21 +3716,12 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
 
     Item source = left.get();
     TypeId source_tid = get_type_id(source);
-    // Elements are maps for attribute lookup but lists for pipe traversal:
-    // treating one as a map here discarded every child row (S10.1.3).
-    bool is_map = source_tid == LMD_TYPE_MAP || source_tid == LMD_TYPE_VMAP;
-    SymbolKeyList* keys = is_map ? item_keys(source) : NULL;
-
-    int64_t len = fn_seq_count(source);
-    // A bare scalar pipes as a one-element stream; a genuinely empty collection
-    // stays empty. Only the non-collection tags lift.
-    bool is_scalar = false;
-    if (len == 0 && source_tid != LMD_TYPE_ARRAY && source_tid != LMD_TYPE_ARRAY_NUM &&
-            source_tid != LMD_TYPE_RANGE && source_tid != LMD_TYPE_ELEMENT &&
-            source_tid != LMD_TYPE_STRING && source_tid != LMD_TYPE_NULL) {
-        len = 1;
-        is_scalar = true;
-    }
+    // S10.1.2v4: the canonical walk includes element attributes and children.
+    SymbolKeyList* keys = item_keys(source);
+    bool is_scalar = !is_container_type_id(source_tid) &&
+        !is_sequence_text_type_id(source_tid) && source_tid != LMD_TYPE_NULL &&
+        source_tid != LMD_TYPE_PATH;
+    int64_t len = is_scalar ? 1 : iter_len(source, keys, LOOP_KEY_ALL);
 
     // A plain accumulator: pipe_end finishes it once the walk is done -- an
     // array for any sequence source (S10.1.2v4) -- as transpile_pipe does.
@@ -3749,18 +3743,9 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         InterpContextGuard bound(f->st, item_slot.home(), index_slot.home(),
             parent_slot.home(), root_slot.home());
         for (int64_t i = 0; i < len; i++) {
-            Item current, key;
-            if (is_map) {
-                Symbol* sym = symbol_key_list_at(keys, i);
-                current = sym ? fn_index(left.get(), {.item = y2it(sym)}) : ItemNull;
-                key = sym ? (Item){.item = y2it(sym)} : ItemNull;
-            } else if (is_scalar) {
-                current = left.get();
-                key = (Item){.item = i2it(i)};
-            } else {
-                current = interp_item_at(left.get(), i);
-                key = (Item){.item = i2it(i)};
-            }
+            Item current = is_scalar ? left.get() :
+                interp_iter_val_at(left.get(), keys, i, LOOP_KEY_ALL, false);
+            Item key = interp_iter_key_at(left.get(), keys, i, LOOP_KEY_ALL);
             item_slot.set(current);
             index_slot.set(key);
 
@@ -4596,7 +4581,7 @@ static Item eval_content_body(InterpFrame* f, AstListNode* list_node, bool hoist
         decl_count = list_node->interp_proc_decl_count;
         stam_count = list_node->interp_proc_stam_count;
     } else if (is_proc) {
-        last_value = interp_proc_block_last_value(list_node, &value_count,
+        last_value = ast_proc_block_last_value(list_node->item, &value_count,
             &decl_count, &stam_count);
     } else {
         for (AstNode* item = list_node->item; item; item = item->next) {
@@ -4649,7 +4634,7 @@ static Item eval_content_body(InterpFrame* f, AstListNode* list_node, bool hoist
             } else if (item == last_value) {
                 // the lone value stands where the block stands: an item
                 // position passes through to it (S2.5.5v2)
-                if (item_position && interp_is_list_producer(item)) {
+                if (item_position && ast_is_list_producer(item)) {
                     f->st->list_item_producer = ast_unwrap_primary(item);
                 }
                 result = eval_expr(f, item);
@@ -4742,7 +4727,7 @@ static Item eval_list_body(InterpFrame* f, AstListNode* list_node) {
     if (list_node->declare && val_count == 1) {
         // block expression: yield the value directly; it stands where the
         // list stands, so an item position passes through (S2.5.5v2)
-        if (item_position && interp_is_list_producer(last_value)) {
+        if (item_position && ast_is_list_producer(last_value)) {
             f->st->list_item_producer = ast_unwrap_primary(last_value);
         }
         Item value = eval_expr(f, last_value);
@@ -4958,30 +4943,6 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
 // pin that here so a future renumbering cannot silently merge the two arms.
 static_assert((int)AST_NODE_START != (int)AST_NODE_EVENT_HANDLER,
     "AST_NODE_START and AST_NODE_EVENT_HANDLER must stay distinguishable");
-
-// Dynamic root/parent navigation may retain lineage only across a direct
-// member/index chain. The carrier is activation state, never a field on the
-// resulting Lambda value.
-static bool interp_navigation_chain_has_current(AstNode* node) {
-    node = ast_unwrap_primary(node);
-    if (!node) return false;
-    if (node->node_type == AST_NODE_CURRENT_ITEM) return true;
-    if (node->node_type == AST_NODE_NAVIGATION_EXPR) {
-        return interp_navigation_chain_has_current(((AstNavigationNode*)node)->object);
-    }
-    if (node->node_type != AST_NODE_MEMBER_EXPR &&
-            node->node_type != AST_NODE_INDEX_EXPR) return false;
-    return interp_navigation_chain_has_current(((AstFieldNode*)node)->object);
-}
-
-static AstNode* interp_navigation_direct_parent(AstNode* node) {
-    node = ast_unwrap_primary(node);
-    if (!node || (node->node_type != AST_NODE_MEMBER_EXPR &&
-            node->node_type != AST_NODE_INDEX_EXPR)) return NULL;
-    AstFieldNode* field = (AstFieldNode*)node;
-    return interp_navigation_chain_has_current(field->object)
-        ? field->object : NULL;
-}
 
 typedef struct InterpFastIntValue {
     int64_t value;
@@ -5997,13 +5958,14 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // same ItemError carrier so a surrounding handler can recover it.
         if (!entry) return ItemError;
         if (entry->is_binder && entry->binder) {
-            if (!f->binder_env || entry->binder_slot >= f->binder_count ||
-                    !f->binder_env[entry->binder_slot]) {
+            if (!f->binder_env || entry->binder_slot >= f->binder_count) {
                 log_error("interp-binder: unresolved binder '%.*s'", entry->name
                     ? (int)entry->name->len : 0, entry->name ? entry->name->chars : "");
                 return ItemError;
             }
-            return lambda_type_value_from_contract(f->binder_env[entry->binder_slot]);
+            // an empty nested binder has no encountered value to select from.
+            Type* selected = f->binder_env[entry->binder_slot];
+            return lambda_type_value_from_contract(selected ? selected : entry->binder->bound);
         }
         // A name bound by `type T = …` is a compile-time binding: it denotes
         // the Type* its declaration built, not a slab slot (which a type
@@ -6259,13 +6221,13 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // The contextual atom (`~`) carries the active occurrence relation in
         // the interpreter context. Keep that relation out of Lambda values;
         // the navigation node consumes the rooted activation slots directly.
-        if (f->st->contexts && interp_navigation_chain_has_current(nav->object)) {
+        if (f->st->contexts && ast_navigation_chain_has_current(nav->object)) {
             InterpContext* context = f->st->contexts;
             if (nav->root) {
                 return context->root
                     ? (Item){.item = *context->root} : object;
             }
-            AstNode* direct_parent = interp_navigation_direct_parent(nav->object);
+            AstNode* direct_parent = ast_navigation_direct_parent(nav->object);
             if (direct_parent) {
                 Scratch parent(f);
                 parent.set(eval_expr(f, direct_parent));
@@ -6988,7 +6950,7 @@ static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_no
         // A body ending in an unconditional `return`/`raise` never yields its
         // block value, so then the value expression may sit anywhere.
         int values = 0, decls = 0, stams = 0;
-        AstNode* last_value = interp_proc_block_last_value(body, &values, &decls, &stams);
+        AstNode* last_value = ast_proc_block_last_value(body->item, &values, &decls, &stams);
         AstNode* last_item = loop;
         bool value_after_loop = last_value == NULL;
         for (AstNode* item = loop; item; item = item->next) {
@@ -7360,6 +7322,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             signature);
         if (!guard.valid()) { st->depth++; return ItemError; }
         InterpFrame* frame = guard.frame();
+        InterpContextGuard activation_context(st);
         uint16_t params = fn_node->analysis->frame_plan.param_count;
         if (borrowed) {
             // LR12-10: which `var` params can publish a replaced root at return
@@ -7418,7 +7381,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 p = next) {
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
-            if (!frame->binder_count || !interp_parameter_is_binder_site(p)) continue;
+            if (!frame->binder_count || !ast_parameter_is_binder_site(p)) continue;
             LambdaBoundary boundary = interp_parameter_boundary(frame, fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
@@ -7438,7 +7401,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 p = next) {
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
-            if (frame->binder_count && interp_parameter_is_binder_site(p)) continue;
+            if (frame->binder_count && ast_parameter_is_binder_site(p)) continue;
             LambdaBoundary boundary = interp_parameter_boundary(frame, fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,

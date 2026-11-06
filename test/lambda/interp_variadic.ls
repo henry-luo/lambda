@@ -9,6 +9,7 @@ fn scoped(...) {
 
 fn layout(a, b = 0, ...) => [a, b, varg()]
 
+// S16.9.7: each recursive call replaces its rest arguments.
 fn tail(n, ...) => if (n == 0) [len(varg()), varg(0)] else tail(n - 1, n)
 
 {

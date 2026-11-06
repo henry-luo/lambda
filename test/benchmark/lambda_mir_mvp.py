@@ -68,12 +68,16 @@ def compiler_identity():
     paths += [ROOT / path for path in (
         "build_lambda_config.json", "lib/math_checked.hpp", "lambda/runtime/runner.cpp",
         "lambda/lambda.h", "lambda/lambda-data.hpp", "lambda/runtime/lambda-data-runtime.cpp",
+        "lambda/runtime/collection_runtime.cpp", "lambda/runtime/vmap.cpp",
+        "lambda/runtime/write_set.hpp", "lambda/runtime/write_set.cpp",
+        "lambda/runtime/recovery_frame.h", "lambda/runtime/recovery_frame.c",
         "lambda/core/print.h", "lambda/core/print.cpp",
         "lambda/runtime/heap_api.h", "lambda/runtime/lambda-mem.cpp",
         "lambda/runtime/gc/gc_object_zone.h", "lambda/runtime/gc/gc_object_zone.c",
         "lambda/runtime/gc/gc_heap.c", "lambda/runtime/lambda-root-frame.hpp",
         "lambda/io/mark_builder.hpp", "lambda/io/mark_builder.cpp",
-        "lambda/runtime/ast-core.cpp", "lambda/runtime/ast-core.hpp", "lambda/runtime/build_ast.cpp",
+        "lambda/runtime/ast-core.cpp", "lambda/runtime/ast-core.hpp", "lambda/runtime/ast.hpp",
+        "lambda/runtime/interp.cpp", "lambda/runtime/interp_plan.cpp", "lambda/runtime/build_ast.cpp",
         "lambda/runtime/transpile-mir.cpp", "lambda/runtime/mir_emitter_shared.hpp",
         "lambda/runtime/mir_loop_analysis.hpp", "lambda/runtime/mir_cow_analysis.hpp",
         "lambda/runtime/mir_shape_candidates.hpp",
@@ -101,7 +105,7 @@ def invoke(command, env):
 
 
 def competing_benchmark_jobs(group=None):
-    """Exclude our process group; builds and active test executables disturb timings."""
+    """Exclude our group; test supervisors remain busy between child bursts."""
     listing = subprocess.run(["ps", "-axo", "pid,pgid,pcpu,args"],
                              capture_output=True, text=True, check=True)
     jobs = []
@@ -115,7 +119,12 @@ def competing_benchmark_jobs(group=None):
         program = Path(command.split()[0]).name
         build = program in ("make", "gmake", "clang", "clang++", "gcc", "g++", "ld")
         suite = any(name in command for name in ("test/test_run.js", "test/interp/tier_sweep.py",
-                                                "test/benchmark/test_lambda_mir_mvp.py"))
+                                                "test/benchmark/test_lambda_mir_mvp.py",
+                                                "-m unittest ", "-m pytest "))
+        # private release harnesses have different prefixes and can be idle
+        # while their next worker starts. CPU thresholds miss those windows.
+        suite |= program.endswith("_gtest.exe") or program in ("pytest", "py.test")
+        suite |= "test-batch" in command and program.endswith(".exe")
         desktop = (" view " in command or " serve " in command) and float(cpu) < 20.0
         active = program.endswith(".exe") and float(cpu) >= 5.0 and not desktop
         if build or suite or active:

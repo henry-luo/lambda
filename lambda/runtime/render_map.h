@@ -110,6 +110,8 @@ Item render_map_get_doc_root(void);
 // Drop mappings for replaced results before their DOM storage can be reused.
 struct EvalContext;
 void render_map_forget_retired_result(struct EvalContext* owner, Item result);
+// Observe the owner's existing maps without creating reconciliation state.
+void render_map_get_counts(struct EvalContext* owner, size_t* forward, size_t* reverse);
 
 // ============================================================================
 // R7 step 3c — source-document path tracking for the editor bridge.

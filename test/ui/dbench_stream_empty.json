@@ -1,0 +1,19 @@
+{
+  "name":"DBench streams an empty result with its duplicate column names",
+  "html": "temp/dbench-prepared/stream_empty/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "stream_empty"],
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT 1 AS duplicate, 2 AS duplicate WHERE 0","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"0","assert_timeout":30000},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Result complete","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#export"}},
+    {"type":"type","target":{"selector":"#export-path"},"text":"temp/dbench-stream-empty.json","clear":true},
+    {"type":"select_option","target":{"selector":"#export-kind"},"value":"json"},
+    {"type":"click","target":{"selector":"#export-save"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Created temp/dbench-stream-empty.json","assert_timeout":30000}
+  ]
+}

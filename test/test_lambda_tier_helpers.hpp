@@ -12,6 +12,7 @@ inline void expect_interp_rejection(const char* executable, const char* script,
     const char* direct_args[] = {executable, script, NULL};
     ShellEnvEntry env[] = {
         {"LAMBDA_EXEC_BACKEND", "interp"},
+        {"LAMBDA_MIR_COMPILER", "production"},
         {"LAMBDA_DISABLE_MIR_CACHE", "1"},
         {NULL, NULL}
     };

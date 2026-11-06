@@ -1713,6 +1713,13 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline test-gtest-resul
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
 
+# Preserve explicit T0/AUTO parity arms; ordinary script cases exercise MVP/JIT.
+.PHONY: test-lambda-mvp
+test-lambda-mvp: TEST_BUILD_QUIET := 1
+test-lambda-mvp: build-lambda-baseline
+	@echo "Running Lambda baseline GTests with MVP selected for JIT arms..."
+	@LAMBDA_TEST_MIR_COMPILER=mvp LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel $(ARGS)
+
 # Independent RFC 6455 peers, including TLS and malformed input.
 .PHONY: test-websocket
 test-websocket: build

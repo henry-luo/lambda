@@ -21,6 +21,16 @@ extern "C" {
 #include "compiler_timing.hpp"
 #include "type_contract.hpp"
 
+bool has_current_item_ref(AstNode* node);
+
+// S11.4.8v2: nested binder sites establish slots before reference admission.
+static inline bool ast_parameter_is_binder_site(const AstNamedNode* parameter) {
+    TypeParam* type = parameter ? lambda_type_param(parameter->type) : NULL;
+    Type* contract = type && type->contract_type
+        ? type->contract_type : parameter ? parameter->declared_type : NULL;
+    return type && (type->binder || lambda_type_contract_has_binder(contract, false));
+}
+
 typedef struct JubeModuleImport {
     String* module;
     String* alias;
@@ -64,6 +74,25 @@ typedef struct AstNavigationNode : AstNode {
     AstNode* object;
     bool root;                // true for ./, false for .~~
 } AstNavigationNode;
+
+// occurrence lineage survives only a direct current-item access chain; a
+// stored value never acquires a hidden parent/root (S10.4.3v2, S10.5.3v2).
+static inline bool ast_navigation_chain_has_current(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return false;
+    if (node->node_type == AST_NODE_CURRENT_ITEM) return true;
+    if (node->node_type == AST_NODE_NAVIGATION_EXPR)
+        return ast_navigation_chain_has_current(((AstNavigationNode*)node)->object);
+    if (node->node_type != AST_NODE_MEMBER_EXPR && node->node_type != AST_NODE_INDEX_EXPR) return false;
+    return ast_navigation_chain_has_current(((AstFieldNode*)node)->object);
+}
+
+static inline AstNode* ast_navigation_direct_parent(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node || (node->node_type != AST_NODE_MEMBER_EXPR && node->node_type != AST_NODE_INDEX_EXPR)) return NULL;
+    AstNode* object = ((AstFieldNode*)node)->object;
+    return ast_navigation_chain_has_current(object) ? object : NULL;
+}
 
 // CRetType, SysFuncArgDesc, and SysFuncInfo are now in sys_func_registry.h
 
@@ -347,6 +376,10 @@ static inline bool ast_call_may_return_argument(AstNode* expr) {
     return false;
 }
 
+static inline bool ast_call_result_needs_capture(AstNode* expr) {
+    return ast_call_may_return_argument(expr) || ast_call_returns_retained_container(expr);
+}
+
 // ...and whether that object may be an argument's own root rather than a part
 // of it: only then is the argument root itself shared by the result mark.
 static inline bool ast_call_may_return_argument_root(AstNode* expr) {
@@ -365,6 +398,26 @@ static inline bool ast_call_has_named_args(const AstCallNode* call) {
         if (arg->node_type == AST_NODE_NAMED_ARG) return true;
     }
     return false;
+}
+
+// explicit sized/u64 conversion calls use a Type producer, not a callable.
+static inline Type* ast_numeric_type_call_target(const AstCallNode* call) {
+    if (!call || call->pipe_inject || !call->argument || call->argument->next) return NULL;
+    AstNode* target = ast_unwrap_primary_to_leaf(call->function);
+    Type* type = target && target->node_type == AST_NODE_TYPE ? ast_called_type_target(target) : NULL;
+    return type && (type->type_id == LMD_TYPE_NUM_SIZED || type->type_id == LMD_TYPE_UINT64)
+        ? type : NULL;
+}
+
+static inline AstNode* ast_positional_call_argument(AstNode* arguments,
+        AstNode* receiver, int position) {
+    if (position < 0) return NULL;
+    if (receiver) {
+        if (!position) return receiver;
+        position--;
+    }
+    while (arguments && position--) arguments = arguments->next;
+    return arguments;
 }
 
 static inline void ast_resolve_call_args(AstNode* arg_list, AstFuncNode* fn_node,
@@ -883,7 +936,7 @@ typedef struct AstListNode : AstArrayNode {
     NameScope *vars;  // scope for the variables in the list
     TypeList* list_type;
     // T0 frame-plan fact: the block's value item and counts when it runs as a
-    // procedural block (interp_proc_block_last_value), scanned once rather
+    // procedural block (ast_proc_block_last_value), scanned once rather
     // than at every evaluation. Unset when the plan never reached the block.
     AstNode* interp_proc_last_value;
     uint16_t interp_proc_value_count;
@@ -1273,6 +1326,15 @@ static inline bool ast_block_item_is_statement(AstNode* node, bool is_proc) {
         (!is_proc && ast_is_control_flow_statement(node)));
 }
 
+// only a direct constructor receives item-position void; other expressions
+// consume a list as a value, including conditional arms (S2.5.5v2).
+static inline bool ast_is_list_producer(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    return node && (node->node_type == AST_NODE_FOR_EXPR ||
+        node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_CONTENT ||
+        node->node_type == AST_NODE_SPREAD);
+}
+
 // S16.6.8: a braced block is a STATEMENT, never an expression, when its
 // interior is procedural. Classification is by interior, extending S16.4.1v2's
 // doctrine from map-vs-block to statement-ness — so a functional block
@@ -1316,6 +1378,31 @@ static inline bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_va
            (node->node_type == AST_NODE_IF_EXPR ||
             node->node_type == AST_NODE_LOOP ||
             ast_for_discards_result(node));
+}
+
+// share procedural result classification across T0, Full MIR and MVP (S2.5.3v3).
+static inline AstNode* ast_proc_block_last_value(AstNode* first,
+        int* value_count, int* decl_count, int* stam_count,
+        AstNode** terminal = nullptr) {
+    AstNode* last_executable = NULL;
+    for (AstNode* scan = first; scan; scan = scan->next) {
+        if (!is_declaration_node(scan)) last_executable = scan;
+    }
+    if (terminal) *terminal = last_executable;
+    AstNode* last_value = NULL;
+    for (AstNode* item = first; item; item = item->next) {
+        if (is_declaration_node(item)) { (*decl_count)++; continue; }
+        if (is_side_effect_stam(item->node_type) ||
+                is_proc_flow_side_effect_node(item, last_executable) ||
+                item->node_type == AST_NODE_LOOP ||
+                ast_for_discards_result(item)) {
+            (*stam_count)++;
+            continue;
+        }
+        (*value_count)++;
+        last_value = item;
+    }
+    return last_value;
 }
 
 typedef Item (*main_func_t)(Context*);
@@ -1530,3 +1617,14 @@ void format_binary_literal(StrBuf* strbuf, Binary* bin);
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, const char* indent);
 
 // for debugging onnly
+
+// a launch retains call syntax, but its array is the task argument vector.
+static inline bool ast_index_call_is_task_launch(const AstIndex* index,
+        AstNodeId call_id) {
+    if (!index || call_id >= index->count) return false;
+    AstNodeId parent_id = ast_index_parent_id(index, call_id);
+    AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
+    AstNode* call = index->nodes[call_id];
+    return parent && parent->node_type == AST_NODE_START &&
+        ((AstStartNode*)parent)->call == call;
+}

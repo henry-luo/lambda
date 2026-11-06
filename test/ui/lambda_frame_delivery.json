@@ -25,6 +25,9 @@
       "attribute": "data-calls",
       "equals": "2"
     },
+    {"type":"assert_attribute","target":{"selector":"#owner"},"attribute":"data-once-tokens","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#owner"},"attribute":"data-once-calls","equals":"3"},
+    {"type":"assert_attribute","target":{"selector":"#owner"},"attribute":"data-once-cancelled","equals":"true"},
     {
       "type": "assert_attribute",
       "target": {

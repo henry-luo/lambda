@@ -1,0 +1,7 @@
+[5, 7]
+[3, 2]
+[4, 5]
+[3, 4, 5]
+[]
+[3, true, true]
+[true, true, true, true]

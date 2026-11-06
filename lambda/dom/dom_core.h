@@ -60,6 +60,7 @@ Item dom_core_same_node_op(Item a, Item b);
 Item dom_core_dispatch(Item n, Item event);
 Item dom_core_dispatch_op(Item n, Item event);
 Item dom_engine_request_frame(Item n, Item event_name);
+Item dom_engine_request_frame_once(Item n, Item event_name);
 Item dom_engine_viewport_size(Item n);
 Item dom_engine_cancel_frame(Item n, Item token);
 Item dom_engine_watch_window(Item n, Item event_name, Item enabled);

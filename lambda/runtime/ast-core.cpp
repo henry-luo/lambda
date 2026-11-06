@@ -317,7 +317,8 @@ static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry)
     if (!entry || !ast_index_publish_scope(index, entry->scope)) return AST_BINDING_ID_INVALID;
     AstBindingId existing = ast_index_find_binding_entry(index, entry);
     if (existing != AST_BINDING_ID_INVALID) return existing;
-    if (index->binding_count >= index->capacity) return AST_BINDING_ID_INVALID;
+    if (index->binding_count >= index->capacity &&
+            !ast_index_reserve(index, index->binding_count + 1)) return AST_BINDING_ID_INVALID;
     if (!ast_index_record_declaration(index, entry, AST_DECLARATION_BINDING,
             index->binding_count)) return AST_BINDING_ID_INVALID;
     AstBindingId id = index->binding_count++;
@@ -351,6 +352,15 @@ static bool ast_index_publish_node(AstIndex* index, AstNode* node, AstNodeId id)
         index->node_bindings[id] = binding_id;
     }
     switch (node->node_type) {
+    case AST_NODE_DECOMPOSE: {
+        AstDecomposeNode* decomposition = (AstDecomposeNode*)node;
+        // unread targets still own storage; their synthetic declarators are
+        // not children of the structural node walk (D8.2.4).
+        for (int i = 0; decomposition->entries && i < decomposition->name_count; i++)
+            if (ast_index_publish_binding(index, decomposition->entries[i]) == AST_BINDING_ID_INVALID)
+                return false;
+        return true;
+    }
     case AST_SCRIPT:
         return ast_index_publish_scope(index, ((AstScript*)node)->global_vars);
     case AST_NODE_BLOCK:

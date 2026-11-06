@@ -54,6 +54,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/demo/sketch/tests",
     "test/demo/word/tests",
     "test/demo/sheet/tests",
+    "test/demo/dbench/tests",
     "test/demo/finder/tests",
     "test/demo/photo-album/tests",
     "test/demo/note/tests",
@@ -195,7 +196,7 @@ TEST(ChartAnimationTests, PaintFallbackDoesNotRaiseAcrossTiers) {
         ShellOptions options = {};
         options.env = env;
         options.timeout_ms = 30000;
-        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
         EXPECT_FALSE(result.timed_out);
         EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
         EXPECT_STREQ(result.stdout_buf, "[]\n");
@@ -229,7 +230,7 @@ TEST(UiDtnaTests, RejectedDocumentReleasesItsErrorBeforeTheHeap) {
         options.env = env;
         options.timeout_ms = 30000;
         options.merge_stderr = true;
-        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
         EXPECT_FALSE(result.timed_out);
         // Render load rejection returns 1; a signal must not masquerade as rejection.
         EXPECT_EQ(result.exit_code, 1) << (result.stdout_buf ? result.stdout_buf : "");
@@ -264,10 +265,12 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsMatchGoldens) {
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/lambda/mvp",
     "test/lambda/archive",
     "test/lambda/ime",
     "test/lambda/docbook/proc",
     "test/demo/word/tests/proc",
+    "test/demo/dbench/tests/proc",
     "test/demo/photo/tests/proc",
     "test/demo/photo-album/tests/proc",
     "test/demo/procart/tests/proc",
@@ -853,7 +856,7 @@ TEST(LambdaTierParityTests, UnannotatedIndexWriteStopsMain) {
         ShellOptions options = {};
         options.env = env;
         options.timeout_ms = 30000;
-        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
         EXPECT_FALSE(result.timed_out);
         EXPECT_EQ(result.exit_code, 1);
         EXPECT_STREQ(result.stdout_buf ? result.stdout_buf : "", "");
@@ -900,6 +903,22 @@ public:
     ScopedTestEnv(const ScopedTestEnv&) = delete;
     ScopedTestEnv& operator=(const ScopedTestEnv&) = delete;
 };
+
+TEST(LambdaCompilerSelectionTests, MvpLanePreservesExplicitInterpreterAndAuto) {
+    ScopedTestEnv compiler("LAMBDA_TEST_MIR_COMPILER", "mvp");
+    ScopedTestEnv inherited_compiler("LAMBDA_MIR_COMPILER", "mvp");
+    const char* tiers[] = {nullptr, "jit", "interp", "auto"};
+    for (const char* tier : tiers) {
+        SCOPED_TRACE(tier ? tier : "ordinary script");
+        LambdaTestCompilerEnv environment(tier);
+        ASSERT_TRUE(environment.valid);
+        EXPECT_STREQ(environment.entries[0].value, tier ? tier : "jit");
+        EXPECT_STREQ(environment.entries[1].value,
+            !tier || strcmp(tier, "jit") == 0 ? "mvp" : "production");
+        test_lambda_script_against_file("test/benchmark/r7rs/fib2.ls",
+            "test/benchmark/r7rs/fib2.txt", true, tier);
+    }
+}
 
 TEST(LambdaTierParityTests, FunctionLocalStateSurvivesCollectionAndPromotion) {
     ScopedTestEnv forced_gc("LAMBDA_GC_FORCE_EVERY", "1");
@@ -1275,7 +1294,7 @@ void test_lambda_script_expects_error(const char* script_path) {
     ShellOptions options = {0};
     options.merge_stderr = true;
     // Negative script paths are argv data and must not pass through shell parsing.
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     std::string output;
     if (shell_result.stdout_buf) {
         output.assign(shell_result.stdout_buf, shell_result.stdout_len);
@@ -1313,7 +1332,7 @@ TEST(LambdaNegativeTests, test_condition_lint_masks) {
     const char* args[] = {LAMBDA_EXE, script_path, NULL};
     ShellOptions options = {0};
     options.merge_stderr = true;
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     char output[65536];
     size_t output_len = shell_result.stdout_len;
     if (output_len >= sizeof(output)) output_len = sizeof(output) - 1;
@@ -1343,7 +1362,7 @@ void test_lambda_proc_script_expects_error(const char* script_path) {
     const char* args[] = {LAMBDA_EXE, "--no-log", "run", script_path, NULL};
     ShellOptions options = {0};
     options.merge_stderr = true;
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     char output[8192];
     size_t output_len = shell_result.stdout_len;
     if (output_len >= sizeof(output)) output_len = sizeof(output) - 1;
@@ -1449,7 +1468,7 @@ TEST(LambdaBinaryTests, output_writes_decoded_bytes) {
     const char* args[] = {LAMBDA_EXE, "--no-log", "run", script_path, NULL};
     ShellOptions options = {0};
     options.merge_stderr = true;
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     ASSERT_EQ(shell_result.exit_code, 0);
     shell_result_free(&shell_result);
 

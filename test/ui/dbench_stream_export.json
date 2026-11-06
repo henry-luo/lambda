@@ -1,0 +1,20 @@
+{
+  "name":"DBench streams a complete query result to JSON",
+  "html": "temp/dbench-prepared/stream_export/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "stream_export"],
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#sql"},"text":"SELECT customer_id, name, note FROM customers ORDER BY customer_id","clear":true},
+    {"type":"click","target":{"selector":"#run"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-mode","equals":"query"},
+    {"type":"assert_text","target":{"selector":"#result-0-1"},"contains":"Customer 001"},
+    {"type":"click","target":{"selector":"#export"}},
+    {"type":"type","target":{"selector":"#export-path"},"text":"temp/dbench-stream-ui.json","clear":true},
+    {"type":"select_option","target":{"selector":"#export-kind"},"value":"json"},
+    {"type":"select_option","target":{"selector":"#export-scope"},"value":"complete"},
+    {"type":"click","target":{"selector":"#export-save"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Created temp/dbench-stream-ui.json","assert_timeout":30000}
+  ]
+}

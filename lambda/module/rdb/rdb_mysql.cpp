@@ -136,18 +136,22 @@ static int mysql_hex(char c) {
     return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
 }
 
-/** percent-decode [s, s+n) into out */
-static void mysql_decode(const char* s, size_t n, char* out, size_t cap) {
+/** percent-decode [s, s+n) without changing or truncating the target */
+static bool mysql_decode(const char* s, size_t n, char* out, size_t cap) {
     size_t o = 0;
-    for (size_t i = 0; i < n && o + 1 < cap; i++) {
-        if (s[i] == '%' && i + 2 < n && mysql_hex(s[i + 1]) >= 0 && mysql_hex(s[i + 2]) >= 0) {
-            out[o++] = (char)(mysql_hex(s[i + 1]) * 16 + mysql_hex(s[i + 2]));
+    for (size_t i = 0; i < n; i++) {
+        unsigned char value = (unsigned char)s[i];
+        if (s[i] == '%') {
+            if (i + 2 >= n || mysql_hex(s[i + 1]) < 0 || mysql_hex(s[i + 2]) < 0) return false;
+            value = (unsigned char)(mysql_hex(s[i + 1]) * 16 + mysql_hex(s[i + 2]));
             i += 2;
-        } else {
-            out[o++] = s[i];
         }
+        // Reject embedded NUL and overflow instead of authorizing a shortened destination.
+        if (!value || o + 1 >= cap) return false;
+        out[o++] = (char)value;
     }
     out[o] = '\0';
+    return true;
 }
 
 static bool mysql_parse_uri(const char* uri, MysqlUri* u) {
@@ -168,21 +172,42 @@ static bool mysql_parse_uri(const char* uri, MysqlUri* u) {
     }
     if (at) {
         const char* colon = (const char*)memchr(p, ':', (size_t)(at - p));
-        mysql_decode(p, (size_t)((colon ? colon : at) - p), u->user, sizeof(u->user));
+        if (!mysql_decode(p, (size_t)((colon ? colon : at) - p), u->user, sizeof(u->user))) return false;
         if (colon) {
             size_t n = (size_t)(at - colon - 1);
             u->password = (char*)calloc(1, n + 1);
-            mysql_decode(colon + 1, n, u->password, n + 1);
+            if (!u->password || !mysql_decode(colon + 1, n, u->password, n + 1)) return false;
         }
         p = at + 1;
     }
     const char* slash = (const char*)memchr(p, '/', (size_t)(end - p));
     const char* host_end = slash ? slash : end;
-    const char* port = (const char*)memchr(p, ':', (size_t)(host_end - p));
-    mysql_decode(p, (size_t)((port ? port : host_end) - p), u->host, sizeof(u->host));
+    const char* host_start = p;
+    const char* host_limit = host_end;
+    const char* port = NULL;
+    if (p < host_end && *p == '[') {
+        // IPv6 colons belong to the address; only the colon after ']' starts a port.
+        const char* close = (const char*)memchr(p + 1, ']', (size_t)(host_end - p - 1));
+        if (!close || close == p + 1 || (close + 1 < host_end && close[1] != ':')) return false;
+        host_start = p + 1;
+        host_limit = close;
+        if (close + 1 < host_end) port = close + 1;
+    } else {
+        port = (const char*)memchr(p, ':', (size_t)(host_end - p));
+        if (port) host_limit = port;
+    }
+    if (!mysql_decode(host_start, (size_t)(host_limit - host_start), u->host, sizeof(u->host))) return false;
     if (!u->host[0]) snprintf(u->host, sizeof(u->host), "localhost");
-    if (port) u->port = atoi(port + 1);
-    if (slash) mysql_decode(slash + 1, (size_t)(end - slash - 1), u->database, sizeof(u->database));
+    if (port) {
+        for (const char* digit = port + 1; digit < host_end; digit++) {
+            if (*digit < '0' || *digit > '9') return false;
+        }
+        char* parsed_end = NULL;
+        long parsed = strtol(port + 1, &parsed_end, 10);
+        if (parsed_end == port + 1 || parsed_end != host_end || parsed < 1 || parsed > 65535) return false;
+        u->port = (int)parsed;
+    }
+    if (slash && !mysql_decode(slash + 1, (size_t)(end - slash - 1), u->database, sizeof(u->database))) return false;
     while (query && *query) {
         query++;
         const char* amp = strchr(query, '&');
@@ -190,8 +215,11 @@ static bool mysql_parse_uri(const char* uri, MysqlUri* u) {
         const char* eq = (const char*)memchr(query, '=', len);
         if (eq) {
             char key[64], value[1024];
-            snprintf(key, sizeof(key), "%.*s", (int)(eq - query), query);
-            mysql_decode(eq + 1, len - (size_t)(eq - query) - 1, value, sizeof(value));
+            size_t key_len = (size_t)(eq - query);
+            if (key_len >= sizeof(key)) return false;
+            memcpy(key, query, key_len);
+            key[key_len] = '\0';
+            if (!mysql_decode(eq + 1, len - (size_t)(eq - query) - 1, value, sizeof(value))) return false;
             for (char* k = key; *k; k++) if (*k == '_') *k = '-';
             if (strcasecmp(key, "ssl-mode") == 0 || strcasecmp(key, "sslmode") == 0) {
                 if (!rdb_mod_parse_tls_mode(value, &u->tls)) {
@@ -233,7 +261,7 @@ static void mysql_target(const MysqlUri* u, RdbTarget* t) {
 }
 
 static int mysql_resolve_targets(const char* uri, RdbTarget* out, int cap, int* out_count) {
-    MysqlUri u;
+    MysqlUri u = {};
     bool ok = cap > 0 && mysql_parse_uri(uri, &u);
     if (ok) mysql_target(&u, &out[0]);
     mysql_uri_free(&u);
@@ -248,6 +276,7 @@ static int mysql_resolve_targets(const char* uri, RdbTarget* out, int cap, int* 
 typedef struct {
     MYSQL*       my;
     bool         mariadb;
+    void*        active_stmt;       // an open cursor owns the connection
     // what a cancel helper session needs to reach the same server (§13.5.3)
     char         endpoint[1024];    // the host bridge's local socket
     bool         upstream_tls;      // the bridge guarantees TLS upstream
@@ -377,15 +406,19 @@ static int mysql_cancel(void* conn) {
 }
 
 static int mysql_ping_conn(void* conn) {
-    return mysql_ping(((MysqlConn*)conn)->my) == 0 ? RDB_OK : RDB_CONN_LOST;
+    MysqlConn* c = (MysqlConn*)conn;
+    if (c->active_stmt) return RDB_ERROR;
+    return mysql_ping(c->my) == 0 ? RDB_OK : RDB_CONN_LOST;
 }
 
 static int mysql_reset_conn(void* conn) {
-    return mysql_reset_connection(((MysqlConn*)conn)->my) == 0 ? RDB_OK : RDB_ERROR;
+    MysqlConn* c = (MysqlConn*)conn;
+    return !c->active_stmt && mysql_reset_connection(c->my) == 0 ? RDB_OK : RDB_ERROR;
 }
 
 static int mysql_set_timeout(void* conn, int64_t statement_ms) {
     MysqlConn* c = (MysqlConn*)conn;
+    if (c->active_stmt) return RDB_ERROR;
     char sql[96];
     // MariaDB counts seconds in max_statement_time; MySQL milliseconds in max_execution_time
     if (c->mariadb) {
@@ -452,7 +485,7 @@ static RdbType mysql_type_for_decl(const char* data_type, const char* column_typ
 }
 
 /* ══════════════════════════════════════════════════════════════════════
- * Statements: server-side prepared, results buffered as text
+ * Statements: server-side prepared, cursor-backed result rows
  * ══════════════════════════════════════════════════════════════════════ */
 
 typedef struct {
@@ -461,6 +494,8 @@ typedef struct {
     int            param_count;
     char**         params;          // text values; NULL = SQL NULL
     bool           executed;
+    bool           done;
+    int            result;
     MYSQL_RES*     meta;
     int            column_count;
     MYSQL_FIELD*   fields;
@@ -470,8 +505,11 @@ typedef struct {
     my_bool*       nulls;
 } MysqlStmt;
 
+static const unsigned long MYSQL_CELL_LIMIT = 16ul * 1024ul * 1024ul;
+
 static int mysql_prepare_stmt(void* conn, const char* sql, void** out_stmt) {
     MysqlConn* c = (MysqlConn*)conn;
+    if (c->active_stmt) return RDB_ERROR;
     MYSQL_STMT* st = mysql_stmt_init(c->my);
     if (!st || mysql_stmt_prepare(st, sql, strlen(sql)) != 0) {
         rdb_mod_log(RDB_LOG_ERROR, "rdb mysql: prepare failed: %s",
@@ -496,8 +534,11 @@ static int mysql_bind(void* stmt, int index, const RdbParam* param) {
     return RDB_OK;
 }
 
+static int mysql_parameter_count(void* stmt) { return ((MysqlStmt*)stmt)->param_count; }
+
 static int mysql_execute(MysqlStmt* s) {
-    if (s->executed) return RDB_OK;
+    if (s->executed) return s->result;
+    if (s->conn->active_stmt) return RDB_ERROR;
     s->executed = true;
     MYSQL_BIND* binds = (MYSQL_BIND*)calloc((size_t)(s->param_count ? s->param_count : 1), sizeof(MYSQL_BIND));
     for (int i = 0; i < s->param_count; i++) {
@@ -505,17 +546,20 @@ static int mysql_execute(MysqlStmt* s) {
         binds[i].buffer = s->params[i];
         binds[i].buffer_length = s->params[i] ? strlen(s->params[i]) : 0;
     }
-    my_bool update_max = 1;
+    unsigned long cursor = CURSOR_TYPE_READ_ONLY;
+    // MySQL rejects cursor mode for commands such as CREATE and UPDATE.
+    bool returns_rows = mysql_stmt_field_count(s->st) != 0;
     bool ok = (s->param_count == 0 || mysql_stmt_bind_param(s->st, binds) == 0) &&
-        mysql_stmt_attr_set(s->st, STMT_ATTR_UPDATE_MAX_LENGTH, &update_max) == 0 &&
-        mysql_stmt_execute(s->st) == 0 && mysql_stmt_store_result(s->st) == 0;
+        (!returns_rows || mysql_stmt_attr_set(s->st, STMT_ATTR_CURSOR_TYPE, &cursor) == 0) &&
+        mysql_stmt_execute(s->st) == 0;
     free(binds);
     if (!ok) {
         rdb_mod_log(RDB_LOG_ERROR, "rdb mysql: query failed: %s", mysql_stmt_error(s->st));
-        return mysql_lost(mysql_stmt_errno(s->st)) ? RDB_CONN_LOST : RDB_ERROR;
+        return s->result = mysql_lost(mysql_stmt_errno(s->st)) ? RDB_CONN_LOST : RDB_ERROR;
     }
     s->meta = mysql_stmt_result_metadata(s->st);
     if (!s->meta) return RDB_OK;        // a statement without a result set
+    s->conn->active_stmt = s;
     s->column_count = (int)mysql_num_fields(s->meta);
     s->fields = mysql_fetch_fields(s->meta);
     size_t n = (size_t)(s->column_count ? s->column_count : 1);
@@ -523,11 +567,12 @@ static int mysql_execute(MysqlStmt* s) {
     s->buffers = (char**)calloc(n, sizeof(char*));
     s->lengths = (unsigned long*)calloc(n, sizeof(unsigned long));
     s->nulls = (my_bool*)calloc(n, sizeof(my_bool));
+    if (!s->results || !s->buffers || !s->lengths || !s->nulls) return s->result = RDB_ERROR;
     for (int c = 0; c < s->column_count; c++) {
-        // every column is fetched as text sized by the stored result's max length
-        unsigned long size = s->fields[c].max_length + 1;
-        if (size < 64) size = 64;
+        // Grow only the current row's truncated columns, not the whole result.
+        unsigned long size = 256;
         s->buffers[c] = (char*)calloc(1, size);
+        if (!s->buffers[c]) return s->result = RDB_ERROR;
         s->results[c].buffer_type = MYSQL_TYPE_STRING;
         s->results[c].buffer = s->buffers[c];
         s->results[c].buffer_length = size;
@@ -536,7 +581,7 @@ static int mysql_execute(MysqlStmt* s) {
     }
     if (mysql_stmt_bind_result(s->st, s->results) != 0) {
         rdb_mod_log(RDB_LOG_ERROR, "rdb mysql: result binding failed: %s", mysql_stmt_error(s->st));
-        return RDB_ERROR;
+        return s->result = RDB_ERROR;
     }
     return RDB_OK;
 }
@@ -545,12 +590,40 @@ static int mysql_step(void* stmt) {
     MysqlStmt* s = (MysqlStmt*)stmt;
     int rc = mysql_execute(s);
     if (rc != RDB_OK) return rc;
-    if (!s->meta) return RDB_DONE;
+    if (!s->meta || s->done) return RDB_DONE;
     int fetched = mysql_stmt_fetch(s->st);
-    if (fetched == 0 || fetched == MYSQL_DATA_TRUNCATED) return RDB_ROW;
-    if (fetched == MYSQL_NO_DATA) return RDB_DONE;
+    if (fetched == 0 || fetched == MYSQL_DATA_TRUNCATED) {
+        bool rebind = false;
+        for (int c = 0; c < s->column_count; c++) {
+            if (s->nulls[c]) continue;
+            unsigned long length = s->lengths[c];
+            if (length > MYSQL_CELL_LIMIT) {
+                rdb_mod_log(RDB_LOG_ERROR, "rdb mysql: result cell exceeds the 16 MiB limit");
+                return s->result = RDB_ERROR;
+            }
+            if (length >= s->results[c].buffer_length) {
+                char* buffer = (char*)realloc(s->buffers[c], (size_t)length + 1);
+                if (!buffer) return s->result = RDB_ERROR;
+                s->buffers[c] = buffer;
+                s->results[c].buffer = buffer;
+                s->results[c].buffer_length = length + 1;
+                if (mysql_stmt_fetch_column(s->st, &s->results[c], (unsigned int)c, 0) != 0)
+                    return s->result = RDB_ERROR;
+                rebind = true;
+            }
+            s->buffers[c][length] = '\0';
+        }
+        if (rebind && mysql_stmt_bind_result(s->st, s->results) != 0) return s->result = RDB_ERROR;
+        return RDB_ROW;
+    }
+    if (fetched == MYSQL_NO_DATA) {
+        mysql_stmt_free_result(s->st);
+        if (s->conn->active_stmt == s) s->conn->active_stmt = NULL;
+        s->done = true;
+        return RDB_DONE;
+    }
     rdb_mod_log(RDB_LOG_ERROR, "rdb mysql: fetch failed: %s", mysql_stmt_error(s->st));
-    return mysql_lost(mysql_stmt_errno(s->st)) ? RDB_CONN_LOST : RDB_ERROR;
+    return s->result = mysql_lost(mysql_stmt_errno(s->st)) ? RDB_CONN_LOST : RDB_ERROR;
 }
 
 static int mysql_column_count_stmt(void* stmt) {
@@ -580,7 +653,10 @@ static RdbValue mysql_column_value(void* stmt, int col) {
         case RDB_TYPE_INT:   v.int_val = strtoll(text, NULL, 10); break;
         case RDB_TYPE_FLOAT: v.float_val = strtod(text, NULL); break;
         case RDB_TYPE_BOOL:  v.bool_val = text[0] != '0'; break;
-        case RDB_TYPE_BLOB:  v.is_null = true; break;   // binary columns arrive in Phase 2
+        case RDB_TYPE_BLOB:
+            v.str_val = text;
+            v.str_len = (int)s->lengths[col];
+            break;
         default:
             v.type = RDB_TYPE_STRING;   // decimal/datetime/JSON travel as text (RDB6)
             v.str_val = text;
@@ -593,10 +669,15 @@ static RdbValue mysql_column_value(void* stmt, int col) {
 static void mysql_finalize(void* stmt) {
     MysqlStmt* s = (MysqlStmt*)stmt;
     if (!s) return;
+    if (s->conn->active_stmt == s) {
+        // Closing the server cursor discards unread rows without client buffering.
+        mysql_stmt_free_result(s->st);
+        s->conn->active_stmt = NULL;
+    }
     if (s->meta) mysql_free_result(s->meta);
     mysql_stmt_close(s->st);
     for (int i = 0; i < s->param_count; i++) free(s->params[i]);
-    for (int c = 0; c < s->column_count; c++) free(s->buffers[c]);
+    for (int c = 0; s->buffers && c < s->column_count; c++) free(s->buffers[c]);
     free(s->params);
     free(s->results);
     free(s->buffers);
@@ -644,6 +725,7 @@ static int mysql_rows_for(const MysqlRows* r, const char* table) {
 }
 
 static int mysql_load_schema(void* conn, const RdbHostAPI* host, void* meta, RdbSchema* out) {
+    if (((MysqlConn*)conn)->active_stmt) return RDB_ERROR;
     MYSQL* my = ((MysqlConn*)conn)->my;
     RdbModMeta m = { host, meta };
     MysqlRows tables, columns, indexes, fks, triggers, functions;
@@ -767,7 +849,7 @@ const RdbDriver rdb_mysql_driver = {
     RDB_DRIVER_API_VERSION,
     "mysql",
     &mysql_dialect,
-    RDB_CAP_CANCEL | RDB_CAP_STATEMENT_TIMEOUT,
+    RDB_CAP_CANCEL | RDB_CAP_STATEMENT_TIMEOUT | RDB_CAP_STREAMING,
     mysql_resolve_targets,
     mysql_open,
     mysql_close_conn,
@@ -786,4 +868,5 @@ const RdbDriver rdb_mysql_driver = {
     mysql_error_text,
     NULL,       // result_schema: row driver, served by the host adapter
     NULL,       // fetch_batch
+    mysql_parameter_count,
 };

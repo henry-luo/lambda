@@ -632,7 +632,8 @@ static const DomHostEngineOps host_test_operations = {
     host_test_web_animation_create, host_test_range_adopt, host_test_range_pins,
     host_test_selection_collapse, host_test_text_split,
     host_test_client_frame, host_test_source_boundary, host_test_selection_rects, host_test_url_attribute,
-    host_test_boundary_property, host_test_scroll_property, host_test_position_property, host_test_embed_property
+    host_test_boundary_property, host_test_scroll_property, host_test_position_property, host_test_embed_property,
+    host_test_operation<10, Item, Item>
 };
 
 static bool host_test_dispatch(bool present) {
@@ -659,6 +660,7 @@ static bool host_test_dispatch(bool present) {
     dom_engine_scroll_cancel_smooth(&host_test_document, &host_test_node);
     Item owner = host_test_item(1), second = host_test_item(2), third = host_test_item(3);
     return dom_engine_request_frame(owner, second).item == (present ? host_test_item(112) : ItemNull).item &&
+        dom_engine_request_frame_once(owner, second).item == (present ? host_test_item(1012) : ItemNull).item &&
         dom_engine_cancel_frame(owner, second).item == (present ? host_test_item(212) : ItemNull).item &&
         dom_engine_viewport_size(owner).item == (present ? host_test_item(31) : ItemNull).item &&
         dom_engine_watch_window(owner, second, third).item == (present ? host_test_item(4123) : ItemNull).item &&

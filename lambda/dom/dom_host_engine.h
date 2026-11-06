@@ -92,7 +92,8 @@ enum DomScrollBehavior : uint8_t;
     OP(const BoundaryProp*, boundary_property, (const DomElement* element), (element), (element ? element->bound.get() : nullptr)) \
     OP(const ScrollProp*, scroll_property, (const DomElement* element), (element), (element ? element->scroller.get() : nullptr)) \
     OP(const PositionProp*, position_property, (const DomElement* element), (element), (element ? element->position.get() : nullptr)) \
-    OP(const EmbedProp*, embed_property, (const DomElement* element), (element), (element ? element->embed.get() : nullptr))
+    OP(const EmbedProp*, embed_property, (const DomElement* element), (element), (element ? element->embed.get() : nullptr)) \
+    OP(Item, request_frame_once, (Item owner, Item event_name), (owner, event_name), ItemNull)
 
 struct DomHostEngineOps {
 #define DOM_HOST_FIELD(result, name, parameters, arguments, absence) result (*name) parameters;

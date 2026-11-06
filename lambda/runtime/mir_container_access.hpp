@@ -1,6 +1,49 @@
 #pragma once
 #include "mir_emitter_shared.hpp"
 
+typedef MIR_reg_t (*MirIndexCoordinateReader)(void* owner, AstNode* key);
+
+// S8.2.4v3: all coordinates address one receiver; a miss stays a boxed null.
+static inline MIR_reg_t em_index_nd(MirEmitter* em, MIR_reg_t receiver,
+        AstNode* keys, MirIndexCoordinateReader read, void* owner) {
+    if (em->root_call_value)
+        em->root_call_value(em->call_owner, receiver, JIT_VALUE_BOXED_ITEM);
+    int count = em_linked_node_count(keys);
+    // data-zone bytes have no independent GC owner. Raw coordinates instead
+    // live once per activation, across collecting keys and repeated loop reads.
+    MIR_reg_t indices = em_fixed_stack_storage(em, "nd_indices", (int64_t)count * sizeof(int64_t));
+    int position = 0;
+    for (AstNode* key = keys; key; key = key->next, position++) {
+        MIR_reg_t coordinate = read(owner, key);
+        em_store_at(em, indices, (MIR_disp_t)position * sizeof(int64_t), MIR_T_I64, coordinate);
+    }
+    return em_call_3(em, "fn_index_nd", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, receiver),
+        MIR_T_I64, MIR_new_int_op(em->ctx, count),
+        MIR_T_P, MIR_new_reg_op(em->ctx, indices), true);
+}
+
+// a nested subscript binds its key's `last`; only its receiver can still
+// refer to the enclosing subscript's last index (S7.2.2).
+static inline void em_scan_index_last(AstNode* child, AstNode* parent, void* context) {
+    (void)parent;
+    bool* found = (bool*)context;
+    if (*found || !child) return;
+    if (child->node_type == AST_NODE_LAST_INDEX) { *found = true; return; }
+    if (child->node_type == AST_NODE_INDEX_EXPR) {
+        em_scan_index_last(((AstFieldNode*)child)->object, child, context);
+        em_scan_index_last(child->next, child, context);
+        return;
+    }
+    ast_visit_core_children(child, em_scan_index_last, context);
+}
+
+static inline bool em_index_keys_use_last(AstNode* keys) {
+    bool found = false;
+    em_scan_index_last(keys, NULL, &found);
+    return found;
+}
+
 // coarse array/map admission proves only the container kind, never an element
 // certificate or record layout. Other carriers retain runtime admission.
 static inline void em_guard_broad_container(MirEmitter* em, MIR_reg_t item,
@@ -446,6 +489,76 @@ static inline MIR_reg_t em_semantic_value_type_test(MirEmitter* em, MIR_reg_t it
             MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, matches)));
     }
     return result;
+}
+
+// S11.2.1: value patterns use membership for types/ranges and equality for
+// other values. A Bool error sentinel is a failed test, never a selected arm.
+static inline MIR_reg_t em_pattern_value_test(MirEmitter* em, MIR_reg_t subject,
+        MIR_reg_t pattern, TypeId known_kind = LMD_TYPE_ANY) {
+    MIR_reg_t result = em_new_reg(em, "pattern_result", MIR_T_I64);
+    MIR_label_t done = em_new_label(em);
+    MIR_reg_t kind = 0;
+    if (known_kind == LMD_TYPE_ANY) {
+        kind = em_call_1(em, "item_type_id", MIR_T_I64, MIR_T_I64,
+            MIR_new_reg_op(em->ctx, pattern), false);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, kind),
+            MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, UINT8_MAX)));
+    }
+    static const struct { TypeId kind; const char* helper; } tests[] = {
+        {LMD_TYPE_TYPE, "fn_is"}, {LMD_TYPE_RANGE, "fn_in"}, {LMD_TYPE_ANY, "fn_eq"},
+    };
+    for (const auto& test : tests) {
+        if (!kind && test.kind != LMD_TYPE_ANY && test.kind != known_kind) continue;
+        MIR_label_t next = kind && test.kind != LMD_TYPE_ANY ? em_new_label(em) : NULL;
+        if (next) em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE, MIR_new_label_op(em->ctx, next),
+            MIR_new_reg_op(em->ctx, kind), MIR_new_int_op(em->ctx, test.kind)));
+        MIR_reg_t matched = em_call_2(em, test.helper, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(em->ctx, subject), MIR_T_I64, MIR_new_reg_op(em->ctx, pattern), true);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, result),
+            MIR_new_reg_op(em->ctx, matched)));
+        if (!kind) break;
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP, MIR_new_label_op(em->ctx, done)));
+        if (next) em_emit_label(em, next);
+    }
+    em_emit_label(em, done);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND, MIR_new_reg_op(em->ctx, result),
+        MIR_new_reg_op(em->ctx, result), MIR_new_int_op(em->ctx, UINT8_MAX)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ, MIR_new_reg_op(em->ctx, result),
+        MIR_new_reg_op(em->ctx, result), MIR_new_int_op(em->ctx, BOOL_TRUE)));
+    return result;
+}
+
+// query windows apply after stable ordering, before the one positional finish
+// (S2.5.2v2). Both lowerings evaluate offset then limit through their value hook.
+static inline MIR_reg_t em_finalize_query_stream(MirEmitter* em, MIR_reg_t output,
+        MIR_reg_t keys, int64_t order_mask, int64_t order_count,
+        AstNode* offset, AstNode* limit, bool limit_from_end, bool item_position) {
+    if (order_count) {
+        output = em_call_4(em, "fn_order_rows", MIR_T_P,
+            MIR_T_I64, MIR_new_reg_op(em->ctx, output), MIR_T_I64, MIR_new_reg_op(em->ctx, keys),
+            MIR_T_I64, MIR_new_int_op(em->ctx, order_mask), MIR_T_I64, MIR_new_int_op(em->ctx, order_count), true);
+        if (em->root_call_value) em->root_call_value(em->call_owner, output, JIT_VALUE_RAW_GC_POINTER);
+    }
+    if (offset || limit) {
+        AstNode* bounds[] = {offset, limit};
+        MIR_reg_t arguments[2];
+        for (int i = 0; i < 2; i++) {
+            if (bounds[i]) arguments[i] = em_require_rep(em,
+                em_lower_value(em, bounds[i], MIR_VALUE_ANY), VALUE_REP_ITEM).reg;
+            else {
+                arguments[i] = em_new_reg(em, "absent_window_bound", MIR_T_I64);
+                em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, arguments[i]),
+                    MIR_new_int_op(em->ctx, ITEM_NULL)));
+            }
+        }
+        int64_t flags = (offset ? FOR_WINDOW_OFFSET : 0) | (!limit ? 0 :
+            limit_from_end ? FOR_WINDOW_LIMIT_LAST : FOR_WINDOW_LIMIT);
+        output = em_call_4(em, "for_window", MIR_T_I64, MIR_T_P, MIR_new_reg_op(em->ctx, output),
+            MIR_T_I64, MIR_new_reg_op(em->ctx, arguments[0]), MIR_T_I64, MIR_new_reg_op(em->ctx, arguments[1]),
+            MIR_T_I64, MIR_new_int_op(em->ctx, flags), true);
+    }
+    return em_call_1(em, item_position ? "list_collapse_item" : "list_collapse_value", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, output), true);
 }
 
 // admitted nullable strings compare exact UTF-8 bytes, including embedded NUL.

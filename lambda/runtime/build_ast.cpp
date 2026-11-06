@@ -957,7 +957,6 @@ static Type* sys_func_call_result_type(Transpiler* tp, SysFuncInfo* info,
 bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out);
 static bool sys_conversion_literal_is_error_free(Transpiler* tp, SysFuncInfo* info,
         AstNode* first_arg);
-static bool ast_is_explicit_type_value(AstNode* node);
 
 static bool sys_conversion_has_error_free_numeric_input(Type* type) {
     // Keep this proof deliberately narrower than the abstract `number` type:
@@ -3586,6 +3585,7 @@ static const struct { const char* path; const char* module; } io_leaf_modules[] 
     {"lambda.io.secret", "io_secret"},
     {"lambda.io.loopback", "io_loopback"},
     {"lambda.io.sqlite", "io_sqlite"},
+    {"lambda.io.rdb", "io_rdb"},
     {"lambda.io.websocket", "io_websocket"},
 };
 
@@ -3930,7 +3930,13 @@ static Type* static_binder_argument_type(AstNode* argument, TypeBinder* binder,
     if (!argument || !argument->type || !binder) return NULL;
     Type* candidate = boundary_unwrap_type(argument->type);
     if (binder->bound == &TYPE_TYPE) {
-        return ast_is_explicit_type_value(argument) ? candidate : NULL;
+        if (ast_is_explicit_type_value(argument)) return candidate;
+        if (lambda_static_boundary_relation(argument->type, &TYPE_TYPE, true) == STATIC_BOUNDARY_REJECTED)
+            return NULL;
+        // the argument's category is type; its selected inner contract is
+        // runtime data and cannot become an exact specialization key.
+        *exact = false;
+        return &TYPE_ANY;
     }
     // S11.4.8v2/S4.2.2: a value binder selects a type, not a scalar singleton.
     Item literal;
@@ -3970,13 +3976,16 @@ static Type* static_binder_join(Type* left, Type* right) {
 }
 
 static bool static_bind_argument(Type** env, bool* written, TypeBinder* binder,
-        AstNode* argument, bool require_exact = false) {
+        AstNode* argument, bool require_exact = false, bool* deferred = NULL,
+        bool nested_site = false) {
     if (!env || !written || !binder || binder->slot >= LAMBDA_MAX_FUNCTION_ARGS) {
         return false;
     }
     bool exact = false;
-    Type* candidate = static_binder_argument_type(argument, binder, &exact);
+    // a nested site observes a subvalue, never the whole array/constraint.
+    Type* candidate = nested_site ? binder->bound : static_binder_argument_type(argument, binder, &exact);
     if (!candidate || (require_exact && !exact)) return false;
+    if (deferred && !exact) *deferred = true;
     if (!written[binder->slot]) {
         env[binder->slot] = candidate;
         written[binder->slot] = true;
@@ -4004,7 +4013,8 @@ bool lambda_ast_collect_static_binder_env(AstCallNode* call,
         TypeBinder* binder = param->binder ? param->binder :
             static_contract_binder_site(parameter_boundary_type(param));
         if (!binder) continue;
-        if (!static_bind_argument(env_out, written, binder, argument, true)) return false;
+        bool nested = !param->binder && parameter_boundary_type(param) != (Type*)binder;
+        if (!static_bind_argument(env_out, written, binder, argument, true, NULL, nested)) return false;
     }
     for (uint16_t i = 0; i < func_type->binder_count; i++) {
         if (!written[i] || !env_out[i]) return false;
@@ -4126,6 +4136,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     bool parameter_short_circuits_error = callee_error;
     Type* binder_env[LAMBDA_MAX_FUNCTION_ARGS] = {};
     bool binder_written[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    bool binder_deferred = false;
     AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     int slot_count = resolve_call_boundary_arguments(call, injected, by_param);
     AstFuncNode* named_callee = ast_call_has_named_args(call)
@@ -4141,7 +4152,8 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         TypeBinder* binder = binder_param->binder ? binder_param->binder :
             static_contract_binder_site(parameter_boundary_type(binder_param));
         if (!binder) continue;
-        if (!static_bind_argument(binder_env, binder_written, binder, binder_arg)) {
+        bool nested = !binder_param->binder && parameter_boundary_type(binder_param) != (Type*)binder;
+        if (!static_bind_argument(binder_env, binder_written, binder, binder_arg, false, &binder_deferred, nested)) {
             if (!line) line = source_span_start_line(tp, diagnostic_span);
             record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
                 binder->bound == &TYPE_TYPE
@@ -4209,14 +4221,6 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         if (!arg || ast_is_omitted_argument(arg)) continue;
         TypeBinder* binder_site = expected_param->binder ? expected_param->binder :
             static_contract_binder_site(parameter_boundary_type(expected_param));
-        if (expected_param->binder && !ast_is_explicit_type_value(arg)) {
-            record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
-                "argument %d must be an explicit type value", arg_index + 1);
-            if (!should_continue_transpiling(tp)) {
-                call->type = &TYPE_ERROR;
-                return false;
-            }
-        }
         if (expected_param->is_var_param) {
             AstIdentNode* root = compound_root_ident(arg);
             if (!root || !root->entry || !root->entry->is_mutable) {
@@ -4286,13 +4290,17 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         }
         Type* full_type = parameter_boundary_type(expected_param);
         full_type = lambda_ast_resolve_binder_contract(full_type, binder_env);
-        if (binder_site) full_type = binder_site->bound;
         if (parameter_short_circuits_argument_error(tp, expected_param, arg)) {
             parameter_short_circuits_error = true;
         }
-        StaticBoundaryResult relation = expected_param->binder
+        // a type-valued expression can supply a binder just like a literal;
+        // only a known type literal proves admission without the type boundary.
+        StaticBoundaryResult relation = expected_param->binder && ast_is_explicit_type_value(arg)
             ? STATIC_BOUNDARY_PROVEN
             : lambda_static_boundary_relation(arg->type, full_type, true);
+        if (binder_deferred && !binder_site && relation == STATIC_BOUNDARY_PROVEN &&
+                lambda_type_contract_has_binder(parameter_boundary_type(expected_param), true))
+            relation = STATIC_BOUNDARY_DEFERRED;
         if (expected_param->has_explicit_contract &&
                 relation == STATIC_BOUNDARY_DEFERRED &&
                 !ast_boundary_cannot_fail(arg, full_type)) {
@@ -5610,32 +5618,6 @@ static Type* alloc_array_num_result_type(Transpiler* tp, AstBinaryNode* ast_node
     return (Type*)type;
 }
 
-static bool ast_is_explicit_type_value(AstNode* node) {
-    node = boundary_unwrap_primary(node);
-    if (!node) return false;
-    switch (node->node_type) {
-    case AST_NODE_TYPE:
-    case AST_NODE_CONTENT_TYPE:
-    case AST_NODE_LIST_TYPE:
-    case AST_NODE_ARRAY_TYPE:
-    case AST_NODE_MAP_TYPE:
-    case AST_NODE_ELMT_TYPE:
-    case AST_NODE_FUNC_TYPE:
-    case AST_NODE_BINARY_TYPE:
-    case AST_NODE_UNARY_TYPE:
-    case AST_NODE_CONSTRAINED_TYPE:
-    case AST_NODE_OBJECT_TYPE:
-    case AST_NODE_STRING_PATTERN:
-    case AST_NODE_SYMBOL_PATTERN:
-        return true;
-    case AST_NODE_IDENT: {
-        AstIdentNode* ident = (AstIdentNode*)node;
-        return ast_definition_denotes_type(ident->entry ? ident->entry->node : NULL);
-    }
-    default:
-        return false;
-    }
-}
 
 static bool ast_may_evaluate_to_type_value(AstNode* node) {
     node = boundary_unwrap_primary(node);
@@ -7431,7 +7413,7 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             return_acknowledgment);
         bool procedural = block->procedural_results;
         int values = 0, declarations = 0, statements = 0;
-        AstNode* last = interp_proc_block_last_value(block,
+        AstNode* last = ast_proc_block_last_value(block->item,
             &values, &declarations, &statements);
         bool retains_items = !procedural && values > 1;
         for (AstNode* item = block->item; item; item = item->next) {
@@ -8113,7 +8095,7 @@ static bool ordinary_outcome_has_error(Transpiler* tp, AstNode* node, int depth)
     case AST_NODE_LIST: {
         AstListNode* block = (AstListNode*)node;
         int values = 0, declarations = 0, statements = 0;
-        AstNode* last = interp_proc_block_last_value(block, &values, &declarations, &statements);
+        AstNode* last = ast_proc_block_last_value(block->item, &values, &declarations, &statements);
         if (!block->procedural_results && values > 1) return false;
         return ordinary_outcome_has_error(tp, last, depth + 1);
     }
@@ -12283,8 +12265,20 @@ static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* e
 // it. A call result is not: the callee marks what it returns of its own
 // parameters. A local follows its initializer and every rebinding; any other
 // binding (loop or pattern variable) stays conservative.
+// S9.1.2: a known function can return storage retained by its module or
+// closure. Opaque callable values have no freshness proof at this call site.
+extern "C" bool ast_call_returns_retained_container(AstNode* expression) {
+    AstNode* node = ast_cow_value_source(expression);
+    if (!node || node->node_type != AST_NODE_CALL_EXPR) return false;
+    AstCallNode* call = (AstCallNode*)node;
+    AstNode* target = ast_unwrap_primary_to_leaf(call->function);
+    if ((target && target->node_type == AST_NODE_SYS_FUNC) || ast_called_type_target(call->function)) return false;
+    AstFuncNode* function = ast_direct_call_function(call);
+    return !function || !function->analysis || function->analysis->returns_retained_container;
+}
+
 static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
-        AstNode* body, int depth, bool whole);
+        AstNode* body, int depth, bool whole, NameScope* retained_locals = NULL);
 
 typedef struct ResultAliasScan {
     NameEntry* entry;
@@ -12294,6 +12288,7 @@ typedef struct ResultAliasScan {
     bool returned;
     // only the parameter's own root counts, not a part of it
     bool whole;
+    NameScope* retained_locals;
 } ResultAliasScan;
 
 static bool result_alias_rebind_scan_node(AstNode* node, void* data) {
@@ -12303,7 +12298,7 @@ static bool result_alias_rebind_scan_node(AstNode* node, void* data) {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         if (assign->target_entry == scan->local &&
                 ast_result_may_alias_entry(assign->value, scan->entry, scan->body,
-                    scan->depth + 1, scan->whole)) {
+                    scan->depth + 1, scan->whole, scan->retained_locals)) {
             scan->returned = true;
         }
     }
@@ -12325,8 +12320,9 @@ static bool result_type_is_scalar(Type* type) {
 
 // `whole`: the result may be the entry's own root, as opposed to a part of it
 static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
-        AstNode* body, int depth, bool whole) {
-    AstNode* node = ast_unwrap_primary(expr);
+        AstNode* body, int depth, bool whole, NameScope* retained_locals) {
+    // successful propagation retains the source owner (S7.6.3v3, S9.1.2).
+    AstNode* node = ast_cow_value_source(expr);
     if (!node) return false;
     // a statically scalar value shares no container (`return a[i]` on float[])
     if (result_type_is_scalar(node->type)) return false;
@@ -12337,6 +12333,8 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
     case AST_NODE_IDENT: {
         NameEntry* source = ((AstIdentNode*)node)->entry;
         if (!source) return false;
+        if (retained_locals && !is_local_to_scope(source, retained_locals) && source->node &&
+                !ast_index_node_is_function(source->node) && !ast_definition_denotes_type(source->node)) return true;
         if (source == entry) return true;
         if (source->is_parameter) return false;
         AstNode* decl = source->node;
@@ -12348,11 +12346,11 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
         }
         if (decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return true;
         if (ast_result_may_alias_entry(((AstDeclaratorNode*)decl)->init, entry,
-                body, depth + 1, whole)) {
+                body, depth + 1, whole, retained_locals)) {
             return true;
         }
         if (!source->is_mutable) return false;
-        ResultAliasScan rebinds = {entry, source, body, depth, false, whole};
+        ResultAliasScan rebinds = {entry, source, body, depth, false, whole, retained_locals};
         walk_lambda_ast(body, result_alias_rebind_scan_node, &rebinds, false);
         return rebinds.returned;
     }
@@ -12373,23 +12371,24 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
                 return false;
             }
         }
-        return ast_result_may_alias_entry(object, entry, body, depth, whole);
+        return ast_result_may_alias_entry(object, entry, body, depth, whole, retained_locals);
     }
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
-        return ast_result_may_alias_entry(branch->then, entry, body, depth, whole) ||
-            ast_result_may_alias_entry(branch->otherwise, entry, body, depth, whole);
+        return ast_result_may_alias_entry(branch->then, entry, body, depth, whole, retained_locals) ||
+            ast_result_may_alias_entry(branch->otherwise, entry, body, depth, whole, retained_locals);
     }
     case AST_NODE_MATCH_EXPR: {
         for (AstNode* arm = ((AstMatchNode*)node)->cases; arm; arm = arm->next) {
             if (ast_result_may_alias_entry(((AstMatchArm*)arm)->body, entry, body,
-                    depth, whole)) {
+                    depth, whole, retained_locals)) {
                 return true;
             }
         }
         return false;
     }
     case AST_NODE_CALL_EXPR: {
+        if (retained_locals && ast_call_returns_retained_container(node)) return true;
         // a callee that may return an argument passes the alias through; its
         // own flag may be decided later (lambda_ast_note_returned_params)
         if (!ast_call_may_return_argument(node)) return false;
@@ -12403,7 +12402,7 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
             bool flows = !positional || !param ||
                 (param->entry && (whole ? param->entry->cow_param_root_returned
                                         : param->entry->cow_param_returned));
-            if (flows && ast_result_may_alias_entry(arg, entry, body, depth + 1, whole)) {
+            if (flows && ast_result_may_alias_entry(arg, entry, body, depth + 1, whole, retained_locals)) {
                 return true;
             }
             if (param) param = (AstNamedNode*)((AstNode*)param)->next;
@@ -12415,7 +12414,7 @@ static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
         // a block's value is its last item
         AstNode* item = ((AstListNode*)node)->item;
         while (item && item->next) item = item->next;
-        return ast_result_may_alias_entry(item, entry, body, depth, whole);
+        return ast_result_may_alias_entry(item, entry, body, depth, whole, retained_locals);
     }
     default:
         return false;
@@ -12427,7 +12426,7 @@ static bool result_alias_return_scan_node(AstNode* node, void* data) {
     if (scan->returned) return false;
     if (node->node_type == AST_NODE_RETURN_STAM &&
             ast_result_may_alias_entry(((AstReturnNode*)node)->value, scan->entry,
-                scan->body, 0, scan->whole)) {
+                scan->body, 0, scan->whole, scan->retained_locals)) {
         scan->returned = true;
     }
     return true;
@@ -12435,16 +12434,16 @@ static bool result_alias_return_scan_node(AstNode* node, void* data) {
 
 // The function result is every `return` value plus the body's own value.
 static bool ast_function_result_may_alias_entry(AstFuncNode* fn, NameEntry* entry,
-        bool whole = false) {
+        bool whole = false, NameScope* retained_locals = NULL) {
     // a scalar parameter shares nothing (`parent_precedence: int`)
-    if (entry->declared_type && result_type_is_scalar(entry->declared_type)) return false;
-    bool returned = ast_result_may_alias_entry(fn->body, entry, fn->body, 0, whole);
+    if (entry && entry->declared_type && result_type_is_scalar(entry->declared_type)) return false;
+    bool returned = ast_result_may_alias_entry(fn->body, entry, fn->body, 0, whole, retained_locals);
     if (!returned) {
-        ResultAliasScan scan = {entry, NULL, fn->body, 0, false, whole};
+        ResultAliasScan scan = {entry, NULL, fn->body, 0, false, whole, retained_locals};
         walk_lambda_ast(fn->body, result_alias_return_scan_node, &scan, false);
         returned = scan.returned;
     }
-    if (returned) {
+    if (returned && entry) {
         log_debug("returned-param: %.*s result may alias %s`%.*s`",
             fn->name ? (int)fn->name->len : 4, fn->name ? fn->name->chars : "anon",
             whole ? "the root of " : "",
@@ -12462,6 +12461,11 @@ static void lambda_ast_note_returned_params(ArrayList* functions) {
         for (int i = 0; i < functions->length; i++) {
             AstFuncNode* fn = (AstFuncNode*)functions->data[i];
             if (!fn || !fn->body) continue;
+            if (fn->analysis && !fn->analysis->returns_retained_container &&
+                    ast_function_result_may_alias_entry(fn, NULL, false, fn->vars)) {
+                fn->analysis->returns_retained_container = true;
+                changed = true;
+            }
             for (AstNamedNode* param = fn->param; param;
                     param = (AstNamedNode*)((AstNode*)param)->next) {
                 NameEntry* entry = param->entry;
@@ -15248,9 +15252,12 @@ static void resolve_if(Transpiler* tp, AstIfNode* node) {
 
 static Type* direct_range_element_type(Transpiler* tp, AstNode* source) {
     AstNode* value = ast_unwrap_primary(source);
+    while (value && value->node_type == AST_NODE_UNARY &&
+            ((AstUnaryNode*)value)->op == OPERATOR_PROPAGATE)
+        value = ast_unwrap_primary(((AstUnaryNode*)value)->operand);
     if (value && value->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)value;
-        if (ident->entry && ident->entry->node &&
+        if (ident->entry && !ident->entry->is_mutable && ident->entry->node &&
                 ident->entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             value = ast_unwrap_primary(((AstDeclaratorNode*)ident->entry->node)->init);
         }
@@ -15268,8 +15275,12 @@ static Type* direct_range_element_type(Transpiler* tp, AstNode* source) {
             // (S7.1, D2.2.2).
             return &TYPE_STRING;
         }
+        if (left == LMD_TYPE_INT && right == LMD_TYPE_INT) return &TYPE_INT;
     }
-    return &TYPE_INT;
+    // range construction may fail, but its members are integers or codepoint
+    // strings, never Error values. Keep that distinction at call admission
+    // without narrowing an unknown character range to int (S11.1.3, S7.7.3).
+    return lambda_type_union_normalized(tp->pool, &TYPE_INT, &TYPE_STRING);
 }
 
 static Type* direct_loop_value_type(Transpiler* tp, AstNode* source,
@@ -15599,7 +15610,7 @@ static void refresh_loop_outcome_child(AstNode* node, void* data) {
         AstListNode* block = (AstListNode*)node;
         if (block->procedural_results) {
             int values = 0, declarations = 0, statements = 0;
-            AstNode* last = interp_proc_block_last_value(block, &values, &declarations, &statements);
+            AstNode* last = ast_proc_block_last_value(block->item, &values, &declarations, &statements);
             node->type = last && last->type ? last->type : &TYPE_NULL;
         }
         break;
@@ -18674,7 +18685,7 @@ static void resolve_content(LambdaResolver* r, AstListNode* content) {
         // S12.1.2v2: one shared classifier handles single and multi-statement
         // blocks, including a trailing declaration or a capture-only handler.
         int values = 0, declarations = 0, statements = 0;
-        AstNode* last = interp_proc_block_last_value(content,
+        AstNode* last = ast_proc_block_last_value(content->item,
             &values, &declarations, &statements);
         content->type = last && last->type ? last->type : &TYPE_NULL;
     } else if (content->list_type->length == 1 && filtered &&

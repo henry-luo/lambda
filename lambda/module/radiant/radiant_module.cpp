@@ -3416,12 +3416,21 @@ RADIANT_C_API Item fn_radiant_request_change(Item node_item) {
     return (Item){.item = b2it(1)};
 }
 
-RADIANT_C_API Item fn_radiant_request_frame(Item owner, Item event_name) {
+static Item radiant_request_frame(Item owner, Item event_name, bool coalesce) {
     DomElement* elem = radiant_dom_element_from_item(owner, "REQUEST_FRAME");
     const char* name = get_type_id(event_name) == LMD_TYPE_STRING ? fn_to_cstr(event_name) : nullptr;
     uint64_t token = elem && name && *name && radiant_host_api && radiant_host_api->dom_catalog
-        ? radiant_host_api->dom_catalog->frame_request_native(elem, name) : 0;
+        ? (coalesce ? radiant_host_api->dom_catalog->frame_request_once_native(elem, name)
+                    : radiant_host_api->dom_catalog->frame_request_native(elem, name)) : 0;
     return (Item){.item = i2it((int64_t)token)};
+}
+
+RADIANT_C_API Item fn_radiant_request_frame(Item owner, Item event_name) {
+    return radiant_request_frame(owner, event_name, false);
+}
+
+static Item radiant_request_frame_once(Item owner, Item event_name) {
+    return radiant_request_frame(owner, event_name, true);
 }
 
 RADIANT_C_API Item fn_radiant_cancel_frame(Item owner, Item token) {
@@ -5705,7 +5714,8 @@ static const DomHostEngineOps radiant_host_operations = {
     radiant_host_boundary_property,
     radiant_host_scroll_property,
     radiant_host_position_property,
-    radiant_host_embed_property
+    radiant_host_embed_property,
+    radiant_request_frame_once
 };
 
 static const DomCollectionHostTypes radiant_collection_types = {

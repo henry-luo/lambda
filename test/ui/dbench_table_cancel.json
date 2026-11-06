@@ -1,0 +1,20 @@
+{
+  "name": "DBench cancels a whole-table export without publication",
+  "html": "temp/dbench-prepared/table_cancel/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "table_cancel"],
+  "viewport": {"width": 1280, "height": 800},
+  "input_turn_ms": 0,
+  "events": [
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"click","target":{"selector":"[data-table=orders]"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-loading","equals":"false","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#export"}},
+    {"type":"type","target":{"selector":"#export-path"},"text":"temp/dbench-table-cancel.csv","clear":true},
+    {"type":"select_option","target":{"selector":"#export-scope"},"value":"table"},
+    {"type":"click","target":{"selector":"#export-save"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Exported","assert_timeout":30000},
+    {"type":"click","target":{"selector":"#cancel"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Cancellation requested"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-connected","equals":"false"}
+  ]
+}

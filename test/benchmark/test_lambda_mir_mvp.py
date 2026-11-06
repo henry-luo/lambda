@@ -17,6 +17,10 @@ from benchmark_provenance import sha256_file
 from run_c2mir_benchmarks import C2M, ensure_c2m, strip_timing
 
 
+GC_MODES = ({}, {"LAMBDA_GC_FORCE_EVERY": "1", "LAMBDA_GC_POISON_FREED": "1"},
+            {"LAMBDA_GC_FORCE_SEED": "1592594996", "LAMBDA_GC_FORCE_ONE_IN": "3",
+             "LAMBDA_GC_POISON_FREED": "1"})
+
 class LambdaMirMvpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -73,9 +77,208 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertEqual(set(CASES), set(lambda_mir_mvp.REGISTERED_CASES))
         self.assertTrue(set(lambda_mir_mvp.COVERED_CASES).issubset(CASES))
         for suite, name in CASES:
-            source = ROOT / "test/benchmark" / suite / f"{name}2.ls"
-            self.assertTrue(source.is_file(), source)
-            self.assertTrue(source.with_suffix(".txt").is_file(), source)
+            for suffix in ("", "2"):
+                source = ROOT / "test/benchmark" / suite / f"{name}{suffix}.ls"
+                self.assertTrue(source.is_file(), source)
+                self.assertTrue(lambda_mir_mvp.lambda_golden_path(source).is_file(), source)
+
+    def check_gc_fixtures(self, fixtures):
+        fixtures = tuple(fixtures)
+        for compiler in ("mvp", "production"):
+            for mode in GC_MODES:
+                for source in fixtures:
+                    with self.subTest(compiler=compiler, mode=mode, fixture=source.stem):
+                        self.check_golden(source, {**mode, "LAMBDA_MIR_COMPILER": compiler})
+
+    def test_scoped_tasks(self):
+        names = ("mvp/mir_mvp_task_values", "conc/start_wait", "conc/start_imported",
+                 "conc/scope_join", "conc/scope_return", "conc/scope_loop_exit",
+                 "conc/scope_escape", "conc/no_replay", "conc/cancel_parked",
+                 "conc/scope_error_cancel", "conc/cancel_nested_cleanup",
+                 "conc/proc_handler_after_wait")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_open_transaction_cleanup(self):
+        names = ("proc/open_scope_exit", "proc/open_scope_unwind", "reference_crud")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_procedural_fault_handlers(self):
+        names = ("proc/proc_local_system_fault", "proc/proc_local_equality_fault",
+                 "conc/proc_handler_fault_after_wait", "proc/handler_results")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_boxed_numeric_literals(self):
+        names = ("wide_int_native_arith", "complex", "math_science_fft",
+                 "math_science_geometry", "numeric_fastpath_edges", "eq_total")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_module_value_ownership(self):
+        self.check_gc_fixtures((ROOT / "test/lambda/mvp/mir_mvp_module_values.ls",))
+
+    def test_range_member_domains(self):
+        names = ("mir_mvp_range_domains", "mir_mvp_query_sources")
+        self.check_gc_fixtures(ROOT / "test/lambda/mvp" / (name + ".ls") for name in names)
+
+    def test_constrained_type_predicates(self):
+        # S11.4.6v4/S11.4.11 cover declaring scopes, recursive predicates,
+        # Error answers, base-only annotations and filtered handlers.
+        names = ("constrained_type", "constrained_type_base", "constrained_type_hoisted",
+                 "constrained_type_predicate", "constrained_type_recursive",
+                 "handler_convenience", "proc/handler_control")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_nominal_literal_values(self):
+        names = ("object_default", "object_constraint", "object_field_admission",
+                 "mvp/mir_mvp_nominal_values")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_nominal_methods(self):
+        # S12.3.3v2/S12.3.4v2/S7.4.6v3: bound receiver snapshots, named
+        # defaults and field publication agree across both generated ABIs.
+        names = ("mvp/mir_mvp_bound_methods", "import_pub_types", "object", "object_nominal",
+                 "object_method_receiver", "object_method_value", "object_inherit", "object_content",
+                 "object_boxed_field_layout", "object_optional_presence", "object_method_named_args",
+                 "object_update", "object_direct_access", "proc/object_method_write",
+                 "proc/object_optional_method", "proc/object_mutation", "proc/object_direct_access",
+                 "proc/object_boxed_field_write", "proc/object_open_instance",
+                 "proc/proc_keyword_object_members", "proc/proc_object_counter")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_native_module_calls_and_scalar_joins(self):
+        names = ("mvp/mir_mvp_module_builtins", "mvp/mir_mvp_scalar_joins",
+                 "dom_derive_chardata", "dom_derive_traversal", "dom_derive_query", "dom_derive_forms",
+                 "dom_derive_urlencode", "dom_edit", "dom_edit_protocol", "dom_edit_plan",
+                 "dom_stylesheet", "dom_validate", "dom_local_fonts")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_inferred_record_fields(self):
+        names = ("mvp/mir_mvp_inferred_record_fields", "latex/test_latex_citeproc_errors",
+                 "latex/test_latex_citeproc_data", "mathml_format")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_decomposition_values(self):
+        names = ("mvp/mir_mvp_decomposition", "mvp/mir_mvp_decomposition_proc",
+                 "fn_local_decomposition", "interp_decompose")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_store_containment(self):
+        names = ("mvp/mir_mvp_store_containment", "mvp/mir_mvp_copy_loops",
+                 "mvp/mir_mvp_iterations", "mvp/mir_mvp_kernel_loops", "proc/ledger_containment")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_confined_capture_homes(self):
+        names = ("mvp/mir_mvp_confined_capture_homes", "fn_local_confined_capture",
+                 "fn_local_capture_modes", "fn_local_capture_iterations", "fn_local_capture_roots",
+                 "fn_local_decomposition_capture", "proc/fn_local_decomposition_snapshot")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_variadic_calls(self):
+        # S16.9.7/D7.4.1: direct, imported and boxed entries share rest slots;
+        # self-tail calls evaluate new rest operands and preserve their effects.
+        names = ("mvp/mir_mvp_variadic_values", "mvp/mir_mvp_variadic_modules",
+                 "mvp/mir_mvp_variadic_recursion", "mvp/mir_mvp_variadic_admission",
+                 "arrow_variadic", "interp_variadic",
+                 "interp_variadic_promoted", "fn_local_capture_flow", "call_dynamic_apply",
+                 "type_enforcement_dynamic_call", "func_param", "func_param2",
+                 "dynamic_call_scalar_ownership")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_variadic_var_outcomes(self):
+        # Full currently loses this var rebind and T0 excludes the call; retain
+        # the S9.1.3 oracle and record those controls in the parity checkpoint.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_variadic_exits.ls", mode)
+
+    def test_binder_calls(self):
+        # S11.4.8v2/D4.1.4: site joins, dependent admission, defaults and
+        # empty nested selections retain the same contract on every call.
+        names = ("type_binder", "type_binder_leading", "type_binder_raw_variants",
+                 "proc/type_binder_proc_raw", "proc/type_binder_var_record_raw",
+                 "type_param_error_short_circuit", "proc/proc_type_param_error_short_circuit",
+                 "proc/generic_array_var_cow_home", "mvp/mir_mvp_binder_calls")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_binder_type_captures(self):
+        # retain the declared oracle: Full/T0 already fail the captured type
+        # cases under p11; their controls remain in the real parity reports.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_binder_values.ls", mode)
+
+    def test_binder_error_admission(self):
+        # S11.4.3/S11.4.8v2: an admitted Error is data; an incompatible
+        # repeated-site selection still rejects the invocation.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_binder_outcomes.ls", mode)
+
+    def test_extended_call_operands(self):
+        # D4.2.1/S7.7.3: conversions and named system operands share checked
+        # call transport; Error-only edges do not create a native value lane.
+        names = ("agg_null_absence", "admission_call_outcomes",
+                 "mvp/mir_mvp_numeric_type_calls", "mvp/mir_mvp_empty_normal_domains")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_imported_type_values(self):
+        self.check_gc_fixtures((ROOT / "test/lambda/import_type_values.ls",))
+
+    def test_javascript_exports(self):
+        # D7.4.1/D6.2.3: retain the defining namespace and caller-owned scalar
+        # homes through each physical bridge arity, including stack operands.
+        names = ("import_js", "import_js_naming", "binary_js_bridge", "mvp/mir_mvp_js_exports")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_javascript_export_values(self):
+        # Full/T0's E229 controls remain in the parity reports; MVP publishes
+        # a Core boxed adapter instead of reinterpreting a JsFunction as code.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_js_export_values.ls", mode)
+
+    def test_ndim_reads_and_images(self):
+        # S8.2.4v3/D6.2.3: coordinates and their receiver survive allocating
+        # keys; image channels expose the same N-D runtime representation.
+        names = ("mvp/mir_mvp_ndim_reads", "mvp/mir_mvp_ndim_effects", "ndim_any_receiver",
+                 "image_composition", "image_edit", "image_gif_disposal", "image_import",
+                 "image_paint", "image_psd", "image_raster")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_content_list_and_spread_semantics(self):
+        names = ("mir_mvp_content", "mir_mvp_root_content", "mir_mvp_elements",
+                             "mir_mvp_type_membership", "mir_mvp_query_context", "mir_mvp_generic_operators",
+                             "mir_mvp_patterns", "mir_mvp_query_windows", "mir_mvp_query_sources",
+                             "mir_mvp_references", "mir_mvp_query_patterns_paths",
+                             "mir_mvp_open_write_contracts", "mir_mvp_navigation", "mir_mvp_last_index",
+                             "mir_mvp_closed_parameters", "mir_mvp_open_projected_borrows",
+                             "mir_mvp_builtin_bool_outcomes", "mir_mvp_procedure_results",
+                             "mir_mvp_provisos", "mir_mvp_scalar_var_lanes",
+                             "mir_mvp_variadic_print", "mir_mvp_closed_arrays",
+                             "mir_mvp_sequence_pipes", "mir_mvp_aggregate_pipes",
+                             "mir_mvp_abstract_numbers", "mir_mvp_named_arguments",
+                             "mir_mvp_vmap_places", "mir_mvp_parking_calls")
+        self.check_gc_fixtures(ROOT / "test/lambda/mvp" / (name + ".ls") for name in names)
+
+    def test_open_var_outcomes(self):
+        # the Full control still mutates a simultaneous plain snapshot; keep the S9.1.3 oracle.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_open_var.ls", mode)
+
+    def test_query_window_scalar_ownership(self):
+        # retain the cold floats when append growth moves their source buffer.
+        for compiler in ("mvp", "production"):
+            for seed in (1592594996, 17, 31, 42, 77, 101, 239, 1024):
+                with self.subTest(compiler=compiler, seed=seed):
+                    self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_query_windows.ls",
+                                      {"LAMBDA_MIR_COMPILER": compiler,
+                                       "LAMBDA_GC_FORCE_SEED": str(seed), "LAMBDA_GC_FORCE_ONE_IN": "3",
+                                       "LAMBDA_GC_POISON_FREED": "1"})
+
+    def test_dynamic_function_values(self):
+        names = ("mir_mvp_dynamic_calls", "mir_mvp_named_values", "mir_mvp_builtin_values",
+                             "mir_mvp_immutable_captures")
+        self.check_gc_fixtures(ROOT / "test/lambda/mvp" / (name + ".ls") for name in names)
 
     def test_benchmark_expansion_semantics(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_benchmark_expansion.ls"
@@ -485,6 +688,18 @@ class LambdaMirMvpTests(unittest.TestCase):
                       "LAMBDA_GC_POISON_FREED": "1"}):
             with self.subTest(mode=mode):
                 self.check_golden(source, mode)
+
+    def test_idle_test_supervisors_block_benchmarking(self):
+        listing = subprocess.CompletedProcess([], 0, stdout="""PID PGID %CPU COMMAND
+10 900 0.0 ../p2_discovery_gtest.exe --gtest_filter=AutoDiscovered/*
+11 901 0.0 ./lambda.exe test-batch --timeout=60
+12 902 0.0 python3 -m unittest test_lambda_mir_mvp.LambdaMirMvpTests
+13 777 90.0 ./lambda.exe run benchmark.ls
+14 903 0.1 ./lambda.exe view example.html
+""")
+        with mock.patch.object(lambda_mir_mvp.subprocess, "run", return_value=listing):
+            jobs = lambda_mir_mvp.competing_benchmark_jobs(777)
+        self.assertEqual({job["pid"] for job in jobs}, {10, 11, 12})
 
     def test_interrupted_round_is_retried(self):
         report = Path(self.scratch.name) / "interrupted.json"

@@ -9,6 +9,7 @@
 //==============================================================================
 
 #include <gtest/gtest.h>
+#include "test_lambda_compiler.hpp"
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/ast_build.hpp"
 #include "../lambda/runtime/mir_emitter_shared.hpp"
@@ -86,6 +87,40 @@ TEST_F(EvalContextTest, TypeMembershipSkipsReportsAndPreservesValidatorMode) {
     EXPECT_EQ(fn_is(value, expected), BOOL_TRUE);
     pool_get_stats(pool, nullptr, &after);
     EXPECT_EQ(before, after);
+}
+
+TEST_F(EvalContextTest, DependentAdmissionDistinguishesErrorDataFromFailure) {
+    // S11.4.3/S11.4.8v2: identical Item tags cannot report admission status.
+    Item failure = ItemError;
+    Bool admitted = BOOL_FALSE;
+    Item result = lambda_type_check_env_status(failure, &TYPE_ANY, nullptr, "open", &admitted);
+    EXPECT_EQ(result.item, failure.item);
+    EXPECT_EQ(admitted, BOOL_TRUE);
+    result = lambda_type_check_env_status(failure, &TYPE_INT, nullptr, "closed", &admitted);
+    EXPECT_EQ(result.item, failure.item);
+    EXPECT_EQ(admitted, BOOL_FALSE);
+
+    TypeBinder* site = (TypeBinder*)alloc_type_kind(eval.pool, TYPE_KIND_BINDER, sizeof(TypeBinder));
+    ASSERT_NE(site, nullptr);
+    site->bound = &TYPE_ANY;
+    // these selections are canonical static types, with no managed owner.
+    Type* environment[1] = {};
+    result = lambda_type_check_env_status(failure, (Type*)site, environment, "site", &admitted);
+    EXPECT_EQ(result.item, failure.item);
+    EXPECT_EQ(admitted, BOOL_TRUE);
+    ASSERT_EQ(environment[0], &TYPE_ERROR);
+    TypeBoundRef* reference = (TypeBoundRef*)alloc_type_kind(eval.pool, TYPE_KIND_BOUND_REF, sizeof(TypeBoundRef));
+    ASSERT_NE(reference, nullptr);
+    reference->bound = &TYPE_ANY;
+    result = lambda_type_check_env_status(failure, (Type*)reference, environment, "reference", &admitted);
+    EXPECT_EQ(result.item, failure.item);
+    EXPECT_EQ(admitted, BOOL_TRUE);
+
+    Item number = {.item = i2it(1)};
+    result = lambda_type_check_env_status(number, (Type*)site, environment, "join", &admitted);
+    EXPECT_EQ(get_type_id(result), LMD_TYPE_ERROR);
+    EXPECT_EQ(admitted, BOOL_FALSE);
+    EXPECT_EQ(environment[0], &TYPE_ERROR);
 }
 
 // S9.1.4v2/D5.3.2: closure environments, rather than native locals, own
@@ -453,7 +488,7 @@ TEST(TypeContractMetadataTest, OrNarrowingRetainsErrorInTheInternalTop) {
         "test/lambda/type_or_narrowing.ls", NULL};
     ShellOptions options = {0};
     options.timeout_ms = 10000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
 
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
@@ -478,7 +513,7 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
         "test/lambda/type_contract_metadata.ls", NULL};
     ShellOptions options = {0};
     options.timeout_ms = 10000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
 
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
@@ -513,7 +548,7 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
 
     const char* import_args[] = {LAMBDA_EXE, "--emit-ast-dump",
         "test/lambda/type_contract_metadata_import.ls", NULL};
-    result = shell_exec(LAMBDA_EXE, import_args, &options);
+    result = lambda_test_shell_exec(LAMBDA_EXE, import_args, &options);
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
@@ -536,7 +571,7 @@ TEST(TypeContractMetadataTest, AstDumpViewStateBindingsCarryNoParameterContract)
         "test/lambda/view_state.ls", NULL};
     ShellOptions options = {0};
     options.timeout_ms = 10000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
 
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
@@ -561,7 +596,7 @@ TEST(TypeContractMetadataTest, SysFuncRelationsInstantiateSelectedArguments) {
         "test/lambda/sysfunc_type_relations.ls", NULL};
     ShellOptions options = {0};
     options.timeout_ms = 10000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
 
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
@@ -598,7 +633,7 @@ TEST(TypeBinderTest, AstDumpPreservesBinderSitesAndDependentReferences) {
         "test/lambda/type_binder.ls", NULL};
     ShellOptions options = {0};
     options.timeout_ms = 10000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
 
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
@@ -618,7 +653,7 @@ TEST(TypeInferenceStructuralTest, IP1OperatorsPublishPreciseTypes) {
         "test/lambda/type_infer_ip1.ls", NULL};
     ShellOptions options = {0};
     options.timeout_ms = 10000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
 
@@ -650,7 +685,7 @@ TEST(TypeInferenceStructuralTest, IP2SysFuncRowsResolvePreciseResults) {
         "test/lambda/type_infer_ip2.ls", NULL};
     ShellOptions options = {0};
     options.timeout_ms = 10000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
 
@@ -676,7 +711,7 @@ TEST(TypeInferenceStructuralTest, IP6JsOperatorsPublishPreciseTypes) {
         "test/js/type_infer_ip6.js", NULL};
     ShellOptions options = {0};
     options.timeout_ms = 10000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
 
@@ -707,7 +742,7 @@ TEST(TypeContractMetadataTest, ImplicitParameterErrorMatchArmIsLinted) {
     const char* args[] = {LAMBDA_EXE, "test/lambda/type_implicit_param_match_lint.ls", NULL};
     ShellOptions options = {0};
     options.merge_stderr = true;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
 
     ASSERT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
@@ -1453,7 +1488,7 @@ ScriptResult run_lambda_script(const char* script_path, bool procedural = false,
     const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {NULL, NULL}};
     if (tier) options.env = env;
     // Negative paths are untrusted test data and must not be interpolated into a shell command.
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     if (shell_result.stdout_buf) {
         result.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
@@ -1958,7 +1993,7 @@ TEST_F(NegativeScriptTest, UnresolvedValueNamesRejectOnEveryTierAndInRelaxedMode
         const char* args[] = {LAMBDA_EXE, "--no-log", "--static-warning", test.path, NULL};
         ShellOptions options = {0};
         options.merge_stderr = true;
-        ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+        ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
         EXPECT_NE(result.exit_code, 0) << test.path;
         for (const char* diagnostic : test.diagnostics) {
             EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf, diagnostic) : nullptr, nullptr)
@@ -1999,7 +2034,7 @@ TEST_F(NegativeScriptTest, BatchReportsUnresolvedNameAsFailedScript) {
     options.stdin_path = manifest;
     options.merge_stderr = true;
     options.timeout_ms = 15000;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     EXPECT_EQ(result.exit_code, 0);
     EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf, "BATCH_END 1") : nullptr, nullptr);
     EXPECT_NE(result.stdout_buf ? strstr(result.stdout_buf, "error[E202]: undefined name 'undefined_var'") : nullptr, nullptr);
@@ -2042,7 +2077,7 @@ TEST_F(NegativeScriptTest, StaticWarningFlagDowngradesSemanticErrorsAndRuns) {
         script, NULL};
     ShellOptions options = {0};
     options.merge_stderr = true;
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult shell_result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     if (shell_result.stdout_buf) {
         result.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
@@ -2086,7 +2121,7 @@ TEST_F(NegativeScriptTest, ElementConstructionRejectsProceduresInsidePn) {
         "test/lambda/negative/semantic/element_calls_pn.ls", nullptr};
     ShellOptions options = {};
     options.timeout_ms = 10000;
-    ShellResult dumped = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult dumped = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     EXPECT_NE(dumped.exit_code, 0);
     EXPECT_FALSE(dumped.timed_out);
     EXPECT_NE(strstr(dumped.stderr_buf ? dumped.stderr_buf : "", "error[E224]"), nullptr);
@@ -2410,7 +2445,7 @@ TEST(ValidatorCliImports, RelativeTypesAdmitAndRejectDataOnEveryTier) {
             ShellOptions options = {};
             options.env = env;
             options.timeout_ms = 15000;
-            ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+            ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
             EXPECT_EQ(result.exit_code, index == 0 ? 0 : 1) << tier;
             EXPECT_FALSE(result.timed_out);
             ASSERT_NE(result.stdout_buf, nullptr);
@@ -2959,7 +2994,7 @@ TEST_F(NegativeScriptTest, SemanticError_ReturnErrorHelpSurvivesWarningMode) {
         "test/lambda/negative/semantic/implicit_fn_error_argument.ls", NULL};
     ShellOptions options = {0};
     options.merge_stderr = true;
-    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, args, &options);
     EXPECT_EQ(result.exit_code, 0);
     ASSERT_NE(result.stdout_buf, nullptr);
     EXPECT_NE(strstr(result.stdout_buf, "warning[E208]"), nullptr) << result.stdout_buf;
@@ -3383,6 +3418,8 @@ TEST_F(NegativeScriptTest, TypeBinderDiagnosticsRemainSpecific) {
         "a binder is not allowed in a return type");
     ExpectErrorMessage("test/lambda/negative/semantic/type_binder_trailing_that.ls",
         "a binder must follow the complete parameter contract");
+    ExpectRejectedOnEveryTier("test/lambda/negative/semantic/type_binder_value_mismatch.ls",
+        false, "argument 1 must be an explicit type value");
 }
 
 TEST_F(NegativeScriptTest, TypeSubtypeDiagnosticsRemainSpecific) {
@@ -3448,7 +3485,7 @@ TEST(LambdaPhaseProfile, RetainsEveryScriptAndCompleteLongPaths) {
     options.env = environment;
     options.timeout_ms = 60000;
     const char* arguments[] = {LAMBDA_EXE, "--no-log", "--tier=interp", root->str, nullptr};
-    ShellResult result = shell_exec(LAMBDA_EXE, arguments, &options);
+    ShellResult result = lambda_test_shell_exec(LAMBDA_EXE, arguments, &options);
     EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     EXPECT_STREQ(result.stdout_buf, "42\n");
     shell_result_free(&result);

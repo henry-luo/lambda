@@ -14,10 +14,6 @@ extern __thread Context* input_context;
 extern "C" bool js_array_runtime_items_release(Array* owner);
 extern "C" bool js_array_immortal_props_store(Array* owner, Map* props);
 
-// The UI content helpers (ui_copy_*_to_*) live with the Input-owned append in
-// lambda-data; this resolves the document Input that owns a UI arena.
-Input* ui_result_input(Arena* arena);
-
 static Arena* ui_collection_arena(const List* owner) {
     // UI-mode elements are arena-owned and therefore cannot keep a GC data
     // buffer alive. Every buffer reachable from one must use the same arena.
@@ -184,15 +180,26 @@ bool array_widen_inferred_pointer_lane(Array* array) {
     return true;
 }
 
+static void array_expand_for_item(Array** owner, Item* item, uint64_t* scalar_home) {
+    RootFrame roots(2);
+    Rooted<Array*> rooted_array(roots, *owner);
+    // a tagged root does not own a scalar borrowed from a moving data buffer.
+    Rooted<Item> rooted_item(roots, lambda_item_adopt_scalar_home(*item, scalar_home));
+    expand_list((List*)rooted_array.get(), nullptr);
+    *owner = rooted_array.get();
+    *item = rooted_item.get();
+}
+
 // Store one value as one item: the tail shared by the sequence and verbatim
 // appends (D3.3.1). A native lane stores in place or widens first; every
 // other store goes through array_set, which rehomes 64-bit scalars into the
 // array's own tail.
 static void array_append_one(Array* arr, Item item) {
+    uint64_t scalar_home = 0;
     if (array_has_native_lane(arr)) {
         if (arr->length >= arr->capacity) {
             int64_t old_capacity = arr->capacity;
-            expand_list((List*)arr, nullptr);
+            array_expand_for_item(&arr, &item, &scalar_home);
             if (arr->capacity <= old_capacity) return;
         }
         if (array_native_lane_store(arr, arr->length, item)) {
@@ -205,14 +212,7 @@ static void array_append_one(Array* arr, Item item) {
         }
     }
     if (arr->length + arr->extra + 2 > arr->capacity) {
-        // A collection allocation is a safepoint. Both the destination and
-        // the incoming value must survive it before their storage is read.
-        RootFrame roots(2);
-        Rooted<Array*> rooted_array(roots, arr);
-        Rooted<Item> rooted_item(roots, item);
-        expand_list((List*)rooted_array.get(), nullptr);
-        arr = rooted_array.get();
-        item = rooted_item.get();
+        array_expand_for_item(&arr, &item, &scalar_home);
     }
     array_set(arr, arr->length, item);
     arr->length++;

@@ -3,6 +3,7 @@ fn scalar_checked(value: any) float^ { return value }
 fn scalar_checked_int(value: any) int^ { return value }
 fn scalar_ordered(value: any) any {
     let checked = scalar_checked_int(value)
+    // S11.2.1/S4.4.1: int satisfies float, so the first arm wins.
     return match checked { case float: false case int: true default: null }
 }
 fn scalar_match(value: any) float^ {

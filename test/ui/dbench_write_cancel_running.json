@@ -1,0 +1,20 @@
+{
+  "name":"DBench cancels a running SQLite write and rolls it back",
+  "html": "temp/dbench-prepared/write_cancel_running/dbench/dbench.ls",
+  "prepare": ["python3", "test/demo/dbench/tests/_prepare_ui.py", "write_cancel_running"],
+  "viewport":{"width":1280,"height":800},
+  "input_turn_ms":0,
+  "events":[
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-rows","equals":"256"},
+    {"type":"type","target":{"selector":"#target"},"text":"temp/dbench-write-running.sqlite","clear":true},
+    {"type":"click","target":{"selector":"#connect"}},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-table","equals":"items"},
+    {"type":"assert_attribute","target":{"selector":"#dbench"},"attribute":"data-loading","equals":"false"},
+    {"type":"type","target":{"selector":"#sql"},"text":"WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000000) INSERT INTO items SELECT x, 'pending' FROM n","clear":true},
+    {"type":"click","target":{"selector":"#write-review"}},
+    {"type":"click","target":{"selector":"#write-confirm"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"Executing reviewed SQL"},
+    {"type":"click","target":{"selector":"#cancel"}},
+    {"type":"assert_text","target":{"selector":"#status"},"contains":"SQL write failed"}
+  ]
+}

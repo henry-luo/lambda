@@ -985,8 +985,17 @@ TEST(RenderMapRetransform, ForgetsRetiredResultsBeforeTheirAddressesAreReused) {
     render_map_record(new_source, "new", new_page, root, 0);
     render_map_set_doc_root(root);
 
+    size_t forward = 0, reverse = 0;
+    render_map_get_counts(nullptr, &forward, &reverse);
+    EXPECT_EQ(forward, 0u);
+    EXPECT_EQ(reverse, 0u);
+    render_map_get_counts(context, &forward, &reverse);
+    EXPECT_EQ(forward, 2u);
+    EXPECT_GE(reverse, 3u);
     render_map_forget_retired_result(context, old_leaf);
     render_map_forget_retired_result(context, old_page);
+    render_map_get_counts(context, &forward, &reverse);
+    EXPECT_EQ(forward, 1u);
     EXPECT_EQ(get_type_id(render_map_get_result(old_source, "old")), LMD_TYPE_NULL);
     RenderMapLookup lookup = {};
     EXPECT_FALSE(render_map_reverse_lookup(old_leaf, &lookup));
