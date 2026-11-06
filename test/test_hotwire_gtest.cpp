@@ -33,6 +33,10 @@ static void hotwire_route(HttpRequest* request, HttpResponse* response, void* da
     http_response_set_header(response, "Cache-Control", "no-store");
     if (!strcmp(request->path, "/health")) {
         http_response_text(response, 200, "lambda-hotwire");
+    } else if (!strcmp(request->path, "/slow-fetch")) {
+        // Outlast the idle watchdog even if startup timers grant one extra interval.
+        uv_sleep(11000);
+        http_response_text(response, 200, "ready");
     } else if (!strcmp(request->path, "/")) {
         http_response_html(response, 200,
             "<!doctype html><html><head><title>Hotwire HTTP</title>"
@@ -110,7 +114,7 @@ static int hotwire_server_main(const char* ready_path) {
     return status ? 1 : 0;
 }
 
-class HotwireHttpTest : public testing::TestWithParam<const char*> {
+class HotwireHttpServerTest : public testing::Test {
 protected:
     ShellProcess* server = NULL;
     char directory[256] = {};
@@ -152,6 +156,22 @@ protected:
         if (directory[0]) file_delete_recursive(directory);
     }
 };
+
+class HotwireHttpTest : public HotwireHttpServerTest, public testing::WithParamInterface<const char*> {};
+
+TEST_F(HotwireHttpServerTest, PendingFetchOutlivesIdleWatchdog) {
+    const char* arguments[] = {"./lambda.exe", "js", "test/js/event_loop_pending_fetch.js",
+        "--document", document_url, "--no-log", NULL};
+    ShellEnvEntry environment[] = {{"JS_EXEC_BACKEND", "mir"}, {NULL, NULL}};
+    ShellOptions options = {};
+    options.env = environment;
+    options.timeout_ms = 30000;
+    ShellResult result = shell_exec(arguments[0], arguments, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    EXPECT_STREQ(result.stdout_buf, "pending fetch: ready lambda-hotwire\n") << (result.stderr_buf ? result.stderr_buf : "");
+    shell_result_free(&result);
+}
 
 TEST_P(HotwireHttpTest, ClientAndServer) {
     const char* arguments[] = {"./lambda.exe", "js", "test/js/hotwire/http.bundle.js",

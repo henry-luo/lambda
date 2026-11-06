@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 #include "../lambda-data.hpp"
+#include "ast-core.hpp"
 #include "../core/print.h"
 #include "sys_func_registry.h"
 #include "compiler_timing.hpp"
@@ -1612,7 +1613,6 @@ typedef struct Transpiler : Script {
 } Transpiler;
 
 void format_binary_literal(StrBuf* strbuf, Binary* bin);
-void print_root_item(StrBuf *strbuf, Item item, const char* indent="  ");
 // for C to access
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, const char* indent);
 

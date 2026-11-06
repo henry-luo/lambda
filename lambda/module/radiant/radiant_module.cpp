@@ -5,17 +5,25 @@
 #include "../../runtime/lambda-error.h"
 #include "../../runtime/interp.hpp"
 #include "../../runtime/transpiler.hpp"
+#include "../../runtime/runtime-state.h"
+#include "../../runtime/activation.h"
+#include "../../runtime/document_host.hpp"
+#include "../../js/js_runtime.h"
+#include "../../js/js_runtime_state.hpp"
+#include "../../js/js_event_loop.h"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
-#include "radiant_webgl_bridge.hpp"
+#include "../../../radiant/gl_core.hpp"
 #include "../../dom/dom_style.h"
 #include "../../dom/dom_host_engine.h"
 #include "../../dom/dom.h"
 #include "../../dom/dom_collection_types.h"
 #include "../../dom/dom_event_host.h"
+#include "../../dom/dom_observers.h"
 #include "radiant_input_value.hpp"
+#include "script_runner_host.hpp"
 #include "radiant_image_job.hpp"
-#include "../../../lib/tagged.hpp"
+#include "../../../radiant/tagged.hpp"
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/svg_animation.hpp"
@@ -27,6 +35,32 @@
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
 #include "../../../radiant/audio_capture.hpp"
+#include "../../../radiant/document_clock.hpp"
+#include "../../../radiant/scroll_observer.hpp"
+#include "../../../radiant/scroll_request.hpp"
+#include "../../../radiant/layout_host.hpp"
+#include "../../../radiant/pdf_export_host.hpp"
+#include "../../../radiant/export_runtime_host.hpp"
+#include "pdf_export_adapter.hpp"
+#include "../../../radiant/speech_event_host.hpp"
+#include "speech_event_adapter.hpp"
+#include "scene3d_control_adapter.hpp"
+#include "source_position_adapter.hpp"
+#include "devtools_adapter.hpp"
+#include "state_store_adapter.hpp"
+#include "editing_dom_adapter.hpp"
+#include "script_loop_adapter.hpp"
+#include "loader_runtime_adapter.hpp"
+#include "reactive_render_adapter.hpp"
+#include "../../../radiant/dom_mutation_prepare.hpp"
+#include "../../../radiant/scene3d/scene3d_physics_event_host.hpp"
+#include "scene3d_physics_event_adapter.hpp"
+#include "../../../radiant/scene3d/scene3d_navigation_event_host.hpp"
+#include "scene3d_navigation_adapter.hpp"
+#include "export_transform_adapter.hpp"
+#include "../../../radiant/event_sim_script_host.hpp"
+#include "event_sim_script_adapter.hpp"
+#include "../../../radiant/resource_observer.hpp"
 #include "../../runtime/value_builder.hpp"
 #include "../../runtime/lambda-number-runtime.hpp"
 #include "../../../radiant/speech.hpp"
@@ -52,6 +86,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <utf8proc.h>
+#include <uv.h>
 
 String* heap_create_name(const char* name, size_t len);
 
@@ -1059,7 +1094,7 @@ static bool radiant_custom_layout_parse_result(const CustomLayoutContext* contex
     return ok;
 }
 
-bool radiant_package_layout_callback(const CustomLayoutContext* context,
+static bool lambda_radiant_package_layout_callback(const CustomLayoutContext* context,
                                      CustomLayoutResult* result,
                                      const char* package_module) {
     if (!context || !result || !package_module) return false;
@@ -5464,7 +5499,7 @@ static const DomCanvasEngineOps radiant_canvas_operations = {
 };
 static const DomWebGlEngineOps radiant_webgl_operations = {
 #define RADIANT_WEBGL_ENTRY(result, name, parameters) radiant_webgl_##name,
-    DOM_WEBGL_ENGINE_OPERATIONS(RADIANT_WEBGL_ENTRY)
+    WEBGL_ENGINE_OPERATIONS(RADIANT_WEBGL_ENTRY)
 #undef RADIANT_WEBGL_ENTRY
 };
 static bool radiant_style_focus_is_hidden(DomElement* element) {
@@ -5510,8 +5545,8 @@ static bool radiant_host_element_has_vertical_rl_flow(void* element) {
 static CssEnum radiant_host_element_specified_keyword(void* element, CssPropertyCode property, CssEnum fallback) {
     return layout_specified_keyword((DomElement*)element, property, fallback);
 }
-static void radiant_host_prepare_children_mutation(void* element) {
-    layout_unwrap_anonymous_table_fixups_for_dom_mutation((DomElement*)element);
+static DomElement* radiant_host_prepare_children_mutation(DomElement* element, DomNode* changed_child) {
+    return radiant_dom_prepare_children_mutation(element, changed_child);
 }
 
 // provider calls finish with the renderer's state/value owners before borrowed arguments expire (D5.5.1).
@@ -5597,6 +5632,20 @@ static bool radiant_host_element_client_frame(DomNode* node, RdtMatrix* matrix, 
     return true;
 }
 
+// Native defaults remain engine-owned; callers borrow them during a synchronous DOM operation.
+static const BoundaryProp* radiant_host_boundary_property(const DomElement* element) {
+    return element ? element->boundary() : nullptr;
+}
+static const ScrollProp* radiant_host_scroll_property(const DomElement* element) {
+    return element ? element->scroll() : nullptr;
+}
+static const PositionProp* radiant_host_position_property(const DomElement* element) {
+    return element ? element->positionp() : nullptr;
+}
+static const EmbedProp* radiant_host_embed_property(const DomElement* element) {
+    return element ? element->embedp() : nullptr;
+}
+
 static const DomHostEngineOps radiant_host_operations = {
     fn_radiant_request_frame,
     fn_radiant_cancel_frame,
@@ -5611,6 +5660,7 @@ static const DomHostEngineOps radiant_host_operations = {
     radiant_dom_set_design_mode,
     radiant_host_state_bool,
     radiant_host_document_request_repaint,
+    radiant_queue_scroll_into_view,
     radiant_host_document_clear_reflow,
     radiant_host_layout_document,
     radiant_host_element_effective_zoom,
@@ -5661,6 +5711,10 @@ static const DomHostEngineOps radiant_host_operations = {
     dom_boundary_from_source_pos,
     editing_geometry_text_control_for_each_selection_rect,
     radiant_dom_url_attribute_get,
+    radiant_host_boundary_property,
+    radiant_host_scroll_property,
+    radiant_host_position_property,
+    radiant_host_embed_property,
     radiant_request_frame_once
 };
 
@@ -5680,8 +5734,169 @@ static const DomEventHostOps radiant_event_host_operations = {
     radiant_author_template_dispatch_end
 };
 
+static bool radiant_document_cleanup_ready(void* document) {
+    return document_runtime_cleanup_ready((DomDocument*)document);
+}
+
+static bool radiant_document_cleanup(void* document) {
+    return free_document_profiled((DomDocument*)document, nullptr);
+}
+
+static const LambdaDocumentHostOps radiant_document_host_operations = {
+    radiant_document_cleanup_ready,
+    radiant_document_cleanup,
+};
+
+// The DOM adapter forwards its existing query to the native layout owner.
+extern "C" bool dom_engine_layout_active(DomDocument* document) {
+    return layout_is_active(document);
+}
+
+static bool lambda_radiant_document_clock(DomDocument* document, double* now_ms) {
+    Runtime* runtime = dom_document_script_runtime(document);
+    if (!runtime) {
+        bool virtual_clock = js_event_loop_virtual_clock_enabled();
+        if (now_ms) *now_ms = virtual_clock ? js_event_loop_virtual_clock_now_ms() : js_performance_monotonic_now_ms();
+        return virtual_clock;
+    }
+    // A different active realm must not supply this document's clock.
+    JsRuntimeState* state = js_runtime_state_for(runtime_get_eval_context(runtime));
+    bool virtual_clock = state && state->event_loop && state->event_loop->virtual_clock_enabled;
+    if (now_ms) {
+        if (state && state->performance.frame_clock_active) *now_ms = state->performance.frame_clock_ms;
+        else if (virtual_clock) *now_ms = state->event_loop->virtual_clock_ms;
+        else *now_ms = (double)uv_hrtime() / 1e6;
+    }
+    return virtual_clock;
+}
+
+static const RadiantDocumentClockOps lambda_radiant_document_clock_ops = {
+    lambda_radiant_document_clock,
+};
+
+static const RadiantScrollObserverOps lambda_radiant_scroll_observer_ops = {
+    dom_notify_scroll_position_change,
+};
+
+static void* lambda_radiant_capture_iframe_context(DomDocument* parent) {
+    Runtime* runtime = dom_document_script_runtime(parent);
+    return runtime ? runtime_get_eval_context(runtime) : nullptr;
+}
+
+static void lambda_radiant_restore_iframe_context(UiContext* ui, DomDocument* parent, void* context) {
+    EvalContext* owner = (EvalContext*)context;
+    if (owner && (!radiant_eval_context_switch(owner) || !radiant_bind_document_script_host(ui, parent)))
+        log_error("iframe context: could not restore the embedding document evaluator");
+}
+
+static bool lambda_radiant_defer_iframe_load() {
+    EvalContext* active = (EvalContext*)eval_context_tls_runtime();
+    return active && active->execution_depth != 0;
+}
+
+static void lambda_radiant_iframe_load_complete(DomDocument* parent, DomElement* frame) {
+    if (!dom_document_has_js_realm(parent)) return;
+    EvalContext* owner = runtime_get_eval_context(parent->js.runtime);
+    if (owner && radiant_eval_context_switch(owner) && js_runtime_state_init(owner)) {
+        dom_set_document(parent);
+        dom_iframe_navigation_complete(frame);
+    }
+}
+
+static bool lambda_radiant_export_runtime_acquire(void** owner) {
+    if (!owner) return false;
+    *owner = nullptr;
+    Runtime* caller = context ? context->runtime : nullptr;
+    if (!caller) return true;
+    if (!runtime_borrow_acquire(caller)) return false;
+    *owner = caller;
+    return true;
+}
+
+static bool lambda_radiant_export_runtime_release(void* owner) {
+    Runtime* runtime = (Runtime*)owner;
+    EvalContext* borrower = runtime_get_eval_context(runtime);
+    return borrower && radiant_eval_context_switch(borrower) && runtime_borrow_release(runtime);
+}
+
+static bool lambda_radiant_export_runtime_retirement_blocked() {
+    return activation_current() || (context && context->execution_depth);
+}
+
+static const RadiantExportRuntimeHostOps lambda_radiant_export_runtime_host_ops = {
+    lambda_radiant_export_runtime_acquire,
+    lambda_radiant_export_runtime_release,
+    lambda_radiant_export_runtime_retirement_blocked,
+    lambda_radiant_load_export_transform,
+};
+
+static const RadiantEventSimScriptHostOps lambda_radiant_event_sim_script_host_ops = {
+    lambda_event_sim_evaluate, lambda_event_sim_collect_gc,
+    lambda_event_sim_animation_frame, lambda_event_sim_measure_frames,
+    lambda_event_sim_clock_ms, lambda_event_sim_dialog_response, lambda_event_sim_selector_matcher,
+    lambda_event_sim_element_from_point,
+};
+
+static const RadiantSpeechEventHostOps lambda_radiant_speech_event_host_ops = {
+    lambda_radiant_speech_event,
+};
+
+static const Scene3dPhysicsEventHostOps lambda_scene3d_physics_event_host_ops = {
+    lambda_scene3d_physics_event,
+};
+
+static const Scene3dNavigationEventHostOps lambda_scene3d_navigation_event_host_ops = {
+    lambda_scene3d_navigation_event,
+};
+
+static const RadiantPdfExportHostOps lambda_radiant_pdf_export_host_ops = {
+    lambda_radiant_export_pdf,
+};
+
+static const RadiantPackageLayoutHostOps lambda_radiant_package_layout_host_ops = {
+    lambda_radiant_package_layout_callback,
+};
+
+static float lambda_radiant_geometry_fallback_dimension(DomElement* element, bool width_axis) {
+    return dom_svg_geometry_fallback_dimension(element, width_axis);
+}
+
+static const RadiantLayoutHostOps lambda_radiant_layout_host_ops = {
+    ScriptRunnerHostLayoutScope::suspend_watchdog_for_layout,
+    script_runner_resume_js_watchdog,
+    dom_observers_post_layout,
+    lambda_radiant_capture_iframe_context,
+    lambda_radiant_restore_iframe_context,
+    lambda_radiant_defer_iframe_load,
+    lambda_radiant_iframe_load_complete,
+    lambda_radiant_geometry_fallback_dimension,
+};
+
+static const RadiantResourceObserverOps lambda_radiant_resource_observer_ops = {
+    dom_queue_image_completion,
+};
+
 bool radiant_register_dom_engine_providers() {
-    if (!dom_canvas_register_engine(&radiant_canvas_operations) ||
+    if (!lambda_document_host_register(&radiant_document_host_operations) ||
+        !radiant_document_clock_register(&lambda_radiant_document_clock_ops) ||
+        !radiant_scroll_observer_register(&lambda_radiant_scroll_observer_ops) ||
+        !radiant_layout_host_register(&lambda_radiant_layout_host_ops) ||
+        !radiant_package_layout_host_register(&lambda_radiant_package_layout_host_ops) ||
+        !radiant_pdf_export_host_register(&lambda_radiant_pdf_export_host_ops) ||
+        !radiant_speech_event_host_register(&lambda_radiant_speech_event_host_ops) ||
+        !scene3d_physics_event_host_register(&lambda_scene3d_physics_event_host_ops) ||
+        !scene3d_navigation_event_host_register(&lambda_scene3d_navigation_event_host_ops) ||
+        !radiant_export_runtime_host_register(&lambda_radiant_export_runtime_host_ops) ||
+        !radiant_event_sim_script_host_register(&lambda_radiant_event_sim_script_host_ops) ||
+        !lambda_source_position_host_register() ||
+        !lambda_radiant_devtools_host_register() ||
+        !lambda_state_store_host_register() ||
+        !lambda_editing_dom_host_register() ||
+        !lambda_script_loop_host_register() ||
+        !lambda_loader_runtime_host_register() ||
+        !lambda_reactive_render_host_register() ||
+        !radiant_resource_observer_register(&lambda_radiant_resource_observer_ops) ||
+        !dom_canvas_register_engine(&radiant_canvas_operations) ||
         !dom_webgl_register_engine(&radiant_webgl_operations) ||
         !dom_style_register_engine(&radiant_style_operations) ||
         !dom_host_register_engine(&radiant_host_operations) ||
@@ -5893,7 +6108,6 @@ extern "C" bool radiant_author_template_event_live(const char* event_name);
 extern "C" void radiant_dispatch_author_template_participant(void* dom_node, Item event,
                                                              const char* event_name);
 extern "C" void radiant_dom_reset_wrapper_cache_current_heap(void);
-extern "C" bool radiant_dom_exec_command(void* document, const char* command, const char* value);
 struct RadiantHistoryTraversal;
 extern "C" bool radiant_history_initialize(DomDocument* document);
 extern "C" int radiant_history_length(DomDocument* document);

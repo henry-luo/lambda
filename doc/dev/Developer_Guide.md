@@ -748,6 +748,8 @@ git branch -d <branch>
 
 ### 7.3 Build Gotchas
 
+- **Sibling extraction:** this checkout currently needs `../lambda-input` and `../radiant`; migration links preserve the old source paths while the projects are separated (D9.1.1v3). On macOS, `make build-lambda-split` builds their debug archives and links `lambda-static.exe` against them. It still builds transitional Lambda-side prerequisites and uses the existing vendor dependencies; it is not a standalone-project qualification. `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` may select other locations only when the migration links resolve to those same projects.
+  The initial matching sibling revisions are [`lambda-input`](https://github.com/henry-luo/lambda-input) `b6e596bf277accf6bb9fe066b8d0b5b8290a3c1f` and [`radiant`](https://github.com/henry-luo/radiant) `0acd63121b1e125e570d7212c33e562e5074bf8f`. These are recorded for checkout reproducibility; the transitional build does not enforce them.
 - **macOS `/usr/bin/make` is GNU Make 3.81.** It compares mtimes in whole seconds, so `sleep 2` between before/after steps. It has no `&:` grouped targets, so the tree-sitter-lambda generate rule becomes three independent targets. `make -j generate-grammar` can run `tree-sitter generate` concurrently; run it without `-j`.
 - **Same-second source swaps.** A `cp` that lands in the same second as the last build leaves the old object linked. Delete `build/obj/<project>/native/<debug|release>/<file>.o` and rebuild. Then confirm which binary you have, with `cmp` or a probe whose output differs between the two versions.
 - **Renamed or moved sources.** Premake never deletes orphaned `.o` files and `ar` never drops members. Purge both, or the link silently uses stale code (seen as bogus "undefined symbol" errors that name the *old* object):
@@ -759,7 +761,7 @@ git branch -d <branch>
 - **Debug and release share `lambda.exe`.**
   - `make test-lambda-baseline` runs `make debug` and always leaves a debug binary.
   - `make build-test` rebuilds the flavour of the last top-level build (the `.lambda_release_build` marker).
-  - After `make build-release-compile`, `make build` does not relink the debug binary. Run `rm lambda.exe` first.
+  - After `make build-release-compile`, `make build` uses the release marker to force a debug relink. If a release binary was built directly without the marker, use `make debug` to force the relink.
   - `make release` runs `clean-all`, which deletes `test/*.exe`. Follow it with `make build-test`.
   - Before timing, check the binary: `strings lambda.exe | grep -c 'VALIDATOR] validate_against_base_type'` prints `0` for release.
 - **Node modules are separate DSOs.** `modules/node-{core,fs,net,crypto}` compile against `JsRuntimeState` (`lambda/js/js_runtime_state.hpp`), and `make build` does not rebuild them. After a layout change they read wrong offsets, with no link error. Rebuild them with `make build-node-core build-node-fs build-node-net build-node-crypto`, on **both** sides of an A/B. A fresh checkout needs the same rebuild before `require("fs")` works.

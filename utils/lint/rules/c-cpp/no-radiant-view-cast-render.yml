@@ -3,7 +3,7 @@ language: cpp
 severity: error
 message: >-
   Unsafe View*/Dom* downcast. Route leaf-type downcasts through the helpers in
-  lib/tagged.hpp (lam::view_as_*/view_require_*/dom_as<>/dom_require<>), or mark
+  radiant/tagged.hpp (lam::view_as_*/view_require_*/dom_as<>/dom_require<>), or mark
   an audited exception with a trailing "// RADIANT_CAST_OK: <reason>".
 metadata:
   suppress: RADIANT_CAST_OK

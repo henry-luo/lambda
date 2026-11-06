@@ -3,6 +3,7 @@
 **Status**: IMPLEMENTED WITH USER-DEFERRED CLASS F — rev 29 (2026-07-24; revs 2–28 as recorded below; rev 28 physically relocated the remaining top-level core/rt translation units and headers into `lambda/core/` and `lambda/runtime/`, completing the P1b mechanical move; rev 29 then replaced every forwarding shim with direct `core/`/`io/`/`runtime/` includes at all active call sites and deleted all of them — the 28 from rev 28 plus 7 pre-existing transitional shims from earlier P1b work — leaving `lambda/` shim-free, and repaired the tooling paths the relocation had staled. Monolithic build, static module archives, the five-DSO boundary check at the unchanged 165-import Class-F baseline, and the Lambda baseline suite are all green)
 **Scope**: split the monolithic `lambda.exe` build into four static libraries + one executable, with a fixed, enforced inter-module interface.
 **Profile update (2026-10-06)**: SM17 specifies `lambda-wasm` for synchronous browser evaluation with a retained REPL (§13.4; D9.2.3). The optimized profile now builds and passes Node/Chromium embedding checks; build details and measured sizes are in `doc/dev/Lambda_WASM_Build.md`.
+**Architecture update (2026-11-05):** D9.1.1v3, D9.1.2v2–D9.1.4v2, D9.2.1v2 and D9.5.6v2 replace the old Radiant-over-runtime layering. [Radiant Split](Lambda_Design_Radiant_Split.md) is the current design. Existing SM1–SM17 implementation notes below describe the predecessor and remain evidence for migration, not authority to keep its dependency direction.
 **Related**: `lib/mem_factory.h` / `vibe/Memory_Context.md` (allocator registry), `vibe/Lambda_Native_Module_Design.md` (Jube host API), `vibe/Lambda_Design_Code_Dedup.md` (DD1–DD5 coherent-header doctrine), `vibe/Lambda_Design_MIR_Cache.md` (MC1–MC8 — the rt-layer MIR cache of §2.1), `utils/check_hosted_python_architecture.py` (boundary-check precedent).
 
 ---
@@ -410,25 +411,13 @@ Plan:
 
 ---
 
-## 12. SM10 — The radiant ↔ lambda relationship (DECIDED: Option A)
+## 12. SM10 — Lambda and Radiant integration (D9.5.6v2)
 
-Both directions exist today: radiant **embeds** the engine (script_runner compiles/runs Lambda pages and JS; includes `js_runtime.h`, `js_event_loop.h`, `js_dom*.h`, `transpiler.hpp`, `network/*`), and the engine **calls up** into radiant (`dispatch_emit`, counters, symbol resolution, path recording). Three candidate shapes:
-
-| Option | Shape | Pros | Cons |
-|---|---|---|---|
-| **A. Layered** (formalize today's reality) | `radiant` sits above `lambda-rt`; embeds it through a narrow `lambda/embed.h` + public `js/*.h`; reverse edges become hooks (SM9) | Smallest delta; matches the state-management design (pages persist by regeneration — Lambda scripts are load-bearing inside radiant); DAG stays acyclic | Radiant not reusable without the engine; embed surface must be actively policed (today it includes `transpiler.hpp` internals) |
-| **B. Shielded** | `radiant` depends only on `lib` + `lambda-data`; **`lambda.exe` inter-links** both and installs all script↔UI glue (script_runner, JS DOM bindings move to a bridge layer owned by the exe) | Radiant becomes an engine-free C++ layout/render library over Mark DOM; cleanest reuse story | Large extraction: scripting/event/state paths are woven through radiant by design; the bridge layer re-creates today's coupling one level up; no current consumer needs an engine-free radiant |
-| **C. Jube-module mediated** | Script-facing radiant surface exposed via `JubeModuleDef` descriptors (`import radiant;` — `ast.hpp:501`, `lambda/module/radiant/radiant_dom_bridge.hpp` already exists); radiant consumes the single-tier host API struct per `Lambda_Native_Module_Design.md` | Script→radiant direction becomes data-driven (no link-time dep from rt); congruent with `lang-python`; the radiant-dom POC is already the plan of record | Only covers the script→radiant direction; radiant embedding the engine (running scripts at all) still needs A or B |
-
-**Decision (rev 3): Option A** — keep it simple. Radiant sits above `lambda-rt` and embeds it; the module split proceeds on A alone:
-
-- The engine-inside-radiant direction is architectural (the Radiant state-management and concurrency designs assume Lambda scripts run inside radiant); the DAG stays `… → lambda-rt → radiant`.
-- Narrow the embedding surface to `lambda/embed.h` + intentionally public `js/*.h`; ban `transpiler.hpp`-grade internal includes from radiant via the tier-1 lint matrix (applied in P4).
-
-B and C remain documented above **for future reference**:
-
-- **B (shielded)** — KIV. Revisit trigger: an engine-free radiant consumer appears (embedding radiant as a pure C++ layout/render library elsewhere).
-- **C (Jube-mediated script surface)** — not part of the module split, but fully compatible with A. The `radiant_dom_bridge.hpp` / `import radiant;` track continues independently under `Lambda_Native_Module_Design.md`; adopting C later removes rt→radiant *script-binding* knowledge without changing the A-shaped link DAG.
+Radiant is a standalone static library over `lambda-input`. Lambda owns the
+scripting adapters and supplies optional host services. The runtime core does
+not require Radiant. The details and migration conditions are in
+[Radiant Split §2–§4](Lambda_Design_Radiant_Split.md#2-dependency-architecture).
+The previous Option A decision is retained in Appendix S below.
 
 ---
 
@@ -437,7 +426,8 @@ B and C remain documented above **for future reference**:
 Uniform pattern (the `render_map.h` precedent): the **lower** module owns a hook header — typedef'd function pointers, a `*_register()` call, null-safe defaults — and radiant installs implementations during its init. No `extern` into an upper module, ever.
 
 **2026-10-11 Canvas/WebGL implementation checkpoint (D9.1.3 / D9.5.6).**
-`lambda/dom/dom_graphics.h` owns the plain native operation schemas;
+`lib/webgl.h` owns the shared WebGL command vocabulary (D9.1.1v3);
+`lambda/dom/dom_graphics.h` owns the runtime's Canvas and provider tables, and
 `lambda/dom/dom_provider.hpp` shares typed, null-safe calls. The runtime's
 `dom_engine_seam.cpp` publishes complete immutable,
 process-lifetime tables with acquire/release atomics; null or incomplete tables
@@ -934,3 +924,30 @@ Unavailable capabilities fail explicitly; retained values and operations
 keep their ordinary semantics
 and ownership contracts (D2.1, D6.3.3). This is a reduced build profile,
 not a Jube bundle or a WASM guest language. [SM17, SM §13.4]
+
+
+## Appendix S — Superseded Radiant embedding decision
+
+The following 2026-07 decision was replaced by D9.1.1v3 and D9.5.6v2 on 2026-11-05.
+
+~~## 12. SM10 — The radiant ↔ lambda relationship (DECIDED: Option A)~~
+
+~~Both directions exist today: radiant **embeds** the engine (script_runner compiles/runs Lambda pages and JS; includes `js_runtime.h`, `js_event_loop.h`, `js_dom*.h`, `transpiler.hpp`, `network/*`), and the engine **calls up** into radiant (`dispatch_emit`, counters, symbol resolution, path recording). Three candidate shapes:~~
+
+~~| Option | Shape | Pros | Cons |~~
+~~|---|---|---|---|~~
+~~| **A. Layered** (formalize today's reality) | `radiant` sits above `lambda-rt`; embeds it through a narrow `lambda/embed.h` + public `js/*.h`; reverse edges become hooks (SM9) | Smallest delta; matches the state-management design (pages persist by regeneration — Lambda scripts are load-bearing inside radiant); DAG stays acyclic | Radiant not reusable without the engine; embed surface must be actively policed (today it includes `transpiler.hpp` internals) |~~
+~~| **B. Shielded** | `radiant` depends only on `lib` + `lambda-data`; **`lambda.exe` inter-links** both and installs all script↔UI glue (script_runner, JS DOM bindings move to a bridge layer owned by the exe) | Radiant becomes an engine-free C++ layout/render library over Mark DOM; cleanest reuse story | Large extraction: scripting/event/state paths are woven through radiant by design; the bridge layer re-creates today's coupling one level up; no current consumer needs an engine-free radiant |~~
+~~| **C. Jube-module mediated** | Script-facing radiant surface exposed via `JubeModuleDef` descriptors (`import radiant;` — `ast.hpp:501`, `lambda/module/radiant/radiant_dom_bridge.hpp` already exists); radiant consumes the single-tier host API struct per `Lambda_Native_Module_Design.md` | Script→radiant direction becomes data-driven (no link-time dep from rt); congruent with `lang-python`; the radiant-dom POC is already the plan of record | Only covers the script→radiant direction; radiant embedding the engine (running scripts at all) still needs A or B |~~
+
+~~**Decision (rev 3): Option A** — keep it simple. Radiant sits above `lambda-rt` and embeds it; the module split proceeds on A alone:~~
+
+~~- The engine-inside-radiant direction is architectural (the Radiant state-management and concurrency designs assume Lambda scripts run inside radiant); the DAG stays `… → lambda-rt → radiant`.~~
+~~- Narrow the embedding surface to `lambda/embed.h` + intentionally public `js/*.h`; ban `transpiler.hpp`-grade internal includes from radiant via the tier-1 lint matrix (applied in P4).~~
+
+~~B and C remain documented above **for future reference**:~~
+
+~~- **B (shielded)** — KIV. Revisit trigger: an engine-free radiant consumer appears (embedding radiant as a pure C++ layout/render library elsewhere).~~
+~~- **C (Jube-mediated script surface)** — not part of the module split, but fully compatible with A. The `radiant_dom_bridge.hpp` / `import radiant;` track continues independently under `Lambda_Native_Module_Design.md`; adopting C later removes rt→radiant *script-binding* knowledge without changing the A-shaped link DAG.~~
+
+~~---~~

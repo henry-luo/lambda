@@ -13,7 +13,7 @@
 #include "js_headers.h"
 #include "js_response.h"
 #include "js_typed_array.h"
-#include "js_well_known_names.h"
+#include "../core/js_well_known_names.h"
 #include "../dom/dom_events.h"
 #include "../dom/dom_xhr.h"
 #include "js_error_codes.h"

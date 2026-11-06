@@ -242,11 +242,15 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     sources = sorted(p for p in JS.glob('*.cpp') if p.name not in NON_HELPERS)
     sources += sorted(p for p in (JS / 'mvp-lmd').glob('*.cpp') if p.name not in NON_HELPERS)
-    sources += [JS / 'js_well_known_names.c']
+    shared_catalog = ROOT / 'lambda/core/js_well_known_names.c'
+    sources += [shared_catalog]
     sources += [JS / 'js_interp.cpp', JS / 'mvp-lmd/mvp_lmd_mir.cpp']
     digest = hashlib.sha256()
     digest.update(json.dumps(clang_configuration()).encode())
     for path in sorted(p for p in JS.rglob('*') if p.suffix in SOURCE_SUFFIXES):
+        digest.update(str(path.relative_to(ROOT)).encode())
+        digest.update(path.read_bytes())
+    for path in (shared_catalog, shared_catalog.with_suffix('.h')):
         digest.update(str(path.relative_to(ROOT)).encode())
         digest.update(path.read_bytes())
     fingerprint = digest.hexdigest()

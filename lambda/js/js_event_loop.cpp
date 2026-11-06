@@ -1602,28 +1602,22 @@ typedef struct JsDrainWatchdogState {
     uint64_t progress_generation;
 } JsDrainWatchdogState;
 
+static bool event_loop_has_pending_requests(void);
+
 static void drain_watchdog_timer_cb(uv_timer_t* handle) {
     JsDrainWatchdogState* state = handle ? (JsDrainWatchdogState*)handle->data : NULL;
     uint64_t elapsed_ms = state
         ? (uv_hrtime() - state->start_ns) / 1000000ULL
         : (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS;
-    if (state && state->progress_generation != timer_progress_generation &&
-        elapsed_ms < (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS) {
-        // The short watchdog bounds an idle drain, not a productive timer chain;
-        // slow debug layouts can cross five seconds while still making progress.
+    bool timer_progress = state && state->progress_generation != timer_progress_generation;
+    if (timer_progress) {
         state->progress_generation = timer_progress_generation;
-        uint64_t remaining = (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS - elapsed_ms;
-        uint64_t next_ms = remaining < (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS
-            ? remaining
-            : (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS;
-        if (next_ms == 0) next_ms = 1;
-        uv_timer_start(handle, drain_watchdog_timer_cb, next_ms, 0);
-        return;
     }
-    // Process handles get the longer startup grace only while they still exist;
-    // once they close, remaining TCP/timer leaks should hit the normal watchdog.
-    if (event_loop_has_refed_process_handles(lambda_uv_loop()) &&
-        elapsed_ms < (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS) {
+    // Productive timers, live processes and finite native requests get bounded
+    // grace; otherwise shutdown can interrupt continuations of an active fetch.
+    if (elapsed_ms < (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS &&
+        (timer_progress || event_loop_has_refed_process_handles(lambda_uv_loop()) ||
+         event_loop_has_pending_requests())) {
         uint64_t remaining = (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS - elapsed_ms;
         uint64_t next_ms = remaining < (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS
             ? remaining

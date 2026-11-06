@@ -376,7 +376,7 @@ static Item webgl_invoke(Item receiver,Item* args,int argc,WebGlOp op,const char
 
 #define WEBGL_METHOD(name,js,signature,arity) \
 static int webgl_call_##name(Item receiver,Item* args,int argc,Item* out) { *out=webgl_invoke(receiver,args,argc,WEBGL_##js,signature);return 1; }
-#include "webgl_methods.def"
+#include "../../lib/webgl_methods.def"
 #undef WEBGL_METHOD
 static int webgl_canvas_get(Item receiver,Item* out) { *out=webgl_owner(webgl_object(receiver,WEBGL_CONTEXT_KIND));return 1; }
 static int webgl_width_get(Item receiver,Item* out) { *out=dom_realm_get_name(webgl_owner(webgl_object(receiver,WEBGL_CONTEXT_KIND)),"width");return 1; }
@@ -403,7 +403,7 @@ static const char webgl_interface[]=
 #include "webgl_constants.def"
 #undef WEBGL_CONSTANT
 #define WEBGL_METHOD(name,js,signature,arity) #name ": fn(" WEBGL_PARAMS_##arity ") any,\n"
-#include "webgl_methods.def"
+#include "../../lib/webgl_methods.def"
 #undef WEBGL_METHOD
     "}\n";
 static const JubeMemberBind webgl_members[]={
@@ -411,7 +411,7 @@ static const JubeMemberBind webgl_members[]={
     {"drawing_buffer_width","drawingBufferWidth",webgl_width_get,nullptr,nullptr,nullptr,JUBE_MEMBER_PROTOTYPE},
     {"drawing_buffer_height","drawingBufferHeight",webgl_height_get,nullptr,nullptr,nullptr,JUBE_MEMBER_PROTOTYPE},
 #define WEBGL_METHOD(name,js,signature,arity) {#name,#js,nullptr,nullptr,webgl_call_##name,nullptr,JUBE_MEMBER_PROTOTYPE|JUBE_MEMBER_REQUIRED_ARGS(arity)},
-#include "webgl_methods.def"
+#include "../../lib/webgl_methods.def"
 #undef WEBGL_METHOD
 };
 static const JubeMemberBind webgl_loss_members[]={

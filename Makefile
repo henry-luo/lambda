@@ -76,14 +76,14 @@ PDF_TEST_CONFIG ?= debug_native
 # Derive builds from the execution selection so newly added suites cannot run
 # stale binaries. The concurrency and Node preliminary suites stay excluded.
 LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --list-build-targets)
-# test-input-baseline invokes these five binaries directly, so keep their
+# test-input-baseline invokes these native binaries directly, so keep their
 # build separate from the full test aggregate and reusable by both targets.
 INPUT_BASELINE_TEST_PROJECTS := \
 	test_wpt_html_parser_gtest \
 	test_markdown_gtest \
 	test_yaml_suite_gtest \
-	test_math_ascii_gtest \
-	test_math_gtest
+	test_input_math_gtest
+INPUT_MATH_TEST ?= ./test/test_input_math_gtest.exe
 # GoogleTest emits pass/skip records and suite summaries unrelated to failures;
 # retain runtime diagnostics and failure records so baseline output stays actionable.
 GTEST_PROGRESS_FILTER = grep -vE '^Running main\(\) from |^Note: Google Test filter =|^\[ RUN      \]|^\[       OK \]|^\[  SKIPPED \]|^\[ DISABLED \]|^  YOU HAVE [0-9]+ DISABLED TESTS|^\[----------\]|^\[==========\]|^\[  PASSED  \]'
@@ -569,6 +569,7 @@ help:
 	@echo "  build-input-baseline - Build only native input baseline test executables"
 	@echo "  build-lambda-baseline - Build Lambda baseline runtime and input test executables"
 	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
+	@echo "  build-lambda-split - Link debug lambda-static.exe against the sibling archives (macOS)"
 	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
 	@echo "  build-jube-test - Build the lambda-jube compatibility link and test executables"
 	@echo ""
@@ -710,7 +711,8 @@ env-debug:
 
 # Main build target (incremental)
 build: $(MIR_LIB)
-	@rm -f .lambda_release_build 2>/dev/null || true
+	@# Debug and release share lambda.exe; a release marker requires a debug relink.
+	@if [ -f .lambda_release_build ]; then rm -f lambda.exe .lambda_release_build; fi
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
 	PATH="/clang64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
@@ -1223,6 +1225,7 @@ test-build-summary:
 	@$(PYTHON) utils/test_build_summary.py
 
 test-premake-generator: test-build-summary
+	@$(PYTHON) utils/test_check_stale_object_dependencies.py
 	@PREMAKE5_BIN="$(PREMAKE5_BIN)" python3 utils/test_premake_generator.py
 
 # Node module coverage must stay independent from JavaScript runtime coverage.
@@ -1700,7 +1703,7 @@ interp-bench:
 	@python3 test/interp/repl_bench.py
 
 test-lambda-baseline: TEST_BUILD_QUIET := 1
-test-lambda-baseline: build-lambda-baseline test-input-baseline
+test-lambda-baseline: build-lambda-baseline test-input-baseline test-gtest-result-counts
 	@echo "Clearing HTTP cache for clean test runs..."
 	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
@@ -2053,30 +2056,34 @@ test-input-baseline: build-input-baseline ensure-yaml-submodule
 	\
 	echo ""; \
 	echo "📦 ASCII Math Tests:"; \
-	if [ -f "test/test_math_ascii_gtest.exe" ]; then \
-		output=$$(./test/test_math_ascii_gtest.exe 2>&1) || true; \
+	if [ -f "$(INPUT_MATH_TEST)" ]; then \
+		math_exit=0; output=$$("$(INPUT_MATH_TEST)" --gtest_filter=NativeMathInputTest.AsciiParserBuildsOperatorTree 2>&1) || math_exit=$$?; \
 		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
 		math_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		math_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		math_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		math_passed=$${math_passed:-0}; math_failed=$${math_failed:-0}; math_skipped=$${math_skipped:-0}; \
+		if { [ "$$math_exit" != "0" ] || [ "$$math_passed" = "0" ]; } && [ "$$math_failed" = "0" ]; then math_failed=1; fi; \
 		if [ "$$math_failed" = "0" ] || [ -z "$$math_failed" ]; then math_status="✅ PASS"; math_failed=0; else math_status="❌ FAIL"; fi; \
 	else \
-		echo "   ⚠️  test/test_math_ascii_gtest.exe not found"; \
+		echo "   ⚠️  $(INPUT_MATH_TEST) not found"; \
+		math_failed=1; math_status="❌ FAIL"; \
 	fi; \
 	\
 	echo ""; \
 	echo "📦 LaTeX Math Tests:"; \
-	if [ -f "test/test_math_gtest.exe" ]; then \
-		output=$$(./test/test_math_gtest.exe 2>&1) || true; \
+	if [ -f "$(INPUT_MATH_TEST)" ]; then \
+		latex_math_exit=0; output=$$("$(INPUT_MATH_TEST)" --gtest_filter=NativeMathInputTest.LatexParserBuildsFractionTree 2>&1) || latex_math_exit=$$?; \
 		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
 		latex_math_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		latex_math_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		latex_math_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		latex_math_passed=$${latex_math_passed:-0}; latex_math_failed=$${latex_math_failed:-0}; latex_math_skipped=$${latex_math_skipped:-0}; \
+		if { [ "$$latex_math_exit" != "0" ] || [ "$$latex_math_passed" = "0" ]; } && [ "$$latex_math_failed" = "0" ]; then latex_math_failed=1; fi; \
 		if [ "$$latex_math_failed" = "0" ] || [ -z "$$latex_math_failed" ]; then latex_math_status="✅ PASS"; latex_math_failed=0; else latex_math_status="❌ FAIL"; fi; \
 	else \
-		echo "   ⚠️  test/test_math_gtest.exe not found"; \
+		echo "   ⚠️  $(INPUT_MATH_TEST) not found"; \
+		latex_math_failed=1; latex_math_status="❌ FAIL"; \
 	fi; \
 	\
 	total_passed=$$((wpt_passed + md_passed + yaml_passed + math_passed + latex_math_passed)); \
@@ -2102,7 +2109,8 @@ test-input-baseline: build-input-baseline ensure-yaml-submodule
 		echo "   ❌ Failed:   $$total_failed"; \
 	fi; \
 	echo "=============================================================="; \
-	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
+	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json; \
+	if [ $$total_failed -gt 0 ]; then exit 1; fi
 
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
 # `baseline` is the untracked work-in-progress corpus; only manifest-backed suites belong here.
@@ -2183,8 +2191,12 @@ run-layout-baseline-suites:
 	@$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites "$(LAYOUT_BASELINE_SUITES)" \
 		--jobs $(LAYOUT_BASELINE_CONCURRENCY) --results "$(LAYOUT_BASELINE_RESULTS)"
 
-test-radiant-baseline: build-radiant-baseline
+test-radiant-baseline: build-radiant-baseline test-gtest-result-counts
 	@$(MAKE) --no-print-directory run-radiant-baseline
+
+.PHONY: test-gtest-result-counts
+test-gtest-result-counts:
+	@node test/test_gtest_result_counts.js
 
 # The full gate preserves the previous baseline inventory and unfiltered cases.
 test-radiant-full: RADIANT_BUILD_SELECTION =
@@ -2199,6 +2211,7 @@ test-scene3d: build-radiant-baseline
 .PHONY: test-map
 test-map: RADIANT_BUILD_SELECTION =
 test-map: build-radiant-baseline
+	@./test/test_radiant_svg_hit_gtest.exe
 	@./test/test_map_gtest.exe
 	@$(MAKE) -C build/premake config=debug_native test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*map_*'
@@ -3244,6 +3257,37 @@ build-lambda-data:
 	$(call run_make_with_error_summary,lambda-data,debug_native,,lambda-data-cpp)
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "✅ lambda-data static archive built successfully!"; fi
 
+.PHONY: test-input-isolation-check check-input-archive-headers check-input-isolation check-radiant-input-value-isolation check-radiant-svg-hit-isolation check-radiant-package-layout-isolation check-radiant-source-path-isolation check-radiant-state-store-isolation
+test-input-isolation-check:
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/test_check_input_isolation.py
+
+check-input-archive-headers: build-lambda-data
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_archive_headers.py
+
+check-input-isolation: build-lambda-data test-input-isolation-check
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest)
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py
+
+check-radiant-input-value-isolation: build-lambda-data test-input-isolation-check
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_radiant_input_value_gtest)
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-input-value
+
+check-radiant-svg-hit-isolation: build-lambda-data test-input-isolation-check
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_radiant_svg_hit_gtest)
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-svg-hit
+
+check-radiant-source-path-isolation: build-lambda-data test-input-isolation-check
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_radiant_source_path_gtest)
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-source-path
+
+check-radiant-state-store-isolation: build-lambda-data test-input-isolation-check
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_state_store_gtest)
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-state-store
+
+check-radiant-package-layout-isolation: build-lambda-data test-input-isolation-check
+	$(call run_make_with_error_summary,input-tests-isolation,debug_native,,test_input_dom_native_gtest test_input_blob_url_gtest test_input_model_gtest test_input_roundtrip_gtest test_markup_modular_gtest test_format_markup_gtest test_input_math_gtest test_dir_gtest test_wpt_html_parser_gtest test_markdown_gtest test_yaml_suite_gtest test_layout_custom_gtest)
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_input_isolation.py --radiant-package-layout
+
 build-lambda-rt: build-lambda-data
 	@echo "Building the lambda-rt static archive..."
 	@mkdir -p build/premake
@@ -3267,7 +3311,25 @@ build-lambda-static: build-radiant
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 	$(PYTHON) utils/patch_static_module_makefile.py
 	$(call run_make_with_error_summary,lambda-exe,debug_native,,lambda-exe)
+	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_radiant_archive_ownership.py
 	@echo "✅ static-module Lambda executable built successfully!"
+
+# Exercise the extracted archive owners while the general build still uses
+# transitional project links and in-tree archive targets.
+.PHONY: build-lambda-split
+build-lambda-split: build-radiant
+	@test "$$(uname -s)" = Darwin || { echo "Sibling archive integration currently supports macOS only"; exit 1; }
+	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" RADIANT_ROOT="$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" $(PYTHON) utils/check_split_roots.py
+	@echo "Building the sibling input and Radiant archives..."
+	$(MAKE) -C "$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" INPUT_DEPS_ROOT="$(CURDIR)" -j$(JOBS)
+	$(MAKE) -C "$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" DEPS_ROOT="$(CURDIR)" -j$(JOBS)
+	$(MAKE) generate-premake
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	$(call run_make_with_error_summary,split-adapters,debug_native,,lambda-radiant-adapter-cpp node-core)
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-core
+	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" RADIANT_ROOT="$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" $(PYTHON) utils/patch_static_module_makefile.py --sibling-archives
+	$(call run_make_with_error_summary,lambda-exe-split,debug_native,-f lambda-exe.make -B,all)
+	@echo "✅ Lambda static executable linked against sibling input and Radiant archives"
 
 # Build only the native binaries invoked by test-input-baseline. Keeping this
 # separate prevents that prerequisite from pulling the all-tests target back
@@ -3305,7 +3367,8 @@ check-module-boundary:
 	$(MAKE) generate-premake
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 	$(MAKE) -C build/premake config=debug_native lambda-boundary-lib lambda-boundary-core lambda-boundary-io lambda-boundary-rt lambda-boundary-radiant -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
-	$(PYTHON) utils/check_module_boundary.py
+	PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/test_check_module_boundary.py
+	PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_module_boundary.py
 	@echo "✅ module-boundary validation completed (Class-F ratcheted deferment)"
 
 # the generated all target includes rdb-drivers, whose pinned client libraries
@@ -3504,7 +3567,7 @@ test-layout:
 		echo "🔧 $(LAMBDA_EXE) missing; building before layout tests"; \
 		$(MAKE) build; \
 	else \
-		STALE_FILE=$$(find radiant lambda lib -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hpp' -o -name '*.m' -o -name '*.mm' \) -newer "$(LAMBDA_EXE)" -print -quit 2>/dev/null); \
+		STALE_FILE=$$(find -L radiant lambda lib -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hpp' -o -name '*.m' -o -name '*.mm' \) -newer "$(LAMBDA_EXE)" -print -quit 2>/dev/null); \
 		if [ -n "$$STALE_FILE" ]; then \
 			echo "🔧 $(LAMBDA_EXE) is older than $$STALE_FILE; rebuilding before layout tests"; \
 			$(MAKE) build; \

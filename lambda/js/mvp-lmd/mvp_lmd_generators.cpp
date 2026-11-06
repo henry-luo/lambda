@@ -3,7 +3,7 @@
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/heap_api.h"
-#include "../js_well_known_names.h"
+#include "../../core/js_well_known_names.h"
 #include "../js_typed_array.h"
 #include "../js_runtime_state.hpp"
 #include "../js_runtime.h"

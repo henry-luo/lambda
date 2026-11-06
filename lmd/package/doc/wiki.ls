@@ -4,9 +4,10 @@ import writer: .wiki.writer
 import c: .misc.common
 fn fail(message) error => error({code:7801,message:"wiki: " ++ message})
 fn checked_keys(options,keys) map^ {
-    if (options != null and not (options is map)) raise fail("options must be a map")
+    let valid_options = if (options != null and not (options is map)) raise fail("options must be a map")
     let value = c.get({v:options},"v",{})
-    let unknown = [for (key,item in value where not (key in keys)) key];
+    // Map keys are symbols; compare their spelling to the string option names (S5.1.1v2).
+    let unknown = [for (key,item in value where not ((string(key)^) in keys)) key];
     if (len(unknown) > 0) raise fail("unknown option " ++ string(unknown[0]))
     else value
 }

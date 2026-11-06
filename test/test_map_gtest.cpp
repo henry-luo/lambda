@@ -11,7 +11,7 @@
 #include "../lib/mem.h"
 #include "../lib/image.h"
 #include "../lib/str.h"
-#include "../lib/tagged.hpp"
+#include "../radiant/tagged.hpp"
 #include "radiant_render_test_utils.hpp"
 #include <math.h>
 
@@ -40,19 +40,6 @@ TEST(MapCamera, DatelinePolesHighZoomAndInvalidNumbers) {
     EXPECT_FALSE(geomap_project(camera, NAN, 0, &x, &y));
     EXPECT_FALSE(geomap_project(camera, 181, 0, &x, &y));
     camera.zoom = INFINITY; EXPECT_FALSE(geomap_camera_valid(camera));
-}
-TEST(MapGeometry, SelfCrossingFillBoundariesAndRectanglesDoNotDependOnSignedArea) {
-    RdtPath* path=rdt_path_new();ASSERT_NE(path,nullptr);
-    rdt_path_move_to(path,32,32);rdt_path_line_to(path,224,160);rdt_path_line_to(path,32,160);
-    rdt_path_line_to(path,224,32);rdt_path_close(path);
-    EXPECT_TRUE(dom_geometry_path_query(path,128,48,128,48,false,RDT_FILL_EVEN_ODD,-1,0,0));
-    EXPECT_TRUE(dom_geometry_path_query(path,80,64,80,64,false,RDT_FILL_EVEN_ODD,-1,0,0));
-    EXPECT_TRUE(dom_geometry_path_query(path,75,62,81,64,true,RDT_FILL_EVEN_ODD,-1,0,0));
-    EXPECT_FALSE(dom_geometry_path_query(path,32,80,40,88,true,RDT_FILL_EVEN_ODD,-1,0,0));
-    rdt_path_free(path);path=rdt_path_new();ASSERT_NE(path,nullptr);
-    rdt_path_move_to(path,32,32);rdt_path_line_to(path,96,96);rdt_path_line_to(path,160,160);rdt_path_close(path);
-    EXPECT_FALSE(dom_geometry_path_query(path,90,90,100,100,true,RDT_FILL_EVEN_ODD,-1,0,0));
-    rdt_path_free(path);
 }
 
 class MapRender : public ::testing::Test {

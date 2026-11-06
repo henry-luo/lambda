@@ -327,7 +327,7 @@ def expect_macos_ime_profile(module) -> None:
                                         linux_pkg_config_includes=[])
     files = set(generator.config['source_files'])
     if 'lambda/host/macos_ime/main.mm' not in files or \
-            'lambda/js/js_well_known_names.c' in files or \
+            'lambda/core/js_well_known_names.c' in files or \
             'lambda' in generator.config['source_dirs']:
         fail('macos-ime source inheritance leaked the CLI or JS entry point')
     if generator.variant_config.get('target_extension') != '' or \
@@ -341,7 +341,8 @@ def expect_macos_ime_profile(module) -> None:
     emitted = '\n'.join(generator.premake_content)
     if 'targetextension ""' not in emitted or \
             '"lambda/host/macos_ime/main.mm"' not in emitted or \
-            '"lambda/js/js_well_known_names.c"' in emitted or \
+            '"lambda/runtime/document_host.cpp"' not in emitted or \
+            '"lambda/core/js_well_known_names.c"' in emitted or \
             '"lambda/main.cpp"' in emitted or \
             '"-framework WebKit"' in emitted:
         fail('macos-ime generated host contains CLI/JS/WebKit inputs')
@@ -373,6 +374,91 @@ def expect_safety_early_profiles(module) -> None:
         fail('minimal safety bootstrap acquired framework or C++ startup dependencies')
 
 
+def expect_static_module_archive_profiles() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "static_module_patcher", ROOT / "utils" / "patch_static_module_makefile.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    template = "build/lib/%{cfg.platform}/%{cfg.buildcfg}/libre2.a"
+    expression = module.configured_archive_path(template, str(ROOT))
+    if "%{cfg." in expression:
+        fail("static-module patcher left a Premake token in its Make expression")
+    with tempfile.TemporaryDirectory(dir=ROOT / "temp") as directory:
+        makefile = Path(directory) / "Makefile"
+        for profile in ("debug", "debug_asan", "release", "release_profile", "coverage"):
+            makefile.write_text(
+                f"OBJDIR = ../obj/lambda-exe/native/{profile}\n"
+                f"ARCHIVE = {expression}\n"
+                "all:\n\t@echo $(ARCHIVE)\n")
+            actual = subprocess.check_output(["make", "-s", "-f", str(makefile)],
+                                             text=True).strip()
+            expected = str(ROOT / "build" / "lib" / "native" / profile / "libre2.a")
+            if actual != expected:
+                fail(f"static-module archive profile {profile}: {actual} != {expected}")
+
+        # The split executable must replace both link inputs and prerequisites,
+        # without changing release profiles that use different archive builds.
+        sandbox = Path(directory)
+        root = sandbox / 'Lambda'
+        archives = ('lambda-input/build/lib/liblambda-input.a',
+                    'lambda-input/build/lib/liblambda-lib.a',
+                    'radiant/build/lib/libradiant.a',
+                    'radiant/build/lib/libradiant-properties.a')
+        for archive in archives:
+            path = sandbox / archive
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        old = ('../lib/liblambda-data-cpp.a ../lib/native/debug/liblambda-lib-cpp.a '
+               '../lib/libradiant-cpp.a ../lib/libradiant-properties.a')
+        debug = f'LIBS += {old}\nLDDEPS += {old}\n'
+        release = f'LIBS += {old}\n'
+        source = f'ifeq ($(config),debug_native)\n{debug}else ifeq ($(config),release_native)\n{release}endif\n'
+        previous = {key: os.environ.pop(key, None) for key in ('LAMBDA_INPUT_ROOT', 'RADIANT_ROOT')}
+        try:
+            result = module.use_sibling_archives(source, str(root))
+        finally:
+            for key, value in previous.items():
+                if value is not None:
+                    os.environ[key] = value
+        selected = result.split('else ifeq', 1)[0]
+        if any(selected.count(Path(archive).name) != 2 for archive in archives) or \
+                any(token in selected for token in old.split()) or \
+                not result.endswith(f'{release}endif\n'):
+            fail('split link does not consistently use sibling debug archives')
+
+
+def expect_radiant_property_ownership(module) -> None:
+    generator = linux_validation_generator(module)
+    targets = {target['name']: target for target in generator.config['targets']}
+    providers = set(targets['radiant-properties']['source_files'])
+    if not providers or providers.intersection(targets['lambda-data']['source_files']):
+        fail('input archive owns a Radiant property provider')
+    if not providers.issubset(targets['radiant'].get('exclude_patterns', [])) or \
+            'radiant-properties' not in targets['radiant']['libraries'] or \
+            'radiant-properties' not in targets['lambda-exe']['libraries']:
+        fail('Radiant duplicates or omits its property-provider archive')
+    adapter = targets['lambda-radiant-adapter']
+    if any(pattern.startswith('lambda/module/radiant/') for pattern in
+           targets['radiant'].get('source_patterns', [])) or \
+            'lambda/module/radiant/*.cpp' not in adapter.get('source_patterns', []) or \
+            'lambda-radiant-adapter' not in targets['lambda-exe']['libraries']:
+        fail('Lambda Radiant adapters are not owned by their own integration archive')
+    for group in generator.config['test']['test_suites']:
+        for test in group.get('tests', []):
+            dependencies = test.get('dependencies', [])
+            native_sources = test.get('additional_sources', [])
+            native_independent = test.get('radiant_native_sources_independent', False)
+            if 'radiant' in dependencies and 'lambda-radiant-adapter' not in dependencies:
+                fail(f"{test.get('binary', test.get('name'))} omits the Lambda Radiant adapter")
+            if native_independent and ('radiant' in dependencies or not any(
+                    path.startswith('radiant/') for path in native_sources)):
+                fail(f"{test.get('binary', test.get('name'))} has an invalid independent-native declaration")
+            if ('radiant' in dependencies or (not native_independent and any(
+                    path.startswith('radiant/') for path in native_sources))) \
+                    and 'radiant-properties' not in dependencies:
+                fail(f"{test.get('binary', test.get('name'))} omits the Radiant property provider")
+
+
 def main() -> int:
     module = load_generator_module()
     generator = linux_validation_generator(module)
@@ -387,6 +473,8 @@ def main() -> int:
     expect_static_runtime_providers(module, "macos")
     expect_static_runtime_providers(module, "linux")
     expect_archive_link_deps(module)
+    expect_static_module_archive_profiles()
+    expect_radiant_property_ownership(module)
     expect_module_only_libraries(module)
     expect_host_export_list(module)
     print("PREMAKE_GENERATOR_SELFTEST: passed")

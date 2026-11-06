@@ -15,7 +15,7 @@
 #include "../../input/input.hpp"
 #include "../../input/input-parsers.h"
 #include "../../core/lambda-decimal.hpp"
-#include "../js_well_known_names.h"
+#include "../../core/js_well_known_names.h"
 #include "../../../lib/datetime.h"
 #include "../../../lib/escape.h"
 #include "../../../lib/strbuf.h"

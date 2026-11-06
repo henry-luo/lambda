@@ -10,6 +10,8 @@
 #include "../radiant/page_fo_expression.hpp"
 #include "../radiant/render.hpp"
 #include "../radiant/event.hpp"
+#include "../radiant/radiant.hpp"
+#include "../lambda/dom/dom_host_engine.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
@@ -24,12 +26,36 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_grow.hpp"
 #include "../lib/strbuf.h"
-#include "../lib/tagged.hpp"
+#include "../radiant/tagged.hpp"
 #include "../lib/font/font_internal.h"
 
 DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
 HashMap* element_dom_map_create(void);
 DomElement* element_dom_map_lookup(HashMap*, Element*);
+
+TEST(RadiantHostPropertyTest, PreservesNativeDefaultsAndStoredProperties) {
+    ASSERT_TRUE(radiant_register_dom_engine_providers());
+    DomElement element = {};
+    EXPECT_EQ(dom_engine_boundary_property(&element), &BOUNDARY_PROP_DEFAULT);
+    EXPECT_EQ(dom_engine_scroll_property(&element), &SCROLL_PROP_DEFAULT);
+    EXPECT_EQ(dom_engine_position_property(&element), &POSITION_PROP_DEFAULT);
+    EXPECT_EQ(dom_engine_embed_property(&element), &EMBED_PROP_DEFAULT);
+    EXPECT_EQ(dom_engine_scroll_property(&element)->scroll_behavior, CSS_VALUE_AUTO);
+    EXPECT_EQ(dom_engine_embed_property(&element)->flex, nullptr);
+
+    BoundaryProp boundary = {};
+    ScrollProp scroll = {};
+    PositionProp position = {};
+    EmbedProp embed = {};
+    element.bound = lam::view_prop(&boundary);
+    element.scroller = lam::view_prop(&scroll);
+    element.position = lam::view_prop(&position);
+    element.embed = lam::view_prop(&embed);
+    EXPECT_EQ(dom_engine_boundary_property(&element), &boundary);
+    EXPECT_EQ(dom_engine_scroll_property(&element), &scroll);
+    EXPECT_EQ(dom_engine_position_property(&element), &position);
+    EXPECT_EQ(dom_engine_embed_property(&element), &embed);
+}
 
 class RadiantCoreTest : public ::testing::Test {
 protected:

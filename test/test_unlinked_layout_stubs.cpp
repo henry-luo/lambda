@@ -1,7 +1,7 @@
 // isolated DOM/box/retained-list targets have no native editing or layout host.
 #include "../radiant/event.hpp"
 #include "../radiant/layout.hpp"
-#include "../lambda/module/radiant/radiant_input_value.hpp"
+#include "../radiant/input_value.hpp"
 #include "../lib/log.h"
 #include <stdlib.h>
 

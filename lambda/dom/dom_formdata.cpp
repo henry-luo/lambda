@@ -30,6 +30,7 @@
 #include "../module/radiant/radiant_input_value.hpp"
 #include "../../radiant/view.hpp"
 #include "../../radiant/event.hpp"
+#include "../../radiant/select_options.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
@@ -242,22 +243,25 @@ static Item js_fd_get(Item name_item) {
 }
 
 static Item js_fd_getAll(Item name_item) {
-    Item this_fd = dom_realm_receiver();
-    Item result = js_array_new(0);
-    Item entries = fd_get_entries(this_fd);
-    if (get_type_id(entries) != LMD_TYPE_ARRAY) return result;
+    RootFrame roots(4);
+    Rooted<Item> this_fd(roots, dom_realm_receiver());
+    Rooted<Item> name(roots, name_item);
+    // Array growth can collect between matches; keep the result and its source live.
+    Rooted<Item> result(roots, js_array_new(0));
+    Rooted<Item> entries(roots, fd_get_entries(this_fd.get()));
+    if (get_type_id(entries.get()) != LMD_TYPE_ARRAY) return result.get();
 
-    const char* name_cs = fn_to_cstr(name_item);
+    const char* name_cs = fn_to_cstr(name.get());
     if (!name_cs) name_cs = "undefined";
 
-    int64_t len = js_array_length(entries);
+    int64_t len = js_array_length(entries.get());
     for (int64_t i = 0; i < len; i++) {
-        Item pair = js_elements_get_int(entries, i);
+        Item pair = js_elements_get_int(entries.get(), i);
         if (js_fd_entry_matches(pair, name_cs)) {
-            js_array_push(result, js_elements_get_int(pair, 1));
+            js_array_push(result.get(), js_elements_get_int(pair, 1));
         }
     }
-    return result;
+    return result.get();
 }
 
 static Item js_fd_has(Item name_item) {
@@ -501,61 +505,40 @@ static void fd_append_text_entry(Item entries, const char* name, const char* val
     fd_append_named_entry(entries_root.get(), name, value_root.get());
 }
 
+struct FormDataSelectContext {
+    Rooted<Item>* entries;
+    DomElement* select;
+    const char* name;
+    bool multiple;
+    bool completed;
+};
+
+static void fd_append_selected_option(DomElement* option, void* opaque) {
+    FormDataSelectContext* context = static_cast<FormDataSelectContext*>(opaque);
+    if (context->completed || !dom_option_is_selected(option) || option->has_attribute("disabled")) return;
+    for (DomNode* parent = option->parent; parent && parent != context->select; parent = parent->parent) {
+        DomElement* element = parent->as_element();
+        if (element && element->tag_name && str_icmp_cstr(element->tag_name, "optgroup") == 0 &&
+            element->has_attribute("disabled")) return;
+    }
+    const char* value = option->get_attribute("value");
+    if (!value) {
+        DomNode* text = option->first_child;
+        value = text && text->is_text() && text->as_text()->text ? text->as_text()->text : "";
+    }
+    fd_append_text_entry(context->entries->get(), context->name, value);
+    context->completed = !context->multiple;
+}
+
 static void fd_append_select_entries(Item entries, DomElement* select_elem) {
     const char* name = select_elem->get_attribute("name");
-    if (!name || !*name) return; // no name → excluded from submission
-
-    bool is_multiple = select_elem->has_attribute("multiple");
-
-    // Walk option children to find selected ones
-    DomNode* child = select_elem->first_child;
-    while (child) {
-        DomElement* ce = child->is_element() ? (DomElement*)child : nullptr;
-        // Live selectedness, not the `selected` content attribute: that
-        // attribute is only the *default* selection, so a user-chosen option
-        // submitted the page's initial one (F21). dom_option_is_selected falls
-        // back to the attribute when nothing has selected anything yet.
-        if (ce && ce->tag_name && str_icmp_cstr(ce->tag_name, "option") == 0 &&
-            dom_option_is_selected(ce) &&
-            !ce->has_attribute("disabled")) {
-            // Spec: option value = value attr if present, else text content
-            const char* opt_val = ce->get_attribute("value");
-            if (!opt_val) {
-                // fall back to text content
-                DomNode* tn = ce->first_child;
-                if (tn && tn->is_text()) {
-                    opt_val = ((DomText*)tn)->text ? ((DomText*)tn)->text : "";
-                } else {
-                    opt_val = "";
-                }
-            }
-            fd_append_text_entry(entries, name, opt_val);
-            if (!is_multiple) break; // single select: first selected wins
-        }
-        // optgroup children
-        if (ce && ce->tag_name && str_icmp_cstr(ce->tag_name, "optgroup") == 0) {
-            bool og_disabled = ce->has_attribute("disabled");
-            DomNode* ogchild = ce->first_child;
-            while (ogchild) {
-                DomElement* oce = ogchild->is_element() ? (DomElement*)ogchild : nullptr;
-                if (oce && oce->tag_name && str_icmp_cstr(oce->tag_name, "option") == 0 &&
-                    dom_option_is_selected(oce) &&
-                    !oce->has_attribute("disabled") && !og_disabled) {
-                    const char* opt_val = oce->get_attribute("value");
-                    if (!opt_val) {
-                        DomNode* tn = oce->first_child;
-                        opt_val = (tn && tn->is_text() && ((DomText*)tn)->text)
-                            ? ((DomText*)tn)->text : "";
-                    }
-                    fd_append_text_entry(entries, name, opt_val);
-                    if (!is_multiple) goto done_select;
-                }
-                ogchild = ogchild->next_sibling;
-            }
-        }
-        child = child->next_sibling;
-    }
-    done_select:;
+    if (!name || !*name) return;
+    RootFrame roots(1);
+    Rooted<Item> entries_root(roots, entries);
+    // The same option-list traversal drives the public collection and form submission.
+    FormDataSelectContext context = {&entries_root, select_elem, name,
+        select_elem->has_attribute("multiple"), false};
+    radiant_select_walk_options(select_elem->first_child, fd_append_selected_option, &context);
 }
 
 // forward declaration (defined after fd_install_methods)

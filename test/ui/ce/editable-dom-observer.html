@@ -1,0 +1,23 @@
+<!doctype html>
+<div id="surface" contenteditable="plaintext-only">seed</div>
+<button id="edit">edit</button>
+<div id="result"></div>
+<div id="observed"></div>
+<script>
+  const surface = document.getElementById('surface');
+  const edit = document.getElementById('edit');
+  const result = document.getElementById('result');
+  const observed = document.getElementById('observed');
+  const observer = new MutationObserver(records => {
+    for (const record of records) {
+      if (record.type === 'characterData') {
+        observed.textContent = record.oldValue + '|' + record.target.data;
+      }
+    }
+  });
+  observer.observe(surface, {subtree: true, characterData: true, characterDataOldValue: true});
+  edit.addEventListener('mousedown', event => event.preventDefault());
+  edit.onclick = () => {
+    result.textContent = document.execCommand('insertText', false, 'X') + '|' + surface.textContent;
+  };
+</script>

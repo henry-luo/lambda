@@ -1,7 +1,7 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_ast.hpp"
 #include "../js_props.h"
-#include "../js_well_known_names.h"
+#include "../../core/js_well_known_names.h"
 #include "../js_runtime.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"

@@ -68,7 +68,7 @@ TIDY_OPTS='{Checks: "'"$TIDY_CHECKS"'", CheckOptions: [
 TIDY_OUT=$(mktemp)
 trap 'rm -f "$TIDY_OUT"' EXIT
 
-find lambda radiant -type f -name '*.cpp' -not -path '*/tree-sitter*/*' 2>/dev/null \
+find -L lambda radiant -type f -name '*.cpp' -not -path '*/tree-sitter*/*' 2>/dev/null \
   | xargs -n 1 -P "$JOBS" -I {} "$CLANG_TIDY" {} \
         --config="$TIDY_OPTS" \
         --quiet \

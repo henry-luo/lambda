@@ -26,7 +26,7 @@
 #define mkdir(path, mode) _mkdir(path)
 #endif
 
-#include "../lambda/lambda-data.hpp"
+#include "../lambda/core/data.hpp"
 #include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lib/arena.h"

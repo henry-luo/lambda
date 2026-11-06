@@ -8,7 +8,7 @@
 #include "../js_source_module.hpp"
 #include "../js_runtime_state.hpp"
 #include "../js_property_attrs.h"
-#include "../js_well_known_names.h"
+#include "../../core/js_well_known_names.h"
 #include "../js_typed_array.h"
 #include "../../input/input.hpp"
 #include "../../runtime/lambda-root-frame.hpp"

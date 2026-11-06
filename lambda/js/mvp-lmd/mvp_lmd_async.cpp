@@ -5,7 +5,7 @@
 #include "../js_runtime_state.hpp"
 #include "../js_property_attrs.h"
 #include "../js_props.h"
-#include "../js_well_known_names.h"
+#include "../../core/js_well_known_names.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 
