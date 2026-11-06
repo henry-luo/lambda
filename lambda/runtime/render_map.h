@@ -6,6 +6,7 @@
 #pragma once
 
 #include "../lambda.h"
+#include "../core/render_bridge.hpp"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -70,16 +71,6 @@ Item render_map_get_result(Item source_item, const char* template_ref);
 // Returns the number of entries re-transformed.
 int render_map_retransform(void);
 
-// Result of a single retransformation (for incremental DOM rebuild)
-typedef struct RetransformResult {
-    Item parent_result;     // Lambda parent element containing the changed child
-    Item new_result;        // new Lambda result element (after re-execution)
-    Item old_result;        // old Lambda result element (before re-execution)
-    int child_index;        // position within parent's children
-    int child_count;        // number of old rendered children replaced
-    const char* template_ref;
-} RetransformResult;
-
 // Re-transform dirty entries and return details of what changed.
 // Fills out_results (up to max_results), returns actual count.
 // If more dirty entries than max_results, excess is still retransformed but not reported.
@@ -98,12 +89,6 @@ void render_map_set_map(struct hashmap* map);
 // Reverse lookup: result_node → (source_item, template_ref)
 // Used by event dispatch to find which template produced a clicked element.
 // ============================================================================
-
-// Result of a reverse lookup
-typedef struct RenderMapLookup {
-    Item source_item;              // the model item that was matched
-    const char* template_ref;      // template reference (interned pointer)
-} RenderMapLookup;
 
 // Reverse lookup: given a result_node Item, find the source_item and template_ref.
 // Returns true if found, false otherwise. Writes to *out on success.

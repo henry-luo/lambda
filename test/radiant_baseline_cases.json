@@ -182,6 +182,11 @@
     "SecondaryViewTest.PageFloatsShareThePageWithNotesAndMoveExistingBodyGeometry"
   ],
   "test_radiant_document_gtest": [
+    "RadiantDocumentTest.EditSnapshotsReleaseTheirIndependentNodePins",
+    "RadiantDocumentTest.AbortedEditRestoresBackingAndSelectionIdentity",
+    "RadiantDocumentTest.NativeEditRetiresDetachedTextOnlyOnCommit",
+    "RadiantDocumentTest.NativeRemovalRelocatesRangesAndClearsFocus",
+    "RadiantDocumentTest.NativeMutationRecordPinsAndReleasesItsNodes",
     "FontCollections.EmojiLookupRetainsTheSelectedNativeFace",
     "FontLocalMetadata.LocalFontMetadataIsOwnedSortedAndUnique",
     "FontTextMeasurement.TextMeasurementsOwnKeysAndInvalidateWhenFontResourcesChange",

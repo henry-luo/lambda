@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>CFBundleIdentifier</key><string>org.lambda-script.viewer</string>
-    <key>CFBundleName</key><string>Lambda Viewer</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Capture audio only when you grant this document microphone input and it explicitly starts recording.</string>
-</dict></plist>

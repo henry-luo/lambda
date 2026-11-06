@@ -223,7 +223,7 @@ per pool:
 |------|------------------|----------------|
 | 0 | `lambda/core/well_known_markup_names.h` | `lambda/core/well_known_markup_names.c` |
 | 1 | `lambda/core/well_known_lambda_names.h` | `lambda/core/well_known_lambda_names.c` |
-| 2 | `lambda/js/js_well_known_names.h` | `lambda/js/js_well_known_names.c` |
+| 2 | `lambda/core/js_well_known_names.h` | `lambda/core/js_well_known_names.c` |
 
 Each header contains a C-compatible enum whose values are the complete
 `[pool:16][generated-ordinal:16]` NameIds, plus the matching external pool-data

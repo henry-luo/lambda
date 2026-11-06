@@ -39,6 +39,7 @@
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_lifecycle.hpp"
+#include "../../radiant/form_controls.hpp"
 
 #include <cstring>
 #include <cmath>
@@ -229,48 +230,15 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
 }
 
 extern "C" DomElement* dom_find_form_owner(void* control_ptr) {
-    DomElement* control = (DomElement*)control_ptr;
-    if (!control) return nullptr;
-    const char* form_id = control->get_attribute("form");
-    if (form_id && *form_id) {
-        DomDocument* doc = control->doc;
-        if (doc && doc->root) return dom_find_element_by_id(doc->root, form_id);
-        return nullptr;
-    }
-
-    DomNode* p = control->parent;
-    while (p && p->is_element()) {
-        DomElement* elem = p->as_element();
-        if (elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0) return elem;
-        p = p->parent;
-    }
-    return nullptr;
+    return radiant_form_owner((DomElement*)control_ptr);
 }
 
 extern "C" bool dom_is_submit_button(void* elem_ptr) {
-    DomElement* elem = (DomElement*)elem_ptr;
-    if (!elem || !elem->tag_name) return false;
-    if (str_icmp_cstr(elem->tag_name, "input") == 0) {
-        const char* type = dom_input_type_lower(elem);
-        return strcmp(type, "submit") == 0 || strcmp(type, "image") == 0;
-    }
-    if (str_icmp_cstr(elem->tag_name, "button") == 0) {
-        const char* type = dom_input_type_lower(elem);
-        return strcmp(type, "text") == 0 || strcmp(type, "submit") == 0;
-    }
-    return false;
+    return radiant_form_is_submit_button((DomElement*)elem_ptr);
 }
 
 extern "C" bool dom_is_reset_button(void* elem_ptr) {
-    DomElement* elem = (DomElement*)elem_ptr;
-    if (!elem || !elem->tag_name) return false;
-    if (str_icmp_cstr(elem->tag_name, "input") == 0) {
-        return strcmp(dom_input_type_lower(elem), "reset") == 0;
-    }
-    if (str_icmp_cstr(elem->tag_name, "button") == 0) {
-        return strcmp(dom_input_type_lower(elem), "reset") == 0;
-    }
-    return false;
+    return radiant_form_is_reset_button((DomElement*)elem_ptr);
 }
 
 static Item dom_throw_named_error(const char* name, const char* message) {

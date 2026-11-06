@@ -165,12 +165,6 @@ Item dom_cssom_get_document_stylesheets(void);
  */
 Item dom_cssom_get_element_sheet(Item elem);
 
-/** Reparse a connected inline <style> after a DOM text-tree mutation. */
-bool dom_cssom_sync_inline_style_element(void* elem);
-
-/** Synchronize mutation-tracked inline sheets in current document source order. */
-void dom_cssom_sync_mutated_inline_stylesheets(void* doc);
-
 /** Neuter CSSOM native payloads before their document pool is destroyed. */
 void dom_cssom_invalidate_document(void* doc);
 /** Remove this realm's weak slots before its heap is released. */

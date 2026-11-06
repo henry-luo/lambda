@@ -1,6 +1,6 @@
 #include "js_runtime_internal.hpp"
 #include "js_object_meta.h"
-#include "js_well_known_names.h"
+#include "../core/js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "mvp-lmd/mvp_lmd.h"
 #include "mvp-lmd/mvp_lmd_runtime.h"

@@ -83,6 +83,18 @@
       },
       "attribute": "data-parent",
       "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {"selector": "#report"},
+      "attribute": "data-removed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {"selector": "#report"},
+      "attribute": "data-reinserted",
+      "equals": "true"
     }
   ]
 }

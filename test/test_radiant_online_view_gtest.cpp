@@ -22,7 +22,7 @@ TEST(RadiantOnlineViewTest, SkippedOnWindows) {
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "../radiant/script_timeout.hpp"
+#include "../lambda/module/radiant/script_timeout.hpp"
 
 #define LAMBDA_EXE "./lambda.exe"
 #define ONLINE_VIEW_CLEANUP_GRACE_SECONDS 30

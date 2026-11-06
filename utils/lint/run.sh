@@ -38,6 +38,7 @@ STRUCTURAL_CHECKS=(
   "no-new-per-file-header:python3 $ROOT/utils/lint/rules/structural/no_new_per_file_header.py"
   "mem-kind-nodes:python3 $ROOT/utils/check_mem_kind_nodes.py"
   "static-module-architecture:python3 $ROOT/utils/check_static_module_architecture.py"
+  "split-header-boundary:python3 $ROOT/utils/check_split_header_boundary.py"
   "formal-index:python3 $ROOT/utils/formal_index.py --check"
   "module-boundary-link:make -C $ROOT check-module-boundary"
   # ls-test-has-golden moved from Python to alint (see .alint.yml).
@@ -110,7 +111,8 @@ fi
 # ---------- ast-grep scan (pattern rules) ----------
 RAW=""
 if (( ! STRUCTURAL_ONLY )); then
-  sg_args=(scan -c "$SGCONFIG" --include-metadata --json=stream)
+  # Native project sources are reached through the extraction links.
+  sg_args=(scan -c "$SGCONFIG" --follow --include-metadata --json=stream)
   # imported codec/archive sources keep upstream conventions; scan Lambda's adapters normally.
   sg_args+=(--globs '!lib/image/lib*/**' --globs '!lib/image/giflib/**')
   sg_args+=(--globs '!lib/zip/**')

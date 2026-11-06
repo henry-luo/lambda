@@ -125,7 +125,7 @@ eligibility for split visits is described in [RAD_12 §6](RAD_12_Paint_IR_Displa
 
 ### 2.5 Per-node dispatch
 
-`render_walk_view` (`render_walk.cpp:315`) is the type switch keyed on `view->view_type`: block-family tags route to `render_block` or `render_walk_block`; `RDT_VIEW_INLINE` to `render_inline`/`render_walk_inline`; `RDT_VIEW_TEXT` to `render_text`; `RDT_VIEW_MARKER` to `render_marker`. The `lam::view_require_*` casts (`lib/tagged.hpp`, see [RAD_01](RAD_01_View_and_DOM_Model.md)) are the zero-cost reinterpretations that make dispatch safe.
+`render_walk_view` (`render_walk.cpp:315`) is the type switch keyed on `view->view_type`: block-family tags route to `render_block` or `render_walk_block`; `RDT_VIEW_INLINE` to `render_inline`/`render_walk_inline`; `RDT_VIEW_TEXT` to `render_text`; `RDT_VIEW_MARKER` to `render_marker`. The `lam::view_require_*` casts (`radiant/tagged.hpp`, see [RAD_01](RAD_01_View_and_DOM_Model.md)) are the zero-cost reinterpretations that make dispatch safe.
 
 ---
 
@@ -244,10 +244,12 @@ in `RdtVectorTest.GaussianFlatRunsPreserveEdgesChannelsAndPitches`.
 ## 8. PDF export
 
 PDF generation is functional through the completed file value (S2.6.6v3,
-D3.5.1, D8.2.6). `render_pdf.cpp` lends an already committed
-`RenderExportSession` to the bundled `lambda.doc.pdf.output.render_view` function
-and saves its result atomically. It reuses an active runtime, or owns a runtime
-at a quiescent host boundary; it never replaces an active evaluator (D6.4.1).
+D3.5.1, D8.2.6). Radiant's `render_pdf.cpp` passes an already committed
+`RenderExportSession` to its optional PDF writer host; Lambda's
+`lambda/module/radiant/pdf_export_adapter.cpp` invokes the bundled
+`lambda.doc.pdf.output.render_view` function and saves its result atomically
+(D9.1.1v3, D9.1.3v2). It reuses an active runtime, or owns a runtime at a
+quiescent host boundary; it never replaces an active evaluator (D6.4.1).
 The old HPDF renderer and `lib/pdf_writer.{c,h}` have been retired.
 
 `radiant_pdf_walk.cpp` supplies the shared `RenderBackend` and secondary-page
@@ -435,7 +437,7 @@ canvas padding and independent/paged producers remain separate limits.
 | `radiant/render_composite.cpp` | `mix-blend-mode` math and backdrop compositors. |
 | `radiant/render.hpp` / `render_painter.cpp` | The `rc_*` gateway → PaintIR → DisplayList lowering seam. |
 | `radiant/render_output.cpp` | Output-target dispatch; raster record→replay; tiled/strip PNG; selective repaint; retained capture. |
-| `radiant/render_pdf.cpp` | Lambda PDF package invocation and atomic save of completed bytes. |
+| `radiant/render_pdf.cpp` / `lambda/module/radiant/pdf_export_adapter.cpp` | Native PDF export sessions and Lambda package invocation with atomic save (D9.1.1v3). |
 | `radiant/render.hpp` / `render_backend_caps.cpp` | Runtime `RenderBackendCaps` vs static `RenderExportTargetCaps`; filter-chain support. |
 | `radiant/render.hpp` / `render_profiler.cpp` | Per-zone counters, `RenderPathTrace`. |
 | `radiant/surface.cpp` | `ImageSurface` ABGR8888 buffer, lazy decode, tile offsets. |

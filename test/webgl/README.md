@@ -60,8 +60,8 @@ chosen output directory. The checked-in reference is under
 captures predate the collection breadcrumbs; use the fresh capture and manifest
 above so the compared canvas bounds match the current page layout.
 
-The partial API is declared in `lambda/dom/webgl_methods.def`;
-`webgl_constants.def` and `webgl_parameters.def` define constants and query
+The partial API is declared in `lib/webgl_methods.def`;
+`lambda/module/radiant/webgl_constants.def` and `radiant/webgl_parameters.def` define constants and query
 result shapes. The advertised extensions are `WEBGL_lose_context`, and, after actual float-target capability probes,
 `EXT_color_buffer_float` and `OES_texture_float_linear`. Phase III adds local
 HTML image and canvas sources for 6/7/9-argument texture uploads, including source

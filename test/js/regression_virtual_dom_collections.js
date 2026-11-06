@@ -109,3 +109,12 @@ console.log("selectedFirst:" + (selected.length === 1));
 optionB.selected = true;
 console.log("selectedLive:" + (selected.length === 2));
 console.log("selectedBrand:" + (selected instanceof HTMLCollection));
+
+var single = document.createElement("select");
+var defaultOption = document.createElement("option");
+single.appendChild(defaultOption);
+var explicitOption = document.createElement("option");
+explicitOption.selected = true;
+single.appendChild(explicitOption);
+console.log("singleResetLast:" + (single.selectedIndex === 1 &&
+    !defaultOption.selected && explicitOption.selected));

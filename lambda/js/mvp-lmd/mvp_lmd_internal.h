@@ -14,7 +14,7 @@
 #include "../js_runtime.h"
 #include "../js_host_hooks.h"
 #include "../js_builtin_catalog.hpp"
-#include "../js_well_known_names.h"
+#include "../../core/js_well_known_names.h"
 #include "../js_props.h"
 #include "../js_runtime_state.hpp"
 #include "../js_execution_internal.hpp"

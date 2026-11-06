@@ -55,14 +55,14 @@ fn code(node,context) map^ {
     let block = node.type == "block" or node.display == "block" or c.tag(node) == "pre"
     let language = c.get(node,"language","")
     let opening = if (not block) profile.code else if (profile.block == "mediawiki")
-        (if (language == "") "<pre>" else "<syntaxhighlight lang=\"" ++ language ++ "\">")
+        (if (node["data-wiki-nowiki"] != null) "<nowiki>" else if (language == "") "<pre>" else "<syntaxhighlight lang=\"" ++ language ++ "\">")
         else if (profile.block == "twiki") "<verbatim>" else if (profile.block == "doku") "<code" ++ (if (language == "") "" else " " ++ language) ++ ">"
         else if (profile.block == "tiki") "~pp~" else if (profile.block == "zim") "'''"
         else if (profile.block == "macro") "{code" ++ (if (language == "") "" else ":language=" ++ language) ++ "}"
         else if (profile.block == "xwiki") "{{code" ++ (if (language == "") "" else " language=\"" ++ language ++ "\"") ++ "}}"
         else "{{{" ++ if (profile.name == "vimwiki" and language != "") "class=\"brush: " ++ language ++ "\"" else ""
     let closing = if (not block) profile.code_end else if (profile.block == "mediawiki")
-        (if (language == "") "</pre>" else "</syntaxhighlight>") else if (profile.block == "twiki") "</verbatim>"
+        (if (node["data-wiki-nowiki"] != null) "</nowiki>" else if (language == "") "</pre>" else "</syntaxhighlight>") else if (profile.block == "twiki") "</verbatim>"
         else if (profile.block == "doku") "</code>" else if (profile.block == "tiki") "~/pp~"
         else if (profile.block == "zim") "'''" else if (profile.block == "macro") "{code}"
         else if (profile.block == "xwiki") "{{/code}}" else "}}}"
@@ -124,11 +124,11 @@ fn render_list(node,context) map^ {
     c.result(body.text ++ (if (context.depth == 0) "\n" else ""),body.diagnostics ++
         if (first_number != 1 and context.profile.lists == "repeat") [c.issue("unsupported-list-start",node,"Repeated-marker lists cannot encode a starting number")] else [])
 }
-fn mw_attributes(node,keys) => join([for (key,value in map(node) where key in keys)
-    string(key) ++ "=\"" ++ (if (value is array) join(value," ") else string(value)) ++ "\""]," ")
-fn table_attribute_issues(node,profile,keys) => [for (key,value in map(node) where key != "sourcepos" and
-    (profile.name != "mediawiki" or not (key in keys) or (not (value is string or value is int or value is array))))
-    c.issue("unsupported-table-attribute",node,"Table attribute has no target mapping: " ++ string(key))]
+fn mw_attributes(node,keys) string^ => join([for (key,value in map(node), key_name in [string(key)^] where key_name in keys)
+    key_name ++ "=\"" ++ (if (value is array) join(value," ") else string(value)) ++ "\""]," ")
+fn table_attribute_issues(node,profile,keys) any^ => [for (key,value in map(node), key_name in [string(key)^] where key_name != "sourcepos" and
+    (profile.name != "mediawiki" or not (key_name in keys) or (not (value is string or value is int or value is array))))
+    c.issue("unsupported-table-attribute",node,"Table attribute has no target mapping: " ++ key_name)]
 fn rows(node,header = false) any^ => [for (child in ((c.kids(node)) ^ { [] }),row in
     (((if (c.tag(child) == "tr") [{node:child,header:header}] else rows(child,header or c.tag(child) == "thead"))) ^ { [] })) row]
 fn table_row(row,context) map^ {
@@ -139,17 +139,19 @@ fn table_row(row,context) map^ {
         (if (profile.table == "atlassian") "||" else if (profile.table == "doku") "^" else if (profile.table == "creole") "|=" else "|") else "|"]
     let cell_keys = ["id","class","style","align","width","height","rowspan","colspan"]
     let row_keys = ["id","class","style","align"]
+    let row_attrs = if (profile.table == "mediawiki") mw_attributes(row.node,row_keys)^ else ""
+    let cell_attrs = if (profile.table == "mediawiki") [for (cell in cells) mw_attributes(cell,cell_keys)^] else []
     let rendered = if (profile.table == "tiki") join([for (value in values) value.text],"|") ++ "\n"
         else if (profile.table == "mediawiki") "|-" ++
-            (if (mw_attributes(row.node,row_keys) == "") "" else " " ++ mw_attributes(row.node,row_keys)) ++ "\n" ++ join([for (i,cell in cells)
+            (if (row_attrs == "") "" else " " ++ row_attrs) ++ "\n" ++ join([for (i,cell in cells)
         (if (row.header or c.tag(cell) == "th") "! " else "| ") ++
-        (if (mw_attributes(cell,cell_keys) == "") "" else mw_attributes(cell,cell_keys) ++ " | ") ++ values[i].text ++ "\n"],"")
+        (if (cell_attrs[i] == "") "" else cell_attrs[i] ++ " | ") ++ values[i].text ++ "\n"],"")
         else join([for (i,cell in cells) delimiters[i] ++ " " ++
             (if (profile.table == "twiki" and (row.header or c.tag(cell) == "th")) "*" else "") ++ values[i].text ++
             (if (profile.table == "twiki" and (row.header or c.tag(cell) == "th")) "*" else "") ++ " "],"") ++
             (if (len(cells) > 0 and profile.table == "atlassian" and row.header) "||" else if (profile.table == "doku" and row.header) "^" else "|") ++ "\n"
-    let issues = table_attribute_issues(row.node,profile,row_keys) ++
-        [for (cell in cells,diagnostic in ((table_attribute_issues(cell,profile,cell_keys)) ^ { [] })) diagnostic];
+    let issues = (table_attribute_issues(row.node,profile,row_keys)^) ++
+        [for (cell in cells,diagnostic in (table_attribute_issues(cell,profile,cell_keys)^)) diagnostic];
     c.result(rendered,[for (value in values,diagnostic in value.diagnostics) diagnostic] ++ issues)
 }
 fn table(node,context) map^ {
@@ -162,11 +164,11 @@ fn table(node,context) map^ {
         c.result(value.text ++ if (profile.table == "vim" and (row.header or any([for (cell in ((c.kids(row.node)) ^ { [] })) c.tag(cell) == "th"])))
             "|" ++ join([for (cell in ((c.kids(row.node)) ^ { [] })) "---"],"|") ++ "|\n" else "",value.diagnostics)
     }])^
-    let issues = caption.diagnostics ++ [for (item in captions,diagnostic in ((table_attribute_issues(item,profile,[])) ^ { [] })) diagnostic] ++ (if (len(captions) > 0 and profile.table != "mediawiki")
+    let issues = caption.diagnostics ++ [for (item in captions,diagnostic in (table_attribute_issues(item,profile,[])^)) diagnostic] ++ (if (len(captions) > 0 and profile.table != "mediawiki")
         [c.issue("unsupported-table-caption",node,"Target table caption syntax is outside this profile")] else []) ++
         if (profile.table in ["pipe","tiki"] and any([for (row in table_rows,cell in ((c.kids(row.node)) ^ { [] })) row.header or c.tag(cell) == "th"]))
         [c.issue("unsupported-table-header",node,"Target table has no header-cell notation")] else [];
-    if (profile.table == "mediawiki") c.result("{| " ++ (if (node.class == null) "class=\"wikitable\" " else "") ++ mw_attributes(node,["id","class"]) ++ "\n" ++
+    if (profile.table == "mediawiki") c.result("{| " ++ (if (node.class == null) "class=\"wikitable\" " else "") ++ (mw_attributes(node,["id","class"])^) ++ "\n" ++
         (if (len(captions) == 0) "" else "|+ " ++ caption.text ++ "\n") ++ body.text ++ "|}\n\n",body.diagnostics ++ issues)
     else if (profile.table == "tiki") c.result("||" ++ trim(body.text) ++ "||\n\n",body.diagnostics ++ issues)
     else c.result(body.text ++ "\n",body.diagnostics ++ issues)
@@ -232,9 +234,9 @@ fn document(node,context) map^ {
     c.result(prefix ++ (if (profile.name == "vimwiki" and len(page_tags) > 0) ":" ++ join(page_tags,":") ++ ":\n" else "") ++ body.text ++
         (if (profile.name == "zimwiki") suffix else ""),body.diagnostics)
 }
-fn metadata(node,context) map^ => c.result("",[for (key,value in map(node) where
-    not ((key == "tags" and c.get(context,"metadata_tags",false)) or (key == "created" and c.get(context,"metadata_created",false))))
-    c.issue("metadata-not-serialized",node,"Metadata field has no target representation: " ++ string(key))])
+fn metadata(node,context) map^ => c.result("",[for (key,value in map(node), key_name in [string(key)^] where
+    not ((key_name == "tags" and c.get(context,"metadata_tags",false)) or (key_name == "created" and c.get(context,"metadata_created",false))))
+    c.issue("metadata-not-serialized",node,"Metadata field has no target representation: " ++ key_name)])
 
 fn render_node(node,context) map^ {
     let kind = c.tag(node)
@@ -297,10 +299,11 @@ pub fn render(node,context) map^ {
             "data-checked","data-task-state","data-task-label","data-task-progress-min","data-task-progress-max","data-task-marker","data-task-flavor",
             "data-tag","data-color","data-wiki-nowiki","data-wiki-template","data-wiki-parameter","data-wiki-parser-function","source","name","args","default",
             "data-kind","data-diagnostic"]
-        let issues = [for (key,item in map(node) where kind != "meta" and not (key in known) and
-            not (key == "id" and (xattrs or kind == "span" or (profile.name == "mediawiki" and kind == "table") or (profile.name == "vimwiki" and node.id == c.text(node) and (kind == "strong" or starts_with(kind,"h"))))) and
-            not (key == "class" and (xattrs or (profile.name == "mediawiki" and kind == "table") or item in ["contains-task-list","task-list-item","wiki-panel","wiki-panel-title"])))
-            c.issue("unsupported-attribute",node,"Attribute has no target mapping: " ++ string(key))]
+        // Attribute names are symbols; normalize once before comparing string names (S5.1.1v2).
+        let issues = [for (key,item in map(node), key_name in [string(key)^] where kind != "meta" and not (key_name in known) and
+            not (key_name == "id" and (xattrs or kind == "span" or (profile.name == "mediawiki" and kind == "table") or (profile.name == "vimwiki" and node.id == c.text(node) and (kind == "strong" or starts_with(kind,"h"))))) and
+            not (key_name == "class" and (xattrs or (profile.name == "mediawiki" and kind == "table") or item in ["contains-task-list","task-list-item","wiki-panel","wiki-panel-title"])))
+            c.issue("unsupported-attribute",node,"Attribute has no target mapping: " ++ key_name)]
         let prefix = if (not xattrs or (node.id == null and node.class == null)) "" else "(%" ++
             (if (node.id == null) "" else " id=\"" ++ node.id ++ "\"") ++
             (if (node.class == null) "" else " class=\"" ++ string(node.class) ++ "\"") ++ " %)\n";

@@ -8,7 +8,7 @@
 
 ## 1. The unified DOM/View tree — the substrate ([RAD_01](radiant/RAD_01_View_and_DOM_Model.md))
 
-There is **no separate view tree**. `typedef DomNode View` (`lambda/input/css/dom_node.hpp`): every `DomNode` carries its own geometry (`x/y/width/height`, border-box, all `float`), its `view_type` tag, and the incremental-layout fields; `DomElement` additionally carries the embedded Lambda `Element` and **all** the layout property-group pointers (`font`, `bound`, `in_line`, `blk`, `position`, flex/grid/table item props). The `View*` classes in `view.hpp` (`ViewSpan`/`ViewBlock`/`ViewTable…`) are **method-only wrappers that add zero fields** — enforced by convention ("Do NOT add fields — views share memory with DomElement!") and the grepable `unsafe_*` casts in `lib/tagged.hpp`.
+There is **no separate view tree**. `typedef DomNode View` (`lambda/input/css/dom_node.hpp`): every `DomNode` carries its own geometry (`x/y/width/height`, border-box, all `float`), its `view_type` tag, and the incremental-layout fields; `DomElement` additionally carries the embedded Lambda `Element` and **all** the layout property-group pointers (`font`, `bound`, `in_line`, `blk`, `position`, flex/grid/table item props). The `View*` classes in `view.hpp` (`ViewSpan`/`ViewBlock`/`ViewTable…`) are **method-only wrappers that add zero fields** — enforced by convention ("Do NOT add fields — views share memory with DomElement!") and the grepable `unsafe_*` casts in `radiant/tagged.hpp`.
 
 "Building" the view tree is therefore an **in-place tag during layout**: `layout_flow_node` walks the DOM and `set_view` does a `static_cast<View*>(node)` and stamps `view_type` — no allocation. `ViewTree` owns a bump **`Arena`** (nodes) + a **`Pool`** (property groups). Incremental relayout marks `layout_dirty` up the ancestry, skips clean children by reusing their cached `layout_height_contribution`, and `view_pool_reset_retained` swaps the property pool **while keeping the nodes** so `DocState` anchors (bound by monotonic node `id`, not pointer) survive. The editor round-trips caret/selection through the `source_pos_bridge` (`render_map` source-path identity).
 
@@ -75,12 +75,12 @@ A single global `UiContext` owns the GLFW window, the `ImageSurface`, fonts, the
 
 | Area | Start here |
 |---|---|
-| View/DOM model & memory | `radiant/view.hpp`, `radiant/view_pool.cpp`, `lib/tagged.hpp` ([RAD_01](radiant/RAD_01_View_and_DOM_Model.md)) |
+| View/DOM model & memory | `radiant/view.hpp`, `radiant/view_pool.cpp`, `radiant/tagged.hpp` ([RAD_01](radiant/RAD_01_View_and_DOM_Model.md)) |
 | CSS computed style | `radiant/resolve_css_style.cpp`, `radiant/resolve_htm_style.cpp` ([RAD_02](radiant/RAD_02_CSS_Style_Resolution.md)) |
 | Layout core & modes | `radiant/layout.cpp`, `radiant/layout_block.cpp`, `radiant/layout_{flex,grid,table}.cpp` ([RAD_03](radiant/RAD_03_Layout_Driver_Block_BFC.md)–[RAD_11](radiant/RAD_11_Positioned_Float_Multicol_Lists.md)) |
 | Rendering | `radiant/paint_ir.cpp`, `radiant/display_list.*`, `radiant/render_*.cpp` ([RAD_12](radiant/RAD_12_Paint_IR_Display_List.md)–[RAD_14](radiant/RAD_14_SVG_Vector_Graph.md)) |
 | Events / editing / state | `radiant/event.cpp`, `radiant/dom_range.cpp`, `radiant/state_store.cpp` ([RAD_15](radiant/RAD_15_Events_Input.md)–[RAD_19](radiant/RAD_19_Form_Controls.md)) |
-| Shell / loading / scripting | `radiant/window.cpp`, `radiant/cmd_layout.cpp`, `radiant/script_runner.cpp` ([RAD_20](radiant/RAD_20_Application_Shell_Browsing.md)–[RAD_22](radiant/RAD_22_Media_Webview.md)) |
+| Shell / loading / scripting | `radiant/window.cpp`, `radiant/cmd_layout.cpp`, `lambda/module/radiant/script_runner.cpp` ([RAD_20](radiant/RAD_20_Application_Shell_Browsing.md)–[RAD_22](radiant/RAD_22_Media_Webview.md)) |
 
 ---
 

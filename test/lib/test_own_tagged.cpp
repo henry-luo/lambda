@@ -4,7 +4,7 @@
 #include "../../lib/ownership.hpp"
 #include "../../lib/mem_kind.hpp"
 #include "../../lib/arraylist.hpp"
-#include "../../lib/tagged.hpp"
+#include "../../radiant/tagged.hpp"
 #include "../../radiant/radiant.hpp"
 
 namespace {

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../lambda-data.hpp"
+#include "value_rep.h"
 
 // a union has no common physical record layout. Constructors may select one
 // matching arm; multiple matches retain dynamic admission (D4.2.5).

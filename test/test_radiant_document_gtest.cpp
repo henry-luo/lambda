@@ -2,6 +2,12 @@
 #include <gtest/gtest.h>
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/dom_mutation_prepare.hpp"
+#include "../radiant/dom_mutation_state.hpp"
+#include "../radiant/dom_mutation_record.hpp"
+#include "../radiant/dom_backed_tree.hpp"
+#include "../radiant/scroll_geometry.hpp"
+#include "../radiant/scroll_request.hpp"
 #include "../radiant/layout_ruby.hpp"
 #include "../radiant/layout_text_context.hpp"
 #include "../radiant/hyphenation.hpp"
@@ -32,7 +38,7 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/value_builder.hpp"
-#include "../lib/tagged.hpp"
+#include "../radiant/tagged.hpp"
 #include "radiant_render_test_utils.hpp"
 #include "radiant_flow_test_utils.hpp"
 #include "../lib/str.h"
@@ -1028,6 +1034,227 @@ TEST_F(RadiantEventSimulation, ShutdownReleasesNavigationHistoryBeforeTheScriptC
 
 TEST_F(RadiantEventSimulation, ShutdownReleasesPagesLeftByBackNavigation) {
     check_navigation(true);
+}
+
+TEST_F(RadiantDocumentTest, EditSnapshotsReleaseTheirIndependentNodePins) {
+    DomElement* host = load_script_source("<div id=result contenteditable=true>bold</div>");
+    ASSERT_NE(host, nullptr);
+    DomNode* node = host->first_child;
+    ASSERT_NE(node, nullptr);
+    ASSERT_TRUE(node->is_text());
+    ASSERT_NE(radiant_document_ensure_state(document, "edit-history-pin-test"), nullptr);
+    DomNodeRef host_ref = dom_node_ref(host);
+    DomNodeRef node_ref = dom_node_ref(node);
+    DomEditInvocation invocation = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(document->state, host, {node, 0}, {node, 0}, &invocation));
+    bool began = dom_edit_invocation_begin_transaction(&invocation);
+    EXPECT_TRUE(began);
+    uint64_t delta = 0;
+    if (began) {
+        EXPECT_EQ(dom_node_pin_count(document, host_ref, DOM_NODE_PIN_EDIT_HISTORY), 1u);
+        EXPECT_EQ(dom_node_pin_count(document, node_ref, DOM_NODE_PIN_EDIT_HISTORY), 1u);
+        uint32_t caret = 0;
+        if (dom_edit_invocation_replace_range_u16(&invocation, node->as_text(), 0, 0, "x", &caret)) {
+            delta = dom_edit_invocation_retain_delta(&invocation);
+            EXPECT_NE(delta, 0u);
+            if (delta) {
+                EXPECT_EQ(dom_node_pin_count(document, host_ref, DOM_NODE_PIN_EDIT_HISTORY), 2u);
+                EXPECT_EQ(dom_node_pin_count(document, node_ref, DOM_NODE_PIN_EDIT_HISTORY), 3u);
+            }
+        } else {
+            ADD_FAILURE() << "edit transaction failed";
+        }
+    }
+    dom_edit_invocation_end(&invocation);
+    if (delta) {
+        EXPECT_EQ(dom_node_pin_count(document, host_ref, DOM_NODE_PIN_EDIT_HISTORY), 1u);
+        EXPECT_EQ(dom_node_pin_count(document, node_ref, DOM_NODE_PIN_EDIT_HISTORY), 2u);
+        EXPECT_TRUE(dom_edit_release_retained_delta(document->state, host, delta));
+    }
+    EXPECT_EQ(dom_node_pin_count(document, host_ref, DOM_NODE_PIN_EDIT_HISTORY), 0u);
+    EXPECT_EQ(dom_node_pin_count(document, node_ref, DOM_NODE_PIN_EDIT_HISTORY), 0u);
+}
+
+TEST_F(RadiantDocumentTest, AbortedEditRestoresBackingAndSelectionIdentity) {
+    DomElement* host = load_script_source("<div id=result contenteditable=true>bold</div>");
+    ASSERT_NE(host, nullptr);
+    DocState* state = radiant_document_ensure_state(document, "edit-abort-test");
+    ASSERT_NE(state, nullptr);
+    if (!state->dom_selection) state->dom_selection = dom_selection_create(state);
+    ASSERT_NE(state->dom_selection, nullptr);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_selection_collapse(state->dom_selection, host, 1, &exception));
+    DomRange* original_range = dom_selection_get_range_at(state->dom_selection, 0, &exception);
+    DomNode* original_child = host->first_child;
+    ASSERT_NE(original_range, nullptr);
+    ASSERT_NE(original_child, nullptr);
+    DomEditInvocation invocation = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, host, {host, 1}, {host, 1}, &invocation));
+    ASSERT_TRUE(dom_edit_insert_at_boundary_u16(&invocation, "discard", nullptr));
+    dom_edit_invocation_end(&invocation);
+    EXPECT_EQ(host->first_child, original_child);
+    EXPECT_EQ(host->last_child, original_child);
+    EXPECT_EQ(dom_element_backing(host)->length, 1);
+    EXPECT_EQ(dom_backed_node_index(host, original_child), 0);
+    EXPECT_EQ(dom_selection_get_range_at(state->dom_selection, 0, &exception), original_range);
+    DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
+    EXPECT_EQ(focus.node, host);
+    EXPECT_EQ(focus.offset, 1u);
+}
+
+TEST_F(RadiantDocumentTest, AbortedEditRestoresHostAndDescendantAttributes) {
+    DomElement* host = load_script_source(
+        "<div id=result contenteditable=true data-state=host><span data-state=child>text</span></div>");
+    ASSERT_NE(host, nullptr);
+    ASSERT_NE(host->first_child, nullptr);
+    ASSERT_TRUE(host->first_child->is_element());
+    DomElement* child = host->first_child->as_element();
+    DocState* state = radiant_document_ensure_state(document, "edit-abort-attribute-test");
+    ASSERT_NE(state, nullptr);
+    DomEditInvocation invocation = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, host, {host, 0}, {host, 0}, &invocation));
+    ASSERT_TRUE(dom_edit_invocation_begin_transaction(&invocation));
+    ASSERT_TRUE(dom_set_non_style_metadata(host, "data-state", "changed"));
+    ASSERT_TRUE(dom_set_non_style_metadata(child, "data-state", "changed"));
+    dom_edit_invocation_end(&invocation);
+    EXPECT_STREQ(host->get_attribute("data-state"), "host");
+    EXPECT_STREQ(child->get_attribute("data-state"), "child");
+}
+
+TEST_F(RadiantDocumentTest, NativeEditRetiresDetachedTextOnlyOnCommit) {
+    DomElement* host = load_script_source("<div id=result contenteditable=true><p>left</p><p>right</p></div>");
+    ASSERT_NE(host, nullptr);
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    ASSERT_NE(document->view_tree, nullptr);
+    ASSERT_NE(host->last_child, nullptr);
+    ASSERT_TRUE(host->last_child->is_element());
+    DomElement* parent = host->last_child->as_element();
+    ASSERT_NE(parent->first_child, nullptr);
+    ASSERT_TRUE(parent->first_child->is_text());
+    DomText* text = parent->first_child->as_text();
+    ASSERT_NE(text->rect, nullptr);
+    TextRect* original_rect = text->rect;
+    DocState* state = radiant_document_ensure_state(document, "native-edit-retirement-test");
+    ASSERT_NE(state, nullptr);
+    if (!state->dom_selection) state->dom_selection = dom_selection_create(state);
+    ASSERT_NE(state->dom_selection, nullptr);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_selection_collapse(state->dom_selection, text, 0, &exception));
+    dom_js_mutation_records_reset(document);
+
+    DomEditInvocation aborted = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, host, {text, 0}, {text, 0}, &aborted));
+    ASSERT_TRUE(dom_edit_invocation_begin_transaction(&aborted));
+    ASSERT_TRUE(radiant_dom_remove_edit_child(text));
+    EXPECT_EQ(text->rect, original_rect);
+    EXPECT_FALSE(document_runtime_cleanup_ready(document));
+    EXPECT_FALSE(free_document_profiled(document, nullptr));
+    EXPECT_FALSE(ui.destroy_document());
+    EXPECT_EQ(ui.document, document);
+    dom_edit_invocation_end(&aborted);
+    EXPECT_EQ(parent->first_child, text);
+    EXPECT_EQ(text->rect, original_rect);
+    EXPECT_EQ(dom_backed_node_index(parent, text), 0);
+    EXPECT_EQ(document->js.mutation_record_count, 0);
+
+    DomEditInvocation committed = {};
+    ASSERT_TRUE(dom_edit_invocation_begin(state, host, {text, 0}, {text, 0}, &committed));
+    ASSERT_TRUE(dom_edit_invocation_begin_transaction(&committed));
+    ASSERT_TRUE(radiant_dom_remove_edit_child(text));
+    EXPECT_EQ(text->rect, original_rect);
+    ViewTree* original_tree = document->view_tree;
+    layout_html_doc(&ui, document, true);
+    ASSERT_EQ(document->view_tree, original_tree);
+    EXPECT_EQ(text->rect, original_rect);
+    EXPECT_FALSE(dom_edit_invocation_commit_selection(&committed));
+    EXPECT_EQ(committed.transaction, nullptr);
+    dom_edit_invocation_end(&committed);
+    EXPECT_EQ(parent->first_child, nullptr);
+    EXPECT_EQ(text->rect, nullptr);
+    EXPECT_EQ(dom_element_backing(parent)->length, 0);
+    dom_js_mutation_records_reset(document);
+}
+
+TEST_F(RadiantDocumentTest, NativeRemovalRelocatesRangesAndClearsFocus) {
+    DomElement* parent = load_script_source(
+        "<div id=result><div id=subject tabindex=0>text</div><button>next</button></div>");
+    ASSERT_NE(parent, nullptr);
+    DomElement* subject = dom_find_element_by_id(parent, "subject");
+    ASSERT_NE(subject, nullptr);
+    DomNode* text = subject->first_child;
+    ASSERT_NE(text, nullptr);
+    DocState* state = radiant_document_ensure_state(document, "native-removal-state-test");
+    ASSERT_NE(state, nullptr);
+    focus_set_programmatic(state, subject, false);
+    ASSERT_EQ(focus_get(state), subject);
+    DomRange* range = dom_range_create(state);
+    ASSERT_NE(range, nullptr);
+    dom_range_link_into_state(state, range);
+    const char* exception = nullptr;
+    ASSERT_TRUE(dom_range_set_start(range, text, 1, &exception));
+    ASSERT_TRUE(dom_range_set_end(range, text, 3, &exception));
+    radiant_dom_pre_remove_state(state, subject);
+    EXPECT_EQ(focus_get(state), nullptr);
+    EXPECT_EQ(range->start.node, parent);
+    EXPECT_EQ(range->start.offset, 0u);
+    EXPECT_EQ(range->end.node, parent);
+    EXPECT_EQ(range->end.offset, 0u);
+    dom_range_release(range);
+}
+
+TEST_F(RadiantDocumentTest, NativeMutationRecordPinsAndReleasesItsNodes) {
+    DomElement* parent = load_script_source(
+        "<style id=sheet>span { color:red }</style><div id=result><span>text</span></div>");
+    ASSERT_NE(parent, nullptr);
+    DomNode* target = parent->first_child;
+    ASSERT_NE(target, nullptr);
+    ASSERT_NE(radiant_document_ensure_state(document, "native-mutation-record-test"), nullptr);
+    dom_js_mutation_records_reset(document);
+    DomNodeRef parent_ref = dom_node_ref(parent);
+    DomNodeRef target_ref = dom_node_ref(target);
+    radiant_dom_record_mutation_detail(document, DOM_JS_MUTATION_CHILD_INSERT,
+                                      target, parent, 42, nullptr, CSS_PROPERTY_UNKNOWN);
+    ASSERT_EQ(document->js.mutation_record_count, 1);
+    const DomJsMutationRecord* record = &document->js.mutation_records[0];
+    EXPECT_EQ(record->sequence, 42u);
+    EXPECT_EQ(record->kind, DOM_JS_MUTATION_CHILD_INSERT);
+    EXPECT_EQ(record->target, target);
+    EXPECT_EQ(record->parent, parent);
+    EXPECT_TRUE(record->was_connected);
+    EXPECT_EQ(dom_node_pin_count(document, target_ref, DOM_NODE_PIN_RECONCILE), 1u);
+    EXPECT_EQ(dom_node_pin_count(document, parent_ref, DOM_NODE_PIN_RECONCILE), 1u);
+    radiant_dom_record_mutation_detail(document, DOM_JS_MUTATION_ATTRIBUTE,
+                                      target, parent, 43, "class", CSS_PROPERTY_UNKNOWN);
+    ASSERT_EQ(document->js.mutation_record_count, 2);
+    EXPECT_EQ(document->js.mutation_records[1].attribute, DOM_JS_MUTATION_ATTRIBUTE_CLASS);
+    EXPECT_FALSE(document->js.mutation_records[1].direction_sensitive);
+    EXPECT_EQ(dom_node_pin_count(document, target_ref, DOM_NODE_PIN_RECONCILE), 2u);
+    EXPECT_EQ(dom_node_pin_count(document, parent_ref, DOM_NODE_PIN_RECONCILE), 2u);
+    DomElement* style = dom_find_element_by_id(document->root, "sheet");
+    ASSERT_NE(style, nullptr);
+    ASSERT_NE(style->first_child, nullptr);
+    radiant_dom_record_inline_stylesheet_mutation(document, DOM_JS_MUTATION_TEXT,
+                                                   style->first_child, style);
+    radiant_dom_record_inline_stylesheet_mutation(document, DOM_JS_MUTATION_TEXT,
+                                                   style->first_child, style);
+    ASSERT_EQ(document->js.inline_stylesheet_mutation_count, 1);
+    EXPECT_EQ(document->js.inline_stylesheet_mutations[0], style);
+    dom_js_mutation_records_reset(document);
+    EXPECT_EQ(dom_node_pin_count(document, target_ref, DOM_NODE_PIN_RECONCILE), 0u);
+    EXPECT_EQ(dom_node_pin_count(document, parent_ref, DOM_NODE_PIN_RECONCILE), 0u);
+    uint64_t before_epoch = document->mutation_epoch;
+    doc_state_clear_reflow(document->state);
+    radiant_dom_record_mutation_detail(document, DOM_JS_MUTATION_CHILD_INSERT,
+                                      target, parent, 0, nullptr, CSS_PROPERTY_UNKNOWN);
+    radiant_dom_mutation_begin(document, DOM_JS_MUTATION_CHILD_INSERT, target, parent,
+                               nullptr, CSS_PROPERTY_UNKNOWN);
+    EXPECT_EQ(document->mutation_epoch, before_epoch + 1);
+    EXPECT_EQ(document->js.mutation_count, 1);
+    EXPECT_EQ(document->js.mutation_record_count, 1);
+    radiant_dom_mutation_finish(document, DOM_JS_MUTATION_CHILD_INSERT);
+    EXPECT_TRUE(document->state->needs_reflow);
+    dom_js_mutation_records_reset(document);
 }
 
 TEST_F(RadiantDocumentTest, TreeMembershipPreservesSubtreesDetachedAndUnregisteredTargets) {
@@ -6212,6 +6439,17 @@ TEST_F(RadiantDocumentTest, RebuiltSourceRangesIgnoreAnonymousTableGroups) {
     EXPECT_EQ(view_state_corresponding_node(cell, table, next_table, true), next_cell);
 }
 
+TEST_F(RadiantDocumentTest, ScrollableExtentIncludesPaddingAfterOverflowingChildren) {
+    DomElement* scrollport = load_script_source(R"HTML(<style>
+        body{margin:0}#result{width:100px;height:50px;padding:0 10px;overflow:auto}
+        #child{width:200px;height:100px}
+        </style><div id="result"><div id="child"></div></div>)HTML");
+    ASSERT_NE(scrollport, nullptr);
+    layout_html_doc(&ui, document, false);
+    EXPECT_FLOAT_EQ(dom_scrollable_extent(scrollport, true), 220.0f);
+    EXPECT_FLOAT_EQ(dom_scrollable_extent(scrollport, false), 100.0f);
+}
+
 TEST_F(RadiantDocumentTest, ScrollRequestsReuseValidatedFlowAndHonorViewportChanges) {
     DomElement* result = load_script_source(R"HTML(<style>
         body{margin:0}#scrollport{width:160px;height:64px;overflow:auto}
@@ -6219,8 +6457,12 @@ TEST_F(RadiantDocumentTest, ScrollRequestsReuseValidatedFlowAndHonorViewportChan
         </style><div id="scrollport"><div id="start"></div><div id="spacer"></div><div id="result">end</div></div>)HTML");
     ASSERT_NE(result, nullptr);
     layout_html_doc(&ui, document, false);
+    auto request = [this](DomElement* target) {
+        radiant_queue_scroll_into_view(document, target, false, true,
+            DOM_SCROLL_ALIGN_START, DOM_SCROLL_ALIGN_NEAREST, DOM_SCROLL_BEHAVIOR_AUTO);
+    };
     // script-only documents can start without an interactive scroll-state owner.
-    dom_scroll_into_view_if_needed_bridge(result);
+    request(result);
     ASSERT_TRUE(layout_update_document(&ui, document));
     expect_box("result", 0, 48, 160, 16);
 
@@ -6232,7 +6474,7 @@ TEST_F(RadiantDocumentTest, ScrollRequestsReuseValidatedFlowAndHonorViewportChan
     ASSERT_NE(start, nullptr);
     DomElement* targets[] = {start, result};
     for (DomElement* target : targets) {
-        dom_scroll_into_view_if_needed_bridge(target);
+        request(target);
         ASSERT_TRUE(layout_update_document(&ui, document));
         EXPECT_EQ(document->view_tree->document_layout_count, layouts);
         expect_box(target == start ? "start" : "result", 0, target == start ? 0 : 48, 160, 16);
@@ -6240,7 +6482,7 @@ TEST_F(RadiantDocumentTest, ScrollRequestsReuseValidatedFlowAndHonorViewportChan
 
     // a queued scroll cannot bypass a changed viewport's normal flow validation.
     ui.viewport_width = 640.0f;
-    dom_scroll_into_view_if_needed_bridge(result);
+    request(result);
     ASSERT_TRUE(layout_update_document(&ui, document));
     EXPECT_EQ(document->view_tree->document_layout_count, layouts + 1);
     EXPECT_FLOAT_EQ(document->view_tree->root->width, 640.0f);
@@ -7327,7 +7569,8 @@ TEST_F(RadiantDocumentTest, ComputedStyleKeepsAuthoredAncestryAcrossTableRepair)
     ASSERT_NE(revision, 0u);
     document->incremental_layout = true;
     document->skip_style_reset = true;
-    layout_unwrap_anonymous_table_fixups_for_dom_mutation(table);
+    ASSERT_EQ(radiant_dom_prepare_children_mutation(table, row), table);
+    EXPECT_EQ(row->parent.get(), table);
     layout_html_doc(&ui, document, true);
     EXPECT_EQ(radiant::css_resolved_style_input_revision(&flow.layout, row), revision);
 

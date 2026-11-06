@@ -9,7 +9,7 @@
 #include "../lib/ownership.hpp"
 #include "../lib/str.h"
 
-#include "../radiant/script_timeout.hpp"
+#include "../lambda/module/radiant/script_timeout.hpp"
 #include "test_radiant_view_helpers.hpp"
 
 extern "C" {
@@ -984,6 +984,7 @@ TEST(RadiantViewTest, LocalNavigationPublishesDelayedRemoteImageWithoutBlocking)
         {"GET /slow.svg ", "image/svg+xml", image, strlen(image), "", 200, 1200},
         {"GET /background.svg ", "image/svg+xml", image, strlen(image), "", 200, 200},
         {"GET /dynamic.svg ", "image/svg+xml", image, strlen(image), "", 200, 700},
+        {"GET /missing.svg ", "text/plain", "missing", 7, "", 404, 300},
         {"GET /cancel.svg ", "image/svg+xml", image, strlen(image), "", 200, 1200},
     };
     RadiantViewImageServer server = {};
@@ -1021,6 +1022,12 @@ TEST(RadiantViewTest, LocalNavigationPublishesDelayedRemoteImageWithoutBlocking)
         "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"body\"},\"attribute\":\"data-loaded\","
         "\"equals\":\"yes\",\"assert_timeout\":5000,\"assert_interval\":50},"
         "{\"type\":\"assert_script\",\"js\":\"document.querySelector('#dynamic').naturalWidth===40\"},"
+        "{\"type\":\"script\",\"js\":\"window.missing=new Image();"
+        "missing.onload=function(){document.body.setAttribute('data-missing','loaded')};"
+        "missing.onerror=function(){document.body.setAttribute('data-missing','error')};"
+        "missing.src=document.body.getAttribute('data-base')+'missing.svg';document.body.appendChild(missing)\"},"
+        "{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"body\"},\"attribute\":\"data-missing\","
+        "\"equals\":\"error\",\"assert_timeout\":5000,\"assert_interval\":50},"
         "{\"type\":\"script\",\"js\":\"window.cancelled=new Image();"
         "cancelled.src=document.body.getAttribute('data-base')+'cancel.svg'\"},"
         "{\"type\":\"click\",\"target\":{\"selector\":\"#back\"}},"
@@ -1036,7 +1043,7 @@ TEST(RadiantViewTest, LocalNavigationPublishesDelayedRemoteImageWithoutBlocking)
         nullptr, 15000, g_radiant_view_executable);
     const char* output = result.stdout_buf ? result.stdout_buf : "";
     EXPECT_EQ(result.exit_code, 0) << output;
-    EXPECT_NE(strstr(output, "Assertions: 9 passed, 0 failed"), nullptr) << output;
+    EXPECT_NE(strstr(output, "Assertions: 11 passed, 0 failed"), nullptr) << output;
     shell_result_free(&result);
     lam::Temp<char> requests(read_text_file(audit));
     ASSERT_NE(requests.get(), nullptr);

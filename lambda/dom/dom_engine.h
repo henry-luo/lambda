@@ -22,6 +22,8 @@
 
 #include "../lambda-data.hpp"
 #include <stddef.h>
+#include "../../lib/layout_boxes.h"
+#include "../../lib/dom_image.h"
 
 struct DomDocument;
 struct DomElement;
@@ -90,13 +92,6 @@ bool dom_engine_layout_active(DomDocument* doc);
 // synchronize scroll-dependent offsets without committing pending DOM layout.
 void dom_engine_resolve_scrolled_geometry(DomDocument* doc);
 
-struct DomCssBoxSizes {
-    float content_width, content_height;
-    float border_width, border_height;
-    float padding_left, padding_top;
-    bool vertical;
-};
-bool dom_engine_element_css_boxes(DomElement* element, DomCssBoxSizes* sizes);
 // committed layout coordinates only; absence leaves zero outputs and never forces layout.
 bool dom_engine_element_viewport_origin(DomElement* element, float* x, float* y);
 bool dom_engine_attribute_has_relational_css_dependency(DomDocument* document, const char* name);
@@ -107,11 +102,6 @@ void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 // selected native pointer stream: 0/1 success, -1 inactive ID, -2 detached target.
 int dom_engine_pointer_capture(DomElement* element,int32_t pointer_id,unsigned operation);
 
-// HTML image loading: the engine owns decoding and intrinsic-image state; the
-// DOM core owns the deferred `load` event and node lifetime around it.
-bool dom_engine_set_image_source(DomElement* element, const char* source, bool* pending);
-bool dom_engine_image_natural_size(DomElement* element, int* width, int* height);
-bool dom_engine_image_rendered_size(DomElement* element, int* width, int* height);
 void dom_engine_install_animation_globals(void);
 void dom_engine_animation_frame_prepare(void* document, double timestamp_ms);
 

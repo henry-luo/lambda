@@ -1,7 +1,7 @@
 #pragma once
 
 #include "dom_provider.hpp"
-#include "dom_svg_context.h"
+#include "../input/css/dom_svg_context.h"
 #include "../lambda-data.hpp"
 #include "../input/css/css_style.hpp"
 #include <math.h>
@@ -15,6 +15,12 @@ struct DocState;
 struct DomSelection;
 struct SourcePosC;
 struct DomBoundary;
+struct BoundaryProp;
+struct ScrollProp;
+struct PositionProp;
+struct EmbedProp;
+enum DomScrollAlign : uint8_t;
+enum DomScrollBehavior : uint8_t;
 
 // native host calls borrow Items/documents/text synchronously; publication has process lifetime
 // (D5.5.1 / D5.1.4, D9.1.3 / D9.5.6).
@@ -32,12 +38,13 @@ struct DomBoundary;
     OP(bool, set_design_mode, (void* document, const char* value), (document, value), false) \
     OP(bool, state_bool, (void* state, void* node, const char* name), (state, node, name), false) \
     OP(void, document_request_repaint, (void* document), (document), (void)0) \
+    OP(void, queue_scroll_into_view, (DomDocument* document, DomElement* element, bool center, bool if_needed, DomScrollAlign block, DomScrollAlign inline_align, DomScrollBehavior behavior), (document, element, center, if_needed, block, inline_align, behavior), (void)0) \
     OP(void, document_clear_reflow, (void* document), (document), (void)0) \
     OP(bool, layout_document, (void* ui_context, void* document, bool is_reflow), (ui_context, document, is_reflow), false) \
     OP(float, element_effective_zoom, (void* element), (element), 1.0f) \
     OP(bool, element_has_vertical_rl_flow, (void* element), (element), false) \
     OP(CssEnum, element_specified_keyword, (void* element, CssPropertyCode property, CssEnum fallback), (element, property, fallback), fallback) \
-    OP(void, prepare_children_mutation, (void* element), (element), (void)0) \
+    OP(DomElement*, prepare_children_mutation, (DomElement* element, DomNode* changed_child), (element, changed_child), nullptr) \
     OP(bool, control_is_disabled, (void* state, void* element), (state, element), false) \
     OP(void, control_focus_programmatic, (void* state, void* element, bool from_keyboard), (state, element, from_keyboard), (void)0) \
     OP(bool, control_store_text, (void* state, void* element, const char* value, uint32_t bytes, uint32_t utf16_units), (state, element, value, bytes, utf16_units), false) \
@@ -81,7 +88,11 @@ struct DomBoundary;
     OP(bool, element_client_frame, (DomNode* node, RdtMatrix* matrix, float* origin_x, float* origin_y), (node, matrix, origin_x, origin_y), false) \
     OP(bool, source_boundary, (DomNode* root, const SourcePosC* position, DomBoundary* boundary), (root, position, boundary), false) \
     OP(bool, text_control_selection_rects, (UiContext* ui, DomElement* element, uint32_t start, uint32_t end, void (*callback)(float, float, float, float, void*), void* owner), (ui, element, start, end, callback, owner), false) \
-    OP(int, url_attribute_get, (Item receiver, Item* out, const char* attribute), (receiver, out, attribute), 0)
+    OP(int, url_attribute_get, (Item receiver, Item* out, const char* attribute), (receiver, out, attribute), 0) \
+    OP(const BoundaryProp*, boundary_property, (const DomElement* element), (element), (element ? element->bound.get() : nullptr)) \
+    OP(const ScrollProp*, scroll_property, (const DomElement* element), (element), (element ? element->scroller.get() : nullptr)) \
+    OP(const PositionProp*, position_property, (const DomElement* element), (element), (element ? element->position.get() : nullptr)) \
+    OP(const EmbedProp*, embed_property, (const DomElement* element), (element), (element ? element->embed.get() : nullptr))
 
 struct DomHostEngineOps {
 #define DOM_HOST_FIELD(result, name, parameters, arguments, absence) result (*name) parameters;

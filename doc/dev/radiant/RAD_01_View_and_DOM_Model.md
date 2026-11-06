@@ -4,7 +4,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the single most load-bearing decision in Radiant: there is no separate layout "view tree" — a parsed DOM node *is* its own view. It describes the unified `DomNode`/`View` representation, the method-only view-wrapper hierarchy, how layout "builds" the view tree by tagging nodes in place, the two-tier arena+pool memory model, incremental relayout, and the source-position bridge that anchors the rich-text editor.
 >
-> **Primary sources:** `lambda/input/css/dom_node.hpp` / `dom_element.hpp` (the base structs that carry every view field), `radiant/view.hpp` (the `View*` wrapper classes + `ViewTree`), `radiant/view_pool.cpp` (in-place tagging, property allocation, teardown, retained reset), `lib/tagged.hpp` (`namespace lam` cast helpers), `radiant/render.hpp` (ownership-tracked pointer retention), `radiant/event.hpp` / `source_pos_bridge.cpp` (DOM↔source mapping), `radiant/layout.cpp` (`layout_flow_node`, view-tree creation).
+> **Primary sources:** `lambda/input/css/dom_node.hpp` / `dom_element.hpp` (the base structs that carry every view field), `radiant/view.hpp` (the `View*` wrapper classes + `ViewTree`), `radiant/view_pool.cpp` (in-place tagging, property allocation, teardown, retained reset), `radiant/tagged.hpp` (`namespace lam` cast helpers), `radiant/render.hpp` (ownership-tracked pointer retention), `radiant/event.hpp` / `source_pos_bridge.cpp` (DOM↔source mapping), `radiant/layout.cpp` (`layout_flow_node`, view-tree creation).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -47,9 +47,9 @@ The `view.hpp` classes reinterpret the same storage and exist purely to hang typ
 
 The exact chain is therefore: `DomNode` → `DomElement` → `ViewElement (= ViewSpan)` → `ViewBlock` → `{ViewTable, ViewTableRowGroup, ViewTableRow, ViewTableCell}`, plus `ViewMarker : DomElement`; and the parallel text branch `DomNode` → `DomText` → `ViewText`.
 
-### 2.4 The cast helpers (`lib/tagged.hpp`, `namespace lam`)
+### 2.4 The cast helpers (`radiant/tagged.hpp`, `namespace lam`)
 
-Because storage is shared, moving between a `DomNode*` and a typed `View*` is a cast, not a conversion. `lib/tagged.hpp` centralizes this glue: the checked accessors `view_as_element`/`view_require_element` (`tagged.hpp:116`/`124`) and `view_require_block` (`tagged.hpp:142`); the no-op identity casts `dom_view`/`view_dom_node` (`tagged.hpp:168`/`176`); the tag-checked template down-cast `dom_as<T>` with its `DomNodeTagToType` map (`tagged.hpp:250`); and the deliberately grepable `unsafe_*` family (`tagged.hpp:184-241`). The `unsafe_*` casts exist for the window during `set_view` where a `ViewBlock*`/`ViewTable*`/`ViewTableCell*` is needed *before* the runtime `view_type` tag has been switched; each documents why it is safe, and the safety proof is exactly "views add no fields" ([§3](#3-the-zero-field-invariant)).
+Because storage is shared, moving between a `DomNode*` and a typed `View*` is a cast, not a conversion. `radiant/tagged.hpp` centralizes this glue: the checked accessors `view_as_element`/`view_require_element` (`tagged.hpp:116`/`124`) and `view_require_block` (`tagged.hpp:142`); the no-op identity casts `dom_view`/`view_dom_node` (`tagged.hpp:168`/`176`); the tag-checked template down-cast `dom_as<T>` with its `DomNodeTagToType` map (`tagged.hpp:250`); and the deliberately grepable `unsafe_*` family (`tagged.hpp:184-241`). The `unsafe_*` casts exist for the window during `set_view` where a `ViewBlock*`/`ViewTable*`/`ViewTableCell*` is needed *before* the runtime `view_type` tag has been switched; each documents why it is safe, and the safety proof is exactly "views add no fields" ([§3](#3-the-zero-field-invariant)).
 
 ---
 
@@ -156,7 +156,7 @@ structural containers retain their children.
 | `lambda/input/css/dom_element.hpp` | `DomElement`: embedded `Element`, property-group pointers, `specified_style`, pseudo styles. |
 | `radiant/view.hpp` | The method-only `View*` wrappers (`ViewElement`/`ViewSpan`/`ViewBlock`/table wrappers/`ViewText`/`ViewMarker`) and `struct ViewTree`. |
 | `radiant/view_pool.cpp` | `set_view` (in-place tagging), `alloc_prop` families, `VIEW_PROP_TEARDOWN` / `view_teardown_visit_node` teardown, `view_pool_init/reset_retained/destroy`. |
-| `lib/tagged.hpp` | `namespace lam` cast helpers: `view_require_*`, `dom_view`/`view_dom_node`, `dom_as<T>`, the `unsafe_*` family. |
+| `radiant/tagged.hpp` | `namespace lam` cast helpers: `view_require_*`, `dom_view`/`view_dom_node`, `dom_as<T>`, the `unsafe_*` family. |
 | `radiant/render.hpp` | Ownership-tracked retention (`PersistentFieldRef`/`PoolPtr`/`SessionPtr`) for heap buffers that outlive a pool swap (font family, bg image, marker text, image source). |
 | `radiant/event.hpp` / `source_pos_bridge.cpp` | `(DomNode*,offset) ↔ (source_path,offset)` mapping over `render_map` for the editor. |
 | `radiant/layout.cpp` | `layout_html_doc`/`layout_html_root`/`layout_flow_node` — where view tagging happens. |

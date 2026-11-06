@@ -1,18 +1,18 @@
 # Radiant and lambda-input Sibling Projects — Design Proposal
 
-**Status:** proposal; project boundaries and dependency direction confirmed by the user on 2026-11-05. Not yet implemented or incorporated into the formal specifications.
+**Status:** architecture ratified on 2026-11-05; implementation in progress.
 **Date:** 2026-11-05.
 **Scope:** extract the shared input/data foundation into `lambda-input`, extract the native Radiant engine into a sibling project, and keep language execution and integration in Lambda.
-**Authority:** existing [formal design rulings](../doc/Lambda_Formal_Design.md) remain current until the coordinated revisions in §9. This document records the approved direction and proposed extraction design; it does not claim the current build already satisfies it.
+**Authority:** [D9.1.1v3, D9.1.2v2–D9.1.4v2, D9.2.1v2 and D9.5.6v2](../doc/Lambda_Formal_Design.md) ratify the new boundaries. The implementation plan tracks remaining conformance; the current build does not yet satisfy them.
 **Related record:** [Lambda Static Module Split](Lambda_Design_Static_Modules.md). This extends that build-boundary work; it does not introduce a competing ruling-ID series.
 
 ### Specification linkage
 
 | Rulings | Relationship to this proposal |
 |---|---|
-| D9.1.1, D9.2.1, D9.5.6 | Revise the current Radiant-over-runtime direction and embedding contract. |
-| D9.1.2, D11.1.2 | Preserve centralized resource acquisition and policy; relocate the standalone portion into `lambda-input`. |
-| D9.1.3–D9.1.4 | Preserve provider ownership, checked boundaries, and the Mark reader/builder/editor layering. |
+| D9.1.1v3, D9.2.1v2, D9.5.6v2 | Replace the Radiant-over-runtime direction and embedding contract; keep script writers in Lambda. |
+| D9.1.2v2, D11.1.2 | Preserve centralized resource acquisition and policy; relocate the standalone portion into `lambda-input`. |
+| D9.1.3v2–D9.1.4v2 | Preserve provider ownership, checked boundaries, and the Mark reader/builder/editor layering. |
 | D2.1.1, D5.1.1–D5.1.3 | Preserve the shared value representation and separation of Input-owned data from runtime GC. |
 | D5.2.1, D5.2.3, D5.2.5 | Preserve allocator contexts, retained ownership, and ordered cleanup. |
 | D5.5.1–D5.5.3, D6.3.3 | Preserve the Radiant ownership seam, copied presentation data, and precise runtime roots. |
@@ -29,6 +29,8 @@ Create three sibling projects with distinct responsibilities:
 Native Radiant tests that require no scripting move with the engine. **DOM tests and end-to-end script integration tests remain in Lambda**, including DOM tests written in C++ that do not execute a script. Radiant-specific `doc/` and `vibe/` material moves with its subsystem. Mixed documents are divided by responsibility.
 
 The user also confirmed that `lambda-input` is a separate sibling project, and that Radiant must not require a Lambda runtime to build or test. Native code implementing a scripting adapter belongs to Lambda; its implementation language does not make it part of the standalone engine.
+
+The user confirmed that script-based output writers remain in Lambda. Standalone `lambda-input` provides the existing native formatters and reports script-only formats as unavailable; Lambda's integrated formatting continues to use the script packages (D9.3.4 and [Wiki design §5](input/Input_Wiki.md#5-phase-ii-wiki-writers)).
 
 This is an architectural extraction, not a change to Lambda language semantics or rendering behavior. Existing partial support and known failures remain visible. Migration must not silently weaken tests, refresh rendering references, or change value ownership to make the new build link.
 
@@ -88,8 +90,8 @@ Directory names under each project are provisional. Dependency locations are con
 |---|---|---|
 | First-party `lib/` modules, including memory, collections, strings, fonts, images, and reusable math/physics helpers | `lambda-input` | Split any runtime-dependent policy from the shared mechanism. Optional backend dependencies remain explicit. |
 | `lambda/input/`, including CSS parsing/cascade and HTML parsing | `lambda-input` | Parse and construct documents without initializing a runtime or evaluating source. |
-| `lambda/format/` | `lambda-input` | Serialize admitted data without executing user code. Rendering/export machinery stays in Radiant. |
-| `lambda/core/mark_reader.*`, `lambda/io/mark_builder.*`, `lambda/io/mark_editor.*` | `lambda-input` | Preserve reader/data versus Input-owned construction/editing responsibilities (D9.1.4). |
+| Native `lambda/format/` providers | `lambda-input` | Serialize admitted data without executing user code. Rendering/export machinery stays in Radiant; script-package writers and their runtime dispatch stay in Lambda. |
+| `lambda/core/mark_reader.*`, `lambda/io/mark_builder.*`, `lambda/io/mark_editor.*` | `lambda-input` | Preserve reader/data versus Input-owned construction/editing responsibilities (D9.1.4v2). |
 | Shared `Item`, scalar/container layouts, names, shapes, Input ownership, and pure data helpers currently spread through `lambda/core/` and aggregate headers | `lambda-input` | Extract the shared definitions; retain runtime execution and GC operations in Lambda. |
 | Input resource acquisition, byte caches, image/archive IO, and reusable policy interfaces in `lambda/io/` and `lambda/network/` | `lambda-input` | Move by provider responsibility, not by copying these directories wholesale. |
 | `radiant/` layout, paint, native Scene3D, native GPU services, events, controls, media, windowing, and platform code | Radiant | Include required Objective-C/Objective-C++ sources and assets. Separate script/runtime operations first. |
@@ -105,6 +107,8 @@ Third-party sources retain their licenses, pinned provenance, and existing patch
 The requested input library cannot consist only of parser translation units. Parsers and formatters use `Input`, `Item`, `Element`, name/shape machinery, allocation contexts, and Mark APIs. Those runtime-independent definitions and providers must be included in its closure.
 
 Keep one canonical representation shared with Lambda (D2.1.1). Do not fork `Item` or add a JSON serialization boundary between the projects. Public input headers must be usable without transitively exposing `Runtime`, `EvalContext`, AST implementation, GC roots, or MIR.
+
+The standalone formatting API admits the native formats without a runtime. Wiki, math, and other targets implemented by shipped Lambda Script packages remain Lambda integration features; requesting them through standalone input reports that a script writer is required. Keep their successful integrated behavior and tests in Lambda. Do not introduce a second native writer or count those targets as standalone formatter coverage.
 
 Separate operations by ownership: building an Input-owned value is an input-library operation; allocating a GC value, invoking a function, interpreting a type predicate, or materializing runtime state is a Lambda operation. The existing `InputAllocationContext` is a useful boundary to preserve. GC allocation must never acquire a malloc/weak-symbol fallback to satisfy a standalone link (D9.1.1, D5.1.3).
 
@@ -148,7 +152,7 @@ Declarative content may itself be parsed from a data file, but evaluating a `.ls
 
 ### 4.1 Resource acquisition
 
-Preserve the resource service principle in D9.1.2 and D11.1.2. Radiant requests bytes through `lambda-input`; it does not grow an independent network stack or bypass host policy. The standalone input service owns source identities, caches, acquisition mechanisms, and explicit policy inputs. Lambda supplies execution-context grants and scheduling adapters when embedded.
+Preserve the resource service principle in D9.1.2v2 and D11.1.2. Radiant requests bytes through `lambda-input`; it does not grow an independent network stack or bypass host policy. The standalone input service owns source identities, caches, acquisition mechanisms, and explicit policy inputs. Lambda supplies execution-context grants and scheduling adapters when embedded.
 
 Runtime-independent acquisition must operate without a Lambda scheduler. Async mechanisms already suitable for the input service can remain there; runtime-coupled continuations stay in Lambda. An absent policy/capability is handled explicitly. Script/MIR artifacts remain runtime-owned, and font/media/render artifacts remain engine-owned, even if a source cache retains an opaque cleanup handle.
 
@@ -207,6 +211,7 @@ The implementation language of a harness does not decide its owner. Python/Node 
 | Radiant View, UI automation, page-load, and layout corpus runners | Split native-only coverage from CLI/script/DOM coverage; do not move an entire suite by its name. |
 | JS/Three.js/WebGL API and Lambda package tests | Retain in Lambda. Native Scene3D/GPU-provider tests can move to Radiant. |
 | Parser/formatter/Mark/lib tests | Move independent cases to `lambda-input`; keep runtime ownership/GC integration coverage in Lambda. |
+| Script-package writer cases, including Wiki and math output | Keep successful end-to-end writer coverage in Lambda; standalone input tests verify the explicit unavailable result. Preserve cases and expectations when splitting mixed suites. |
 
 Radiant needs a small native test/fixture driver that loads through `lambda-input` and calls the real engine. It must not invoke `lambda.exe` or use runtime stubs. Reuse existing native fixture construction, geometry/pixel comparators, and event simulation where their dependencies permit; separate scripting-aware portions instead of duplicating the harness.
 
@@ -235,20 +240,20 @@ Provide a migration map from old paths/anchors to their new owners. Update diagr
 
 Formal S#/D# identifiers keep their identity. Engine-side documents may cite Lambda's shared-contract rulings through versioned links; do not duplicate normative text and let it drift. New standalone-engine rulings need an explicit documentation authority decision when adopted, not accidental authority inferred from a moved implementation guide.
 
-## 9. Required formal-spec transition
+## 9. Formal-spec transition
 
-The user approved the new direction during proposal preparation. The existing formal text still describes the previous architecture. Before implementation claims conformance to the new architecture, update the formal spec and its working records together:
+The user approved the new direction during proposal preparation and authorized implementation on 2026-11-05. Formal design version 63.0.0 ratified the initial boundary. Version 64.0.0 clarifies the user's decision to keep script-based writers in Lambda. Implementation marks remain open until the associated project boundaries are proven.
 
 | Ruling | Proposed revision |
 |---|---|
-| D9.1.1 | Replace the `lib → lambda-data → lambda-rt → radiant → lambda.exe` dependency order with standalone `lambda-input`, Radiant depending on input, and Lambda integration consuming both. Keep static linking, explicit upward callbacks, and the prohibition on fake GC allocation fallbacks. |
-| D9.1.2 | Assign standalone input/resource services to `lambda-input`; retain runtime scheduling and execution artifacts in Lambda and rendering artifacts in Radiant. |
-| D9.1.3 | Enforce provider ownership and strict closure at the new project boundaries. Replace obsolete Class-F exceptions with explicit adapter ownership, not a broader undefined-symbol allowance. |
-| D9.1.4 | Place Mark APIs in the input project while retaining their internal data-versus-Input-owner distinction. |
-| D9.2.1 | Remove the requirement that Radiant sits above and embeds rt. Preserve explicit headless profiles and the same engine behavior where capabilities are present. |
-| D9.5.6 | State that Lambda hosts standalone Radiant through native engine and optional host-service contracts. Retain the declared script-facing `radiant-dom` contract and package layout behavior. |
+| D9.1.1v3 | Standalone `lambda-input` owns native formatters; Lambda owns script-based writers. Radiant depends on input, and Lambda integrates both. Keep static linking, explicit host services, and the prohibition on fake GC allocation fallbacks. |
+| D9.1.2v2 | Assign standalone input/resource services to `lambda-input`; retain runtime scheduling and execution artifacts in Lambda and rendering artifacts in Radiant. |
+| D9.1.3v2 | Enforce provider ownership and strict closure at the new project boundaries. Replace obsolete Class-F exceptions with explicit adapter ownership, not a broader undefined-symbol allowance. |
+| D9.1.4v2 | Place Mark APIs in the input project while retaining their internal data-versus-Input-owner distinction. |
+| D9.2.1v2 | Radiant does not embed rt. Preserve explicit headless profiles and the same engine behavior where capabilities are present. |
+| D9.5.6v2 | Lambda hosts standalone Radiant through native engine and optional host-service contracts. Retain the script-facing `radiant-dom` contract and package layout behavior. |
 
-Revise affected rulings in place with version suffixes and an appropriate formal-spec semver bump; changing the architecture requires a MAJOR bump under [Doc Convention §3](../doc/Doc_Convention.md#3-the-formal-specs-root-adrs). Update the Static Modules record and relevant Jube/DOM integration records at the same time, then regenerate the formal index. Preserve superseded reasoning in the working records.
+The prior embedding direction is preserved as superseded history in the Static Modules record. The new rulings and generated formal index change together under [Doc Convention §3](../doc/Doc_Convention.md#3-the-formal-specs-root-adrs). Existing Jube/DOM behavior contracts remain in force while their providers migrate.
 
 D5.5 ownership and D6.3 rooting rules need no semantic relaxation. This proposal does not adopt a new memory model or change language-visible DOM/package behavior.
 
@@ -285,7 +290,7 @@ For implementation, use focused checks while separating each seam, then run the 
 
 Functional qualification and performance qualification are separate. Any performance comparison uses release artifacts, fixed fixtures/worker settings, and recorded source/binary identities. Preserve visual qualification for renderer changes and distinguish platform-environment failures from source regressions. No performance gain is claimed merely from moving code into a static archive.
 
-This proposal itself requires document/link/ruling checks only. It does not require rebuilding the engine or running those implementation gates.
+Implementation progress and verification are recorded in [the implementation plan](impl/Lambda_Impl_Radiant_Split.md).
 
 ## 11. Alternatives and remaining implementation choices
 
@@ -298,24 +303,28 @@ The following alternatives do not meet the agreed direction:
 - **Move all native-written tests:** this violates the explicit requirement to keep DOM and script integration tests in Lambda.
 - **Switch to shared libraries or replace the build system during extraction:** neither is necessary for the requested static-library boundary.
 
-No further architectural answer is needed to prepare this proposal. The approved decisions are three sibling projects, the exact `lambda-input` name, a standalone static Radiant engine, and Lambda-owned scripting adapters and DOM/integration tests.
+The approved decisions are three sibling projects, the exact `lambda-input` name, a standalone static Radiant engine, and Lambda-owned scripting adapters, script-based writers, and DOM/integration tests.
 
 Implementation still needs concrete repository URLs, the final Radiant directory/package spelling, public header/install layout, dependency pin format, and a reviewed case-level migration inventory. Those choices must implement the boundaries above; they must not reopen the runtime dependency through convenience paths.
 
 ## Appendix A — Current extraction evidence
 
-The existing static split is a starting point, but its archives do not establish independence. The following observations were checked against the source tree on 2026-11-05; they are not a completed symbol-closure audit.
+The following table records the pre-extraction evidence checked on 2026-11-05. Its historical source and archive assignments are not the current build manifest; the checkpoint below and the implementation plan record later progress. Neither is a completed symbol-closure audit.
 
 | Evidence | Why a directory move is insufficient | Required separation |
 |---|---|---|
-| `build_lambda_config.json`: `radiant` links `lambda-rt`, `lambda-data`, and `lambda-lib`; its source patterns include `lambda/module/radiant/*.cpp` | Engine and scripting bridge are one current build unit | Extract the native archive and place language adapters in Lambda |
-| `lambda-data` includes `radiant/view_prop_defaults.cpp`, `radiant/view_prop_ensure.cpp`, and source patterns for `lambda/devtools/*.cpp` | The data archive currently owns engine providers and integration code | Move providers by responsibility and remove upward dependencies |
-| `lambda/lambda-data.hpp` includes `runtime/ast-core.hpp` and `runtime/context_capsule.h`; `lambda/core/lambda-data.cpp` includes runtime headers | Public data and implementation compilation still expose execution machinery | Split canonical data headers and pure providers from runtime operations |
-| `lambda/input/css/dom_element.hpp` includes the aggregate `lambda.hpp`; builders/editors manage native DOM storage | Input construction and presentation are structurally connected | Keep shared document storage below both consumers; isolate presentation and host attachments |
-| `radiant/script_runner.cpp` directly includes JS, transpiler, GC, scheduler, and template state headers | Page execution is a runtime implementation inside the engine tree | Move execution into the Lambda adapter; retain native document orchestration in Radiant |
-| `radiant/window.cpp`, `ui_context.cpp`, `document_clock.cpp`, `event_sim.cpp`, and layout/event paths reference runtime/DOM APIs | Removing the script-runner file alone does not close the dependency graph | Extract lifecycle, scheduling, event, and geometry seams across their real callers |
-| `radiant/gl_core.cpp` includes `lambda/module/radiant/radiant_webgl_bridge.hpp` | Native GPU declarations and language/module placement are mixed | Promote native provider declarations into Radiant; retain WebGL wrapping in Lambda |
+| Before extraction, `build_lambda_config.json` included `lambda/module/radiant/*.cpp` in the runtime-linked `radiant` build | Engine and scripting bridge shared a build unit | Separate native and Lambda adapter archives, then close Radiant's remaining runtime dependencies |
+| Before extraction, `lambda-data` included `radiant/view_prop_defaults.cpp`, `radiant/view_prop_ensure.cpp`, and `lambda/devtools/*.cpp` | The data archive owned engine providers and integration code | Assign providers by responsibility and remove upward dependencies |
+| Before extraction, `lambda/lambda-data.hpp` and `lambda/core/lambda-data.cpp` imported AST headers and the data header owned the evaluator context | Input-facing data and execution state shared a transitive header | `lambda/core/value.hpp` and `lambda/core/data.hpp` now own the shared model; `lambda/runtime/eval_context.hpp` owns execution state. Selected input and Radiant headers no longer import runtime headers; `lambda.h` declarations and numeric providers still need separation |
+| Before extraction, `lambda/input/css/dom_element.hpp` included the aggregate `lambda.hpp`; builders/editors manage native DOM storage | Input construction and presentation are structurally connected | Keep shared document storage below both consumers; isolate presentation and host attachments |
+| Page-script execution imports JS, transpiler, GC, scheduler, and template state headers | It belongs to Lambda rather than the standalone engine | Keep `script_runner.cpp` and its timeout policy in the Lambda adapter archive and close its host interfaces |
+| Before extraction, `radiant/window.cpp`, `ui_context.cpp`, `document_clock.cpp`, `event_sim.cpp`, and layout/event paths referenced runtime/DOM APIs | Removing the script-runner file alone does not close the dependency graph | Extract lifecycle, scheduling, event, and geometry seams across their real callers |
+| Before extraction, `radiant/gl_core.cpp` included `lambda/module/radiant/radiant_webgl_bridge.hpp` | Native GPU declarations and language/module placement were mixed | The shared command schema now lives in `lib/webgl.h`, and `radiant/gl_core.hpp` owns native provider declarations; WebGL wrapping remains in Lambda |
 | `utils/check_module_boundary.py` retains a Class-F runtime-to-Radiant import baseline | The old accepted direction/exceptions do not prove the new standalone contracts | Classify remaining imports, move adapter calls, and enforce the new forbidden edges |
 | Native-looking test sources import runtime/JS/DOM interfaces | Moving whole executables can carry the runtime back into Radiant | Split suites by behavior and verify the actual link/runtime closure |
 
-The controlling rule is provider ownership (D9.1.3). A changed include path, opaque cast, runtime stub, or permissive linker option does not resolve a misplaced provider.
+The transitional module-boundary check distinguishes the old runtime Class-F ratchet from the approved Lambda DOM adapter dependency on Radiant (D9.1.1v3, D9.1.3v2). A newly classified adapter call must have exactly one Radiant archive provider; its callers must be Lambda DOM sources or the Jube registry exposing a native DOM catalog entry. Other callers, unlisted registry exports and missing or duplicate providers fail. This check does not establish independent Radiant linkage.
+
+On 2026-11-06 sibling `lambda-input` and `radiant` projects own the moved source trees and native target manifests. A macOS split build links Lambda's static executable to archives built in the siblings; temporary source links, Lambda runtime dependencies in Radiant, and the existing vendor setup remain. Input archive dependency records exclude Lambda runtime sources and headers, and the complete input archives link into a native client. Radiant builds its native archives and a focused host-test subset directly, but its complete archive does not yet have standalone runtime closure. The detailed checkpoint and exact validation scope are in [`impl/Lambda_Impl_Radiant_Split.md`](impl/Lambda_Impl_Radiant_Split.md) (D6.3.3, D9.1.1v3, D9.1.3v2, D10.2.1).
+
+The controlling rule is provider ownership (D9.1.3v2). A changed include path, opaque cast, runtime stub, or permissive linker option does not resolve a misplaced provider.

@@ -29,7 +29,10 @@ pn visit_target(target, targets, external, root,
                 visited_external = visited_external ++ [dependency]
                 let archive = library.lib
                 if ((archive != null and archive != "" and not starts_with(archive, "-"))^) {
-                    archives = archives ++ [if (starts_with(archive, "/")) archive else root ++ "/" ++ archive]
+                    let configured = replace(replace(archive, "%{cfg.platform}",
+                        "$(notdir $(patsubst %/,%,$(dir $(OBJDIR))))"),
+                        "%{cfg.buildcfg}", "$(notdir $(OBJDIR))")
+                    archives = archives ++ [if (starts_with(configured, "/")) configured else root ++ "/" ++ configured]
                 }
             }
         }
@@ -53,6 +56,13 @@ pn replace_first(content: string, marker: string, replacement: string) {
 pub pn patch_makefile(config_path: string, makefile_path: string, root: string) {
     let config = input(config_path, "json")^
     var targets = {}
+    // Input and Radiant now own the target manifests used by the default build.
+    for (imported_path in config.config_imports) {
+        let imported = input(root ++ "/" ++ imported_path, "json")^
+        for (target in imported.targets) {
+            if (target.name != null) { targets[target.name] = target }
+        }
+    }
     for (target in config.targets) {
         if (target.name != null) { targets[target.name] = target }
     }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../lambda-data.hpp"
+#include "../core/data.hpp"
 
 // Output builders own bytes, never retained Items. Host-readable virtual
 // containers (VArray/Velmt) have a separate contract (D9.5.5).

@@ -252,7 +252,7 @@ The root `event_interval_ms` defaults to 50; `0` runs adjacent commands without 
 
 ### 8.1 Render and animation assertions
 
-`event_sim_render.{cpp,hpp}` supplies the Scene3D CLI integration vocabulary. These commands use the same assertion totals and `--event-result` JSON as the existing UI assertions. `script` fails on an exception; `assert_script` requires the boolean `true`. Script turns borrow the document evaluator and keep code/results in precise roots (**D6.3.3**), including script-less pages whose evaluator has not initialized its heap yet.
+`event_sim_render.{cpp,hpp}` supplies the native Scene3D capture and assertion vocabulary. Script evaluation, GC, animation-frame callbacks and frame-measurement callbacks pass through an optional host implemented by `lambda/module/radiant/event_sim_script_adapter.cpp` (**D9.1.1v3, D9.1.3v2**). These commands use the same assertion totals and `--event-result` JSON as the existing UI assertions. `script` fails on an exception; `assert_script` requires the boolean `true`. Script turns borrow the document evaluator and keep code/results in precise roots (**D6.3.3**), including script-less pages whose evaluator has not initialized its heap yet.
 
 | Commands | Arguments and observation |
 |---|---|

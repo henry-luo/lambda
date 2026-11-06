@@ -39,3 +39,4 @@ childrenForIn:true
 selectedFirst:true
 selectedLive:true
 selectedBrand:true
+singleResetLast:true

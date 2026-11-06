@@ -3,6 +3,9 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "../radiant/scene3d/scene3d.hpp"
+#include "../lambda/module/radiant/scene3d_control_adapter.hpp"
+#include "../lambda/module/radiant/scene3d_particles_adapter.hpp"
+#include "../lambda/module/radiant/scene3d_physics_adapter.hpp"
 #include "../radiant/scene3d/scene3d_math.hpp"
 #include "../lib/image_hdr.h"
 #include "../radiant/animation_mixer.hpp"
@@ -46,6 +49,7 @@
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_blob_url.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/io/mark_builder.hpp"
@@ -53,10 +57,10 @@
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"
 #include "../lambda/module/radiant/radiant_history.hpp"
 #include "../lambda/module/radiant/radiant_input_value.hpp"
-#include "../lambda/module/radiant/radiant_webgl_bridge.hpp"
+#include "../radiant/gl_core.hpp"
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
-#include "../lib/tagged.hpp"
+#include "../radiant/tagged.hpp"
 #include "../lib/mem_context.h"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
@@ -8603,6 +8607,17 @@ TEST_F(Scene3dTest, NativeAnimationRootsRetireBeforeStandaloneJsRuntime) {
     radiant_input_set_live_value(input_element,"native text survives");
     radiant_input_set_files(input_element,js_new_object());
     ASSERT_NE(radiant_input_files(input_element).item,ItemNull.item);
+    DomElement* files_first = DomElement::create(page,"input",nullptr);
+    ASSERT_NE(files_first,nullptr);
+    ASSERT_TRUE(page->root->as_element()->append_child(files_first));
+    EXPECT_EQ(radiant_input_peek_live_value(files_first),nullptr);
+    EXPECT_EQ(radiant_input_files(files_first).item,ItemNull.item);
+    EXPECT_STREQ(radiant_input_peek_live_value(files_first),"");
+    Item blob_url = run_js("URL.createObjectURL(new Blob(['a'], {type:'text/plain'}))");
+    ASSERT_EQ(get_type_id(blob_url),LMD_TYPE_STRING);
+    char* retained_blob_url = mem_strdup(it2s(blob_url)->chars,MEM_CAT_SYSTEM);
+    ASSERT_NE(retained_blob_url,nullptr);
+    EXPECT_STREQ(dom_blob_url_data_uri(page,retained_blob_url),"data:text/plain;base64,YQ==");
     state_set(page->state,input_element,"retained-script-value",js_new_object());
     ASSERT_NE(state_get(page->state,input_element,"retained-script-value").item,ItemNull.item);
 
@@ -8628,6 +8643,9 @@ TEST_F(Scene3dTest, NativeAnimationRootsRetireBeforeStandaloneJsRuntime) {
     EXPECT_STREQ(url_get_hash(page->url),"#retained");
     EXPECT_STREQ(radiant_input_live_value(input_element),"native text survives");
     EXPECT_EQ(radiant_input_files(input_element).item,ItemNull.item);
+    EXPECT_STREQ(radiant_input_live_value(files_first),"");
+    EXPECT_STREQ(dom_blob_url_data_uri(page,retained_blob_url),"data:text/plain;base64,YQ==");
+    mem_free(retained_blob_url);
     for (auto* resource = page->resources.get(); resource; resource = resource->next)
         EXPECT_NE(resource->runtime_owner,owner);
     // a surviving document can still tick native timelines after its JS drivers retire.

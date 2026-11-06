@@ -1,5 +1,6 @@
 #include "../input/input-postscript.hpp"
 #include "../core/mark_reader.hpp"
+#include "eval_context.hpp"
 
 extern "C" Item fn_ps_scan(Item source, Item offset, Item options) {
     if (get_type_id(offset) != LMD_TYPE_INT || offset.int_val < 0) return ItemNull;

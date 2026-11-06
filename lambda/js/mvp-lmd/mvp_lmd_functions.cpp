@@ -4,7 +4,7 @@
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/side_stack.h"
 #include "../../runtime/heap_api.h"
-#include "../js_well_known_names.h"
+#include "../../core/js_well_known_names.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
 #include "../js_function.hpp"

@@ -57,15 +57,11 @@
 #endif
 #include "../dom/dom.h"
 #include "context_capsule.h"
+#include "document_host.hpp"
 #include "security_context.h"
 #include "../../lib/path_str.h"
 
 extern "C" Item js_get_key_default(Item object, Item key);
-struct DomDocument;
-struct DocumentCleanupTiming;
-extern bool free_document_profiled(DomDocument* doc, DocumentCleanupTiming* timing);
-extern bool document_runtime_cleanup_ready(DomDocument* doc);
-
 #ifndef LAMBDA_MIR_CACHE_DEFAULT
 #define LAMBDA_MIR_CACHE_DEFAULT 1
 #endif
@@ -3785,7 +3781,7 @@ static void runtime_quiesce_satellite_workers(Runtime* runtime);
 static void runtime_quiesce_satellite_workers(Runtime* runtime);
 
 static bool runtime_document_preflight(Runtime* runtime) {
-    if (!runtime->dom_doc || document_runtime_cleanup_ready((DomDocument*)runtime->dom_doc)) return true;
+    if (lambda_document_cleanup_ready(runtime->dom_doc)) return true;
     log_error("runtime-document-preflight: document is not ready for retirement");
     return false;
 }
@@ -4098,7 +4094,7 @@ static RuntimeCleanupResult runtime_try_cleanup_impl(Runtime* runtime, bool reti
         dom_shutdown();
         if (runtime->dom_doc) {
             // A refused document close leaves native owners live; stop before freeing their heap.
-            if (!free_document_profiled((DomDocument*)runtime->dom_doc, NULL))
+            if (!lambda_document_cleanup(runtime->dom_doc))
                 return RUNTIME_CLEANUP_INCOMPLETE;
             runtime->dom_doc = NULL;
             // Child teardown can leave its evaluator and JS capsule bound here.
@@ -4168,7 +4164,7 @@ static RuntimeCleanupResult runtime_try_cleanup_impl(Runtime* runtime, bool reti
         if (cleanup_owner) runtime_release_tasks_and_resources(runtime, cleanup_owner);
         dom_shutdown();
         if (runtime->dom_doc) {
-            if (!free_document_profiled((DomDocument*)runtime->dom_doc, NULL))
+            if (!lambda_document_cleanup(runtime->dom_doc))
                 return RUNTIME_CLEANUP_INCOMPLETE;
             runtime->dom_doc = NULL;
         }

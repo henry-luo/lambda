@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 62.0.0 (2026-11-05)
+**Spec version:** 64.0.0 (2026-11-05)
 
 **Status:** normative. This document is the single source of truth for the
 design decisions that implement
@@ -1393,43 +1393,39 @@ loosely.
 
 ### D9.1 Build layering
 
-- **D9.1.1 — Static libraries in a strict layer order.** The build links
-  static libraries; dynamic libraries are only for Jube modules. The layers are
-  `lib` → `lambda-data` (core and io) → `lambda-rt` → `radiant` →
-  `lambda.exe`. A layer calls only to its left. An upward call goes through a
-  hook header that the lower layer owns, with a null-safe default. GC
-  allocation is a safepoint, not an allocator flavor: a missing heap service
-  never falls back to a weak, null or malloc path. [SM1–SM3, SM6]
-- **D9.1.2* — All resource IO lives in `lambda-io`.** Source bytes and file
-  acquisition can be kept in the neutral script cache of the input manager.
-  Derived artifacts live above it: script and MIR caches in rt, and font and
-  media rendering in radiant. Radiant never fetches. The cache owns only the
-  source identity and the opaque artifact lifetime; language adapters own the
-  AST and MIR types. No execution, document, heap or context state crosses
-  this boundary. Raw mechanisms that need no context stay in `lib`. IO that is
-  coupled to the event loop or to Items stays in rt, by an explicit, reviewed
-  classification. [SM12]
-- **D9.1.3 — Provider ownership beats include ownership.** The module that
-  declares a function in its public header, or a lower module, must define it.
-  A symbol-provider inventory enforces this. Boundary enforcement has two
-  tiers: lint rules, and boundary DSOs that must link with no undefined
-  symbols. The remaining rt → radiant imports are a ratcheted baseline:
-  additions fail, and deletions are progress. [SM13, SM5]
-- **D9.1.4 — Mark API ownership resolves the layering.** `MarkReader` is core.
-  `MarkBuilder` and `MarkEditor` are io, because they take an `Input*`.
-  Ownership resolves the layering, not callback abstractions. Remove a
-  forwarding shim when its call sites move. [SM §9.4]
+- **D9.1.1v3* — Input, Radiant and Lambda have separate owners.**
+  `lambda-input` owns shared libraries, data, parsers, native formatters and Mark APIs.
+  Lambda owns script-based writers and their execution (D9.3.4).
+  Radiant depends on `lambda-input`, not on the Lambda runtime. Lambda
+  integrates the runtime and Radiant. Input and Radiant ship as static
+  libraries. Dynamic libraries remain for Jube modules. Optional host
+  services cross explicit interfaces. A missing GC service never falls back
+  to weak, null or malloc allocation. [SM1–SM3, SM6; Radiant_Split §2–§3]
+- **D9.1.2v2* — The input service owns resource acquisition.** `lambda-input`
+  owns source acquisition, source identity and neutral source caches.
+  Radiant requests resources through that service. Lambda owns execution,
+  script and MIR artifacts and runtime-coupled scheduling. Radiant owns
+  rendering artifacts. Host policy governs resource access (D11.1.2).
+  [SM12; Radiant_Split §4.1]
+- **D9.1.3v2* — Provider ownership beats include ownership.** The owner of a
+  public declaration, or a dependency of that owner, defines its provider.
+  Include and whole-archive link checks enforce project boundaries.
+  Input and Radiant have no runtime imports. [SM13, SM5; Radiant_Split §6]
+- **D9.1.4v2* — The input project owns the Mark API.** `MarkReader` reads the
+  shared data model. `MarkBuilder` and `MarkEditor` use the `Input` owner.
+  Ownership resolves layering; it does not require callback abstractions.
+  [SM §9.4; Radiant_Split §3.1]
 
 ### D9.2 Build profiles
 
-- **D9.2.1 — Headless has three profiles.** Profile A (`lambda-cli`, D9.2.2)
+- **D9.2.1v2* — Headless has three profiles.** Profile A (`lambda-cli`, D9.2.2)
   omits `radiant` at link time. Profile B is a runtime flag inside the full
   `lambda.exe`. Profile C (`lambda-headless`) is the full engine with a null
   windowing backend in place of the GUI, OpenGL and webview toolkits; it
   refuses `view` and `edit` explicitly. B and C compile the same Radiant
-  sources, with no `#ifdef` removal of display code. Radiant is above rt, and
-  it embeds rt through a narrow interface. Public headers never define
-  build-profile macros. [SM9, SM10, SM16]
+  sources, with no `#ifdef` removal of display code. Lambda supplies optional
+  scripting services through the Radiant host interface. Public headers never
+  define build-profile macros. [SM9, SM10, SM16; Radiant_Split §6]
 - **D9.2.2 — `lambda-cli` is the runtime-only host.** It has only the Lambda
   runtime: core, io, the engine, the validator and their libraries. It
   excludes Radiant, the JS/TS runtime and DOM, the Jube host modules and the
@@ -1567,13 +1563,12 @@ loosely.
   has both its list face and its map face. Member records (D9.5.4) are the
   named-member protocol on all carriers. Do not flatten element-shaped data
   into a map, and do not copy array-shaped state into real arrays. [DOM4 D4l]
-- **D9.5.6 — Lambda and Radiant meet through two explicit contracts.** Radiant
-  embeds Lambda through a versioned embed interface that follows Jube. Lambda
-  reaches Radiant only through the `radiant-dom` module. `lambda-rt` never
-  links radiant. Shipped document layouts connect automatically to pure
-  package `layout(parent, children, ctx)` exports. Callback registration is
-  host plumbing, and it is not part of the public DOM or Radiant API. [JA15,
-  SM10; Radiant_Design_Custom_Layout §6]
+- **D9.5.6v2* — Lambda and Radiant meet through explicit contracts.** Lambda
+  hosts the standalone Radiant library through native engine and host-service
+  interfaces. Scripting adapters and the `radiant-dom` module belong to Lambda.
+  The runtime core does not require Radiant. Shipped document layouts connect
+  automatically to pure package `layout(parent, children, ctx)` exports.
+  [JA15, SM10; Radiant_Split §4; Radiant_Design_Custom_Layout §6]
 
 ## D10 Documents and Shipped Packages
 
@@ -1754,7 +1749,7 @@ authority to itself.*
 
 ## Appendix A — Implementation Status
 
-Status of the `*`-marked rulings on 2026-11-04. Each entry gives only the
+Status of the `*`-marked rulings on 2026-11-05. Each entry gives only the
 status and the live residue. The detailed footnotes, evidence and dates are in
 the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.md#2-implementation-footnotes).
 
@@ -1801,7 +1796,7 @@ the [implementation history §2](../vibe/impl/Lambda_Impl_Formal_Design_History.
 | D8.5.1 | The common source registry and its loaders are in place. |
 | D8.5.2, D8.5.3 | Not started. |
 | D8.6.4 | Instrumentation is in place. The exit ratchets are not yet met. |
-| D9.1.2 | Partial: the persistent script cache is in place. The IO inventory is incomplete. |
+| D9.1.1–D9.1.4, D9.2.1, D9.5.6 | The three-project extraction has started. Input and Radiant still depend on runtime providers. See `vibe/impl/Lambda_Impl_Radiant_Split.md`. |
 | D9.4.6 | In place on macOS. Linux is generated but not verified. Windows is not covered. |
 | D9.5.3 | Not active since guest-language hosting was removed (2026-10-07). |
 | D9.5.5 | Partial: distinct VArray/Velmt TypeIds and carrier dispatch are in place. Some live collections are pending. |
@@ -1950,9 +1945,9 @@ in the [implementation history §3](../vibe/impl/Lambda_Impl_Formal_Design_Histo
 | D8.4 | JSI1–JSI36 | `Lambda_Design_JS_Interpreter.md`, `jube/JS_MVP_Lmd.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |
 | D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Design_Unified_AST.md` |
-| D9.1–D9.2 | SM1–SM17 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
+| D9.1–D9.2 | SM1–SM17; Radiant_Split §2–§6 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md`, `Lambda_Design_Radiant_Split.md` |
 | D9.3 | RG14; DF15; ER-D2; MC1; Demo_Mail ML11 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Demo_Mail.md` |
-| D9.4–D9.5 | JA1–JA16 (D9.4.6: JA5.1); Native_Module §6–§10; Lang_Hosting §5–§13; DOM4 D4j–D4l | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_Type_Virtual.md`, `Lambda_Jube_DOM4.md` |
+| D9.4–D9.5 | JA1–JA16 (D9.4.6: JA5.1); Native_Module §6–§10; Lang_Hosting §5–§13; DOM4 D4j–D4l; Radiant_Split §4 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_Type_Virtual.md`, `Lambda_Jube_DOM4.md`, `Lambda_Design_Radiant_Split.md` |
 | D10.1 | Mark file extensions; XHTML admission; SVG parsing admission and DOM export | `input/Input_System.md`, `input/Input_XML.md`, `radiant/Radiant_SVG2.md` |
 | D10.2 | UA editing; TeX engine; Pkg_Math §8, §11 | `radiant/Radiant_Design_Editable.md` §20, `latex/Lambda_Design_TeX_Engine.md`, `Lambda_Pkg_Math.md` |
 | D11.1 | JA10, JA16 | `Lambda_Design_Jube_Architecture.md` |

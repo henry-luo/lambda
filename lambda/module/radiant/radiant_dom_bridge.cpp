@@ -4,6 +4,7 @@
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "radiant_input_value.hpp"
+#include "script_runner_host.hpp"
 #include "../../jube/jube_interface.h"
 #include "../../input/css/dom_node.hpp"
 #include "../../input/css/dom_element.hpp"

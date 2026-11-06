@@ -975,7 +975,7 @@ The required source/link closure excludes `lambda/js/`, `lambda/dom/`,
 `radiant/`, Jube/Node modules, the HTTP server, CLI command handlers, and
 unrelated CLI image, document, physics and network facilities. It also
 excludes their libraries, including GLFW, ThorVG, WebKit and curl. The CLI
-variant currently lists `lambda/js/js_well_known_names.c` and the generator
+variant currently lists `lambda/core/js_well_known_names.c` and the generator
 adds some libraries without checking a variant's actual consumers. M5 must
 move any genuinely shared names to a runtime-neutral owner and make library
 selection follow the target's dependency graph; it may not retain a JS object

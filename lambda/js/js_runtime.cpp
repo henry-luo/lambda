@@ -17,7 +17,7 @@
 #include "js_regex_router_scanner.h"
 #include "js_regexp_compile.h"
 #include "js_state_guards.h"
-#include "js_well_known_names.h"
+#include "../core/js_well_known_names.h"
 #include "js_exec_profile.h"
 #include "mvp-lmd/mvp_lmd.h"
 #include "mvp-lmd/mvp_lmd_runtime.h"
@@ -8277,11 +8277,14 @@ extern "C" Item js_array_new_with_class(int length, int class_id) {
     }
     // Array elements live in the Array header; the companion map is the
     // immutable class carrier for named properties and internal prototype data.
-    Item props = js_new_object_with_class(class_id);
-    if (get_type_id(props) != LMD_TYPE_MAP || !props.map) return result;
-    props.map->map_kind = MAP_KIND_ARRAY_PROPS;
-    js_elements_set_props(result.array, props.map);
-    return result;
+    // Allocating the companion can collect the otherwise unrooted array.
+    JS_ROOTS(roots, result_root, result, props_root, ItemNull);
+    props_root.set(js_new_object_with_class(class_id));
+    if (get_type_id(props_root.get()) != LMD_TYPE_MAP || !props_root.get().map)
+        return result_root.get();
+    props_root.get().map->map_kind = MAP_KIND_ARRAY_PROPS;
+    js_elements_set_props(result_root.get().array, props_root.get().map);
+    return result_root.get();
 }
 
 // Return a hole sentinel value for array elisions

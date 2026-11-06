@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include "../lib/strbuf.h"
-#include "../lib/tagged.hpp"
+#include "../radiant/tagged.hpp"
 #include "../lib/uv_loop.h"
 #include "../lib/memtrack.h"
 
@@ -40,6 +40,7 @@ extern "C" {
 }
 
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/module/radiant/loader_runtime_adapter.hpp"
 #include "../lambda/runtime/concurrency.h"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_runtime.h"

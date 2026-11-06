@@ -5,6 +5,7 @@
 
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
+#include "../runtime/ast-core.hpp"  // FnPromotionCell is stored by value.
 
 struct JsFunction;
 struct AstFuncNode;
