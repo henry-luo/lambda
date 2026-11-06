@@ -4754,34 +4754,35 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("Timeout: %d ms\n", timeout_ms);
         }
 
-        // Create a NetworkResource for the download
-        NetworkResource res = {0};
-        res.url = mem_strdup(url, MEM_CAT_TEMP);
-        res.timeout_ms = timeout_ms;
-        res.state = STATE_PENDING;
-        res.type = RESOURCE_HTML;  // Treat as generic content
+        // The downloader owns result fields, so use the shared resource lifetime.
+        NetworkResource* res = network_resource_create(url, RESOURCE_HTML, PRIORITY_NORMAL, NULL);
+        if (!res) {
+            log_error("fetch: failed to allocate network resource");
+            return lambda_main_finish(1);
+        }
+        res->timeout_ms = timeout_ms;
 
         // Perform the download
         double start_time = (double)clock() / CLOCKS_PER_SEC;
-        bool success = network_download_resource(&res);
+        bool success = network_download_resource(res);
         double end_time = (double)clock() / CLOCKS_PER_SEC;
         double elapsed_ms = (end_time - start_time) * 1000.0;
 
         if (success) {
             if (verbose) {
                 printf("✅ Download successful\n");
-                printf("   HTTP Status: %d\n", res.http_status_code);
+                printf("   HTTP Status: %d\n", res->http_status_code);
                 printf("   Time: %.2f ms\n", elapsed_ms);
-                if (res.local_path) {
-                    printf("   Cached: %s\n", res.local_path);
+                if (res->local_path) {
+                    printf("   Cached: %s\n", res->local_path);
                 }
             }
 
             // Output content
             if (output_file) {
-                if (res.local_path) {
+                if (res->local_path) {
                     // Copy from cache to output file
-                    char* content = read_text_file(res.local_path);
+                    char* content = read_text_file(res->local_path);
                     if (content) {
                         write_text_file(output_file, content);
                         mem_free(content);
@@ -4790,18 +4791,18 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         }
                     } else {
                         printf("Error: Failed to read cached content\n");
-                        mem_free(res.url);
+                        resource_release(res);
                         return lambda_main_finish(1);
                     }
                 } else {
                     printf("Error: No content available\n");
-                    mem_free(res.url);
+                    resource_release(res);
                     return lambda_main_finish(1);
                 }
             } else {
                 // Print to stdout
-                if (res.local_path) {
-                    char* content = read_text_file(res.local_path);
+                if (res->local_path) {
+                    char* content = read_text_file(res->local_path);
                     if (content) {
                         printf("%s", content);
                         mem_free(content);
@@ -4809,19 +4810,19 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             }
 
-            mem_free(res.url);
+            resource_release(res);
             return lambda_main_finish(0);
         } else {
             printf("❌ Download failed\n");
             printf("   URL: %s\n", url);
-            printf("   HTTP Status: %d\n", res.http_status_code);
-            if (res.error_message) {
-                printf("   Error: %s\n", res.error_message);
+            printf("   HTTP Status: %d\n", res->http_status_code);
+            if (res->error_message) {
+                printf("   Error: %s\n", res->error_message);
             }
-            printf("   Retryable: %s\n", is_http_error_retryable(res.http_status_code) ? "yes" : "no");
+            printf("   Retryable: %s\n", is_http_error_retryable(res->http_status_code) ? "yes" : "no");
             printf("   Time: %.2f ms\n", elapsed_ms);
 
-            mem_free(res.url);
+            resource_release(res);
             return lambda_main_finish(1);
         }
     }

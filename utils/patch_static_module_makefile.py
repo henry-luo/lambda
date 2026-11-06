@@ -29,7 +29,23 @@ def configured_archive_path(archive, root):
     return archive if os.path.isabs(archive) else os.path.join(root, archive)
 
 
-def use_sibling_archives(content, root):
+def sibling_native_archives(root):
+    input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root).parent / 'lambda-input')).resolve()
+    archives = {name: input_root / 'build/lib/native/debug' / name for name in
+                ('libre2.a', 'liblambda-archive-readers.a', 'liblambda-image-codecs.a')}
+    archives['libcurl.a'] = input_root / 'build/deps/curl/lib/libcurl.a'
+    return archives
+
+
+def select_sibling_native_archives(archives, root):
+    sibling_native = sibling_native_archives(root)
+    # The late link line is shared by every profile; select sibling native
+    # providers only for the debug split build.
+    return [f'$(if $(filter debug_native,$(config)),{sibling_native[Path(path).name]},{path})'
+            if Path(path).name in sibling_native else path for path in archives]
+
+
+def use_sibling_archives(content, root, curl_archive):
     """Select sibling-built debug archives for the static executable link."""
     make_dir = Path(root) / 'build' / 'premake'
     input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root).parent / 'lambda-input')).resolve()
@@ -52,6 +68,19 @@ def use_sibling_archives(content, root):
         if any(character.isspace() for character in replacement):
             raise RuntimeError(f'sibling archive path contains whitespace: {archive}')
         # Both LIBS and LDDEPS must reference the same provider.
+        if debug.count(original) != 2:
+            raise RuntimeError(f'unexpected number of debug archive references: {original}')
+        debug = debug.replace(original, replacement)
+    for name, archive in sibling_native_archives(root).items():
+        if not archive.is_file():
+            raise RuntimeError(f'missing sibling archive: {archive}')
+        replacement = os.path.relpath(archive, make_dir)
+        if any(character.isspace() for character in replacement):
+            raise RuntimeError(f'sibling archive path contains whitespace: {archive}')
+        original = ('../../' + curl_archive if name == 'libcurl.a' else
+                    f'../../build/lib/native/debug/{name}')
+        # Premake records each static dependency both as a prerequisite and
+        # as a force-loaded linker input.
         if debug.count(original) != 2:
             raise RuntimeError(f'unexpected number of debug archive references: {original}')
         debug = debug.replace(original, replacement)
@@ -102,7 +131,8 @@ def main():
     with open(makefile_path, encoding='utf-8') as source:
         content = source.read()
     if sys.argv[1:] == ['--sibling-archives']:
-        content = use_sibling_archives(content, root)
+        content = use_sibling_archives(content, root, external['curl']['lib'])
+        archives = select_sibling_native_archives(archives, root)
     elif sys.argv[1:]:
         raise RuntimeError('usage: patch_static_module_makefile.py [--sibling-archives]')
     marker = '$(ALL_LDFLAGS) $(LIBS)'

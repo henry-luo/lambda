@@ -404,27 +404,52 @@ def expect_static_module_archive_profiles() -> None:
                     'lambda-input/build/lib/liblambda-lib.a',
                     'radiant/build/lib/libradiant.a',
                     'radiant/build/lib/libradiant-properties.a')
-        for archive in archives:
+        native_archives = tuple(f'lambda-input/build/lib/native/debug/{name}' for name in
+                                ('libre2.a', 'liblambda-archive-readers.a', 'liblambda-image-codecs.a'))
+        curl_archive = 'lambda-input/build/deps/curl/lib/libcurl.a'
+        for archive in archives + native_archives + (curl_archive,):
             path = sandbox / archive
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
         old = ('../lib/liblambda-data-cpp.a ../lib/native/debug/liblambda-lib-cpp.a '
                '../lib/libradiant-cpp.a ../lib/libradiant-properties.a')
-        debug = f'LIBS += {old}\nLDDEPS += {old}\n'
+        old_native = ' '.join(f'../../build/lib/native/debug/{Path(name).name}' for name in native_archives)
+        old_native += ' ../../mac-deps/curl-8.10.1/lib/libcurl.a'
+        debug = f'LIBS += {old}\nLDDEPS += {old}\nLDDEPS += {old_native}\nALL_LDFLAGS += {old_native}\n'
         release = f'LIBS += {old}\n'
         source = f'ifeq ($(config),debug_native)\n{debug}else ifeq ($(config),release_native)\n{release}endif\n'
         previous = {key: os.environ.pop(key, None) for key in ('LAMBDA_INPUT_ROOT', 'RADIANT_ROOT')}
         try:
-            result = module.use_sibling_archives(source, str(root))
+            result = module.use_sibling_archives(source, str(root), 'mac-deps/curl-8.10.1/lib/libcurl.a')
+            original = str(root / 'build/lib/native/release/libre2.a')
+            choice = module.select_sibling_native_archives([original], str(root))[0]
+            original_curl = str(root / 'mac-deps/curl-8.10.1/lib/libcurl.a')
+            curl_choice = module.select_sibling_native_archives([original_curl], str(root))[0]
         finally:
             for key, value in previous.items():
                 if value is not None:
                     os.environ[key] = value
         selected = result.split('else ifeq', 1)[0]
         if any(selected.count(Path(archive).name) != 2 for archive in archives) or \
+                any(selected.count(Path(archive).name) != 2 for archive in native_archives + (curl_archive,)) or \
                 any(token in selected for token in old.split()) or \
+                any(token in selected for token in old_native.split()) or \
                 not result.endswith(f'{release}endif\n'):
             fail('split link does not consistently use sibling debug archives')
+        makefile.write_text(f'ARCHIVE = {choice}\nall:\n\t@echo $(ARCHIVE)\n')
+        for profile, expected in [('debug_native', str(sandbox / native_archives[0])),
+                                  ('release_native', original)]:
+            actual = subprocess.check_output(['make', '-s', '-f', str(makefile), f'config={profile}'],
+                                             text=True).strip()
+            if actual != expected:
+                fail(f'split native archive profile {profile}: {actual} != {expected}')
+        makefile.write_text(f'ARCHIVE = {curl_choice}\nall:\n\t@echo $(ARCHIVE)\n')
+        for profile, expected in [('debug_native', str(sandbox / curl_archive)),
+                                  ('release_native', original_curl)]:
+            actual = subprocess.check_output(['make', '-s', '-f', str(makefile), f'config={profile}'],
+                                             text=True).strip()
+            if actual != expected:
+                fail(f'split curl archive profile {profile}: {actual} != {expected}')
 
 
 def expect_radiant_property_ownership(module) -> None:

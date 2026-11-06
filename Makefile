@@ -570,6 +570,7 @@ help:
 	@echo "  build-lambda-baseline - Build Lambda baseline runtime and input test executables"
 	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
 	@echo "  build-lambda-split - Link debug lambda-static.exe against the sibling archives (macOS)"
+	@echo "  test-split-fetch   - Test split CLI HTTPS fetch and resource cleanup (macOS)"
 	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
 	@echo "  build-jube-test - Build the lambda-jube compatibility link and test executables"
 	@echo ""
@@ -3314,22 +3315,30 @@ build-lambda-static: build-radiant
 	@PYTHONPYCACHEPREFIX="$(CURDIR)/temp/python-cache" $(PYTHON) utils/check_radiant_archive_ownership.py
 	@echo "✅ static-module Lambda executable built successfully!"
 
-# Exercise the extracted archive owners while the general build still uses
-# transitional project links and in-tree archive targets.
+# Build the split providers directly; the general build remains transitional.
 .PHONY: build-lambda-split
-build-lambda-split: build-radiant
+build-lambda-split: $(MIR_LIB)
 	@test "$$(uname -s)" = Darwin || { echo "Sibling archive integration currently supports macOS only"; exit 1; }
 	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" RADIANT_ROOT="$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" $(PYTHON) utils/check_split_roots.py
-	@echo "Building the sibling input and Radiant archives..."
-	$(MAKE) -C "$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" INPUT_DEPS_ROOT="$(CURDIR)" -j$(JOBS)
-	$(MAKE) -C "$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" DEPS_ROOT="$(CURDIR)" -j$(JOBS)
 	$(MAKE) generate-premake
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	$(call run_make_with_error_summary,split-adapters,debug_native,,lambda-radiant-adapter-cpp node-core)
+	@echo "Building the sibling input and Radiant archives..."
+	$(MAKE) -C "$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" curl-deps
+	$(MAKE) -C "$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" INPUT_DEPS_ROOT="$(CURDIR)" CURL_PREFIX="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))/build/deps/curl" -j$(JOBS)
+	$(MAKE) -C "$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" INPUT_DEPS_ROOT="$(CURDIR)" -j$(JOBS) native-deps
+	$(MAKE) -C "$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" DEPS_ROOT="$(CURDIR)" -j$(JOBS)
+	@# Static archive creation does not link its declared library dependencies.
+	$(call run_make_with_error_summary,split-runtime,debug_native,-f lambda-rt-cpp.make LDDEPS=,all)
+	$(call run_make_with_error_summary,split-adapters,debug_native,-f lambda-radiant-adapter-cpp.make LDDEPS=,all)
+	$(call run_make_with_error_summary,split-node-core,debug_native,-f node-core.make,all)
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-core
 	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" RADIANT_ROOT="$(abspath $(if $(RADIANT_ROOT),$(RADIANT_ROOT),../radiant))" $(PYTHON) utils/patch_static_module_makefile.py --sibling-archives
 	$(call run_make_with_error_summary,lambda-exe-split,debug_native,-f lambda-exe.make -B,all)
 	@echo "✅ Lambda static executable linked against sibling input and Radiant archives"
+
+.PHONY: test-split-fetch
+test-split-fetch: build-lambda-split
+	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" $(PYTHON) test/test_fetch_lifetime.py ./lambda-static.exe
 
 # Build only the native binaries invoked by test-input-baseline. Keeping this
 # separate prevents that prerequisite from pulling the all-tests target back

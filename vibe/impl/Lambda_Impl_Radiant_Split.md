@@ -4,6 +4,117 @@
 
 ## Current checkpoint
 
+### Active continuation — input-owned curl
+
+- **Goal:** build the pinned mbedTLS-backed curl inside `lambda-input`, then
+  make the split executable and input tests consume it (D9.1.1v3, D9.1.3v2).
+  Preserve the existing curl features and asynchronous DNS required by the
+  private HTTPS pull service. Verify TLS with a local fixture and retain the
+  existing graph LOC-budget failure without changing its limits.
+- **Starting state:** the prior continuation's uncommitted changes remain in
+  all three projects. The current macOS split link still uses Lambda's curl
+  installation; the available system curl uses an incompatible TLS backend.
+- **Input-owned provider:** `make -C ../lambda-input curl-deps` builds pinned
+  curl 8.10.1 from a SHA-256-checked release with the prior mbedTLS, HTTP/2,
+  asynchronous DNS, protocol and feature settings. It builds only the library,
+  headers and curl-config, and invalidates on build-script/config changes. An
+  input-owned loopback TLS fixture validates host and explicit trust callbacks,
+  rejected CA and wrong hostname; all 46 input native cases pass. The private
+  pull test also passes trusted TLS, rejected CA and production loopback denial.
+  The graph suite remains 19/20 because of the unchanged LOC budget. Logs:
+  `input-owned-curl-library-only.log`, `input-owned-curl-private-pull.log`
+  (D9.1.1v3, D11.2.3).
+- **Integrated provider:** the split executable links input's curl archive and
+  fetched the expected bytes from a locally trusted HTTPS server. The input
+  archive build rejects curl installations without an mbedTLS-only backend.
+  The normal Lambda build still uses its old provider.
+- **Split build graph:** `build-lambda-split` now builds the Lambda runtime,
+  adapter and Node module directly and uses the sibling input and Radiant
+  archives; it no longer invokes the in-tree input and Radiant archive targets
+  as prerequisites. A warm build and `test-split-fetch` pass; a clean-checkout
+  dependency qualification remains open. Log: `curl-split-direct-build.log`
+  (D9.1.1v3, D9.1.3v2).
+- **Fetch lifetime:** both the old normal and split executables leaked one
+  network allocation after a successful fetch. The CLI now uses the existing
+  reference-counted resource constructor and release path, including failure
+  exits. The normal debug executable passes trusted and rejected local HTTPS
+  requests with `MEMTRACK_MODE=DEBUG`; `make test-split-fetch` passes the same
+  checks through the split executable. Logs:
+  `curl-lifetime-{success,failure}.log`, `curl-fetch-lifetime-split-test.log`
+  (D5.5.1, D9.1.1v3).
+- **Aggregate verification:** the Lambda baseline passed with 9,272 passed and
+  25 skipped after the resource change; the configured Radiant baseline passed
+  with 7,973 passed, 303 partial and 21 skipped. Test262 exited zero with
+  40,260 fully passing, one case passing only on retry, 2,652 skipped and no
+  reported regressions. Logs: `curl-ownership-lambda-baseline.log`,
+  `curl-ownership-radiant-baseline.log`, `curl-ownership-test262.log`.
+- **Final focused checks:** `test-split-fetch`, the split `slice_clamp` golden,
+  input source/header boundary and generator self-tests pass. The final input
+  native run passed 46 cases, the private pull case and 19 graph cases; the
+  existing graph LOC budget case remains failing. Logs:
+  `curl-split-direct-build.log`, `curl-split-direct-native-final.log`,
+  `curl-split-direct-generator.log`, `curl-split-direct-boundary.log`.
+
+### Active continuation — 2026-11-06
+
+- **Goal:** complete the standalone input and Radiant projects and integrate
+  their archives with Lambda (D9.1.1v3, D9.1.3v2). The split remains open.
+- **Starting state:** Lambda `36b04883d`, input `3f19388`, Radiant `32d614d`;
+  all three worktrees were clean. Current input and Lambda changes are uncommitted.
+- **Input compilation:** a forced build with `INPUT_DEPS_ROOT=./deps` and its
+  source/header boundary audit passed using system-provided headers. This did
+  not verify generated codec-header compatibility or standalone linkage.
+- **Ownership move:** native codec/archive target descriptions and generated
+  configuration now belong to `lambda-input/build_native_deps_config.json`;
+  the shared config loader and generator moved to `lambda-input/scripts/`, with
+  migration links from Lambda's `utils/`. Lambda's fully merged configuration
+  initially remained identical. The input-owned config subsequently gained
+  `HAVE_WCSLEN`, fixing the archive reader's clean build against C17 headers.
+- **Input-owned build and tests:** input generates its pinned codec headers and
+  builds RE2, archive-reader and image-codec debug archives from source. Build
+  signatures invalidate objects when flags or dependency paths change, including
+  same-second changes under macOS Make 3.81. The blob and image test sources and
+  AVIF/TIFF fixtures now live in input; whole-archive linking passes 44 cases.
+  The migrated graph parser executable passes 19/20; its pre-existing LOC
+  budget case fails on 306 vs 273 resolver lines, 108 vs 107 header lines, and
+  4,443 vs 4,409 combined lines. Both source lengths and the thresholds match
+  the starting commits. `make test-native` reports this failure; it is not
+  filtered or waived. This still uses Lambda's mbedTLS curl
+  and installed dependencies; other profiles, platforms and independent vendor
+  packaging remain open. Logs: `input-native-deps-signed.log`,
+  `input-test-native-graph.log` (D9.1.1v3, D9.1.3v2).
+- **Integrated validation:** normal `make build` and the generator self-tests
+  pass after the dependency ownership move. `make build-lambda-split` links
+  all three sibling-built native archives and passes the `slice_clamp` golden.
+  The regular build remains monolithic. Logs: `owned-deps-integrated-build.log`,
+  `final-after-owned-header.log`, `split-final-golden.out`.
+- **Radiant incremental build:** the shared build signature now tracks Radiant
+  compiler flags, dependency paths and source membership. Changing flags, then
+  repeating and restoring them, rebuilt precisely when expected even within one
+  second; the rebuilt sibling's four native host cases pass. Input's signature
+  also tracks source membership, so removing a source refreshes the archive.
+  Logs: `radiant-signature-verification.log`,
+  `radiant-signature-test-native.log` (D9.1.1v3).
+- **Shared render contract:** `lambda/core/render_bridge.hpp` is now owned by
+  input, with Lambda's old path as a migration link. The Radiant reactive
+  render host no longer reaches Lambda for that contract. The file's Git blob
+  is unchanged and the split-root check passes (D9.1.1v3, D9.1.3v2).
+- **Lambda aggregate:** `make test-lambda-baseline` passed with 9,272 passed
+  and 25 skipped. The binary was built before the byte-identical shared render
+  header move. Log:
+  `lambda-baseline-owned-native.log` (D9.1.1v3).
+- **Radiant aggregate:** `make test-radiant-baseline` passed its configured
+  gate with 7,973 passed, 303 partial and 21 skipped; Scene3D passed 656/656
+  and UI automation 326/326. Log:
+  `radiant-baseline-owned-native.log` (D9.1.1v3).
+- **Test262 aggregate:** `make test262-baseline` exited zero with 40,260/40,261
+  fully passing, one slow case passing only on individual retry, 2,652 skipped,
+  and no reported regressions. Log: `test262-owned-native.log` (D8.3.1).
+- **Next:** verify generated configuration equivalence and sibling-archive
+  integration, then make the normal Lambda build consume the input-owned
+  archives with correct profile isolation. Finish input test/dependency
+  packaging and Radiant's runtime closure before claiming the split complete.
+
 - **Split executable and native tests:** `make build-lambda-split` builds the two sibling projects' debug archives and links `lambda-static.exe` to those archives. It still builds transitional in-tree prerequisites and uses Lambda's local vendor setup. The generated link depends on sibling archives and rebuilds Lambda's adapter before linking; bypassing that adapter rebuild originally reproduced a layout crash from a stale host table (`sibling-layout-lldb-backtrace.log`). The corrected executable passes `slice_clamp`, a scripted layout with JS timing and incremental recascade, and a navigation whose resulting view contains the destination document. Eighteen native host test sources, the Radiant-dependent font test and two test helpers now live in the Radiant sibling. `make -C ../radiant test-native DEPS_ROOT=../Lambda` passes four direct native archive cases (`radiant-sibling-native-tests.log`). These do not prove complete standalone linkage (D9.1.1v3, D9.1.3v2, D6.3.3).
 - **Loader phase timing and retirement:** native document layout now obtains script timing and JS document cleanup through the registered Lambda loader host. Missing hosts return zero timing and reject retirement when script state remains. Provider/no-host tests pass 8/8 and 3/3, and the split executable passes scripted timing and redirect replays; `nm` confirms the three former JS imports are absent from native `cmd_layout.o`. The transform value contract moved from the runtime header to `lib/document_transform.h`; `cmd_layout.cpp` now compiles without transitive runtime, JS, DOM-adapter or module headers, and is included in the native header audit. That include cleanup occurred after the recorded integrated builds and needs the final split rebuild (D9.1.1v3, D6.3.3).
 - **Radiant aggregate after physical moves and loader host:** the configured reduced baseline passed with 7,973 passed, 303 partial and 21 skipped of 8,297; Scene3D passed 656/656 and UI automation 326/326. The first attempt failed during compilation because the font test still lived under the input library; it was moved to Radiant before this retry. The later loader include cleanup postdates the aggregate. Logs: `radiant-baseline-sibling-projects.log` and `radiant-baseline-sibling-projects-retry.log` (D9.1.1v3).
