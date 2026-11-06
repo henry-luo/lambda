@@ -64,8 +64,6 @@ Source artifacts inspected:
 - `test/node/official_slow_list.txt`
 - `test/test_node_gtest.cpp`
 - `lambda/js/js_*.cpp`
-- `doc/dev/js/JS_14_Node_Compat.md`
-- `doc/dev/js/JS_16_Testing.md`
 - focused harness sample:
 - `ref/node` updated from `320b450cd13` to `92b72d4f601` on 2026-06-29 to
   resolve baseline filenames missing from the local Node checkout;

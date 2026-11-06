@@ -30,8 +30,7 @@
 > **Ledger**: extends the compiling area's **LC#** series
 > (`Lambda_Design_Compiling.md`): decisions **LC4.1–LC4.12**, open issues
 > **LCO7–LCO12** (continuing LCO1–LCO6 of the Lambda doc). No new series.
-> **Companion**: `doc/dev/js/JS_01_Compilation_Pipeline.md`,
-> `JS_02_Parsing_AST.md`, `JS_04_MIR_Lowering.md`, `JS_15_Performance.md`;
+> **Companion**: `jube/JS_Grammar_Parser.md`, `jube/JS_MVP_Lmd.md`;
 > measurement tool `utils/js_compile_phase_bench.sh`.
 
 ---
@@ -154,7 +153,7 @@ not surface in the JS samples; the literal-shape scans hide it.
    the AST lane on this build (§1.3). The document safety gate
    (`MIR_RADIANT_AST_NODE_THRESHOLD`) already routes very large bundles to
    the AST executor because MIR was measurably too slow for them
-   (JS_01 §6, JS_15); the numbers above say the gate is set far above where
+  ; the numbers above say the gate is set far above where
    the pathology starts.
 2. **Lambda already made this decision.** D8.3.5 ships AUTO: every
    Lambda definition starts in T0 and promotes when hot. LambdaJS has the
@@ -575,12 +574,12 @@ Shared: `ast_index_visit` span-owner loop (`ast-core.cpp`).
   only the pure-interpreter mode needs confirming against the design record
   before LC4.7.
 - **LCO9** The interp-interface path's own cost on 400k-instruction modules
-  is unmeasured here; JS_15 measured 4–6× on lodash. Re-measure with LC4.7.
+  is unmeasured here; an earlier profile measured 4–6× on lodash. Re-measure with LC4.7.
 - **LCO10** Sampler attribution for the alpine compile captured only ~1.2 s
   of a 9.5 s run; the per-pass timers of LC4.1 replace sampling for the
   budget table.
 - **LCO11** Document AST gate (`MIR_RADIANT_AST_NODE_THRESHOLD`, 25,000
-  nodes in `mir_policy.hpp`, 50,000 in JS_01 §6) disagree; unify with LC4.7.
+  nodes in `mir_policy.hpp`, 50,000 in the former pipeline doc) disagree; unify with LC4.7.
 - **LCO12** Minified bundles cost 3–5× more front end per KB than source
   (`alpine.min.js` 0.65 ms/KB vs `lib_marked.js` 0.1 ms/KB); whether that is
   token density or identifier interning is unknown.

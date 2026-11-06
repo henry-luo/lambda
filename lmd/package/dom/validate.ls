@@ -6,7 +6,7 @@
 // the restyle all stay native.
 //
 // It covers ground the native v1 pass never did — minlength, maxlength, min,
-// max and step (RAD_19 known-issue 6). `pattern` is still not covered: Lambda
+// max and step (RAD19-6). `pattern` is still not covered: Lambda
 // exposes no regex system function today, so there is nothing to compile the
 // pattern with (ESO29). Native had the same gap for the same reason.
 import dom

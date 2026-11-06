@@ -1407,12 +1407,12 @@ this work that is four places, and only one of them is new:
 | what | where |
 |---|---|
 | the ruling D4.2.3 (terse, normative, `v2` + doc semver bump) | `doc/Lambda_Formal_Design.md` |
-| validation engine: the layering of §9.4, cycle rule, `(S,T)` memo | `doc/dev/lambda/LR_13_Schema_Validator.md` §3 |
-| shape/TypeMap interning, adoption, retag transitions | `doc/dev/lambda/LR_03_Value_and_Type_Model.md`, "Map shape: `TypeMap` & `ShapeEntry`" |
+| validation engine: the layering of §9.4, cycle rule, `(S,T)` memo | `vibe/Lambda_Schema_Validator.md` |
+| shape/TypeMap interning, adoption, retag transitions | `vibe/Lambda_Design_Shape_Transitions.md` |
 | the decision record — options weighed, measurements, rejected routes | **`vibe/Lambda_Design_Type_Boundary.md`** (new) |
 
 So `Lambda_Design_Type_Boundary.md` is the right name, in `vibe/` as the working
-record; the *detailed* design belongs in the existing LR_13 and LR_03 rather
+record; the *detailed* design belongs in the existing vibe records rather
 than a new file, since both already own their sections.
 
 ## 11. The literal-construction half: reverted 2026-08-19, RE-LANDED 2026-08-20 (§11.5)

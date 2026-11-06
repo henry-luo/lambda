@@ -744,7 +744,7 @@ theme, viewport, resource, and font revisions.
 
 The current [support matrix](../doc/HTML_CSS_SVG_Support.md) describes local
 audio/video as partial, macOS-specific support, with empty static render boxes;
-the [media/webview design](../doc/dev/radiant/RAD_22_Media_Webview.md) describes
+the [webview](radiant/Radiant_Webview.md) and [video playback](radiant/Radiant_Video_Playback.md) designs describe
 the relevant host mechanisms. Therefore native multimedia, cross-platform
 playback, provider embeds, fullscreen and posters need
 explicit capability tests and potentially general engine work. Their full

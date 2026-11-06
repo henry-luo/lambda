@@ -6,7 +6,7 @@ paint-only commits only, per Q5. See the
 [stage B checkpoint](#stage-b-checkpoint--2026-10-21).
 
 **Scope:** frames whose only DOM change is a presentation write of `transform`
-or `opacity`, the "paint-only commit" (RAD_16). This proposal covers how much
+or `opacity`, the "paint-only commit". This proposal covers how much
 those frames re-rasterise, and how retained rasters can stand in for unchanged
 or merely moved content. Layout, cascade and the paint-only commit's
 eligibility are unchanged.
@@ -89,7 +89,7 @@ presentation_style_set_property (dom.cpp:12123)
      animation ticks are all repainted in full, because each of them also
      requests a repaint.
    - Only `dirty_mark_element`, which sets `needs_repaint` alone, reaches the
-     selective clear. RAD_13 §7 describes the selective path, but it is
+     selective clear. The selective path exists, but it is
      practically unreachable from a commit.
 3. **The incremental commit falls back to full** when selective marking fails
    (`event.cpp:7856`).
@@ -104,11 +104,10 @@ presentation_style_set_property (dom.cpp:12123)
   visual bounds of every element are therefore known after recording.
   Retained fragments keep them (`bounds`, `marker_bounds`).
 - **Dirty-clip replay.** `dl_replay_push_dirty_clip` clips to the dirty union,
-  and `dl_replay_skip_clean_item` jumps over element subtrees outside it
-  (RAD_12 §5).
-- **Retained display-list fragments**, keyed by `view_id` (RAD_12 §6). They are
+  and `dl_replay_skip_clean_item` jumps over element subtrees outside it.
+- **Retained display-list fragments**, keyed by `view_id`. They are
   reused only on selective frames, and never inside a `css3d_context`.
-- **The inline-SVG raster layer** (RAD_14 §4.4), the model for §4:
+- **The inline-SVG raster layer**, the model for §4:
   - a document-resource registry;
   - a content stamp of generations;
   - capture on the second identical paint;
@@ -296,7 +295,7 @@ These remain deferred until A and B are measured:
   C1–C7 in [Radiant_Design_GPU_Compositor.md](Radiant_Design_GPU_Compositor.md),
   with rulings Q7–Q13 accepted by the user on 2026-11-02;
 - `will-change` layer promotion beyond Q2;
-- tiled replay with glyphs (RAD_12 §9.5).
+- tiled replay with glyphs.
 
 ## 6. Verification plan
 
@@ -328,8 +327,7 @@ These remain deferred until A and B are measured:
   Record per-frame record, replay, upload and total time before and after each
   stage, plus layer memory.
 - **Path traces.** Extend `[RENDER_PATH]` with the damage share and layer
-  hits, misses and captures, so the path taken can be confirmed after the fact
-  (RAD_13 §9).
+  hits, misses and captures, so the path taken can be confirmed after the fact.
 
 ## 7. Staging and effort
 
@@ -339,7 +337,7 @@ These remain deferred until A and B are measured:
 | A2 | Split `is_dirty`/`full_repaint`; audit region-marking callers | Medium, wide reach | A1 for the paint-only caller |
 | A3 | Persistent texture plus sub-rect upload | Small (window.cpp) | A2 |
 | B1–B4 | Paint-layer registry, stamp, capture, `DL_DRAW_LAYER`, css3d plane integration | Large | A (layers pay off most when damage is bounded) |
-| Docs | RAD_12 §5–6, RAD_13 §7, RAD_16 §3; this doc's checkpoints | Small | each step |
+| Docs | this doc's checkpoints | Small | each step |
 
 A is useful on its own for every presentation animation: slides, CSS-driven
 transforms written by packages, and the album. B builds on A.
@@ -522,8 +520,8 @@ load). Remaining per-frame cost:
   `box-shadow` over its whole rectangle, even though an outer shadow never
   paints inside the border box.
 
-The region replay cannot fan out across workers while the list has glyphs
-(RAD_12 §9 item 5). Stage B (a retained raster of the static spread) and an
+The region replay cannot fan out across workers while the list has glyphs.
+Stage B (a retained raster of the static spread) and an
 edge-band, cached outer-shadow blur are the next steps.
 
 ## Stage B checkpoint — 2026-10-21
@@ -672,8 +670,8 @@ live-window sample with layers shows where the time remains:
 - **The turning leaf** is one projected image (`render_image_project_pixels`)
   at 2×, which costs about as much as its live content did.
 - **Shade planes** are full-page projective gradient fills.
-- **Region replay** still runs on one tile worker (the glyph gate,
-  RAD_12 §9 item 5), and the whole spread is now in the region.
+- **Region replay** still runs on one tile worker (the glyph gate),
+  and the whole spread is now in the region.
 - **Captures** (about three per turn) land on the frames after a turn starts.
 
 Candidate next steps:
@@ -735,7 +733,7 @@ background load):
 **Open:**
 - The first-turn spike.
 - The remaining 2× per-frame cost: the projected turning face, region replay on
-  one worker (RAD_12 §9 item 5) and the radial desk backdrop.
+  one worker and the radial desk backdrop.
 - The live 3D path's mirrored-gradient offset (above).
 
 ### The two open issues, fixed (2026-10-21)

@@ -1,7 +1,7 @@
 # Lambda Core Runtime — Central Issue Ledger
 
 > **Consolidated from the per-area "Known Issues & Future Improvements" sections of
-> [`doc/dev/lambda/LR_01`–`LR_13`](../doc/dev/lambda/LR_00_Overview.md)**, plus
+> the former core-runtime design set (areas `LR01`–`LR13`)**, plus
 > verified items from the former sibling `vibe/Lambda_Issue*.md` ledgers (§14)
 > and the retired Outstanding rollup's design gaps (§15).
 >
@@ -11,7 +11,7 @@
 > each keeps its detail and evidence, while its live residue is indexed here.
 > Add new issues here, not to the fixed archive or a retired archive. This is
 > the single working list for core-runtime defects, caps, and structural
-> hazards. The `LR_*` documents remain the *design* record; this ledger is the
+> hazards. Design lives in the formal specs and the vibe records; this ledger is the
 > *issue* record.
 >
 > **Audience:** engine developers. **Status:** working ledger (`vibe/`), not normative.
@@ -170,7 +170,7 @@ Every live issue below was re-checked against the tree at `c568f0f93`. Three out
 
 | Doc | Result |
 |---|---|
-| `Lambda_Issues_Outstanding.md` | **Reviewed in full and RETIRED 2026-08-25** → archived as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 was verified subsumed by §1–§13; §2/§4 were pointer indexes into docs that still own them; its OI design gaps and hygiene themes moved to §15. One item was genuinely missing from this ledger — LR_12 #8, now resolved and moved to [LR12-R8](<Lambda_Issue_Ledger (fixed).md#lr12-r8>). |
+| `Lambda_Issues_Outstanding.md` | **Reviewed in full and RETIRED 2026-08-25** → archived as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 was verified subsumed by §1–§13; §2/§4 were pointer indexes into docs that still own them; its OI design gaps and hygiene themes moved to §15. One item was genuinely missing from this ledger — LR12-8, now resolved and moved to [LR12-R8](<Lambda_Issue_Ledger (fixed).md#lr12-r8>). |
 | `impl/Lambda_Issue_Type_Support (retired).md` | TS-1, TS-2, TS-7 verified **FIXED**; TS-5's dead-code half fixed; TS-9's C16 implementation has landed. TS-6, TS-8 confirmed open; TS-3, TS-4 open pending measurement → §14. |
 | `Lambda_Issues8 (retired).md` | **All 28 entries triaged; 22 re-tested.** 17 fixed/closed, 9 open or partial (§14), 4 not re-tested (Radiant-retained, Structurizr fixtures, and an incremental-release build issue — each needs a fixture outside the core runtime). Earlier note: **Fixed:** unbraced scalar `if` in a block body; map literal after `if` (S16.4.1v2); multiline iterator + `where`; `list` as a for-binding (now a clear diagnostic); the double-quoted-key error cascade. **Ruled not a defect:** double-quoted map keys — the doc was wrong and is corrected. **Does not reproduce:** recursive params overwritten after descent. **Still open → §14:** dynamic map spread, element attribute spread, one-line Mark comprehensions, and the weak double-quoted-key diagnostic. |
 | `Lambda_Issues5 (retired).md` | 7 entries re-tested. **Fixed:** postfix `^` in `let` (#4), chained comparisons (#5), string slicing (#11), `if`-expression value in a `pn` (#15), and §23's inline-`if` attribute value. **By design, not defects:** element-wise list `+` (#1), `let` reassignment rejected in a `pn` (#10). **Still open:** §23's attribute spread → §14. |
@@ -240,21 +240,21 @@ still need larger architectural work.
 
 Counts:
 
-| Source doc | Area | Open | Partial | Resolved | Total |
+| Area ID | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
-| LR_01 | Compilation pipeline, CLI & REPL | 5 | 2 | 0 | 7 |
-| LR_02 | Parsing & AST construction | 2 | 4 | 0 | 6 |
-| LR_03 | Value & type model | 3 | 1 | 0 | 4 |
-| LR_04 | Numbers, decimal & datetime | 5 | 1 | 0 | 6 |
-| LR_05 | Strings, symbols & vectors | 2 | 1 | 0 | 3 |
-| LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
-| LR_07 | MIR Direct transpiler & JIT | 8 | 0 | 0 | 8 |
-| LR_08 | Memory management & GC | 6 | 0 | 0 | 6 |
-| LR_09 | Runtime builtins | 3 | 0 | 0 | 3 |
-| LR_10 | Error handling | 1 | 0 | 0 | 1 |
-| LR_11 | Mark data API | 6 | 0 | 0 | 6 |
-| LR_12 | Procedural runtime | 5 | 0 | 0 | 5 |
-| LR_13 | Schema validator | 6 | 1 | 0 | 7 |
+| LR01 | Compilation pipeline, CLI & REPL | 5 | 2 | 0 | 7 |
+| LR02 | Parsing & AST construction | 2 | 4 | 0 | 6 |
+| LR03 | Value & type model | 3 | 1 | 0 | 4 |
+| LR04 | Numbers, decimal & datetime | 5 | 1 | 0 | 6 |
+| LR05 | Strings, symbols & vectors | 2 | 1 | 0 | 3 |
+| LR06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
+| LR07 | MIR Direct transpiler & JIT | 8 | 0 | 0 | 8 |
+| LR08 | Memory management & GC | 6 | 0 | 0 | 6 |
+| LR09 | Runtime builtins | 3 | 0 | 0 | 3 |
+| LR10 | Error handling | 1 | 0 | 0 | 1 |
+| LR11 | Mark data API | 6 | 0 | 0 | 6 |
+| LR12 | Procedural runtime | 5 | 0 | 0 | 5 |
+| LR13 | Schema validator | 6 | 1 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 5 | 1 | 0 | 6 |
 | **Live total** | | **59** | **11** | **0** | **70** |
 
@@ -262,7 +262,7 @@ The active ledger now contains 70 live records, with the 64 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
-LR_03 #4 (sentinels → LR03-R4 + LR03-5) and LR_05 #3 (two string orderings →
+LR03 #4 (sentinels → LR03-R4 + LR03-5) and LR05 #3 (two string orderings →
 LR05-R2 + LR05-R3). And two defects were **found during verification** rather
 than extracted: LR02-8 through LR02-10, each marked as such in place (a fourth, LR02-11, was fixed the same day and is now LR02-R6).
 
@@ -284,7 +284,7 @@ longer parse.
 The largest single change since the docs were written: **the C2MIR backend was
 deleted from the tree** (`lambda/transpile.cpp`, `transpile-call.cpp`,
 `lambda-embed.h`, `jit_compile_to_mir` all gone; no build defines
-`LAMBDA_C2MIR`; the `--c2mir` CLI flag is not parsed). All nine LR_06 issues are
+`LAMBDA_C2MIR`; the `--c2mir` CLI flag is not parsed). All nine LR06 issues are
 therefore archived as obsolete, and every cross-doc "diverges from C2MIR"
 framing (LR07-3) now reads as a plain MIR Direct gap rather than a backend
 divergence.
@@ -476,7 +476,7 @@ Running every Lambda snippet on the website (`site/`) against the current build 
 ---
 
 
-## 1. Compilation pipeline, CLI & REPL (LR_01)
+## 1. Compilation pipeline, CLI & REPL (LR01)
 
 <a id="lr01-2"></a>**LR01-2 · `serve` is a stub · OPEN**
 The subcommand exists but does nothing: `// TODO: Phase 5 — instantiate Server,
@@ -554,12 +554,12 @@ Evidence: `temp/error-handling-merge-20261103T054805Z/latest-mvp-frontend.json`
 and `final-source-audit.json`.
 [Production qualification](<impl/Lambda_Impl_Type_Error_Handling (done).md#production-integration-and-user-acceptance-2026-11-03>).
 
-## 2. Parsing & AST construction (LR_02)
+## 2. Parsing & AST construction (LR02)
 
 <a id="lr02-1"></a>**LR02-1 · Relational result type is representation-sensitive · PARTIAL**
 `< <= > >=` still yields `TYPE_BOOL` or `set_type_any(tp, ANY_COMPARE)`
 depending on operand openness (`build_ast.cpp:7270`–`7274`), and must stay in
-lockstep with the transpiler's vectorized-comparison codegen ([LR_07](#7-mir-direct-transpiler--jit-lr_07)).
+lockstep with the transpiler's vectorized-comparison codegen ([LR07](#7-mir-direct-transpiler--jit-lr_07)).
 *Residue:* the `ARRAY_NUM` third outcome the doc described is no longer produced
 here, so the lockstep surface is narrower than documented but still real.
 
@@ -683,7 +683,7 @@ every use fails to parse.
 <a id="lr02-37"></a>**LR02-37 · The C expression parser gave `|`, `&`, `!` and `to` one binding power · OPEN (S10.1.1v5 implemented 2026-11-03; qualification pending)**
 `infix_bp` previously mapped all four operators to `LAMBDA_BP_SET`, left-associative (`lambda/runtime/parser/lambda_parser.c`). That made `type T = "a" | "b" & "c"` admit `"a"`, while the same expression in `let x = ...` denoted `none`; `let r = 5 | 1 to 3` also failed at run time. **S10.1.1v5** adopts the reference grammar and type-pattern order, `to` > `&` > `!` > `|`, left-associative. The C parser now has separate binding powers, so both contexts group the first example as `"a" | ("b" & "c")`, and the range expression as `5 | (1 to 3)`. The previous reproducers have not yet been rerun.
 
-## 3. Value & type model (LR_03)
+## 3. Value & type model (LR03)
 
 <a id="lr03-40"></a>**LR03-40 · Qualified-name integration · PARTIAL (core fixed 2026-10-29; Mark namespace encoding pending)**
 
@@ -772,7 +772,7 @@ With `type P { a: int, b: string }`, `<P a: 1, b: "x", extra: 5>` prints `<P a: 
 
 
 
-## 4. Numbers, decimal & datetime (LR_04)
+## 4. Numbers, decimal & datetime (LR04)
 
 
 <a id="lr04-2"></a>**LR04-2 · BigInt still has practical caps · OPEN**
@@ -805,7 +805,7 @@ Division-by-zero and invalid decimal results can still collapse to a generic
 are the finest precision. Out-of-range construction yields
 `DATETIME_MAKE_ERROR()`.
 
-## 5. Strings, symbols & vectors (LR_05)
+## 5. Strings, symbols & vectors (LR05)
 
 
 <a id="lr05-6"></a>**LR05-6 · Fixed-size buffer truncation in stencils · OPEN**
@@ -832,11 +832,11 @@ Full text and recommendations: [Lambda_Design_String_Pattern.md §9](Lambda_Desi
 ---
 
 
-## 6. C transpiler — legacy C2MIR (LR_06)
+## 6. C transpiler — legacy C2MIR (LR06)
 
 **All nine issues are archived in the [fixed issue ledger](<Lambda_Issue_Ledger (fixed).md#lr06-r1r9>).** The backend no longer exists in the tree.
 
-## 7. MIR Direct transpiler & JIT (LR_07)
+## 7. MIR Direct transpiler & JIT (LR07)
 
 These cluster around three structural facts: MIR's immutable register types, the
 dual native-or-boxed value representation, and GC rooting under a non-moving
@@ -967,7 +967,7 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 
 
 
-## 8. Memory management & GC (LR_08)
+## 8. Memory management & GC (LR08)
 
 
 <a id="lr08-2"></a>**LR08-2 · Execution-side-stack capacity is reserved up front · OPEN**
@@ -998,7 +998,7 @@ profiles rather than runtime configuration.
 ---
 
 
-## 9. Runtime builtins (LR_09)
+## 9. Runtime builtins (LR09)
 
 <a id="lr09-1"></a>**LR09-1 · Commented-out replace-in-file procedures (key collision) · OPEN**
 `pn_replace_file3` / `pn_replace_file4` are still commented out in the registry
@@ -1033,14 +1033,14 @@ The markup formatters skip any text string above a size cap, log an error and ca
   - The LaTeX formatter drops strings of 64 KiB or more (`lambda/format/format-latex.cpp:56`).
 - **Reproduced 2026-09-24 on both tiers, for HTML and XML:** a paragraph of 1,200,000 characters followed by `<p>tail-marker</p>` formats to 79 characters of HTML and 120 of XML. The paragraph is gone and the marker survives. The only trace is an `[ERR!] html_string_guard: skipping suspicious string` log line.
 - **Likely intent:** the log wording suggests a defence against corrupt string pointers, not an intended size limit.
-- **Why filed here:** the formatters sit outside LR_09's scope (`lambda/format/`, which `lambda convert` also uses), but the wrong value is observed through the `format()` builtin.
+- **Why filed here:** the formatters sit outside LR09's scope (`lambda/format/`, which `lambda convert` also uses), but the wrong value is observed through the `format()` builtin.
 - **Fix:** needs a decision — remove the caps, or make an oversized string an error.
 
 
 <a id="lr09-34"></a>**LR09-34 · File-based `find(path, pattern, options?)` is designed but not built; it waits on a proposal that does not exist yet · OPEN (logged 2026-10-23, string doc consolidation)**
 GRP27 (USER, 2026-10-04) keeps file-based `find` an `fn` running on `lib/grep`, with the uniform `{value, index}` shape, `file` for a directory or wildcard, and opt-in `line` / `byte_offset` fields. Its determinism is to come from session caching, which a separate proposal is to design together with `input()`, `exists()` and `path#`; that proposal has not been written, so phase G5B of [Lib_Grep.md](lib/Lib_Grep.md) is blocked. Today `find` takes a string or symbol only (`SYSFUNC_FIND`, `SYSFUNC_FIND3` in `lambda/runtime/sys_func_registry.c`), and `io.grep` (a `pn`) is the only file search. Record: [Lambda_Design_String_Pattern.md §7.3](Lambda_Design_String_Pattern.md#73-file-based-findpath---designed-not-built).
 
-## 10. Error handling (LR_10)
+## 10. Error handling (LR10)
 
 
 <a id="lr10-12"></a>**LR10-12 · A proviso answers null for an error operand when its predicate touches `~` (S10.1.5v3, S7.9) · OPEN (found 2026-09-25, waiting on a ruling)**
@@ -1048,7 +1048,7 @@ GRP27 (USER, 2026-10-04) keeps file-based `find` an `fn` running on `lib/grep`, 
 
 
 
-## 11. Mark data API (LR_11)
+## 11. Mark data API (LR11)
 
 <a id="lr11-1"></a>**LR11-1 · Reader traversal is stubbed · OPEN**
 `MarkReader::ElementIterator`'s destructor leaks `state_`
@@ -1067,7 +1067,7 @@ as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 ---
 
 
-## 12. Procedural runtime (LR_12)
+## 12. Procedural runtime (LR12)
 
 
 
@@ -1274,7 +1274,7 @@ channel).
 
 *Remaining (needs a ruling):* whether a write error from a plain `pn` must escape a **discarded statement-position call in its caller**, rather than being available as the call's result. This separate caller-boundary policy is not decided by repairing the originating store.
 
-## 13. Schema validator (LR_13)
+## 13. Schema validator (LR13)
 
 
 <a id="lr13-2"></a>**LR13-2 · Inconsistent `max_depth` defaults · OPEN**
@@ -1412,7 +1412,7 @@ The error-handling concerns have no source-level marker.
 ## 14. Sibling vibe ledgers (TS, Issues8)
 
 > Issues raised in the sibling `vibe/Lambda_Issue*.md` docs rather than in an
-> `LR_*` Known-Issues section. **IDs are kept as their owning doc assigns them**
+> `LR*` Known-Issues section. **IDs are kept as their owning doc assigns them**
 > (rule 17: no new ID series); those docs stay the detail record and this section
 > is the index. Verified 2026-08-25 unless noted.
 
@@ -1508,12 +1508,12 @@ and points at the generator that actually conflicts.
 
 > `vibe/Lambda_Issues_Outstanding.md` was **retired on 2026-08-25** and archived
 > as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 (Lambda core,
-> `LR_01–13`) was verified fully subsumed by §1–§13 above — every MAJOR item it
+> `LR01–13`) was verified fully subsumed by §1–§13 above — every MAJOR item it
 > bolded resolves to a ledger entry, and the ledger carries more per section than
-> the rollup listed. Its §2 (JO1–JO13) and §4 (JS_01–16) were pointer indexes
+> the rollup listed. Its §2 (JO1–JO13) and §4 (JS01–16) were pointer indexes
 > into docs that still own them: `vibe/Lambda_Design_Stack_Frame_JS.md` (18 JO
-> references) and the `doc/dev/js/JS_*.md` Known-Issues sections (present in all
-> 17). What had **no other home** were the OI design gaps and the cross-cutting
+> references) and the JS known-issue sections, now in
+> `vibe/jube/JS_Issue_Ledger.md`. What had **no other home** were the OI design gaps and the cross-cutting
 > themes, indexed below; the archived file remains the full argument for each.
 >
 > **IDs keep their `OI-n` spelling** (rule 17). These are design gaps needing an
@@ -1552,7 +1552,7 @@ and points at the generator that actually conflicts.
   work is that callback-style `fs` operations can run synchronously and invoke
   callbacks inline; stream internals remain partial (K27 shared stream core is
   the settled fix); and crypto lacks asymmetric primitives and complete
-  Node-style error behavior. See `doc/dev/js/JS_14_Node_Compat.md` §11.
+  Node-style error behavior. See JS14 in `vibe/jube/JS_Issue_Ledger.md`.
 - **OI-8 · DOM fidelity.** No on-read layout flush, so mutate-then-read
   `offsetWidth` sees stale pixels; framework-blocking API gaps fail as silent
   `undefined`; O(n) listener/wrapper storage degrades quadratically; no text
@@ -1680,8 +1680,8 @@ together, not individually.
 
 # Appendix C — Maintaining this ledger
 
-1. **This file is the working list; `LR_*` sections stay as design record.**
-   When an `LR_*` "Known Issues" section changes, mirror the change here with
+1. **This file is the working list; `LR*` sections stay as design record.**
+   When an `LR*` "Known Issues" section changes, mirror the change here with
    the same `LRnn-k` ID. IDs are stable — a resolved issue keeps its number and
    moves to the fixed archive with an `-R` suffix rather than being renumbered.
 2. **Re-verify before acting.** Every `file:line` in this document was resolved

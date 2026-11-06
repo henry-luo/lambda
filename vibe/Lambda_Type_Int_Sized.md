@@ -16,8 +16,7 @@
   embeddings, egress), `vibe/Lambda_Type_Double_Boxing.md` (LANDED float
   self-tagging — the sibling representation decision),
   `vibe/Lambda_Issue_Scalar_Lane.md` (return-lane consequences of
-  pointer-backed scalars), `doc/dev/lambda/LR_04_Numbers_Decimal_DateTime.md`
-  (arithmetic ladders).
+  pointer-backed scalars).
 - This file was previously `Lambda_Type_Int2.md`, an audit document. The
   audit's findings are all fixed; this revision keeps only the decided design.
   Consult git history for the original issue list and evidence matrix.

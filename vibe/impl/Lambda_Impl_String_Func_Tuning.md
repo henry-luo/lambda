@@ -361,7 +361,7 @@ The P5c section above labels MiB values as MB. The first column here was re-meas
 - All 21,602 HTML files, the 10 corpora, 99 inputs and 108 formatter outputs are identical.
 - Lambda passes 5,868/5,868, Radiant all suites, and test262 40,261/40,261.
 - The four `TypeMapHash*` unit tests assumed a stack `TypeMap` had slots without a pool. They now prepare their table through a pool. They are joined by `TypeMapHashIsAbsentUntilPopulated` and `TypeMapHashOwnedInsertGrowsWithTheShape`.
-- The design descriptions were updated in `doc/dev/lambda/LR_03_Value_and_Type_Model.md` and `vibe/Lambda_Design_Runtime_Structs.md`. No `D#` ruling covered the inline table.
+- The design description was updated in `vibe/Lambda_Design_Runtime_Structs.md`. No `D#` ruling covered the inline table.
 
 ## Findings not yet filed
 

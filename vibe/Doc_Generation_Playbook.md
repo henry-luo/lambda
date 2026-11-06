@@ -1,6 +1,8 @@
 # Documentation Generation Playbook
 
-A reusable recipe for producing a structured detailed-design doc set for a subsystem of the Lambda/Radiant repo, the way the LambdaJS runtime set in `doc/dev/js/` was produced. Paste the prompt below (with the placeholders filled), or hand it to an agent.
+> **Retired 2026-11-06.** The detailed-design sets that this recipe produced are retired ([Doc Convention §7](../doc/Doc_Convention.md)).
+
+A reusable recipe for producing a structured detailed-design doc set for a subsystem of the Lambda/Radiant repo. Paste the prompt below (with the placeholders filled), or hand it to an agent.
 
 The output is: one doc per subsystem area, each grounded in the actual code with a "Known Issues" section, plus an overview/index doc with C4 architecture diagrams — all cross-linked, all rendered with embedded SVG diagrams.
 
@@ -10,10 +12,7 @@ The output is: one doc per subsystem area, each grounded in the actual code with
 
 ````text
 Develop structured detailed-design documentation for the <SUBSYSTEM> of the Lambda/Radiant repo,
-following EXACTLY the process, structure, and conventions used for the LambdaJS runtime docs in
-doc/dev/js/. Before doing anything, read doc/dev/js/JS_00_Overview.md plus two detail docs
-(JS_01_Compilation_Pipeline.md and JS_06_Objects_Properties_Prototypes.md) as the gold-standard
-template for structure, tone, density, diagrams, cross-linking, and the per-doc "Known Issues" section.
+following EXACTLY the process, structure, and conventions below.
 
 SCOPE / INPUTS
 - Subsystem: <SUBSYSTEM>. Primary code under: <CODE_DIRS>.
@@ -76,7 +75,7 @@ checkpoint after the breakdown.
 | `<SUBSYSTEM>` | Radiant CSS layout & rendering engine | Lambda core language runtime | Lambda input parsers & formatters |
 | `<CODE_DIRS>` | `radiant/` | `lambda/` (excl. `js/`, `input/`, `format/`, `validator/`) | `lambda/input/`, `lambda/format/` |
 | `<EXISTING_DOCS>` | `doc/dev/Radiant_Layout_Design.md`, `doc/dev/Radiant_View_Design.md` | `doc/dev/Lamdba_Runtime.md`, `doc/dev/Lambda_Transpiler.md` | (none, or relevant ones) |
-| `<OUTPUT_DIR>` | `doc/dev/radiant/` | `doc/dev/lambda/` | `doc/dev/io/` |
+| `<OUTPUT_DIR>` | `vibe/radiant/` | `vibe/` | `vibe/input/` |
 | `<PREFIX>` | `RAD` | `LR` | `IO` |
 | `<SOURCE_MATERIAL>` | `vibe/` notes on radiant / layout / CSS | `vibe/` notes on runtime / transpiler / MIR | `vibe/` notes per format |
 

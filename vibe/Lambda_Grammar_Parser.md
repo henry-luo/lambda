@@ -5,7 +5,7 @@
 - **Status:** **PRODUCTION CUTOVER COMPLETE FOR NORMAL LAMBDA FILES/MODULES.** P2.1 source spans, P2.2 shared construction seams, P2.3 direct AST reduction, and the normal-runner P2.4 selector are landed. With `LAMBDA_PARSER` unset (or `c`), the first-party C hybrid recursive-descent + Pratt parser builds the existing typed AST directly. `LAMBDA_PARSER=tree`/`tree-sitter` is an explicit reference/rollback mode; `compare` records Tree-sitter syntax acceptance after the C AST is built and routes disagreements to D8.1.1 review. The REPL and a few legacy inspection paths still retain Tree-sitter fragment trees because their append-only source/span transaction is separate from the file cutover.
 - **Formal authority:** **D8.3.3** (first-party C parser → shared typed AST pipeline), **D8.1.1** (`grammar.js` as the best first-cut structural reference, C as the final production implementation, disagreements manually reviewed), **D8.2.1–D8.2.5** (one core AST, no tree rewriting, indexed compilation unit, typed pass schedule), and **D5.1.1** (AST/const-pool ownership). The accepted language and S2.4.3v3/S7.6.3v2 syntax rulings are unchanged.
 - **Surface-syntax authority:** the formal syntax rulings win. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut verifier, but it misses reviewed corner cases; the production C parser is the shipped implementation and can also be wrong. A disagreement is therefore a manual-review case, not an automatic verdict for either parser. S2.4.3v3 governs greedy namespace-qualified names, and S7.6.3v2 governs query at the postfix/member tier.
-- **Related:** [grammar-reduction reference](Lambda_Grammar_Reduce.md) (historical techniques and Tree-sitter size measurements), `doc/dev/lambda/LR_02_Parsing_AST.md` (C parser and reference builder), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp`, `lambda/runtime/ast-core.hpp`, `lambda/runtime/parse_type_pattern.cpp` (and, until 2026-09-21, `lambda/runtime/parse_path_expr.cpp`).
+- **Related:** [grammar-reduction reference](Lambda_Grammar_Reduce.md) (historical techniques and Tree-sitter size measurements), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp`, `lambda/runtime/ast-core.hpp`, `lambda/runtime/parse_type_pattern.cpp` (and, until 2026-09-21, `lambda/runtime/parse_path_expr.cpp`).
 - **Proposal IDs:** CGP1–CGP21.
 
 ## 1. Proposal
@@ -1022,9 +1022,7 @@ The normal production switch is now landed. The formal and working records were
 updated together:
 
 1. `doc/Lambda_Formal_Design.md`: D8.3.3, D8.1.1, semver, implementation status.
-2. `doc/dev/lambda/LR_01_Compilation_Pipeline.md`: production source→AST pipeline and explicit reference selector.
-3. `doc/dev/lambda/LR_02_Parsing_AST.md`: C lexer/Pratt/RD parser and direct AST sink, with the reference CST adapter retained.
-4. [Grammar-reduction reference](Lambda_Grammar_Reduce.md): preserves historical
+2. [Grammar-reduction reference](Lambda_Grammar_Reduce.md): preserves historical
    tuning results; Tree-sitter is a structural reference and the C parser is the
    production front end under D8.3.2 / D8.1.1.
 5. `vibe/Lambda_Repl.md`: explicitly records its transitional retained Tree-sitter fragment transaction.

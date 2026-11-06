@@ -178,7 +178,7 @@ to the editor.
   re-running the solver from a shifted box could not unstick it either. The
   solver now records the offset it applied and re-solves from the box's
   normal-flow position, and a moved scroll position makes paint and
-  hit-testing re-solve first (RAD_11 §2.1). The shell also set
+  hit-testing re-solve first. The shell also set
   `html, body { height: 100% }`: a sticky box never leaves its containing
   block, and a viewport-tall body carried both bars away past the first
   screen; the body now grows with the document (`min-height`). Regressions:
@@ -206,7 +206,7 @@ to the editor.
   earlier content it covered. Both now follow CSS 2.1 Appendix E step 8 among
   siblings: the painter's `render_walk_children` paints these boxes after
   their non-positioned siblings, and `target_children` tries them first,
-  later sibling first (RAD_13 §2.4, RAD_15 §3). Regression:
+  later sibling first. Regression:
   `test/ui/positioned_paint_order_hit.json`.
 
 ## 3. Package decisions

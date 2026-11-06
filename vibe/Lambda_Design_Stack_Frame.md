@@ -12,7 +12,7 @@ protocol. Sections 1.2 and the historical motivation below describe the system
 this design replaced, not the current representation contract.
 **Rooting successor (2026-07-18):** the precise-rooting *emission strategy* and conservative-scan *retirement path* — sketched here as SF8/SF9 — are now governed by `vibe/Lambda_Design_Stack_Rooting.md` (safepoint-current canonical slots, CR1–CR8, in implementation). That document supersedes this one on rooting-emission, helper-handle, and scan-retirement questions; the lifetime architecture in this document (side stacks, watermarks, re-homing, SF12–SF20) is unchanged by it.
 **Date:** 2026-07-15
-**Context:** A unified stack-frame architecture for Lambda and hosted languages (LambdaJS, future Jube guests) that addresses two runtime debts at once: (1) JIT GC rooting goes through heap-allocated shadow frames with a C call per rooted store, and (2) the numeric nursery is never collected — an unbounded leak by design. Successor-in-spirit to the G1 honest-rooting fix (`vibe/Lambda_Issue_GC_Root (fixed).md`); feeds the G2 host-API rooting clause (`vibe/Lambda_Semantics_Features.md` §1.8). Detailed current-state design lives in `doc/dev/lambda/LR_08_Memory_and_GC.md`.
+**Context:** A unified stack-frame architecture for Lambda and hosted languages (LambdaJS, future Jube guests) that addresses two runtime debts at once: (1) JIT GC rooting goes through heap-allocated shadow frames with a C call per rooted store, and (2) the numeric nursery is never collected — an unbounded leak by design. Successor-in-spirit to the G1 honest-rooting fix (`vibe/Lambda_Issue_GC_Root (fixed).md`); feeds the G2 host-API rooting clause (`vibe/Lambda_Semantics_Features.md` §1.8). Current-state rulings are in D5.3 and D6.
 
 ---
 
@@ -22,7 +22,7 @@ Facts verified in code on 2026-07-15; file:line references are to that state of 
 
 ### 1.1 GC rooting today
 
-The root set has four layers (LR_08 §6):
+The root set has four layers:
 
 1. **Registered slots/ranges** — `heap_register_gc_root` / `heap_register_gc_root_range` (`lambda-mem.cpp:343`, `:357`) for BSS globals, JS module-var arrays (`js_runtime_state.cpp:186`), and runtime singletons (`js_current_this` etc.).
 2. **Per-call JIT root frames** — the G1 machinery. A thread-local stack of heap-allocated `JitGcRootFrame` records, each holding a chain of 64-slot `JitGcRootBlock`s (`lambda-mem.cpp:24`). Frames materialize lazily: `heap_jit_gc_root_frame_enter` only bumps a depth counter (`:463`); the first `..._set` at that depth allocates the frame (free-list cached, max 256). The MIR-Direct transpiler emits `enter`/`exit` around every function body and a **C call per rooted store** (`store_gc_root_slot` → `emit_call_void_2("heap_jit_gc_root_frame_set", ...)`, `transpile-mir.cpp:520`). Which locals get slots is decided by the post-G1 honest-typing predicate `should_gc_root_var` (`transpile-mir.cpp:497`): `MIR_T_P`, or `type_id >= LMD_TYPE_INT64 && != LMD_TYPE_FLOAT`.
@@ -39,7 +39,7 @@ The C2MIR (legacy) path emits **no rooting at all** — `transpile.cpp` has zero
 | R-I2 | Even rootless functions pay two C calls (`enter`/`exit`) per invocation. |
 | R-I3 | Root frames are heap allocations (mitigated by the free-list, but still malloc traffic, pointer chasing in the scan, and a 64-slot granularity that scans unused slots). |
 | R-I4 | Slot access is a linear walk of the block chain (`jit_gc_root_frame_get_block`, `lambda-mem.cpp:368`). |
-| R-I5 | The conservative scan both **over-retains** (any stack word that looks like an Item pins an object) and has a documented **under-retention hole**: a value held only in a register the compiler happens not to spill is missed; the `setjmp` flush is a mitigation, not a guarantee (LR_08 §9). Plus ASan poisoning contortions. |
+| R-I5 | The conservative scan both **over-retains** (any stack word that looks like an Item pins an object) and has a documented **under-retention hole**: a value held only in a register the compiler happens not to spill is missed; the `setjmp` flush is a mitigation, not a guarantee. Plus ASan poisoning contortions. |
 | R-I6 | C2MIR code and all C host functions have *only* the conservative net — the same class of exposure that produced BUG-001 on the MIR-Direct path. |
 | R-I7 | G2 is unanswered: there is no rooting contract for native modules / `JubeHostAPI`; safety is emergent from the conservative scan. |
 
@@ -71,7 +71,7 @@ What each system contributes to the new direction:
 - **OCaml `CAMLparam`/`CAMLlocal`.** C stubs declare frame-local root blocks that macro-chain into a TLS list (`caml_local_roots`). Decades of evidence that hand-written host functions can carry precise rooting with a couple of macros. **Take: the C-helper pattern, and its known failure mode (forgetting the macro) — which our conservative-scan backstop covers during migration (SF9).**
 - **Lua's value stack.** All VM values live on a per-coroutine contiguous stack; the C API works exclusively via push/pop with integer watermarks (`lua_gettop`/`lua_settop`); host functions receive and return values *on the stack*. **Take: the watermark model for the number stack, and the proof that host functions integrate cleanly when the "stack" is a per-thread region rather than the native frame.**
 - **LLVM shadow-stack GC strategy** (`llvm.gcroot` lowering). Same chained-frame shape generated by a compiler; its documented cost center is exactly the redundant stores — motivating our static per-function sizing and inline stores. **Take: the codegen-emitted variant works; keep stores minimal.**
-- **V8 `HandleScope`.** Arena of handles with scope watermarks. V8 needs double indirection because its GC *moves* objects; Lambda's collector is non-moving ("Dual-Zone Non-Moving Mark-and-Sweep", LR_08 §2), so our slots can hold direct Item bits — strictly cheaper than V8's model. **Take: scope-watermark ergonomics; and the reason we get away with less.**
+- **V8 `HandleScope`.** Arena of handles with scope watermarks. V8 needs double indirection because its GC *moves* objects; Lambda's collector is non-moving ("Dual-Zone Non-Moving Mark-and-Sweep"), so our slots can hold direct Item bits — strictly cheaper than V8's model. **Take: scope-watermark ergonomics; and the reason we get away with less.**
 - **JVM/.NET precise stack maps.** The theoretical end-game: zero runtime stores, GC reads register/stack liveness from compiler-emitted maps. Requires deep codegen support that MIR does not provide (single-tier, no map emission). **Rejected for Jube — the shadow-frame family is the attainable point on the curve.** (Consistent with G5: no tiering/deopt ambitions.)
 
 ---

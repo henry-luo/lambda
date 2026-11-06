@@ -16,8 +16,7 @@ The overarching goal: make the transpiler's generated code **structurally correc
 - [Lambda_Box_Unbox (retired).md](<Lambda_Box_Unbox (retired).md>) — Dual version optimization proposal (original)
 - [Lambda_Box_Unbox2 (retired).md](<Lambda_Box_Unbox2 (retired).md>) — Container unboxing fix (correctness)
 - `doc/dev/Lamdba_Runtime.md` §Suggestions — Runtime improvement list (10 items).
-  That file has since been removed; its material lives in
-  [`doc/dev/lambda/LR_00_Overview.md`](../../doc/dev/lambda/LR_00_Overview.md).
+  That file has since been removed.
 
 ---
 

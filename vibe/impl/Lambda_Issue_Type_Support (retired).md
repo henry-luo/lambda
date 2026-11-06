@@ -44,7 +44,7 @@ Consequently any path that produces a value whose representation disagrees with 
 corrupts every consumer downstream, silently, and no assertion can catch it. TS-1, TS-2, TS-3 and
 TS-4 are all instances. Two already-fixed bugs from the same family (a `string` return type
 segfaulting `len()`, and `var x: int = <decimal expr>` yielding `<error>`) are recorded in
-`doc/dev/lambda/LR_07` territory and in the session memory; they are cited below only as evidence
+the session memory; they are cited below only as evidence
 that the class is live rather than theoretical.
 
 ---

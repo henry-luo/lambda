@@ -143,7 +143,7 @@ Everything a front-end can call lives in **one 2,902-line file**, `lambda/sys_fu
 
 - **`import_resolver`'s dynamic map is the extension hook.** MIR resolves imports *by name at link time*; anything registered via `register_dynamic_import()` before `MIR_link` is callable from JIT'd code. A loaded module only has to get its symbols into that map. Layer 3 needs no redesign.
 - **`SysFuncInfo` is the right idea in the wrong shape** — it already captures exactly what a front-end needs (typing, arity, conventions, can_raise). The fix is making it *per-module data* with a declarative signature, not inventing a different metadata model.
-- **The interop contract is already documented** (Item ABI, non-moving object zone, relocating data zone, interned names, error tiers — `doc/dev/Lambda_and_JS_Runtime.md` §4). The host API (§6.4) is largely a C projection of contracts that already exist.
+- **The interop contract is already documented** (Item ABI, non-moving object zone, relocating data zone, name identity, error lane — D2.1, D5.3.1, D5.6.1, D7.4.3). The host API (§6.4) is largely a C projection of contracts that already exist.
 
 ---
 
@@ -313,7 +313,7 @@ static const JubeFuncDef spellcheck_funcs[] = {
 
 (`hunspell` is a module-registered native type — a VMap projection declared via `JubeTypeDef`, §6.3; other modules reference it as `spellcheck.hunspell`.)
 
-- **`fn` vs `pn` is a semantic contract, enforced by the host on the Lambda side**: `pn` functions are callable only from procedural contexts (the safety analyzer, [LR_12](../doc/dev/lambda/LR_12_Procedural_Runtime.md), rejects them in pure code), while `fn` is the module author's *purity promise* — the compiler is free to CSE, reorder, or elide calls to it. Any function that mutates arguments, touches I/O, or holds hidden state **must** declare `pn` (e.g. `open` above does file I/O). There is no default: the prefix is mandatory, so purity is never accidental.
+- **`fn` vs `pn` is a semantic contract, enforced by the host on the Lambda side**: `pn` functions are callable only from procedural contexts (the safety analyzer rejects them in pure code), while `fn` is the module author's *purity promise* — the compiler is free to CSE, reorder, or elide calls to it. Any function that mutates arguments, touches I/O, or holds hidden state **must** declare `pn` (e.g. `open` above does file I/O). There is no default: the prefix is mandatory, so purity is never accidental.
 - Other front-ends may not care (JS/Python treat both as ordinary callables), but the information is free for them and load-bearing for Lambda — the "don't care" languages simply ignore the prefix, mirroring how `is_proc` in today's `SysFuncInfo` only gates the Lambda side.
 - `-> T^` marks `can_raise` (existing error-tier syntax) — no separate flag.
 - Union types, optionals, containers, `any` — the whole existing type grammar is available; front-ends consume the parsed `Type*` exactly as they consume `sys_func_defs` types today.
@@ -436,7 +436,7 @@ typedef struct JubeHostAPI {
 Design rules:
 
 - **Derived by extraction, not speculation**: v1's exact function list = the deduplicated set of runtime symbols `py/`, `rb/`, `module/bash/`, and the POC modules actually use. Anything in-tree module code needs that isn't in the struct is a bug in the struct.
-- **Hot inlines live in `jube.h`**: Item packing/unpacking macros (`i2it`, `get_type_id`, …) are already the frozen interop contract (`Lambda_and_JS_Runtime.md` §4), so they may appear as inlines in the public header without freezing anything new. The struct carries everything whose implementation can churn.
+- **Hot inlines live in `jube.h`**: Item packing/unpacking macros (`i2it`, `get_type_id`, …) are already the frozen interop contract (DI1–DI3, D2.1), so they may appear as inlines in the public header without freezing anything new. The struct carries everything whose implementation can churn.
 - Struct-of-pointers indirection cost ≈ a PLT call through any dylib — not a real overhead concern; the fast path for hot leaf functions is §6.5, not API bypass.
 
 **Contracts stated in the SDK (mostly restating existing invariants):**
@@ -538,7 +538,7 @@ key = hash( runtime build ID
 - The key covers everything lowering depended on. If cross-module inference consumes only dependency *interfaces*, hashing interface summaries suffices and hits stay frequent; future call-site-specialized compilations either join the key or are marked uncacheable. Graceful degradation is always "compile from source," which is always correct.
 - **Backend choice (deferred until the module system exists; invisible to all format decisions):**
   - *(a) mir2c → system C compiler → dylib*: works with today's pieces; needs a client toolchain; slow first compile. Viable stopgap.
-  - *(b) code-image cache*: serialize JIT'd machine code + a relocation journal recorded during codegen; load = map + patch import fixups + W^X flip (the dance the JIT already does). No client toolchain, no linker formats, microsecond loads. Requires a contained MIR-gen patch to record relocations. **Recommended end-state.** Rationale: per `JS_01`/`JS_15`, link-time codegen dominates large-script cost — a cache that stops at MIR (skipping only parse/lower) leaves the dominant cost on the table.
+  - *(b) code-image cache*: serialize JIT'd machine code + a relocation journal recorded during codegen; load = map + patch import fixups + W^X flip (the dance the JIT already does). No client toolchain, no linker formats, microsecond loads. Requires a contained MIR-gen patch to record relocations. **Recommended end-state.** Rationale: link-time codegen dominates large-script cost — a cache that stops at MIR (skipping only parse/lower) leaves the dominant cost on the table.
 
 ---
 

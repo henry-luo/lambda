@@ -9,9 +9,7 @@ the reproducible C0 snapshot and C8 evidence are summarised in
 `JS_Tune_History.md` §4.1 (B4; full record at commit `294779edbb`)
 
 **Companions**: `JS_Runtime_Redesign.md` (JR1/JR5/JR6),
-`JS_Runtime_Name.md` (RN1–RN16), `JS_Tune_History.md` §4.1 (B2, JR3.3–JR3.9),
-`doc/dev/js/JS_05_Functions_Closures.md`, and
-`doc/dev/js/JS_07_Classes.md`
+`JS_Runtime_Name.md` (RN1–RN16), and `JS_Tune_History.md` §4.1 (B2, JR3.3–JR3.9)
 
 Decisions introduced here use **JC#** ledger ids only where the formal design
 does not already rule the point. Existing formal rulings are cited first, per
@@ -899,8 +897,7 @@ operation.
 
 1. Run all structural scans and delete phase flags, legacy declarations,
    duplicate adapters, stale catalog groups, and dead comments.
-2. Update `doc/dev/js/JS_05`, `JS_06`, `JS_07`, `JS_15`, and diagrams to the
-   implemented callable flow.
+2. Update the design records to the implemented callable flow.
 3. Update `JS_Runtime_Redesign.md`: mark JR5 complete, revise JR6 dependencies,
    and record actual mechanism/LOC counts.
 4. Run release profiles and compare call cost, method cost, construct cost,

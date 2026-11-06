@@ -2,7 +2,7 @@
 
 LambdaJS is Lambda's embedded JavaScript engine. It shares the Lambda runtime's value representation, garbage collector, AST interpreter and MIR JIT, and it runs page scripts inside the Radiant viewer as well as standalone Node-style programs.
 
-> **Status:** usable and measured, still labelled experimental. Conformance is tracked against TC39 test262 (ES2024 scope) and Web Platform Tests subsets. The figures below are the committed baselines, which the test suites regenerate; the design is documented in [doc/dev/js/JS_00_Overview.md](dev/js/JS_00_Overview.md).
+> **Status:** usable and measured, still labelled experimental. Conformance is tracked against TC39 test262 (ES2024 scope) and Web Platform Tests subsets. The figures below are the committed baselines, which the test suites regenerate; the design rulings are in [Lambda_Formal_Design.md](Lambda_Formal_Design.md) D8.4.
 
 ## Usage
 
@@ -42,7 +42,7 @@ The DOM lives in `lambda/dom/` and is realm-neutral: the same nodes are driven b
 - **CSSOM and layout**: `element.style` get/set with camelCase mapping, `getComputedStyle` over the full cascade, stylesheet objects, `classList` and `dataset`, `getBoundingClientRect`, `offsetWidth`/`clientHeight` and `scrollTop`/`scrollLeft` computed from a lazy layout pass.
 - **Document**: `document.cookie`, `readyState`, `title`, `URL`/`location`, `write`, `innerHTML`/`outerHTML` (parsing HTML fragments), forms and form controls, selection and ranges, clipboard.
 
-The full surface is described in [doc/dev/js/JS_13_Web_DOM.md](dev/js/JS_13_Web_DOM.md).
+The design record is [Lambda_Design_DOM_API.md](../vibe/Lambda_Design_DOM_API.md).
 
 ## Node.js Compatibility
 
@@ -53,7 +53,7 @@ The full surface is described in [doc/dev/js/JS_13_Web_DOM.md](dev/js/JS_13_Web_
 - **Globals**: `process` (reports `v20.0.0`), `console`, `Buffer`, timers and `setImmediate`, `performance`, `fetch`, `URL`, `TextEncoder`/`TextDecoder`, `AbortController`, `structuredClone`.
 - **Not available**: `events`, `stream`, `http`, `https`, `net`, `tls`, `zlib`, `child_process`, `assert`, `readline`, `cluster`, `dns`, `vm`, `async_hooks` and `node:test`. `require()` of any of them throws "Cannot find module". An earlier, wider layer covered these; it was removed in September 2026.
 
-Design: [doc/dev/js/JS_14_Node_Compat.md](dev/js/JS_14_Node_Compat.md), which still describes the wider layer in places; tests: `test/node/` (231 scripts).
+Tests: `test/node/` (231 scripts).
 
 ## Performance
 
@@ -85,4 +85,4 @@ JavaScript / TypeScript source
   DOM and web APIs (lambda/dom, shared with Lambda) → Radiant (layout, paint, events)
 ```
 
-`lambda/js` is about 150K lines (131K of C++; the rest is the C parser, the builtin catalogue and generated Unicode tables) and `lambda/dom` about 34K. Values are Lambda `Item`s, so a page script and a Lambda transformation operate on literally the same objects; the compilation pipeline is described in [JS_01_Compilation_Pipeline.md](dev/js/JS_01_Compilation_Pipeline.md) and the value model in [JS_03_Value_Model.md](dev/js/JS_03_Value_Model.md).
+`lambda/js` is about 150K lines (131K of C++; the rest is the C parser, the builtin catalogue and generated Unicode tables) and `lambda/dom` about 34K. Values are Lambda `Item`s, so a page script and a Lambda transformation operate on literally the same objects; the compilation tiers are in [Lambda_Formal_Design.md](Lambda_Formal_Design.md) D8.4 and the value model in D2.

@@ -101,9 +101,7 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | Document | Description |
 |----------|-------------|
 | **[Developer_Guide.md](dev/Developer_Guide.md)** | **Developer Guide** — Build from source, dependencies, testing, grammar, MIR JIT |
-| **[lambda/LR_00_Overview.md](dev/lambda/LR_00_Overview.md)** | **Lambda Core Runtime** — Compilation pipeline, value & type model, MIR-Direct transpiler and JIT, memory & GC, builtins |
-| **[radiant/RAD_00_Overview.md](dev/radiant/RAD_00_Overview.md)** | **Radiant Engine** — CSS resolution, layout, rendering, events, editing, the application shell |
-| **[js/JS_00_Overview.md](dev/js/JS_00_Overview.md)** | **LambdaJS Runtime** — The JavaScript engine's pipeline, value model, runtime, DOM and Node compatibility |
+| **[vibe/](../vibe/)** | **Design Records** — Working design records by subsystem: core runtime, Radiant, LambdaJS and Jube |
 
 ### Quick Reference
 

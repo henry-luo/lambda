@@ -313,7 +313,7 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
      static — the bump is cheap now and removes the temptation permanently; mere
      registry rejection is the fallback only if an out-of-tree module appears before
      then), plus stale comments/docs referencing the fallback protocol
-     (jube.h, hostobj_demo, JS_13) updated.
+     (jube.h, hostobj_demo) updated.
   4. At least 1,000 DOM-related C/C++ source lines are removed between the frozen DOM4
      baseline and exit, measured with `./utils/count_loc.sh`; record the baseline and
      exit counts with the same source scope, and do not count code movement, tests,

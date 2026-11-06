@@ -440,7 +440,6 @@ Lambda no longer feeds generated Lambda C into it.
 
 | File | Role |
 |------|------|
-| `doc/dev/lambda/LR_06_C_Transpiler.md` | Historical C2MIR design record (implementation removed) |
 | `lambda/transpile-mir.cpp` | Emits MIR IR directly from Lambda AST (direct path) |
 | `lambda/mir.c` | MIR context, runtime import registry, linking, and code generation |
 | `lambda/lambda.h` | C API header — function signatures callable from JIT code |
@@ -514,7 +513,7 @@ make test-mir                    # Run MIR JIT test suite
 
 Radiant is Lambda's HTML/CSS layout and rendering engine. It implements browser-compatible layout algorithms (block, inline, flex, grid, table) and renders to SVG, PDF, PNG, and an interactive viewer window.
 
-For the full design document set, see [the Radiant engine design overview](radiant/RAD_00_Overview.md).
+The design records are in [`vibe/radiant/`](../../vibe/radiant/).
 
 ### Architecture Overview
 

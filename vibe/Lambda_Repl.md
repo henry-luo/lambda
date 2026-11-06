@@ -5,7 +5,7 @@
 rebinding, session kinds); `doc/Lambda_Formal_Design.md` D8.3.6 (one T0
 session, no replay, no Tree-sitter, interrupt, unsupported entries). Decision
 record: [`Lambda_Design_Repl_Interp.md`](Lambda_Design_Repl_Interp.md) (RI1–RI6).
-Detailed design: `doc/dev/lambda/LR_01_Compilation_Pipeline.md` §6.
+Design: D8.3.6 and `vibe/Lambda_Design_Repl_Interp.md`.
 
 ## Overview
 

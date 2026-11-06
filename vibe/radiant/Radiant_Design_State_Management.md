@@ -1,7 +1,7 @@
 # Radiant State Management — Durability Classes & State Persistence
 
 **Status:** seed design — direction confirmed 2026-07-09 (ledger RS1–RS16; open items RSO1–RSO9)
-**Context:** builds on the existing interaction-state layer (`doc/dev/radiant/RAD_17_Interaction_State.md`: `DocState`, the stateless validating FSM, the schema tables, the Mark dump) and on the page-isolate model of `Radiant_Design_Concurrency.md` (RC1–RC8). This doc adds two things RAD_17 explicitly disclaimed: a **durability contract** over the store, and a **persistence/hibernation design** — the ability to throw away a page's DOM/view tree (e.g. a hidden tab) and later reconstruct the live page from serialized state. The write model of RAD_17 (typed direct-write fields + cascade-settle validation, *not* a reactive graph) is unchanged; this doc changes what the store promises, not how it is written to.
+**Context:** builds on the existing interaction-state layer (`Radiant_Design_State_Machine.md`: `DocState`, the stateless validating FSM, the schema tables, the Mark dump) and on the page-isolate model of `Radiant_Design_Concurrency.md` (RC1–RC8). This doc adds two things that layer explicitly disclaimed: a **durability contract** over the store, and a **persistence/hibernation design** — the ability to throw away a page's DOM/view tree (e.g. a hidden tab) and later reconstruct the live page from serialized state. The write model of that layer (typed direct-write fields + cascade-settle validation, *not* a reactive graph) is unchanged; this doc changes what the store promises, not how it is written to.
 
 ---
 
@@ -52,13 +52,13 @@ Why transient state stays in the store (RS2):
 3. Serialization is a **filter, not a container boundary** — the snapshot walk skips transient-tagged fields for free, while the Mark dump, event-state log, WebDriver, and record-replay goldens *want* transient state included (a hover-restyle regression is a diff over transient state).
 4. Discard-on-hibernate becomes an FSM transition: "settle to neutral" (cancel drag, cancel composition, close overlays) is validated by the machine instead of being a scavenger hunt across subsystem structs (RSO8).
 
-The hot-path objection does not apply: RAD_17's store already writes transient state via typed direct fields / packed `ViewState` bits with validation deferred to cascade settle. "In the store" means store-owned memory + store writer API + schema coverage — not a subscription graph in the write path.
+The hot-path objection does not apply: the state store already writes transient state via typed direct fields / packed `ViewState` bits with validation deferred to cascade settle. "In the store" means store-owned memory + store writer API + schema coverage — not a subscription graph in the write path.
 
 ### 1.3 Derived state — should not be in the store at all
 
 Caches belong to their consumers; pending-work queues belong to the scheduler. Current inventory and disposition:
 
-- `CaretState`/`SelectionState` projections (`state_store_internal.hpp`) — **delete** once renderers read DomRange layout directly (already planned in RAD_17 §8.3); their policing invariants go with them.
+- `CaretState`/`SelectionState` projections (`state_store_internal.hpp`) — **delete** once renderers read DomRange layout directly (already planned); their policing invariants go with them.
 - Layout geometry on `DomNode` — already outside the store; stays there. Never serialized: restore does a full layout.
 - `render_map` result-node bindings — derived (rebuilt every render); acceptable in `DocState` as an explicitly-tagged binding table, never serialized, rebuilt on restore.
 - `video_placements` cached geometry, `caret_blink_t`/`caret_on` — renderer/frame-clock bookkeeping; migrate out.
@@ -97,7 +97,7 @@ Restore only works if re-running templates over identical (model, state) reprodu
 
 ### 3.2 The identity spine is the model source path (RS7)
 
-- `TemplateStateKey` is keyed by `Item model_item` **identity** (`lambda/template_state.h`) — identity dies with the heap, and Lambda map equality is structural. The codebase already solved this once: `render_map` records stable **source paths** (child-index arrays) precisely because Item identity was unusable (RAD_01 §7). Serialized template state is keyed by source path and re-bound to model items on restore.
+- `TemplateStateKey` is keyed by `Item model_item` **identity** (`lambda/template_state.h`) — identity dies with the heap, and Lambda map equality is structural. The codebase already solved this once: `render_map` records stable **source paths** (child-index arrays) precisely because Item identity was unusable. Serialized template state is keyed by source path and re-bound to model items on restore.
 - Radiant-store interaction state on generated nodes (scroll on a particular div, focus, form values) is keyed **template-instance-relative**: (template instance = (model source path, template_ref), path-within-template-output). Exact addressing scheme: RSO2.
 - The input markup store is the *provider* of stable source-path identity — that contract is the critical seam between the two stores and is fixed here even though the markup store design is separate (RSO1).
 
@@ -136,7 +136,7 @@ Restore only works if re-running templates over identical (model, state) reprodu
 6. **API contracts** — `pure` appears in function types (`pure <: fn` subtyping), the validator, and native-module signatures; the one consumer that is cost rather than benefit (RSO10.3).
 7. **Logging** — the lattice forces the previously-flagged decision, now resolved: `log_*` is **observationally pure** — logs are derived diagnostic output, exempt from the lattice (RS21).
 
-**Event-sourced page state (RS22).** The state design is event sourcing: **page ≡ input docs + event journal + view states**, where durable view state is a *checkpoint of the fold* over the event history — a materialized view that lets replay start from the last snapshot instead of t=0, and lets the journal be truncated behind it. For frame-by-frame reproducibility the journal must capture *all* nondeterminism entering the page: input events (mouse, keyboard, hw), per-pass env deltas (time ticks, input-doc syncs), and mailbox arrivals (background-task results, in loop-arrival order — K20e's per-sender FIFO makes this stable), plus engine/script version stamps (replay is only guaranteed against the same code). The single-threaded page loop (RC1/RC2) means there is exactly one total order of events — journaling it is trivial, which is another dividend of the same-thread decision. Seeds already exist: the RAD_15 event JSONL log and the per-cascade state dump.
+**Event-sourced page state (RS22).** The state design is event sourcing: **page ≡ input docs + event journal + view states**, where durable view state is a *checkpoint of the fold* over the event history — a materialized view that lets replay start from the last snapshot instead of t=0, and lets the journal be truncated behind it. For frame-by-frame reproducibility the journal must capture *all* nondeterminism entering the page: input events (mouse, keyboard, hw), per-pass env deltas (time ticks, input-doc syncs), and mailbox arrivals (background-task results, in loop-arrival order — K20e's per-sender FIFO makes this stable), plus engine/script version stamps (replay is only guaranteed against the same code). The single-threaded page loop (RC1/RC2) means there is exactly one total order of events — journaling it is trivial, which is another dividend of the same-thread decision. Seeds already exist: the event JSONL log and the per-cascade state dump.
 
 **Retention & compaction — the practical form of RS22 (RS24).** In theory, input markups + full event history = all states; in practice a long editor session accumulates enormous event volume, most of it doc-neutral (mouse move, selection, scroll), and reconstructing a late state by replaying an hour of events is unacceptably slow. So the persistent state is three parts:
 
@@ -155,7 +155,7 @@ Periodically the engine **folds** the oldest events into snapshots and truncates
 - **`pn` eval at a frame** — cannot run inside the timeline; it **forks a branch**: a new timeline from frame N's checkpoint. What-if debugging (replay the session with a different input doc, a patched handler) is the same operation.
 - **Retroactive logging** — add `log_*` statements and replay: logs from the past, guaranteed identical to what a live run would have printed (RS21: logs are derived output).
 The differentiator is the lattice, not the journal — every time-travel system can record events; what kills them is paused-world evaluation, and Lambda answers it in the type system. Time-travel granularity follows RS24's retention structure: frame-exact scrubbing within the current event interval; snapshot-hopping beyond it.
-Precedent calibration: rr/Replay.io record at syscall level with heavy overhead — Lambda records at event level (tiny journals) because determinism is a language property, not an instrumentation trick; Elm's famous time-travel debugger decayed because effects/subscriptions broke replay — Lambda's lattice makes replay-safety statically known; Redux DevTools time-travels only the reducer state — Lambda reproduces the *screen* at frame N, because the DOM is derived (RS5) and layout is deterministic (RC6). Scrubbing cost model: RS18's transaction-scale passes make checkpoint-to-frame replay milliseconds of work — no process snapshots or fork-per-checkpoint tricks. Implementation distance is short — the debugger is productizing infrastructure that exists for testing: the `event_sim` replay harness + JSONL event log (RAD_15), the per-cascade Mark state dump (frame checkpoints), the display-list golden machinery (RO8, pixel-exact frames), and the REPL (the eval-at-frame engine).
+Precedent calibration: rr/Replay.io record at syscall level with heavy overhead — Lambda records at event level (tiny journals) because determinism is a language property, not an instrumentation trick; Elm's famous time-travel debugger decayed because effects/subscriptions broke replay — Lambda's lattice makes replay-safety statically known; Redux DevTools time-travels only the reducer state — Lambda reproduces the *screen* at frame N, because the DOM is derived (RS5) and layout is deterministic (RC6). Scrubbing cost model: RS18's transaction-scale passes make checkpoint-to-frame replay milliseconds of work — no process snapshots or fork-per-checkpoint tricks. Implementation distance is short — the debugger is productizing infrastructure that exists for testing: the `event_sim` replay harness + JSONL event log, the per-cascade Mark state dump (frame checkpoints), the display-list golden machinery (RO8, pixel-exact frames), and the REPL (the eval-at-frame engine).
 
 ### 3.6 Two hibernation levels *(proposed this review)* (RS11)
 
@@ -245,9 +245,9 @@ A page containing Lambda templates *and* non-cooperative `<script>` JS is persis
 
 | This doc | Related design |
 |---|---|
-| Store write model, FSM, schema tables, Mark dump | `doc/dev/radiant/RAD_17_Interaction_State.md` (unchanged by this doc except the persistence contract) |
+| Store write model, FSM, schema tables, Mark dump | `Radiant_Design_State_Machine.md` (unchanged by this doc except the persistence contract) |
 | Page isolate, quiescent loop, mailboxes, K29 wire, RC7 crash recovery, RO1 scheduler | `Radiant_Design_Concurrency.md` (RC1–RC8, RO1) + `../Lambda_Design_Concurrency.md` (K13 capture, K18 processes, K20 mailboxes, K29 wire) |
 | Template state runtime | `lambda/template_state.h`, `lambda/render_map.h`, `doc/Reactive_UI.md` |
-| Source-path identity precedent | RAD_01 §7 (`source_pos_bridge`, render-map source paths) |
+| Source-path identity precedent | (`source_pos_bridge`, render-map source paths) |
 | Resource lifecycle (R1–R5) | `../Lambda_Semantics_Features.md` §3.5 |
-| Form dirty value / undo ring / IME | `doc/dev/radiant/RAD_19_Form_Controls.md` |
+| Form dirty value / undo ring / IME | `Radiant_Design_Form_Input.md` |

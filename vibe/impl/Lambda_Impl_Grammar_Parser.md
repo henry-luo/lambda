@@ -122,7 +122,7 @@ Each phase ends green on `make build`, `make test-lambda-baseline`, and the JIT 
 2. Rename the binding in `test/lambda/graph/graphviz/formatter.ls:42` (`let grammar` → `let dot_grammar`); its golden is unaffected unless it prints the name.
 3. `grammar.js`: add `'grammar'` to `KEYWORD_NAMES`; add a `grammar_stam` rule to the statement choices at `:533`/`:563` (body parsed loosely — the reference grammar is the first-cut verifier, D8.1.1, not the production parser). `make generate-grammar`.
 4. Regenerate Appendix K of `Lambda_Design_Syntax.md` (65 → 66 barred words).
-5. Ledger: open a `GM` area in `vibe/Lambda_Issue_Ledger.md` only when the first defect lands (there is no `LR_14` yet; §6 Q6).
+5. Ledger: open a `GM` area in `vibe/Lambda_Issue_Ledger.md` only when the first defect lands (§6 Q6).
 
 **Exit:** `let grammar = 1` is E201; `grammar` as an element tag/map key/member still works (S16.10.2); baseline green.
 
@@ -219,7 +219,7 @@ jq (bison grammar with `%left/%right`, the acceptance test for P3), XQuery (pars
 | **Q3** | Diagnostics | **Align with the existing Lambda input and script parsers** → GM5.2: script-parser E-code scheme and reporters at compile time, `ERR_PARSE_ERROR` with `parse_error_message` at run time, `log_warn` lint lines; no new catalog or tags. |
 | **Q4** | Guest package namespace | **`lambda.grammar`** (`lambda.grammar.xpath`, `lambda.grammar.jq`, …). |
 | **Q5** | XPath (P5) before composition (P4) | **Yes.** P5 follows P3; P4 when XQuery starts. |
-| **Q6** | Doc/dev and ledger home | **Yes** to a new `LR_14_Grammar_Module.md` with its own ledger section, written at the end of P2. |
+| **Q6** | Doc and ledger home | **Yes** to a new design doc with its own ledger section, written at the end of P2. |
 
 Still open, in the design doc: GM-O1 (where `grammar` is ratified in the formal spec), GM-O2 (explicit level references), GM-O3 (symbol as rule-name escape), GM-O5 (packrat by default), GM-O6 (semantic predicates), GM-O7 (`lambda-cli` membership — assumed yes by §2.4).
 

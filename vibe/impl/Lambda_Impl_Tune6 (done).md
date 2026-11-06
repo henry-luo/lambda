@@ -64,7 +64,7 @@ tax on a ~100%-hit IC, which was J3's target, not J1's.
 returned to `Lambda_Tuning_Proposal.md` R2 as KIV: with J2 reverted and L3
 returning ~1.5%, further IC-based tuning does not look like the remaining
 factor. J1's companion fix (re-key shaped ctor/devirt fast paths by TypeMap
-identity instead of class-name strings, JS_07 §7.7) is independently worthwhile
+identity instead of class-name strings) is independently worthwhile
 and can be salvaged on its own.
 
 **hashmap is megamorphic-dominated, but not for the reason §3.2 assumed.**
@@ -278,7 +278,7 @@ was ultimately aimed at is caused by shape *identity* on unshaped plain objects
 — see **proposal R2b**, which supersedes this phase.
 
 Salvageable independently: the companion fix below (re-key shaped ctor/devirt
-fast paths by TypeMap identity instead of class-name strings, JS_07 §7.7).
+fast paths by TypeMap identity instead of class-name strings).
 
 The original design text is kept below because R2/R2b reference it.
 
@@ -325,7 +325,7 @@ extending the existing `JsLoadIC` rather than inventing a parallel structure:
 
 **Companion fix (from OI-6, mandatory):** duplicate-class-name deopt — re-key
 the shaped construction/devirtualization fast paths by constructor/`TypeMap`
-identity instead of class-name strings (JS_07 §7.7). Small, and the PIC makes
+identity instead of class-name strings. Small, and the PIC makes
 the class-name keying actively dangerous.
 
 **Fixtures (inherited from the reverted widening attempt, mandatory):**

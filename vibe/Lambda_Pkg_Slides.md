@@ -149,7 +149,7 @@ conformance or performance measurement.
 The animation scheduler is a mechanism, not a presentation timeline. A deck
 needs cue boundaries, object identity, reset rules and navigation policy above it.
 
-The older RAD_16 statement that CSS transitions are unwired is stale relative to
+The older statement that CSS transitions are unwired is stale relative to
 `css_transition_start` and `css_transition_resolve`. This proposal uses the
 current code inventory and the newer support matrix; it does not treat stale
 implementation documentation as a semantics ruling.
@@ -927,11 +927,11 @@ SLD3/SLD4 therefore remove per-navigation publication rather than reclaim it.
 Measured frame cost justified three further host mechanisms, none of them a
 slide model (D9.5.6). The journal records which property a presentation write
 changed, so a turn whose writes are all `opacity`, or `transform` that stays a
-transform, commits without cascade or layout (RAD_16 §8). Inline SVGs painted in
+transform, commits without cascade or layout. Inline SVGs painted in
 one pass share one host style context. Inline-SVG raster layers key on content
 rather than on every DOM write or repaint request, and fold the fitted stage's
-uniform scale into the capture, so animated wrappers move cached rasters
-(RAD_14 §4.4). Timing, easing and effect policy stay in Lambda.
+uniform scale into the capture, so animated wrappers move cached rasters.
+Timing, easing and effect policy stay in Lambda.
 
 ## 14. Validation strategy
 
@@ -992,9 +992,9 @@ must follow the project's approval and recorded-patch process.
   [reactive UI](../doc/Reactive_UI.md): package/template usage.
 - [HTML/CSS/SVG support](../doc/HTML_CSS_SVG_Support.md#13-transitions-and-animations):
   current animation inventory and limits.
-- [Animation/frame scheduling](../doc/dev/radiant/RAD_16_Animation_Frame_Scheduling.md):
-  timing architecture; the transition-creation inventory is dated.
-- [PaintIR/display lists](../doc/dev/radiant/RAD_12_Paint_IR_Display_List.md):
+- [Presentation animation repaint](radiant/Radiant_Design_Animation_Repaint.md):
+  timing and repaint architecture.
+- [PaintIR/display lists](radiant/Radiant_Design_Rendering.md):
   shared rendering abstractions.
 - [DOM host API design](Lambda_Design_DOM_Host_API.md): extend the shared catalog,
   rather than creating slide-specific bridge code.

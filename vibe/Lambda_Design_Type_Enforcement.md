@@ -91,7 +91,7 @@ touched here only where enforcement is its prerequisite.
 **Related:** `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-1…TS-9 issue ledger; evidence),
 `doc/Lambda_Formal_Semantics.md` (semantic authority), `doc/Lambda_Type.md`,
 `vibe/Lambda_Issue_Ledger.md` §15 OI-5 (MIR value-representation contract),
-`doc/dev/lambda/LR_13_Schema_Validator.md` (validator design), and
+`vibe/Lambda_Schema_Validator.md` (validator design), and
 [`vibe/Lambda_Design_Sys_Func.md`](Lambda_Design_Sys_Func.md) for
 system-function admission policy.
 **Evidence basis:** §§5–6 preserve the 2026-07-29 pre-implementation survey and its release

@@ -2,7 +2,7 @@
 
 **Status:** Level 1 **decided**; Level 2 **approved experiment**; Level 3 **direction decided — Route B (code-image)**, long-term
 **Date:** 2026-07-12
-**Context:** Reduces script startup cost across the Lambda runtime (Lambda, JS, and other Jube guests). Companion to `vibe/Lambda_Design_Native_Module.md` §7.4 ("Local compiled-code cache"), which already established the governing principle **P14: native compiled artifacts are derived local caches, never distribution formats**. This doc turns that principle into a staged plan. Detailed backend design lives in `doc/dev/lambda/LR_07_MIR_Transpiler_JIT.md` (MIR Direct) and `LR_06_C_Transpiler.md` (legacy C2MIR).
+**Context:** Reduces script startup cost across the Lambda runtime (Lambda, JS, and other Jube guests). Companion to `vibe/Lambda_Design_Native_Module.md` §7.4 ("Local compiled-code cache"), which already established the governing principle **P14: native compiled artifacts are derived local caches, never distribution formats**. This doc turns that principle into a staged plan. Detailed backend design lives in `vibe/Lambda_Transpiler.md` (MIR Direct).
 
 ---
 
@@ -63,7 +63,7 @@ The **JS transpiler** is far worse: property names, string/regex/template litera
 - A general dlopen+dlsym module loader exists (POSIX only, Windows stubbed): `jube_load_dynamic_module` (`lambda/jube/jube_registry.cpp:679`).
 - `lambda.exe` does **not** export dynamic symbols (no `-rdynamic`/export list anywhere in the build config).
 - A comprehensive name→function-pointer runtime table already exists — `sys_func_defs[]` (~213) + `jit_runtime_imports[]` (~1,446) in `lambda/sys_func_registry.c`, consumed by `import_resolver` — i.e. the "inject the runtime API as a pointer table" pattern is already the established mechanism, also used by the Jube host API vtables.
-- The legacy C backend (`lambda/transpile.cpp`, `LAMBDA_C2MIR`, only in the `jube` build config) generates **fully position-independent C** — consts/types by integer index, runtime functions as extern identifiers, imports via a runtime-populated BSS struct. But it is legacy, frozen, and feature-divergent (GROUP BY is a hard stub at `transpile.cpp:2355`; new features land MIR-first per `LR_06`).
+- The legacy C backend (`lambda/transpile.cpp`, `LAMBDA_C2MIR`, only in the `jube` build config) generates **fully position-independent C** — consts/types by integer index, runtime functions as extern identifiers, imports via a runtime-populated BSS struct. But it is legacy, frozen, and feature-divergent (GROUP BY is a hard stub at `transpile.cpp:2355`; new features land MIR-first).
 
 ---
 

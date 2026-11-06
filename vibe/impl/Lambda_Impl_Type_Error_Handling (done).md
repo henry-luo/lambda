@@ -398,8 +398,7 @@ positions. The spelling-only subset preserves runtime output.
   or raised/returned obligation differences.
   Cover return equivalence, early error return, composition, and overwritten
   outcomes. Start with `doc/Lambda_Error_Handling.md`,
-  `doc/Lambda_Type.md`, `doc/Lambda_Procedural.md`, and relevant `doc/dev/lambda`
-  chapters. Keep historical completed implementation plans historical.
+  `doc/Lambda_Type.md` and `doc/Lambda_Procedural.md`. Keep historical completed implementation plans historical.
 - Document `or^` precedence and broader caret subject, filtered residual errors,
   chains versus a single match, and the existing union classification spelling.
   Document S7.5.7: `empty` is not reserved or predefined; users may declare

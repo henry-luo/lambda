@@ -14,11 +14,7 @@ Layout algorithms and format-support inventories remain in their subsystem docs.
 This is the current pipeline overview. The older
 [render-path design](Radiant_Design_Render_Paths.md) preserves the motivation and
 migration history for the two-level paint model; its early descriptions of
-strip rendering and PDF generation are historical. Detailed source inventories
-remain in [RAD_12](../../doc/dev/radiant/RAD_12_Paint_IR_Display_List.md),
-[RAD_13](../../doc/dev/radiant/RAD_13_Render_Walk_Painters.md),
-[RAD_14](../../doc/dev/radiant/RAD_14_SVG_Vector_Graph.md) and
-[RAD_23](../../doc/dev/radiant/RAD_23_Paged_Composition.md).
+strip rendering and PDF generation are historical.
 
 ## 1. Responsibilities and authority
 
@@ -693,7 +689,7 @@ with the edition. Page visitors feed preview rasterization and PDF export.
 Transient lowering may borrow published commands while the edition stays live.
 This is an existing example of retained semantic paint, distinct from the
 continuous-view retained DisplayList cache. Detailed layout/publication rules
-remain in [RAD_23](../../doc/dev/radiant/RAD_23_Paged_Composition.md).
+are in [Radiant_Layout_Paged_Media.md](Radiant_Layout_Paged_Media.md).
 
 ## 9. Observability and evolution
 
@@ -759,7 +755,7 @@ Line anchors are audit conveniences; confirm the named symbol when lines move.
 | Native path copies | [vendored tvgShape.h](../../mac-deps/thorvg/src/renderer/tvgShape.h): `ShapeImpl::append`, `ShapeImpl::duplicate`; inspected only, never edited by this work |
 | SVG export | [render_svg.cpp](../../radiant/render_svg.cpp): `svg_lower_paint_list`, `svg_make_backend` |
 | PDF adapter | [render_pdf.cpp](../../radiant/render_pdf.cpp), [radiant_pdf_walk.cpp](../../lambda/module/radiant/radiant_pdf_walk.cpp), [radiant_pdf_graphic.cpp](../../lambda/module/radiant/radiant_pdf_graphic.cpp): `render_lambda_pdf`, `pdf_walk_graphic`, `pdf_vector_resource` |
-| Published pages | [layout_paged.cpp](../../radiant/layout_paged.cpp): `paged_publish_box_paint`, `paged_flow_compose_pages`; see RAD_23 for the publication inventory |
+| Published pages | [layout_paged.cpp](../../radiant/layout_paged.cpp): `paged_publish_box_paint`, `paged_flow_compose_pages` |
 | Profiling | [render_profiler.cpp](../../radiant/render_profiler.cpp), [render_output.cpp](../../radiant/render_output.cpp): `RenderProfiler`, record/replay timing and retained capture ordering |
 
 ## Appendix B. Measured storage transition

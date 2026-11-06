@@ -630,7 +630,7 @@ Actions:
 3. Re-run the original 11-failure table. Every row must be fixed, explicitly
    reclassified as unrelated with evidence, or left as a visible failure; no
    harness masking is allowed.
-4. Update `doc/dev/lambda/LR_10_Error_Handling.md`, LambdaJS runtime docs, Jube
+4. Update LambdaJS runtime docs, Jube
    docs, and implementation footnotes with landed status and exact gaps.
 5. Mark phases complete in this file only after their exit gates pass.
 

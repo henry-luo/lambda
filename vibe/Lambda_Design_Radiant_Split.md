@@ -227,14 +227,14 @@ Move documentation with the subsystem it explains, preserving useful history and
 
 | Material | Owner after extraction |
 |---|---|
-| Native portions of `doc/dev/radiant/`, associated diagram sources/assets, `doc/dev/Radiant_Design.md`, and `radiant/README.md` | Radiant |
+| `radiant/README.md` | Radiant |
 | Native layout/render/media/Scene3D/interaction designs and implementation records in `vibe/radiant/`, plus Radiant-specific files elsewhere in `vibe/` and `vibe/impl/` | Radiant |
 | `doc/HTML_CSS_SVG_Support.md` | Radiant owns the engine support matrix; links identify parser capabilities owned by `lambda-input` and script/DOM capabilities owned by Lambda |
 | Input/formatter/Mark/shared-lib design and developer docs, including applicable `vibe/input/` material | `lambda-input` |
 | `doc/JS_DOM_Support.md`, DOM language API designs, scripting packages, Jube adapters, CLI integration, and end-to-end test guides | Lambda |
 | Formal Lambda semantics/design specs and this cross-project extraction proposal | Lambda, with explicit cross-project references |
 
-Mixed documents require section-level ownership. For example, `RAD_21_JS_Scripting_Integration.md` must separate the engine's host contract from the Lambda implementation of page execution. Native selection/rendering material moves; DOM API semantics and script editing policy remain with Lambda. A `Radiant_*` filename alone is not sufficient evidence to move an entire document.
+Mixed documents require section-level ownership. For example, the JS scripting integration design must separate the engine's host contract from the Lambda implementation of page execution. Native selection/rendering material moves; DOM API semantics and script editing policy remain with Lambda. A `Radiant_*` filename alone is not sufficient evidence to move an entire document.
 
 Provide a migration map from old paths/anchors to their new owners. Update diagrams, support-inventory generators, source references, test documentation, repository guides, and CI checks. Use links to canonical documents rather than maintaining independent copies. The new repositories need their own `AGENTS.md` and local development/test instructions that work without Lambda.
 

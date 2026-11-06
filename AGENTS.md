@@ -171,10 +171,10 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 | Data construction | `lambda/io/mark_builder.hpp`, `lambda/core/mark_reader.hpp`, `lambda/io/mark_editor.hpp` |
 | Input parsers | `lambda/input/input.cpp` (dispatcher), `lambda/input/input-*.cpp` |
 | Output formatters | `lambda/format/` |
-| CSS, layout, rendering & interaction | `radiant/` — start with `radiant/view.hpp`, `radiant/layout.hpp`, `radiant/render.hpp`, `radiant/event.hpp`, `radiant/radiant.hpp`; detailed design in `doc/dev/radiant/RAD_00_Overview.md` (view/DOM model, CSS resolution, layout, rendering, SVG, events, editing, state, shell, JS scripting, media/webview) |
-| LambdaJS (JS engine) | `lambda/js/` — detailed design in `doc/dev/js/JS_00_Overview.md` |
-| DOM / web platform | `lambda/dom/` — realm-neutral DOM core driven by **both** JS (`el.querySelector`) and Lambda (`import dom`, and the `radiant.*` waist the `lambda/dom` templates use). Symbols are `dom_*`; `js_*` means the JS adapter. Design: `vibe/Lambda_Design_DOM_API.md`, surface: `doc/dev/js/JS_13_Web_DOM.md` |
-| Core runtime internals | `lambda/` (core) — detailed design in `doc/dev/lambda/LR_00_Overview.md` (value model, transpilers, MIR JIT, memory & GC, builtins) |
+| CSS, layout, rendering & interaction | `radiant/` — start with `radiant/view.hpp`, `radiant/layout.hpp`, `radiant/render.hpp`, `radiant/event.hpp`, `radiant/radiant.hpp`; design records in `vibe/radiant/` |
+| LambdaJS (JS engine) | `lambda/js/` — rulings in `doc/Lambda_Formal_Design.md` D8.4; design records in `vibe/jube/` and `vibe/Lambda_Design_JS_*.md` |
+| DOM / web platform | `lambda/dom/` — realm-neutral DOM core driven by **both** JS (`el.querySelector`) and Lambda (`import dom`, and the `radiant.*` waist the `lambda/dom` templates use). Symbols are `dom_*`; `js_*` means the JS adapter. Design: `vibe/Lambda_Design_DOM_API.md`, surface: `doc/JS_DOM_Support.md` |
+| Core runtime internals | `lambda/` (core) — rulings in `doc/Lambda_Formal_Design.md` D2–D8; design records in `vibe/Lambda_Design_*.md` |
 | Custom lib types | `lib/str.h`, `lib/strbuf.h`, `lib/arraylist.h`, `lib/hashmap.h`, `lib/mempool.h` |
 | Tests | `test/*.cpp` (GTest), `test/lambda/*.ls` (integration), `test/layout/` (HTML/CSS) |
 
@@ -204,6 +204,4 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 - `doc/Lambda_Validator.md` — Schema-based data validation
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
 - `doc/dev/Lambda_Jube_Runtime.md` — Jube native-module build and packaging (Node compatibility and RDB modules; hosted languages removed 2026-10-07, the Bash and Ruby front ends are compiled out)
-- `doc/dev/radiant/RAD_00_Overview.md` — Radiant engine detailed design — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table/positioned), the rendering pipeline (paint IR, display list, painters, PDF/SVG), vector graphics, events, animation, editing, forms, interaction state, application shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set)
-- `doc/dev/lambda/LR_00_Overview.md` — Lambda core-runtime detailed design — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, runtime builtins, error handling, the Mark data API, the procedural runtime, the schema validator, and the grammar module (index to the LR_01–LR_14 set)
-- `doc/dev/js/JS_00_Overview.md` — LambdaJS runtime detailed design — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility (index to the JS_01–JS_16 set)
+- `vibe/` — Working design records, the home of detailed design: `vibe/Lambda_Design_*.md` (core runtime), `vibe/radiant/` (Radiant), `vibe/jube/` (LambdaJS, Jube). `doc/Lambda_Formal_Design.md` Appendix C maps each section to its records
