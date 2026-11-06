@@ -2,13 +2,13 @@
 // Full MIR currently loses loop-guard errors; interpreter/AUTO match this golden.
 pn touch(var calls: int[], value: any) any { calls[0] = calls[0] + 1; return value }
 pn both(var calls: int[], left: any, right: any) any {
-    while (touch(calls, left) and touch(calls, right)) { return 1 }
+    while ((touch(calls, left) and touch(calls, right))^) { return 1 }
 }
 pn either(var calls: int[], left: any, right: any) any {
-    while (touch(calls, left) or touch(calls, right)) { return 1 }
+    while ((touch(calls, left) or touch(calls, right))^) { return 1 }
 }
 pn negate(var calls: int[], value: any) any {
-    while (not touch(calls, value)) { return 1 }
+    while ((not touch(calls, value))^) { return 1 }
 }
 pn main() {
     var calls: int[] = [0]

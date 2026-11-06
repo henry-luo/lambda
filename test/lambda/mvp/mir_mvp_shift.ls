@@ -3,10 +3,13 @@ pn typed(a: int, count: int) any { return shr(a, count) }
 pn boxed(a: any, count: any) any { return shr(a, count) }
 pn fixed(a: int) any { return shr(a, 1) }
 pn divide(a: int, b: int) int { return a div b }
-pn bad_count(count: int) {
+pn bad_count(count: int) any {
     var result: int = shr(7, count)
-    print("UNEXPECTED COUNT\n")
+    return result
 }
+// numeric error results are observed through their Error contract (S7.9.3).
+fn same_result(left: any, right: any) bool^ =>
+    if (left is error) right is error and left.code == right.code else left == right
 pn packed(a: int, count: int) any { return bor(shl(a, count), 1) }
 pn nested(a: int, b: int) any { return bxor(bor(a, b), shl(a, 2)) }
 pn mark(a: int) int { print(a); print(" "); return a }
@@ -23,10 +26,11 @@ pn main() {
     print(typed(-43, 1) == boxed(-43, 1)); print(" "); print(typed(42, 2) + 5); print("\n")
     let infinity: int = divide(1, 0)
     let poison: int = divide(0, 0)
-    print(string(typed(infinity, 1)) == string(boxed(infinity, 1))); print(" ")
-    print(string(typed(poison, 1)) == string(boxed(poison, 1))); print("\n")
-    print(fixed(-43)); print(" "); print(string(fixed(infinity)) == string(boxed(infinity, 1))); print(" ")
-    print(string(fixed(poison)) == string(boxed(poison, 1))); print("\n")
-    bad_count(-1)
+    print(same_result(typed(infinity, 1), boxed(infinity, 1))); print(" ")
+    print(same_result(typed(poison, 1), boxed(poison, 1))); print("\n")
+    print(fixed(-43)); print(" "); print(same_result(fixed(infinity), boxed(infinity, 1))); print(" ")
+    print(same_result(fixed(poison), boxed(poison, 1))); print("\n")
+    let rejected_count = bad_count(-1)
+    print(rejected_count is error); print("\n")
     print("checked shift count\n")
 }

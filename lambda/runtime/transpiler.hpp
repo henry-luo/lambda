@@ -44,6 +44,9 @@ typedef struct Heap {
     // EvalContext::last_error may name a GC-heap error (a published completion);
     // this registered slot keeps it alive while it stays the diagnostic mirror.
     uint64_t last_error_root;
+    // native weak storage keeps captures alive exactly while their runtime
+    // type value or instance is live; static nominal records hold code only.
+    uint64_t object_environments_root;
     // Per-runtime caches for compiler-proven temporary-object regions.  These
     // blocks never enter gc->all_objects and are recycled only after a region
     // ends, so an ordinary heap object can never retain a region pointer.

@@ -153,6 +153,9 @@ typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
 void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         bool descend_functions);
 
+// physical callback entries reuse the source body's task-scope and call facts.
+bool lambda_ast_plan_body_concurrency(AstNode* body, FnAnalysis* analysis);
+
 // Lexer-neutral literal categories. The C lexer maps directly to these
 // categories.
 typedef enum LambdaAstLiteralKind {

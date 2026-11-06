@@ -11,6 +11,80 @@ static constexpr size_t MIR_EVAL_CONTEXT_VARGS_OFFSET = offsetof(EvalContext, cu
 
 typedef MIR_reg_t (*MirArgumentItem)(void*, int);
 
+static inline const char* em_binding_boundary_site(MirEmitter* em,
+        const char* kind, String* name) {
+    StrBuf* label = strbuf_new_cap(64);
+    strbuf_append_format(label, "%s '%.*s'", kind,
+        name ? (int)name->len : 0, name ? name->chars : "");
+    const char* result = mir_em_persist_cstr(em, label->str).str;
+    strbuf_free(label);
+    return result;
+}
+
+static inline MIR_reg_t em_error_stamp_site(MirEmitter* em, MIR_reg_t error,
+        const char* reference, const AstSysFuncNode* site) {
+    // constructor locations are definition-site metadata, shared by both MIR
+    // front ends rather than supplied by an eventual error observer (S7.4.4).
+    const char* file = mir_em_persist_cstr(em, reference ? reference : "").str;
+    return em_call_4(em, "lambda_error_stamp_site", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, error), MIR_T_P, MIR_new_int_op(em->ctx, (intptr_t)file),
+        MIR_T_I64, MIR_new_int_op(em->ctx, site->site_line),
+        MIR_T_I64, MIR_new_int_op(em->ctx, site->site_column), true);
+}
+
+// S7.4.4: a successful admission stays lazy; only rejection resolves its
+// definition-site source point. The pooled label outlives the JIT image.
+static inline MIR_reg_t em_type_boundary_check(MirEmitter* em, Pool* pool,
+        const char* source, const char* reference, const AstNode* site_node,
+        MIR_reg_t value, Type* expected, const char* site, MIR_reg_t env = 0,
+        bool terminal = false) {
+    LambdaBoundary* boundary = (LambdaBoundary*)pool_calloc(pool, sizeof(LambdaBoundary));
+    const char* text = site ? site : "typed boundary";
+    boundary->text = pool_dup_n(pool, text, strlen(text));
+    if (site_node) {
+        boundary->source = source;
+        boundary->file = reference;
+        boundary->source_offset = site_node->source_span.start_byte;
+    }
+    MIR_type_t types[] = {MIR_T_I64, MIR_T_P, MIR_T_P, MIR_T_P};
+    MIR_op_t args[] = {MIR_new_reg_op(em->ctx, value), MIR_new_int_op(em->ctx, (intptr_t)expected),
+        env ? MIR_new_reg_op(em->ctx, env) : MIR_new_int_op(em->ctx, 0),
+        MIR_new_int_op(em->ctx, (intptr_t)boundary)};
+    return terminal ? em_call_terminal_with_args(em, "lambda_type_check_lazy", MIR_T_I64, 4, types, args, false)
+        : em_call_with_args(em, "lambda_type_check_lazy", MIR_T_I64, 4, types, args, false);
+}
+
+// state defaults run only on first admission of this model/template/name.
+static inline MIR_reg_t em_template_state_read(MirEmitter* em, MIR_reg_t model,
+        const char* reference, AstStateEntry* state, bool initialize) {
+    MIR_op_t model_op = MIR_new_reg_op(em->ctx, model);
+    MIR_op_t reference_op = MIR_new_int_op(em->ctx, (intptr_t)reference);
+    MIR_op_t name_op = MIR_new_int_op(em->ctx, (intptr_t)state->name->chars);
+    if (!initialize)
+        return em_call_3(em, "tmpl_state_get", MIR_T_I64,
+            MIR_T_I64, model_op, MIR_T_P, reference_op, MIR_T_P, name_op, true);
+    MIR_reg_t fallback = em_new_reg(em, "state_default", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, fallback), MIR_new_int_op(em->ctx, ITEM_NULL)));
+    if (state->value) {
+        MIR_reg_t initialized = em_call_3(em, "tmpl_state_has", MIR_T_I64,
+            MIR_T_I64, model_op, MIR_T_P, reference_op, MIR_T_P, name_op, true);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UEXT8,
+            MIR_new_reg_op(em->ctx, initialized), MIR_new_reg_op(em->ctx, initialized)));
+        MIR_label_t ready = em_new_label(em);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, ready), MIR_new_reg_op(em->ctx, initialized)));
+        MirValue value = em_require_rep(em, em_lower_value(em, state->value, MIR_VALUE_ANY), VALUE_REP_ITEM);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+            MIR_new_reg_op(em->ctx, fallback), MIR_new_reg_op(em->ctx, value.reg)));
+        em_emit_label(em, ready);
+    }
+    if (em->root_call_value) em->root_call_value(em->call_owner, fallback, JIT_VALUE_BOXED_ITEM);
+    return em_call_4(em, "tmpl_state_get_or_init", MIR_T_I64,
+        MIR_T_I64, model_op, MIR_T_P, reference_op, MIR_T_P, name_op,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, fallback), true);
+}
+
 // conversion returns an Item so rejected inputs retain their error value.
 static inline MIR_reg_t em_numeric_type_call(MirEmitter* em, Type* target, MIR_reg_t item) {
     return target->type_id == LMD_TYPE_NUM_SIZED
@@ -290,6 +364,33 @@ static inline MIR_reg_t em_capture_slot_read(MirEmitter* em, MIR_reg_t environme
 }
 
 // task entries use boxed functions and a boxed-value argument array (S13.1.1v3).
+// S13.1.3v2: select stages all handles and its named timeout in source order;
+// both MIR frontends use the same rooted variadic-to-array bridge.
+static inline MIR_reg_t em_select_tasks(MirEmitter* em, AstCallNode* call) {
+    MIR_reg_t handles = em_call_0(em, "array", MIR_T_P, true);
+    if (em->root_call_value) em->root_call_value(em->call_owner, handles, JIT_VALUE_RAW_GC_POINTER);
+    MIR_reg_t timeout = em_new_reg(em, "select_timeout", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, timeout),
+        MIR_new_int_op(em->ctx, (uint64_t)LMD_TYPE_INT << 56)));
+    if (em->root_call_value) em->root_call_value(em->call_owner, timeout, JIT_VALUE_BOXED_ITEM);
+    for (AstNode* argument = call->argument; argument; argument = argument->next) {
+        AstNamedNode* named = argument->node_type == AST_NODE_NAMED_ARG ? (AstNamedNode*)argument : NULL;
+        bool is_timeout = named && named->name && named->name->len == 7 &&
+            memcmp(named->name->chars, "timeout", 7) == 0;
+        MirValue item = em_require_rep(em,
+            em_lower_value(em, is_timeout ? named->as : argument, MIR_VALUE_ANY), VALUE_REP_ITEM);
+        if (is_timeout) {
+            em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, timeout),
+                MIR_new_reg_op(em->ctx, item.reg)));
+        } else em_call_void_2(em, "array_push_verbatim",
+            MIR_T_P, MIR_new_reg_op(em->ctx, handles), MIR_T_I64, MIR_new_reg_op(em->ctx, item.reg), true);
+    }
+    MIR_reg_t items = em_call_1(em, "array_end", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(em->ctx, handles), true);
+    return em_call_2(em, "pn_select", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, items), MIR_T_I64, MIR_new_reg_op(em->ctx, timeout), true);
+}
+
 static inline MIR_reg_t em_start_task(MirEmitter* em, AstStartNode* start,
         MirResultCheck check_arguments) {
     AstCallNode* call = start->call;

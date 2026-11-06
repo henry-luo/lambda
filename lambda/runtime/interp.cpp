@@ -7256,13 +7256,13 @@ public:
     InterpBorrowedScratch& operator=(const InterpBorrowedScratch&) = delete;
 };
 
+static Item interp_call_retained_entry(Function* fn, const Item* args, int argc,
+    const InterpBorrowedCall* borrowed, uint64_t* output_destination);
+
 static Item interp_call_internal(Function* fn, const Item* args, int argc,
         const InterpBorrowedCall* borrowed, uint64_t* output_destination = nullptr) {
     InterpState* st = interp_current_state();
-    if (!st) {
-        log_error("interp: no interpreter state for an interpreted call");
-        return ItemError;
-    }
+    if (!st) return interp_call_retained_entry(fn, args, argc, borrowed, output_destination);
     const AstFuncNode* fn_node = (const AstFuncNode*)fn->def;
     Script* module = fn->def_module;
     // Function entry is an execution safe point even when a direct AST call
@@ -7578,7 +7578,7 @@ Item interp_call_emit(Function* fn, const Item* args, int argc, List* destinatio
 // clean, so an ordinary call must never read them.
 extern "C" Item interp_call_borrowed(Function* fn, const Item* args, int argc) {
     InterpState* st = interp_current_state();
-    Context* transport = st ? (Context*)st->ctx : NULL;
+    Context* transport = st ? (Context*)st->ctx : context;
     if (transport) {
         InterpBorrowedCall borrowed = {};
         bool any = false;
@@ -7686,6 +7686,59 @@ public:
     InterpStateGuard(const InterpStateGuard&) = delete;
     InterpStateGuard& operator=(const InterpStateGuard&) = delete;
 };
+
+static Item interp_call_retained_entry(Function* fn, const Item* args, int argc,
+        const InterpBorrowedCall* borrowed, uint64_t* output_destination) {
+    if (!context) {
+        log_error("interp-retained-entry: interpreted call has no evaluator context");
+        return ItemError;
+    }
+    Item result = ItemError;
+    bool failed = false;
+    LambdaFaultReason reason = LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT;
+    LambdaErrorCode prior = ERR_OK;
+    {
+        // native callers can retain a T0 Function after its runner unwinds.
+        // reuse the retained-callback state; recursive T0 calls stay on it.
+        InterpStateGuard state_guard(context);
+        List* saved_vargs = context->current_vargs;
+        uint32_t capabilities = LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY;
+        for (LambdaRecoveryFrame* outer = lambda_recovery_frame_current(); outer;
+                outer = outer->previous) {
+            // an existing transaction already dominates inner handlers; land
+            // here first only to release this retained interpreter state.
+            if (outer->signal_armed &&
+                    (outer->capabilities & LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER)) {
+                capabilities |= LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER;
+                break;
+            }
+        }
+        LambdaRecoveryFrame* barrier = lambda_recovery_frame_begin_for(
+            context, capabilities);
+        if (!barrier) {
+            failed = true;
+            reason = LAMBDA_FAULT_OUT_OF_MEMORY;
+        } else if (LAMBDA_RECOVERY_FRAME_SETJMP(barrier)) {
+            // a native fault bypasses destructors: close the T0 state before
+            // forwarding it to the caller's handler (D7.4.3/D6.3).
+            if (lambda_recovery_frame_restore_landing(barrier)) {
+                reason = barrier->fault.reason;
+                prior = barrier->fault.prior_error_code;
+            }
+            state_guard.get()->top = NULL;
+            context->current_vargs = saved_vargs;
+            failed = true;
+        } else if (!lambda_recovery_frame_arm(barrier)) {
+            failed = true;
+        } else {
+            result = interp_call_internal(fn, args, argc, borrowed, output_destination);
+        }
+        if (barrier) lambda_recovery_frame_end(barrier);
+    }
+    if (failed && !lambda_recovery_frame_raise_fault(reason, prior))
+        return lambda_recovery_publish_fault_item(context, reason, prior);
+    return result;
+}
 
 #ifndef _WIN32
 #define INTERP_WORKER_STACK_SIZE (128U * 1024U * 1024U)

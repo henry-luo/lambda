@@ -7,7 +7,7 @@ pn main() {
     print(fetch_string(values, -1)); print(" "); print(fetch_string(values, 2)); print(" ")
     print(fetch_string(values, 4294967296)); print("\n")
     let saved = values
-    change(values)
+    change(values)^
     print(fetch_string(saved, 0)); print(" "); print(fetch_string(values, 0)); print("\n")
     let empty: string[] = []
     print(fetch_string(empty, 0)); print("\n")

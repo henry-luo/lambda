@@ -90,6 +90,29 @@ class LambdaMirMvpTests(unittest.TestCase):
                     with self.subTest(compiler=compiler, mode=mode, fixture=source.stem):
                         self.check_golden(source, {**mode, "LAMBDA_MIR_COMPILER": compiler})
 
+    def test_ndim_canonical_values(self):
+        names = ("typed_array_ndim_index", "typed_array_ndim_literal",
+                 "typed_array_ndim_dynamic", "typed_array_construction_exact", "type_counted_rank")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_named_declaration_snapshots(self):
+        names = ("fn_local_named_snapshots", "fn_local_capture_modes", "fn_local_capture_iterations")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_file_output_values(self):
+        names = ("proc/proc_pdf_file", "pdf/pdf_file_mvp", "pdf/output_pages", "pdf/output_text")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_native_view_definitions(self):
+        names = ("view_template", "view_state", "view_attr_pattern", "error_view_outcomes",
+                 "error_event_outcomes", "edit_bridge", "ui_controls", "ui_workspace")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_scalar_var_places(self):
+        names = ("place_borrow_scalar_homes", "place_borrow_homes", "cow_var_typed_rebind",
+                 "proc_nullable_native_wide_map_storage")
+        self.check_gc_fixtures(ROOT / "test/lambda/proc" / f"{name}.ls" for name in names)
+
     def test_scoped_tasks(self):
         names = ("mvp/mir_mvp_task_values", "conc/start_wait", "conc/start_imported",
                  "conc/scope_join", "conc/scope_return", "conc/scope_loop_exit",
@@ -119,6 +142,12 @@ class LambdaMirMvpTests(unittest.TestCase):
         names = ("mir_mvp_range_domains", "mir_mvp_query_sources")
         self.check_gc_fixtures(ROOT / "test/lambda/mvp" / (name + ".ls") for name in names)
 
+    def test_type_values_and_nullable_returns(self):
+        # S11.4.12v2/D2.3.5: declarations bind types; optional scalar returns
+        # keep their value category across native and public entries.
+        names = ("grammar/types", "type_literal_alias", "mvp/mir_mvp_array_domains")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
     def test_constrained_type_predicates(self):
         # S11.4.6v4/S11.4.11 cover declaring scopes, recursive predicates,
         # Error answers, base-only annotations and filtered handlers.
@@ -135,7 +164,9 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_nominal_methods(self):
         # S12.3.3v2/S12.3.4v2/S7.4.6v3: bound receiver snapshots, named
         # defaults and field publication agree across both generated ABIs.
-        names = ("mvp/mir_mvp_bound_methods", "import_pub_types", "object", "object_nominal",
+        names = ("mvp/mir_mvp_bound_methods", "mvp/mir_mvp_local_type_methods",
+                 "mvp/mir_mvp_nominal_method_alias", "mvp/mir_mvp_nested_type_methods",
+                 "import_pub_types", "object", "object_nominal",
                  "object_method_receiver", "object_method_value", "object_inherit", "object_content",
                  "object_boxed_field_layout", "object_optional_presence", "object_method_named_args",
                  "object_update", "object_direct_access", "proc/object_method_write",
@@ -152,9 +183,23 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
 
     def test_inferred_record_fields(self):
-        names = ("mvp/mir_mvp_inferred_record_fields", "latex/test_latex_citeproc_errors",
+        names = ("mvp/mir_mvp_inferred_record_fields", "mvp/mir_mvp_error_boundaries", "latex/test_latex_citeproc_errors",
                  "latex/test_latex_citeproc_data", "mathml_format")
         self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_counted_admission_and_callable_pipe(self):
+        # D4.3.3/S10.1.7v2: resizing invalidates counts; nested ~ is not free.
+        cases = (("array_count_resized_binding", "error[E201]", "maximum allowed is 3"),
+                 ("pipe_body_bound_current", "error[E212]", "pipe target is not callable"))
+        for compiler in ("mvp", "production"):
+            for mode in GC_MODES:
+                for name, code, message in cases:
+                    with self.subTest(compiler=compiler, mode=mode, fixture=name):
+                        source = ROOT / "test/lambda/negative/runtime" / (name + ".ls")
+                        result = self.run_script(source, {**mode, "LAMBDA_MIR_COMPILER": compiler})
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(code, result.stdout + result.stderr)
+                        self.assertIn(message, result.stdout + result.stderr)
 
     def test_decomposition_values(self):
         names = ("mvp/mir_mvp_decomposition", "mvp/mir_mvp_decomposition_proc",
@@ -212,6 +257,132 @@ class LambdaMirMvpTests(unittest.TestCase):
         for mode in GC_MODES:
             with self.subTest(mode=mode):
                 self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_binder_outcomes.ls", mode)
+
+    def test_admission_outcome_boundaries(self):
+        # S7.4.4/S7.7.4v2/S11.4.6v4: diagnostics, implicit returns and
+        # borrowed outcomes retain normal conversion and exact Error values.
+        names = ("admission_runtime_type", "error_members", "type_none",
+                 "proc/admission_borrowed_outcomes", "proc/admission_return_outcomes",
+                 "proc/error_union_normal_admission")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_binder_default_order(self):
+        # S11.4.8v2/TG18: defaults see admitted predecessors but do not
+        # select a binder; the paired Full failure remains in the report.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_binder_default_order.ls", mode)
+
+    def test_member_contract_representations(self):
+        # S11.1.2v4/D4.2.5: member contracts preserve boxed values,
+        # independent type values, record reification and COW snapshots.
+        names = ("pattern_annotation", "pattern_quoted_classes", "range_type_membership", "string_pattern_syntax",
+                 "import_patterns", "type_syntax_edges", "ledger_verified_semantics",
+                 "proc/ledger_lane_widening", "proc/cow_element_snapshot",
+                 "proc/map_contract_reordered_literal", "number_model_c14c_div_mod",
+                 "list_collapse_void", "navigation/paths", "navigation/surfaces")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+        # Full still skips the known int-to-float conversion after a deferred
+        # failed store. MVP and T0 preserve the S11.4.6v4 destination domain.
+        for tier in ("jit", "interp"):
+            for mode in GC_MODES:
+                with self.subTest(tier=tier, mode=mode):
+                    self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_member_contracts.ls",
+                                      {**mode, "LAMBDA_EXEC_BACKEND": tier,
+                                       "LAMBDA_MIR_COMPILER": "mvp" if tier == "jit" else "production"})
+
+    def test_captured_dependent_annotations(self):
+        # S11.4.8v2/D4.1.4: captured annotations and same-spelling aliases
+        # resolve by declaration, independently of each activation's slots.
+        for mode in GC_MODES:
+            for name in ("mir_mvp_captured_annotations", "mir_mvp_captured_type_shadowing"):
+                with self.subTest(mode=mode, fixture=name):
+                    self.check_golden(ROOT / "test/lambda/mvp" / (name + ".ls"), mode)
+
+    def test_method_lexical_environments(self):
+        # S9.1.4v2/S12.3.3v2: each activation owns its method captures;
+        # saved receivers and writable method places keep their COW boundary.
+        for mode in GC_MODES:
+            for name in ("mir_mvp_method_captures", "mir_mvp_method_capture_cow",
+                         "mir_mvp_method_capture_annotations"):
+                with self.subTest(mode=mode, fixture=name):
+                    self.check_golden(ROOT / "test/lambda/mvp" / (name + ".ls"), mode)
+            source = ROOT / "test/lambda/negative/semantic/fn_local_method_capture_escape.ls"
+            with self.subTest(mode=mode, fixture=source.stem):
+                result = self.run_script(source, mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(source.with_suffix(".txt").read_text().strip(), result.stderr)
+
+    def test_query_join_streams(self):
+        names = ("for_join_test", "for_join_s3b_test", "for_join_group_test",
+                 "for_group_test", "mvp/mir_mvp_join_group_values")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_traversal_exits(self):
+        # D6.1.1: key frames unwind on propagation, multi-source transfers
+        # and projected var calls. Full's continue defect remains recorded.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_traversal_exits.ls", mode)
+
+    def test_functional_loop_results_and_nullable_places(self):
+        # S2.5.3v3/S9.1.2: nested functional streams remain values, and a
+        # nullable alias uses the ordinary checked COW write path.
+        names = ("expr_stam", "proc/ledger_cow_value_boundaries")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_recovery_and_pointer_result_domains(self):
+        # S7.6.1v9/D2.3.5: recovery can replace a native domain, and a
+        # raw C pointer's zero result must box as absence.
+        names = ("handler_current_error", "name_member", "symbol_empty")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_borrowed_outcome_and_coordinate_boundaries(self):
+        # S7.2.2/S7.6.3v3/S9.3.1/D4.3.3: joins retain insertion capture,
+        # arrays still admit their values, and split propagates its Error arm.
+        names = ("proc/rejected_error_any_operand", "proc/ledger_place_insertion",
+                 "proc/subscript_last_scope", "proc/tune23_array_consumer_refinement",
+                 "proc/fn_local_proc_snapshot", "conc/select_basic",
+                 "proc/proc_ndim_index_write", "proc/ndim_row_assign",
+                 "mvp/mir_mvp_select_many")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+        # Full still mutates the prior N-D snapshots; T0 excludes the nominal
+        # projected write. Those controls remain in the paired diagnostic.
+        for mode in GC_MODES:
+            with self.subTest(mode=mode):
+                self.check_golden(ROOT / "test/lambda/mvp/mir_mvp_coordinate_places.ls", mode)
+
+    def test_boundary_source_and_entry_roles(self):
+        # S7.4.4/S12.1.1v3: admission owns its source point; a pure main
+        # is an ordinary definition and inferred schemas add no admission.
+        names = ("ledger_boundary_location", "ledger_parameter_result_site",
+                 "grammar_reduce5_scanner", "mvp/mir_mvp_named_main_function",
+                 "mvp/mir_mvp_inferred_array_contracts")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_native_subsystem_result_domains(self):
+        # S8.3.1v3/S2.6.6v3/D4.3.1: virtual content needs semantic length,
+        # and constructor/conditional Error outcomes stay boxed across imports.
+        names = ("archive_input", "zip_jar", "zip_errors", "proc/zip_output",
+                 "proc/element_prepared_parts", "proc/proc_pdf_maps",
+                 "pdf/phase37_page_content_stream_data", "proc/archive_output",
+                 "music/music_gc_roots", "scene3d/invalid", "procart/wfc_native",
+                 "input_markdown_edit", "input_markdown_emoji")
+        self.check_gc_fixtures(ROOT / "test/lambda" / (name + ".ls") for name in names)
+
+    def test_producer_carrier_transports(self):
+        names = ("mvp/mir_mvp_producer_transport", "match_expr", "raise_non_error",
+                 "proc/handler_results", "graph_d2_routing", "graph_transform_html",
+                 "graph_transform_input", "input_markdown_mermaid", "procart/animal_surfaces")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_procedure_and_pointer_result_contracts(self):
+        # S2.5.3v3/D2.3.5/D4.3.1: collapsed statements retain demand,
+        # admitted unions select a lane, and open aliases may widen.
+        names = ("proc/dense_for_range", "proc/tune23_array_consumer",
+                 "proc/function_colour_poly", "proc/record_boundary_admission",
+                 "proc/verified_contract_prefix", "mvp/mir_mvp_pointer_union_admission")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
 
     def test_extended_call_operands(self):
         # D4.2.1/S7.7.3: conversions and named system operands share checked
@@ -901,30 +1072,28 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_module_initialization(self):
         source = Path(self.scratch.name) / "module.ls"
         source.write_text('fn candidate() any { "wrong" }; let bad: int = candidate(); '
-                          'pn main() { print("UNEXPECTED MAIN") }\n')
-        source.with_suffix(".txt").write_text("type check at bad failed\n")
-        result = self.run_script(source)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("UNEXPECTED MAIN", result.stdout)
-        self.assertIn("type check at bad failed", result.stdout + result.stderr)
+                          'pn main() { print([bad is error, bad.code]) }\n')
+        # S7.7.2v2 retains a deferred validation outcome and continues into main.
+        source.with_suffix(".txt").write_text("[true, 201]\n")
+        for compiler in ("mvp", "production"):
+            with self.subTest(compiler=compiler):
+                self.check_golden(source, {"LAMBDA_MIR_COMPILER": compiler})
 
     def test_admission_precedes_execution(self):
-        sources = {
-            "capture": 'pn outer(x: int) { pn inner() int { return x }; return inner() }; pn main() { print("EXECUTED"); print(outer(7)) }',
-            "content": '1; 2',
-        }
-        for name, code in sources.items():
-            with self.subTest(name=name):
-                source = Path(self.scratch.name) / f"{name}.ls"
-                source.write_text(code + "\n")
-                source.with_suffix(".txt").write_text("")
-                result = self.run_script(source)
+        source = Path(self.scratch.name) / "static_mismatch.ls"
+        source.write_text('pn main() { print("EXECUTED"); let bad: int = "wrong" }\n')
+        source.with_suffix(".txt").write_text("")
+        for compiler in ("mvp", "production"):
+            with self.subTest(compiler=compiler):
+                result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler})
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout.strip(), "")
-                self.assertIn("Lambda MIR MVP", result.stderr)
+                self.assertIn("error[E201]", result.stderr)
 
     def test_expanded_admission_executes(self):
         sources = {
+            "capture": ('pn outer(x: int) { pn inner() int { return x }; return inner() }; pn main() { print("EXECUTED"); print(outer(7)) }', 'EXECUTED7'),
+            "content": ('1; 2', '1\n2'),
             "comprehension": ('pn main() { print([for (x in 0 to 2) x]) }', '[0, 1, 2]'),
             "builtin": ('pn main() { print(abs(math.tan(2.0) + 2.185039863261519) < 0.000000001) }', 'true'),
             "module_call": ('let A = 1.5; let B = float(2); pn main() { print(A ++ " " ++ B) }', '1.5 2'),
@@ -1138,12 +1307,16 @@ class LambdaMirMvpTests(unittest.TestCase):
     def test_assignment_failure_names_binding(self):
         source = Path(self.scratch.name) / "assignment.ls"
         source.write_text('pn assign(candidate: any) any { var saved: int = 7; saved = candidate; '
-                          'print("UNEXPECTED"); return saved }; pn main() { return assign("bad") }\n')
-        source.with_suffix(".txt").write_text("type check at saved failed\n")
-        result = self.run_script(source)
-        self.assertGreater(result.returncode, 0, result.stdout + result.stderr)
-        self.assertNotIn("UNEXPECTED", result.stdout)
-        self.assertIn("type check at saved failed", result.stdout + result.stderr)
+                          'print(saved is error); return saved }; pn main() { return assign("bad") }\n')
+        source.with_suffix(".txt").write_text("true\n")
+        # S7.7.4v2 continues with the retained Error; main then returns that Error.
+        for compiler in ("mvp", "production"):
+            with self.subTest(compiler=compiler):
+                result = self.run_script(source, {"LAMBDA_MIR_COMPILER": compiler})
+                self.assertGreater(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(strip_timing(result.stdout), "true")
+                self.assertIn("error[E201]", result.stderr)
+                self.assertRegex(result.stderr, r"type check at [^\n]*\bsaved\b[^\n]* failed")
 
     def test_bounded_counter_mir(self):
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_integer.ls", "bounded")

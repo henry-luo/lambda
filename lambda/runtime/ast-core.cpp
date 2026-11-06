@@ -329,6 +329,8 @@ static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry)
 static NameEntry* ast_index_node_entry(AstNode* node) {
     switch (node->node_type) {
     case AST_NODE_IDENT: return ((AstIdentNode*)node)->entry;
+    case AST_NODE_OBJECT_TYPE: return ((AstObjectTypeNode*)node)->entry;
+    case AST_NODE_OBJECT_LITERAL: return ((AstObjectLiteralNode*)node)->type_entry;
     case AST_NODE_PARAM: case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG:
     case AST_NODE_FOR_INDEX: return ((AstNamedNode*)node)->entry;
     // publish the iterator even when the body never reads it; code generation
@@ -587,7 +589,7 @@ static bool ast_index_function_reference_for_node(const AstIndex* index,
     if (!node || owner >= index->function_count) return false;
     AstBindingId binding_id = AST_BINDING_ID_INVALID;
     uint8_t flags = 0;
-    if (!write && node->node_type == AST_NODE_IDENT) {
+    if (!write && (node->node_type == AST_NODE_IDENT || node->node_type == AST_NODE_OBJECT_LITERAL)) {
         binding_id = index->node_bindings[node_id];
         flags = AST_FUNCTION_REF_READ;
     } else if (write && node->node_type == AST_NODE_ASSIGN_STAM) {

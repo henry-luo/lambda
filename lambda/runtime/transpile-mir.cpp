@@ -6833,32 +6833,9 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
 static MIR_reg_t emit_runtime_type_boundary(MirTranspiler* mt, MIR_reg_t value,
         Type* expected, const char* site, MIR_reg_t env = 0,
         bool terminal = false) {
-    LambdaBoundary* label = (LambdaBoundary*)pool_calloc(mt->script_pool,
-        sizeof(LambdaBoundary));
-    const char* name = site ? site : "typed boundary";
-    label->text = pool_dup_n(mt->script_pool, name, strlen(name));
-    if (mt->boundary_source) {
-        label->source = mt->source;
-        label->file = mt->owner_script ? mt->owner_script->reference : NULL;
-        label->source_offset = mt->boundary_source->source_span.start_byte;
-    }
-    MIR_reg_t contract = new_reg(mt, "boundary_type", MIR_T_P);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, contract),
-        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)expected)));
-    MIR_reg_t location = new_reg(mt, "boundary_site", MIR_T_P);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, location),
-        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)label)));
-    MIR_type_t types[4] = {MIR_T_I64, MIR_T_P, MIR_T_P, MIR_T_P};
-    MIR_op_t args[4] = {MIR_new_reg_op(mt->ctx, value),
-        MIR_new_reg_op(mt->ctx, contract),
-        env ? MIR_new_reg_op(mt->ctx, env) : MIR_new_int_op(mt->ctx, 0),
-        MIR_new_reg_op(mt->ctx, location)};
-    return terminal ? em_call_terminal_with_args(&mt->em,
-        "lambda_type_check_lazy", MIR_T_I64, 4, types, args, false)
-        : em_call_with_args(&mt->em, "lambda_type_check_lazy", MIR_T_I64,
-            4, types, args, false);
+    return em_type_boundary_check(&mt->em, mt->script_pool, mt->source,
+        mt->owner_script ? mt->owner_script->reference : NULL, mt->boundary_source,
+        value, expected, site, env, terminal);
 }
 
 // A raw signed integer already owns the exact machine lane needed by a u32
@@ -18206,6 +18183,8 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 // ============================================================================
 
 static bool mir_for_has_join_clause(AstForNode* for_node) {
+    // grouped multi-source rows need named tuples even without an on clause.
+    if (for_node && for_node->group && for_node->loop && for_node->loop->next) return true;
     for (AstNode* cur = for_node ? for_node->loop : NULL; cur; cur = cur->next) {
         AstLoopNode* loop = (AstLoopNode*)cur;
         if (loop->on || loop->optional) return true;
@@ -18237,28 +18216,10 @@ static Type* mir_join_index_type(AstLoopNode* loop) {
     return (loop->key_filter == LOOP_KEY_INT) ? &TYPE_INT : &TYPE_ANY;
 }
 
-// Emit the index/key binding name as an item register (or a null item when absent).
-static MIR_reg_t mir_join_idx_name_item(MirTranspiler* mt, AstLoopNode* loop);
-
 static MIR_reg_t mir_join_name_item(MirTranspiler* mt, String* name) {
-    MIR_reg_t name_ptr = emit_load_string_literal(mt, name->chars);
-    MIR_reg_t str_ptr = emit_call_1(mt, "heap_create_name", MIR_T_P,
-        MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr));
-    return emit_box_string(mt, str_ptr);
+    return em_query_name(&mt->em, name);
 }
 
-static MIR_reg_t mir_join_idx_name_item(MirTranspiler* mt, AstLoopNode* loop) {
-    if (loop->index_name) return mir_join_name_item(mt, loop->index_name);
-    return emit_null_item_reg(mt);
-}
-
-// Bind a fetched Item (for-in / group-by / join element, open alias) as a
-// variable of its declared type. A var's reads take their carrier from its
-// TypeId (mir_value_from_var_entry), so every type whose canonical carrier is
-// not the boxed Item is unboxed into that carrier here. LR07-21: a hand-kept
-// list that omitted bool left the boxed word in bool's 0/1 lane, so `if (b)`
-// tested the tag bits and read `false` as truthy -- S3.1: the falsy set is
-// exactly null, false, error values and "".
 static void mir_bind_item_var(MirTranspiler* mt, String* name,
         NameEntry* binding, Type* item_type, MIR_reg_t item_reg) {
     // an occurrence contract (`T?`) is a meta-type: bind it as `any`
@@ -18445,30 +18406,9 @@ static void mir_join_bind_tuple_vars(MirTranspiler* mt, AstLoopNode* first, AstL
     }
 }
 
-// A key in the representation the shared runtime helpers consume -- group,
-// order and join keys alike: the boxed value for one expression, an Array
-// tuple for several.
-typedef AstNode* (*MirKeyExprOf)(AstNode* node);
-static AstNode* mir_group_key_expr(AstNode* node) { return ((AstGroupKey*)node)->expr; }
-static AstNode* mir_order_key_expr(AstNode* node) { return ((AstOrderSpec*)node)->expr; }
-static AstNode* mir_join_prior_expr(AstNode* node) { return ((AstJoinKey*)node)->prior_expr; }
-static AstNode* mir_join_new_expr(AstNode* node) { return ((AstJoinKey*)node)->new_expr; }
-
-static MIR_reg_t mir_box_key_item(MirTranspiler* mt, AstNode* first, MirKeyExprOf expr_of) {
-    if (!first) return emit_null_item_reg(mt);
-    if (!first->next) return transpile_box_item(mt, expr_of(first));
-    MIR_reg_t tuple = emit_call_0(mt, "array_plain", MIR_T_P);
-    for (AstNode* node = first; node; node = node->next) {
-        MIR_reg_t boxed = transpile_box_item(mt, expr_of(node));
-        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, tuple),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-    }
-    return emit_box_container(mt, tuple);
-}
-
 static MIR_reg_t mir_join_key_item(MirTranspiler* mt, AstLoopNode* loop, bool use_new_side) {
-    return mir_box_key_item(mt, loop ? (AstNode*)loop->join_keys : NULL,
-        use_new_side ? mir_join_new_expr : mir_join_prior_expr);
+    return em_query_key(&mt->em, loop ? (AstNode*)loop->join_keys : NULL,
+        use_new_side ? em_join_new_expr : em_join_prior_expr);
 }
 
 static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_reg_t rows,
@@ -18574,7 +18514,7 @@ static void mir_emit_for_body_and_order(MirTranspiler* mt, AstForNode* for_node,
     }
 
     if (for_node->order && result_demanded) {
-        MIR_reg_t boxed_key = mir_box_key_item(mt, for_node->order, mir_order_key_expr);
+        MIR_reg_t boxed_key = em_query_key(&mt->em, for_node->order, em_order_key_expr);
         emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
             MIR_new_reg_op(mt->ctx, keys_arr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
@@ -18673,8 +18613,8 @@ static MIR_reg_t transpile_for_join_grouped(MirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, group_rows),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_item));
 
-    MIR_reg_t group_key_item = mir_box_key_item(mt, (AstNode*)for_node->group->keys,
-        mir_group_key_expr);
+    MIR_reg_t group_key_item = em_query_key(&mt->em, (AstNode*)for_node->group->keys,
+        em_group_key_expr);
     emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
         MIR_new_reg_op(mt->ctx, group_keys),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, group_key_item));
@@ -18692,6 +18632,18 @@ static MIR_reg_t transpile_for_join_grouped(MirTranspiler* mt,
         output, keys_arr);
 }
 
+static void mir_collect_join_source(void* owner, AstLoopNode* source,
+        MIR_reg_t rows, MIR_reg_t keys, MIR_reg_t indices) {
+    mir_join_collect_source((MirTranspiler*)owner, source, rows, keys, keys != 0, indices);
+}
+
+static MIR_reg_t mir_emit_join_prior_key(void* owner, AstLoopNode* first,
+        AstLoopNode* stop, MIR_reg_t tuple) {
+    MirTranspiler* mt = (MirTranspiler*)owner;
+    mir_join_bind_tuple_vars(mt, first, stop, tuple);
+    return mir_join_key_item(mt, stop, false);
+}
+
 static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
         AstLoopNode* first, bool result_demanded) {
     if (!mir_validate_join_sources(first)) {
@@ -18706,74 +18658,7 @@ static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
     MIR_reg_t keys_arr = has_order && result_demanded
         ? emit_call_0(mt, "array_plain", MIR_T_P) : 0;
 
-    MIR_reg_t seed_rows = emit_call_0(mt, "array_plain", MIR_T_P);
-    MIR_reg_t seed_idx = first->index_name ? emit_call_0(mt, "array_plain", MIR_T_P) : 0;
-    mir_join_collect_source(mt, first, seed_rows, 0, false, seed_idx);
-    MIR_reg_t seed_idx_item = seed_idx ? emit_box_container(mt, seed_idx) : emit_null_item_reg(mt);
-    MIR_reg_t tuples = emit_call_4(mt, "fn_join_seed_tuples", MIR_T_P,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, seed_rows)),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, first->name)),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_idx_name_item(mt, first)),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, seed_idx_item));
-
-    for (AstLoopNode* cur = (AstLoopNode*)first->next; cur; cur = (AstLoopNode*)cur->next) {
-        MIR_reg_t rows = emit_call_0(mt, "array_plain", MIR_T_P);
-        MIR_reg_t cur_idx = cur->index_name ? emit_call_0(mt, "array_plain", MIR_T_P) : 0;
-
-        if (!cur->on) {
-            // cross-product stage: expand every prior tuple by every row of this source.
-            mir_join_collect_source(mt, cur, rows, 0, false, cur_idx);
-            MIR_reg_t cur_idx_item = cur_idx ? emit_box_container(mt, cur_idx) : emit_null_item_reg(mt);
-            tuples = emit_call_5(mt, "fn_cross_join_tuples", MIR_T_P,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, tuples)),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, rows)),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, cur->name)),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_idx_name_item(mt, cur)),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_idx_item));
-            continue;
-        }
-
-        // hash-join stage.
-        MIR_reg_t row_keys = emit_call_0(mt, "array_plain", MIR_T_P);
-        mir_join_collect_source(mt, cur, rows, row_keys, true, cur_idx);
-
-        MIR_reg_t prior_keys = emit_call_0(mt, "array_plain", MIR_T_P);
-        MIR_reg_t tuple_stream_item = emit_box_container(mt, tuples);
-        MIR_reg_t tuple_len = emit_machine_len(mt, tuple_stream_item);
-        MIR_reg_t pidx = new_reg(mt, "jpidx", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pidx),
-            MIR_new_int_op(mt->ctx, 0)));
-        MIR_label_t l_prior = new_label(mt);
-        MIR_label_t l_prior_end = new_label(mt);
-        emit_label(mt, l_prior);
-        MIR_reg_t pcmp = new_reg(mt, "jpcmp", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, pcmp),
-            MIR_new_reg_op(mt->ctx, pidx), MIR_new_reg_op(mt->ctx, tuple_len)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_prior_end),
-            MIR_new_reg_op(mt->ctx, pcmp)));
-        MIR_reg_t tuple_item = emit_call_2(mt, "item_at", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_stream_item),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, pidx));
-        mir_join_bind_tuple_vars(mt, first, cur, tuple_item);
-        MIR_reg_t prior_key = mir_join_key_item(mt, cur, false);
-        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, prior_keys),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, prior_key));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, pidx),
-            MIR_new_reg_op(mt->ctx, pidx), MIR_new_int_op(mt->ctx, 1)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_prior)));
-        emit_label(mt, l_prior_end);
-
-        MIR_reg_t cur_idx_item = cur_idx ? emit_box_container(mt, cur_idx) : emit_null_item_reg(mt);
-        tuples = emit_call_8(mt, "fn_hash_join_tuples", MIR_T_P,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, tuples)),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, prior_keys)),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, rows)),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, emit_box_container(mt, row_keys)),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_name_item(mt, cur->name)),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, cur->optional ? 1 : 0),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, mir_join_idx_name_item(mt, cur)),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_idx_item));
-    }
+    MIR_reg_t tuples = em_join_stream(&mt->em, first, mir_collect_join_source, mir_emit_join_prior_key);
 
     if (for_node->group) {
         return transpile_for_join_grouped(mt, for_node, first, tuples,
@@ -19290,8 +19175,8 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, group_rows),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, current_item));
 
-        MIR_reg_t group_key_item = mir_box_key_item(mt, (AstNode*)for_node->group->keys,
-            mir_group_key_expr);
+        MIR_reg_t group_key_item = em_query_key(&mt->em, (AstNode*)for_node->group->keys,
+            em_group_key_expr);
         emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, group_keys),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, group_key_item));
 
@@ -23098,9 +22983,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     AstNode* saved_empty_array_node = mt->empty_array_boundary_node;
                     Type* saved_empty_array_contract = mt->empty_array_boundary_contract;
                     const char* saved_empty_array_site = mt->empty_array_boundary_site;
-                    char empty_array_site[192];
-                    snprintf(empty_array_site, sizeof(empty_array_site), "declaration '%.*s'",
-                        (int)asn->name->len, asn->name->chars);
+                    const char* empty_array_site = em_binding_boundary_site(&mt->em, "declaration", asn->name);
                     mt->empty_array_boundary_node = mir_empty_array_boundary_literal(mt,
                         asn->init, initializer_contract);
                     mt->empty_array_boundary_contract = initializer_contract;
@@ -23454,9 +23337,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // the join is already the requested native lane.
                     expr_tid = declared_value_type->type_id;
                 } else if (native_scalar_declaration) {
-                    char boundary[192];
-                    snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
-                        (int)asn->name->len, asn->name->chars);
+                    const char* boundary = em_binding_boundary_site(&mt->em, "declaration", asn->name);
                     val = emit_native_scalar_declaration_boundary(mt, val,
                         declared_value_type, boundary, fused_propagation);
                     // The boundary preserved a proved native success lane.
@@ -23465,9 +23346,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // carrier (D2.3.4-D2.3.5).
                     expr_tid = declared_value_type->type_id;
                 } else if (optional_int_lane_declaration) {
-                    char boundary[192];
-                    snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
-                        (int)asn->name->len, asn->name->chars);
+                    const char* boundary = em_binding_boundary_site(&mt->em, "declaration", asn->name);
                     // The system row has already propagated ItemError and
                     // decoded its int|null Item into an IntLane. Preserve the
                     // required null rejection without boxing that lane for a
@@ -23477,9 +23356,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         declared_value_type, boundary);
                     expr_tid = LMD_TYPE_INT;
                 } else if (native_numeric_fill_array_declaration) {
-                    char boundary[192];
-                    snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
-                        (int)asn->name->len, asn->name->chars);
+                    const char* boundary = em_binding_boundary_site(&mt->em, "declaration", asn->name);
                     val = emit_fill_numeric_array_declaration_boundary(mt, val,
                         declared_value_type, boundary);
                     // The runtime helper establishes the full T[] certificate
@@ -23487,9 +23364,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     expr_tid = LMD_TYPE_ANY;
                     checked_declaration_boundary = true;
                 } else if (declaration_boundary_applies && !declaration_boundary_redundant) {
-                    char boundary[192];
-                    snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
-                        (int)asn->name->len, asn->name->chars);
+                    const char* boundary = em_binding_boundary_site(&mt->em, "declaration", asn->name);
                     // T21-1e: `var n: u32 = <int lane>` selects the native u32
                     // range check only when the producer's lane is declared
                     // here; a silent VALUE_REP_NONE boxed the value, spilled it,
@@ -27683,9 +27558,7 @@ static bool mir_try_scalar_array_binding(MirTranspiler* mt,
         // A failed length guard makes the required non-null float[] literal
         // fail its original declaration boundary; replay it for the exact error.
         MIR_reg_t original = transpile_box_item(mt, declaration->init);
-        char site[192];
-        snprintf(site, sizeof(site), "declaration '%.*s'",
-            (int)declaration->name->len, declaration->name->chars);
+        const char* site = em_binding_boundary_site(&mt->em, "declaration", declaration->name);
         MIR_reg_t checked = emit_checked_boundary(mt, original, LMD_TYPE_ANY,
             declaration->declared_type, site);
         transpile_task_scope_unwind(mt, true);
@@ -33013,35 +32886,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
         }
 
         if (info->fn == SYSPROC_SELECT) {
-            MIR_reg_t handles = emit_call_0(mt, "array", MIR_T_P);
-            int handles_root = create_pointer_gc_root_slot(mt, handles);
-            MIR_reg_t timeout = new_reg(mt, "select_timeout", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, timeout),
-                MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)LMD_TYPE_INT << 56))));
-            for (arg = call_node->argument; arg; arg = arg->next) {
-                if (arg->node_type == AST_NODE_NAMED_ARG) {
-                    AstNamedNode* named = (AstNamedNode*)arg;
-                    if (named->name && named->name->len == 7 &&
-                            memcmp(named->name->chars, "timeout", 7) == 0) {
-                        timeout = transpile_box_item(mt, named->as);
-                        continue;
-                    }
-                }
-                MIR_reg_t handle = transpile_box_item(mt, arg);
-                int handle_root = create_gc_root_slot(mt, handle);
-                handles = load_gc_root_slot(mt, handles_root, "select_handles");
-                handle = load_gc_root_slot(mt, handle_root, "select_handle");
-                emit_call_void_2(mt, "array_push_verbatim",
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, handles),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, handle));
-            }
-            handles = load_gc_root_slot(mt, handles_root, "select_handles");
-            MIR_reg_t handles_item = emit_call_1(mt, "array_end", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, handles));
-            RETURN_CALL_VALUE(emit_call_2(mt, "pn_select", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, handles_item),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, timeout)));
+            RETURN_CALL_VALUE(em_select_tasks(&mt->em, call_node));
         }
 
         // ==== VMap: map() and map(arr) ====
@@ -34044,16 +33889,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node,
                 RETURN_CALL_VALUE(emit_rejected_join_close(mt, rejected, result, c_ret_tid));
             }
             if (info->fn == SYSFUNC_ERROR || info->fn == SYSFUNC_ERROR2) {
-                // S7.4.4: stamp the error() call site, as T0's eval_call does
-                AstSysFuncNode* site = sys;
-                MIR_reg_t file = emit_load_string_literal(mt,
-                    mt->owner_script && mt->owner_script->reference
-                        ? mt->owner_script->reference : "");
-                result = emit_call_4(mt, "lambda_error_stamp_site", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, file),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site->site_line),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site->site_column));
+                result = em_error_stamp_site(&mt->em, result,
+                    mt->owner_script ? mt->owner_script->reference : NULL, sys);
             }
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
@@ -36174,7 +36011,7 @@ static MirValue emit_that_proviso_value(MirTranspiler* mt, AstPipeNode* pipe_nod
         mir_expr_semantic_type(node));
 }
 
-static MIR_reg_t mir_emit_pipe_body(void* owner, AstPipeNode* pipe, MirPipeContext context) {
+static MIR_reg_t mir_emit_pipe_body(void* owner, AstPipeNode* pipe, MirPipeContext context, MIR_reg_t) {
     MirTranspiler* mt = (MirTranspiler*)owner;
     MirPipeContext saved = mir_pipe_context_save(mt);
     mir_pipe_context_restore(mt, context);
@@ -36743,18 +36580,14 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
         if (native_scalar_assignment && fused_scalar_index_boundary) {
             val_tid = contract->type_id;
         } else if (native_scalar_assignment) {
-            char boundary[192];
-            snprintf(boundary, sizeof(boundary), "assignment to '%.*s'",
-                (int)assign->target->len, assign->target->chars);
+            const char* boundary = em_binding_boundary_site(&mt->em, "assignment to", assign->target);
             // Keeps the declared contract's rejection semantics on the null
             // arm; the non-null arm is a raw move, and val_tid stays the
             // native lane the register actually holds.
             val = emit_native_scalar_declaration_boundary(mt, val, contract,
                 boundary);
         } else if (assignment_boundary_applies) {
-            char boundary[192];
-            snprintf(boundary, sizeof(boundary), "assignment to '%.*s'",
-                (int)assign->target->len, assign->target->chars);
+            const char* boundary = em_binding_boundary_site(&mt->em, "assignment to", assign->target);
             val = emit_checked_boundary(mt, val, val_tid, contract, boundary);
             // as at the declaration: an error-admitting `var` receives it
             if (!outcome_binding && !lambda_type_accepts_error(contract)) emit_return_if_item_error(mt, val);
@@ -39679,11 +39512,9 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             bool typed_nd_root = typed_root && typed_path.count == 0 &&
                 lambda_array_contract_info(typed_contract, &typed_array_info);
             int ndim = em_linked_node_count(ca->key);
-            int64_t buf_bytes = (int64_t)ndim * (int64_t)sizeof(int64_t);
-            MIR_reg_t idx_buf = emit_call_1(mt, "heap_data_calloc", MIR_T_P,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, buf_bytes));
-            int slot = 0;
-            for (AstNode* it = ca->key; it; it = it->next) {
+            MIR_reg_t idx_buf = em_index_coordinates(&mt->em, ca->key,
+                [](void* owner, AstNode* it) -> MIR_reg_t {
+                MirTranspiler* mt = (MirTranspiler*)owner;
                 MirValue index_value = transpile_expr_value(mt, it);
                 TypeId vt = mir_value_carrier_type(index_value);
                 MIR_reg_t val = is_integer_type_id(vt)
@@ -39697,14 +39528,8 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                 }
                 // G0 exception 1: same int64_t[] buffer as the load side --
                 // narrow whether the value arrived native or via unboxing.
-                val = emit_machine_index(mt, val, LMD_TYPE_INT);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                   (MIR_disp_t)(slot * (int)sizeof(int64_t)),
-                                   idx_buf, 0, 1),
-                    MIR_new_reg_op(mt->ctx, val)));
-                slot++;
-            }
+                return emit_machine_index(mt, val, LMD_TYPE_INT);
+            }, mt);
             MIR_reg_t obj_item = mir_store_owner(mt, ca->object);
             MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
             MIR_reg_t boxed_val = transpile_box_item(mt, ca->value);
@@ -48100,31 +47925,7 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
         const char* state_name = se->name->chars;
         log_debug("mir: view state init: %s", state_name);
 
-        // state survives redraws; do not repeat an initializer whose value is already retained.
-        MIR_reg_t default_val = emit_null_item_reg(mt);
-        MIR_reg_t initialized = emit_call_3(mt, "tmpl_state_has", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, model_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)tmpl_ref),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)state_name));
-        MIR_label_t state_ready = new_label(mt);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-            MIR_new_label_op(mt->ctx, state_ready), MIR_new_reg_op(mt->ctx, initialized)));
-        if (se->value) {
-            MIR_reg_t initial_value = transpile_box_item(mt, se->value);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, default_val),
-                MIR_new_reg_op(mt->ctx, initial_value)));
-        }
-        emit_label(mt, state_ready);
-
-        // call tmpl_state_get_or_init(model_item, template_ref, state_name, default)
-        // signature: Item(Item, const char*, const char*, Item)
-        MIR_reg_t state_val = emit_call_4(mt, "tmpl_state_get_or_init",
-            MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, model_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)tmpl_ref),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)state_name),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, default_val));
+        MIR_reg_t state_val = em_template_state_read(&mt->em, model_reg, tmpl_ref, se, true);
 
         // bind as state variable (boxed Item, type ANY)
         set_state_var(mt, state_name, state_val, MIR_T_I64, LMD_TYPE_ANY, state_name);
@@ -48268,12 +48069,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         if (!se->name) continue;
         const char* sname = se->name->chars;
 
-        // call tmpl_state_get(model_item, template_ref, state_name) -> Item
-        MIR_reg_t state_val = emit_call_3(mt, "tmpl_state_get",
-            MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, model_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)tmpl_ref),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sname));
+        MIR_reg_t state_val = em_template_state_read(&mt->em, model_reg, tmpl_ref, se, false);
 
         set_state_var(mt, sname, state_val, MIR_T_I64, LMD_TYPE_ANY, sname);
         publish_var_binding(mt, sname, se->entry);
@@ -50066,7 +49862,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     if (property_keys) arraylist_free(property_keys);
 
     // The same registration runs when a cached MIR graph enters a fresh Runtime.
-    if (!mir_context.mvp) lambda_register_mir_view_templates(tp);
+    lambda_register_mir_view_templates(tp);
     lambda_mvp_destroy(mir_context.mvp);
 
     if (!tp->main_func) {

@@ -16,7 +16,7 @@ pn lazy_condition(values: bool[], key: int) int {
     return 0
 }
 pn mutable_table(values: int[], keys: int[]) any { return values[keys[0]] }
-pn replacement_key(var values: int[]) int { values = fill(128, 9); return 0 }
+pn replacement_key(var values: int[]) int^ { values = fill(128, 9)^; return 0 }
 // existing Full MIR reads the replacement; interpreter/AUTO/MVP retain the evaluated receiver.
 pn effectful_read(var values: int[]) any { return values[replacement_key(values)] }
 pn main() {

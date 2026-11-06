@@ -12,9 +12,9 @@ fn collect(n: int) int {
     if (value < 3) { value = value + 1 }
     while (value < 4) { value = value + 1 }
 }
-fn checked(value) int {
+fn checked(value) int^ {
     let admitted: int = value
-    return admitted
+    return admitted^
 }
 pn main() {
     print(choose(-1)); print("\n")
@@ -23,6 +23,6 @@ pn main() {
     print(collect(2)); print("\n")
     print(checked(9)); print("\n")
     let failed = checked("bad")
-    if (failed) { print("unexpected admitted value\n") }
+    if (not (failed is error)) { print("unexpected admitted value\n") }
     print("after boundary\n")
 }

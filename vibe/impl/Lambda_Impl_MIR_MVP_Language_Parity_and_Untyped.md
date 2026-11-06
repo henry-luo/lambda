@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-05
 
-**Status:** goal paused at the user's wrap-up request; language parity and performance gates remain incomplete.
+**Status:** Paused at the user's wrap-up request. P36–P43 close selected producer, admission, procedure and scene failures. PDF/EPS, watercolor and native residuals remain open. Focused units only; no final correctness or performance closure claimed.
 
 **Starting tree:** `71296a16a9622f764229720ed2c321330efcd278`, branch `master`.
 
@@ -18,72 +18,184 @@ object layouts, type system, scheduler and precise GC remain shared.
 
 ## Current checkpoint
 
-- **Updated:** 2026-11-06. Goal paused at the user's wrap-up request. Full
-  implemented language/GTest parity, faster untyped benchmarks and typed
-  performance preservation remain open.
-- **Scope:** only Full's existing interpreter delegations (D8.3.1–D8.3.3).
-  Shared value layouts, scheduler and precise GC. Lambda baseline only; no
-  Radiant baseline/C2MIR execution. No commit requested; root exes untouched.
-- **Tree:** `master`, HEAD `b8e29b077` plus recorded changes. Evidence under
-  `temp/lambda_mir_mvp/language_untyped/`.
-- **Last qualified release:** `p15_ndim_owners-release.exe`, SHA256
+- **Updated:** 2026-11-06. Goal paused at the user's wrap-up request: finish the known language gaps, then
+  qualify Lambda/GTests and benchmark performance. HEAD `a9b813686`, `master`;
+  P16 onward remains uncommitted. No commit was requested.
+- **Verification policy:** focused unit tests only while implementing features,
+  per the user. No intermediate Lambda baseline/full verification, Radiant
+  baseline or C2MIR execution. Root executables remain untouched.
+- **Prior full evidence:** P15 `p15_ndim_owners`, SHA256
   `b81fef5ba18aa42050cadaa25a6c556b46d60555adab86cf3f73da0933fc80f0`.
-  Frozen graph 769 release units / 3,543 source files; source drift zero.
-  Current native VFS snapshots verified. All p14/p15 jobs are terminal.
-  `p15-ndim-owners-validation-summary.json` records provenance.
-- **Wrap-up audit:** release binary, 3,543 source hashes and 1,262 input
-  hashes still match P15. All tracked build/test session handles are closed.
-  The subsequent N-D representation investigation was read-only; no further
-  compiler change was started. Resume from the next action below.
-- **Inputs:** 1,262 recorded files and corpus v2's 483 frozen files, drift zero.
-  Authorized v2 benchmark repairs remain distinct from original 72/77 (§10.8).
-  Variadic tail-oracle repairs retain `[1, 1]` (S16.9.7, §10.55). No existing
-  p13–p15 oracle changed; p14's newly authored declarations-only helper golden
-  was corrected to empty and both compiler policies rerun (§10.58).
-- **Implemented:** boxed values/collections, calls/defaults, captures, queries,
-  paths, var transport, procedures/tasks/scopes, CRUD/open/fault frames,
-  nominal types/methods, scalar joins, inferred fields, decomposition and
-  precise confined pn homes (§10.43–§10.54). Variadics (§10.55), dependent
-  definitions/binder values (§10.56), call forms/error-only domains (§10.57).
-- **New p14:** imported type-value effects; shared JS bridge (arity 0–8),
-  boxed adapters and canonical hosted import identity (S5.5.1v2, D7.2.1,
-  D7.4.1–D7.4.3; §10.58). No additional AST fallback.
-- **New p15:** all coordinates of N-D reads, fixed native coordinate storage,
-  receiver roots and tensor requirements through aliases/direct calls
-  (S8.2.4v3, D6.3.1, D6.3.4; §10.59). Frozen p14 Full controls reproduce the
-  collecting-key buffer defect fixed in both compilers. All seven image
-  fixtures now pass MVP under normal and both forced-GC policies.
-- **Focused checks:** **177/177 MVP** across 59 fixtures / three GC policies;
-  Full **165/177**, T0 **156/177**. AUTO/production control **75/75**. Twenty-five
-  Python methods pass **970 script checks**, including typed 77/77 under each
-  compiler. Untyped **77/77 each**. Native cache/index/import **11 + 11 GC**,
-  admission/diagnostics **4 + 4 GC**, security **98/98 explicitly MVP**.
-- **Real harness:** **137/152 MVP, 119/152 Full**. All ten added MVP rows pass;
-  no prior passing row regresses in the common 142. The same fifteen MVP
-  failures also fail Full. Full/T0 binder, var/rest and JS-value controls and
-  T0 index exclusions remain visible. Aggregate Lambda baseline unqualified.
-- **Census:** old frozen p12 supervisor completed **86/86** compiler chunks.
-  Population 2,123; paired reports **1,873**, passing **1,334 MVP / 1,637 Full**.
-  Input drift zero. Chunks 14, 16, 22, 23, 24 have six missing/timed-out reports;
-  250 cases remain outside the paired count. Reported failures: 320 MVP-only,
-  219 shared, 17 Full-only. This does not qualify p15. Both census sessions
-  (49890, resumed 6287) are terminal. Disk-interrupted attempt preserved;
-  atomic state writes and superseded-archive cleanup are recorded separately.
-- **Known gaps:** N-D literal/dynamic-row normalization (three retained screen
-  failures), views/edit/event lowering, named-function declaration snapshots,
-  captured dependent annotations/default ordering, method lexical captures and
-  receiver places, dynamic/projected var transport and native result joins.
-  S9.1.4v2 governs legal capture writes; Full's legacy pn-parent write-back
-  grants no new permission. Preserve shared frontend/package failures.
-- **Performance:** no current timing qualification. Old p2 untyped screen:
-  26/77 lower medians, 24 screening upper bounds below Full, GM 1.1913.
-  Preserve all 49 v6 confirmations. Old typed p6/p5: ten slower/twelve faster
-  flags, GM 0.99763. Goldens do not prove performance preservation.
-- **Next:** replace unproved nested-row storage with a canonicalization proof
-  for literal/opaque N-D producers; implement native views and investigate the
-  census's MVP-only cases and unresolved chunks. Finish aggregate Lambda gates
-  and 30-pair primary / 50-pair confirmation timing, including batched Sumfp,
-  without competing jobs.
+  Its 177 focused checks, 970 Python CLI checks, typed/untyped 77 each, selected
+  native checks and 137/152 real-harness result qualify that prior tree only
+  (§10.59). Current evidence does not establish final correctness/performance.
+- **P16–P18 completed slices:** canonical N-D values and rank-aware length;
+  named declaration snapshots; file/PDF constructor outcomes; native views,
+  state, events, edits and cold callback ownership; scalar/projected var homes,
+  once-evaluated place keys and wide-field lanes (§10.60–10.62). Their focused
+  script/native results remain recorded with each frozen milestone engine.
+- **P19–P22 completed slices:** ordered dependent defaults with no default
+  selection (S11.4.8v2/TG18); native handler task-scope analysis; traversal key
+  cleanup and query transfers; safe range proofs; shared stable native join
+  streams, optional rows, indices and grouped tuples (S14.1.1v2/S14.1.3).
+  Results: 57 binder script checks, normal/GC dispatch unit, 9 traversal checks,
+  30 paired join checks and 33 permanent query/traversal checks (§10.63–10.66).
+- **P23 implemented:** shared lexical type-use metadata survives scope rebinding
+  and aliases. Captures compare declaration identity, including same-spelling
+  binders. Dependent admission carries exact rooted captured selections beside
+  local slots, without TLS or TypeBoundRef layout/back-pointer changes
+  (D4.1.4/D8.2.4). Array element access preserves binder identity; structural
+  record checks reuse the env-aware field proof. Return checking defers an
+  unknown `T:type` payload domain (§10.68).
+- **P23 focused evidence:** `p23-captured-final-unit.json` passes **6/6** on the
+  current two fixtures across GC modes, including defaults, return-only uses,
+  arrays/maps, cold floats, Error payloads, shadowing and nested site selection.
+  `p23-binder-python-unit.log` passes **60** selected checks, including **54**
+  existing paired binder checks. Full controls retain their failures; no oracle
+  was weakened. Earlier failed attempts are retained.
+- **P24 implemented:** local type method syntax uses callable depth relative
+  to its declaration. Methods were previously discarded inside functions.
+  Local/saved/ordinary receivers pass **18/18 paired GC checks** in
+  `p24-local-method-unit.json`; the permanent method unit includes the fixture.
+- **P25 implemented:** methods retain per-declaration lexical environments,
+  inherited methods and escaped constructors. Bound lexical methods own their
+  receiver and source Function; COW copies retain attachments. Shared closure
+  flow follows type/instance retention, rejecting escaped capture writes.
+  Dynamic dot/index pn calls prepare the entire writable receiver place and
+  evaluate keys once (S9.1.3v3/S9.1.4v2/S12.3.3v2). Nominal aliases preserve
+  the complete descriptor instead of truncating TypeObject to TypeMap.
+- **P25 storage:** the existing native collection storage/hash/order/ephemeron
+  algorithms moved from JS into `native_collection.cpp/.hpp`. Lambda and JS
+  share one implementation; CLI-only builds need no JS realm or stubs for
+  this storage. Public Item/container/type layouts remain unchanged (D6.1.1).
+- **P25 focused evidence:** new capture/default/annotation/recursion/COW cases
+  pass 9/9 GC checks; existing methods pass 30/30 paired checks; nominal aliases
+  pass 9/9 across MVP, Full and T0. The escaping-write negative passes all three
+  tiers. Selected permanent Python unit passes 12 CLI checks. Shared JS storage
+  passes 9/9 script checks; the native no-realm ephemeron unit passes normally
+  and with GC poison, including value-to-key cycles (§10.70).
+- **P26 implemented:** nested type assembly owns a scoped resolver state, so
+  closing an inner declaration preserves outer fields, layouts and methods.
+  The new nested fixture passes 9/9 across MVP/Full/T0 and GC modes; lexical
+  capture and writable-place controls pass 12/12 (§10.71).
+- **Current qualified focused release:** `p34_retained_t0_completion`, SHA256
+  `44b359ee1fa63452daf0b9081d135f00da99e1a2c9b82d2949b2049130c91347`.
+  Its 3,545 source freeze includes the corrected native ephemeron unit. Use `release-commands-p25-native.json` and
+  `release-input-extension-p25-native.json` for subsequent frozen builds: they
+  include the new runtime translation unit. The object reuse chain includes
+  a recorded failed build with valid individual objects; no failed executable
+  is used. Root executables remain untouched.
+- **P27 implemented:** normal error-union admission converts before boxing;
+  inlined var input/publication use actual success lanes and Item outcomes;
+  implicit body results participate in effect planning. Constructor source
+  stamps and boundary labels share emitters with Full. All six prior failures
+  pass; 66 selected CLI unit checks pass across normal/GC modes, including
+  Full controls, scalar places and captured dependent annotations (§10.73).
+- **P28 implemented:** pattern/range members retain Item transport while type
+  values keep their independent carrier. Scalar matches, nullable equality,
+  element COW, record reification, normal float stores and boxed numeric
+  dispatch retain their actual domains/effects. The frontend keeps all
+  comma-separated aliases in the semantic tree. The permanent focused unit
+  passes 90 CLI checks, including paired original controls and new MVP/T0
+  checks (§10.74). Full's separate deferred float-store defect remains visible.
+- **P29 implemented:** checked write-place admission recognizes nullable
+  array success domains; functional braced loops honor their enclosing result
+  demand. The permanent result/place and traversal units pass 15 CLI checks
+  across normal/forced/seeded GC. Full's existing traversal-continue failure
+  remains recorded (§10.75).
+- **P30 implemented:** handler inference joins the actual recovery domain
+  with the surviving operand domain; raw C pointer results preserve zero as
+  absence before boxing. The three selected recovery/name/symbol fixtures
+  pass 18 paired CLI checks across GC modes (§10.76).
+- **P31 implemented:** all six borrowed-outcome/task failures are fixed.
+  Insertion capture follows the shared ownership predicate through conditional
+  values. Array membership cannot skip value-dependent admission. Split keeps
+  its Error arm until propagation. Captured activations retain access facts;
+  coordinate writes reuse the checked COW path, including projected receivers
+  and once-evaluated keys. Full/MVP share rooted select and coordinate staging.
+  The permanent unit passes 57 CLI checks across GC modes (§10.77).
+  `p31_shared_coordinate_places` is the exercised binary; the current release
+  restores its exact argument-limit policy and changes the select comment only.
+- **P32 implemented:** Full/MVP share lazy admission source labels; parameter
+  rejection reports the call's source and declaration outcomes report their
+  declaration. A pure function named main remains an ordinary callable.
+  Identical inferred record layouts need no reification, and inferred binding
+  storage performs carrier conversion without creating a user contract.
+  The selected permanent units pass 123 CLI checks across GC modes (§10.78).
+- **P33 implemented:** virtual-array length uses the checked generic producer;
+  file/conditional results retain their Error alternatives, and unresolved
+  native namespace values publish the shared Error sentinel. All 13 original
+  MVP failures pass. The selected permanent units pass 201 CLI checks across
+  both compilers and three GC modes (§10.79).
+- **P34 implemented:** retained interpreted Functions can be called without
+  an active interpreter runner, reusing the shared retained-callback state.
+  Escaped faults release it before forwarding; callee-local handlers keep
+  their fault boundary. The native MVP → T0 → MVP callback, view/edit/event
+  units pass 12 checks across GC modes, including outer transaction cleanup,
+  cold floats, Error and container retention (§10.80).
+- **Historical census:** P12 recorded 320 MVP-only failures, 219 shared,
+  17 Full-only and 250 unpaired. P16–P33 resolve the selected root-cause
+  families; that old population is not a current gate. Spread does not expand
+  call arguments under S12.3.5v2.
+- **Feature inventory review:** §10.3 replaces the stale P0/P1 statuses with
+  the implemented routes and focused evidence. No known public AST-family
+  lowering remains unimplemented within the existing Full/T0 surface.
+- **Final gates starting (P35):** freeze the current engine/harness/corpus,
+  then run all applicable Lambda GTests and the aggregate Lambda baseline,
+  typed/untyped correctness and timing/no-regression qualification. Failures
+  remain open and resume focused root-cause work; no final pass is claimed.
+- **P35 actual gate progress:** frozen release `p35_language_feature_closure`,
+  SHA256 `8992dd73a74fd7b6f1971161448405ba0fdca3ca13b2beb53b14daaef59058c6`.
+  The original paired run finished its 112 compiler chunks: 2,153/2,233 cases
+  have paired reports; chunks 30 and 32 lack MVP reports after timeouts.
+  MVP passes 1,698 and Full 1,824 on that frozen old engine. The 304 shared,
+  151 MVP-only and 25 Full-only failures are historical residual inputs,
+  not current-engine counts (`p35-full-language-gate-summary.json`). Native results: security
+  98/98; errors 307/311; concurrency 93 cases with 48 failures and a failed
+  suite setup. Context-switch failures cascade in the concurrency process;
+  isolate them before attributing all 48 to MVP. No baseline or timing ran.
+- **P35 Python result:** 103 semantic/emission methods, 1,985 recorded CLI
+  invocations, 80 nonzero exits and 100 failed assertions/subtests. Typed
+  goldens pass 72/77 on MVP and 77/77 on Full. Failures include stale shared
+  oracles/emission expectations as well as genuine MVP rejections; preserve
+  them until classified (`p35-python-full-gate.log` and invocation manifest).
+- **P36 partial fix:** homogeneous literal joins preserve their scalar
+  carrier without introducing inferred refinements. Conditional results keep
+  the actual condition Error alternative; procedural protected operands keep
+  their producer's successful domain. All three graph import failures,
+  `proc/handler_results` and a public conditional-string probe now pass.
+  Candidate `p36_join_carrier_domains` passes 18/28 selected paired checks;
+  it does not close the remaining array/fill/binder/closed-region failures.
+  The open-parameter admission patch preserves already-proven actual domains;
+  array constructor outcomes, generic match results, raise effects and closed
+  local carriers have also been repaired. `p36_closed_admission_domains`
+  passes 24/24 selected paired checks after the CD and Three-way Merge fixes.
+  Five focused GC/admission methods also pass (§10.82).
+- **P37:** Error-only admission uses status rather than treating its successful
+  Error tag as rejection (S11.4.2v3). Counted arrays recheck lengths after
+  resizing (D4.3.3), and arbitrary callable-pipe targets retain application
+  checks (S10.1.7v2). Six focused Python units pass; all three selected native
+  negative tests pass on MVP. Full fails one diagnostic unit (§10.83).
+- **P38:** optional Bool call results restore their scalar category
+  before boxing. Array-domain and modular-update fixtures pass on both
+  compilers. A grammar declaration with no value initializer entered inferred
+  value widening; repeated nullable descriptors prevented convergence. The
+  type-declaration/idempotence patch passes grammar-lint and selected package
+  units, including forced/seeded GC (§10.84).
+- **P39:** imported Error-only returns use `none` for their successful domain
+  (S11.1.7), fixing a mail-import compiler crash. Two GC units pass 48 CLI
+  checks. Targeted replays pass 117/118 and 16/21 prior MVP-only source units.
+  No complete-population pass is claimed (§10.85).
+- **P40–P43:** statement result/colour checks, local alias mutation proofs,
+  collapsed procedural-loop demand and admitted pointer-union transport close
+  the six late procedure/scene cases. The final three original failures pass
+  6/6 paired checks; the permanent affected unit passes 36/36 CLI checks across
+  normal/forced/seeded GC (§10.87). Temporary runtime origin logs are removed.
+- **Current next work:** six late cases remain: PDF output streaming, EPS
+  fonts/text/machine/raster and the watercolor timeout. `pnpoly2` passes paired
+  standalone goldens but its prior harness failure needs attribution. Two
+  unreported chunks, native concurrency residuals and old Python assertions
+  also need focused classification. No new full gate or baseline has run.
 
 ## 1. Acceptance contract
 
@@ -669,32 +781,53 @@ The superseded failing candidate and its logs remain available.
 
 ### 10.3 Current feature and delegation inventory
 
-The following is a source-backed work inventory, not a claim of complete
-support. Rejections remain failures; they do not select Full lowering or a
-whole-script AST fallback (**D8.3.1–D8.3.3**).
+Updated through P34. This records
+implemented routes and focused evidence, not final qualification. Rejections
+do not select Full lowering or a whole-script AST fallback
+(D8.3.1–D8.3.3).
 
 | Family | Full route | MVP state / next phase | Semantic evidence or remaining probe |
 |---|---|---|---|
-| Scalar literals and numeric/string arithmetic | MIR instructions and registered scalar helpers | Native paths retained; binary/datetime, boxed power, vector comparisons and reference/subtype relations added; remaining surface open | Typed corpus; `mir_mvp_elements`, `binary_decode`; remaining scalar GTests |
-| Lists, functional blocks, spread and root content | Local MIR collection and shared append/finalize helpers | P1 sequence slice implemented | `mir_mvp_content`, `mir_mvp_root_content`, spread family |
-| Arrays and shaped maps | Local MIR plus shared allocation/admission/COW | Existing typed and boxed paths; broader domain tests still fail | Typed corpus and all registered MVP array/record fixtures |
-| Ordinary elements and attributes | `emit_element_storage`, literal/fill/content runtime helpers | P1 construction added; qualified attributes and nominal contracts need complete family checks | `mir_mvp_elements`, `computed_keys`; element corpus |
-| File/PDF output elements | Constructor-local MIR error region plus output runtime | Explicit rejection pending P1/P3 region support | Existing PDF/output GTests; no waiver |
-| Type values, `is`, constrained tests and match | MIR type expressions, runtime membership, local predicate lowering | Generic/structural membership and value/range/union match added; exact carrier guards kept separate from numeric subtyping; predicates remain P1/P3 | `array_ndim_join_spread`, `datetime`, type/match corpus |
-| Conditions and all loop/query forms | Local MIR control, collection/group/order/join helpers | While, single-source group/order/windows and dependent products; grouped products, optional sources, joins and remaining loops stay P1 | Complete loop/query GTests, failure and GC cases |
-| Declared binding/error outcomes | Shared admission with local outcomes | Current deferred boxed-outcome path retained; all producer/native boundaries need audit under S11.4.1v5 | Negative runtime cases and MVP outcome fixtures |
-| Named/default/rest/spread/pipe calls | Shared call analysis plus MIR entries/adapters | Fixed direct/default subset and ordinary boxed indirect calls; normalization remains P2; dynamic named/var calls stay rejected per S12.3.2 | Existing call, order, var and negative-signature tests |
-| Nested closures and function values | MIR environments/boxed dispatcher | Anonymous and named zero-capture function/procedure values and indirect calls added; capture environments remain P2 | Closure/capture corpus and forced GC |
-| Nominal objects/methods/modules | Local MIR and shared module/object runtime | Existing public imports; remaining object/function/module forms P2/P3 | Package corpus and in-process loaders |
-| Views, edits, events, references, CRUD and tasks | MIR lowering plus shared subsystem C ABIs | Complete route audit and P3 implementation pending | Existing document/concurrency/runtime GTests |
-| Calling an already interpreted Function | `lambda_dynamic_invoke_by_count` in `lambda-eval.cpp`, then `interp_call` / `interp_call_borrowed` if it does not promote | Allowed same shared dispatcher at P2; do not create a new per-AST fallback | Ordinary dispatcher exercised; interpreted Function/promotion probe remains open; dynamic var rejection retained |
+| Scalar literals and numeric/string arithmetic | MIR instructions and registered scalar helpers | Native and complete boxed routes, sized/compound numerics, vector/reference/subtype operators | P1/P8/P28/P30 scalar, numeric and nullable-result units; D2.3/S4/S10 |
+| Lists, functional blocks, spread and root content | Local MIR collection and shared append/finalize helpers | Functional/procedural demand, conditional collection, decomposition, spread and root values | Content, decomposition and P29 functional-result units; S2.5/S12.1.1v3 |
+| Arrays, shaped maps and places | Local MIR plus shared allocation/admission/COW | Boxed/native arrays, views, N-D coordinates, projected writes, nullable and caller-owned var homes | P15–P18/P27–P33 ownership, coordinate, inferred-array and admission units; D5.4/D6.3/S9 |
+| Ordinary elements and attributes | Element construction and content runtime helpers | Qualified/computed attributes, content, nominal contracts, captured element snapshots | Element, nested-place and P28 member-contract units; S2.6/S9.3.1 |
+| File/PDF/archive/native output | Constructor-local error region and subsystem runtime | Constructor outcomes and native result domains retained; generic virtual lengths checked | P16/P33 PDF, ZIP, archive, music, scene and Markdown units; S7.6.3v3 |
+| Type values, `is`, constrained tests and match | Type expressions, runtime membership, predicate lowering | Pattern/range/recursive/constrained/binary contracts; lexical binder captures and shared env-aware admission | Predicate, binder, P23/P28/P32 member/refinement units; S11/D4.1.4 |
+| Conditions, loops and queries | MIR control and collection/group/order/join helpers | While, nested products, optional/keyed/hash/cross/grouped joins, ordering/windows, traversal and nonlocal transfers | P21/P22/P29 traversal/query units; S14.1.1v2/S14.1.3 |
+| Declared binding/error outcomes | Shared admission and local outcomes | Error-union transport, normal-lane conversion, recovery joins, lazy declaration/call source labels | P27/P28/P30/P32/P33 outcome and boundary units; S11.4.1v5/S7.4.4 |
+| Named/default/rest/spread/pipe calls | Shared call analysis and MIR entries/adapters | Ordered binding/defaults, variadics, named/static and boxed/dynamic calls; inferred types create no contract | P19/P27/P32 binder/default, variadic and call-source units; D4.3.1/S12.3 |
+| Nested closures and function values | MIR environments and boxed dispatcher | Anonymous/named captures, recursion, confined live borrows and escaping snapshot ownership | Capture corpus, P16/P23/P25/P31 units and negative escape checks; D7.2/D5.4 |
+| Nominal objects/methods/modules | MIR and shared module/object runtime | Lexical methods, bound receivers, aliases, inheritance, nested declarations, imported and JS exports | P24–P26 methods/aliases/COW plus module/bridge units; S11.3/D9.3.2 |
+| Views, edits, events, references and CRUD | MIR plus shared subsystem C ABIs | Native templates, handlers/state, edits/navigation, transactional opens and cleanup | P17/P18/P20 native view/edit/event and CRUD/resource units; D6.3/S9 |
+| Tasks, waits, messaging and cancellation | Shared activation/scheduler ABIs | Native task launch, scoped cleanup, select staging and suspended native stacks | Task corpus, P20/P31 handler/select units; S13.1.2v2/S13.1.3v2 |
+| Calling an already interpreted Function | Shared boxed dispatcher, then `interp_call` / `interp_call_borrowed` | Dispatcher reused; P34 supplies retained T0 state and preserves escaped/local fault cleanup | `MvpCallsInterpretedFunctionAndNativeCallback` passes all three GC modes; D7.4.2/D8.3.1 |
 | MIR bytecode interpretation | Full can select MIR's interpreter explicitly or for large O0 input | Distinct from the AST interpreter and from unsupported-feature delegation | Record the executed mode; no native-speed claim for this route |
 
 The audited existing interpreted-Function dispatch is conditional on the actual
 `Function::entry_abi`; it upgrades a hot function before selecting the native
 prototype. This does not authorize routing arbitrary rejected MVP nodes to T0.
-There is no new delegation in this implementation slice. The remaining matrix
-must enumerate current AST kinds/contracts and their fixtures before P0 closes.
+There is no unrestricted unsupported-node delegation. The P33 source audit of
+the admission switch covers the public Lambda AST families listed above;
+allocation failures, invalid analysis invariants and foreign-frontend nodes
+remain explicit errors. Final discovered/native gates must still qualify the
+entire current population.
+
+The following restrictions are not missing MVP lowerings:
+
+- Dynamic named and dynamic var/inout calls retain S12.3.2's rejection. Calls
+  retain the shared 16-operand limit (S12.3.1); print has its existing separate
+  variadic route. Spread is a value operation, not argument expansion
+  (S12.3.5v2).
+- Thread/process `start` modes remain shared frontend exclusions; the existing
+  implemented mode is a shared-context task (S13.1.3v2). Foreign-frontend
+  C-style/do-loop AST forms are not public Lambda loop syntax.
+- The CLI invokes a zero-argument procedure main. A pure function named main
+  is an ordinary function (P32). Parameterized procedural CLI entries and the
+  registry's unimplemented `set` entry have no established Full route here.
+- The formal specifications' marked partial features remain partial; this
+  compiler parity task does not invent a language surface absent from all
+  three execution tiers.
 
 
 ### 10.4 Callable values, operators and ordered patterns
@@ -3030,3 +3163,817 @@ with zero input drift. The disk-interrupted unsaved attempt was preserved and
 repeated after reclaiming superseded task link archives; source objects,
 executables and evidence remain. No census process is still running. This
 older diagnostic is not combined with p15 as a current whole-corpus gate.
+
+
+### 10.60 P16: canonical N-D values, declaration snapshots and file outputs
+
+Canonical array construction now calls `array_end` unless the shared AST index
+proves every use consumes scalar coordinates or length, including closed
+forwarding. Shape observers, escaping/opaque producers and nested children use
+the canonical N-D representation (D3.2.2, D4.3.1). Public `len` on a tensor uses
+`fn_len_l` rather than the total payload count. Named lexical declarations own a
+rooted Function snapshot; direct recursion retains its environment, sibling
+captures retain the Function, and later aliases reuse it (S9.1.4v2).
+
+File elements initialize their evaluated destination and retain append/finish
+errors as the constructor's outcome (S2.6.6v3). Normal elements keep their content
+normalization. Focused evidence: `p16-tensor-unit.json` (12/15 before the length
+fix), `p16-snapshot-unit.json` (15/15), `p16-file-unit.json` (15/15 after the fix).
+These are unit checks, not benchmark or whole-language qualification. No
+existing golden changed.
+
+### 10.61 P17: native views, event entries and edit model places
+
+View/handler entries are private physical MVP functions with the existing
+Context/model/event ABI. The shared AST index supplies their structural
+ownership; no alternate semantic type table is introduced (D8.2.4–D8.2.6).
+State defaults/read access share `em_template_state_read` with Full. Handlers
+reload view state and lexical body declarations in their own activation and
+publish state through `tmpl_state_set` (S12.1.3v2). The existing registration
+pass now runs for MVP as well as Full, including cached execution contexts.
+Model writes in edit handlers call the existing MarkEditor bridges.
+
+`p17-view-unit.json` passes 18/18 checks; `p17-edit-unit.json` passes 12/12.
+The native GTest `MvpNativeViewsRetainStateAndHandlerHomes` exercises actual
+callbacks, retained state, cold values, errors and repeated fresh mounts.
+Its first authored source needed an explicit statement separator. Its next
+failure was a test-only Error accessor; after correcting that, the added cold
+view-result assertion reproduced a pending Item escaping the native template
+boundary. The runtime fix resolves the existing companion-slot transport before
+returning to the C caller (D6.2.3, D7.4.2). The subsequent edit unit caught a raw-C ABI error in the new auto-commit call:
+its optional description takes a null C pointer, not a tagged null Item. The
+fixed call uses `MIR_T_P` and zero. Both native units now pass under normal and
+forced GC in `p17-edit-callback-unit-{normal,gc}.json`, covering actual model
+mutation as well as callback returns. Four new permanent Python unit methods
+pass 120 script checks (`p17-focused-python-unit.log`). Two selected Full state
+controls also pass six checks. These are focused checks only. The user's
+instruction defers all full sweeps and baseline/performance gates.
+
+
+### 10.62 P18: scalar var and wide map lanes
+
+The old parameter gate rejected float/pointer `var` locals although transport
+already owns a boxed Item home independently of the callee's lane (D5.4.6,
+D7.3.2). That gate is removed. Focused place-borrow units then exposed a separate
+invariance test rejecting a typed leaf passed to an open untyped `var`. The
+callee still admits its incoming value; write-back enforces the leaf's declared
+contract. Open value contracts now share one classifier across those proofs.
+
+The nullable-wide map fixture also exposed native-field lowering reading raw
+machine integers as boxed Items. A shared direct-lane predicate now restricts
+native reads/stores to the representations the physical emitter implements;
+other field descriptors retain the runtime decoder (D2.4.2). Initial evidence
+`p18-var-unit.json` is 3/12, with all failures retained. `p18-var-lane-unit.json` improved to 6/12: scalar place homes pass, but the
+place-borrow fixture showed a key call executed twice and literal wide fields
+still used raw construction. `read_place` now consumes the keys already staged
+by `place_path`, including subscript `last`; native literal construction shares
+the read/write lane gate. The frozen `p18_var_place_values` release passes all four fixtures in all
+three GC modes (12/12) in `p18-var-place-unit.json`. The permanent Python method
+also passes the same four fixtures under both compilers and all three GC modes
+(24 checks). The frozen 3,543 engine source files match the working tree. Full
+verification remains deferred until the outstanding language work is complete.
+
+### 10.63 P19: dependent parameter/default ordering
+
+Supplied binder sites are admitted before reference parameters, so repeated
+sites have finished selecting their join. The remaining parameter/default
+pass then runs in source order; a later default observes an earlier parameter
+in its admitted type (S11.4.8v2). Fired defaults use an exact rooted scratch
+selection environment, preserving TG18's rule that a default does not bind T.
+Optional normalization can copy a binder descriptor, so activation ownership
+replaces the old pointer-identity test for body reads. The physical binding's
+open observation never replaces its dependent admission contract (D4.1.4).
+
+`p19-binder-default-unit.json` passes 15/15 MVP checks (five fixtures, three GC
+modes). `p19-binder-python-unit.log` passes the two selected permanent methods,
+57 script checks. The before report retains Full's six false assertions in the
+new ten-assertion default-order fixture and MVP's optional descriptor failure;
+no existing golden changed. Captured annotation environments remain open.
+
+### 10.64 P20: native handler scoped tasks
+
+Physical native handlers do not have a source-function analysis record. The
+shared body scanner is now available through `lambda_ast_plan_body_concurrency`;
+private handler entries use it instead of silently omitting task-scope joins
+(S13.3.1v2). This reuses the existing syntax and direct-call facts, without a
+second semantic walk implementation or interpreter delegation.
+
+`LambdaScriptCache.MvpNativeHandlersJoinScopedChildren` dispatches a native
+handler whose nested block starts a sleeping child. The child commits to a
+temporary document; the handler's following return must read the committed
+value. It passes normal and forced/poison GC in
+`p20-handler-native-unit-{normal,gc}.json`, using the frozen P20 engine.
+
+### 10.65 P21: query/pipe resource exits and range-proof crash
+
+Key lists own precise root frames. They now join the existing cleanup chain,
+so propagation/admission/return exits and loop transfers retire abandoned
+query/pipe resources (D6.1.1). A multi-source query has one break destination,
+while continue retains the active source frames and advances its current row.
+The shared pipe body callback exposes its key-list resource to MVP; its normal
+completion still frees the resource in the shared walker.
+
+An initially authored pipe test used statement blocks as operands, rejected
+by both compilers under S16.6.6/S16.6.8v3. The corrected fixture uses admitted
+propagation and projected var calls. Its stopped-query case then exposed a
+compiler crash: dense-region analysis cast a general source to a binary range.
+The proof now first verifies the native range shape and excludes query clauses.
+The symbolicated private release link and failing probes remain recorded.
+
+`p21-checked-traversal-unit.json` passes 9/9 MVP checks over traversal exits,
+existing query sources and implicit key subjects in three GC modes. Full's
+separate control returns zero for the multi-source continue accumulator, where
+MVP returns the required 43; that Full control defect remains visible in
+`p21-isolated-probes.json`. Existing oracles were not changed.
+
+### 10.66 P22: shared native join streams and grouped tuple rows
+
+MVP now materializes join sources through its retained keyed-source walker,
+then invokes the same stable hash/cross-product stages as Full MIR. The physical
+join-stream builder and single/multi-key construction are shared in
+`mir_path.hpp`; lexical binding remains backend-specific. Optional rows retain
+null padding, key/index bindings travel in tuples, and grouping retains the
+complete tuple row verbatim (S14.1.1v2/S14.1.3). Grouped cross-products also
+select that tuple path in Full, fixing its previously missing group stage.
+
+The initial 15/30 report records the missing structural JOIN_KEY admission and
+Full's pre-fix grouped cross-product result. `p22-join-keys-unit.json` then passes
+30/30 across five fixtures, two compilers and three GC modes. The new grouped
+row fixture was extended with retained cold float/wide integer owners;
+`p22-query-python-unit.log` passes 33 checks through the permanent query and
+traversal methods. The current frozen release/source identity is recorded in
+the checkpoint. No full verification, baseline or performance run was performed.
+
+### 10.67 P23 investigation: lexical owner of dependent annotations
+
+The focused `p23-captured-annotation-before.json` reproduces an outer `T: type`
+used in a returned named function's parameter annotation, including an inner
+`number as U` that occupies its own slot zero. MVP reports the missing lexical
+environment; Full returns `[false, true, false]`. The temporary paired fixture
+is an investigation artifact, not a new failing permanent test.
+
+`resolve_type_name` morphs the annotation identifier into a plain type node and
+erases its `NameEntry`. Parameter annotation syntax remains on
+`TypeParam::type_expr`, but the shared core child visitor does not index that
+edge; return annotation syntax is discarded after publishing its contract.
+Body expression captures therefore work while annotation captures lack their
+owner. Slot and copied bound alone cannot distinguish the outer and inner slot
+zero. The next implementation must retain lexical type-use facts in shared
+analysis (D8.2.4), then build exact rooted physical environments; it must not
+add a forbidden binder back pointer to `TypeBoundRef` (D4.1.4). No frontend/type
+model change has yet been made for this investigation.
+
+### 10.68 P23: lexical dependent annotations and aggregate admission
+
+An annotation's reference retains only its stable slot and written bound, as
+D4.1.4 requires. `AstBoundTypeUse` now records the resolved declaration in the
+function's lexical scope metadata. Alias references inherit those dependencies;
+the direct scope publication pass rebinds their entries through its ordinary
+identity map. The capture pass consumes those facts, and same-spelling captures
+compare declaration identity (S9.1.4v2/D8.2.4).
+
+MVP passes the captured reference identities and exact rooted type-value slots
+beside local binder slots. The runtime recursive admission walk carries this
+explicit view, so nested checks and callbacks need no TLS or global temporary
+state. The TypeBoundRef/Item/container layouts remain unchanged. A shared type
+dependency visitor replaces duplicate discovery walks; its function-parameter
+case explicitly follows the parameter's contract, since a descriptor can carry
+a map TypeId without having a TypeMap payload.
+
+Focused tests exposed two aggregate root causes. The array element accessor
+peeled a binder/reference to its bound before element admission, losing both
+selection and lexical lookup. It now preserves the semantic element descriptor.
+Structural map fields already passed their env-aware checks, so rechecking the
+same unbound descriptors outside that environment was both redundant and
+incorrect; nominal identity/constraints and binary-schema checks remain intact.
+A `T:type` reference denotes the unknown value domain of the supplied type's
+payload, so static return checking now defers it rather than requiring a type
+Item (S11.4.8v2). Captured defaults, return-only annotations and retained Error
+payloads then pass without weakening their expected results.
+
+`p23-captured-final-unit.json` passes the two current permanent fixtures in all
+three GC modes (6/6), including same-spelling aliases, nested site publication,
+structured conversions and cold numeric owners. The selected Python methods
+pass 60 checks, with 54 paired existing binder calls. The six captured checks
+also pass through the permanent method; its earlier log predates the final
+nested-site assertions, whose current hashes are in the final matrix. Full's
+normal controls remain visible in `p23-captured-full-controls.json`. The initial
+missing scope-rebinding identity, authored syntax/reserved-name mistakes,
+parameter-descriptor crash and aggregate failures remain in their before logs;
+no existing oracle was edited. No full gate or performance run was performed.
+
+### 10.69 P24: retain methods in local type declarations
+
+The syntax sink used an absolute function depth of one to recognize a type's
+methods. Inside a function that condition was false, and the method never
+entered the retained AST or TypeMethod table; all three tiers then tried to
+call null. The sink now records the declaration's surrounding callable depth
+and recognizes its immediate methods relative to that depth (S12.3.3v2).
+
+`p24-local-method-unit.json` passes the new local/saved receiver fixture and two
+existing receiver/method-value fixtures under both compilers and all GC modes
+(18/18). The broader lexical-capture probe now reaches MVP's explicit method
+environment gate, recorded in `p24-method-capture-after-parser.json`; receiver
+plus lexical environments remain the next implementation task, not a completed
+feature. The nominal method table must retain only immutable code metadata;
+per-activation captures require exact GC ownership and COW preservation.
+
+### 10.70 P25: method lexical environments and writable receiver places
+
+Each dynamic nominal declaration now has a fresh runtime type value, while its
+nominal record keeps definition-site identity (S11.3.1v2). A native weak table
+attaches a private method-name/Function map to that value and to constructed
+instances. The table is an existing collection ephemeron carrier; it is rooted
+precisely by the Heap, and weak owner keys do not retain dead instances through
+their environments. Bound lexical methods use two owned slots: receiver and
+source Function. The source Function already owns the ordinary capture slots,
+so capture indices and the shared closure count limit remain unchanged. Saved
+fn methods snapshot their receiver; bound equality compares definition and
+receiver under S12.3.3v2, excluding private ownership metadata.
+
+The first focused attempts exposed two shared frontend edges: nominal
+back-pointers were never assigned, and extension entry edges were rewritten
+after index publication. Declaration/literal entries now rebind before their
+shared index facts are published (D8.2.4). Method escape flow also follows a
+type binding into literals and retained constructors; returning an instance
+cannot incorrectly prove its pn methods confined to the factory (S9.1.4v2).
+A nominal alias keeps the complete declared descriptor; copying just its
+TypeMap prefix into a structural placeholder truncated the method tail.
+
+Untyped dynamic pn member calls previously skipped receiver detachment when
+static analysis did not set `is_proc_method`. MVP now resolves the callee once,
+then a shared runtime boundary classifies its method metadata and detaches the
+root/spine using `cow_path_borrow_keys`. It updates the bound receiver and
+publishes the prepared root before arguments execute. The same path handles
+projected and computed receivers, immutable-place refusal, and existing fn or
+ordinary field callables (S9.1.3v3/S9.3.1). COW map/element clones preserve the
+instance attachment without publishing Functions on static TypeMethods.
+
+Native collection storage, stable order nodes, hashing, writes and ephemeron
+tracing moved intact from JS into a shared runtime module. JS retains key
+canonicalization, dispatch, iterators and observable error policy. Lambda does
+not instantiate JS state, and no-JS stubs no longer claim these shared storage
+lifecycle hooks. The private command/source inventories explicitly add this
+translation unit; ordinary builds discover it under the runtime source dir.
+
+Focused release evidence:
+
+- `p25-native-method-unit.json`: 9/9, three permanent capture fixtures across
+  normal, forced-every/poison and seeded/poison modes.
+- `p25-existing-method-controls.json`: 30/30 existing paired method checks.
+  Its six extra alias attempts used a reserved binding name and are retained;
+  after correcting that authored test, `p25-alias-method-unit.json` passes 9/9
+  across MVP/Full/T0 without changing expected behavior.
+- `p25-negative-method-unit.json`: 3/3 escaped capture-writing method refusals.
+  `p25-method-python-unit.log` runs the permanent focused method (12 CLI checks).
+- `p25-js-storage-units.json`: 9/9 existing collection/order/advanced scripts
+  across GC modes after storage promotion.
+- `p25-native-storage-liveness-unit.log` and its GC counterpart: the native
+  no-JS-realm ephemeron unit passes, retaining a value while its key is rooted
+  and reclaiming a value-to-key cycle afterward. The first test used an
+  ownership query as a liveness oracle; the correction checks GC_FLAG_FREED,
+  since object-zone ownership includes free slots.
+
+All earlier compiler crashes, storage promotion compile failures and authored
+probe mistakes remain in their logs. `p25-native-binary-cleanup.json` records 43
+superseded private executables removed, with their hashes retained. No full
+Lambda baseline, aggregate language gate or performance gate ran for P25.
+
+### 10.71 P26: scoped nested nominal assembly
+
+The resolver kept one object assembly cursor. A type declared in a method
+replaced it, and the inner close then cleared the outer declaration, discarding
+its later fields and methods. MVP could crash while lowering the partial AST;
+Full/T0 called missing methods. A private `LambdaObjectResolutionState` now
+travels with the recursive declaration walk. The inner type gets a fresh
+cursor, then restores the enclosing state after its ordinary scope exit
+(D8.2.4/S12.3.3v2). Runtime value/type layouts remain unchanged.
+
+`p26-nested-method-final-unit.json` passes 9/9 on all three tiers and GC modes,
+including three nesting levels and a wide field after a nested method.
+`p26-captured-method-unit.json` passes 12/12, including the original captured
+outer-method reproducer. The initial new fixture missed an attribute comma;
+that syntax error is retained in `p26-nested-method-unit.json`, and only the
+source syntax was corrected. No full or performance gate ran.
+
+### 10.72 P27 investigation checkpoint: admission and result joins
+
+A selected batch of 16 prior failures passes 26/32 paired normal-mode checks
+on P26. Full passes every row. The six remaining MVP fixtures are
+`admission_runtime_type`, `error_members`, `type_none`,
+`proc/admission_borrowed_outcomes`, `proc/admission_return_outcomes` and
+`proc/error_union_normal_admission`. Their original sources/goldens remain
+unchanged. This batch is diagnostic unit work, not an aggregate gate.
+
+Concrete next investigations (no P27 code has changed yet):
+
+- Dependent admission reports `at value` instead of `at declaration 'value'`.
+  Pass the ordinary declaration boundary label into the existing env-aware
+  checker; use a shared label formatter if extracting Full's spelling.
+- MVP builtin error() lowering lacks Full's `lambda_error_stamp_site` call.
+  Promote that emission shape into a shared helper rather than copy it
+  (S7.4.4). Constructor `AstSysFuncNode` already carries site_line/site_column.
+- The effect fixed point checks explicit RETURN_STAM but misses an implicit
+  body return's admission. `passes_through(x) none` and `narrowed_literal()
+  int^` emit checked helpers in a planned noncollecting function. Model the
+  actual implicit result boundary, preserving proven clean typed paths.
+- `proc/admission_borrowed_outcomes` preserves arrays but loses a scalar
+  Error when a var call writes a deferred failed admission. The caller's
+  register/domain must include the formal's effective outcome; Item borrow
+  homes alone do not preserve it when reloaded into an int lane (S7.7.4v2).
+- Error-union admission skips normal conversion when membership/subtyping is
+  proven: `receive(7)` returns int instead of float, and `flow_number(7)`
+  similarly fails. Preserve scalar/record conversion even with an admitted
+  Error arm (S11.4.6v4/D4.2.5); inspect `admit()` proven/success_proven paths.
+
+Use `p26_nested_type_state` and the P25 native command/input inventories for
+next frozen builds. Engine sources match all 3,545 frozen hashes. Do not run
+full verification or Lambda baseline until these and the other known gaps are
+implemented; continue focused feature batches only.
+
+### 10.73 P27: complete admission outcomes and implicit return effects
+
+The six focused failures now pass their unchanged goldens. Error unions lift
+normal admission before boxing, preserving numeric conversion and record
+reification while Error remains data (S11.4.6v4). Inlined parameter reception
+reuses the ordinary conversion path. Its var publication now carries an Item,
+rather than labeling a post-store Error with the incoming int ABI lane
+(S7.7.4v2). Native entry values exclude failed-store Error from their input
+carrier, independently of the binding's broader body domain.
+
+Shared block-result classification now supplies the implicit-result effect
+boundary and collection allocation fact, alongside explicit returns. Pure
+proven bodies keep their existing effect proof; deferred `none`/narrowing
+returns cannot emit unplanned checked helpers. Full and MVP share the error()
+source-stamp emitter (S7.4.4) and pooled declaration/assignment labels, removing
+eight repeated Full label formatters.
+
+`p27-admission-first-unit.json` passes the six original normal cases.
+`p27-admission-gc-unit.log` passes the selected permanent admission, scalar-var
+place and captured-annotation methods: 66 CLI checks across normal, forced and
+seeded GC/poison, including paired Full controls. Current focused release
+`p27_admission_var_lanes` has SHA256
+`0d1213add437fb58d256d43a9679a131da29fc4bc7f7bdc6749f0325e7603631`.
+No aggregate/full or performance gate ran.
+
+### 10.74 P28: member contracts, layouts and functional result carriers
+
+Pattern/range contracts denote member values, not Type pointers (S11.1.2v4,
+S11.1.3). Their canonical representation now stays boxed. The shared explicit
+Type-value predicate includes islands through primary wrappers, independently
+of their text-member contract. Comma-separated type aliases now share the
+statement's declaration chain and all resolve there, rather than detaching
+later clauses from the semantic graph. This fixes annotation-only and local
+pattern uses as well as later value references; no lazy-reference workaround
+remains in MVP.
+
+Boxed null equality retains its proven Bool domain. An inferred homogeneous
+scalar match uses the base domain of its literal arms and preserves other
+mixed carriers (S11.2.1). Raw element reads now capture snapshots, as existing
+map/array reads do (S9.1.2). Record admission distinguishes semantic membership
+from the runtime's exact/storage-compatible shape relation; a reordered
+literal still reifies into its declared record layout (D4.2.5). Implicit-return
+effects survive the body's node-specific producer analysis instead of being
+overwritten. Plain deferred scalar stores convert to the destination lane
+before boxing. Numeric operations without a native opcode use the existing
+boxed operation kernel, including float `div`/`%` under S4.5.3.
+
+`p28-contract-navigation-before.json` records 14 original MVP failures with
+14 passing Full controls. `p28-contract-first-unit.json` records the first
+10/14 result; `p28-return-match-first-unit.json` passes the remaining four.
+The permanent `test_member_contract_representations` passes 90 CLI checks in
+`p28-member-contract-gc-final-unit.log`: 14 original fixtures across both JIT
+compilers and three GC modes, plus the new member-contract fixture on MVP/T0
+across those modes. Full still skips the known int-to-float store conversion
+after an earlier deferred failed store, so that control is retained as debt,
+not used to weaken the oracle. The initial new fixture used reserved `number`
+and mistakenly expected float division to return Error; those authored probe
+errors and the interpreter compiler-selection error remain in their logs.
+No aggregate/full or performance gate ran.
+
+### 10.75 P29: nullable write places and nested functional loop demand
+
+Write-place admission now classifies the existing normal non-null domain,
+just as its element/map checks do, allowing a nullable array alias through the
+ordinary checked COW path (S9.1.2). The `for` emitter consumes its caller's
+result demand. A braced loop inside functional content still yields a stream
+(S2.5.3v3); its source statement spelling cannot discard that requested value
+merely because an enclosing conditional is outside direct item position.
+Procedural block classification already passes discard demand for statement
+loops, so no extra syntax override belongs in the producer (D8.2.6).
+
+`p29-places-query-native-before.json` records 30/32 paired normal checks, with
+Full passing all 16 and only these two MVP failures. The original COW/expr
+fixtures now pass 12/12 paired GC checks. `p29-functional-place-unit.json`
+also retains three Full failures in the pre-existing traversal-continue unit;
+MVP passes its three rows. The selected permanent result/place and traversal
+Python methods pass 15 CLI checks in `p29-functional-place-python-unit.log`.
+No aggregate/full or performance gate ran.
+
+### 10.76 P30: recovery domains and nullable raw helper results
+
+A handler's successful recovery can replace the operand with an unrelated
+value (S7.6.1v9). MVP now queries that recovery producer and joins it with the
+surviving operand domain, rather than retaining the stale numeric AST lane.
+A shared private helper supplies the pass-through domain in planning and
+emission. Raw C pointer results now retain nullable transport: a zero returned
+by `name()` for null or an anonymous function becomes ItemNull before any
+Symbol tag is added (D2.3.5), while existing proven native producers keep their
+own descriptors.
+
+`p30-outcome-bridge-before.json` records the 16 selected paired checks: the
+two MVP failures and Full's already-recorded deferred float-store defect;
+all other numeric/JS bridge controls pass. The focused permanent recovery,
+name and empty-symbol unit passes 18 paired CLI checks across normal and
+forced/seeded GC in `p30-recovery-pointer-unit.log`. Its 3,545 engine source
+hashes match the frozen candidate. No aggregate/full or performance gate ran.
+
+### 10.77 P31: captured writes, admission and task selection
+
+The selected 17-fixture replay recorded six MVP-only failures in
+`p31-borrowed-outcome-before.json`. All six now pass, as do the existing
+N-D write and row-replacement controls (`p31-borrowed-first-unit.json`, 16/16
+paired normal checks).
+
+- Container insertion follows the shared ownership predicate through `if`,
+  `or`, `that` and other borrowed-result joins, rather than restricting capture
+  to direct member/index ASTs (S9.1.2/S9.3.1). Return capture uses the returned
+  expression, not the statement wrapper.
+- Semantically compatible array domains still need ordinary value-dependent
+  admission when their element contracts differ. Only invariant compatible
+  storage proves that check redundant (D4.3.3/S11.4.6v4); a fractional float
+  array cannot bypass an int-array parameter boundary.
+- A split producer retains Error even when its call AST already describes
+  post-caret success (S7.6.3v3). The explicit propagation guard runs before the
+  narrowed successful result escapes.
+- Captured activations copy immutable array/record access facts into their
+  fresh binding state. Discarding these facts left the captured array writer
+  with no native witness registers (D8.2.5/D6.3).
+- Every axis of a multi-axis write enters the existing checked COW path.
+  Keys evaluate once, share the subscript's receiver for `last`, and retain
+  root/field/array contracts (S7.2.2/S8.2.4v3/S9.2.2). Coordinate staging for
+  N-D reads and Full's direct N-D writes shares fixed activation storage.
+- Select's handle/timeout staging moved from Full into one rooted physical
+  emitter used by both compilers (S13.1.3v2/S13.1.2v2). S12.3.1 still caps
+  calls at 16 source operands; an initial 21-operand probe correctly failed
+  both compilers and was corrected, without changing that rule.
+
+The permanent focused method passes 57 CLI checks in
+`p31-borrowed-coordinate-fixed-gc-unit.log`: nine fixtures across both JIT
+compilers and three GC modes, plus the new projected-coordinate snapshot
+fixture on MVP across those modes. That new fixture exposes Full's pre-existing
+N-D snapshot mutation and T0's nominal projected-write exclusion; both remain
+in `p31-projected-coordinate-fixed-unit.json`. Initial authored record-admission
+and excessive-arity probes remain in their logs. Final release
+`p31_task_capture_domains` restores the exercised argument-limit policy;
+its only other delta from `p31_shared_coordinate_places` is the select ruling
+comment. No aggregate/full or performance gate ran.
+
+### 10.78 P32: boundary source identity and inferred binding storage
+
+Full's lazy type-boundary emitter moved into a shared primitive used by MVP.
+It retains a pooled label and source offset and resolves line/column only when
+admission rejects (S7.4.4). Declaration outcomes use the declaration source;
+parameter failures use the source call. The existing two location goldens now
+pass unchanged. A pure function named `main` keeps ordinary parameters and
+defaults; only a procedure participates in the CLI entry role (S12.1.1v3).
+
+An identical inferred record schema already describes its physical producer,
+so it requires no reification. More broadly, an inferred binding selects
+storage without admitting a new user contract (D4.3.1). The scanner fixture
+first exposed an unplanned inferred-map boundary, then an inferred first
+string literal rejecting the next array item. Inferred stores now convert
+the planned carrier directly, and the added inferred-array fixture separately
+proves that a declared literal refinement still rejects incompatible members
+(S11.4.6v4).
+
+`p32-native-result-before.json` records the three original scanner/location
+failures with passing Full controls. The first authored main fixture lacked
+its statement separator; after correction `p32-named-main-before.json` records
+one MVP failure and passing Full/T0 controls. The permanent boundary/entry,
+admission-outcome and borrowed/coordinate methods pass 123 CLI checks across
+normal and forced/seeded GC in `p32-carrier-boundary-gc-final-unit.log`. All
+3,545 engine hashes match `p32_inferred_carriers`. No aggregate/full or
+performance gate ran.
+
+### 10.79 P33: native subsystem outcomes and virtual lengths
+
+The paired 16-fixture normal replay recorded 13 MVP failures and no Full
+failures (`p33-native-subsystems-before.json`). The unchanged cases cover
+archive/ZIP I/O, file/PDF constructors, music, scenes, procedural art and
+Markdown edits. These were shared lowering faults, rather than missing
+per-package adapters.
+
+Generic and virtual-array `len` now uses the existing checked producer.
+Reading a native array header from an archive's virtual content returned a
+bogus count. The raw no-GC path remains restricted to strings and proven
+primitive rank-one array storage (D2.3.2/D8.2.6). File constructors retain their
+Element-or-Error result, including the owning binding's carrier. Conditional
+contracts join both actual arm outcomes and condition errors; stale inferred
+success-only AST metadata cannot hide an Error alternative (S7.6.3v3/D4.3.1).
+An unresolved native namespace value emits the shared Error sentinel, matching
+Full's value route without accepting an undefined source identifier.
+
+All 13 failures pass on `p33_native_result_domains`
+(`p33-native-subsystems-first-unit.json`). The permanent subsystem, boundary,
+admission and borrowed/coordinate units pass **201 CLI checks** across both
+compilers and normal/forced/seeded GC in
+`p33-native-subsystem-gc-unit.log`. The 3,545 engine source hashes match the
+freeze. No aggregate/full or performance gate ran.
+
+### 10.80 P34: retained interpreted entry and native callbacks
+
+The direct native → T0 → native probe exposed a shared runtime gap: the
+interpreted call entry required a still-active interpreter runner. MVP and
+Full already select that same entry by Function ABI; a retained T0 Function
+could therefore fail after its originating runner ended (D7.4.2/D8.3.1).
+
+The cold entry now reuses `InterpStateGuard`, already used by retained host
+callbacks. Recursive interpreted calls stay on the active state. Borrowed
+transport reads the current evaluator when no walker is active. A recovery
+boundary releases retained state before forwarding an escaped fault. It
+preserves inner local handlers and the priority of an existing outer
+transaction (D7.4.3/D6.3). An invocation without an outer recovery target
+publishes the shared durable fault outcome.
+
+The permanent native unit retains an MVP function/callback, loads a T0 relay
+in the same evaluator with promotion disabled, and crosses both entry ABIs.
+It checks cold floats, Error, containers, precise-root watermarks, explicit GC,
+escaped faults, outer transaction cleanup, a local procedural handler and a
+later successful callback. Initial authored probes retained an incompatible
+compiler selector and then used a pure-function handler instead of a
+procedural handler; those failed logs remain available.
+
+The callback and three native MVP view/edit/event units pass **12 checks**
+across normal/forced/seeded GC in `p34-retained-final-native-results.json`.
+Engine: `p34_retained_t0_completion`; native fixture sources and archive
+provenance are recorded in its `retained-entry-final` native manifest.
+This closes the remaining inventory probe. P35 starts final verification;
+there has been no intermediate Lambda baseline or full sweep in this slice.
+Superseded private release executables were removed to free 5.25 GB; hashes,
+source freezes, objects, build manifests and failed-test logs remain, as do
+the starting control and current releases (`p34-superseded-release-cleanup.json`).
+
+### 10.81 P35: final gate opened residual work
+
+The frozen final candidate and current native harness use release O3 ThinLTO
+objects; root executables are untouched. The actual Lambda harness discovers
+2,233 cases. A single paired all-case run is progressing in recorded chunks
+(`p35-full-language-gate-state.json`); it is not yet complete. Package failures
+shared with Full remain visible, including static int/string diagnostics in
+procedural-art/chart import cones. Do not turn the old P12 counts into current
+results or treat an MVP-only subset as the full language gate.
+
+The Python semantic/emission gate selected 103 methods and recorded 1,985 CLI
+invocations. It finished with 100 failed assertions/subtests; 80 CLI exits were
+nonzero, including expected negative invocations. Typed correctness is 72/77
+MVP and 77/77 Full. Real defects include rejected array/record producers and
+closed numeric bodies. Other assertions still expect formerly unsupported
+capture/content syntax or pre-S7.7.2v2 declaration failure control. Separate
+those stale expectations from runtime defects; keep the original report.
+
+Native security passes 98/98. Native errors passes 307/311. Concurrency ran
+93 cases with 48 failures and a suite setup failure. Its process retains a
+context after the early Jube/JS cases, so later context-switch failures cascade.
+The four focused MVP callback/view/edit/event units pass independently. Native
+failure attribution needs focused isolation and controls, not added skips.
+Reports are `p35-native-gate-results.json` and the per-executable JSON/logs.
+
+P35 did not run the aggregate Lambda baseline, Radiant baseline or timings.
+Residual failures resume focused work before another final gate.
+
+### 10.82 P36 in progress: producer domains and closed scalar locals
+
+Homogeneous literal joins retain a common scalar carrier without imposing a
+literal refinement (D4.3.1). Conditional transport keeps the condition's Error
+arm, and procedural protected operands retain their successful producer domain
+(D2.3.5/S7.6.1v9). These fix the three graph imports and handler result cases.
+
+Open parameter admission preserves the actual's proven normal domain instead
+of replacing it with the abstract receiving type. Fill producers publish their
+array/Error alternatives and retain certified success domains; inferred fill
+bindings keep Error values rather than creating a receiving contract. Generic
+matches join their actual arms and possible unmatched absence. Raise's rich
+Error constructor participates in effect planning (S7.4.6). These fix noise
+imports, retained buffers, Brainfuck, match and non-Error raise units.
+
+Closed numeric alternatives now narrow declared outcomes and inferred scalar
+locals under the same proof that checks every initializer/write. Register-class
+changes allocate a matching MIR register; checked siblings keep their original
+binding plans. Type-preserving math retains its actual operand domain. The
+noncollecting assertion remains enabled and now identifies the first offending
+helper. Both remaining region rejections named `lambda_type_check_lazy`;
+Bounce and Pnpoly now pass without disabling their native alternatives.
+
+`p36_closed_admission_domains` passed **22/24** selected paired checks
+(`p36-closed-first-unit.json`). The two remaining failures were CD and
+Three-way Merge. The subsequent patches preserve
+generic array-image metadata, bounded parameter read domains and constructor
+Error alternatives, and delay loop-source queries until every binding is
+initialized. `p36_preserved_boundaries` passes **24/24** paired normal checks
+(`p36-preserved-first-unit.json`), including all five typed benchmarks rejected
+by P35. Its release SHA is
+`1e27d9bc8678dcb239187312f92be894a3c1724564c123186bcd7679c0c5b2e0`.
+The failed `p36_map_and_binder_domains` build is retained: a patch initially
+matched the wrong result join, then was corrected before later builds.
+
+The five focused producer, admission, binder, member and borrowed/coordinate
+Python units pass (`p36-transport-gc-units.log`). They include the permanent
+`test_producer_carrier_transports` unit (nine fixtures, paired
+normal/forced/seeded GC). Next: replay remaining failing package families,
+classify P35's residual native failures, and correct obsolete rejection tests
+against their formal rulings. The single frozen P35 paired campaign continues;
+no additional aggregate baseline/full sweep or performance measurement has
+run during P36.
+
+### 10.83 P37: Error-valued admission, mutable counts and callable pipes
+
+An Error-only receiving contract needs the validator's admission status: an
+admitted Error has the same Item tag as a rejected normal value. MVP now uses
+the existing status-bearing boundary helper for Error-only contracts, as for
+dependent admission (S11.4.2v3/S7.7.3). The permanent
+`mir_mvp_error_boundaries` fixture covers direct, erased and dynamic calls.
+Both citation diagnostic fixtures now pass without changing their goldens.
+
+Static admission no longer proves counted lengths from a binding descriptor:
+push/splice can invalidate them without a checked binding write (D4.3.3).
+An arbitrary `~`-free pipe RHS now uses the shared callable application helper;
+only builder-promoted injected calls use ordinary call lowering. A match arm's
+locally bound `~` cannot make that enclosing pipe a mapping (S10.1.7v2).
+Boundary diagnostics name source-level parameter, return and store sites. The
+shared nested-path adapter selects an array/ND/map diagnostic from its receiver.
+
+Release `p37_boundary_diagnostics`, SHA
+`e4bde2c940c01a0cac54f8cbde68bba680adc865c09d5916e4444c254c5034a0`,
+passes six focused Python methods (`p37-final-boundary-unit.log`), including
+paired normal/forced/seeded GC for Error admission, citation diagnostics,
+counted-array rejection and callable-pipe rejection. The three selected native
+negative tests pass **3/3 MVP** and **2/3 Full**
+(`p37-negative-boundary-results.json`). Full's remaining failures concern a
+computed-key Error and an array-fallback diagnostic label; they are retained.
+
+Old Python capture/content rejection assertions became positive checks. The
+module-initializer and whole-variable reassignment tests now assert retained
+validation Errors and continued execution under S7.7.2v2/S7.7.4v2. Selected old
+MVP fixtures also lacked required acknowledgements/return Error alternatives,
+or applied `^` to an explicit non-error value. Their source updates make the
+intended control explicit. The modular-update golden adds `[true, true]` for
+the two retained invalid-index outcomes; no engine rule or expected valid
+numeric result was weakened. Failed initial fixture-repair reports remain in
+`p37-repaired-fixture-units.json` and
+`p37-repaired-contract-fixture-units.json`; shared Full COW differences remain.
+
+The isolated grammar-lint native unit still exits 137 on MVP; its paired Full
+CLI control completes in 0.075 s with all warnings and `"compiled"`.
+This is an MVP planner defect, not an environmental waiver. Superseded private
+executables/archives were removed after disk exhaustion approached; the 47
+paths, hashes and sizes are in `p37-superseded-build-cleanup.json`. Current
+controls, objects, frozen sources, manifests and test reports remain.
+
+### 10.84 P38: optional call categories and type declarations
+
+Restoring only a call result's contract left optional Bool native returns with
+the category of the type-expression descriptor. The shared MVP value builder
+now restores the semantic category before native-to-Item conversion (D2.3.5).
+`p38_nullable_call_results` passes the array-domain and modular-update paired
+units (**4/4**, `p38-nullable-unit.json`).
+
+Grammar definitions have no value initializer. They must bind a type value
+(S11.4.12v2), rather than enter inferred mutable-value widening (D4.3.1).
+The planner excludes type definitions from value seeding/widening and makes an
+already-nullable domain's null join idempotent.
+`p38_type_declaration_domains` (SHA
+`cb058c766762eea0714d70c3fca056101aa40c1bb32ab3e02e484629a1ef1a35`)
+passes the grammar-lint native unit, using the unchanged P37 child-process
+harness against the P38 CLI. Its standalone grammar-lint unit completes in
+0.86 s; this is diagnostic latency, not a benchmark claim. Selected
+grammar/diff/readability/mail units pass 21/22 paired checks; the mail-compose
+compiler crash continues into P39. The permanent type-value/nullable-return GC
+method passes all 18 CLI checks.
+
+The old float-array fixture now checks that a failed initializer retained
+Error and continued (S7.7.2v2); its golden gains `true`. Invalid short-array
+kernel calls retain their outcomes instead of propagating out of main
+(S7.7.6v2). The shift fixture observes Error codes through the Error contract,
+rather than passing Errors into `string` (S7.9.3); its golden adds `true` for
+the retained invalid-count result. Both array fixtures pass on MVP and Full;
+shift passes on MVP and retains Full's differing poison/count results in
+`p38-repaired-array-unit.json`. No goldens were changed to accept Full's COW
+or poison discrepancies.
+
+### 10.85 P39: imported bottom and focused residual replays
+
+An Error-only imported return removed its sole alternative to a null pointer.
+Its successful domain is `none` (S11.1.7), while the actual Error remains an
+ordinary boxed result. The planner now uses its existing normal-domain helper.
+The imported module in `mir_mvp_error_boundaries` covers this public ABI.
+A release linker map and an isolated crash probe identified the compiler
+failure; those diagnostic artifacts are under `temp/`, not runtime changes.
+
+`p39_imported_bottom_domain`, SHA
+`0e1e15a5f819f053b3320cf033c0a83f140329dc9317db237994733fca616ecd`,
+passes the imported Error fixture and mail-compose control (**4/4**), plus
+eight selected diagram/demo fixtures (**16/16**). Two permanent GC units pass
+**48 CLI checks** (`p39-bottom-gc-unit.log`). The expansion semantics fixture
+also passes MVP; Full's existing differing result remains visible.
+
+The focused replay selected only previously failing source-driven GTest cases
+from completed P35 pairs, using the frozen discovery harness and the P39 CLI:
+**117/118** pass. Only `scene3d_midtown` remains. A second replay of 21 late
+procedure failures passes **16/21**. Logs, selections, executable hashes and
+reports are `p39-residual-units.*`, `p39-residual-unit-selection.json` and
+`p39-late-residual-unit.*`. These are failure-only units, not another full
+verification. The older frozen P35 qualification remains separate and running.
+
+### 10.86 P40/P41 in progress: procedure effects and receiver writes
+
+Planner observation now unwraps expression statements, rather than inheriting
+their stale context type. A single print retains null/Error provider outcomes;
+this matters when it is a handler's recovery value (S7.6.1v9/S7.9.3).
+Direct polymorphic calls check flagged argument colours before entering the
+callee, using the same helper as Full (S12.1.4v4), and retain call-site failure
+effects. `function_colour_poly`, `record_boundary_admission` and
+`verified_contract_prefix` now pass. A proof restriction on value-producing
+`for` expressions did not close the range case; it remains unresolved.
+
+`p40_effect_and_statement_domains` (SHA
+`0f95a0ade9b075ba94dd5c35689c04151a7b17b07b040d03dbfafa451eb82ef6`)
+passes **9/12** paired checks. Full passes all six. The remaining MVP cases are
+`dense_for_range` (`fn_to` in a closed region), `scene3d_midtown` (texture
+return conversion), and `tune23_array_consumer` (String payload decode after
+an open alias appends an integer). Native OS crash evidence confirms the last
+case faults while printing a String tagged with address 42. A later temporary
+signal-interposition probe itself recursed; its report is diagnostic-tool
+failure, not runtime evidence, and is retained separately.
+
+The receiver audit now reuses `ast_body_may_write_entry` for a procedure
+method's implicit mutable receiver before preserving an initializer's private
+array domain (S9.1.2/D4.3.1). `p41_receiver_and_origins` is building. It also
+contains temporary conversion/range origin logs and a linker map for tracing
+the other two rejections; remove those logs and `<dlfcn.h>` after diagnosis.
+Next: replay only the three remaining fixtures, finish their root fixes and
+run their affected unit/GC controls. No new full verification, aggregate
+Lambda baseline or performance measurement has run.
+
+### 10.87 P42/P43: local mutation proofs and result carriers
+
+The P41 method audit was necessary but insufficient for the array-consumer
+crash: the builder had already lowered `alias.push(42)` to a system call.
+The underlying proof shortcut applied parameter escape flags to local aliases.
+Restricting it to actual parameters and checking mutation before seeding a
+private inferred primitive-array domain fixes the stale string lane
+(D4.3.1/S9.1.2). `p42_local_array_proofs` passes that original fixture.
+
+The canonical AST for `fill_range` has a direct `for` body, because the parser
+collapses a one-statement block. Function emission now preserves its flagged
+procedural discard demand (S2.5.3v3), avoiding an allocating range constructor
+inside a closed numeric region. The closed-region collecting-call assertion
+remains enabled. A proven union of element outcomes can lack a single source
+pointer lane; after proven admission, the receiving contract selects that lane
+for Item conversion (D2.3.5). This fixes the imported Midtown texture function.
+All temporary origin logging and `<dlfcn.h>` have been removed.
+
+Clean release `p43_admitted_pointer_and_discard`, SHA256
+`47e640b025d6eb6b771fc5d51dcf4ab9b8f560cfaf3042117bc77faa7ca2232d`,
+passes the three original fixtures on both compilers (**6/6**,
+`p43-three-unit.json`). The permanent
+`test_procedure_and_pointer_result_contracts` method passes **36/36** CLI
+checks: six fixtures on both compilers under normal/forced/seeded GC
+(`p43-result-gc-unit.log`). Its new `mir_mvp_pointer_union_admission` fixture
+covers both success and recovery element results; the other five fixtures
+cover range statements, heterogeneous aliases, callable colour, record
+admission and handler prefixes. `git diff --check` passes.
+
+A failure-only replay selects the 11 late MVP-only cases not included in the
+P39 replays. Four pass: recursive arrays, nested cancellation, Bounce and
+N-Queens. Seven fail (`p43-later-unit.json`):
+
+- `proc_procart_watercolor_sim`: harness timeout, still uninvestigated.
+- `pdf_output_streaming`: three recovery/rollback checks produce Error where
+  Full produces true. Paired standalone controls confirm the difference.
+- EPS `fonts` and `text`: MVP raises the package's composite-typecheck Error;
+  paired Full completes successfully.
+- EPS `machine` and `raster`: incorrect stack/file semantics, still open.
+- `larceny_pnpoly2`: harness status 256, but both standalone runs exit zero
+  and match the golden (`inside=29415`). Retain the harness failure pending
+  attribution; do not claim stability or benchmark qualification.
+
+The paired direct evidence is `p43-late-paired-diagnostics.json`; these were
+correctness diagnostics, not a performance campaign. A native isolation check
+using the frozen P35 harness reproduces only the Jube ordinal/husk failure;
+callable-realm identity and the first MIR cache unit pass independently
+(`p43-p35-native-isolation.json`). Ordinal get/set reject prototype members
+before their dead-husk handling, while by-name access handles the husk first.
+No Jube change has been made. Broader native cascading failures still need
+classification rather than skips.
+
+The original P35 run is now finished: 112/112 compiler chunks, 2,153 paired
+reported cases from 2,233 frozen entries; two MVP chunks timed out without a
+report. Its input audit records no drift. Historical paired counts are
+1,698 MVP / 1,824 Full, with 304 shared, 151 MVP-only and 25 Full-only failures.
+Those are old-engine results, not the current residual count. Next resume:
+close the six late source cases, attribute the benchmark/native failures and
+unreported chunks, then classify remaining Python assertions. Full correctness
+and performance qualification remain deferred until known gaps are closed.
+The user requested wrap-up at this checkpoint; no baseline or new full
+verification was started, and no commit was requested.

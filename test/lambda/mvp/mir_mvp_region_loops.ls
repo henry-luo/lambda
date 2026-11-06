@@ -146,7 +146,7 @@ pn main() {
     evolve(a, b, 2)^
     print(a); print(" "); print(saved); print("\n")
     var short: int[] = [1, 2]
-    evolve(short, b, 2)^
+    let rejected_short = evolve(short, b, 2)
     print(short); print("\n")
     evolve(a, short, 0)^
     print(a); print("\n")

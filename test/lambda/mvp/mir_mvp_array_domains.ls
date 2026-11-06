@@ -1,5 +1,5 @@
 // closed tables refine reads; inferred containers still admit other contents.
-fn choose(start: int) int {
+fn choose(start: int) int^ {
     var table = [2, 0, 1]
     var values: int[] = [10, 20, 30]
     var sum: int = 0
@@ -8,7 +8,7 @@ fn choose(start: int) int {
         if (values[table[i]] > 0) { sum = sum + values[table[i]] }
         i = i + 1
     }
-    return sum
+    return sum^
 }
 
 fn maybe_int(yes: bool) int? { return if (yes) 7 else null }

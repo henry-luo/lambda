@@ -18,11 +18,15 @@
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/template_state.h"
+#include "../lambda/runtime/template_registry.h"
+#include "../lambda/runtime/template_host.h"
+#include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/runtime/recovery_frame.h"
 #include "../lambda/runtime/lambda-stack.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/interp.hpp"
+#include "../lambda/runtime/native_collection.hpp"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/runtime/gc/gc_object_zone.h"
 #include "../lambda/js/js_runtime.h"
@@ -701,6 +705,251 @@ TEST(LambdaScriptCache, ForeignExportsRetainExecutionOwnedNamespaces) {
     }
 }
 
+TEST(LambdaScriptCache, MvpNativeViewsRetainStateAndHandlerHomes) {
+    const char* source =
+        "view <mvp_native_counter> state count: 0, value: 1.000000000000001 {\n"
+        "  let delta = ~.delta;\n"
+        "  <state count:count, value:value, delta:delta>\n"
+        "}\n"
+        "on advance(event) {\n"
+        "  let churn = [for (i in 1 to 60) {text:string(i)}]\n"
+        "  count = count + event.delta + delta\n"
+        "  value = event.value\n"
+        "  return value\n"
+        "}\n"
+        "on reject(event) { error(\"event failure\") }\n"
+        "view int { 1.0e-310 }\n"
+        "<mvp_native_counter delta:2, value:1.0e-310>\n";
+    LambdaTestNativeCompiler compiler(LAMBDA_TIER_JIT);
+    compiler.select_compiler("mvp");
+    for (int iteration = 0; iteration < 2; iteration++) {
+        TemplateHostSession* mounted = template_host_session_open(source,
+            "test/lambda/mvp/_cache_native_views.ls");
+        ASSERT_NE(mounted, nullptr);
+        {
+            TemplateHostBinding binding(mounted);
+            ASSERT_TRUE(binding.valid());
+            RootFrame roots(4);
+            Rooted<Item> model(roots, Item{.item = template_host_session_root_word(mounted)});
+            Rooted<Item> rendered(roots, fn_apply1(model.get()));
+            Rooted<Item> scalar(roots, fn_apply1(Item{.item = i2it(1)}));
+            EXPECT_FALSE(lambda_item_is_pending(scalar.get().item));
+            EXPECT_EQ(get_type_id(scalar.get()), LMD_TYPE_FLOAT);
+            EXPECT_EQ(it2d(scalar.get()), 1.0e-310);
+            ASSERT_EQ(get_type_id(rendered.get()), LMD_TYPE_ELEMENT);
+            EXPECT_EQ(it2i(item_attr(rendered.get(), "count")), 0);
+            EXPECT_EQ(it2d(item_attr(rendered.get(), "value")), 1.000000000000001);
+            TemplateEntry* entry = template_registry_match(g_template_registry, model.get(), false, nullptr);
+            ASSERT_NE(entry, nullptr);
+            ASSERT_NE(entry->body_func, nullptr);
+            EXPECT_EQ(entry->interp_view, nullptr);
+            ASSERT_NE(entry->handlers, nullptr);
+            EXPECT_EQ(entry->handlers->interp_handler, nullptr);
+            bool handled = false;
+            Rooted<Item> outcome(roots, template_dispatch_event(model.get(), false,
+                "advance", model.get(), &handled));
+            EXPECT_TRUE(handled);
+            EXPECT_FALSE(lambda_item_is_pending(outcome.get().item));
+            EXPECT_EQ(get_type_id(outcome.get()), LMD_TYPE_FLOAT);
+            EXPECT_EQ(it2d(outcome.get()), 1.0e-310);
+            rendered.set(fn_apply1(model.get()));
+            EXPECT_EQ(it2i(item_attr(rendered.get(), "count")), 4);
+            EXPECT_EQ(it2d(item_attr(rendered.get(), "value")), 1.0e-310);
+            outcome.set(template_dispatch_event(model.get(), false, "reject", model.get(), &handled));
+            EXPECT_TRUE(handled);
+            EXPECT_EQ(get_type_id(outcome.get()), LMD_TYPE_ERROR);
+            LambdaError* error = it2err(outcome.get());
+            ASSERT_NE(error, nullptr);
+            EXPECT_STREQ(error->message, "event failure");
+        }
+        template_host_session_close(mounted);
+    }
+}
+
+TEST(LambdaScriptCache, MvpCallsInterpretedFunctionAndNativeCallback) {
+    // D7.4.2/D8.3.1: one context retains both entry ABIs through reentry;
+    // the callback's containers, Error and cold float outlive both callees.
+    const char* source =
+        "fn through(f: function, cb: function) any^ => f(cb, 41)^\n"
+        "fn callback(n: int) any^ {\n"
+        "  let kept = {value: 1.0e-310 * n}\n"
+        "  let churn = [for (i in 1 to 40) {text: string(i)}]\n"
+        "  return [kept.value, error(\"callback error\"), kept]\n"
+        "}\n"
+        "<bridge through: through, callback: callback>\n";
+    LambdaTestNativeCompiler compiler(LAMBDA_TIER_JIT);
+    compiler.select_compiler("mvp");
+    TemplateHostSession* mounted = template_host_session_open(source,
+        "test/lambda/mvp/_cache_cross_tier_callback.ls");
+    ASSERT_NE(mounted, nullptr);
+    // fatal assertions still release the mounted session after leaving roots.
+    auto exercise = [&]() {
+        TemplateHostBinding binding(mounted);
+        ASSERT_TRUE(binding.valid());
+        ASSERT_NE(context->runtime, nullptr);
+        RootFrame roots(8);
+        Rooted<Item> model(roots, Item{.item = template_host_session_root_word(mounted)});
+        Rooted<Item> through(roots, item_attr(model.get(), "through"));
+        Rooted<Item> callback(roots, item_attr(model.get(), "callback"));
+        ASSERT_EQ(get_type_id(through.get()), LMD_TYPE_FUNC);
+        ASSERT_EQ(get_type_id(callback.get()), LMD_TYPE_FUNC);
+        ASSERT_NE(through.get().function->ptr, nullptr);
+        ASSERT_NE(callback.get().function->ptr, nullptr);
+        // pin T0 while invoking the already compiled MVP entries, so this
+        // unit cannot pass by promoting the interpreted leg to native code.
+        compiler.select(LAMBDA_TIER_INTERP);
+        compiler.select_compiler("production");
+        Script* interpreted = load_script(context->runtime,
+            "test/lambda/mvp/_cache_interpreted_relay.ls",
+            "fn relay(cb: function, n: int) any^ {\n"
+            "  let churn = [for (i in 1 to 40) {text: string(i)}]\n"
+            "  cb(n)^\n"
+            "}\n"
+            "fn exhaust(cb: function, n: int) any^ => 1 + exhaust(cb, n + 1)^\n"
+            "pn invoke(cb: function, n: int) any^ { return exhaust(cb, n)^ }\n"
+            "pn caught(cb: function, n: int) any^ {\n"
+            "  var outcome = 0\n"
+            "  invoke(cb, n) ^ { outcome = 77 }\n"
+            "  return outcome\n"
+            "}\n"
+            "<legs relay: relay, exhaust: exhaust, caught: caught>\n");
+        ASSERT_NE(interpreted, nullptr);
+        Runner runner = {};
+        runner_init(context->runtime, &runner);
+        runner.script = interpreted;
+        runner.context = context;
+        Rooted<Item> legs(roots, interp_run_script(&runner, false));
+        ASSERT_EQ(get_type_id(legs.get()), LMD_TYPE_ELEMENT);
+        Rooted<Item> relay(roots, item_attr(legs.get(), "relay"));
+        Rooted<Item> exhaust(roots, item_attr(legs.get(), "exhaust"));
+        Rooted<Item> caught(roots, item_attr(legs.get(), "caught"));
+        ASSERT_EQ(get_type_id(relay.get()), LMD_TYPE_FUNC);
+        ASSERT_EQ(get_type_id(exhaust.get()), LMD_TYPE_FUNC);
+        ASSERT_EQ(get_type_id(caught.get()), LMD_TYPE_FUNC);
+        ASSERT_EQ(relay.get().function->entry_abi, FN_ENTRY_ABI_LAMBDA_INTERPRETED);
+        Rooted<Item> result(roots, ItemNull);
+        uint64_t* root_top = context->side_root_top;
+        result.set(fn_call2(through.get().function, relay.get(), callback.get()));
+        EXPECT_EQ(context->side_root_top, root_top);
+        EXPECT_EQ(relay.get().function->entry_abi, FN_ENTRY_ABI_LAMBDA_INTERPRETED);
+        EXPECT_FALSE(lambda_item_is_pending(result.get().item));
+        ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_ARRAY);
+        gc_collect(context->heap->gc, context->side_root_base,
+            context->side_root_top - context->side_root_base);
+        ASSERT_EQ(result.get().array->length, 3);
+        EXPECT_DOUBLE_EQ(it2d(array_get(result.get().array, 0)), 1.0e-310 * 41.0);
+        LambdaError* error = it2err(array_get(result.get().array, 1));
+        ASSERT_NE(error, nullptr);
+        EXPECT_STREQ(error->message, "callback error");
+        Item kept = array_get(result.get().array, 2);
+        EXPECT_DOUBLE_EQ(it2d(item_attr(kept, "value")), 1.0e-310 * 41.0);
+        EXPECT_FALSE(interp_has_active_state());
+
+        // exercise escaped and callee-local faults without consuming the
+        // default recursion budget; restore the knob before any assertion.
+        const char* depth = getenv("LAMBDA_INTERP_DEPTH");
+        char* saved_depth = depth ? strdup(depth) : nullptr;
+        bool selected_depth = shell_setenv("LAMBDA_INTERP_DEPTH", "48");
+        bool landed = true;
+        bool state_released = true;
+        uint32_t capabilities[] = {LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY,
+            LAMBDA_RECOVERY_CAP_TRANSACTION_BARRIER};
+        for (uint32_t capability : capabilities) {
+            LambdaRecoveryFrame* boundary = lambda_recovery_frame_begin_for(context, capability);
+            bool restored = false;
+            LambdaFaultReason reason = LAMBDA_FAULT_NONE;
+            if (boundary && LAMBDA_RECOVERY_FRAME_SETJMP(boundary)) {
+                restored = lambda_recovery_frame_restore_landing(boundary);
+                reason = boundary->fault.reason;
+                _lambda_stack_overflow_flag = false;
+            } else if (boundary && lambda_recovery_frame_arm(boundary)) {
+                result.set(fn_call2(through.get().function, exhaust.get(), callback.get()));
+            }
+            if (boundary) lambda_recovery_frame_end(boundary);
+            landed &= restored && reason == LAMBDA_FAULT_STACK_OVERFLOW;
+            state_released &= !interp_has_active_state();
+        }
+        result.set(fn_call2(caught.get().function, callback.get(), Item{.item = i2it(1)}));
+        bool restored_depth = saved_depth
+            ? shell_setenv("LAMBDA_INTERP_DEPTH", saved_depth)
+            : shell_unsetenv("LAMBDA_INTERP_DEPTH");
+        free(saved_depth);
+        EXPECT_TRUE(selected_depth);
+        EXPECT_TRUE(restored_depth);
+        EXPECT_TRUE(landed);
+        EXPECT_TRUE(state_released);
+        EXPECT_FALSE(interp_has_active_state());
+        EXPECT_EQ(get_type_id(result.get()), LMD_TYPE_INT);
+        EXPECT_EQ(it2i(result.get()), 77);
+        EXPECT_EQ(context->side_root_top, root_top);
+        result.set(fn_call2(through.get().function, relay.get(), callback.get()));
+        EXPECT_EQ(get_type_id(result.get()), LMD_TYPE_ARRAY);
+        EXPECT_FALSE(interp_has_active_state());
+    };
+    exercise();
+    template_host_session_close(mounted);
+}
+
+TEST(LambdaScriptCache, MvpNativeEditHandlersWriteTheModel) {
+    const char* source =
+        "edit <mvp_native_edit> { ~ }\n"
+        "on update(event) { ~.value = event.next; return ~.value }\n"
+        "<mvp_native_edit value:1, next:9>\n";
+    LambdaTestNativeCompiler compiler(LAMBDA_TIER_JIT);
+    compiler.select_compiler("mvp");
+    TemplateHostSession* mounted = template_host_session_open(source,
+        "test/lambda/mvp/_cache_native_edits.ls");
+    ASSERT_NE(mounted, nullptr);
+    {
+        TemplateHostBinding binding(mounted);
+        ASSERT_TRUE(binding.valid());
+        RootFrame roots(2);
+        Rooted<Item> model(roots, Item{.item = template_host_session_root_word(mounted)});
+        ASSERT_EQ(get_type_id(model.get()), LMD_TYPE_ELEMENT);
+        EXPECT_EQ(it2i(item_attr(model.get(), "value")), 1);
+        edit_bridge_init(nullptr);
+        bool handled = false;
+        Rooted<Item> outcome(roots, template_dispatch_event(model.get(), true,
+            "update", model.get(), &handled));
+        EXPECT_TRUE(handled);
+        EXPECT_EQ(get_type_id(outcome.get()), LMD_TYPE_INT);
+        EXPECT_EQ(it2i(outcome.get()), 9);
+        EXPECT_EQ(it2i(item_attr(model.get(), "value")), 9);
+    }
+    template_host_session_close(mounted);
+}
+
+TEST(LambdaScriptCache, MvpNativeHandlersJoinScopedChildren) {
+    const char* source =
+        "let initial = temp('mvp_event_join', {count:0})^;\n"
+        "pn child() { sleep(1)^; put temp.'mvp_event_join'#count = 1 }\n"
+        "view <mvp_event_join> { ~ }\n"
+        "on join(event) {\n"
+        "  if (true) { start(child) }\n"
+        "  return temp.'mvp_event_join'#count\n"
+        "}\n"
+        "<mvp_event_join>\n";
+    LambdaTestNativeCompiler compiler(LAMBDA_TIER_JIT);
+    compiler.select_compiler("mvp");
+    TemplateHostSession* mounted = template_host_session_open(source,
+        "test/lambda/mvp/_cache_native_event_join.ls");
+    ASSERT_NE(mounted, nullptr);
+    {
+        TemplateHostBinding binding(mounted);
+        ASSERT_TRUE(binding.valid());
+        RootFrame roots(2);
+        Rooted<Item> model(roots, Item{.item = template_host_session_root_word(mounted)});
+        bool handled = false;
+        Rooted<Item> outcome(roots, template_dispatch_event(model.get(), false,
+            "join", model.get(), &handled));
+        EXPECT_TRUE(handled);
+        // the nested block joins before the return reads the committed value.
+        EXPECT_EQ(get_type_id(outcome.get()), LMD_TYPE_INT);
+        EXPECT_EQ(it2i(outcome.get()), 1);
+    }
+    template_host_session_close(mounted);
+}
+
 TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
     const char* identity = "test/lambda/auto_cache_root.ls";
     const char* source =
@@ -1234,6 +1483,55 @@ protected:
         pool = NULL;
     }
 };
+
+TEST_F(LambdaConcurrencyRuntime, NativeMethodStorageUsesEphemeronsWithoutJsRealm) {
+    EXPECT_EQ(js_active_runtime_state, nullptr);
+    concurrency_test_gc->js_native_trace = [](void* data, gc_heap_t* gc) {
+        native_collection_gc_trace((Map*)data, gc);
+    };
+    concurrency_test_gc->js_native_destroy = [](void* data) {
+        gc_native_seen_t seen = {};
+        gc_native_seen_init(&seen);
+        native_collection_heap_destroy((Map*)data, &seen);
+        gc_native_seen_dispose(&seen);
+    };
+    TypeMap shape = {};
+    shape.type_id = LMD_TYPE_MAP;
+    RootFrame roots(4);
+    Rooted<Item> storage(roots, native_collection_create(&shape, pool, NATIVE_COLLECTION_MAP, true));
+    ASSERT_EQ(get_type_id(storage.get()), LMD_TYPE_MAP);
+    Rooted<Item> key(roots, {.map = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP)});
+    ASSERT_NE(key.get().map, nullptr);
+    key.get().map->type_id = LMD_TYPE_MAP;
+    key.get().map->type = &shape;
+    Rooted<void*> environment(roots, heap_calloc_closure_env(sizeof(Item)));
+    ASSERT_NE(environment.get(), nullptr);
+    owned_item_slot_store((Item*)environment.get(), 1, 0, key.get());
+    Rooted<Function*> captured(roots, to_closure_named(nullptr, 0, environment.get(), "method test"));
+    ASSERT_NE(captured.get(), nullptr);
+    captured.get()->closure_field_count = 1;
+    NativeCollectionData* data = native_collection_data(storage.get());
+    ASSERT_TRUE(native_collection_set(data, key.get(), {.function = captured.get()}));
+    Function* observed = captured.get();
+    captured.set(nullptr);
+    environment.set(nullptr);
+    gc_collect(concurrency_test_gc, eval.side_root_base, eval.side_root_top - eval.side_root_base);
+    EXPECT_TRUE(gc_is_managed(concurrency_test_gc, observed));
+    EXPECT_FALSE(gc_get_header(observed)->gc_flags & GC_FLAG_FREED);
+    EXPECT_EQ(hashmap_count(data->hmap), 1u);
+    // the value captures its key, but that cycle must not keep either alive
+    // after the last independent key root is gone (D6.1.1).
+    key.set(ItemNull);
+    gc_collect(concurrency_test_gc, eval.side_root_base, eval.side_root_top - eval.side_root_base);
+    // ownership queries include freed object-zone slots; the header records
+    // reclamation until the next allocation can reuse that slot.
+    EXPECT_TRUE(gc_get_header(observed)->gc_flags & GC_FLAG_FREED);
+    EXPECT_EQ(hashmap_count(data->hmap), 0u);
+    gc_native_seen_t seen = {};
+    gc_native_seen_init(&seen);
+    native_collection_heap_destroy(storage.get().map, &seen);
+    gc_native_seen_dispose(&seen);
+}
 
 struct AttachmentTeardownProbe {
     int worker_started;

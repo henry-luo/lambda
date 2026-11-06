@@ -3,6 +3,7 @@ true true true true false
 null -3 true
 null null
 -0 3 true
+true
 3
 null
 3 false

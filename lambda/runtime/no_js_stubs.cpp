@@ -66,13 +66,11 @@ void dom_shutdown(void) {}
 #define NO_JS_MAP_TRACE(entry) \
     extern "C" void entry(Map* map, gc_heap_t* gc) { (void)map; (void)gc; }
 NO_JS_MAP_TRACE(js_async_frame_map_gc_trace)
-NO_JS_MAP_TRACE(js_collection_map_gc_trace)
 NO_JS_MAP_TRACE(js_weak_map_gc_trace)
 #undef NO_JS_MAP_TRACE
 #define NO_JS_MAP_DESTROY(entry) \
     extern "C" void entry(Map* map, gc_native_seen_t* seen_native) { (void)map; (void)seen_native; }
 NO_JS_MAP_DESTROY(js_regex_map_heap_destroy)
-NO_JS_MAP_DESTROY(js_collection_map_heap_destroy)
 #undef NO_JS_MAP_DESTROY
 extern "C" void js_async_frame_map_heap_destroy(Map* map) { (void)map; }
 extern "C" void js_weak_map_heap_destroy(Map* map) { (void)map; }

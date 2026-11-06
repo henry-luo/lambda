@@ -1380,7 +1380,7 @@ static inline bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_va
 }
 
 // share procedural result classification across T0, Full MIR and MVP (S2.5.3v3).
-static inline AstNode* ast_proc_block_last_value(AstNode* first,
+static inline AstNode* ast_block_last_value(AstNode* first, bool procedural,
         int* value_count, int* decl_count, int* stam_count,
         AstNode** terminal = nullptr) {
     AstNode* last_executable = NULL;
@@ -1391,10 +1391,10 @@ static inline AstNode* ast_proc_block_last_value(AstNode* first,
     AstNode* last_value = NULL;
     for (AstNode* item = first; item; item = item->next) {
         if (is_declaration_node(item)) { (*decl_count)++; continue; }
-        if (is_side_effect_stam(item->node_type) ||
+        if (procedural ? (is_side_effect_stam(item->node_type) ||
                 is_proc_flow_side_effect_node(item, last_executable) ||
                 item->node_type == AST_NODE_LOOP ||
-                ast_for_discards_result(item)) {
+                ast_for_discards_result(item)) : ast_block_item_is_statement(item, false)) {
             (*stam_count)++;
             continue;
         }
@@ -1402,6 +1402,12 @@ static inline AstNode* ast_proc_block_last_value(AstNode* first,
         last_value = item;
     }
     return last_value;
+}
+
+static inline AstNode* ast_proc_block_last_value(AstNode* first,
+        int* value_count, int* decl_count, int* stam_count,
+        AstNode** terminal = nullptr) {
+    return ast_block_last_value(first, true, value_count, decl_count, stam_count, terminal);
 }
 
 typedef Item (*main_func_t)(Context*);

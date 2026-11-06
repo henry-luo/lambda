@@ -2830,6 +2830,11 @@ extern "C" {
     Object* object_with_data(int64_t type_index);
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);
     Item object_from_fields(const struct TypeObject* type, Item fields);
+    Item lambda_object_type_value(Item type, Item base);
+    Item lambda_object_capture_method(Item type, const char* name, Item function);
+    Item lambda_object_copy_environment(Item destination, Item source);
+    Item lambda_object_prepare_method_call(Item callable, Item* root,
+        const Item* keys, int64_t count);
     Object* object_fill(Object* obj, ...);
     // S2.1.3 object content face (lazily allocated side list)
     struct List* object_content(Object* obj);
@@ -3079,6 +3084,8 @@ extern "C" {
     // status separates an admitted Error value from a failed dependent check.
     Item lambda_type_check_env_status(Item value, Type* expected, Type** env,
         const char* boundary, Bool* admitted);
+    Item lambda_type_check_captured_env_status(Item value, Type* expected, Type** local,
+        Type** references, Type** captured, int64_t count, const char* boundary, Bool* admitted);
     // A boundary label that is formatted only if the check fails. The T0
     // walker checks every declared binding, assignment and argument, and
     // formatting the label eagerly cost it 15-29% of its time. `text` is used
