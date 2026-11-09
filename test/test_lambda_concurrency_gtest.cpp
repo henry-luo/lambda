@@ -392,7 +392,12 @@ TEST(JubeDom4, OrdinalParityCoversDeclaredMembersAndHusks) {
         ASSERT_GE(slot, 0) << binding->type_name;
         int member_count = jube_member_count(type);
         ASSERT_GE(member_count, 0) << binding->type_name;
-        Item husk = vmap_new();
+        // these wrappers and JS keys span allocating host calls; the native
+        // stack is not a GC owner (D6.3.3).
+        RootFrame roots(4);
+        Rooted<Item> husk_root(roots, vmap_new());
+        Rooted<Item> key_root(roots, ItemNull), camel_root(roots, ItemNull), value_root(roots, ItemNull);
+        Item husk = husk_root.get();
         ASSERT_EQ(get_type_id(husk), LMD_TYPE_VMAP);
         husk.vmap->host_type = type;
         husk.vmap->host_data = nullptr;
@@ -402,12 +407,20 @@ TEST(JubeDom4, OrdinalParityCoversDeclaredMembersAndHusks) {
             const char* camel_name = jube_member_name_at(type, ordinal, true);
             ASSERT_NE(snake_name, nullptr) << binding->type_name << " ordinal " << ordinal;
             ASSERT_NE(camel_name, nullptr) << binding->type_name << " ordinal " << ordinal;
-            ASSERT_EQ(jube_member_ordinal(type, snake_name,
-                (uint32_t)strlen(snake_name)), ordinal) << binding->type_name;
-            ASSERT_EQ(jube_member_ordinal(type, camel_name,
-                (uint32_t)strlen(camel_name)), ordinal) << binding->type_name;
-            Item key = js_make_string(snake_name);
-            Item camel_key = js_make_string(camel_name);
+            // receiver-specific binding variants share a declared spelling;
+            // name lookup selects its first ordinal, while all variants are guarded.
+            int snake_ordinal = jube_member_ordinal(type, snake_name,
+                (uint32_t)strlen(snake_name));
+            int camel_ordinal = jube_member_ordinal(type, camel_name,
+                (uint32_t)strlen(camel_name));
+            ASSERT_GE(snake_ordinal, 0) << binding->type_name;
+            ASSERT_GE(camel_ordinal, 0) << binding->type_name;
+            ASSERT_STREQ(jube_member_name_at(type, snake_ordinal, false), snake_name);
+            ASSERT_STREQ(jube_member_name_at(type, camel_ordinal, true), camel_name);
+            key_root.set(js_make_string(snake_name));
+            camel_root.set(js_make_string(camel_name));
+            Item key = key_root.get();
+            Item camel_key = camel_root.get();
             const char* member_name = camel_name;
             Item by_name = ItemNull;
             Item by_ordinal = ItemNull;
@@ -426,8 +439,11 @@ TEST(JubeDom4, OrdinalParityCoversDeclaredMembersAndHusks) {
 
             Item name_set = ItemNull;
             Item ordinal_set = ItemNull;
-            Item value = js_make_string("dom4-parity");
-            EXPECT_EQ(jube_member_set(husk, key, value, &name_set),
+            value_root.set(js_make_string("dom4-parity"));
+            Item value = value_root.get();
+            // ordinal stores use JS Set completion, while Lambda Set
+            // returns its assigned value (D9.5.4).
+            EXPECT_EQ(jube_member_set_js(husk, key, value, husk, &name_set),
                 jube_member_set_by_ordinal(husk, slot, (uint32_t)ordinal,
                     value, &ordinal_set));
             EXPECT_EQ(name_set.item, ordinal_set.item)

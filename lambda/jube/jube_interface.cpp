@@ -972,12 +972,12 @@ extern "C" int jube_member_get_by_ordinal(Item receiver, int slot,
     JubeTypeRecord* trec = NULL;
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out) return 0;
-    if (jube_prototype_member_for(rec, receiver)) return 0;
     if (!jube_native_alive(receiver)) {
         // the native payload is gone, but the wrapper identity remains a valid husk.
         *out = jube_undefined_item();
         return 1;
     }
+    if (jube_prototype_member_for(rec, receiver)) return 0;
     return jube_dispatch_get_record(receiver, rec, out, true);
 }
 
@@ -986,11 +986,12 @@ extern "C" int jube_member_set_by_ordinal(Item receiver, int slot,
     JubeTypeRecord* trec = NULL;
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out) return 0;
-    if (jube_prototype_member_for(rec, receiver)) return 0;
     if (!jube_native_alive(receiver)) {
+        // dead wrappers have the same handled write as name-based lookup.
         *out = (Item){.item = ITEM_FALSE};
         return 1;
     }
+    if (jube_prototype_member_for(rec, receiver)) return 0;
     return jube_dispatch_set_record(receiver, trec, rec, value, out, true);
 }
 

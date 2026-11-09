@@ -10,6 +10,9 @@ pn dynamic(seed: any) any {
     a[0] = (a[0] + 3) % 16
     return a[0]
 }
+pn conditional_step(var a: any, k: int) any {
+    if (k >= 0) { a[k] = (a[k] + 3) % 16 }
+}
 pn remainder(a: int) int { return a % 16 }
 pn quotient(a: int) int { return a div 16 }
 pn large(a: int) int { return a % 4503599627370496 }
@@ -39,4 +42,9 @@ pn main() {
     print(match invalid { case error: true default: false }); print("\n")
     var over: int[] = [9007199254740991]
     affine_cancel(over)^; print(over[0]); print("\n")
+    var erased = [14]
+    var floating = [1.5]
+    conditional_step(erased, 0)^
+    conditional_step(floating, 0)^
+    print([erased[0], floating[0]]); print("\n")
 }

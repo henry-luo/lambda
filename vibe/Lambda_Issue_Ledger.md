@@ -967,6 +967,23 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 
 
 
+<a id="lr07-53"></a>**LR07-53 · Full MIR loses a nonnumeric recursive array replacement · OPEN**
+
+Reproduced 2026-11-09 at `14f48f209` plus the MVP parity changes, using
+the frozen release `temp/mvp_untyped_tuning_20261109/starting-release.exe`
+(SHA256 `e45cec36fef54f4ebb1d2833fbde9d99dbc79f4c8b6be926630025f5cfb5ad70`).
+`LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_COMPILER=production <exe> run
+test/lambda/mvp/mir_mvp_untyped_snapshots.ls --no-log` prints `[0, [99]]`
+for the recursive string replacement; **S9.1.2 / S12.2.1v3 / D4.3.1** require
+`["changed", [99]]`. MVP returns the required result. Full fails identically
+under normal, forced and seeded GC; the input array snapshot stays unchanged.
+`mir_param_scalar_snapshot` / `mir_confined_scalar_snapshot` are relevant
+source anchors; the exact Full codegen cause is not yet confirmed. This does
+not block MVP tuning or its benchmark comparisons. The permanent golden is
+unchanged to keep the Full failure visible. Evidence:
+`temp/mvp_untyped_tuning_20261109/p6-focused-units.log`; implementation context:
+[MVP tuning checkpoint](impl/Lambda_Impl_MIR_MVP_Language_Parity_and_Untyped.md#1091-untyped-release-tuning-2026-11-09).
+
 ## 8. Memory management & GC (LR08)
 
 

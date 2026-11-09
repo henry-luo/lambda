@@ -203,7 +203,7 @@ Type* mvp_bound_array_contract(Type* contract) {
         !lambda_type_contract_has_binder(bound.array_contract, true) ? bound.array_contract : NULL;
 }
 
-static TypeArray* private_array_domain(LambdaMvpModule* m, Type* element) {
+TypeArray* mvp_private_array_domain(LambdaMvpModule* m, Type* element) {
     TypeArray* array = (TypeArray*)alloc_type(m->tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
     array->nested = element; array->length = -1; array->type_index = -1;
     return array;
@@ -708,14 +708,14 @@ TypeMap* mvp_contextual_map_contract(LambdaMvpModule* m, AstNode* literal) {
     return ambiguous ? NULL : shape;
 }
 
-bool mvp_native_range_source(AstNode* source) {
+bool mvp_native_range_source(LambdaMvpModule* m, AstNode* source) {
     source = ast_unwrap_primary_to_leaf(source);
     if (!source || source->node_type != AST_NODE_BINARY ||
             ((AstBinaryNode*)source)->op != OPERATOR_TO) return false;
     AstBinaryNode* range = (AstBinaryNode*)source;
     // the loop counter's lane must hold for every evaluation, not only an inferred initial bound.
-    return mvp_boundary_proven(range->left->type, &TYPE_INT) &&
-        mvp_boundary_proven(range->right->type, &TYPE_INT);
+    return mvp_boundary_proven(normal_domain(m, mvp_value_contract(m, range->left)), &TYPE_INT) &&
+        mvp_boundary_proven(normal_domain(m, mvp_value_contract(m, range->right)), &TYPE_INT);
 }
 
 struct MvpRowUse {
@@ -1999,6 +1999,20 @@ static void plan_float_parameters(LambdaMvpModule* m) {
     }
 }
 
+static bool scalar_snapshot_key(AstNode* key, void* data) {
+    LambdaMvpModule* m = (LambdaMvpModule*)data;
+    bool optional = false;
+    Type* type = lambda_type_nullable_lane_base(
+        lambda_type_remove_error(m->tp->pool, mvp_value_contract(m, key)), &optional);
+    return type && (type->type_id == LMD_TYPE_INT || type->type_id == LMD_TYPE_FLOAT ||
+        type->type_id == LMD_TYPE_INT64);
+}
+
+static void widen_closed_parameter(MvpBinding* b) {
+    b->closed_parameter = b->scalar_snapshot = false;
+    b->contract = &TYPE_ANY; b->rep = VALUE_REP_ITEM;
+}
+
 static void seed_closed_values(LambdaMvpModule* m) {
     for (uint32_t i = 0; i < m->binding_count; i++) {
         MvpBinding* b = &m->bindings[i];
@@ -2007,7 +2021,7 @@ static void seed_closed_values(LambdaMvpModule* m) {
                 b->owner >= m->function_count ||
                 m->functions[b->owner].boxed_entry) continue;
         TypeParam* p = lambda_type_param(b->entry->node->type);
-        if (!p || p->is_optional || p->is_var_param || binding_reassigned(m, b, true) ||
+        if (!p || p->is_optional || p->is_var_param || binding_reassigned(m, b, false) ||
                 binding_var_borrow(m, b)) continue;
         // closed direct calls may select a scalar lane without adding an
         // admission contract. Every incoming edge must survive widening below.
@@ -2031,6 +2045,19 @@ static bool update_closed_values(LambdaMvpModule* m, bool choose_domain = false)
     AstIndex* index = &m->tp->ast_index;
     bool changed = false;
     for (AstNodeId i = 0; i < index->count; i++) {
+        AstNode* node = index->nodes[i];
+        if (!choose_domain && (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
+                node->node_type == AST_NODE_MEMBER_ASSIGN_STAM)) {
+            AstAssignStamNode* write = (AstAssignStamNode*)node;
+            MvpBinding* b = mvp_local_binding(m, write->object);
+            Type* element = b ? mvp_array_element(b->contract) : NULL;
+            if (b && b->closed_parameter && (node->node_type != AST_NODE_INDEX_ASSIGN_STAM ||
+                    !element || !mvp_private_domain_proven(mvp_value_contract(m, write->value), element))) {
+                // mutable private observations survive only exact-domain
+                // stores; an inferred element type never constrains a write.
+                widen_closed_parameter(b); changed = true;
+            }
+        }
         if (index->nodes[i]->node_type != AST_NODE_CALL_EXPR) continue;
         AstCallNode* call = (AstCallNode*)index->nodes[i];
         AstFuncNode* target = ast_direct_call_function(call);
@@ -2061,8 +2088,10 @@ static bool update_closed_values(LambdaMvpModule* m, bool choose_domain = false)
                     // indexed-use audit: an erased child retention flag alone
                     // does not mean that its primitive array owner escapes.
                     Type* previous = b->contract;
-                    b->contract = private_array_domain(m, element);
-                    if (mvp_parameter_borrowable(m, param)) {
+                    b->contract = mvp_private_array_domain(m, element);
+                    if (mvp_parameter_borrowable(m, param) ||
+                            mir_confined_scalar_snapshot(index, target, param, position,
+                                element->type_id, scalar_snapshot_key, m)) {
                         b->rep = mvp_rep(b->contract); changed = true;
                     } else b->contract = previous;
                 }
@@ -2071,8 +2100,7 @@ static bool update_closed_values(LambdaMvpModule* m, bool choose_domain = false)
             if (!errors && mvp_private_domain_proven(incoming, b->contract)) continue;
             // absence, Error and conflicting carriers retain ordinary Item
             // transport; dependent local observations widen in the same pass.
-            b->closed_parameter = false;
-            b->contract = &TYPE_ANY; b->rep = VALUE_REP_ITEM;
+            widen_closed_parameter(b);
             changed = true;
         }
     }
@@ -2094,6 +2122,24 @@ static bool update_closed_values(LambdaMvpModule* m, bool choose_domain = false)
         if (incoming->type_id == f->result_contract->type_id) continue;
         f->result_contract = f->scalar_result_fallback;
         f->scalar_result_fallback = NULL;
+        changed = true;
+    }
+    return changed;
+}
+
+static bool widen_range_bindings(LambdaMvpModule* m) {
+    bool changed = false;
+    for (uint32_t i = 0; i < m->binding_count; i++) {
+        MvpBinding* b = &m->bindings[i];
+        if (!b->entry || !b->entry->node || b->entry->node->node_type != AST_NODE_FOR_CLAUSE ||
+                b->contract != &TYPE_INT) continue;
+        AstLoopNode* loop = (AstLoopNode*)b->entry->node;
+        AstNode* source = ast_unwrap_primary_to_leaf(loop->as);
+        if (!source || source->node_type != AST_NODE_BINARY || ((AstBinaryNode*)source)->op != OPERATOR_TO ||
+                mvp_native_range_source(m, source)) continue;
+        // range counters share the closed-value fixed point: an untyped bound
+        // can widen later, and must then retain ordinary iteration (D4.3.1).
+        b->contract = &TYPE_ANY; b->rep = VALUE_REP_ITEM;
         changed = true;
     }
     return changed;
@@ -3005,7 +3051,8 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             normal_domain(m, mvp_value_contract(m, source)), &optional);
         bool integer_keys = loop->key_only &&
             (loop->key_filter == LOOP_KEY_INT || mvp_array_contract(sequence));
-        b->contract = mvp_native_range_source(source) || integer_keys ? &TYPE_INT : &TYPE_ANY;
+        bool range = source && source->node_type == AST_NODE_BINARY && ((AstBinaryNode*)source)->op == OPERATOR_TO;
+        b->contract = range || integer_keys ? &TYPE_INT : &TYPE_ANY;
         b->rep = mvp_rep(b->contract);
     }
     seed_closed_values(m);
@@ -3021,7 +3068,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
         if (!element) continue;
         // keep a private primitive domain only while the fixed point proves
         // every write. The public inferred type remains unrestricted.
-        TypeArray* contract = private_array_domain(m, element);
+        TypeArray* contract = mvp_private_array_domain(m, element);
         if (binding_var_borrow(m, b, (Type*)contract)) continue;
         // a constructor's ordinary Error remains an inferred binding value,
         // even when its successful array has a private primitive certificate.
@@ -3251,14 +3298,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
             MvpBinding* b = mvp_binding(m, param->entry);
             Type* element = mvp_array_element(b->contract);
             b->scalar_snapshot = element && mir_confined_scalar_snapshot(index, f->ast, param, position,
-                element ? element->type_id : LMD_TYPE_ANY, [](AstNode* key, void* data) -> bool {
-                    LambdaMvpModule* m = (LambdaMvpModule*)data;
-                    bool optional = false;
-                    Type* type = lambda_type_nullable_lane_base(
-                        lambda_type_remove_error(m->tp->pool, mvp_value_contract(m, key)), &optional);
-                    return type && (type->type_id == LMD_TYPE_INT || type->type_id == LMD_TYPE_FLOAT ||
-                        type->type_id == LMD_TYPE_INT64);
-                }, m);
+                element->type_id, scalar_snapshot_key, m);
             // the confined snapshot allocates a precisely rooted header and can fail.
             if (b->scalar_snapshot) f->abi.effects.may_gc = f->abi.effects.may_return_error = true;
         }
@@ -3267,6 +3307,7 @@ bool lambda_mvp_plan(LambdaMvpModule* m) {
     bool changed;
     do {
         changed = update_closed_values(m);
+        changed |= widen_range_bindings(m);
         for (AstNodeId i = 0; i < index->count; i++) {
             AstNode* node = index->nodes[i];
             AstFunctionId owner = mvp_node_owner(m, i);

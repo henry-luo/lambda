@@ -103,6 +103,20 @@ class LambdaMirMvpTests(unittest.TestCase):
         names = ("proc/proc_pdf_file", "pdf/pdf_file_mvp", "pdf/output_pages", "pdf/output_text")
         self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
 
+    def test_output_destination_recovery(self):
+        # S2.6.6v3: encoder failures rewind a producer before its replacement.
+        names = ("pdf/output_streaming", "mvp/mir_mvp_output_recovery")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_boxed_ranges_and_live_borrows(self):
+        names = ("mvp/mir_mvp_boxed_range_bounds", "mvp/mir_mvp_live_borrow_arguments",
+                 "proc/cow_var_borrow", "proc/tune23_map_argument_order")
+        self.check_gc_fixtures(ROOT / "test/lambda" / f"{name}.ls" for name in names)
+
+    def test_eps_object_operations(self):
+        names = ("machine", "raster", "fonts", "text")
+        self.check_gc_fixtures(ROOT / "test/lambda/eps" / f"{name}.ls" for name in names)
+
     def test_native_view_definitions(self):
         names = ("view_template", "view_state", "view_attr_pattern", "error_view_outcomes",
                  "error_event_outcomes", "edit_bridge", "ui_controls", "ui_workspace")
@@ -904,6 +918,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_static_scalar_fallback(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_scalar_fallback.ls"
+        self.check_gc_fixtures([source])
         for name in ("decimal_sum", "decimal_remainder", "decimal_quotient", "decimal_compare", "string_compare"):
             body = self.function_mir(source, name)
             self.assertNotIn("lambda_int_lane_", body)
@@ -912,6 +927,7 @@ class LambdaMirMvpTests(unittest.TestCase):
         dynamic = self.function_mir(source, "dynamic_sum")
         self.assertIn("\tubgt\t", dynamic)
         self.assertIn("\tcall\tfn_add", dynamic)
+        self.assertIn("\tdadd\t", dynamic)
         chain = self.function_mir(source, "decimal_chain")
         self.assertNotRegex(chain, r"\tcall\tmvp_\d+_decimal_quotient_dp")
         self.assertIn("\tcall\tlambda_decimal_binary", chain)
@@ -1049,6 +1065,29 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertIn("lambda_array_set_checked_item", body)
         body = self.function_mir(ROOT / "test/lambda/mvp/mir_mvp_borrow_inline.ls", "nested")
         self.assertNotRegex(body, r"\tcall\tmvp_\d+_replace_owner_dp")
+
+    def test_erased_array_iterations(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_erased_iterations.ls"
+        for compiler in ("production", "mvp"):
+            for stress in GC_MODES:
+                with self.subTest(compiler=compiler, stress=stress):
+                    self.check_golden(source, {**stress, "LAMBDA_MIR_COMPILER": compiler})
+        body = self.function_mir(source, "scale")
+        native = body[:body.index("\tcall\tfn_index_")]
+        self.assertIn("\tdmul\t", native)
+
+    def test_untyped_native_ranges(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_untyped_ranges.ls"
+        self.check_gc_fixtures([source, ROOT / "test/lambda/mvp/mir_mvp_boxed_range_bounds.ls"])
+        body = self.function_mir(source, "total")
+        self.assertNotIn("\tcall\tfn_to_", body)
+        self.assertNotIn("\tcall\titer_val_at_", body)
+
+    def test_untyped_recursive_snapshots(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_untyped_snapshots.ls"
+        self.check_gc_fixtures([source])
+        body = self.function_mir(source, "visit")
+        self.assertIn("lambda_array_scalar_snapshot", body)
 
     def test_recursive_array_capture_effects(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_recursive_arrays.ls"
@@ -1300,6 +1339,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_modular_array_update(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_modular_update.ls"
+        self.check_gc_fixtures([source])
         body = self.function_mir(source, "step")
         first = body[:body.index("\tcall\tfn_index")]
         self.assertRegex(first, r"\tand\t[^\n]+, 15\n")
@@ -1309,6 +1349,10 @@ class LambdaMirMvpTests(unittest.TestCase):
         self.assertRegex(first, r"\tmul\t[^\n]+, 13\n")
         self.assertRegex(first, r"\tmod\t[^\n]+, 31\n")
         self.assertIn("\tcall\tfn_int", affine)
+        conditional = self.function_mir(source, "conditional_step")
+        native = conditional[:conditional.index("\tcall\tfn_index")]
+        self.assertNotIn("\tcall\tfmod_", native)
+        self.assertNotIn("\tcall\tlambda_int_lane_add_slow", native)
 
     def test_single_use_string_constructor(self):
         body = self.function_mir(ROOT / "test/benchmark/kostya/json_gen2.ls", "benchmark")
