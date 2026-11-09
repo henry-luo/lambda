@@ -8585,13 +8585,72 @@ typedef struct {
     bool alt;
     bool meta;
     const char* pointer_type;
+    int pointer_id;                        // W3C pointerId: 1 for the mouse, 2 for a pen
+    const MousePositionEvent* source;      // PE6: the native event with pen axes and samples
 } PointerEventBuildArgs;
+
+// PE6: W3C pressure of a native sample; a mouse reports 0.5 while a button is down.
+static float native_pointer_pressure(const MousePositionEvent* source, float pressure, int buttons) {
+    return source->pointer_type == RDT_POINTER_MOUSE ? (buttons ? 0.5f : 0.0f) : pressure;
+}
+
+// PE6: attach the samples the native event coalesces, this event last, as dom.pointer_samples.
+static void native_pointer_attach_samples(Item event, const PointerEventBuildArgs* args) {
+    const MousePositionEvent* source = args->source;
+    RdtPointerSample own = rdt_pointer_sample_of(source);
+    const RdtPointerSample* items = &own;
+    int count = 1;
+    if (source->samples && source->samples->count > 0) {
+        items = source->samples->items;
+        count = source->samples->count;
+        if (source->samples->dropped) log_debug("pointer-samples: older samples dropped on overflow");
+    }
+    DomPointerSample rows[RDT_POINTER_SAMPLE_CAPACITY];
+    for (int i = 0; i < count; i++) {
+        const RdtPointerSample& s = items[i];
+        rows[i] = {s.x, s.y, native_pointer_pressure(source, s.pressure, args->buttons),
+                   s.tilt_x, s.tilt_y, s.twist, source->timestamp - s.timestamp};
+    }
+    dom_event_set_pointer_samples(event, rows, count);
+}
 
 static Item build_pointer_event_item(void* userdata) {
     PointerEventBuildArgs* args = (PointerEventBuildArgs*)userdata;
-    return js_create_native_pointer_event(args->type, args->client_x, args->client_y,
+    const MousePositionEvent* source = args->source;
+    DomPointerAxes axes = {};
+    bool pen = source && source->pointer_type != RDT_POINTER_MOUSE;
+    if (pen) {
+        axes = {source->pressure, source->tangential_pressure,
+                source->tilt_x, source->tilt_y, source->twist};
+    }
+    RootFrame roots(1);
+    Rooted<Item> event(roots, js_create_native_pointer_event(args->type, args->client_x, args->client_y,
         args->button, args->buttons, args->ctrl, args->shift, args->alt,
-        args->meta, args->pointer_type, 1, true);
+        args->meta, args->pointer_type, args->pointer_id, true, pen ? &axes : nullptr));
+    if (source && !item_is_error(event.get())) native_pointer_attach_samples(event.get(), args);
+    return event.get();
+}
+
+// PE6: the native pointer event behind a pointer event, when it carries device data.
+static const MousePositionEvent* native_pointer_source(EventContext* evcon) {
+    if (!evcon) return nullptr;
+    EventType type = evcon->event.type;
+    if (type != RDT_EVENT_MOUSE_MOVE && type != RDT_EVENT_MOUSE_DOWN && type != RDT_EVENT_MOUSE_UP) return nullptr;
+    return &evcon->event.mouse_position;
+}
+
+// PE6: a pen or eraser in W3C terms. Pointer Events 3 §4.1.1.2: an eraser is a pen whose
+// contact is button 5 and buttons bit 32.
+static void native_pointer_device(PointerEventBuildArgs* args) {
+    const MousePositionEvent* source = args->source;
+    if (!source || source->pointer_type == RDT_POINTER_MOUSE) return;
+    args->pointer_type = source->pointer_type == RDT_POINTER_TOUCH ? "touch" : "pen";
+    args->pointer_id = 1 + (int)source->pointer_id;
+    if (source->pointer_type != RDT_POINTER_ERASER) return;
+    if (args->buttons & 1) args->buttons = (args->buttons & ~1) | 32;
+    if (args->button == 0 && (!strcmp(args->type, "pointerdown") || !strcmp(args->type, "pointerup"))) {
+        args->button = 5;
+    }
 }
 
 struct NativePointerCapture : DomDocumentResourceData {
@@ -8604,6 +8663,7 @@ struct NativePointerCapture : DomDocumentResourceData {
     CssEnum resize_axes;
     bool resize_active;
     int buttons;
+    int pointer_id;   // the pointer that last pressed (PE6: a pen is not pointer 1)
     bool active;
 };
 static NativePointerCapture* native_pointer_captures;
@@ -8616,7 +8676,7 @@ static NativePointerCapture* native_pointer_capture(DomDocument* doc,bool create
     for(auto* capture=native_pointer_captures;capture;capture=capture->next) if(capture->document==doc) return capture;
     if(!doc||!create) return nullptr;
     auto* capture=(NativePointerCapture*)mem_calloc(1,sizeof(NativePointerCapture),MEM_CAT_RENDER);if(!capture) return nullptr;
-    capture->document=doc;
+    capture->document=doc;capture->pointer_id=1;
     if(!dom_document_add_resource(doc,capture,native_pointer_capture_destroy)) {mem_free(capture);return nullptr;}
     capture->next=native_pointer_captures;native_pointer_captures=capture;return capture;
 }
@@ -8707,8 +8767,8 @@ void radiant_pointer_capture_follow_rebuild(DomDocument* doc, DomNode* old_root,
 }
 extern "C" int dom_engine_pointer_capture(DomElement* element,int32_t id,unsigned operation) {
     auto* capture=element?native_pointer_capture(element->doc,false):nullptr;
-    if(operation==2) return capture&&id==1&&dom_node_ref_validate(element->doc,capture->pending)==element;
-    if(!capture||id!=1||!capture->active) return -1;
+    if(operation==2) return capture&&id==capture->pointer_id&&dom_node_ref_validate(element->doc,capture->pending)==element;
+    if(!capture||id!=capture->pointer_id||!capture->active) return -1;
     if(operation==0) {
         if(!dom_node_is_connected(element)) return -2;
         if(capture->buttons) capture->pending=dom_node_ref(element);
@@ -8738,16 +8798,18 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
                                            bool* dispatched = nullptr) {
     PointerEventBuildArgs args = {
         type, client_x, client_y, button, buttons,
-        ctrl, shift, alt, meta, pointer_type ? pointer_type : "mouse"
+        ctrl, shift, alt, meta, pointer_type ? pointer_type : "mouse", 1,
+        native_pointer_source(evcon)
     };
+    native_pointer_device(&args);
     // pointer transport can have no compatibility mouse event (touch/pen); project its own point.
     RdtLogicalPoint saved_pointer = {evcon->viewport_pointer_x, evcon->viewport_pointer_y};
     evcon->viewport_pointer_x = (float)client_x;
     evcon->viewport_pointer_y = (float)client_y;
     NativePointerCapture* capture=native_pointer_capture(event_context_target_document(evcon),true);
     if(capture) {
-        if(!strcmp(type,"pointerdown")) capture->active=true;
-        capture->buttons=buttons;
+        if(!strcmp(type,"pointerdown")) {capture->active=true;capture->pointer_id=args.pointer_id;}
+        capture->buttons=args.buttons;
         native_pointer_process_capture(evcon,capture,&args);
         DomNode* captured=dom_node_ref_validate(capture->document,capture->current);
         if(captured) target=(View*)captured;

@@ -143,6 +143,9 @@ DOM_OP(CORE, keyboard_click,   event, 1, "pn(n: any) -> bool",                  
 DOM_OP(CORE, keyboard_command, event, 2, "pn(n: any, name: string) -> bool",                dom_engine_keyboard_command, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, add_listener,     event, 4, "pn(n: any, type: string, fn: any, opts: any) -> null", dom_add_event_listener_bridge, DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, remove_listener,  event, 4, "pn(n: any, type: string, fn: any, opts: any) -> null", dom_remove_event_listener_bridge, DOM_F_MUTATES, "", none, "", "")
+// PE6 / PT10: the samples a native pointer event coalesces, as one f32[N, 7] array in
+// lambda.paint's stroke layout; Lambda's answer to getCoalescedEvents (PT-O8).
+DOM_OP(CORE, pointer_samples,  event, 1, "fn(event: any) -> any",                           dom_core_pointer_samples, DOM_F_NEUTRAL, "", none, "", "")
 // JS's legacy document.createEvent: it answers a JS Event object, so it needs
 // the realm and is JS-only by nature rather than by omission. Lambda does not
 // need it -- an event value is a map literal, {type: ..., bubbles: ...}, which

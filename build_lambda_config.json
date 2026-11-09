@@ -1115,6 +1115,7 @@
       "extra_exclude_source_files": [
         "radiant/clipboard_mac.mm",
         "radiant/ime_mac.mm",
+        "radiant/pen_mac.mm",
         "radiant/app_icon_mac.mm",
         "radiant/webview_child_mac.mm",
         "radiant/webview_layer_mac.mm",
@@ -2117,6 +2118,7 @@
         "radiant/app_icon_mac_static.cpp",
         "radiant/clipboard_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
+        "radiant/pen_mac_static.cpp",
         "radiant/rdt_video_stub.cpp"
       ],
       "additional_source_files": [],
