@@ -112,9 +112,10 @@ When `grammar.js` is modified, the Lambda CST parser artifacts are regenerated b
 | `test` | Run every suite except `jube` and `test_radiant_online_view_gtest`; `test-all` runs everything. |
 | `test-all` | Run ALL test suites (baseline + extended) in parallel. |
 | `test-all-baseline` | Run ALL baseline test suites. **Must pass 100%.** |
-| `test-lambda-baseline` | Run Lambda engine baseline tests only. **Must pass 100%.** |
-| `test-input-baseline` | Run input parser baselines: HTML5 WPT, CommonMark, YAML, ASCII Math, LaTeX Math. |
-| `test-radiant-baseline` | Build and run the reduced Radiant baseline with one console/JSON report. Paged media, document/text queries and UI automation use the explicit cases in `test/radiant_baseline_cases.json`; the runner checks that every selected case runs. UI automation includes all view fixtures and a representative subset of DOM fixtures in the same runner. EPUB persistence, native GeoMap and the original Three.js demo-page renderer cases run in the full gate. Other native, layout, snapshot and render checks retain their full baseline coverage. Native and script pools share a worker budget; layout and snapshots use isolated scratch directories. `RADIANT_TEST_CONFIG=release_native` selects optimized native runners after `make build-release-compile`; the default is `debug_native`. |
+| `test-lambda-baseline` | Run Lambda-owned engine and integration baseline tests. Sibling-owned unit tests run in their owners' `test-native` targets. **Must pass 100%.** |
+| `make -C ../lambda-input test-input-baseline` | Run the input owner's native unit and parser suites. |
+| `make -C ../radiant test-radiant-baseline` | Run the Radiant owner's native unit suites. |
+| `test-radiant-baseline` | Build and run the reduced Lambda-owned Radiant integration baseline with one console/JSON report; run `make -C ../radiant test-native` for Radiant-owned unit tests. Paged media, document/text queries and UI automation use the explicit cases in `test/radiant_baseline_cases.json`; the runner checks that every selected case runs. UI automation includes all view fixtures and a representative subset of DOM fixtures in the same runner. EPUB persistence, native GeoMap and the original Three.js demo-page renderer cases run in the full gate. Native and script pools share a worker budget; layout and snapshots use isolated scratch directories. `RADIANT_TEST_CONFIG=release_native` selects optimized native runners after `make build-release-compile`; the default is `debug_native`. |
 | `test-radiant-full` | Build and run the former complete Radiant baseline inventory, including EPUB persistence, native GeoMap, the original Three.js demo-page renderer cases, and all cases in the three reduced executables, including every DOM and view fixture in the combined UI run. This does not add the separate extended-category suites. |
 | `run-radiant-baseline`, `run-radiant-full` | Run the corresponding selection without rebuilding. `ARGS` accepts shared runner options; `--list` prints the inventory. |
 | `test-pdf-render` | Build the PDF visual/export runner and run its cases through eight CPU-capped workers with isolated scratch directories. Cases run in balanced batches of at most 16; `LAMBDA_PDF_TEST_BATCH_SIZE=1` restores process isolation per case. POSIX batches reuse a persistent render process; `LAMBDA_PDF_BATCH=0` selects ordinary render commands. Build the host first. `LAMBDA_PDF_TEST_JOBS` sets the case-worker limit; `PDF_TEST_CONFIG=release_native` selects the optimized runner after `make build-release-compile`. Supplying `ARGS` runs GTest directly for focused debugging. This executable belongs to `input / baseline`, independently of the Radiant baseline. |
@@ -187,7 +188,8 @@ make test                          # every suite except jube and the online view
 make test-all-baseline             # baseline only (must pass 100%)
 make test-lambda-baseline          # Lambda engine baseline
 make test-layout-baseline          # Radiant layout baseline
-make test-input-baseline           # input parser baselines
+make -C ../lambda-input test-input-baseline   # input owner unit baseline
+make -C ../radiant test-radiant-baseline     # Radiant owner unit baseline
 make test-fuzzy                    # 5-minute fuzz run
 make test-math-single test=frac    # single math test
 ```

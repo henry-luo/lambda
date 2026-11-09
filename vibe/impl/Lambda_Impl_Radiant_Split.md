@@ -4,6 +4,77 @@
 
 ## Current checkpoint
 
+### Owner-local unit baseline targets
+
+- **Goal:** provide input and Radiant unit baselines in their owning projects,
+  and remove the input-baseline target from Lambda (D9.1.1v4, D9.1.3v2).
+- **Implementation:** owner baseline names invoke their existing complete native
+  runners; Lambda's full gate invokes the input owner directly. The old Lambda
+  input runner and build selection are removed. Restrict the download catch-all
+  to download commands so the removed target cannot silently succeed.
+- **Verification:** input baseline ran 5,209 cases: 5,206 passed, one
+  skipped, and the existing graph LOC budget and external-parent tests failed.
+  Radiant baseline ran 807 cases: 762 passed, 45 skipped and none failed.
+  Lambda baseline build passed; the removed target now reports no rule, while
+  the download filename catch-all remains available.
+
+### Baseline ownership selection
+
+- **Goal:** exclude sibling-owned tests from Lambda's Lambda and Radiant
+  baseline targets while retaining Lambda integration checks (D9.1.1v4,
+  D9.1.3v2).
+- **Implementation:** both build inventories and runners select sources owned
+  by Lambda; stale local executables cannot pull sibling tests into the gate.
+  The independent input baseline and full aggregate coverage remain available.
+- **Verification:** all 82 runner contract checks passed; selection removes
+  four Lambda-baseline and 30 Radiant-baseline sibling-owned suites, all of
+  the latter registered by Radiant. Lambda baseline: 6,940 passed and one
+  pre-existing `mvp__mir_mvp_error_boundary_module` failure (6,941 total).
+  Radiant baseline passed with 7,531 passed, 303 partial and 20 skipped.
+  The four sibling-owned suites retained by the full Lambda gate built and
+  passed 251 cases with 25 existing skips.
+
+### Split native unit-test ownership
+
+- **Goal:** place tests of input-owned libraries and parsers in lambda-input,
+  native layout/render/event-host tests in Radiant, and retain Lambda runtime,
+  scripting, DOM adapter, and cross-project integration coverage in Lambda
+  (D9.1.1v4, D9.1.3v2, D6.3.3).
+- **Acceptance:** migrate owner-only tests with their helpers and fixtures;
+  each owner can build and run those tests against its archives, and Lambda's
+  existing aggregate references still resolve without source symlinks. Keep
+  mixed tests with Lambda unless their cases can be separated without loss.
+- **Verification budget:** run owner-focused migrated suites, build the Lambda
+  test projects that reference moved sources, then run relevant aggregate gates
+  when feasible. Record failures and unsupported environments separately.
+- **Implemented:** migrated input-only library, parser, formatter, network,
+  archive, model and CSS tests and native Radiant event, state, rendering,
+  media, fullscreen, and CSS/DOM tests with their helpers and required data.
+  Owner-local runners link the sibling archives; the input test utility archive
+  is built by input, and Lambda resolves moved sources and archive link closure.
+  Input fetches the pinned YAML corpus independently and uses shared Markdown;
+  Radiant uses shared layout and media data. Full integration tests remain in
+  Lambda.
+- **Verification:** all 125 removed Lambda test source/helper paths have an
+  owner copy (97 input, 28 Radiant); Lambda generator checks and 516 focused
+  migrated Lambda cases passed. The input owner run covered 5,209 cases:
+  5,206 passed, one skipped and two failed. The failures are the pre-existing
+  `GraphParserTest.ParserLocBudget` and the existing test/source disagreement
+  `TransitionTreeExternalParentTest.InadmissibleParentsAreDeclined`. All six
+  loopback HTTP cases passed after enabling cookies and Brotli in input's curl;
+  online network cases remain an explicit separate target. Radiant's owner-local
+  run covered 807 cases: 762 passed and 45 skipped; no cases failed.
+- **Lambda baseline:** 9,291 passed, 25 skipped and one failed
+  (`mvp__mir_mvp_error_boundary_module`); its input baseline passed 2,100/2,100.
+  This run preceded the curl feature repair.
+- **Radiant baseline:** passed with 7,975 passed, 303 partially passing,
+  21 skipped and no failures (8,299 total).
+- **Test262 baseline:** 40,261/40,261 fully passed, no regressions and
+  2,652 selection skips, using the rebuilt release executable.
+- **Outstanding:** resolve the two existing input checks and the Lambda script
+  baseline failure. Keep the mixed DOM range tests in Lambda because they
+  exercise its document provider and DOM seam.
+
 ### Complete source and normal-build ownership split
 
 - **Goal:** remove input-owned source and header links from Lambda; each normal
@@ -28,9 +99,9 @@
   allowlist, and ThorVG's detected OpenMP archive dependency during the builds.
   No tests were run. Some installed Homebrew archives report a newer macOS
   deployment version than the host's 15.7 target.
-- **Still outstanding:** legacy test/isolation and specialized build graphs,
-  platform dependency closure beyond this macOS host, and behavioral and
-  aggregate regression verification. Do not treat the full split as complete.
+- **Still outstanding:** specialized build graphs and platform dependency
+  closure beyond this macOS host; address the regression failures recorded in
+  the native test-ownership checkpoint above.
 
 
 ### Lambda project without top-level source links

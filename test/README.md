@@ -5,6 +5,12 @@ Written for coding agents; build and Make details live in [`doc/dev/Make_Guide.m
 
 Last verified against tree: 2026-10-11; Radiant baseline runner: 2026-10-13
 
+## Test ownership
+
+Input parsers, formatters and shared-library unit tests live in `../lambda-input/test`; native layout, rendering, media and host-interface tests live in `../radiant/test` (D9.1.1v4, D9.1.3v2). Lambda keeps runtime, scripting, DOM adapters and integration tests here. Existing Lambda aggregate entries resolve the owner-local sources through `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` and continue to write their executables under this checkout's `test/` directory.
+
+Run `make -C ../lambda-input test-input-baseline` and `make -C ../radiant test-radiant-baseline` for the native owner suites. The input target prepares its pinned YAML corpus and uses the sibling `lambda-test` Markdown corpus; Radiant uses that checkout's layout and media corpora. Public-network input tests are a separate `test-network-online` target. Lambda's `test-lambda-baseline` and `test-radiant-baseline` select Lambda-owned sources and integration scripts; they do not run sibling-owned unit tests. The full Lambda gate also invokes the input owner's baseline.
+
 ## Ground rules
 
 - Run everything from the repo root. Harnesses use repo-relative paths (`./lambda.exe`, `test/...`).
@@ -39,7 +45,7 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 | EPUB reader: `lmd/package/doc/ebook*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='*ebook*'`; `./test/test_ui_automation_gtest.exe --suite baseline --test 'ebook_*,doc_viewer_epub_preview,iframe_navigation_delegate,browser_focus_caret,browser_inline_focus'`; `python3 test/epub_reader_check.py --report temp/epub-state.json` |
 | Diff review: `lmd/package/doc/diff*`, byte grammar and process capture | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `./test/test_lambda_gtest.exe --gtest_filter='*grammar_*:*diff_*'`; `./test/test_ui_automation_gtest.exe --test 'diff_*'`; `./test/test_lambda_concurrency_gtest.exe` |
 | Native geographic maps: `radiant/geomap*`, `lmd/package/map*` | **`make test-lambda-baseline`** + **`make test-radiant-baseline`** | `make test-map` (frames, indexed picking, native pointer/control input), `make test-map-export`, `make test-map-reference` (first `npm ci --prefix test/map`); fixtures and pinned expression corpus in `test/map/`, functional goldens in `test/lambda/map/` |
-| Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make test-input-baseline` (5 corpora, also run by test-lambda-baseline) + `make test-input` (68-binary input suite) | `./test/test_input_model_gtest.exe`; `./test/test_input_blob_url_gtest.exe`; `./test/test_input_dom_native_gtest.exe`; `./test/test_markdown_gtest.exe --baseline`; `./test/test_input_roundtrip_gtest.exe --gtest_filter='JsonTests.*'`; `./test/test_html_gtest.exe` |
+| Input parsers / formatters: `lambda/input/`, `lambda/format/`, `lambda/io/` | `make -C ../lambda-input test-input-baseline` | `../lambda-input/build/test/test_input_model_gtest`; `../lambda-input/build/test/test_input_roundtrip_gtest --gtest_filter='JsonTests.*'`; `../lambda-input/build/test/markup/test_markdown_gtest --baseline` |
 | Script source writers: `lmd/package/doc/misc*` | `make test-input` + `make test-lambda-baseline` | `python3 test/script_format_roundtrip.py --report temp/script-format-roundtrip.json` (`--format` / `--route` select cases); `./test/test_lambda_gtest.exe --gtest_filter='*doc_misc_roundtrip*'`. EML/VCF/ICS pass; prose readback currently fails. Details: [`Script_Formats_Support.md`](../doc/Script_Formats_Support.md#verification) |
 | CSS engine: `lambda/input/css/` | **`make test-radiant-baseline`** + `make test-input` (`test_css_*` binaries) | `./test/test_css_parser_gtest.exe`; `make layout test=<file>` |
 | Radiant layout / render / events: `radiant/` | **`make test-radiant-baseline`** (the `radiant` suite's baseline native and script checks) | `make layout test=baseline_301_simple_margin`; `make layout suite=<dir>`; `./test/test_ui_automation_gtest.exe --suite baseline --test <id>`; `make test-render test=<name>` |
@@ -233,10 +239,11 @@ still require native checks. Design: [Radiant Fullscreen](../vibe/radiant/Radian
 |---|---|
 | `make test` | every suite except `jube`, and minus `test_radiant_online_view_gtest`. This is not `test-all`, despite what `make help` says |
 | `make test-all` / `test-all-baseline` / `test-extended` | all suites / `--category=baseline` / `--category=extended`. `test-extended` also runs `dom-ui-run`. |
-| `make test-lambda-baseline` | `test-input-baseline`, then `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`), one merged report |
-| `make test-lambda-full` | the above plus concurrency, `test_lambda_extended_gtest`, `test_lambda_domnode_gtest`, `test_validator_input_gtest` |
-| `make test-input-baseline` | `test_wpt_html_parser_gtest --baseline`, `test_markdown_gtest --baseline`, `test_yaml_suite_gtest`, native ASCII and LaTeX cases in `test_input_math_gtest`; the script-backed math roundtrips run in the Lambda suite |
-| `make test-radiant-baseline` | builds the native projects selected by `--target=radiant --category=baseline`, then runs independent checks concurrently through `test/test_run.js` within a shared worker budget. All native checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks appear in the shared console/JSON report; layout partials, skips and baseline verdicts are retained |
+| `make test-lambda-baseline` | Lambda-owned `lambda` suite baseline (excludes `test_node_prelim_gtest`, `test_lambda_concurrency_gtest`) |
+| `make test-lambda-full` | the above, the input owner's baseline, WebSocket interoperability, concurrency, extended runtime, and the four relocated unit suites retained by the full gate |
+| `make -C ../lambda-input test-input-baseline` | input-owned native library, parser, formatter, model, CSS, archive and offline network suites, including HTML, Markdown and YAML corpora |
+| `make -C ../radiant test-radiant-baseline` | Radiant-owned native layout, rendering, media and host-interface unit suites |
+| `make test-radiant-baseline` | Lambda-owned Radiant integration checks, layout suites, page snapshot, UI/DOM fixtures and render visual checks run through `test/test_run.js` within a shared worker budget; layout partials, skips and baseline verdicts are retained |
 | `make run-radiant-baseline` | the same Radiant checks with no rebuild |
 | `make test-layout-baseline` | layout baseline suites only |
 
@@ -482,7 +489,7 @@ Run `./setup-test.sh` once per clone (`LAMBDA_TEST_DIR=<dir>` overrides `../lamb
 | `../lambda-test/editing` | read directly | not linked (`test/editing` is a tracked dir) | `test_chromium_contenteditable_gtest` |
 | `ref/wpt` | WPT clone at the commit pinned in `setup-test.sh` | ignored | WPT runners |
 | `ref/test262`, `ref/node` | manual checkout (`setup-test.sh` does not fetch them) | ignored | Test262, Node official tests (`make node-shim`) |
-| `test/yaml` | git submodule | submodule | `test_yaml_suite_gtest` (`ensure-yaml-submodule` inits it) |
+| `test/yaml` | git submodule | submodule | Lambda's legacy YAML test paths; the input owner's baseline prepares its own pinned corpus |
 
 ## 6. Updating goldens and baselines
 
@@ -536,7 +543,7 @@ The other two fixtures use `accept test/lambda/pdf/output_resources.golden.pdf` 
 Gotchas:
 - In `test_lambda_gtest`, the gtest filter also chooses which scripts the batch runs, so a narrow filter is fast. `test_lambda_std_gtest` always batches all of `test/std`.
 - The display-list, state-store, DOM-range and media-player tests link against `test/*_stubs.cpp`. A new `radiant/` symbol that code calls needs a stub there, and only `make build-test` catches a missing one.
-- The `LAMBDA_BASELINE_TEST_PROJECTS`, `RADIANT_BASELINE_TEST_PROJECTS` and `INPUT_BASELINE_TEST_PROJECTS` lists at the top of the Makefile must match what the gates run. Update them when you add a baseline binary.
+- The `LAMBDA_BASELINE_TEST_PROJECTS` and `RADIANT_BASELINE_TEST_PROJECTS` lists derive from the runner selections used by the gates.
 
 WebAssembly build and tests: `make build-wasm`, `make test-wasm`, and [`doc/dev/Lambda_WASM_Build.md`](../doc/dev/Lambda_WASM_Build.md).
 

@@ -27,6 +27,7 @@ let inputResultsFile = '';
 let listTests = false;
 let listBuildTargets = false;
 let radiantBaseline = false;
+let lambdaOwnedOnly = false;
 
 function addSelectedTests(target, value) {
     if (!value) return;
@@ -56,6 +57,7 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--sequential')       parallelExecution = false;
     else if (arg === '--parallel')         parallelExecution = true;
     else if (arg === '--radiant-baseline') radiantBaseline = true;
+    else if (arg === '--lambda-owned')     lambdaOwnedOnly = true;
     else if (arg === '--list')             listTests = true;
     else if (arg === '--list-build-targets') listBuildTargets = true;
     else if (arg === '-h' || arg === '--help') {
@@ -69,6 +71,7 @@ for (let i = 0; i < args.length; i++) {
   --sequential         Run tests sequentially (default: parallel)
   --parallel           Run tests in parallel (default)
   --radiant-baseline   Use the reduced Radiant baseline selection
+  --lambda-owned       Select tests whose sources are owned by Lambda
   --list               Print the selected test inventory as JSON without running it
   --list-build-targets  Print unique native build targets for the selection
   --help               Show this help message
@@ -99,6 +102,27 @@ const TEST_BINARY_DIR = process.env.LAMBDA_TEST_BIN_DIR
     ? path.resolve(ROOT_DIR, process.env.LAMBDA_TEST_BIN_DIR)
     : path.join(ROOT_DIR, 'test');
 const IS_WINDOWS = process.platform === 'win32';
+
+// Resolve ownership from the source, not a possibly stale executable in test/.
+function testSourceOwner(source) {
+    const relative = source.startsWith('test/') ? source : `test/${source}`;
+    const owners = [
+        ['lambda', ROOT_DIR],
+        ['lambda-input', path.resolve(ROOT_DIR, process.env.LAMBDA_INPUT_ROOT || '../lambda-input')],
+        ['radiant', path.resolve(ROOT_DIR, process.env.RADIANT_ROOT || '../radiant')],
+    ];
+    for (const [owner, root] of owners) {
+        const candidate = path.resolve(root, relative);
+        if (!fs.existsSync(candidate)) continue;
+        const real = fs.realpathSync(candidate);
+        for (const [actualOwner, actualRoot] of owners.slice(1)) {
+            const resolvedRoot = fs.existsSync(actualRoot) ? fs.realpathSync(actualRoot) : actualRoot;
+            if (real === resolvedRoot || real.startsWith(resolvedRoot + path.sep)) return actualOwner;
+        }
+        return owner;
+    }
+    return null;
+}
 
 const SCRIPT_TESTS = [
     {
@@ -368,10 +392,11 @@ function discoverTests(config) {
             const exePath = path.join(TEST_BINARY_DIR, executable);
             const srcPath = path.join(ROOT_DIR, src.startsWith('test/') ? src : `test/${src}`);
 
-            if (fs.existsSync(exePath) || fs.existsSync(srcPath)) {
+            if (lambdaOwnedOnly || fs.existsSync(exePath) || fs.existsSync(srcPath)) {
                 const libs = t.libraries || [];
                 tests.push({
                     baseName,
+                    source: src,
                     exePath,
                     suite: suite.suite,
                     category: t.category || suite.category || 'baseline',
@@ -439,6 +464,14 @@ function filterTests(tests) {
     if (excludeTests.size) result = result.filter(t => !excludeTests.has(t.baseName));
     if (includeTests.size) result = result.filter(t => includeTests.has(t.baseName));
     if (targetCategory) result = result.filter(t => t.category === targetCategory);
+    if (lambdaOwnedOnly) {
+        result = result.filter(t => {
+            if (!t.source) return true; // Lambda-owned script runners have no native source.
+            const owner = testSourceOwner(t.source);
+            if (!owner) throw new Error(`test source not found in any project: ${t.source}`);
+            return owner === 'lambda';
+        });
+    }
     if (radiantBaseline) {
         // Keep the full inventory as the source of truth; the fast gate selects
         // named cases so new tests cannot silently change its coverage or cost.

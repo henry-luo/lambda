@@ -246,7 +246,8 @@ make test-all-baseline  # ALL baseline suites (must pass 100%)
 # Core suites — run these after any engine changes
 make test-lambda-baseline    # Lambda core functionality
 make test-radiant-baseline   # Radiant layout engine
-make test-input-baseline     # Input parsers (HTML5 WPT, CommonMark, YAML)
+make -C ../lambda-input test-input-baseline   # Input owner unit baseline
+make -C ../radiant test-radiant-baseline     # Radiant owner unit baseline
 
 # Targeted suites
 make test-mir                # MIR JIT compilation tests

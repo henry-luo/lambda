@@ -68,7 +68,8 @@ def expect_static_runtime_providers(module, platform_name: str) -> None:
         if '"node-core",' in generated:
             fail(f"{platform_name} static runtime host linked a replaceable Node module")
         for provider in ('lambda-rt-cpp', 'radiant'):
-            if f'lib{provider}.a' not in generated:
+            expected = f'lib{provider}.a'
+            if expected not in generated:
                 fail(f"{platform_name} runtime host omitted static provider {provider}")
         if option not in generated:
             fail(f"{platform_name} runtime test host omitted the D9.4.6 export allowlist")
@@ -277,13 +278,15 @@ def expect_re2_source_build(module) -> None:
             generator._generate_single_test('test_re2_provider', 'lib/test_grep_gtest.cpp',
                                             dependencies, '', '', ['gtest', 'gtest_main', *libraries])
             emitted = '\n'.join(generator.premake_content)
-            if not re.search(r'dependson \{[^}]*"re2"', emitted):
-                fail(f'{platform_name} test can link RE2 before its source target builds')
+            if 'libre2.a' not in emitted or 'build/lib/native/%{cfg.buildcfg}' not in emitted:
+                fail(f'{platform_name} test lost its input-owned profile RE2 archive')
+            if re.search(r'dependson \{[^}]*"re2"', emitted):
+                fail(f'{platform_name} test rebuilds RE2 from sibling sources')
         generator.premake_content = []
         generator.generate_main_program()
         emitted = '\n'.join(generator.premake_content)
-        if not re.search(r'dependson \{[^}]*"re2"', emitted) or library['lib'] not in emitted:
-            fail(f'{platform_name} host lost the source-built RE2 archive dependency')
+        if library['lib'] not in emitted or re.search(r'dependson \{[^}]*"re2"', emitted):
+            fail(f'{platform_name} host lost the input-owned RE2 archive dependency')
 
 
 def expect_image_source_build(module) -> None:
@@ -311,15 +314,16 @@ def expect_image_source_build(module) -> None:
         generator.premake_content = []
         generator.generate_main_program()
         emitted = '\n'.join(generator.premake_content)
-        if not re.search(r'dependson \{[^}]*"lambda-image-codecs"', emitted):
-            fail('host can link the image archive before its source target builds')
+        if 'liblambda-image-codecs.a' not in emitted or re.search(r'dependson \{[^}]*"lambda-image-codecs"', emitted):
+            fail('host lost the input-owned image archive dependency')
         if 'build_temp/image-codecs' in emitted:
             fail('host still consumes the retired CMake codec prefix')
         generator.premake_content = []
         generator._generate_single_test('test_image_provider', 'test/test_image_io_gtest.cpp',
                                         ['lambda-data'], '', '', ['gtest', 'gtest_main'])
-        if not re.search(r'dependson \{[^}]*"lambda-image-codecs"', '\n'.join(generator.premake_content)):
-            fail('image tests lost their transitive source-build dependency')
+        emitted = '\n'.join(generator.premake_content)
+        if 'liblambda-image-codecs.a' not in emitted or re.search(r'dependson \{[^}]*"lambda-image-codecs"', emitted):
+            fail('image tests lost their input-owned archive dependency')
     generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'windows',
                                         target_architecture='x86_64')
     codec = next(t for t in generator.config['targets'] if t['name'] == 'lambda-image-codecs')
@@ -387,6 +391,21 @@ def expect_cli_sibling_roots(module) -> None:
     includes = {(ROOT / path).resolve() for path in generator.config['includes']}
     if not set(module.sibling_roots()).issubset(includes):
         fail('CLI include overlay lost a sibling project root')
+
+
+def expect_owned_test_source_resolution(module) -> None:
+    input_root, radiant_root = module.sibling_roots()
+    cases = [
+        ('lib/test_atomic_gtest.cpp', input_root / 'test/lib/test_atomic_gtest.cpp'),
+        ('test_input_sourcepos_gtest.cpp', input_root / 'test/test_input_sourcepos_gtest.cpp'),
+        ('test/css/test_css_parser_gtest.cpp', input_root / 'test/css/test_css_parser_gtest.cpp'),
+        ('test_animation_gtest.cpp', radiant_root / 'test/test_animation_gtest.cpp'),
+        ('test/css/test_css_dom_crud.cpp', radiant_root / 'test/css/test_css_dom_crud.cpp'),
+    ]
+    for source, expected in cases:
+        actual = module.resolve_split_paths({'source': source})['source']
+        if (ROOT / actual).resolve() != expected.resolve():
+            fail(f'test source {source} did not resolve to its owner: {actual}')
 
 
 def expect_static_module_archive_profiles() -> None:
@@ -573,6 +592,7 @@ def main() -> int:
     expect_macos_ime_profile(module)
     expect_safety_early_profiles(module)
     expect_cli_sibling_roots(module)
+    expect_owned_test_source_resolution(module)
     expect_profile_isolated_archives(module)
     expect_static_runtime_providers(module, "macos")
     expect_static_runtime_providers(module, "linux")

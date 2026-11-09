@@ -1,6 +1,8 @@
 """Resolve source and header paths owned by the sibling projects."""
 
 import os
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -19,6 +21,28 @@ def sibling_roots():
     root = Path(__file__).resolve().parent.parent
     return (Path(os.environ.get('LAMBDA_INPUT_ROOT', root.parent / 'lambda-input')).resolve(),
             Path(os.environ.get('RADIANT_ROOT', root.parent / 'radiant')).resolve())
+
+
+def thorvg_openmp_archives(required=False):
+    """Use the OpenMP runtime recorded by the owner-built ThorVG archive."""
+    pkg_dir = sibling_roots()[0] / 'build/deps/thorvg/lib/pkgconfig'
+    metadata = pkg_dir / 'thorvg.pc'
+    if not metadata.is_file() and not required:
+        return []
+    env = dict(os.environ)
+    env['PKG_CONFIG_PATH'] = str(pkg_dir) + os.pathsep + env.get('PKG_CONFIG_PATH', '')
+    flags = shlex.split(subprocess.check_output(
+        ['pkg-config', '--libs', '--static', 'thorvg'], env=env, text=True))
+    archives = []
+    for flag in flags:
+        if flag.endswith('/libomp.dylib'):
+            archive = Path(flag).with_suffix('.a')
+            if not archive.is_file():
+                raise RuntimeError(f'ThorVG enabled OpenMP but its static runtime is missing: {archive}')
+            archives.append(str(archive))
+        elif flag in ('-lomp', '-lgomp'):
+            archives.append(flag)
+    return archives
 
 
 def use_input_scripts():
@@ -82,6 +106,10 @@ def resolve_split_paths(config):
             value = value.replace('${input_root}', str(input_root)).replace('${radiant_root}', str(radiant_root))
         if isinstance(value, str) and field in PATH_FIELDS:
             if field == 'source' and not value.startswith('test/'):
+                # Test manifests historically spell paths relative to test/.
+                candidate = project_source_path('test/' + value, root, (input_root, radiant_root))
+                if candidate.is_file() and not candidate.is_relative_to(root):
+                    return Path(os.path.relpath(candidate, root)).as_posix()
                 return value
             path = project_source_path(value, root, (input_root, radiant_root))
             if not path.is_relative_to(root):
@@ -91,7 +119,7 @@ def resolve_split_paths(config):
     result = visit(config)
     # Canonical includes resolve against the owning project, including overrides.
     includes = result.setdefault('includes', [])
-    for directory in (input_root, radiant_root, input_root / 'test', radiant_root / 'test'):
+    for directory in (input_root, radiant_root, input_root / 'test', input_root / 'test/css', radiant_root / 'test'):
         path = Path(os.path.relpath(directory, root)).as_posix()
         if path not in includes:
             includes.append(path)

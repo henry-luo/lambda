@@ -68,25 +68,15 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
 # Derive native build projects from the same suite selection used for execution.
-RADIANT_BUILD_SELECTION ?= --radiant-baseline
+RADIANT_BUILD_SELECTION ?= --radiant-baseline --lambda-owned
 RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline $(RADIANT_BUILD_SELECTION) --list-build-targets) test_wpt_input_events_gtest
 # Native runners can use release code for whole-gate performance measurements.
 RADIANT_TEST_CONFIG ?= debug_native
 PDF_TEST_CONFIG ?= debug_native
 # Derive builds from the execution selection so newly added suites cannot run
 # stale binaries. The concurrency and Node preliminary suites stay excluded.
-LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --list-build-targets)
-# test-input-baseline invokes these native binaries directly, so keep their
-# build separate from the full test aggregate and reusable by both targets.
-INPUT_BASELINE_TEST_PROJECTS := \
-	test_wpt_html_parser_gtest \
-	test_markdown_gtest \
-	test_yaml_suite_gtest \
-	test_input_math_gtest
-INPUT_MATH_TEST ?= ./test/test_input_math_gtest.exe
-# GoogleTest emits pass/skip records and suite summaries unrelated to failures;
-# retain runtime diagnostics and failure records so baseline output stays actionable.
-GTEST_PROGRESS_FILTER = grep -vE '^Running main\(\) from |^Note: Google Test filter =|^\[ RUN      \]|^\[       OK \]|^\[  SKIPPED \]|^\[ DISABLED \]|^  YOU HAVE [0-9]+ DISABLED TESTS|^\[----------\]|^\[==========\]|^\[  PASSED  \]'
+LAMBDA_BASELINE_SELECTION = --target=lambda --category=baseline --lambda-owned --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest
+LAMBDA_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --list-build-targets)
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -511,11 +501,11 @@ tree-sitter-libs: tree-sitter-jube-libs
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
-	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-input-baseline test-radiant-baseline test-radiant-full test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-mir-gc-stress-full test-bash-baseline test-radiant-baseline test-radiant-full test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-headless build-headless lambda-nomir build-nomir lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs \
-	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test run-radiant-baseline run-radiant-full run-layout-baseline-suites \
+	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test run-radiant-baseline run-radiant-full run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-lambda-inventory fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches verify-re2-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-parity test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
@@ -566,7 +556,6 @@ help:
 	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
 	@echo "  clean-premake - Clean Premake build artifacts and generated files"
 	@echo "  build-test    - Build all test executables using Premake"
-	@echo "  build-input-baseline - Build only native input baseline test executables"
 	@echo "  build-lambda-baseline - Build Lambda baseline runtime and input test executables"
 	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
 	@echo "  build-lambda-split - Link Lambda against sibling archives"
@@ -594,7 +583,6 @@ help:
 	@echo "  test-mir-gc-stress - Run batched GC stress and reviewed backend-parity probes"
 	@echo "  test-mir-gc-stress-full - Force GC for every MIR corpus fixture"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
-	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-math-corpus - Run the font-driven SVG math formula corpus"
 	@echo "  test-mathcmp     - Compare Lambda math PNGs against pdfLaTeX (ARGS='--case Functions')"
 	@echo "  test-radiant-baseline - Run the reduced Radiant baseline with one report"
@@ -1624,7 +1612,7 @@ interp-bench:
 	@python3 test/interp/repl_bench.py
 
 test-lambda-baseline: TEST_BUILD_QUIET := 1
-test-lambda-baseline: build-lambda-baseline test-input-baseline test-gtest-result-counts
+test-lambda-baseline: build-lambda-baseline test-gtest-result-counts
 	@echo "Clearing HTTP cache for clean test runs..."
 	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
@@ -1632,14 +1620,14 @@ test-lambda-baseline: build-lambda-baseline test-input-baseline test-gtest-resul
 	@$(PYTHON) test/sqlite_commit_sync_test.py
 	@echo "Running LAMBDA baseline test suite..."
 	# ordinary debug is the non-ASan host and carries the JS trace hooks.
-	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --parallel
 
 # Preserve explicit T0/AUTO parity arms; ordinary script cases exercise MVP/JIT.
 .PHONY: test-lambda-mvp
 test-lambda-mvp: TEST_BUILD_QUIET := 1
 test-lambda-mvp: build-lambda-baseline
 	@echo "Running Lambda baseline GTests with MVP selected for JIT arms..."
-	@LAMBDA_TEST_MIR_COMPILER=mvp LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel $(ARGS)
+	@LAMBDA_TEST_MIR_COMPILER=mvp LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js $(LAMBDA_BASELINE_SELECTION) --parallel $(ARGS)
 
 # Independent RFC 6455 peers, including TLS and malformed input.
 .PHONY: test-websocket
@@ -1654,6 +1642,7 @@ test-chat-clients: build
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
+	@$(MAKE) -C "$(SPLIT_INPUT_ROOT)" PROFILE=debug test-input-baseline
 	@echo "Running WebSocket interoperability gate..."
 	@$(PYTHON) test/websocket/test_websocket.py
 	@node test/websocket/test_browser_websocket.cjs
@@ -1661,8 +1650,9 @@ test-lambda-full: test-lambda-baseline
 	@./test/test_lambda_concurrency_gtest.exe
 	@echo "Running extended Lambda runtime gate..."
 	@./test/test_lambda_extended_gtest.exe
-	@echo "Running Lambda DOM-node gate..."
-	@./test/test_lambda_domnode_gtest.exe
+	@echo "Running sibling-owned tests retained by the full Lambda gate..."
+	@$(MAKE) -C build/premake config=debug_native test_zip_gtest test_lambda_domnode_gtest test_css_dom_integration test_css_dom_crud -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@node test/test_run.js --target=lambda --category=baseline --include-test=test_zip_gtest,test_lambda_domnode_gtest,test_css_dom_integration,test_css_dom_crud --parallel
 	@echo "Running Lambda validator-input gate..."
 	@./test/test_validator_input_gtest.exe
 	@echo "Running semantics-model verification gate..."
@@ -1907,132 +1897,6 @@ node-update-baseline: build-test node-shim
 node-official-report:
 	@$(PYTHON) -B test/node/node_official_report.py
 
-ensure-yaml-submodule:
-	@if [ ! -f test/yaml/229Q/=== ]; then \
-		echo "Initializing test/yaml submodule..."; \
-		git submodule update --init test/yaml; \
-	fi
-
-test-input-baseline: build-input-baseline ensure-yaml-submodule
-	@echo "Clearing HTTP cache for clean test runs..."
-	@rm -rf temp/cache
-	@mkdir -p test_output
-	@echo "=============================================================="
-	@echo "🧪 Running INPUT baseline tests"
-	@echo "=============================================================="
-	@total_passed=0; \
-	total_failed=0; \
-	total_skipped=0; \
-	wpt_passed=0; wpt_failed=0; wpt_skipped=0; wpt_status="⏭️  SKIP"; \
-	md_passed=0; md_failed=0; md_skipped=0; md_status="⏭️  SKIP"; \
-	yaml_passed=0; yaml_failed=0; yaml_skipped=0; yaml_status="⏭️  SKIP"; \
-	math_passed=0; math_failed=0; math_skipped=0; math_status="⏭️  SKIP"; \
-	latex_math_passed=0; latex_math_failed=0; latex_math_skipped=0; latex_math_status="⏭️  SKIP"; \
-	\
-	echo ""; \
-	echo "📦 HTML5 WPT Parser Tests:"; \
-	if [ -f "test/test_wpt_html_parser_gtest.exe" ]; then \
-		output=$$(./test/test_wpt_html_parser_gtest.exe --baseline 2>&1) || true; \
-		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
-		wpt_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		wpt_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		wpt_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		wpt_passed=$${wpt_passed:-0}; wpt_failed=$${wpt_failed:-0}; wpt_skipped=$${wpt_skipped:-0}; \
-		if [ "$$wpt_failed" = "0" ] || [ -z "$$wpt_failed" ]; then wpt_status="✅ PASS"; wpt_failed=0; else wpt_status="❌ FAIL"; fi; \
-	else \
-		echo "   ⚠️  test/test_wpt_html_parser_gtest.exe not found"; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 CommonMark Markdown Tests:"; \
-	if [ -f "test/test_markdown_gtest.exe" ]; then \
-		output=$$(./test/test_markdown_gtest.exe --baseline 2>&1) || true; \
-		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
-		md_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		md_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		md_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		md_passed=$${md_passed:-0}; md_failed=$${md_failed:-0}; md_skipped=$${md_skipped:-0}; \
-		if [ "$$md_failed" = "0" ] || [ -z "$$md_failed" ]; then md_status="✅ PASS"; md_failed=0; else md_status="❌ FAIL"; fi; \
-	else \
-		echo "   ⚠️  test/test_markdown_gtest.exe not found"; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 YAML Suite Tests:"; \
-	if [ -f "test/test_yaml_suite_gtest.exe" ]; then \
-		output=$$(./test/test_yaml_suite_gtest.exe 2>&1) || true; \
-		echo "$$output" | grep -E "^===|^Total|^Pass rate" | head -10; \
-		yaml_total=$$(echo "$$output" | grep "Total test cases:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		yaml_json_passed=$$(echo "$$output" | grep "JSON Comparison Results" -A1 | grep "Total:" | grep -oE "Passed: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
-		yaml_json_failed=$$(echo "$$output" | grep "JSON Comparison Results" -A1 | grep "Total:" | grep -oE "Failed: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
-		yaml_error_passed=$$(echo "$$output" | grep "Error Test Results" -A1 | grep "Total:" | grep -oE "Passed[^:]*: [0-9]+" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		yaml_parse_passed=$$(echo "$$output" | grep "Parse-Only Test Results" -A1 | grep "Total:" | grep -oE "Passed[^:]*: [0-9]+" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		yaml_passed=$$((yaml_json_passed + yaml_error_passed + yaml_parse_passed)); \
-		yaml_passed=$${yaml_passed:-0}; yaml_json_failed=$${yaml_json_failed:-0}; \
-		yaml_failed=$${yaml_json_failed:-0}; yaml_skipped=0; \
-		if [ "$$yaml_failed" = "0" ] || [ -z "$$yaml_failed" ]; then yaml_status="✅ PASS"; yaml_failed=0; else yaml_status="❌ FAIL"; fi; \
-	else \
-		echo "   ⚠️  test/test_yaml_suite_gtest.exe not found"; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 ASCII Math Tests:"; \
-	if [ -f "$(INPUT_MATH_TEST)" ]; then \
-		math_exit=0; output=$$("$(INPUT_MATH_TEST)" --gtest_filter=NativeMathInputTest.AsciiParserBuildsOperatorTree 2>&1) || math_exit=$$?; \
-		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
-		math_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		math_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		math_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		math_passed=$${math_passed:-0}; math_failed=$${math_failed:-0}; math_skipped=$${math_skipped:-0}; \
-		if { [ "$$math_exit" != "0" ] || [ "$$math_passed" = "0" ]; } && [ "$$math_failed" = "0" ]; then math_failed=1; fi; \
-		if [ "$$math_failed" = "0" ] || [ -z "$$math_failed" ]; then math_status="✅ PASS"; math_failed=0; else math_status="❌ FAIL"; fi; \
-	else \
-		echo "   ⚠️  $(INPUT_MATH_TEST) not found"; \
-		math_failed=1; math_status="❌ FAIL"; \
-	fi; \
-	\
-	echo ""; \
-	echo "📦 LaTeX Math Tests:"; \
-	if [ -f "$(INPUT_MATH_TEST)" ]; then \
-		latex_math_exit=0; output=$$("$(INPUT_MATH_TEST)" --gtest_filter=NativeMathInputTest.LatexParserBuildsFractionTree 2>&1) || latex_math_exit=$$?; \
-		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
-		latex_math_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		latex_math_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		latex_math_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		latex_math_passed=$${latex_math_passed:-0}; latex_math_failed=$${latex_math_failed:-0}; latex_math_skipped=$${latex_math_skipped:-0}; \
-		if { [ "$$latex_math_exit" != "0" ] || [ "$$latex_math_passed" = "0" ]; } && [ "$$latex_math_failed" = "0" ]; then latex_math_failed=1; fi; \
-		if [ "$$latex_math_failed" = "0" ] || [ -z "$$latex_math_failed" ]; then latex_math_status="✅ PASS"; latex_math_failed=0; else latex_math_status="❌ FAIL"; fi; \
-	else \
-		echo "   ⚠️  $(INPUT_MATH_TEST) not found"; \
-		latex_math_failed=1; latex_math_status="❌ FAIL"; \
-	fi; \
-	\
-	total_passed=$$((wpt_passed + md_passed + yaml_passed + math_passed + latex_math_passed)); \
-	total_failed=$$((wpt_failed + md_failed + yaml_failed + math_failed + latex_math_failed)); \
-	total_tests=$$((total_passed + total_failed)); \
-	\
-	echo ""; \
-	echo "=============================================================="; \
-	echo "🏁 INPUT BASELINE TEST RESULTS"; \
-	echo "=============================================================="; \
-	echo ""; \
-	echo "📊 Test Results by Suite:"; \
-	echo "   ├── HTML5 WPT Parser    $$wpt_status  ($$wpt_passed passed, $$wpt_failed failed)"; \
-	echo "   ├── CommonMark Markdown $$md_status  ($$md_passed passed, $$md_failed failed)"; \
-	echo "   ├── YAML Suite          $$yaml_status  ($$yaml_passed passed, $$yaml_failed failed)"; \
-	echo "   ├── ASCII Math          $$math_status  ($$math_passed passed, $$math_failed failed)"; \
-	echo "   └── LaTeX Math          $$latex_math_status  ($$latex_math_passed passed, $$latex_math_failed failed)"; \
-	echo ""; \
-	echo "📊 Overall Results:"; \
-	echo "   Total Tests: $$total_tests"; \
-	echo "   ✅ Passed:   $$total_passed"; \
-	if [ $$total_failed -gt 0 ]; then \
-		echo "   ❌ Failed:   $$total_failed"; \
-	fi; \
-	echo "=============================================================="; \
-	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json; \
-	if [ $$total_failed -gt 0 ]; then exit 1; fi
-
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
 # `baseline` is the untracked work-in-progress corpus; only manifest-backed suites belong here.
 # build configuration owns the default inventory; keep command-line overrides available.
@@ -2190,7 +2054,7 @@ test-svg-smil: build
 # All Radiant checks use the shared runner's JSON artifacts and final report.
 # Native and script pools share a worker budget; artifact-sharing checks remain exclusive.
 run-radiant-baseline:
-	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline --radiant-baseline $(ARGS)
+	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(RADIANT_BUILD_SELECTION) $(ARGS)
 
 run-radiant-full:
 	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(ARGS)
@@ -3238,14 +3102,6 @@ test-split-fetch: build-lambda-split
 	LAMBDA_INPUT_ROOT="$(abspath $(if $(LAMBDA_INPUT_ROOT),$(LAMBDA_INPUT_ROOT),../lambda-input))" $(PYTHON) test/test_fetch_lifetime.py ./lambda-static.exe
 	$(PYTHON) test/test_split_host_snapshot.py ./lambda-static.exe
 
-# Build only the native binaries invoked by test-input-baseline. Keeping this
-# separate prevents that prerequisite from pulling the all-tests target back
-# into test-lambda-baseline transitively.
-# source-built external archives are ordered by the generated Premake graph.
-build-input-baseline: build-lambda-data
-	@echo "Building input baseline test executables..."
-	$(call run_make_with_error_summary,input-baseline,debug_native,,$(INPUT_BASELINE_TEST_PROJECTS))
-
 # Build the Lambda host and only the native projects selected by the Lambda
 # baseline runner. The release-host branch preserves the existing convention
 # that baseline tests use an already-selected release host when available.
@@ -3255,7 +3111,7 @@ build-input-baseline: build-lambda-data
 # debug and release share lambda.exe; remove it before a release host rebuild
 # so make cannot mistake an ASan debug binary for an up-to-date release host.
 # CryptoKey lazily loads node-crypto; stale DSOs otherwise hide current host behavior.
-build-lambda-baseline: build-input-baseline build-node-core build-node-fs build-node-crypto
+build-lambda-baseline: build-lambda-data build-node-core build-node-fs build-node-crypto
 	@echo "Building the Lambda baseline runtime and native test executables..."
 	@if [ -f .lambda_release_build ]; then \
 		$(MAKE) build-lambda-split SPLIT_PROFILE=release SPLIT_OUTPUT=lambda.exe; \
@@ -3720,8 +3576,10 @@ download:
 	node utils/downloader/download-page.js "$$URL_VAR" "$$OUTPUT_DIR" --prefix "$$PREFIX" --name "$$FILENAME"
 
 # Catch-all target to allow filenames as targets for download
+ifneq ($(filter download,$(MAKECMDGOALS)),)
 %:
 	@:
+endif
 
 # Run compilation performance benchmark
 bench-compile:

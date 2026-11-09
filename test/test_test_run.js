@@ -209,6 +209,33 @@ function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = 
 }
 
 try {
+    check('Lambda-owned baselines exclude sibling sources even with stale executables', () => {
+        fs.writeFileSync(path.join(fixture, 'test_zip_gtest.exe'), fake, { mode: 0o755 });
+        for (const suite of ['lambda', 'radiant']) {
+            const selection = ['--target=' + suite, '--category=baseline', '--lambda-owned'];
+            if (suite === 'radiant') selection.push('--radiant-baseline');
+            const listed = invoke([...selection, '--list'], { LAMBDA_TEST_BIN_DIR: fixture });
+            assert.equal(listed.status, 0, listed.stderr);
+            const tests = JSON.parse(listed.stdout);
+            const names = new Set(tests.map(t => t.baseName));
+            for (const name of suite === 'lambda'
+                ? ['test_zip_gtest', 'test_lambda_domnode_gtest', 'test_css_dom_integration', 'test_css_dom_crud']
+                : ['test_animation_gtest', 'test_state_store_gtest', 'test_display_list_gtest', 'test_audio_player_gtest']) {
+                assert.ok(!names.has(name), name);
+            }
+            assert.ok(names.has(suite === 'lambda' ? 'test_dom_range_gtest' : 'test_radiant_view_gtest'));
+            const targets = invoke([...selection, '--list-build-targets'], { LAMBDA_TEST_BIN_DIR: fixture });
+            assert.equal(targets.status, 0, targets.stderr);
+            assert.deepEqual(targets.stdout.trim().split(/\s+/), [...new Set(tests.map(t => t.buildTarget).filter(Boolean))]);
+        }
+    });
+    check('Lambda-owned selection rejects a missing owner source', () => {
+        const child = invoke(['--target=lambda', '--include-test=test_zip_gtest', '--lambda-owned', '--list'], {
+            LAMBDA_INPUT_ROOT: path.join(fixture, 'missing-input'), RADIANT_ROOT: path.join(fixture, 'missing-radiant'),
+        });
+        assert.notEqual(child.status, 0);
+        assert.match(child.stderr, /test source not found in any project: test_zip_gtest\.cpp/);
+    });
     check('Selected PDF workers preserve every case and isolate fixed scratch paths', () => {
         const name = 'test_pdf_render_visual_gtest';
         fs.writeFileSync(path.join(fixture, name + '.exe'), fake, { mode: 0o755 });

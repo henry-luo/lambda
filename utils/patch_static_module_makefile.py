@@ -2,12 +2,10 @@
 """Append exact static archives after Lambda's generated executable libraries."""
 
 import os
-import shlex
-import subprocess
 import sys
 from pathlib import Path
 
-from split_paths import resolve_split_paths, use_input_scripts
+from split_paths import resolve_split_paths, thorvg_openmp_archives, use_input_scripts
 use_input_scripts()
 from build_config import load_build_config
 
@@ -103,22 +101,7 @@ def main():
         with open(makefile_path, 'w', encoding='utf-8') as output:
             output.write(content)
         return 0
-    # ThorVG enables OpenMP when Meson finds it; its installed pkg-config
-    # metadata records the matching runtime needed by a static host.
-    input_root = Path(os.environ.get('LAMBDA_INPUT_ROOT', Path(root).parent / 'lambda-input')).resolve()
-    env = dict(os.environ)
-    pkg_dir = str(input_root / 'build/deps/thorvg/lib/pkgconfig')
-    env['PKG_CONFIG_PATH'] = pkg_dir + os.pathsep + env.get('PKG_CONFIG_PATH', '')
-    flags = shlex.split(subprocess.check_output(
-        ['pkg-config', '--libs', '--static', 'thorvg'], env=env, text=True))
-    for flag in flags:
-        if flag.endswith('/libomp.dylib'):
-            omp_archive = Path(flag).with_suffix('.a')
-            if not omp_archive.is_file():
-                raise RuntimeError(f'ThorVG enabled OpenMP but its static runtime is missing: {omp_archive}')
-            archives.append(str(omp_archive))
-        elif flag in ('-lomp', '-lgomp'):
-            archives.append(flag)
+    archives.extend(thorvg_openmp_archives(required=True))
     marker = '$(ALL_LDFLAGS) $(LIBS)'
     replacement = '$(ALL_LDFLAGS) $(LIBS) $(LAMBDA_STATIC_LATE_ARCHIVES)'
     if marker not in content:
