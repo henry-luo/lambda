@@ -1,0 +1,14 @@
+{
+  "name": "FixedColumnRowsCountGuttersInTheirPhysicalPitch",
+  "html": "test/html/layout_multicol_rows.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#default"}, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#explicit"}, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#styled"}, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#two"}, "height": 40.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#auto"}, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#short"}, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#zero"}, "height": 80.0, "tolerance": 1e-05}
+  ]
+}

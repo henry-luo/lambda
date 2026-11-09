@@ -1,0 +1,13 @@
+{
+  "name": "PreservedWhitespaceUsesHangingAndCrossNodeBreakState",
+  "html": "test/html/layout_preserved_whitespace.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#green"}, "width": 80.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#tabs"}, "width": 40.0, "height": 140.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#spaces"}, "width": 40.0, "height": 80.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#unbroken"}, "width": 40.0, "height": 120.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#newline"}, "width": 0.0, "height": 20.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#separate-newline"}, "width": 0.0, "height": 20.0, "tolerance": 1e-05}
+  ]
+}

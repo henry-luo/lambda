@@ -1,0 +1,7 @@
+<!doctype html>
+<div id="result"></div>
+<script>
+  setTimeout(function() { document.getElementById('result').setAttribute('data-timer', 'yes'); }, 0);
+  location.replace('next.html');
+  Promise.resolve().then(function() { location.replace('#result'); });
+</script>

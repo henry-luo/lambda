@@ -1899,9 +1899,10 @@ node-official-report:
 	@$(PYTHON) -B test/node/node_official_report.py
 
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
-# `baseline` is the untracked work-in-progress corpus; only manifest-backed suites belong here.
+# Keep raw `baseline` out of Lambda's inventory; `baseline-js` holds its dynamic cases.
 # build configuration owns the default inventory; keep command-line overrides available.
 LAYOUT_BASELINE_SUITES ?= $(shell node -p "require('./$(DEFAULT_CONFIG)').test.layout_baseline_suites.join(' ')")
+override LAYOUT_BASELINE_SUITES := $(filter-out baseline,$(LAYOUT_BASELINE_SUITES))
 # The baseline target must select recorded entries before reporting aggregate
 # failures; otherwise untracked work-in-progress fixtures are misreported as
 # baseline regressions.

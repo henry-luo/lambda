@@ -65,7 +65,9 @@ the resulting archives with an independent DOCX reader; setup and scope are in
 The `geomap_*_events.json` fixtures replace the in-process map input cases:
 selection and callbacks, controls and keyboard, drag suppression, pointer and
 wheel input, and double-density coordinates. `dom_regexp_unicode_email.json`
-checks the document-realm matcher through the same host. Both run in the
+checks the document-realm matcher through the same host. Fragment-navigation
+timer and microtask replays, sticky-scroll readback, flex paragraph direction,
+and column-layout geometry also run through the host. These fixtures run in the
 Radiant UI baseline; `make test-map` also runs the map replays (D9.1.1v4).
 
 Procart surface changes use `./test/test_lambda_gtest.exe --gtest_filter='ProcartSurfaceTests.*'`
@@ -258,7 +260,12 @@ Both layout baseline targets select their default categories from
 `LAYOUT_BASELINE_SUITES` can override the list for a focused run. The writing-modes
 baseline records all 1,980 fixtures (1,600 full matches and 380 partials at
 admission); partial scores remain visible and any recorded-score regression
-fails the gate. Raw conformance is still reported by `make layout`.
+fails the gate. The shared corpus's non-dynamic fixtures stay under
+`data/baseline`, which Lambda's layout inventory excludes. Lambda runs the
+script-driven, stateful and embedded-content cases from `data/baseline-js`,
+including its nested `wpt/` fixtures. This keeps script execution with Lambda
+under the project ownership split (**D9.1.1v4, D9.1.3v2**). Raw conformance is
+still reported by `make layout`.
 
 Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~240):
 

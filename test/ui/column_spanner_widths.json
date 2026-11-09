@@ -1,0 +1,12 @@
+{
+  "name": "SpannersResolveAuthoredWidthsAgainstTheFullContainer",
+  "html": "test/html/layout_multicol_spanner_width.html",
+  "viewport": {"width": 320, "height": 200},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#content"}, "width": 95.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#border"}, "width": 75.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#percentage"}, "width": 70.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#maximum"}, "width": 80.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#minimum"}, "width": 90.0, "tolerance": 1e-05}
+  ]
+}

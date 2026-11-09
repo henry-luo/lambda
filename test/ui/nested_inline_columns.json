@@ -1,0 +1,23 @@
+{
+  "name": "NestedInlineColumnsFitTheRemainingOuterSpace",
+  "html": "test/html/layout_nested_inline_remaining_columns.html",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#quarter-inner"}, "x": 0.0, "y": 75.0, "width": 50.0, "height": 25.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#quarter-first"}, "x": 0.0, "y": 75.0, "width": 25.0, "height": 25.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#quarter-second"}, "x": 25.0, "y": 75.0, "width": 25.0, "height": 25.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#quarter-tail"}, "x": 50.0, "y": 0.0, "width": 50.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#remainder-inner"}, "x": 0.0, "y": 130.0, "width": 50.0, "height": 90.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#remainder-first"}, "x": 0.0, "y": 130.0, "width": 25.0, "height": 50.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#remainder-second"}, "x": 25.0, "y": 130.0, "width": 25.0, "height": 50.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#remainder-tail"}, "x": 50.0, "y": 120.0, "width": 50.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fitting-inner"}, "x": 0.0, "y": 290.0, "width": 50.0, "height": 50.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fitting-first"}, "x": 0.0, "y": 290.0, "width": 25.0, "height": 25.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fitting-second"}, "x": 0.0, "y": 315.0, "width": 25.0, "height": 25.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fitting-tail"}, "x": 50.0, "y": 240.0, "width": 50.0, "height": 100.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fixed-inner"}, "x": 0.0, "y": 385.0, "width": 50.0, "height": 50.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fixed-first"}, "x": 0.0, "y": 385.0, "width": 25.0, "height": 25.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fixed-second"}, "x": 0.0, "y": 410.0, "width": 25.0, "height": 25.0, "tolerance": 1e-05},
+    {"type": "assert_rect", "target": {"selector": "#fixed-tail"}, "x": 50.0, "y": 360.0, "width": 50.0, "height": 100.0, "tolerance": 1e-05}
+  ]
+}
