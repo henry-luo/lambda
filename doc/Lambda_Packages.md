@@ -4886,7 +4886,9 @@ colour replaces `color_h`, `color_s` and `color_v`.
 
 Points are pen samples `[x, y, pressure, tilt_x, tilt_y, twist, time]`. Only `x` and `y` are
 required. Tilt and twist are in W3C degrees, and time is in seconds; a sample without one
-follows the previous sample by 10 ms. Colours are sRGB `[r, g, b]` or `[r, g, b, a]`.
+follows the previous sample by 10 ms. In a Radiant handler, `dom.pointer_samples(evt)`
+returns a pointer event's pen samples in this layout, with `x` and `y` in viewport CSS
+pixels ([Lambda_Sys_Func](Lambda_Sys_Func.md)). Colours are sRGB `[r, g, b]` or `[r, g, b, a]`.
 
 `stroke_step(source, brush, colour, points, previous)` continues a stroke batch by batch.
 Round-brush dabs sit at fixed arc-length steps from the stroke's first point, and a mypaint
@@ -4902,6 +4904,56 @@ stroke. Its result carries:
 
 `dabs(brush, colour, points)` exposes the engine's dab table: 34 `f32` columns per dab.
 Unknown options are errors (**S17.8.1**).
+
+`adjust_brush(brush, {size, opacity})` returns the same brush at another diameter or opacity. A
+mypaint brush keeps its input curves: `size` sets `radius_logarithmic` and `opacity` sets `opaque`.
+
+An interactive session is a value holding one paint layer over a paper colour, the stroke in
+progress, the rectangle still to be shown, and stroke-level undo and redo:
+
+```lambda
+var s = paint.session(1200, 800)^                      // {paper: [r, g, b], history_budget}
+s = paint.begin(s, evt.pointerId, brush, [0.1, 0.2, 0.5])^
+s = paint.feed(s, evt.pointerId, paint.in_layer(dom.pointer_samples(evt), box, s))^
+let f = paint.frame(s)^                                // {session, rect, pixels}
+if (f.rect != null) dom.set_canvas_pixels_rect(canvas, f.pixels, f.rect)^
+s = paint.end(f.session, evt.pointerId)^               // one undo entry
+```
+
+- `in_layer(samples, box, session, pressure)` moves pen samples from viewport CSS pixels into
+  layer pixels for a canvas shown in `box` (`dom.bounding_box`). A non-null `pressure` replaces
+  each sample's pressure; a demo might pass 1.0 for a mouse.
+- `frame` returns the dirty rectangle as `(h, w, 4)` sRGB `u8` samples over the paper, and
+  `null`s when nothing changed. A new session's first frame is the whole canvas.
+- `undo`, `redo`, `can_undo`, `can_redo`, `clear`, `cancel(s, pointer)` and `mark(s, rect)`
+  (present again) complete the history. A history entry keeps the previous layer, whose
+  untouched tiles are shared. Entries are dropped oldest first once the tiles they keep exceed
+  `history_budget` bytes (256 MiB by default); the newest entry always stays. `undo` during a
+  stroke cancels it.
+- `color_at(s, x, y)` is the sRGB colour shown at a layer pixel, for a colour picker.
+- One stroke paints at a time: `begin` from another pointer first ends the stroke in progress.
+
+[`lambda demo paint`](../test/demo/paint/README.md) is built on this session.
+
+A painting is saved as a `.painting` file, a ZIP container in the style of Krita's `.kra`. It
+stores the layer's pixels, so opening it decodes them in one pass and never replays strokes:
+
+```lambda
+paint.save_painting(s, "study.painting")^      // bytes written, replaced atomically
+let back = paint.open_painting("study.painting")^   // a session with nothing to undo
+paint.export_png(back, "study.png")^           // flattened over the paper
+```
+
+The entries are `mimetype` (`application/x-lambda-painting`, first), `painting.mark` (the
+`<painting>` element: size, paper, and a `<layer>` naming its tile entry), `layers/paint.tiles`
+(the present tiles as little-endian samples with a tile index; empty tiles are omitted),
+`preview.png` (scaled down when the painting exceeds 16 million pixels, the image raster limit, which
+also bounds `export_png`) and a `thumbnail.png` at most 256 pixels on its longer side.
+`painting_tree(s)` returns the file's `<fs>` tree without writing it, and `painting_document(s)`
+returns the `<painting>` element. `flattened(s)` gives the pixels `export_png` writes, and
+`png(pixels)` encodes any `(h, w, 4)` sRGB `u8` array. Opening checks the mimetype, the version
+and that the tiles match the layer's size. Painting files need Radiant, so `lambda-cli` cannot
+read or write them.
 
 `lambda.image`'s `paint_stroke`, `paint_stroke_step` and `retouch` use this brush, with the
 linear profile, for their stroke coverage.

@@ -1,0 +1,15 @@
+{
+  "version": 3,
+  "comment": "Lambda paint demo: a thin graphite pencil. Original settings for this demo.",
+  "group": "",
+  "parent_brush_name": "",
+  "settings": {
+    "opaque": {"base_value": 0.75, "inputs": {}},
+    "opaque_multiply": {"base_value": 0.0, "inputs": {"pressure": [[0.0, 0.0], [1.0, 1.0]]}},
+    "radius_logarithmic": {"base_value": 0.3, "inputs": {"pressure": [[0.0, -0.25], [1.0, 0.15]]}},
+    "hardness": {"base_value": 0.95, "inputs": {}},
+    "dabs_per_actual_radius": {"base_value": 4.0, "inputs": {}},
+    "radius_by_random": {"base_value": 0.15, "inputs": {}},
+    "tracking_noise": {"base_value": 0.05, "inputs": {}}
+  }
+}

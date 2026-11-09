@@ -1,0 +1,17 @@
+{
+  "version": 3,
+  "comment": "Lambda paint demo: a soft, grainy charcoal stick. Original settings for this demo.",
+  "group": "",
+  "parent_brush_name": "",
+  "settings": {
+    "opaque": {"base_value": 0.55, "inputs": {}},
+    "opaque_multiply": {"base_value": 0.0, "inputs": {"pressure": [[0.0, 0.0], [1.0, 1.0]]}},
+    "radius_logarithmic": {"base_value": 1.7, "inputs": {"pressure": [[0.0, -0.3], [1.0, 0.2]]}},
+    "hardness": {"base_value": 0.35, "inputs": {}},
+    "dabs_per_actual_radius": {"base_value": 3.0, "inputs": {}},
+    "offset_by_random": {"base_value": 0.35, "inputs": {}},
+    "radius_by_random": {"base_value": 0.45, "inputs": {}},
+    "elliptical_dab_ratio": {"base_value": 1.6, "inputs": {}},
+    "elliptical_dab_angle": {"base_value": 45.0, "inputs": {}}
+  }
+}

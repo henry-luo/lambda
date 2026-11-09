@@ -26,7 +26,7 @@ fn counter(v) bool => ((v is int) and v >= 1) ^ { false }
 // a pen sample: [x, y] or [x, y, pressure, tilt_x, tilt_y, twist, time] (W3C degrees, seconds).
 fn valid_point(p) bool => (p is array and len(p) >= 2 and len(p) <= 7 and coordinate(p[0]) and coordinate(p[1]) and
     (len(p) < 3 or unit(p[2])) and (len(p) < 4 or within(p[3], -90.0, 90.0)) and (len(p) < 5 or within(p[4], -90.0, 90.0)) and
-    (len(p) < 6 or within(p[5], -360.0, 360.0)) and (len(p) < 7 or within(p[6], 0.0, 1000000000.0))) ^ { false }
+    (len(p) < 6 or within(p[5], -360.0, 360.0)) and (len(p) < 7 or within(p[6], -1000000000.0, 1000000000.0))) ^ { false }
 fn valid_batch(points) bool => (points is array and len(points) >= 1 and len(points) <= MAX_POINTS and
     all([for (p in points) valid_point(p)])) ^ { false }
 fn valid_carry(carry) bool => (carry == null or (carry is map and valid_point(carry.point) and numeric(carry.arc) and

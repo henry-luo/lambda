@@ -84,5 +84,23 @@ fn mypaint(options) map^ {
     }
 }
 
+// adjust(brush, {size, opacity}) -> the same brush at another diameter or opacity (PT10's
+// palette controls). A mypaint brush keeps its input curves: size sets radius_logarithmic's base
+// to ln(size / 2) and opacity sets opaque's base.
+pub fn adjust(b, changes) map^ {
+    let c = layer.checked(changes, ["size", "opacity"])^
+    if (c.size != null and not number_in(c.size, 0.5, 16384.0)) raise error("paint: brush size must be in [0.5, 16384]")
+    else if (c.opacity != null and not number_in(c.opacity, 0.0, 1.0)) raise error("paint: brush opacity must be in [0, 1]")
+    else if (string(b.kind) == "mypaint") {
+        let s = b.settings
+        let radius = if (c.size == null) ({}) else ({radius_logarithmic: {base: math.log(float(c.size) / 2.0),
+            inputs: if (s.radius_logarithmic == null) ({}) else s.radius_logarithmic.inputs}})
+        let opaque = if (c.opacity == null) ({}) else ({opaque: {base: float(c.opacity),
+            inputs: if (s.opaque == null) ({}) else s.opaque.inputs}})
+        brush({kind: 'mypaint', settings: {*: s, *: radius, *: opaque}, blend: b.blend, seed: b.seed})^
+    }
+    else brush({*: b, size: pick(c.size, b.size), opacity: pick(c.opacity, b.opacity)})^
+}
+
 // the distance between round-brush dab centres along a stroke.
 pub fn step(b) float^ => if (b.size * b.spacing < 0.25) 0.25 else b.size * b.spacing

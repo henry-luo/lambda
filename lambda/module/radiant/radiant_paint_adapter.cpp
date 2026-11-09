@@ -578,6 +578,129 @@ RADIANT_C_API Item fn_radiant_paint_present(Item layer_item, Item options_item) 
     return output.get();
 }
 
+// PT12 `layers/<id>.tiles`: a layer's present tiles as one little-endian blob. A 32-byte header
+// (magic "LPT1", version, tile size, tiles_x, tiles_y, channels, sample kind 0 = f32 / 1 = u8,
+// count) is followed by the cell index of each present tile, ascending, then their dense samples.
+// Empty tiles are omitted; the ZIP entry's deflate compresses the rest.
+static const uint32_t PAINT_TILES_VERSION = 1;
+static const size_t PAINT_TILES_HEADER = 32;
+static const size_t PAINT_TILES_MAX_BYTES = (size_t)1 << 30;
+
+static void paint_put_u32(uint8_t* out, uint32_t v) {
+    out[0] = (uint8_t)v; out[1] = (uint8_t)(v >> 8); out[2] = (uint8_t)(v >> 16); out[3] = (uint8_t)(v >> 24);
+}
+
+static uint32_t paint_get_u32(const uint8_t* in) {
+    return (uint32_t)in[0] | ((uint32_t)in[1] << 8) | ((uint32_t)in[2] << 16) | ((uint32_t)in[3] << 24);
+}
+
+static size_t paint_tile_bytes(const PaintLayerInfo* info) {
+    return (size_t)(info->tile * info->tile * paint_layer_channels(info)) * (info->elem == PAINT_ELEM_F32 ? 4 : 1);
+}
+
+// radiant.paint_tiles_encode(layer) -> binary (PT12).
+RADIANT_C_API Item fn_radiant_paint_tiles_encode(Item layer_item) {
+    RootFrame roots(1);
+    Rooted<Item> layer(roots, layer_item);
+    PaintLayerInfo info;
+    const char* problem = paint_layer_read(layer.get(), &info);
+    if (problem) return paint_error(problem);
+    int64_t cells = info.tiles_x * info.tiles_y;
+    int channels = paint_layer_channels(&info);
+    size_t tile_bytes = paint_tile_bytes(&info);
+    uint32_t count = 0;
+    for (int64_t i = 0; i < cells; i++)
+        if (get_type_id(MapReader::fromItem(layer.get()).get("tiles").asArray().get(i).item()) != LMD_TYPE_NULL) count++;
+    size_t total = PAINT_TILES_HEADER + (size_t)count * (4 + tile_bytes);
+    if (total > PAINT_TILES_MAX_BYTES) return paint_error("paint layer is too large to store");
+    uint8_t* buffer = (uint8_t*)mem_alloc(total, MEM_CAT_RENDER);
+    if (!buffer) return paint_error("cannot allocate stored tiles");
+    memcpy(buffer, "LPT1", 4);
+    uint32_t header[7] = {PAINT_TILES_VERSION, (uint32_t)info.tile, (uint32_t)info.tiles_x, (uint32_t)info.tiles_y,
+                          (uint32_t)channels, info.elem == PAINT_ELEM_F32 ? 0u : 1u, count};
+    for (int k = 0; k < 7; k++) paint_put_u32(buffer + 4 + k * 4, header[k]);
+    uint8_t* index = buffer + PAINT_TILES_HEADER;
+    uint8_t* samples = index + (size_t)count * 4;
+    uint32_t written = 0;
+    // no allocation happens while tile storage is read (D5.4.4)
+    for (int64_t i = 0; i < cells; i++) {
+        PaintView view;
+        if (!paint_tile_view(MapReader::fromItem(layer.get()).get("tiles").asArray().get(i).item(), &info, &view)) {
+            mem_free(buffer);
+            return paint_error("a paint tile does not match its layer");
+        }
+        if (!view.data) continue;
+        paint_put_u32(index + written * 4, (uint32_t)i);
+        uint8_t* out = samples + (size_t)written * tile_bytes;
+        for (int64_t y = 0; y < info.tile; y++) for (int64_t x = 0; x < info.tile; x++) for (int c = 0; c < channels; c++) {
+            int64_t at = y * view.row_stride + x * view.pixel_stride + c;
+            if (info.elem == PAINT_ELEM_U8) *out++ = ((const uint8_t*)view.data)[at];
+            else {
+                uint32_t bits;
+                memcpy(&bits, (const float*)view.data + at, 4);
+                paint_put_u32(out, bits);
+                out += 4;
+            }
+        }
+        written++;
+    }
+    Binary* blob = heap_binary_from_bytes((const char*)buffer, (int64_t)total);
+    mem_free(buffer);
+    if (!blob) return paint_error("cannot allocate stored tiles");
+    return {.item = x2it(blob)};
+}
+
+// radiant.paint_tiles_decode(bytes, layer) -> the layer with the stored tiles (PT12). `layer`
+// gives the geometry, format and sample kind the blob must match; its own tiles are replaced.
+RADIANT_C_API Item fn_radiant_paint_tiles_decode(Item bytes_item, Item layer_item) {
+    RootFrame roots(4);
+    Rooted<Item> bytes(roots, bytes_item), layer(roots, layer_item), fresh(roots, ItemNull);
+    PaintLayerInfo info;
+    const char* problem = paint_layer_read(layer.get(), &info);
+    if (problem) return paint_error(problem);
+    if (get_type_id(bytes.get()) != LMD_TYPE_BINARY) return paint_error("stored tiles must be binary");
+    size_t length = bytes.get().get_binary()->len;
+    const uint8_t* data = binary_data(bytes.get().get_binary());
+    if (length < PAINT_TILES_HEADER || memcmp(data, "LPT1", 4)) return paint_error("stored tiles have no LPT1 header");
+    uint32_t header[7];
+    for (int k = 0; k < 7; k++) header[k] = paint_get_u32(data + 4 + k * 4);
+    int channels = paint_layer_channels(&info);
+    size_t tile_bytes = paint_tile_bytes(&info);
+    uint32_t count = header[6];
+    int64_t cells = info.tiles_x * info.tiles_y;
+    if (header[0] != PAINT_TILES_VERSION) return paint_error("stored tiles have an unknown version");
+    if (header[1] != (uint32_t)info.tile || header[2] != (uint32_t)info.tiles_x || header[3] != (uint32_t)info.tiles_y ||
+        header[4] != (uint32_t)channels || header[5] != (info.elem == PAINT_ELEM_F32 ? 0u : 1u))
+        return paint_error("stored tiles do not match their layer");
+    if ((int64_t)count > cells || length != PAINT_TILES_HEADER + (size_t)count * (4 + tile_bytes))
+        return paint_error("stored tiles are truncated or have extra bytes");
+    for (uint32_t k = 0; k < count; k++) {
+        uint32_t cell = paint_get_u32(data + PAINT_TILES_HEADER + k * 4);
+        if ((int64_t)cell >= cells || (k > 0 && cell <= paint_get_u32(data + PAINT_TILES_HEADER + (k - 1) * 4)))
+            return paint_error("stored tile cells must be ascending and inside the layer");
+    }
+    RootedValueBuilder result(true);
+    uint32_t next = 0;
+    for (int64_t i = 0; i < cells; i++) {
+        // the blob's storage is re-read after each tile allocation (D5.4.4)
+        data = binary_data(bytes.get().get_binary());
+        if (next >= count || paint_get_u32(data + PAINT_TILES_HEADER + next * 4) != (uint32_t)i) { result.append(ItemNull); continue; }
+        ArrayNum* dense = paint_tile_new(&info);
+        if (!dense) return paint_error("cannot allocate a paint tile");
+        fresh.set({.array_num = dense});
+        data = binary_data(bytes.get().get_binary());
+        const uint8_t* in = data + PAINT_TILES_HEADER + (size_t)count * 4 + (size_t)next * tile_bytes;
+        if (info.elem == PAINT_ELEM_U8) memcpy(dense->data, in, tile_bytes);
+        else for (size_t k = 0; k < tile_bytes / 4; k++) {
+            uint32_t bits = paint_get_u32(in + k * 4);
+            memcpy((float*)dense->data + k, &bits, 4);
+        }
+        result.append(fresh.get());
+        next++;
+    }
+    return paint_layer_with_tiles(layer.get(), result.value.get());
+}
+
 // radiant.paint_capabilities() -> the engine's profile (PT15).
 RADIANT_C_API Item fn_radiant_paint_capabilities(void) {
     RootedValueBuilder out(RootedValueBuilder::DATA_MAP), formats(true), profiles(true);

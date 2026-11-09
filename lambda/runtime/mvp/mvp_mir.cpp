@@ -284,7 +284,8 @@ static MirValue convert(void* owner, MirValue v, ValueRep to) {
     return value(c, r, v.semantic_type, to, v.semantic_contract, (AstNode*)v.provenance_node);
 }
 static MirValue expression(MvpCompiler* c, AstNode* node, bool discard = false, bool tail = false,
-    bool item_position = false);
+    bool item_position = false, MIR_reg_t output_destination = 0);
+static MirValue output_expression(MvpCompiler* c, AstNode* node, MIR_reg_t destination);
 static MirValue mvp_lower_value(void* owner, AstNode* node, uint32_t demand) {
     return expression((MvpCompiler*)owner, node, (demand & MIR_VALUE_DISCARD) != 0);
 }
@@ -296,7 +297,8 @@ static MirValue string_concat(MvpCompiler* c, AstNode* node, MvpBinding* owner =
     MvpBinding* replacement = NULL, AstNode* initializer = NULL);
 enum MvpSequenceMode { MVP_BLOCK_RESULTS, MVP_LIST_RESULTS, MVP_CONTENT_RESULTS };
 static MirValue statements(MvpCompiler* c, AstNode* node, bool discard = false, bool tail = false,
-    bool item_position = false, MvpSequenceMode mode = MVP_BLOCK_RESULTS, AstNode* declarations = NULL);
+    bool item_position = false, MvpSequenceMode mode = MVP_BLOCK_RESULTS, AstNode* declarations = NULL,
+    MIR_reg_t output_destination = 0);
 static void array_iteration(MvpCompiler* c, AstNode* body);
 static MIR_label_t dense_call_loop(MvpCompiler* c, AstLoopControlNode* loop);
 static MIR_label_t dense_array_loop(MvpCompiler* c, AstNode* loop);
@@ -307,7 +309,7 @@ static void receive_parameter(MvpCompiler* c, MvpBinding* binding, MIR_reg_t inp
     Type* incoming_contract = NULL);
 static bool guarded_scalar_body(MvpCompiler* c);
 static MirValue direct_call(MvpCompiler* c, MvpFunction* f, AstCallNode* call,
-    bool discard = false, MvpBinding* destination = NULL, bool propagate = false);
+    bool discard = false, MvpBinding* destination = NULL, bool propagate = false, MIR_reg_t output_destination = 0);
 static void return_value(MvpCompiler* c, MirValue v, AstNode* node, bool error_exit = false);
 static MirValue propagated_value(MvpCompiler* c, MirValue v, AstNode* node);
 
