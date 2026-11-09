@@ -22,13 +22,14 @@ It is **not** a guide for writing Lambda Script programs. For the Lambda languag
 | Git | Source control | macOS: `brew install git`; Linux: `sudo apt install git` |
 | Node.js + npm | Tree-sitter CLI (`npx`) | macOS: `brew install node`; Linux: `sudo apt install nodejs npm` |
 | pkg-config | Library discovery | macOS: `brew install pkg-config`; Linux: `sudo apt install pkg-config` |
-| Python 3 | Build script generation | Usually pre-installed |
+| Python 3 | Build configuration, dependency preparation and checks | Python 3.9 has been verified for the split build |
 | Premake5 | Generates Makefiles from config | macOS: `brew install premake`; Linux: download from premake.github.io |
 
 ### Clone and Build
 
 ```bash
-git clone <repo-url> && cd Jubily
+# Clone lambda, lambda-input and radiant as sibling directories, then:
+cd lambda
 
 # 1. Install platform dependencies (pick one)
 ./setup-mac-deps.sh        # macOS
@@ -42,7 +43,8 @@ make build
 ./lambda.exe --help
 ```
 
-The build produces `lambda.exe` in the project root.
+The build produces `lambda.exe` in the project root. To select a different
+interpreter, pass `PYTHON` to Make; the value is propagated to sibling builds.
 
 ---
 
@@ -68,7 +70,7 @@ These libraries and tools are required on every platform.
 |------|---------|
 | C/C++ compiler (GCC or Clang) | Build toolchain (C++17) |
 | Make | Build orchestration |
-| Python 3 | Premake config generation (`utils/generate_premake.py`) |
+| Python 3 | Build configuration, sibling archive manifests, dependency preparation and checks |
 | Premake5 | Generates platform Makefiles from `build_lambda_config.json` and `build_deps_config.json` |
 | Node.js + npm | Tree-sitter CLI via `npx` for parser generation |
 | pkg-config | Library discovery |
@@ -85,8 +87,8 @@ These libraries and tools are required on every platform.
 | **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX reference grammar for `lambda-cst` only |
 | **tree-sitter-typescript** | Built from `lambda/tree-sitter-typescript/` | TypeScript reference grammar for `lambda-cst` only |
 | **MIR** | Built from `lambda/mir/` with its Makefile | JIT compiler backend (Medium Internal Representation) |
-| **RE2** | Vendored at `../lambda-input/lib/re2/`, built by the JSON-owned Premake `re2` target into `build/lib/<platform>/<configuration>/libre2.a` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
-| **utf8proc** | Built from `build_temp/utf8proc/` | Unicode text processing and normalization |
+| **RE2** | Vendored at `../lambda-input/lib/re2/`, built by input into `../lambda-input/build/lib/native/<configuration>/libre2.a` | Regular expression engine (pinned 2023-03-01, no Abseil dependency) |
+| **utf8proc** | Built by input under `../lambda-input/build/deps/utf8proc/` | Unicode text processing and normalization |
 | **mpdecimal** | System package or built from source | Multi-precision decimal arithmetic |
 | **rpmalloc** | Built from `mac-deps/rpmalloc-src/` | High-performance memory allocator |
 | **libcurl** | Built from source with mbedTLS | HTTP/HTTPS client library |
@@ -128,8 +130,9 @@ mbedtls@3  freetype  expat  glfw  libjpeg-turbo  giflib  libpng
 zlib  bzip2  pkg-config  libevent  premake
 ```
 
-Built from source in `mac-deps/`:
-- libcurl (with mbedTLS), nghttp2, ThorVG, Brotli, rpmalloc; WOFF2 uses the vendored host sources.
+The split build prepares curl (with mbedTLS), ThorVG, Brotli and utf8proc under
+`../lambda-input/build/deps/`; WOFF2 uses vendored input sources. Platform setup
+also supplies dependencies under `mac-deps/` and through Homebrew.
 
 System frameworks: OpenGL, Cocoa, IOKit, CoreFoundation, CoreServices
 
@@ -166,14 +169,14 @@ Built from source in `win-native-deps/`:
 ### Dependency Architecture
 
 `build_lambda_config.json` owns the host, runtime and test graph. Its
-`config_imports` loads `build_deps_config.json`, which owns RE2,
-image/archive source targets, their generated headers, and standalone source
-recipes for ThorVG, Brotli, utf8proc, nghttp2, Google Test, mbedTLS, libpq,
-MariaDB Connector/C and the optional Clang metadata tool. Both paths use
-`utils/generate_premake.py` (`PremakeGenerator`); `utils/build_config.py`
+`config_imports` loads `build_deps_config.json` and the sibling
+`build_targets.json` manifests. `utils/generate_premake.py`
+(`PremakeGenerator`) generates the host configuration; `utils/build_config.py`
 (`load_build_config`) merges imports and rejects cycles or duplicate targets.
-Dependencies remain static libraries under D9.1.1; the RDB TLS and plugin
-profile retains RDB8/RDB11 from `vibe/Lambda_IO_RDB.md`.
+Input and Radiant build their own static archives from their manifests, as
+required by D9.1.1v4 and D9.1.3v2. Input also prepares native dependencies
+such as RE2, image codecs and archive readers. The RDB TLS and plugin profile
+retains RDB8/RDB11 from `vibe/Lambda_IO_RDB.md`.
 
 ```bash
 make build-dependency DEP=thorvg
@@ -191,13 +194,14 @@ scripts fetch sources and invoke those recipes; only installation into a system
 prefix uses sudo. PostgreSQL retains its configure probes and Make/Perl header
 generation; compilation and archiving use Premake. Other generated headers use
 the upstream templates and compiler probes rather than cached platform results.
-MIR, Tree-sitter, curl, mpdecimal and the existing Makefile-based builds remain
-available without CMake, Meson or Ninja.
+Some standalone dependency recipes use other build systems. For example, the
+input-owned ThorVG build uses Meson and Ninja, and its Brotli build uses CMake.
 
-All dependency paths are defined in `build_lambda_config.json`. The build pipeline is:
+The normal host build combines the generated Lambda build with the sibling
+archive builds:
 
 ```
-build_lambda_config.json
+build_lambda_config.json + sibling build_targets.json manifests
         │
         ▼  (utils/generate_premake.py)
 premake5.{mac,lin,win}.lua    ← DO NOT EDIT (auto-generated)
@@ -206,8 +210,15 @@ premake5.{mac,lin,win}.lua    ← DO NOT EDIT (auto-generated)
 build/premake/Makefile
         │
         ▼  (make)
-build/lib/*.a  →  lambda.exe
+Lambda runtime/adapter archives + input and Radiant archives → lambda.exe
 ```
+
+Python drives the build-time steps around the native compiler: the host
+generator reads and merges the JSON manifests, sibling scripts expand source
+lists and prepare dependency configuration, and boundary and build-signature
+checks protect the selected inputs. Premake generates Makefiles; Make, the C/C++
+compiler and the linker build the executable. Python is not required to run
+the resulting native executable.
 
 > **Rule**: Never edit `premake5.*.lua` files directly. Edit `build_lambda_config.json` and run `make` to regenerate.
 
@@ -704,11 +715,12 @@ Radiant supports multiple render targets:
 Build, test and checkout behaviour that is easy to misread as a regression. Several agents usually share one clone, its main checkout and its git worktrees.
 
 The Lambda checkout expects sibling `../lambda-input` and `../radiant` projects;
-`LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` select their locations for generated
-build paths. Lambda has no top-level `lib` or `radiant` directory. The normal
-build currently compiles sibling sources; `make build-lambda-split` links the
-macOS sibling archives. The remaining `lambda/input` migration link must point
-to the selected input checkout (D9.1.1v4, D9.1.3v2).
+`LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` select other locations. `make build`
+builds their archives and links them into `lambda.exe`; `make build-lambda-split`
+defaults to `lambda-static.exe`. Lambda must not contain the old `lib`,
+`radiant`, `lambda/input`, `lambda/io`, `lambda/network` or `lambda/format`
+paths or source links into the selected owners. `utils/check_split_roots.py`
+checks these boundaries (D9.1.1v4, D9.1.3v2).
 
 ### 7.1 Test Data
 
@@ -737,7 +749,7 @@ ln -s "$MAIN/test/js262"   test/js262     # likewise test/layout, test/render, t
 ```
 
 - `test/layout` holds the fonts used by the UI-automation preflight. Without the link, the UI runner fails before it runs anything.
-- RE2 is built from `../lambda-input/lib/re2/` into each checkout's `build/lib/<platform>/<configuration>/libre2.a`; its objects and archives are not shared through `build_temp/` (GRP15).
+- The split host uses RE2 from the selected input checkout's `build/lib/native/<configuration>/`; sibling archive outputs belong to those checkouts, not the Lambda worktree.
 - The links show as `??`, because `build_*/`, `mac-deps/`, `node_modules/` and `ref/` only match directories. Stage files by name, and never `git add -A`.
 - Tracked links (`test/markdown`, `test/jquery-ui`, `test/media`) point to `../../lambda-test/*`, which does not resolve under `.claude/worktrees/<name>/`. Fixtures that use them fail in a worktree. Run those fixtures from the main checkout.
 - Worktree paths contain `.claude/`, so a dot appears in every absolute path. Before calling a failure pre-existing, run the base binary **from its own checkout's cwd**.
@@ -758,8 +770,8 @@ git branch -d <branch>
 
 ### 7.3 Build Gotchas
 
-- **Sibling extraction:** this checkout currently needs `../lambda-input` and `../radiant`; Lambda's migration links preserve its old source paths (D9.1.1v4). Radiant resolves input headers through `INPUT_ROOT` and does not link whole input source directories. On macOS, `make build-lambda-split` builds the sibling debug archives and links `lambda-static.exe` against them. It still uses Lambda-side vendor dependencies; it is not an independently packaged release. `LAMBDA_INPUT_ROOT` and `RADIANT_ROOT` may select other locations only when Lambda's migration links resolve to those same projects.
-  The initial matching sibling revisions are [`lambda-input`](https://github.com/henry-luo/lambda-input) `b6e596bf277accf6bb9fe066b8d0b5b8290a3c1f` and [`radiant`](https://github.com/henry-luo/radiant) `0acd63121b1e125e570d7212c33e562e5074bf8f`. These are recorded for checkout reproducibility; the transitional build does not enforce them.
+- **Sibling archives:** `make build` invokes `build-lambda-split` with the debug profile and `lambda.exe` output. The split target builds input's `liblambda-lib.a` and `liblambda-input.a`, Radiant's `libradiant.a` and `libradiant-properties.a`, then links them with Lambda's runtime and adapter archives. Radiant gets input headers through `INPUT_ROOT`. The split build and smoke checks have been verified locally on macOS; that does not qualify distribution or other platforms (D9.1.1v4, D9.1.3v2).
+- **Python selection:** the split build has been verified with macOS system Python 3.9. Pass `PYTHON` to Make to select another interpreter; compatibility with versions older than 3.9 has not been established.
 - **macOS `/usr/bin/make` is GNU Make 3.81.** It compares mtimes in whole seconds, so `sleep 2` between before/after steps. It has no `&:` grouped targets, so the tree-sitter-lambda generate rule becomes three independent targets. `make -j generate-grammar` can run `tree-sitter generate` concurrently; run it without `-j`.
 - **Same-second source swaps.** A `cp` that lands in the same second as the last build leaves the old object linked. Delete `build/obj/<project>/native/<debug|release>/<file>.o` and rebuild. Then confirm which binary you have, with `cmp` or a probe whose output differs between the two versions.
 - **Renamed or moved sources.** Premake never deletes orphaned `.o` files and `ar` never drops members. Purge both, or the link silently uses stale code (seen as bogus "undefined symbol" errors that name the *old* object):
@@ -767,16 +779,16 @@ git branch -d <branch>
   find build -name "<old_stem>*.o" -delete
   for a in $(find build -name "*.a"); do ar t "$a" | grep -q "^<old_stem>" && rm -f "$a"; done
   ```
-  `make build` builds only the `lambda` project. Test archives under `build/lib/` (e.g. `liblambda-rt-cpp.a`) are relinked by `make build-test` or the baseline targets.
+  `make build` refreshes the sibling archives and the Lambda runtime and adapter archives; test executables are built by `make build-test` or the baseline targets.
 - **Debug and release share `lambda.exe`.**
   - `make test-lambda-baseline` runs `make debug` and always leaves a debug binary.
   - `make build-test` rebuilds the flavour of the last top-level build (the `.lambda_release_build` marker).
   - After `make build-release-compile`, `make build` uses the release marker to force a debug relink. If a release binary was built directly without the marker, use `make debug` to force the relink.
   - `make release` runs `clean-all`, which deletes `test/*.exe`. Follow it with `make build-test`.
   - Before timing, check the binary: `strings lambda.exe | grep -c 'VALIDATOR] validate_against_base_type'` prints `0` for release.
-- **Node modules are separate DSOs.** `modules/node-{core,fs,net,crypto}` compile against `JsRuntimeState` (`lambda/js/js_runtime_state.hpp`), and `make build` does not rebuild them. After a layout change they read wrong offsets, with no link error. Rebuild them with `make build-node-core build-node-fs build-node-net build-node-crypto`, on **both** sides of an A/B. A fresh checkout needs the same rebuild before `require("fs")` works.
+- **Node modules are separate DSOs.** `modules/node-{core,fs,net,crypto}` compile against `JsRuntimeState` (`lambda/js/js_runtime_state.hpp`). The split build refreshes node-core, but not node-fs, node-net or node-crypto. After a layout change, stale modules can read wrong offsets without a link error. Rebuild them with `make build-node-core build-node-fs build-node-net build-node-crypto`, on **both** sides of an A/B. A fresh checkout needs the same rebuild before `require("fs")` works.
 - **Archive relinking.** `utils/generate_premake.py` overrides premake's `ldDeps`, so every `.a` in a binary's `linkoptions` is a link prerequisite (`make test-premake-generator` checks this). If a binary seems to hold an old archive, check `grep '^ *LDDEPS' build/premake/<project>.make`.
-- **Archive configurations.** Utility, RE2, image-codec and archive-reader libraries live in `build/lib/<platform>/<configuration>/`. Separate outputs preserve each profile when debug and release builds alternate; a shared archive filename can otherwise satisfy make with objects from the wrong profile. Internal linker groups and split-project wrappers must honor the configured archive directory too. `make test-premake-generator` exercises both profile switches and consumer execution.
+- **Archive configurations.** The split build keeps input and Radiant archives under their owners' `build/lib/<configuration>/`, and input's RE2, image-codec and archive-reader libraries under `build/lib/native/<configuration>/`. Separate outputs preserve each profile when debug and release builds alternate; a shared archive filename can otherwise satisfy make with objects from the wrong profile. Internal linker groups and split-project wrappers must honor the configured archive directory too. `make test-premake-generator` exercises profile switches and consumer execution.
 - **Tree-sitter CLI.** `package.json` pins `tree-sitter-cli` 0.25.10. The Lambda grammar needs 0.25+ (ABI 15), so run `npm install` in a checkout that still has an older CLI. The CLI caches compiled grammars by language name in a per-user cache. Parsing a scratch copy of the grammar can therefore swap the parser other checkouts see. Set `TREE_SITTER_LIBDIR=<own dir>` for each copy; `test/ts_s16_conformance.sh` already uses `temp/tree-sitter-lib`.
 
 ### 7.4 Test Gotchas

@@ -932,9 +932,19 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_nullable_comparison_mir(self):
         body = self.function_mir(ROOT / "test/benchmark/larceny/quicksort2.ls", "partition")
-        self.assertIn("\tle\t", body)
-        self.assertNotIn("fn_le", body)
+        native = body[:body.index("\tcall\tfn_index")]
+        self.assertIn("\tle\t", native)
+        self.assertNotIn("fn_le", native)
+        # the checked sibling retains the pivot's deferred admission outcome (S7.7.2v2).
+        self.assertIn("fn_le", body)
         self.assertNotIn("is_truthy", body)
+
+    def test_error_only_return_to_union(self):
+        source = ROOT / "test/lambda/mvp/mir_mvp_error_boundaries.ls"
+        self.check_gc_fixtures((source,))
+        # an admitted Error cannot need validation of the union's normal int arm.
+        body = self.function_mir(source, "returned_error")
+        self.assertNotIn("lambda_type_check", body)
 
     def test_guarded_numeric_iterations(self):
         body = self.function_mir(ROOT / "test/benchmark/kostya/collatz2.ls", "collatz_len")
@@ -945,6 +955,7 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_indexed_region_and_call_boundary(self):
         source = ROOT / "test/benchmark/larceny/quicksort2.ls"
+        self.check_gc_fixtures((source,))
         body = self.function_mir(source, "partition")
         native = body[:body.index("\tcall\tfn_index")]
         for helper in ("lambda_array_set_checked_item", "lambda_type_check", "lambda_int_lane_add_slow"):
@@ -964,10 +975,12 @@ class LambdaMirMvpTests(unittest.TestCase):
 
     def test_array_reduction_mir(self):
         for source, function in ((ROOT / "test/benchmark/larceny/array12.ls", "benchmark"),
-                                 (ROOT / "test/lambda/mvp/mir_mvp_arrays.ls", "reduce")):
-            body = self.function_mir(source, function)
-            self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
-            self.assertIn("fn_index", body)  # short/negative extents keep the checked sibling
+                                 (ROOT / "test/lambda/mvp/mir_mvp_arrays.ls", "reduce"),
+                                 (ROOT / "test/lambda/mvp/mir_mvp_arrays.ls", "reduce_outcome")):
+            with self.subTest(source=source.name, function=function):
+                body = self.function_mir(source, function)
+                self.assertRegex(body, r"\tadd\t[^\n]+, 4\n")
+                self.assertIn("fn_index", body)  # short/negative extents keep the checked sibling
 
     def test_fallible_inline_and_bool_count(self):
         source = ROOT / "test/lambda/mvp/mir_mvp_consumers.ls"

@@ -292,6 +292,38 @@ into `mir_container_access.hpp`; both emitters now call them.
   element magnitude. Every partial sum and merge must fit int53. Other inputs
   execute the original checked loop; no result or iteration is omitted
   (**S4.1.2**, **D5.4.4**).
+  The 2026-11-09 regression fix also admits a local boxed `int | error`
+  accumulator with an `int` receiving contract. Deferred admission had changed
+  these bindings to Item storage, so the native-only eligibility check disabled
+  the reduction. An exact boxed-zero guard now selects native temporary sums
+  and boxes the finite result on success; nonzero seeds, retained errors and
+  shared homes keep ordinary assignment behavior (**S7.7.2v2**, **S7.7.4v2**, **S4.1.2**).
+  The existing array fixture covers successful and failed accumulator admission,
+  including zero trips; the MIR gate retains the four-step assertion.
+  The split debug host passes the reduction and adjacent MIR checks and the
+  ownership fixtures in normal, forced and seeded poisoned-GC modes. The
+  154 MVP/production benchmark golden checks retain one MVP quicksort rejection
+  (`lambda_type_check_lazy` in a closed numeric region); a current-source control
+  with only this fix reverted reproduces it. The aggregate Lambda gate stops
+  before execution because `test_wpt_html_parser_gtest` has no build target.
+  Evidence: `temp/mvp-array-reduction/`.
+
+- **Quicksort Error-arm admission repair (2026-11-09):** a propagated Error
+  already admitted by `int | error` still emitted the normal integer validator.
+  Although unreachable at runtime, that collecting call violated the closed
+  region invariant and rejected quicksort. Admission now forwards a proven,
+  admitted Error arm directly, preserving the payload and leaving the
+  collecting-call assertion enabled (**S7.6.3v3**, **S11.4.2v3**, **D5.4.4**).
+  The comparison MIR test checks the guarded prefix and retains generic
+  comparison in the checked sibling, where the pivot may hold Error
+  (**S7.7.2v2**). The expanded error-return fixture passes on both compilers
+  under normal/forced/seeded GC, and its no-validator regression fails against
+  the pre-fix control. All 154 paired benchmark goldens and six focused groups
+  pass on the split debug host. The separate `test_propagation_outcomes`
+  no-`int2it_lane` assertion still fails on both control and candidate; its
+  semantic GC cases pass. Aggregate Lambda execution remains unqualified
+  because the input test build lacks `test_wpt_html_parser_gtest`.
+  Evidence: `temp/mvp-quicksort/`.
 
 The focused gate now has **13 groups**, covering all six benchmark goldens,
 forced-GC benchmark execution, reduction MIR, and the new

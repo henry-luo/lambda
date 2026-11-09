@@ -310,16 +310,23 @@ static MirValue propagated_value(MvpCompiler* c, MirValue v, AstNode* node);
 static MIR_label_t array_sum_loop(MvpCompiler* c, AstLoopControlNode* node) {
     MvpArraySumPlan plan = {};
     if (!mvp_array_sum_plan(c->module, node, &plan) || !plan.array->array_native) return NULL;
-    MIR_reg_t index = plan.counter->reg, sum = plan.sum->reg;
+    MIR_reg_t index = plan.counter->reg;
+    bool boxed_sum = plan.sum->rep == VALUE_REP_ITEM;
+    // shared homes need per-store publication; keep their ordinary assignment path.
+    if (boxed_sum && (plan.sum->owner != c->function->id || plan.sum->var_home ||
+            plan.sum->capture_home || plan.sum->state_name || plan.sum->module_ref || plan.sum->module_slot)) return NULL;
     MIR_reg_t limit = expression(c, plan.limit).reg;
-    MIR_label_t generic = label(c), done = label(c), remainder = label(c), body = label(c);
+    MIR_label_t generic = label(c), done = label(c), publish = label(c), remainder = label(c), body = label(c);
     branch(c, MIR_BEQ, generic, reg(c, plan.array->array_native), imm(c, 0));
-    branch(c, MIR_BNE, generic, reg(c, sum), imm(c, 0));
+    // admission errors stay boxed; only exact integer zero enters the finite reduction (S7.7.4v2).
+    branch(c, MIR_BNE, generic, reg(c, plan.sum->reg),
+        imm(c, boxed_sum ? (uint64_t)LMD_TYPE_INT << 56 : 0));
     branch(c, MIR_BLT, generic, reg(c, index), imm(c, 0));
     branch(c, MIR_UBGT, generic, reg(c, limit), imm(c, plan.max_count - plan.inclusive));
     if (plan.inclusive) limit = operation(c, MIR_ADD, reg(c, limit), imm(c, 1));
     branch(c, MIR_UBGT, generic, reg(c, limit), reg(c, plan.array->array_length));
     branch(c, MIR_BGE, done, reg(c, index), reg(c, limit));
+    MIR_reg_t sum = boxed_sum ? constant(c, 0) : plan.sum->reg;
     // the complete element domain and trip bound prove every partial/merged sum
     // finite. This allocation-free region can retain its buffer (D5.4.4, S4.1.2).
     MIR_reg_t items = em_load_at(&c->em, plan.array->reg, LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "sum_items");
@@ -339,12 +346,14 @@ static MIR_label_t array_sum_loop(MvpCompiler* c, AstLoopControlNode* node) {
     move(c, index, reg(c, operation(c, MIR_ADD, reg(c, index), imm(c, lanes))));
     branch(c, MIR_BLT, body, reg(c, index), reg(c, end)); mark(c, remainder);
     for (int i = 1; i < lanes; i++) move(c, sum, reg(c, operation(c, MIR_ADD, reg(c, sum), reg(c, partial[i]))));
-    branch(c, MIR_BGE, done, reg(c, index), reg(c, limit));
+    branch(c, MIR_BGE, publish, reg(c, index), reg(c, limit));
     MIR_label_t tail = label(c); mark(c, tail);
     MIR_reg_t term = em_load_at(&c->em, em_element_address(&c->em, items, index, width), 0, storage, "sum_tail");
     move(c, sum, reg(c, operation(c, MIR_ADD, reg(c, sum), reg(c, term))));
     move(c, index, reg(c, operation(c, MIR_ADD, reg(c, index), imm(c, 1))));
     branch(c, MIR_BLT, tail, reg(c, index), reg(c, limit));
+    mark(c, publish);
+    if (boxed_sum) move(c, plan.sum->reg, reg(c, em_box_finite_int_item(&c->em, sum)));
     jump(c, done); mark(c, generic);
     return done;
 }
@@ -642,6 +651,10 @@ static MirValue admit(MvpCompiler* c, MirValue v, Type* contract, MvpErrorTarget
         return value(c, checked, LMD_TYPE_ANY, VALUE_REP_ITEM, contract, (AstNode*)v.provenance_node);
     }
     if (lambda_type_accepts_error(contract)) {
+        // an admitted Error needs no normal-arm conversion or validator (S11.4.2v3).
+        if (mvp_boundary_proven(v.semantic_contract, &TYPE_ERROR) &&
+                mvp_boundary_proven(v.semantic_contract, contract))
+            return convert(c, v, VALUE_REP_ITEM);
         Type* normal = lambda_type_normal_admission_contract(c->module->tp->pool, contract);
         if (normal && normal != contract) {
             MIR_label_t done = NULL;

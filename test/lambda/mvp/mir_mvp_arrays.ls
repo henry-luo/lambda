@@ -38,6 +38,17 @@ pn reduce(n: int, first: int, initial: int, seed: int) any {
     }
     return sum
 }
+// S7.7.2v2: guarded reduction must preserve a failed accumulator admission, including zero trips.
+pn reduce_outcome(n: int, initial: any) any {
+    var a: int[] = fill(6, 3)^
+    var i: int = 0
+    var sum: int = initial
+    while (i < n) {
+        sum = sum + a[i]
+        i = i + 1
+    }
+    return sum
+}
 pn nested_argument(var a: int[]) int^ { a = fill(2, 11)^; return a[0] }
 pn store_from(var a: int[], n: int) { a[0] = n }
 pn mutating_key(var a: int[]) int { a[0] = 99; return 0 }
@@ -115,6 +126,8 @@ pn main() {
     if (reduce(9, -1, 0, 3) ^ { false }) { print("UNEXPECTED NEGATIVE INDEX\n") }
     changed_counter() ^ { null }
     print("checked reduction fallback\n")
+    print([reduce_outcome(6, 0), reduce_outcome(6, 7), reduce_outcome(0, 7),
+        reduce_outcome(6, "bad") is error, reduce_outcome(0, "bad") is error]); print("\n")
     var other: int[] = fill(2, 2)^
     store_from(a, nested_argument(other))^
     print(a[0]); print(" "); print(other[0]); print(" ")
