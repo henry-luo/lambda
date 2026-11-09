@@ -1399,7 +1399,7 @@ class PremakeGenerator:
         resolved.update(override)
         return resolved
 
-    def _sibling_archive(self, project_name: str) -> str | None:
+    def _sibling_archive(self, project_name: str) -> Optional[str]:
         """Return an owner-built archive for a concrete provider project."""
         input_root, radiant_root = sibling_roots()
         providers = {
