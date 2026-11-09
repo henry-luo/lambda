@@ -1,0 +1,20 @@
+{
+  "name": "Map pointer capture, wheel and keyboard update the viewport",
+  "html": "test/map/interactive.ls",
+  "viewport": {"width": 360, "height": 260},
+  "event_interval_ms": 0,
+  "events": [
+    {"type": "assert_pixel", "x": 144, "y": 112, "min_r": 253, "max_g": 2, "max_b": 2},
+    {"type": "mouse_down", "x": 144, "y": 112, "button": 0},
+    {"type": "mouse_move", "x": 184, "y": 112},
+    {"type": "mouse_up", "x": 184, "y": 112, "button": 0},
+    {"type": "assert_pixel", "x": 184, "y": 112, "min_r": 253, "max_g": 2, "max_b": 2},
+    {"type": "assert_pixel", "x": 144, "y": 112, "min_r": 236, "max_r": 240, "min_g": 241, "max_g": 245, "min_b": 244, "max_b": 248},
+    {"type": "scroll", "x": 184, "y": 112, "dx": 0, "dy": 1},
+    {"type": "assert_pixel", "x": 184, "y": 112, "min_r": 253, "max_g": 2, "max_b": 2},
+    {"type": "assert_script", "js": "Number(document.querySelector('#viewport').getAttribute('zoom')) > 1"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_pixel", "x": 144, "y": 112, "min_r": 253, "max_g": 2, "max_b": 2},
+    {"type": "assert_pixel", "x": 184, "y": 112, "min_r": 236, "max_r": 240, "min_g": 241, "max_g": 245, "min_b": 244, "max_b": 248}
+  ]
+}

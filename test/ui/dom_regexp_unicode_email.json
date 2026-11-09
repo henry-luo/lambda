@@ -1,0 +1,8 @@
+{
+  "name": "Document realm Unicode email pattern retains native matcher flags",
+  "html": "test/ui/dom_regexp_unicode_email.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-matches", "equals": "[true,true,true,false]"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-flags", "equals": "giu"}
+  ]
+}

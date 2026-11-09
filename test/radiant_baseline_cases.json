@@ -231,7 +231,6 @@
     "RadiantDocumentTest.HtmlPrincipalWritingModeChangesUsedRootFlowAndPreservesComputedMapping",
     "RadiantDocumentTest.EmptyVerticalBlocksPreserveTransitiveMarginAdjacency",
     "RadiantDocumentTest.SiblingVerticalFloatWrappersShareUsedBfcCoordinates",
-    "RadiantDocumentTest.UnicodeEmailPatternSurvivesDirectMatcherResourceLimit",
     "RadiantDocumentTest.FragmentNavigationRetainsCurrentDocumentTimers",
     "RadiantDocumentTest.LiveRemoteImageHonorsDocumentResourcePolicy",
     "RadiantDocumentTest.CachedSvgDeliveryUsesItsOwnerBeforePublicationAndAcrossDocuments",

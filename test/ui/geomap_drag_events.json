@@ -1,0 +1,14 @@
+{
+  "name": "Map drag suppresses selection and moves the painted feature",
+  "html": "test/map/selection.ls",
+  "viewport": {"width": 360, "height": 260},
+  "event_interval_ms": 0,
+  "events": [
+    {"type": "mouse_down", "x": 128, "y": 96, "button": 0},
+    {"type": "mouse_move", "x": 168, "y": 96},
+    {"type": "mouse_up", "x": 168, "y": 96, "button": 0},
+    {"type": "assert_attribute", "target": {"selector": "#viewport"}, "attribute": "data-map-selection", "equals": "[]"},
+    {"type": "assert_script", "js": "document.querySelector('#selection').getAttribute('data-selected') === null"},
+    {"type": "assert_pixel", "x": 168, "y": 96, "min_r": 253, "max_g": 2, "max_b": 2}
+  ]
+}
