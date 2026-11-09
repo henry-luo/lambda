@@ -434,8 +434,7 @@ def expect_static_module_archive_profiles() -> None:
         sandbox = Path(directory)
         root = sandbox / 'Lambda'
         profiles = ('debug', 'debug_asan', 'release', 'release_profile', 'coverage')
-        common = ('../lib/liblambda-data-cpp.a ../lib/libradiant-cpp.a '
-                  '../lib/libradiant-properties.a')
+        common = '../lib/liblambda-data-cpp.a ../lib/libradiant-cpp.a'
         source = ''.join(f'ifeq ($(config),{profile}_native)\n'
                          f'LIBS += {common} ../lib/native/{profile}/liblambda-lib-cpp.a\n'
                          f'LDDEPS += {common} ../lib/native/{profile}/liblambda-lib-cpp.a\nendif\n'
@@ -518,13 +517,15 @@ def expect_radiant_property_ownership(module) -> None:
         path = ROOT.parent / 'radiant/lambda' / name
         if path.exists() or path.is_symlink():
             fail(f'Radiant has a reverse Lambda source link: {name}')
-    providers = set(targets['radiant-properties']['source_files'])
-    if not providers or providers.intersection(targets['lambda-data']['source_files']):
+    providers = {'radiant/view_prop_defaults.cpp', 'radiant/view_prop_ensure.cpp'}
+    native_sources = subprocess.check_output(
+        [sys.executable, str(ROOT.parent / 'lambda-input/scripts/build_sources.py'),
+         'radiant', str(ROOT.parent / 'radiant')], text=True).split()
+    if providers.intersection(targets['lambda-data']['source_files']):
         fail('input archive owns a Radiant property provider')
-    if not providers.issubset(targets['radiant'].get('exclude_patterns', [])) or \
-            'radiant-properties' not in targets['radiant']['libraries'] or \
-            'radiant-properties' not in targets['lambda-exe']['libraries']:
-        fail('Radiant duplicates or omits its property-provider archive')
+    if 'radiant-properties' in targets or any(native_sources.count(path) != 1 for path in providers) or \
+            'radiant' not in targets['lambda-exe']['libraries']:
+        fail('Radiant must contain each property provider exactly once')
     adapter = targets['lambda-radiant-adapter']
     radiant_prefix = Path(os.path.relpath(module.sibling_roots()[1] / 'radiant', ROOT)).as_posix() + '/'
     if any(pattern.startswith('lambda/module/radiant/') for pattern in
@@ -537,15 +538,13 @@ def expect_radiant_property_ownership(module) -> None:
             dependencies = test.get('dependencies', [])
             native_sources = test.get('additional_sources', [])
             native_independent = test.get('radiant_native_sources_independent', False)
-            if 'radiant' in dependencies and 'lambda-radiant-adapter' not in dependencies:
+            has_native_sources = any(path.startswith(radiant_prefix) for path in native_sources)
+            if 'radiant' in dependencies and 'lambda-radiant-adapter' not in dependencies and not has_native_sources:
                 fail(f"{test.get('binary', test.get('name'))} omits the Lambda Radiant adapter")
-            if native_independent and ('radiant' in dependencies or not any(
-                    path.startswith(radiant_prefix) for path in native_sources)):
+            if native_independent and ('radiant' in dependencies or not has_native_sources):
                 fail(f"{test.get('binary', test.get('name'))} has an invalid independent-native declaration")
-            if ('radiant' in dependencies or (not native_independent and any(
-                    path.startswith(radiant_prefix) for path in native_sources))) \
-                    and 'radiant-properties' not in dependencies:
-                fail(f"{test.get('binary', test.get('name'))} omits the Radiant property provider")
+            if not native_independent and has_native_sources and 'radiant' not in dependencies:
+                fail(f"{test.get('binary', test.get('name'))} omits the Radiant archive")
 
 
 def expect_radiant_media_platform_selection(module) -> None:

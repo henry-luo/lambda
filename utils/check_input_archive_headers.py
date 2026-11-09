@@ -19,16 +19,17 @@ ARCHIVES = (
 )
 
 
-def input_dependencies(depfile: Path):
+def input_dependencies(depfile: Path, build_dir: Path = BUILD_DIR):
     # -MD emits a continued primary rule followed by -MP phony header rules.
     primary = depfile.read_text().replace("\\\n", " ").splitlines()[0]
     _, separator, prerequisites = primary.partition(": ")
     if not separator:
         raise ValueError(f"invalid dependency rule: {depfile}")
     for token in shlex.split(prerequisites):
-        source = Path(os.path.normpath(BUILD_DIR / token))
+        source = Path(os.path.normpath(build_dir / token))
         for project, prefix in ((INPUT_ROOT, Path()),
                                 (RADIANT_ROOT / 'radiant', Path('radiant')),
+                                (RADIANT_ROOT / 'test', Path('radiant/test')),
                                 (ROOT, Path())):
             try:
                 yield prefix / source.relative_to(project)
@@ -39,8 +40,10 @@ def input_dependencies(depfile: Path):
 
 def dependency_file(relative: Path) -> Path:
     """Locate a logical dependency in its owning sibling or Lambda."""
-    if relative.parts[0] == 'lib':
+    if relative.parts[0] in ('lib', 'build_temp') or relative.parts[:2] == ('build', 'deps'):
         return INPUT_ROOT / relative
+    if relative.parts[:2] == ('radiant', 'test'):
+        return RADIANT_ROOT / Path(*relative.parts[1:])
     if relative.parts[0] == 'radiant':
         return RADIANT_ROOT / relative
     local = ROOT / relative

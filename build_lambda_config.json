@@ -735,7 +735,6 @@
         "lambda-rt",
         "lambda-radiant-adapter",
         "radiant",
-        "radiant-properties",
         "lambda-data",
         "lambda-lib",
         "mir",
@@ -830,7 +829,6 @@
       "libraries": [
         "lambda-rt",
         "radiant",
-        "radiant-properties",
         "lambda-data",
         "lambda-lib"
       ],
@@ -2829,8 +2827,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -3894,7 +3891,7 @@
             "source": "test_clipboard_store_gtest.cpp",
             "name": "Clipboard Store Ownership Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4088,8 +4085,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -4139,7 +4135,7 @@
             "source": "test_retained_display_list_gtest.cpp",
             "name": "Retained Display List Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4163,7 +4159,7 @@
             "source": "test_display_list_gtest.cpp",
             "name": "Display List Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data",
               "lambda-lib"
             ],
@@ -4212,8 +4208,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -4250,8 +4245,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -4292,8 +4286,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -4334,8 +4327,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -4369,7 +4361,7 @@
             "source": "test/test_layout_custom_gtest.cpp",
             "name": "Custom Layout Engine Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4397,8 +4389,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -4446,7 +4437,7 @@
             "source": "test_animation_gtest.cpp",
             "name": "Animation Scheduler Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4464,7 +4455,7 @@
             "source": "test_state_store_gtest.cpp",
             "name": "StateStore DOM Mutation Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4521,8 +4512,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -4556,7 +4546,7 @@
             "source": "test_gif_player_gtest.cpp",
             "name": "GIF Animation Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4579,7 +4569,7 @@
             "source": "test_video_gtest.cpp",
             "name": "Video Playback Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4617,7 +4607,7 @@
             "source": "test_midi_player_gtest.cpp",
             "name": "MIDI Playback Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4637,7 +4627,7 @@
             "source": "test_audio_player_gtest.cpp",
             "name": "Decoded Audio Playback Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4665,7 +4655,7 @@
             "source": "test_lottie_player_gtest.cpp",
             "name": "Lottie Animation Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -4986,7 +4976,7 @@
             "source": "test_browsing_session_gtest.cpp",
             "name": "Browsing Session Memory Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -5661,7 +5651,7 @@
             "source": "test/css/test_css_style_application_gtest.cpp",
             "name": "CSS Style Application Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -5700,7 +5690,7 @@
             "source": "test_html_css_gtest.cpp",
             "name": "HTML to CSS E2E Integration Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -6011,8 +6001,7 @@
             "dependencies": [
               "lambda-rt",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -6027,8 +6016,7 @@
             "dependencies": [
               "lambda-rt",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",
@@ -6087,7 +6075,7 @@
             "source": "test_source_pos_bridge_gtest.cpp",
             "name": "Editor Source-Position Bridge Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -6236,8 +6224,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "additional_sources": [
               "lambda/runtime/concurrency.cpp",
@@ -6279,8 +6266,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "additional_sources": [
               "lambda/runtime/concurrency.cpp",
@@ -6323,8 +6309,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "additional_sources": [
               "lambda/runtime/concurrency.cpp",
@@ -6423,8 +6408,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "binary": "test_js_mvp_lmd_gtest.exe",
             "libraries": [
@@ -6461,8 +6445,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "binary": "test_item_repr_gtest.exe",
             "libraries": [
@@ -6541,8 +6524,7 @@
             "dependencies": [
               "lambda-rt",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "binary": "test_lambda_runtime_gtest.exe",
             "libraries": [
@@ -6636,8 +6618,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "binary": "test_js_parser_benchmark_gtest.exe",
             "libraries": [
@@ -6673,8 +6654,7 @@
             "dependencies": [
               "lambda-rt",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "binary": "test_js_script_gtest.exe",
             "libraries": [
@@ -6886,7 +6866,7 @@
             "source": "test_lambda_domnode_gtest.cpp",
             "name": "DomNodeBase Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -6908,7 +6888,7 @@
             "source": "test_dom_range_gtest.cpp",
             "name": "DOM Range / Selection Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -6943,7 +6923,7 @@
             "source": "test/css/test_css_dom_integration.cpp",
             "name": "DOM Integration & Selector Matching Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -6972,7 +6952,7 @@
             "source": "test/css/test_css_dom_crud.cpp",
             "name": "DOM Element CRUD Tests",
             "dependencies": [
-              "radiant-properties",
+              "radiant",
               "lambda-data"
             ],
             "libraries": [
@@ -7131,8 +7111,7 @@
               "lambda-rt",
               "node-core",
               "lambda-radiant-adapter",
-              "radiant",
-              "radiant-properties"
+              "radiant"
             ],
             "libraries": [
               "gtest",

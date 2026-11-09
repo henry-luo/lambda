@@ -15,6 +15,7 @@ import subprocess
 import sys
 
 from check_input_archive_headers import input_dependencies
+from split_paths import sibling_roots
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,9 +55,9 @@ def adapter_native_imports(unexpected: set[str]) -> set[str]:
     if not unexpected:
         return set()
     providers = Counter()
-    for archive in (ROOT / "build/lib/libradiant-cpp.a", ROOT / "build/lib/libradiant-properties.a"):
-        output = subprocess.check_output(["nm", "-gU", "-j", str(archive)], text=True, stderr=subprocess.DEVNULL)
-        providers.update(symbol for symbol in output.splitlines() if symbol in unexpected)
+    archive = sibling_roots()[1] / "build/lib/debug/libradiant.a"
+    output = subprocess.check_output(["nm", "-gU", "-j", str(archive)], text=True, stderr=subprocess.DEVNULL)
+    providers.update(symbol for symbol in output.splitlines() if symbol in unexpected)
     importers = defaultdict(set)
     object_dir = ROOT / "build/obj/lambda-boundary-rt/native/debug"
     for obj in object_dir.glob("*.o"):
@@ -64,7 +65,7 @@ def adapter_native_imports(unexpected: set[str]) -> set[str]:
         matched = unexpected.intersection(output.splitlines())
         if not matched:
             continue
-        sources = list(input_dependencies(obj.with_suffix(".d")))
+        sources = list(input_dependencies(obj.with_suffix(".d"), ROOT / "build/premake"))
         if not sources:
             raise RuntimeError(f"missing source provenance for {obj}")
         for symbol in matched:

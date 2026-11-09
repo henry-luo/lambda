@@ -39,7 +39,6 @@ def use_sibling_archives(content, root):
     providers = {
         '../lib/liblambda-data-cpp.a': input_root / 'build/lib/$(notdir $(OBJDIR))/liblambda-input.a',
         '../lib/libradiant-cpp.a': radiant_root / 'build/lib/$(notdir $(OBJDIR))/libradiant.a',
-        '../lib/libradiant-properties.a': radiant_root / 'build/lib/$(notdir $(OBJDIR))/libradiant-properties.a',
     }
     for profile in profiles:
         providers[f'../lib/native/{profile}/liblambda-lib-cpp.a'] = input_root / f'build/lib/{profile}/liblambda-lib.a'
